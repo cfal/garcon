@@ -1,0 +1,291 @@
+import { promises as fs } from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { EventEmitter } from 'events';
+import { normalizeQueueState } from '../common/queue-state.ts';
+import { UserMessage } from '../common/chat-types.ts';
+
+function emptyQueue() {
+  return { entries: [], paused: false };
+}
+
+function normalizeForPersist(queue) {
+  return normalizeQueueState(queue);
+}
+
+// Manages per-chat message queues and orchestrates turn execution.
+// Extends EventEmitter to notify listeners of queue state changes,
+// dispatching events, and session stops.
+export class QueueManager extends EventEmitter {
+  #busy = new Map();
+  #workspaceDir;
+  #providers;
+  #historyCache;
+
+  // providers and historyCache are optional for backward compat in tests
+  // that only exercise state management methods.
+  constructor(workspaceDir, providers, historyCache) {
+    super();
+    this.#workspaceDir = workspaceDir;
+    this.#providers = providers || null;
+    this.#historyCache = historyCache || null;
+  }
+
+  // Listener wrappers for typed event subscriptions.
+  onQueueUpdated(cb) { this.on('queue-updated', cb); }
+  onDispatching(cb) { this.on('dispatching', cb); }
+  onSessionStopped(cb) { this.on('session-stopped', cb); }
+
+  #chatQueueFilePath(chatId) {
+    return path.join(this.#workspaceDir, 'queues', `${chatId}.queue.json`);
+  }
+
+  async #withLock(key, fn) {
+    while (this.#busy.get(key)) {
+      await new Promise(r => setImmediate(r));
+    }
+    this.#busy.set(key, true);
+    try {
+      return await fn();
+    } finally {
+      this.#busy.delete(key);
+    }
+  }
+
+  async #writeChatQueue(chatId, queue) {
+    const filePath = this.#chatQueueFilePath(chatId);
+    const normalized = normalizeForPersist(queue);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(normalized, null, 2), 'utf8');
+  }
+
+  async readChatQueue(chatId) {
+    try {
+      const data = await fs.readFile(this.#chatQueueFilePath(chatId), 'utf8');
+      return normalizeQueueState(JSON.parse(data));
+    } catch (error) {
+      if (error.code === 'ENOENT') return emptyQueue();
+      throw error;
+    }
+  }
+
+  async enqueueChat(chatId, content) {
+    return this.#withLock(`chat:${chatId}`, async () => {
+      const queue = await this.readChatQueue(chatId);
+      const existing = queue.entries.find(e => e.status === 'queued');
+      if (existing) {
+        existing.content += '\n' + content;
+        await this.#writeChatQueue(chatId, queue);
+        const result = normalizeForPersist(queue);
+        this.emit('queue-updated', chatId, result);
+        return { entry: existing, queue: result };
+      }
+      const entry = {
+        id: crypto.randomUUID(),
+        content,
+        status: 'queued',
+        createdAt: new Date().toISOString(),
+      };
+      queue.entries.push(entry);
+      await this.#writeChatQueue(chatId, queue);
+      const result = normalizeForPersist(queue);
+      this.emit('queue-updated', chatId, result);
+      return { entry, queue: result };
+    });
+  }
+
+  async dequeueChat(chatId, entryId) {
+    return this.#withLock(`chat:${chatId}`, async () => {
+      const queue = await this.readChatQueue(chatId);
+      queue.entries = queue.entries.filter(e => e.id !== entryId);
+      await this.#writeChatQueue(chatId, queue);
+      const result = normalizeForPersist(queue);
+      this.emit('queue-updated', chatId, result);
+      return result;
+    });
+  }
+
+  async clearChatQueue(chatId) {
+    return this.#withLock(`chat:${chatId}`, async () => {
+      const queue = await this.readChatQueue(chatId);
+      queue.entries = [];
+      queue.paused = false;
+      await this.#writeChatQueue(chatId, queue);
+      const result = normalizeForPersist(queue);
+      this.emit('queue-updated', chatId, result);
+      return result;
+    });
+  }
+
+  async pauseChatQueue(chatId) {
+    return this.#withLock(`chat:${chatId}`, async () => {
+      const queue = await this.readChatQueue(chatId);
+      queue.paused = queue.entries.length > 0;
+      await this.#writeChatQueue(chatId, queue);
+      const result = normalizeForPersist(queue);
+      this.emit('queue-updated', chatId, result);
+      return result;
+    });
+  }
+
+  async resumeChatQueue(chatId) {
+    return this.#withLock(`chat:${chatId}`, async () => {
+      const queue = await this.readChatQueue(chatId);
+      queue.paused = false;
+      await this.#writeChatQueue(chatId, queue);
+      const result = normalizeForPersist(queue);
+      this.emit('queue-updated', chatId, result);
+      return result;
+    });
+  }
+
+  async popNextChat(chatId) {
+    return this.#withLock(`chat:${chatId}`, async () => {
+      const queue = await this.readChatQueue(chatId);
+      if (queue.paused && queue.entries.length === 0) {
+        queue.paused = false;
+        await this.#writeChatQueue(chatId, queue);
+        this.emit('queue-updated', chatId, normalizeForPersist(queue));
+        return null;
+      }
+      if (queue.paused) return null;
+      const next = queue.entries.find(e => e.status === 'queued');
+      if (!next) return null;
+      next.status = 'sending';
+      await this.#writeChatQueue(chatId, queue);
+      const result = normalizeForPersist(queue);
+      this.emit('queue-updated', chatId, result);
+      return { entry: next, queue: result };
+    });
+  }
+
+  async removeSentChat(chatId, entryId) {
+    return this.#withLock(`chat:${chatId}`, async () => {
+      const queue = await this.readChatQueue(chatId);
+      queue.entries = queue.entries.filter(e => e.id !== entryId);
+      await this.#writeChatQueue(chatId, queue);
+      const result = normalizeForPersist(queue);
+      this.emit('queue-updated', chatId, result);
+      return result;
+    });
+  }
+
+  async resetAndPauseChat(chatId, entryId) {
+    return this.#withLock(`chat:${chatId}`, async () => {
+      const queue = await this.readChatQueue(chatId);
+      const entry = queue.entries.find(e => e.id === entryId);
+      if (entry) entry.status = 'queued';
+      queue.paused = true;
+      await this.#writeChatQueue(chatId, queue);
+      const result = normalizeForPersist(queue);
+      this.emit('queue-updated', chatId, result);
+      return result;
+    });
+  }
+
+  // Submits a command to a chat session. Appends the user message to
+  // history, runs the provider turn, then drains any queued entries.
+  async submit(chatId, command, options) {
+    if (command && this.#historyCache) {
+      const userMsg = new UserMessage(new Date().toISOString(), String(command));
+      this.#historyCache.appendMessages(chatId, [userMsg]).catch((err) => {
+        console.warn(`queue: failed to append user message for ${chatId}:`, err.message);
+      });
+    }
+
+    await this.#providers.runProviderTurn(chatId, command, options);
+    await this.#drain(chatId, options);
+  }
+
+  // Aborts the running provider session and pauses the queue if entries remain.
+  async abort(chatId) {
+    const success = await this.#providers.abortSession(chatId);
+    if (success) {
+      try {
+        const current = await this.readChatQueue(chatId);
+        if (current.entries.length > 0) {
+          await this.pauseChatQueue(chatId);
+        }
+      } catch { }
+    }
+    this.emit('session-stopped', chatId, success);
+    return success;
+  }
+
+  // Triggers drain if the provider is not currently running.
+  // Used after queue-resume to pick up queued entries.
+  async triggerDrain(chatId, options) {
+    if (this.#providers.isChatRunning(chatId)) return;
+    await this.#drain(chatId, options);
+  }
+
+  // Pops queued entries one at a time, appends to history, and runs provider turns.
+  async #drain(chatId, options) {
+    while (true) {
+      if (this.#providers.isChatRunning(chatId)) break;
+
+      const result = await this.popNextChat(chatId);
+      if (!result) break;
+
+      const { entry } = result;
+      this.emit('dispatching', chatId, entry.id, entry.content);
+
+      if (this.#historyCache) {
+        const userMsg = new UserMessage(new Date().toISOString(), String(entry.content));
+        this.#historyCache.appendMessages(chatId, [userMsg]).catch((err) => {
+          console.warn(`queue: failed to append queued message for ${chatId}:`, err.message);
+        });
+      }
+
+      try {
+        await this.#providers.runProviderTurn(chatId, entry.content, options);
+        await this.removeSentChat(chatId, entry.id);
+      } catch (error) {
+        console.error('queue: error processing queued message:', error.message);
+        await this.resetAndPauseChat(chatId, entry.id);
+        break;
+      }
+    }
+  }
+
+  async deleteChatQueueFile(chatId) {
+    try {
+      await fs.unlink(this.#chatQueueFilePath(chatId));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+
+  async recoverStaleChatQueues() {
+    const queuesDir = path.join(this.#workspaceDir, 'queues');
+    let files;
+    try {
+      files = await fs.readdir(queuesDir);
+    } catch (error) {
+      if (error.code === 'ENOENT') return;
+      throw error;
+    }
+
+    const queueFiles = files.filter(f => f.endsWith('.queue.json'));
+    for (const qf of queueFiles) {
+      const filePath = path.join(queuesDir, qf);
+      try {
+        const data = normalizeQueueState(JSON.parse(await fs.readFile(filePath, 'utf8')));
+        let modified = false;
+        for (const entry of data.entries || []) {
+          if (entry.status === 'sending') {
+            entry.status = 'queued';
+            modified = true;
+          }
+        }
+        if (modified) {
+          data.paused = true;
+          await fs.writeFile(filePath, JSON.stringify(normalizeForPersist(data), null, 2), 'utf8');
+          console.log(`queue: recovered stale chat queue: ${qf}`);
+        }
+      } catch (error) {
+        console.warn(`queue: could not recover chat queue ${qf}:`, error.message);
+      }
+    }
+  }
+}

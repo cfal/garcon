@@ -1,0 +1,10 @@
+node_modules
+dist
+build
+out
+.idea
+.vscode
+.DS_Store
+.claude
+CLAUDE.md
+AGENTS.md

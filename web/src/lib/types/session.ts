@@ -1,0 +1,37 @@
+// Session and settings types used by app.ts and components.
+
+export interface ChatSession {
+	id: string;
+	provider: 'claude' | 'codex' | 'opencode';
+	model: string | null;
+	permissionMode?: string;
+	thinkingMode?: string;
+	title: string;
+	projectPath: string;
+	tags: string[];
+	native: {
+		path: string | null;
+	};
+	activity: {
+		createdAt: string | null;
+		lastActivityAt: string | null;
+		lastReadAt: string | null;
+	};
+	preview: {
+		lastMessage: string;
+	};
+	canFork?: boolean;
+	isPinned: boolean;
+	isArchived: boolean;
+	isActive: boolean;
+	isUnread: boolean;
+}
+
+export interface AppSettings {
+	ui: Record<string, unknown>;
+	paths: {
+		pinnedProjectPaths?: string[];
+		browseStartPath?: string;
+	};
+	pinnedChatIds: string[];
+}

@@ -1,0 +1,567 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+@theme inline {
+	--color-background: hsl(var(--background));
+	--color-foreground: hsl(var(--foreground));
+	--color-card: hsl(var(--card));
+	--color-card-foreground: hsl(var(--card-foreground));
+	--color-popover: hsl(var(--popover));
+	--color-popover-foreground: hsl(var(--popover-foreground));
+	--color-primary: hsl(var(--primary));
+	--color-primary-foreground: hsl(var(--primary-foreground));
+	--color-secondary: hsl(var(--secondary));
+	--color-secondary-foreground: hsl(var(--secondary-foreground));
+	--color-muted: hsl(var(--muted));
+	--color-muted-foreground: hsl(var(--muted-foreground));
+	--color-accent: hsl(var(--accent));
+	--color-accent-foreground: hsl(var(--accent-foreground));
+	--color-destructive: hsl(var(--destructive));
+	--color-destructive-foreground: hsl(var(--destructive-foreground));
+	--color-border: hsl(var(--border));
+	--color-input: hsl(var(--input));
+	--color-ring: hsl(var(--ring));
+	--color-chat-header: hsl(var(--chat-header-bg));
+	--color-chat-header-border: hsl(var(--chat-header-border));
+	--color-chat-tabs-rail: hsl(var(--chat-tabs-rail-bg));
+	--color-chat-tabs-rail-border: hsl(var(--chat-tabs-rail-border));
+	--color-chat-tabs-active: hsl(var(--chat-tabs-active-bg));
+	--color-chat-tabs-active-foreground: hsl(var(--chat-tabs-active-foreground));
+	--color-chat-tabs-active-border: hsl(var(--chat-tabs-active-border));
+
+	--color-sidebar: hsl(var(--sidebar-background));
+	--color-sidebar-foreground: hsl(var(--sidebar-foreground));
+	--color-sidebar-accent: hsl(var(--sidebar-accent));
+	--color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+	--color-sidebar-border: hsl(var(--sidebar-border));
+		--color-sidebar-ring: hsl(var(--sidebar-ring));
+		--color-sidebar-primary: hsl(var(--sidebar-primary));
+		--color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+		--color-sidebar-chat-item-bg: hsl(var(--sidebar-chat-item-bg));
+		--color-sidebar-chat-item-hover-bg: hsl(var(--sidebar-chat-item-hover-bg));
+		--color-sidebar-chat-item-selected-bg: hsl(var(--sidebar-chat-item-selected-bg));
+		--color-sidebar-chat-item-selected-foreground: hsl(var(--sidebar-chat-item-selected-foreground));
+		--color-sidebar-badge-pinned-bg: hsl(var(--sidebar-badge-pinned-bg));
+		--color-sidebar-badge-pinned-foreground: hsl(var(--sidebar-badge-pinned-foreground));
+		--color-sidebar-badge-pinned-border: hsl(var(--sidebar-badge-pinned-border));
+		--color-sidebar-badge-archived-bg: hsl(var(--sidebar-badge-archived-bg));
+		--color-sidebar-badge-archived-foreground: hsl(var(--sidebar-badge-archived-foreground));
+		--color-sidebar-badge-archived-border: hsl(var(--sidebar-badge-archived-border));
+		--color-provider-codex-bg: hsl(var(--provider-codex-bg));
+	--color-provider-codex-foreground: hsl(var(--provider-codex-foreground));
+	--color-provider-codex-border: hsl(var(--provider-codex-border));
+	--color-provider-claude-bg: hsl(var(--provider-claude-bg));
+	--color-provider-claude-foreground: hsl(var(--provider-claude-foreground));
+	--color-provider-claude-border: hsl(var(--provider-claude-border));
+	--color-provider-opencode-bg: hsl(var(--provider-opencode-bg));
+	--color-provider-opencode-foreground: hsl(var(--provider-opencode-foreground));
+	--color-provider-opencode-border: hsl(var(--provider-opencode-border));
+	--color-indicator-unread: hsl(var(--indicator-unread));
+		--color-status-processing: hsl(var(--status-processing));
+		--color-status-processing-foreground: hsl(var(--status-processing-foreground));
+		--color-status-processing-border: hsl(var(--status-processing-border));
+		--color-status-info: hsl(var(--status-info));
+		--color-status-info-foreground: hsl(var(--status-info-foreground));
+		--color-status-info-border: hsl(var(--status-info-border));
+		--color-status-success: hsl(var(--status-success));
+		--color-status-success-foreground: hsl(var(--status-success-foreground));
+		--color-status-success-border: hsl(var(--status-success-border));
+		--color-status-error: hsl(var(--status-error));
+		--color-status-error-foreground: hsl(var(--status-error-foreground));
+		--color-status-error-border: hsl(var(--status-error-border));
+		--color-status-neutral: hsl(var(--status-neutral));
+		--color-status-neutral-foreground: hsl(var(--status-neutral-foreground));
+		--color-status-neutral-border: hsl(var(--status-neutral-border));
+		--color-status-warning: hsl(var(--status-warning));
+		--color-status-warning-foreground: hsl(var(--status-warning-foreground));
+		--color-status-warning-border: hsl(var(--status-warning-border));
+		--color-queue-surface: hsl(var(--queue-surface));
+		--color-queue-border: hsl(var(--queue-border));
+		--color-queue-entry-border: hsl(var(--queue-entry-border));
+		--color-queue-foreground: hsl(var(--queue-foreground));
+		--color-queue-action-bg: hsl(var(--queue-action-bg));
+		--color-queue-action-hover-bg: hsl(var(--queue-action-hover-bg));
+		--color-stop-button-bg: hsl(var(--stop-button-bg));
+		--color-stop-button-foreground: hsl(var(--stop-button-foreground));
+		--color-stop-button-border: hsl(var(--stop-button-border));
+		--color-user-bubble: hsl(var(--user-bubble));
+		--color-user-bubble-foreground: hsl(var(--user-bubble-foreground));
+		--color-user-bubble-timestamp: hsl(var(--user-bubble-timestamp));
+
+	--color-diff-modified: hsl(var(--diff-modified));
+	--color-diff-modified-foreground: hsl(var(--diff-modified-foreground));
+	--color-diff-modified-border: hsl(var(--diff-modified-border));
+	--color-diff-addition: hsl(var(--diff-addition));
+	--color-diff-deletion: hsl(var(--diff-deletion));
+	--color-diff-hunk: hsl(var(--diff-hunk));
+	--color-interactive-accent: hsl(var(--interactive-accent));
+	--color-file-icon-code: hsl(var(--file-icon-code));
+	--color-file-icon-doc: hsl(var(--file-icon-doc));
+	--color-file-icon-image: hsl(var(--file-icon-image));
+	--color-file-icon-folder: hsl(var(--file-icon-folder));
+	--color-terminal-bg: hsl(var(--terminal-bg));
+
+	--color-git-action-commit: hsl(var(--git-action-commit));
+	--color-git-action-commit-hover: hsl(var(--git-action-commit-hover));
+	--color-git-action-pull: hsl(var(--git-action-pull));
+	--color-git-action-pull-hover: hsl(var(--git-action-pull-hover));
+	--color-git-action-push: hsl(var(--git-action-push));
+	--color-git-action-push-hover: hsl(var(--git-action-push-hover));
+	--color-git-action-publish: hsl(var(--git-action-publish));
+	--color-git-action-publish-hover: hsl(var(--git-action-publish-hover));
+	--color-git-action-foreground: hsl(var(--git-action-foreground));
+
+	--color-git-modified: hsl(var(--git-modified));
+	--color-git-added: hsl(var(--git-added));
+	--color-git-deleted: hsl(var(--git-deleted));
+	--color-git-untracked: hsl(var(--git-untracked));
+	--color-git-renamed: hsl(var(--git-renamed));
+
+	--color-diff-add: hsl(var(--diff-add-bg));
+	--color-diff-add-fg: hsl(var(--diff-add-fg));
+	--color-diff-add-line-num: hsl(var(--diff-add-line-num));
+	--color-diff-del: hsl(var(--diff-del-bg));
+	--color-diff-del-fg: hsl(var(--diff-del-fg));
+	--color-diff-del-line-num: hsl(var(--diff-del-line-num));
+	--color-diff-hunk-header: hsl(var(--diff-hunk-header-bg));
+
+	--radius-sm: calc(var(--radius) - 4px);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+	--background: 0 0% 100%;
+	--foreground: 0 0% 5%;
+	--card: 0 0% 100%;
+	--card-foreground: 0 0% 5%;
+	--popover: 0 0% 100%;
+	--popover-foreground: 0 0% 5%;
+	--primary: 0 0% 15%;
+	--primary-foreground: 0 0% 98%;
+	--secondary: 0 0% 96%;
+	--secondary-foreground: 0 0% 10%;
+	--muted: 0 0% 96%;
+	--muted-foreground: 0 0% 45%;
+	--accent: 0 0% 96%;
+	--accent-foreground: 0 0% 10%;
+	--destructive: 0 84.2% 60.2%;
+	--destructive-foreground: 0 0% 98%;
+	--border: 0 0% 90%;
+	--input: 0 0% 90%;
+	--ring: 0 0% 40%;
+	--radius: 0.5rem;
+	--chat-header-bg: 0 0% 97%;
+	--chat-header-border: 0 0% 88%;
+	--chat-tabs-rail-bg: 0 0% 94%;
+	--chat-tabs-rail-border: 0 0% 86%;
+	--chat-tabs-active-bg: 0 0% 18%;
+	--chat-tabs-active-foreground: 0 0% 98%;
+	--chat-tabs-active-border: 0 0% 18%;
+
+	--sidebar-background: 0 0% 98%;
+	--sidebar-foreground: 0 0% 5%;
+	--sidebar-primary: 0 0% 15%;
+		--sidebar-primary-foreground: 0 0% 98%;
+		--sidebar-accent: 0 0% 96%;
+		--sidebar-accent-foreground: 0 0% 10%;
+		--sidebar-border: 0 0% 90%;
+		--sidebar-ring: 0 0% 40%;
+		--sidebar-chat-item-bg: 0 0% 100%;
+		--sidebar-chat-item-hover-bg: 0 0% 96%;
+		--sidebar-chat-item-selected-bg: 0 0% 94%;
+		--sidebar-chat-item-selected-foreground: 0 0% 12%;
+		--sidebar-badge-pinned-bg: 45 100% 94%;
+		--sidebar-badge-pinned-foreground: 40 90% 26%;
+		--sidebar-badge-pinned-border: 45 55% 76%;
+		--sidebar-badge-archived-bg: 215 20% 94%;
+		--sidebar-badge-archived-foreground: 215 18% 35%;
+		--sidebar-badge-archived-border: 215 16% 80%;
+		--provider-codex-bg: 146 48% 94%;
+	--provider-codex-foreground: 146 70% 22%;
+	--provider-codex-border: 146 35% 78%;
+	--provider-claude-bg: 214 100% 95%;
+	--provider-claude-foreground: 214 80% 28%;
+	--provider-claude-border: 214 55% 78%;
+	--provider-opencode-bg: 270 65% 95%;
+	--provider-opencode-foreground: 270 60% 30%;
+	--provider-opencode-border: 270 40% 78%;
+	--indicator-unread: 214 90% 48%;
+		--status-processing: 214 90% 48%;
+		--status-processing-foreground: 214 85% 32%;
+		--status-processing-border: 214 70% 55%;
+		--status-info: 270 70% 96%;
+		--status-info-foreground: 270 70% 30%;
+		--status-info-border: 270 40% 78%;
+		--status-success: 146 60% 95%;
+		--status-success-foreground: 146 65% 24%;
+		--status-success-border: 146 35% 76%;
+		--status-error: 0 86% 96%;
+		--status-error-foreground: 0 72% 34%;
+		--status-error-border: 0 50% 78%;
+		--status-neutral: 220 16% 96%;
+		--status-neutral-foreground: 220 12% 35%;
+		--status-neutral-border: 220 12% 80%;
+	--status-warning: 34 93% 52%;
+	--status-warning-foreground: 0 0% 10%;
+	--status-warning-border: 34 88% 42%;
+	--queue-surface: 34 93% 52% / 0.2;
+	--queue-border: 34 88% 42%;
+	--queue-entry-border: 34 88% 42%;
+	--queue-foreground: 0 0% 14%;
+	--queue-action-bg: 34 93% 52% / 0.3;
+	--queue-action-hover-bg: 34 93% 52% / 0.45;
+	--stop-button-bg: 0 72% 48%;
+	--stop-button-foreground: 0 0% 98%;
+	--stop-button-border: 0 66% 40%;
+	--user-bubble: 0 0% 15%;
+	--user-bubble-foreground: 0 0% 98%;
+	--user-bubble-timestamp: 0 0% 82%;
+	--markdown-code-background: 220 23% 97%;
+	--markdown-code-foreground: 217 19% 18%;
+	--markdown-code-keyword: 343 72% 40%;
+	--markdown-code-title: 266 48% 44%;
+	--markdown-code-meta: 211 100% 35%;
+	--markdown-code-string: 210 94% 20%;
+	--markdown-code-symbol: 26 92% 42%;
+	--markdown-code-comment: 215 10% 45%;
+	--markdown-code-name: 134 60% 34%;
+	--markdown-code-section: 211 100% 35%;
+	--markdown-code-addition-bg: 138 76% 97%;
+	--markdown-code-addition-fg: 134 60% 34%;
+	--markdown-code-deletion-bg: 353 100% 97%;
+	--markdown-code-deletion-fg: 355 72% 41%;
+
+	--diff-modified: 48 88% 93%;
+	--diff-modified-foreground: 33 78% 38%;
+	--diff-modified-border: 48 50% 78%;
+	--diff-addition: 142 71% 38%;
+	--diff-deletion: 0 72% 45%;
+	--diff-hunk: 214 82% 45%;
+	--interactive-accent: 214 82% 51%;
+	--file-icon-code: 142 71% 38%;
+	--file-icon-doc: 214 82% 45%;
+	--file-icon-image: 271 76% 53%;
+	--file-icon-folder: 214 82% 45%;
+	--terminal-bg: 0 0% 12%;
+
+	--git-action-commit: 214 82% 51%;
+	--git-action-commit-hover: 214 82% 43%;
+	--git-action-pull: 146 60% 40%;
+	--git-action-pull-hover: 146 60% 34%;
+	--git-action-push: 30 90% 48%;
+	--git-action-push-hover: 30 90% 40%;
+	--git-action-publish: 271 60% 50%;
+	--git-action-publish-hover: 271 60% 42%;
+	--git-action-foreground: 0 0% 98%;
+
+	--git-modified: 33 78% 38%;
+	--git-added: 142 71% 38%;
+	--git-deleted: 0 72% 45%;
+	--git-untracked: 214 82% 45%;
+	--git-renamed: 271 76% 53%;
+
+	--diff-add-bg: 138 76% 95%;
+	--diff-add-fg: 134 60% 28%;
+	--diff-add-line-num: 134 40% 50%;
+	--diff-del-bg: 353 100% 96%;
+	--diff-del-fg: 355 72% 36%;
+	--diff-del-line-num: 355 40% 50%;
+	--diff-hunk-header-bg: 214 60% 95%;
+
+	--safe-area-inset-top: env(safe-area-inset-top);
+	--safe-area-inset-right: env(safe-area-inset-right);
+	--safe-area-inset-bottom: env(safe-area-inset-bottom);
+	--safe-area-inset-left: env(safe-area-inset-left);
+
+	--mobile-nav-height: 60px;
+	--mobile-nav-total: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
+}
+
+.dark {
+	--background: 0 0% 10%;
+	--foreground: 0 0% 95%;
+	--card: 0 0% 8%;
+	--card-foreground: 0 0% 95%;
+	--popover: 0 0% 8%;
+	--popover-foreground: 0 0% 95%;
+	--primary: 0 0% 85%;
+	--primary-foreground: 0 0% 5%;
+	--secondary: 0 0% 16%;
+	--secondary-foreground: 0 0% 95%;
+	--muted: 0 0% 16%;
+	--muted-foreground: 0 0% 60%;
+	--accent: 0 0% 18%;
+	--accent-foreground: 0 0% 95%;
+	--destructive: 0 62.8% 30.6%;
+	--destructive-foreground: 0 0% 95%;
+	--border: 0 0% 20%;
+	--input: 0 0% 40%;
+	--ring: 0 0% 60%;
+	--chat-header-bg: 0 0% 12%;
+	--chat-header-border: 0 0% 24%;
+	--chat-tabs-rail-bg: 0 0% 16%;
+	--chat-tabs-rail-border: 0 0% 24%;
+	--chat-tabs-active-bg: 0 0% 84%;
+	--chat-tabs-active-foreground: 0 0% 8%;
+	--chat-tabs-active-border: 0 0% 84%;
+
+	--sidebar-background: 0 0% 8%;
+	--sidebar-foreground: 0 0% 95%;
+	--sidebar-primary: 0 0% 85%;
+		--sidebar-primary-foreground: 0 0% 5%;
+		--sidebar-accent: 0 0% 18%;
+		--sidebar-accent-foreground: 0 0% 95%;
+		--sidebar-border: 0 0% 20%;
+		--sidebar-ring: 0 0% 60%;
+		--sidebar-chat-item-bg: 0 0% 8%;
+		--sidebar-chat-item-hover-bg: 0 0% 14%;
+		--sidebar-chat-item-selected-bg: 0 0% 18%;
+		--sidebar-chat-item-selected-foreground: 0 0% 98%;
+		--sidebar-badge-pinned-bg: 45 46% 26%;
+		--sidebar-badge-pinned-foreground: 45 90% 84%;
+		--sidebar-badge-pinned-border: 45 34% 38%;
+		--sidebar-badge-archived-bg: 215 18% 22%;
+		--sidebar-badge-archived-foreground: 215 22% 76%;
+		--sidebar-badge-archived-border: 215 14% 34%;
+		--provider-codex-bg: 146 38% 22%;
+	--provider-codex-foreground: 146 70% 85%;
+	--provider-codex-border: 146 32% 36%;
+	--provider-claude-bg: 214 48% 24%;
+	--provider-claude-foreground: 214 95% 86%;
+	--provider-claude-border: 214 40% 36%;
+	--provider-opencode-bg: 270 34% 24%;
+	--provider-opencode-foreground: 270 82% 88%;
+	--provider-opencode-border: 270 30% 36%;
+	--indicator-unread: 214 95% 68%;
+		--status-processing: 214 95% 68%;
+		--status-processing-foreground: 214 95% 86%;
+		--status-processing-border: 214 74% 54%;
+		--status-info: 270 36% 26%;
+		--status-info-foreground: 270 85% 88%;
+		--status-info-border: 270 30% 38%;
+		--status-success: 146 36% 24%;
+		--status-success-foreground: 146 76% 86%;
+		--status-success-border: 146 30% 36%;
+		--status-error: 0 34% 24%;
+		--status-error-foreground: 0 82% 86%;
+		--status-error-border: 0 28% 36%;
+		--status-neutral: 220 14% 20%;
+		--status-neutral-foreground: 220 12% 78%;
+		--status-neutral-border: 220 10% 32%;
+	--status-warning: 34 92% 62%;
+	--status-warning-foreground: 0 0% 8%;
+	--status-warning-border: 34 74% 44%;
+	--queue-surface: 34 92% 62% / 0.2;
+	--queue-border: 34 74% 44%;
+	--queue-entry-border: 34 74% 44%;
+	--queue-foreground: 34 90% 88%;
+	--queue-action-bg: 34 92% 62% / 0.32;
+	--queue-action-hover-bg: 34 92% 62% / 0.48;
+	--stop-button-bg: 0 78% 62%;
+	--stop-button-foreground: 0 0% 8%;
+	--stop-button-border: 0 62% 46%;
+	--user-bubble: 0 0% 74%;
+	--user-bubble-foreground: 0 0% 98%;
+	--user-bubble-timestamp: 0 0% 28%;
+	--diff-modified: 45 38% 22%;
+	--diff-modified-foreground: 48 85% 78%;
+	--diff-modified-border: 45 30% 34%;
+	--diff-addition: 142 66% 58%;
+	--diff-deletion: 0 78% 62%;
+	--diff-hunk: 214 92% 68%;
+	--interactive-accent: 213 94% 68%;
+	--file-icon-code: 142 66% 58%;
+	--file-icon-doc: 214 92% 68%;
+	--file-icon-image: 271 81% 72%;
+	--file-icon-folder: 214 92% 68%;
+	--terminal-bg: 0 0% 12%;
+
+	--git-action-commit: 214 82% 55%;
+	--git-action-commit-hover: 214 82% 48%;
+	--git-action-pull: 146 56% 46%;
+	--git-action-pull-hover: 146 56% 38%;
+	--git-action-push: 30 85% 52%;
+	--git-action-push-hover: 30 85% 44%;
+	--git-action-publish: 271 56% 56%;
+	--git-action-publish-hover: 271 56% 48%;
+	--git-action-foreground: 0 0% 98%;
+
+	--git-modified: 48 85% 78%;
+	--git-added: 142 66% 58%;
+	--git-deleted: 0 78% 62%;
+	--git-untracked: 214 92% 68%;
+	--git-renamed: 271 81% 72%;
+
+	--diff-add-bg: 145 90% 12%;
+	--diff-add-fg: 132 68% 83%;
+	--diff-add-line-num: 132 40% 55%;
+	--diff-del-bg: 356 89% 14%;
+	--diff-del-fg: 9 100% 88%;
+	--diff-del-line-num: 9 50% 55%;
+	--diff-hunk-header-bg: 214 40% 18%;
+
+	--markdown-code-background: 220 26% 10%;
+	--markdown-code-foreground: 213 15% 83%;
+	--markdown-code-keyword: 4 100% 72%;
+	--markdown-code-title: 273 79% 82%;
+	--markdown-code-meta: 209 97% 72%;
+	--markdown-code-string: 206 90% 80%;
+	--markdown-code-symbol: 28 100% 68%;
+	--markdown-code-comment: 215 9% 58%;
+	--markdown-code-name: 132 65% 71%;
+	--markdown-code-section: 216 84% 53%;
+	--markdown-code-addition-bg: 145 90% 12%;
+	--markdown-code-addition-fg: 132 68% 83%;
+	--markdown-code-deletion-bg: 356 89% 22%;
+	--markdown-code-deletion-fg: 9 100% 92%;
+	}
+
+@layer components {
+	/* Prevent prose from overriding highlight.js styles inside code blocks */
+	.markdown-body pre {
+		background-color: transparent;
+		padding: 0;
+		margin: 0.5rem 0;
+	}
+
+	.markdown-body pre code {
+		background-color: transparent;
+		padding: 0;
+		border: none;
+		font-size: inherit;
+	}
+
+	.markdown-body .hljs {
+		background-color: hsl(var(--markdown-code-background));
+		color: hsl(var(--markdown-code-foreground));
+		display: block;
+	}
+
+	.markdown-body .hljs-doctag,
+	.markdown-body .hljs-keyword,
+	.markdown-body .hljs-meta .hljs-keyword,
+	.markdown-body .hljs-template-tag,
+	.markdown-body .hljs-template-variable,
+	.markdown-body .hljs-type,
+	.markdown-body .hljs-variable.language_ {
+		color: hsl(var(--markdown-code-keyword));
+	}
+
+	.markdown-body .hljs-title,
+	.markdown-body .hljs-title.class_,
+	.markdown-body .hljs-title.class_.inherited__,
+	.markdown-body .hljs-title.function_ {
+		color: hsl(var(--markdown-code-title));
+	}
+
+	.markdown-body .hljs-attr,
+	.markdown-body .hljs-attribute,
+	.markdown-body .hljs-literal,
+	.markdown-body .hljs-meta,
+	.markdown-body .hljs-number,
+	.markdown-body .hljs-operator,
+	.markdown-body .hljs-selector-attr,
+	.markdown-body .hljs-selector-class,
+	.markdown-body .hljs-selector-id,
+	.markdown-body .hljs-variable {
+		color: hsl(var(--markdown-code-meta));
+	}
+
+	.markdown-body .hljs-meta .hljs-string,
+	.markdown-body .hljs-regexp,
+	.markdown-body .hljs-string {
+		color: hsl(var(--markdown-code-string));
+	}
+
+	.markdown-body .hljs-built_in,
+	.markdown-body .hljs-symbol {
+		color: hsl(var(--markdown-code-symbol));
+	}
+
+	.markdown-body .hljs-code,
+	.markdown-body .hljs-comment,
+	.markdown-body .hljs-formula {
+		color: hsl(var(--markdown-code-comment));
+	}
+
+	.markdown-body .hljs-name,
+	.markdown-body .hljs-quote,
+	.markdown-body .hljs-selector-pseudo,
+	.markdown-body .hljs-selector-tag {
+		color: hsl(var(--markdown-code-name));
+	}
+
+	.markdown-body .hljs-subst,
+	.markdown-body .hljs-emphasis,
+	.markdown-body .hljs-strong {
+		color: hsl(var(--markdown-code-foreground));
+	}
+
+	.markdown-body .hljs-section {
+		color: hsl(var(--markdown-code-section));
+	}
+
+	.markdown-body .hljs-addition {
+		background-color: hsl(var(--markdown-code-addition-bg));
+		color: hsl(var(--markdown-code-addition-fg));
+	}
+
+	.markdown-body .hljs-deletion {
+		background-color: hsl(var(--markdown-code-deletion-bg));
+		color: hsl(var(--markdown-code-deletion-fg));
+	}
+
+	/* Keeps long inline tokens from forcing chat bubbles wider than viewport */
+	.markdown-body {
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
+
+	.markdown-body code {
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
+
+	/* Tables within markdown */
+	.markdown-body table {
+		border-collapse: collapse;
+		width: 100%;
+		margin: 0.5rem 0;
+	}
+
+	.markdown-body th,
+	.markdown-body td {
+		padding: 0.5rem 0.75rem;
+		border: 1px solid hsl(var(--border));
+		text-align: left;
+		font-size: 0.875rem;
+	}
+
+	.markdown-body thead {
+		background-color: hsl(var(--muted));
+	}
+}
+
+@layer base {
+	* {
+		border-color: theme(--color-border);
+		box-sizing: border-box;
+	}
+
+	html,
+	body {
+		height: 100%;
+		margin: 0;
+		background-color: theme(--color-background);
+		color: theme(--color-foreground);
+		font-family:
+			-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+			sans-serif;
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+		overscroll-behavior: none;
+		overflow: hidden;
+	}
+}
