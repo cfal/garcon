@@ -1,0 +1,38 @@
+{
+  "name": "garcon",
+  "version": "0.1.0",
+  "description": "A cross-platform agentic coding UI for Claude Code, Codex, and Opencode",
+  "type": "module",
+  "main": "server/main.js",
+  "files": [
+    "server/",
+    "common/",
+    "web/build/",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cfal/garcon.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cfal/garcon/issues"
+  },
+  "scripts": {
+    "install": "bun install --cwd server && bun install --cwd web",
+    "build": "bun run --cwd web build",
+    "start": "bun run build && bun server/main.js",
+    "test": "for f in server/**/__tests__/*.test.js; do bun test \"$f\" || exit 1; done && bun run --cwd web test",
+    "check": "bun run --cwd web check",
+    "typecheck": "bun run --cwd web check"
+  },
+  "keywords": [
+    "claude code",
+    "codex",
+    "opencode",
+    "ai",
+    "mobile",
+    "web"
+  ],
+  "author": "Alex Lau <github@alau.ca>",
+  "license": "GPL-3.0"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "garcon-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun main.js"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "^0.104.0",
+    "@opencode-ai/sdk": "^1.2.10",
+    "bun-pty": "^0.4.8",
+    "jsonwebtoken": "^9.0.3",
+    "mime-types": "^3.0.2",
+    "shell-quote": "^1.8.3"
+  }
+}
