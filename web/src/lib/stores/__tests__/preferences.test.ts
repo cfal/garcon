@@ -26,6 +26,11 @@ describe('PreferencesStore', () => {
 		expect(store.codeEditorFontSize).toBe('12');
 	});
 
+	it('defaults markdownViewerFontSize to 12', () => {
+		const store = createPreferencesStore();
+		expect(store.markdownViewerFontSize).toBe('12');
+	});
+
 	it('persists showChatHeader through storage', () => {
 		const first = createPreferencesStore();
 		first.setPreference('showChatHeader', true);
@@ -56,5 +61,13 @@ describe('PreferencesStore', () => {
 
 		const second = createPreferencesStore();
 		expect(second.alwaysFullscreenOnGitPanel).toBe(false);
+	});
+
+	it('persists markdownViewerFontSize through storage', () => {
+		const first = createPreferencesStore();
+		first.setPreference('markdownViewerFontSize', '16');
+
+		const second = createPreferencesStore();
+		expect(second.markdownViewerFontSize).toBe('16');
 	});
 });

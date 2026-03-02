@@ -12,7 +12,7 @@
 	let menuOpen = $state(false);
 
 	function setFontSize(size: string): void {
-		preferences.setPreference('codeEditorFontSize', size);
+		preferences.setPreference('markdownViewerFontSize', size);
 	}
 </script>
 
@@ -36,13 +36,13 @@
 				</div>
 				<Select.Root
 					type="single"
-					value={preferences.codeEditorFontSize}
+					value={preferences.markdownViewerFontSize}
 					onValueChange={(value) => {
 						if (value) setFontSize(value);
 					}}
 				>
 					<Select.Trigger class="w-[80px]" size="sm">
-						{preferences.codeEditorFontSize}px
+						{preferences.markdownViewerFontSize}px
 					</Select.Trigger>
 					<Select.Content>
 						{#each fontSizeOptions as size}

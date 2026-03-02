@@ -30,6 +30,7 @@ export interface PreferencesState {
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
 	codeEditorFontSize: string;
+	markdownViewerFontSize: string;
 	language: string;
 }
 
@@ -52,6 +53,7 @@ const DEFAULTS: PreferencesState = {
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
 	codeEditorFontSize: '12',
+	markdownViewerFontSize: '12',
 	language: 'en',
 };
 
@@ -127,6 +129,10 @@ function readPersisted(): PreferencesState {
 						typeof parsed.codeEditorFontSize === 'string'
 							? parsed.codeEditorFontSize
 							: DEFAULTS.codeEditorFontSize,
+					markdownViewerFontSize:
+						typeof parsed.markdownViewerFontSize === 'string'
+							? parsed.markdownViewerFontSize
+							: DEFAULTS.markdownViewerFontSize,
 					language:
 						typeof parsed.language === 'string'
 							? parsed.language
@@ -165,6 +171,7 @@ export class PreferencesStore {
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
 	codeEditorFontSize = $state(DEFAULTS.codeEditorFontSize);
+	markdownViewerFontSize = $state(DEFAULTS.markdownViewerFontSize);
 	language = $state(DEFAULTS.language);
 
 	// Runtime-only, not persisted
@@ -189,6 +196,7 @@ export class PreferencesStore {
 		this.codeEditorWordWrap = saved.codeEditorWordWrap;
 		this.codeEditorLineNumbers = saved.codeEditorLineNumbers;
 		this.codeEditorFontSize = saved.codeEditorFontSize;
+		this.markdownViewerFontSize = saved.markdownViewerFontSize;
 		this.language = saved.language;
 	}
 
@@ -211,6 +219,7 @@ export class PreferencesStore {
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
 			codeEditorFontSize: this.codeEditorFontSize,
+			markdownViewerFontSize: this.markdownViewerFontSize,
 			language: this.language,
 		};
 	}
