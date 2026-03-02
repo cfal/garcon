@@ -15,6 +15,7 @@
 	import { updateSessionName } from '$lib/api/settings.js';
 	import { ChatRunningQueryRequest } from '$shared/ws-requests';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
+	import FileViewerHost from '../files/FileViewerHost.svelte';
 
 	const navigation = getNavigation();
 	const chatRuntime = getChatRuntime();
@@ -226,6 +227,7 @@
 {/if}
 
 <NewChatDialog />
+<FileViewerHost />
 
 {#if appShell.showSettings}
 	{#await lazySettings() then { default: Settings }}

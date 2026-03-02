@@ -19,9 +19,11 @@
 		onSave?: (content: string) => Promise<void> | void;
 		onContentChange?: (content: string) => void;
 		onDirtyChange?: (dirty: boolean) => void;
+		showMarkdownViewButton?: boolean;
+		onRequestMarkdownView?: () => void;
 	}
 
-	let { file, onRequestClose, onSave, onContentChange, onDirtyChange }: FileEditorDialogProps = $props();
+	let { file, onRequestClose, onSave, onContentChange, onDirtyChange, showMarkdownViewButton = false, onRequestMarkdownView }: FileEditorDialogProps = $props();
 
 	let maximized = $state(false);
 
@@ -60,6 +62,8 @@
 					isSidebar={true}
 					isExpanded={maximized}
 					onToggleExpand={toggleMaximize}
+					{showMarkdownViewButton}
+					{onRequestMarkdownView}
 				/>
 		{/if}
 	</Dialog.Content>

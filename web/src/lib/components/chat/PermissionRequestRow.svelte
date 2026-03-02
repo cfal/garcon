@@ -9,7 +9,7 @@
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { parseFileLink } from '$lib/chat/file-link-parser';
-	import { getNavigation, getChatSessions, getFileOpen, getAppShell } from '$lib/context';
+	import { getChatSessions, getFileViewer, getAppShell } from '$lib/context';
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';
 
@@ -28,9 +28,8 @@
 
 	let { request, terminal, onDecision, onExitPlanMode }: Props = $props();
 
-	const navigation = getNavigation();
 	const sessions = getChatSessions();
-	const fileOpen = getFileOpen();
+	const fileViewer = getFileViewer();
 	const appShell = getAppShell();
 
 	const projectBasePath = $derived(appShell.projectBasePath);
@@ -62,12 +61,18 @@
 
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file') return;
-		const chatId = sessions.selectedChatId;
-		if (!chatId || !chatProjectPath) return;
-		const parsed = parseFileLink(link.rawHref, { projectBasePath: chatProjectPath });
+		const chat = sessions.selectedChat;
+		if (!chat) return;
+		const parsed = parseFileLink(link.rawHref, { projectBasePath: chat.projectPath });
 		if (parsed.kind !== 'file') return;
-		fileOpen.requestOpenFile(chatId, parsed.relativePath, 'markdown');
-		navigation.setActiveTab('files');
+		fileViewer.openAuto({
+			chatId: chat.id,
+			projectPath: chat.projectPath,
+			relativePath: parsed.relativePath,
+			source: 'markdown-link',
+			line: parsed.line,
+			col: parsed.col,
+		});
 		return true;
 	}
 

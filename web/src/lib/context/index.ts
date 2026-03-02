@@ -13,7 +13,7 @@ import type { ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { ProviderState } from '$lib/chat/provider-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
-import type { FileOpenStore } from '$lib/stores/file-open.svelte';
+import type { FileViewerStore } from '$lib/stores/file-viewer.svelte';
 import type { ReadReceiptOutboxStore } from '$lib/stores/read-receipt-outbox.svelte';
 
 // Root-level contexts (set in +layout.svelte)
@@ -24,7 +24,7 @@ export const [getChatRuntime, setChatRuntime] = createContext<ChatRuntimeStore>(
 export const [getChatSessions, setChatSessions] = createContext<ChatSessionsStore>();
 export const [getAppShell, setAppShell] = createContext<AppShellStore>();
 export const [getWs, setWs] = createContext<WsConnection>();
-export const [getFileOpen, setFileOpen] = createContext<FileOpenStore>();
+export const [getFileViewer, setFileViewer] = createContext<FileViewerStore>();
 export const [getReadReceiptOutbox, setReadReceiptOutbox] = createContext<ReadReceiptOutboxStore>();
 
 // Chat-level contexts (set in ConversationWorkspace.svelte)
