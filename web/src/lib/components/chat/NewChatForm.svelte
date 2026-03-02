@@ -283,7 +283,7 @@
 			value={form.modelValue}
 			onchange={handleModelChange}
 			class="{PILL_BASE} {MODE_STYLES.default
-				.button} w-[12.5rem] sm:w-[13.5rem] shrink-0 cursor-pointer"
+				.button} w-[9rem] sm:w-[10.5rem] shrink-0 cursor-pointer"
 		>
 			{#each form.modelOptions as opt (opt.value)}
 				<option value={opt.value}>{opt.label}</option>
@@ -334,10 +334,10 @@
 		<button
 			type="button"
 			onclick={openImagePicker}
-			class="w-8 h-8 text-muted-foreground hover:text-foreground rounded-full flex items-center justify-center transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ring-offset-background"
+			class="w-8 h-8 text-muted-foreground hover:text-foreground rounded-lg border border-border flex items-center justify-center transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ring-offset-background"
 			title={m.chat_composer_attach_images()}
 		>
-			<ImagePlus class="w-5 h-5" />
+			<ImagePlus class="w-4 h-4" />
 		</button>
 	</div>
 
