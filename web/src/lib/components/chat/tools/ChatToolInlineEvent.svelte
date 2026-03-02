@@ -103,7 +103,7 @@
 {#snippet copyButton()}
 	<button
 		onclick={handleAction}
-		class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-foreground transition-all flex-shrink-0"
+		class="opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100 text-muted-foreground hover:text-foreground flex-shrink-0"
 		title={m.chat_tool_display_copy_to_clipboard()}
 		aria-label={m.chat_tool_display_copy_to_clipboard()}
 	>
@@ -115,10 +115,8 @@
 	{#if isTerminal}
 		<ChatEventCard variant="default" compact>
 			{#snippet body()}
-				<div class="mb-1 flex items-center justify-between gap-1.5 min-w-0">
-					<span class="text-[11px] font-medium text-muted-foreground tracking-wide">
-						{label || toolName}
-					</span>
+				<div class="mb-1 flex items-center gap-1.5 min-w-0">
+					<span class="text-[11px] font-medium text-muted-foreground tracking-wide">{label || toolName}</span>
 					{#if action === 'copyValue'}
 						{@render copyButton()}
 					{/if}

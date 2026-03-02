@@ -8,19 +8,13 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ShellProps {
-		projectPath: string | null;
-		chatId?: string | null;
-		initialCommand?: string;
-		onProcessComplete?: (exitCode: number) => void;
-		minimal?: boolean;
+		projectPath: string;
+		chatId: string;
 	}
 
 	let {
 		projectPath,
-		chatId = null,
-		initialCommand,
-		onProcessComplete,
-		minimal = false
+		chatId
 	}: ShellProps = $props();
 
 	let terminalEl = $state<HTMLDivElement>(undefined!);
@@ -29,17 +23,10 @@
 	let isDark = $state(document.documentElement.classList.contains('dark'));
 
 	const runtime = new ShellRuntime({
-		get initialCommand() { return initialCommand; },
-		get onProcessComplete() { return onProcessComplete; },
-		get minimal() { return minimal; },
 		get isDark() { return isDark; },
 	});
 
-	let chatDisplayNameShort = $derived(chatId ? chatId.slice(0, 8) : null);
-
-	export function restartShell(): void {
-		runtime.restartShell();
-	}
+	let chatDisplayNameShort = $derived(chatId.slice(0, 8));
 
 	// Observes dark class on <html> to keep the terminal theme in sync.
 	$effect(() => {
@@ -59,8 +46,8 @@
 
 	// Re-initialize when the restart cycle finishes
 	$effect(() => {
-		if (runtime.needsInit && projectPath && terminalEl) {
-			runtime.initTerminal(terminalEl, projectPath, chatId ?? null);
+		if (runtime.needsInit && terminalEl) {
+			runtime.initTerminal(terminalEl, projectPath, chatId);
 		}
 	});
 
@@ -75,8 +62,8 @@
 				document.head.appendChild(style);
 			}
 		}
-		if (projectPath && terminalEl && runtime.needsInit) {
-			runtime.initTerminal(terminalEl, projectPath, chatId ?? null);
+		if (terminalEl && runtime.needsInit) {
+			runtime.initTerminal(terminalEl, projectPath, chatId);
 		}
 	});
 
@@ -85,34 +72,13 @@
 	});
 </script>
 
-{#if !projectPath}
-	<div class="h-full flex items-center justify-center">
-		<div class="text-center text-muted-foreground">
-			<div class="w-16 h-16 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
-				<svg class="w-8 h-8 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
-				</svg>
-			</div>
-			<h3 class="text-lg font-semibold mb-2">{m.shell_select_project()}</h3>
-			<p>{m.shell_open_chat_for_shell()}</p>
-		</div>
-	</div>
-{:else if minimal}
-	<div class="h-full w-full bg-terminal-bg relative">
-		<div bind:this={terminalEl} class="h-full w-full outline-none focus-visible:ring-2 focus-visible:ring-ring" style="outline: none;"></div>
-	</div>
-{:else}
 	<div class="h-full flex flex-col bg-terminal-bg w-full">
 		<!-- Status bar -->
 		<div class="flex-shrink-0 bg-card border-b border-border px-4 py-2">
 			<div class="flex items-center justify-between">
 				<div class="flex items-center space-x-2">
 					<div class="w-2 h-2 rounded-full {runtime.isConnected ? 'bg-status-success' : 'bg-status-error'}"></div>
-					{#if chatId}
-						<span class="text-xs text-primary">({chatDisplayNameShort})</span>
-					{:else}
-						<span class="text-xs text-muted-foreground">{m.shell_new_session()}</span>
-					{/if}
+					<span class="text-xs text-primary">({chatDisplayNameShort})</span>
 					{#if !runtime.isInitialized}
 						<span class="text-xs text-status-warning-foreground">{m.shell_initializing()}</span>
 					{/if}
@@ -141,7 +107,7 @@
 					{/if}
 
 					<button
-						onclick={restartShell}
+						onclick={() => runtime.restartShell()}
 						disabled={runtime.isRestarting || runtime.isConnected}
 						class="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
 						title={m.shell_restart_shell()}
@@ -183,4 +149,3 @@
 			{/if}
 		</div>
 	</div>
-{/if}
