@@ -274,7 +274,7 @@
 						/>
 						{:else if asThinking}
 							<ChatEventCard variant="thinking" compact>
-								{#snippet header()}
+								{#snippet body()}
 									<button
 										type="button"
 										class="flex w-full items-center gap-2 text-left cursor-pointer"
@@ -284,10 +284,8 @@
 										<span class="text-xs font-medium text-muted-foreground">{m.chat_message_thinking()}</span>
 										<ChevronRight class="ml-auto w-3 h-3 transition-transform {thinkingOpen ? 'rotate-90' : ''}" />
 									</button>
-								{/snippet}
-								{#snippet body()}
 									{#if thinkingOpen}
-										<div class="text-sm text-foreground/90">
+										<div class="mt-0.5 text-sm text-foreground/90">
 											<Markdown source={asThinking.content} variant="thinking" {projectBasePath} onLinkNavigate={handleLinkNavigate} />
 										</div>
 									{/if}

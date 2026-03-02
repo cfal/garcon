@@ -111,11 +111,11 @@
 	</button>
 {/snippet}
 
-<div class="group my-1">
+<div class="group my-0.5">
 	{#if isTerminal}
 		<ChatEventCard variant="default" compact>
 			{#snippet body()}
-				<div class="mb-1 flex items-center gap-1.5 min-w-0">
+				<div class="mb-0.5 flex items-center gap-1.5 min-w-0">
 					<span class="text-[11px] font-medium text-muted-foreground tracking-wide">{label || toolName}</span>
 					{#if action === 'copyValue'}
 						{@render copyButton()}
@@ -128,13 +128,13 @@
 				>
 					{value}
 				</code>
-				{#if secondary}
-					<div class="mt-1">
-						<span class="text-[11px] text-muted-foreground italic">
-							{secondary}
-						</span>
-					</div>
-				{/if}
+					{#if secondary}
+						<div class="mt-0.5">
+							<span class="text-[11px] text-muted-foreground italic">
+								{secondary}
+							</span>
+						</div>
+					{/if}
 			{/snippet}
 		</ChatEventCard>
 	{:else if action === 'openFile'}
@@ -151,12 +151,12 @@
 							{displayName}
 						</button>
 					</div>
-					{#if secondary}
-						<div class="mt-1 text-[11px] text-muted-foreground break-words">{secondary}</div>
-					{/if}
-				</div>
-			{/snippet}
-		</ChatEventCard>
+						{#if secondary}
+							<div class="mt-0.5 text-[11px] text-muted-foreground break-words">{secondary}</div>
+						{/if}
+					</div>
+				{/snippet}
+			</ChatEventCard>
 	{:else if action === 'jumpToResult'}
 		<ChatEventCard variant="default" compact>
 			{#snippet body()}
@@ -187,12 +187,12 @@
 							</a>
 						{/if}
 					</div>
-					{#if secondary}
-						<div class="mt-1 text-[11px] text-muted-foreground break-words">{secondary}</div>
-					{/if}
-				</div>
-			{/snippet}
-		</ChatEventCard>
+						{#if secondary}
+							<div class="mt-0.5 text-[11px] text-muted-foreground break-words">{secondary}</div>
+						{/if}
+					</div>
+				{/snippet}
+			</ChatEventCard>
 	{:else}
 		<ChatEventCard variant="default" compact>
 				{#snippet body()}
@@ -212,11 +212,11 @@
 								{@render copyButton()}
 							{/if}
 						</div>
-						{#if showGrepPatternRow}
-							<div class="mt-1 flex items-center gap-1.5 min-w-0">
-								<span class="text-xs text-muted-foreground flex-shrink-0">Pattern</span>
-								<span
-									class="text-xs font-mono {wrapText
+							{#if showGrepPatternRow}
+								<div class="mt-0.5 flex items-center gap-1.5 min-w-0">
+									<span class="text-xs text-muted-foreground flex-shrink-0">Pattern</span>
+									<span
+										class="text-xs font-mono {wrapText
 									? 'whitespace-pre-wrap break-all'
 									: 'truncate'} flex-1 min-w-0 {colorScheme.primary}"
 								>
