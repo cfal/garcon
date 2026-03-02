@@ -103,12 +103,12 @@ Registers languages once at module scope for efficiency.
 
 <div class="group relative overflow-hidden rounded-md border border-border bg-muted/30">
 	<div
-		class="flex items-center justify-between border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
+		class="flex items-center gap-1.5 border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
 	>
 		<span>{lang || 'text'}</span>
 		<button
 			onclick={copyToClipboard}
-			class="inline-flex h-6 w-6 items-center justify-center rounded opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100 focus-visible:opacity-100"
+			class="inline-flex h-6 w-6 items-center justify-center rounded opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100 hover:bg-accent"
 			title={m.chat_code_block_copy()}
 			aria-label={copied ? m.chat_code_block_copied() : m.chat_code_block_copy()}
 		>

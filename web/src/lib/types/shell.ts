@@ -1,8 +1,6 @@
 // Typed shell WebSocket message contracts. Centralizes payload shape
 // assumptions so Shell.svelte no longer performs ad hoc raw parsing.
 
-export type ShellSessionPolicy = 'reuse' | 'fresh';
-
 export type ShellServerMessage =
 	| { type: 'output'; data: string }
 	| { type: 'exit'; exitCode: number; signal?: string }
@@ -16,8 +14,7 @@ export type ShellClientMessage =
 			chatId: string | null;
 			cols: number;
 			rows: number;
-			initialCommand?: string;
-			sessionPolicy: ShellSessionPolicy;
+			sessionPolicy: 'reuse';
 		}
 	| { type: 'resize'; cols: number; rows: number };
 

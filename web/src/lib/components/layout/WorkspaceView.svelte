@@ -212,7 +212,7 @@
 				{/await}
 			{:else if activeTab === 'shell'}
 				{#await lazyStandaloneShell() then { default: StandaloneShell }}
-					<StandaloneShell initialPath={selectedChat.projectPath} chatId={selectedChat.id} />
+					<StandaloneShell initialPath={selectedChat.projectPath!} chatId={selectedChat.id} />
 				{/await}
 			{:else if activeTab === 'git'}
 				{#await lazyGitPanel() then { default: GitPanel }}

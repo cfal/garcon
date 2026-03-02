@@ -61,9 +61,6 @@ const VSCODE_LIGHT_THEME: import('@xterm/xterm').ITheme = {
 };
 
 export interface ShellRuntimeOptions {
-	get initialCommand(): string | undefined;
-	get onProcessComplete(): ((exitCode: number) => void) | undefined;
-	get minimal(): boolean;
 	get isDark(): boolean;
 }
 
@@ -116,9 +113,7 @@ export class ShellRuntime {
 		this.fitAddon = fitAddon;
 		terminal.loadAddon(fitAddon);
 
-		if (!this.opts.minimal) {
-			terminal.loadAddon(new WebLinksAddon());
-		}
+		terminal.loadAddon(new WebLinksAddon());
 
 		try {
 			terminal.loadAddon(new WebglAddon());
@@ -242,15 +237,13 @@ export class ShellRuntime {
 				requestAnimationFrame(() => {
 					if (this.fitAddon && this.terminal) {
 						this.fitAddon.fit();
-						const sessionPolicy = this.opts.initialCommand ? 'fresh' : 'reuse';
 						sendShellMessage(socket, {
 							type: 'init',
 							projectPath,
 							chatId: chatId ?? null,
 							cols: this.terminal.cols,
 							rows: this.terminal.rows,
-							initialCommand: this.opts.initialCommand,
-							sessionPolicy,
+							sessionPolicy: 'reuse',
 						});
 					}
 				});
@@ -281,9 +274,6 @@ export class ShellRuntime {
 				this.terminal?.write(msg.data);
 				break;
 			case 'exit': {
-				if (this.opts.onProcessComplete) {
-					this.opts.onProcessComplete(msg.exitCode);
-				}
 				this.ws = null;
 				this.isConnected = false;
 				socket.close();
