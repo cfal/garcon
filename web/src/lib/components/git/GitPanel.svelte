@@ -6,7 +6,6 @@
 	// it down so the toolbar can access commit/review state.
 
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
-	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import * as m from '$lib/paraglide/messages.js';
 	import GitTopToolbar from './GitTopToolbar.svelte';
 	import GitWorkbench from './GitWorkbench.svelte';
@@ -16,6 +15,7 @@
 	import GitConfirmModal from './GitConfirmModal.svelte';
 	import GitPushModal from './GitPushModal.svelte';
 	import CommitMessageSettingsModal from './CommitMessageSettingsModal.svelte';
+	import GitRevertModal from './GitRevertModal.svelte';
 	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
 	import { GitWorkbenchStore } from '$lib/stores/git-workbench.svelte.js';
 	import { getPreferences } from '$lib/context';
@@ -41,7 +41,7 @@
 	let showCommitSettings = $state(false);
 
 	// Revert UI state (lives here since revert is a history-mode action)
-	let showRevertConfirm = $state(false);
+	let showRevertModal = $state(false);
 	let revertStrategy = $state<'revert' | 'reset-soft'>('revert');
 
 	// Derived: whether push is available
@@ -85,7 +85,7 @@
 	async function handleRevert(): Promise<void> {
 		if (!projectPath) return;
 		await wb.revertLastCommit(projectPath, revertStrategy);
-		showRevertConfirm = false;
+		showRevertModal = false;
 	}
 </script>
 
@@ -122,37 +122,12 @@
 			onSetDiffMode={(m) => wb.setDiffMode(m)}
 			onSetContextLines={(n) => wb.setContextLines(n)}
 			onOpenCommitSettings={() => { showCommitSettings = true; }}
-			onRevert={() => { showRevertConfirm = true; }}
+			onRevert={() => {
+				revertStrategy = 'revert';
+				showRevertModal = true;
+			}}
 			onRefresh={handleRefresh}
 		/>
-
-		<!-- Revert confirm dialog (history mode action, rendered at panel level) -->
-		{#if showRevertConfirm}
-			<div class="px-3 py-2 border-b border-border bg-status-warning/5 space-y-2">
-				<div class="flex items-center gap-1.5 text-xs text-status-warning-foreground">
-					<AlertTriangle class="w-3.5 h-3.5" />
-					<span class="font-medium">Revert last commit?</span>
-				</div>
-				<div class="flex gap-2 items-center">
-					<label class="flex items-center gap-1 text-[10px] text-foreground">
-						<input type="radio" bind:group={revertStrategy} value="revert" class="accent-interactive-accent" />
-						Revert (safe, creates new commit)
-					</label>
-					<label class="flex items-center gap-1 text-[10px] text-foreground">
-						<input type="radio" bind:group={revertStrategy} value="reset-soft" class="accent-interactive-accent" />
-						Reset soft (removes commit, keeps changes)
-					</label>
-				</div>
-				<div class="flex gap-1">
-					<button onclick={handleRevert} class="px-2 py-0.5 text-[10px] rounded bg-status-warning text-status-warning-foreground hover:brightness-110">
-						Confirm
-					</button>
-					<button onclick={() => { showRevertConfirm = false; }} class="px-2 py-0.5 text-[10px] rounded bg-muted text-muted-foreground">
-						Cancel
-					</button>
-				</div>
-			</div>
-		{/if}
 
 		{#if store.gitStatus?.error}
 			<div class="flex-1 flex flex-col items-center justify-center text-muted-foreground px-6 py-12">
@@ -201,6 +176,15 @@
 				confirmAction={store.confirmAction}
 				onConfirm={() => store.confirmAndExecute(projectPath)}
 				onCancel={() => (store.confirmAction = null)}
+			/>
+		{/if}
+
+		{#if showRevertModal}
+			<GitRevertModal
+				strategy={revertStrategy}
+				onStrategyChange={(strategy) => { revertStrategy = strategy; }}
+				onConfirm={handleRevert}
+				onCancel={() => { showRevertModal = false; }}
 			/>
 		{/if}
 
