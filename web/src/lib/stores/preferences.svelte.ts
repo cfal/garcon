@@ -51,7 +51,7 @@ const DEFAULTS: PreferencesState = {
 	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
-	codeEditorFontSize: '14',
+	codeEditorFontSize: '12',
 	language: 'en',
 };
 

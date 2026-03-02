@@ -21,6 +21,11 @@ describe('PreferencesStore', () => {
 		expect(store.alwaysFullscreenOnGitPanel).toBe(true);
 	});
 
+	it('defaults codeEditorFontSize to 12', () => {
+		const store = createPreferencesStore();
+		expect(store.codeEditorFontSize).toBe('12');
+	});
+
 	it('persists showChatHeader through storage', () => {
 		const first = createPreferencesStore();
 		first.setPreference('showChatHeader', true);
