@@ -12,9 +12,9 @@
 	import { createChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
-	import { createFileOpenStore } from '$lib/stores/file-open.svelte.js';
+	import { createFileViewerStore } from '$lib/stores/file-viewer.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
-	import { setAuth, setPreferences, setNavigation, setChatRuntime, setChatSessions, setAppShell, setWs, setFileOpen, setReadReceiptOutbox } from '$lib/context';
+	import { setAuth, setPreferences, setNavigation, setChatRuntime, setChatSessions, setAppShell, setWs, setFileViewer, setReadReceiptOutbox } from '$lib/context';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
@@ -29,7 +29,7 @@
 	const chatSessions = createChatSessionsStore();
 	const appShell = createAppShellStore();
 	const ws = createWsConnection();
-	const fileOpen = createFileOpenStore();
+	const fileViewer = createFileViewerStore();
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 
 	setAuth(auth);
@@ -39,7 +39,7 @@
 	setChatSessions(chatSessions);
 	setAppShell(appShell);
 	setWs(ws);
-	setFileOpen(fileOpen);
+	setFileViewer(fileViewer);
 	setReadReceiptOutbox(readReceiptOutbox);
 
 	const publicRoutes = ['/login', '/setup'];

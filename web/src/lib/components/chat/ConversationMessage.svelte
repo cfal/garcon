@@ -15,7 +15,7 @@
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Copy from '@lucide/svelte/icons/copy';
 	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
-	import { getNavigation, getChatSessions, getFileOpen, getAppShell, getPreferences } from '$lib/context';
+	import { getChatSessions, getFileViewer, getAppShell, getPreferences } from '$lib/context';
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { parseFileLink } from '$lib/chat/file-link-parser';
@@ -61,9 +61,8 @@
 		showThinking = true
 	}: Props = $props();
 
-	const navigation = getNavigation();
 	const sessions = getChatSessions();
-	const fileOpen = getFileOpen();
+	const fileViewer = getFileViewer();
 	const appShell = getAppShell();
 	const preferences = getPreferences();
 
@@ -145,25 +144,34 @@
 		});
 	}
 
-	/** Routes a file-like markdown link to the Files tab via the coordinator. */
+	/** Routes a file-like markdown link to the viewer overlay. */
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file') return;
-		const chatId = sessions.selectedChatId;
-		if (!chatId || !chatProjectPath) return;
-		// Re-parse with the chat's project path for correct relativization
-		const parsed = parseFileLink(link.rawHref, { projectBasePath: chatProjectPath });
+		const chat = sessions.selectedChat;
+		if (!chat) return;
+		const parsed = parseFileLink(link.rawHref, { projectBasePath: chat.projectPath });
 		if (parsed.kind !== 'file') return;
-		fileOpen.requestOpenFile(chatId, parsed.relativePath, 'markdown');
-		navigation.setActiveTab('files');
+		fileViewer.openAuto({
+			chatId: chat.id,
+			projectPath: chat.projectPath,
+			relativePath: parsed.relativePath,
+			source: 'markdown-link',
+			line: parsed.line,
+			col: parsed.col,
+		});
 		return true;
 	}
 
-	/** Routes a tool file-open action to the Files tab via the coordinator. */
+	/** Routes a tool file-open action to the viewer overlay. */
 	function handleToolFileOpen(filePath: string): void {
-		const chatId = sessions.selectedChatId;
-		if (!chatId) return;
-		fileOpen.requestOpenFile(chatId, filePath, 'tool');
-		navigation.setActiveTab('files');
+		const chat = sessions.selectedChat;
+		if (!chat) return;
+		fileViewer.openAuto({
+			chatId: chat.id,
+			projectPath: chat.projectPath,
+			relativePath: filePath,
+			source: 'tool',
+		});
 	}
 
 	let thinkingOpen = $state(true);

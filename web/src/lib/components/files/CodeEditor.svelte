@@ -29,6 +29,8 @@
 		fontSize?: number;
 		oldContent?: string | null;
 		showDiff?: boolean;
+		showMarkdownViewButton?: boolean;
+		onRequestMarkdownView?: () => void;
 	}
 
 	let {
@@ -48,6 +50,8 @@
 		fontSize = 14,
 		oldContent = null,
 		showDiff = false,
+		showMarkdownViewButton = false,
+		onRequestMarkdownView,
 	}: CodeEditorProps = $props();
 
 	let editorContainer: HTMLDivElement | undefined = $state();
@@ -268,6 +272,16 @@
 			</div>
 
 			<div class="flex items-center gap-1 md:gap-2 flex-shrink-0">
+				{#if showMarkdownViewButton && onRequestMarkdownView}
+					<Button
+						variant="ghost"
+						size="sm"
+						onclick={onRequestMarkdownView}
+						title="Switch to markdown view"
+					>
+						View
+					</Button>
+				{/if}
 				{#if onSave}
 					<Button
 						variant={saveSuccess ? 'default' : 'default'}
