@@ -1,13 +1,15 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from 'svelte';
 	import FileMentionMenu from './FileMentionMenu.svelte';
-	import ChatToolbar from './ChatToolbar.svelte';
-	import { getComposerState, getChatLifecycle, getPreferences, getChatSessions, getAppShell } from '$lib/context';
+	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import { getComposerState, getChatLifecycle, getPreferences, getChatSessions, getAppShell, getModelCatalog, getProviderState } from '$lib/context';
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
+	import { buildPermissionOptions, buildThinkingOptions, toModelMenuOptions } from '$lib/chat/composer-controls';
+	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
 	import * as m from '$lib/paraglide/messages.js';
-	import { Send, ImagePlus } from '@lucide/svelte';
+	import { ImagePlus } from '@lucide/svelte';
 	import type { PermissionMode } from '$lib/types/chat';
 
 	interface Props {
@@ -21,9 +23,11 @@
 
 	const composerState = getComposerState();
 	const lifecycle = getChatLifecycle();
+	const providerState = getProviderState();
 	const preferences = getPreferences();
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
+	const modelCatalog = getModelCatalog();
 
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
@@ -171,13 +175,20 @@
 		Boolean(sessions.selectedChat?.status === 'running' && sessions.selectedChat?.isProcessing)
 	);
 	const isDisabled = $derived(isDraftStartupLoading);
-	const hasInput = $derived(Boolean(composerState.inputText.trim()));
 	const canSubmit = $derived(
 		canSubmitComposer(isDisabled, composerState.inputText, composerState.images.length)
 	);
-	const sendHint = $derived(
-		preferences.sendByShiftEnter ? m.chat_composer_shift_enter_to_send() : m.chat_composer_enter_to_send()
+	const permissionOptions = $derived(
+		buildPermissionOptions(
+			providerState.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES
+		)
 	);
+	const thinkingOptions = $derived(buildThinkingOptions());
+	const modelOptions = $derived(
+		toModelMenuOptions(modelCatalog.getModels(providerState.provider))
+	);
+	const canAttachImages = $derived(modelCatalog.supportsImages(providerState.provider));
+	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 
 	// Composer resize via drag handle. Persists height to localStorage and
 	// mutates the DOM directly during drag to avoid render latency.
@@ -246,20 +257,13 @@
 </script>
 
 <div class="flex-shrink-0">
-		<div data-composer class="relative bg-card pb-[env(safe-area-inset-bottom)]">
+		<div data-composer class="relative bg-card border-t border-border pb-1 sm:pb-2">
 		<!-- Invisible resize grab zone above the composer -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
 		<div
 			onpointerdown={handleResizeStart}
 			class="absolute left-0 right-0 -top-1 h-3 cursor-row-resize z-10 touch-none"
 		></div>
-
-		<ChatToolbar
-			{onModelChange}
-			{onPermissionModeChange}
-			{onThinkingModeChange}
-			onAttachImages={handleImagePick}
-		/>
 
 		<FileMentionMenu
 			projectPath={sessions.selectedChat?.projectPath || ''}
@@ -341,28 +345,41 @@
 							oninput={handleInput}
 							onpaste={handlePaste}
 							onfocus={() => appShell.requestSidebarRecenterToSelected()}
-							placeholder={m.chat_composer_placeholder()}
+							placeholder={m.chat_composer_reply_placeholder()}
 							disabled={isDisabled}
-								class="block w-full pl-4 pr-14 sm:pr-16 py-1.5 sm:py-3 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
+								class="block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
 								style:min-height="{composerHeight}px"
 							></textarea>
-
-							<button
-								type="submit"
-								disabled={!canSubmit}
-									class="absolute right-2 top-1/2 transform -translate-y-1/2 w-9 h-9 sm:w-11 sm:h-11 border {isQueueMode ? 'bg-status-info text-status-info-foreground border-status-info-border hover:bg-status-info/85' : 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90'} disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
-									title={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
-								>
-								<Send class="w-4 h-4 sm:w-5 sm:h-5" />
-						</button>
-
-						<div
-								class="absolute bottom-1 left-4 right-14 sm:right-16 text-xs text-muted-foreground pointer-events-none hidden sm:block transition-opacity duration-200 {hasInput ? 'opacity-0' : 'opacity-100'}"
-							>
-							{sendHint}
-						</div>
 					</div>
 				</div>
+
+				<ComposerBottomBar
+					canAttachImages={canAttachImages}
+					attachImagesTooltip="Image attachments are unavailable for this provider."
+					onAddImage={handleImagePick}
+					permissionOptions={permissionOptions}
+					selectedPermission={providerState.permissionMode}
+					onPermissionSelect={(mode) => {
+						providerState.permissionMode = mode;
+						onPermissionModeChange?.(mode);
+					}}
+					thinkingOptions={thinkingOptions}
+					selectedThinking={providerState.thinkingMode}
+					onThinkingSelect={(mode) => {
+						providerState.thinkingMode = mode;
+						onThinkingModeChange?.(mode);
+					}}
+					modelOptions={modelOptions}
+					selectedModel={providerState.model}
+					onModelSelect={(model) => {
+						providerState.setModel(model);
+						onModelChange?.(model);
+					}}
+					canSend={canSubmit}
+					onSend={handleFormSubmit}
+					sendTitle={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
+					sendButtonClass={sendButtonClass}
+				/>
 			</form>
 		</div>
 	</div>

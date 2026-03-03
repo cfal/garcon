@@ -6,12 +6,16 @@
 	import type { NewChatConfig } from '$lib/types/app.js';
 	import {
 		NewChatFormState,
-		MODE_LABEL_GETTERS,
-		PILL_BASE,
-		PROVIDER_PILL_WIDTH,
-		THINKING_PILL_WIDTH
 	} from '$lib/chat/new-chat-form-state.svelte.js';
-	import { MODE_STYLES, DEFAULT_MODE_STYLE } from '$lib/chat/provider-state.svelte.js';
+	import { shouldSubmitOnEnter } from '$lib/chat/composer-shortcuts';
+	import {
+		buildPermissionOptions,
+		buildThinkingOptions,
+		PROVIDER_MENU_OPTIONS,
+		toModelMenuOptions
+	} from '$lib/chat/composer-controls';
+	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
+	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import { getPreferences, getAppShell, getModelCatalog } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import DirectoryBrowser from './DirectoryBrowser.svelte';
@@ -21,7 +25,6 @@
 	import X from '@lucide/svelte/icons/x';
 	import Pin from '@lucide/svelte/icons/pin';
 	import PinOff from '@lucide/svelte/icons/pin-off';
-	import ImagePlus from '@lucide/svelte/icons/image-plus';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
 
 	interface Props {
@@ -126,22 +129,22 @@
 		textareaRef.style.height = `${textareaRef.scrollHeight}px`;
 	}
 
-	function handleModelChange(e: Event): void {
-		form.handleModelChange((e.target as HTMLSelectElement).value);
-	}
-
 	function handleSubmit(): void {
 		const config = form.buildConfig();
 		if (config) onStartChat(config);
 	}
 
 	function handleKeyDown(e: KeyboardEvent): void {
-		if (e.key === 'Tab') {
-			e.preventDefault();
-			form.cycleProvider();
-			return;
-		}
-		if (e.key === 'Enter' && !e.shiftKey) {
+		if (
+			e.key === 'Enter'
+			&& shouldSubmitOnEnter({
+				sendByShiftEnter: preferences.sendByShiftEnter,
+				shiftKey: e.shiftKey,
+				ctrlKey: e.ctrlKey,
+				metaKey: e.metaKey,
+				isComposing: e.isComposing,
+			})
+		) {
 			if (!form.canSubmit) return;
 			e.preventDefault();
 			handleSubmit();
@@ -151,6 +154,13 @@
 			onCancel();
 		}
 	}
+
+	const permissionOptions = $derived(
+		buildPermissionOptions(form.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES)
+	);
+	const thinkingOptions = $derived(buildThinkingOptions());
+	const modelOptions = $derived(toModelMenuOptions(form.modelOptions));
+	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 </script>
 
 <div class="p-6 sm:p-8 space-y-6">
@@ -261,87 +271,8 @@
 		{/if}
 	</div>
 
-	<!-- Controls row -->
-	<div
-		class="flex flex-wrap items-center justify-center gap-2 sm:gap-3 py-1.5 px-3 bg-muted/30 rounded-lg"
-	>
-		<!-- Provider button -->
-		<button
-			type="button"
-			onclick={() => form.cycleProvider()}
-			class="{PILL_BASE} {MODE_STYLES.default.button} {PROVIDER_PILL_WIDTH}"
-			title={m.chat_new_chat_switch_provider()}
-		>
-			<span class="block w-full text-center truncate">{form.providerName}</span>
-		</button>
-
-		<!-- Model selector -->
-		<select
-			value={form.modelValue}
-			onchange={handleModelChange}
-			class="{PILL_BASE} {MODE_STYLES.default
-				.button} w-[9rem] sm:w-[10.5rem] shrink-0 cursor-pointer"
-		>
-			{#each form.modelOptions as opt (opt.value)}
-				<option value={opt.value}>{opt.label}</option>
-			{/each}
-		</select>
-
-		<!-- Permission mode button -->
-		<button
-			type="button"
-			onclick={() => form.cyclePermissionMode()}
-			class="{PILL_BASE} max-w-[10rem] sm:max-w-none {form.modeStyle.button}"
-			title={m.chat_new_chat_change_mode()}
-		>
-			<div class="flex items-center gap-2 min-w-0">
-				<div class="w-2 h-2 rounded-full flex-shrink-0 {form.modeStyle.dot}"></div>
-				<span class="truncate">{MODE_LABEL_GETTERS[form.permissionMode]()}</span>
-			</div>
-		</button>
-
-		<!-- Thinking mode button -->
-		<button
-			type="button"
-			onclick={() => form.cycleThinkingMode()}
-			class="{PILL_BASE} {form.thinkingMode === 'none'
-				? MODE_STYLES.default.button
-				: DEFAULT_MODE_STYLE.button} {THINKING_PILL_WIDTH}"
-			title="Thinking: {form.currentThinkingMode.name()}"
-		>
-			<span class="flex items-center justify-center gap-1.5 w-full min-w-0">
-				<svg
-					class="w-4 h-4"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					aria-hidden="true"
-				>
-					<path
-						d="M9 18h6M10 22h4M8.5 14.5A6.5 6.5 0 1115.5 14.5C14.7 15.3 14 16.1 14 17H10c0-.9-.7-1.7-1.5-2.5z"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					/>
-				</svg>
-				<span class="truncate">{form.currentThinkingMode.name()}</span>
-			</span>
-		</button>
-
-		{#if modelCatalog.supportsImages(form.provider)}
-			<button
-				type="button"
-				onclick={openImagePicker}
-				class="px-3 py-1.5 text-muted-foreground hover:text-foreground rounded-lg border border-border flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
-				title={m.chat_composer_attach_images()}
-			>
-				<ImagePlus class="w-4 h-4" />
-			</button>
-		{/if}
-	</div>
-
 	<!-- Message input -->
-	<div class="relative">
+	<div class="relative border border-border rounded-lg pb-1.5">
 		<input
 			bind:this={imageInputRef}
 			type="file"
@@ -357,31 +288,40 @@
 			oninput={autoResizeTextarea}
 			onpaste={handleMessagePaste}
 			placeholder={form.placeholder}
-			disabled={!form.canSubmit}
-			class="chat-input-placeholder block w-full pl-4 pr-14 py-3 bg-background border border-border rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring text-foreground placeholder-muted-foreground/60 disabled:opacity-50 resize-none min-h-[56px] max-h-[200px] text-base leading-6"
+			disabled={!form.canCompose}
+			class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground disabled:opacity-50 resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
 			rows="2"
 		></textarea>
-		<button
-			type="button"
-			onclick={handleSubmit}
-			disabled={!form.canSubmit}
-			class="absolute right-2 bottom-2 w-10 h-10 bg-primary hover:bg-primary/90 disabled:bg-muted disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
-			title={m.chat_new_chat_start_session()}
-		>
-			<svg
-				class="w-5 h-5 text-primary-foreground transform rotate-90"
-				fill="none"
-				stroke="currentColor"
-				viewBox="0 0 24 24"
-			>
-				<path
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					stroke-width="2"
-					d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-				/>
-			</svg>
-		</button>
+
+		<ComposerBottomBar
+			canAttachImages={modelCatalog.supportsImages(form.provider)}
+			attachImagesTooltip="Image attachments are unavailable for this provider."
+			onAddImage={openImagePicker}
+			permissionOptions={permissionOptions}
+			selectedPermission={form.permissionMode}
+			onPermissionSelect={(mode) => {
+				form.permissionMode = mode;
+			}}
+			thinkingOptions={thinkingOptions}
+			selectedThinking={form.thinkingMode}
+			onThinkingSelect={(mode) => {
+				form.thinkingMode = mode;
+			}}
+			providerOptions={PROVIDER_MENU_OPTIONS}
+			selectedProvider={form.provider}
+			onProviderSelect={(provider) => {
+				form.selectProvider(provider);
+			}}
+			modelOptions={modelOptions}
+			selectedModel={form.modelValue}
+			onModelSelect={(model) => {
+				form.handleModelChange(model);
+			}}
+			canSend={form.canSubmit}
+			onSend={handleSubmit}
+			sendTitle={m.chat_new_chat_start_session()}
+			sendButtonClass={sendButtonClass}
+		/>
 	</div>
 
 	{#if form.attachedImages.length > 0}
@@ -407,9 +347,6 @@
 		</div>
 	{/if}
 
-	<p class="text-xs text-center text-muted-foreground">
-		{m.chat_new_chat_enter_to_start()}
-	</p>
 </div>
 
 {#if form.worktreeModalOpen}

@@ -70,9 +70,12 @@ describe('NewChatFormState', () => {
 	});
 
 	it('computes canSubmit correctly', () => {
-		// Valid path (no message needed to submit, just a valid path)
+		// Valid path still requires a first message.
 		state.projectPath = '/valid/path';
 		state.validationStatus = 'valid';
+		expect(state.canSubmit).toBe(false);
+
+		state.firstMessage = 'Start this task';
 		expect(state.canSubmit).toBe(true);
 
 		// Invalid path

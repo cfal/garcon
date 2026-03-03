@@ -20,6 +20,7 @@ export function shouldSubmitOnEnter(params: EnterSubmissionParams): boolean {
  *  the button disabled state and the keyboard/form submit paths so
  *  they remain identical. */
 export function canSubmitComposer(isDisabled: boolean, inputText: string, imageCount: number): boolean {
+	void imageCount;
 	if (isDisabled) return false;
-	return inputText.trim().length > 0 || imageCount > 0;
+	return inputText.trim().length > 0;
 }
