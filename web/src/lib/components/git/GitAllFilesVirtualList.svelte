@@ -34,6 +34,7 @@
 		onComposerClose?: () => void;
 		onEditComment?: (id: string, patch: Partial<GitReviewCommentDraft>) => void;
 		onRemoveComment?: (id: string) => void;
+		scrollToRequest?: { filePath: string; token: number } | null;
 	}
 
 	let {
@@ -58,6 +59,7 @@
 		onComposerClose,
 		onEditComment,
 		onRemoveComment,
+		scrollToRequest = null,
 	}: Props = $props();
 
 	const DEFAULT_HEIGHT = 400;
@@ -194,6 +196,14 @@
 			for (const fp of toLoad) requestedPaths.add(fp);
 			onRequestLoad(toLoad);
 		}
+	});
+
+	// Scrolls the virtual list to the requested file card.
+	$effect(() => {
+		if (!scrollToRequest || !viewport) return;
+		const index = items.findIndex((item) => item.filePath === scrollToRequest.filePath);
+		if (index === -1) return;
+		viewport.scrollTop = Math.max(0, offsets[index] - 8);
 	});
 </script>
 
