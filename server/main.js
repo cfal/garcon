@@ -22,6 +22,7 @@ Environment Variables:
   GARCON_CONFIG_DIR                Base config directory. Default: ~/.garcon
   GARCON_WORKSPACE_DIR             Explicit workspace directory path.
   GARCON_WORKSPACE                 Workspace suffix under config dir. Default: default
+  GARCON_API_KEY                   Static API key for Bearer auth (bypasses login/setup).
   GARCON_JWT_TOKEN_EXPIRY          JWT expiry for auth tokens. Default: 30d
   GARCON_PROJECT_BASE_DIR          Restricts project file access to this resolved path.
   GARCON_TERMINAL_SHELL            Shell executable for PTY sessions (non-Windows).

@@ -115,6 +115,12 @@ export function getJwtTokenExpiry() {
   return process.env.GARCON_JWT_TOKEN_EXPIRY || '30d';
 }
 
+// Static API key for token-less authentication.
+// When set, requests bearing this key (as a Bearer token) bypass JWT/setup.
+export function getApiKey() {
+  return process.env.GARCON_API_KEY || null;
+}
+
 // File access boundary
 export function getProjectBasePath() {
   if (process.env.GARCON_PROJECT_BASE_DIR) {

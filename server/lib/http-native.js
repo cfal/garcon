@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { getJwtSecret } from '../auth/store.js';
+import { getApiKey } from './api-key.js';
 
 // Lazily resolved on first use and cached for the process lifetime.
 let cachedSecret = null;
@@ -44,12 +45,18 @@ export function getTokenFromRequest(request) {
   return null;
 }
 
-// Verifies the JWT token. Single-user system so we only check token
-// validity, not user lookup. Returns decoded payload as user.
+// Verifies the JWT token or static API key. Single-user system so we only
+// check token validity, not user lookup. Returns decoded payload as user.
 export async function authenticateHttpRequest(request) {
   const token = getTokenFromRequest(request);
   if (!token) {
     return { user: null, errorResponse: Response.json({ error: 'Access denied. No token provided.' }, { status: 401 }) };
+  }
+
+  // Check static API key first (constant-time comparison).
+  const apiKeyUser = getApiKey().verify(token);
+  if (apiKeyUser) {
+    return { user: apiKeyUser, errorResponse: null };
   }
 
   try {

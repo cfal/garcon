@@ -52,6 +52,7 @@ Common environment variables:
 
 - `GARCON_PORT`, `GARCON_BIND_ADDRESS`
 - `GARCON_CONFIG_DIR`, `GARCON_WORKSPACE_DIR`, `GARCON_WORKSPACE`
+- `GARCON_API_KEY` — static Bearer token that bypasses login/setup
 - `GARCON_PROJECT_BASE_DIR`
 - `GARCON_TERMINAL_SHELL`
 - `GARCON_JWT_TOKEN_EXPIRY`

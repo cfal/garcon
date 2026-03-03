@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { getJwtSecret } from '../auth/store.js';
 import { getJwtTokenExpiry } from '../config.js';
+import { getApiKey } from '../lib/api-key.js';
 
 // Lazily resolved on first use and cached for the process lifetime.
 let cachedSecret = null;
@@ -24,6 +25,12 @@ export async function generateToken(user) {
 export async function authenticateWebSocket(token) {
   if (!token) {
     return null;
+  }
+
+  // Check static API key first.
+  const apiKeyUser = getApiKey().verify(token);
+  if (apiKeyUser) {
+    return apiKeyUser;
   }
 
   try {
