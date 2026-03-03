@@ -23,6 +23,7 @@ import {
 } from '$lib/api/git.js';
 import {
 	computeCommonDirPrefix as computeCommonDirPrefixSync,
+	applyDirPrefix,
 } from '$lib/utils/common-prefix.js';
 
 export type DiffMode = 'unified' | 'split';
@@ -799,8 +800,8 @@ export class GitWorkbenchStore {
 					let msg = data.message;
 					if (this.commitUseCommonDirPrefix) {
 						const prefix = computeCommonDirPrefixSync(files);
-						if (prefix && !msg.startsWith(`${prefix}: `)) {
-							msg = `${prefix}: ${msg}`;
+						if (prefix) {
+							msg = applyDirPrefix(msg, prefix);
 						}
 					}
 					this.commitMessage = msg;

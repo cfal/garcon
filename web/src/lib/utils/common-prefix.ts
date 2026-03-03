@@ -1,12 +1,12 @@
-// Computes the longest common directory prefix from a list of file paths
-// and applies it to conventional commit messages.
+// Computes the longest common prefix from a list of file paths.
+// For single-file commits the prefix includes the filename itself.
 
 const LOCK_EXTENSIONS = new Set([
 	'.lock', '.sum', '.lockb',
 ]);
 
 const GENERIC_TOKENS = new Set([
-	'src', 'source', 'lib', 'pkg', 'packages', 'packages-ts',
+	'src', 'source', 'sources', 'lib', 'pkg', 'packages', 'packages-ts',
 	'internal', 'cmd', 'app', 'apps',
 ]);
 
@@ -19,73 +19,70 @@ function isIgnoredFile(filePath: string): boolean {
 }
 
 /**
- * Computes the longest common directory prefix from a list of file paths.
- * Ignores lock/sum files. Filters out generic path tokens.
- * Returns empty string when no meaningful common prefix exists.
+ * Computes the longest common prefix from a list of file paths.
+ * For a single (non-ignored) file the full path is used as the prefix,
+ * including the filename. For multiple files, reduces to the deepest
+ * shared directory. Ignored files (lockfiles, checksums) are skipped
+ * unless every file is ignored, in which case they are all considered.
+ * Generic path tokens (src, lib, etc.) are stripped from the result.
+ * File extensions are trimmed when `trimExtension` is true.
  */
-export function computeCommonDirPrefix(filePaths: string[]): string {
-	const relevant = filePaths.filter((f) => !isIgnoredFile(f));
-	if (relevant.length === 0) return '';
+export function computeCommonDirPrefix(filePaths: string[], trimExtension = false): string {
+	if (!filePaths.length) return '';
 
-	const splitPaths = relevant.map((f) => f.split('/'));
+	// Find the first non-ignored file to seed the prefix.
+	let startIdx = 0;
+	let allIgnored = false;
+	while (startIdx < filePaths.length && isIgnoredFile(filePaths[startIdx])) {
+		startIdx++;
+	}
+	// If every file is ignored, fall back to computing from all of them.
+	if (startIdx >= filePaths.length) {
+		startIdx = 0;
+		allIgnored = true;
+	}
 
-	// Find common directory segments (excluding the filename itself).
-	const dirs = splitPaths.map((parts) => parts.slice(0, -1));
-	if (dirs.length === 0) return '';
+	// Seed with the full path (including filename) then narrow down.
+	let currentPrefix = filePaths[startIdx];
 
-	const commonParts: string[] = [];
-	const minLen = Math.min(...dirs.map((d) => d.length));
+	for (let j = startIdx + 1; j < filePaths.length; j++) {
+		const f = filePaths[j];
+		if (!allIgnored && isIgnoredFile(f)) continue;
 
-	for (let i = 0; i < minLen; i++) {
-		const segment = dirs[0][i];
-		if (dirs.every((d) => d[i] === segment)) {
-			commonParts.push(segment);
-		} else {
-			break;
+		// Pop trailing segments until currentPrefix is a directory ancestor of f.
+		while (currentPrefix && !f.startsWith(currentPrefix + '/')) {
+			const tokens = currentPrefix.split('/');
+			tokens.pop();
+			currentPrefix = tokens.join('/');
 		}
 	}
 
+	if (!currentPrefix) return '';
+
 	// Filter out generic tokens.
-	const meaningful = commonParts.filter((t) => !GENERIC_TOKENS.has(t));
-	if (meaningful.length === 0) return '';
+	const tokens = currentPrefix.split('/');
+	const meaningful = tokens.filter((t) => !GENERIC_TOKENS.has(t));
+	if (!meaningful.length) return '';
 
-	// If all files are in the same directory, use just the deepest meaningful segment.
-	// Otherwise use the slash-joined meaningful path.
-	const prefix = meaningful.join('/');
+	let prefix = meaningful.join('/');
 
-	// If the prefix looks like a single file (has an extension), strip the extension.
-	if (meaningful.length === 1 && meaningful[0].includes('.')) {
-		const dot = meaningful[0].lastIndexOf('.');
-		return meaningful[0].substring(0, dot);
+	// Optionally strip the file extension.
+	if (trimExtension) {
+		const dot = prefix.lastIndexOf('.');
+		const slash = prefix.lastIndexOf('/');
+		if (dot > slash) {
+			prefix = prefix.substring(0, dot);
+		}
 	}
 
 	return prefix;
 }
 
-/**
- * Applies a directory prefix to a commit message.
- * For conventional commits (type(scope): subject), replaces the scope.
- * For conventional commits without scope (type: subject), inserts the scope.
- * Otherwise prepends "prefix: " to the message.
- */
+/** Prepends "prefix: " to the first line of a commit message. */
 export function applyDirPrefix(message: string, prefix: string): string {
 	if (!prefix || !message) return message;
 
 	const lines = message.split('\n');
-	const firstLine = lines[0];
-
-	// Match conventional commit: type(scope): subject or type: subject
-	const conventionalMatch = firstLine.match(
-		/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore)(\(.*?\))?:\s*(.*)$/,
-	);
-
-	if (conventionalMatch) {
-		const [, type, , subject] = conventionalMatch;
-		lines[0] = `${type}(${prefix}): ${subject}`;
-		return lines.join('\n');
-	}
-
-	// Non-conventional: prepend prefix
-	lines[0] = `${prefix}: ${firstLine}`;
+	lines[0] = `${prefix}: ${lines[0]}`;
 	return lines.join('\n');
 }
