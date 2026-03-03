@@ -111,7 +111,7 @@
 						onclick={onAbort}
 						class="ml-2 mr-1 text-xs sm:text-sm border border-stop-button-border bg-stop-button-bg text-stop-button-foreground hover:bg-stop-button-bg/90 px-2.5 py-1 sm:px-3 sm:py-1 rounded-md transition-colors flex items-center flex-shrink-0 font-medium"
 					>
-					<span class="hidden sm:inline">{m.chat_loading_stop()}</span>
+					<span>{m.chat_loading_stop()}</span>
 				</button>
 			{/if}
 		</div>
