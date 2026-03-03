@@ -11,6 +11,8 @@
 		content: string;
 		oldContent?: string | null;
 		showDiff?: boolean;
+		line?: number;
+		col?: number;
 	}
 
 	interface FileEditorDialogProps {
@@ -47,24 +49,26 @@
 		showCloseButton={false}
 	>
 		{#if file}
-				<CodeEditor
-					content={file.content}
-					filePath={file.path}
+			<CodeEditor
+				content={file.content}
+				filePath={file.path}
 				oldContent={file.oldContent ?? null}
 				showDiff={Boolean(file.showDiff && file.oldContent != null)}
+				initialLine={file.line}
+				initialColumn={file.col}
 				wordWrap={preferences.codeEditorWordWrap}
 				showLineNumbers={preferences.codeEditorLineNumbers}
 				fontSize={parseInt(preferences.codeEditorFontSize, 10)}
-					onClose={onRequestClose}
-					{onSave}
-					onChange={onContentChange}
-					{onDirtyChange}
-					isSidebar={true}
-					isExpanded={maximized}
-					onToggleExpand={toggleMaximize}
-					{showMarkdownViewButton}
-					{onRequestMarkdownView}
-				/>
+				onClose={onRequestClose}
+				{onSave}
+				onChange={onContentChange}
+				{onDirtyChange}
+				isSidebar={true}
+				isExpanded={maximized}
+				onToggleExpand={toggleMaximize}
+				{showMarkdownViewButton}
+				{onRequestMarkdownView}
+			/>
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>
