@@ -16,8 +16,7 @@ import { MODE_STYLES, DEFAULT_MODE_STYLE } from '$lib/chat/provider-state.svelte
 import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
 import { canSubmitNewChat, type PathValidationStatus } from '$lib/components/chat/new-chat-submit.js';
 import * as m from '$lib/paraglide/messages.js';
-
-export const PROVIDERS: SessionProvider[] = ['claude', 'codex', 'opencode'];
+import { PROVIDERS } from '$shared/providers';
 
 export const PROVIDER_LABELS: Record<SessionProvider, string> = {
 	claude: 'Claude',

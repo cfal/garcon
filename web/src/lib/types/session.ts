@@ -20,7 +20,6 @@ export interface ChatSession {
 	preview: {
 		lastMessage: string;
 	};
-	canFork?: boolean;
 	isPinned: boolean;
 	isArchived: boolean;
 	isActive: boolean;

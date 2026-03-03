@@ -3,7 +3,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { Button } from '$lib/components/ui/button';
-	import { getAppShell } from '$lib/context';
+	import { getAppShell, getModelCatalog } from '$lib/context';
 	import Pin from '@lucide/svelte/icons/pin';
 	import Archive from '@lucide/svelte/icons/archive';
 	import Edit2 from '@lucide/svelte/icons/pencil';
@@ -145,6 +145,7 @@
 	}
 
 	const appShell = getAppShell();
+	const modelCatalog = getModelCatalog();
 
 	let itemEl: HTMLDivElement | undefined = $state();
 
@@ -305,7 +306,7 @@
 						<Info />
 						{m.sidebar_chats_details()}
 					</DropdownMenuItem>
-					{#if session.canFork}
+					{#if modelCatalog.supportsFork(session.provider)}
 						<DropdownMenuItem onclick={() => onForkChat(session.id)}>
 							<Copy />
 							{m.sidebar_chats_fork()}

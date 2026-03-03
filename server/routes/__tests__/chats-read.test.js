@@ -60,7 +60,6 @@ const historyCache = {
 const providers = {
   startSession: mock(() => undefined),
   isProviderSessionRunning: mock(() => false),
-  supportsFork: mock((provider) => provider === 'claude' || provider === 'codex'),
 };
 
 const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);

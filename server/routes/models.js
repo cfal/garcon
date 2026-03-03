@@ -3,8 +3,27 @@
 // GET /api/models endpoint.
 
 import { CLAUDE_MODELS, CODEX_MODELS } from '../../common/models.js';
+import { PROVIDERS, supportsFork, supportsImages } from '../../common/providers.ts';
 
 const OPENCODE_REFRESH_INTERVAL = 5 * 60 * 1000;
+
+function getDefaultModel(provider, cache) {
+  if (provider === 'claude') return CLAUDE_MODELS.DEFAULT;
+  if (provider === 'codex') return CODEX_MODELS.DEFAULT;
+  return cache.opencode[0]?.value ?? '';
+}
+
+function buildProviderCatalog(cache) {
+  return {
+    providers: PROVIDERS.map((id) => ({
+      id,
+      supportsFork: supportsFork(id),
+      supportsImages: supportsImages(id),
+      defaultModel: getDefaultModel(id, cache),
+      models: cache[id] || [],
+    })),
+  };
+}
 
 export default function createModelsRoutes(providers) {
   // Canonical shape: { value: string, label: string }[]
@@ -25,9 +44,11 @@ export default function createModelsRoutes(providers) {
   async function getModels(request, url) {
     const provider = url?.searchParams?.get('provider');
     if (provider && cache[provider]) {
-      return Response.json({ [provider]: cache[provider] });
+      const catalog = buildProviderCatalog(cache);
+      const filtered = { providers: catalog.providers.filter((p) => p.id === provider) };
+      return Response.json({ [provider]: cache[provider], catalog: filtered });
     }
-    return Response.json(cache);
+    return Response.json({ ...cache, catalog: buildProviderCatalog(cache) });
   }
 
   refreshOpenCodeCache();

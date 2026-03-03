@@ -17,7 +17,6 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 		createdAt: session.activity?.createdAt ?? null,
 		lastActivityAt: session.activity?.lastActivityAt ?? null,
 		lastReadAt: session.activity?.lastReadAt ?? null,
-		canFork: session.canFork ?? false,
 		isPinned: session.isPinned,
 		isArchived: session.isArchived ?? false,
 		isProcessing: session.isActive,
@@ -39,7 +38,6 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.createdAt === b.createdAt &&
 		a.lastActivityAt === b.lastActivityAt &&
 		a.lastReadAt === b.lastReadAt &&
-		a.canFork === b.canFork &&
 		a.isPinned === b.isPinned &&
 		a.isArchived === b.isArchived &&
 		a.isUnread === b.isUnread &&
@@ -142,7 +140,6 @@ export class ChatSessionsStore {
 			createdAt: null,
 			lastActivityAt: null,
 			lastReadAt: null,
-			canFork: false,
 			isPinned: false,
 			isArchived: false,
 			isProcessing: false,
