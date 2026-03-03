@@ -92,8 +92,8 @@ describe('canSubmitComposer', () => {
 		expect(canSubmitComposer(false, 'hello', 0)).toBe(true);
 	});
 
-	it('allows submission with images only', () => {
-		expect(canSubmitComposer(false, '', 1)).toBe(true);
+	it('blocks submission with images only', () => {
+		expect(canSubmitComposer(false, '', 1)).toBe(false);
 	});
 
 	it('allows submission with text and images', () => {

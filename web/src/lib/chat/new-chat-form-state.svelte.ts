@@ -12,38 +12,9 @@ import type { PermissionMode } from '$lib/types/chat.js';
 import type { PreferencesStore } from '$lib/stores/preferences.svelte.js';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
-import { MODE_STYLES, DEFAULT_MODE_STYLE } from '$lib/chat/provider-state.svelte.js';
 import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
-import { canSubmitNewChat, type PathValidationStatus } from '$lib/components/chat/new-chat-submit.js';
+import { canComposeNewChat, canSubmitNewChat, type PathValidationStatus } from '$lib/components/chat/new-chat-submit.js';
 import * as m from '$lib/paraglide/messages.js';
-import { PROVIDERS } from '$shared/providers';
-
-export const PROVIDER_LABELS: Record<SessionProvider, string> = {
-	claude: 'Claude',
-	codex: 'Codex',
-	opencode: 'OpenCode'
-};
-
-export const MODE_LABEL_GETTERS: Record<string, () => string> = {
-	default: () => m.chat_new_chat_default_mode(),
-	acceptEdits: () => m.chat_new_chat_accept_edits(),
-	bypassPermissions: () => m.chat_new_chat_bypass_permissions(),
-	plan: () => m.chat_new_chat_plan_mode()
-};
-
-export const THINKING_MODE_OPTIONS = [
-	{ id: 'none', name: () => m.chat_new_chat_standard() },
-	{ id: 'think', name: () => m.chat_new_chat_think() },
-	{ id: 'think-hard', name: () => m.chat_new_chat_think_hard() },
-	{ id: 'think-harder', name: () => m.chat_new_chat_think_harder() },
-	{ id: 'ultrathink', name: () => m.chat_new_chat_ultrathink() }
-];
-
-// Style constants re-exported for use in the template.
-export const PILL_BASE =
-	'px-3 py-1.5 rounded-lg text-sm font-medium border transition-all duration-200';
-export const PROVIDER_PILL_WIDTH = 'w-[6.75rem] sm:w-[7.5rem] shrink-0';
-export const THINKING_PILL_WIDTH = 'w-[7.25rem] sm:w-[8rem] shrink-0';
 
 export class NewChatFormState {
 	// Provider and model
@@ -120,26 +91,16 @@ export class NewChatFormState {
 		return this.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES;
 	}
 
-	get modeStyle(): { button: string; dot: string } {
-		return MODE_STYLES[this.permissionMode] || DEFAULT_MODE_STYLE;
-	}
-
-	get currentThinkingMode(): (typeof THINKING_MODE_OPTIONS)[number] {
-		return THINKING_MODE_OPTIONS.find((t) => t.id === this.thinkingMode) || THINKING_MODE_OPTIONS[0];
-	}
-
-	get providerName(): string {
-		return PROVIDER_LABELS[this.provider];
-	}
-
 	get canSubmit(): boolean {
-		return canSubmitNewChat(this.trimmedPath, this.validationStatus);
+		return canSubmitNewChat(this.trimmedPath, this.validationStatus, this.firstMessage);
+	}
+
+	get canCompose(): boolean {
+		return canComposeNewChat(this.trimmedPath, this.validationStatus);
 	}
 
 	get placeholder(): string {
-		return this.canSubmit
-			? `Type @ for files, or ask ${this.providerName} anything...`
-			: 'Enter a valid project path first';
+		return m.chat_new_chat_placeholder();
 	}
 
 	get modelOptions(): ModelOption[] {
@@ -171,11 +132,6 @@ export class NewChatFormState {
 		this.#preferences.setPreference('selectedProvider', next);
 	}
 
-	cycleProvider(): void {
-		const idx = PROVIDERS.indexOf(this.provider);
-		this.selectProvider(PROVIDERS[(idx + 1) % PROVIDERS.length]);
-	}
-
 	// Model
 
 	handleModelChange(value: string): void {
@@ -201,22 +157,6 @@ export class NewChatFormState {
 		if (provider === 'codex' && !liveModels.some((m) => m.value === this.codexModel)) {
 			this.codexModel = liveModels[0].value;
 		}
-	}
-
-	// Permission mode
-
-	cyclePermissionMode(): void {
-		const modes = this.permissionModes;
-		const idx = modes.indexOf(this.permissionMode);
-		this.permissionMode = modes[(idx + 1) % modes.length];
-	}
-
-	// Thinking mode
-
-	cycleThinkingMode(): void {
-		const ids = THINKING_MODE_OPTIONS.map((t) => t.id);
-		const idx = ids.indexOf(this.thinkingMode);
-		this.thinkingMode = ids[(idx + 1) % ids.length];
 	}
 
 	// Images (delegated to ImageAttachmentState)
@@ -424,6 +364,10 @@ export class NewChatFormState {
 		}
 		if (this.validationStatus === 'invalid' || this.validationStatus === 'idle') {
 			this.error = this.validationError || m.chat_new_chat_errors_invalid_directory();
+			return null;
+		}
+		if (!this.firstMessage.trim()) {
+			this.error = m.chat_messages_send_first_message();
 			return null;
 		}
 		this.error = null;

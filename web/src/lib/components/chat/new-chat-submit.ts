@@ -1,5 +1,9 @@
 export type PathValidationStatus = 'idle' | 'checking' | 'valid' | 'invalid';
 
-export function canSubmitNewChat(path: string, validationStatus: PathValidationStatus): boolean {
+export function canSubmitNewChat(path: string, validationStatus: PathValidationStatus, firstMessage: string): boolean {
+	return Boolean(path.trim()) && validationStatus === 'valid' && Boolean(firstMessage.trim());
+}
+
+export function canComposeNewChat(path: string, validationStatus: PathValidationStatus): boolean {
 	return Boolean(path.trim()) && validationStatus === 'valid';
 }
