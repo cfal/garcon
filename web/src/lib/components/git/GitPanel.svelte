@@ -18,17 +18,19 @@
 	import GitRevertModal from './GitRevertModal.svelte';
 	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
 	import { GitWorkbenchStore } from '$lib/stores/git-workbench.svelte.js';
-	import { getPreferences } from '$lib/context';
+	import { getPreferences, getFileViewer } from '$lib/context';
 
 	interface GitPanelProps {
+		chatId: string;
 		projectPath: string | null;
 		isMobile: boolean;
 		onSendToChat?: (message: string) => Promise<boolean>;
 	}
 
-	let { projectPath, isMobile, onSendToChat }: GitPanelProps = $props();
+	let { chatId, projectPath, isMobile, onSendToChat }: GitPanelProps = $props();
 
 	const preferences = getPreferences();
+	const fileViewer = getFileViewer();
 	const store = new GitPanelStore({
 		get provider() { return preferences.selectedProvider; },
 	});
@@ -88,6 +90,17 @@
 		await wb.revertLastCommit(projectPath, revertStrategy);
 		showRevertModal = false;
 	}
+
+	function handleOpenInEditor(relativePath: string, line: number): void {
+		if (!projectPath) return;
+		fileViewer.openCode({
+			chatId,
+			projectPath,
+			relativePath,
+			source: 'command',
+			line,
+		});
+	}
 </script>
 
 {#if !projectPath}
@@ -145,16 +158,17 @@
 					</p>
 				</div>
 			</div>
-			{:else}
-				{#if store.activeView === 'changes'}
-					<GitWorkbench
-						projectPath={projectPath}
-						{isMobile}
-						{wb}
-						{onSendToChat}
-						diffFontSize={gitDiffFontSize}
-					/>
-				{/if}
+		{:else}
+			{#if store.activeView === 'changes'}
+				<GitWorkbench
+					projectPath={projectPath}
+					{isMobile}
+					{wb}
+					{onSendToChat}
+					diffFontSize={gitDiffFontSize}
+					onOpenInEditor={handleOpenInEditor}
+				/>
+			{/if}
 
 			{#if store.activeView === 'history' && !store.gitStatus?.error}
 				<GitHistoryView

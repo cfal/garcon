@@ -24,9 +24,10 @@
 		wb: GitWorkbenchStore;
 		diffFontSize: number;
 		onSendToChat?: (message: string) => Promise<boolean>;
+		onOpenInEditor?: (relativePath: string, line: number) => void;
 	}
 
-	let { projectPath, isMobile, wb, diffFontSize, onSendToChat }: GitWorkbenchProps = $props();
+	let { projectPath, isMobile, wb, diffFontSize, onSendToChat, onOpenInEditor }: GitWorkbenchProps = $props();
 
 	// Mobile pane navigation (files or diff only -- review is now a modal)
 	type MobilePane = 'files' | 'diff';
@@ -238,6 +239,7 @@
 						onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
 						onRemoveComment={(id) => wb.removeDraftComment(id)}
 						scrollToRequest={wb.diffScrollRequest}
+						{onOpenInEditor}
 					/>
 				{/if}
 			</div>
@@ -336,6 +338,7 @@
 						onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
 						onRemoveComment={(id) => wb.removeDraftComment(id)}
 						scrollToRequest={wb.diffScrollRequest}
+						{onOpenInEditor}
 					/>
 					{#if wb.hasSelection}
 						<div class="flex items-center gap-2 px-3 py-2 border-t border-border bg-background shrink-0">

@@ -216,7 +216,12 @@
 				{/await}
 			{:else if activeTab === 'git'}
 				{#await lazyGitPanel() then { default: GitPanel }}
-					<GitPanel projectPath={selectedChat.projectPath} isMobile={!!onMenuClick} onSendToChat={handleSendToChat} />
+					<GitPanel
+						chatId={selectedChat.id}
+						projectPath={selectedChat.projectPath}
+						isMobile={!!onMenuClick}
+						onSendToChat={handleSendToChat}
+					/>
 				{/await}
 			{/if}
 		</div>

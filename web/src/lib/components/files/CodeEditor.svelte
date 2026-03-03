@@ -29,6 +29,8 @@
 		fontSize?: number;
 		oldContent?: string | null;
 		showDiff?: boolean;
+		initialLine?: number;
+		initialColumn?: number;
 		showMarkdownViewButton?: boolean;
 		onRequestMarkdownView?: () => void;
 	}
@@ -50,6 +52,8 @@
 		fontSize = 14,
 		oldContent = null,
 		showDiff = false,
+		initialLine,
+		initialColumn,
 		showMarkdownViewButton = false,
 		onRequestMarkdownView,
 	}: CodeEditorProps = $props();
@@ -68,9 +72,8 @@
 	// Derives the file name from the path for display.
 	let fileName = $derived(filePath.split('/').pop() ?? filePath);
 
-	// Derives the line and character counts from current content.
+	// Derives the current line count from content.
 	let lineCount = $derived(currentContent.split('\n').length);
-	let charCount = $derived(currentContent.length);
 
 	const dynamicCompartment = new Compartment();
 	const languageCompartment = new Compartment();
@@ -169,6 +172,20 @@
 		editorView?.destroy();
 	});
 
+	/** Moves the selection and viewport to the requested line/column. */
+	function jumpToLine(lineNumber: number, columnNumber?: number): void {
+		if (!editorView) return;
+		const line = Math.max(1, Math.min(lineNumber, editorView.state.doc.lines));
+		const lineInfo = editorView.state.doc.line(line);
+		const colOffset = Math.max(0, (columnNumber ?? 1) - 1);
+		const pos = Math.min(lineInfo.from + colOffset, lineInfo.to);
+		editorView.dispatch({
+			selection: { anchor: pos },
+			effects: EditorView.scrollIntoView(pos, { y: 'start' }),
+		});
+		editorView.focus();
+	}
+
 	// Observes dark class on <html> to keep the editor theme in sync.
 	$effect(() => {
 		const root = document.documentElement;
@@ -217,6 +234,16 @@
 			baselineContent = content;
 			onDirtyChange?.(false);
 		}
+	});
+
+	// Jumps to requested line/column for open-from-location flows.
+	$effect(() => {
+		if (!editorView) return;
+		const line = initialLine;
+		const col = initialColumn;
+		const _path = filePath;
+		if (!line || line < 1) return;
+		jumpToLine(line, col);
 	});
 
 	async function handleSave() {
@@ -351,8 +378,7 @@
 		<!-- Footer -->
 		<div class="flex items-center justify-between p-3 border-t border-border bg-muted flex-shrink-0">
 			<div class="flex items-center gap-4 text-sm text-muted-foreground">
-				<span>{m.editor_footer_lines()}: {lineCount}</span>
-				<span>{m.editor_footer_characters()}: {charCount}</span>
+				<span>{m.editor_footer_lines()} {lineCount}</span>
 			</div>
 			<div class="text-sm text-muted-foreground">
 				{m.editor_footer_ctrl_s_to_save()}

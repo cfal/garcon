@@ -261,8 +261,13 @@ export class FileViewerHostState {
 	}
 
 	/** Returns a file object suitable for FileEditorDialog. */
-	toEditorFile(): { name: string; path: string; content: string } | null {
-		return this.file;
+	toEditorFile(): { name: string; path: string; content: string; line?: number; col?: number } | null {
+		if (!this.file) return null;
+		return {
+			...this.file,
+			line: this.session?.line,
+			col: this.session?.col,
+		};
 	}
 
 	/** Updates editor content from CodeEditor onChange. */

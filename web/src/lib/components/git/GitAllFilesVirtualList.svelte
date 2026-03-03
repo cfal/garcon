@@ -36,6 +36,7 @@
 		onEditComment?: (id: string, patch: Partial<GitReviewCommentDraft>) => void;
 		onRemoveComment?: (id: string) => void;
 		scrollToRequest?: { filePath: string; token: number } | null;
+		onOpenInEditor?: (relativePath: string, line: number) => void;
 	}
 
 	let {
@@ -62,6 +63,7 @@
 		onEditComment,
 		onRemoveComment,
 		scrollToRequest = null,
+		onOpenInEditor,
 	}: Props = $props();
 
 	const DEFAULT_HEIGHT = 400;
@@ -250,6 +252,7 @@
 							{onComposerClose}
 							{onEditComment}
 							{onRemoveComment}
+							onOpenInEditor={(line) => onOpenInEditor?.(item.filePath, line)}
 						/>
 					</div>
 				</div>

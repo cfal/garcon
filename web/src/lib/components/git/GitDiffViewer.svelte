@@ -53,6 +53,7 @@
 		onComposerClose?: () => void;
 		onEditComment?: (id: string, patch: Partial<GitReviewCommentDraft>) => void;
 		onRemoveComment?: (id: string) => void;
+		onOpenInEditor?: (line: number) => void;
 	}
 
 	let {
@@ -78,6 +79,7 @@
 		onComposerClose,
 		onEditComment,
 		onRemoveComment,
+		onOpenInEditor,
 	}: GitDiffViewerProps = $props();
 
 	let lastClickedKey = $state<string | null>(null);
@@ -897,6 +899,14 @@
 					>
 						Add comment
 					</button>
+					{#if onOpenInEditor}
+						<button
+							onclick={() => { onOpenInEditor(ctxMenu.line!); closeCtxMenu(); }}
+							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors"
+						>
+							Open in Editor
+						</button>
+					{/if}
 				{/if}
 				{#if !readOnly && ctxMenu.hunkIndex >= 0}
 					{#if activeTab === 'unstaged'}
