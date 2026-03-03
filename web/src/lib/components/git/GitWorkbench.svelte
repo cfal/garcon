@@ -22,10 +22,11 @@
 		projectPath: string | null;
 		isMobile: boolean;
 		wb: GitWorkbenchStore;
+		diffFontSize: number;
 		onSendToChat?: (message: string) => Promise<boolean>;
 	}
 
-	let { projectPath, isMobile, wb, onSendToChat }: GitWorkbenchProps = $props();
+	let { projectPath, isMobile, wb, diffFontSize, onSendToChat }: GitWorkbenchProps = $props();
 
 	// Mobile pane navigation (files or diff only -- review is now a modal)
 	type MobilePane = 'files' | 'diff';
@@ -222,6 +223,7 @@
 						items={allScopeReviewItems}
 						activeTab={wb.activeTab}
 						diffMode={wb.diffMode}
+						fontSize={diffFontSize}
 						selectedLineKeys={wb.selectedLineKeys}
 						overscan={3}
 						onRequestLoad={handleRequestLoad}
@@ -314,6 +316,7 @@
 						items={allScopeReviewItems}
 						activeTab={wb.activeTab}
 						diffMode={wb.diffMode}
+						fontSize={diffFontSize}
 						selectedLineKeys={wb.selectedLineKeys}
 						overscan={5}
 						onRequestLoad={handleRequestLoad}

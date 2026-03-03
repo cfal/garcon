@@ -31,6 +31,11 @@ describe('PreferencesStore', () => {
 		expect(store.markdownViewerFontSize).toBe('12');
 	});
 
+	it('defaults gitDiffFontSize to 12', () => {
+		const store = createPreferencesStore();
+		expect(store.gitDiffFontSize).toBe('12');
+	});
+
 	it('persists showChatHeader through storage', () => {
 		const first = createPreferencesStore();
 		first.setPreference('showChatHeader', true);
@@ -69,5 +74,13 @@ describe('PreferencesStore', () => {
 
 		const second = createPreferencesStore();
 		expect(second.markdownViewerFontSize).toBe('16');
+	});
+
+	it('persists gitDiffFontSize through storage', () => {
+		const first = createPreferencesStore();
+		first.setPreference('gitDiffFontSize', '16');
+
+		const second = createPreferencesStore();
+		expect(second.gitDiffFontSize).toBe('16');
 	});
 });

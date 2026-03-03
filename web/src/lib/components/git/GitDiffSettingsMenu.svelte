@@ -13,20 +13,25 @@
 	interface Props {
 		diffMode: DiffMode;
 		contextLines: number;
+		diffFontSize: string;
 		onSetDiffMode: (mode: DiffMode) => void;
 		onSetContextLines: (lines: number) => void;
+		onSetDiffFontSize: (size: string) => void;
 		onOpenCommitSettings: () => void;
 	}
 
 	let {
 		diffMode,
 		contextLines,
+		diffFontSize,
 		onSetDiffMode,
 		onSetContextLines,
+		onSetDiffFontSize,
 		onOpenCommitSettings,
 	}: Props = $props();
 
 	const CONTEXT_OPTIONS = ['3', '5', '10', '20'];
+	const FONT_SIZE_OPTIONS = ['10', '11', '12', '13', '14', '15', '16', '18', '20'];
 
 	let popoverOpen = $state(false);
 
@@ -50,6 +55,24 @@
 
 	<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
 		<div class="bg-card text-foreground rounded-md border border-border">
+			<div class="flex items-center justify-between px-4 py-2.5 border-b border-border">
+				<div class="text-sm font-medium text-foreground">Font size</div>
+				<Select.Root
+					type="single"
+					value={diffFontSize}
+					onValueChange={(v) => { if (v) onSetDiffFontSize(v); }}
+				>
+					<Select.Trigger class="w-[80px]" size="sm">
+						{diffFontSize}px
+					</Select.Trigger>
+					<Select.Content>
+						{#each FONT_SIZE_OPTIONS as size}
+							<Select.Item value={size} label="{size}px">{size}px</Select.Item>
+						{/each}
+					</Select.Content>
+				</Select.Root>
+			</div>
+
 			<div class="flex items-center justify-between px-4 py-2.5">
 				<div class="text-sm font-medium text-foreground">Diff mode</div>
 				<Select.Root

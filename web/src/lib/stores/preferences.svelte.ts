@@ -30,6 +30,7 @@ export interface PreferencesState {
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
 	codeEditorFontSize: string;
+	gitDiffFontSize: string;
 	markdownViewerFontSize: string;
 	language: string;
 }
@@ -53,6 +54,7 @@ const DEFAULTS: PreferencesState = {
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
 	codeEditorFontSize: '12',
+	gitDiffFontSize: '12',
 	markdownViewerFontSize: '12',
 	language: 'en',
 };
@@ -129,6 +131,10 @@ function readPersisted(): PreferencesState {
 						typeof parsed.codeEditorFontSize === 'string'
 							? parsed.codeEditorFontSize
 							: DEFAULTS.codeEditorFontSize,
+					gitDiffFontSize:
+						typeof parsed.gitDiffFontSize === 'string'
+							? parsed.gitDiffFontSize
+							: DEFAULTS.gitDiffFontSize,
 					markdownViewerFontSize:
 						typeof parsed.markdownViewerFontSize === 'string'
 							? parsed.markdownViewerFontSize
@@ -171,6 +177,7 @@ export class PreferencesStore {
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
 	codeEditorFontSize = $state(DEFAULTS.codeEditorFontSize);
+	gitDiffFontSize = $state(DEFAULTS.gitDiffFontSize);
 	markdownViewerFontSize = $state(DEFAULTS.markdownViewerFontSize);
 	language = $state(DEFAULTS.language);
 
@@ -196,6 +203,7 @@ export class PreferencesStore {
 		this.codeEditorWordWrap = saved.codeEditorWordWrap;
 		this.codeEditorLineNumbers = saved.codeEditorLineNumbers;
 		this.codeEditorFontSize = saved.codeEditorFontSize;
+		this.gitDiffFontSize = saved.gitDiffFontSize;
 		this.markdownViewerFontSize = saved.markdownViewerFontSize;
 		this.language = saved.language;
 	}
@@ -219,6 +227,7 @@ export class PreferencesStore {
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
 			codeEditorFontSize: this.codeEditorFontSize,
+			gitDiffFontSize: this.gitDiffFontSize,
 			markdownViewerFontSize: this.markdownViewerFontSize,
 			language: this.language,
 		};

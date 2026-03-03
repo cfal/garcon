@@ -16,6 +16,7 @@
 		items: VirtualListItem[];
 		activeTab: GitDiffTab;
 		diffMode: DiffMode;
+		fontSize?: number;
 		selectedLineKeys: Set<string>;
 		overscan?: number;
 		onRequestLoad: (filePaths: string[]) => void;
@@ -41,6 +42,7 @@
 		items,
 		activeTab,
 		diffMode,
+		fontSize = 12,
 		selectedLineKeys,
 		overscan = 5,
 		onRequestLoad,
@@ -229,6 +231,7 @@
 							reviewData={item.reviewData}
 							{activeTab}
 							{diffMode}
+							{fontSize}
 							{selectedLineKeys}
 							isLoading={!item.reviewData}
 							readOnly

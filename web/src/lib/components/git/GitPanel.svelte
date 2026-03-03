@@ -35,6 +35,7 @@
 	const wb = new GitWorkbenchStore({
 		get provider() { return preferences.selectedProvider; },
 	});
+	let gitDiffFontSize = $derived(parseInt(preferences.gitDiffFontSize, 10) || 12);
 
 	// Commit modal state
 	let showCommitModal = $state(false);
@@ -110,6 +111,7 @@
 			{canPush}
 			diffMode={wb.diffMode}
 			contextLines={wb.contextLines}
+			diffFontSize={preferences.gitDiffFontSize}
 			onToggleBranchDropdown={() => (store.showBranchDropdown = !store.showBranchDropdown)}
 			onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
 			onShowNewBranchModal={() => (store.showNewBranchModal = true)}
@@ -121,6 +123,7 @@
 			onPush={() => store.handleToolbarPush(projectPath)}
 			onSetDiffMode={(m) => wb.setDiffMode(m)}
 			onSetContextLines={(n) => wb.setContextLines(n)}
+			onSetDiffFontSize={(size) => preferences.setPreference('gitDiffFontSize', size)}
 			onOpenCommitSettings={() => { showCommitSettings = true; }}
 			onRevert={() => {
 				revertStrategy = 'revert';
@@ -142,10 +145,16 @@
 					</p>
 				</div>
 			</div>
-		{:else}
-			{#if store.activeView === 'changes'}
-				<GitWorkbench projectPath={projectPath} {isMobile} {wb} {onSendToChat} />
-			{/if}
+			{:else}
+				{#if store.activeView === 'changes'}
+					<GitWorkbench
+						projectPath={projectPath}
+						{isMobile}
+						{wb}
+						{onSendToChat}
+						diffFontSize={gitDiffFontSize}
+					/>
+				{/if}
 
 			{#if store.activeView === 'history' && !store.gitStatus?.error}
 				<GitHistoryView

@@ -33,6 +33,7 @@
 		canPush: boolean;
 		diffMode: DiffMode;
 		contextLines: number;
+		diffFontSize: string;
 		onToggleBranchDropdown: () => void;
 		onCloseBranchDropdown: () => void;
 		onShowNewBranchModal: () => void;
@@ -44,6 +45,7 @@
 		onPush: () => void;
 		onSetDiffMode: (mode: DiffMode) => void;
 		onSetContextLines: (lines: number) => void;
+		onSetDiffFontSize: (size: string) => void;
 		onOpenCommitSettings: () => void;
 		onRevert: () => void;
 		onRefresh: () => void;
@@ -64,6 +66,7 @@
 		canPush,
 		diffMode,
 		contextLines,
+		diffFontSize,
 		onToggleBranchDropdown,
 		onCloseBranchDropdown,
 		onShowNewBranchModal,
@@ -75,6 +78,7 @@
 		onPush,
 		onSetDiffMode,
 		onSetContextLines,
+		onSetDiffFontSize,
 		onOpenCommitSettings,
 		onRevert,
 		onRefresh,
@@ -218,8 +222,10 @@
 			<GitDiffSettingsMenu
 				{diffMode}
 				{contextLines}
+				{diffFontSize}
 				onSetDiffMode={onSetDiffMode}
 				onSetContextLines={onSetContextLines}
+				onSetDiffFontSize={onSetDiffFontSize}
 				{onOpenCommitSettings}
 			/>
 
