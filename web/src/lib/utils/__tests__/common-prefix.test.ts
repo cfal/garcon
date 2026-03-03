@@ -6,11 +6,15 @@ describe('computeCommonDirPrefix', () => {
 		expect(computeCommonDirPrefix([])).toBe('');
 	});
 
-	it('returns the directory for a single file', () => {
-		expect(computeCommonDirPrefix(['server/git/git-service.js'])).toBe('server/git');
+	it('includes filename for a single file', () => {
+		expect(computeCommonDirPrefix(['server/git/git-service.js'])).toBe('server/git/git-service.js');
 	});
 
-	it('finds common prefix across multiple files', () => {
+	it('trims extension for a single file when trimExtension is true', () => {
+		expect(computeCommonDirPrefix(['server/git/git-service.js'], true)).toBe('server/git/git-service');
+	});
+
+	it('finds common directory prefix across multiple files', () => {
 		expect(computeCommonDirPrefix([
 			'server/git/git-service.js',
 			'server/git/git-error-classifier.js',
@@ -36,10 +40,10 @@ describe('computeCommonDirPrefix', () => {
 			'server/git/git-service.js',
 			'package-lock.lock',
 			'go.sum',
-		])).toBe('server/git');
+		])).toBe('server/git/git-service.js');
 	});
 
-	it('returns empty when all files are lockfiles', () => {
+	it('falls back to all files when every file is ignored', () => {
 		expect(computeCommonDirPrefix(['go.sum', 'Cargo.lock'])).toBe('');
 	});
 
@@ -50,7 +54,7 @@ describe('computeCommonDirPrefix', () => {
 		])).toBe('');
 	});
 
-	it('strips extension when prefix resolves to a single file-like segment', () => {
+	it('preserves dotted directory segments in multi-file prefix', () => {
 		expect(computeCommonDirPrefix([
 			'web/vite.config/a.ts',
 			'web/vite.config/b.ts',
@@ -65,30 +69,48 @@ describe('computeCommonDirPrefix', () => {
 		expect(computeCommonDirPrefix([
 			'web/src/components/Foo.svelte',
 			'bun.lockb',
-		])).toBe('web/components');
+		])).toBe('web/components/Foo.svelte');
+	});
+
+	it('filters generic tokens from single-file path', () => {
+		expect(computeCommonDirPrefix(['src/lib/utils/foo.ts'])).toBe('utils/foo.ts');
+	});
+
+	it('filters generic tokens from single-file path with trimExtension', () => {
+		expect(computeCommonDirPrefix(['src/lib/utils/foo.ts'], true)).toBe('utils/foo');
+	});
+
+	it('filters sources token', () => {
+		expect(computeCommonDirPrefix([
+			'sources/api/handler.go',
+			'sources/api/router.go',
+		])).toBe('api');
+	});
+
+	it('single root-level file returns its name', () => {
+		expect(computeCommonDirPrefix(['package.json'])).toBe('package.json');
+	});
+
+	it('single root-level file with trimExtension strips extension', () => {
+		expect(computeCommonDirPrefix(['package.json'], true)).toBe('package');
 	});
 });
 
 describe('applyDirPrefix', () => {
-	it('replaces scope in conventional commit with scope', () => {
-		expect(applyDirPrefix('feat(old): add feature', 'server/git'))
-			.toBe('feat(server/git): add feature');
-	});
-
-	it('inserts scope in conventional commit without scope', () => {
-		expect(applyDirPrefix('fix: resolve issue', 'server/git'))
-			.toBe('fix(server/git): resolve issue');
-	});
-
-	it('prepends prefix to non-conventional message', () => {
+	it('prepends prefix to message', () => {
 		expect(applyDirPrefix('add a new feature', 'server/git'))
 			.toBe('server/git: add a new feature');
 	});
 
+	it('prepends prefix to conventional commit as-is', () => {
+		expect(applyDirPrefix('feat: add feature', 'server/git'))
+			.toBe('server/git: feat: add feature');
+	});
+
 	it('preserves multiline body', () => {
-		const msg = 'feat: add feature\n\nDetailed description here.';
+		const msg = 'add feature\n\nDetailed description here.';
 		expect(applyDirPrefix(msg, 'web'))
-			.toBe('feat(web): add feature\n\nDetailed description here.');
+			.toBe('web: add feature\n\nDetailed description here.');
 	});
 
 	it('returns original message when prefix is empty', () => {
@@ -97,13 +119,5 @@ describe('applyDirPrefix', () => {
 
 	it('returns original message when message is empty', () => {
 		expect(applyDirPrefix('', 'web')).toBe('');
-	});
-
-	it('handles all conventional commit types', () => {
-		const types = ['feat', 'fix', 'docs', 'style', 'refactor', 'perf', 'test', 'build', 'ci', 'chore'];
-		for (const type of types) {
-			expect(applyDirPrefix(`${type}: something`, 'api'))
-				.toBe(`${type}(api): something`);
-		}
 	});
 });
