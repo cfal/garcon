@@ -42,7 +42,17 @@ On first launch, create the single local account at `/setup`, then configure pro
 
 ## Run and Configuration
 
-CLI options:
+### Docker (recommended)
+
+Auto-restarts on crash or machine reboot:
+
+```bash
+GARCON_PROJECT_DIR=~/repos docker compose up -d
+```
+
+Set `GARCON_PROJECT_DIR` to the directory containing your repos. Pass any API keys (e.g. `OPENAI_API_KEY`) as additional env vars. Config is persisted in a Docker volume across restarts.
+
+### CLI
 
 ```bash
 bun server/main.js --port 8080 --bind-address 127.0.0.1 --project-base-dir /path/to/repos

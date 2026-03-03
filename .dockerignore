@@ -1,0 +1,13 @@
+node_modules
+.git
+web/build
+web/node_modules
+server/node_modules
+dist
+out
+.idea
+.vscode
+.DS_Store
+.claude
+CLAUDE.md
+AGENTS.md

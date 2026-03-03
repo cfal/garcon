@@ -1,0 +1,17 @@
+services:
+  garcon:
+    build: .
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${GARCON_PORT:-8080}:8080"
+    volumes:
+      - garcon-data:/home/bun/.garcon
+      - ${GARCON_PROJECT_DIR:-.}:/projects
+    environment:
+      - GARCON_BIND_ADDRESS=0.0.0.0
+      - GARCON_PROJECT_BASE_DIR=/projects
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+
+volumes:
+  garcon-data:
