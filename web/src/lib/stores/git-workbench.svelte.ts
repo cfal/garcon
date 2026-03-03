@@ -33,6 +33,12 @@ export interface GitWorkbenchStoreOptions {
 	get provider(): string;
 }
 
+/** Injectable dependencies for testing. Defaults load the real
+ *  settings API when not overridden. */
+export interface GitWorkbenchDeps {
+	getSettings: () => Promise<{ ui?: Record<string, unknown> }>;
+}
+
 export class GitWorkbenchStore {
 	// File tree
 	tree = $state<GitTreeNode[]>([]);
@@ -97,6 +103,7 @@ export class GitWorkbenchStore {
 	// Per-file scroll positions for restore on switch
 	private scrollPositions = new Map<string, number>();
 	private readonly opts: GitWorkbenchStoreOptions;
+	private readonly deps: GitWorkbenchDeps;
 
 	// Viewport-driven loading: bounded-concurrency queue that fetches
 	// only the files currently visible in the virtual list.
@@ -129,8 +136,14 @@ export class GitWorkbenchStore {
 		}
 	}
 
-	constructor(opts?: GitWorkbenchStoreOptions) {
+	constructor(opts?: GitWorkbenchStoreOptions, deps?: GitWorkbenchDeps) {
 		this.opts = opts ?? { get provider() { return 'claude'; } };
+		this.deps = deps ?? {
+			getSettings: async () => {
+				const { getSettings } = await import('$lib/api/settings.js');
+				return getSettings();
+			},
+		};
 		this.loadTreePaneWidth();
 		this.hydrateCommitSettings();
 	}
@@ -785,8 +798,7 @@ export class GitWorkbenchStore {
 	// Reads commit message settings from persisted app settings.
 	private async hydrateCommitSettings(): Promise<void> {
 		try {
-			const { getSettings } = await import('$lib/api/settings.js');
-			const settings = await getSettings();
+			const settings = await this.deps.getSettings();
 			const ui = (settings.ui ?? {}) as Record<string, unknown>;
 			const cm = (ui.commitMessage ?? {}) as Record<string, unknown>;
 			this.commitGenerationEnabled = cm.enabled !== false;

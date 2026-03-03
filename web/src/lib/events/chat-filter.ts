@@ -47,21 +47,11 @@ export function filterByChat(
 
 	const messageChatId = getChatId(message);
 
-	const isUnscopedError =
-		!messageChatId &&
-		ctx.pendingViewChatId &&
-		!ctx.pendingViewChatId.includes(':') &&
-		key === 'agent-run-failed';
-
-	if (!activeViewChatId) {
-		return isUnscopedError ? { action: 'process' } : { action: 'skip' };
-	}
-
-	if (!messageChatId && !isUnscopedError) {
+	if (!activeViewChatId || !messageChatId) {
 		return { action: 'skip' };
 	}
 
-	if (messageChatId && messageChatId !== activeViewChatId) {
+	if (messageChatId !== activeViewChatId) {
 		return { action: 'skip' };
 	}
 

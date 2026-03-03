@@ -1,6 +1,6 @@
 // File operations API for reading, writing, browsing, and uploading files.
 
-import { apiGet, apiPut, apiPostForm } from './client.js';
+import { apiFetch, apiGet, apiPut, apiPostForm } from './client.js';
 
 export interface FilePathParams {
 	chatId?: string | null;
@@ -50,10 +50,6 @@ export interface FileEntry {
 export interface ValidateDirResponse {
 	valid: boolean;
 	path?: string;
-}
-
-export interface BrowseDirResponse {
-	entries: Array<{ name: string; type: string }>;
 }
 
 export interface ReadTextResponse {
@@ -139,7 +135,19 @@ export async function validateDir(dirPath: string): Promise<ValidateDirResponse>
 	return apiGet<ValidateDirResponse>(`/api/v1/files/validate-dir?path=${encodeURIComponent(dirPath)}`);
 }
 
-/** Browses directory contents for the file picker. */
-export async function browseDir(dirPath: string): Promise<BrowseDirResponse> {
-	return apiGet<BrowseDirResponse>(`/api/v1/files/browse?path=${encodeURIComponent(dirPath)}`);
+export interface DirectoryEntry {
+	name: string;
+	path: string;
+	type: string;
+}
+
+/** Fetches directory entries for the directory browser. Returns the raw
+ *  array the server sends, validated to be an Array. */
+export async function browseDirectory(path: string, signal?: AbortSignal): Promise<DirectoryEntry[]> {
+	const response = await apiFetch(`/api/v1/files/browse?path=${encodeURIComponent(path)}`, { signal });
+	const payload = await response.json();
+	if (!Array.isArray(payload)) {
+		throw new Error('Invalid directory browse payload');
+	}
+	return payload;
 }

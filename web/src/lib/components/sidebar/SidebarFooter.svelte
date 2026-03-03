@@ -57,7 +57,7 @@
 							placeholder={m.sidebar_projects_search_placeholder()}
 							value={searchFilter}
 							oninput={handleSearchInput}
-							class={`pl-8 ${footerControlHeightClass} text-sm bg-muted/50 border border-sidebar-border/70 focus:bg-background focus:ring-1 focus:ring-primary/20`}
+							class={`pl-8 ${footerControlHeightClass} text-sm bg-muted/50 border border-sidebar-border/70 focus-visible:bg-background focus-visible:ring-1 focus-visible:ring-primary/20`}
 						/>
 						{#if searchFilter}
 							<button
@@ -104,7 +104,7 @@
 							placeholder={m.sidebar_projects_search_placeholder()}
 							value={searchFilter}
 							oninput={handleSearchInput}
-							class={`pl-8 ${footerControlHeightClass} text-xs bg-muted/50 border border-sidebar-border/70 focus:bg-background focus:ring-1 focus:ring-primary/20 disabled:opacity-100`}
+							class={`pl-8 ${footerControlHeightClass} text-xs bg-muted/50 border border-sidebar-border/70 focus-visible:bg-background focus-visible:ring-1 focus-visible:ring-primary/20 disabled:opacity-100`}
 							disabled={isLoading}
 						/>
 						{#if searchFilter}

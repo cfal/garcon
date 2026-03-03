@@ -4,7 +4,8 @@
 	import ChatToolbar from './ChatToolbar.svelte';
 	import { getComposerState, getChatLifecycle, getPreferences, getChatSessions, getAppShell } from '$lib/context';
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
-	import { shouldSubmitOnEnter } from '$lib/chat/composer-shortcuts';
+	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
+	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { Send, ImagePlus } from '@lucide/svelte';
 	import type { PermissionMode } from '$lib/types/chat';
@@ -33,18 +34,14 @@
 		return appShell.onComposerFocusRequested(() => textarea?.focus());
 	});
 
-	// File mention menu state.
-	let showFileMenu = $state(false);
-	let fileQuery = $state('');
-	let previousComposerChatId = $state<string | null>(sessions.selectedChatId);
+	// Ephemeral UI state extracted to companion class.
+	const ui = new PromptComposerUiState();
+	ui.previousChatId = sessions.selectedChatId;
 
 	// Resets ephemeral UI state when switching chats without remounting the composer.
 	$effect(() => {
-		const chatId = sessions.selectedChatId;
-		if (chatId === previousComposerChatId) return;
-		previousComposerChatId = chatId;
-		showFileMenu = false;
-		fileQuery = '';
+		const changed = ui.resetOnChatSwitch(sessions.selectedChatId);
+		if (!changed) return;
 		composerState.isDragActive = false;
 		requestAnimationFrame(() => {
 			autoResize();
@@ -76,20 +73,20 @@
 	function updateFileTrigger(value: string, caret: number) {
 		const prefix = value.slice(0, caret);
 		const fileMatch = prefix.match(/(?:^|\s)@([^\s]*)$/);
-		showFileMenu = Boolean(fileMatch);
-		fileQuery = fileMatch?.[1] ?? '';
+		ui.showFileMenu = Boolean(fileMatch);
+		ui.fileQuery = fileMatch?.[1] ?? '';
 	}
 
 	function insertFileMention(path: string) {
 		composerState.inputText = composerState.inputText.replace(/(?:^|\s)@([^\s]*)$/, ` @${path} `);
-		showFileMenu = false;
+		ui.showFileMenu = false;
 		textarea?.focus();
 	}
 
 	// Handles Enter/Shift+Enter submission depending on preference.
 	// Defers to the file menu while it is open.
 	function handleKeyDown(event: KeyboardEvent) {
-		if (showFileMenu) return;
+		if (ui.showFileMenu) return;
 		if (event.key !== 'Enter') return;
 		if (
 			!shouldSubmitOnEnter({
@@ -106,8 +103,7 @@
 	}
 
 	function handleFormSubmit() {
-		const text = composerState.inputText.trim();
-		if (!text && composerState.images.length === 0) return;
+		if (!canSubmit) return;
 		onsubmit();
 	}
 
@@ -176,6 +172,9 @@
 	);
 	const isDisabled = $derived(isDraftStartupLoading);
 	const hasInput = $derived(Boolean(composerState.inputText.trim()));
+	const canSubmit = $derived(
+		canSubmitComposer(isDisabled, composerState.inputText, composerState.images.length)
+	);
 	const sendHint = $derived(
 		preferences.sendByShiftEnter ? m.chat_composer_shift_enter_to_send() : m.chat_composer_enter_to_send()
 	);
@@ -261,10 +260,10 @@
 
 		<FileMentionMenu
 			projectPath={sessions.selectedChat?.projectPath || ''}
-			isVisible={showFileMenu}
-			query={fileQuery}
+			isVisible={ui.showFileMenu}
+			query={ui.fileQuery}
 			onSelect={insertFileMention}
-			onClose={() => (showFileMenu = false)}
+			onClose={() => (ui.showFileMenu = false)}
 		/>
 
 			<form
@@ -347,7 +346,7 @@
 
 							<button
 								type="submit"
-								disabled={!hasInput || isDisabled}
+								disabled={!canSubmit}
 									class="absolute right-2 top-1/2 transform -translate-y-1/2 w-9 h-9 sm:w-11 sm:h-11 border {isQueueMode ? 'bg-status-info text-status-info-foreground border-status-info-border hover:bg-status-info/85' : 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90'} disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
 									title={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
 								>

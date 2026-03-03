@@ -150,7 +150,7 @@
 		<div bind:this={viewportEl} class="flex-1 overflow-auto flex justify-center items-center bg-muted min-h-[400px] p-4">
 			{#if loading}
 				<div class="text-center text-muted-foreground">
-					<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3"></div>
+					<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-status-info-border mx-auto mb-3"></div>
 					<p>{m.image_loading()}</p>
 				</div>
 			{:else if imageUrl}

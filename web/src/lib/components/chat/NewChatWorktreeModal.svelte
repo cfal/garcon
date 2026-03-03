@@ -149,20 +149,20 @@
 						type="text"
 						bind:value={createPath}
 						placeholder="Worktree path (required)"
-						class="w-full px-3 py-1.5 text-sm bg-background border border-border rounded focus:ring-1 focus:ring-interactive-accent focus:border-interactive-accent text-foreground placeholder-muted-foreground/60"
+						class="w-full px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
 					/>
 					<div class="flex gap-2">
 						<input
 							type="text"
 							bind:value={createBranch}
 							placeholder="Branch name (optional)"
-							class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus:ring-1 focus:ring-interactive-accent focus:border-interactive-accent text-foreground placeholder-muted-foreground/60"
+							class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
 						/>
 						<input
 							type="text"
 							bind:value={createBaseRef}
 							placeholder="Base ref (optional)"
-							class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus:ring-1 focus:ring-interactive-accent focus:border-interactive-accent text-foreground placeholder-muted-foreground/60"
+							class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
 						/>
 					</div>
 					<div class="flex gap-2 justify-end">

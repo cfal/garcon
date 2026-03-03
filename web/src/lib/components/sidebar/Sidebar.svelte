@@ -6,9 +6,10 @@
 	import { getAppShell } from '$lib/context';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import { togglePinned, toggleArchive, reorderChats, reorderChatsQuick, getChatDetails, forkChat } from '$lib/api/chats.js';
+	import { reorderChats } from '$lib/api/chats.js';
 	import type { ChatOrderList } from '$lib/api/chats.js';
 	import { createReorderWriteQueue } from './reorder-write-queue';
+	import { SidebarController } from './sidebar-controller.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ChatDeleteConfirmation {
@@ -57,8 +58,11 @@
 		onShowSettings,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
+	const controller = new SidebarController({
+		get onQuietRefresh() { return onQuietRefresh; },
+	});
 
-	// Sidebar controller state (inlined from useSidebarController).
+	// Sidebar UI state.
 	let searchFilter = $state('');
 	let chatDeleteConfirmation = $state<ChatDeleteConfirmation | null>(null);
 	let chatRenameConfirmation = $state<ChatRenameConfirmation | null>(null);
@@ -91,8 +95,7 @@
 		const chat = chats.find((s) => s.id === chatId);
 		const wasPinned = chat?.isPinned === true;
 		try {
-			await togglePinned(chatId);
-			await onQuietRefresh();
+			await controller.togglePinned(chatId);
 			if (!wasPinned && selectedChatId === chatId) {
 				appShell.requestSidebarRecenterToSelected();
 			}
@@ -111,8 +114,7 @@
 			? (chats[chatIndex + 1]?.id ?? chats[chatIndex - 1]?.id ?? null)
 			: null;
 		try {
-			await toggleArchive(chatId);
-			await onQuietRefresh();
+			await controller.toggleArchive(chatId);
 			if (isArchivingSelectedChat) {
 				if (neighborId) {
 					onChatSelect(neighborId);
@@ -172,7 +174,7 @@
 
 		void (async () => {
 			try {
-				const details = await getChatDetails(chatId);
+				const details = await controller.loadDetails(chatId);
 				if (!chatDetailsDialog || chatDetailsDialog.chatId !== chatId) return;
 				chatDetailsDialog = {
 					...chatDetailsDialog,
@@ -251,19 +253,16 @@
 	// Quick reorder for context menu actions.
 	async function handleQuickMove(chatId: string, chatIdAbove?: string, chatIdBelow?: string) {
 		try {
-			await reorderChatsQuick({ chatId, chatIdAbove, chatIdBelow });
-			await onQuietRefresh();
+			await controller.quickMove(chatId, chatIdAbove, chatIdBelow);
 		} catch (error) {
 			console.error('Failed to quick reorder:', error);
 		}
 	}
 
 	async function handleForkChat(sourceChatId: string) {
-		const newChatId = `${Date.now()}`;
 		try {
-			const result = await forkChat({ sourceChatId, chatId: newChatId });
-			await onQuietRefresh();
-			onChatSelect(result.chatId);
+			const resultChatId = await controller.forkChat(sourceChatId);
+			onChatSelect(resultChatId);
 		} catch (error) {
 			console.error('Failed to fork chat:', error);
 		}
