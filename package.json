@@ -20,7 +20,8 @@
   "scripts": {
     "install": "bun install --cwd server && bun install --cwd web",
     "build": "bun run --cwd web build",
-    "start": "bun run build && bun server/main.js",
+    "server": "bun server/main.js",
+    "start": "bun run build && bun run server",
     "test": "for f in server/**/__tests__/*.test.js; do bun test \"$f\" || exit 1; done && bun run --cwd web test",
     "check": "bun run --cwd web check",
     "typecheck": "bun run --cwd web check"
