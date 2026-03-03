@@ -50,6 +50,8 @@ routes['/icon-512.png'] = { GET: noauthServeStatic('icon-512.png') };
 routes['/site.webmanifest'] = { GET: noauthServeStatic('site.webmanifest') };
 routes['/_app/*'] = { GET: markRouteNoAuth(noauthServeFile) };
 routes['/chat/:id'] = { GET: noauthServeStatic('index.html') };
+routes['/setup'] = { GET: noauthServeStatic('index.html') };
+routes['/login'] = { GET: noauthServeStatic('index.html') };
 //routes['/*'] = { GET: noauthServeFile };
 
 export default routes;
