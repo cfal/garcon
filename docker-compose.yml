@@ -4,7 +4,7 @@ services:
     init: true
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${GARCON_PORT:-8080}:8080"
     volumes:
       - garcon-data:/home/bun/.garcon
       - ${GARCON_PROJECT_DIR:-.}:/projects
