@@ -9,6 +9,7 @@ import {
 	getChatSessions, setChatSessions,
 	getAppShell, setAppShell,
 	getWs, setWs,
+	getModelCatalog, setModelCatalog,
 	getChatState, setChatState,
 	getComposerState, setComposerState,
 	getProviderState, setProviderState,
@@ -31,6 +32,8 @@ describe('context factories', () => {
 		expect(typeof setAppShell).toBe('function');
 		expect(typeof getWs).toBe('function');
 		expect(typeof setWs).toBe('function');
+		expect(typeof getModelCatalog).toBe('function');
+		expect(typeof setModelCatalog).toBe('function');
 	});
 
 	it('exports getter/setter pairs for all chat-level contexts', () => {

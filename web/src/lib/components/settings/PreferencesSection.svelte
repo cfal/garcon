@@ -8,14 +8,13 @@
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import type { ThemeMode } from '$lib/stores/preferences.svelte.js';
 	import type { SessionProvider } from '$lib/types/app';
-	import type { ModelOption } from '$lib/stores/preferences.svelte.js';
 	import { onMount } from 'svelte';
-	import { getPreferences } from '$lib/context';
+	import { getModelCatalog, getPreferences } from '$lib/context';
 	import { getSettings, updateSettings } from '$lib/api/settings.js';
-	import { apiFetch } from '$lib/api/client.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const preferences = getPreferences();
+	const modelCatalog = getModelCatalog();
 
 	function setTheme(mode: ThemeMode) {
 		preferences.setPreference('theme', mode);
@@ -36,8 +35,8 @@
 	let titleModel = $state('');
 
 	// Shared model catalog for title provider selection.
-	let allModels = $state<Partial<Record<SessionProvider, ModelOption[]>>>({});
-	let availableTitleModels = $derived(allModels[titleProvider] ?? []);
+	let availableTitleModels = $derived(modelCatalog.getModels(titleProvider));
+	let availableProviders = $derived(modelCatalog.getProviders());
 
 	onMount(async () => {
 		const settings = await getSettings();
@@ -53,20 +52,18 @@
 			: 'claude');
 		titleModel = typeof chatTitle.model === 'string' ? chatTitle.model : '';
 
-		// Fetch available models for title provider selection.
-		try {
-			const modelsRes = await apiFetch('/api/v1/models');
-			if (modelsRes.ok) {
-				allModels = await modelsRes.json();
-				const titleProviderModels = (allModels[titleProvider] ?? []) as ModelOption[];
-				if (!titleModel && titleProviderModels.length > 0) {
-					titleModel = titleProviderModels[0].value;
-				}
-			}
-		} catch {
-			// Models may be unavailable during startup.
+		await modelCatalog.refreshIfStale();
+		const titleProviderModels = modelCatalog.getModels(titleProvider);
+		if (!titleModel && titleProviderModels.length > 0) {
+			titleModel = titleProviderModels[0].value;
 		}
 	});
+
+	function providerLabel(provider: SessionProvider): string {
+		if (provider === 'claude') return m.provider_claude();
+		if (provider === 'codex') return m.provider_codex();
+		return m.provider_opencode();
+	}
 
 	async function onPinnedInsertPositionChange(next: PinnedInsertPosition) {
 		pinnedInsertPosition = next;
@@ -201,16 +198,16 @@
 					value={titleProvider}
 					onchange={async (e) => {
 						titleProvider = (e.currentTarget as HTMLSelectElement).value as SessionProvider;
-						const models = allModels[titleProvider] ?? [];
+						const models = modelCatalog.getModels(titleProvider);
 						if (!models.some((opt) => opt.value === titleModel)) {
 							titleModel = models[0]?.value ?? '';
 						}
 						await persistChatTitleSettings();
 					}}
 				>
-					<option value="claude">{m.provider_claude()}</option>
-					<option value="codex">{m.provider_codex()}</option>
-					<option value="opencode">{m.provider_opencode()}</option>
+					{#each availableProviders as provider (provider)}
+						<option value={provider}>{providerLabel(provider)}</option>
+					{/each}
 				</select>
 			</div>
 

@@ -9,9 +9,9 @@ import { getGitRepoInfo, getGitWorktrees, gitCreateWorktree } from '$lib/api/git
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import type { NewChatConfig, SessionProvider } from '$lib/types/app.js';
 import type { PermissionMode } from '$lib/types/chat.js';
-import type { ModelOption } from '$lib/stores/preferences.svelte.js';
 import type { PreferencesStore } from '$lib/stores/preferences.svelte.js';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
+import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
 import { MODE_STYLES, DEFAULT_MODE_STYLE } from '$lib/chat/provider-state.svelte.js';
 import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
 import { canSubmitNewChat, type PathValidationStatus } from '$lib/components/chat/new-chat-submit.js';
@@ -40,24 +40,6 @@ export const THINKING_MODE_OPTIONS = [
 	{ id: 'ultrathink', name: () => m.chat_new_chat_ultrathink() }
 ];
 
-const CLAUDE_DEFAULTS: ModelOption[] = [
-	{ value: 'opus', label: 'Opus' },
-	{ value: 'sonnet', label: 'Sonnet' },
-	{ value: 'haiku', label: 'Haiku' }
-];
-const CODEX_DEFAULTS: ModelOption[] = [
-	{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
-	{ value: 'gpt-5.2-codex', label: 'GPT-5.2 Codex' },
-	{ value: 'gpt-5.2', label: 'GPT-5.2' },
-	{ value: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max' },
-	{ value: 'o3-pro', label: 'o3-pro' },
-	{ value: 'o3', label: 'o3' },
-	{ value: 'o4-mini', label: 'o4-mini' },
-	{ value: 'gpt-4.1', label: 'GPT-4.1' },
-	{ value: 'gpt-4.1-mini', label: 'GPT-4.1 mini' },
-	{ value: 'gpt-4.1-nano', label: 'GPT-4.1 nano' }
-];
-
 // Style constants re-exported for use in the template.
 export const PILL_BASE =
 	'px-3 py-1.5 rounded-lg text-sm font-medium border transition-all duration-200';
@@ -67,10 +49,9 @@ export const THINKING_PILL_WIDTH = 'w-[7.25rem] sm:w-[8rem] shrink-0';
 export class NewChatFormState {
 	// Provider and model
 	provider = $state<SessionProvider>('claude');
-	claudeModel = $state('opus');
-	codexModel = $state('gpt-5.3-codex');
+	claudeModel = $state('');
+	codexModel = $state('');
 	opencodeModel = $state('');
-	providerModels = $state<Partial<Record<SessionProvider, ModelOption[]>>>({});
 
 	// Path
 	projectPath = $state('');
@@ -113,15 +94,17 @@ export class NewChatFormState {
 	// Injected dependencies
 	readonly #preferences: PreferencesStore;
 	readonly #appShell: AppShellStore;
+	readonly #modelCatalog: ModelCatalogStore;
 
-	constructor(preferences: PreferencesStore, appShell: AppShellStore) {
+	constructor(preferences: PreferencesStore, appShell: AppShellStore, modelCatalog: ModelCatalogStore) {
 		this.#preferences = preferences;
 		this.#appShell = appShell;
+		this.#modelCatalog = modelCatalog;
 
 		this.provider = preferences.selectedProvider || 'claude';
-		this.claudeModel = preferences.claudeModel || 'opus';
-		this.codexModel = preferences.codexModel || 'gpt-5.3-codex';
-		this.opencodeModel = preferences.opencodeModel || '';
+		this.claudeModel = preferences.claudeModel || this.#modelCatalog.getDefaultModel('claude');
+		this.codexModel = preferences.codexModel || this.#modelCatalog.getDefaultModel('codex');
+		this.opencodeModel = preferences.opencodeModel || this.#modelCatalog.getDefaultModel('opencode');
 	}
 
 	// Derived accessors
@@ -162,14 +145,10 @@ export class NewChatFormState {
 
 	get modelOptions(): ModelOption[] {
 		const opts: Record<SessionProvider, ModelOption[]> = {
-			claude: this.providerModels.claude?.length
-				? this.providerModels.claude
-				: CLAUDE_DEFAULTS,
-			codex: this.providerModels.codex?.length
-				? this.providerModels.codex
-				: CODEX_DEFAULTS,
-			opencode: this.providerModels.opencode?.length
-				? this.providerModels.opencode
+			claude: this.#modelCatalog.getModels('claude'),
+			codex: this.#modelCatalog.getModels('codex'),
+			opencode: this.#modelCatalog.getModels('opencode').length
+				? this.#modelCatalog.getModels('opencode')
 				: this.opencodeModel
 					? [{ value: this.opencodeModel, label: this.opencodeModel }]
 					: []
@@ -211,7 +190,7 @@ export class NewChatFormState {
 
 	/** Validates the selected model against the live model list for a provider. */
 	validateModelAgainstLive(provider: SessionProvider): void {
-		const liveModels = this.providerModels[provider];
+		const liveModels = this.#modelCatalog.getModels(provider);
 		if (!liveModels?.length) return;
 
 		if (provider === 'opencode' && !liveModels.some((m) => m.value === this.opencodeModel)) {
@@ -219,6 +198,9 @@ export class NewChatFormState {
 		}
 		if (provider === 'claude' && !liveModels.some((m) => m.value === this.claudeModel)) {
 			this.claudeModel = liveModels[0].value;
+		}
+		if (provider === 'codex' && !liveModels.some((m) => m.value === this.codexModel)) {
+			this.codexModel = liveModels[0].value;
 		}
 	}
 
@@ -485,25 +467,20 @@ export class NewChatFormState {
 
 	// Initialization
 
-	/** Loads server settings and model lists. */
+	/** Loads server settings and refreshes models when the cache is stale. */
 	async loadSettingsAndModels(): Promise<void> {
 		try {
-			const [settingsData, modelsRes] = await Promise.all([
+			const [settingsData] = await Promise.all([
 				settingsApi.getSettings(),
-				apiFetch('/api/v1/models')
+				this.#modelCatalog.refreshIfStale()
 			]);
 
 			if (settingsData) {
 				this.#applySettings(settingsData);
 			}
-
-			if (modelsRes.ok) {
-				const models = await modelsRes.json();
-				this.providerModels = models;
-				if (models.claude) this.#preferences.setProviderModels('claude', models.claude);
-				if (models.codex) this.#preferences.setProviderModels('codex', models.codex);
-				if (models.opencode) this.#preferences.setProviderModels('opencode', models.opencode);
-			}
+			this.validateModelAgainstLive('claude');
+			this.validateModelAgainstLive('codex');
+			this.validateModelAgainstLive('opencode');
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings and models', err);
 		} finally {

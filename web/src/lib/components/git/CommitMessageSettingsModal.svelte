@@ -6,10 +6,9 @@
 	import { onMount } from 'svelte';
 	import X from '@lucide/svelte/icons/x';
 	import { Switch } from '$lib/components/ui/switch';
+	import { getModelCatalog } from '$lib/context';
 	import { getSettings, updateSettings } from '$lib/api/settings.js';
-	import { apiFetch } from '$lib/api/client.js';
 	import type { SessionProvider } from '$lib/types/app';
-	import type { ModelOption } from '$lib/stores/preferences.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -54,8 +53,9 @@ Return only the commit message now.`;
 	let customPrompt = $state('');
 	let useCommonDirPrefix = $state(false);
 	let isDefaultPrompt = $derived(!customPrompt || customPrompt === DEFAULT_PROMPT);
-	let allModels = $state<Partial<Record<SessionProvider, ModelOption[]>>>({});
-	let availableModels = $derived(allModels[provider] ?? []);
+	const modelCatalog = getModelCatalog();
+	let availableModels = $derived(modelCatalog.getModels(provider));
+	let availableProviders = $derived(modelCatalog.getProviders());
 	let loaded = $state(false);
 
 	onMount(async () => {
@@ -73,16 +73,11 @@ Return only the commit message now.`;
 			if (typeof cm.useCommonDirPrefix === 'boolean') useCommonDirPrefix = cm.useCommonDirPrefix;
 		} catch { /* use defaults */ }
 
-		try {
-			const res = await apiFetch('/api/v1/models');
-			if (res.ok) {
-				allModels = await res.json();
-				if (!model) {
-					const models = allModels[provider] ?? [];
-					if (models.length > 0) model = models[0].value;
-				}
-			}
-		} catch { /* models may be unavailable */ }
+		await modelCatalog.refreshIfStale();
+		if (!model) {
+			const models = modelCatalog.getModels(provider);
+			if (models.length > 0) model = models[0].value;
+		}
 
 		loaded = true;
 	});
@@ -103,11 +98,17 @@ Return only the commit message now.`;
 
 	async function handleProviderChange(e: Event) {
 		provider = (e.currentTarget as HTMLSelectElement).value as SessionProvider;
-		const models = allModels[provider] ?? [];
+		const models = modelCatalog.getModels(provider);
 		if (!models.some((opt) => opt.value === model)) {
 			model = models[0]?.value ?? '';
 		}
 		await persist();
+	}
+
+	function providerLabel(currentProvider: SessionProvider): string {
+		if (currentProvider === 'claude') return m.provider_claude();
+		if (currentProvider === 'codex') return m.provider_codex();
+		return m.provider_opencode();
 	}
 
 	async function handleModelChange(e: Event) {
@@ -173,9 +174,9 @@ Return only the commit message now.`;
 							value={provider}
 							onchange={handleProviderChange}
 						>
-							<option value="claude">{m.provider_claude()}</option>
-							<option value="codex">{m.provider_codex()}</option>
-							<option value="opencode">{m.provider_opencode()}</option>
+							{#each availableProviders as availableProvider (availableProvider)}
+								<option value={availableProvider}>{providerLabel(availableProvider)}</option>
+							{/each}
 						</select>
 					</div>
 

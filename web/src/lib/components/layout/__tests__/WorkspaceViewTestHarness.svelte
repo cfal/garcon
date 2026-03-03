@@ -1,6 +1,6 @@
 <script lang="ts">
 	import WorkspaceView from '../WorkspaceView.svelte';
-	import { setChatSessions, setPreferences } from '$lib/context';
+	import { setChatSessions, setModelCatalog, setPreferences } from '$lib/context';
 	import type { AppTab } from '$lib/types/app';
 
 	interface WorkspaceViewTestHarnessProps {
@@ -34,6 +34,16 @@
 		get alwaysFullscreenOnGitPanel() {
 			return alwaysFullscreenOnGitPanel;
 		},
+	} as never);
+
+	setModelCatalog({
+		version: 0,
+		getModels() {
+			return [];
+		},
+		getProviders() {
+			return ['claude', 'codex', 'opencode'];
+		}
 	} as never);
 
 	function handleTabChange(_tab: AppTab): void {

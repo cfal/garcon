@@ -5,7 +5,7 @@
 		MODE_LABELS,
 		THINKING_MODES
 	} from '$lib/chat/provider-state.svelte';
-	import { getProviderState, getChatSessions, getPreferences } from '$lib/context';
+	import { getProviderState, getChatSessions, getPreferences, getModelCatalog } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { Lightbulb, ImagePlus } from '@lucide/svelte';
 	import type { PermissionMode } from '$lib/types/chat';
@@ -22,6 +22,7 @@
 	const providerState = getProviderState();
 	const sessions = getChatSessions();
 	const preferences = getPreferences();
+	const modelCatalog = getModelCatalog();
 
 	// Maps thinking mode IDs to display-friendly keys.
 	const MODE_KEY_MAP: Record<string, string> = {
@@ -39,7 +40,7 @@
 
 	function cycleModel() {
 		const provider = providerState.provider;
-		const models = preferences.providerModels[provider] ?? [];
+		const models = modelCatalog.getModels(provider);
 		if (models.length === 0) return;
 		const idx = models.findIndex((m) => m.value === providerState.model);
 		const next = models[(idx + 1) % models.length];

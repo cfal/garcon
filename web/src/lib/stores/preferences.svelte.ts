@@ -3,14 +3,9 @@
 
 import type { SessionProvider } from '$lib/types/app';
 import type { PermissionMode } from '$lib/types/chat';
+import { CLAUDE_MODELS, CODEX_MODELS } from '$shared/models';
 
-export interface ModelOption {
-	value: string;
-	label: string;
-}
-
-// Persisted preference fields. providerModels is runtime-only and
-// excluded from persistence.
+// Persisted preference fields.
 export type ThemeMode = 'dark' | 'light' | 'system';
 
 export interface PreferencesState {
@@ -47,8 +42,8 @@ const DEFAULTS: PreferencesState = {
 	alwaysFullscreenOnGitPanel: true,
 	sidebarVisible: true,
 	selectedProvider: 'claude',
-	claudeModel: 'opus',
-	codexModel: 'gpt-5.3-codex',
+	claudeModel: CLAUDE_MODELS.DEFAULT,
+	codexModel: CODEX_MODELS.DEFAULT,
 	opencodeModel: 'anthropic/claude-sonnet-4-5',
 	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
@@ -181,8 +176,6 @@ export class PreferencesStore {
 	markdownViewerFontSize = $state(DEFAULTS.markdownViewerFontSize);
 	language = $state(DEFAULTS.language);
 
-	// Runtime-only, not persisted
-	providerModels = $state<Partial<Record<SessionProvider, ModelOption[]>>>({});
 	lastPermissionMode = $state<PermissionMode>('default');
 
 	constructor() {
@@ -272,10 +265,6 @@ export class PreferencesStore {
 		this.lastPermissionMode = mode;
 	}
 
-	/** Adds or replaces the live model list for a given provider. */
-	setProviderModels(provider: SessionProvider, models: ModelOption[]): void {
-		this.providerModels = { ...this.providerModels, [provider]: models };
-	}
 }
 
 export function createPreferencesStore(): PreferencesStore {

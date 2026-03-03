@@ -15,6 +15,7 @@ import type { ProviderState } from '$lib/chat/provider-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { FileViewerStore } from '$lib/stores/file-viewer.svelte';
 import type { ReadReceiptOutboxStore } from '$lib/stores/read-receipt-outbox.svelte';
+import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -26,6 +27,7 @@ export const [getAppShell, setAppShell] = createContext<AppShellStore>();
 export const [getWs, setWs] = createContext<WsConnection>();
 export const [getFileViewer, setFileViewer] = createContext<FileViewerStore>();
 export const [getReadReceiptOutbox, setReadReceiptOutbox] = createContext<ReadReceiptOutboxStore>();
+export const [getModelCatalog, setModelCatalog] = createContext<ModelCatalogStore>();
 
 // Chat-level contexts (set in ConversationWorkspace.svelte)
 export const [getChatState, setChatState] = createContext<ChatState>();
