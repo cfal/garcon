@@ -42,31 +42,13 @@ On first launch, create the single local account at `/setup`, then configure pro
 
 ## Docker
 
-Run Garcon in a container with auto-restart on crash or machine reboot:
-
-```bash
-docker compose up -d
-```
-
-Point `GARCON_PROJECT_DIR` at the directory containing your repos:
+Run with Docker — auto-restarts on crash or machine reboot:
 
 ```bash
 GARCON_PROJECT_DIR=~/repos docker compose up -d
 ```
 
-Pass API keys from the host:
-
-```bash
-OPENAI_API_KEY=sk-... docker compose up -d
-```
-
-View logs:
-
-```bash
-docker compose logs -f
-```
-
-Configuration is persisted in a Docker volume (`garcon-data`), so it survives container restarts.
+Set `GARCON_PROJECT_DIR` to the directory containing your repos. Pass any API keys (e.g. `OPENAI_API_KEY`) as additional env vars. Config is persisted in a Docker volume across restarts.
 
 ## Run and Configuration
 
