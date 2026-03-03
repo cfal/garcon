@@ -139,7 +139,7 @@
 		baselineContent = content;
 		onDirtyChange?.(false);
 
-		const state = EditorState.create({
+		const editorState = EditorState.create({
 			doc: content,
 			extensions: [
 				...buildStaticExtensions(),
@@ -149,7 +149,7 @@
 		});
 
 		editorView = new EditorView({
-			state,
+			state: editorState,
 			parent: editorContainer,
 		});
 

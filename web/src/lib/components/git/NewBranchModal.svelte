@@ -50,7 +50,7 @@
 					oninput={(e) => onNameChange((e.target as HTMLInputElement).value)}
 					onkeydown={handleKeydown}
 					placeholder={m.git_new_branch_placeholder()}
-					class="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+					class="w-full px-3 py-2 border border-border rounded-md bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				/>
 			</div>
 		</div>

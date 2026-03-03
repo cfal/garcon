@@ -172,7 +172,7 @@
 						onfocus={() => form.handlePathFocus()}
 						oninput={() => form.clearError()}
 						placeholder={form.projectBasePath}
-						class="w-full pl-3 pr-8 py-2 text-sm bg-background border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring placeholder-muted-foreground/60 text-foreground"
+						class="w-full pl-3 pr-8 py-2 text-sm bg-background border border-border rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring placeholder-muted-foreground/60 text-foreground"
 					/>
 					<div class="absolute right-2 top-1/2 -translate-y-1/2">
 						{#if !form.trimmedPath}
@@ -334,7 +334,7 @@
 		<button
 			type="button"
 			onclick={openImagePicker}
-			class="px-3 py-1.5 text-muted-foreground hover:text-foreground rounded-lg border border-border flex items-center justify-center transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ring-offset-background"
+			class="px-3 py-1.5 text-muted-foreground hover:text-foreground rounded-lg border border-border flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
 			title={m.chat_composer_attach_images()}
 		>
 			<ImagePlus class="w-4 h-4" />
@@ -359,14 +359,14 @@
 			onpaste={handleMessagePaste}
 			placeholder={form.placeholder}
 			disabled={!form.canSubmit}
-			class="chat-input-placeholder block w-full pl-4 pr-14 py-3 bg-background border border-border rounded-xl focus:ring-2 focus:ring-ring focus:border-ring text-foreground placeholder-muted-foreground/60 disabled:opacity-50 resize-none min-h-[56px] max-h-[200px] text-base leading-6"
+			class="chat-input-placeholder block w-full pl-4 pr-14 py-3 bg-background border border-border rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring text-foreground placeholder-muted-foreground/60 disabled:opacity-50 resize-none min-h-[56px] max-h-[200px] text-base leading-6"
 			rows="2"
 		></textarea>
 		<button
 			type="button"
 			onclick={handleSubmit}
 			disabled={!form.canSubmit}
-			class="absolute right-2 bottom-2 w-10 h-10 bg-primary hover:bg-primary/90 disabled:bg-muted disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ring-offset-background"
+			class="absolute right-2 bottom-2 w-10 h-10 bg-primary hover:bg-primary/90 disabled:bg-muted disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
 			title={m.chat_new_chat_start_session()}
 		>
 			<svg

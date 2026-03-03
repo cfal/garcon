@@ -137,21 +137,57 @@ describe('parseServerWsMessage', () => {
 		expect(msg).toBeNull();
 	});
 
-	it('coerces missing chatId to empty string', () => {
+	it('returns null for agent-run-finished when chatId is missing', () => {
 		const msg = parseServerWsMessage({ type: 'agent-run-finished' });
-		expect(msg).toBeInstanceOf(AgentRunFinishedMessage);
-		expect((msg as AgentRunFinishedMessage).chatId).toBe('');
+		expect(msg).toBeNull();
 	});
 
-	it('coerces numeric chatId to empty string', () => {
+	it('returns null for agent-run-finished when chatId is numeric', () => {
 		const msg = parseServerWsMessage({ type: 'agent-run-finished', chatId: 42 });
-		expect(msg).toBeInstanceOf(AgentRunFinishedMessage);
-		expect((msg as AgentRunFinishedMessage).chatId).toBe('');
+		expect(msg).toBeNull();
 	});
 
-	it('coerces missing error to empty string for agent-run-failed', () => {
+	it('returns null for agent-run-failed when error is missing', () => {
 		const msg = parseServerWsMessage({ type: 'agent-run-failed', chatId: 'c-1' });
-		expect(msg).toBeInstanceOf(AgentRunFailedMessage);
-		expect((msg as AgentRunFailedMessage).error).toBe('');
+		expect(msg).toBeNull();
+	});
+
+	it('returns null for agent-run-failed when chatId is missing', () => {
+		const msg = parseServerWsMessage({ type: 'agent-run-failed', error: 'timeout' });
+		expect(msg).toBeNull();
+	});
+
+	it('returns null for agent-run-output when chatId is empty string', () => {
+		const msg = parseServerWsMessage({ type: 'agent-run-output', chatId: '', messages: [] });
+		expect(msg).toBeNull();
+	});
+
+	it('returns null for chat-session-created when chatId is missing', () => {
+		const msg = parseServerWsMessage({ type: 'chat-session-created' });
+		expect(msg).toBeNull();
+	});
+
+	it('returns null for chat-log-response when clientRequestId is missing', () => {
+		const msg = parseServerWsMessage({
+			type: 'chat-log-response',
+			chatId: 'c-1',
+			messages: [],
+			total: 0,
+			hasMore: false,
+			offset: 0,
+			limit: 50,
+		});
+		expect(msg).toBeNull();
+	});
+
+	it('returns null for client-request-error when requestType is missing', () => {
+		const msg = parseServerWsMessage({
+			type: 'client-request-error',
+			clientRequestId: 'req-1',
+			code: 'SESSION_NOT_FOUND',
+			message: 'not found',
+			retryable: false,
+		});
+		expect(msg).toBeNull();
 	});
 });

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GitWorkbenchStore } from '../git-workbench.svelte';
+import { GitWorkbenchStore, type GitWorkbenchDeps } from '../git-workbench.svelte';
+
+const mockDeps: GitWorkbenchDeps = {
+	getSettings: vi.fn().mockResolvedValue({ ui: {} }),
+};
 
 // Mock the git API module
 vi.mock('$lib/api/git.js', () => ({
@@ -30,7 +34,7 @@ describe('GitWorkbenchStore', () => {
 	let wb: GitWorkbenchStore;
 
 	beforeEach(() => {
-		wb = new GitWorkbenchStore();
+		wb = new GitWorkbenchStore(undefined, mockDeps);
 		vi.clearAllMocks();
 	});
 

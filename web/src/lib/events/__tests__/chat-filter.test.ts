@@ -108,26 +108,6 @@ describe('filterByChat', () => {
 		expect(result).toEqual({ action: 'skip' });
 	});
 
-	it('processes agent-run-failed without chatId when pendingViewChatId is set', () => {
-		const pendingCtx = { selectedChatId: null, currentChatId: null, pendingViewChatId: 'draft-1' };
-		const result = filterByChat(
-			'agent-run-failed',
-			{ type: 'agent-run-failed', error: 'boom' } as never,
-			pendingCtx,
-		);
-		expect(result).toEqual({ action: 'process' });
-	});
-
-	it('skips agent-run-failed without chatId when pendingViewChatId contains colon', () => {
-		const pendingCtx = { selectedChatId: null, currentChatId: null, pendingViewChatId: 'ns:draft-1' };
-		const result = filterByChat(
-			'agent-run-failed',
-			{ type: 'agent-run-failed', error: 'boom' } as never,
-			pendingCtx,
-		);
-		expect(result).toEqual({ action: 'skip' });
-	});
-
 	it('handles message with non-string chatId gracefully', () => {
 		const result = filterByChat(
 			'agent-run-output',

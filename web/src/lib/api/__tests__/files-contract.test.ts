@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getTree, getFileList, readText, saveText, validateDir, browseDir } from '../files';
+import { getTree, getFileList, readText, saveText, validateDir, browseDirectory } from '../files';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -105,15 +105,22 @@ describe('files API contract', () => {
 		await expect(validateDir('/bad')).rejects.toMatchObject({ message: 'Invalid path' });
 	});
 
-	it('browseDir calls GET /api/v1/files/browse', async () => {
-		const payload = { entries: [{ name: 'src', type: 'directory' }] };
+	it('browseDirectory calls GET /api/v1/files/browse and returns raw array', async () => {
+		const payload = [{ name: 'src', path: '/p/src', type: 'directory' }];
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await browseDir('/p');
+		const result = await browseDirectory('/p');
 
-		expect(result.entries).toHaveLength(1);
+		expect(result).toHaveLength(1);
+		expect(result[0]).toEqual({ name: 'src', path: '/p/src', type: 'directory' });
 		const [url] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/files/browse');
 		expect(url).toContain('path=%2Fp');
+	});
+
+	it('browseDirectory rejects non-array payloads', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ entries: [] }));
+
+		await expect(browseDirectory('/p')).rejects.toThrow('Invalid directory browse payload');
 	});
 });

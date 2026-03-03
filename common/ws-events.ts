@@ -174,52 +174,107 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
 
+// Validates a required non-empty string field. Returns null when the
+// value is not a non-empty string so the caller can reject the message.
+function requiredStr(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 // Constructs a typed ServerWsMessage class instance from raw data.
 // Returns null for unrecognized message types.
 export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMessage | null {
   switch (data.type) {
-    case 'agent-run-output':
-      return new AgentRunOutputMessage(str(data.chatId), parseChatMessages(data.messages));
-    case 'agent-run-finished':
-      return new AgentRunFinishedMessage(str(data.chatId), data.exitCode as number | undefined);
-    case 'agent-run-failed':
-      return new AgentRunFailedMessage(str(data.chatId), str(data.error));
-    case 'chat-session-created':
-      return new ChatSessionCreatedMessage(str(data.chatId));
-    case 'chat-session-stopped':
-      return new ChatSessionStoppedMessage(str(data.chatId), Boolean(data.success));
-    case 'chat-processing-updated':
-      return new ChatProcessingUpdatedMessage(str(data.chatId), Boolean(data.isProcessing));
-    case 'queue-state-updated':
-      return new QueueStateUpdatedMessage(str(data.chatId), normalizeQueueState(data.queue));
-    case 'queue-dispatching':
-      return new QueueDispatchingMessage(str(data.chatId), str(data.entryId), String(data.content ?? ''));
+    case 'agent-run-output': {
+      const chatId = requiredStr(data.chatId);
+      if (!chatId) return null;
+      return new AgentRunOutputMessage(chatId, parseChatMessages(data.messages));
+    }
+    case 'agent-run-finished': {
+      const chatId = requiredStr(data.chatId);
+      if (!chatId) return null;
+      return new AgentRunFinishedMessage(chatId, data.exitCode as number | undefined);
+    }
+    case 'agent-run-failed': {
+      const chatId = requiredStr(data.chatId);
+      const error = requiredStr(data.error);
+      if (!chatId || !error) return null;
+      return new AgentRunFailedMessage(chatId, error);
+    }
+    case 'chat-session-created': {
+      const chatId = requiredStr(data.chatId);
+      if (!chatId) return null;
+      return new ChatSessionCreatedMessage(chatId);
+    }
+    case 'chat-session-stopped': {
+      const chatId = requiredStr(data.chatId);
+      if (!chatId) return null;
+      return new ChatSessionStoppedMessage(chatId, Boolean(data.success));
+    }
+    case 'chat-processing-updated': {
+      const chatId = requiredStr(data.chatId);
+      if (!chatId) return null;
+      return new ChatProcessingUpdatedMessage(chatId, Boolean(data.isProcessing));
+    }
+    case 'queue-state-updated': {
+      const chatId = requiredStr(data.chatId);
+      if (!chatId) return null;
+      return new QueueStateUpdatedMessage(chatId, normalizeQueueState(data.queue));
+    }
+    case 'queue-dispatching': {
+      const chatId = requiredStr(data.chatId);
+      const entryId = requiredStr(data.entryId);
+      if (!chatId || !entryId) return null;
+      return new QueueDispatchingMessage(chatId, entryId, String(data.content ?? ''));
+    }
     case 'chat-sessions-running':
       return new ChatSessionsRunningMessage(data.sessions as ChatSessionsRunningMessage['sessions']);
     case 'ws-fault':
       return new WsFaultMessage(str(data.error));
-    case 'chat-title-updated':
-      return new ChatTitleUpdatedMessage(str(data.chatId), str(data.title));
-    case 'chat-session-deleted':
-      return new ChatSessionDeletedWsMessage(str(data.chatId));
-    case 'chat-read-updated-v1':
-      return new ChatReadUpdatedV1Message(str(data.chatId), str(data.lastReadAt));
-    case 'chat-list-refresh-requested':
-      return new ChatListRefreshRequestedMessage(data.reason as ChatListInvalidationReason, str(data.chatId));
-    case 'chat-log-response':
+    case 'chat-title-updated': {
+      const chatId = requiredStr(data.chatId);
+      if (!chatId) return null;
+      return new ChatTitleUpdatedMessage(chatId, str(data.title));
+    }
+    case 'chat-session-deleted': {
+      const chatId = requiredStr(data.chatId);
+      if (!chatId) return null;
+      return new ChatSessionDeletedWsMessage(chatId);
+    }
+    case 'chat-read-updated-v1': {
+      const chatId = requiredStr(data.chatId);
+      const lastReadAt = requiredStr(data.lastReadAt);
+      if (!chatId || !lastReadAt) return null;
+      return new ChatReadUpdatedV1Message(chatId, lastReadAt);
+    }
+    case 'chat-list-refresh-requested': {
+      const chatId = requiredStr(data.chatId);
+      if (!chatId) return null;
+      return new ChatListRefreshRequestedMessage(data.reason as ChatListInvalidationReason, chatId);
+    }
+    case 'chat-log-response': {
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const chatId = requiredStr(data.chatId);
+      if (!clientRequestId || !chatId) return null;
       return new ChatLogResponseMessage(
-        str(data.clientRequestId), str(data.chatId), parseChatMessages(data.messages),
+        clientRequestId, chatId, parseChatMessages(data.messages),
         Number(data.total), Boolean(data.hasMore), Number(data.offset), Number(data.limit),
       );
-    case 'client-request-error':
+    }
+    case 'client-request-error': {
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const requestType = requiredStr(data.requestType);
+      if (!clientRequestId || !requestType) return null;
       return new ClientRequestErrorMessage(
-        str(data.clientRequestId),
-        str(data.requestType),
+        clientRequestId,
+        requestType,
         data.code as ClientRequestErrorCode,
         str(data.message),
         Boolean(data.retryable),
         data.chatId as string | undefined,
       );
+    }
     default:
       return null;
   }

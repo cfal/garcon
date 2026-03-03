@@ -11,9 +11,8 @@
 	const lazySettings = () => import('../settings/Settings.svelte');
 	import { getNavigation, getChatRuntime, getChatSessions, getAppShell, getWs, getPreferences } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import { listChats, deleteChat } from '$lib/api/chats.js';
-	import { updateSessionName } from '$lib/api/settings.js';
 	import { ChatRunningQueryRequest } from '$shared/ws-requests';
+	import { AppShellController } from './app-shell-controller.svelte';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileViewerHost from '../files/FileViewerHost.svelte';
 
@@ -23,6 +22,10 @@
 	const appShell = getAppShell();
 	const ws = getWs();
 	const preferences = getPreferences();
+	const shellController = new AppShellController({
+		upsertFromServer: (s) => sessions.upsertFromServer(s),
+		setLoadingChats: (v) => { chatRuntime.isLoadingChats = v; },
+	});
 
 	let isMobile = $state(false);
 	let isWorkspaceFullscreen = $state(false);
@@ -60,25 +63,12 @@
 		return () => mql.removeEventListener('change', onChange);
 	});
 
-	async function fetchChats() {
-		chatRuntime.isLoadingChats = true;
-		try {
-			const res = await listChats();
-			sessions.upsertFromServer(res.sessions ?? []);
-		} catch (err) {
-			console.error('[AppShell] Failed to fetch chats:', err);
-		} finally {
-			chatRuntime.isLoadingChats = false;
-		}
+	function fetchChats() {
+		return shellController.fetchChats();
 	}
 
-	async function quietRefresh() {
-		try {
-			const res = await listChats();
-			sessions.upsertFromServer(res.sessions ?? []);
-		} catch (err) {
-			console.error('[AppShell] Quiet refresh failed:', err);
-		}
+	function quietRefresh() {
+		return shellController.quietRefresh();
 	}
 
 	/** Fetches the chat list, then requests the processing snapshot.
@@ -116,20 +106,12 @@
 		appShell.openNewChatDialog();
 	}
 
-	async function handleChatDelete(chatId: string) {
-		try {
-			await deleteChat(chatId);
-		} catch (err) {
-			console.error('[AppShell] Delete failed:', err);
-		}
+	function handleChatDelete(chatId: string) {
+		return shellController.deleteChat(chatId);
 	}
 
-	async function handleChatRenamed(chatId: string, newTitle: string) {
-		try {
-			await updateSessionName(chatId, newTitle);
-		} catch (err) {
-			console.error('[AppShell] Rename failed:', err);
-		}
+	function handleChatRenamed(chatId: string, newTitle: string) {
+		return shellController.renameChat(chatId, newTitle);
 	}
 
 	function handleTabChange(tab: AppTab) {

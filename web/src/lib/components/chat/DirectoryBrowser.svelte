@@ -3,19 +3,13 @@
 	// listings from GET /api/v1/files/browse and displays breadcrumb navigation.
 
 	import { onMount, onDestroy } from 'svelte';
-	import { apiFetch } from '$lib/api/client.js';
+	import { browseDirectory, type DirectoryEntry } from '$lib/api/files.js';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Folder from '@lucide/svelte/icons/folder';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import * as m from '$lib/paraglide/messages.js';
-
-	interface DirectoryEntry {
-		name: string;
-		path: string;
-		type: string;
-	}
 
 	interface DirectoryBrowserProps {
 		currentPath: string;
@@ -54,31 +48,23 @@
 		loading = true;
 		error = null;
 
-		const controller = new AbortController();
+		const abortController = new AbortController();
 
-		apiFetch(`/api/v1/files/browse?path=${encodeURIComponent(path)}`, {
-			signal: controller.signal
-		})
-			.then((res) => res.json())
-			.then((data) => {
-				if (controller.signal.aborted) return;
-				if (Array.isArray(data)) {
-					entries = data;
-				} else {
-					entries = [];
-					error = 'Unable to list directory';
-				}
-				loading = false;
+		void browseDirectory(path, abortController.signal)
+			.then((list) => {
+				if (abortController.signal.aborted) return;
+				entries = list;
 				focusIndex = -1;
+				loading = false;
 			})
 			.catch((err) => {
-				if (controller.signal.aborted) return;
+				if (abortController.signal.aborted) return;
 				entries = [];
-				error = err.message || 'Failed to browse';
+				error = err instanceof Error ? err.message : String(err);
 				loading = false;
 			});
 
-		return () => controller.abort();
+		return () => abortController.abort();
 	});
 
 	// Close on Escape key.
