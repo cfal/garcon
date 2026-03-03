@@ -200,7 +200,7 @@
 		if (Number.isFinite(stored)) composerHeight = clampHeight(stored);
 	});
 
-	function handleResizeStart(event: MouseEvent) {
+	function handleResizeStart(event: PointerEvent) {
 		event.preventDefault();
 		const startY = event.clientY;
 		const startHeight = composerHeight;
@@ -209,30 +209,33 @@
 
 		document.body.style.cursor = 'row-resize';
 		document.body.style.userSelect = 'none';
+		document.body.style.touchAction = 'none';
 
-		function onMouseMove(e: MouseEvent) {
+		function onPointerMove(e: PointerEvent) {
 			if (ta) ta.style.minHeight = `${clampHeight(startHeight + startY - e.clientY)}px`;
 		}
 
-		function onMouseUp(e: MouseEvent) {
-			document.removeEventListener('mousemove', onMouseMove);
-			document.removeEventListener('mouseup', onMouseUp);
+		function onPointerUp(e: PointerEvent) {
+			document.removeEventListener('pointermove', onPointerMove);
+			document.removeEventListener('pointerup', onPointerUp);
 			document.body.style.cursor = '';
 			document.body.style.userSelect = '';
+			document.body.style.touchAction = '';
 			dragCleanup = null;
 			const finalHeight = clampHeight(startHeight + startY - e.clientY);
 			composerHeight = finalHeight;
 			window.localStorage.setItem(COMPOSER_STORAGE_KEY, String(Math.round(finalHeight)));
 		}
 
-		document.addEventListener('mousemove', onMouseMove);
-		document.addEventListener('mouseup', onMouseUp);
+		document.addEventListener('pointermove', onPointerMove);
+		document.addEventListener('pointerup', onPointerUp);
 
 		dragCleanup = () => {
-			document.removeEventListener('mousemove', onMouseMove);
-			document.removeEventListener('mouseup', onMouseUp);
+			document.removeEventListener('pointermove', onPointerMove);
+			document.removeEventListener('pointerup', onPointerUp);
 			document.body.style.cursor = '';
 			document.body.style.userSelect = '';
+			document.body.style.touchAction = '';
 		};
 	}
 
@@ -244,11 +247,11 @@
 
 <div class="flex-shrink-0">
 		<div data-composer class="relative bg-card pb-[env(safe-area-inset-bottom)]">
-		<!-- Invisible resize grab zone above the composer (desktop only) -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -- resize handle, mouse-only by design -->
+		<!-- Invisible resize grab zone above the composer -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
 		<div
-			onmousedown={handleResizeStart}
-			class="hidden sm:block absolute left-0 right-0 -top-1 h-2 cursor-row-resize z-10"
+			onpointerdown={handleResizeStart}
+			class="absolute left-0 right-0 -top-1 h-3 cursor-row-resize z-10 touch-none"
 		></div>
 
 		<ChatToolbar
