@@ -7,6 +7,7 @@ import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import { UserMessage } from '../../common/chat-types.ts';
 import { resolveMissingNativePath } from '../chats/resolve-native-path.js';
 import { forkChatFileCopy } from '../chats/fork-chat.js';
+import { PROVIDERS as VALID_PROVIDERS, supportsFork as providerSupportsFork, supportsImages as providerSupportsImages } from '../../common/providers.ts';
 
 function createdAtFromId(id) {
   const raw = String(id || '').trim();
@@ -56,7 +57,6 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
         entryMap.set(chatId, {
           id: chatId,
           provider: session.provider,
-          canFork: providers.supportsFork(session.provider),
           model: session.model || null,
           permissionMode: session.permissionMode || 'default',
           thinkingMode: session.thinkingMode || 'none',
@@ -110,7 +110,6 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
     try {
       const body = await parseJsonBody(request);
       const chatId = String(body.chatId || '').trim();
-      const VALID_PROVIDERS = ['claude', 'codex', 'opencode'];
       const provider = typeof body.provider === 'string' && VALID_PROVIDERS.includes(body.provider)
         ? body.provider
         : 'claude';
@@ -122,6 +121,9 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
 
       if (!chatId || !/^\d+$/.test(chatId)) {
         return Response.json({ success: false, error: 'Valid numeric chatId is required' }, { status: 400 });
+      }
+      if (initialImages.length > 0 && !providerSupportsImages(provider)) {
+        return Response.json({ success: false, error: `Images unsupported for provider: ${provider}` }, { status: 422 });
       }
       if (!projectPath) {
         return Response.json({ success: false, error: 'projectPath is required' }, { status: 400 });
@@ -466,7 +468,7 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
         return Response.json({ success: false, error: 'Source session not found' }, { status: 404 });
       }
 
-      if (!providers.supportsFork(sourceSession.provider)) {
+      if (!providerSupportsFork(sourceSession.provider)) {
         return Response.json({ success: false, error: `Fork unsupported for provider: ${sourceSession.provider}` }, { status: 422 });
       }
 
@@ -482,7 +484,6 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
         registry,
         settings,
         metadata,
-        providers,
       });
 
       return Response.json({ success: true, ...result });

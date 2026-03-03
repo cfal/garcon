@@ -65,14 +65,12 @@ const historyCache = {
 const providers = {
   startSession: mock(() => undefined),
   isProviderSessionRunning: mock(() => false),
-  supportsFork: mock((provider) => provider === 'claude' || provider === 'codex'),
 };
 
 const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
 
 const allMocks = [
   registry.getChat, parseJsonBody, forkChatFileCopy,
-  providers.supportsFork,
 ];
 
 describe('POST /api/v1/chats/fork', () => {
@@ -229,52 +227,3 @@ describe('POST /api/v1/chats/fork', () => {
   });
 });
 
-describe('GET /api/v1/chats includes canFork', () => {
-  const handler = chatsRoutes['/api/v1/chats'].GET;
-
-  beforeEach(() => {
-    allMocks.forEach(m => m.mockClear());
-  });
-
-  it('returns canFork true for claude provider', async () => {
-    registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'claude', projectPath: '/proj', tags: [] },
-    }));
-    metadata.listAllChatMetadata.mockImplementation(() => new Map());
-    settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
-
-    const response = await handler();
-    const body = await response.json();
-
-    expect(body.sessions[0].canFork).toBe(true);
-  });
-
-  it('returns canFork true for codex provider', async () => {
-    registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'codex', projectPath: '/proj', tags: [] },
-    }));
-    metadata.listAllChatMetadata.mockImplementation(() => new Map());
-    settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
-
-    const response = await handler();
-    const body = await response.json();
-
-    expect(body.sessions[0].canFork).toBe(true);
-  });
-
-  it('returns canFork false for opencode provider', async () => {
-    registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'opencode', projectPath: '/proj', tags: [] },
-    }));
-    metadata.listAllChatMetadata.mockImplementation(() => new Map());
-    settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
-
-    const response = await handler();
-    const body = await response.json();
-
-    expect(body.sessions[0].canFork).toBe(false);
-  });
-});

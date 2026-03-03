@@ -26,7 +26,6 @@ export interface ChatSessionRecord {
 	createdAt: string | null;
 	lastActivityAt: string | null;
 	lastReadAt: string | null;
-	canFork: boolean;
 	isPinned: boolean;
 	isArchived: boolean;
 	isProcessing: boolean;

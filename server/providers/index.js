@@ -287,18 +287,6 @@ export class ProviderRegistry {
     return [];
   }
 
-  // Returns true if the given provider supports fork (file copy + UUID rewrite).
-  supportsFork(provider) {
-    return provider === 'claude' || provider === 'codex';
-  }
-
-  // Returns true if the chat identified by chatId can be forked.
-  chatSupportsFork(chatId) {
-    const entry = this.#registry.getChat(chatId);
-    if (!entry?.provider) return false;
-    return this.supportsFork(entry.provider);
-  }
-
   // Fetches available models for a provider.
   async getModels(provider) {
     if (provider === 'opencode') return this.#opencode.getModels();

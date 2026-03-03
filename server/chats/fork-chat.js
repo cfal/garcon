@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { resolveMissingNativePath } from './resolve-native-path.js';
+import { supportsFork } from '../../common/providers.ts';
 
 function escapeRegExp(input) {
   return String(input).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -37,10 +38,9 @@ export async function forkChatFileCopy({
   registry,
   settings,
   metadata,
-  providers,
 }) {
   const sourceProvider = sourceSession.provider;
-  if (!providers.supportsFork(sourceProvider)) {
+  if (!supportsFork(sourceProvider)) {
     throw new Error(`Provider does not support fork: ${sourceProvider}`);
   }
 

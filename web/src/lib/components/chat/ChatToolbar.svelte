@@ -95,12 +95,14 @@
 			</span>
 		</button>
 
-		<button
-			type="button"
-			onclick={onAttachImages}
-			class="px-3 py-1.5 text-muted-foreground hover:text-foreground rounded-lg border border-border flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
-			title={m.chat_composer_attach_images()}
-		>
-			<ImagePlus class="w-4 h-4" />
-		</button>
+		{#if modelCatalog.supportsImages(providerState.provider)}
+			<button
+				type="button"
+				onclick={onAttachImages}
+				class="px-3 py-1.5 text-muted-foreground hover:text-foreground rounded-lg border border-border flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
+				title={m.chat_composer_attach_images()}
+			>
+				<ImagePlus class="w-4 h-4" />
+			</button>
+		{/if}
 </div>
