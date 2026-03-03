@@ -34,6 +34,7 @@
 		reviewData: GitFileReviewData | null;
 		activeTab: GitDiffTab;
 		diffMode: DiffMode;
+		fontSize?: number;
 		selectedLineKeys: Set<string>;
 		isLoading: boolean;
 		readOnly?: boolean;
@@ -58,6 +59,7 @@
 		reviewData,
 		activeTab,
 		diffMode,
+		fontSize = 12,
 		selectedLineKeys,
 		isLoading,
 		readOnly = false,
@@ -79,6 +81,8 @@
 	}: GitDiffViewerProps = $props();
 
 	let lastClickedKey = $state<string | null>(null);
+	let headerFontSize = $derived(Math.max(fontSize - 1, 10));
+	let rowLineHeight = $derived(Math.max(Math.round(fontSize * 1.5), 16));
 
 	// Build renderable rows from review data (unified mode)
 	let rows = $derived.by(() => {
@@ -450,11 +454,15 @@
 	{:else}
 		<!-- File path header -->
 		<div class="px-3 py-1.5 border-b border-border bg-muted/30 flex items-center gap-2">
-			<span class="text-xs font-mono text-foreground truncate">{reviewData.path}</span>
+			<span class="font-mono text-foreground truncate" style:font-size={`${fontSize}px`}>{reviewData.path}</span>
 		</div>
 
 		<!-- Diff content -->
-		<div class="flex-1 overflow-auto font-mono text-xs leading-5">
+		<div
+			class="flex-1 overflow-auto font-mono"
+			style:font-size={`${fontSize}px`}
+			style:line-height={`${rowLineHeight}px`}
+		>
 			{#if diffMode === 'split'}
 				<!-- Split diff -->
 				<table class="w-full border-collapse">
@@ -462,7 +470,7 @@
 						{#each splitRows as srow, idx (idx)}
 							{#if srow.isHeader}
 								<tr class="bg-diff-hunk-header">
-									<td colspan={onStageLine ? 6 : 4} class="px-2 py-1 text-muted-foreground text-[11px]">
+									<td colspan={onStageLine ? 6 : 4} class="px-2 py-1 text-muted-foreground" style:font-size={`${headerFontSize}px`}>
 										<div class="flex items-center gap-2">
 											<span class="flex-1 truncate">{srow.headerText}</span>
 											{#if !readOnly}
@@ -694,7 +702,7 @@
 						{#each rows as row, idx (idx)}
 							{#if row.kind === 'hunk-header'}
 								<tr class={rowBgClass(row)}>
-									<td colspan={onStageLine ? 4 : 3} class="px-2 py-1 text-muted-foreground text-[11px]">
+									<td colspan={onStageLine ? 4 : 3} class="px-2 py-1 text-muted-foreground" style:font-size={`${headerFontSize}px`}>
 										<div class="flex items-center gap-2">
 											<span class="flex-1 truncate">{row.beforeText}</span>
 											{#if !readOnly}
