@@ -3,6 +3,11 @@ import path from 'path';
 import os from 'os';
 
 async function getCodexAuthStatus() {
+  // Check OPENAI_API_KEY env var first.
+  if (typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.trim()) {
+    return { authenticated: true, email: 'API Key Auth', method: 'api_key_env' };
+  }
+
   try {
     const authPath = path.join(os.homedir(), '.codex', 'auth.json');
     const content = await fs.readFile(authPath, 'utf8');
@@ -21,10 +26,10 @@ async function getCodexAuthStatus() {
           email = 'Authenticated';
         }
       }
-      return { authenticated: true, email };
+      return { authenticated: true, email, method: 'credentials_file' };
     }
     if (auth.OPENAI_API_KEY) {
-      return { authenticated: true, email: 'API Key Auth' };
+      return { authenticated: true, email: 'API Key Auth', method: 'api_key_file' };
     }
     return { authenticated: false, email: null, error: 'No usable Codex credentials were found.' };
   } catch (error) {
