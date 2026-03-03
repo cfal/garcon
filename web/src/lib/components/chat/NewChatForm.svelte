@@ -12,7 +12,7 @@
 		THINKING_PILL_WIDTH
 	} from '$lib/chat/new-chat-form-state.svelte.js';
 	import { MODE_STYLES, DEFAULT_MODE_STYLE } from '$lib/chat/provider-state.svelte.js';
-	import { getPreferences, getAppShell } from '$lib/context';
+	import { getPreferences, getAppShell, getModelCatalog } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import DirectoryBrowser from './DirectoryBrowser.svelte';
 	import NewChatWorktreeModal from './NewChatWorktreeModal.svelte';
@@ -34,7 +34,8 @@
 
 	const preferences = getPreferences();
 	const appShell = getAppShell();
-	const form = new NewChatFormState(preferences, appShell);
+	const modelCatalog = getModelCatalog();
+	const form = new NewChatFormState(preferences, appShell, modelCatalog);
 
 	let textareaRef: HTMLTextAreaElement | undefined = $state();
 	let imageInputRef: HTMLInputElement | undefined = $state();
@@ -58,16 +59,12 @@
 		return appShell.onNewChatDialogSeed(() => reseed());
 	});
 
-	// Validate opencode model against live list when it arrives.
+	// Revalidates selected models whenever the shared model catalog updates.
 	$effect(() => {
-		void form.providerModels.opencode;
-		form.validateModelAgainstLive('opencode');
-	});
-
-	// Validate claude model against live list when it arrives.
-	$effect(() => {
-		void form.providerModels.claude;
+		void modelCatalog.version;
 		form.validateModelAgainstLive('claude');
+		form.validateModelAgainstLive('codex');
+		form.validateModelAgainstLive('opencode');
 	});
 
 	// Focus textarea when path validates successfully.

@@ -14,7 +14,8 @@
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
 	import { createFileViewerStore } from '$lib/stores/file-viewer.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
-	import { setAuth, setPreferences, setNavigation, setChatRuntime, setChatSessions, setAppShell, setWs, setFileViewer, setReadReceiptOutbox } from '$lib/context';
+	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
+	import { setAuth, setPreferences, setNavigation, setChatRuntime, setChatSessions, setAppShell, setWs, setFileViewer, setReadReceiptOutbox, setModelCatalog } from '$lib/context';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
@@ -31,6 +32,7 @@
 	const ws = createWsConnection();
 	const fileViewer = createFileViewerStore();
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
+	const modelCatalog = createModelCatalogStore();
 
 	setAuth(auth);
 	setPreferences(preferences);
@@ -41,6 +43,7 @@
 	setWs(ws);
 	setFileViewer(fileViewer);
 	setReadReceiptOutbox(readReceiptOutbox);
+	setModelCatalog(modelCatalog);
 
 	const publicRoutes = ['/login', '/setup'];
 	let isPublicRoute = $derived(publicRoutes.includes(page.url.pathname));
@@ -90,6 +93,7 @@
 
 	onMount(() => {
 		auth.checkAuthStatus();
+		void modelCatalog.refreshIfStale();
 	});
 
 	function handlePageHide() {

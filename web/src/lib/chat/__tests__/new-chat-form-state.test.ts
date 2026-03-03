@@ -18,6 +18,15 @@ const mockPreferences = {
 const mockAppShell = {
 	onNewChatDialogSeed: vi.fn().mockReturnValue(() => {})
 };
+const mockModelCatalog = {
+	getDefaultModel: vi.fn((provider: string) => {
+		if (provider === 'claude') return 'opus';
+		if (provider === 'codex') return 'gpt-5.3-codex';
+		return '';
+	}),
+	getModels: vi.fn(() => []),
+	refreshIfStale: vi.fn().mockResolvedValue(undefined)
+};
 
 // Also mock context since it might be used inside imports
 vi.mock('$lib/context', () => ({
@@ -30,7 +39,7 @@ describe('NewChatFormState', () => {
 
 	beforeEach(() => {
 		vi.useFakeTimers();
-		state = new NewChatFormState(mockPreferences as any, mockAppShell as any);
+		state = new NewChatFormState(mockPreferences as any, mockAppShell as any, mockModelCatalog as any);
 	});
 
 	it('initializes with default values', () => {
