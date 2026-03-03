@@ -19,6 +19,7 @@
 		treeSearchQuery: string;
 		totalChangedFiles: number;
 		onSelectFile: (path: string) => void;
+		onSelectDirectory?: (path: string) => void;
 		onToggleDir: (path: string) => void;
 		onSearchChange: (query: string) => void;
 		onStageFile?: (path: string) => void;
@@ -36,6 +37,7 @@
 		treeSearchQuery,
 		totalChangedFiles,
 		onSelectFile,
+		onSelectDirectory,
 		onToggleDir,
 		onSearchChange,
 		onStageFile,
@@ -122,17 +124,23 @@
 			style="padding-left: {depth * 12 + 8}px"
 		>
 			<button
+				type="button"
 				onclick={() => onToggleDir(node.path)}
 				onkeydown={(e) => handleKeyDown(e, node.path, true)}
-				class="flex items-center flex-1 min-w-0"
+				class="w-5 h-5 flex items-center justify-center rounded hover:bg-muted shrink-0"
+				aria-label={isCollapsed ? 'Expand directory' : 'Collapse directory'}
 			>
-				<span class="w-4 h-4 flex items-center justify-center mr-1 text-muted-foreground">
-					{#if isCollapsed}
-						<ChevronRight class="w-3.5 h-3.5" />
-					{:else}
-						<ChevronDown class="w-3.5 h-3.5" />
-					{/if}
-				</span>
+				{#if isCollapsed}
+					<ChevronRight class="w-3.5 h-3.5 text-muted-foreground" />
+				{:else}
+					<ChevronDown class="w-3.5 h-3.5 text-muted-foreground" />
+				{/if}
+			</button>
+			<button
+				type="button"
+				onclick={() => onSelectDirectory?.(node.path)}
+				class="flex items-center flex-1 min-w-0 ml-1"
+			>
 				<span class="w-4 h-4 flex items-center justify-center mr-1.5 text-muted-foreground">
 					{#if isCollapsed}
 						<FolderIcon class="w-3.5 h-3.5" />
@@ -174,6 +182,7 @@
 			style="padding-left: {depth * 12 + 8}px"
 		>
 			<button
+				type="button"
 				onclick={() => onSelectFile(node.path)}
 				onkeydown={(e) => handleKeyDown(e, node.path, false)}
 				class="flex items-center flex-1 min-w-0"

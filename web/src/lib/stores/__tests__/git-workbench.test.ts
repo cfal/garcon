@@ -580,6 +580,64 @@ describe('GitWorkbenchStore', () => {
 		});
 	});
 
+	describe('tree selection scroll targets', () => {
+		it('finds the first visible file for a selected directory in unstaged tab', () => {
+			wb.tree = [
+				{
+					path: 'src', name: 'src', kind: 'directory', staged: false, hasUnstaged: true,
+					children: [
+						{ path: 'src/a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
+						{ path: 'src/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
+					],
+				},
+				{ path: 'README.md', name: 'README.md', kind: 'file', staged: false, hasUnstaged: true },
+			] as any;
+			wb.setActiveTab('unstaged');
+
+			expect(wb.firstVisibleFileInDirectory('src')).toBe('src/a.ts');
+		});
+
+		it('finds the first visible file for a selected directory in staged tab', () => {
+			wb.tree = [
+				{
+					path: 'src', name: 'src', kind: 'directory', staged: true, hasUnstaged: true,
+					children: [
+						{ path: 'src/a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
+						{ path: 'src/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
+					],
+				},
+			] as any;
+			wb.setActiveTab('staged');
+
+			expect(wb.firstVisibleFileInDirectory('src')).toBe('src/b.ts');
+		});
+
+		it('returns null when directory has no visible files for active tab', () => {
+			wb.tree = [
+				{
+					path: 'src', name: 'src', kind: 'directory', staged: false, hasUnstaged: false,
+					children: [
+						{ path: 'src/a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: false },
+					],
+				},
+			] as any;
+			wb.setActiveTab('staged');
+
+			expect(wb.firstVisibleFileInDirectory('src')).toBeNull();
+		});
+
+		it('creates unique scroll requests for repeated file selections', () => {
+			wb.requestDiffScrollToFile('src/a.ts');
+			const first = wb.diffScrollRequest;
+			wb.requestDiffScrollToFile('src/a.ts');
+			const second = wb.diffScrollRequest;
+
+			expect(first?.filePath).toBe('src/a.ts');
+			expect(second?.filePath).toBe('src/a.ts');
+			expect(second?.token).toBeGreaterThan(first?.token ?? 0);
+		});
+	});
+
 	describe('reset', () => {
 		it('clears all state including activeTab', () => {
 			wb.tree = [{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true }] as any;

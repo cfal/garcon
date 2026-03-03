@@ -57,6 +57,16 @@
 	function handleSelectFile(path: string): void {
 		if (!projectPath) return;
 		wb.openFile(projectPath, path);
+		wb.requestDiffScrollToFile(path);
+		if (isMobile) mobilePane = 'diff';
+	}
+
+	function handleSelectDirectory(path: string): void {
+		if (!projectPath) return;
+		const firstFile = wb.firstVisibleFileInDirectory(path);
+		if (!firstFile) return;
+		wb.openFile(projectPath, firstFile);
+		wb.requestDiffScrollToFile(firstFile);
 		if (isMobile) mobilePane = 'diff';
 	}
 
@@ -185,6 +195,7 @@
 						treeSearchQuery={wb.treeSearchQuery}
 						totalChangedFiles={wb.totalChangedFiles}
 						onSelectFile={handleSelectFile}
+						onSelectDirectory={handleSelectDirectory}
 						onToggleDir={(p) => wb.toggleDirCollapsed(p)}
 						onSearchChange={(q) => { wb.treeSearchQuery = q; }}
 						onStageFile={handleStageFile}
@@ -224,6 +235,7 @@
 						commentsForFile={(fp) => wb.commentsForFile(fp)}
 						onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
 						onRemoveComment={(id) => wb.removeDraftComment(id)}
+						scrollToRequest={wb.diffScrollRequest}
 					/>
 				{/if}
 			</div>
@@ -265,6 +277,7 @@
 							treeSearchQuery={wb.treeSearchQuery}
 							totalChangedFiles={wb.totalChangedFiles}
 							onSelectFile={handleSelectFile}
+							onSelectDirectory={handleSelectDirectory}
 							onToggleDir={(p) => wb.toggleDirCollapsed(p)}
 							onSearchChange={(q) => { wb.treeSearchQuery = q; }}
 							onStageFile={handleStageFile}
@@ -319,6 +332,7 @@
 						onComposerClose={() => wb.closeCommentComposer()}
 						onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
 						onRemoveComment={(id) => wb.removeDraftComment(id)}
+						scrollToRequest={wb.diffScrollRequest}
 					/>
 					{#if wb.hasSelection}
 						<div class="flex items-center gap-2 px-3 py-2 border-t border-border bg-background shrink-0">

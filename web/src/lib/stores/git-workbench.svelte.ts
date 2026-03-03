@@ -48,6 +48,7 @@ export class GitWorkbenchStore {
 
 	// Selected file and review data
 	selectedFile = $state<string | null>(null);
+	diffScrollRequest = $state<{ filePath: string; token: number } | null>(null);
 	reviewDataByPath = $state<Record<string, GitFileReviewData>>({});
 	isLoadingFile = $state(false);
 
@@ -103,6 +104,7 @@ export class GitWorkbenchStore {
 	// Per-file scroll positions for restore on switch
 	private scrollPositions = new Map<string, number>();
 	private readonly opts: GitWorkbenchStoreOptions;
+	private diffScrollToken = 0;
 	private readonly deps: GitWorkbenchDeps;
 
 	// Viewport-driven loading: bounded-concurrency queue that fetches
@@ -386,6 +388,23 @@ export class GitWorkbenchStore {
 	async openFile(projectPath: string, filePath: string): Promise<void> {
 		this.selectedFile = filePath;
 		this.selectedLineKeys = new Set();
+	}
+
+	// Queues a scroll request for the virtualized diff list.
+	requestDiffScrollToFile(filePath: string): void {
+		if (!filePath) return;
+		this.diffScrollToken += 1;
+		this.diffScrollRequest = { filePath, token: this.diffScrollToken };
+	}
+
+	// Resolves the first visible file under a directory path for the active tab.
+	firstVisibleFileInDirectory(dirPath: string): string | null {
+		if (!dirPath) return null;
+		const prefix = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
+		for (const filePath of this.visibleFilePaths) {
+			if (filePath.startsWith(prefix)) return filePath;
+		}
+		return null;
 	}
 
 	async loadFileReviewData(projectPath: string, filePath: string): Promise<void> {
@@ -972,6 +991,7 @@ export class GitWorkbenchStore {
 	reset(): void {
 		this.tree = [];
 		this.selectedFile = null;
+		this.diffScrollRequest = null;
 		this.reviewDataByPath = {};
 		this.selectedLineKeys = new Set();
 		this.collapsedDirs = new Set();
