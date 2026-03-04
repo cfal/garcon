@@ -365,10 +365,13 @@ class ClaudeProvider extends AbsProvider {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
 
-        for (const line of lines) {
+        // Parse lines incrementally via indexOf instead of split().
+        let idx;
+        while ((idx = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 1);
+
           if (!line.trim()) continue;
           let msg;
           try {
