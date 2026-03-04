@@ -157,6 +157,9 @@ export class ConversationSessionController {
 		}
 
 		try {
+			// Wait for WS to be connected before attempting to load messages.
+			// Prevents the race where chat selection fires before WS connects.
+			await deps.ws.waitForConnection();
 			const messages = await deps.chatState.loadMessages(chatId, deps.ws);
 			if (deps.sessions.selectedChatId !== chatId) return;
 

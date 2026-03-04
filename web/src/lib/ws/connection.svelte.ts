@@ -151,6 +151,36 @@ export class WsConnection {
     }
   }
 
+  /** Returns a promise that resolves when the WebSocket is connected.
+   *  Resolves immediately if already connected. Rejects on timeout. */
+  waitForConnection(timeoutMs = 10_000): Promise<void> {
+    if (this.isConnected) return Promise.resolve();
+    if (this.#destroyed) return Promise.reject(new Error('WebSocket destroyed'));
+
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('Timed out waiting for WebSocket connection'));
+      }, timeoutMs);
+
+      const check = () => {
+        if (this.isConnected) {
+          cleanup();
+          resolve();
+        }
+      };
+
+      // Poll on a short interval since isConnected is reactive state
+      // but we can't use $effect inside a class method.
+      const interval = setInterval(check, 100);
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        clearInterval(interval);
+      };
+    });
+  }
+
   /** Sends a JSON-serializable message. Returns true if sent. */
   sendMessage(msg: unknown): boolean {
     const socket = this.#ws;
