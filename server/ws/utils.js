@@ -1,5 +1,8 @@
 const OPEN_WS_STATE = 1;
 
+// Reuse a single TextDecoder instance instead of creating Buffer intermediaries.
+const decoder = new TextDecoder();
+
 function sendWebSocketMessage(ws, payload) {
   if (ws.readyState !== OPEN_WS_STATE) return false;
   ws.send(payload);
@@ -11,5 +14,6 @@ export function sendWebSocketJson(ws, payload) {
 }
 
 export function decodeWebSocketMessage(message) {
-  return typeof message === 'string' ? message : Buffer.from(message).toString('utf8');
+  if (typeof message === 'string') return message;
+  return decoder.decode(message);
 }
