@@ -28,6 +28,8 @@ import {
 } from '../../common/ws-requests.ts';
 import { resolveMissingNativePath } from '../chats/resolve-native-path.js';
 
+const DEBUG_WS = process.env.GARCON_DEBUG_WS === '1';
+
 const PERMISSION_DEDUP_TTL = 30_000;
 
 class WebSocketWriter {
@@ -66,8 +68,8 @@ export class ChatHandler {
   }
 
   async #handleAgentCommand(data, chatId, writer) {
-    console.log(`chat: ${data.provider || 'unknown'} message:`, data.command || '[continue/resume]');
-    console.log('chat: project:', data.options?.projectPath || data.options?.cwd || 'unknown');
+    if (DEBUG_WS) console.log(`chat: ${data.provider || 'unknown'} message:`, data.command || '[continue/resume]');
+    if (DEBUG_WS) console.log('chat: project:', data.options?.projectPath || data.options?.cwd || 'unknown');
 
     if (!/^\d+$/.test(String(chatId))) {
       writer.send(new AgentRunFailedMessage(chatId, 'Invalid session ID format'));

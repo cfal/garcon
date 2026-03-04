@@ -9,6 +9,8 @@ import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequest
 import { convertClaudeToolUse } from './converters/claude-tool-use.js';
 import { AbsProvider } from './base.js';
 
+const DEBUG_CLI = process.env.GARCON_DEBUG_CLI === '1';
+
 // Converts a finalized CLI assistant message to ChatMessage objects.
 function convertCLIMessageToChatMessages(msg) {
   if (msg.type !== 'assistant') return [];
@@ -417,7 +419,7 @@ class ClaudeProvider extends AbsProvider {
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n')) {
           if (line.trim()) {
-            console.log(`cli(${sessionId.slice(0, 8)}): stderr: ${line}`);
+            if (DEBUG_CLI) console.log(`cli(${sessionId.slice(0, 8)}): stderr: ${line}`);
           }
         }
       }

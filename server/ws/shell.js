@@ -3,6 +3,8 @@ import { spawn as ptySpawn } from 'bun-pty';
 import { sendWebSocketJson } from './utils.js';
 import { getUserShell } from '../config.js';
 
+const DEBUG_SHELL = process.env.GARCON_DEBUG_SHELL === '1';
+
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 
 export class ShellManager {
@@ -35,7 +37,7 @@ export class ShellManager {
     const shellState = this.#getShellState(ws);
 
     try {
-      console.log('shell: message received:', data.type);
+      if (DEBUG_SHELL) console.log('shell: message received:', data.type);
 
       if (data.type === 'init') {
         const projectPath = data.projectPath || process.cwd();
@@ -63,7 +65,7 @@ export class ShellManager {
           ? this.#sessions.get(ptySessionKey)
           : null;
         if (existingSession) {
-          console.log('shell: reconnecting to existing PTY session:', ptySessionKey);
+          if (DEBUG_SHELL) console.log('shell: reconnecting to existing PTY session:', ptySessionKey);
           shellState.shellProcess = existingSession.pty;
 
           clearTimeout(existingSession.timeoutId);
@@ -74,7 +76,7 @@ export class ShellManager {
           });
 
           if (existingSession.buffer && existingSession.buffer.length > 0) {
-            console.log(`shell: sending ${existingSession.buffer.length} buffered messages`);
+            if (DEBUG_SHELL) console.log(`shell: sending ${existingSession.buffer.length} buffered messages`);
             existingSession.buffer.forEach((bufferedData) => {
               sendWebSocketJson(ws, {
                 type: 'output',
@@ -140,7 +142,7 @@ export class ShellManager {
           });
           shellState.shellProcess = shellProcess;
 
-          console.log('shell: process started, PID:', shellProcess.pid);
+          if (DEBUG_SHELL) console.log('shell: process started, PID:', shellProcess.pid);
 
           this.#sessions.set(ptySessionKey, {
             pty: shellProcess,
