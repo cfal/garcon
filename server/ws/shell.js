@@ -5,6 +5,14 @@ import { getUserShell } from '../config.js';
 
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 
+// Precomputed PTY environment — avoids per-session allocation.
+const PTY_BASE_ENV = {
+  ...process.env,
+  TERM: 'xterm-256color',
+  COLORTERM: 'truecolor',
+  FORCE_COLOR: '3',
+};
+
 export class ShellManager {
   #sessions = new Map();
 
@@ -106,12 +114,7 @@ export class ShellManager {
           const termCols = data.cols || 80;
           const termRows = data.rows || 24;
 
-          const ptyEnv = {
-            ...process.env,
-            TERM: 'xterm-256color',
-            COLORTERM: 'truecolor',
-            FORCE_COLOR: '3',
-          };
+          const ptyEnv = PTY_BASE_ENV;
 
           let shell;
           let shellArgs;

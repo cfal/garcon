@@ -9,6 +9,9 @@ import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequest
 import { convertClaudeToolUse } from './converters/claude-tool-use.js';
 import { AbsProvider } from './base.js';
 
+// Precomputed environment with CLAUDECODE stripped — avoids per-spawn allocation.
+const SANITIZED_ENV = (() => { const { CLAUDECODE, ...env } = process.env; return env; })();
+
 // Converts a finalized CLI assistant message to ChatMessage objects.
 function convertCLIMessageToChatMessages(msg) {
   if (msg.type !== 'assistant') return [];
@@ -61,7 +64,7 @@ async function runSingleQuery(prompt, { model, cwd, permissionMode, ...rest } = 
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env },
+    env: SANITIZED_ENV,
   });
 
   const chunks = [];
@@ -435,7 +438,7 @@ class ClaudeProvider extends AbsProvider {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
-      env: { ...process.env },
+      env: SANITIZED_ENV,
     });
 
     session.process = proc;
