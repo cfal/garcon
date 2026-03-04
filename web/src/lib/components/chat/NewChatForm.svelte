@@ -70,9 +70,9 @@
 		form.validateModelAgainstLive('opencode');
 	});
 
-	// Focus textarea when path validates successfully.
+	// Focus textarea when path validates successfully, but not while browsing.
 	$effect(() => {
-		if (form.validationStatus === 'valid') {
+		if (form.validationStatus === 'valid' && !form.showBrowser) {
 			textareaRef?.focus();
 		}
 	});
