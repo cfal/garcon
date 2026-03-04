@@ -131,7 +131,7 @@ export function getProjectBasePath() {
     }
     return path.resolve(projectBaseDir);
   }
-  // Default to the user's home directory, like an IDE.
+  // Default to the user's home directory
   return os.homedir();
 }
 
