@@ -61,7 +61,7 @@ async function runSingleQuery(prompt, { model, cwd, permissionMode, ...rest } = 
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env },
+    env: (() => { const { CLAUDECODE, ...env } = process.env; return env; })(),
   });
 
   const chunks = [];
@@ -435,7 +435,7 @@ class ClaudeProvider extends AbsProvider {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
-      env: { ...process.env },
+      env: (() => { const { CLAUDECODE, ...env } = process.env; return env; })(),
     });
 
     session.process = proc;
