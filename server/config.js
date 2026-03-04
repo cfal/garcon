@@ -131,8 +131,8 @@ export function getProjectBasePath() {
     }
     return path.resolve(projectBaseDir);
   }
-  // this returns a correct path for windows
-  return path.resolve('/');
+  // Default to the user's home directory, like an IDE.
+  return os.homedir();
 }
 
 // User shell for PTY sessions
