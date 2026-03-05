@@ -1,6 +1,6 @@
 # Garcon
 
-Garcon is a local-first coding workspace for AI agents, with one UI for Claude, Codex, and OpenCode.
+Garcon is a coding workspace for Claude, Codex, and OpenCode.
 
 <table>
   <tr>
