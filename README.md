@@ -2,6 +2,37 @@
 
 Garcon is a local-first coding workspace for AI agents, with one UI for Claude, Codex, and OpenCode.
 
+<table>
+  <tr>
+    <td align="center">
+      <a href="screenshots/main-screen.png">
+        <img src="screenshots/main-screen.png" alt="Garcon main workspace" width="200" />
+      </a>
+    </td>
+    <td align="center">
+      <a href="screenshots/git-screen.png">
+        <img src="screenshots/git-screen.png" alt="Garcon git panel" width="200" />
+      </a>
+    </td>
+    <td align="center">
+      <a href="screenshots/main-screen-mobile.png">
+        <img src="screenshots/main-screen-mobile.png" alt="Garcon mobile layout" width="70" />
+      </a>
+    </td>
+    <td align="center">
+      <a href="screenshots/main-screen-dark.png">
+        <img src="screenshots/main-screen-dark.png" alt="Garcon main workspace in dark theme" width="200" />
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><em>Main workspace</em></td>
+    <td align="center"><em>Built-in Git workbench</em></td>
+    <td align="center"><em>Mobile layout</em></td>
+    <td align="center"><em>Main workspace (dark theme)</em></td>
+  </tr>
+</table>
+
 ## Capabilities
 
 - Multi-provider chat sessions (`claude`, `codex`, `opencode`) with per-chat model selection
@@ -84,4 +115,3 @@ docker run -d \
 ```
 
 Set `GARCON_PROJECT_DIR` (compose) or the `/projects` bind mount (`docker run`) to the directory containing your repos. Pass any API keys (e.g. `OPENAI_API_KEY`) as needed. Config is persisted in `garcon-data`.
-
