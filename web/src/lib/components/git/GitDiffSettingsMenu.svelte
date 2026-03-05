@@ -9,6 +9,7 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		diffMode: DiffMode;
@@ -110,17 +111,17 @@
 
 				<div class="border-t border-border">
 					<div class="p-2.5">
-						<Button
-							variant="outline"
-							size="sm"
-							class="w-full justify-start gap-2"
-							onclick={handleOpenCommitSettings}
-						>
-							<Sparkles class="w-3.5 h-3.5" />
-							<span>Configure commit messages</span>
-						</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								class="w-fit gap-2"
+								onclick={handleOpenCommitSettings}
+							>
+								<Sparkles class="w-3.5 h-3.5" />
+								<span>{m.git_changes_configure_messages()}</span>
+							</Button>
+						</div>
 					</div>
-				</div>
 			</div>
 		</Popover.Content>
 	</Popover.Root>
