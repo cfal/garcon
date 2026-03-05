@@ -32,8 +32,24 @@ jobs:
       - name: Run tests
         run: bun run test
 
+      - name: Build web assets
+        run: bun run build
+
       - name: Validate startup
-        run: timeout 30s bun run start --port 0
+        run: |
+          startup_log="$(mktemp)"
+          set +e
+          timeout 30s bun run server --port 0 >"$startup_log" 2>&1
+          startup_exit="$?"
+          set -e
+          cat "$startup_log"
+          if [ "$startup_exit" -eq 0 ]; then
+            exit 0
+          fi
+          if [ "$startup_exit" -eq 124 ] && grep -q "Started at http" "$startup_log"; then
+            exit 0
+          fi
+          exit "$startup_exit"
 
   build:
     name: Build ${{ matrix.target }}
