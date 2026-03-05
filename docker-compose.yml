@@ -6,8 +6,11 @@ services:
     ports:
       - "${GARCON_PORT:-8080}:8080"
     volumes:
-      - garcon-data:/home/bun/.garcon
+      - garcon-data:/home/garcon/.garcon
       - ${GARCON_PROJECT_DIR:-.}:/projects
+      - ${CLAUDE_CONFIG_DIR:-~/.claude}:/home/garcon/.claude
+      - ${CODEX_HOME:-~/.codex}:/home/garcon/.codex
+      - ${OPENCODE_CONFIG_DIR:-~/.opencode}:/home/garcon/.opencode
     environment:
       - GARCON_BIND_ADDRESS=0.0.0.0
       - GARCON_PROJECT_BASE_DIR=/projects
