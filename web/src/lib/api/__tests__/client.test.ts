@@ -119,6 +119,30 @@ describe('API client helpers', () => {
 		}
 	});
 
+	it('preserves errorCode and details from error payload', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse(
+				{
+					error: 'Timed out',
+					errorCode: 'commit_message_timeout',
+					details: 'upstream timeout',
+				},
+				504,
+			),
+		);
+
+		try {
+			await apiGet('/api/git/generate-commit-message');
+			expect.unreachable('should have thrown');
+		} catch (err) {
+			expect(err).toBeInstanceOf(ApiError);
+			const apiErr = err as ApiError;
+			expect(apiErr.status).toBe(504);
+			expect(apiErr.errorCode).toBe('commit_message_timeout');
+			expect(apiErr.details).toBe('upstream timeout');
+		}
+	});
+
 	it('throws ApiError with statusText when body has no error field', async () => {
 		fetchMock.mockResolvedValue(
 			new Response('not json', { status: 500, statusText: 'Internal Server Error' })

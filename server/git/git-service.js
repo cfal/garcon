@@ -159,6 +159,58 @@ Diff excerpt:
 
 Return only the commit message now.`;
 
+const COMMIT_MESSAGE_ERROR_MAP = Object.freeze({
+  COMMIT_MESSAGE_NO_STAGED_FILES: { status: 400, errorCode: 'commit_message_no_staged_files' },
+  COMMIT_MESSAGE_PROVIDER_AUTH_REQUIRED: { status: 401, errorCode: 'commit_message_provider_auth_required' },
+  COMMIT_MESSAGE_RATE_LIMITED: { status: 429, errorCode: 'commit_message_rate_limited' },
+  COMMIT_MESSAGE_PROVIDER_UNAVAILABLE: { status: 503, errorCode: 'commit_message_provider_unavailable' },
+  COMMIT_MESSAGE_TIMEOUT: { status: 504, errorCode: 'commit_message_timeout' },
+  COMMIT_MESSAGE_EMPTY_RESPONSE: { status: 502, errorCode: 'commit_message_empty_response' },
+  COMMIT_MESSAGE_INVALID_RESPONSE: { status: 502, errorCode: 'commit_message_invalid_response' },
+  COMMIT_MESSAGE_GENERATION_FAILED: { status: 500, errorCode: 'commit_message_generation_failed' },
+});
+
+function classifyCommitMessageProviderError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  if (
+    message.includes('401')
+    || message.includes('unauthorized')
+    || message.includes('forbidden')
+    || message.includes('auth')
+    || message.includes('login')
+    || message.includes('api key')
+  ) {
+    return 'COMMIT_MESSAGE_PROVIDER_AUTH_REQUIRED';
+  }
+  if (
+    message.includes('429')
+    || message.includes('rate limit')
+    || message.includes('quota')
+    || message.includes('too many requests')
+  ) {
+    return 'COMMIT_MESSAGE_RATE_LIMITED';
+  }
+  if (
+    message.includes('timed out')
+    || message.includes('timeout')
+    || message.includes('deadline')
+    || message.includes('etimedout')
+  ) {
+    return 'COMMIT_MESSAGE_TIMEOUT';
+  }
+  if (
+    message.includes('service unavailable')
+    || message.includes('unavailable')
+    || message.includes('econnrefused')
+    || message.includes('enotfound')
+    || message.includes('network')
+    || message.includes('failed to create opencode session')
+  ) {
+    return 'COMMIT_MESSAGE_PROVIDER_UNAVAILABLE';
+  }
+  return 'COMMIT_MESSAGE_GENERATION_FAILED';
+}
+
 // Generates a conventional commit message using the given AI provider.
 // When customPrompt is non-empty, it is used as the template with
 // {{files}} and {{diff}} placeholders substituted in.
@@ -181,11 +233,21 @@ async function generateCommitMessage(files, diffContext, provider, projectPath, 
     const opts = { provider, cwd: projectPath };
     if (model) opts.model = model;
     const responseText = await runSingleQueryFn(prompt, opts);
+    if (!responseText?.trim()) {
+      throw new GitDomainError('COMMIT_MESSAGE_EMPTY_RESPONSE', 'Provider returned an empty commit message response.');
+    }
     const cleaned = normalizeCommitMessage(responseText);
-    return cleaned || 'chore: update files';
+    if (!cleaned) {
+      throw new GitDomainError('COMMIT_MESSAGE_INVALID_RESPONSE', 'Provider returned an invalid commit message format.');
+    }
+    return cleaned;
   } catch (error) {
+    if (error instanceof GitDomainError) throw error;
     console.error('Error generating commit message:', error);
-    return `chore: update ${files.length} file${files.length !== 1 ? 's' : ''}`;
+    throw new GitDomainError(
+      classifyCommitMessageProviderError(error),
+      'Failed to generate commit message.',
+    );
   }
 }
 
@@ -363,9 +425,9 @@ function parsePatch(patchText) {
 
   for (const line of allLines) {
     if (line.startsWith('diff --git') || line.startsWith('index ') ||
-        line.startsWith('new file') || line.startsWith('deleted file') ||
-        line.startsWith('---') || line.startsWith('+++') ||
-        line.startsWith('old mode') || line.startsWith('new mode')) {
+      line.startsWith('new file') || line.startsWith('deleted file') ||
+      line.startsWith('---') || line.startsWith('+++') ||
+      line.startsWith('old mode') || line.startsWith('new mode')) {
       header.push(line);
       continue;
     }
@@ -567,7 +629,7 @@ export function createGitService({ providers, classifyGitError }) {
       const filePath = resolvePathWithinProject(projectPath, file);
       const stats = await fs.stat(filePath);
       if (stats.isDirectory()) {
-        diff = `Directory: ${file}\n(Cannot show diff for directories)`;
+        diff = `--- directory: ${file}`;
       } else {
         const fileContent = await fs.readFile(filePath, 'utf-8');
         const lines = fileContent.split('\n');
@@ -718,6 +780,10 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function generateCommitMessageForFiles({ projectPath, files, provider, model, customPrompt }) {
+    if (!Array.isArray(files) || files.length === 0) {
+      throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged files to generate a commit message.');
+    }
+
     // Use --cached to get the staged diff (HEAD vs index). This correctly
     // handles new files, deletions, and partial staging unlike diff HEAD.
     let diffContext = '';
@@ -730,6 +796,10 @@ export function createGitService({ providers, classifyGitError }) {
       } catch (error) {
         console.error(`Error getting diff for ${file}:`, error);
       }
+    }
+
+    if (!diffContext.trim()) {
+      throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged changes found for selected files.');
     }
 
     const message = await generateCommitMessage(files, diffContext, provider, projectPath, (prompt, opts) => providers.runSingleQuery(prompt, opts), model, customPrompt);
@@ -758,7 +828,7 @@ export function createGitService({ providers, classifyGitError }) {
           hasRemote = true;
           foundRemoteName = remotes.includes('origin') ? 'origin' : remotes[0];
         }
-      } catch {}
+      } catch { }
 
       return {
         hasRemote,
@@ -1012,7 +1082,7 @@ export function createGitService({ providers, classifyGitError }) {
     let truncated = false;
     let truncatedReason;
     if ((contentBefore && contentBefore.length > MAX_CONTENT_SIZE) ||
-        (contentAfter && contentAfter.length > MAX_CONTENT_SIZE)) {
+      (contentAfter && contentAfter.length > MAX_CONTENT_SIZE)) {
       truncated = true;
       truncatedReason = 'File exceeds 500KB display limit';
     }
@@ -1425,6 +1495,13 @@ export function createGitService({ providers, classifyGitError }) {
 
     if (error instanceof GitDomainError) {
       const code = error.code;
+      if (COMMIT_MESSAGE_ERROR_MAP[code]) {
+        const entry = COMMIT_MESSAGE_ERROR_MAP[code];
+        return Response.json(
+          { error: error.message, errorCode: entry.errorCode },
+          { status: entry.status },
+        );
+      }
       if (code === 'INVALID_INPUT') return Response.json({ error: error.message }, { status: 400 });
       if (code === 'NOT_REPO') return Response.json({ error: error.message }, { status: 400 });
       if (code === 'AUTH_FAILED') return Response.json({ error: error.message }, { status: 401 });

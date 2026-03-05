@@ -21,6 +21,8 @@ import {
 	gitRemoveWorktree,
 	gitRevertLastCommit,
 } from '$lib/api/git.js';
+import { ApiError } from '$lib/api/client.js';
+import * as m from '$lib/paraglide/messages.js';
 import {
 	computeCommonDirPrefix as computeCommonDirPrefixSync,
 	applyDirPrefix,
@@ -344,6 +346,31 @@ export class GitWorkbenchStore {
 		setTimeout(() => {
 			if (this.lastError === msg) this.lastError = null;
 		}, 6000);
+	}
+
+	private commitMessageGenerationErrorMessage(err: unknown): string {
+		if (!(err instanceof ApiError)) {
+			return `Generate message failed: ${err instanceof Error ? err.message : String(err)}`;
+		}
+		switch (err.errorCode) {
+			case 'commit_message_no_staged_files':
+				return m.git_commit_message_errors_no_staged_files();
+			case 'commit_message_provider_auth_required':
+				return m.git_commit_message_errors_provider_auth_required();
+			case 'commit_message_provider_unavailable':
+				return m.git_commit_message_errors_provider_unavailable();
+			case 'commit_message_rate_limited':
+				return m.git_commit_message_errors_rate_limited();
+			case 'commit_message_timeout':
+				return m.git_commit_message_errors_timeout();
+			case 'commit_message_empty_response':
+				return m.git_commit_message_errors_empty_response();
+			case 'commit_message_invalid_response':
+				return m.git_commit_message_errors_invalid_response();
+			case 'commit_message_generation_failed':
+			default:
+				return m.git_commit_message_errors_generation_failed();
+		}
 	}
 
 	dismissError(): void {
@@ -812,7 +839,7 @@ export class GitWorkbenchStore {
 				this.surfaceError(data.error ?? 'Failed to generate commit message');
 			}
 		} catch (err) {
-			this.surfaceError(`Generate message failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(this.commitMessageGenerationErrorMessage(err));
 		} finally {
 			this.isGeneratingMessage = false;
 		}

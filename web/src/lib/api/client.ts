@@ -54,10 +54,14 @@ export function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Re
 
 export class ApiError extends Error {
 	status: number;
-	constructor(status: number, message: string) {
+	errorCode?: string;
+	details?: string;
+	constructor(status: number, message: string, errorCode?: string, details?: string) {
 		super(message);
 		this.name = 'ApiError';
 		this.status = status;
+		this.errorCode = errorCode;
+		this.details = details;
 	}
 }
 
@@ -65,14 +69,18 @@ export class ApiError extends Error {
 async function parseResponse<T>(response: Response): Promise<T> {
 	if (!response.ok) {
 		let message = response.statusText;
+		let errorCode: string | undefined;
+		let details: string | undefined;
 		try {
 			const body = await response.json();
 			if (body.error) message = body.error;
 			else if (body.message) message = body.message;
+			if (typeof body.errorCode === 'string') errorCode = body.errorCode;
+			if (typeof body.details === 'string') details = body.details;
 		} catch {
 			// Use statusText as fallback
 		}
-		throw new ApiError(response.status, message);
+		throw new ApiError(response.status, message, errorCode, details);
 	}
 	return response.json() as Promise<T>;
 }
