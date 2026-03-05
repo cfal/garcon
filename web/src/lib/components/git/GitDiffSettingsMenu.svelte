@@ -56,7 +56,7 @@
 
 	<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
 		<div class="bg-card text-foreground rounded-md border border-border">
-			<div class="flex items-center justify-between px-4 py-2.5 border-b border-border">
+				<div class="flex items-center justify-between px-4 py-2.5">
 				<div class="text-sm font-medium text-foreground">Font size</div>
 				<Select.Root
 					type="single"
@@ -109,19 +109,17 @@
 				</Select.Root>
 			</div>
 
-				<div class="border-t border-border">
-					<div class="p-2.5">
-							<Button
-								variant="outline"
-								size="sm"
-								class="w-fit gap-2"
-								onclick={handleOpenCommitSettings}
-							>
-								<Sparkles class="w-3.5 h-3.5" />
-								<span>{m.git_changes_configure_messages()}</span>
-							</Button>
-						</div>
-					</div>
+				<div class="p-2.5">
+					<Button
+						variant="outline"
+						size="sm"
+						class="w-fit gap-2"
+						onclick={handleOpenCommitSettings}
+					>
+						<Sparkles class="w-3.5 h-3.5" />
+						<span>{m.git_changes_configure_messages()}</span>
+					</Button>
+				</div>
 			</div>
 		</Popover.Content>
 	</Popover.Root>
