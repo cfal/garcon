@@ -56,3 +56,30 @@ export async function listDirectory(dirPath, showHidden = true) {
     return a.name.localeCompare(b.name);
   });
 }
+
+export async function listDirectoryNames(dirPath, showHidden = true) {
+  const skipNames = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
+  let entries;
+  try {
+    entries = await fs.readdir(dirPath, { withFileTypes: true });
+  } catch (error) {
+    if (error.code !== 'EACCES' && error.code !== 'EPERM') {
+      console.error('Error reading directory:', error);
+    }
+    return [];
+  }
+
+  const items = [];
+  for (const entry of entries) {
+    if (skipNames.has(entry.name)) continue;
+    if (!showHidden && entry.name.startsWith('.')) continue;
+    if (!entry.isDirectory()) continue;
+    items.push({
+      name: entry.name,
+      path: path.join(dirPath, entry.name),
+      type: 'directory',
+    });
+  }
+
+  return items.sort((a, b) => a.name.localeCompare(b.name));
+}
