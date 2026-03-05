@@ -1,7 +1,9 @@
 import { parseJsonBody } from '../lib/http-native.js';
 import { getProjectBasePath } from '../config.js';
+import { CLAUDE_MODELS, CODEX_MODELS } from '../../common/models.js';
+import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 
-export default function createWorkspaceRoutes(settings) {
+export default function createWorkspaceRoutes(settings, providers) {
 
   async function putSessionNameHandler(request) {
     try {
@@ -23,15 +25,38 @@ export default function createWorkspaceRoutes(settings) {
 
   async function getAppSettings() {
     try {
-      const [ui, paths, pinnedChatIds, lastPermissionMode, lastThinkingMode] = await Promise.all([
+      const [ui, paths, pinnedChatIds, lastPermissionMode, lastThinkingMode, authByProvider, opencodeModels] = await Promise.all([
         settings.getUiSettings(),
         settings.getPathSettings(),
         settings.getPinnedChatIds(),
         settings.getLastPermissionMode(),
         settings.getLastThinkingMode(),
+        providers?.getAuthStatusMap?.() ?? Promise.resolve({
+          claude: { authenticated: false },
+          codex: { authenticated: false },
+          opencode: { authenticated: false },
+        }),
+        providers?.getModels?.('opencode') ?? Promise.resolve([]),
       ]);
+      const modelsByProvider = {
+        claude: CLAUDE_MODELS.OPTIONS,
+        codex: CODEX_MODELS.OPTIONS,
+        opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
+      };
+      const uiEffective = {
+        chatTitle: resolveEffectiveGenerationConfig({
+          persisted: ui?.chatTitle,
+          authByProvider,
+          modelsByProvider,
+        }),
+        commitMessage: resolveEffectiveGenerationConfig({
+          persisted: ui?.commitMessage,
+          authByProvider,
+          modelsByProvider,
+        }),
+      };
       const projectBasePath = getProjectBasePath();
-      return Response.json({ success: true, ui, paths, pinnedChatIds, lastPermissionMode, lastThinkingMode, projectBasePath });
+      return Response.json({ success: true, ui, uiEffective, paths, pinnedChatIds, lastPermissionMode, lastThinkingMode, projectBasePath });
     } catch (error) {
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }

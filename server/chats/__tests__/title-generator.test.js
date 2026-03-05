@@ -2,7 +2,17 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { maybeGenerateChatTitle } from '../title-generator.js';
 
 const runSingleQueryMock = mock(() => Promise.resolve('Test Chat Title'));
-const mockProviders = { runSingleQuery: runSingleQueryMock };
+const getAuthStatusMapMock = mock(() => Promise.resolve({
+  claude: { authenticated: false },
+  codex: { authenticated: false },
+  opencode: { authenticated: false },
+}));
+const getModelsMock = mock(() => Promise.resolve([]));
+const mockProviders = {
+  runSingleQuery: runSingleQueryMock,
+  getAuthStatusMap: getAuthStatusMapMock,
+  getModels: getModelsMock,
+};
 
 const setSessionNameMock = mock(() => Promise.resolve(undefined));
 const getChatNameMock = mock(() => null);
@@ -17,7 +27,7 @@ const mockSettings = {
 
 const allMocks = [
   runSingleQueryMock, setSessionNameMock,
-  getChatNameMock, getUiSettingsMock,
+  getChatNameMock, getUiSettingsMock, getAuthStatusMapMock, getModelsMock,
 ];
 
 describe('maybeGenerateChatTitle', () => {
@@ -26,6 +36,12 @@ describe('maybeGenerateChatTitle', () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({
       chatTitle: { enabled: true, provider: 'claude', model: 'opus' },
     }));
+    getAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: false },
+      opencode: { authenticated: false },
+    }));
+    getModelsMock.mockImplementation(() => Promise.resolve([]));
     runSingleQueryMock.mockImplementation(() => Promise.resolve('Test Chat Title'));
     getChatNameMock.mockImplementation(() => null);
   });
@@ -77,6 +93,54 @@ describe('maybeGenerateChatTitle', () => {
     });
 
     expect(runSingleQueryMock).not.toHaveBeenCalled();
+  });
+
+  it('auto-enables and defaults to codex when codex is authenticated', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
+    getAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: true },
+      opencode: { authenticated: true },
+    }));
+
+    await maybeGenerateChatTitle({
+      chatId: '301',
+      projectPath: '/proj',
+      firstPrompt: 'Hello',
+      providers: mockProviders,
+      settings: mockSettings,
+    });
+
+    expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
+    const [, opts] = runSingleQueryMock.mock.calls[0];
+    expect(opts.provider).toBe('codex');
+    expect(opts.model).toBe('gpt-5.1-codex-mini');
+  });
+
+  it('auto-enables and skips DeepSeek R1 when selecting OpenCode defaults', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
+    getAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: false },
+      opencode: { authenticated: true },
+    }));
+    getModelsMock.mockImplementation(() => Promise.resolve([
+      { value: 'deepseek-r1', label: 'DeepSeek R1' },
+      { value: 'deepseek-v3', label: 'DeepSeek V3' },
+    ]));
+
+    await maybeGenerateChatTitle({
+      chatId: '302',
+      projectPath: '/proj',
+      firstPrompt: 'Hello',
+      providers: mockProviders,
+      settings: mockSettings,
+    });
+
+    expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
+    const [, opts] = runSingleQueryMock.mock.calls[0];
+    expect(opts.provider).toBe('opencode');
+    expect(opts.model).toBe('deepseek-v3');
   });
 
   it('does nothing when firstPrompt is empty', async () => {

@@ -62,7 +62,8 @@ Return only the commit message now.`;
 		try {
 			const settings = await getSettings();
 			const ui = (settings.ui ?? {}) as Record<string, unknown>;
-			const cm = (ui.commitMessage ?? {}) as Record<string, unknown>;
+			const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
+			const cm = (uiEffective.commitMessage ?? ui.commitMessage ?? {}) as Record<string, unknown>;
 			enabled = cm.enabled !== false;
 			if (['claude', 'codex', 'opencode'].includes(cm.provider as string)) {
 				provider = cm.provider as SessionProvider;

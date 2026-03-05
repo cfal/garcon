@@ -9,6 +9,9 @@ import path from 'path';
 import { findCodexSessionFileBySessionId, getCodexSessionMeta } from '../projects/codex.js';
 import { runSingleQuery as runSingleQueryClaude } from './claude-cli.js';
 import { runSingleQuery as runSingleQueryCodex } from './codex.js';
+import { getClaudeAuthStatus } from './claude-auth.js';
+import { getCodexAuthStatus } from './codex-auth.js';
+import { getOpenCodeAuthStatus } from './opencode-auth.js';
 
 // Stateless loaders and preview functions
 import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loaders/claude-history-loader.js';
@@ -52,6 +55,16 @@ async function recoverProviderSessionId(entry) {
   }
 
   return null;
+}
+
+async function getAllProviderAuthStatus(opencode) {
+  const [claude, codex, opencodeStatus] = await Promise.all([
+    getClaudeAuthStatus(),
+    getCodexAuthStatus(),
+    getOpenCodeAuthStatus(opencode),
+  ]);
+
+  return { claude, codex, opencode: opencodeStatus };
 }
 
 export class ProviderRegistry {
@@ -291,6 +304,11 @@ export class ProviderRegistry {
   async getModels(provider) {
     if (provider === 'opencode') return this.#opencode.getModels();
     return [];
+  }
+
+  // Returns current auth status for all providers.
+  async getAuthStatusMap() {
+    return getAllProviderAuthStatus(this.#opencode);
   }
 
   // Starts purge timers on providers that maintain session maps.
