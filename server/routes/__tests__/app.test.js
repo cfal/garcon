@@ -183,6 +183,28 @@ describe('GET /api/app/settings', () => {
     expect(body.uiEffective.commitMessage.provider).toBe('codex');
     expect(body.uiEffective.commitMessage.model).toBe('gpt-5.1-codex-mini');
   });
+
+  it('preserves persisted commitMessage extra fields in uiEffective', async () => {
+    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({
+      commitMessage: {
+        enabled: true,
+        provider: 'codex',
+        model: 'gpt-5.1-codex-mini',
+        customPrompt: 'Write a short message',
+        useCommonDirPrefix: true,
+      },
+    }));
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(body.success).toBe(true);
+    expect(body.uiEffective.commitMessage.enabled).toBe(true);
+    expect(body.uiEffective.commitMessage.provider).toBe('codex');
+    expect(body.uiEffective.commitMessage.model).toBe('gpt-5.1-codex-mini');
+    expect(body.uiEffective.commitMessage.customPrompt).toBe('Write a short message');
+    expect(body.uiEffective.commitMessage.useCommonDirPrefix).toBe(true);
+  });
 });
 
 describe('PUT /api/app/settings', () => {

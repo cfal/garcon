@@ -4,6 +4,9 @@ import { CLAUDE_MODELS, CODEX_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 
 export default function createWorkspaceRoutes(settings, providers) {
+  function asPlainObject(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  }
 
   async function putSessionNameHandler(request) {
     try {
@@ -43,17 +46,25 @@ export default function createWorkspaceRoutes(settings, providers) {
         codex: CODEX_MODELS.OPTIONS,
         opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
       };
+      const persistedChatTitle = asPlainObject(ui?.chatTitle);
+      const persistedCommitMessage = asPlainObject(ui?.commitMessage);
       const uiEffective = {
-        chatTitle: resolveEffectiveGenerationConfig({
-          persisted: ui?.chatTitle,
-          authByProvider,
-          modelsByProvider,
-        }),
-        commitMessage: resolveEffectiveGenerationConfig({
-          persisted: ui?.commitMessage,
-          authByProvider,
-          modelsByProvider,
-        }),
+        chatTitle: {
+          ...persistedChatTitle,
+          ...resolveEffectiveGenerationConfig({
+            persisted: persistedChatTitle,
+            authByProvider,
+            modelsByProvider,
+          }),
+        },
+        commitMessage: {
+          ...persistedCommitMessage,
+          ...resolveEffectiveGenerationConfig({
+            persisted: persistedCommitMessage,
+            authByProvider,
+            modelsByProvider,
+          }),
+        },
       };
       const projectBasePath = getProjectBasePath();
       return Response.json({ success: true, ui, uiEffective, paths, pinnedChatIds, lastPermissionMode, lastThinkingMode, projectBasePath });
