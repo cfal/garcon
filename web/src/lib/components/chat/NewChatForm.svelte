@@ -232,16 +232,16 @@
 			</div>
 
 				{#if form.validationStatus === 'invalid' && form.validationError}
-					<p class="-mt-1 ml-2 pl-1 text-xs text-destructive transition-colors">
+					<p class="-mt-1 text-xs text-destructive transition-colors">
 						{form.validationError}
 					</p>
 				{:else if form.gitRepoStatus === 'git'}
 					<button
 						type="button"
 						onclick={() => form.openWorktreeModal()}
-						class="-mt-1 ml-2 pl-1 flex items-center gap-1.5 text-xs text-interactive-accent hover:underline transition-colors"
+						class="-mt-1 flex items-center gap-1.5 text-xs text-interactive-accent hover:underline transition-colors"
 					>
-						Select a different worktree
+						{m.chat_new_chat_select_different_worktree()}
 					</button>
 				{/if}
 
