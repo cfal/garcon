@@ -42,28 +42,46 @@ On first launch, create the single local account at `/setup`, then configure pro
 
 ## Run and Configuration
 
-### Docker (recommended)
+### CLI
 
-Auto-restarts on crash or machine reboot:
+```bash
+bun run start --port 8080 --bind-address 127.0.0.1 --project-base-dir /path/to/repos
+```
+
+Run `bun run help` to see all flags and supported environment variables.
+
+### Docker
+
+Published image:
+
+```bash
+docker pull garconide/garcon:latest
+```
+
+Run with Docker Compose (builds local image):
 
 ```bash
 GARCON_PROJECT_DIR=~/repos docker compose up -d
 ```
 
-Set `GARCON_PROJECT_DIR` to the directory containing your repos. Pass any API keys (e.g. `OPENAI_API_KEY`) as additional env vars. Config is persisted in a Docker volume across restarts.
-
-### CLI
+Run with Docker Hub image:
 
 ```bash
-bun server/main.js --port 8080 --bind-address 127.0.0.1 --project-base-dir /path/to/repos
+docker run -d \
+  --name garcon \
+  --init \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -e GARCON_BIND_ADDRESS=0.0.0.0 \
+  -e GARCON_PROJECT_BASE_DIR=/projects \
+  -e OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+  -v garcon-data:/home/garcon/.garcon \
+  -v "$HOME/repos":/projects \
+  -v "$HOME/.claude":/home/garcon/.claude \
+  -v "$HOME/.codex":/home/garcon/.codex \
+  -v "$HOME/.opencode":/home/garcon/.opencode \
+  garconide/garcon:latest
 ```
 
-Common environment variables:
+Set `GARCON_PROJECT_DIR` (compose) or the `/projects` bind mount (`docker run`) to the directory containing your repos. Pass any API keys (e.g. `OPENAI_API_KEY`) as needed. Config is persisted in `garcon-data`.
 
-- `GARCON_PORT`, `GARCON_BIND_ADDRESS`
-- `GARCON_CONFIG_DIR`, `GARCON_WORKSPACE_DIR`, `GARCON_WORKSPACE`
-- `GARCON_PROJECT_BASE_DIR`
-- `GARCON_TERMINAL_SHELL`
-- `GARCON_JWT_TOKEN_EXPIRY`
-- `OPENAI_API_KEY`
-- `CLAUDE_BINARY`
