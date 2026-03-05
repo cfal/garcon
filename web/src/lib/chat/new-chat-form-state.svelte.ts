@@ -21,6 +21,7 @@ export class NewChatFormState {
 	provider = $state<SessionProvider>('claude');
 	claudeModel = $state('');
 	codexModel = $state('');
+	ampModel = $state('');
 	opencodeModel = $state('');
 
 	// Path
@@ -74,6 +75,7 @@ export class NewChatFormState {
 		this.provider = preferences.selectedProvider || 'claude';
 		this.claudeModel = preferences.claudeModel || this.#modelCatalog.getDefaultModel('claude');
 		this.codexModel = preferences.codexModel || this.#modelCatalog.getDefaultModel('codex');
+		this.ampModel = preferences.ampModel || this.#modelCatalog.getDefaultModel('amp');
 		this.opencodeModel = preferences.opencodeModel || this.#modelCatalog.getDefaultModel('opencode');
 	}
 
@@ -107,6 +109,7 @@ export class NewChatFormState {
 		const opts: Record<SessionProvider, ModelOption[]> = {
 			claude: this.#modelCatalog.getModels('claude'),
 			codex: this.#modelCatalog.getModels('codex'),
+			amp: this.#modelCatalog.getModels('amp'),
 			opencode: this.#modelCatalog.getModels('opencode').length
 				? this.#modelCatalog.getModels('opencode')
 				: this.opencodeModel
@@ -120,6 +123,7 @@ export class NewChatFormState {
 		const map: Record<SessionProvider, string> = {
 			claude: this.claudeModel,
 			codex: this.codexModel,
+			amp: this.ampModel,
 			opencode: this.opencodeModel
 		};
 		return map[this.provider];
@@ -138,6 +142,7 @@ export class NewChatFormState {
 		const setterMap: Record<SessionProvider, (v: string) => void> = {
 			claude: (v) => { this.claudeModel = v; },
 			codex: (v) => { this.codexModel = v; },
+			amp: (v) => { this.ampModel = v; },
 			opencode: (v) => { this.opencodeModel = v; }
 		};
 		setterMap[this.provider](value);
@@ -156,6 +161,9 @@ export class NewChatFormState {
 		}
 		if (provider === 'codex' && !liveModels.some((m) => m.value === this.codexModel)) {
 			this.codexModel = liveModels[0].value;
+		}
+		if (provider === 'amp' && !liveModels.some((m) => m.value === this.ampModel)) {
+			this.ampModel = liveModels[0].value;
 		}
 	}
 
@@ -423,6 +431,7 @@ export class NewChatFormState {
 			}
 			this.validateModelAgainstLive('claude');
 			this.validateModelAgainstLive('codex');
+			this.validateModelAgainstLive('amp');
 			this.validateModelAgainstLive('opencode');
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings and models', err);

@@ -1,10 +1,10 @@
 # Garcon
 
-Garcon is a local-first coding workspace for AI agents, with one UI for Claude, Codex, and OpenCode.
+Garcon is a local-first coding workspace for AI agents, with one UI for Claude, Codex, OpenCode, and Amp.
 
 ## Capabilities
 
-- Multi-provider chat sessions (`claude`, `codex`, `opencode`) with per-chat model selection
+- Multi-provider chat sessions (`claude`, `codex`, `opencode`, `amp`) with per-chat model selection
 - Unified coding workspace tabs: chat, files, terminal, and git
 - Full Git workbench: status, diff, staging/hunks, branches, history, commit/push/pull/fetch, worktrees, revert
 - Persistent chat history with pin/archive/reorder/read-state/fork operations
@@ -26,6 +26,7 @@ Garcon is a local-first coding workspace for AI agents, with one UI for Claude, 
   - Claude CLI (`claude`) and local Claude auth
   - Codex auth (`~/.codex/auth.json`) or `OPENAI_API_KEY`
   - OpenCode provider keys/config (through OpenCode SDK)
+  - Amp CLI (`amp`) and Amp auth (`AMP_API_KEY` or local Amp secrets file)
 
 ## Quick Start
 
@@ -66,4 +67,6 @@ Common environment variables:
 - `GARCON_TERMINAL_SHELL`
 - `GARCON_JWT_TOKEN_EXPIRY`
 - `OPENAI_API_KEY`
+- `AMP_API_KEY`
 - `CLAUDE_BINARY`
+- `AMP_BINARY`

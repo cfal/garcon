@@ -91,10 +91,12 @@
 		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
 		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
 		opencode: 'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
+		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
 	};
 	let providerTagVariant = $derived(PROVIDER_TAG_VARIANTS[provider] ?? PROVIDER_TAG_VARIANTS.claude);
 	let providerTagLabel = $derived(
 		provider === 'codex' ? m.provider_codex()
+		: provider === 'amp' ? m.provider_amp()
 		: provider === 'opencode' ? m.provider_opencode()
 		: m.provider_claude()
 	);

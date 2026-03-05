@@ -222,6 +222,7 @@
   "mobile_menu": "Menu",
   "provider_claude": "Claude",
   "provider_codex": "Codex",
+  "provider_amp": "Amp",
   "provider_opencode": "OpenCode",
   "settings_agents_auth_status_checking": "Checking...",
   "settings_agents_auth_status_connected": "Connected",

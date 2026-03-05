@@ -16,7 +16,9 @@ describe('ModelCatalogStore', () => {
 		const store = createModelCatalogStore();
 		expect(store.getModels('claude').length).toBeGreaterThan(0);
 		expect(store.getModels('codex').length).toBeGreaterThan(0);
+		expect(store.getModels('amp').length).toBeGreaterThan(0);
 		expect(store.getDefaultModel('claude')).toBe('opus');
+		expect(store.getDefaultModel('amp')).toBe('smart');
 	});
 
 	it('exposes default capabilities from common contract', () => {
@@ -24,9 +26,11 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('claude')).toBe(true);
 		expect(store.supportsFork('codex')).toBe(true);
 		expect(store.supportsFork('opencode')).toBe(false);
+		expect(store.supportsFork('amp')).toBe(true);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(false);
 		expect(store.supportsImages('opencode')).toBe(false);
+		expect(store.supportsImages('amp')).toBe(false);
 	});
 
 	it('hydrates cached models from localStorage', () => {
@@ -56,6 +60,7 @@ describe('ModelCatalogStore', () => {
 					claude: { supportsFork: true, supportsImages: true },
 					codex: { supportsFork: true, supportsImages: false },
 					opencode: { supportsFork: false, supportsImages: false },
+					amp: { supportsFork: true, supportsImages: false },
 				},
 				lastFetchedAt: Date.now()
 			})
@@ -82,6 +87,7 @@ describe('ModelCatalogStore', () => {
 		expect(store.getModels('opencode')).toEqual([{ value: 'moonshot/kimi-k2', label: 'Kimi K2' }]);
 		expect(store.getModels('claude').length).toBeGreaterThan(0);
 		expect(store.getModels('codex').length).toBeGreaterThan(0);
+		expect(store.getModels('amp').length).toBeGreaterThan(0);
 	});
 
 	it('parses catalog.providers from API response', async () => {
@@ -90,6 +96,7 @@ describe('ModelCatalogStore', () => {
 			json: async () => ({
 				claude: [{ value: 'opus', label: 'Opus' }],
 				codex: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' }],
+				amp: [{ value: 'smart', label: 'Smart' }],
 				opencode: [],
 				catalog: {
 					providers: [
@@ -111,6 +118,12 @@ describe('ModelCatalogStore', () => {
 							supportsImages: false,
 							models: [],
 						},
+						{
+							id: 'amp',
+							supportsFork: true,
+							supportsImages: false,
+							models: [{ value: 'smart', label: 'Smart' }],
+						},
 					],
 				},
 			})
@@ -121,9 +134,11 @@ describe('ModelCatalogStore', () => {
 
 		expect(store.supportsFork('claude')).toBe(true);
 		expect(store.supportsFork('opencode')).toBe(false);
+		expect(store.supportsFork('amp')).toBe(true);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(false);
 		expect(store.getModels('claude')).toEqual([{ value: 'opus', label: 'Opus' }]);
+		expect(store.getModels('amp')).toEqual([{ value: 'smart', label: 'Smart' }]);
 	});
 
 	it('falls back to legacy shape when catalog is absent', async () => {
@@ -132,6 +147,7 @@ describe('ModelCatalogStore', () => {
 			json: async () => ({
 				claude: [{ value: 'opus', label: 'Opus' }],
 				codex: [],
+				amp: [],
 				opencode: [],
 			})
 		} as unknown as Response);

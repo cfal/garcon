@@ -20,3 +20,13 @@ export const CODEX_MODELS = {
   ],
   DEFAULT: 'gpt-5.3-codex',
 };
+
+export const AMP_MODELS = {
+  OPTIONS: [
+    { value: 'smart', label: 'Smart' },
+    { value: 'deep', label: 'Deep' },
+    { value: 'rush', label: 'Rush' },
+    { value: 'free', label: 'Free' },
+  ],
+  DEFAULT: 'smart',
+};

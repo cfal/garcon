@@ -3,7 +3,7 @@
 
 import type { SessionProvider } from '$lib/types/app';
 import type { PermissionMode } from '$lib/types/chat';
-import { CLAUDE_MODELS, CODEX_MODELS } from '$shared/models';
+import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '$shared/models';
 
 // Persisted preference fields.
 export type ThemeMode = 'dark' | 'light' | 'system';
@@ -20,6 +20,7 @@ export interface PreferencesState {
 	selectedProvider: SessionProvider;
 	claudeModel: string;
 	codexModel: string;
+	ampModel: string;
 	opencodeModel: string;
 	codeEditorTheme: string;
 	codeEditorWordWrap: boolean;
@@ -44,6 +45,7 @@ const DEFAULTS: PreferencesState = {
 	selectedProvider: 'claude',
 	claudeModel: CLAUDE_MODELS.DEFAULT,
 	codexModel: CODEX_MODELS.DEFAULT,
+	ampModel: AMP_MODELS.DEFAULT,
 	opencodeModel: 'anthropic/claude-sonnet-4-5',
 	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
@@ -106,6 +108,10 @@ function readPersisted(): PreferencesState {
 						typeof parsed.codexModel === 'string'
 							? parsed.codexModel
 							: DEFAULTS.codexModel,
+					ampModel:
+						typeof parsed.ampModel === 'string'
+							? parsed.ampModel
+							: DEFAULTS.ampModel,
 					opencodeModel:
 						typeof parsed.opencodeModel === 'string'
 							? parsed.opencodeModel
@@ -167,6 +173,7 @@ export class PreferencesStore {
 	selectedProvider = $state<SessionProvider>(DEFAULTS.selectedProvider);
 	claudeModel = $state(DEFAULTS.claudeModel);
 	codexModel = $state(DEFAULTS.codexModel);
+	ampModel = $state(DEFAULTS.ampModel);
 	opencodeModel = $state(DEFAULTS.opencodeModel);
 	codeEditorTheme = $state(DEFAULTS.codeEditorTheme);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
@@ -191,6 +198,7 @@ export class PreferencesStore {
 		this.selectedProvider = saved.selectedProvider;
 		this.claudeModel = saved.claudeModel;
 		this.codexModel = saved.codexModel;
+		this.ampModel = saved.ampModel;
 		this.opencodeModel = saved.opencodeModel;
 		this.codeEditorTheme = saved.codeEditorTheme;
 		this.codeEditorWordWrap = saved.codeEditorWordWrap;
@@ -215,6 +223,7 @@ export class PreferencesStore {
 			selectedProvider: this.selectedProvider,
 			claudeModel: this.claudeModel,
 			codexModel: this.codexModel,
+			ampModel: this.ampModel,
 			opencodeModel: this.opencodeModel,
 			codeEditorTheme: this.codeEditorTheme,
 			codeEditorWordWrap: this.codeEditorWordWrap,

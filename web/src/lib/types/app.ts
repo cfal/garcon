@@ -1,6 +1,6 @@
 // Application-level types shared across the Svelte frontend.
 
-export type SessionProvider = 'claude' | 'codex' | 'opencode';
+export type SessionProvider = 'claude' | 'codex' | 'opencode' | 'amp';
 
 export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'preview';
 

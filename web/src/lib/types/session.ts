@@ -2,7 +2,7 @@
 
 export interface ChatSession {
 	id: string;
-	provider: 'claude' | 'codex' | 'opencode';
+	provider: 'claude' | 'codex' | 'opencode' | 'amp';
 	model: string | null;
 	permissionMode?: string;
 	thinkingMode?: string;

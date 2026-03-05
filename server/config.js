@@ -110,6 +110,11 @@ export function getClaudeBinary() {
   return process.env.CLAUDE_BINARY || 'claude';
 }
 
+// Amp CLI binary path
+export function getAmpBinary() {
+  return process.env.AMP_BINARY || 'amp';
+}
+
 // JWT token expiry (secret is managed by auth/store.js).
 export function getJwtTokenExpiry() {
   return process.env.GARCON_JWT_TOKEN_EXPIRY || '30d';

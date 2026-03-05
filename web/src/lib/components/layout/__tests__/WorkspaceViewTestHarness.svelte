@@ -42,7 +42,7 @@
 			return [];
 		},
 		getProviders() {
-			return ['claude', 'codex', 'opencode'];
+			return ['claude', 'codex', 'opencode', 'amp'];
 		}
 	} as never);
 

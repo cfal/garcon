@@ -6,6 +6,8 @@ mock.module('../../lib/http-native.js', () => ({
 
 mock.module('../../providers/loaders/claude-history-loader.js', () => ({
   getClaudeSessionMessagesFromNativePath: mock(() => undefined),
+  getClaudePreviewFromNativePath: mock(() => undefined),
+  loadClaudeChatMessages: mock(() => []),
 }));
 
 mock.module('../../projects/codex.js', () => ({
