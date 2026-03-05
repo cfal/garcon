@@ -29,15 +29,39 @@
 		return raw;
 	});
 
+	// Split the typed path into a browsable parent directory and a filter
+	// prefix. If the path ends with '/' or is a known directory (from the
+	// last fetch), browse it directly. Otherwise treat the last segment as
+	// a partial name filter on the parent directory.
+	let resolvedDir = $state('');
+	let filterPrefix = $state('');
+
+	$effect(() => {
+		const raw = clampedStart;
+		if (raw.endsWith('/') || raw === basePath) {
+			resolvedDir = raw;
+			filterPrefix = '';
+		} else {
+			const lastSlash = raw.lastIndexOf('/');
+			resolvedDir = lastSlash >= 0 ? raw.slice(0, lastSlash) || '/' : '/';
+			filterPrefix = lastSlash >= 0 ? raw.slice(lastSlash + 1).toLowerCase() : '';
+		}
+	});
+
 	let browsePath = $state('');
-	let entries = $state<DirectoryEntry[]>([]);
+	let allEntries = $state<DirectoryEntry[]>([]);
+	let entries = $derived(
+		filterPrefix
+			? allEntries.filter((e) => e.name.toLowerCase().startsWith(filterPrefix))
+			: allEntries
+	);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let focusIndex = $state(-1);
 
-	// Initialize browsePath from clampedStart
+	// Initialize browsePath from resolvedDir
 	$effect(() => {
-		browsePath = clampedStart;
+		browsePath = resolvedDir;
 	});
 
 	// Fetch directory contents whenever browsePath changes.
@@ -53,13 +77,13 @@
 		void browseDirectory(path, abortController.signal)
 			.then((list) => {
 				if (abortController.signal.aborted) return;
-				entries = list;
+				allEntries = list;
 				focusIndex = -1;
 				loading = false;
 			})
 			.catch((err) => {
 				if (abortController.signal.aborted) return;
-				entries = [];
+				allEntries = [];
 				error = err instanceof Error ? err.message : String(err);
 				loading = false;
 			});
