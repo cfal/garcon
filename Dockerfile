@@ -1,5 +1,8 @@
+ARG BUN_IMAGE=oven/bun
+ARG BUN_TAG=latest
+
 # -- Build stage: install deps and compile SvelteKit frontend --
-FROM oven/bun:latest AS build
+FROM ${BUN_IMAGE}:${BUN_TAG} AS build
 
 WORKDIR /app
 
@@ -19,10 +22,38 @@ COPY web/ web/
 RUN bun run build
 
 # -- Runtime stage --
-FROM oven/bun:latest
+FROM ${BUN_IMAGE}:${BUN_TAG}
 
-RUN apt-get update && apt-get install -y --no-install-recommends git && \
+RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
+
+ENV HOME=/home/garcon
+ENV PATH="${HOME}/.bun/bin:${PATH}"
+ENV PATH="${HOME}/.local/bin:${PATH}"
+
+# Install Claude
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+ENV CLAUDE_CONFIG_DIR="${HOME}/.claude"
+VOLUME ["${HOME}/.claude"]
+
+# Install Codex
+RUN bun install -g @openai/codex
+
+ENV CODEX_HOME="${HOME}/.codex"
+VOLUME ["${HOME}/.codex"]
+
+# Install Opencode
+RUN bun install -g opencode-ai@latest
+
+# Setup opencode XDG symlinks
+RUN mkdir -p $HOME/.local/share $HOME/.local/state $HOME/.local/cache && \
+  ln -s $HOME/.opencode/opencode-data $HOME/.local/share/opencode && \
+  ln -s $HOME/.opencode/opencode-state $HOME/.local/state/opencode && \
+  ln -s $HOME/.opencode/opencode-cache $HOME/.local/cache/opencode
+
+ENV OPENCODE_CONFIG_DIR="${HOME}/.opencode"
+VOLUME ["${HOME}/.opencode"]
 
 WORKDIR /app
 
@@ -38,7 +69,9 @@ COPY --from=build /app/common/ common/
 # Copy built web assets
 COPY --from=build /app/web/build/ web/build/
 
+ENV GARCON_CONFIG_DIR="${HOME}/.garcon"
 ENV GARCON_BIND_ADDRESS=0.0.0.0
+VOLUME ["${HOME}/.garcon"]
 EXPOSE 8080
 
 CMD ["bun", "server/main.js"]
