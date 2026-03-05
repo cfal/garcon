@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Modal for selecting or creating a git worktree from the New Chat form.
 
+	import { tick } from 'svelte';
 	import X from '@lucide/svelte/icons/x';
 	import Check from '@lucide/svelte/icons/check';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -36,6 +37,7 @@
 	let createPath = $state('');
 	let createBranch = $state('');
 	let createBaseRef = $state('');
+	let createPathRef: HTMLInputElement | undefined = $state();
 
 	function handleKeydown(e: KeyboardEvent): void {
 		if (e.key === 'Escape') onClose();
@@ -53,6 +55,12 @@
 		createBranch = '';
 		createBaseRef = '';
 	}
+
+	async function openCreateForm(): Promise<void> {
+		showCreateForm = true;
+		await tick();
+		createPathRef?.focus();
+	}
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -69,7 +77,7 @@
 		aria-modal="true"
 		aria-label="Select worktree"
 		tabindex="-1"
-		class="bg-popover border border-border rounded-lg shadow-xl w-full max-w-xl mx-4 max-h-[80vh] flex flex-col"
+		class="bg-popover border border-border rounded-lg shadow-xl w-full max-w-xl mx-4 max-h-[80dvh] flex flex-col"
 	>
 		<!-- Header -->
 		<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
@@ -82,8 +90,8 @@
 			</button>
 		</div>
 
-		<!-- Body -->
-		<div class="flex-1 overflow-y-auto">
+		<!-- Body (scrollable worktree list) -->
+		<div class="flex-1 overflow-y-auto min-h-0">
 			{#if errorMessage}
 				<div class="flex items-center gap-2 px-4 py-3 text-sm text-destructive bg-destructive/10 border-b border-border">
 					<AlertTriangle class="w-4 h-4 shrink-0" />
@@ -140,66 +148,67 @@
 					</div>
 				{/if}
 			{/if}
+		</div>
 
-			<!-- Create form -->
-			{#if showCreateForm}
-				<div class="border-t border-border px-4 py-3 space-y-2">
-					<div class="text-xs font-medium text-muted-foreground">Create worktree</div>
+		<!-- Create form (pinned below scroll area, always visible) -->
+		{#if showCreateForm}
+			<div class="border-t border-border px-4 py-3 space-y-2 shrink-0">
+				<div class="text-xs font-medium text-muted-foreground">Create worktree</div>
+				<input
+					bind:this={createPathRef}
+					type="text"
+					bind:value={createPath}
+					placeholder="Worktree path (required)"
+					class="w-full px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
+				/>
+				<div class="flex gap-2">
 					<input
 						type="text"
-						bind:value={createPath}
-						placeholder="Worktree path (required)"
-						class="w-full px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
+						bind:value={createBranch}
+						placeholder="Branch name (optional)"
+						class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
 					/>
-					<div class="flex gap-2">
-						<input
-							type="text"
-							bind:value={createBranch}
-							placeholder="Branch name (optional)"
-							class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
-						/>
-						<input
-							type="text"
-							bind:value={createBaseRef}
-							placeholder="Base ref (optional)"
-							class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
-						/>
-					</div>
-					<div class="flex gap-2 justify-end">
-						<button
-							onclick={resetCreateForm}
-							class="px-3 py-1.5 text-xs rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
-						>
-							Cancel
-						</button>
-						<button
-							onclick={handleCreate}
-							disabled={!createPath.trim() || isCreating}
-							class="px-3 py-1.5 text-xs rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed
-								{createPath.trim() && !isCreating
-									? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
-									: 'bg-muted text-muted-foreground'}"
-						>
-							{#if isCreating}
-								<span class="flex items-center gap-1.5">
-									<LoaderCircle class="w-3 h-3 animate-spin" />
-									Creating...
-								</span>
-							{:else}
-								Create
-							{/if}
-						</button>
-					</div>
+					<input
+						type="text"
+						bind:value={createBaseRef}
+						placeholder="Base ref (optional)"
+						class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
+					/>
 				</div>
-			{/if}
-		</div>
+				<div class="flex gap-2 justify-end">
+					<button
+						onclick={resetCreateForm}
+						class="px-3 py-1.5 text-xs rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
+					>
+						Cancel
+					</button>
+					<button
+						onclick={handleCreate}
+						disabled={!createPath.trim() || isCreating}
+						class="px-3 py-1.5 text-xs rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed
+							{createPath.trim() && !isCreating
+								? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
+								: 'bg-muted text-muted-foreground'}"
+					>
+						{#if isCreating}
+							<span class="flex items-center gap-1.5">
+								<LoaderCircle class="w-3 h-3 animate-spin" />
+								Creating...
+							</span>
+						{:else}
+							Create
+						{/if}
+					</button>
+				</div>
+			</div>
+		{/if}
 
 		<!-- Footer -->
 		<div class="flex items-center justify-between px-4 py-3 border-t border-border shrink-0">
 			<div class="flex gap-2">
 				{#if !showCreateForm}
 					<button
-						onclick={() => (showCreateForm = true)}
+						onclick={openCreateForm}
 						class="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
 					>
 						<Plus class="w-3 h-3" />
