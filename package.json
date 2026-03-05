@@ -20,6 +20,9 @@
   "scripts": {
     "install": "bun install --cwd server && bun install --cwd web",
     "build": "bun run --cwd web build",
+    "build-exe:compile": "bun scripts/build-exe.js",
+    "build-exe:smoke": "bun scripts/smoke-exe.js",
+    "build-exe": "bun run check && bun run test && bun run build && bun run build-exe:compile && bun run build-exe:smoke",
     "server": "bun server/main.js",
     "start": "bun run build && bun run server",
     "test": "for f in server/**/__tests__/*.test.js; do bun test \"$f\" || exit 1; done && bun run --cwd web test",
