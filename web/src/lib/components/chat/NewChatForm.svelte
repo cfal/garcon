@@ -177,7 +177,13 @@
 						type="text"
 						bind:value={form.projectPath}
 						onfocus={() => form.handlePathFocus()}
-						oninput={() => form.clearError()}
+						oninput={() => { form.clearError(); form.resetTabCompletions(); }}
+						onkeydown={(e: KeyboardEvent) => {
+							if (e.key === 'Tab') {
+								e.preventDefault();
+								form.handleTabCompletion();
+							}
+						}}
 						placeholder={form.projectBasePath}
 						class="w-full pl-3 pr-8 py-2 text-sm bg-background border border-border rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring placeholder-muted-foreground/60 text-foreground"
 					/>

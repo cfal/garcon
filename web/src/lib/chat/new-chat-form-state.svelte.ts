@@ -3,6 +3,7 @@
 // the config payload used to start a session.
 
 import { apiFetch } from '$lib/api/client.js';
+import { browseDirectory } from '$lib/api/files.js';
 import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 import * as settingsApi from '$lib/api/settings.js';
 import { getGitRepoInfo, getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
@@ -469,9 +470,75 @@ export class NewChatFormState {
 	// Auto-open browser on first path focus
 
 	handlePathFocus(): void {
-		if (!this.hasAutoOpened) {
-			this.hasAutoOpened = true;
-			this.showBrowser = true;
+		this.showBrowser = true;
+	}
+
+	// Tab-completion for the path input
+
+	tabCompletions = $state<string[]>([]);
+	#tabCompletionIndex = 0;
+
+	/** Handles Tab key in the path input. Completes the path like a terminal. */
+	async handleTabCompletion(): Promise<void> {
+		const raw = this.projectPath;
+		if (!raw) return;
+
+		// If we already have multiple completions, cycle through them.
+		if (this.tabCompletions.length > 1) {
+			this.#tabCompletionIndex = (this.#tabCompletionIndex + 1) % this.tabCompletions.length;
+			this.projectPath = this.tabCompletions[this.#tabCompletionIndex];
+			return;
+		}
+
+		// Determine the parent directory and partial name to match.
+		const lastSlash = raw.lastIndexOf('/');
+		const parentDir = lastSlash >= 0 ? raw.slice(0, lastSlash) || '/' : '/';
+		const partial = lastSlash >= 0 ? raw.slice(lastSlash + 1).toLowerCase() : '';
+
+		try {
+			const entries = await browseDirectory(parentDir);
+			const matches = partial
+				? entries.filter((e) => e.name.toLowerCase().startsWith(partial))
+				: entries;
+
+			if (matches.length === 0) return;
+
+			const matchPaths = matches.map((e) => e.path);
+
+			if (matches.length === 1) {
+				// Single match — complete it and add trailing slash.
+				this.projectPath = matchPaths[0] + '/';
+				this.tabCompletions = [];
+			} else {
+				// Multiple matches — fill common prefix and open browser.
+				const common = longestCommonPrefix(matchPaths);
+				if (common.length > raw.length) {
+					this.projectPath = common;
+				}
+				this.tabCompletions = matchPaths;
+				this.#tabCompletionIndex = 0;
+				this.showBrowser = true;
+			}
+		} catch {
+			// Silently ignore browse errors on tab.
 		}
 	}
+
+	/** Resets tab-completion state when the user types. */
+	resetTabCompletions(): void {
+		this.tabCompletions = [];
+		this.#tabCompletionIndex = 0;
+	}
+}
+
+function longestCommonPrefix(strings: string[]): string {
+	if (strings.length === 0) return '';
+	let prefix = strings[0];
+	for (let i = 1; i < strings.length; i++) {
+		while (!strings[i].startsWith(prefix)) {
+			prefix = prefix.slice(0, -1);
+			if (!prefix) return '';
+		}
+	}
+	return prefix;
 }
