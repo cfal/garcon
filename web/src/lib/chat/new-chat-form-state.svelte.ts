@@ -2,11 +2,11 @@
 // model, permission/thinking mode, path validation, image attachments, and
 // the config payload used to start a session.
 
-import { apiFetch } from '$lib/api/client.js';
 import { browseDirectory } from '$lib/api/files.js';
+import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
 import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 import * as settingsApi from '$lib/api/settings.js';
-import { getGitRepoInfo, getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
+import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import type { NewChatConfig, SessionProvider } from '$lib/types/app.js';
 import type { PermissionMode } from '$lib/types/chat.js';
@@ -14,7 +14,7 @@ import type { PreferencesStore } from '$lib/stores/preferences.svelte.js';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
 import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
-import { canComposeNewChat, canSubmitNewChat, type PathValidationStatus } from '$lib/components/chat/new-chat-submit.js';
+import { canSubmitNewChat, type PathValidationStatus } from '$lib/components/chat/new-chat-submit.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export class NewChatFormState {
@@ -47,9 +47,8 @@ export class NewChatFormState {
 	hasAutoOpened = $state(false);
 	settingsLoaded = $state(false);
 
-	// Git repo detection
-	gitRepoStatus = $state<'unknown' | 'checking' | 'git' | 'non-git' | 'error'>('unknown');
-	repoRootPath = $state<string | null>(null);
+	// Git repo status from validate-start endpoint.
+	gitRepoStatus = $state<'unknown' | 'git' | 'non-git'>('unknown');
 
 	// Worktree modal
 	worktreeModalOpen = $state(false);
@@ -57,8 +56,6 @@ export class NewChatFormState {
 	isLoadingWorktrees = $state(false);
 	isCreatingWorktree = $state(false);
 	worktreeError = $state<string | null>(null);
-	#gitDetectionVersion = 0;
-
 	// Images (delegated to shared ImageAttachmentState)
 	readonly #images = new ImageAttachmentState();
 
@@ -94,10 +91,6 @@ export class NewChatFormState {
 
 	get canSubmit(): boolean {
 		return canSubmitNewChat(this.trimmedPath, this.validationStatus, this.firstMessage);
-	}
-
-	get canCompose(): boolean {
-		return canComposeNewChat(this.trimmedPath, this.validationStatus);
 	}
 
 	get placeholder(): string {
@@ -190,43 +183,13 @@ export class NewChatFormState {
 		this.#images.revokeAll();
 	}
 
-	// Git repo detection
-
-	/** Probes the validated path for git repository status. */
-	async detectGitRepo(): Promise<void> {
-		if (this.validationStatus !== 'valid' || !this.trimmedPath) {
-			this.gitRepoStatus = 'unknown';
-			this.repoRootPath = null;
-			return;
-		}
-
-		this.gitRepoStatus = 'checking';
-		const version = ++this.#gitDetectionVersion;
-
-		try {
-			const info = await getGitRepoInfo(this.trimmedPath);
-			if (version !== this.#gitDetectionVersion) return;
-
-			if (info.isGitRepository) {
-				this.gitRepoStatus = 'git';
-				this.repoRootPath = info.repoRoot ?? null;
-			} else {
-				this.gitRepoStatus = 'non-git';
-				this.repoRootPath = null;
-			}
-		} catch {
-			if (version !== this.#gitDetectionVersion) return;
-			this.gitRepoStatus = 'error';
-			this.repoRootPath = null;
-		}
-	}
-
 	// Worktree modal
 
-	async openWorktreeModal(): Promise<void> {
+	openWorktreeModal(): void {
 		this.worktreeModalOpen = true;
 		this.worktreeError = null;
-		await this.loadWorktrees();
+		this.worktreeItems = [];
+		void this.loadWorktrees();
 	}
 
 	closeWorktreeModal(): void {
@@ -294,27 +257,35 @@ export class NewChatFormState {
 		if (this.#validationTimer) clearTimeout(this.#validationTimer);
 		const requestVersion = ++this.#validationRequestVersion;
 
-		this.#validationTimer = setTimeout(async () => {
-			try {
-				const res = await apiFetch(
-					`/api/v1/files/validate-dir?path=${encodeURIComponent(path)}`
-				);
-				const data = await res.json();
-				if (requestVersion !== this.#validationRequestVersion) return;
-				if (data.valid) {
-					this.validationStatus = 'valid';
-					this.validationError = null;
-				} else {
+			this.#validationTimer = setTimeout(async () => {
+				try {
+					const data = await validateStart(path);
+					if (requestVersion !== this.#validationRequestVersion) return;
+					if (data.valid) {
+						this.validationStatus = 'valid';
+						this.validationError = null;
+						this.gitRepoStatus = data.isGitRepo ? 'git' : 'non-git';
+					} else {
+						this.validationStatus = 'invalid';
+						this.validationError = this.#validationErrorMessage(data.errorCode);
+						this.gitRepoStatus = 'non-git';
+					}
+				} catch (err) {
+					if (requestVersion !== this.#validationRequestVersion) return;
 					this.validationStatus = 'invalid';
 					this.validationError = m.chat_new_chat_errors_invalid_directory();
+					this.gitRepoStatus = 'non-git';
+					console.warn('[NewChatFormState] Path validation request failed', err);
 				}
-			} catch (err) {
-				if (requestVersion !== this.#validationRequestVersion) return;
-				this.validationStatus = 'invalid';
-				this.validationError = m.chat_new_chat_errors_invalid_directory();
-				console.warn('[NewChatFormState] Path validation request failed', err);
-			}
-		}, 300);
+			}, 300);
+		}
+
+	#validationErrorMessage(errorCode?: ValidateStartErrorCode): string {
+		if (errorCode === 'outside_base_dir') return m.chat_new_chat_errors_path_outside_base_dir();
+		if (errorCode === 'path_not_found') return m.chat_new_chat_errors_path_not_found();
+		if (errorCode === 'permission_denied') return m.chat_new_chat_errors_path_permission_denied();
+		if (errorCode === 'not_directory') return m.chat_new_chat_errors_path_not_directory();
+		return m.chat_new_chat_errors_invalid_directory();
 	}
 
 	#clearValidation(): void {
@@ -322,10 +293,11 @@ export class NewChatFormState {
 			clearTimeout(this.#validationTimer);
 			this.#validationTimer = null;
 		}
-		this.#validationRequestVersion += 1;
-		this.validationStatus = 'idle';
-		this.validationError = null;
-	}
+			this.#validationRequestVersion += 1;
+			this.validationStatus = 'idle';
+			this.validationError = null;
+			this.gitRepoStatus = 'unknown';
+		}
 
 	// Pinned paths
 
@@ -400,11 +372,10 @@ export class NewChatFormState {
 		this.firstMessage = prefill;
 		this.attachedImages = [];
 		this.error = null;
-		this.showBrowser = false;
-		this.hasAutoOpened = false;
-		this.gitRepoStatus = 'unknown';
-		this.repoRootPath = null;
-		this.worktreeModalOpen = false;
+			this.showBrowser = false;
+			this.hasAutoOpened = false;
+			this.gitRepoStatus = 'unknown';
+			this.worktreeModalOpen = false;
 		this.worktreeItems = [];
 		this.worktreeError = null;
 	}

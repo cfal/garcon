@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getTree, getFileList, readText, saveText, validateDir, browseDirectory } from '../files';
+import { getTree, getFileList, readText, saveText, browseDirectory } from '../files';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -86,23 +86,6 @@ describe('files API contract', () => {
 		expect(opts.method).toBe('PUT');
 		const body = JSON.parse(opts.body);
 		expect(body.content).toBe('new content');
-	});
-
-	it('validateDir calls GET /api/v1/files/validate-dir', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ valid: true, path: '/p' }));
-
-		const result = await validateDir('/p');
-
-		expect(result.valid).toBe(true);
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('/api/v1/files/validate-dir');
-		expect(url).toContain('path=%2Fp');
-	});
-
-	it('validateDir propagates ApiError on 400', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ error: 'Invalid path' }, 400));
-
-		await expect(validateDir('/bad')).rejects.toMatchObject({ message: 'Invalid path' });
 	});
 
 	it('browseDirectory calls GET /api/v1/files/browse and returns raw array', async () => {

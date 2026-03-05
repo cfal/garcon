@@ -89,13 +89,6 @@
 		form.validatePath();
 	});
 
-	// Detect git repo when path becomes valid.
-	$effect(() => {
-		void form.validationStatus;
-		void form.trimmedPath;
-		form.detectGitRepo();
-	});
-
 	onDestroy(() => {
 		form.revokeAllImageUrls();
 	});
@@ -232,18 +225,22 @@
 					isMobile={false}
 				/>
 			{/if}
-		</div>
+			</div>
 
-		{#if form.gitRepoStatus === 'git'}
-			<button
-				type="button"
-				onclick={() => form.openWorktreeModal()}
-				class="ml-1 flex items-center gap-1.5 text-xs text-interactive-accent hover:underline transition-colors"
-			>
-				<GitBranch class="w-3 h-3" />
-				Select a different worktree
-			</button>
-		{/if}
+				{#if form.validationStatus === 'invalid' && form.validationError}
+					<p class="-mt-1 ml-2 pl-1 text-xs text-destructive transition-colors">
+						{form.validationError}
+					</p>
+				{:else if form.gitRepoStatus === 'git'}
+					<button
+						type="button"
+						onclick={() => form.openWorktreeModal()}
+						class="-mt-1 ml-2 pl-1 flex items-center gap-1.5 text-xs text-interactive-accent hover:underline transition-colors"
+					>
+						<GitBranch class="w-3 h-3" />
+						Select a different worktree
+					</button>
+				{/if}
 
 		<!-- Pinned paths or placeholder -->
 		{#if form.pinnedProjectPaths.length > 0}
@@ -287,17 +284,16 @@
 			class="hidden"
 			onchange={handleImageInputChange}
 		/>
-		<textarea
+			<textarea
 			bind:this={textareaRef}
 			bind:value={form.firstMessage}
 			onkeydown={handleKeyDown}
 			oninput={autoResizeTextarea}
-			onpaste={handleMessagePaste}
-			placeholder={form.placeholder}
-			disabled={!form.canCompose}
-			class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground disabled:opacity-50 resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
-			rows="2"
-		></textarea>
+				onpaste={handleMessagePaste}
+				placeholder={form.placeholder}
+				class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
+				rows="2"
+			></textarea>
 
 		<ComposerBottomBar
 			canAttachImages={modelCatalog.supportsImages(form.provider)}

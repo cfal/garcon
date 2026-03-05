@@ -2,12 +2,36 @@
 // and dispatches message reads to the appropriate provider parser.
 
 import { promises as fs } from 'fs';
+import path from 'path';
 import { parseJsonBody } from '../lib/http-native.js';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import { UserMessage } from '../../common/chat-types.ts';
 import { resolveMissingNativePath } from '../chats/resolve-native-path.js';
 import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { PROVIDERS as VALID_PROVIDERS, supportsFork as providerSupportsFork, supportsImages as providerSupportsImages } from '../../common/providers.ts';
+import { getProjectBasePath } from '../config.js';
+
+const PROJECT_BASE_PATH = getProjectBasePath();
+
+function isWithinBasePath(targetPath) {
+  const resolved = path.resolve(targetPath);
+  const projectBasePathPrefix = PROJECT_BASE_PATH.endsWith(path.sep) ? PROJECT_BASE_PATH : PROJECT_BASE_PATH + path.sep;
+  return resolved === PROJECT_BASE_PATH || resolved.startsWith(projectBasePathPrefix);
+}
+
+async function isGitRepository(projectPath) {
+  try {
+    const proc = Bun.spawn(['git', 'rev-parse', '--is-inside-work-tree'], {
+      cwd: projectPath,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [stdout, exitCode] = await Promise.all([proc.stdout.text(), proc.exited]);
+    return exitCode === 0 && stdout.trim() === 'true';
+  } catch {
+    return false;
+  }
+}
 
 function createdAtFromId(id) {
   const raw = String(id || '').trim();
@@ -26,6 +50,41 @@ function extractFirstLine(text) {
 }
 
 export default function createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers) {
+
+  async function validateStartPath(request, url) {
+    const dirPath = String(url.searchParams.get('path') || '').trim();
+    if (!dirPath) {
+      return Response.json(
+        { valid: false, error: 'path is required', errorCode: 'path_required' },
+        { status: 400 },
+      );
+    }
+
+    if (!isWithinBasePath(dirPath)) {
+      return Response.json({
+        valid: false,
+        error: 'Path is outside the allowed base directory',
+        errorCode: 'outside_base_dir',
+      });
+    }
+
+    try {
+      const stat = await fs.stat(dirPath);
+      if (!stat.isDirectory()) {
+        return Response.json({ valid: false, error: 'Not a directory', errorCode: 'not_directory' });
+      }
+      const isGitRepo = await isGitRepository(dirPath);
+      return Response.json({ valid: true, isGitRepo });
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return Response.json({ valid: false, error: 'Path does not exist', errorCode: 'path_not_found' });
+      }
+      if (error.code === 'EACCES' || error.code === 'EPERM') {
+        return Response.json({ valid: false, error: 'Permission denied', errorCode: 'permission_denied' });
+      }
+      return Response.json({ valid: false, error: error.message, errorCode: 'unknown' });
+    }
+  }
 
   async function getChats() {
     try {
@@ -498,6 +557,7 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
   return {
     '/api/v1/chats': { GET: getChats, DELETE: deleteSessionHandler },
     '/api/v1/chats/start': { POST: postStartSession },
+    '/api/v1/chats/validate-start': { GET: validateStartPath },
     '/api/v1/chats/fork': { POST: postForkChat },
     '/api/v1/chats/messages': { GET: getMessages },
     '/api/v1/chats/details': { GET: getChatDetails },

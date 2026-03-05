@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
-import * as clientApi from '$lib/api/client';
+import * as chatsApi from '$lib/api/chats';
 
-vi.mock('$lib/api/client', () => ({
-	apiFetch: vi.fn()
+vi.mock('$lib/api/files', () => ({
+	browseDirectory: vi.fn()
+}));
+
+vi.mock('$lib/api/chats', () => ({
+	validateStart: vi.fn()
 }));
 
 const mockPreferences = {
@@ -49,15 +53,13 @@ describe('NewChatFormState', () => {
 	});
 
 	it('debounces directory validation', async () => {
-		vi.mocked(clientApi.apiFetch).mockResolvedValue({ 
-			json: () => Promise.resolve({ valid: true }) 
-		} as unknown as Response);
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
 
 		// Trigger validation
 		state.projectPath = '/fake/path';
 		state.validatePath();
 		expect(state.validationStatus).toBe('checking');
-		expect(clientApi.apiFetch).not.toHaveBeenCalled();
+		expect(chatsApi.validateStart).not.toHaveBeenCalled();
 
 		// Advance time past debounce
 		vi.advanceTimersByTime(500);
@@ -65,8 +67,24 @@ describe('NewChatFormState', () => {
 		// Let promises resolve
 		await vi.runAllTimersAsync();
 
-		expect(clientApi.apiFetch).toHaveBeenCalledWith('/api/v1/files/validate-dir?path=%2Ffake%2Fpath');
+		expect(chatsApi.validateStart).toHaveBeenCalledWith('/fake/path');
 		expect(state.validationStatus).toBe('valid');
+	});
+
+	it('maps outside-base-dir validation errors to a specific message', async () => {
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({
+			valid: false,
+			error: 'Path is outside the allowed base directory',
+			errorCode: 'outside_base_dir'
+		});
+
+		state.projectPath = '/outside';
+		state.validatePath();
+		vi.advanceTimersByTime(500);
+		await vi.runAllTimersAsync();
+
+		expect(state.validationStatus).toBe('invalid');
+		expect(state.validationError).toBe('Path is outside the allowed base directory.');
 	});
 
 	it('computes canSubmit correctly', () => {

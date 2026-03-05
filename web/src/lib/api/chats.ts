@@ -83,6 +83,25 @@ export async function markChatsReadBatch(
 	return apiPost<MarkReadBatchResponse>('/api/v1/chats/read', { entries });
 }
 
+export type ValidateStartErrorCode =
+	| 'path_required'
+	| 'outside_base_dir'
+	| 'not_directory'
+	| 'path_not_found'
+	| 'permission_denied'
+	| 'unknown';
+
+export interface ValidateStartResponse {
+	valid: boolean;
+	isGitRepo?: boolean;
+	error?: string;
+	errorCode?: ValidateStartErrorCode;
+}
+
+export async function validateStart(path: string): Promise<ValidateStartResponse> {
+	return apiGet<ValidateStartResponse>(`/api/v1/chats/validate-start?path=${encodeURIComponent(path)}`);
+}
+
 export interface ForkChatParams {
 	sourceChatId: string;
 	chatId: string;
