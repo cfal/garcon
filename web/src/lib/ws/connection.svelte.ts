@@ -59,6 +59,7 @@ export class WsConnection {
   #reconnectAttempts = 0;
   #destroyed = false;
   #pendingRequests = new Map<string, PendingRequest>();
+  #connectionWaiters = new Set<{ resolve: () => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   #visibilityHandler: (() => void) | null = null;
 
   constructor() {
@@ -95,6 +96,7 @@ export class WsConnection {
         this.isConnected = true;
         this.#ws = websocket;
         this.#reconnectAttempts = 0;
+        this.#resolveAllWaiters();
       };
 
       websocket.onmessage = (event: MessageEvent) => {
@@ -143,12 +145,30 @@ export class WsConnection {
   disconnect(): void {
     this.#destroyed = true;
     this.#clearReconnectTimeout();
+    this.#rejectAllWaiters('WebSocket destroyed');
     this.#rejectAllPending();
     this.#closeExisting();
     if (this.#visibilityHandler) {
       window.removeEventListener('visibilitychange', this.#visibilityHandler);
       this.#visibilityHandler = null;
     }
+  }
+
+  /** Returns a promise that resolves when the WebSocket is connected.
+   *  Resolves immediately if already connected. Rejects on timeout or destroy. */
+  waitForConnection(timeoutMs = 10_000): Promise<void> {
+    if (this.isConnected) return Promise.resolve();
+    if (this.#destroyed) return Promise.reject(new Error('WebSocket destroyed'));
+
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#connectionWaiters.delete(waiter);
+        reject(new Error('Timed out waiting for WebSocket connection'));
+      }, timeoutMs);
+
+      const waiter = { resolve, reject, timer };
+      this.#connectionWaiters.add(waiter);
+    });
   }
 
   /** Sends a JSON-serializable message. Returns true if sent. */
@@ -236,6 +256,22 @@ export class WsConnection {
       this.#ws = null;
       this.isConnected = false;
     }
+  }
+
+  #resolveAllWaiters(): void {
+    for (const waiter of this.#connectionWaiters) {
+      clearTimeout(waiter.timer);
+      waiter.resolve();
+    }
+    this.#connectionWaiters.clear();
+  }
+
+  #rejectAllWaiters(reason: string): void {
+    for (const waiter of this.#connectionWaiters) {
+      clearTimeout(waiter.timer);
+      waiter.reject(new Error(reason));
+    }
+    this.#connectionWaiters.clear();
   }
 
   #rejectAllPending(): void {
