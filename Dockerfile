@@ -71,6 +71,7 @@ COPY --from=build /app/web/build/ web/build/
 
 ENV GARCON_CONFIG_DIR="${HOME}/.garcon"
 ENV GARCON_BIND_ADDRESS=0.0.0.0
+ENV GARCON_PROJECT_BASE_DIR="/"
 VOLUME ["${HOME}/.garcon"]
 EXPOSE 8080
 
