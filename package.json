@@ -24,7 +24,8 @@
     "start": "bun run build && bun run server",
     "test": "for f in server/**/__tests__/*.test.js; do bun test \"$f\" || exit 1; done && bun run --cwd web test",
     "check": "bun run --cwd web check",
-    "typecheck": "bun run --cwd web check"
+    "typecheck": "bun run --cwd web check",
+    "help": "bun run server --help"
   },
   "keywords": [
     "claude code",
