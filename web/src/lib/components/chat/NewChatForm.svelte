@@ -25,7 +25,6 @@
 	import X from '@lucide/svelte/icons/x';
 	import Pin from '@lucide/svelte/icons/pin';
 	import PinOff from '@lucide/svelte/icons/pin-off';
-	import GitBranch from '@lucide/svelte/icons/git-branch';
 
 	interface Props {
 		prefill?: string;
@@ -171,12 +170,17 @@
 						bind:value={form.projectPath}
 						onfocus={() => form.handlePathFocus()}
 						oninput={() => { form.clearError(); form.resetTabCompletions(); }}
-						onkeydown={(e: KeyboardEvent) => {
-							if (e.key === 'Tab') {
-								e.preventDefault();
-								form.handleTabCompletion();
-							}
-						}}
+							onkeydown={(e: KeyboardEvent) => {
+								if (e.key === 'Tab') {
+									e.preventDefault();
+									form.handleTabCompletion();
+								}
+								if (e.key === 'Enter') {
+									e.preventDefault();
+									form.showBrowser = false;
+									textareaRef?.focus();
+								}
+							}}
 						placeholder={form.projectBasePath}
 						class="w-full pl-3 pr-8 py-2 text-sm bg-background border border-border rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring placeholder-muted-foreground/60 text-foreground"
 					/>
@@ -237,7 +241,6 @@
 						onclick={() => form.openWorktreeModal()}
 						class="-mt-1 ml-2 pl-1 flex items-center gap-1.5 text-xs text-interactive-accent hover:underline transition-colors"
 					>
-						<GitBranch class="w-3 h-3" />
 						Select a different worktree
 					</button>
 				{/if}
