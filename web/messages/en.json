@@ -149,6 +149,7 @@
   "git_changes_commit_changes": "Commit Changes",
   "git_changes_commit_files": "Commit {count} file(s)",
   "git_changes_committing": "Committing...",
+  "git_changes_configure_messages": "Configure commit messages",
   "git_changes_create_initial_commit": "Create Initial Commit",
   "git_changes_creating_initial_commit": "Creating Initial Commit...",
   "git_changes_deleted": "Deleted",
