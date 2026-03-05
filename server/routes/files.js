@@ -243,29 +243,6 @@ export default function createFilesRoutes(registry) {
     }
   }
 
-  async function handleValidateDir(request, url) {
-    const dirPath = url.searchParams.get('path');
-    if (!dirPath) {
-      return Response.json({ valid: false, error: 'path is required' }, { status: 400 });
-    }
-
-    if (!isWithinBasePath(dirPath)) {
-      return Response.json({ valid: false, error: 'Path is outside the allowed base directory' });
-    }
-
-    try {
-      const stat = await fs.stat(dirPath);
-      if (!stat.isDirectory()) {
-        return Response.json({ valid: false, error: 'Not a directory' });
-      }
-      return Response.json({ valid: true });
-    } catch (error) {
-      if (error.code === 'ENOENT') return Response.json({ valid: false, error: 'Path does not exist' });
-      if (error.code === 'EACCES' || error.code === 'EPERM') return Response.json({ valid: false, error: 'Permission denied' });
-      return Response.json({ valid: false, error: error.message });
-    }
-  }
-
   async function handleBrowse(request, url) {
     const dirPath = url.searchParams.get('path') || PROJECT_BASE_PATH;
 
@@ -295,7 +272,6 @@ export default function createFilesRoutes(registry) {
     '/api/v1/files/text': { GET: getText, PUT: putText },
     '/api/v1/files/content': { GET: handleContent },
     '/api/v1/files/upload-images': { POST: handleUploadImages },
-    '/api/v1/files/validate-dir': { GET: handleValidateDir },
     '/api/v1/files/browse': { GET: handleBrowse },
   };
 }

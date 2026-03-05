@@ -47,11 +47,6 @@ export interface FileEntry {
 	path: string;
 }
 
-export interface ValidateDirResponse {
-	valid: boolean;
-	path?: string;
-}
-
 export interface ReadTextResponse {
 	content?: string;
 	[key: string]: unknown;
@@ -128,11 +123,6 @@ export async function uploadImages(params: UploadImagesParams): Promise<UploadIm
 	const qs = buildProjectQuery(params);
 	const url = `/api/v1/files/upload-images${qs ? `?${qs}` : ''}`;
 	return apiPostForm<UploadImagesResponse>(url, params.formData);
-}
-
-/** Validates that a directory path exists and is accessible. */
-export async function validateDir(dirPath: string): Promise<ValidateDirResponse> {
-	return apiGet<ValidateDirResponse>(`/api/v1/files/validate-dir?path=${encodeURIComponent(dirPath)}`);
 }
 
 export interface DirectoryEntry {

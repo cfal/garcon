@@ -9,6 +9,7 @@ import {
 	reorderChats,
 	reorderChatsQuick,
 	forkChat,
+	validateStart,
 } from '../chats';
 
 vi.stubGlobal('localStorage', {
@@ -172,5 +173,30 @@ describe('chats API contract', () => {
 		expect(url).toBe('/api/v1/chats/fork');
 		expect(opts.method).toBe('POST');
 		expect(JSON.parse(opts.body)).toEqual({ sourceChatId: '1', chatId: '2' });
+	});
+
+	it('validateStart calls GET /api/v1/chats/validate-start', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ valid: true, isGitRepo: true }));
+
+		const result = await validateStart('/repo');
+
+		expect(result).toEqual({ valid: true, isGitRepo: true });
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/chats/validate-start?path=%2Frepo');
+		expect(opts.method ?? 'GET').toBe('GET');
+	});
+
+	it('validateStart returns structured invalid payloads on 200', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ valid: false, error: 'Path does not exist', errorCode: 'path_not_found' })
+		);
+
+		const result = await validateStart('/missing');
+
+		expect(result).toEqual({
+			valid: false,
+			error: 'Path does not exist',
+			errorCode: 'path_not_found'
+		});
 	});
 });
