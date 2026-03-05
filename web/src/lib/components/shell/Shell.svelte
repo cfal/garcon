@@ -5,6 +5,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import '@xterm/xterm/css/xterm.css';
 	import { ShellRuntime } from './shell-runtime.svelte';
+	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ShellProps {
@@ -75,8 +76,8 @@
 	<div class="h-full flex flex-col bg-terminal-bg w-full">
 		<!-- Status bar -->
 		<div class="flex-shrink-0 bg-card border-b border-border px-4 py-2">
-			<div class="flex items-center justify-between">
-				<div class="flex items-center space-x-2">
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-2">
 					<div class="w-2 h-2 rounded-full {runtime.isConnected ? 'bg-status-success' : 'bg-status-error'}"></div>
 					<span class="text-xs text-primary">({chatDisplayNameShort})</span>
 					{#if !runtime.isInitialized}
@@ -86,40 +87,46 @@
 						<span class="text-xs text-primary">{m.shell_restarting()}</span>
 					{/if}
 				</div>
-				<div class="flex items-center space-x-3">
-					<button
-						onclick={() => void runtime.pasteFromClipboard()}
-						class="text-xs text-muted-foreground hover:text-foreground flex items-center space-x-1"
-						title={m.shell_paste_from_clipboard()}
-					><span>{m.shell_paste()}</span></button>
-
-					{#if runtime.isConnected}
-						<button
-							onclick={() => runtime.disconnectFromShell()}
-							class="px-3 py-1 text-xs bg-destructive text-destructive-foreground rounded hover:bg-destructive/90 flex items-center space-x-1"
-							title={m.shell_disconnect_shell()}
+					<div class="flex items-center gap-2">
+						<Button
+							onclick={() => void runtime.pasteFromClipboard()}
+							variant="ghost"
+							size="sm"
+							title={m.shell_paste_from_clipboard()}
 						>
-							<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-							</svg>
-							<span>{m.shell_disconnect()}</span>
-						</button>
-					{/if}
+							<span>{m.shell_paste()}</span>
+						</Button>
 
-					<button
-						onclick={() => runtime.restartShell()}
-						disabled={runtime.isRestarting || runtime.isConnected}
-						class="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
-						title={m.shell_restart_shell()}
-					>
-						<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-						</svg>
-						<span>{m.shell_restart()}</span>
-					</button>
+							{#if runtime.isConnected}
+								<Button
+									onclick={() => runtime.disconnectFromShell()}
+									variant="outline"
+									size="sm"
+									class="border-status-error-border text-status-error-foreground hover:bg-status-error"
+									title={m.shell_disconnect_shell()}
+								>
+								<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+								</svg>
+								<span>{m.shell_disconnect()}</span>
+							</Button>
+						{/if}
+
+						<Button
+							onclick={() => runtime.restartShell()}
+							disabled={runtime.isRestarting || runtime.isConnected}
+							variant="outline"
+							size="sm"
+							title={m.shell_restart_shell()}
+						>
+							<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+							</svg>
+							<span>{m.shell_restart()}</span>
+						</Button>
+					</div>
 				</div>
 			</div>
-		</div>
 
 		<!-- Terminal viewport -->
 		<div class="flex-1 p-2 overflow-hidden relative">
