@@ -824,7 +824,9 @@ export class GitWorkbenchStore {
 			const settings = await this.deps.getSettings();
 			const ui = (settings.ui ?? {}) as Record<string, unknown>;
 			const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
-			const cm = (uiEffective.commitMessage ?? ui.commitMessage ?? {}) as Record<string, unknown>;
+			const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;
+			const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
+			const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
 			this.commitGenerationEnabled = cm.enabled !== false;
 			const provider = cm.provider as string;
 			if (['claude', 'codex', 'opencode'].includes(provider)) {

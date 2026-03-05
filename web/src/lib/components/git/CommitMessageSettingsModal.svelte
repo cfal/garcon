@@ -58,13 +58,15 @@ Return only the commit message now.`;
 	let availableProviders = $derived(modelCatalog.getProviders());
 	let loaded = $state(false);
 
-	onMount(async () => {
-		try {
-			const settings = await getSettings();
-			const ui = (settings.ui ?? {}) as Record<string, unknown>;
-			const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
-			const cm = (uiEffective.commitMessage ?? ui.commitMessage ?? {}) as Record<string, unknown>;
-			enabled = cm.enabled !== false;
+		onMount(async () => {
+			try {
+				const settings = await getSettings();
+				const ui = (settings.ui ?? {}) as Record<string, unknown>;
+				const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
+				const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;
+				const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
+				const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
+				enabled = cm.enabled !== false;
 			if (['claude', 'codex', 'opencode'].includes(cm.provider as string)) {
 				provider = cm.provider as SessionProvider;
 			}
