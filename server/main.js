@@ -33,6 +33,7 @@ Environment Variables:
   GARCON_WS_MAX_PAYLOAD_LENGTH     WebSocket max payload length (bytes). Default: 16777216
   GARCON_HTTP_IDLE_TIMEOUT_SECONDS HTTP idle timeout seconds. Default: 120
   CLAUDE_BINARY                    Claude CLI binary path. Default: claude
+  AMP_BINARY                       Amp CLI binary path. Default: amp
   SHELL                            Fallback shell path when GARCON_TERMINAL_SHELL is unset.
 
 Notes:

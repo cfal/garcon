@@ -47,7 +47,7 @@
 		// Hydrate chat title settings.
 		const chatTitle = (ui.chatTitle ?? {}) as Record<string, unknown>;
 		titleEnabled = Boolean(chatTitle.enabled);
-		titleProvider = (['claude', 'codex', 'opencode'].includes(chatTitle.provider as string)
+		titleProvider = (['claude', 'codex', 'opencode', 'amp'].includes(chatTitle.provider as string)
 			? chatTitle.provider as SessionProvider
 			: 'claude');
 		titleModel = typeof chatTitle.model === 'string' ? chatTitle.model : '';
@@ -62,6 +62,7 @@
 	function providerLabel(provider: SessionProvider): string {
 		if (provider === 'claude') return m.provider_claude();
 		if (provider === 'codex') return m.provider_codex();
+		if (provider === 'amp') return m.provider_amp();
 		return m.provider_opencode();
 	}
 

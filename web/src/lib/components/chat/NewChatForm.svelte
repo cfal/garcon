@@ -67,6 +67,7 @@
 		void modelCatalog.version;
 		form.validateModelAgainstLive('claude');
 		form.validateModelAgainstLive('codex');
+		form.validateModelAgainstLive('amp');
 		form.validateModelAgainstLive('opencode');
 	});
 

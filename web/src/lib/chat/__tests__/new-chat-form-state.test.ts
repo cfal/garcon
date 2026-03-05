@@ -10,6 +10,7 @@ const mockPreferences = {
 	selectedProvider: 'claude',
 	claudeModel: 'opus',
 	codexModel: 'gpt-5.3-codex',
+	ampModel: 'smart',
 	opencodeModel: 'gpt-4o',
 	permissionMode: 'default',
 	thinkingMode: 'none'
@@ -22,6 +23,7 @@ const mockModelCatalog = {
 	getDefaultModel: vi.fn((provider: string) => {
 		if (provider === 'claude') return 'opus';
 		if (provider === 'codex') return 'gpt-5.3-codex';
+		if (provider === 'amp') return 'smart';
 		return '';
 	}),
 	getModels: vi.fn(() => []),

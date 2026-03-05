@@ -6,10 +6,11 @@
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
-	import { buildPermissionOptions, buildThinkingOptions, toModelMenuOptions } from '$lib/chat/composer-controls';
+	import { buildPermissionOptions, buildThinkingOptions, PROVIDER_MENU_OPTIONS, toModelMenuOptions } from '$lib/chat/composer-controls';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ImagePlus } from '@lucide/svelte';
+	import type { SessionProvider } from '$lib/types/app';
 	import type { PermissionMode } from '$lib/types/chat';
 
 	interface Props {
@@ -168,6 +169,22 @@
 		}
 	}
 
+	function handleProviderSelect(provider: SessionProvider) {
+		const chatId = sessions.selectedChatId;
+		if (!chatId || !sessions.isDraft(chatId)) return;
+
+		const nextModels = modelCatalog.getModels(provider);
+		const nextModel = nextModels.some((model) => model.value === providerState.model)
+			? providerState.model
+			: (nextModels[0]?.value ?? modelCatalog.getDefaultModel(provider));
+
+		providerState.setProvider(provider);
+		providerState.setModel(nextModel);
+
+		sessions.patchDraftStartup(chatId, { provider, model: nextModel });
+		sessions.patchChat(chatId, { provider, model: nextModel });
+	}
+
 	const isDraftStartupLoading = $derived(
 		lifecycle.isLoading && sessions.selectedChat?.status === 'draft'
 	);
@@ -188,6 +205,7 @@
 		toModelMenuOptions(modelCatalog.getModels(providerState.provider))
 	);
 	const canAttachImages = $derived(modelCatalog.supportsImages(providerState.provider));
+	const isDraftChat = $derived(sessions.selectedChat?.status === 'draft');
 	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 
 	// Composer resize via drag handle. Persists height to localStorage and
@@ -369,6 +387,9 @@
 						providerState.thinkingMode = mode;
 						onThinkingModeChange?.(mode);
 					}}
+					providerOptions={isDraftChat ? PROVIDER_MENU_OPTIONS : undefined}
+					selectedProvider={providerState.provider}
+					onProviderSelect={handleProviderSelect}
 					modelOptions={modelOptions}
 					selectedModel={providerState.model}
 					onModelSelect={(model) => {

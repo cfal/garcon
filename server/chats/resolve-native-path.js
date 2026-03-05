@@ -42,5 +42,9 @@ export async function resolveMissingNativePath(session) {
     return `opencode:${session.providerSessionId}`;
   }
 
+  if (session.provider === 'amp') {
+    return `amp:${session.providerSessionId}`;
+  }
+
   return null;
 }

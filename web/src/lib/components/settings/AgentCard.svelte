@@ -15,7 +15,7 @@
 		error: string | null;
 	}
 
-	type AgentId = 'claude' | 'codex' | 'opencode';
+	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp';
 
 	let {
 		agentId,
@@ -36,7 +36,8 @@
 	const borderColorClass: Record<AgentId, string> = {
 		claude: 'border-l-provider-claude-border',
 		codex: 'border-l-provider-codex-border',
-		opencode: 'border-l-provider-opencode-border'
+		opencode: 'border-l-provider-opencode-border',
+		amp: 'border-l-provider-amp-border'
 	};
 </script>
 

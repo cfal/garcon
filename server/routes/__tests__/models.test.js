@@ -15,6 +15,7 @@ describe('GET /api/v1/models', () => {
 
     expect(body.claude).toBeDefined();
     expect(body.codex).toBeDefined();
+    expect(body.amp).toBeDefined();
     expect(body.opencode).toBeDefined();
     expect(Array.isArray(body.claude)).toBe(true);
   });
@@ -25,7 +26,7 @@ describe('GET /api/v1/models', () => {
 
     expect(body.catalog).toBeDefined();
     expect(Array.isArray(body.catalog.providers)).toBe(true);
-    expect(body.catalog.providers.length).toBe(3);
+    expect(body.catalog.providers.length).toBe(4);
 
     const claude = body.catalog.providers.find((p) => p.id === 'claude');
     expect(claude.supportsFork).toBe(true);
@@ -36,6 +37,11 @@ describe('GET /api/v1/models', () => {
     const codex = body.catalog.providers.find((p) => p.id === 'codex');
     expect(codex.supportsFork).toBe(true);
     expect(codex.supportsImages).toBe(false);
+
+    const amp = body.catalog.providers.find((p) => p.id === 'amp');
+    expect(amp.supportsFork).toBe(true);
+    expect(amp.supportsImages).toBe(false);
+    expect(amp.defaultModel).toBe('smart');
 
     const opencode = body.catalog.providers.find((p) => p.id === 'opencode');
     expect(opencode.supportsFork).toBe(false);

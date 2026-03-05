@@ -9,7 +9,7 @@
 	import type { PermissionMode } from '$lib/types/chat';
 	import type { ComposerMenuOption, ComposerModeOption } from '$lib/chat/composer-controls';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
-	import { ChevronDown, ImagePlus, Plus, Send } from '@lucide/svelte';
+	import { Check, ChevronDown, ImagePlus, Plus, Send } from '@lucide/svelte';
 
 	interface Props {
 		canAttachImages: boolean;
@@ -69,6 +69,15 @@
 	const activeModel = $derived(
 		modelOptions.find((option) => option.value === selectedModel) ?? modelOptions[0]
 	);
+	const hasAmpQuickToggle = $derived(
+		selectedProvider === 'amp'
+		&& modelOptions.some((option) => option.value === 'smart')
+		&& modelOptions.some((option) => option.value === 'deep')
+	);
+	const AMP_QUICK_MODES: Array<{ value: 'smart' | 'deep'; label: string }> = [
+		{ value: 'smart', label: 'Smart' },
+		{ value: 'deep', label: 'Deep' },
+	];
 </script>
 
 {#snippet providerAndModelSelectors(align: 'start' | 'end')}
@@ -83,14 +92,39 @@
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align={align}>
 				{#each providerOptions as option (option.value)}
-					<DropdownMenuItem onclick={() => onProviderSelect(option.value)} class="items-start">
-						<div class="min-w-0">
+					<DropdownMenuItem onclick={() => onProviderSelect(option.value)} class="items-start gap-2">
+						<div class="min-w-0 flex-1">
 							<div class="font-medium">{option.label}</div>
+							<div class="text-xs text-muted-foreground">{option.description}</div>
 						</div>
+						{#if option.value === selectedProvider}
+							<Check class="mt-0.5 size-4 text-primary" />
+						{/if}
 					</DropdownMenuItem>
 				{/each}
 			</DropdownMenuContent>
 		</DropdownMenu>
+	{/if}
+
+	{#if hasAmpQuickToggle}
+		<div
+			class="inline-flex h-9 items-center gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5"
+			title="Amp mode"
+		>
+			{#each AMP_QUICK_MODES as option (option.value)}
+				<button
+					type="button"
+					onclick={() => onModelSelect(option.value)}
+					class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium transition-colors {
+						selectedModel === option.value
+							? 'bg-background text-foreground shadow-sm border border-border'
+							: 'text-muted-foreground hover:bg-muted hover:text-foreground'
+					}"
+				>
+					{option.label}
+				</button>
+			{/each}
+		</div>
 	{/if}
 
 	<DropdownMenu>

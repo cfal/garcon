@@ -12,11 +12,12 @@ describe('extractRunningChatIds', () => {
 		const msg = new ChatSessionsRunningMessage({
 			claude: [{ id: 'c1' }, { id: 'c2' }],
 			codex: [{ id: 'x1' }],
+			amp: [{ id: 'a1' }],
 			opencode: [],
 		});
 
 		const ids = extractRunningChatIds(msg);
-		expect(ids).toEqual(new Set(['c1', 'c2', 'x1']));
+		expect(ids).toEqual(new Set(['c1', 'c2', 'x1', 'a1']));
 	});
 
 	it('filters out entries with missing IDs', () => {
@@ -27,6 +28,7 @@ describe('extractRunningChatIds', () => {
 			sessions: {
 				claude: [{ id: 'c1' }, { id: undefined }],
 				codex: [{}],
+				amp: [{ id: undefined }],
 				opencode: [],
 			},
 		} as unknown as ChatSessionsRunningMessage;
@@ -36,7 +38,7 @@ describe('extractRunningChatIds', () => {
 	});
 
 	it('handles empty sessions', () => {
-		const msg = new ChatSessionsRunningMessage({ claude: [], codex: [], opencode: [] });
+		const msg = new ChatSessionsRunningMessage({ claude: [], codex: [], opencode: [], amp: [] });
 
 		const ids = extractRunningChatIds(msg);
 		expect(ids.size).toBe(0);
@@ -59,6 +61,7 @@ describe('handleRunningChats', () => {
 		const msg = makeRunningChatsMsg({
 			claude: [{ id: 'a' }],
 			codex: [{ id: 'b' }],
+			amp: [{ id: 'c' }],
 			opencode: [],
 		});
 
@@ -66,14 +69,14 @@ describe('handleRunningChats', () => {
 
 		expect(reconcileProcessing).toHaveBeenCalledOnce();
 		const receivedSet = reconcileProcessing.mock.calls[0][0] as Set<string>;
-		expect(receivedSet).toEqual(new Set(['a', 'b']));
+		expect(receivedSet).toEqual(new Set(['a', 'b', 'c']));
 	});
 
 	it('passes empty set when no running chats', () => {
 		const reconcileProcessing = vi.fn();
 		const ctx: RunningChatsContext = { reconcileProcessing };
 
-		const msg = makeRunningChatsMsg({ claude: [], codex: [], opencode: [] });
+		const msg = makeRunningChatsMsg({ claude: [], codex: [], opencode: [], amp: [] });
 		handleRunningChats(msg, ctx);
 
 		const receivedSet = reconcileProcessing.mock.calls[0][0] as Set<string>;

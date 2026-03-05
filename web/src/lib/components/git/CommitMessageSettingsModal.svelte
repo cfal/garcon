@@ -64,7 +64,7 @@ Return only the commit message now.`;
 			const ui = (settings.ui ?? {}) as Record<string, unknown>;
 			const cm = (ui.commitMessage ?? {}) as Record<string, unknown>;
 			enabled = cm.enabled !== false;
-			if (['claude', 'codex', 'opencode'].includes(cm.provider as string)) {
+			if (['claude', 'codex', 'opencode', 'amp'].includes(cm.provider as string)) {
 				provider = cm.provider as SessionProvider;
 			}
 			if (typeof cm.model === 'string') model = cm.model;
@@ -108,6 +108,7 @@ Return only the commit message now.`;
 	function providerLabel(currentProvider: SessionProvider): string {
 		if (currentProvider === 'claude') return m.provider_claude();
 		if (currentProvider === 'codex') return m.provider_codex();
+		if (currentProvider === 'amp') return m.provider_amp();
 		return m.provider_opencode();
 	}
 

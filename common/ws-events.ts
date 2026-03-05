@@ -55,6 +55,7 @@ export class ChatSessionsRunningMessage {
     claude: Array<{ id: string }>;
     codex: Array<{ id: string }>;
     opencode: Array<{ id: string }>;
+    amp: Array<{ id: string }>;
   }) { }
 }
 
