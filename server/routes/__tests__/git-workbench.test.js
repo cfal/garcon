@@ -215,6 +215,23 @@ describe('POST /api/v1/git/revert-last-commit validation', () => {
   });
 });
 
+describe('POST /api/v1/git/generate-commit-message contract', () => {
+  const handler = routes['/api/v1/git/generate-commit-message'].POST;
+
+  beforeEach(() => { parseJsonBody.mockClear(); });
+
+  it('returns typed errorCode when no staged changes are found', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({ project: '/definitely-not-a-repo', files: ['a.ts'], provider: 'claude' }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.errorCode).toBe('commit_message_no_staged_files');
+  });
+});
+
 describe('malformed JSON body', () => {
   const handler = routes['/api/v1/git/commit-index'].POST;
 

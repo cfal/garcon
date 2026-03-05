@@ -5,6 +5,7 @@
 
 	import { onMount } from 'svelte';
 	import X from '@lucide/svelte/icons/x';
+	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
 	import { getModelCatalog } from '$lib/context';
 	import { getSettings, updateSettings } from '$lib/api/settings.js';
@@ -198,25 +199,35 @@ Return only the commit message now.`;
 
 						<div class="space-y-1.5 pt-1">
 							<div class="text-sm font-medium text-foreground">Generation prompt</div>
-						<textarea
-							value={customPrompt}
-							oninput={(e) => { customPrompt = e.currentTarget.value; }}
-							onblur={() => persist()}
+							<textarea
+								value={customPrompt}
+								oninput={(e) => { customPrompt = e.currentTarget.value; }}
+								onblur={() => persist()}
 							placeholder={'Leave empty for default prompt. Use {{files}} and {{diff}} as placeholders.'}
 							class="w-full text-sm p-2.5 bg-muted/30 border border-border rounded-md resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent text-foreground placeholder:text-muted-foreground/60"
-							rows="8"
-						></textarea>
-						{#if !isDefaultPrompt}
-							<div class="flex justify-end">
-								<button
-									onclick={() => { customPrompt = DEFAULT_PROMPT; persist(); }}
-									class="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-								>
-									Restore default prompt
-								</button>
+								rows="8"
+							></textarea>
+							<div class="rounded-md border border-border bg-muted/20 px-3 py-2">
+								<div class="text-xs font-medium text-foreground">
+									{m.git_commit_settings_prompt_legend_title()}
+								</div>
+								<div class="mt-1 space-y-1 text-xs text-muted-foreground">
+									<div><code class="font-mono text-foreground">{'{{files}}'}</code> {m.git_commit_settings_prompt_legend_files()}</div>
+									<div><code class="font-mono text-foreground">{'{{diff}}'}</code> {m.git_commit_settings_prompt_legend_diff()}</div>
+								</div>
 							</div>
-						{/if}
-					</div>
+							{#if !isDefaultPrompt}
+								<div class="flex justify-end">
+									<Button
+										variant="outline"
+										size="sm"
+										onclick={() => { customPrompt = DEFAULT_PROMPT; persist(); }}
+									>
+										{m.git_commit_settings_restore_default_prompt()}
+									</Button>
+								</div>
+							{/if}
+						</div>
 				{/if}
 			</div>
 		{:else}

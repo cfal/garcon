@@ -74,6 +74,15 @@ describe('toHttpError', () => {
     expect(response.status).toBe(500);
   });
 
+  it('maps commit message timeout domain code to 504 + typed errorCode', async () => {
+    const err = new GitDomainError('COMMIT_MESSAGE_TIMEOUT', 'Timed out');
+    const response = git.toHttpError(err);
+    expect(response.status).toBe(504);
+    const body = await response.json();
+    expect(body.error).toBe('Timed out');
+    expect(body.errorCode).toBe('commit_message_timeout');
+  });
+
   it('delegates non-GitDomainError to classifier', async () => {
     const err = new Error('random failure');
     const response = git.toHttpError(err);

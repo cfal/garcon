@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { GitWorkbenchStore, type GitWorkbenchDeps } from '../git-workbench.svelte';
+import { ApiError } from '$lib/api/client.js';
 
 const mockDeps: GitWorkbenchDeps = {
 	getSettings: vi.fn().mockResolvedValue({ ui: {} }),
@@ -317,9 +318,22 @@ describe('GitWorkbenchStore', () => {
 
 			await wb.generateCommitMsg('/project');
 
-			expect(wb.lastError).toContain('No staged files');
+				expect(wb.lastError).toContain('No staged files');
+			});
+
+			it('maps typed commit generation errorCode to localized message', async () => {
+				wb.tree = [
+					{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
+				] as any;
+				mockedApi.generateCommitMessage.mockRejectedValue(
+					new ApiError(504, 'Timed out', 'commit_message_timeout'),
+				);
+
+				await wb.generateCommitMsg('/project');
+
+				expect(wb.lastError).toContain('timed out');
+			});
 		});
-	});
 
 	describe('derived getters', () => {
 		it('stagedFiles collects staged file paths', () => {
