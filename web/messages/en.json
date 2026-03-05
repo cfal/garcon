@@ -64,6 +64,7 @@
   "chat_new_chat_project_path": "Project Path",
   "chat_new_chat_placeholder": "How can I help you today?",
   "chat_new_chat_remove_from_favorites": "Unpin project path",
+  "chat_new_chat_select_different_worktree": "Select a different worktree",
   "chat_new_chat_standard": "Standard",
   "chat_new_chat_star_bookmark": "Pin a project path to bookmark it here",
   "chat_new_chat_start_session": "Start session",
