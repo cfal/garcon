@@ -1,0 +1,61 @@
+name: CLA Status
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: read
+
+jobs:
+  cla-status:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require CLA Assistant status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const ref = context.payload.pull_request.head.sha;
+            const requiredContext = 'license/cla';
+
+            const startedAt = Date.now();
+            const timeoutMs = 3 * 60 * 1000;
+            const intervalMs = 15 * 1000;
+
+            while (Date.now() - startedAt < timeoutMs) {
+              const response = await github.rest.repos.getCombinedStatusForRef({
+                owner,
+                repo,
+                ref
+              });
+
+              const status = response.data.statuses.find(
+                (entry) => entry.context === requiredContext
+              );
+
+              if (status) {
+                if (status.state === 'success') {
+                  core.info(`Found ${requiredContext}=success`);
+                  return;
+                }
+
+                if (status.state === 'failure' || status.state === 'error') {
+                  core.setFailed(
+                    `${requiredContext} is ${status.state}. Contributor must sign the CLA before merge.`
+                  );
+                  return;
+                }
+              }
+
+              core.info(`Waiting for ${requiredContext} status to appear...`);
+              await new Promise((resolve) => setTimeout(resolve, intervalMs));
+            }
+
+            core.setFailed(
+              `Timed out waiting for ${requiredContext}. Install/configure CLA Assistant and ensure it reports status on this PR.`
+            );

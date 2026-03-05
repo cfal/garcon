@@ -1,0 +1,135 @@
+name: Build Binaries
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun run install
+
+      - name: Run tests
+        run: bun run test
+
+      - name: Validate startup
+        run: timeout 30s bun run start --port 0
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-linux-x64
+            binary_name: garcon-bun-linux-x64
+            archive_ext: tar.gz
+          - target: bun-linux-x64-musl
+            binary_name: garcon-bun-linux-x64-musl
+            archive_ext: tar.gz
+          - target: bun-linux-arm64
+            binary_name: garcon-bun-linux-arm64
+            archive_ext: tar.gz
+          - target: bun-linux-arm64-musl
+            binary_name: garcon-bun-linux-arm64-musl
+            archive_ext: tar.gz
+          - target: bun-darwin-x64
+            binary_name: garcon-bun-darwin-x64
+            archive_ext: tar.gz
+          - target: bun-darwin-arm64
+            binary_name: garcon-bun-darwin-arm64
+            archive_ext: tar.gz
+          - target: bun-windows-x64
+            binary_name: garcon-bun-windows-x64.exe
+            archive_ext: zip
+          - target: bun-windows-arm64
+            binary_name: garcon-bun-windows-arm64.exe
+            archive_ext: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun run install
+
+      - name: Build web assets
+        run: bun run build
+
+      - name: Compile executable
+        run: BUN_BUILD_TARGET="${{ matrix.target }}" BUN_BUILD_OUTPUT_NAME="${{ matrix.binary_name }}" bun run build-exe:compile
+
+      - name: Package artifact (tar.gz)
+        if: matrix.archive_ext == 'tar.gz'
+        run: |
+          mkdir -p artifacts
+          cp "dist/${{ matrix.binary_name }}" "artifacts/${{ matrix.binary_name }}"
+          cd artifacts
+          tar -czf "garcon-${{ matrix.target }}.tar.gz" "${{ matrix.binary_name }}"
+          rm "${{ matrix.binary_name }}"
+
+      - name: Package artifact (zip)
+        if: matrix.archive_ext == 'zip'
+        run: |
+          mkdir -p artifacts
+          cp "dist/${{ matrix.binary_name }}" "artifacts/${{ matrix.binary_name }}"
+          cd artifacts
+          zip "garcon-${{ matrix.target }}.zip" "${{ matrix.binary_name }}"
+          rm "${{ matrix.binary_name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: garcon-${{ matrix.target }}
+          path: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+          if-no-files-found: error
+
+  prerelease:
+    name: Create Prerelease
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release-artifacts
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-artifacts/ \;
+          ls -la release-artifacts
+
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          prerelease: true
+          draft: false
+          generate_release_notes: true

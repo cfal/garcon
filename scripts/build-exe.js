@@ -8,7 +8,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const distDir = path.resolve(repoRoot, 'web', 'build');
-const outFile = path.resolve(repoRoot, 'dist', 'garcon');
+const buildTarget = process.env.BUN_BUILD_TARGET?.trim() || null;
+const outName = process.env.BUN_BUILD_OUTPUT_NAME?.trim()
+  || (buildTarget ? `garcon-${buildTarget}${buildTarget.includes('windows') ? '.exe' : ''}` : 'garcon');
+const outFile = path.resolve(repoRoot, 'dist', outName);
 
 async function listFilesRecursive(directory) {
   const entries = await fs.readdir(directory, { withFileTypes: true });
@@ -47,13 +50,13 @@ async function buildExecutable() {
   });
 
   await fs.mkdir(path.dirname(outFile), { recursive: true });
+  const compile = { outfile: outFile };
+  if (buildTarget) compile.target = buildTarget;
   let result;
   try {
     result = await Bun.build({
       entrypoints: [virtualMainEntrypoint],
-      compile: {
-        outfile: outFile,
-      },
+      compile,
       naming: {
         asset: '[dir]/[name].[ext]',
       },
@@ -72,7 +75,8 @@ async function buildExecutable() {
     throw new Error('Executable build failed.');
   }
 
-  console.log(`Compiled executable at dist/garcon with ${files.length} embedded static assets.`);
+  const targetLabel = buildTarget ? ` for ${buildTarget}` : '';
+  console.log(`Compiled executable at dist/${outName}${targetLabel} with ${files.length} embedded static assets.`);
 }
 
 buildExecutable().catch((error) => {
