@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import mime from 'mime-types';
 import { parseJsonBody } from '../lib/http-native.js';
-import { listDirectory } from './projects.utils.js';
+import { listDirectory, listDirectoryNames } from './projects.utils.js';
 import { getProjectBasePath } from '../config.js';
 
 const MAX_IMAGE_UPLOAD_BODY_BYTES = 30 * 1024 * 1024;
@@ -280,8 +280,7 @@ export default function createFilesRoutes(registry) {
     }
 
     try {
-      const entries = await listDirectory(dirPath, true);
-      // Only return directories that are within the allowed base path.
+      const entries = await listDirectoryNames(dirPath, true);
       return Response.json(
         entries.filter((e) => e.type === 'directory' && isWithinBasePath(e.path))
       );
