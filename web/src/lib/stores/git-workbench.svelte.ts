@@ -37,7 +37,10 @@ export interface GitWorkbenchStoreOptions {
 /** Injectable dependencies for testing. Defaults load the real
  *  settings API when not overridden. */
 export interface GitWorkbenchDeps {
-	getSettings: () => Promise<{ ui?: Record<string, unknown> }>;
+	getSettings: () => Promise<{
+		ui?: Record<string, unknown>;
+		uiEffective?: Record<string, unknown>;
+	}>;
 }
 
 export class GitWorkbenchStore {
@@ -820,7 +823,8 @@ export class GitWorkbenchStore {
 		try {
 			const settings = await this.deps.getSettings();
 			const ui = (settings.ui ?? {}) as Record<string, unknown>;
-			const cm = (ui.commitMessage ?? {}) as Record<string, unknown>;
+			const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
+			const cm = (uiEffective.commitMessage ?? ui.commitMessage ?? {}) as Record<string, unknown>;
 			this.commitGenerationEnabled = cm.enabled !== false;
 			const provider = cm.provider as string;
 			if (['claude', 'codex', 'opencode'].includes(provider)) {

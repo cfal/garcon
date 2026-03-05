@@ -25,19 +25,19 @@ function createMockCtx() {
       getLastThinkingMode: mock(() => Promise.resolve('none')),
       setLastThinkingMode: mock(() => Promise.resolve(undefined)),
     },
+    providers: {
+      getAuthStatusMap: mock(() => Promise.resolve({
+        claude: { authenticated: false },
+        codex: { authenticated: false },
+        opencode: { authenticated: false },
+      })),
+      getModels: mock(() => Promise.resolve([])),
+    },
   };
 }
 
 const ctx = createMockCtx();
-const appRoutes = createWorkspaceRoutes(ctx.settings);
-
-const allMocks = [
-  ctx.settings.setSessionName, ctx.settings.getUiSettings, ctx.settings.setUiSettings,
-  ctx.settings.getPathSettings, ctx.settings.setPathSettings, ctx.settings.getPinnedChatIds,
-  ctx.settings.getLastPermissionMode, ctx.settings.setLastPermissionMode,
-  ctx.settings.getLastThinkingMode, ctx.settings.setLastThinkingMode,
-  parseJsonBody,
-];
+const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.providers);
 
 function makeRequest(body) {
   return new Request('http://localhost/api/app/session-name', {
@@ -51,7 +51,19 @@ describe('PUT /api/app/session-name', () => {
   const handler = appRoutes['/api/v1/app/session-name'].PUT;
 
   beforeEach(() => {
-    allMocks.forEach(m => m.mockClear());
+    ctx.settings.setSessionName.mockClear();
+    ctx.settings.getUiSettings.mockClear();
+    ctx.settings.setUiSettings.mockClear();
+    ctx.settings.getPathSettings.mockClear();
+    ctx.settings.setPathSettings.mockClear();
+    ctx.settings.getPinnedChatIds.mockClear();
+    ctx.settings.getLastPermissionMode.mockClear();
+    ctx.settings.setLastPermissionMode.mockClear();
+    ctx.settings.getLastThinkingMode.mockClear();
+    ctx.settings.setLastThinkingMode.mockClear();
+    ctx.providers.getAuthStatusMap.mockClear();
+    ctx.providers.getModels.mockClear();
+    parseJsonBody.mockClear();
   });
 
   it('sets a session name with valid payload', async () => {
@@ -108,7 +120,19 @@ describe('GET /api/app/settings', () => {
   const handler = appRoutes['/api/v1/app/settings'].GET;
 
   beforeEach(() => {
-    allMocks.forEach(m => m.mockClear());
+    ctx.settings.setSessionName.mockClear();
+    ctx.settings.getUiSettings.mockClear();
+    ctx.settings.setUiSettings.mockClear();
+    ctx.settings.getPathSettings.mockClear();
+    ctx.settings.setPathSettings.mockClear();
+    ctx.settings.getPinnedChatIds.mockClear();
+    ctx.settings.getLastPermissionMode.mockClear();
+    ctx.settings.setLastPermissionMode.mockClear();
+    ctx.settings.getLastThinkingMode.mockClear();
+    ctx.settings.setLastThinkingMode.mockClear();
+    ctx.providers.getAuthStatusMap.mockClear();
+    ctx.providers.getModels.mockClear();
+    parseJsonBody.mockClear();
   });
 
   it('returns ui, paths, pinnedChatIds, and recent mode settings', async () => {
@@ -127,7 +151,37 @@ describe('GET /api/app/settings', () => {
     expect(body.pinnedChatIds).toEqual(['a', 'b']);
     expect(body.lastPermissionMode).toBe('acceptEdits');
     expect(body.lastThinkingMode).toBe('think-hard');
+    expect(body.uiEffective.chatTitle.enabled).toBe(false);
+    expect(body.uiEffective.chatTitle.provider).toBe('claude');
+    expect(body.uiEffective.chatTitle.model).toBe('haiku');
+    expect(body.uiEffective.commitMessage.enabled).toBe(false);
+    expect(body.uiEffective.commitMessage.provider).toBe('claude');
+    expect(body.uiEffective.commitMessage.model).toBe('haiku');
     expect(body.chatSortOrder).toBeUndefined();
+  });
+
+  it('auto-enables generation defaults from authenticated provider priority', async () => {
+    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
+    ctx.providers.getAuthStatusMap.mockImplementation(() => Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: true },
+      opencode: { authenticated: true },
+    }));
+    ctx.providers.getModels.mockImplementation(() => Promise.resolve([
+      { value: 'deepseek-r1', label: 'DeepSeek R1' },
+      { value: 'openai/gpt-4.1', label: 'GPT-4.1' },
+    ]));
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(body.success).toBe(true);
+    expect(body.uiEffective.chatTitle.enabled).toBe(true);
+    expect(body.uiEffective.chatTitle.provider).toBe('codex');
+    expect(body.uiEffective.chatTitle.model).toBe('gpt-5.1-codex-mini');
+    expect(body.uiEffective.commitMessage.enabled).toBe(true);
+    expect(body.uiEffective.commitMessage.provider).toBe('codex');
+    expect(body.uiEffective.commitMessage.model).toBe('gpt-5.1-codex-mini');
   });
 });
 
@@ -135,7 +189,19 @@ describe('PUT /api/app/settings', () => {
   const handler = appRoutes['/api/v1/app/settings'].PUT;
 
   beforeEach(() => {
-    allMocks.forEach(m => m.mockClear());
+    ctx.settings.setSessionName.mockClear();
+    ctx.settings.getUiSettings.mockClear();
+    ctx.settings.setUiSettings.mockClear();
+    ctx.settings.getPathSettings.mockClear();
+    ctx.settings.setPathSettings.mockClear();
+    ctx.settings.getPinnedChatIds.mockClear();
+    ctx.settings.getLastPermissionMode.mockClear();
+    ctx.settings.setLastPermissionMode.mockClear();
+    ctx.settings.getLastThinkingMode.mockClear();
+    ctx.settings.setLastThinkingMode.mockClear();
+    ctx.providers.getAuthStatusMap.mockClear();
+    ctx.providers.getModels.mockClear();
+    parseJsonBody.mockClear();
   });
 
   it('patches ui settings', async () => {

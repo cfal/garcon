@@ -41,16 +41,17 @@
 	onMount(async () => {
 		const settings = await getSettings();
 		const ui = (settings.ui ?? {}) as Record<string, unknown>;
+		const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
 		const raw = ui.pinnedInsertPosition;
 		pinnedInsertPosition = raw === 'bottom' ? 'bottom' : 'top';
 
 		// Hydrate chat title settings.
-		const chatTitle = (ui.chatTitle ?? {}) as Record<string, unknown>;
-		titleEnabled = Boolean(chatTitle.enabled);
-		titleProvider = (['claude', 'codex', 'opencode'].includes(chatTitle.provider as string)
-			? chatTitle.provider as SessionProvider
+		const chatTitleEffective = (uiEffective.chatTitle ?? ui.chatTitle ?? {}) as Record<string, unknown>;
+		titleEnabled = chatTitleEffective.enabled !== false;
+		titleProvider = (['claude', 'codex', 'opencode'].includes(chatTitleEffective.provider as string)
+			? chatTitleEffective.provider as SessionProvider
 			: 'claude');
-		titleModel = typeof chatTitle.model === 'string' ? chatTitle.model : '';
+		titleModel = typeof chatTitleEffective.model === 'string' ? chatTitleEffective.model : '';
 
 		await modelCatalog.refreshIfStale();
 		const titleProviderModels = modelCatalog.getModels(titleProvider);

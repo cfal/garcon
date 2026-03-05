@@ -1,6 +1,8 @@
 // Automatic chat title generation. Runs a one-shot LLM query to
 // produce a concise title from the first user prompt, then persists
 // via setSessionName (which emits 'session-name-changed' for broadcast).
+import { CLAUDE_MODELS, CODEX_MODELS } from '../../common/models.js';
+import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 
 // Modified from Open WebUI
 const TITLE_GENERATION_PROMPT = `### Task:
@@ -38,8 +40,24 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
   if (!firstPrompt?.trim()) return;
 
   const ui = await settings.getUiSettings();
-  const cfg = ui?.chatTitle;
-  if (!cfg?.enabled) return;
+  const [authByProvider, opencodeModels] = await Promise.all([
+    providers?.getAuthStatusMap?.() ?? Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: false },
+      opencode: { authenticated: false },
+    }),
+    providers?.getModels?.('opencode') ?? Promise.resolve([]),
+  ]);
+  const cfg = resolveEffectiveGenerationConfig({
+    persisted: ui?.chatTitle,
+    authByProvider,
+    modelsByProvider: {
+      claude: CLAUDE_MODELS.OPTIONS,
+      codex: CODEX_MODELS.OPTIONS,
+      opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
+    },
+  });
+  if (!cfg.enabled) return;
 
   const existing = settings.getChatName(chatId);
   if (existing) return;
