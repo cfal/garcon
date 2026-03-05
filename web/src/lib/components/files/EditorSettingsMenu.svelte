@@ -37,8 +37,8 @@
 		</Button>
 	</Popover.Trigger>
 
-	<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
-		<div class="bg-card text-foreground rounded-md border border-border divide-y divide-border">
+		<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
+			<div class="bg-card text-foreground rounded-md border border-border">
 			<div class="flex items-center justify-between px-4 py-3">
 				<div class="text-sm font-medium text-foreground">
 					{m.settings_appearance_settings_code_editor_font_size_label()}
