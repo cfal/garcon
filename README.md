@@ -81,6 +81,19 @@ bun run start --port 8080 --bind-address 127.0.0.1 --project-base-dir /path/to/r
 
 Run `bun run help` to see all flags and supported environment variables.
 
+### Build Executable
+
+Build a standalone Bun executable (server + embedded static frontend assets):
+
+```bash
+bun run build-exe
+```
+
+This command runs checks/tests, builds `web/build`, compiles `dist/garcon`, and runs a smoke test against the executable.
+
+At server startup, static assets are served from embedded assets when `Bun.embeddedFiles` is non-empty.
+Otherwise the server reads from `web/build`.
+
 ### Docker
 
 Published image:
