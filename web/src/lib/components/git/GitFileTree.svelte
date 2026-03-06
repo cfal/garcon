@@ -48,6 +48,13 @@
 	}: GitFileTreeProps = $props();
 
 	const actionVisibility = $derived(alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100');
+	const treeGuideIndentPx = 12;
+	const treeGuideStartPx = 8;
+	const treeGuideToggleCenterOffsetPx = 10;
+
+	function treeGuideColumnLeft(depthIndex: number): number {
+		return treeGuideStartPx + depthIndex * treeGuideIndentPx + treeGuideToggleCenterOffsetPx;
+	}
 
 	function changeKindColor(kind?: GitChangeKind): string {
 		switch (kind) {
@@ -120,9 +127,19 @@
 	{#if node.kind === 'directory'}
 		{@const isCollapsed = collapsedDirs.has(node.path)}
 		<div
-			class="flex items-center w-full px-2 py-1 text-xs hover:bg-muted/50 transition-colors group"
+			class="relative flex items-center w-full px-2 py-1 text-xs hover:bg-muted/50 transition-colors group"
 			style="padding-left: {depth * 12 + 8}px"
 		>
+			{#if depth > 0}
+				<div class="absolute inset-y-0 left-0 pointer-events-none" aria-hidden="true">
+					{#each Array(depth) as _, depthIndex}
+						<span
+							class="absolute inset-y-0 w-px bg-border/70"
+							style="left: {treeGuideColumnLeft(depthIndex)}px"
+						></span>
+					{/each}
+				</div>
+			{/if}
 			<button
 				type="button"
 				onclick={() => onToggleDir(node.path)}
@@ -139,9 +156,9 @@
 			<button
 				type="button"
 				onclick={() => onSelectDirectory?.(node.path)}
-				class="flex items-center flex-1 min-w-0 ml-1"
+				class="flex items-center flex-1 min-w-0 ml-0.5"
 			>
-				<span class="w-4 h-4 flex items-center justify-center mr-1.5 text-muted-foreground">
+				<span class="w-4 h-4 flex items-center justify-center mr-1 text-muted-foreground">
 					{#if isCollapsed}
 						<FolderIcon class="w-3.5 h-3.5" />
 					{:else}
@@ -177,10 +194,20 @@
 	{:else}
 		{@const isSelected = selectedFile === node.path}
 		<div
-			class="flex items-center w-full px-2 py-1 text-xs transition-colors group
+			class="relative flex items-center w-full px-2 py-1 text-xs transition-colors group
 				{isSelected ? 'bg-interactive-accent/10 text-interactive-accent' : 'hover:bg-muted/50 text-foreground'}"
 			style="padding-left: {depth * 12 + 8}px"
 		>
+			{#if depth > 0}
+				<div class="absolute inset-y-0 left-0 pointer-events-none" aria-hidden="true">
+					{#each Array(depth) as _, depthIndex}
+						<span
+							class="absolute inset-y-0 w-px bg-border/70"
+							style="left: {treeGuideColumnLeft(depthIndex)}px"
+						></span>
+					{/each}
+				</div>
+			{/if}
 			<button
 				type="button"
 				onclick={() => onSelectFile(node.path)}

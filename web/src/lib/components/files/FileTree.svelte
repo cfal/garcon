@@ -111,6 +111,14 @@
 			? 'inline-flex items-center gap-1 text-foreground hover:text-foreground'
 			: 'inline-flex items-center gap-1 hover:text-foreground';
 	}
+
+	const treeGuideIndentPx = 16;
+	const treeGuideStartPx = 12;
+	const treeGuideColumnOffsetPx = 7;
+
+	function treeGuideColumnLeft(levelIndex: number): number {
+		return treeGuideStartPx + levelIndex * treeGuideIndentPx + treeGuideColumnOffsetPx;
+	}
 </script>
 
 {#snippet sortIcon(column: SortKey)}
@@ -145,7 +153,7 @@
 	<div class="select-none">
 		<button
 			type="button"
-			class={`grid grid-cols-12 gap-2 px-2 py-1.5 hover:bg-accent cursor-pointer items-center w-full text-left rounded-sm ${rowClass(item.path)}`}
+			class={`relative grid grid-cols-12 gap-2 px-2 py-1.5 hover:bg-accent cursor-pointer items-center w-full text-left rounded-sm ${rowClass(item.path)}`}
 			style={`padding-left: ${level * 16 + 12}px`}
 			onclick={() => handleItemClick(item)}
 			role="treeitem"
@@ -154,6 +162,16 @@
 			aria-selected={selectedPath === item.path}
 			tabindex={0}
 		>
+			{#if level > 0}
+				<div class="absolute inset-y-0 left-0 pointer-events-none" aria-hidden="true">
+					{#each Array(level) as _, levelIndex}
+						<span
+							class="absolute inset-y-0 w-px bg-border/70"
+							style={`left: ${treeGuideColumnLeft(levelIndex)}px`}
+						></span>
+					{/each}
+				</div>
+			{/if}
 			<div class="col-span-5 flex items-center gap-2 min-w-0">
 				{#if item.type === 'directory'}
 					{#if isExpanded}
