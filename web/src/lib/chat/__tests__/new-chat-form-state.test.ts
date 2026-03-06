@@ -39,14 +39,15 @@ describe('NewChatFormState', () => {
 
 	beforeEach(() => {
 		vi.useFakeTimers();
-		vi.mocked(settingsApi.getSettings).mockResolvedValue({
-			ui: {},
-			paths: {},
-			pinnedChatIds: [],
-			lastProvider: 'claude',
-			lastModel: 'opus',
-			lastPermissionMode: 'default',
-			lastThinkingMode: 'none',
+			vi.mocked(settingsApi.getSettings).mockResolvedValue({
+				ui: {},
+				paths: {},
+				pinnedChatIds: [],
+				lastProvider: 'claude',
+				lastProjectPath: '',
+				lastModel: 'opus',
+				lastPermissionMode: 'default',
+				lastThinkingMode: 'none',
 			projectBasePath: '/workspace'
 		});
 		vi.mocked(settingsApi.updateSettings).mockResolvedValue({ success: true });
@@ -60,13 +61,14 @@ describe('NewChatFormState', () => {
 	});
 
 	it('loads startup defaults from server settings', async () => {
-		vi.mocked(settingsApi.getSettings).mockResolvedValue({
-			ui: {},
-			paths: { lastProjectPath: '/workspace/project' },
-			pinnedChatIds: [],
-			lastProvider: 'codex',
-			lastModel: 'gpt-5.4',
-			lastPermissionMode: 'acceptEdits',
+			vi.mocked(settingsApi.getSettings).mockResolvedValue({
+				ui: {},
+				paths: {},
+				pinnedChatIds: [],
+				lastProvider: 'codex',
+				lastProjectPath: '/workspace/project',
+				lastModel: 'gpt-5.4',
+				lastPermissionMode: 'acceptEdits',
 			lastThinkingMode: 'think-hard',
 			projectBasePath: '/workspace'
 		});
@@ -140,10 +142,10 @@ describe('NewChatFormState', () => {
 		expect(state.error).toBe('Chat defaults are still loading.');
 	});
 
-	it('persists only the last used project path on submit', () => {
-		state.settingsLoaded = true;
-		state.projectPath = '/valid/path';
-		state.validationStatus = 'valid';
+		it('builds config without persisting startup defaults through app settings', () => {
+			state.settingsLoaded = true;
+			state.projectPath = '/valid/path';
+			state.validationStatus = 'valid';
 		state.firstMessage = 'Start this task';
 		state.provider = 'codex';
 		state.handleModelChange('gpt-5.4');
@@ -152,14 +154,13 @@ describe('NewChatFormState', () => {
 
 		const config = state.buildConfig();
 
-		expect(config).toMatchObject({
-			provider: 'codex',
-			model: 'gpt-5.4',
-			permissionMode: 'acceptEdits',
-			thinkingMode: 'think-hard',
-		});
-		expect(settingsApi.updateSettings).toHaveBeenCalledWith({
-			paths: { lastProjectPath: '/valid/path' }
+			expect(config).toMatchObject({
+				provider: 'codex',
+				projectPath: '/valid/path',
+				model: 'gpt-5.4',
+				permissionMode: 'acceptEdits',
+				thinkingMode: 'think-hard',
+			});
+			expect(settingsApi.updateSettings).not.toHaveBeenCalled();
 		});
 	});
-});

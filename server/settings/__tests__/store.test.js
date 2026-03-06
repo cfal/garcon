@@ -208,7 +208,7 @@ describe('settings store', () => {
       expect(settings).toEqual({
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
-        lastProvider: 'claude', lastModel: '',
+        lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
       });
     });
@@ -219,7 +219,7 @@ describe('settings store', () => {
       expect(settings).toEqual({
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
-        lastProvider: 'claude', lastModel: '',
+        lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
       });
     });
@@ -440,7 +440,7 @@ describe('settings store', () => {
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [],
         archivedChatIds: [],
-        lastProvider: 'claude', lastModel: '',
+        lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
       });
 
@@ -448,6 +448,7 @@ describe('settings store', () => {
         store.ensureInNormal('chat-1'),
         store.setLastChatDefaults({
           provider: 'codex',
+          projectPath: '/workspace/chat-2',
           model: 'gpt-5.4',
           permissionMode: 'bypassPermissions',
           thinkingMode: 'think-hard',
@@ -459,6 +460,7 @@ describe('settings store', () => {
       expect(settings.normalChatIds).toContain('chat-1');
       expect(settings.normalChatIds).toContain('chat-2');
       expect(settings.lastProvider).toBe('codex');
+      expect(settings.lastProjectPath).toBe('/workspace/chat-2');
       expect(settings.lastModel).toBe('gpt-5.4');
       expect(settings.lastPermissionMode).toBe('bypassPermissions');
       expect(settings.lastThinkingMode).toBe('think-hard');
@@ -470,6 +472,10 @@ describe('settings store', () => {
       expect(await store.getLastProvider()).toBe('claude');
     });
 
+    it('getLastProjectPath defaults to empty string', async () => {
+      expect(await store.getLastProjectPath()).toBe('');
+    });
+
     it('getLastModel defaults to empty string', async () => {
       expect(await store.getLastModel()).toBe('');
     });
@@ -477,11 +483,13 @@ describe('settings store', () => {
     it('setLastChatDefaults persists the full startup selection', async () => {
       await store.setLastChatDefaults({
         provider: 'codex',
+        projectPath: '/workspace/project-a',
         model: 'gpt-5.4',
         permissionMode: 'bypassPermissions',
         thinkingMode: 'think-hard',
       });
       expect(await store.getLastProvider()).toBe('codex');
+      expect(await store.getLastProjectPath()).toBe('/workspace/project-a');
       expect(await store.getLastModel()).toBe('gpt-5.4');
       expect(await store.getLastPermissionMode()).toBe('bypassPermissions');
       expect(await store.getLastThinkingMode()).toBe('think-hard');
@@ -490,12 +498,14 @@ describe('settings store', () => {
     it('preserves unspecified fields when updating only one startup setting', async () => {
       await store.setLastChatDefaults({
         provider: 'codex',
+        projectPath: '/workspace/project-a',
         model: 'gpt-5.4',
         permissionMode: 'bypassPermissions',
         thinkingMode: 'think-hard',
       });
       await store.setLastPermissionMode('acceptEdits');
       expect(await store.getLastProvider()).toBe('codex');
+      expect(await store.getLastProjectPath()).toBe('/workspace/project-a');
       expect(await store.getLastModel()).toBe('gpt-5.4');
       expect(await store.getLastPermissionMode()).toBe('acceptEdits');
       expect(await store.getLastThinkingMode()).toBe('think-hard');

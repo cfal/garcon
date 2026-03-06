@@ -105,6 +105,7 @@ describe('POST /api/v1/chats/start', () => {
     expect(body.success).toBe(true);
     expect(settings.setLastChatDefaults).toHaveBeenCalledWith({
       provider: 'codex',
+      projectPath,
       model: 'gpt-5.4',
       permissionMode: 'acceptEdits',
       thinkingMode: 'think-hard',
@@ -139,6 +140,7 @@ describe('POST /api/v1/chats/start', () => {
     expect(body.error).toBe('boom');
     expect(settings.setLastChatDefaults).toHaveBeenCalledWith({
       provider: 'claude',
+      projectPath,
       model: 'opus',
       permissionMode: 'default',
       thinkingMode: 'none',

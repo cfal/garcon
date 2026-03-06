@@ -26,15 +26,18 @@ describe('NewChatForm', () => {
 		vi.mocked(settingsApi.getSettings).mockReturnValueOnce(pending.promise);
 
 		const { container } = render(NewChatFormTestHarness);
+		const pathInput = screen.getByLabelText('Project Path') as HTMLInputElement;
 
 		expect(screen.getByRole('status', { name: 'Loading chat defaults...' })).toBeTruthy();
+		expect(pathInput.disabled).toBe(true);
 		expect(container.querySelector('div.invisible textarea')).toBeTruthy();
 
 		pending.resolve({
 			ui: {},
-			paths: { lastProjectPath: '/workspace/project' },
+			paths: {},
 			pinnedChatIds: [],
 			lastProvider: 'claude',
+			lastProjectPath: '/workspace/project',
 			lastModel: 'opus',
 			lastPermissionMode: 'default',
 			lastThinkingMode: 'none',
@@ -44,6 +47,7 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
+		expect(pathInput.disabled).toBe(false);
 		expect(container.querySelector('div.invisible textarea')).toBeNull();
 	});
 });

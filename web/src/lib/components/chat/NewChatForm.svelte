@@ -191,14 +191,15 @@
 		</label>
 		<div class="relative">
 			<div class="flex gap-2">
-				<div class="relative flex-1">
-					<input
-						id="project-path-input"
-						type="text"
-						bind:value={form.projectPath}
-						onfocus={() => form.handlePathFocus()}
-						oninput={() => { form.clearError(); form.resetTabCompletions(); }}
-							onkeydown={(e: KeyboardEvent) => {
+					<div class="relative flex-1">
+						<input
+							id="project-path-input"
+							type="text"
+							bind:value={form.projectPath}
+							disabled={!form.settingsLoaded}
+							onfocus={() => form.handlePathFocus()}
+							oninput={() => { form.clearError(); form.resetTabCompletions(); }}
+								onkeydown={(e: KeyboardEvent) => {
 								if (e.key === 'Tab') {
 									e.preventDefault();
 									form.handleTabCompletion();
@@ -206,17 +207,21 @@
 								if (e.key === 'Enter') {
 									e.preventDefault();
 									form.showBrowser = false;
-									textareaRef?.focus();
-								}
-							}}
-						placeholder={form.projectBasePath}
-						class="w-full pl-3 pr-8 py-2 text-sm bg-background border border-border rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring placeholder-muted-foreground/60 text-foreground"
-					/>
-					<div class="absolute right-2 top-1/2 -translate-y-1/2">
-						{#if !form.trimmedPath}
-							<!-- no indicator -->
-						{:else if form.validationStatus === 'checking'}
-							<Loader2
+										textareaRef?.focus();
+									}
+								}}
+							placeholder={form.settingsLoaded ? form.projectBasePath : ''}
+							class="w-full pl-3 pr-8 py-2 text-sm bg-background border border-border rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring placeholder-muted-foreground/60 text-foreground disabled:cursor-wait disabled:text-muted-foreground disabled:bg-muted/20"
+						/>
+						<div class="absolute right-2 top-1/2 -translate-y-1/2">
+							{#if !form.settingsLoaded}
+								<Loader2
+									class="w-4 h-4 animate-spin text-muted-foreground transition-opacity duration-200"
+								/>
+							{:else if !form.trimmedPath}
+								<!-- no indicator -->
+							{:else if form.validationStatus === 'checking'}
+								<Loader2
 								class="w-4 h-4 animate-spin text-muted-foreground transition-opacity duration-200"
 							/>
 						{:else if form.validationStatus === 'valid'}
@@ -227,14 +232,14 @@
 							</span>
 						{/if}
 					</div>
-				</div>
-				<button
-					type="button"
-					onclick={() => form.togglePinnedPath()}
-					disabled={!form.trimmedPath}
-					class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 disabled:opacity-40 transition-colors"
-					title={form.isPinnedPath
-						? m.chat_new_chat_remove_from_favorites()
+					</div>
+					<button
+						type="button"
+						onclick={() => form.togglePinnedPath()}
+						disabled={!form.settingsLoaded || !form.trimmedPath}
+						class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 disabled:opacity-40 transition-colors"
+						title={form.isPinnedPath
+							? m.chat_new_chat_remove_from_favorites()
 						: m.chat_new_chat_add_to_favorites()}
 				>
 					{#if form.isPinnedPath}
@@ -245,10 +250,10 @@
 				</button>
 			</div>
 
-				{#if form.showBrowser}
-					<DirectoryBrowser
-						currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
-						basePath={form.projectBasePath}
+					{#if form.settingsLoaded && form.showBrowser}
+						<DirectoryBrowser
+							currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
+							basePath={form.projectBasePath}
 					onSelect={(selPath) => {
 						form.projectPath = selPath;
 						form.clearError();
@@ -259,14 +264,14 @@
 				{/if}
 			</div>
 
-				{#if form.validationStatus === 'invalid' && form.validationError}
-					<p class="-mt-1 text-xs text-destructive transition-colors">
-						{form.validationError}
-					</p>
-				{:else if form.gitRepoStatus === 'git'}
-					<button
-						type="button"
-						onclick={() => form.openWorktreeModal()}
+					{#if form.settingsLoaded && form.validationStatus === 'invalid' && form.validationError}
+						<p class="-mt-1 text-xs text-destructive transition-colors">
+							{form.validationError}
+						</p>
+					{:else if form.settingsLoaded && form.gitRepoStatus === 'git'}
+						<button
+							type="button"
+							onclick={() => form.openWorktreeModal()}
 						class="-mt-1 flex items-center gap-1.5 text-xs text-interactive-accent hover:underline transition-colors"
 					>
 						{m.chat_new_chat_select_different_worktree()}
@@ -274,9 +279,11 @@
 				{/if}
 
 		<!-- Pinned paths or placeholder -->
-		{#if form.pinnedProjectPaths.length > 0}
-			<div class="flex flex-wrap gap-2">
-				{#each form.pinnedProjectPaths as pinnedPath (pinnedPath)}
+			{#if !form.settingsLoaded}
+				<div class="h-7 rounded-md bg-muted/20" aria-hidden="true"></div>
+			{:else if form.pinnedProjectPaths.length > 0}
+				<div class="flex flex-wrap gap-2">
+					{#each form.pinnedProjectPaths as pinnedPath (pinnedPath)}
 						<button
 							type="button"
 							class="text-xs px-2.5 py-1 rounded-md border transition-colors {form.projectPath ===

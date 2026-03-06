@@ -21,6 +21,7 @@ function createMockCtx() {
       setPathSettings: mock(() => Promise.resolve({})),
       getPinnedChatIds: mock(() => Promise.resolve([])),
       getLastProvider: mock(() => Promise.resolve('claude')),
+      getLastProjectPath: mock(() => Promise.resolve('')),
       getLastModel: mock(() => Promise.resolve('')),
       getLastPermissionMode: mock(() => Promise.resolve('default')),
       getLastThinkingMode: mock(() => Promise.resolve('none')),
@@ -58,6 +59,7 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
     ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastProjectPath.mockClear();
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
@@ -127,6 +129,7 @@ describe('GET /api/app/settings', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
     ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastProjectPath.mockClear();
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
@@ -140,6 +143,7 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({ lastDir: '/home' }));
     ctx.settings.getPinnedChatIds.mockImplementation(() => Promise.resolve(['a', 'b']));
     ctx.settings.getLastProvider.mockImplementation(() => Promise.resolve('codex'));
+    ctx.settings.getLastProjectPath.mockImplementation(() => Promise.resolve('/workspace/project'));
     ctx.settings.getLastModel.mockImplementation(() => Promise.resolve('gpt-5.4'));
     ctx.settings.getLastPermissionMode.mockImplementation(() => Promise.resolve('acceptEdits'));
     ctx.settings.getLastThinkingMode.mockImplementation(() => Promise.resolve('think-hard'));
@@ -152,6 +156,7 @@ describe('GET /api/app/settings', () => {
     expect(body.paths).toEqual({ lastDir: '/home' });
     expect(body.pinnedChatIds).toEqual(['a', 'b']);
     expect(body.lastProvider).toBe('codex');
+    expect(body.lastProjectPath).toBe('/workspace/project');
     expect(body.lastModel).toBe('gpt-5.4');
     expect(body.lastPermissionMode).toBe('acceptEdits');
     expect(body.lastThinkingMode).toBe('think-hard');
@@ -222,6 +227,7 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
     ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastProjectPath.mockClear();
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
