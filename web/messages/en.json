@@ -1,5 +1,4 @@
 {
-  "auth_login_description": "Sign in to your Garcon account",
   "auth_login_errors_invalid_credentials": "Invalid username or password",
   "auth_login_errors_required_fields": "Please fill in all fields",
   "auth_login_loading": "Signing in...",
@@ -23,8 +22,6 @@
   "auth_setup_internet_exposure_notice": "This is a single user app. If this server is exposed to the internet, configure credentials to protect access.",
   "auth_setup_disable_auth_hint": "Authentication can be disabled via an environment variable or CLI flag.",
   "auth_setup_title": "Welcome to Garcon",
-  "auth_login_badge": "Authentication",
-  "auth_login_single_user_notice": "This server is configured for single-user password protection.",
   "chat_chat_loading_chat_messages": "Loading session messages...",
   "chat_chat_loading_older_messages": "Loading older messages...",
   "chat_chat_messages_load_earlier": "Load earlier messages",

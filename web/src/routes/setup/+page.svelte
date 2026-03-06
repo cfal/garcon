@@ -114,10 +114,12 @@
 					</div>
 				{/if}
 
-				<Button type="submit" class="w-full" disabled={isSubmitting}>
-					{isSubmitting ? m.auth_setup_setting_up() : m.auth_setup_create_account()}
-				</Button>
-			</form>
+					<div class="pt-2">
+						<Button type="submit" class="w-full" disabled={isSubmitting}>
+							{isSubmitting ? m.auth_setup_setting_up() : m.auth_setup_create_account()}
+						</Button>
+					</div>
+				</form>
+			</div>
 		</div>
-	</div>
 </div>
