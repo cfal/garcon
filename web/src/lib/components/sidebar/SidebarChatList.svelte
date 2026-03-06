@@ -2,7 +2,6 @@
 	import { untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import SidebarChatItem from './SidebarChatItem.svelte';
-	import Folder from '@lucide/svelte/icons/folder';
 	import Search from '@lucide/svelte/icons/search';
 	import GripVertical from '@lucide/svelte/icons/grip-vertical';
 	import { DragDropProvider, PointerSensor } from '@dnd-kit/svelte';
@@ -214,13 +213,6 @@
 		</div>
 	</div>
 {:else if chats.length === 0}
-	<div class="text-center py-12 md:py-8 px-4">
-		<div class="w-12 h-12 bg-muted rounded-lg flex items-center justify-center mx-auto mb-4 md:mb-3">
-			<Folder class="w-6 h-6 text-muted-foreground" />
-		</div>
-		<h3 class="text-base font-medium text-foreground mb-2 md:mb-1">{m.sidebar_chats_no_chats()}</h3>
-		<p class="text-sm text-muted-foreground">{m.sidebar_projects_run_claude_cli_to_create()}</p>
-	</div>
 {:else if !showChats}
 	<div class="text-center py-12 md:py-8 px-4">
 		<div class="w-12 h-12 bg-muted rounded-lg flex items-center justify-center mx-auto mb-4 md:mb-3">
