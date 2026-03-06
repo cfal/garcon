@@ -1,5 +1,5 @@
 import { needsSetup, getUserByUsername, createUser, getUser } from '../auth/store.js';
-import { generateToken } from '../middleware/auth.js';
+import { generateAuthToken } from '../middleware/auth.js';
 import { parseJsonBody } from '../lib/http-native.js';
 import { createRateLimiter } from '../lib/rate-limit.js';
 import { markRouteNoAuth } from '../lib/route-auth.js';
@@ -60,7 +60,7 @@ async function noauthPostRegister(request) {
 
     const passwordHash = await Bun.password.hash(password, { algorithm: 'bcrypt', cost: 12 });
     const user = await createUser(trimmedUsername, passwordHash);
-    const token = await generateToken(user);
+    const token = await generateAuthToken(user);
 
     return Response.json({
       success: true,
@@ -99,7 +99,7 @@ async function noauthPostLogin(request) {
       return Response.json({ error: 'Invalid username or password' }, { status: 401 });
     }
 
-    const token = await generateToken(user);
+    const token = await generateAuthToken(user);
     return Response.json({
       success: true,
       user: { id: user.username, username: user.username },

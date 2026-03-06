@@ -4,7 +4,7 @@
 
 	import ChatEventCard from '../rows/ChatEventCard.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { copyTextToClipboard } from '$lib/utils/clipboard';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import type { ToolInlineAction } from '$lib/chat/tool-display-contract';
 
 	interface OneLineDisplayProps {
@@ -53,7 +53,7 @@
 
 	async function handleAction() {
 		if (action === 'copyValue' && value) {
-			const didCopy = await copyTextToClipboard(value);
+			const didCopy = await copyToClipboard(value);
 			if (!didCopy) return;
 			copied = true;
 			setTimeout(() => (copied = false), 2000);

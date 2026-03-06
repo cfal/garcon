@@ -16,7 +16,7 @@ import {
 } from './config.js';
 import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/route-auth.js';
-import { authenticateWebSocket } from './middleware/auth.js';
+import { verifyWebSocketToken } from './middleware/auth.js';
 import { init as initAuthStore } from './auth/store.js';
 import { resolveMissingNativePath } from './chats/resolve-native-path.js';
 
@@ -137,7 +137,7 @@ export async function startServer() {
           }
 
           const token = url.searchParams.get('token') || request.headers.get('authorization')?.split(' ')[1];
-          const isAuthorized = authDisabled ? true : await authenticateWebSocket(token);
+          const isAuthorized = authDisabled ? true : await verifyWebSocketToken(token);
           if (!isAuthorized) {
             return new Response('Unauthorized', { status: 401 });
           }

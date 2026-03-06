@@ -12,16 +12,16 @@ async function resolveSecret() {
   return cachedSecret;
 }
 
-export async function generateToken(user) {
+export async function generateAuthToken({ username }) {
   const secret = await resolveSecret();
   return jwt.sign(
-    { username: user.username },
+    { username },
     secret,
     { expiresIn: getJwtTokenExpiry() },
   );
 }
 
-export async function authenticateWebSocket(token) {
+export async function verifyWebSocketToken(token) {
   if (!token) {
     return false;
   }
@@ -31,7 +31,7 @@ export async function authenticateWebSocket(token) {
     jwt.verify(token, secret);
     return true;
   } catch (error) {
-    console.error('WebSocket token verification error:', error);
+    console.warn('WebSocket token verification failed:', error.message);
     return false;
   }
 }

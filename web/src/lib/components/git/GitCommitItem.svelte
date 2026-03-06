@@ -7,7 +7,7 @@
 	import Check from '@lucide/svelte/icons/check';
 	import Copy from '@lucide/svelte/icons/copy';
 	import type { GitCommit } from '$lib/api/git';
-	import { copyTextToClipboard } from '$lib/utils/clipboard';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { formatDiff } from './GitFileItem.svelte';
 
 	interface GitCommitItemProps {
@@ -39,7 +39,7 @@
 	});
 
 	async function handleHashCopy(): Promise<void> {
-		const copied = await copyTextToClipboard(commit.hash);
+		const copied = await copyToClipboard(commit.hash);
 		if (!copied) return;
 		copiedHash = true;
 		if (copiedResetTimer) clearTimeout(copiedResetTimer);

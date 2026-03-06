@@ -5,7 +5,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Check from '@lucide/svelte/icons/check';
-	import { copyTextToClipboard } from '$lib/utils/clipboard';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import type { SessionProvider } from '$lib/types/app';
 
 	interface ChatDeleteConfirmation {
@@ -122,7 +122,7 @@
 		const container =
 			(e.currentTarget as HTMLElement)?.closest('[role="dialog"]') ??
 			undefined;
-		const copied = await copyTextToClipboard(value, container);
+		const copied = await copyToClipboard(value, container);
 		if (!copied) return;
 
 		onCopied(true);

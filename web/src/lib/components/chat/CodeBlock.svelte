@@ -75,7 +75,7 @@ Registers languages once at module scope for efficiency.
 
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { copyTextToClipboard } from '$lib/utils/clipboard';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface Props {
 		lang?: string;
@@ -93,8 +93,8 @@ Registers languages once at module scope for efficiency.
 	});
 
 	let copied = $state(false);
-	async function copyToClipboard() {
-		const didCopy = await copyTextToClipboard(text);
+	async function handleCopy() {
+		const didCopy = await copyToClipboard(text);
 		if (!didCopy) return;
 		copied = true;
 		setTimeout(() => (copied = false), 2000);
@@ -107,7 +107,7 @@ Registers languages once at module scope for efficiency.
 	>
 		<span>{lang || 'text'}</span>
 		<button
-			onclick={copyToClipboard}
+			onclick={handleCopy}
 			class="inline-flex h-6 w-6 items-center justify-center rounded opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100 hover:bg-accent"
 			title={m.chat_code_block_copy()}
 			aria-label={copied ? m.chat_code_block_copied() : m.chat_code_block_copy()}

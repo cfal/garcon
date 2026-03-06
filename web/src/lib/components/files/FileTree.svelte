@@ -80,15 +80,22 @@
 		return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 	}
 
+	const RELATIVE_TIME_UNITS: [number, (count: number) => string][] = [
+		[60, () => m.filetree_just_now()],
+		[60, (c) => m.filetree_min_ago({ count: c })],
+		[24, (c) => m.filetree_hours_ago({ count: c })],
+		[30, (c) => m.filetree_days_ago({ count: c })],
+	];
+
 	function formatRelativeTime(date: string | undefined): string {
 		if (!date) return '-';
-		const now = new Date();
 		const past = new Date(date);
-		const diffInSeconds = Math.floor((now.getTime() - past.getTime()) / 1000);
-		if (diffInSeconds < 60) return m.filetree_just_now();
-		if (diffInSeconds < 3600) return m.filetree_min_ago({ count: Math.floor(diffInSeconds / 60) });
-		if (diffInSeconds < 86400) return m.filetree_hours_ago({ count: Math.floor(diffInSeconds / 3600) });
-		if (diffInSeconds < 2592000) return m.filetree_days_ago({ count: Math.floor(diffInSeconds / 86400) });
+		if (isNaN(past.getTime())) return '-';
+		let remaining = Math.floor((Date.now() - past.getTime()) / 1000);
+		for (const [divisor, format] of RELATIVE_TIME_UNITS) {
+			if (remaining < divisor) return format(remaining);
+			remaining = Math.floor(remaining / divisor);
+		}
 		return past.toLocaleDateString();
 	}
 
