@@ -11,6 +11,11 @@ function authPath() {
   return path.join(getConfigDir(), 'auth.json');
 }
 
+// Ensures the auth config directory exists.
+export async function init() {
+  await fs.mkdir(getConfigDir(), { recursive: true });
+}
+
 async function readFromDisk() {
   try {
     const raw = await fs.readFile(authPath(), 'utf8');

@@ -17,6 +17,7 @@ import {
 import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/route-auth.js';
 import { authenticateWebSocket } from './middleware/auth.js';
+import { init as initAuthStore } from './auth/store.js';
 
 // Classes
 import { ChatRegistry } from './chats/store.js';
@@ -60,6 +61,7 @@ export async function startServer() {
     const pathCache = new PathCache();
     const shellManager = new ShellManager();
 
+    await initAuthStore();
     await chatRegistry.init();
     await settings.init();
 
