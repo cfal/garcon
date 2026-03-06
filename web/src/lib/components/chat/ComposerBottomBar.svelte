@@ -72,51 +72,53 @@
 </script>
 
 {#snippet providerAndModelSelectors(align: 'start' | 'end')}
-	{#if providerOptions && activeProvider && onProviderSelect}
+	<div class="flex min-w-0 items-center gap-2">
+		{#if providerOptions && activeProvider && onProviderSelect}
+			<DropdownMenu>
+				<DropdownMenuTrigger
+					class="inline-flex h-9 max-w-[7rem] items-center gap-1.5 rounded-lg px-2.5 text-sm text-foreground transition-colors hover:bg-muted min-w-0 sm:max-w-[10rem]"
+					title={activeProvider.label}
+				>
+					<span class="truncate max-w-[4.5rem] sm:max-w-[7rem]">{activeProvider.label}</span>
+					<ChevronDown class="size-3.5 text-muted-foreground" />
+				</DropdownMenuTrigger>
+				<DropdownMenuContent align={align}>
+					{#each providerOptions as option (option.value)}
+						<DropdownMenuItem onclick={() => onProviderSelect(option.value)} class="items-start">
+							<div class="min-w-0">
+								<div class="font-medium">{option.label}</div>
+							</div>
+						</DropdownMenuItem>
+					{/each}
+				</DropdownMenuContent>
+			</DropdownMenu>
+		{/if}
+
 		<DropdownMenu>
 			<DropdownMenuTrigger
-				class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-foreground transition-colors hover:bg-muted min-w-0"
-				title={activeProvider.label}
+				class="inline-flex h-9 max-w-[9rem] items-center gap-1.5 rounded-lg px-2.5 text-sm text-foreground transition-colors hover:bg-muted min-w-0 sm:max-w-[14rem]"
+				title={activeModel?.label ?? 'Model'}
 			>
-				<span class="truncate max-w-[7rem]">{activeProvider.label}</span>
+				<span class="truncate max-w-[6.5rem] sm:max-w-[10rem]">{activeModel?.label ?? ''}</span>
 				<ChevronDown class="size-3.5 text-muted-foreground" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align={align}>
-				{#each providerOptions as option (option.value)}
-					<DropdownMenuItem onclick={() => onProviderSelect(option.value)} class="items-start">
+				{#each modelOptions as option (option.value)}
+					<DropdownMenuItem onclick={() => onModelSelect(option.value)} class="items-start">
 						<div class="min-w-0">
 							<div class="font-medium">{option.label}</div>
+							<div class="text-xs text-muted-foreground">{option.description}</div>
 						</div>
 					</DropdownMenuItem>
 				{/each}
 			</DropdownMenuContent>
 		</DropdownMenu>
-	{/if}
-
-	<DropdownMenu>
-		<DropdownMenuTrigger
-			class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-foreground transition-colors hover:bg-muted min-w-0"
-			title={activeModel?.label ?? 'Model'}
-		>
-			<span class="truncate max-w-[10rem]">{activeModel?.label ?? ''}</span>
-			<ChevronDown class="size-3.5 text-muted-foreground" />
-		</DropdownMenuTrigger>
-		<DropdownMenuContent align={align}>
-			{#each modelOptions as option (option.value)}
-				<DropdownMenuItem onclick={() => onModelSelect(option.value)} class="items-start">
-					<div class="min-w-0">
-						<div class="font-medium">{option.label}</div>
-						<div class="text-xs text-muted-foreground">{option.description}</div>
-					</div>
-				</DropdownMenuItem>
-			{/each}
-		</DropdownMenuContent>
-	</DropdownMenu>
+	</div>
 {/snippet}
 
 <div class="mt-1 pt-1.5 px-2 pb-[env(safe-area-inset-bottom)]">
-	<div class="flex items-center justify-between gap-2">
-		<div class="flex items-center gap-2">
+	<div class="flex min-w-0 flex-wrap items-center gap-2">
+		<div class="flex min-w-0 grow flex-wrap items-center gap-2">
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					disabled={!canAttachImages}
@@ -185,7 +187,7 @@
 			{/if}
 		</div>
 
-		<div class="flex items-center gap-2 min-w-0">
+		<div class="flex min-w-0 basis-full items-center justify-between gap-2 sm:ml-auto sm:basis-auto sm:justify-end">
 			{#if selectorsSide === 'right'}
 				{@render providerAndModelSelectors('end')}
 			{/if}
