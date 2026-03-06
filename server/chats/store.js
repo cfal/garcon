@@ -68,6 +68,47 @@ export class ChatRegistry extends EventEmitter {
     return this.#registry;
   }
 
+  async reconcileSessions(resolveNativePath) {
+    const registry = this.getRegistry();
+    const sessions = registry.sessions || {};
+    let dirty = false;
+
+    for (const [chatId, session] of Object.entries(sessions)) {
+      if (!session?.providerSessionId) {
+        console.warn(`sessions: discarding chat ${chatId} with missing providerSessionId`);
+        if (session?.nativePath) this.#nativePathCache.delete(session.nativePath);
+        delete sessions[chatId];
+        dirty = true;
+        continue;
+      }
+
+      if (session.nativePath) continue;
+
+      const resolvedPath = await resolveNativePath(session).catch((error) => {
+        console.warn(`sessions: failed to reconcile nativePath for ${chatId}:`, error.message);
+        return null;
+      });
+      if (!resolvedPath) {
+        console.warn(`sessions: discarding chat ${chatId} with unresolved nativePath`);
+        delete sessions[chatId];
+        dirty = true;
+        continue;
+      }
+
+      session.nativePath = resolvedPath;
+      dirty = true;
+    }
+
+    if (!dirty) return false;
+
+    if (this.#pendingSaveTimer) {
+      clearTimeout(this.#pendingSaveTimer);
+      this.#pendingSaveTimer = null;
+    }
+    await this.saveRegistry(registry);
+    return true;
+  }
+
   // Returns a shallow copy of all sessions.
   listAllChats() {
     const registry = this.getRegistry();

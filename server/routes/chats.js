@@ -6,7 +6,6 @@ import path from 'path';
 import { parseJsonBody } from '../lib/http-native.js';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import { UserMessage } from '../../common/chat-types.ts';
-import { resolveMissingNativePath } from '../chats/resolve-native-path.js';
 import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { PROVIDERS as VALID_PROVIDERS, supportsFork as providerSupportsFork, supportsImages as providerSupportsImages } from '../../common/providers.ts';
 import { getProjectBasePath } from '../config.js';
@@ -336,14 +335,6 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       const session = registry.getChat(chatId);
       if (!session) {
         return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
-      }
-      if (!session.nativePath) {
-        const resolvedPath = await resolveMissingNativePath(session);
-        if (!resolvedPath) {
-          return Response.json({ messages: [], total: 0, hasMore: false, offset: 0, limit: 20 });
-        }
-        session.nativePath = resolvedPath;
-        registry.updateChat(chatId, { nativePath: resolvedPath });
       }
 
       const limit = parseInt(url.searchParams.get('limit') || '20', 10);
