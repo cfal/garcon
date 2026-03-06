@@ -144,7 +144,7 @@
 		</Dialog.Header>
 		<Dialog.Footer>
 			<Button variant="outline" onclick={onCancelDelete}>{m.sidebar_actions_cancel()}</Button>
-			<Button variant="destructive" onclick={onConfirmDelete}>{m.sidebar_actions_delete()}</Button>
+			<Button variant="destructive" onclick={onConfirmDelete} autofocus>{m.sidebar_actions_delete()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

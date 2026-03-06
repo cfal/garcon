@@ -67,6 +67,7 @@
 			>{m.git_confirm_cancel()}</button>
 			<button
 				onclick={onConfirm}
+				autofocus
 				class="px-4 py-2 text-sm rounded-md flex items-center space-x-2 {isDestructive ? 'text-destructive-foreground' : 'text-git-action-foreground'} {buttonClasses[confirmAction.type]}"
 			>
 				{#if confirmAction.type === 'discard' || confirmAction.type === 'delete'}
