@@ -60,7 +60,7 @@
 			<ChevronDownIcon class="size-4 text-muted-foreground shrink-0 transition-transform duration-200 {open ? 'rotate-180' : ''}" />
 		</Collapsible.Trigger>
 
-		{#if !auth.loading && !auth.authenticated}
+		{#if !auth.loading && !auth.authenticated && !open}
 			<Button variant="outline" size="sm" onclick={onLogin}>
 				<LogInIcon class="size-3.5 mr-1.5" />
 				{m.settings_agents_login_button()}
