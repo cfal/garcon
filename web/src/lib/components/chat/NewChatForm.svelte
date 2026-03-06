@@ -38,6 +38,7 @@
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
 	const form = new NewChatFormState(preferences, appShell, modelCatalog);
+	let isMobile = $state(false);
 
 	let textareaRef: HTMLTextAreaElement | undefined = $state();
 	let imageInputRef: HTMLInputElement | undefined = $state();
@@ -58,7 +59,18 @@
 	onMount(() => {
 		reseed();
 		form.loadSettingsAndModels();
-		return appShell.onNewChatDialogSeed(() => reseed());
+		const removeSeedListener = appShell.onNewChatDialogSeed(() => reseed());
+		const mql = window.matchMedia('(max-width: 768px)');
+		isMobile = mql.matches;
+		const handleMediaChange = (e: MediaQueryListEvent) => {
+			isMobile = e.matches;
+		};
+		mql.addEventListener('change', handleMediaChange);
+
+		return () => {
+			removeSeedListener();
+			mql.removeEventListener('change', handleMediaChange);
+		};
 	});
 
 	// Revalidates selected models whenever the shared model catalog updates.
@@ -155,7 +167,7 @@
 	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 </script>
 
-<div class="p-6 sm:p-8 space-y-6">
+<div class="p-4 sm:p-8 space-y-6">
 	<!-- Project path -->
 	<div class="space-y-2">
 		<label for="project-path-input" class="block text-sm font-medium text-muted-foreground">
@@ -217,18 +229,18 @@
 				</button>
 			</div>
 
-			{#if form.showBrowser}
-				<DirectoryBrowser
-					currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
-					basePath={form.projectBasePath}
+				{#if form.showBrowser}
+					<DirectoryBrowser
+						currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
+						basePath={form.projectBasePath}
 					onSelect={(selPath) => {
 						form.projectPath = selPath;
 						form.clearError();
-					}}
-					onClose={() => (form.showBrowser = false)}
-					isMobile={false}
-				/>
-			{/if}
+						}}
+						onClose={() => (form.showBrowser = false)}
+						{isMobile}
+					/>
+				{/if}
 			</div>
 
 				{#if form.validationStatus === 'invalid' && form.validationError}
@@ -249,21 +261,21 @@
 		{#if form.pinnedProjectPaths.length > 0}
 			<div class="flex flex-wrap gap-2">
 				{#each form.pinnedProjectPaths as pinnedPath (pinnedPath)}
-					<button
-						type="button"
-						class="text-xs px-2.5 py-1 rounded-md border transition-colors {form.projectPath ===
-							pinnedPath
-							? 'border-border bg-accent text-accent-foreground'
-							: 'border-border/70 bg-muted/40 text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}"
-						onclick={() => {
-							form.projectPath = pinnedPath;
-							form.clearError();
-						}}
-					>
-						{pinnedPath}
-					</button>
-				{/each}
-			</div>
+						<button
+							type="button"
+							class="text-xs px-2.5 py-1 rounded-md border transition-colors {form.projectPath ===
+								pinnedPath
+								? 'border-border bg-accent text-accent-foreground'
+								: 'border-border/70 bg-muted/40 text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}"
+							onclick={() => {
+								form.projectPath = pinnedPath;
+								form.clearError();
+							}}
+						>
+							<span class="block max-w-[70vw] truncate sm:max-w-[24rem]">{pinnedPath}</span>
+						</button>
+					{/each}
+				</div>
 		{:else}
 			<p
 				class="text-xs px-2.5 py-1 rounded-md bg-muted/30 text-muted-foreground text-center w-full"
