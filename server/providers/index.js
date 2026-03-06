@@ -126,16 +126,15 @@ export class ProviderRegistry {
       throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
     }
 
-    const { provider, model, permissionMode, thinkingMode, providerSessionId } = entry;
+    const { provider, providerSessionId } = entry;
     if (!providerSessionId) {
       throw new Error(`Session missing provider session ID: ${chatId}`);
     }
 
     const mergedOpts = {
-      ...opts,
-      model: opts.model ?? model ?? undefined,
-      permissionMode: opts.permissionMode ?? permissionMode ?? undefined,
-      thinkingMode: opts.thinkingMode ?? thinkingMode ?? undefined,
+      model: opts.model ?? entry.model ?? undefined,
+      permissionMode: opts.permissionMode ?? entry.permissionMode ?? undefined,
+      thinkingMode: opts.thinkingMode ?? entry.thinkingMode ?? undefined,
     };
 
     if (provider === 'claude') {

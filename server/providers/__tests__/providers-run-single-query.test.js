@@ -136,6 +136,7 @@ describe('ProviderRegistry session option hydration', () => {
     expect(mockCodex.runTurn).toHaveBeenCalledWith('continue', {
       sessionId: 'sess-1',
       chatId: '123',
+      cwd: '/proj',
       model: 'gpt-5.4',
       permissionMode: 'bypassPermissions',
       thinkingMode: 'think-hard',
@@ -161,6 +162,7 @@ describe('ProviderRegistry session option hydration', () => {
     expect(mockClaude.runClaudeTurn).toHaveBeenCalledWith('continue', {
       sessionId: 'sess-2',
       chatId: '123',
+      cwd: '/proj',
       model: 'sonnet',
       permissionMode: 'acceptEdits',
       thinkingMode: 'ultrathink',

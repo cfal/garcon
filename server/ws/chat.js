@@ -65,8 +65,7 @@ export class ChatHandler {
   }
 
   async #handleAgentCommand(data, chatId, writer) {
-    console.log(`chat: ${data.provider || 'unknown'} message:`, data.command || '[continue/resume]');
-    console.log('chat: project:', data.options?.projectPath || data.options?.cwd || 'unknown');
+    console.log('chat: message:', data.command || '[continue/resume]');
 
     if (!/^\d+$/.test(String(chatId))) {
       writer.send(new AgentRunFailedMessage(chatId, 'Invalid session ID format'));
@@ -74,7 +73,11 @@ export class ChatHandler {
     }
 
     try {
-      await this.#queue.submit(chatId, data.command, data.options || {});
+      await this.#queue.submit(chatId, data.command, {
+        permissionMode: data.permissionMode,
+        thinkingMode: data.thinkingMode,
+        model: data.model,
+      });
     } catch (error) {
       writer.send(new AgentRunFailedMessage(chatId, error.message));
     }
@@ -215,12 +218,7 @@ export class ChatHandler {
       } else if (data instanceof QueueResumeRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         await this.#queue.resumeChatQueue(chatId);
-        this.#queue.triggerDrain(chatId, {
-          projectPath: data.projectPath,
-          cwd: data.projectPath,
-          permissionMode: data.permissionMode,
-          toolsSettings: data.toolsSettings,
-        }).catch((err) => {
+        this.#queue.triggerDrain(chatId, {}).catch((err) => {
           console.error('queue: resume drain error:', err.message);
         });
       } else if (data instanceof QueueQueryRequest) {

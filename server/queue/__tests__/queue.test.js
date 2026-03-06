@@ -121,8 +121,8 @@ describe('orchestration', () => {
 
   describe('submit', () => {
     it('runs provider turn with the given command', async () => {
-      await orchQueue.submit('c1', 'hello', { projectPath: '/tmp' });
-      expect(mockProviders.runProviderTurn).toHaveBeenCalledWith('c1', 'hello', { projectPath: '/tmp' });
+      await orchQueue.submit('c1', 'hello', { permissionMode: 'default' });
+      expect(mockProviders.runProviderTurn).toHaveBeenCalledWith('c1', 'hello', { permissionMode: 'default' });
     });
 
     it('appends user message to history cache', async () => {
