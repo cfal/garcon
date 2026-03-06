@@ -136,6 +136,7 @@ class ClaudeProvider extends AbsProvider {
       case 'tool_use_summary':
       case 'auth_status':
       case 'keep_alive':
+      case 'user':
         break;
 
       default:
