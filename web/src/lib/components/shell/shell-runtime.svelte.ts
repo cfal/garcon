@@ -4,7 +4,7 @@
 
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { WebglAddon } from '@xterm/addon-webgl';
+
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { getAuthToken } from '$lib/api/client';
 import { attachShellSocket, sendShellMessage } from '$lib/ws/shell-transport';
@@ -79,6 +79,11 @@ export class ShellRuntime {
 	private resizeObserver: ResizeObserver | null = null;
 	private pasteCleanup: (() => void) | null = null;
 	private resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+	private lastProjectPath: string | null = null;
+	private lastChatId: string | null = null;
+	private reconnectAttempts = 0;
+	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private manualDisconnect = false;
 
 	private opts: ShellRuntimeOptions;
 
@@ -114,12 +119,6 @@ export class ShellRuntime {
 		terminal.loadAddon(fitAddon);
 
 		terminal.loadAddon(new WebLinksAddon());
-
-		try {
-			terminal.loadAddon(new WebglAddon());
-		} catch {
-			console.warn('shell: WebGL renderer unavailable, using canvas fallback');
-		}
 
 		terminal.open(terminalEl);
 
@@ -197,6 +196,8 @@ export class ShellRuntime {
 		this.resizeObserver.observe(terminalEl);
 
 		// Auto-connect after initialization
+		this.lastProjectPath = projectPath;
+		this.lastChatId = chatId;
 		this.connectWebSocket(projectPath, chatId);
 	}
 
@@ -208,6 +209,7 @@ export class ShellRuntime {
 	}
 
 	connectWebSocket(projectPath: string | null, chatId: string | null): void {
+		this.manualDisconnect = false;
 		if (this.isConnecting || this.isConnected) return;
 		this.isConnecting = true;
 
@@ -232,6 +234,8 @@ export class ShellRuntime {
 				}
 				this.isConnected = true;
 				this.isConnecting = false;
+				this.reconnectAttempts = 0;
+				this.clearReconnectTimer();
 				this.clipboardMessage = '';
 
 				requestAnimationFrame(() => {
@@ -253,16 +257,14 @@ export class ShellRuntime {
 				this.ws = null;
 				this.isConnecting = false;
 
-				if (this.terminal) {
-					this.terminal.clear();
-					this.terminal.write('\x1b[2J\x1b[H');
-				}
 				this.isConnected = false;
+				this.scheduleReconnect();
 			},
 			onError: () => {
 				if (this.ws !== socket) return;
 				this.isConnected = false;
 				this.isConnecting = false;
+				this.scheduleReconnect();
 			}
 		});
 	}
@@ -285,7 +287,33 @@ export class ShellRuntime {
 		}
 	}
 
+	private clearReconnectTimer(): void {
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+	}
+
+	private scheduleReconnect(): void {
+		if (this.manualDisconnect || this.isRestarting) return;
+		if (this.isConnecting || this.isConnected) return;
+		if (!this.lastProjectPath) return;
+
+		this.clearReconnectTimer();
+		const base = 500;
+		const max = 10_000;
+		const delay = Math.min(max, base * 2 ** this.reconnectAttempts);
+		this.reconnectAttempts++;
+
+		this.reconnectTimer = setTimeout(() => {
+			this.reconnectTimer = null;
+			this.connectWebSocket(this.lastProjectPath, this.lastChatId);
+		}, delay);
+	}
+
 	disconnectFromShell(): void {
+		this.manualDisconnect = true;
+		this.clearReconnectTimer();
 		if (this.ws) {
 			this.ws.close();
 			this.ws = null;
@@ -301,6 +329,9 @@ export class ShellRuntime {
 
 	restartShell(): void {
 		this.isRestarting = true;
+		this.clearReconnectTimer();
+		this.manualDisconnect = false;
+		this.reconnectAttempts = 0;
 
 		if (this.ws) {
 			this.ws.close();
@@ -354,6 +385,8 @@ export class ShellRuntime {
 	}
 
 	cleanup(): void {
+		this.manualDisconnect = true;
+		this.clearReconnectTimer();
 		this.pasteCleanup?.();
 		this.pasteCleanup = null;
 		if (this.resizeTimeout) {
