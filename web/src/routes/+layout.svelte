@@ -87,7 +87,8 @@
 	$effect(() => {
 		if (auth.isAuthenticated) {
 			const token = auth.token;
-			untrack(() => ws.connect(token));
+			const authDisabled = auth.authDisabled;
+			untrack(() => ws.connect(token, authDisabled));
 		}
 	});
 
@@ -114,6 +115,7 @@
 	$effect(() => {
 		if (auth.isLoading) return;
 		if (isPublicRoute) return;
+		if (auth.authDisabled) return;
 		if (auth.needsSetup) {
 			goto('/setup');
 		} else if (!auth.isAuthenticated) {
@@ -125,7 +127,7 @@
 	$effect(() => {
 		if (auth.isLoading) return;
 		if (!isPublicRoute) return;
-		if (auth.isAuthenticated && !auth.needsSetup) {
+		if (auth.authDisabled || (auth.isAuthenticated && !auth.needsSetup)) {
 			goto('/');
 		}
 	});

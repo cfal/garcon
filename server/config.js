@@ -172,6 +172,15 @@ export function getHttpIdleTimeoutSeconds() {
   return envInt('HTTP_IDLE_TIMEOUT_SECONDS', 60 * 2);
 }
 
+// Global authentication toggle.
+// Env takes precedence over CLI to match the rest of config behavior.
+export function isAuthDisabled() {
+  if (process.env.GARCON_DISABLE_AUTH !== undefined) {
+    return envBool('DISABLE_AUTH', false);
+  }
+  return process.argv.includes('--disable-auth');
+}
+
 // Generate a random port in the range 8080..=65535.
 function randomPort() {
   return 8080 + Math.floor(Math.random() * (65535 - 8080 + 1));
@@ -190,4 +199,16 @@ function envInt(name, fallback) {
     throw new Error(`Invalid ${varName} value: ${raw}. Must be an integer.`);
   }
   return parsed;
+}
+
+function envBool(name, fallback) {
+  const varName = 'GARCON_' + name;
+  const raw = process.env[varName];
+  if (raw === undefined || raw === '') {
+    return fallback;
+  }
+  const normalized = String(raw).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  throw new Error(`Invalid ${varName} value: ${raw}. Must be a boolean-like value.`);
 }

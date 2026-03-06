@@ -33,8 +33,9 @@ export class AuthStore {
 	user = $state<AuthUser | null>(null);
 	isLoading = $state(true);
 	needsSetup = $state(false);
+	authDisabled = $state(false);
 	error = $state<string | null>(null);
-	isAuthenticated = $derived(!!this.token && !!this.user);
+	isAuthenticated = $derived(this.authDisabled || (!!this.token && !!this.user));
 
 	constructor() {
 		this.token = getAuthToken();
@@ -47,24 +48,38 @@ export class AuthStore {
 			this.error = null;
 
 			const status = await getAuthStatus();
+			this.authDisabled = Boolean(status.authDisabled);
 
-			if (status.needsSetup) {
-				this.needsSetup = true;
+			if (this.authDisabled) {
+				this.needsSetup = false;
+				this.token = null;
+				this.user = { id: 'local', username: 'local' };
+				clearAuthToken();
 				this.isLoading = false;
 				return;
 			}
+
+			if (status.needsSetup) {
+				this.needsSetup = true;
+				this.user = null;
+				this.isLoading = false;
+				return;
+			}
+
+			this.needsSetup = false;
 
 			if (this.token) {
 				try {
 					const data = await getUser();
 					this.user = data.user;
-					this.needsSetup = false;
 				} catch {
 					// Token is invalid or expired
 					clearAuthToken();
 					this.token = null;
 					this.user = null;
 				}
+			} else {
+				this.user = null;
 			}
 		} catch (err) {
 			console.error('[AuthStore] Auth status check failed:', err);
@@ -78,6 +93,12 @@ export class AuthStore {
 	async login(username: string, password: string): Promise<AuthResult> {
 		try {
 			this.error = null;
+			if (this.authDisabled) {
+				return {
+					success: false,
+					error: 'Authentication is disabled by server configuration.'
+				};
+			}
 			const data = await apiLogin(username, password);
 			this.token = data.token;
 			this.user = data.user;
@@ -94,6 +115,12 @@ export class AuthStore {
 	async register(username: string, password: string): Promise<AuthResult> {
 		try {
 			this.error = null;
+			if (this.authDisabled) {
+				return {
+					success: false,
+					error: 'Authentication is disabled by server configuration.'
+				};
+			}
 			const data = await apiRegister(username, password);
 			this.token = data.token;
 			this.user = data.user;
@@ -110,6 +137,7 @@ export class AuthStore {
 	/** Clears local auth state and notifies the server. */
 	logout(): void {
 		const hadToken = !!this.token;
+		if (this.authDisabled) return;
 		this.token = null;
 		this.user = null;
 		clearAuthToken();

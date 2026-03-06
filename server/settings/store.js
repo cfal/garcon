@@ -135,6 +135,7 @@ export class SettingsStore extends EventEmitter {
   }
 
   async init() {
+    await fs.mkdir(this.#workspaceDir, { recursive: true });
     this.#cache = await this.#readFromDisk();
     return this.#cache;
   }

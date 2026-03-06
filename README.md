@@ -70,6 +70,7 @@ bun run start
 Default URL: `http://127.0.0.1:8080`
 
 On first launch, create the single local account at `/setup`, then configure providers in Settings.
+If you start the server with auth disabled, onboarding/login is skipped and you enter the app directly.
 
 ## Run and Configuration
 
@@ -77,6 +78,13 @@ On first launch, create the single local account at `/setup`, then configure pro
 
 ```bash
 bun run start --port 8080 --bind-address 127.0.0.1 --project-base-dir /path/to/repos
+```
+
+Disable auth at startup (requires server restart to change):
+
+```bash
+bun run start -- --disable-auth
+# or GARCON_DISABLE_AUTH=true bun run start
 ```
 
 Run `bun run help` to see all flags and supported environment variables.
