@@ -212,7 +212,6 @@
 			<p class="text-sm text-muted-foreground">{m.sidebar_chats_fetching_chats()}</p>
 		</div>
 	</div>
-{:else if chats.length === 0}
 {:else if !showChats}
 	<div class="text-center py-12 md:py-8 px-4">
 		<div class="w-12 h-12 bg-muted rounded-lg flex items-center justify-center mx-auto mb-4 md:mb-3">
