@@ -39,19 +39,22 @@
 	const modelCatalog = getModelCatalog();
 	const form = new NewChatFormState(appShell, modelCatalog);
 	let isMobile = $state(false);
+	let pendingTextareaFocus = $state(true);
 
 	let textareaRef: HTMLTextAreaElement | undefined = $state();
 	let imageInputRef: HTMLInputElement | undefined = $state();
 
 	function reseed(): void {
 		form.reseed(prefill);
+		pendingTextareaFocus = true;
 		setTimeout(() => {
-			if (textareaRef) {
+			if (textareaRef && form.settingsLoaded) {
 				if (prefill) {
 					textareaRef.setSelectionRange(0, 0);
 					textareaRef.scrollTop = 0;
 				}
 				textareaRef.focus();
+				pendingTextareaFocus = false;
 			}
 		}, 50);
 	}
@@ -86,6 +89,19 @@
 		if (form.validationStatus === 'valid' && !form.showBrowser) {
 			textareaRef?.focus();
 		}
+	});
+
+	// Defers initial textarea focus until startup defaults have loaded and the
+	// input is visible.
+	$effect(() => {
+		if (!pendingTextareaFocus || !form.settingsLoaded || form.showBrowser) return;
+		if (!textareaRef) return;
+		if (prefill) {
+			textareaRef.setSelectionRange(0, 0);
+			textareaRef.scrollTop = 0;
+		}
+		textareaRef.focus();
+		pendingTextareaFocus = false;
 	});
 
 	// Reconcile image preview URLs when attached images change.
@@ -290,7 +306,7 @@
 	</div>
 
 	<!-- Message input -->
-	<div class="relative border border-border rounded-lg pb-1.5">
+	<div class="relative min-h-[120px] border border-border rounded-lg pb-1.5">
 		<input
 			bind:this={imageInputRef}
 			type="file"
@@ -299,18 +315,18 @@
 			class="hidden"
 			onchange={handleImageInputChange}
 		/>
-			<textarea
-			bind:this={textareaRef}
-			bind:value={form.firstMessage}
+		<div class:invisible={!form.settingsLoaded}>
+				<textarea
+				bind:this={textareaRef}
+				bind:value={form.firstMessage}
 			onkeydown={handleKeyDown}
 			oninput={autoResizeTextarea}
 				onpaste={handleMessagePaste}
 				placeholder={form.placeholder}
 				class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
-				rows="2"
-			></textarea>
+					rows="2"
+				></textarea>
 
-		{#if form.settingsLoaded}
 			<ComposerBottomBar
 				canAttachImages={modelCatalog.supportsImages(form.provider)}
 				attachImagesTooltip="Image attachments are unavailable for this provider."
@@ -340,9 +356,16 @@
 				sendTitle={m.chat_new_chat_start_session()}
 				sendButtonClass={sendButtonClass}
 			/>
-		{:else}
-			<div class="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-				{m.chat_new_chat_loading_defaults()}
+		</div>
+		{#if !form.settingsLoaded}
+			<div class="absolute inset-0 flex items-center justify-center rounded-lg bg-background/95">
+				<div
+					role="status"
+					aria-label={m.chat_new_chat_loading_defaults()}
+					class="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-muted/30 text-muted-foreground"
+				>
+					<Loader2 class="h-5 w-5 animate-spin" />
+				</div>
 			</div>
 		{/if}
 	</div>
