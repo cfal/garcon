@@ -16,7 +16,7 @@
 	import GitCommentModal from './GitCommentModal.svelte';
 	import { GitWorkbenchStore } from '$lib/stores/git-workbench.svelte.js';
 	import type { GitFileReviewData } from '$lib/api/git.js';
-	import { copyTextToClipboard } from '$lib/utils/clipboard';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface GitWorkbenchProps {
 		projectPath: string | null;
@@ -81,7 +81,7 @@
 			await wb.finalizeReviewToAgent(onSendToChat);
 		} else {
 			const message = wb.buildFinalizedReviewMessage();
-			const copied = await copyTextToClipboard(message);
+			const copied = await copyToClipboard(message);
 			if (copied) {
 				wb.reviewComments = [];
 				wb.reviewSummary = '';

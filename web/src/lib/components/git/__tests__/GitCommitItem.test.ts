@@ -3,12 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import GitCommitItem from '../GitCommitItem.svelte';
 import type { GitCommit } from '$lib/api/git';
 
-const { copyTextToClipboard } = vi.hoisted(() => ({
-	copyTextToClipboard: vi.fn(),
+const { copyToClipboard } = vi.hoisted(() => ({
+	copyToClipboard: vi.fn(),
 }));
 
 vi.mock('$lib/utils/clipboard', () => ({
-	copyTextToClipboard,
+	copyToClipboard,
 }));
 
 describe('GitCommitItem', () => {
@@ -22,7 +22,7 @@ describe('GitCommitItem', () => {
 	};
 
 	it('copies full hash when shortened hash is clicked without toggling row expansion', async () => {
-		copyTextToClipboard.mockResolvedValue(true);
+		copyToClipboard.mockResolvedValue(true);
 		const onToggleExpanded = vi.fn();
 
 		render(GitCommitItem, {
@@ -36,13 +36,13 @@ describe('GitCommitItem', () => {
 
 		await fireEvent.click(screen.getByTitle('Copy commit hash'));
 
-		expect(copyTextToClipboard).toHaveBeenCalledWith('abc123def456');
+		expect(copyToClipboard).toHaveBeenCalledWith('abc123def456');
 		expect(onToggleExpanded).not.toHaveBeenCalled();
 		expect(screen.getByTitle('Copied')).toBeTruthy();
 	});
 
 	it('toggles expansion when the row button is clicked', async () => {
-		copyTextToClipboard.mockResolvedValue(true);
+		copyToClipboard.mockResolvedValue(true);
 		const onToggleExpanded = vi.fn();
 
 		render(GitCommitItem, {

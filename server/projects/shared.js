@@ -75,7 +75,7 @@ export async function readJsonlTailLines(filePath, maxBytes = PROJECT_PREVIEW_TA
   }
 }
 
-export function normalizeComparablePath(inputPath) {
+export function normalizePath(inputPath) {
   if (typeof inputPath !== 'string') {
     return '';
   }

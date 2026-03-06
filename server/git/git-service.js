@@ -94,24 +94,24 @@ function stripDiffHeaders(diff) {
   return hunkStart === -1 ? diff : diff.substring(hunkStart + 1);
 }
 
-// Validates that the given path is an accessible git working tree.
-async function validateGitRepository(projectPath) {
+// Asserts that the given path is an accessible git working tree.
+// Throws on failure with a descriptive error message.
+async function assertGitRepository(projectPath) {
   try {
     await fs.access(projectPath);
   } catch {
     throw new Error(`Unable to access project directory: ${projectPath}`);
   }
 
+  let stdout;
   try {
-    const { stdout: insideWorkTreeOutput } = await runGit(projectPath, ['rev-parse', '--is-inside-work-tree']);
-    const isInsideWorkTree = insideWorkTreeOutput.trim() === 'true';
-    if (!isInsideWorkTree) {
-      throw new Error('The target path exists but is not inside a Git working tree.');
-    }
-
-    await runGit(projectPath, ['rev-parse', '--show-toplevel']);
+    ({ stdout } = await runGit(projectPath, ['rev-parse', '--is-inside-work-tree']));
   } catch {
     throw new Error('Git is not initialized in this directory. Initialize a repository with "git init" before using source control actions.');
+  }
+
+  if (stdout.trim() !== 'true') {
+    throw new Error('The target path exists but is not inside a Git working tree.');
   }
 }
 
@@ -576,7 +576,7 @@ function tabDiffArgs(contextLines, file, isUnstage) {
 export function createGitService({ providers, classifyGitError }) {
 
   async function getStatus({ projectPath }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     let branch = 'main';
     let hasCommits = true;
@@ -618,7 +618,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function getDiff({ projectPath, file }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
     const isUntracked = statusOutput.startsWith('??');
@@ -653,7 +653,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function getFileWithDiff({ projectPath, file }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
     const isUntracked = statusOutput.startsWith('??');
@@ -687,7 +687,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function initialCommit({ projectPath }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     try {
       await runGit(projectPath, ['rev-parse', 'HEAD']);
@@ -703,7 +703,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function commit({ projectPath, message, files }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
     for (const file of files) {
       await runGit(projectPath, ['add', '--', file]);
     }
@@ -712,7 +712,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function getBranches({ projectPath }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
     const { stdout } = await runGit(projectPath, ['branch', '-a']);
     const branches = stdout
       .split('\n')
@@ -738,7 +738,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function getCommits({ projectPath, limit }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
     const parsedLimit = Number.parseInt(String(limit), 10);
     const safeLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
       ? Math.min(parsedLimit, 100)
@@ -807,7 +807,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function getRemoteStatus({ projectPath }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const { stdout: currentBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const branch = currentBranch.trim();
@@ -855,7 +855,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function fetch({ projectPath }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const { stdout: fetchBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const branch = fetchBranch.trim();
@@ -873,7 +873,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function pull({ projectPath }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const { stdout: pullBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const branch = pullBranch.trim();
@@ -900,7 +900,7 @@ export function createGitService({ providers, classifyGitError }) {
 
   // Returns list of configured remotes with their fetch URLs.
   async function getRemotes({ projectPath }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const { stdout } = await runGit(projectPath, ['remote', '-v']);
     const seen = new Map();
@@ -916,7 +916,7 @@ export function createGitService({ providers, classifyGitError }) {
 
   // Pushes to a specific remote. Never sets upstream tracking.
   async function push({ projectPath, remote, remoteBranch }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const { stdout: headBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const branch = headBranch.trim();
@@ -933,7 +933,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function discard({ projectPath, file }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
     if (!statusOutput.trim()) {
@@ -959,7 +959,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function deleteUntracked({ projectPath, file }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
     if (!statusOutput.trim()) {
@@ -983,7 +983,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function getFileReviewData({ projectPath, file, mode, context }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
     const statusCode = statusOutput.substring(0, 2);
@@ -1102,7 +1102,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function getChangesTree({ projectPath }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     let hasCommits = true;
     try {
@@ -1247,7 +1247,7 @@ export function createGitService({ providers, classifyGitError }) {
   // index entry first so `git diff` can produce a usable patch. On
   // failure, the intent-to-add is rolled back.
   async function stageSelection({ projectPath, file, mode, selection, contextLines = 5 }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const reverse = mode === 'unstage';
 
@@ -1316,7 +1316,7 @@ export function createGitService({ providers, classifyGitError }) {
   // to the diff the frontend tab displayed (unstaged tab = `git diff`,
   // staged tab = `git diff --cached`).
   async function stageHunk({ projectPath, file, mode, hunkIndex, contextLines = 5 }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const isUnstage = mode === 'unstage';
 
@@ -1381,7 +1381,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function getWorktrees({ projectPath }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const { stdout } = await runGit(projectPath, ['worktree', 'list', '--porcelain']);
     const worktrees = [];
@@ -1424,7 +1424,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function createWorktree({ projectPath, baseRef, worktreePath, branch, detach }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const args = ['worktree', 'add'];
     if (detach) {
@@ -1440,7 +1440,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function removeWorktree({ projectPath, worktreePath, force }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     const args = ['worktree', 'remove'];
     if (force) args.push('--force');
@@ -1451,13 +1451,13 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function commitIndex({ projectPath, message }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
     const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
     return { success: true, output: stdout };
   }
 
   async function stageFile({ projectPath, file, mode }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
     resolvePathWithinProject(projectPath, file);
 
     if (mode === 'stage') {
@@ -1469,7 +1469,7 @@ export function createGitService({ providers, classifyGitError }) {
   }
 
   async function revertLastCommit({ projectPath, strategy }) {
-    await validateGitRepository(projectPath);
+    await assertGitRepository(projectPath);
 
     try {
       await runGit(projectPath, ['rev-parse', 'HEAD']);

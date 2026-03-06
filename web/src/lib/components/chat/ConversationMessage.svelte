@@ -29,7 +29,7 @@
 		ContextMenuItem
 	} from '$lib/components/ui/context-menu';
 	import * as m from '$lib/paraglide/messages.js';
-	import { copyTextToClipboard } from '$lib/utils/clipboard';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface PermissionTerminal {
 		state: 'resolved' | 'cancelled';
@@ -134,7 +134,7 @@
 
 	async function copyText() {
 		if (!messageMenuText) return;
-		await copyTextToClipboard(messageMenuText);
+		await copyToClipboard(messageMenuText);
 	}
 
 	function sendToNewSession() {

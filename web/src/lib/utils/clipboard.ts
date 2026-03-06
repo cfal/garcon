@@ -6,7 +6,6 @@ function copyWithLegacyExecCommand(
 	text: string,
 	container: Element = document.body,
 ): boolean {
-	if (!text || typeof document === 'undefined') return false;
 	const textarea = document.createElement('textarea');
 	const previouslyFocused = document.activeElement as HTMLElement | null;
 	textarea.value = text;
@@ -34,14 +33,14 @@ function copyWithLegacyExecCommand(
 /** Copies text with the async Clipboard API, falling back to execCommand.
  *  Callers inside focus-trapped contexts (e.g. dialogs) should pass their
  *  container so the legacy fallback textarea can receive focus. */
-export async function copyTextToClipboard(
+export async function copyToClipboard(
 	text: string,
 	container?: Element,
 ): Promise<boolean> {
 	if (!text) return false;
 
 	// Prefer the modern async Clipboard API.
-	if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+	if (navigator.clipboard?.writeText) {
 		try {
 			await navigator.clipboard.writeText(text);
 			return true;
@@ -51,5 +50,5 @@ export async function copyTextToClipboard(
 	}
 
 	// Legacy fallback for runtimes without the async API.
-	return copyWithLegacyExecCommand(text, container ?? document.body);
+	return copyWithLegacyExecCommand(text, container);
 }

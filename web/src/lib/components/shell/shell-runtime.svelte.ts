@@ -10,7 +10,7 @@ import { getAuthToken } from '$lib/api/client';
 import { attachShellSocket, sendShellMessage } from '$lib/ws/shell-transport';
 import type { ShellServerMessage } from '$lib/types/shell';
 import * as m from '$lib/paraglide/messages.js';
-import { copyTextToClipboard } from '$lib/utils/clipboard';
+import { copyToClipboard } from '$lib/utils/clipboard';
 
 const VSCODE_DARK_THEME: import('@xterm/xterm').ITheme = {
 	background: '#1e1e1e',
@@ -133,7 +133,7 @@ export class ShellRuntime {
 			) {
 				event.preventDefault();
 				event.stopPropagation();
-				void copyTextToClipboard(terminal.getSelection());
+				void copyToClipboard(terminal.getSelection());
 				return false;
 			}
 
