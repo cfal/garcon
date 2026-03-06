@@ -44,20 +44,19 @@ export function getTokenFromRequest(request) {
   return null;
 }
 
-// Verifies the JWT token. Single-user system so we only check token
-// validity, not user lookup. Returns decoded payload as user.
+// Verifies JWT token presence/validity for protected HTTP routes.
 export async function authenticateHttpRequest(request) {
   const token = getTokenFromRequest(request);
   if (!token) {
-    return { user: null, errorResponse: Response.json({ error: 'Access denied. No token provided.' }, { status: 401 }) };
+    return { errorResponse: Response.json({ error: 'Access denied. No token provided.' }, { status: 401 }) };
   }
 
   try {
     const secret = await resolveSecret();
-    const decoded = jwt.verify(token, secret);
-    return { user: { username: decoded.username }, errorResponse: null };
+    jwt.verify(token, secret);
+    return { errorResponse: null };
   } catch (error) {
     console.error('Token verification error:', error);
-    return { user: null, errorResponse: Response.json({ error: 'Invalid token' }, { status: 403 }) };
+    return { errorResponse: Response.json({ error: 'Invalid token' }, { status: 403 }) };
   }
 }

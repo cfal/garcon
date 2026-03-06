@@ -4,7 +4,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { getAuth } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import MessageSquare from '@lucide/svelte/icons/message-square';
+	import Shield from '@lucide/svelte/icons/shield';
 
 	const auth = getAuth();
 
@@ -33,24 +33,27 @@
 	}
 </script>
 
-<div class="min-h-dvh bg-background flex items-center justify-center p-4">
-	<div class="w-full max-w-md">
-		<div class="bg-card rounded-lg shadow-lg border border-border p-8 space-y-6">
-			<div class="text-center">
-				<div class="flex justify-center mb-4">
-					<div
-						class="w-16 h-16 bg-primary rounded-lg flex items-center justify-center shadow-sm"
-					>
-						<MessageSquare class="w-8 h-8 text-primary-foreground" />
-					</div>
-				</div>
-				<h1 class="text-2xl font-bold text-foreground">{m.auth_login_title()}</h1>
-				<p class="text-muted-foreground mt-2">{m.auth_login_description()}</p>
-			</div>
+<div class="relative flex min-h-dvh items-center justify-center bg-background px-4 py-8">
+	<div
+		class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,hsl(var(--primary)/0.08),transparent_42%)]"
+	></div>
 
+	<div class="relative w-full max-w-lg overflow-hidden rounded-lg border border-border bg-background shadow-lg">
+		<div class="border-b border-border px-6 py-4">
+			<div class="inline-flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+				<Shield class="size-3.5" />
+				Authentication
+			</div>
+			<h1 class="mt-3 text-xl font-semibold text-foreground">{m.auth_login_title()}</h1>
+			<p class="mt-1 text-sm text-muted-foreground">
+				This server is configured for single-user password protection.
+			</p>
+		</div>
+
+		<div class="px-6 py-5">
 			<form onsubmit={handleSubmit} class="space-y-4">
 				<div>
-					<label for="username" class="block text-sm font-medium text-foreground mb-1">
+					<label for="username" class="mb-1 block text-sm font-medium text-foreground">
 						{m.auth_login_username()}
 					</label>
 					<Input
@@ -64,7 +67,7 @@
 				</div>
 
 				<div>
-					<label for="password" class="block text-sm font-medium text-foreground mb-1">
+					<label for="password" class="mb-1 block text-sm font-medium text-foreground">
 						{m.auth_login_password()}
 					</label>
 					<Input
@@ -78,9 +81,7 @@
 				</div>
 
 				{#if error}
-					<div
-						class="p-3 bg-status-error border border-status-error-border rounded-md"
-					>
+					<div class="rounded-md border border-status-error-border bg-status-error p-3">
 						<p class="text-sm text-status-error-foreground">{error}</p>
 					</div>
 				{/if}
@@ -89,12 +90,6 @@
 					{isSubmitting ? m.auth_login_loading() : m.auth_login_submit()}
 				</Button>
 			</form>
-
-			<div class="text-center">
-				<p class="text-sm text-muted-foreground">
-					{m.auth_login_description()}
-				</p>
-			</div>
 		</div>
 	</div>
 </div>

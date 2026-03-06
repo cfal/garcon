@@ -3,15 +3,25 @@ import { generateToken } from '../middleware/auth.js';
 import { parseJsonBody } from '../lib/http-native.js';
 import { createRateLimiter } from '../lib/rate-limit.js';
 import { markRouteNoAuth } from '../lib/route-auth.js';
+import { isAuthDisabled } from '../config.js';
 
 const loginLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
 
 async function noauthGetStatus() {
   try {
+    const authDisabled = isAuthDisabled();
+    if (authDisabled) {
+      return Response.json({
+        needsSetup: false,
+        isAuthenticated: true,
+        authDisabled: true,
+      });
+    }
     const setupNeeded = await needsSetup();
     return Response.json({
       needsSetup: setupNeeded,
       isAuthenticated: false,
+      authDisabled: false,
     });
   } catch (error) {
     console.error('Auth status error:', error);
@@ -21,6 +31,9 @@ async function noauthGetStatus() {
 
 async function noauthPostRegister(request) {
   try {
+    if (isAuthDisabled()) {
+      return Response.json({ error: 'Authentication is disabled by server configuration' }, { status: 403 });
+    }
     const { username, password } = await parseJsonBody(request);
 
     if (!username || !password) {
@@ -41,7 +54,7 @@ async function noauthPostRegister(request) {
 
     return Response.json({
       success: true,
-      user: { username: user.username },
+      user: { id: user.username, username: user.username },
       token,
     });
   } catch (error) {
@@ -58,6 +71,9 @@ async function noauthPostLogin(request) {
   if (limited) return limited;
 
   try {
+    if (isAuthDisabled()) {
+      return Response.json({ error: 'Authentication is disabled by server configuration' }, { status: 403 });
+    }
     const { username, password } = await parseJsonBody(request);
     if (!username || !password) {
       return Response.json({ error: 'Both username and password are required' }, { status: 400 });
@@ -76,7 +92,7 @@ async function noauthPostLogin(request) {
     const token = await generateToken(user);
     return Response.json({
       success: true,
-      user: { username: user.username },
+      user: { id: user.username, username: user.username },
       token,
     });
   } catch (error) {
@@ -89,11 +105,15 @@ async function noauthPostLogin(request) {
 }
 
 async function getAuthUser() {
+  if (isAuthDisabled()) {
+    return Response.json({ user: { id: 'local', username: 'local' } });
+  }
+
   const user = await getUser();
   if (!user) {
     return Response.json({ error: 'No user found' }, { status: 404 });
   }
-  return Response.json({ user: { username: user.username } });
+  return Response.json({ user: { id: user.username, username: user.username } });
 }
 
 // No-op: JWTs are stateless so there's no server-side session to invalidate.

@@ -6,6 +6,7 @@ import { apiGet, apiPost, ApiError } from './client.js';
 export interface AuthStatusResponse {
 	needsSetup: boolean;
 	isAuthenticated: boolean;
+	authDisabled: boolean;
 }
 
 export interface AuthUser {
