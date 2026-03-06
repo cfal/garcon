@@ -1,4 +1,5 @@
 import { authenticateHttpRequest } from './http-native.js';
+import { isAuthDisabled } from '../config.js';
 
 const noAuthRouteMarker = Symbol('no-auth-route');
 
@@ -22,6 +23,13 @@ export function isNoAuthHandler(handler) {
 
 // Wraps one route handler with URL parsing and JWT auth enforcement.
 export function wrapRoute(handler, routePath, method) {
+  if (isAuthDisabled()) {
+    return async (req) => {
+      const url = new URL(req.url);
+      return (await handler(req, url)) || new Response('Not found', { status: 404 });
+    };
+  }
+
   if (isNoAuthHandler(handler)) {
     console.debug(`Skipping auth wrapping for ${method} ${routePath}`);
     return async (req) => {
@@ -32,9 +40,9 @@ export function wrapRoute(handler, routePath, method) {
 
   return async (req) => {
     const url = new URL(req.url);
-    const { user, errorResponse } = await authenticateHttpRequest(req);
+    const { errorResponse } = await authenticateHttpRequest(req);
     if (errorResponse) return errorResponse;
-    return (await handler(req, url, user)) || new Response('Not found', { status: 404 });
+    return (await handler(req, url)) || new Response('Not found', { status: 404 });
   };
 }
 

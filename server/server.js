@@ -12,6 +12,7 @@ import {
   getWsMaxPayloadLength,
   getHttpIdleTimeoutSeconds,
   getWorkspaceDir,
+  isAuthDisabled,
 } from './config.js';
 import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/route-auth.js';
@@ -105,6 +106,7 @@ export async function startServer() {
 
     const listenPort = getPort();
     const bindAddress = getBindAddress();
+    const authDisabled = isAuthDisabled();
 
     const server = Bun.serve({
       port: listenPort,
@@ -131,15 +133,14 @@ export async function startServer() {
           }
 
           const token = url.searchParams.get('token') || request.headers.get('authorization')?.split(' ')[1];
-          const user = await authenticateWebSocket(token);
-          if (!user) {
+          const isAuthorized = authDisabled ? true : await authenticateWebSocket(token);
+          if (!isAuthorized) {
             return new Response('Unauthorized', { status: 401 });
           }
 
           const upgraded = server.upgrade(request, {
             data: {
               pathname,
-              user,
             },
           });
           if (!upgraded) {
@@ -258,6 +259,10 @@ export async function startServer() {
 
     console.log('');
     console.log(`Started at http://${bindAddress}:${listenPort}`);
+    console.log(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
+    if (authDisabled && bindAddress !== '127.0.0.1' && bindAddress !== 'localhost') {
+      console.warn('WARNING: authentication is disabled while bound to a non-localhost address.');
+    }
     console.log('');
   } catch (error) {
     console.error('Failed to start server:', error);

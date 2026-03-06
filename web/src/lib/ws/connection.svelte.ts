@@ -30,13 +30,15 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 
-function buildWebSocketUrl(token: string): string {
+function buildWebSocketUrl(token: string | null): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   // We append a timestamp to the URL to bust the browser cache.
   // This is specifically required for mobile Safari, which can otherwise aggressively
   // cache the 101 Switching Protocols response and refuse to establish a new WebSocket
   // connection if the tab was suspended or encountered a momentary connection drop.
-  return `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}&v=${Date.now()}`;
+  const params = new URLSearchParams({ v: String(Date.now()) });
+  if (token) params.set('token', token);
+  return `${protocol}//${window.location.host}/ws?${params.toString()}`;
 }
 
 // crypto.randomUUID() is only available when window.isSecureContext is true,
@@ -61,6 +63,7 @@ export class WsConnection {
   #pendingRequests = new Map<string, PendingRequest>();
   #connectionWaiters = new Set<{ resolve: () => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   #visibilityHandler: (() => void) | null = null;
+  #authDisabled = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -70,17 +73,18 @@ export class WsConnection {
           this.#reconnectAttempts = 0;
           this.#clearReconnectTimeout();
           const token = getAuthToken();
-          if (token) this.connect(token);
+          this.connect(token, this.#authDisabled);
         }
       };
       window.addEventListener('visibilitychange', this.#visibilityHandler);
     }
   }
 
-  connect(token: string | null): void {
+  connect(token: string | null, authDisabled = false): void {
     if (this.#destroyed) return;
+    this.#authDisabled = authDisabled;
 
-    if (!token) {
+    if (!token && !authDisabled) {
       console.warn('No authentication token found for WebSocket connection');
       return;
     }
@@ -295,7 +299,7 @@ export class WsConnection {
     this.#reconnectTimeout = setTimeout(() => {
       if (this.#destroyed) return;
       const token = getAuthToken();
-      this.connect(token);
+      this.connect(token, this.#authDisabled);
     }, delay);
   }
 

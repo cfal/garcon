@@ -1,9 +1,13 @@
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
 
-const authenticateHttpRequest = mock(() => Promise.resolve({ user: { username: 'alice' }, errorResponse: null }));
+const authenticateHttpRequest = mock(() => Promise.resolve({ errorResponse: null }));
+const isAuthDisabled = mock(() => false);
 
 mock.module('../http-native.js', () => ({
   authenticateHttpRequest,
+}));
+mock.module('../../config.js', () => ({
+  isAuthDisabled,
 }));
 
 import { markRouteNoAuth, isNoAuthHandler, wrapRoute, wrapRoutes } from '../route-auth.js';
@@ -11,16 +15,18 @@ import { markRouteNoAuth, isNoAuthHandler, wrapRoute, wrapRoutes } from '../rout
 describe('route auth wrapping', () => {
   beforeEach(() => {
     authenticateHttpRequest.mockClear();
+    isAuthDisabled.mockReset();
+    isAuthDisabled.mockReturnValue(false);
   });
 
   it('requires auth for unmarked handlers', async () => {
-    const handler = mock((_req, _url, user) => Response.json({ username: user.username }));
+    const handler = mock(() => Response.json({ ok: true }));
     const wrapped = wrapRoute(handler, '/api/private', 'GET');
     const response = await wrapped(new Request('http://localhost/api/private'));
     const payload = await response.json();
 
     expect(authenticateHttpRequest).toHaveBeenCalledTimes(1);
-    expect(payload.username).toBe('alice');
+    expect(payload.ok).toBe(true);
   });
 
   it('bypasses auth for marked handlers', async () => {
@@ -34,15 +40,15 @@ describe('route auth wrapping', () => {
   });
 
   it('does not bypass auth based on function name', async () => {
-    const noauthByNameOnly = function noauthAccidentalByName(_req, _url, user) {
-      return Response.json({ username: user.username });
+    const noauthByNameOnly = function noauthAccidentalByName() {
+      return Response.json({ ok: true });
     };
     const wrapped = wrapRoute(noauthByNameOnly, '/api/private', 'GET');
     const response = await wrapped(new Request('http://localhost/api/private'));
     const payload = await response.json();
 
     expect(authenticateHttpRequest).toHaveBeenCalledTimes(1);
-    expect(payload.username).toBe('alice');
+    expect(payload.ok).toBe(true);
   });
 
   it('marks handlers with explicit no-auth metadata', () => {
@@ -55,7 +61,7 @@ describe('route auth wrapping', () => {
   it('wrapRoutes applies wrapping to each route method', async () => {
     const rawRoutes = {
       '/api/public': { GET: markRouteNoAuth(() => Response.json({ public: true })) },
-      '/api/private': { POST: (_req, _url, user) => Response.json({ username: user.username }) },
+      '/api/private': { POST: () => Response.json({ private: true }) },
     };
     const wrappedRoutes = wrapRoutes(rawRoutes);
 
@@ -63,7 +69,18 @@ describe('route auth wrapping', () => {
     const privateResponse = await wrappedRoutes['/api/private'].POST(new Request('http://localhost/api/private'));
 
     expect((await publicResponse.json()).public).toBe(true);
-    expect((await privateResponse.json()).username).toBe('alice');
+    expect((await privateResponse.json()).private).toBe(true);
     expect(authenticateHttpRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('bypasses auth for all handlers when auth is globally disabled', async () => {
+    isAuthDisabled.mockReturnValue(true);
+    const handler = mock(() => Response.json({ ok: true }));
+    const wrapped = wrapRoute(handler, '/api/private', 'GET');
+    const response = await wrapped(new Request('http://localhost/api/private'));
+    const payload = await response.json();
+
+    expect(authenticateHttpRequest).not.toHaveBeenCalled();
+    expect(payload.ok).toBe(true);
   });
 });

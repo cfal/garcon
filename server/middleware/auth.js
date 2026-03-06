@@ -23,14 +23,15 @@ export async function generateToken(user) {
 
 export async function authenticateWebSocket(token) {
   if (!token) {
-    return null;
+    return false;
   }
 
   try {
     const secret = await resolveSecret();
-    return jwt.verify(token, secret);
+    jwt.verify(token, secret);
+    return true;
   } catch (error) {
     console.error('WebSocket token verification error:', error);
-    return null;
+    return false;
   }
 }
