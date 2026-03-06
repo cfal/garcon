@@ -70,7 +70,12 @@ export class ProviderRegistry {
     }
 
     const { provider, projectPath } = entry;
-    const mergedOpts = { ...opts, model: entry.model || undefined };
+    const mergedOpts = {
+      ...opts,
+      model: opts.model ?? entry.model ?? undefined,
+      permissionMode: opts.permissionMode ?? entry.permissionMode ?? undefined,
+      thinkingMode: opts.thinkingMode ?? entry.thinkingMode ?? undefined,
+    };
 
     if (provider === 'claude') {
       const providerSessionId = crypto.randomUUID();
@@ -121,12 +126,17 @@ export class ProviderRegistry {
       throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
     }
 
-    const { provider, model, providerSessionId } = entry;
+    const { provider, model, permissionMode, thinkingMode, providerSessionId } = entry;
     if (!providerSessionId) {
       throw new Error(`Session missing provider session ID: ${chatId}`);
     }
 
-    const mergedOpts = { ...opts, model };
+    const mergedOpts = {
+      ...opts,
+      model: opts.model ?? model ?? undefined,
+      permissionMode: opts.permissionMode ?? permissionMode ?? undefined,
+      thinkingMode: opts.thinkingMode ?? thinkingMode ?? undefined,
+    };
 
     if (provider === 'claude') {
       await this.#claude.runClaudeTurn(command, { ...mergedOpts, sessionId: providerSessionId, chatId });

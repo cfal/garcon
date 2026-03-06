@@ -25,14 +25,16 @@ describe('NewChatForm', () => {
 		const pending = deferred<Awaited<ReturnType<typeof settingsApi.getSettings>>>();
 		vi.mocked(settingsApi.getSettings).mockReturnValueOnce(pending.promise);
 
-		render(NewChatFormTestHarness);
+		const { container } = render(NewChatFormTestHarness);
 
 		const projectPathInput = screen.getByLabelText('Project Path');
 		const messageInput = screen.getByPlaceholderText('How can I help you today?');
+		const hiddenFormContainer = container.querySelector('.space-y-6[aria-hidden="true"]');
 
 		expect(screen.getByRole('status', { name: 'Loading chat defaults...' })).toBeTruthy();
-		expect(window.getComputedStyle(projectPathInput).visibility).toBe('hidden');
-		expect(window.getComputedStyle(messageInput).visibility).toBe('hidden');
+		expect(hiddenFormContainer).toBeTruthy();
+		expect(hiddenFormContainer?.contains(projectPathInput)).toBe(true);
+		expect(hiddenFormContainer?.contains(messageInput)).toBe(true);
 
 		pending.resolve({
 			ui: {},
@@ -49,7 +51,8 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
-		expect(window.getComputedStyle(projectPathInput).visibility).toBe('visible');
-		expect(window.getComputedStyle(messageInput).visibility).toBe('visible');
+		expect(container.querySelector('.space-y-6[aria-hidden="true"]')).toBeNull();
+		expect(container.querySelector('.space-y-6[aria-hidden="false"]')?.contains(projectPathInput)).toBe(true);
+		expect(container.querySelector('.space-y-6[aria-hidden="false"]')?.contains(messageInput)).toBe(true);
 	});
 });
