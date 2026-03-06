@@ -28,11 +28,12 @@ export default function createWorkspaceRoutes(settings, providers) {
 
   async function getAppSettings() {
     try {
-      const [ui, paths, pinnedChatIds, lastProvider, lastModel, lastPermissionMode, lastThinkingMode, authByProvider, opencodeModels] = await Promise.all([
+      const [ui, paths, pinnedChatIds, lastProvider, lastProjectPath, lastModel, lastPermissionMode, lastThinkingMode, authByProvider, opencodeModels] = await Promise.all([
         settings.getUiSettings(),
         settings.getPathSettings(),
         settings.getPinnedChatIds(),
         settings.getLastProvider(),
+        settings.getLastProjectPath(),
         settings.getLastModel(),
         settings.getLastPermissionMode(),
         settings.getLastThinkingMode(),
@@ -76,6 +77,7 @@ export default function createWorkspaceRoutes(settings, providers) {
         paths,
         pinnedChatIds,
         lastProvider,
+        lastProjectPath,
         lastModel,
         lastPermissionMode,
         lastThinkingMode,

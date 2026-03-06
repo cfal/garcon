@@ -32,10 +32,10 @@ export interface AppSettings {
 	paths: {
 		pinnedProjectPaths?: string[];
 		browseStartPath?: string;
-		lastProjectPath?: string;
 	};
 	pinnedChatIds: string[];
 	lastProvider: ChatSession['provider'];
+	lastProjectPath: string;
 	lastModel: string;
 	lastPermissionMode: string;
 	lastThinkingMode: string;

@@ -351,13 +351,6 @@ export class NewChatFormState {
 		}
 		this.error = null;
 
-		// Persists the last-used path. Startup settings now persist via chat start.
-		settingsApi.updateSettings({
-			paths: { lastProjectPath: this.trimmedPath }
-		}).catch((err) => {
-			console.warn('[NewChatFormState] Failed to persist settings', err);
-		});
-
 		return {
 			provider: this.provider,
 			projectPath: this.trimmedPath,
@@ -419,22 +412,21 @@ export class NewChatFormState {
 			this.#appShell.projectBasePath = settingsData.projectBasePath;
 		}
 
-		const paths = settingsData.paths as Record<string, unknown> | undefined;
-		if (paths) {
-			const pinned = Array.isArray(paths.pinnedProjectPaths)
-				? (paths.pinnedProjectPaths as string[])
-				: [];
-			const browse =
-				typeof paths.browseStartPath === 'string' ? paths.browseStartPath : '';
-			const lastPath =
-				typeof paths.lastProjectPath === 'string' ? paths.lastProjectPath : '';
-			this.pinnedProjectPaths = pinned;
-			this.browseStartPath = browse;
-			const defaultPath = lastPath || browse;
-			if (defaultPath && !this.projectPath) {
-				this.projectPath = defaultPath;
+			const paths = settingsData.paths as Record<string, unknown> | undefined;
+			if (paths) {
+				const pinned = Array.isArray(paths.pinnedProjectPaths)
+					? (paths.pinnedProjectPaths as string[])
+					: [];
+				const browse =
+					typeof paths.browseStartPath === 'string' ? paths.browseStartPath : '';
+				this.pinnedProjectPaths = pinned;
+				this.browseStartPath = browse;
+				const defaultPath =
+					(typeof settingsData.lastProjectPath === 'string' ? settingsData.lastProjectPath : '') || browse;
+				if (defaultPath && !this.projectPath) {
+					this.projectPath = defaultPath;
+				}
 			}
-		}
 
 		if (!this.projectPath) {
 			this.projectPath = this.projectBasePath;

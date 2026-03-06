@@ -240,6 +240,7 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
 
       await settings.setLastChatDefaults({
         provider,
+        projectPath,
         model,
         permissionMode,
         thinkingMode,

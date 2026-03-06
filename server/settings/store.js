@@ -17,6 +17,7 @@ function createEmpty() {
     normalChatIds: [],
     archivedChatIds: [],
     lastProvider: 'claude',
+    lastProjectPath: '',
     lastModel: '',
     lastPermissionMode: 'default',
     lastThinkingMode: 'none',
@@ -32,6 +33,7 @@ function sanitize(parsed) {
     normalChatIds: Array.isArray(parsed.normalChatIds) ? parsed.normalChatIds : [],
     archivedChatIds: Array.isArray(parsed.archivedChatIds) ? parsed.archivedChatIds : [],
     lastProvider: typeof parsed.lastProvider === 'string' ? parsed.lastProvider : 'claude',
+    lastProjectPath: typeof parsed.lastProjectPath === 'string' ? parsed.lastProjectPath : '',
     lastModel: typeof parsed.lastModel === 'string' ? parsed.lastModel : '',
     lastPermissionMode: typeof parsed.lastPermissionMode === 'string' ? parsed.lastPermissionMode : 'default',
     lastThinkingMode: typeof parsed.lastThinkingMode === 'string' ? parsed.lastThinkingMode : 'none',
@@ -324,6 +326,11 @@ export class SettingsStore extends EventEmitter {
     return settings.lastProvider || 'claude';
   }
 
+  async getLastProjectPath() {
+    const settings = await this.loadSettings();
+    return settings.lastProjectPath || '';
+  }
+
   async getLastModel() {
     const settings = await this.loadSettings();
     return settings.lastModel || '';
@@ -335,6 +342,9 @@ export class SettingsStore extends EventEmitter {
       settings.lastProvider = typeof defaults?.provider === 'string'
         ? defaults.provider
         : (settings.lastProvider || 'claude');
+      settings.lastProjectPath = typeof defaults?.projectPath === 'string'
+        ? defaults.projectPath
+        : (settings.lastProjectPath || '');
       settings.lastModel = typeof defaults?.model === 'string'
         ? defaults.model
         : (settings.lastModel || '');
