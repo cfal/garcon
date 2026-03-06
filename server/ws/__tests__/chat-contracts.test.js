@@ -1,14 +1,10 @@
 // Contract tests for the chat WebSocket message handler.
 // Verifies dispatch routing and response shapes for all message types.
 // Dependencies injected via constructor are mocked as plain objects;
-// module-level imports (sendWebSocketJson, resolveMissingNativePath) still
-// use mock.module() because chat.js imports them at the top level.
+// sendWebSocketJson remains a module mock because chat.js imports it
+// at the top level.
 
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
-
-mock.module('../../chats/resolve-native-path.js', () => ({
-  resolveMissingNativePath: mock(() => Promise.resolve(null)),
-}));
 
 mock.module('../utils.js', () => ({
   sendWebSocketJson: mock(() => undefined),
@@ -16,7 +12,6 @@ mock.module('../utils.js', () => ({
 
 import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
-import { resolveMissingNativePath } from '../../chats/resolve-native-path.js';
 
 const mockProviders = {
   getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [] })),
@@ -65,7 +60,7 @@ const injectedMocks = [
   mockHistoryCache.getPaginatedMessages,
 ];
 
-const moduleMocks = [sendWebSocketJson, resolveMissingNativePath];
+const moduleMocks = [sendWebSocketJson];
 
 const chatHandlerInstance = new ChatHandler(
   mockProviders, mockQueue, mockHistoryCache, mockRegistry,
@@ -420,47 +415,6 @@ describe('chat WebSocket handler', () => {
       });
       const payload = lastSentPayload();
       expect(payload.clientRequestId).toBe('unique-req-id');
-    });
-
-    it('resolves missing nativePath before loading', async () => {
-      mockRegistry.getChat.mockReturnValue({
-        provider: 'claude',
-        nativePath: null,
-        providerSessionId: 'session-1',
-        projectPath: '/home/user/project',
-      });
-      resolveMissingNativePath.mockResolvedValue('/resolved/path.jsonl');
-      await chatHandler.message(ws, {
-        type: 'chat-log-query',
-        chatId: '123',
-        clientRequestId: 'req-resolve',
-      });
-      expect(resolveMissingNativePath).toHaveBeenCalled();
-      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { nativePath: '/resolved/path.jsonl' });
-      expect(mockHistoryCache.ensureLoaded).toHaveBeenCalledWith('123');
-    });
-
-    it('returns client-request-error when nativePath cannot be resolved', async () => {
-      mockRegistry.getChat.mockReturnValue({
-        provider: 'claude',
-        nativePath: null,
-        providerSessionId: 'session-1',
-        projectPath: '/home/user/project',
-      });
-      resolveMissingNativePath.mockResolvedValue(null);
-      await chatHandler.message(ws, {
-        type: 'chat-log-query',
-        chatId: '123',
-        clientRequestId: 'req-no-resolve',
-      });
-      const payload = lastSentPayload();
-      expect(payload).toMatchObject({
-        type: 'client-request-error',
-        clientRequestId: 'req-no-resolve',
-        chatId: '123',
-        code: 'NATIVE_PATH_UNRESOLVED',
-      });
-      expect(mockHistoryCache.ensureLoaded).not.toHaveBeenCalled();
     });
 
     it('silently ignores requests without clientRequestId', async () => {

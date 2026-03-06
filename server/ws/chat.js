@@ -26,7 +26,6 @@ import {
   QueueResumeRequest,
   QueueQueryRequest,
 } from '../../common/ws-requests.ts';
-import { resolveMissingNativePath } from '../chats/resolve-native-path.js';
 
 const PERMISSION_DEDUP_TTL = 30_000;
 
@@ -126,21 +125,6 @@ export class ChatHandler {
           retryable: false, chatId,
         });
         return;
-      }
-
-      if (!session.nativePath) {
-        const resolvedPath = await resolveMissingNativePath(session);
-        if (!resolvedPath) {
-          this.#sendRequestError(writer, {
-            clientRequestId, requestType,
-            code: 'NATIVE_PATH_UNRESOLVED',
-            message: `Could not resolve native path for chat ${chatId}`,
-            retryable: true, chatId,
-          });
-          return;
-        }
-        session.nativePath = resolvedPath;
-        await this.#registry.updateChat(chatId, { nativePath: resolvedPath });
       }
 
       const limit = parseInt(String(data.limit || '20'), 10);

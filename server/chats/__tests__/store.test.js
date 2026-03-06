@@ -148,4 +148,63 @@ describe('ChatRegistry', () => {
       expect(Object.keys(fresh.listAllChats())).toEqual([]);
     });
   });
+
+  describe('reconcileSessions', () => {
+    it('discards chats missing providerSessionId', async () => {
+      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+
+      const changed = await registry.reconcileSessions(async () => '/should-not-be-used.jsonl');
+
+      expect(changed).toBe(true);
+      expect(registry.getChat('c1')).toBeNull();
+    });
+
+    it('repairs missing nativePath when resolver succeeds', async () => {
+      registry.addChat({
+        id: 'c1',
+        provider: 'claude',
+        model: 'opus',
+        projectPath: '/p',
+        providerSessionId: 'ps1',
+        nativePath: null,
+      });
+
+      const changed = await registry.reconcileSessions(async () => '/resolved/path.jsonl');
+
+      expect(changed).toBe(true);
+      expect(registry.getChat('c1')?.nativePath).toBe('/resolved/path.jsonl');
+    });
+
+    it('discards chats when nativePath reconciliation fails', async () => {
+      registry.addChat({
+        id: 'c1',
+        provider: 'claude',
+        model: 'opus',
+        projectPath: '/p',
+        providerSessionId: 'ps1',
+        nativePath: null,
+      });
+
+      const changed = await registry.reconcileSessions(async () => null);
+
+      expect(changed).toBe(true);
+      expect(registry.getChat('c1')).toBeNull();
+    });
+
+    it('returns false when registry is already consistent', async () => {
+      registry.addChat({
+        id: 'c1',
+        provider: 'claude',
+        model: 'opus',
+        projectPath: '/p',
+        providerSessionId: 'ps1',
+        nativePath: '/tmp/a.jsonl',
+      });
+
+      const changed = await registry.reconcileSessions(async () => '/resolved/path.jsonl');
+
+      expect(changed).toBe(false);
+      expect(registry.getChat('c1')?.nativePath).toBe('/tmp/a.jsonl');
+    });
+  });
 });

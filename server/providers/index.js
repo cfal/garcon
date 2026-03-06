@@ -6,7 +6,7 @@
 import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
-import { findCodexSessionFileBySessionId, getCodexSessionMeta } from '../projects/codex.js';
+import { findCodexSessionFileBySessionId } from '../projects/codex.js';
 import { runSingleQuery as runSingleQueryClaude } from './claude-cli.js';
 import { runSingleQuery as runSingleQueryCodex } from './codex.js';
 import { getClaudeAuthStatus } from './claude-auth.js';
@@ -32,29 +32,6 @@ function resolveClaudeNativePath(projectPath, providerSessionId) {
     projectName,
     `${providerSessionId}.jsonl`,
   );
-}
-
-// Recovers missing providerSessionId for legacy registry entries.
-async function recoverProviderSessionId(entry) {
-  if (!entry?.nativePath) return null;
-
-  if (entry.provider === 'claude') {
-    return path.basename(entry.nativePath, '.jsonl') || null;
-  }
-
-  if (entry.provider === 'opencode') {
-    if (entry.nativePath.startsWith('opencode:')) {
-      return entry.nativePath.slice('opencode:'.length) || null;
-    }
-    return null;
-  }
-
-  if (entry.provider === 'codex') {
-    const meta = await getCodexSessionMeta(entry.nativePath).catch(() => null);
-    return meta?.id || null;
-  }
-
-  return null;
 }
 
 async function getAllProviderAuthStatus(opencode) {
@@ -351,4 +328,4 @@ export class ProviderRegistry {
   }
 }
 
-export { encodeProjectPath, recoverProviderSessionId };
+export { encodeProjectPath };

@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import path from 'path';
 import { promises as fs } from 'fs';
-import { resolveMissingNativePath } from './resolve-native-path.js';
 import { supportsFork } from '../../common/providers.ts';
 
 function escapeRegExp(input) {
@@ -46,11 +45,7 @@ export async function forkChatFileCopy({
 
   let sourceNativePath = sourceSession.nativePath || null;
   if (!sourceNativePath) {
-    sourceNativePath = await resolveMissingNativePath(sourceSession);
-    if (!sourceNativePath) {
-      throw new Error(`Source native path unavailable for chat ${sourceChatId}`);
-    }
-    registry.updateChat(sourceChatId, { nativePath: sourceNativePath });
+    throw new Error(`Source native path unavailable for chat ${sourceChatId}`);
   }
 
   const sourceProviderSessionId = sourceSession.providerSessionId;
