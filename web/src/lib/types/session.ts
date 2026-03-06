@@ -28,9 +28,16 @@ export interface ChatSession {
 
 export interface AppSettings {
 	ui: Record<string, unknown>;
+	uiEffective?: Record<string, unknown>;
 	paths: {
 		pinnedProjectPaths?: string[];
 		browseStartPath?: string;
+		lastProjectPath?: string;
 	};
 	pinnedChatIds: string[];
+	lastProvider: ChatSession['provider'];
+	lastModel: string;
+	lastPermissionMode: string;
+	lastThinkingMode: string;
+	projectBasePath?: string;
 }

@@ -1,10 +1,7 @@
 // App settings API for session naming and global settings.
 
 import { apiGet, apiPut } from './client.js';
-
-export interface AppSettings {
-	[key: string]: unknown;
-}
+import type { AppSettings } from '$lib/types/session.js';
 
 export interface UpdateSessionNameResponse {
 	success: boolean;

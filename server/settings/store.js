@@ -9,7 +9,18 @@ import path from 'path';
 import { EventEmitter } from 'events';
 
 function createEmpty() {
-  return { ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: [], archivedChatIds: [], lastPermissionMode: 'default', lastThinkingMode: 'none' };
+  return {
+    ui: {},
+    paths: {},
+    chatNames: {},
+    pinnedChatIds: [],
+    normalChatIds: [],
+    archivedChatIds: [],
+    lastProvider: 'claude',
+    lastModel: '',
+    lastPermissionMode: 'default',
+    lastThinkingMode: 'none',
+  };
 }
 
 function sanitize(parsed) {
@@ -20,6 +31,8 @@ function sanitize(parsed) {
     pinnedChatIds: Array.isArray(parsed.pinnedChatIds) ? parsed.pinnedChatIds : [],
     normalChatIds: Array.isArray(parsed.normalChatIds) ? parsed.normalChatIds : [],
     archivedChatIds: Array.isArray(parsed.archivedChatIds) ? parsed.archivedChatIds : [],
+    lastProvider: typeof parsed.lastProvider === 'string' ? parsed.lastProvider : 'claude',
+    lastModel: typeof parsed.lastModel === 'string' ? parsed.lastModel : '',
     lastPermissionMode: typeof parsed.lastPermissionMode === 'string' ? parsed.lastPermissionMode : 'default',
     lastThinkingMode: typeof parsed.lastThinkingMode === 'string' ? parsed.lastThinkingMode : 'none',
   };
@@ -306,12 +319,37 @@ export class SettingsStore extends EventEmitter {
     return settings.lastPermissionMode || 'default';
   }
 
-  async setLastPermissionMode(mode) {
+  async getLastProvider() {
+    const settings = await this.loadSettings();
+    return settings.lastProvider || 'claude';
+  }
+
+  async getLastModel() {
+    const settings = await this.loadSettings();
+    return settings.lastModel || '';
+  }
+
+  async setLastChatDefaults(defaults) {
     return this.#withLock(async () => {
       const settings = await this.loadSettings();
-      settings.lastPermissionMode = typeof mode === 'string' ? mode : 'default';
+      settings.lastProvider = typeof defaults?.provider === 'string'
+        ? defaults.provider
+        : (settings.lastProvider || 'claude');
+      settings.lastModel = typeof defaults?.model === 'string'
+        ? defaults.model
+        : (settings.lastModel || '');
+      settings.lastPermissionMode = typeof defaults?.permissionMode === 'string'
+        ? defaults.permissionMode
+        : (settings.lastPermissionMode || 'default');
+      settings.lastThinkingMode = typeof defaults?.thinkingMode === 'string'
+        ? defaults.thinkingMode
+        : (settings.lastThinkingMode || 'none');
       await this.saveSettings(settings);
     });
+  }
+
+  async setLastPermissionMode(mode) {
+    return this.setLastChatDefaults({ permissionMode: mode });
   }
 
   async getLastThinkingMode() {
@@ -320,11 +358,7 @@ export class SettingsStore extends EventEmitter {
   }
 
   async setLastThinkingMode(mode) {
-    return this.#withLock(async () => {
-      const settings = await this.loadSettings();
-      settings.lastThinkingMode = typeof mode === 'string' ? mode : 'none';
-      await this.saveSettings(settings);
-    });
+    return this.setLastChatDefaults({ thinkingMode: mode });
   }
 
   async getNormalChatIds() {

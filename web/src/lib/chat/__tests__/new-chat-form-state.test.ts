@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
 import * as chatsApi from '$lib/api/chats';
+import * as settingsApi from '$lib/api/settings';
 
 vi.mock('$lib/api/files', () => ({
 	browseDirectory: vi.fn()
@@ -10,46 +11,74 @@ vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn()
 }));
 
-const mockPreferences = {
-	selectedProvider: 'claude',
-	claudeModel: 'opus',
-	codexModel: 'gpt-5.3-codex',
-	opencodeModel: 'gpt-4o',
-	permissionMode: 'default',
-	thinkingMode: 'none'
-};
+vi.mock('$lib/api/settings', () => ({
+	getSettings: vi.fn(),
+	updateSettings: vi.fn()
+}));
 
 const mockAppShell = {
-	onNewChatDialogSeed: vi.fn().mockReturnValue(() => {})
+	onNewChatDialogSeed: vi.fn().mockReturnValue(() => {}),
+	projectBasePath: '/',
 };
 const mockModelCatalog = {
 	getDefaultModel: vi.fn((provider: string) => {
 		if (provider === 'claude') return 'opus';
-		if (provider === 'codex') return 'gpt-5.3-codex';
+		if (provider === 'codex') return 'gpt-5.4';
 		return '';
 	}),
-	getModels: vi.fn(() => []),
+	getModels: vi.fn((provider: string) => {
+		if (provider === 'claude') return [{ value: 'opus', label: 'Opus' }];
+		if (provider === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
+		return [];
+	}),
 	refreshIfStale: vi.fn().mockResolvedValue(undefined)
 };
-
-// Also mock context since it might be used inside imports
-vi.mock('$lib/context', () => ({
-	getAppShell: () => mockAppShell,
-	getPreferences: () => mockPreferences
-}));
 
 describe('NewChatFormState', () => {
 	let state: NewChatFormState;
 
 	beforeEach(() => {
 		vi.useFakeTimers();
-		state = new NewChatFormState(mockPreferences as any, mockAppShell as any, mockModelCatalog as any);
+		vi.mocked(settingsApi.getSettings).mockResolvedValue({
+			ui: {},
+			paths: {},
+			pinnedChatIds: [],
+			lastProvider: 'claude',
+			lastModel: 'opus',
+			lastPermissionMode: 'default',
+			lastThinkingMode: 'none',
+			projectBasePath: '/workspace'
+		});
+		vi.mocked(settingsApi.updateSettings).mockResolvedValue({ success: true });
+		state = new NewChatFormState(mockAppShell as any, mockModelCatalog as any);
 	});
 
 	it('initializes with default values', () => {
 		expect(state.provider).toBe('claude');
 		expect(state.validationStatus).toBe('idle');
 		expect(state.canSubmit).toBe(false); // Empty path
+	});
+
+	it('loads startup defaults from server settings', async () => {
+		vi.mocked(settingsApi.getSettings).mockResolvedValue({
+			ui: {},
+			paths: { lastProjectPath: '/workspace/project' },
+			pinnedChatIds: [],
+			lastProvider: 'codex',
+			lastModel: 'gpt-5.4',
+			lastPermissionMode: 'acceptEdits',
+			lastThinkingMode: 'think-hard',
+			projectBasePath: '/workspace'
+		});
+
+		await state.loadSettingsAndModels();
+
+		expect(state.settingsLoaded).toBe(true);
+		expect(state.provider).toBe('codex');
+		expect(state.modelValue).toBe('gpt-5.4');
+		expect(state.permissionMode).toBe('acceptEdits');
+		expect(state.thinkingMode).toBe('think-hard');
+		expect(state.projectPath).toBe('/workspace/project');
 	});
 
 	it('debounces directory validation', async () => {
@@ -89,6 +118,7 @@ describe('NewChatFormState', () => {
 
 	it('computes canSubmit correctly', () => {
 		// Valid path still requires a first message.
+		state.settingsLoaded = true;
 		state.projectPath = '/valid/path';
 		state.validationStatus = 'valid';
 		expect(state.canSubmit).toBe(false);
@@ -99,5 +129,37 @@ describe('NewChatFormState', () => {
 		// Invalid path
 		state.validationStatus = 'invalid';
 		expect(state.canSubmit).toBe(false);
+	});
+
+	it('rejects submission while startup defaults are still loading', () => {
+		state.projectPath = '/valid/path';
+		state.validationStatus = 'valid';
+		state.firstMessage = 'Start this task';
+
+		expect(state.buildConfig()).toBeNull();
+		expect(state.error).toBe('Chat defaults are still loading.');
+	});
+
+	it('persists only the last used project path on submit', () => {
+		state.settingsLoaded = true;
+		state.projectPath = '/valid/path';
+		state.validationStatus = 'valid';
+		state.firstMessage = 'Start this task';
+		state.provider = 'codex';
+		state.handleModelChange('gpt-5.4');
+		state.permissionMode = 'acceptEdits';
+		state.thinkingMode = 'think-hard';
+
+		const config = state.buildConfig();
+
+		expect(config).toMatchObject({
+			provider: 'codex',
+			model: 'gpt-5.4',
+			permissionMode: 'acceptEdits',
+			thinkingMode: 'think-hard',
+		});
+		expect(settingsApi.updateSettings).toHaveBeenCalledWith({
+			paths: { lastProjectPath: '/valid/path' }
+		});
 	});
 });

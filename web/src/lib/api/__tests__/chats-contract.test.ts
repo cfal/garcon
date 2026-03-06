@@ -57,6 +57,8 @@ describe('chats API contract', () => {
 			provider: 'claude',
 			projectPath: '/project',
 			model: 'opus',
+			permissionMode: 'default',
+			thinkingMode: 'none',
 			command: 'hello',
 		});
 
@@ -68,6 +70,8 @@ describe('chats API contract', () => {
 		const body = JSON.parse(opts.body);
 		expect(body.chatId).toBe('c-1');
 		expect(body.provider).toBe('claude');
+		expect(body.permissionMode).toBe('default');
+		expect(body.thinkingMode).toBe('none');
 		expect(body.command).toBe('hello');
 		expect(body.options).toEqual({});
 		expect(body.tags).toEqual([]);
@@ -81,12 +85,16 @@ describe('chats API contract', () => {
 			provider: 'claude',
 			projectPath: '/p',
 			model: 'm',
+			permissionMode: 'acceptEdits',
+			thinkingMode: 'think-hard',
 			command: 'test',
 			options: { cwd: '/p' },
 			tags: ['fast'],
 		});
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(body.permissionMode).toBe('acceptEdits');
+		expect(body.thinkingMode).toBe('think-hard');
 		expect(body.options).toEqual({ cwd: '/p' });
 		expect(body.tags).toEqual(['fast']);
 	});

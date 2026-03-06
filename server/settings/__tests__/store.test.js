@@ -208,6 +208,7 @@ describe('settings store', () => {
       expect(settings).toEqual({
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
+        lastProvider: 'claude', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
       });
     });
@@ -218,6 +219,7 @@ describe('settings store', () => {
       expect(settings).toEqual({
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
+        lastProvider: 'claude', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
       });
     });
@@ -233,6 +235,8 @@ describe('settings store', () => {
         pinnedChatIds: ['a'],
         normalChatIds: [],
         archivedChatIds: [],
+        lastProvider: 'claude',
+        lastModel: '',
         lastPermissionMode: 'default',
         lastThinkingMode: 'none',
       });
@@ -254,6 +258,8 @@ describe('settings store', () => {
         pinnedChatIds: ['a', 'gone'],
         normalChatIds: ['also-gone'],
         archivedChatIds: [],
+        lastProvider: 'claude',
+        lastModel: '',
         lastPermissionMode: 'default',
         lastThinkingMode: 'none',
       });
@@ -274,6 +280,8 @@ describe('settings store', () => {
         pinnedChatIds: ['a'],
         normalChatIds: ['a', 'b'],
         archivedChatIds: ['a'],
+        lastProvider: 'claude',
+        lastModel: '',
         lastPermissionMode: 'default',
         lastThinkingMode: 'none',
       });
@@ -411,6 +419,7 @@ describe('settings store', () => {
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: ['existing'],
         archivedChatIds: [],
+        lastProvider: 'claude', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
       });
 
@@ -426,28 +435,72 @@ describe('settings store', () => {
       expect(settings.chatNames['existing']).toBe('title');
     });
 
-    it('does not lose ensureInNormal when setLastPermissionMode runs concurrently', async () => {
+    it('does not lose ensureInNormal when setLastChatDefaults runs concurrently', async () => {
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [],
         archivedChatIds: [],
+        lastProvider: 'claude', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
       });
 
       await Promise.all([
         store.ensureInNormal('chat-1'),
-        store.setLastPermissionMode('bypassPermissions'),
+        store.setLastChatDefaults({
+          provider: 'codex',
+          model: 'gpt-5.4',
+          permissionMode: 'bypassPermissions',
+          thinkingMode: 'think-hard',
+        }),
         store.ensureInNormal('chat-2'),
       ]);
 
       const settings = await store.loadSettings();
       expect(settings.normalChatIds).toContain('chat-1');
       expect(settings.normalChatIds).toContain('chat-2');
+      expect(settings.lastProvider).toBe('codex');
+      expect(settings.lastModel).toBe('gpt-5.4');
       expect(settings.lastPermissionMode).toBe('bypassPermissions');
+      expect(settings.lastThinkingMode).toBe('think-hard');
     });
   });
 
-  describe('permission and thinking mode', () => {
+  describe('chat startup defaults', () => {
+    it('getLastProvider defaults to "claude"', async () => {
+      expect(await store.getLastProvider()).toBe('claude');
+    });
+
+    it('getLastModel defaults to empty string', async () => {
+      expect(await store.getLastModel()).toBe('');
+    });
+
+    it('setLastChatDefaults persists the full startup selection', async () => {
+      await store.setLastChatDefaults({
+        provider: 'codex',
+        model: 'gpt-5.4',
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'think-hard',
+      });
+      expect(await store.getLastProvider()).toBe('codex');
+      expect(await store.getLastModel()).toBe('gpt-5.4');
+      expect(await store.getLastPermissionMode()).toBe('bypassPermissions');
+      expect(await store.getLastThinkingMode()).toBe('think-hard');
+    });
+
+    it('preserves unspecified fields when updating only one startup setting', async () => {
+      await store.setLastChatDefaults({
+        provider: 'codex',
+        model: 'gpt-5.4',
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'think-hard',
+      });
+      await store.setLastPermissionMode('acceptEdits');
+      expect(await store.getLastProvider()).toBe('codex');
+      expect(await store.getLastModel()).toBe('gpt-5.4');
+      expect(await store.getLastPermissionMode()).toBe('acceptEdits');
+      expect(await store.getLastThinkingMode()).toBe('think-hard');
+    });
+
     it('getLastPermissionMode defaults to "default"', async () => {
       expect(await store.getLastPermissionMode()).toBe('default');
     });

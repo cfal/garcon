@@ -9,8 +9,8 @@ import * as settingsApi from '$lib/api/settings.js';
 import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import type { NewChatConfig, SessionProvider } from '$lib/types/app.js';
+import type { AppSettings } from '$lib/types/session.js';
 import type { PermissionMode } from '$lib/types/chat.js';
-import type { PreferencesStore } from '$lib/stores/preferences.svelte.js';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
 import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
@@ -60,19 +60,12 @@ export class NewChatFormState {
 	readonly #images = new ImageAttachmentState();
 
 	// Injected dependencies
-	readonly #preferences: PreferencesStore;
 	readonly #appShell: AppShellStore;
 	readonly #modelCatalog: ModelCatalogStore;
 
-	constructor(preferences: PreferencesStore, appShell: AppShellStore, modelCatalog: ModelCatalogStore) {
-		this.#preferences = preferences;
+	constructor(appShell: AppShellStore, modelCatalog: ModelCatalogStore) {
 		this.#appShell = appShell;
 		this.#modelCatalog = modelCatalog;
-
-		this.provider = preferences.selectedProvider || 'claude';
-		this.claudeModel = preferences.claudeModel || this.#modelCatalog.getDefaultModel('claude');
-		this.codexModel = preferences.codexModel || this.#modelCatalog.getDefaultModel('codex');
-		this.opencodeModel = preferences.opencodeModel || this.#modelCatalog.getDefaultModel('opencode');
 	}
 
 	// Derived accessors
@@ -90,7 +83,7 @@ export class NewChatFormState {
 	}
 
 	get canSubmit(): boolean {
-		return canSubmitNewChat(this.trimmedPath, this.validationStatus, this.firstMessage);
+		return this.settingsLoaded && canSubmitNewChat(this.trimmedPath, this.validationStatus, this.firstMessage);
 	}
 
 	get placeholder(): string {
@@ -123,7 +116,6 @@ export class NewChatFormState {
 
 	selectProvider(next: SessionProvider): void {
 		this.provider = next;
-		this.#preferences.setPreference('selectedProvider', next);
 	}
 
 	// Model
@@ -151,6 +143,16 @@ export class NewChatFormState {
 		if (provider === 'codex' && !liveModels.some((m) => m.value === this.codexModel)) {
 			this.codexModel = liveModels[0].value;
 		}
+	}
+
+	applyResolvedModel(provider: SessionProvider, model: string): void {
+		const liveModels = this.#modelCatalog.getModels(provider);
+		const resolvedModel = liveModels.some((entry) => entry.value === model)
+			? model
+			: (liveModels[0]?.value ?? model);
+		if (provider === 'claude') this.claudeModel = resolvedModel;
+		if (provider === 'codex') this.codexModel = resolvedModel;
+		if (provider === 'opencode') this.opencodeModel = resolvedModel;
 	}
 
 	// Images (delegated to ImageAttachmentState)
@@ -327,6 +329,10 @@ export class NewChatFormState {
 
 	/** Validates and builds the config, returning null if validation fails. */
 	buildConfig(): NewChatConfig | null {
+		if (!this.settingsLoaded) {
+			this.error = m.chat_new_chat_errors_defaults_loading();
+			return null;
+		}
 		if (!this.trimmedPath) {
 			this.error = m.chat_new_chat_errors_project_path_required();
 			return null;
@@ -345,11 +351,9 @@ export class NewChatFormState {
 		}
 		this.error = null;
 
-		// Persist last-used path and modes (fire and forget).
+		// Persists the last-used path. Startup settings now persist via chat start.
 		settingsApi.updateSettings({
-			paths: { lastProjectPath: this.trimmedPath },
-			lastPermissionMode: this.permissionMode,
-			lastThinkingMode: this.thinkingMode
+			paths: { lastProjectPath: this.trimmedPath }
 		}).catch((err) => {
 			console.warn('[NewChatFormState] Failed to persist settings', err);
 		});
@@ -398,12 +402,18 @@ export class NewChatFormState {
 			this.validateModelAgainstLive('opencode');
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings and models', err);
+			this.applyResolvedModel('claude', this.#modelCatalog.getDefaultModel('claude'));
+			this.applyResolvedModel('codex', this.#modelCatalog.getDefaultModel('codex'));
+			this.applyResolvedModel('opencode', this.#modelCatalog.getDefaultModel('opencode'));
+			if (!this.projectPath) {
+				this.projectPath = this.projectBasePath;
+			}
 		} finally {
 			this.settingsLoaded = true;
 		}
 	}
 
-	#applySettings(settingsData: Record<string, unknown>): void {
+	#applySettings(settingsData: AppSettings): void {
 		if (typeof settingsData.projectBasePath === 'string') {
 			this.projectBasePath = settingsData.projectBasePath;
 			this.#appShell.projectBasePath = settingsData.projectBasePath;
@@ -430,10 +440,20 @@ export class NewChatFormState {
 			this.projectPath = this.projectBasePath;
 		}
 
+		if (typeof settingsData.lastProvider === 'string') {
+			this.provider = settingsData.lastProvider as SessionProvider;
+		}
+		if (typeof settingsData.lastModel === 'string' && settingsData.lastModel) {
+			this.applyResolvedModel(this.provider, settingsData.lastModel);
+		} else {
+			this.applyResolvedModel('claude', this.#modelCatalog.getDefaultModel('claude'));
+			this.applyResolvedModel('codex', this.#modelCatalog.getDefaultModel('codex'));
+			this.applyResolvedModel('opencode', this.#modelCatalog.getDefaultModel('opencode'));
+		}
 		if (typeof settingsData.lastPermissionMode === 'string' && settingsData.lastPermissionMode) {
 			this.permissionMode = settingsData.lastPermissionMode as PermissionMode;
 		}
-		if (typeof settingsData.lastThinkingMode === 'string' && settingsData.lastThinkingMode !== 'none') {
+		if (typeof settingsData.lastThinkingMode === 'string') {
 			this.thinkingMode = settingsData.lastThinkingMode;
 		}
 	}

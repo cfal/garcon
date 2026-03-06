@@ -2,7 +2,6 @@
 // preferences to localStorage under a consistent key prefix.
 
 import type { SessionProvider } from '$lib/types/app';
-import type { PermissionMode } from '$lib/types/chat';
 import { CLAUDE_MODELS, CODEX_MODELS } from '$shared/models';
 
 // Persisted preference fields.
@@ -176,8 +175,6 @@ export class PreferencesStore {
 	markdownViewerFontSize = $state(DEFAULTS.markdownViewerFontSize);
 	language = $state(DEFAULTS.language);
 
-	lastPermissionMode = $state<PermissionMode>('default');
-
 	constructor() {
 		const saved = readPersisted();
 		this.theme = saved.theme;
@@ -259,12 +256,6 @@ export class PreferencesStore {
 		}
 		this.save();
 	}
-
-	/** Updates the last-used permission mode. */
-	setLastPermissionMode(mode: PermissionMode): void {
-		this.lastPermissionMode = mode;
-	}
-
 }
 
 export function createPreferencesStore(): PreferencesStore {
