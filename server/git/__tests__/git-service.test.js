@@ -1,4 +1,8 @@
 import { describe, it, expect } from 'bun:test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { GitDomainError } from '../git-types.js';
 import { createGitService } from '../git-service.js';
 
@@ -14,6 +18,25 @@ function mockClassifyGitError(error) {
 const mockProviders = {
   runSingleQuery: () => Promise.resolve('chore: stub'),
 };
+
+async function runGitCommand(cwd, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+    child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(`git ${args.join(' ')} failed: ${stderr || stdout}`));
+    });
+  });
+}
 
 describe('GitDomainError', () => {
   it('extends Error with name and code', () => {
@@ -41,6 +64,55 @@ describe('createGitService', () => {
     ];
     for (const method of expectedMethods) {
       expect(typeof git[method]).toBe('function');
+    }
+  });
+});
+
+describe('getChangesTree', () => {
+  it('expands untracked directories to untracked files', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tree-'));
+    const git = createGitService({ providers: mockProviders, classifyGitError: mockClassifyGitError });
+
+    try {
+      await runGitCommand(projectPath, ['init']);
+      await fs.mkdir(path.join(projectPath, 'newdir/subdir'), { recursive: true });
+      await fs.writeFile(path.join(projectPath, 'newdir/subdir/file.txt'), 'hello\n', 'utf-8');
+
+      const tree = await git.getChangesTree({ projectPath });
+      expect(tree.root).toEqual([
+        {
+          path: 'newdir',
+          name: 'newdir',
+          kind: 'directory',
+          changeKind: 'untracked',
+          staged: false,
+          hasUnstaged: false,
+          children: [
+            {
+              path: 'newdir/subdir',
+              name: 'subdir',
+              kind: 'directory',
+              changeKind: 'untracked',
+              staged: false,
+              hasUnstaged: false,
+              children: [
+                {
+                  path: 'newdir/subdir/file.txt',
+                  name: 'file.txt',
+                  kind: 'file',
+                  changeKind: 'untracked',
+                  staged: false,
+                  hasUnstaged: false,
+                  additions: 0,
+                  deletions: 0,
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
 });

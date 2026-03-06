@@ -592,7 +592,7 @@ export function createGitService({ providers, classifyGitError }) {
       }
     }
 
-    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain']);
+    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '-uall']);
 
     const modified = [];
     const added = [];
@@ -1111,7 +1111,7 @@ export function createGitService({ providers, classifyGitError }) {
       hasCommits = false;
     }
 
-    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain']);
+    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '-uall']);
     if (!statusOutput.trim()) {
       return { root: [], hasCommits };
     }
