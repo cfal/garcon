@@ -248,16 +248,16 @@ export class ConversationSessionController {
 			try {
 				await startChat({
 					chatId,
-					provider,
+					provider: provider as typeof deps.providerState.provider,
 					projectPath: selected.projectPath,
 					model,
+					permissionMode,
+					thinkingMode,
 					command: text,
 					options: {
 						cwd: selected.projectPath,
 						projectPath: selected.projectPath,
 						sessionId: chatId,
-						permissionMode,
-						thinkingMode,
 						images: imagePayload,
 					},
 				});

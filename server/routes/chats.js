@@ -211,16 +211,16 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
         );
       }
 
-      const model = body.model || null;
+      const model = typeof body.model === 'string' ? body.model : '';
 
       const permissionMode =
-        typeof requestOptions.permissionMode === 'string'
-          ? requestOptions.permissionMode
+        typeof body.permissionMode === 'string'
+          ? body.permissionMode
           : 'default';
 
       const thinkingMode =
-        typeof requestOptions.thinkingMode === 'string'
-          ? requestOptions.thinkingMode
+        typeof body.thinkingMode === 'string'
+          ? body.thinkingMode
           : 'none';
 
       const created = registry.addChat({
@@ -239,6 +239,12 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       }
       metadata.addNewChatMetadata(chatId, command);
 
+      await settings.setLastChatDefaults({
+        provider,
+        model,
+        permissionMode,
+        thinkingMode,
+      });
       await settings.ensureInNormal(chatId);
 
       historyCache.appendMessages(chatId, [
@@ -255,6 +261,11 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
         });
       } catch (error) {
         registry.removeChat(chatId);
+        try {
+          await settings.removeFromAllOrderLists(chatId);
+        } catch (cleanupError) {
+          console.warn(`sessions: failed to remove ${chatId} from order lists after startup failure:`, cleanupError.message);
+        }
         return Response.json({ success: false, error: error.message }, { status: 500 });
       }
 

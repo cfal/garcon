@@ -37,7 +37,7 @@
 	const preferences = getPreferences();
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
-	const form = new NewChatFormState(preferences, appShell, modelCatalog);
+	const form = new NewChatFormState(appShell, modelCatalog);
 	let isMobile = $state(false);
 
 	let textareaRef: HTMLTextAreaElement | undefined = $state();
@@ -310,35 +310,41 @@
 				rows="2"
 			></textarea>
 
-		<ComposerBottomBar
-			canAttachImages={modelCatalog.supportsImages(form.provider)}
-			attachImagesTooltip="Image attachments are unavailable for this provider."
-			onAddImage={openImagePicker}
-			permissionOptions={permissionOptions}
-			selectedPermission={form.permissionMode}
-			onPermissionSelect={(mode) => {
-				form.permissionMode = mode;
-			}}
-			thinkingOptions={thinkingOptions}
-			selectedThinking={form.thinkingMode}
-			onThinkingSelect={(mode) => {
-				form.thinkingMode = mode;
-			}}
-			providerOptions={PROVIDER_MENU_OPTIONS}
-			selectedProvider={form.provider}
-			onProviderSelect={(provider) => {
-				form.selectProvider(provider);
-			}}
-			modelOptions={modelOptions}
-			selectedModel={form.modelValue}
-			onModelSelect={(model) => {
-				form.handleModelChange(model);
-			}}
-			canSend={form.canSubmit}
-			onSend={handleSubmit}
-			sendTitle={m.chat_new_chat_start_session()}
-			sendButtonClass={sendButtonClass}
-		/>
+		{#if form.settingsLoaded}
+			<ComposerBottomBar
+				canAttachImages={modelCatalog.supportsImages(form.provider)}
+				attachImagesTooltip="Image attachments are unavailable for this provider."
+				onAddImage={openImagePicker}
+				permissionOptions={permissionOptions}
+				selectedPermission={form.permissionMode}
+				onPermissionSelect={(mode) => {
+					form.permissionMode = mode;
+				}}
+				thinkingOptions={thinkingOptions}
+				selectedThinking={form.thinkingMode}
+				onThinkingSelect={(mode) => {
+					form.thinkingMode = mode;
+				}}
+				providerOptions={PROVIDER_MENU_OPTIONS}
+				selectedProvider={form.provider}
+				onProviderSelect={(provider) => {
+					form.selectProvider(provider);
+				}}
+				modelOptions={modelOptions}
+				selectedModel={form.modelValue}
+				onModelSelect={(model) => {
+					form.handleModelChange(model);
+				}}
+				canSend={form.canSubmit}
+				onSend={handleSubmit}
+				sendTitle={m.chat_new_chat_start_session()}
+				sendButtonClass={sendButtonClass}
+			/>
+		{:else}
+			<div class="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+				{m.chat_new_chat_loading_defaults()}
+			</div>
+		{/if}
 	</div>
 
 	{#if form.attachedImages.length > 0}

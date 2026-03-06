@@ -20,10 +20,10 @@ function createMockCtx() {
       getPathSettings: mock(() => Promise.resolve({})),
       setPathSettings: mock(() => Promise.resolve({})),
       getPinnedChatIds: mock(() => Promise.resolve([])),
+      getLastProvider: mock(() => Promise.resolve('claude')),
+      getLastModel: mock(() => Promise.resolve('')),
       getLastPermissionMode: mock(() => Promise.resolve('default')),
-      setLastPermissionMode: mock(() => Promise.resolve(undefined)),
       getLastThinkingMode: mock(() => Promise.resolve('none')),
-      setLastThinkingMode: mock(() => Promise.resolve(undefined)),
     },
     providers: {
       getAuthStatusMap: mock(() => Promise.resolve({
@@ -57,10 +57,10 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
+    ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
-    ctx.settings.setLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
-    ctx.settings.setLastThinkingMode.mockClear();
     ctx.providers.getAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
@@ -126,19 +126,21 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
+    ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
-    ctx.settings.setLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
-    ctx.settings.setLastThinkingMode.mockClear();
     ctx.providers.getAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
   });
 
-  it('returns ui, paths, pinnedChatIds, and recent mode settings', async () => {
+  it('returns ui, paths, pinnedChatIds, and recent startup settings', async () => {
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({ theme: 'dark' }));
     ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({ lastDir: '/home' }));
     ctx.settings.getPinnedChatIds.mockImplementation(() => Promise.resolve(['a', 'b']));
+    ctx.settings.getLastProvider.mockImplementation(() => Promise.resolve('codex'));
+    ctx.settings.getLastModel.mockImplementation(() => Promise.resolve('gpt-5.4'));
     ctx.settings.getLastPermissionMode.mockImplementation(() => Promise.resolve('acceptEdits'));
     ctx.settings.getLastThinkingMode.mockImplementation(() => Promise.resolve('think-hard'));
 
@@ -149,6 +151,8 @@ describe('GET /api/app/settings', () => {
     expect(body.ui).toEqual({ theme: 'dark' });
     expect(body.paths).toEqual({ lastDir: '/home' });
     expect(body.pinnedChatIds).toEqual(['a', 'b']);
+    expect(body.lastProvider).toBe('codex');
+    expect(body.lastModel).toBe('gpt-5.4');
     expect(body.lastPermissionMode).toBe('acceptEdits');
     expect(body.lastThinkingMode).toBe('think-hard');
     expect(body.uiEffective.chatTitle.enabled).toBe(false);
@@ -217,10 +221,10 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
+    ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
-    ctx.settings.setLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
-    ctx.settings.setLastThinkingMode.mockClear();
     ctx.providers.getAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
@@ -263,20 +267,16 @@ describe('PUT /api/app/settings', () => {
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ chatTitle: chatTitleConfig });
   });
 
-  it('patches last used permission and thinking mode', async () => {
+  it('does not patch last startup settings through app settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard' }));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
     ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
-    ctx.settings.getLastPermissionMode.mockImplementation(() => Promise.resolve('acceptEdits'));
-    ctx.settings.getLastThinkingMode.mockImplementation(() => Promise.resolve('think-hard'));
 
     const response = await handler(makeRequest({ lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard' }));
     const body = await response.json();
 
     expect(body.success).toBe(true);
-    expect(ctx.settings.setLastPermissionMode).toHaveBeenCalledWith('acceptEdits');
-    expect(ctx.settings.setLastThinkingMode).toHaveBeenCalledWith('think-hard');
-    expect(body.lastPermissionMode).toBe('acceptEdits');
-    expect(body.lastThinkingMode).toBe('think-hard');
+    expect(body.lastPermissionMode).toBeUndefined();
+    expect(body.lastThinkingMode).toBeUndefined();
   });
 });

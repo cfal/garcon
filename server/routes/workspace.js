@@ -28,10 +28,12 @@ export default function createWorkspaceRoutes(settings, providers) {
 
   async function getAppSettings() {
     try {
-      const [ui, paths, pinnedChatIds, lastPermissionMode, lastThinkingMode, authByProvider, opencodeModels] = await Promise.all([
+      const [ui, paths, pinnedChatIds, lastProvider, lastModel, lastPermissionMode, lastThinkingMode, authByProvider, opencodeModels] = await Promise.all([
         settings.getUiSettings(),
         settings.getPathSettings(),
         settings.getPinnedChatIds(),
+        settings.getLastProvider(),
+        settings.getLastModel(),
         settings.getLastPermissionMode(),
         settings.getLastThinkingMode(),
         providers?.getAuthStatusMap?.() ?? Promise.resolve({
@@ -67,7 +69,18 @@ export default function createWorkspaceRoutes(settings, providers) {
         },
       };
       const projectBasePath = getProjectBasePath();
-      return Response.json({ success: true, ui, uiEffective, paths, pinnedChatIds, lastPermissionMode, lastThinkingMode, projectBasePath });
+      return Response.json({
+        success: true,
+        ui,
+        uiEffective,
+        paths,
+        pinnedChatIds,
+        lastProvider,
+        lastModel,
+        lastPermissionMode,
+        lastThinkingMode,
+        projectBasePath,
+      });
     } catch (error) {
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
@@ -90,20 +103,11 @@ export default function createWorkspaceRoutes(settings, providers) {
         paths = await settings.getPathSettings();
       }
 
-      if (typeof body.lastPermissionMode === 'string') {
-        await settings.setLastPermissionMode(body.lastPermissionMode);
-      }
-      if (typeof body.lastThinkingMode === 'string') {
-        await settings.setLastThinkingMode(body.lastThinkingMode);
-      }
-
-      const [pinnedChatIds, lastPermissionMode, lastThinkingMode] = await Promise.all([
+      const [pinnedChatIds] = await Promise.all([
         settings.getPinnedChatIds(),
-        settings.getLastPermissionMode(),
-        settings.getLastThinkingMode(),
       ]);
 
-      return Response.json({ success: true, ui, paths, pinnedChatIds, lastPermissionMode, lastThinkingMode });
+      return Response.json({ success: true, ui, paths, pinnedChatIds });
     } catch (error) {
       if (error.message === 'Malformed JSON') {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
