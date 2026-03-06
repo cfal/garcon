@@ -4,7 +4,7 @@
 // opencode is injected via constructor as an instance with a
 // runSingleQuery method.
 
-import { describe, it, expect, mock } from 'bun:test';
+import { describe, it, expect, mock, beforeEach } from 'bun:test';
 
 const claudeMock = mock(async () => 'claude-response');
 const codexMock = mock(async () => 'codex-response');
@@ -36,18 +36,16 @@ mock.module('../loaders/opencode-history-loader.js', () => ({
 }));
 
 const opencodeMock = mock(async () => 'opencode-response');
-const mockOpencode = { runSingleQuery: opencodeMock };
-
-const mockRegistry = {
-  getChat: mock(() => null),
-  getChatByProviderSessionId: mock(() => null),
-};
-
 import { ProviderRegistry } from '../index.js';
 
-const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode);
-
 describe('providers registry runSingleQuery', () => {
+  const mockRegistry = {
+    getChat: mock(() => null),
+    getChatByProviderSessionId: mock(() => null),
+  };
+  const mockOpencode = { runSingleQuery: opencodeMock };
+  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode);
+
   it('routes to claude by default', async () => {
     const result = await registry.runSingleQuery('test prompt', {});
     expect(result).toBe('claude-response');
@@ -72,5 +70,100 @@ describe('providers registry runSingleQuery', () => {
     claudeMock.mockClear();
     await registry.runSingleQuery('hello', { provider: 'claude', model: 'opus', cwd: '/proj' });
     expect(claudeMock).toHaveBeenCalledWith('hello', { model: 'opus', cwd: '/proj' });
+  });
+});
+
+describe('ProviderRegistry session option hydration', () => {
+  let mockRegistry;
+  let mockClaude;
+  let mockCodex;
+  let mockOpencode;
+  let registry;
+
+  beforeEach(() => {
+    mockRegistry = {
+      getChat: mock(() => null),
+      getChatByProviderSessionId: mock(() => null),
+      updateChat: mock(() => undefined),
+    };
+    mockClaude = {
+      startClaudeInternalSession: mock(() => Promise.resolve('claude-session')),
+      runClaudeTurn: mock(() => Promise.resolve(undefined)),
+    };
+    mockCodex = {
+      startSession: mock(() => Promise.resolve('codex-session')),
+      runTurn: mock(() => Promise.resolve(undefined)),
+    };
+    mockOpencode = {
+      startSession: mock(() => Promise.resolve('opencode-session')),
+      runTurn: mock(() => Promise.resolve(undefined)),
+    };
+    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode);
+  });
+
+  it('hydrates permission and thinking modes from the registry on new-session startup', async () => {
+    mockRegistry.getChat.mockReturnValue({
+      provider: 'opencode',
+      projectPath: '/proj',
+      model: 'openai/gpt-5',
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'think-hard',
+    });
+
+    await registry.startSession('123', 'hello', { cwd: '/proj' });
+
+    expect(mockOpencode.startSession).toHaveBeenCalledWith('hello', {
+      cwd: '/proj',
+      model: 'openai/gpt-5',
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'think-hard',
+      chatId: '123',
+    });
+  });
+
+  it('hydrates permission and thinking modes from the registry on resumed turns when omitted', async () => {
+    mockRegistry.getChat.mockReturnValue({
+      provider: 'codex',
+      projectPath: '/proj',
+      providerSessionId: 'sess-1',
+      model: 'gpt-5.4',
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'think-hard',
+    });
+
+    await registry.runProviderTurn('123', 'continue', {});
+
+    expect(mockCodex.runTurn).toHaveBeenCalledWith('continue', {
+      sessionId: 'sess-1',
+      chatId: '123',
+      model: 'gpt-5.4',
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'think-hard',
+    });
+  });
+
+  it('preserves explicit runtime overrides over registry values', async () => {
+    mockRegistry.getChat.mockReturnValue({
+      provider: 'claude',
+      projectPath: '/proj',
+      providerSessionId: 'sess-2',
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    await registry.runProviderTurn('123', 'continue', {
+      model: 'sonnet',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'ultrathink',
+    });
+
+    expect(mockClaude.runClaudeTurn).toHaveBeenCalledWith('continue', {
+      sessionId: 'sess-2',
+      chatId: '123',
+      model: 'sonnet',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'ultrathink',
+    });
   });
 });
