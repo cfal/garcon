@@ -13,17 +13,6 @@ function strOrUndef(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
 
-export interface AgentCommandOptions {
-  cwd?: string;
-  projectPath?: string;
-  sessionId?: string;
-  model?: string;
-  permissionMode?: string;
-  thinkingMode?: string;
-  resume?: boolean;
-  toolsSettings?: Record<string, unknown>;
-}
-
 export interface AgentCommandImage {
   data: string;
   name: string;
@@ -32,21 +21,21 @@ export interface AgentCommandImage {
 export class AgentRunRequest {
   readonly type = 'agent-run' as const;
   constructor(
-    public chatId: string | null,
-    public provider?: string,
-    public command?: string,
-    public isNewChat?: boolean,
-    public options?: AgentCommandOptions,
+    public chatId: string,
+    public command: string,
+    public permissionMode: string,
+    public thinkingMode: string,
+    public model: string,
     public images?: AgentCommandImage[],
   ) { }
 
   static fromJson(data: Record<string, unknown>): AgentRunRequest {
     return new AgentRunRequest(
-      strOrNull(data.chatId),
-      strOrUndef(data.provider),
-      strOrUndef(data.command),
-      data.isNewChat as boolean | undefined,
-      data.options as AgentCommandOptions | undefined,
+      typeof data.chatId === 'string' ? data.chatId : '',
+      typeof data.command === 'string' ? data.command : '',
+      typeof data.permissionMode === 'string' ? data.permissionMode : '',
+      typeof data.thinkingMode === 'string' ? data.thinkingMode : '',
+      typeof data.model === 'string' ? data.model : '',
       data.images as AgentCommandImage[] | undefined,
     );
   }
@@ -183,20 +172,10 @@ export class QueuePauseRequest {
 
 export class QueueResumeRequest {
   readonly type = 'queue-resume' as const;
-  constructor(
-    public chatId: string | null,
-    public projectPath?: string,
-    public permissionMode?: string,
-    public toolsSettings?: Record<string, unknown>,
-  ) { }
+  constructor(public chatId: string | null) { }
 
   static fromJson(data: Record<string, unknown>): QueueResumeRequest {
-    return new QueueResumeRequest(
-      strOrNull(data.chatId),
-      strOrUndef(data.projectPath),
-      strOrUndef(data.permissionMode),
-      data.toolsSettings as Record<string, unknown> | undefined,
-    );
+    return new QueueResumeRequest(strOrNull(data.chatId));
   }
 }
 

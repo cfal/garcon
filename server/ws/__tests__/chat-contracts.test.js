@@ -100,18 +100,25 @@ describe('chat WebSocket handler', () => {
       await chatHandler.message(ws, {
         type: 'agent-run',
         chatId: '123',
-        provider: 'claude',
         command: 'hello',
-        options: { projectPath: '/tmp' },
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: 'opus',
       });
-      expect(mockQueue.submit).toHaveBeenCalledWith('123', 'hello', { projectPath: '/tmp' });
+      expect(mockQueue.submit).toHaveBeenCalledWith('123', 'hello', {
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: 'opus',
+      });
     });
 
     it('sends error for missing chatId', async () => {
       await chatHandler.message(ws, {
         type: 'agent-run',
-        provider: 'claude',
         command: 'hello',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: 'opus',
       });
       const payload = lastSentPayload();
       expect(payload).toMatchObject({ type: 'ws-fault' });
@@ -122,8 +129,10 @@ describe('chat WebSocket handler', () => {
       await chatHandler.message(ws, {
         type: 'agent-run',
         chatId: 'not-numeric',
-        provider: 'claude',
         command: 'hello',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: 'opus',
       });
       const payload = lastSentPayload();
       expect(payload).toMatchObject({
@@ -138,8 +147,10 @@ describe('chat WebSocket handler', () => {
       await chatHandler.message(ws, {
         type: 'agent-run',
         chatId: '123',
-        provider: 'claude',
         command: 'hello',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: 'opus',
       });
       const payload = lastSentPayload();
       expect(payload).toMatchObject({

@@ -86,12 +86,9 @@ export class ComposerState {
 		ws: WsConnection,
 		chatId: string,
 		options: {
-			provider: string;
 			model: string;
 			permissionMode: string;
-			projectPath: string;
-			isNewChat: boolean;
-			thinkingMode?: string;
+			thinkingMode: string;
 		}
 	): Promise<boolean> {
 		const text = this.inputText.trim();
@@ -122,17 +119,10 @@ export class ComposerState {
 
 			const sent = ws.sendMessage(new AgentRunRequest(
 				chatId,
-				options.provider,
 				text,
-				options.isNewChat,
-				{
-					cwd: options.projectPath,
-					projectPath: options.projectPath,
-					sessionId: chatId,
-					model: options.model,
-					permissionMode: options.permissionMode,
-					thinkingMode: options.thinkingMode
-				},
+				options.permissionMode,
+				options.thinkingMode,
+				options.model,
 				imageData.length > 0 ? imageData : undefined
 			));
 

@@ -278,11 +278,8 @@ export class ConversationSessionController {
 			}
 		} else {
 			const sent = await deps.composerState.submitMessage(deps.ws, chatId, {
-				provider: selected.provider,
 				model: selected.model ?? deps.providerState.model,
 				permissionMode: deps.providerState.permissionMode,
-				projectPath: selected.projectPath,
-				isNewChat: false,
 				thinkingMode: deps.providerState.thinkingMode,
 			});
 			if (!sent) {
@@ -337,14 +334,13 @@ export class ConversationSessionController {
 			deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
 
 			deps.ws.sendMessage(
-				new AgentRunRequest(chatId, deps.providerState.provider, buildApprovalMessage(), false, {
-					cwd: path,
-					projectPath: path,
-					sessionId: chatId,
-					resume: true,
-					model: deps.providerState.model ?? undefined,
-					permissionMode: mode,
-				}),
+				new AgentRunRequest(
+					chatId,
+					buildApprovalMessage(),
+					mode,
+					deps.providerState.thinkingMode,
+					deps.providerState.model,
+				),
 			);
 		};
 
