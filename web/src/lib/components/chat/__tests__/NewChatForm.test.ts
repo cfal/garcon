@@ -25,12 +25,14 @@ describe('NewChatForm', () => {
 		const pending = deferred<Awaited<ReturnType<typeof settingsApi.getSettings>>>();
 		vi.mocked(settingsApi.getSettings).mockReturnValueOnce(pending.promise);
 
-		const { container } = render(NewChatFormTestHarness);
-		const pathInput = screen.getByLabelText('Project Path') as HTMLInputElement;
+		render(NewChatFormTestHarness);
+
+		const projectPathInput = screen.getByLabelText('Project Path');
+		const messageInput = screen.getByPlaceholderText('How can I help you today?');
 
 		expect(screen.getByRole('status', { name: 'Loading chat defaults...' })).toBeTruthy();
-		expect(pathInput.disabled).toBe(true);
-		expect(container.querySelector('div.invisible textarea')).toBeTruthy();
+		expect(window.getComputedStyle(projectPathInput).visibility).toBe('hidden');
+		expect(window.getComputedStyle(messageInput).visibility).toBe('hidden');
 
 		pending.resolve({
 			ui: {},
@@ -47,7 +49,7 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
-		expect(pathInput.disabled).toBe(false);
-		expect(container.querySelector('div.invisible textarea')).toBeNull();
+		expect(window.getComputedStyle(projectPathInput).visibility).toBe('visible');
+		expect(window.getComputedStyle(messageInput).visibility).toBe('visible');
 	});
 });

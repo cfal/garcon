@@ -183,189 +183,210 @@
 	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 </script>
 
-<div class="p-4 sm:p-8 space-y-6">
-	<!-- Project path -->
-	<div class="space-y-2">
-		<label for="project-path-input" class="block text-sm font-medium text-muted-foreground">
-			{m.chat_new_chat_project_path()}
-		</label>
-		<div class="relative">
-			<div class="flex gap-2">
-					<div class="relative flex-1">
-						<input
-							id="project-path-input"
-							type="text"
-							bind:value={form.projectPath}
-							disabled={!form.settingsLoaded}
-							onfocus={() => form.handlePathFocus()}
-							oninput={() => { form.clearError(); form.resetTabCompletions(); }}
+<div class="p-4 sm:p-8">
+	<div class="relative">
+		<div
+			class="space-y-6"
+			class:invisible={!form.settingsLoaded}
+			class:pointer-events-none={!form.settingsLoaded}
+			aria-hidden={!form.settingsLoaded}
+		>
+			<div class="space-y-2">
+				<label for="project-path-input" class="block text-sm font-medium text-muted-foreground">
+					{m.chat_new_chat_project_path()}
+				</label>
+				<div class="relative">
+					<div class="flex gap-2">
+						<div class="relative flex-1">
+							<input
+								id="project-path-input"
+								type="text"
+								bind:value={form.projectPath}
+								onfocus={() => form.handlePathFocus()}
+								oninput={() => { form.clearError(); form.resetTabCompletions(); }}
 								onkeydown={(e: KeyboardEvent) => {
-								if (e.key === 'Tab') {
-									e.preventDefault();
-									form.handleTabCompletion();
-								}
-								if (e.key === 'Enter') {
-									e.preventDefault();
-									form.showBrowser = false;
+									if (e.key === 'Tab') {
+										e.preventDefault();
+										form.handleTabCompletion();
+									}
+									if (e.key === 'Enter') {
+										e.preventDefault();
+										form.showBrowser = false;
 										textareaRef?.focus();
 									}
 								}}
-							placeholder={form.settingsLoaded ? form.projectBasePath : ''}
-							class="w-full pl-3 pr-8 py-2 text-sm bg-background border border-border rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring placeholder-muted-foreground/60 text-foreground disabled:cursor-wait disabled:text-muted-foreground disabled:bg-muted/20"
-						/>
-						<div class="absolute right-2 top-1/2 -translate-y-1/2">
-							{#if !form.settingsLoaded}
-								<Loader2
-									class="w-4 h-4 animate-spin text-muted-foreground transition-opacity duration-200"
-								/>
-							{:else if !form.trimmedPath}
-								<!-- no indicator -->
-							{:else if form.validationStatus === 'checking'}
-								<Loader2
-								class="w-4 h-4 animate-spin text-muted-foreground transition-opacity duration-200"
+								placeholder={form.projectBasePath}
+								class="w-full pl-3 pr-8 py-2 text-sm bg-background border border-border rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring placeholder-muted-foreground/60 text-foreground"
 							/>
-						{:else if form.validationStatus === 'valid'}
-							<Check class="w-4 h-4 text-primary transition-opacity duration-200" />
-						{:else if form.validationStatus === 'invalid'}
-							<span title={form.validationError || 'Invalid path'}>
-								<X class="w-4 h-4 text-destructive transition-opacity duration-200" />
-							</span>
-						{/if}
+							<div class="absolute right-2 top-1/2 -translate-y-1/2">
+								{#if !form.trimmedPath}
+									<!-- no indicator -->
+								{:else if form.validationStatus === 'checking'}
+									<Loader2 class="w-4 h-4 animate-spin text-muted-foreground transition-opacity duration-200" />
+								{:else if form.validationStatus === 'valid'}
+									<Check class="w-4 h-4 text-primary transition-opacity duration-200" />
+								{:else if form.validationStatus === 'invalid'}
+									<span title={form.validationError || 'Invalid path'}>
+										<X class="w-4 h-4 text-destructive transition-opacity duration-200" />
+									</span>
+								{/if}
+							</div>
+						</div>
+						<button
+							type="button"
+							onclick={() => form.togglePinnedPath()}
+							disabled={!form.trimmedPath}
+							class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 disabled:opacity-40 transition-colors"
+							title={form.isPinnedPath
+								? m.chat_new_chat_remove_from_favorites()
+								: m.chat_new_chat_add_to_favorites()}
+						>
+							{#if form.isPinnedPath}
+								<PinOff class="w-4 h-4 text-primary" />
+							{:else}
+								<Pin class="w-4 h-4 text-muted-foreground" />
+							{/if}
+						</button>
 					</div>
-					</div>
-					<button
-						type="button"
-						onclick={() => form.togglePinnedPath()}
-						disabled={!form.settingsLoaded || !form.trimmedPath}
-						class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 disabled:opacity-40 transition-colors"
-						title={form.isPinnedPath
-							? m.chat_new_chat_remove_from_favorites()
-						: m.chat_new_chat_add_to_favorites()}
-				>
-					{#if form.isPinnedPath}
-						<PinOff class="w-4 h-4 text-primary" />
-					{:else}
-						<Pin class="w-4 h-4 text-muted-foreground" />
-					{/if}
-				</button>
-			</div>
 
-					{#if form.settingsLoaded && form.showBrowser}
+					{#if form.showBrowser}
 						<DirectoryBrowser
 							currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
 							basePath={form.projectBasePath}
-					onSelect={(selPath) => {
-						form.projectPath = selPath;
-						form.clearError();
-						}}
-						onClose={() => (form.showBrowser = false)}
-						{isMobile}
-					/>
-				{/if}
-			</div>
+							onSelect={(selPath) => {
+								form.projectPath = selPath;
+								form.clearError();
+							}}
+							onClose={() => (form.showBrowser = false)}
+							{isMobile}
+						/>
+					{/if}
+				</div>
 
-					{#if form.settingsLoaded && form.validationStatus === 'invalid' && form.validationError}
-						<p class="-mt-1 text-xs text-destructive transition-colors">
+				<div class="-mt-1 min-h-[1.25rem]">
+					{#if form.validationStatus === 'invalid' && form.validationError}
+						<p class="text-xs text-destructive transition-colors">
 							{form.validationError}
 						</p>
-					{:else if form.settingsLoaded && form.gitRepoStatus === 'git'}
+					{:else if form.gitRepoStatus === 'git'}
 						<button
 							type="button"
 							onclick={() => form.openWorktreeModal()}
-						class="-mt-1 flex items-center gap-1.5 text-xs text-interactive-accent hover:underline transition-colors"
-					>
-						{m.chat_new_chat_select_different_worktree()}
-					</button>
+							class="flex items-center gap-1.5 text-xs text-interactive-accent hover:underline transition-colors"
+						>
+							{m.chat_new_chat_select_different_worktree()}
+						</button>
+					{:else}
+						<div aria-hidden="true"></div>
+					{/if}
+				</div>
+
+				{#if form.pinnedProjectPaths.length > 0}
+					<div class="flex flex-wrap gap-2">
+						{#each form.pinnedProjectPaths as pinnedPath (pinnedPath)}
+							<button
+								type="button"
+								class="text-xs px-2.5 py-1 rounded-md border transition-colors {form.projectPath ===
+									pinnedPath
+									? 'border-border bg-accent text-accent-foreground'
+									: 'border-border/70 bg-muted/40 text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}"
+								onclick={() => {
+									form.projectPath = pinnedPath;
+									form.clearError();
+								}}
+							>
+								<span class="block max-w-[70vw] truncate sm:max-w-[24rem]">{pinnedPath}</span>
+							</button>
+						{/each}
+					</div>
+				{:else}
+					<p class="text-xs px-2.5 py-1 rounded-md bg-muted/30 text-muted-foreground text-center w-full">
+						{m.chat_new_chat_star_bookmark()}
+					</p>
 				{/if}
 
-		<!-- Pinned paths or placeholder -->
-			{#if !form.settingsLoaded}
-				<div class="h-7 rounded-md bg-muted/20" aria-hidden="true"></div>
-			{:else if form.pinnedProjectPaths.length > 0}
-				<div class="flex flex-wrap gap-2">
-					{#each form.pinnedProjectPaths as pinnedPath (pinnedPath)}
-						<button
-							type="button"
-							class="text-xs px-2.5 py-1 rounded-md border transition-colors {form.projectPath ===
-								pinnedPath
-								? 'border-border bg-accent text-accent-foreground'
-								: 'border-border/70 bg-muted/40 text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}"
-							onclick={() => {
-								form.projectPath = pinnedPath;
-								form.clearError();
-							}}
-						>
-							<span class="block max-w-[70vw] truncate sm:max-w-[24rem]">{pinnedPath}</span>
-						</button>
-					{/each}
-				</div>
-		{:else}
-			<p
-				class="text-xs px-2.5 py-1 rounded-md bg-muted/30 text-muted-foreground text-center w-full"
-			>
-				{m.chat_new_chat_star_bookmark()}
-			</p>
-		{/if}
+				{#if form.error}
+					<p class="text-sm text-destructive">{form.error}</p>
+				{/if}
+			</div>
 
-		{#if form.error}
-			<p class="text-sm text-destructive">{form.error}</p>
-		{/if}
-	</div>
-
-	<!-- Message input -->
-	<div class="relative min-h-[120px] border border-border rounded-lg pb-1.5">
-		<input
-			bind:this={imageInputRef}
-			type="file"
-			accept="image/*"
-			multiple
-			class="hidden"
-			onchange={handleImageInputChange}
-		/>
-		<div class:invisible={!form.settingsLoaded}>
+			<div class="relative min-h-[120px] border border-border rounded-lg pb-1.5">
+				<input
+					bind:this={imageInputRef}
+					type="file"
+					accept="image/*"
+					multiple
+					class="hidden"
+					onchange={handleImageInputChange}
+				/>
 				<textarea
-				bind:this={textareaRef}
-				bind:value={form.firstMessage}
-			onkeydown={handleKeyDown}
-			oninput={autoResizeTextarea}
-				onpaste={handleMessagePaste}
-				placeholder={form.placeholder}
-				class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
+					bind:this={textareaRef}
+					bind:value={form.firstMessage}
+					onkeydown={handleKeyDown}
+					oninput={autoResizeTextarea}
+					onpaste={handleMessagePaste}
+					placeholder={form.placeholder}
+					class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
 					rows="2"
 				></textarea>
 
-			<ComposerBottomBar
-				canAttachImages={modelCatalog.supportsImages(form.provider)}
-				attachImagesTooltip="Image attachments are unavailable for this provider."
-				onAddImage={openImagePicker}
-				permissionOptions={permissionOptions}
-				selectedPermission={form.permissionMode}
-				onPermissionSelect={(mode) => {
-					form.permissionMode = mode;
-				}}
-				thinkingOptions={thinkingOptions}
-				selectedThinking={form.thinkingMode}
-				onThinkingSelect={(mode) => {
-					form.thinkingMode = mode;
-				}}
-				providerOptions={PROVIDER_MENU_OPTIONS}
-				selectedProvider={form.provider}
-				onProviderSelect={(provider) => {
-					form.selectProvider(provider);
-				}}
-				modelOptions={modelOptions}
-				selectedModel={form.modelValue}
-				onModelSelect={(model) => {
-					form.handleModelChange(model);
-				}}
-				canSend={form.canSubmit}
-				onSend={handleSubmit}
-				sendTitle={m.chat_new_chat_start_session()}
-				sendButtonClass={sendButtonClass}
-			/>
+				<ComposerBottomBar
+					canAttachImages={modelCatalog.supportsImages(form.provider)}
+					attachImagesTooltip="Image attachments are unavailable for this provider."
+					onAddImage={openImagePicker}
+					permissionOptions={permissionOptions}
+					selectedPermission={form.permissionMode}
+					onPermissionSelect={(mode) => {
+						form.permissionMode = mode;
+					}}
+					thinkingOptions={thinkingOptions}
+					selectedThinking={form.thinkingMode}
+					onThinkingSelect={(mode) => {
+						form.thinkingMode = mode;
+					}}
+					providerOptions={PROVIDER_MENU_OPTIONS}
+					selectedProvider={form.provider}
+					onProviderSelect={(provider) => {
+						form.selectProvider(provider);
+					}}
+					modelOptions={modelOptions}
+					selectedModel={form.modelValue}
+					onModelSelect={(model) => {
+						form.handleModelChange(model);
+					}}
+					canSend={form.canSubmit}
+					onSend={handleSubmit}
+					sendTitle={m.chat_new_chat_start_session()}
+					sendButtonClass={sendButtonClass}
+				/>
+			</div>
+
+			{#if form.attachedImages.length > 0}
+				<div class="p-2 bg-muted/40 rounded-lg">
+					<div class="flex flex-wrap gap-2">
+						{#each form.attachedImages as file, idx (file.name + idx)}
+							<div class="relative group">
+								<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
+									{#if form.imageUrlFor(file, idx)}
+										<img src={form.imageUrlFor(file, idx)} alt={file.name} class="w-full h-full object-cover" />
+									{/if}
+								</div>
+								<button
+									type="button"
+									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+									onclick={() => form.removeImage(idx)}
+								>
+									x
+								</button>
+							</div>
+						{/each}
+					</div>
+				</div>
+			{/if}
 		</div>
+
 		{#if !form.settingsLoaded}
-			<div class="absolute inset-0 flex items-center justify-center rounded-lg bg-background/95">
+			<div class="absolute inset-0 flex items-center justify-center">
 				<div
 					role="status"
 					aria-label={m.chat_new_chat_loading_defaults()}
@@ -376,30 +397,6 @@
 			</div>
 		{/if}
 	</div>
-
-	{#if form.attachedImages.length > 0}
-		<div class="p-2 bg-muted/40 rounded-lg">
-			<div class="flex flex-wrap gap-2">
-				{#each form.attachedImages as file, idx (file.name + idx)}
-					<div class="relative group">
-						<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
-							{#if form.imageUrlFor(file, idx)}
-								<img src={form.imageUrlFor(file, idx)} alt={file.name} class="w-full h-full object-cover" />
-							{/if}
-						</div>
-						<button
-							type="button"
-							class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-							onclick={() => form.removeImage(idx)}
-						>
-							x
-						</button>
-					</div>
-				{/each}
-			</div>
-		</div>
-	{/if}
-
 </div>
 
 {#if form.worktreeModalOpen}
