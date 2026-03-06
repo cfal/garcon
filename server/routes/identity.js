@@ -39,8 +39,18 @@ async function noauthPostRegister(request) {
     if (!username || !password) {
       return Response.json({ error: 'Both username and password are required' }, { status: 400 });
     }
-    if (username.length < 3 || password.length < 6) {
-      return Response.json({ error: 'Username requires 3+ characters, password requires 6+' }, { status: 400 });
+    const trimmedUsername = username.trim();
+    if (trimmedUsername.length < 1) {
+      return Response.json({ error: 'Username is required' }, { status: 400 });
+    }
+    if (trimmedUsername.length > 64) {
+      return Response.json({ error: 'Username must be 64 characters or fewer' }, { status: 400 });
+    }
+    if (password.length < 8) {
+      return Response.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
+    }
+    if (password.length > 128) {
+      return Response.json({ error: 'Password must be 128 characters or fewer' }, { status: 400 });
     }
 
     const setupNeeded = await needsSetup();
@@ -49,7 +59,7 @@ async function noauthPostRegister(request) {
     }
 
     const passwordHash = await Bun.password.hash(password, { algorithm: 'bcrypt', cost: 12 });
-    const user = await createUser(username, passwordHash);
+    const user = await createUser(trimmedUsername, passwordHash);
     const token = await generateToken(user);
 
     return Response.json({
