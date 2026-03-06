@@ -23,18 +23,29 @@
 			return;
 		}
 
-		if (username.length < 3) {
-			error = m.auth_setup_errors_username_too_short();
+		const trimmedUsername = username.trim();
+		if (trimmedUsername.length < 1) {
+			error = m.auth_setup_errors_username_required();
 			return;
 		}
 
-		if (password.length < 6) {
+		if (trimmedUsername.length > 64) {
+			error = m.auth_setup_errors_username_too_long();
+			return;
+		}
+
+		if (password.length < 8) {
 			error = m.auth_setup_errors_password_too_short();
 			return;
 		}
 
+		if (password.length > 128) {
+			error = m.auth_setup_errors_password_too_long();
+			return;
+		}
+
 		isSubmitting = true;
-		const result = await auth.register(username, password);
+		const result = await auth.register(trimmedUsername, password);
 		if (!result.success) {
 			error = result.error || m.auth_setup_errors_registration_failed();
 		} else {
