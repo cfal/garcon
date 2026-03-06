@@ -216,6 +216,14 @@ export class ChatHandler {
           return writer.send(new WsFaultMessage('queue-enqueue requires non-empty string content'));
         }
         await this.#queue.enqueueChat(chatId, data.content);
+        // Trigger drain in case the provider has already finished.
+        // triggerDrain no-ops if the provider is still running.
+        this.#queue.triggerDrain(chatId, {
+          projectPath: data.projectPath,
+          cwd: data.projectPath,
+        }).catch((err) => {
+          console.error('queue: enqueue drain error:', err.message);
+        });
       } else if (data instanceof QueueDropRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (!data.entryId) {

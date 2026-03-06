@@ -204,14 +204,14 @@ describe('orchestration', () => {
   describe('drain', () => {
     it('emits dispatching for each entry', async () => {
       await orchQueue.enqueueChat('c1', 'msg1');
-      // Second enqueue appends to existing entry since status is 'queued'.
-      // Use separate chats or pop the first to test sequential drain.
+      await orchQueue.enqueueChat('c1', 'msg2');
       const events = [];
       orchQueue.onDispatching((chatId, entryId, content) => events.push({ chatId, content }));
 
       await orchQueue.triggerDrain('c1', {});
-      expect(events).toHaveLength(1);
+      expect(events).toHaveLength(2);
       expect(events[0].content).toBe('msg1');
+      expect(events[1].content).toBe('msg2');
     });
 
     it('pauses on provider error via resetAndPauseChat', async () => {

@@ -72,14 +72,6 @@ export class QueueManager extends EventEmitter {
   async enqueueChat(chatId, content) {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
-      const existing = queue.entries.find(e => e.status === 'queued');
-      if (existing) {
-        existing.content += '\n' + content;
-        await this.#writeChatQueue(chatId, queue);
-        const result = normalizeForPersist(queue);
-        this.emit('queue-updated', chatId, result);
-        return { entry: existing, queue: result };
-      }
       const entry = {
         id: crypto.randomUUID(),
         content,
