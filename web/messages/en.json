@@ -349,8 +349,6 @@
   "sidebar_navigation_files": "Files",
   "sidebar_navigation_git": "Git",
   "sidebar_navigation_terminal": "Terminal",
-  "sidebar_projects_run_claude_cli": "Run Claude CLI in a project directory to get started",
-  "sidebar_projects_run_claude_cli_to_create": "Run Claude CLI to create chats.",
   "sidebar_projects_search_placeholder": "Search chats...",
   "sidebar_tooltips_delete_chat": "Delete",
   "sidebar_tooltips_edit_chat_name": "Rename",
