@@ -53,11 +53,14 @@
 		<div class="border-b border-border px-6 py-4">
 			<div class="inline-flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
 				<Shield class="size-3.5" />
-				Single-user setup
+				{m.auth_setup_badge()}
 			</div>
 			<h1 class="mt-3 text-xl font-semibold text-foreground">{m.auth_setup_title()}</h1>
 			<p class="mt-1 text-sm text-muted-foreground">
-				This is a single-user app. Configure credentials to protect access if this server is exposed externally.
+				{m.auth_setup_internet_exposure_notice()}
+			</p>
+			<p class="mt-2 text-sm text-muted-foreground">
+				{m.auth_setup_disable_auth_hint()}
 			</p>
 		</div>
 

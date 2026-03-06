@@ -42,11 +42,11 @@
 		<div class="border-b border-border px-6 py-4">
 			<div class="inline-flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
 				<Shield class="size-3.5" />
-				Authentication
+				{m.auth_login_badge()}
 			</div>
 			<h1 class="mt-3 text-xl font-semibold text-foreground">{m.auth_login_title()}</h1>
 			<p class="mt-1 text-sm text-muted-foreground">
-				This server is configured for single-user password protection.
+				{m.auth_login_single_user_notice()}
 			</p>
 		</div>
 
