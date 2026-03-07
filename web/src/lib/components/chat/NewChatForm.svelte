@@ -12,6 +12,7 @@
 		buildPermissionOptions,
 		buildThinkingOptions,
 		PROVIDER_MENU_OPTIONS,
+		PROVIDER_MENU_GROUPS,
 		toModelMenuOptions
 	} from '$lib/chat/composer-controls';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
@@ -345,6 +346,7 @@
 						form.thinkingMode = mode;
 					}}
 					providerOptions={PROVIDER_MENU_OPTIONS}
+					providerGroups={PROVIDER_MENU_GROUPS}
 					selectedProvider={form.provider}
 					onProviderSelect={(provider) => {
 						form.selectProvider(provider);
