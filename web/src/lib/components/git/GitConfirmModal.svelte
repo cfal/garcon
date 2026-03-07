@@ -45,10 +45,12 @@
 	};
 
 	let isDestructive = $derived(confirmAction.type === 'discard' || confirmAction.type === 'delete');
+
+	let confirmButtonRef = $state<HTMLButtonElement | null>(null);
 </script>
 
 <Dialog.Root open={true} onOpenChange={(open) => { if (!open) onCancel(); }}>
-	<Dialog.Content showCloseButton={false}>
+	<Dialog.Content showCloseButton={false} onOpenAutoFocus={(e) => { e.preventDefault(); confirmButtonRef?.focus(); }}>
 		<Dialog.Header>
 			<div class="flex items-center">
 				<div class="p-2 rounded-full mr-3 {isDestructive ? 'bg-status-error' : 'bg-diff-modified'}">
@@ -66,8 +68,8 @@
 				class="px-4 py-2 text-sm text-muted-foreground hover:bg-accent rounded-md"
 			>{m.git_confirm_cancel()}</button>
 			<button
+				bind:this={confirmButtonRef}
 				onclick={onConfirm}
-				autofocus
 				class="px-4 py-2 text-sm rounded-md flex items-center space-x-2 {isDestructive ? 'text-destructive-foreground' : 'text-git-action-foreground'} {buttonClasses[confirmAction.type]}"
 			>
 				{#if confirmAction.type === 'discard' || confirmAction.type === 'delete'}
