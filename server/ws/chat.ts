@@ -27,8 +27,11 @@ import {
   QueueResumeRequest,
   QueueQueryRequest,
 } from '../../common/ws-requests.ts';
+import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { QueueState } from '../../common/queue-state.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
+import type { PersistedChatExecutionConfig, RunProviderTurnOptions } from '../providers/types.js';
+import { requireChatExecutionConfig } from '../providers/types.js';
 
 const PERMISSION_DEDUP_TTL = 30_000;
 
@@ -42,14 +45,14 @@ interface ProviderRegistryDep {
     opencode: Array<{ id: string; [key: string]: unknown }>;
   };
   resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
-  setPermissionMode(chatId: string, mode: string): Promise<void>;
+  setPermissionMode(chatId: string, mode: PermissionMode): Promise<void>;
   setModel(chatId: string, model: string): Promise<void>;
 }
 
 interface QueueManagerDep {
-  submit(chatId: string, command: string, options: Record<string, unknown>): Promise<void>;
+  submit(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
   abort(chatId: string): Promise<boolean>;
-  triggerDrain(chatId: string, options: Record<string, unknown>): Promise<void>;
+  triggerDrain(chatId: string, options: RunProviderTurnOptions): Promise<void>;
   readChatQueue(chatId: string): Promise<QueueState>;
   enqueueChat(chatId: string, content: string): Promise<unknown>;
   dequeueChat(chatId: string, entryId: string): Promise<unknown>;
@@ -70,7 +73,7 @@ interface HistoryCacheDep {
 }
 
 interface ChatRegistryDep {
-  getChat(chatId: string): Record<string, unknown> | null;
+  getChat(chatId: string): PersistedChatExecutionConfig | null;
   updateChat(chatId: string, updates: Record<string, unknown>): void | Promise<void>;
 }
 
@@ -134,6 +137,7 @@ export class ChatHandler {
 
     try {
       await this.#queue.submit(chatId, data.command, {
+        images: data.images,
         permissionMode: data.permissionMode,
         thinkingMode: data.thinkingMode,
         model: data.model,
@@ -296,15 +300,13 @@ export class ChatHandler {
     }
   }
 
-  // Builds drain options from the registry entry, falling back to
-  // client-supplied values for permissionMode and projectPath.
-  #drainOptions(chatId: string): Record<string, unknown> {
-    const entry = this.#registry.getChat(chatId);
-    const projectPath = entry?.projectPath;
+  // Builds drain options from persisted chat settings for queued turns.
+  #drainOptions(chatId: string): RunProviderTurnOptions {
+    const entry = requireChatExecutionConfig(chatId, this.#registry.getChat(chatId));
     return {
-      projectPath,
-      cwd: projectPath,
-      permissionMode: entry?.permissionMode,
+      permissionMode: entry.permissionMode,
+      thinkingMode: entry.thinkingMode,
+      model: entry.model,
     };
   }
 

@@ -8,7 +8,7 @@ import path from 'path';
 import { normalizeToolResultContent } from '../chats/normalize.js';
 import { AssistantMessage, ThinkingMessage, BashToolUseMessage, EditToolUseMessage, WebSearchToolUseMessage, TodoWriteToolUseMessage, ToolResultMessage, ErrorMessage } from '../../common/chat-types.js';
 import { AbsProvider } from './base.js';
-import type { PermissionMode } from '../../common/ws-requests.js';
+import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { StartSessionRequest, ResumeTurnRequest } from './types.js';
 
 interface CodexItem {
@@ -167,7 +167,7 @@ export function convertCodexEventToChatMessages(transformed: NormalizedEvent): u
   return chatMessages;
 }
 
-function mapThinkingModeToReasoningEffort(thinkingMode: string | undefined): string | undefined {
+function mapThinkingModeToCodexEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
   switch (thinkingMode) {
     case 'think': return 'low';
     case 'think-hard': return 'medium';
@@ -183,7 +183,7 @@ const CODEX_SANDBOX: Record<string, { sandboxMode: string; approvalPolicy: strin
   bypassPermissions: { sandboxMode: 'danger-full-access', approvalPolicy: 'never' },
 };
 
-function codexSandboxOptions(permissionMode: string): { sandboxMode: string; approvalPolicy: string } {
+function codexSandboxOptions(permissionMode: PermissionMode): { sandboxMode: string; approvalPolicy: string } {
   return CODEX_SANDBOX[permissionMode] ?? CODEX_SANDBOX.default;
 }
 
@@ -212,13 +212,12 @@ export async function runSingleQuery(prompt: string, options: Record<string, any
     model,
     permissionMode = 'default',
     thinkingMode,
-    modelReasoningEffort,
   } = options;
 
   const workingDirectory = cwd || projectPath || process.cwd();
   const effectivePermissionMode = permissionMode === 'plan' ? 'default' : permissionMode;
   const { sandboxMode, approvalPolicy } = codexSandboxOptions(effectivePermissionMode);
-  const reasoningEffort = modelReasoningEffort || mapThinkingModeToReasoningEffort(thinkingMode);
+  const reasoningEffort = mapThinkingModeToCodexEffort(thinkingMode);
 
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-single-query-'));
   const outputPath = path.join(tmpDir, 'last-message.txt');
@@ -265,6 +264,11 @@ interface CodexSession {
   status: 'running' | 'completed' | 'aborted';
   abortController: AbortController;
   startedAt: string;
+}
+
+interface CodexRunTurnRequest extends Omit<ResumeTurnRequest, 'providerSessionId'> {
+  providerSessionId?: string;
+  onThreadStarted?: (id: string) => void;
 }
 
 async function runCodexStreamedTurn({
@@ -323,7 +327,6 @@ export class CodexProvider extends AbsProvider {
     permissionMode,
     projectPath,
     thinkingMode,
-    modelReasoningEffort,
   }: StartSessionRequest): Promise<string> {
     void images;
 
@@ -337,15 +340,13 @@ export class CodexProvider extends AbsProvider {
 
       this.runTurn({
         command,
-        providerSessionId: '',
         chatId,
         model,
         permissionMode,
         projectPath,
         thinkingMode,
-        modelReasoningEffort,
         onThreadStarted,
-      } as ResumeTurnRequest & { onThreadStarted?: (id: string) => void }).catch((error: Error) => {
+      }).catch((error: Error) => {
         if (settled) return;
         settled = true;
         reject(error);
@@ -361,9 +362,8 @@ export class CodexProvider extends AbsProvider {
     model,
     permissionMode = 'default',
     thinkingMode,
-    modelReasoningEffort,
     onThreadStarted,
-  }: ResumeTurnRequest & { onThreadStarted?: (id: string) => void }): Promise<void> {
+  }: CodexRunTurnRequest): Promise<void> {
     const workingDirectory = projectPath;
     const effectivePermissionMode = permissionMode === 'plan' ? 'default' : permissionMode;
     const { sandboxMode, approvalPolicy } = codexSandboxOptions(effectivePermissionMode);
@@ -384,7 +384,7 @@ export class CodexProvider extends AbsProvider {
         sandboxMode,
         approvalPolicy,
         model,
-        modelReasoningEffort: modelReasoningEffort || mapThinkingModeToReasoningEffort(thinkingMode),
+        modelReasoningEffort: mapThinkingModeToCodexEffort(thinkingMode),
       };
 
       if (providerSessionId) {

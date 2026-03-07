@@ -6,7 +6,7 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import type { SessionProvider } from '$lib/types/app';
-	import type { PermissionMode } from '$lib/types/chat';
+	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import type { ComposerMenuOption, ComposerModeOption } from '$lib/chat/composer-controls';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
 	import { ChevronDown, ImagePlus, Plus, Send } from '@lucide/svelte';
@@ -18,9 +18,9 @@
 		permissionOptions: ComposerModeOption<PermissionMode>[];
 		selectedPermission: PermissionMode;
 		onPermissionSelect: (mode: PermissionMode) => void;
-		thinkingOptions: ComposerModeOption[];
-		selectedThinking: string;
-		onThinkingSelect: (mode: string) => void;
+		thinkingOptions: ComposerModeOption<ThinkingMode>[];
+		selectedThinking: ThinkingMode;
+		onThinkingSelect: (mode: ThinkingMode) => void;
 		providerOptions?: ComposerMenuOption<SessionProvider>[];
 		selectedProvider?: SessionProvider;
 		onProviderSelect?: (provider: SessionProvider) => void;

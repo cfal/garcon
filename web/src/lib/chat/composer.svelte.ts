@@ -3,6 +3,7 @@
 
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import { AgentRunRequest } from '$shared/ws-requests';
+import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 
 const DRAFT_PREFIX = 'chat_draft_';
 
@@ -87,8 +88,8 @@ export class ComposerState {
 		chatId: string,
 		options: {
 			model: string;
-			permissionMode: string;
-			thinkingMode: string;
+			permissionMode: PermissionMode;
+			thinkingMode: ThinkingMode;
 		}
 	): Promise<boolean> {
 		const text = this.inputText.trim();

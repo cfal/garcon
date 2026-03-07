@@ -1,5 +1,5 @@
 import type { SessionProvider } from '$lib/types/app';
-import type { PermissionMode } from '$lib/types/chat';
+import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import { THINKING_MODES } from '$lib/chat/chat-ui-constants';
 
 export type ComposerModeIconId =
@@ -54,7 +54,7 @@ const PERMISSION_OPTION_METADATA: Record<PermissionMode, Omit<ComposerModeOption
 	}
 };
 
-const THINKING_ICON_METADATA: Record<string, Pick<ComposerModeOption, 'iconId' | 'toneClass'>> = {
+const THINKING_ICON_METADATA: Record<ThinkingMode, Pick<ComposerModeOption<ThinkingMode>, 'iconId' | 'toneClass'>> = {
 	none: {
 		iconId: 'thinking-none',
 		toneClass:
@@ -104,7 +104,7 @@ export function buildPermissionOptions(modes: PermissionMode[]): ComposerModeOpt
 	}));
 }
 
-export function buildThinkingOptions(): ComposerModeOption[] {
+export function buildThinkingOptions(): ComposerModeOption<ThinkingMode>[] {
 	return THINKING_MODES.map((mode) => {
 		const iconMeta = THINKING_ICON_METADATA[mode.id] ?? THINKING_ICON_METADATA.none;
 		return {

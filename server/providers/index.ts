@@ -18,14 +18,17 @@ import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loader
 import { getCodexPreviewFromNativePath, loadCodexChatMessages } from './loaders/codex-history-loader.js';
 import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loaders/opencode-history-loader.js';
 
-import type { AgentCommandImage, PermissionMode } from '../../common/ws-requests.js';
+import type { AgentCommandImage } from '../../common/ws-requests.js';
+import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type {
   ProviderChatEntry,
   ProviderName,
   StartSessionRequest,
   ClaudeStartSessionRequest,
   ResumeTurnRequest,
+  RequiredChatExecutionConfig,
 } from './types.js';
+import { requireChatExecutionConfig } from './types.js';
 
 // Encodes a project path into a safe directory name for Claude session storage.
 function encodeProjectPath(projectPath: string): string {
@@ -59,28 +62,15 @@ function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | unde
   projectPath: string;
   model: string;
   permissionMode: PermissionMode;
-  thinkingMode: string;
+  thinkingMode: ThinkingMode;
 } {
+  const execution = requireChatExecutionConfig(chatId, entry);
   if (!entry) {
     throw new Error(`Session not initialized: ${chatId}`);
   }
-  if (!entry.projectPath) {
-    throw new Error(`Chat ${chatId} is missing projectPath`);
-  }
-  if (!entry.model) {
-    throw new Error(`Chat ${chatId} is missing model`);
-  }
-  if (!entry.permissionMode) {
-    throw new Error(`Chat ${chatId} is missing permissionMode`);
-  }
-  if (!entry.thinkingMode) {
-    throw new Error(`Chat ${chatId} is missing thinkingMode`);
-  }
-  return entry as ProviderChatEntry & {
-    projectPath: string;
-    model: string;
-    permissionMode: PermissionMode;
-    thinkingMode: string;
+  return {
+    ...entry,
+    ...execution,
   };
 }
 
@@ -88,8 +78,8 @@ function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | unde
 function hydrateStartSessionRequest(
   chatId: string,
   command: string,
-  entry: { projectPath: string; model: string; permissionMode: PermissionMode; thinkingMode: string },
-  opts: { images?: AgentCommandImage[]; modelReasoningEffort?: string },
+  entry: RequiredChatExecutionConfig,
+  opts: { images?: AgentCommandImage[] },
 ): StartSessionRequest {
   return {
     chatId,
@@ -98,7 +88,6 @@ function hydrateStartSessionRequest(
     model: entry.model,
     permissionMode: entry.permissionMode,
     thinkingMode: entry.thinkingMode,
-    modelReasoningEffort: opts.modelReasoningEffort,
     images: opts.images,
   };
 }
@@ -107,13 +96,12 @@ function hydrateStartSessionRequest(
 function hydrateResumeTurnRequest(
   chatId: string,
   command: string,
-  entry: { projectPath: string; providerSessionId: string; model: string; permissionMode: PermissionMode; thinkingMode: string },
+  entry: RequiredChatExecutionConfig & { providerSessionId: string },
   opts: {
     images?: AgentCommandImage[];
     model?: string;
     permissionMode?: PermissionMode;
-    thinkingMode?: string;
-    modelReasoningEffort?: string;
+    thinkingMode?: ThinkingMode;
   },
 ): ResumeTurnRequest {
   return {
@@ -124,7 +112,6 @@ function hydrateResumeTurnRequest(
     model: opts.model ?? entry.model,
     permissionMode: opts.permissionMode ?? entry.permissionMode,
     thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
-    modelReasoningEffort: opts.modelReasoningEffort,
     images: opts.images,
   };
 }
@@ -143,7 +130,7 @@ interface ClaudeProviderInstance {
   abortClaudeInternalSession(providerSessionId: string): boolean;
   getRunningClaudeInternalSessions(): Array<{ id: string; status: string; startedAt: string }>;
   resolveInternalToolApproval(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void;
-  setInternalPermissionMode(providerSessionId: string, mode: string): void;
+  setInternalPermissionMode(providerSessionId: string, mode: PermissionMode): void;
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
@@ -207,8 +194,7 @@ export class ProviderRegistry {
     images?: AgentCommandImage[];
     model?: string;
     permissionMode?: PermissionMode;
-    thinkingMode?: string;
-    modelReasoningEffort?: string;
+    thinkingMode?: ThinkingMode;
     projectPath?: string;
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
@@ -253,8 +239,7 @@ export class ProviderRegistry {
     images?: AgentCommandImage[];
     model?: string;
     permissionMode?: PermissionMode;
-    thinkingMode?: string;
-    modelReasoningEffort?: string;
+    thinkingMode?: ThinkingMode;
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
     if (!rawEntry) {
@@ -363,7 +348,7 @@ export class ProviderRegistry {
     console.warn('providers: no permission handler for provider:', chat.provider);
   }
 
-  async setPermissionMode(chatId: string, mode: string): Promise<void> {
+  async setPermissionMode(chatId: string, mode: PermissionMode): Promise<void> {
     const entry = this.#registry.getChat(chatId);
     const providerSessionId = entry?.providerSessionId;
     if (!providerSessionId || entry.provider !== 'claude') return;

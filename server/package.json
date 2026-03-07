@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "bun main.js"
+    "start": "bun main.js",
+    "typecheck": "bunx tsc -p tsconfig.json"
   },
   "dependencies": {
     "@openai/codex-sdk": "^0.104.0",

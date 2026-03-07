@@ -1,11 +1,13 @@
 // Session and settings types used by app.ts and components.
 
+import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
+
 export interface ChatSession {
 	id: string;
 	provider: 'claude' | 'codex' | 'opencode';
 	model: string | null;
-	permissionMode?: string;
-	thinkingMode?: string;
+	permissionMode?: PermissionMode;
+	thinkingMode?: ThinkingMode;
 	title: string;
 	projectPath: string;
 	tags: string[];
@@ -37,7 +39,7 @@ export interface AppSettings {
 	lastProvider: ChatSession['provider'];
 	lastProjectPath: string;
 	lastModel: string;
-	lastPermissionMode: string;
-	lastThinkingMode: string;
+	lastPermissionMode: PermissionMode;
+	lastThinkingMode: ThinkingMode;
 	projectBasePath?: string;
 }

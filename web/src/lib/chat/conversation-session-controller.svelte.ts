@@ -24,7 +24,7 @@ import type { ProviderState } from '$lib/chat/provider-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { WsConnection } from '$lib/ws/connection.svelte';
-import type { PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
+import type { PendingPermissionRequest, PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { AppTab } from '$lib/types/app';
 
@@ -33,7 +33,7 @@ export interface SessionControllerDeps {
 		selectedChatId: string | null;
 		selectedChat: ChatSessionRecord | null;
 		byId: Record<string, ChatSessionRecord>;
-		startupByChatId: Record<string, { provider: string; model: string; permissionMode: PermissionMode; thinkingMode: string; firstMessage: string; initialImages?: File[] }>;
+		startupByChatId: Record<string, { provider: string; model: string; permissionMode: PermissionMode; thinkingMode: ThinkingMode; firstMessage: string; initialImages?: File[] }>;
 		isDraft: (chatId: string) => boolean;
 		patchDraftStartup: (chatId: string, patch: Record<string, unknown>) => void;
 		patchChat: (chatId: string, patch: Record<string, unknown>) => void;
@@ -324,9 +324,9 @@ export class ConversationSessionController {
 		const buildApprovalMessage = () =>
 			`User has approved your plan. You can now start coding. Start with updating your todo list if applicable\n\n## Approved Plan:\n${plan}`;
 
-		const resumeWithApproval = (mode: string) => {
+		const resumeWithApproval = (mode: PermissionMode) => {
 			deps.setPreviousPermissionMode(null);
-			deps.providerState.permissionMode = mode as PermissionMode;
+			deps.providerState.permissionMode = mode;
 			if (!chatId || !path) return;
 
 			deps.lifecycle.activateLoading();
@@ -348,7 +348,7 @@ export class ConversationSessionController {
 			case 'bypass-new': {
 				const restoreMode = deps.getPreviousPermissionMode() || 'default';
 				deps.setPreviousPermissionMode(null);
-				deps.providerState.permissionMode = restoreMode as PermissionMode;
+				deps.providerState.permissionMode = restoreMode;
 
 				const planMessage = `Implement the following plan:\n\n${plan}`;
 				deps.appShell.openNewChatDialog({ prefill: planMessage });
@@ -413,7 +413,7 @@ export class ConversationSessionController {
 		deps.sessions.patchChat(chatId, { permissionMode: mode });
 	}
 
-	handleThinkingModeChange(mode: string): void {
+	handleThinkingModeChange(mode: ThinkingMode): void {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId;
 		if (!chatId) return;

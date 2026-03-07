@@ -1,11 +1,11 @@
 // Discriminated union of all WebSocket messages the client can emit.
 // Shared between server and frontend to enforce a typed contract.
 
-export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
-
-const VALID_PERMISSION_MODES: ReadonlySet<string> = new Set<PermissionMode>([
-  'default', 'acceptEdits', 'bypassPermissions', 'plan',
-]);
+import {
+  isPermissionMode,
+  isThinkingMode,
+} from './chat-modes.js';
+import type { PermissionMode, ThinkingMode } from './chat-modes.js';
 
 // Narrows an unknown value to string | null for chatId fields.
 function strOrNull(v: unknown): string | null {
@@ -26,10 +26,18 @@ function requireNonEmptyString(v: unknown, field: string): string {
 
 function requirePermissionMode(v: unknown): PermissionMode {
   const s = requireNonEmptyString(v, 'permissionMode');
-  if (!VALID_PERMISSION_MODES.has(s)) {
+  if (!isPermissionMode(s)) {
     throw new Error(`Invalid permissionMode: ${s}`);
   }
-  return s as PermissionMode;
+  return s;
+}
+
+function requireThinkingMode(v: unknown): ThinkingMode {
+  const s = requireNonEmptyString(v, 'thinkingMode');
+  if (!isThinkingMode(s)) {
+    throw new Error(`Invalid thinkingMode: ${s}`);
+  }
+  return s;
 }
 
 function parseAgentRunImages(v: unknown): AgentCommandImage[] | undefined {
@@ -48,7 +56,7 @@ export class AgentRunRequest {
     public chatId: string,
     public command: string,
     public permissionMode: PermissionMode,
-    public thinkingMode: string,
+    public thinkingMode: ThinkingMode,
     public model: string,
     public images?: AgentCommandImage[],
   ) { }
@@ -65,7 +73,7 @@ export class AgentRunRequest {
       chatId,
       command,
       requirePermissionMode(data.permissionMode),
-      requireNonEmptyString(data.thinkingMode, 'thinkingMode'),
+      requireThinkingMode(data.thinkingMode),
       requireNonEmptyString(data.model, 'model'),
       images,
     );
@@ -128,19 +136,21 @@ export class PermissionDecisionRequest {
 
 export class PermissionModeSetRequest {
   readonly type = 'permission-mode-set' as const;
-  constructor(public chatId: string | null, public mode?: string) { }
+  constructor(public chatId: string | null, public mode?: PermissionMode) { }
 
   static fromJson(data: Record<string, unknown>): PermissionModeSetRequest {
-    return new PermissionModeSetRequest(strOrNull(data.chatId), strOrUndef(data.mode));
+    const mode = data.mode === undefined ? undefined : requirePermissionMode(data.mode);
+    return new PermissionModeSetRequest(strOrNull(data.chatId), mode);
   }
 }
 
 export class ThinkingModeSetRequest {
   readonly type = 'thinking-mode-set' as const;
-  constructor(public chatId: string | null, public mode?: string) { }
+  constructor(public chatId: string | null, public mode?: ThinkingMode) { }
 
   static fromJson(data: Record<string, unknown>): ThinkingModeSetRequest {
-    return new ThinkingModeSetRequest(strOrNull(data.chatId), strOrUndef(data.mode));
+    const mode = data.mode === undefined ? undefined : requireThinkingMode(data.mode);
+    return new ThinkingModeSetRequest(strOrNull(data.chatId), mode);
   }
 }
 
