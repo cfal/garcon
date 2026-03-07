@@ -4,7 +4,6 @@
 
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { getAuthToken } from '$lib/api/client';
 import { attachShellSocket, sendShellMessage } from '$lib/ws/shell-transport';
@@ -264,7 +263,6 @@ export class ShellRuntime {
 				if (this.ws !== socket) return;
 				this.isConnected = false;
 				this.isConnecting = false;
-				this.scheduleReconnect();
 			}
 		});
 	}
@@ -276,6 +274,7 @@ export class ShellRuntime {
 				this.terminal?.write(msg.data);
 				break;
 			case 'exit': {
+				this.manualDisconnect = true;
 				this.ws = null;
 				this.isConnected = false;
 				socket.close();
