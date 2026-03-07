@@ -358,6 +358,7 @@
 					onSend={handleSubmit}
 					sendTitle={m.chat_new_chat_start_session()}
 					sendButtonClass={sendButtonClass}
+					mobileRightGroupFullRow={true}
 				/>
 			</div>
 
