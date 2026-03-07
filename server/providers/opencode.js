@@ -407,8 +407,20 @@ export class OpenCodeProvider extends AbsProvider {
     return models;
   }
 
-  async startSession(command, options = {}) {
-    const { chatId, cwd, model, permissionMode = 'default' } = options;
+  async startSession({
+    command,
+    chatId,
+    images,
+    model,
+    permissionMode = 'default',
+    projectPath,
+    thinkingMode,
+    modelReasoningEffort,
+  } = {}) {
+    void images;
+    void projectPath;
+    void thinkingMode;
+    void modelReasoningEffort;
 
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();
@@ -447,18 +459,32 @@ export class OpenCodeProvider extends AbsProvider {
     return providerSessionId;
   }
 
-  async runTurn(command, options = {}) {
-    const { sessionId, chatId, model } = options;
+  async runTurn({
+    command,
+    providerSessionId,
+    chatId,
+    images,
+    model,
+    permissionMode,
+    projectPath,
+    thinkingMode,
+    modelReasoningEffort,
+  } = {}) {
+    void images;
+    void permissionMode;
+    void projectPath;
+    void thinkingMode;
+    void modelReasoningEffort;
 
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();
 
-    const session = this.#sessions.get(sessionId);
+    const session = this.#sessions.get(providerSessionId);
     if (session) {
       session.status = 'running';
       session.chatId = chatId;
     } else {
-      this.#sessions.set(sessionId, {
+      this.#sessions.set(providerSessionId, {
         status: 'running',
         chatId,
         model,
@@ -469,18 +495,18 @@ export class OpenCodeProvider extends AbsProvider {
 
     const client = await this.getClient();
     const promptBody = buildPromptBody(command, model);
-    const waiter = this.#createTurnWaiter(sessionId);
+    const waiter = this.#createTurnWaiter(providerSessionId);
 
     try {
       await client.session.promptAsync({
-        sessionID: sessionId,
+        sessionID: providerSessionId,
         ...promptBody,
       });
     } catch (err) {
-      console.error(`opencode: query failed for session ${sessionId}:`, err.message);
-      const sess = this.#sessions.get(sessionId);
+      console.error(`opencode: query failed for session ${providerSessionId}:`, err.message);
+      const sess = this.#sessions.get(providerSessionId);
       if (sess) sess.status = 'completed';
-      this.#rejectTurnWaiter(sessionId, err);
+      this.#rejectTurnWaiter(providerSessionId, err);
       this.emitProcessing(chatId, false);
       this.emitFailed(chatId, err.message);
       throw err;

@@ -112,7 +112,7 @@ describe('chat WebSocket handler', () => {
       });
     });
 
-    it('sends error for missing chatId', async () => {
+    it('rejects agent-run payloads with missing chatId', async () => {
       await chatHandler.message(ws, {
         type: 'agent-run',
         command: 'hello',
@@ -122,7 +122,7 @@ describe('chat WebSocket handler', () => {
       });
       const payload = lastSentPayload();
       expect(payload).toMatchObject({ type: 'ws-fault' });
-      expect(payload.error).toContain('Missing chatId');
+      expect(payload.error).toContain('chatId');
     });
 
     it('sends agent-run-failed for invalid session ID format', async () => {
@@ -158,6 +158,54 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
       });
       expect(payload.error).toBe('provider timeout');
+    });
+
+    it('rejects malformed agent-run payloads before queue submission', async () => {
+      await chatHandler.message(ws, {
+        type: 'agent-run',
+        chatId: '123',
+        command: 'hello',
+        permissionMode: '',
+        thinkingMode: 'none',
+        model: 'opus',
+      });
+      const payload = lastSentPayload();
+      expect(mockQueue.submit).not.toHaveBeenCalled();
+      expect(payload).toMatchObject({ type: 'ws-fault' });
+      expect(payload.error).toContain('permissionMode');
+    });
+
+    it('accepts image-only agent-run payloads', async () => {
+      await chatHandler.message(ws, {
+        type: 'agent-run',
+        chatId: '123',
+        command: '',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: 'opus',
+        images: [{ data: 'data:image/png;base64,abc', name: 'a.png' }],
+      });
+      expect(mockQueue.submit).toHaveBeenCalledWith('123', '', {
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: 'opus',
+      });
+    });
+
+    it('rejects agent-run payloads with neither command nor images', async () => {
+      await chatHandler.message(ws, {
+        type: 'agent-run',
+        chatId: '123',
+        command: '   ',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: 'opus',
+        images: [],
+      });
+      const payload = lastSentPayload();
+      expect(mockQueue.submit).not.toHaveBeenCalled();
+      expect(payload).toMatchObject({ type: 'ws-fault' });
+      expect(payload.error).toContain('command or images required');
     });
   });
 

@@ -13,6 +13,18 @@ function strOrUndef(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
 
+function requireNonEmptyString(v: unknown, field: string): string {
+  if (typeof v !== 'string' || !v.trim()) {
+    throw new Error(`Invalid or missing ${field}`);
+  }
+  return v;
+}
+
+function parseAgentRunImages(v: unknown): AgentCommandImage[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  return v;
+}
+
 export interface AgentCommandImage {
   data: string;
   name: string;
@@ -30,13 +42,20 @@ export class AgentRunRequest {
   ) { }
 
   static fromJson(data: Record<string, unknown>): AgentRunRequest {
+    const chatId = requireNonEmptyString(data.chatId, 'chatId');
+    const command = typeof data.command === 'string' ? data.command : '';
+    const images = parseAgentRunImages(data.images);
+    if (!command.trim() && (!images || images.length === 0)) {
+      throw new Error('Invalid agent-run payload: command or images required');
+    }
+
     return new AgentRunRequest(
-      typeof data.chatId === 'string' ? data.chatId : '',
-      typeof data.command === 'string' ? data.command : '',
-      typeof data.permissionMode === 'string' ? data.permissionMode : '',
-      typeof data.thinkingMode === 'string' ? data.thinkingMode : '',
-      typeof data.model === 'string' ? data.model : '',
-      data.images as AgentCommandImage[] | undefined,
+      chatId,
+      command,
+      requireNonEmptyString(data.permissionMode, 'permissionMode'),
+      requireNonEmptyString(data.thinkingMode, 'thinkingMode'),
+      requireNonEmptyString(data.model, 'model'),
+      images,
     );
   }
 }

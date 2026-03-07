@@ -257,7 +257,16 @@ export class CodexProvider extends AbsProvider {
     super();
   }
 
-  async startSession(command, options = {}) {
+  async startSession({
+    command,
+    chatId,
+    images,
+    model,
+    permissionMode,
+    projectPath,
+    thinkingMode,
+    modelReasoningEffort,
+  } = {}) {
     return await new Promise((resolve, reject) => {
       let settled = false;
       const onThreadStarted = (providerSessionId) => {
@@ -266,7 +275,17 @@ export class CodexProvider extends AbsProvider {
         resolve(providerSessionId);
       };
 
-      this.runTurn(command, { ...options, onThreadStarted }).catch((error) => {
+      this.runTurn({
+        command,
+        chatId,
+        images,
+        model,
+        permissionMode,
+        projectPath,
+        thinkingMode,
+        modelReasoningEffort,
+        onThreadStarted,
+      }).catch((error) => {
         if (settled) return;
         settled = true;
         reject(error);
@@ -274,26 +293,24 @@ export class CodexProvider extends AbsProvider {
     });
   }
 
-  async runTurn(command, options = {}) {
-    const {
-      sessionId,
-      chatId,
-      onThreadStarted,
-      cwd,
-      projectPath,
-      model,
-      permissionMode = 'default',
-      thinkingMode,
-      modelReasoningEffort,
-    } = options;
-
-    const workingDirectory = cwd || projectPath || process.cwd();
+  async runTurn({
+    command,
+    providerSessionId,
+    chatId,
+    onThreadStarted,
+    projectPath,
+    model,
+    permissionMode = 'default',
+    thinkingMode,
+    modelReasoningEffort,
+  } = {}) {
+    const workingDirectory = projectPath || process.cwd();
     const effectivePermissionMode = permissionMode === 'plan' ? 'default' : permissionMode;
     const { sandboxMode, approvalPolicy } = codexSandboxOptions(effectivePermissionMode);
 
     let codex;
     let thread;
-    let currentProviderSessionId = sessionId;
+    let currentProviderSessionId = providerSessionId;
     const abortController = new AbortController();
 
     let chatCreatedEmitted = false;
@@ -310,13 +327,13 @@ export class CodexProvider extends AbsProvider {
         modelReasoningEffort: modelReasoningEffort || mapThinkingModeToReasoningEffort(thinkingMode),
       };
 
-      if (sessionId) {
-        thread = codex.resumeThread(sessionId, threadOptions);
+      if (providerSessionId) {
+        thread = codex.resumeThread(providerSessionId, threadOptions);
       } else {
         thread = codex.startThread(threadOptions);
       }
 
-      currentProviderSessionId = sessionId || thread.id || null;
+      currentProviderSessionId = providerSessionId || thread.id || null;
       if (currentProviderSessionId) {
         this.#sessions.set(currentProviderSessionId, {
           thread,

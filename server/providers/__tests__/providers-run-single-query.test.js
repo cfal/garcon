@@ -110,10 +110,11 @@ describe('ProviderRegistry session option hydration', () => {
       thinkingMode: 'think-hard',
     });
 
-    await registry.startSession('123', 'hello', { cwd: '/proj' });
+    await registry.startSession('123', 'hello', {});
 
-    expect(mockOpencode.startSession).toHaveBeenCalledWith('hello', {
-      cwd: '/proj',
+    expect(mockOpencode.startSession).toHaveBeenCalledWith({
+      command: 'hello',
+      projectPath: '/proj',
       model: 'openai/gpt-5',
       permissionMode: 'bypassPermissions',
       thinkingMode: 'think-hard',
@@ -121,7 +122,7 @@ describe('ProviderRegistry session option hydration', () => {
     });
   });
 
-  it('hydrates permission and thinking modes from the registry on resumed turns when omitted', async () => {
+  it('hydrates project path and execution modes from the registry on resumed turns', async () => {
     mockRegistry.getChat.mockReturnValue({
       provider: 'codex',
       projectPath: '/proj',
@@ -133,11 +134,59 @@ describe('ProviderRegistry session option hydration', () => {
 
     await registry.runProviderTurn('123', 'continue', {});
 
-    expect(mockCodex.runTurn).toHaveBeenCalledWith('continue', {
-      sessionId: 'sess-1',
+    expect(mockCodex.runTurn).toHaveBeenCalledWith({
+      command: 'continue',
+      providerSessionId: 'sess-1',
       chatId: '123',
+      projectPath: '/proj',
       model: 'gpt-5.4',
       permissionMode: 'bypassPermissions',
+      thinkingMode: 'think-hard',
+    });
+  });
+
+  it('hydrates project path from the registry for resumed Claude turns', async () => {
+    mockRegistry.getChat.mockReturnValue({
+      provider: 'claude',
+      projectPath: '/proj',
+      providerSessionId: 'sess-2',
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    await registry.runProviderTurn('123', 'continue', {});
+
+    expect(mockClaude.runClaudeTurn).toHaveBeenCalledWith({
+      command: 'continue',
+      providerSessionId: 'sess-2',
+      chatId: '123',
+      projectPath: '/proj',
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+  });
+
+  it('passes hydrated project path through resumed OpenCode turns', async () => {
+    mockRegistry.getChat.mockReturnValue({
+      provider: 'opencode',
+      projectPath: '/proj',
+      providerSessionId: 'sess-3',
+      model: 'openai/gpt-5',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'think-hard',
+    });
+
+    await registry.runProviderTurn('123', 'continue', {});
+
+    expect(mockOpencode.runTurn).toHaveBeenCalledWith({
+      command: 'continue',
+      providerSessionId: 'sess-3',
+      chatId: '123',
+      projectPath: '/proj',
+      model: 'openai/gpt-5',
+      permissionMode: 'acceptEdits',
       thinkingMode: 'think-hard',
     });
   });
@@ -158,9 +207,11 @@ describe('ProviderRegistry session option hydration', () => {
       thinkingMode: 'ultrathink',
     });
 
-    expect(mockClaude.runClaudeTurn).toHaveBeenCalledWith('continue', {
-      sessionId: 'sess-2',
+    expect(mockClaude.runClaudeTurn).toHaveBeenCalledWith({
+      command: 'continue',
+      providerSessionId: 'sess-2',
       chatId: '123',
+      projectPath: '/proj',
       model: 'sonnet',
       permissionMode: 'acceptEdits',
       thinkingMode: 'ultrathink',

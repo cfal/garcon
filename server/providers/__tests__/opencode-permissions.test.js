@@ -203,7 +203,8 @@ describe('OpenCodeProvider resolvePermission guards', () => {
   });
 
   it('passes comprehensive bypass permission rules at session creation', async () => {
-    await provider.startSession('test command', {
+    await provider.startSession({
+      command: 'test command',
       chatId: '123',
       permissionMode: 'bypassPermissions',
     });

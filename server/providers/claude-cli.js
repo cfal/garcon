@@ -432,7 +432,7 @@ class ClaudeProvider extends AbsProvider {
     console.log(`cli: spawning: ${claudeBinary} ${args.join(' ')}`);
 
     const proc = Bun.spawn([claudeBinary, ...args], {
-      cwd: options.cwd || process.cwd(),
+      cwd: options.projectPath,
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -453,17 +453,31 @@ class ClaudeProvider extends AbsProvider {
     return proc;
   }
 
-  async startClaudeInternalSession(command, {
-    sessionId,
+  async startClaudeInternalSession({
+    command,
+    providerSessionId,
     chatId,
     images,
+    model,
     permissionMode,
-    ...restOpts
+    projectPath,
+    thinkingMode,
+    modelReasoningEffort,
   }) {
     if (!chatId) throw new Error('chatId is required when starting a Claude session');
+    if (!providerSessionId) throw new Error('providerSessionId is required when starting a Claude session');
 
-    const providerSessionId = sessionId || crypto.randomUUID();
-    const allOpts = { sessionId: providerSessionId, chatId, images, permissionMode, ...restOpts };
+    const allOpts = {
+      providerSessionId,
+      sessionId: providerSessionId,
+      chatId,
+      images,
+      model,
+      permissionMode,
+      projectPath,
+      thinkingMode,
+      modelReasoningEffort,
+    };
 
     const session = {
       id: providerSessionId,
@@ -488,12 +502,16 @@ class ClaudeProvider extends AbsProvider {
     return providerSessionId;
   }
 
-  async runClaudeTurn(command, {
-    sessionId: providerSessionId,
+  async runClaudeTurn({
+    command,
+    providerSessionId,
     chatId,
     images,
+    model,
     permissionMode,
-    ...restOpts
+    projectPath,
+    thinkingMode,
+    modelReasoningEffort,
   } = {}) {
     if (!providerSessionId) {
       throw new Error('Cannot resume without session ID');
@@ -502,7 +520,17 @@ class ClaudeProvider extends AbsProvider {
       throw new Error('Cannot resume without chat ID');
     }
 
-    const allOpts = { sessionId: providerSessionId, chatId, images, permissionMode, ...restOpts };
+    const allOpts = {
+      providerSessionId,
+      sessionId: providerSessionId,
+      chatId,
+      images,
+      model,
+      permissionMode,
+      projectPath,
+      thinkingMode,
+      modelReasoningEffort,
+    };
 
     let session = this.#runningSessions.get(providerSessionId);
     if (!session) {
@@ -528,7 +556,17 @@ class ClaudeProvider extends AbsProvider {
     this.emitProcessing(effectiveChatId, true);
 
     if (!session.process) {
-      this.#spawnCLI(session, { ...session.options, ...allOpts }, true);
+      this.#spawnCLI(session, {
+        providerSessionId,
+        sessionId: providerSessionId,
+        chatId: effectiveChatId,
+        images: allOpts.images ?? session.options?.images,
+        model: allOpts.model ?? session.options?.model,
+        permissionMode: allOpts.permissionMode ?? session.options?.permissionMode,
+        projectPath: allOpts.projectPath ?? session.options?.projectPath,
+        thinkingMode: allOpts.thinkingMode ?? session.options?.thinkingMode,
+        modelReasoningEffort: allOpts.modelReasoningEffort ?? session.options?.modelReasoningEffort,
+      }, true);
     }
 
     const newMode = permissionMode || 'default';

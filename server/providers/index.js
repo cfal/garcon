@@ -70,23 +70,27 @@ export class ProviderRegistry {
     }
 
     const { provider, projectPath } = entry;
-    const mergedOpts = {
-      ...opts,
-      model: opts.model ?? entry.model ?? undefined,
-      permissionMode: opts.permissionMode ?? entry.permissionMode ?? undefined,
-      thinkingMode: opts.thinkingMode ?? entry.thinkingMode ?? undefined,
-    };
+    const images = opts.images;
+    const model = opts.model ?? entry?.model ?? undefined;
+    const permissionMode = opts.permissionMode ?? entry?.permissionMode ?? undefined;
+    const thinkingMode = opts.thinkingMode ?? entry?.thinkingMode ?? undefined;
+    const modelReasoningEffort = opts.modelReasoningEffort;
 
     if (provider === 'claude') {
       const providerSessionId = crypto.randomUUID();
       const nativePath = resolveClaudeNativePath(projectPath, providerSessionId);
       this.#registry.updateChat(chatId, { providerSessionId, nativePath });
 
-      this.#claude.startClaudeInternalSession(command, {
-        ...mergedOpts,
-        sessionId: providerSessionId,
+      this.#claude.startClaudeInternalSession({
+        providerSessionId,
         chatId,
-        cwd: mergedOpts.cwd || projectPath,
+        command,
+        images,
+        model,
+        permissionMode,
+        projectPath,
+        thinkingMode,
+        modelReasoningEffort,
       }).catch((error) => {
         console.error(`providers: claude start failed for chat ${chatId}:`, error.message);
       });
@@ -94,11 +98,15 @@ export class ProviderRegistry {
     }
 
     if (provider === 'codex') {
-      const providerSessionId = await this.#codex.startSession(command, {
-        ...mergedOpts,
-        sessionId: null,
+      const providerSessionId = await this.#codex.startSession({
         chatId,
-        cwd: mergedOpts.cwd || projectPath,
+        command,
+        images,
+        model,
+        permissionMode,
+        projectPath,
+        thinkingMode,
+        modelReasoningEffort,
       });
       const nativePath = await findCodexSessionFileBySessionId(providerSessionId);
       this.#registry.updateChat(chatId, { providerSessionId, nativePath });
@@ -106,10 +114,15 @@ export class ProviderRegistry {
     }
 
     if (provider === 'opencode') {
-      const providerSessionId = await this.#opencode.startSession(command, {
-        ...mergedOpts,
+      const providerSessionId = await this.#opencode.startSession({
         chatId,
-        cwd: mergedOpts.cwd || projectPath,
+        command,
+        images,
+        model,
+        permissionMode,
+        projectPath,
+        thinkingMode,
+        modelReasoningEffort,
       });
       const nativePath = `opencode:${providerSessionId}`;
       this.#registry.updateChat(chatId, { providerSessionId, nativePath });
@@ -126,23 +139,53 @@ export class ProviderRegistry {
       throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
     }
 
-    const { provider, providerSessionId } = entry;
+    const { provider, providerSessionId, projectPath } = entry;
     if (!providerSessionId) {
       throw new Error(`Session missing provider session ID: ${chatId}`);
     }
 
-    const mergedOpts = {
-      model: opts.model ?? entry.model ?? undefined,
-      permissionMode: opts.permissionMode ?? entry.permissionMode ?? undefined,
-      thinkingMode: opts.thinkingMode ?? entry.thinkingMode ?? undefined,
-    };
+    const images = opts.images;
+    const model = opts.model ?? entry?.model ?? undefined;
+    const permissionMode = opts.permissionMode ?? entry?.permissionMode ?? undefined;
+    const thinkingMode = opts.thinkingMode ?? entry?.thinkingMode ?? undefined;
+    const modelReasoningEffort = opts.modelReasoningEffort;
 
     if (provider === 'claude') {
-      await this.#claude.runClaudeTurn(command, { ...mergedOpts, sessionId: providerSessionId, chatId });
+      await this.#claude.runClaudeTurn({
+        providerSessionId,
+        chatId,
+        command,
+        images,
+        model,
+        permissionMode,
+        projectPath,
+        thinkingMode,
+        modelReasoningEffort,
+      });
     } else if (provider === 'codex') {
-      await this.#codex.runTurn(command, { ...mergedOpts, sessionId: providerSessionId, chatId });
+      await this.#codex.runTurn({
+        providerSessionId,
+        chatId,
+        command,
+        images,
+        model,
+        permissionMode,
+        projectPath,
+        thinkingMode,
+        modelReasoningEffort,
+      });
     } else if (provider === 'opencode') {
-      await this.#opencode.runTurn(command, { ...mergedOpts, sessionId: providerSessionId, chatId });
+      await this.#opencode.runTurn({
+        providerSessionId,
+        chatId,
+        command,
+        images,
+        model,
+        permissionMode,
+        projectPath,
+        thinkingMode,
+        modelReasoningEffort,
+      });
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
