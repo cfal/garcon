@@ -136,6 +136,8 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			deps.readReceiptOutbox.enqueue(chatId, readAt);
 			deps.sessions.patchLastReadAt(chatId, readAt);
 		},
+		removeChatSnapshot: (chatId) => deps.chatState.snapshotCache.remove(chatId),
+		markChatSnapshotValidated: (chatId) => deps.chatState.snapshotCache.markValidated(chatId),
 	};
 }
 

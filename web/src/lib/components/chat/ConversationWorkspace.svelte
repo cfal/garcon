@@ -138,7 +138,8 @@
 	});
 
 	// Reloads the current chat when WS reconnects after a disconnect.
-	// This catches up on any streaming messages missed while offline.
+	// Marks the active snapshot stale before revalidating so the cache
+	// reflects that messages may have been missed while offline.
 	$effect(() => {
 		const connected = ws.isConnected;
 		untrack(() => {
@@ -149,6 +150,7 @@
 				ws.sendMessage(new QueueQueryRequest(selected.id));
 			}
 			if (chatId) {
+				chatState.snapshotCache.markStale(chatId);
 				controller.loadChat(chatId);
 			}
 		});

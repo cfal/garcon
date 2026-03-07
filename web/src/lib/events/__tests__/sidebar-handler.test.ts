@@ -56,13 +56,14 @@ describe('handleChatTitle', () => {
 });
 
 describe('handleChatDeleted', () => {
-	it('navigates away then removes the chat', () => {
+	it('navigates away then removes the chat and snapshot', () => {
 		const ctx = {
 			removeChat: vi.fn(),
 			navigateAwayFromChat: vi.fn(),
 			patchChatTitle: vi.fn(),
 			patchLastReadAt: vi.fn(),
 			refreshChats: vi.fn(),
+			removeChatSnapshot: vi.fn(),
 		};
 
 		handleChatDeleted(
@@ -72,6 +73,7 @@ describe('handleChatDeleted', () => {
 
 		expect(ctx.navigateAwayFromChat).toHaveBeenCalledWith('chat-1');
 		expect(ctx.removeChat).toHaveBeenCalledWith('chat-1');
+		expect(ctx.removeChatSnapshot).toHaveBeenCalledWith('chat-1');
 		// Navigate must happen before remove so the order lookup works.
 		const navOrder = ctx.navigateAwayFromChat.mock.invocationCallOrder[0];
 		const removeOrder = ctx.removeChat.mock.invocationCallOrder[0];
@@ -85,6 +87,7 @@ describe('handleChatDeleted', () => {
 			patchChatTitle: vi.fn(),
 			patchLastReadAt: vi.fn(),
 			refreshChats: vi.fn(),
+			removeChatSnapshot: vi.fn(),
 		};
 
 		handleChatDeleted(
@@ -94,6 +97,7 @@ describe('handleChatDeleted', () => {
 
 		expect(ctx.navigateAwayFromChat).not.toHaveBeenCalled();
 		expect(ctx.removeChat).not.toHaveBeenCalled();
+		expect(ctx.removeChatSnapshot).not.toHaveBeenCalled();
 	});
 });
 
