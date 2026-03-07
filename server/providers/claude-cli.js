@@ -453,7 +453,7 @@ class ClaudeProvider extends AbsProvider {
     return proc;
   }
 
-  async startClaudeInternalSession({
+  async startClaudeCliSession({
     command,
     providerSessionId,
     chatId,
