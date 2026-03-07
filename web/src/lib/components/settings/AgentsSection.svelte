@@ -162,6 +162,7 @@
 						open={isOpen(agent.id)}
 						onOpenChange={(v) => setOpen(agent.id, v)}
 						onLogin={() => handleLogin(agent.id)}
+						cliOnly={agent.id === 'amp'}
 					/>
 				{/each}
 			</div>
