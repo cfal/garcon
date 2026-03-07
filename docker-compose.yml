@@ -4,7 +4,7 @@ services:
     init: true
     restart: unless-stopped
     ports:
-      - "${GARCON_PORT:-8080}:8080"
+      - "${GARCON_PORT:-8080}:${GARCON_PORT:-8080}"
     volumes:
       - garcon-data:/home/garcon/.garcon
       - ${GARCON_PROJECT_DIR:-.}:/projects
@@ -12,6 +12,7 @@ services:
       - ${CODEX_HOME:-~/.codex}:/home/garcon/.codex
       - ${OPENCODE_CONFIG_DIR:-~/.opencode}:/home/garcon/.opencode
     environment:
+      - GARCON_PORT=${GARCON_PORT:-8080}
       - GARCON_BIND_ADDRESS=0.0.0.0
       - GARCON_PROJECT_BASE_DIR=/projects
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
