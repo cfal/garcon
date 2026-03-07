@@ -178,7 +178,7 @@
 	<!-- Status corner badge overlays chat content without affecting layout flow. -->
 		{#if isPinned || isArchived}
 			<div
-				class="absolute top-1 right-1 z-20 pointer-events-none w-5 h-5 rounded-full border flex items-center justify-center {cornerBadgeClass}"
+				class={cn("absolute top-1 right-1 z-20 pointer-events-none w-5 h-5 rounded-full border flex items-center justify-center [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-0 transition-opacity", menuOpen && "!opacity-0", cornerBadgeClass)}
 				aria-hidden="true"
 			>
 				{#if isPinned}
@@ -259,7 +259,7 @@
 	<div
 		class={cn(
 			"absolute z-20",
-			!isAtCursor && "sidebar-item-menu-anchor right-1 bottom-1 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
+			!isAtCursor && "sidebar-item-menu-anchor right-1 top-1 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
 			!isAtCursor && menuOpen && "!opacity-100"
 		)}
 		style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
