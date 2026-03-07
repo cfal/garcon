@@ -1,7 +1,10 @@
 // Chat-specific types for the Svelte frontend. Re-exports shared message
 // types from the canonical definitions in $shared/chat-types.
 
-export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+export type {
+	PermissionMode,
+	ThinkingMode,
+} from '$shared/chat-modes';
 
 export type {
 	ChatImage,

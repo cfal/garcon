@@ -2,10 +2,10 @@
 // UI labels. Consolidates duplicated definitions from provider-state
 // and new-chat-form-state into a single source of truth.
 
-import type { PermissionMode } from '$lib/types/chat';
+import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 
 export interface ThinkingModeOption {
-	id: string;
+	id: ThinkingMode;
 	name: string;
 	description?: string;
 	prefix?: string;

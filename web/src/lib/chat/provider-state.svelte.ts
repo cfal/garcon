@@ -3,7 +3,7 @@
 // selections to localStorage.
 
 import type { SessionProvider } from '$lib/types/app';
-import type { PermissionMode } from '$lib/types/chat';
+import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import {
 	THINKING_MODES,
 	CYCLABLE_PERMISSION_MODES,
@@ -46,7 +46,7 @@ export class ProviderState {
 	provider = $state<SessionProvider>('claude');
 	model = $state('opus');
 	permissionMode = $state<PermissionMode>('default');
-	thinkingMode = $state('none');
+	thinkingMode = $state<ThinkingMode>('none');
 
 	/** Cycles to the next user-cyclable permission mode. */
 	cyclePermissionMode(): void {

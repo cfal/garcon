@@ -9,6 +9,7 @@ import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
 import { UserMessage } from '../common/chat-types.ts';
+import type { RunProviderTurnOptions } from './providers/types.js';
 
 function emptyQueue(): QueueState {
   return { entries: [], paused: false };
@@ -19,7 +20,7 @@ function normalizeForPersist(queue: unknown): QueueState {
 }
 
 interface ProvidersDep {
-  runProviderTurn(chatId: string, command: string, options: Record<string, unknown>): Promise<void>;
+  runProviderTurn(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
   abortSession(chatId: string): Promise<boolean>;
   isChatRunning(chatId: string): boolean;
 }
@@ -200,7 +201,7 @@ export class QueueManager extends EventEmitter {
 
   // Submits a command to a chat session. Appends the user message to
   // history, runs the provider turn, then drains any queued entries.
-  async submit(chatId: string, command: string, options: Record<string, unknown>): Promise<void> {
+  async submit(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
     if (command && this.#historyCache) {
       const userMsg = new UserMessage(new Date().toISOString(), String(command));
       this.#historyCache.appendMessages(chatId, [userMsg]).catch((err: Error) => {
@@ -228,13 +229,13 @@ export class QueueManager extends EventEmitter {
   }
 
   // Triggers drain if the provider is not currently running.
-  async triggerDrain(chatId: string, options: Record<string, unknown>): Promise<void> {
+  async triggerDrain(chatId: string, options: RunProviderTurnOptions): Promise<void> {
     if (this.#providers!.isChatRunning(chatId)) return;
     await this.#drain(chatId, options);
   }
 
   // Pops queued entries one at a time, appends to history, and runs provider turns.
-  async #drain(chatId: string, options: Record<string, unknown>): Promise<void> {
+  async #drain(chatId: string, options: RunProviderTurnOptions): Promise<void> {
     while (true) {
       if (this.#providers!.isChatRunning(chatId)) break;
 

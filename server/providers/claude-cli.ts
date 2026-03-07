@@ -8,7 +8,7 @@ import { getClaudeBinary } from '../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
 import { convertClaudeToolUse } from './converters/claude-tool-use.js';
 import { AbsProvider } from './base.js';
-import type { PermissionMode } from '../../common/ws-requests.js';
+import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { ClaudeStartSessionRequest, ResumeTurnRequest } from './types.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 
@@ -41,8 +41,7 @@ interface ClaudeSessionOptions {
   projectPath: string;
   model: string;
   permissionMode: PermissionMode;
-  thinkingMode: string;
-  modelReasoningEffort?: string;
+  thinkingMode: ThinkingMode;
   images?: AgentCommandImage[];
 }
 
@@ -141,6 +140,20 @@ async function runSingleQuery(prompt: string, { model, cwd, permissionMode, ...r
 
   const decoder = new TextDecoder();
   return chunks.map((c) => decoder.decode(c, { stream: true })).join('') + decoder.decode();
+}
+
+function mapThinkingModeToClaudeEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
+  switch (thinkingMode) {
+    case 'think':
+      return 'low';
+    case 'think-hard':
+      return 'medium';
+    case 'think-harder':
+    case 'ultrathink':
+      return 'high';
+    default:
+      return undefined;
+  }
 }
 
 class ClaudeProvider extends AbsProvider {
@@ -264,7 +277,7 @@ class ClaudeProvider extends AbsProvider {
     pending.resolve(msg.response!.response ?? {});
   }
 
-  setInternalPermissionMode(providerSessionId: string, mode: string): void {
+  setInternalPermissionMode(providerSessionId: string, mode: PermissionMode): void {
     const session = this.#runningSessions.get(providerSessionId);
     if (!session) return;
 
@@ -373,7 +386,15 @@ class ClaudeProvider extends AbsProvider {
     });
   }
 
-  #buildCLIArgs(session: ClaudeRunningSession, { model, permissionMode, thinkingMode }: { model?: string; permissionMode?: string; thinkingMode?: string } = {}, resume: boolean = false): string[] {
+  #buildCLIArgs(session: ClaudeRunningSession, {
+    model,
+    permissionMode,
+    thinkingMode,
+  }: {
+    model?: string;
+    permissionMode?: PermissionMode;
+    thinkingMode?: ThinkingMode;
+  } = {}, resume: boolean = false): string[] {
     const args = [
       '--print',
       '--output-format', 'stream-json',
@@ -398,8 +419,7 @@ class ClaudeProvider extends AbsProvider {
     }
 
     if (thinkingMode) {
-      const effortMap: Record<string, string> = { 'think': 'low', 'think-hard': 'medium', 'think-harder': 'high', 'ultrathink': 'high' };
-      const effort = effortMap[thinkingMode];
+      const effort = mapThinkingModeToClaudeEffort(thinkingMode);
       if (effort) {
         args.push('--effort', effort);
       }
@@ -524,7 +544,6 @@ class ClaudeProvider extends AbsProvider {
     permissionMode,
     projectPath,
     thinkingMode,
-    modelReasoningEffort,
   }: ClaudeStartSessionRequest): Promise<string> {
     if (!chatId) throw new Error('chatId is required when starting a Claude session');
     if (!providerSessionId) throw new Error('providerSessionId is required when starting a Claude session');
@@ -538,7 +557,6 @@ class ClaudeProvider extends AbsProvider {
       permissionMode,
       projectPath,
       thinkingMode,
-      modelReasoningEffort,
     };
 
     const session: ClaudeRunningSession = {
@@ -573,7 +591,6 @@ class ClaudeProvider extends AbsProvider {
     permissionMode,
     projectPath,
     thinkingMode,
-    modelReasoningEffort,
   }: ResumeTurnRequest): Promise<void> {
     if (!providerSessionId) {
       throw new Error('Cannot resume without session ID');
@@ -591,7 +608,6 @@ class ClaudeProvider extends AbsProvider {
       permissionMode,
       projectPath,
       thinkingMode,
-      modelReasoningEffort,
     };
 
     let session = this.#runningSessions.get(providerSessionId);
@@ -628,7 +644,6 @@ class ClaudeProvider extends AbsProvider {
         permissionMode: allOpts.permissionMode ?? session.options?.permissionMode,
         projectPath: allOpts.projectPath ?? session.options?.projectPath,
         thinkingMode: allOpts.thinkingMode ?? session.options?.thinkingMode,
-        modelReasoningEffort: allOpts.modelReasoningEffort ?? session.options?.modelReasoningEffort,
       };
       this.#spawnCLI(session, spawnOpts, true);
     }

@@ -10,13 +10,13 @@
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ImagePlus } from '@lucide/svelte';
-	import type { PermissionMode } from '$lib/types/chat';
+	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 
 	interface Props {
 		onsubmit: () => void;
 		onModelChange?: (model: string) => void;
 		onPermissionModeChange?: (mode: PermissionMode) => void;
-		onThinkingModeChange?: (mode: string) => void;
+		onThinkingModeChange?: (mode: ThinkingMode) => void;
 	}
 
 	let { onsubmit, onModelChange, onPermissionModeChange, onThinkingModeChange }: Props = $props();

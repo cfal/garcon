@@ -2,7 +2,7 @@
 // ad-hoc ChatEntry snapshots with a single authoritative record shape.
 
 import type { SessionProvider } from '$lib/types/app';
-import type { PermissionMode } from '$lib/types/chat';
+import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 
 export type ChatStatus = 'draft' | 'running';
 
@@ -10,7 +10,7 @@ export interface ChatStartupConfig {
 	provider: SessionProvider;
 	model: string;
 	permissionMode: PermissionMode;
-	thinkingMode: string;
+	thinkingMode: ThinkingMode;
 	firstMessage: string;
 	initialImages?: File[];
 }
@@ -22,7 +22,7 @@ export interface ChatSessionRecord {
 	provider: SessionProvider;
 	model: string | null;
 	permissionMode: PermissionMode;
-	thinkingMode: string;
+	thinkingMode: ThinkingMode;
 	createdAt: string | null;
 	lastActivityAt: string | null;
 	lastReadAt: string | null;

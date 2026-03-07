@@ -25,7 +25,7 @@ export function handlePlanModeMessages(msg: AgentRunOutputMessage, ctx: PlanMode
 			if (ctx.permissionMode !== 'plan') {
 				ctx.setPreviousPermissionMode(ctx.permissionMode);
 			}
-			ctx.setPermissionMode('plan' as PermissionMode);
+			ctx.setPermissionMode('plan');
 		}
 
 		if (chatMsg instanceof ExitPlanModeToolUseMessage) {

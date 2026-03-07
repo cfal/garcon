@@ -10,7 +10,7 @@ import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import type { NewChatConfig, SessionProvider } from '$lib/types/app.js';
 import type { AppSettings } from '$lib/types/session.js';
-import type { PermissionMode } from '$lib/types/chat.js';
+import type { PermissionMode, ThinkingMode } from '$lib/types/chat.js';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
 import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
@@ -38,7 +38,7 @@ export class NewChatFormState {
 
 	// Modes
 	permissionMode = $state<PermissionMode>('default');
-	thinkingMode = $state('none');
+	thinkingMode = $state<ThinkingMode>('none');
 
 	// Form
 	firstMessage = $state('');
@@ -443,7 +443,7 @@ export class NewChatFormState {
 			this.applyResolvedModel('opencode', this.#modelCatalog.getDefaultModel('opencode'));
 		}
 		if (typeof settingsData.lastPermissionMode === 'string' && settingsData.lastPermissionMode) {
-			this.permissionMode = settingsData.lastPermissionMode as PermissionMode;
+			this.permissionMode = settingsData.lastPermissionMode;
 		}
 		if (typeof settingsData.lastThinkingMode === 'string') {
 			this.thinkingMode = settingsData.lastThinkingMode;

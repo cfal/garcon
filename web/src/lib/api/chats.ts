@@ -3,14 +3,15 @@
 import { apiGet, apiPost, apiDelete } from './client.js';
 import type { ChatSession } from '$lib/types/session.js';
 import type { SessionProvider } from '$lib/types/app.js';
+import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
 
 export interface StartChatParams {
 	chatId: string;
 	provider: SessionProvider;
 	projectPath: string;
 	model: string;
-	permissionMode: string;
-	thinkingMode: string;
+	permissionMode: PermissionMode;
+	thinkingMode: ThinkingMode;
 	command: string;
 	options?: Record<string, unknown>;
 	tags?: string[];

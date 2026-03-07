@@ -6,7 +6,7 @@ import { normalizeToolResultContent } from '../chats/normalize.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
 import { convertOpenCodeToolUse } from './converters/opencode-tool-use.js';
 import { AbsProvider } from './base.js';
-import type { PermissionMode } from '../../common/ws-requests.js';
+import type { PermissionMode } from '../../common/chat-modes.js';
 import type { StartSessionRequest, ResumeTurnRequest } from './types.js';
 
 // Source of OpenCode permission keys:
@@ -445,12 +445,10 @@ export class OpenCodeProvider extends AbsProvider {
     permissionMode = 'default',
     projectPath,
     thinkingMode,
-    modelReasoningEffort,
   }: StartSessionRequest): Promise<string> {
     void images;
     void projectPath;
     void thinkingMode;
-    void modelReasoningEffort;
 
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();
@@ -496,13 +494,11 @@ export class OpenCodeProvider extends AbsProvider {
     permissionMode,
     projectPath,
     thinkingMode,
-    modelReasoningEffort,
   }: ResumeTurnRequest): Promise<void> {
     void images;
     void permissionMode;
     void projectPath;
     void thinkingMode;
-    void modelReasoningEffort;
 
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();

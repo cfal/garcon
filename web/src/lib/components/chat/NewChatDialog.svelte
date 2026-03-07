@@ -6,7 +6,6 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { getAppShell, getNavigation, getChatSessions } from '$lib/context';
 	import { createClientChatId } from '$lib/chat/client-id.js';
-	import type { PermissionMode } from '$lib/types/chat';
 	import type { NewChatConfig } from '$lib/types/app';
 	import NewChatForm from './NewChatForm.svelte';
 	import { goto } from '$app/navigation';
@@ -31,7 +30,7 @@
 			startup: {
 				provider: config.provider,
 				model: config.model,
-				permissionMode: config.permissionMode as PermissionMode,
+				permissionMode: config.permissionMode,
 				thinkingMode: config.thinkingMode,
 				firstMessage: config.firstMessage,
 				initialImages: config.initialImages,
