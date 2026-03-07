@@ -67,7 +67,7 @@ bun run install
 bun run start
 ```
 
-Default URL: `http://127.0.0.1:8080`
+Default URL: `http://127.0.0.1:8080` (override with `GARCON_PORT` or `--port`)
 
 On first launch, create the single local account at `/setup`, then configure providers in Settings.
 If you start the server with auth disabled, onboarding/login is skipped and you enter the app directly.
@@ -116,6 +116,12 @@ Run with Docker Compose (builds local image):
 GARCON_PROJECT_DIR=~/repos docker compose up -d
 ```
 
+Custom port:
+
+```bash
+GARCON_PROJECT_DIR=~/repos GARCON_PORT=3000 docker compose up -d
+```
+
 Run with Docker Hub image:
 
 ```bash
@@ -124,6 +130,7 @@ docker run -d \
   --init \
   --restart unless-stopped \
   -p 8080:8080 \
+  -e GARCON_PORT=8080 \
   -e GARCON_BIND_ADDRESS=0.0.0.0 \
   -e GARCON_PROJECT_BASE_DIR=/projects \
   -e OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
