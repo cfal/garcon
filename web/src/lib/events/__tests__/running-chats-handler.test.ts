@@ -13,6 +13,7 @@ describe('extractRunningChatIds', () => {
 			claude: [{ id: 'c1' }, { id: 'c2' }],
 			codex: [{ id: 'x1' }],
 			opencode: [],
+			amp: [],
 		});
 
 		const ids = extractRunningChatIds(msg);
@@ -36,7 +37,7 @@ describe('extractRunningChatIds', () => {
 	});
 
 	it('handles empty sessions', () => {
-		const msg = new ChatSessionsRunningMessage({ claude: [], codex: [], opencode: [] });
+		const msg = new ChatSessionsRunningMessage({ claude: [], codex: [], opencode: [], amp: [] });
 
 		const ids = extractRunningChatIds(msg);
 		expect(ids.size).toBe(0);
@@ -60,6 +61,7 @@ describe('handleRunningChats', () => {
 			claude: [{ id: 'a' }],
 			codex: [{ id: 'b' }],
 			opencode: [],
+			amp: [],
 		});
 
 		handleRunningChats(msg, ctx);
@@ -73,7 +75,7 @@ describe('handleRunningChats', () => {
 		const reconcileProcessing = vi.fn();
 		const ctx: RunningChatsContext = { reconcileProcessing };
 
-		const msg = makeRunningChatsMsg({ claude: [], codex: [], opencode: [] });
+		const msg = makeRunningChatsMsg({ claude: [], codex: [], opencode: [], amp: [] });
 		handleRunningChats(msg, ctx);
 
 		const receivedSet = reconcileProcessing.mock.calls[0][0] as Set<string>;

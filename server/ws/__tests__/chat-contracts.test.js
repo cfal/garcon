@@ -14,7 +14,7 @@ import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
 
 const mockProviders = {
-  getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [] })),
+  getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [] })),
   resolvePermission: mock(() => undefined),
   setPermissionMode: mock(() => Promise.resolve(undefined)),
   setModel: mock(() => Promise.resolve(undefined)),

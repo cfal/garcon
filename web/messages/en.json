@@ -244,6 +244,7 @@
   "main_enter_fullscreen": "Fullscreen",
   "main_exit_fullscreen": "Exit fullscreen",
   "mobile_menu": "Menu",
+  "provider_amp": "Amp",
   "provider_claude": "Claude",
   "provider_codex": "Codex",
   "provider_opencode": "OpenCode",

@@ -94,6 +94,11 @@ export const PROVIDER_MENU_OPTIONS: ComposerMenuOption<SessionProvider>[] = [
 		value: 'opencode',
 		label: 'OpenCode',
 		description: 'Runs through OpenCode-compatible backends.'
+	},
+	{
+		value: 'amp',
+		label: 'Amp',
+		description: 'Amp agent with multi-tool workflows.'
 	}
 ];
 
