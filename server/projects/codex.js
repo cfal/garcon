@@ -19,6 +19,17 @@ export async function findCodexSessionFileBySessionId(sessionId) {
   return match || null;
 }
 
+// Extracts session metadata from a Codex JSONL file path.
+// Codex filenames follow: rollout-{timestamp}-{sessionId}.jsonl
+export function getCodexSessionMeta(nativePath) {
+  if (!nativePath) return null;
+  const base = path.basename(nativePath, '.jsonl');
+  // Extract the last segment after the last dash as session ID
+  const lastDash = base.lastIndexOf('-');
+  if (lastDash < 0) return { id: base };
+  return { id: base.slice(lastDash + 1) };
+}
+
 async function findFileWithSuffix(dir, suffix) {
   if (!dir || !suffix) {
     return null;
