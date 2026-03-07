@@ -129,7 +129,7 @@
 			</div>
 
 		<!-- Terminal viewport -->
-		<div class="flex-1 min-h-0 p-2 relative">
+		<div class="flex-1 min-h-0 p-2 overflow-hidden relative">
 			<div bind:this={terminalEl} class="h-full w-full min-h-0 outline-none focus-visible:ring-2 focus-visible:ring-ring" style="outline: none;"></div>
 
 			{#if runtime.clipboardMessage}
