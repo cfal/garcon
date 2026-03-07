@@ -46,15 +46,18 @@ async function runSingleQuery(prompt, { cwd } = {}) {
     '--no-notifications',
     '--dangerously-allow-all',
     '--stream-json',
-    '-x', prompt,
+    '-x',
   ];
 
   const proc = Bun.spawn([ampBinary, ...args], {
     cwd: cwd || process.cwd(),
-    stdin: 'ignore',
+    stdin: 'pipe',
     stdout: 'pipe',
-    stderr: 'pipe',
+    stderr: 'ignore',
   });
+
+  proc.stdin.write(prompt);
+  proc.stdin.end();
 
   const chunks = [];
   const reader = proc.stdout.getReader();
@@ -211,17 +214,22 @@ class AmpProvider extends AbsProvider {
     } catch { /* stream closed */ }
   }
 
-  #spawnAmp(session, { cwd }, args) {
+  #spawnAmp(session, { cwd }, args, prompt) {
     const ampBinary = getAmpBinary();
 
     console.log(`amp: spawning: ${ampBinary} ${args.join(' ')}`);
 
     const proc = Bun.spawn([ampBinary, ...args], {
       cwd: cwd || process.cwd(),
-      stdin: 'ignore',
+      stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
     });
+
+    if (prompt) {
+      proc.stdin.write(prompt);
+      proc.stdin.end();
+    }
 
     session.process = proc;
     this.#readStdout(session, proc);
@@ -242,12 +250,6 @@ class AmpProvider extends AbsProvider {
 
     return new Promise(resolve => {
       session.turnResolve = resolve;
-
-      if (session.process) {
-        session.process.exited.then(exitCode => {
-          this.#finalizeTurn(session, exitCode);
-        });
-      }
     });
   }
 
@@ -276,11 +278,11 @@ class AmpProvider extends AbsProvider {
       '--no-notifications',
       '--dangerously-allow-all',
       '--stream-json',
-      '-x', command,
+      '-x',
     ];
 
     try {
-      this.#spawnAmp(session, { cwd }, args);
+      this.#spawnAmp(session, { cwd }, args, command);
     } catch (err) {
       this.#runningSessions.delete(providerSessionId);
       this.emitProcessing(chatId, false);
@@ -331,11 +333,11 @@ class AmpProvider extends AbsProvider {
       '--no-notifications',
       '--dangerously-allow-all',
       '--stream-json',
-      '-x', command,
+      '-x',
     ];
 
     try {
-      this.#spawnAmp(session, { cwd }, args);
+      this.#spawnAmp(session, { cwd }, args, command);
     } catch (err) {
       session.isRunning = false;
       this.emitProcessing(chatId, false);
