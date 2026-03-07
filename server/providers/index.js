@@ -81,7 +81,7 @@ export class ProviderRegistry {
       const nativePath = resolveClaudeNativePath(projectPath, providerSessionId);
       this.#registry.updateChat(chatId, { providerSessionId, nativePath });
 
-      this.#claude.startClaudeInternalSession({
+      this.#claude.startClaudeCliSession({
         providerSessionId,
         chatId,
         command,

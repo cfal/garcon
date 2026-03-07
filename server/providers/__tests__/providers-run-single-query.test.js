@@ -87,7 +87,7 @@ describe('ProviderRegistry session option hydration', () => {
       updateChat: mock(() => undefined),
     };
     mockClaude = {
-      startClaudeInternalSession: mock(() => Promise.resolve('claude-session')),
+      startClaudeCliSession: mock(() => Promise.resolve('claude-session')),
       runClaudeTurn: mock(() => Promise.resolve(undefined)),
     };
     mockCodex = {
