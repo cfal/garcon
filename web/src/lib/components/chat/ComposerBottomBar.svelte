@@ -32,6 +32,7 @@
 		sendTitle: string;
 		sendButtonClass: string;
 		selectorsSide?: 'left' | 'right';
+		mobileRightGroupFullRow?: boolean;
 	}
 
 	let {
@@ -55,6 +56,7 @@
 		sendTitle,
 		sendButtonClass,
 		selectorsSide = 'right',
+		mobileRightGroupFullRow = false,
 	}: Props = $props();
 
 	const activePermission = $derived(
@@ -187,7 +189,10 @@
 			{/if}
 		</div>
 
-		<div class="flex min-w-0 basis-full items-center justify-between gap-2 sm:ml-auto sm:basis-auto sm:justify-end">
+		<div
+			class="flex min-w-0 items-center justify-between gap-2 sm:ml-auto sm:basis-auto sm:justify-end"
+			class:basis-full={mobileRightGroupFullRow}
+		>
 			{#if selectorsSide === 'right'}
 				{@render providerAndModelSelectors('end')}
 			{/if}
