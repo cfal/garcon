@@ -20,15 +20,7 @@ export interface LifecycleContext {
 	onNavigateToChat?: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	clearPendingChatId: () => void;
-}
-
-// Removes cached messages for the given chat ID from localStorage.
-function removeCachedMessages(chatId: string): void {
-	try {
-		localStorage.removeItem(`chat_messages_${chatId}`);
-	} catch {
-		// Storage unavailable
-	}
+	markChatSnapshotValidated?: (chatId: string) => void;
 }
 
 export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: LifecycleContext) {
@@ -49,7 +41,7 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	}
 
 	if (completedChatId && msg.exitCode !== 1) {
-		removeCachedMessages(completedChatId);
+		ctx.markChatSnapshotValidated?.(completedChatId);
 	}
 
 	// Preserve plan-exit permission requests across turn boundaries

@@ -92,6 +92,9 @@ export interface EventRouterStores {
 	// Read state for unread indicators
 	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 	enqueueReadReceipt: (chatId: string, readAt: string) => void;
+	// Snapshot cache operations for lifecycle and sidebar handlers.
+	removeChatSnapshot?: (chatId: string) => void;
+	markChatSnapshotValidated?: (chatId: string) => void;
 }
 
 function extractFirstLine(text: string): string {
@@ -201,6 +204,7 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 		onNavigateToChat,
 		getPendingChatId,
 		clearPendingChatId,
+		markChatSnapshotValidated: stores.markChatSnapshotValidated,
 	};
 
 	const chatEventCtx: ChatEventContext = {
@@ -274,6 +278,7 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 		patchChatTitle: stores.patchChatTitle,
 		patchLastReadAt: stores.patchLastReadAt,
 		refreshChats: stores.refreshChats,
+		removeChatSnapshot: stores.removeChatSnapshot,
 	};
 
 	return {

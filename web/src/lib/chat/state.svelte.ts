@@ -1,9 +1,10 @@
 // Per-chat message state: message arrays, pagination, scroll management,
-// and message persistence to localStorage.
+// and message persistence via LocalChatSnapshotCache.
 
 import { parseChatMessages, type ChatMessage } from '$shared/chat-types';
 import { ChatLogQueryRequest } from '$shared/ws-requests';
 import type { WsConnection } from '$lib/ws/connection.svelte';
+import { LocalChatSnapshotCache } from './chat-snapshot-cache';
 
 const MESSAGES_PER_PAGE = 20;
 const INITIAL_VISIBLE_MESSAGES = 100;
@@ -12,6 +13,7 @@ const CHAT_LOG_TIMEOUT_MS = 45_000;
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 
 export class ChatState {
+	readonly snapshotCache = new LocalChatSnapshotCache();
 	chatMessages = $state<ChatMessage[]>([]);
 	visibleMessageCount = $state(INITIAL_VISIBLE_MESSAGES);
 	isLoadingMessages = $state(false);
@@ -158,35 +160,22 @@ export class ChatState {
 		this.loadError = null;
 	}
 
-	/** Persists current messages to localStorage for the given chat ID. */
+	/** Persists current messages via the snapshot cache. */
 	persistMessages(chatId: string): void {
-		if (!chatId) return;
-		const key = `chat_messages_${chatId}`;
-		try {
-			if (this.chatMessages.length > 0) {
-				localStorage.setItem(key, JSON.stringify(this.chatMessages));
-			} else {
-				localStorage.removeItem(key);
-			}
-		} catch {
-			// Storage full or unavailable
-		}
+		this.snapshotCache.persist(chatId, this.chatMessages);
 	}
 
-	/** Restores messages from localStorage for the given chat ID. */
+	/** Restores messages from the snapshot cache. */
 	restoreMessages(chatId: string): boolean {
-		if (!chatId) return false;
-		const key = `chat_messages_${chatId}`;
-		try {
-			const saved = localStorage.getItem(key);
-			if (saved) {
-				this.chatMessages = parseChatMessages(JSON.parse(saved));
-				return true;
-			}
-		} catch {
-			localStorage.removeItem(key);
-		}
-		return false;
+		const restored = this.snapshotCache.restore(chatId);
+		if (!restored) return false;
+		this.chatMessages = restored.messages;
+		return true;
+	}
+
+	/** Removes cached messages for the given chat ID. */
+	removeCachedMessages(chatId: string): void {
+		this.snapshotCache.remove(chatId);
 	}
 }
 

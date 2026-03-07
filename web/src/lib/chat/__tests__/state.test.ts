@@ -99,23 +99,39 @@ describe('ChatState', () => {
 
 	it('persistMessages overwrites cached content for same-length replacements', () => {
 		const chatId = 'persist-chat';
-		localStorage.removeItem(`chat_messages_${chatId}`);
-		const state = new ChatState();
-		state.setMessages([
+		localStorage.clear();
+		const chatState = new ChatState();
+		chatState.setMessages([
 			new UserMessage('2024-01-01T00:00:00Z', 'first'),
 		]);
-		state.persistMessages(chatId);
+		chatState.persistMessages(chatId);
 
-		state.setMessages([
+		chatState.setMessages([
 			new UserMessage('2024-01-01T00:00:01Z', 'second'),
 		]);
-		state.persistMessages(chatId);
+		chatState.persistMessages(chatId);
 
 		const restored = new ChatState();
 		const ok = restored.restoreMessages(chatId);
 		expect(ok).toBe(true);
 		expect(restored.chatMessages).toHaveLength(1);
 		expect((restored.chatMessages[0] as UserMessage).content).toBe('second');
-		localStorage.removeItem(`chat_messages_${chatId}`);
+		localStorage.clear();
+	});
+
+	it('removeCachedMessages delegates to snapshot cache', () => {
+		const chatId = 'remove-chat';
+		localStorage.clear();
+		const chatState = new ChatState();
+		chatState.setMessages([
+			new UserMessage('2024-01-01T00:00:00Z', 'hello'),
+		]);
+		chatState.persistMessages(chatId);
+
+		chatState.removeCachedMessages(chatId);
+
+		const restored = new ChatState();
+		expect(restored.restoreMessages(chatId)).toBe(false);
+		localStorage.clear();
 	});
 });
