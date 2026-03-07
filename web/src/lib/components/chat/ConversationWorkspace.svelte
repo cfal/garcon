@@ -137,19 +137,19 @@
 		controller.handleChatSwitchIfChanged(sessions.selectedChatId);
 	});
 
-	// Reloads the current chat when WS reconnects after a failed load.
+	// Reloads the current chat when WS reconnects after a disconnect.
+	// This catches up on any streaming messages missed while offline.
 	$effect(() => {
 		const connected = ws.isConnected;
 		untrack(() => {
+			if (!connected) return;
 			const selected = sessions.selectedChat;
-			if (connected && selected && selected.status === 'running') {
+			const chatId = sessions.selectedChatId;
+			if (selected && selected.status === 'running') {
 				ws.sendMessage(new QueueQueryRequest(selected.id));
 			}
-			if (connected && (needsServerLoad || chatState.loadStatus === 'error')) {
-				const chatId = sessions.selectedChatId;
-				if (chatId) {
-					controller.loadChat(chatId);
-				}
+			if (chatId) {
+				controller.loadChat(chatId);
 			}
 		});
 	});
