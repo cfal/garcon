@@ -3,6 +3,10 @@
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
+const VALID_PERMISSION_MODES: ReadonlySet<string> = new Set<PermissionMode>([
+  'default', 'acceptEdits', 'bypassPermissions', 'plan',
+]);
+
 // Narrows an unknown value to string | null for chatId fields.
 function strOrNull(v: unknown): string | null {
   return typeof v === 'string' ? v : null;
@@ -20,6 +24,14 @@ function requireNonEmptyString(v: unknown, field: string): string {
   return v;
 }
 
+function requirePermissionMode(v: unknown): PermissionMode {
+  const s = requireNonEmptyString(v, 'permissionMode');
+  if (!VALID_PERMISSION_MODES.has(s)) {
+    throw new Error(`Invalid permissionMode: ${s}`);
+  }
+  return s as PermissionMode;
+}
+
 function parseAgentRunImages(v: unknown): AgentCommandImage[] | undefined {
   if (!Array.isArray(v)) return undefined;
   return v;
@@ -35,7 +47,7 @@ export class AgentRunRequest {
   constructor(
     public chatId: string,
     public command: string,
-    public permissionMode: string,
+    public permissionMode: PermissionMode,
     public thinkingMode: string,
     public model: string,
     public images?: AgentCommandImage[],
@@ -52,7 +64,7 @@ export class AgentRunRequest {
     return new AgentRunRequest(
       chatId,
       command,
-      requireNonEmptyString(data.permissionMode, 'permissionMode'),
+      requirePermissionMode(data.permissionMode),
       requireNonEmptyString(data.thinkingMode, 'thinkingMode'),
       requireNonEmptyString(data.model, 'model'),
       images,

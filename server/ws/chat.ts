@@ -9,6 +9,7 @@ import {
   ChatSessionsRunningMessage, WsFaultMessage,
   ClientRequestErrorMessage,
 } from '../../common/ws-events.ts';
+import type { ClientRequestErrorCode } from '../../common/ws-events.ts';
 import {
   parseClientWsMessage,
   AgentRunRequest,
@@ -26,37 +27,96 @@ import {
   QueueResumeRequest,
   QueueQueryRequest,
 } from '../../common/ws-requests.ts';
+import type { QueueState } from '../../common/queue-state.ts';
+import type { ChatMessage } from '../../common/chat-types.ts';
 
 const PERMISSION_DEDUP_TTL = 30_000;
 
+// Bun's ServerWebSocket parameterized over the per-socket data bag.
+type WS = import('bun').ServerWebSocket<unknown>;
+
+interface ProviderRegistryDep {
+  getRunningSessions(): {
+    claude: Array<{ id: string; [key: string]: unknown }>;
+    codex: Array<{ id: string; [key: string]: unknown }>;
+    opencode: Array<{ id: string; [key: string]: unknown }>;
+  };
+  resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
+  setPermissionMode(chatId: string, mode: string): Promise<void>;
+  setModel(chatId: string, model: string): Promise<void>;
+}
+
+interface QueueManagerDep {
+  submit(chatId: string, command: string, options: Record<string, unknown>): Promise<void>;
+  abort(chatId: string): Promise<boolean>;
+  triggerDrain(chatId: string, options: Record<string, unknown>): Promise<void>;
+  readChatQueue(chatId: string): Promise<QueueState>;
+  enqueueChat(chatId: string, content: string): Promise<unknown>;
+  dequeueChat(chatId: string, entryId: string): Promise<unknown>;
+  clearChatQueue(chatId: string): Promise<unknown>;
+  pauseChatQueue(chatId: string): Promise<unknown>;
+  resumeChatQueue(chatId: string): Promise<unknown>;
+}
+
+interface HistoryCacheDep {
+  ensureLoaded(chatId: string): Promise<void>;
+  getPaginatedMessages(chatId: string, limit: number, offset: number): {
+    messages: ChatMessage[];
+    total: number;
+    hasMore: boolean;
+    offset: number;
+    limit: number;
+  };
+}
+
+interface ChatRegistryDep {
+  getChat(chatId: string): Record<string, unknown> | null;
+  updateChat(chatId: string, updates: Record<string, unknown>): void | Promise<void>;
+}
+
 class WebSocketWriter {
-  constructor(ws) {
-    this.ws = ws;
+  #ws: WS;
+  constructor(ws: WS) {
+    this.#ws = ws;
   }
-  send(data) {
-    sendWebSocketJson(this.ws, data);
+  send(data: unknown): void {
+    sendWebSocketJson(this.#ws, data);
   }
 }
 
-export class ChatHandler {
-  #providers;
-  #queue;
-  #historyCache;
-  #registry;
-  #recentPermissionDecisions = new Map();
+interface RequestErrorParams {
+  clientRequestId: string;
+  requestType: string;
+  code: ClientRequestErrorCode;
+  message: string;
+  retryable: boolean;
+  chatId?: string;
+}
 
-  // providers: ProviderRegistry
-  // queue: QueueManager (orchestrator)
-  // historyCache: HistoryCache
-  // registry: ChatRegistry
-  constructor(providers, queue, historyCache, registry) {
+export class ChatHandler {
+  #providers: ProviderRegistryDep;
+  #queue: QueueManagerDep;
+  #historyCache: HistoryCacheDep;
+  #registry: ChatRegistryDep;
+  #recentPermissionDecisions = new Map<string, number>();
+
+  constructor(
+    providers: ProviderRegistryDep,
+    queue: QueueManagerDep,
+    historyCache: HistoryCacheDep,
+    registry: ChatRegistryDep,
+  ) {
     this.#providers = providers;
     this.#queue = queue;
     this.#historyCache = historyCache;
     this.#registry = registry;
   }
 
-  createHandler() {
+  createHandler(): {
+    open: (ws: WS) => void;
+    message: (ws: WS, data: unknown) => Promise<void>;
+    close: (ws: WS, code?: number, reason?: string) => void;
+  } {
     return {
       open: (ws) => this.#handleOpen(ws),
       message: (ws, data) => this.#handleMessage(ws, data),
@@ -64,7 +124,7 @@ export class ChatHandler {
     };
   }
 
-  async #handleAgentCommand(data, chatId, writer) {
+  async #handleAgentCommand(data: AgentRunRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
     console.log('chat: message:', data.command || '[continue/resume]');
 
     if (!/^\d+$/.test(String(chatId))) {
@@ -78,17 +138,17 @@ export class ChatHandler {
         thinkingMode: data.thinkingMode,
         model: data.model,
       });
-    } catch (error) {
-      writer.send(new AgentRunFailedMessage(chatId, error.message));
+    } catch (error: unknown) {
+      writer.send(new AgentRunFailedMessage(chatId, (error as Error).message));
     }
   }
 
-  async #handleAbortSession(data, chatId) {
+  async #handleAbortSession(_data: AgentStopRequest, chatId: string): Promise<void> {
     console.log('chat: abort session request:', chatId);
     await this.#queue.abort(chatId);
   }
 
-  #handlePermissionResponse(data) {
+  #handlePermissionResponse(data: PermissionDecisionRequest): void {
     if (!data.permissionRequestId || !data.chatId) return;
 
     if (this.#recentPermissionDecisions.has(data.permissionRequestId)) {
@@ -96,7 +156,7 @@ export class ChatHandler {
       return;
     }
     this.#recentPermissionDecisions.set(data.permissionRequestId, Date.now());
-    setTimeout(() => this.#recentPermissionDecisions.delete(data.permissionRequestId), PERMISSION_DEDUP_TTL);
+    setTimeout(() => this.#recentPermissionDecisions.delete(data.permissionRequestId!), PERMISSION_DEDUP_TTL);
 
     const decision = {
       allow: Boolean(data.allow),
@@ -106,13 +166,14 @@ export class ChatHandler {
     this.#providers.resolvePermission(data.chatId, data.permissionRequestId, decision);
   }
 
-  #sendRequestError(writer, { clientRequestId, requestType, code, message, retryable, chatId }) {
+  #sendRequestError(writer: WebSocketWriter, params: RequestErrorParams): void {
     writer.send(new ClientRequestErrorMessage(
-      clientRequestId, requestType, code, message, Boolean(retryable), chatId,
+      params.clientRequestId, params.requestType, params.code,
+      params.message, Boolean(params.retryable), params.chatId,
     ));
   }
 
-  async #handleGetMessages(data, chatId, writer) {
+  async #handleGetMessages(data: ChatLogQueryRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
     const clientRequestId = data.clientRequestId;
     if (!clientRequestId) return;
 
@@ -140,32 +201,32 @@ export class ChatHandler {
         clientRequestId, chatId, result.messages, result.total,
         result.hasMore, result.offset, result.limit,
       ));
-    } catch (error) {
-      console.error(`ws: error reading messages for ${chatId}:`, error.message);
+    } catch (error: unknown) {
+      console.error(`ws: error reading messages for ${chatId}:`, (error as Error).message);
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
         code: 'HISTORY_LOAD_FAILED',
-        message: error.message || 'Failed to load chat history',
+        message: (error as Error).message || 'Failed to load chat history',
         retryable: true, chatId,
       });
     }
   }
 
-  #handleGetRunningSessions(data, writer) {
+  #handleGetRunningSessions(_data: ChatRunningQueryRequest, writer: WebSocketWriter): void {
     writer.send(new ChatSessionsRunningMessage(this.#providers.getRunningSessions()));
   }
 
-  #handleOpen(ws) {
+  #handleOpen(ws: WS): void {
     console.log('ws: chat client connected');
     ws.subscribe('chat');
   }
 
-  async #handleMessage(ws, rawData) {
+  async #handleMessage(ws: WS, rawData: unknown): Promise<void> {
     const writer = new WebSocketWriter(ws);
     try {
-      const data = parseClientWsMessage(rawData);
+      const data = parseClientWsMessage(rawData as Record<string, unknown>);
       if (!data) return;
-      const chatId = 'chatId' in data ? data.chatId || null : null;
+      const chatId = 'chatId' in data ? (data.chatId as string) || null : null;
 
       if (data instanceof AgentRunRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
@@ -203,9 +264,7 @@ export class ChatHandler {
           return writer.send(new WsFaultMessage('queue-enqueue requires non-empty string content'));
         }
         await this.#queue.enqueueChat(chatId, data.content);
-        // Trigger drain in case the provider has already finished.
-        // triggerDrain no-ops if the provider is still running.
-        this.#queue.triggerDrain(chatId, this.#drainOptions(chatId, data)).catch((err) => {
+        this.#queue.triggerDrain(chatId, this.#drainOptions(chatId)).catch((err: Error) => {
           console.error('queue: enqueue drain error:', err.message);
         });
       } else if (data instanceof QueueDropRequest) {
@@ -223,7 +282,7 @@ export class ChatHandler {
       } else if (data instanceof QueueResumeRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         await this.#queue.resumeChatQueue(chatId);
-        this.#queue.triggerDrain(chatId, this.#drainOptions(chatId, data)).catch((err) => {
+        this.#queue.triggerDrain(chatId, this.#drainOptions(chatId)).catch((err: Error) => {
           console.error('queue: resume drain error:', err.message);
         });
       } else if (data instanceof QueueQueryRequest) {
@@ -231,30 +290,29 @@ export class ChatHandler {
         const queue = await this.#queue.readChatQueue(chatId);
         writer.send(new QueueStateUpdatedMessage(chatId, queue));
       }
-    } catch (error) {
-      console.error('ws: chat error:', error.message);
-      writer.send(new WsFaultMessage(error.message));
+    } catch (error: unknown) {
+      console.error('ws: chat error:', (error as Error).message);
+      writer.send(new WsFaultMessage((error as Error).message));
     }
   }
 
   // Builds drain options from the registry entry, falling back to
-  // client-supplied values. This ensures permissionMode and projectPath
-  // are always present even when the client omits them.
-  #drainOptions(chatId, data) {
+  // client-supplied values for permissionMode and projectPath.
+  #drainOptions(chatId: string): Record<string, unknown> {
     const entry = this.#registry.getChat(chatId);
-    const projectPath = entry?.projectPath || data.projectPath;
+    const projectPath = entry?.projectPath;
     return {
       projectPath,
       cwd: projectPath,
-      permissionMode: entry?.permissionMode || data.permissionMode,
+      permissionMode: entry?.permissionMode,
     };
   }
 
-  #sendMissingSessionError(writer, type) {
+  #sendMissingSessionError(writer: WebSocketWriter, type: string): void {
     writer.send(new WsFaultMessage(`Missing chatId for "${type}"`));
   }
 
-  #handleClose(ws, code, reason) {
+  #handleClose(_ws: WS, code?: number, reason?: string): void {
     console.log('ws: chat client disconnected', code ?? '', reason ? `(${reason})` : '');
   }
 }

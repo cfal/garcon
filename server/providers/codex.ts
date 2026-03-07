@@ -8,15 +8,57 @@ import path from 'path';
 import { normalizeToolResultContent } from '../chats/normalize.js';
 import { AssistantMessage, ThinkingMessage, BashToolUseMessage, EditToolUseMessage, WebSearchToolUseMessage, TodoWriteToolUseMessage, ToolResultMessage, ErrorMessage } from '../../common/chat-types.js';
 import { AbsProvider } from './base.js';
+import type { PermissionMode } from '../../common/ws-requests.js';
+import type { StartSessionRequest, ResumeTurnRequest } from './types.js';
 
-const CODEX_ITEM_NORMALIZERS = {
+interface CodexItem {
+  type: string;
+  text?: string;
+  command?: string;
+  aggregated_output?: string;
+  exit_code?: number;
+  status?: string;
+  changes?: unknown;
+  items?: unknown[];
+  message?: string;
+  query?: string;
+}
+
+interface CodexStreamEvent {
+  type: string;
+  item?: CodexItem;
+  thread_id?: string;
+  usage?: unknown;
+  error?: unknown;
+  message?: string;
+}
+
+interface NormalizedEvent {
+  type: string;
+  itemType?: string;
+  message?: { role: string; content: string; isReasoning?: boolean };
+  command?: string;
+  output?: string;
+  exitCode?: number;
+  status?: string;
+  changes?: unknown;
+  items?: unknown[];
+  query?: string;
+  threadId?: string;
+  usage?: unknown;
+  error?: unknown;
+  data?: unknown;
+  item?: unknown;
+}
+
+const CODEX_ITEM_NORMALIZERS: Record<string, (item: CodexItem) => NormalizedEvent> = {
   agent_message: (item) => ({
     type: 'item', itemType: 'agent_message',
-    message: { role: 'assistant', content: item.text },
+    message: { role: 'assistant', content: item.text || '' },
   }),
   reasoning: (item) => ({
     type: 'item', itemType: 'reasoning',
-    message: { role: 'assistant', content: item.text, isReasoning: true },
+    message: { role: 'assistant', content: item.text || '', isReasoning: true },
   }),
   command_execution: (item) => ({
     type: 'item', itemType: 'command_execution',
@@ -35,21 +77,21 @@ const CODEX_ITEM_NORMALIZERS = {
   }),
   error: (item) => ({
     type: 'item', itemType: 'error',
-    message: { role: 'error', content: item.message },
+    message: { role: 'error', content: item.message || '' },
   }),
 };
 
-function normalizeCodexItem(item) {
+function normalizeCodexItem(item: CodexItem): NormalizedEvent {
   const fn = CODEX_ITEM_NORMALIZERS[item.type];
   return fn ? fn(item) : { type: 'item', itemType: item.type, item };
 }
 
-function normalizeCodexStreamEvent(event) {
+function normalizeCodexStreamEvent(event: CodexStreamEvent): NormalizedEvent {
   if (event.type === 'turn.started')   return { type: 'turn_started' };
   if (event.type === 'turn.completed') return { type: 'turn_complete', usage: event.usage };
   if (event.type === 'turn.failed')    return { type: 'turn_failed', error: event.error };
   if (event.type === 'thread.started') return { type: 'thread_started', threadId: event.thread_id };
-  if (event.type === 'error')          return { type: 'error', message: event.message };
+  if (event.type === 'error')          return { type: 'error', message: { role: 'error', content: event.message || '' } };
 
   if (event.type === 'item.started' || event.type === 'item.updated' || event.type === 'item.completed') {
     return event.item ? normalizeCodexItem(event.item) : { type: event.type, item: null };
@@ -58,10 +100,10 @@ function normalizeCodexStreamEvent(event) {
   return { type: event.type, data: event };
 }
 
-export function convertCodexEventToChatMessages(transformed) {
+export function convertCodexEventToChatMessages(transformed: NormalizedEvent): unknown[] {
   if (!transformed) return [];
 
-  const chatMessages = [];
+  const chatMessages: unknown[] = [];
   const now = new Date().toISOString();
 
   if (transformed.type === 'item') {
@@ -125,7 +167,7 @@ export function convertCodexEventToChatMessages(transformed) {
   return chatMessages;
 }
 
-function mapThinkingModeToReasoningEffort(thinkingMode) {
+function mapThinkingModeToReasoningEffort(thinkingMode: string | undefined): string | undefined {
   switch (thinkingMode) {
     case 'think': return 'low';
     case 'think-hard': return 'medium';
@@ -135,25 +177,25 @@ function mapThinkingModeToReasoningEffort(thinkingMode) {
   }
 }
 
-const CODEX_SANDBOX = {
+const CODEX_SANDBOX: Record<string, { sandboxMode: string; approvalPolicy: string }> = {
   default:           { sandboxMode: 'workspace-write',    approvalPolicy: 'never' },
   acceptEdits:       { sandboxMode: 'workspace-write',    approvalPolicy: 'never' },
   bypassPermissions: { sandboxMode: 'danger-full-access', approvalPolicy: 'never' },
 };
 
-function codexSandboxOptions(permissionMode) {
+function codexSandboxOptions(permissionMode: string): { sandboxMode: string; approvalPolicy: string } {
   return CODEX_SANDBOX[permissionMode] ?? CODEX_SANDBOX.default;
 }
 
-async function runCodexExec(args, input) {
+async function runCodexExec(args: string[], input: string): Promise<{ stdout: string; stderr: string }> {
   const proc = Bun.spawn(['codex', ...args], {
     stdin: new Blob([input]),
     stdout: 'pipe',
     stderr: 'pipe',
   });
   const [stdout, stderr, exitCode] = await Promise.all([
-    proc.stdout.text(),
-    proc.stderr.text(),
+    new Response(proc.stdout as ReadableStream).text(),
+    new Response(proc.stderr as ReadableStream).text(),
     proc.exited,
   ]);
   if (exitCode !== 0) {
@@ -163,7 +205,7 @@ async function runCodexExec(args, input) {
   return { stdout, stderr };
 }
 
-export async function runSingleQuery(prompt, options = {}) {
+export async function runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
   const {
     cwd,
     projectPath,
@@ -217,6 +259,14 @@ export async function runSingleQuery(prompt, options = {}) {
   }
 }
 
+interface CodexSession {
+  thread: any;
+  codex: any;
+  status: 'running' | 'completed' | 'aborted';
+  abortController: AbortController;
+  startedAt: string;
+}
+
 async function runCodexStreamedTurn({
   thread,
   command,
@@ -225,9 +275,17 @@ async function runCodexStreamedTurn({
   isAborted,
   onThreadStarted,
   onEvent,
-}) {
+}: {
+  thread: any;
+  command: string;
+  abortController: AbortController;
+  getSessionId: () => string | null;
+  isAborted: (id: string) => boolean;
+  onThreadStarted: (threadId: string) => void;
+  onEvent: (transformed: NormalizedEvent) => void;
+}): Promise<void> {
   const streamedTurn = await thread.runStreamed(command, {
-    signal: abortController.signal
+    signal: abortController.signal,
   });
 
   for await (const event of streamedTurn.events) {
@@ -251,7 +309,7 @@ async function runCodexStreamedTurn({
 }
 
 export class CodexProvider extends AbsProvider {
-  #sessions = new Map();
+  #sessions = new Map<string, CodexSession>();
 
   constructor() {
     super();
@@ -266,10 +324,12 @@ export class CodexProvider extends AbsProvider {
     projectPath,
     thinkingMode,
     modelReasoningEffort,
-  } = {}) {
-    return await new Promise((resolve, reject) => {
+  }: StartSessionRequest): Promise<string> {
+    void images;
+
+    return await new Promise<string>((resolve, reject) => {
       let settled = false;
-      const onThreadStarted = (providerSessionId) => {
+      const onThreadStarted = (providerSessionId: string) => {
         if (settled) return;
         settled = true;
         resolve(providerSessionId);
@@ -277,15 +337,15 @@ export class CodexProvider extends AbsProvider {
 
       this.runTurn({
         command,
+        providerSessionId: '',
         chatId,
-        images,
         model,
         permissionMode,
         projectPath,
         thinkingMode,
         modelReasoningEffort,
         onThreadStarted,
-      }).catch((error) => {
+      } as ResumeTurnRequest & { onThreadStarted?: (id: string) => void }).catch((error: Error) => {
         if (settled) return;
         settled = true;
         reject(error);
@@ -297,20 +357,20 @@ export class CodexProvider extends AbsProvider {
     command,
     providerSessionId,
     chatId,
-    onThreadStarted,
     projectPath,
     model,
     permissionMode = 'default',
     thinkingMode,
     modelReasoningEffort,
-  } = {}) {
-    const workingDirectory = projectPath || process.cwd();
+    onThreadStarted,
+  }: ResumeTurnRequest & { onThreadStarted?: (id: string) => void }): Promise<void> {
+    const workingDirectory = projectPath;
     const effectivePermissionMode = permissionMode === 'plan' ? 'default' : permissionMode;
     const { sandboxMode, approvalPolicy } = codexSandboxOptions(effectivePermissionMode);
 
-    let codex;
-    let thread;
-    let currentProviderSessionId = providerSessionId;
+    let codex: any;
+    let thread: any;
+    let currentProviderSessionId = providerSessionId || null;
     const abortController = new AbortController();
 
     let chatCreatedEmitted = false;
@@ -318,7 +378,7 @@ export class CodexProvider extends AbsProvider {
     try {
       codex = new Codex();
 
-      const threadOptions = {
+      const threadOptions: Record<string, unknown> = {
         workingDirectory,
         skipGitRepoCheck: true,
         sandboxMode,
@@ -340,7 +400,7 @@ export class CodexProvider extends AbsProvider {
           codex,
           status: 'running',
           abortController,
-          startedAt: new Date().toISOString()
+          startedAt: new Date().toISOString(),
         });
         this.emitProcessing(chatId, true);
 
@@ -356,18 +416,18 @@ export class CodexProvider extends AbsProvider {
         command,
         abortController,
         getSessionId: () => currentProviderSessionId,
-        isAborted: (id) => {
+        isAborted: (id: string) => {
           const session = this.#sessions.get(id);
           return Boolean(session && session.status === 'aborted');
         },
-        onThreadStarted: (threadId) => {
+        onThreadStarted: (threadId: string) => {
           currentProviderSessionId = threadId;
           this.#sessions.set(currentProviderSessionId, {
             thread,
             codex,
             status: 'running',
             abortController,
-            startedAt: new Date().toISOString()
+            startedAt: new Date().toISOString(),
           });
           this.emitProcessing(chatId, true);
           if (!chatCreatedEmitted) {
@@ -376,7 +436,7 @@ export class CodexProvider extends AbsProvider {
           }
           if (typeof onThreadStarted === 'function') onThreadStarted(currentProviderSessionId);
         },
-        onEvent: (transformed) => {
+        onEvent: (transformed: NormalizedEvent) => {
           const chatMessages = convertCodexEventToChatMessages(transformed);
           if (chatMessages.length > 0) {
             this.emitMessages(chatId, chatMessages);
@@ -386,7 +446,7 @@ export class CodexProvider extends AbsProvider {
 
       this.emitFinished(chatId);
 
-    } catch (error) {
+    } catch (error: any) {
       const session = currentProviderSessionId ? this.#sessions.get(currentProviderSessionId) : null;
       const wasAborted =
         session?.status === 'aborted' ||
@@ -409,7 +469,7 @@ export class CodexProvider extends AbsProvider {
     }
   }
 
-  abort(providerSessionId) {
+  abort(providerSessionId: string): boolean {
     const session = this.#sessions.get(providerSessionId);
 
     if (!session) {
@@ -419,25 +479,25 @@ export class CodexProvider extends AbsProvider {
     session.status = 'aborted';
     try {
       session.abortController?.abort();
-    } catch (error) {
+    } catch (error: any) {
       console.warn(`codex: failed to abort session ${providerSessionId}:`, error);
     }
 
     return true;
   }
 
-  isRunning(providerSessionId) {
+  isRunning(providerSessionId: string): boolean {
     const session = this.#sessions.get(providerSessionId);
     return session?.status === 'running';
   }
 
-  getRunningSessions() {
+  getRunningSessions(): Array<{ id: string; status: string; startedAt: string }> {
     return Array.from(this.#sessions.entries())
       .filter(([, session]) => session.status === 'running')
       .map(([id, session]) => ({ id, status: session.status, startedAt: session.startedAt }));
   }
 
-  startPurgeTimer() {
+  startPurgeTimer(): ReturnType<typeof setInterval> {
     return setInterval(() => {
       const now = Date.now();
       const maxAge = 30 * 60 * 1000;

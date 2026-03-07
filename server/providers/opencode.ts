@@ -6,6 +6,8 @@ import { normalizeToolResultContent } from '../chats/normalize.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
 import { convertOpenCodeToolUse } from './converters/opencode-tool-use.js';
 import { AbsProvider } from './base.js';
+import type { PermissionMode } from '../../common/ws-requests.js';
+import type { StartSessionRequest, ResumeTurnRequest } from './types.js';
 
 // Source of OpenCode permission keys:
 // - https://github.com/anomalyco/opencode/blob/f5eade1d2b95562c7fb58e3041e662a8b2b611b6/packages/web/src/content/docs/permissions.mdx
@@ -30,10 +32,10 @@ export const OPENCODE_PERMISSION_KEYS = Object.freeze([
   'question',
   'plan_enter',
   'plan_exit',
-]);
+] as const);
 
-export function mapPermissionMode(mode) {
-  const map = {
+export function mapPermissionMode(mode: string): Array<{ permission: string; pattern: string; action: string }> {
+  const map: Record<string, Record<string, string>> = {
     acceptEdits: { edit: 'allow', bash: 'ask', webfetch: 'allow' },
     bypassPermissions: Object.fromEntries(OPENCODE_PERMISSION_KEYS.map((permission) => [permission, 'allow'])),
     default: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
@@ -48,8 +50,8 @@ export function mapPermissionMode(mode) {
   }));
 }
 
-function buildPromptBody(command, model) {
-  const body = {
+function buildPromptBody(command: string, model: string | undefined): Record<string, unknown> {
+  const body: Record<string, unknown> = {
     parts: [{ type: 'text', text: command }],
   };
   if (model && model.includes('/')) {
@@ -62,7 +64,12 @@ function buildPromptBody(command, model) {
   return body;
 }
 
-function extractSessionId(event) {
+interface SSEEvent {
+  type: string;
+  properties?: Record<string, any>;
+}
+
+function extractSessionId(event: SSEEvent): string | undefined {
   const props = event.properties || {};
   return props.sessionID
     || props.part?.sessionID
@@ -70,17 +77,17 @@ function extractSessionId(event) {
     || (event.type?.startsWith('session.') ? props.info?.id : undefined);
 }
 
-function extractTextParts(parts) {
+function extractTextParts(parts: unknown): string {
   if (!Array.isArray(parts)) return '';
   return parts
-    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
-    .map((part) => part.text.trim())
+    .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
+    .map((part: any) => part.text.trim())
     .filter(Boolean)
     .join('\n')
     .trim();
 }
 
-function parseOpenCodeModel(model) {
+function parseOpenCodeModel(model: string | undefined): { providerID: string; modelID: string } | null {
   if (!model || typeof model !== 'string') return null;
   const idx = model.indexOf('/');
   if (idx < 1 || idx === model.length - 1) return null;
@@ -91,14 +98,19 @@ function parseOpenCodeModel(model) {
 }
 
 // Maps a permission decision to V2 reply value.
-export function mapPermissionDecision(decision) {
+export function mapPermissionDecision(decision: { allow?: boolean; alwaysAllow?: boolean } | null | undefined): string {
   const allow = Boolean(decision?.allow);
   const alwaysAllow = Boolean(decision?.alwaysAllow);
   return allow ? (alwaysAllow ? 'always' : 'once') : 'reject';
 }
 
 // Extracts a normalized permission request from a V2 permission.asked event.
-export function extractPermissionRequest(event) {
+export function extractPermissionRequest(event: SSEEvent): {
+  requestId: string;
+  toolName: string;
+  toolInput: Record<string, unknown>;
+  sessionID: string | null;
+} | null {
   if (event.type !== 'permission.asked') return null;
 
   const props = event.properties || {};
@@ -119,50 +131,69 @@ export function extractPermissionRequest(event) {
   };
 }
 
+interface OpenCodeSession {
+  status: 'running' | 'completed' | 'aborted';
+  chatId: string;
+  model?: string;
+  startedAt: string;
+}
+
+interface PendingTurnWaiter {
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}
+
+interface PendingPermission {
+  originalRequestId: string;
+  providerSessionId: string;
+  chatId: string;
+}
+
 export class OpenCodeProvider extends AbsProvider {
-  #client = null;
-  #initPromise = null;
+  #client: any = null;
+  #initPromise: Promise<any> | null = null;
   #sseListenerStarted = false;
-  #sessions = new Map();
-  #pendingTurnWaiters = new Map();
-  #pendingPermissions = new Map();
-  #messageRoles = new Map();
-  #assistantPartTypes = new Map();
+  #sessions = new Map<string, OpenCodeSession>();
+  #pendingTurnWaiters = new Map<string, PendingTurnWaiter>();
+  #pendingPermissions = new Map<string, PendingPermission>();
+  #messageRoles = new Map<string, Map<string, string>>();
+  #assistantPartTypes = new Map<string, Map<string, string>>();
 
   constructor() {
     super();
   }
 
-  #createTurnWaiter(providerSessionId) {
+  #createTurnWaiter(providerSessionId: string): PendingTurnWaiter {
     if (this.#pendingTurnWaiters.has(providerSessionId)) {
       throw new Error(`Turn already in progress for session ${providerSessionId}`);
     }
-    let resolveFn;
-    let rejectFn;
-    const promise = new Promise((resolve, reject) => {
+    let resolveFn!: () => void;
+    let rejectFn!: (error: Error) => void;
+    const promise = new Promise<void>((resolve, reject) => {
       resolveFn = resolve;
       rejectFn = reject;
     });
-    const waiter = { promise, resolve: resolveFn, reject: rejectFn };
+    const waiter: PendingTurnWaiter = { promise, resolve: resolveFn, reject: rejectFn };
     this.#pendingTurnWaiters.set(providerSessionId, waiter);
     return waiter;
   }
 
-  #resolveTurnWaiter(providerSessionId) {
+  #resolveTurnWaiter(providerSessionId: string): void {
     const waiter = this.#pendingTurnWaiters.get(providerSessionId);
     if (!waiter) return;
     this.#pendingTurnWaiters.delete(providerSessionId);
     waiter.resolve();
   }
 
-  #rejectTurnWaiter(providerSessionId, error) {
+  #rejectTurnWaiter(providerSessionId: string, error: unknown): void {
     const waiter = this.#pendingTurnWaiters.get(providerSessionId);
     if (!waiter) return;
     this.#pendingTurnWaiters.delete(providerSessionId);
     waiter.reject(error instanceof Error ? error : new Error(String(error || 'OpenCode turn failed')));
   }
 
-  async #ensureOpenCodeServer() {
+  async #ensureOpenCodeServer(): Promise<any> {
     if (this.#client) return this.#client;
     if (this.#initPromise) return this.#initPromise;
 
@@ -182,8 +213,8 @@ export class OpenCodeProvider extends AbsProvider {
     return this.#initPromise;
   }
 
-  #convertOpenCodeEventToChatMessages(event, chatId) {
-    const chatMessages = [];
+  #convertOpenCodeEventToChatMessages(event: SSEEvent, chatId: string): unknown[] | undefined {
+    const chatMessages: unknown[] = [];
     const now = new Date().toISOString();
     const props = event.properties || {};
     const roleFromEvent = (
@@ -194,11 +225,11 @@ export class OpenCodeProvider extends AbsProvider {
       || null
     );
 
-    const assistantPartTypes = this.#assistantPartTypes.get(chatId) || new Map();
+    const assistantPartTypes = this.#assistantPartTypes.get(chatId) || new Map<string, string>();
     if (!this.#assistantPartTypes.has(chatId)) {
       this.#assistantPartTypes.set(chatId, assistantPartTypes);
     }
-    const messageRoles = this.#messageRoles.get(chatId) || new Map();
+    const messageRoles = this.#messageRoles.get(chatId) || new Map<string, string>();
     if (!this.#messageRoles.has(chatId)) {
       this.#messageRoles.set(chatId, messageRoles);
     }
@@ -280,8 +311,7 @@ export class OpenCodeProvider extends AbsProvider {
     return chatMessages;
   }
 
-  // Dispatches converted messages via the event emitter.
-  #dispatchOpenCodeEvent(event, chatId) {
+  #dispatchOpenCodeEvent(event: SSEEvent, chatId: string): void {
     const chatMessages = this.#convertOpenCodeEventToChatMessages(event, chatId);
     if (!chatMessages || !chatMessages.length) {
       return;
@@ -290,13 +320,12 @@ export class OpenCodeProvider extends AbsProvider {
     this.emitMessages(chatId, chatMessages);
   }
 
-  // Permission lifecycle messages flow through the same emitMessages path.
-  #emitPermissionMessages(chatId, messages) {
+  #emitPermissionMessages(chatId: string, messages: unknown[]): void {
     if (!messages.length) return;
     this.emitMessages(chatId, messages);
   }
 
-  #cancelPendingPermissionsForSession(providerSessionId, reason) {
+  #cancelPendingPermissionsForSession(providerSessionId: string, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
     for (const [permissionRequestId, pending] of this.#pendingPermissions.entries()) {
       if (pending.providerSessionId !== providerSessionId) continue;
       this.#pendingPermissions.delete(permissionRequestId);
@@ -304,11 +333,11 @@ export class OpenCodeProvider extends AbsProvider {
     }
   }
 
-  #extractPermissionRequestFromEvent(event) {
+  #extractPermissionRequestFromEvent(event: SSEEvent) {
     return extractPermissionRequest(event);
   }
 
-  async #startGlobalSSEListener() {
+  async #startGlobalSSEListener(): Promise<void> {
     if (this.#sseListenerStarted) return;
     this.#sseListenerStarted = true;
 
@@ -366,7 +395,7 @@ export class OpenCodeProvider extends AbsProvider {
             }
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         for (const sessionId of this.#pendingTurnWaiters.keys()) {
           this.#rejectTurnWaiter(sessionId, err);
         }
@@ -379,27 +408,28 @@ export class OpenCodeProvider extends AbsProvider {
     runListener();
   }
 
-  async getClient() {
+  async getClient(): Promise<any> {
     const instance = await this.#ensureOpenCodeServer();
     return instance.client;
   }
 
-  async getModels() {
+  async getModels(): Promise<Array<{ value: string; label: string }>> {
     const client = await this.getClient();
     const result = await client.provider.list();
     const data = result.data;
-    const allProviders = Array.isArray(data.all) ? data.all : [];
-    const connected = new Set(Array.isArray(data.connected) ? data.connected : []);
+    const allProviders: any[] = Array.isArray(data.all) ? data.all : [];
+    const connected = new Set<string>(Array.isArray(data.connected) ? data.connected : []);
 
-    const models = [];
+    const models: Array<{ value: string; label: string }> = [];
     for (const provider of allProviders) {
       const pid = provider.id || provider.name;
       if (!connected.has(pid)) continue;
       const providerModelsObj = provider.models || {};
       for (const [modelKey, model] of Object.entries(providerModelsObj)) {
+        const m = model as any;
         models.push({
-          value: `${provider.id || provider.name}/${model.id || modelKey}`,
-          label: `${provider.name}: ${model.name || model.id || modelKey}`,
+          value: `${provider.id || provider.name}/${m.id || modelKey}`,
+          label: `${provider.name}: ${m.name || m.id || modelKey}`,
         });
       }
     }
@@ -416,7 +446,7 @@ export class OpenCodeProvider extends AbsProvider {
     projectPath,
     thinkingMode,
     modelReasoningEffort,
-  } = {}) {
+  }: StartSessionRequest): Promise<string> {
     void images;
     void projectPath;
     void thinkingMode;
@@ -429,10 +459,8 @@ export class OpenCodeProvider extends AbsProvider {
     const sessionResult = await client.session.create({
       permission: mapPermissionMode(permissionMode),
     });
-    const providerSessionId = sessionResult.data.id;
+    const providerSessionId: string = sessionResult.data.id;
 
-    // Register session directly from the create response.
-    // V2 SSE does not emit session.created, only session.updated.
     this.#sessions.set(providerSessionId, {
       status: 'running',
       chatId,
@@ -448,7 +476,7 @@ export class OpenCodeProvider extends AbsProvider {
     client.session.promptAsync({
       sessionID: providerSessionId,
       ...promptBody,
-    }).catch((err) => {
+    }).catch((err: Error) => {
       console.error(`opencode: prompt failed for session ${providerSessionId}:`, err.message);
       const sess = this.#sessions.get(providerSessionId);
       if (sess) sess.status = 'completed';
@@ -469,7 +497,7 @@ export class OpenCodeProvider extends AbsProvider {
     projectPath,
     thinkingMode,
     modelReasoningEffort,
-  } = {}) {
+  }: ResumeTurnRequest): Promise<void> {
     void images;
     void permissionMode;
     void projectPath;
@@ -502,7 +530,7 @@ export class OpenCodeProvider extends AbsProvider {
         sessionID: providerSessionId,
         ...promptBody,
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error(`opencode: query failed for session ${providerSessionId}:`, err.message);
       const sess = this.#sessions.get(providerSessionId);
       if (sess) sess.status = 'completed';
@@ -515,33 +543,33 @@ export class OpenCodeProvider extends AbsProvider {
     await waiter.promise;
   }
 
-  abort(providerSessionId) {
+  abort(providerSessionId: string): boolean {
     const session = this.#sessions.get(providerSessionId);
     if (!session) return false;
 
     session.status = 'aborted';
     this.#rejectTurnWaiter(providerSessionId, new Error('OpenCode session aborted'));
     this.#cancelPendingPermissionsForSession(providerSessionId, 'aborted');
-    this.getClient().then((client) => {
-      client.session.abort({ sessionID: providerSessionId }).catch((err) => {
+    this.getClient().then((client: any) => {
+      client.session.abort({ sessionID: providerSessionId }).catch((err: Error) => {
         console.warn(`opencode: failed to abort session ${providerSessionId}:`, err.message);
       });
     });
     return true;
   }
 
-  isRunning(providerSessionId) {
+  isRunning(providerSessionId: string): boolean {
     const session = this.#sessions.get(providerSessionId);
     return session?.status === 'running';
   }
 
-  getRunningSessions() {
+  getRunningSessions(): Array<{ id: string; status: string; startedAt: string }> {
     return Array.from(this.#sessions.entries())
       .filter(([, session]) => session.status === 'running')
       .map(([id, session]) => ({ id, status: session.status, startedAt: session.startedAt }));
   }
 
-  async resolvePermission(permissionRequestId, decision) {
+  async resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> {
     if (!permissionRequestId) return;
     const pending = this.#pendingPermissions.get(permissionRequestId);
     this.#pendingPermissions.delete(permissionRequestId);
@@ -566,8 +594,10 @@ export class OpenCodeProvider extends AbsProvider {
     });
   }
 
-  async runSingleQuery(prompt, options = {}) {
+  async runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
     const { cwd, projectPath, model, permissionMode = 'default' } = options;
+    void cwd;
+    void projectPath;
     const client = await this.getClient();
 
     const createResult = await client.session.create({
@@ -582,7 +612,7 @@ export class OpenCodeProvider extends AbsProvider {
 
     try {
       const parsedModel = parseOpenCodeModel(model);
-      const body = {
+      const body: Record<string, unknown> = {
         parts: [{ type: 'text', text: prompt }],
         tools: { '*': false },
       };
@@ -607,7 +637,7 @@ export class OpenCodeProvider extends AbsProvider {
     }
   }
 
-  startPurgeTimer() {
+  startPurgeTimer(): ReturnType<typeof setInterval> {
     const maxAge = 30 * 60 * 1000;
 
     return setInterval(() => {
