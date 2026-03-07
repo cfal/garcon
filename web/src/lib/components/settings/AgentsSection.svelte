@@ -1,7 +1,7 @@
 <!-- Agents settings section. Renders collapsible cards for each provider
-     with auth status and login actions. Primary providers (Claude, Codex)
-     are always visible; secondary providers (OpenCode, Amp) are grouped
-     under a collapsible "More providers" toggle. -->
+     with auth status and login actions. Primary providers (Claude, Codex,
+     OpenCode) are always visible; Amp is grouped under a collapsible
+     "More providers" toggle. -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getAuthStatus } from '$lib/api/providers.js';
@@ -21,11 +21,11 @@
 
 	const primaryAgents: { id: AgentId; name: string }[] = [
 		{ id: 'claude', name: 'Claude' },
-		{ id: 'codex', name: 'Codex' }
+		{ id: 'codex', name: 'Codex' },
+		{ id: 'opencode', name: 'OpenCode' }
 	];
 
 	const secondaryAgents: { id: AgentId; name: string }[] = [
-		{ id: 'opencode', name: 'OpenCode' },
 		{ id: 'amp', name: 'Amp' }
 	];
 
@@ -95,7 +95,7 @@
 
 	// Count how many secondary providers are connected
 	let secondaryConnectedCount = $derived(
-		[opencodeAuth, ampAuth].filter((a) => a.authenticated).length
+		[ampAuth].filter((a) => a.authenticated).length
 	);
 
 	let authExpandDone = $state(false);
@@ -105,12 +105,11 @@
 			authExpandDone = true;
 			if (!claudeAuth.authenticated) claudeOpen = true;
 			if (!codexAuth.authenticated) codexOpen = true;
-			// Auto-expand the "More providers" section if a secondary provider
-			// is disconnected but was previously used, or if any is connected
-			if (opencodeAuth.authenticated || ampAuth.authenticated) {
+			if (!opencodeAuth.authenticated) opencodeOpen = true;
+			// Auto-expand the "More providers" section if Amp is connected
+			if (ampAuth.authenticated) {
 				moreProvidersOpen = true;
 			}
-			if (!opencodeAuth.authenticated) opencodeOpen = true;
 			if (!ampAuth.authenticated) ampOpen = true;
 		}
 	});

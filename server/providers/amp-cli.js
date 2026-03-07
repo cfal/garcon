@@ -127,14 +127,9 @@ class AmpProvider extends AbsProvider {
       }
 
       case 'result':
+        session.resultSeen = true;
         this.emitFinished(session.chatId, msg.is_error ? 1 : 0);
-        session.isRunning = false;
-        this.emitProcessing(session.chatId, false);
-        if (session.turnResolve) {
-          const resolve = session.turnResolve;
-          session.turnResolve = null;
-          resolve();
-        }
+        this.#finalizeTurn(session);
         break;
 
       default:
@@ -175,18 +170,27 @@ class AmpProvider extends AbsProvider {
         console.error(`amp(${session.id.slice(0, 8)}): stdout read error:`, err.message);
       }
     } finally {
-      this.#handleProcessExit(session);
+      this.#finalizeTurn(session);
     }
   }
 
-  #handleProcessExit(session) {
-    if (session.turnResolve) {
-      session.isRunning = false;
-      this.emitProcessing(session.chatId, false);
-      const resolve = session.turnResolve;
-      session.turnResolve = null;
-      resolve();
+  // Idempotent turn finalizer. Safe to call from both the result message
+  // handler and the stdout-closed / process-exit paths.
+  #finalizeTurn(session, exitCode) {
+    if (session.finalized) return;
+    session.finalized = true;
+
+    const wasRunning = session.isRunning;
+    session.isRunning = false;
+    if (wasRunning) this.emitProcessing(session.chatId, false);
+
+    if (!session.resultSeen) {
+      this.emitFailed(session.chatId, `Amp process exited before result${exitCode != null ? ` (code ${exitCode})` : ''}`);
     }
+
+    const resolve = session.turnResolve;
+    session.turnResolve = null;
+    resolve?.();
   }
 
   async #pipeStderr(sessionId, proc) {
@@ -241,15 +245,7 @@ class AmpProvider extends AbsProvider {
 
       if (session.process) {
         session.process.exited.then(exitCode => {
-          if (session.isRunning) {
-            session.isRunning = false;
-            this.emitProcessing(session.chatId, false);
-            if (session.turnResolve === resolve) {
-              session.turnResolve = null;
-              resolve();
-            }
-            this.emitFailed(session.chatId, `Amp process exited with code ${exitCode}`);
-          }
+          this.#finalizeTurn(session, exitCode);
         });
       }
     });
@@ -265,6 +261,8 @@ class AmpProvider extends AbsProvider {
       chatId,
       threadId: null,
       isRunning: true,
+      resultSeen: false,
+      finalized: false,
       turnResolve: null,
       startTime: Date.now(),
       process: null,
@@ -281,7 +279,14 @@ class AmpProvider extends AbsProvider {
       '-x', command,
     ];
 
-    this.#spawnAmp(session, { cwd }, args);
+    try {
+      this.#spawnAmp(session, { cwd }, args);
+    } catch (err) {
+      this.#runningSessions.delete(providerSessionId);
+      this.emitProcessing(chatId, false);
+      this.emitFailed(chatId, `Amp spawn failed: ${err.message}`);
+      throw err;
+    }
 
     await this.#waitForTurnComplete(session);
 
@@ -299,16 +304,23 @@ class AmpProvider extends AbsProvider {
         chatId,
         threadId,
         isRunning: true,
+        resultSeen: false,
+        finalized: false,
         turnResolve: null,
         startTime: Date.now(),
         process: null,
       };
       this.#runningSessions.set(threadId, session);
     } else {
+      if (session.isRunning) {
+        throw new Error(`Session ${threadId} is already running`);
+      }
       if (chatId !== session.chatId) {
         throw new Error('Chat ID mismatch');
       }
       session.isRunning = true;
+      session.resultSeen = false;
+      session.finalized = false;
     }
 
     this.emitProcessing(chatId, true);
@@ -322,7 +334,14 @@ class AmpProvider extends AbsProvider {
       '-x', command,
     ];
 
-    this.#spawnAmp(session, { cwd }, args);
+    try {
+      this.#spawnAmp(session, { cwd }, args);
+    } catch (err) {
+      session.isRunning = false;
+      this.emitProcessing(chatId, false);
+      this.emitFailed(chatId, `Amp spawn failed: ${err.message}`);
+      throw err;
+    }
 
     await this.#waitForTurnComplete(session);
   }

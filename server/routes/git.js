@@ -182,8 +182,8 @@ export default function createGitRoutes(providers) {
       if (!project || !files || files.length === 0) {
         return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
       }
-      if (!['claude', 'codex', 'opencode'].includes(provider)) {
-        return Response.json({ error: 'Invalid provider. Expected one of: claude, codex, opencode.' }, { status: 400 });
+      if (!['claude', 'codex', 'opencode', 'amp'].includes(provider)) {
+        return Response.json({ error: 'Invalid provider. Expected one of: claude, codex, opencode, amp.' }, { status: 400 });
       }
 
       const result = await git.generateCommitMessageForFiles({ projectPath: project, files, provider, model, customPrompt });

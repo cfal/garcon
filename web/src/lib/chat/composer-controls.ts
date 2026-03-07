@@ -97,16 +97,16 @@ export const PROVIDER_MENU_GROUPS: ProviderMenuGroup[] = [
 				label: 'Codex',
 				description: 'Code-heavy workflows and terminal-first tasks.'
 			},
-		]
-	},
-	{
-		label: 'More',
-		options: [
 			{
 				value: 'opencode',
 				label: 'OpenCode',
 				description: 'Runs through OpenCode-compatible backends.'
 			},
+		]
+	},
+	{
+		label: 'More',
+		options: [
 			{
 				value: 'amp',
 				label: 'Amp',
