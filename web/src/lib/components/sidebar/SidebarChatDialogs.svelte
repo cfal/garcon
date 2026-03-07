@@ -54,6 +54,7 @@
 
 	let renameValue = $state('');
 	let renameInputRef = $state<HTMLInputElement | null>(null);
+	let deleteButtonRef = $state<HTMLButtonElement | null>(null);
 	let firstMessageCopied = $state(false);
 	let nativePathCopied = $state(false);
 
@@ -132,7 +133,7 @@
 
 <!-- Delete confirmation dialog -->
 <Dialog.Root open={deleteOpen} onOpenChange={handleDeleteOpenChange}>
-	<Dialog.Content>
+	<Dialog.Content onOpenAutoFocus={(e) => { e.preventDefault(); deleteButtonRef?.focus(); }}>
 		<Dialog.Header class="min-w-0">
 			<Dialog.Title>{m.sidebar_delete_confirmation_delete_chat()}</Dialog.Title>
 			<Dialog.Description class="min-w-0 max-w-full">
@@ -144,7 +145,7 @@
 		</Dialog.Header>
 		<Dialog.Footer>
 			<Button variant="outline" onclick={onCancelDelete}>{m.sidebar_actions_cancel()}</Button>
-			<Button variant="destructive" onclick={onConfirmDelete}>{m.sidebar_actions_delete()}</Button>
+			<Button variant="destructive" onclick={onConfirmDelete} bind:ref={deleteButtonRef}>{m.sidebar_actions_delete()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
