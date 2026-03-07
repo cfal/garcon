@@ -5,14 +5,16 @@
     "moduleResolution": "bundler",
     "allowJs": true,
     "checkJs": false,
-    "strict": false,
+    "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "rewriteRelativeImportExtensions": true,
-    "types": ["bun-types"]
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "types": ["@types/bun"]
   },
   "include": [
     "**/*.ts",

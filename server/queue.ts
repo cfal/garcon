@@ -1,46 +1,61 @@
+// Manages per-chat message queues and orchestrates turn execution.
+// Extends EventEmitter to notify listeners of queue state changes,
+// dispatching events, and session stops.
+
 import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
+import type { QueueState, QueueEntry } from '../common/queue-state.ts';
 import { UserMessage } from '../common/chat-types.ts';
 
-function emptyQueue() {
+function emptyQueue(): QueueState {
   return { entries: [], paused: false };
 }
 
-function normalizeForPersist(queue) {
+function normalizeForPersist(queue: unknown): QueueState {
   return normalizeQueueState(queue);
 }
 
-// Manages per-chat message queues and orchestrates turn execution.
-// Extends EventEmitter to notify listeners of queue state changes,
-// dispatching events, and session stops.
+interface ProvidersDep {
+  runProviderTurn(chatId: string, command: string, options: Record<string, unknown>): Promise<void>;
+  abortSession(chatId: string): Promise<boolean>;
+  isChatRunning(chatId: string): boolean;
+}
+
+interface HistoryCacheDep {
+  appendMessages(chatId: string, messages: unknown[]): Promise<void>;
+}
+
+type QueueUpdatedCallback = (chatId: string, state: QueueState) => void;
+type DispatchingCallback = (chatId: string, entryId: string, content: string) => void;
+type SessionStoppedCallback = (chatId: string, success: boolean) => void;
+
 export class QueueManager extends EventEmitter {
-  #busy = new Map();
-  #workspaceDir;
-  #providers;
-  #historyCache;
+  #busy = new Map<string, boolean>();
+  #workspaceDir: string;
+  #providers: ProvidersDep | null;
+  #historyCache: HistoryCacheDep | null;
 
   // providers and historyCache are optional for backward compat in tests
   // that only exercise state management methods.
-  constructor(workspaceDir, providers, historyCache) {
+  constructor(workspaceDir: string, providers?: ProvidersDep | null, historyCache?: HistoryCacheDep | null) {
     super();
     this.#workspaceDir = workspaceDir;
     this.#providers = providers || null;
     this.#historyCache = historyCache || null;
   }
 
-  // Listener wrappers for typed event subscriptions.
-  onQueueUpdated(cb) { this.on('queue-updated', cb); }
-  onDispatching(cb) { this.on('dispatching', cb); }
-  onSessionStopped(cb) { this.on('session-stopped', cb); }
+  onQueueUpdated(cb: QueueUpdatedCallback): void { this.on('queue-updated', cb); }
+  onDispatching(cb: DispatchingCallback): void { this.on('dispatching', cb); }
+  onSessionStopped(cb: SessionStoppedCallback): void { this.on('session-stopped', cb); }
 
-  #chatQueueFilePath(chatId) {
+  #chatQueueFilePath(chatId: string): string {
     return path.join(this.#workspaceDir, 'queues', `${chatId}.queue.json`);
   }
 
-  async #withLock(key, fn) {
+  async #withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
     while (this.#busy.get(key)) {
       await new Promise(r => setImmediate(r));
     }
@@ -52,24 +67,24 @@ export class QueueManager extends EventEmitter {
     }
   }
 
-  async #writeChatQueue(chatId, queue) {
+  async #writeChatQueue(chatId: string, queue: unknown): Promise<void> {
     const filePath = this.#chatQueueFilePath(chatId);
     const normalized = normalizeForPersist(queue);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, JSON.stringify(normalized, null, 2), 'utf8');
   }
 
-  async readChatQueue(chatId) {
+  async readChatQueue(chatId: string): Promise<QueueState> {
     try {
       const data = await fs.readFile(this.#chatQueueFilePath(chatId), 'utf8');
       return normalizeQueueState(JSON.parse(data));
-    } catch (error) {
-      if (error.code === 'ENOENT') return emptyQueue();
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyQueue();
       throw error;
     }
   }
 
-  async enqueueChat(chatId, content) {
+  async enqueueChat(chatId: string, content: string): Promise<{ entry: QueueEntry; queue: QueueState }> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       const existing = queue.entries.find(e => e.status === 'queued');
@@ -80,7 +95,7 @@ export class QueueManager extends EventEmitter {
         this.emit('queue-updated', chatId, result);
         return { entry: existing, queue: result };
       }
-      const entry = {
+      const entry: QueueEntry = {
         id: crypto.randomUUID(),
         content,
         status: 'queued',
@@ -94,7 +109,7 @@ export class QueueManager extends EventEmitter {
     });
   }
 
-  async dequeueChat(chatId, entryId) {
+  async dequeueChat(chatId: string, entryId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       queue.entries = queue.entries.filter(e => e.id !== entryId);
@@ -105,7 +120,7 @@ export class QueueManager extends EventEmitter {
     });
   }
 
-  async clearChatQueue(chatId) {
+  async clearChatQueue(chatId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       queue.entries = [];
@@ -117,7 +132,7 @@ export class QueueManager extends EventEmitter {
     });
   }
 
-  async pauseChatQueue(chatId) {
+  async pauseChatQueue(chatId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       queue.paused = queue.entries.length > 0;
@@ -128,7 +143,7 @@ export class QueueManager extends EventEmitter {
     });
   }
 
-  async resumeChatQueue(chatId) {
+  async resumeChatQueue(chatId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       queue.paused = false;
@@ -139,7 +154,7 @@ export class QueueManager extends EventEmitter {
     });
   }
 
-  async popNextChat(chatId) {
+  async popNextChat(chatId: string): Promise<{ entry: QueueEntry; queue: QueueState } | null> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       if (queue.paused && queue.entries.length === 0) {
@@ -159,7 +174,7 @@ export class QueueManager extends EventEmitter {
     });
   }
 
-  async removeSentChat(chatId, entryId) {
+  async removeSentChat(chatId: string, entryId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       queue.entries = queue.entries.filter(e => e.id !== entryId);
@@ -170,7 +185,7 @@ export class QueueManager extends EventEmitter {
     });
   }
 
-  async resetAndPauseChat(chatId, entryId) {
+  async resetAndPauseChat(chatId: string, entryId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       const entry = queue.entries.find(e => e.id === entryId);
@@ -185,44 +200,43 @@ export class QueueManager extends EventEmitter {
 
   // Submits a command to a chat session. Appends the user message to
   // history, runs the provider turn, then drains any queued entries.
-  async submit(chatId, command, options) {
+  async submit(chatId: string, command: string, options: Record<string, unknown>): Promise<void> {
     if (command && this.#historyCache) {
       const userMsg = new UserMessage(new Date().toISOString(), String(command));
-      this.#historyCache.appendMessages(chatId, [userMsg]).catch((err) => {
+      this.#historyCache.appendMessages(chatId, [userMsg]).catch((err: Error) => {
         console.warn(`queue: failed to append user message for ${chatId}:`, err.message);
       });
     }
 
-    await this.#providers.runProviderTurn(chatId, command, options);
+    await this.#providers!.runProviderTurn(chatId, command, options);
     await this.#drain(chatId, options);
   }
 
   // Aborts the running provider session and pauses the queue if entries remain.
-  async abort(chatId) {
-    const success = await this.#providers.abortSession(chatId);
+  async abort(chatId: string): Promise<boolean> {
+    const success = await this.#providers!.abortSession(chatId);
     if (success) {
       try {
         const current = await this.readChatQueue(chatId);
         if (current.entries.length > 0) {
           await this.pauseChatQueue(chatId);
         }
-      } catch { }
+      } catch { /* ignore */ }
     }
     this.emit('session-stopped', chatId, success);
     return success;
   }
 
   // Triggers drain if the provider is not currently running.
-  // Used after queue-resume to pick up queued entries.
-  async triggerDrain(chatId, options) {
-    if (this.#providers.isChatRunning(chatId)) return;
+  async triggerDrain(chatId: string, options: Record<string, unknown>): Promise<void> {
+    if (this.#providers!.isChatRunning(chatId)) return;
     await this.#drain(chatId, options);
   }
 
   // Pops queued entries one at a time, appends to history, and runs provider turns.
-  async #drain(chatId, options) {
+  async #drain(chatId: string, options: Record<string, unknown>): Promise<void> {
     while (true) {
-      if (this.#providers.isChatRunning(chatId)) break;
+      if (this.#providers!.isChatRunning(chatId)) break;
 
       const result = await this.popNextChat(chatId);
       if (!result) break;
@@ -232,37 +246,37 @@ export class QueueManager extends EventEmitter {
 
       if (this.#historyCache) {
         const userMsg = new UserMessage(new Date().toISOString(), String(entry.content));
-        this.#historyCache.appendMessages(chatId, [userMsg]).catch((err) => {
+        this.#historyCache.appendMessages(chatId, [userMsg]).catch((err: Error) => {
           console.warn(`queue: failed to append queued message for ${chatId}:`, err.message);
         });
       }
 
       try {
-        await this.#providers.runProviderTurn(chatId, entry.content, options);
+        await this.#providers!.runProviderTurn(chatId, entry.content, options);
         await this.removeSentChat(chatId, entry.id);
-      } catch (error) {
-        console.error('queue: error processing queued message:', error.message);
+      } catch (error: unknown) {
+        console.error('queue: error processing queued message:', (error as Error).message);
         await this.resetAndPauseChat(chatId, entry.id);
         break;
       }
     }
   }
 
-  async deleteChatQueueFile(chatId) {
+  async deleteChatQueueFile(chatId: string): Promise<void> {
     try {
       await fs.unlink(this.#chatQueueFilePath(chatId));
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
 
-  async recoverStaleChatQueues() {
+  async recoverStaleChatQueues(): Promise<void> {
     const queuesDir = path.join(this.#workspaceDir, 'queues');
-    let files;
+    let files: string[];
     try {
       files = await fs.readdir(queuesDir);
-    } catch (error) {
-      if (error.code === 'ENOENT') return;
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
       throw error;
     }
 
@@ -272,7 +286,7 @@ export class QueueManager extends EventEmitter {
       try {
         const data = normalizeQueueState(JSON.parse(await fs.readFile(filePath, 'utf8')));
         let modified = false;
-        for (const entry of data.entries || []) {
+        for (const entry of data.entries) {
           if (entry.status === 'sending') {
             entry.status = 'queued';
             modified = true;
@@ -283,8 +297,8 @@ export class QueueManager extends EventEmitter {
           await fs.writeFile(filePath, JSON.stringify(normalizeForPersist(data), null, 2), 'utf8');
           console.log(`queue: recovered stale chat queue: ${qf}`);
         }
-      } catch (error) {
-        console.warn(`queue: could not recover chat queue ${qf}:`, error.message);
+      } catch (error: unknown) {
+        console.warn(`queue: could not recover chat queue ${qf}:`, (error as Error).message);
       }
     }
   }

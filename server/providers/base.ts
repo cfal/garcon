@@ -8,50 +8,56 @@
 
 import { EventEmitter } from 'events';
 
+export type MessagesCallback = (chatId: string, messages: unknown[]) => void;
+export type ProcessingCallback = (chatId: string, isProcessing: boolean) => void;
+export type SessionCreatedCallback = (chatId: string) => void;
+export type FinishedCallback = (chatId: string, exitCode: number) => void;
+export type FailedCallback = (chatId: string, errorMessage: string) => void;
+
 export class AbsProvider extends EventEmitter {
   // Emit helpers (used by subclasses)
 
-  emitMessages(chatId, messages) {
+  emitMessages(chatId: string, messages: unknown[]): void {
     if (messages.length > 0) {
       this.emit('messages', chatId, messages);
     }
   }
 
-  emitProcessing(chatId, isProcessing) {
+  emitProcessing(chatId: string, isProcessing: boolean): void {
     this.emit('processing', chatId, isProcessing);
   }
 
-  emitSessionCreated(chatId) {
+  emitSessionCreated(chatId: string): void {
     this.emit('session-created', chatId);
   }
 
-  emitFinished(chatId, exitCode = 0) {
+  emitFinished(chatId: string, exitCode: number = 0): void {
     this.emit('finished', chatId, exitCode);
   }
 
-  emitFailed(chatId, errorMessage) {
+  emitFailed(chatId: string, errorMessage: string): void {
     this.emit('failed', chatId, errorMessage);
   }
 
   // Listener helpers (used by composition root)
 
-  onMessages(cb) {
+  onMessages(cb: MessagesCallback): void {
     this.on('messages', cb);
   }
 
-  onProcessing(cb) {
+  onProcessing(cb: ProcessingCallback): void {
     this.on('processing', cb);
   }
 
-  onSessionCreated(cb) {
+  onSessionCreated(cb: SessionCreatedCallback): void {
     this.on('session-created', cb);
   }
 
-  onFinished(cb) {
+  onFinished(cb: FinishedCallback): void {
     this.on('finished', cb);
   }
 
-  onFailed(cb) {
+  onFailed(cb: FailedCallback): void {
     this.on('failed', cb);
   }
 }

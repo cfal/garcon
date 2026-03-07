@@ -12,27 +12,79 @@ import { getProjectBasePath } from '../config.js';
 
 const PROJECT_BASE_PATH = getProjectBasePath();
 
-function isWithinBasePath(targetPath) {
+type RouteHandler = (request: Request, url: URL) => Promise<Response> | Response;
+type RouteMap = Record<string, Record<string, RouteHandler>>;
+
+interface ChatRegistryDep {
+  getChat(chatId: string): Record<string, unknown> | null;
+  listAllChats(): Record<string, Record<string, unknown>>;
+  addChat(entry: Record<string, unknown>): boolean;
+  removeChat(chatId: string): void;
+  updateChat(chatId: string, updates: Record<string, unknown>): void;
+}
+
+interface SettingsDep {
+  getPinnedChatIds(): Promise<string[]>;
+  getNormalChatIds(): Promise<string[]>;
+  getArchivedChatIds(): Promise<string[]>;
+  getChatName(chatId: string): string | null;
+  setLastChatDefaults(defaults: Record<string, unknown>): Promise<void>;
+  ensureInNormal(chatId: string): Promise<void>;
+  removeFromAllOrderLists(chatId: string): Promise<void>;
+  removeSessionName(chatId: string): Promise<void>;
+  togglePin(chatId: string): Promise<{ isPinned: boolean }>;
+  toggleArchive(chatId: string): Promise<{ isArchived: boolean }>;
+  reorderWindow(list: string, oldOrder: string[], newOrder: string[]): Promise<{ success: boolean; error?: string }>;
+  reorderRelative(chatId: string, refId: string, mode: string): Promise<{ success: boolean; error?: string }>;
+}
+
+interface QueueDep {
+  deleteChatQueueFile(chatId: string): Promise<void>;
+}
+
+interface PathCacheDep {
+  isProjectPathAvailable(projectPath: string): Promise<boolean>;
+}
+
+interface MetadataDep {
+  listAllChatMetadata(): Map<string, Record<string, unknown>>;
+  getChatMetadata(chatId: string): Record<string, unknown> | null;
+  addNewChatMetadata(chatId: string, command: string): void;
+}
+
+interface HistoryCacheDep {
+  ensureLoaded(chatId: string): Promise<void>;
+  getPaginatedMessages(chatId: string, limit: number, offset: number): unknown;
+  appendMessages(chatId: string, messages: unknown[]): Promise<void>;
+}
+
+interface ProvidersDep {
+  isProviderSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
+  startSession(chatId: string, command: string, opts: Record<string, unknown>): Promise<void>;
+  runSingleQuery(prompt: string, opts?: Record<string, unknown>): Promise<string>;
+}
+
+function isWithinBasePath(targetPath: string): boolean {
   const resolved = path.resolve(targetPath);
   const projectBasePathPrefix = PROJECT_BASE_PATH.endsWith(path.sep) ? PROJECT_BASE_PATH : PROJECT_BASE_PATH + path.sep;
   return resolved === PROJECT_BASE_PATH || resolved.startsWith(projectBasePathPrefix);
 }
 
-async function isGitRepository(projectPath) {
+async function isGitRepository(projectPath: string): Promise<boolean> {
   try {
     const proc = Bun.spawn(['git', 'rev-parse', '--is-inside-work-tree'], {
       cwd: projectPath,
       stdout: 'pipe',
       stderr: 'pipe',
     });
-    const [stdout, exitCode] = await Promise.all([proc.stdout.text(), proc.exited]);
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     return exitCode === 0 && stdout.trim() === 'true';
   } catch {
     return false;
   }
 }
 
-function createdAtFromId(id) {
+function createdAtFromId(id: string): string | null {
   const raw = String(id || '').trim();
   if (!/^\d+$/.test(raw)) return null;
   const msString = raw.length > 13 ? raw.slice(0, -3) : raw;
@@ -41,16 +93,24 @@ function createdAtFromId(id) {
   return new Date(ts).toISOString();
 }
 
-function extractFirstLine(text) {
+function extractFirstLine(text: string | null | undefined): string {
   if (!text) return '';
   const nl = text.indexOf('\n');
   if (nl < 0) return text.trim();
   return text.slice(0, nl).trim();
 }
 
-export default function createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers) {
+export default function createChatRoutes(
+  registry: ChatRegistryDep,
+  settings: SettingsDep,
+  queue: QueueDep,
+  pathCache: PathCacheDep,
+  metadata: MetadataDep,
+  historyCache: HistoryCacheDep,
+  providers: ProvidersDep,
+): RouteMap {
 
-  async function validateStartPath(request, url) {
+  async function validateStartPath(_request: Request, url: URL): Promise<Response> {
     const dirPath = String(url.searchParams.get('path') || '').trim();
     if (!dirPath) {
       return Response.json(
@@ -74,23 +134,24 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       }
       const isGitRepo = await isGitRepository(dirPath);
       return Response.json({ valid: true, isGitRepo });
-    } catch (error) {
-      if (error.code === 'ENOENT') {
+    } catch (error: unknown) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') {
         return Response.json({ valid: false, error: 'Path does not exist', errorCode: 'path_not_found' });
       }
-      if (error.code === 'EACCES' || error.code === 'EPERM') {
+      if (err.code === 'EACCES' || err.code === 'EPERM') {
         return Response.json({ valid: false, error: 'Permission denied', errorCode: 'permission_denied' });
       }
-      return Response.json({ valid: false, error: error.message, errorCode: 'unknown' });
+      return Response.json({ valid: false, error: (error as Error).message, errorCode: 'unknown' });
     }
   }
 
-  async function getChats() {
+  async function getChats(): Promise<Response> {
     try {
       const sessions = registry.listAllChats();
       const metadataMap = metadata.listAllChatMetadata();
 
-      let pinnedList, normalList, archivedList;
+      let pinnedList: string[], normalList: string[], archivedList: string[];
       try { pinnedList = await settings.getPinnedChatIds(); } catch { pinnedList = []; }
       try { normalList = await settings.getNormalChatIds(); } catch { normalList = []; }
       try { archivedList = await settings.getArchivedChatIds(); } catch { archivedList = []; }
@@ -98,18 +159,17 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       const pinnedIds = new Set(pinnedList);
       const archivedIds = new Set(archivedList);
 
-      // Build entry map for all visible sessions.
-      const entryMap = new Map();
+      const entryMap = new Map<string, Record<string, unknown>>();
       for (const chatId in sessions) {
         const session = sessions[chatId];
-        if (!await pathCache.isProjectPathAvailable(session.projectPath)) continue;
+        if (!await pathCache.isProjectPathAvailable(session.projectPath as string)) continue;
         const meta = metadataMap.get(chatId) || null;
         const inferredCreatedAt = createdAtFromId(chatId);
         const overrideTitle = settings.getChatName(chatId);
         const isPinned = pinnedIds.has(chatId);
         const isArchived = !isPinned && archivedIds.has(chatId);
-        const lastReadAt = session.lastReadAt || null;
-        const lastActivityAt = meta?.lastActivity || null;
+        const lastReadAt = (session.lastReadAt as string) || null;
+        const lastActivityAt = (meta?.lastActivity as string) || null;
         const isUnread = Boolean(lastActivityAt && (!lastReadAt || lastActivityAt > lastReadAt));
 
         entryMap.set(chatId, {
@@ -118,39 +178,33 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
           model: session.model || null,
           permissionMode: session.permissionMode || 'default',
           thinkingMode: session.thinkingMode || 'none',
-          title: extractFirstLine(overrideTitle || meta?.firstMessage || 'New Session'),
+          title: extractFirstLine((overrideTitle || meta?.firstMessage || 'New Session') as string),
           projectPath: session.projectPath,
           tags: session.tags || [],
-          activity: { createdAt: meta?.createdAt || inferredCreatedAt, lastActivityAt, lastReadAt },
-          preview: { lastMessage: extractFirstLine(meta?.lastMessage) },
-          isActive: providers.isProviderSessionRunning(session.provider, session.providerSessionId),
+          activity: { createdAt: (meta?.createdAt as string) || inferredCreatedAt, lastActivityAt, lastReadAt },
+          preview: { lastMessage: extractFirstLine(meta?.lastMessage as string) },
+          isActive: providers.isProviderSessionRunning(session.provider as string, session.providerSessionId as string | null),
           isPinned,
           isArchived,
           isUnread,
         });
       }
 
-      // Emit chats in persisted order, skipping IDs that don't map to visible sessions.
-      const orderedFromList = (list) => list.map((id) => entryMap.get(id)).filter(Boolean);
+      const orderedFromList = (list: string[]) => list.map((id: string) => entryMap.get(id)).filter(Boolean);
 
       const pinned = orderedFromList(pinnedList);
       const normal = orderedFromList(normalList);
       const archived = orderedFromList(archivedList);
 
-      // Safety net: include chats that exist in the registry but are missing
-      // from all order lists (can happen if a concurrent settings write
-      // clobbered the ensureInNormal update during chat creation).
       const listed = new Set([...pinnedList, ...normalList, ...archivedList]);
-      const orphans = [];
+      const orphans: Record<string, unknown>[] = [];
       for (const [id, entry] of entryMap) {
         if (!listed.has(id)) orphans.push(entry);
       }
       if (orphans.length > 0) {
-        // Sort newest-first so they appear at the top of the normal section.
-        orphans.sort((a, b) => (b.activity.createdAt || '').localeCompare(a.activity.createdAt || ''));
-        // Lazily repair the order list so subsequent fetches are consistent.
+        orphans.sort((a, b) => ((b.activity as Record<string, string>).createdAt || '').localeCompare((a.activity as Record<string, string>).createdAt || ''));
         for (const entry of orphans) {
-          settings.ensureInNormal(entry.id).catch((err) => {
+          settings.ensureInNormal(entry.id as string).catch((err: Error) => {
             console.warn(`chats: failed to repair orphan ${entry.id}:`, err.message);
           });
         }
@@ -158,13 +212,13 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
 
       const all = [...pinned, ...orphans, ...normal, ...archived];
       return Response.json({ sessions: all, total: all.length });
-    } catch (error) {
-      console.error('sessions: error listing sessions:', error.message);
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+    } catch (error: unknown) {
+      console.error('sessions: error listing sessions:', (error as Error).message);
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function postStartSession(request) {
+  async function postStartSession(request: Request): Promise<Response> {
     try {
       const body = await parseJsonBody(request);
       const chatId = String(body.chatId || '').trim();
@@ -175,7 +229,7 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       const command = String(body.command || '').trim();
       const tags = Array.isArray(body.tags) ? body.tags : [provider];
       const requestOptions = body.options && typeof body.options === 'object' ? body.options : {};
-      const initialImages = Array.isArray(requestOptions.images) ? requestOptions.images : [];
+      const initialImages = Array.isArray((requestOptions as Record<string, unknown>).images) ? (requestOptions as Record<string, unknown>).images as unknown[] : [];
 
       if (!chatId || !/^\d+$/.test(chatId)) {
         return Response.json({ success: false, error: 'Valid numeric chatId is required' }, { status: 400 });
@@ -186,7 +240,6 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       if (!projectPath) {
         return Response.json({ success: false, error: 'projectPath is required' }, { status: 400 });
       }
-      // TODO: use path-cache
       try {
         await fs.access(projectPath);
       } catch {
@@ -248,27 +301,26 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       await settings.ensureInNormal(chatId);
 
       historyCache.appendMessages(chatId, [
-        new UserMessage(new Date().toISOString(), command, initialImages.length > 0 ? initialImages : undefined),
-      ]).catch((err) => {
+        new UserMessage(new Date().toISOString(), command, initialImages.length > 0 ? initialImages as any : undefined),
+      ]).catch((err: Error) => {
         console.warn(`sessions: failed to append initial user message for ${chatId}:`, err.message);
       });
 
       try {
         await providers.startSession(chatId, command, {
-          ...requestOptions,
+          ...(requestOptions as Record<string, unknown>),
           projectPath,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         registry.removeChat(chatId);
         try {
           await settings.removeFromAllOrderLists(chatId);
-        } catch (cleanupError) {
-          console.warn(`sessions: failed to remove ${chatId} from order lists after startup failure:`, cleanupError.message);
+        } catch (cleanupError: unknown) {
+          console.warn(`sessions: failed to remove ${chatId} from order lists after startup failure:`, (cleanupError as Error).message);
         }
-        return Response.json({ success: false, error: error.message }, { status: 500 });
+        return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
       }
 
-      // Fire-and-forget title generation; non-blocking for chat startup.
       void maybeGenerateChatTitle({ chatId, projectPath, firstPrompt: command, providers, settings });
 
       return Response.json({
@@ -277,15 +329,15 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
         provider,
         status: 'initialized',
       });
-    } catch (error) {
-      if (error.message === 'Malformed JSON') {
+    } catch (error: unknown) {
+      if ((error as Error).message === 'Malformed JSON') {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function deleteSessionHandler(request, url) {
+  async function deleteSessionHandler(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return Response.json({ error: 'chatId query parameter is required' }, { status: 400 });
 
@@ -297,10 +349,10 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
 
       if (session.nativePath) {
         try {
-          await fs.unlink(session.nativePath);
-        } catch (error) {
-          if (error.code !== 'ENOENT') {
-            console.warn(`sessions: could not delete native file ${session.nativePath}:`, error.message);
+          await fs.unlink(session.nativePath as string);
+        } catch (error: unknown) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            console.warn(`sessions: could not delete native file ${session.nativePath}:`, (error as Error).message);
           }
         }
       }
@@ -315,19 +367,19 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
 
       try {
         await settings.removeFromAllOrderLists(chatId);
-      } catch { }
+      } catch { /* ignore */ }
 
       try {
         await settings.removeSessionName(chatId);
-      } catch { }
+      } catch { /* ignore */ }
 
       return Response.json({ success: true });
-    } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+    } catch (error: unknown) {
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function getMessages(request, url) {
+  async function getMessages(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return Response.json({ error: 'chatId query parameter is required' }, { status: 400 });
 
@@ -342,13 +394,13 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
 
       await historyCache.ensureLoaded(chatId);
       return Response.json(historyCache.getPaginatedMessages(chatId, limit, offset));
-    } catch (error) {
-      console.error(`sessions: error reading messages for ${chatId}:`, error.message);
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+    } catch (error: unknown) {
+      console.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function getChatDetails(request, url) {
+  async function getChatDetails(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return Response.json({ error: 'chatId query parameter is required' }, { status: 400 });
 
@@ -366,12 +418,12 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
         lastActivityAt: meta?.lastActivity || null,
         nativePath: session.nativePath || null,
       });
-    } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+    } catch (error: unknown) {
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function postTogglePin(request, url) {
+  async function postTogglePin(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return Response.json({ error: 'chatId query parameter is required' }, { status: 400 });
 
@@ -383,12 +435,12 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
 
       const result = await settings.togglePin(chatId);
       return Response.json({ success: true, isPinned: result.isPinned });
-    } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+    } catch (error: unknown) {
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function postToggleArchive(request, url) {
+  async function postToggleArchive(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return Response.json({ error: 'chatId query parameter is required' }, { status: 400 });
 
@@ -400,13 +452,12 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
 
       const result = await settings.toggleArchive(chatId);
       return Response.json({ success: true, isArchived: result.isArchived });
-    } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+    } catch (error: unknown) {
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  // Batch marks chats as read with monotonic merge.
-  async function postMarkRead(request) {
+  async function postMarkRead(request: Request): Promise<Response> {
     try {
       const body = await parseJsonBody(request);
       const entries = Array.isArray(body.entries) ? body.entries : [];
@@ -415,7 +466,7 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       }
 
       const now = new Date().toISOString();
-      const results = [];
+      const results: Array<{ chatId: string; lastReadAt: string }> = [];
       for (const entry of entries) {
         const chatId = String(entry.chatId || '').trim();
         if (!chatId) continue;
@@ -424,7 +475,7 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
         if (!session) continue;
 
         const incoming = entry.lastReadAt || now;
-        const existing = session.lastReadAt || null;
+        const existing = (session.lastReadAt as string) || null;
         const merged = existing && existing > incoming ? existing : incoming;
 
         registry.updateChat(chatId, { lastReadAt: merged });
@@ -432,16 +483,15 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       }
 
       return Response.json({ success: true, results });
-    } catch (error) {
-      if (error.message === 'Malformed JSON') {
+    } catch (error: unknown) {
+      if ((error as Error).message === 'Malformed JSON') {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  // Persists a window reorder within a specified group.
-  async function postReorderChats(request) {
+  async function postReorderChats(request: Request): Promise<Response> {
     try {
       const body = await parseJsonBody(request);
       const list = body?.list;
@@ -461,16 +511,15 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       }
 
       return Response.json({ success: true });
-    } catch (error) {
-      if (error.message === 'Malformed JSON') {
+    } catch (error: unknown) {
+      if ((error as Error).message === 'Malformed JSON') {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  // Moves a single chat relative to a neighbor within the same group.
-  async function postReorderQuick(request) {
+  async function postReorderQuick(request: Request): Promise<Response> {
     try {
       const body = await parseJsonBody(request);
       const chatId = typeof body?.chatId === 'string' ? body.chatId.trim() : '';
@@ -495,20 +544,20 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
 
       const result = await settings.reorderRelative(chatId, refId, mode);
       if (!result.success) {
-        const status = result.error.includes('not found') ? 404 : 400;
+        const status = result.error!.includes('not found') ? 404 : 400;
         return Response.json({ success: false, error: result.error }, { status });
       }
 
       return Response.json({ success: true });
-    } catch (error) {
-      if (error.message === 'Malformed JSON') {
+    } catch (error: unknown) {
+      if ((error as Error).message === 'Malformed JSON') {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function postForkChat(request) {
+  async function postForkChat(request: Request): Promise<Response> {
     try {
       const body = await parseJsonBody(request);
       const sourceChatId = String(body.sourceChatId || '').trim();
@@ -529,7 +578,7 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
         return Response.json({ success: false, error: 'Source session not found' }, { status: 404 });
       }
 
-      if (!providerSupportsFork(sourceSession.provider)) {
+      if (!providerSupportsFork(sourceSession.provider as import('../../common/providers.ts').ProviderId)) {
         return Response.json({ success: false, error: `Fork unsupported for provider: ${sourceSession.provider}` }, { status: 422 });
       }
 
@@ -548,11 +597,11 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       });
 
       return Response.json({ success: true, ...result });
-    } catch (error) {
-      if (error.message === 'Malformed JSON') {
+    } catch (error: unknown) {
+      if ((error as Error).message === 'Malformed JSON') {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
