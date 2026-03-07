@@ -112,7 +112,6 @@ describe('POST /api/v1/chats/start', () => {
     });
     expect(providers.startSession).toHaveBeenCalledWith('123', 'hello', {
       images: [],
-      cwd: projectPath,
       projectPath,
     });
   });

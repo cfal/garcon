@@ -256,7 +256,6 @@ export default function createChatRoutes(registry, settings, queue, pathCache, m
       try {
         await providers.startSession(chatId, command, {
           ...requestOptions,
-          cwd: projectPath,
           projectPath,
         });
       } catch (error) {
