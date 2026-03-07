@@ -31,6 +31,7 @@ import { HistoryCache } from './chats/history-cache.js';
 import { ClaudeProvider } from './providers/claude-cli.js';
 import { CodexProvider } from './providers/codex.js';
 import { OpenCodeProvider } from './providers/opencode.js';
+import { AmpProvider } from './providers/amp-cli.js';
 import { ProviderRegistry } from './providers/index.js';
 import { ChatHandler } from './ws/chat.js';
 import {
@@ -77,9 +78,10 @@ export async function startServer() {
     const claudeProvider = new ClaudeProvider();
     const codexProvider = new CodexProvider();
     const opencodeProvider = new OpenCodeProvider();
+    const ampProvider = new AmpProvider();
 
     // Tier 2: Provider registry wrapping providers + registry
-    const providerRegistry = new ProviderRegistry(chatRegistry, claudeProvider, codexProvider, opencodeProvider);
+    const providerRegistry = new ProviderRegistry(chatRegistry, claudeProvider, codexProvider, opencodeProvider, ampProvider);
 
     // Tier 3: Chat infrastructure (uses ProviderRegistry)
     const metadata = new MetadataIndex(chatRegistry, providerRegistry);

@@ -2,7 +2,7 @@
 
 import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
 
-export type SessionProvider = 'claude' | 'codex' | 'opencode';
+export type SessionProvider = 'claude' | 'codex' | 'opencode' | 'amp';
 
 export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'preview';
 

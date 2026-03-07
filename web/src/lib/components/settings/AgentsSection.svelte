@@ -12,39 +12,45 @@
 		error: string | null;
 	}
 
-	type AgentId = 'claude' | 'codex' | 'opencode';
+	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp';
 
 	const DEFAULT_AUTH: AuthStatus = { authenticated: false, email: null, loading: true, error: null };
 
 	const agents: { id: AgentId; name: string }[] = [
 		{ id: 'claude', name: 'Claude' },
 		{ id: 'codex', name: 'Codex' },
-		{ id: 'opencode', name: 'OpenCode' }
+		{ id: 'opencode', name: 'OpenCode' },
+		{ id: 'amp', name: 'Amp' }
 	];
 
 	let claudeAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 	let codexAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 	let opencodeAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
+	let ampAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 
 	let claudeOpen = $state(false);
 	let codexOpen = $state(false);
 	let opencodeOpen = $state(false);
+	let ampOpen = $state(false);
 
 	function authFor(agent: AgentId): AuthStatus {
 		if (agent === 'claude') return claudeAuth;
 		if (agent === 'codex') return codexAuth;
+		if (agent === 'amp') return ampAuth;
 		return opencodeAuth;
 	}
 
 	function isOpen(agent: AgentId): boolean {
 		if (agent === 'claude') return claudeOpen;
 		if (agent === 'codex') return codexOpen;
+		if (agent === 'amp') return ampOpen;
 		return opencodeOpen;
 	}
 
 	function setOpen(agent: AgentId, value: boolean) {
 		if (agent === 'claude') claudeOpen = value;
 		else if (agent === 'codex') codexOpen = value;
+		else if (agent === 'amp') ampOpen = value;
 		else opencodeOpen = value;
 	}
 
@@ -52,6 +58,7 @@
 		const setAuth = (status: AuthStatus) => {
 			if (agent === 'claude') claudeAuth = status;
 			else if (agent === 'codex') codexAuth = status;
+			else if (agent === 'amp') ampAuth = status;
 			else opencodeAuth = status;
 		};
 
@@ -80,12 +87,13 @@
 
 	let authExpandDone = $state(false);
 	$effect(() => {
-		const allLoaded = !claudeAuth.loading && !codexAuth.loading && !opencodeAuth.loading;
+		const allLoaded = !claudeAuth.loading && !codexAuth.loading && !opencodeAuth.loading && !ampAuth.loading;
 		if (allLoaded && !authExpandDone) {
 			authExpandDone = true;
 			if (!claudeAuth.authenticated) claudeOpen = true;
 			if (!codexAuth.authenticated) codexOpen = true;
 			if (!opencodeAuth.authenticated) opencodeOpen = true;
+			if (!ampAuth.authenticated) ampOpen = true;
 		}
 	});
 
@@ -93,6 +101,7 @@
 		checkAuth('claude');
 		checkAuth('codex');
 		checkAuth('opencode');
+		checkAuth('amp');
 	});
 </script>
 

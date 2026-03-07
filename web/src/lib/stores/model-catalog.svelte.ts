@@ -1,6 +1,6 @@
 import { apiFetch } from '$lib/api/client.js';
 import type { SessionProvider } from '$lib/types/app';
-import { CLAUDE_MODELS, CODEX_MODELS } from '$shared/models';
+import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '$shared/models';
 import { PROVIDERS, PROVIDER_CAPABILITIES, type ProviderId } from '$shared/providers';
 
 export interface ModelOption {
@@ -27,7 +27,8 @@ const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000;
 const STATIC_FALLBACKS: ProviderModels = {
 	claude: CLAUDE_MODELS.OPTIONS,
 	codex: CODEX_MODELS.OPTIONS,
-	opencode: []
+	opencode: [],
+	amp: AMP_MODELS.OPTIONS
 };
 
 // Default capabilities derived from the shared common contract. Used when
@@ -62,7 +63,8 @@ function mergeWithFallbacks(models: ProviderModels): ProviderModels {
 	return {
 		claude: models.claude?.length ? models.claude : STATIC_FALLBACKS.claude,
 		codex: models.codex?.length ? models.codex : STATIC_FALLBACKS.codex,
-		opencode: models.opencode?.length ? models.opencode : STATIC_FALLBACKS.opencode
+		opencode: models.opencode?.length ? models.opencode : STATIC_FALLBACKS.opencode,
+		amp: models.amp?.length ? models.amp : STATIC_FALLBACKS.amp
 	};
 }
 
@@ -181,6 +183,7 @@ export class ModelCatalogStore {
 	getDefaultModel(provider: SessionProvider): string {
 		if (provider === 'claude') return CLAUDE_MODELS.DEFAULT;
 		if (provider === 'codex') return CODEX_MODELS.DEFAULT;
+		if (provider === 'amp') return AMP_MODELS.DEFAULT;
 		return this.getModels('opencode')[0]?.value ?? '';
 	}
 
