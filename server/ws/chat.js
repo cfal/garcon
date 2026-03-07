@@ -218,10 +218,7 @@ export class ChatHandler {
         await this.#queue.enqueueChat(chatId, data.content);
         // Trigger drain in case the provider has already finished.
         // triggerDrain no-ops if the provider is still running.
-        this.#queue.triggerDrain(chatId, {
-          projectPath: data.projectPath,
-          cwd: data.projectPath,
-        }).catch((err) => {
+        this.#queue.triggerDrain(chatId, this.#drainOptions(chatId, data)).catch((err) => {
           console.error('queue: enqueue drain error:', err.message);
         });
       } else if (data instanceof QueueDropRequest) {
@@ -239,12 +236,7 @@ export class ChatHandler {
       } else if (data instanceof QueueResumeRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         await this.#queue.resumeChatQueue(chatId);
-        this.#queue.triggerDrain(chatId, {
-          projectPath: data.projectPath,
-          cwd: data.projectPath,
-          permissionMode: data.permissionMode,
-          toolsSettings: data.toolsSettings,
-        }).catch((err) => {
+        this.#queue.triggerDrain(chatId, this.#drainOptions(chatId, data)).catch((err) => {
           console.error('queue: resume drain error:', err.message);
         });
       } else if (data instanceof QueueQueryRequest) {
@@ -256,6 +248,19 @@ export class ChatHandler {
       console.error('ws: chat error:', error.message);
       writer.send(new WsFaultMessage(error.message));
     }
+  }
+
+  // Builds drain options from the registry entry, falling back to
+  // client-supplied values. This ensures permissionMode and projectPath
+  // are always present even when the client omits them.
+  #drainOptions(chatId, data) {
+    const entry = this.#registry.getChat(chatId);
+    const projectPath = entry?.projectPath || data.projectPath;
+    return {
+      projectPath,
+      cwd: projectPath,
+      permissionMode: entry?.permissionMode || data.permissionMode,
+    };
   }
 
   #sendMissingSessionError(writer, type) {
