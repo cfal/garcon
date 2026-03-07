@@ -129,8 +129,8 @@
 			</div>
 
 		<!-- Terminal viewport -->
-		<div class="flex-1 p-2 overflow-hidden relative">
-			<div bind:this={terminalEl} class="h-full w-full outline-none focus-visible:ring-2 focus-visible:ring-ring" style="outline: none;"></div>
+		<div class="flex-1 min-h-0 p-2 overflow-hidden relative">
+			<div bind:this={terminalEl} class="h-full w-full min-h-0 outline-none focus-visible:ring-2 focus-visible:ring-ring" style="outline: none;"></div>
 
 			{#if runtime.clipboardMessage}
 				<div class="absolute top-2 right-2 z-20 rounded bg-destructive/90 px-3 py-2 text-xs text-destructive-foreground">
@@ -156,3 +156,9 @@
 			{/if}
 		</div>
 	</div>
+
+<style>
+	:global(.xterm .xterm-viewport) {
+		overflow-y: auto !important;
+	}
+</style>
