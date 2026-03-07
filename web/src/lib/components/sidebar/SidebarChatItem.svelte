@@ -175,10 +175,10 @@
 </script>
 
 <div class="chat-item-root group relative" bind:this={itemEl}>
-	<!-- Status corner badge overlays chat content without affecting layout flow. -->
+	<!-- Status corner badge stays away from the top-right menu trigger. -->
 		{#if isPinned || isArchived}
 			<div
-				class={cn("absolute top-1 right-1 z-20 pointer-events-none w-5 h-5 rounded-full border flex items-center justify-center [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-0 transition-opacity", menuOpen && "!opacity-0", cornerBadgeClass)}
+				class={cn("absolute right-1 bottom-[5px] z-10 pointer-events-none w-5 h-5 rounded-full border flex items-center justify-center", cornerBadgeClass)}
 				aria-hidden="true"
 			>
 				{#if isPinned}
