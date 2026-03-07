@@ -1,9 +1,12 @@
 <!-- Agents settings section. Renders collapsible cards for each provider
-     with auth status and login actions. -->
+     with auth status and login actions. Primary providers (Claude, Codex)
+     are always visible; secondary providers (OpenCode, Amp) are grouped
+     under a collapsible "More providers" toggle. -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getAuthStatus } from '$lib/api/providers.js';
 	import AgentCard from './AgentCard.svelte';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 
 	interface AuthStatus {
 		authenticated: boolean;
@@ -16,9 +19,12 @@
 
 	const DEFAULT_AUTH: AuthStatus = { authenticated: false, email: null, loading: true, error: null };
 
-	const agents: { id: AgentId; name: string }[] = [
+	const primaryAgents: { id: AgentId; name: string }[] = [
 		{ id: 'claude', name: 'Claude' },
-		{ id: 'codex', name: 'Codex' },
+		{ id: 'codex', name: 'Codex' }
+	];
+
+	const secondaryAgents: { id: AgentId; name: string }[] = [
 		{ id: 'opencode', name: 'OpenCode' },
 		{ id: 'amp', name: 'Amp' }
 	];
@@ -32,6 +38,8 @@
 	let codexOpen = $state(false);
 	let opencodeOpen = $state(false);
 	let ampOpen = $state(false);
+
+	let moreProvidersOpen = $state(false);
 
 	function authFor(agent: AgentId): AuthStatus {
 		if (agent === 'claude') return claudeAuth;
@@ -85,6 +93,11 @@
 		window.open(loginUrl, '_blank', 'width=800,height=600');
 	}
 
+	// Count how many secondary providers are connected
+	let secondaryConnectedCount = $derived(
+		[opencodeAuth, ampAuth].filter((a) => a.authenticated).length
+	);
+
 	let authExpandDone = $state(false);
 	$effect(() => {
 		const allLoaded = !claudeAuth.loading && !codexAuth.loading && !opencodeAuth.loading && !ampAuth.loading;
@@ -92,6 +105,11 @@
 			authExpandDone = true;
 			if (!claudeAuth.authenticated) claudeOpen = true;
 			if (!codexAuth.authenticated) codexOpen = true;
+			// Auto-expand the "More providers" section if a secondary provider
+			// is disconnected but was previously used, or if any is connected
+			if (opencodeAuth.authenticated || ampAuth.authenticated) {
+				moreProvidersOpen = true;
+			}
 			if (!opencodeAuth.authenticated) opencodeOpen = true;
 			if (!ampAuth.authenticated) ampOpen = true;
 		}
@@ -106,7 +124,7 @@
 </script>
 
 <section data-section="agents" class="space-y-3">
-	{#each agents as agent (agent.id)}
+	{#each primaryAgents as agent (agent.id)}
 		<AgentCard
 			agentId={agent.id}
 			agentName={agent.name}
@@ -116,4 +134,34 @@
 			onLogin={() => handleLogin(agent.id)}
 		/>
 	{/each}
+
+	<!-- Secondary providers toggle -->
+	<div class="pt-1">
+		<button
+			type="button"
+			class="flex w-full items-center gap-2 px-1 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+			onclick={() => (moreProvidersOpen = !moreProvidersOpen)}
+		>
+			<ChevronDownIcon class="size-3.5 shrink-0 transition-transform duration-200 {moreProvidersOpen ? 'rotate-180' : ''}" />
+			<span>More providers</span>
+			{#if !moreProvidersOpen && secondaryConnectedCount > 0}
+				<span class="ml-auto text-xs text-muted-foreground/70">{secondaryConnectedCount} connected</span>
+			{/if}
+		</button>
+
+		{#if moreProvidersOpen}
+			<div class="mt-2 space-y-3">
+				{#each secondaryAgents as agent (agent.id)}
+					<AgentCard
+						agentId={agent.id}
+						agentName={agent.name}
+						auth={authFor(agent.id)}
+						open={isOpen(agent.id)}
+						onOpenChange={(v) => setOpen(agent.id, v)}
+						onLogin={() => handleLogin(agent.id)}
+					/>
+				{/each}
+			</div>
+		{/if}
+	</div>
 </section>

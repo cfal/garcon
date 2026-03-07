@@ -37,7 +37,7 @@
 		claude: 'border-l-provider-claude-border',
 		codex: 'border-l-provider-codex-border',
 		opencode: 'border-l-provider-opencode-border',
-		amp: 'border-l-provider-opencode-border'
+		amp: 'border-l-provider-amp-border'
 	};
 </script>
 

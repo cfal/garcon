@@ -79,28 +79,46 @@ const THINKING_ICON_METADATA: Record<ThinkingMode, Pick<ComposerModeOption<Think
 	}
 };
 
-export const PROVIDER_MENU_OPTIONS: ComposerMenuOption<SessionProvider>[] = [
+export interface ProviderMenuGroup {
+	label?: string;
+	options: ComposerMenuOption<SessionProvider>[];
+}
+
+export const PROVIDER_MENU_GROUPS: ProviderMenuGroup[] = [
 	{
-		value: 'claude',
-		label: 'Claude',
-		description: 'General-purpose reasoning and tool workflows.'
+		options: [
+			{
+				value: 'claude',
+				label: 'Claude',
+				description: 'General-purpose reasoning and tool workflows.'
+			},
+			{
+				value: 'codex',
+				label: 'Codex',
+				description: 'Code-heavy workflows and terminal-first tasks.'
+			},
+		]
 	},
 	{
-		value: 'codex',
-		label: 'Codex',
-		description: 'Code-heavy workflows and terminal-first tasks.'
-	},
-	{
-		value: 'opencode',
-		label: 'OpenCode',
-		description: 'Runs through OpenCode-compatible backends.'
-	},
-	{
-		value: 'amp',
-		label: 'Amp',
-		description: 'Amp agent with multi-tool workflows.'
+		label: 'More',
+		options: [
+			{
+				value: 'opencode',
+				label: 'OpenCode',
+				description: 'Runs through OpenCode-compatible backends.'
+			},
+			{
+				value: 'amp',
+				label: 'Amp',
+				description: 'Amp agent with multi-tool workflows.'
+			}
+		]
 	}
 ];
+
+// Flat list for backward compatibility and lookup
+export const PROVIDER_MENU_OPTIONS: ComposerMenuOption<SessionProvider>[] =
+	PROVIDER_MENU_GROUPS.flatMap((g) => g.options);
 
 export function buildPermissionOptions(modes: PermissionMode[]): ComposerModeOption<PermissionMode>[] {
 	return modes.map((mode) => ({
