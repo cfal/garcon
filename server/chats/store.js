@@ -82,7 +82,15 @@ export class ChatRegistry extends EventEmitter {
         continue;
       }
 
-      if (session.nativePath) continue;
+      if (session.nativePath) {
+        if (session.provider === 'opencode') continue;
+        try {
+          await fs.access(session.nativePath);
+          continue;
+        } catch {
+          if (session.nativePath) this.#nativePathCache.delete(session.nativePath);
+        }
+      }
 
       const resolvedPath = await resolveNativePath(session).catch((error) => {
         console.warn(`sessions: failed to reconcile nativePath for ${chatId}:`, error.message);

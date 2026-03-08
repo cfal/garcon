@@ -3,6 +3,9 @@
 // flows through typed events wired in the composition root.
 
 import crypto from 'crypto';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
 import { normalizeToolResultContent } from '../chats/normalize.js';
 import { getClaudeBinary } from '../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
@@ -66,6 +69,21 @@ interface PendingPermission {
 
 interface PendingControlRequest {
   resolve: (value: unknown) => void;
+}
+
+// Builds the Claude session file path from the canonicalized project path.
+async function createClaudeNativePath(projectPath: string, providerSessionId: string): Promise<string | null> {
+  if (!projectPath || !providerSessionId) return null;
+  const canonicalProjectPath = await fs.realpath(projectPath);
+  const projectName = canonicalProjectPath.replace(/[\\/:\s~_]/g, '-');
+  if (!projectName) return null;
+  return path.join(
+    os.homedir(),
+    '.claude',
+    'projects',
+    projectName,
+    `${providerSessionId}.jsonl`,
+  );
 }
 
 // Converts a finalized CLI assistant message to ChatMessage objects.
@@ -686,4 +704,4 @@ class ClaudeProvider extends AbsProvider {
   }
 }
 
-export { ClaudeProvider, convertCLIMessageToChatMessages, runSingleQuery };
+export { ClaudeProvider, convertCLIMessageToChatMessages, createClaudeNativePath, runSingleQuery };

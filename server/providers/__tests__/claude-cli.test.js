@@ -1,5 +1,27 @@
 import { describe, it, expect } from 'bun:test';
-import { convertCLIMessageToChatMessages } from '../claude-cli.js';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+import { convertCLIMessageToChatMessages, createClaudeNativePath } from '../claude-cli.js';
+
+describe('createClaudeNativePath', () => {
+  it('uses the canonical project path before encoding', async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-native-path-'));
+    const actualProjectPath = path.join(rootDir, 'workspace');
+    const symlinkRoot = path.join(rootDir, 'alias-root');
+    const symlinkProjectPath = path.join(symlinkRoot, 'workspace');
+
+    await fs.mkdir(actualProjectPath, { recursive: true });
+    await fs.symlink(rootDir, symlinkRoot);
+
+    const nativePath = await createClaudeNativePath(symlinkProjectPath, 'session-1');
+    const canonicalProjectPath = await fs.realpath(symlinkProjectPath);
+    const encodedProjectPath = canonicalProjectPath.replace(/[\\/:\s~_]/g, '-');
+
+    expect(nativePath).toBe(path.join(os.homedir(), '.claude', 'projects', encodedProjectPath, 'session-1.jsonl'));
+    expect(nativePath).not.toContain('alias-root');
+  });
+});
 
 describe('convertCLIMessageToChatMessages', () => {
   it('returns empty array for non-assistant messages', () => {

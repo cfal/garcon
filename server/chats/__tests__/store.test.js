@@ -192,19 +192,38 @@ describe('ChatRegistry', () => {
     });
 
     it('returns false when registry is already consistent', async () => {
+      const existingNativePath = path.join(tmpDir, 'existing.jsonl');
+      await fs.writeFile(existingNativePath, '', 'utf8');
+
       registry.addChat({
         id: 'c1',
         provider: 'claude',
         model: 'opus',
         projectPath: '/p',
         providerSessionId: 'ps1',
-        nativePath: '/tmp/a.jsonl',
+        nativePath: existingNativePath,
       });
 
       const changed = await registry.reconcileSessions(async () => '/resolved/path.jsonl');
 
       expect(changed).toBe(false);
-      expect(registry.getChat('c1')?.nativePath).toBe('/tmp/a.jsonl');
+      expect(registry.getChat('c1')?.nativePath).toBe(existingNativePath);
+    });
+
+    it('repairs stale nativePath when the stored file is missing', async () => {
+      registry.addChat({
+        id: 'c1',
+        provider: 'claude',
+        model: 'opus',
+        projectPath: '/p',
+        providerSessionId: 'ps1',
+        nativePath: '/tmp/missing.jsonl',
+      });
+
+      const changed = await registry.reconcileSessions(async () => '/resolved/path.jsonl');
+
+      expect(changed).toBe(true);
+      expect(registry.getChat('c1')?.nativePath).toBe('/resolved/path.jsonl');
     });
   });
 });
