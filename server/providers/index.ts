@@ -74,48 +74,6 @@ function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | unde
   };
 }
 
-// Builds a fully-hydrated StartSessionRequest from registry + caller opts.
-function hydrateStartSessionRequest(
-  chatId: string,
-  command: string,
-  entry: RequiredChatExecutionConfig,
-  opts: { images?: AgentCommandImage[] },
-): StartSessionRequest {
-  return {
-    chatId,
-    command,
-    projectPath: entry.projectPath,
-    model: entry.model,
-    permissionMode: entry.permissionMode,
-    thinkingMode: entry.thinkingMode,
-    images: opts.images,
-  };
-}
-
-// Builds a fully-hydrated ResumeTurnRequest, allowing runtime overrides.
-function hydrateResumeTurnRequest(
-  chatId: string,
-  command: string,
-  entry: RequiredChatExecutionConfig & { providerSessionId: string },
-  opts: {
-    images?: AgentCommandImage[];
-    model?: string;
-    permissionMode?: PermissionMode;
-    thinkingMode?: ThinkingMode;
-  },
-): ResumeTurnRequest {
-  return {
-    chatId,
-    providerSessionId: entry.providerSessionId,
-    command,
-    projectPath: entry.projectPath,
-    model: opts.model ?? entry.model,
-    permissionMode: opts.permissionMode ?? entry.permissionMode,
-    thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
-    images: opts.images,
-  };
-}
-
 interface ChatRegistry {
   getChat(chatId: string): ProviderChatEntry | null;
   getChatByProviderSessionId(id: string): [string, ProviderChatEntry] | null;
@@ -199,7 +157,15 @@ export class ProviderRegistry {
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
     const entry = requireChatEntry(chatId, rawEntry);
-    const request = hydrateStartSessionRequest(chatId, command, entry, opts);
+    const request: StartSessionRequest = {
+      chatId,
+      command,
+      projectPath: entry.projectPath,
+      model: entry.model,
+      permissionMode: entry.permissionMode,
+      thinkingMode: entry.thinkingMode,
+      images: opts.images,
+    };
 
     if (entry.provider === 'claude') {
       const providerSessionId = crypto.randomUUID();
@@ -252,10 +218,16 @@ export class ProviderRegistry {
     }
 
     const entry = requireChatEntry(chatId, rawEntry);
-    const request = hydrateResumeTurnRequest(chatId, command, {
-      ...entry,
+    const request: ResumeTurnRequest = {
+      chatId,
       providerSessionId,
-    }, opts);
+      command,
+      projectPath: entry.projectPath,
+      model: opts.model ?? entry.model,
+      permissionMode: opts.permissionMode ?? entry.permissionMode,
+      thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
+      images: opts.images,
+    };
 
     if (provider === 'claude') {
       await this.#claude.runClaudeTurn(request);
@@ -305,8 +277,8 @@ export class ProviderRegistry {
     return false;
   }
 
-  getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>> {
-    const mapToChatId = (arr: Array<{ id: string; [key: string]: unknown }>) =>
+  getRunningSessions(): Record<string, Array<{ id: string;[key: string]: unknown }>> {
+    const mapToChatId = (arr: Array<{ id: string;[key: string]: unknown }>) =>
       arr
         .map((e) => (typeof e === 'string' ? { id: e } : e))
         .map((e) => {
@@ -356,10 +328,10 @@ export class ProviderRegistry {
   }
 
   // Model changes are applied on the next CLI spawn; no-op here.
-  async setModel(_chatId: string, _model: string): Promise<void> {}
+  async setModel(_chatId: string, _model: string): Promise<void> { }
 
   // Runs a one-shot query against the specified provider.
-  async runSingleQuery(prompt: string, options: { provider?: string; [key: string]: unknown } = {}): Promise<string> {
+  async runSingleQuery(prompt: string, options: { provider?: string;[key: string]: unknown } = {}): Promise<string> {
     const { provider = 'claude', ...rest } = options;
     if (provider === 'codex') return runSingleQueryCodex(prompt, rest);
     if (provider === 'opencode') return this.#opencode.runSingleQuery(prompt, rest);
