@@ -3,29 +3,17 @@
 // TODO: can we deprecate this?
 
 import { promises as fs } from 'fs';
-import os from 'os';
-import path from 'path';
 import { findCodexSessionFileBySessionId } from '../projects/codex.js';
-
-export function encodeProjectPath(projectPath) {
-  return String(projectPath || '').replace(/[\\/:\s~_]/g, '-');
-}
+import { createClaudeNativePath } from '../providers/claude-cli.js';
 
 export async function resolveMissingNativePath(session) {
-  if (!session || session.nativePath || !session.providerSessionId) {
+  if (!session || !session.providerSessionId) {
     return null;
   }
 
   if (session.provider === 'claude') {
-    const projectName = encodeProjectPath(session.projectPath);
-    if (!projectName) return null;
-    const candidate = path.join(
-      os.homedir(),
-      '.claude',
-      'projects',
-      projectName,
-      `${session.providerSessionId}.jsonl`,
-    );
+    const candidate = await createClaudeNativePath(session.projectPath, session.providerSessionId);
+    if (!candidate) return null;
     try {
       await fs.access(candidate);
       return candidate;

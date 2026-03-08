@@ -4,10 +4,8 @@
 // can resolve chat data without knowing per-provider details.
 
 import crypto from 'crypto';
-import os from 'os';
-import path from 'path';
 import { findCodexSessionFileBySessionId } from '../projects/codex.js';
-import { runSingleQuery as runSingleQueryClaude } from './claude-cli.js';
+import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude } from './claude-cli.js';
 import { runSingleQuery as runSingleQueryCodex } from './codex.js';
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { getCodexAuthStatus } from './codex-auth.js';
@@ -29,23 +27,6 @@ import type {
   RequiredChatExecutionConfig,
 } from './types.js';
 import { requireChatExecutionConfig } from './types.js';
-
-// Encodes a project path into a safe directory name for Claude session storage.
-function encodeProjectPath(projectPath: string): string {
-  return String(projectPath || '').replace(/[\\/:\s~_]/g, '-');
-}
-
-function resolveClaudeNativePath(projectPath: string, providerSessionId: string): string | null {
-  const projectName = encodeProjectPath(projectPath);
-  if (!projectName || !providerSessionId) return null;
-  return path.join(
-    os.homedir(),
-    '.claude',
-    'projects',
-    projectName,
-    `${providerSessionId}.jsonl`,
-  );
-}
 
 async function getAllProviderAuthStatus(opencode: OpenCodeProviderInstance): Promise<Record<string, unknown>> {
   const [claude, codex, opencodeStatus] = await Promise.all([
@@ -169,7 +150,7 @@ export class ProviderRegistry {
 
     if (entry.provider === 'claude') {
       const providerSessionId = crypto.randomUUID();
-      const nativePath = resolveClaudeNativePath(entry.projectPath, providerSessionId);
+      const nativePath = await createClaudeNativePath(entry.projectPath, providerSessionId);
       this.#registry.updateChat(chatId, { providerSessionId, nativePath });
 
       const claudeRequest: ClaudeStartSessionRequest = {
@@ -426,5 +407,3 @@ export class ProviderRegistry {
     this.#opencode.onFailed(cb);
   }
 }
-
-export { encodeProjectPath };

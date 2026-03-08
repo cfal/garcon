@@ -11,6 +11,7 @@ const codexMock = mock(async () => 'codex-response');
 
 mock.module('../claude-cli.js', () => ({
   runSingleQuery: claudeMock,
+  createClaudeNativePath: mock(() => Promise.resolve('/tmp/claude-session.jsonl')),
   ClaudeProvider: class { constructor() {} },
 }));
 
@@ -22,7 +23,7 @@ mock.module('../codex.js', () => ({
 // Mock the stateless loader imports that ProviderRegistry pulls in
 mock.module('../loaders/claude-history-loader.js', () => ({
   getClaudePreviewFromNativePath: mock(() => Promise.resolve(null)),
-  getClaudeSessionMessagesFromNativePath: mock(() => Promise.resolve([])),
+  loadClaudeChatMessages: mock(() => Promise.resolve([])),
 }));
 
 mock.module('../loaders/codex-history-loader.js', () => ({
@@ -165,6 +166,23 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'opus',
       permissionMode: 'default',
       thinkingMode: 'none',
+    });
+  });
+
+  it('stores the derived native path when starting a Claude session', async () => {
+    mockRegistry.getChat.mockReturnValue({
+      provider: 'claude',
+      projectPath: '/proj',
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    await registry.startSession('123', 'hello', {});
+
+    expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+      providerSessionId: expect.any(String),
+      nativePath: '/tmp/claude-session.jsonl',
     });
   });
 
