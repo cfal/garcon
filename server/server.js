@@ -53,6 +53,10 @@ import {
 import createAllRoutes from './routes/index.js';
 
 export async function startServer() {
+  process.on('unhandledRejection', (err) => {
+    console.error('unhandled rejection (non-fatal):', err?.message || err);
+  });
+
   try {
     const workspaceDir = getWorkspaceDir();
 
