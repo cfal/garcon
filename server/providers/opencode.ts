@@ -199,6 +199,11 @@ export class OpenCodeProvider extends AbsProvider {
 
     this.#initPromise = (async () => {
       try {
+        if (typeof Bun !== 'undefined' && typeof Bun.which === 'function'
+            && process.env.NODE_ENV !== 'test' && !Bun.which('opencode')) {
+          throw new Error('opencode executable not found in $PATH');
+        }
+
         const { createOpencode } = await import('@opencode-ai/sdk/v2');
         const port = 10000 + Math.floor(Math.random() * 50000);
         const result = await createOpencode({ timeout: 30000, port });
