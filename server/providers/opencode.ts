@@ -198,16 +198,21 @@ export class OpenCodeProvider extends AbsProvider {
     if (this.#initPromise) return this.#initPromise;
 
     this.#initPromise = (async () => {
-      const { createOpencode } = await import('@opencode-ai/sdk/v2');
-      const port = 10000 + Math.floor(Math.random() * 50000);
-      const result = await createOpencode({ timeout: 30000, port });
+      try {
+        const { createOpencode } = await import('@opencode-ai/sdk/v2');
+        const port = 10000 + Math.floor(Math.random() * 50000);
+        const result = await createOpencode({ timeout: 30000, port });
 
-      if (!result?.client?.permission?.reply) {
-        throw new Error('OpenCode v2 client missing permission.reply; aborting startup');
+        if (!result?.client?.permission?.reply) {
+          throw new Error('OpenCode v2 client missing permission.reply; aborting startup');
+        }
+
+        this.#client = result;
+        return result;
+      } catch (err) {
+        this.#initPromise = null;
+        throw err;
       }
-
-      this.#client = result;
-      return result;
     })();
 
     return this.#initPromise;
