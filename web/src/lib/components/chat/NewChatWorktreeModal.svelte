@@ -1,5 +1,6 @@
 <script lang="ts">
 	// Modal for selecting or creating a git worktree from the New Chat form.
+	// Provides a branch-name-driven create flow with smart path defaults.
 
 	import { tick } from 'svelte';
 	import X from '@lucide/svelte/icons/x';
@@ -9,7 +10,10 @@
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import type { GitWorktreeItem } from '$lib/api/git.js';
+	import { deriveWorktreePath } from '$lib/utils/worktree-path.js';
 
 	interface Props {
 		worktrees: GitWorktreeItem[];
@@ -34,32 +38,41 @@
 	}: Props = $props();
 
 	let showCreateForm = $state(false);
-	let createPath = $state('');
-	let createBranch = $state('');
-	let createBaseRef = $state('');
-	let createPathRef: HTMLInputElement | undefined = $state();
+	let branchName = $state('');
+	let showAdvanced = $state(false);
+	let pathOverride = $state('');
+	let baseRefOverride = $state('');
+	let branchInputRef: HTMLInputElement | undefined = $state();
+
+	let derivedPath = $derived(deriveWorktreePath(branchName));
+	let effectivePath = $derived(pathOverride.trim() || derivedPath);
+	let canCreate = $derived(Boolean(branchName.trim() && effectivePath));
 
 	function handleKeydown(e: KeyboardEvent): void {
 		if (e.key === 'Escape') onClose();
 	}
 
 	function handleCreate(): void {
-		const path = createPath.trim();
-		if (!path) return;
-		onCreate(path, createBranch.trim() || undefined, createBaseRef.trim() || undefined);
+		if (!canCreate) return;
+		onCreate(
+			effectivePath,
+			branchName.trim() || undefined,
+			baseRefOverride.trim() || undefined,
+		);
 	}
 
 	function resetCreateForm(): void {
 		showCreateForm = false;
-		createPath = '';
-		createBranch = '';
-		createBaseRef = '';
+		branchName = '';
+		showAdvanced = false;
+		pathOverride = '';
+		baseRefOverride = '';
 	}
 
 	async function openCreateForm(): Promise<void> {
 		showCreateForm = true;
 		await tick();
-		createPathRef?.focus();
+		branchInputRef?.focus();
 	}
 </script>
 
@@ -155,26 +168,45 @@
 			<div class="border-t border-border px-4 py-3 space-y-2 shrink-0">
 				<div class="text-xs font-medium text-muted-foreground">Create worktree</div>
 				<input
-					bind:this={createPathRef}
+					bind:this={branchInputRef}
 					type="text"
-					bind:value={createPath}
-					placeholder="Worktree path (required)"
+					bind:value={branchName}
+					placeholder="Branch name (e.g. fix/login-bug)"
 					class="w-full px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
+					onkeydown={(e) => { if (e.key === 'Enter') handleCreate(); }}
 				/>
-				<div class="flex gap-2">
-					<input
-						type="text"
-						bind:value={createBranch}
-						placeholder="Branch name (optional)"
-						class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
-					/>
-					<input
-						type="text"
-						bind:value={createBaseRef}
-						placeholder="Base ref (optional)"
-						class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
-					/>
-				</div>
+				{#if derivedPath}
+					<div class="flex items-center gap-2 text-xs text-muted-foreground">
+						<span class="truncate">Path: <span class="font-mono">{effectivePath}</span></span>
+						<button
+							onclick={() => { showAdvanced = !showAdvanced; }}
+							class="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors shrink-0"
+						>
+							{#if showAdvanced}
+								<ChevronDown class="w-3 h-3" />
+							{:else}
+								<ChevronRight class="w-3 h-3" />
+							{/if}
+							Advanced
+						</button>
+					</div>
+				{/if}
+				{#if showAdvanced}
+					<div class="flex gap-2">
+						<input
+							type="text"
+							bind:value={pathOverride}
+							placeholder="Path override ({derivedPath})"
+							class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
+						/>
+						<input
+							type="text"
+							bind:value={baseRefOverride}
+							placeholder="Base ref (HEAD)"
+							class="flex-1 px-3 py-1.5 text-sm bg-background border border-border rounded focus-visible:ring-1 focus-visible:ring-interactive-accent focus-visible:border-interactive-accent text-foreground placeholder-muted-foreground/60"
+						/>
+					</div>
+				{/if}
 				<div class="flex gap-2 justify-end">
 					<button
 						onclick={resetCreateForm}
@@ -184,9 +216,9 @@
 					</button>
 					<button
 						onclick={handleCreate}
-						disabled={!createPath.trim() || isCreating}
+						disabled={!canCreate || isCreating}
 						class="px-3 py-1.5 text-xs rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed
-							{createPath.trim() && !isCreating
+							{canCreate && !isCreating
 								? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
 								: 'bg-muted text-muted-foreground'}"
 					>

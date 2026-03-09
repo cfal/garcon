@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Panel for managing git worktrees: list, create, remove. Includes
-	// strong confirmation for destructive operations.
+	// strong confirmation for destructive operations and branch-name-driven
+	// creation with smart path defaults.
 
 	import GitBranch from '@lucide/svelte/icons/git-branch';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -8,7 +9,10 @@
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import type { GitWorktreeItem } from '$lib/api/git.js';
+	import { deriveWorktreePath } from '$lib/utils/worktree-path.js';
 
 	interface GitWorktreePanelProps {
 		worktrees: GitWorktreeItem[];
@@ -27,26 +31,32 @@
 	}: GitWorktreePanelProps = $props();
 
 	let showCreateForm = $state(false);
-	let newPath = $state('');
-	let newBranch = $state('');
-	let newBaseRef = $state('');
+	let branchName = $state('');
+	let showAdvanced = $state(false);
+	let pathOverride = $state('');
+	let baseRefOverride = $state('');
 	let isCreating = $state(false);
 
 	let confirmRemovePath = $state<string | null>(null);
 	let isRemoving = $state(false);
 
+	let derivedPath = $derived(deriveWorktreePath(branchName));
+	let effectivePath = $derived(pathOverride.trim() || derivedPath);
+	let canCreate = $derived(Boolean(branchName.trim() && effectivePath));
+
 	async function handleCreate(): Promise<void> {
-		if (!newPath.trim()) return;
+		if (!canCreate) return;
 		isCreating = true;
-		const ok = await onCreateWorktree(newPath.trim(), {
-			branch: newBranch.trim() || undefined,
-			baseRef: newBaseRef.trim() || undefined,
+		const ok = await onCreateWorktree(effectivePath, {
+			branch: branchName.trim() || undefined,
+			baseRef: baseRefOverride.trim() || undefined,
 		});
 		if (ok) {
 			showCreateForm = false;
-			newPath = '';
-			newBranch = '';
-			newBaseRef = '';
+			branchName = '';
+			showAdvanced = false;
+			pathOverride = '';
+			baseRefOverride = '';
 		}
 		isCreating = false;
 	}
@@ -81,24 +91,43 @@
 	{#if showCreateForm}
 		<div class="border border-border rounded p-2 space-y-2 bg-muted/20">
 			<input
-				bind:value={newPath}
-				placeholder="Worktree path (e.g. ../my-feature)"
+				bind:value={branchName}
+				placeholder="Branch name (e.g. fix/login-bug)"
 				class="w-full text-xs p-1.5 bg-background border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+				onkeydown={(e) => { if (e.key === 'Enter') handleCreate(); }}
 			/>
-			<input
-				bind:value={newBranch}
-				placeholder="New branch name (optional)"
-				class="w-full text-xs p-1.5 bg-background border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-			/>
-			<input
-				bind:value={newBaseRef}
-				placeholder="Base ref (default: HEAD)"
-				class="w-full text-xs p-1.5 bg-background border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-			/>
+			{#if derivedPath}
+				<div class="flex items-center gap-2 text-[10px] text-muted-foreground">
+					<span class="truncate">Path: <span class="font-mono">{effectivePath}</span></span>
+					<button
+						onclick={() => { showAdvanced = !showAdvanced; }}
+						class="flex items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors shrink-0"
+					>
+						{#if showAdvanced}
+							<ChevronDown class="w-3 h-3" />
+						{:else}
+							<ChevronRight class="w-3 h-3" />
+						{/if}
+						Advanced
+					</button>
+				</div>
+			{/if}
+			{#if showAdvanced}
+				<input
+					bind:value={pathOverride}
+					placeholder="Path override ({derivedPath})"
+					class="w-full text-xs p-1.5 bg-background border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+				/>
+				<input
+					bind:value={baseRefOverride}
+					placeholder="Base ref (HEAD)"
+					class="w-full text-xs p-1.5 bg-background border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+				/>
+			{/if}
 			<div class="flex gap-2">
 				<button
 					onclick={handleCreate}
-					disabled={!newPath.trim() || isCreating}
+					disabled={!canCreate || isCreating}
 					class="flex-1 px-2 py-1 text-xs rounded bg-interactive-accent text-interactive-accent-foreground
 						{isCreating ? 'opacity-50 cursor-wait' : 'hover:brightness-110'} transition-all"
 				>
