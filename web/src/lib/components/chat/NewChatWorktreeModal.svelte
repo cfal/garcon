@@ -51,10 +51,14 @@
 	let canCreate = $derived(Boolean(branchName.trim() && effectivePath));
 	let selectableWorktrees = $derived(worktrees.filter((wt) => !wt.isPathMissing));
 
-	// Clamp selectedIndex when the list changes (e.g. after refresh)
-	$effect(() => {
+	// Clamp selectedIndex when the list changes (e.g. after refresh),
+	// ensuring it never lands on a missing-path worktree.
+	$effect.pre(() => {
 		if (selectedIndex >= worktrees.length) {
 			selectedIndex = worktrees.length - 1;
+		}
+		while (selectedIndex >= 0 && worktrees[selectedIndex]?.isPathMissing) {
+			selectedIndex--;
 		}
 	});
 
@@ -79,10 +83,14 @@
 
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			selectedIndex = Math.min(selectedIndex + 1, worktrees.length - 1);
+			let next = selectedIndex + 1;
+			while (next < worktrees.length && worktrees[next].isPathMissing) next++;
+			if (next < worktrees.length) selectedIndex = next;
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			selectedIndex = Math.max(selectedIndex - 1, 0);
+			let prev = selectedIndex - 1;
+			while (prev >= 0 && worktrees[prev].isPathMissing) prev--;
+			if (prev >= 0) selectedIndex = prev;
 		} else if (e.key === 'Enter' && selectedIndex >= 0) {
 			e.preventDefault();
 			const wt = worktrees[selectedIndex];
@@ -143,12 +151,14 @@
 					disabled={isLoading}
 					class="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground disabled:opacity-50"
 					title="Refresh worktrees"
+					aria-label="Refresh worktrees"
 				>
 					<RefreshCw class="w-3.5 h-3.5 {isLoading ? 'animate-spin' : ''}" />
 				</button>
 				<button
 					onclick={onClose}
 					class="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+					aria-label="Close"
 				>
 					<X class="w-3.5 h-3.5" />
 				</button>
@@ -189,7 +199,7 @@
 						onclick={() => {
 							if (!wt.isPathMissing) onSelect(wt.path);
 						}}
-						onmouseenter={() => { selectedIndex = i; }}
+						onmouseenter={() => { if (!wt.isPathMissing) selectedIndex = i; }}
 						disabled={wt.isPathMissing}
 						class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors
 							{i === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}
