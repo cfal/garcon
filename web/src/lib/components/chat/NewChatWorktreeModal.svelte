@@ -51,6 +51,20 @@
 	let canCreate = $derived(Boolean(branchName.trim() && effectivePath));
 	let selectableWorktrees = $derived(worktrees.filter((wt) => !wt.isPathMissing));
 
+	// Clamp selectedIndex when the list changes (e.g. after refresh)
+	$effect(() => {
+		if (selectedIndex >= worktrees.length) {
+			selectedIndex = worktrees.length - 1;
+		}
+	});
+
+	// Scroll the selected item into view, matching CommandMenu pattern
+	$effect(() => {
+		if (selectedIndex < 0) return;
+		const el = document.querySelector(`[data-wt-index="${selectedIndex}"]`);
+		el?.scrollIntoView({ block: 'nearest' });
+	});
+
 	function handleKeydown(e: KeyboardEvent): void {
 		if (e.key === 'Escape') {
 			if (showCreateForm) {
@@ -66,21 +80,14 @@
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			selectedIndex = Math.min(selectedIndex + 1, worktrees.length - 1);
-			scrollToSelected();
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			selectedIndex = Math.max(selectedIndex - 1, 0);
-			scrollToSelected();
 		} else if (e.key === 'Enter' && selectedIndex >= 0) {
 			e.preventDefault();
 			const wt = worktrees[selectedIndex];
 			if (wt && !wt.isPathMissing) onSelect(wt.path);
 		}
-	}
-
-	function scrollToSelected(): void {
-		const el = document.querySelector(`[data-wt-index="${selectedIndex}"]`);
-		el?.scrollIntoView({ block: 'nearest' });
 	}
 
 	function handleCreate(): void {
@@ -163,7 +170,7 @@
 		{/if}
 
 		<!-- Body (scrollable worktree list) -->
-		<div class="flex-1 overflow-y-auto min-h-0 p-1.5">
+		<div class="flex-1 overflow-y-auto min-h-0 p-1.5" role="listbox">
 			{#if isLoading}
 				<div class="flex items-center justify-center py-10">
 					<LoaderCircle class="w-5 h-5 animate-spin text-muted-foreground" />
@@ -177,6 +184,8 @@
 				{#each worktrees as wt, i (wt.path)}
 					<button
 						data-wt-index={i}
+						role="option"
+						aria-selected={i === selectedIndex}
 						onclick={() => {
 							if (!wt.isPathMissing) onSelect(wt.path);
 						}}
