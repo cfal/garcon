@@ -36,6 +36,17 @@ describe('sanitizeBranchForPath', () => {
 		expect(sanitizeBranchForPath('')).toBe('');
 		expect(sanitizeBranchForPath('   ')).toBe('');
 	});
+
+	it('rejects dot-only names to prevent path traversal', () => {
+		expect(sanitizeBranchForPath('..')).toBe('');
+		expect(sanitizeBranchForPath('.')).toBe('');
+		expect(sanitizeBranchForPath('...')).toBe('');
+	});
+
+	it('preserves dot-prefixed names that are not pure dots', () => {
+		expect(sanitizeBranchForPath('.config')).toBe('.config');
+		expect(sanitizeBranchForPath('..hidden')).toBe('..hidden');
+	});
 });
 
 describe('deriveWorktreePath', () => {

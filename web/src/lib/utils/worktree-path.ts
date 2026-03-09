@@ -7,7 +7,8 @@ export function sanitizeBranchForPath(branch: string): string {
 		.replace(/[/\\]/g, '-')
 		.replace(/[^a-zA-Z0-9._-]/g, '-')
 		.replace(/-{2,}/g, '-')
-		.replace(/^-|-$/g, '');
+		.replace(/^-|-$/g, '')
+		.replace(/^\.+$/, '');
 }
 
 /** Derives a worktree path from a branch name using the ../.worktrees/ convention. */
