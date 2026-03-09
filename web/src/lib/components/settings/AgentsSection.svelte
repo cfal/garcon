@@ -89,10 +89,7 @@
 	}
 
 	function handleLogin(agent: AgentId) {
-		if (agent === 'amp') {
-			window.alert('Run "amp login" in your terminal to authenticate.');
-			return;
-		}
+		if (agent === 'amp') return;
 		const loginUrl = `/api/v1/${agent}/auth/login`;
 		window.open(loginUrl, '_blank', 'width=800,height=600');
 	}

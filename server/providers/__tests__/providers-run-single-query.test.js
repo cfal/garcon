@@ -45,7 +45,7 @@ describe('providers registry runSingleQuery', () => {
     getChatByProviderSessionId: mock(() => null),
   };
   const mockOpencode = { runSingleQuery: opencodeMock };
-  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode);
+  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode, {});
 
   it('routes to claude by default', async () => {
     const result = await registry.runSingleQuery('test prompt', {});
@@ -79,6 +79,7 @@ describe('ProviderRegistry session option hydration', () => {
   let mockClaude;
   let mockCodex;
   let mockOpencode;
+  let mockAmp;
   let registry;
 
   beforeEach(() => {
@@ -99,7 +100,11 @@ describe('ProviderRegistry session option hydration', () => {
       startSession: mock(() => Promise.resolve('opencode-session')),
       runTurn: mock(() => Promise.resolve(undefined)),
     };
-    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode);
+    mockAmp = {
+      startSession: mock(() => Promise.resolve('amp-session')),
+      runTurn: mock(() => Promise.resolve(undefined)),
+    };
+    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp);
   });
 
   it('hydrates permission and thinking modes from the registry on new-session startup', async () => {

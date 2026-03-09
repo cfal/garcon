@@ -393,7 +393,7 @@ describe('chat WebSocket handler', () => {
       expect(payload).toMatchObject({
         type: 'chat-sessions-running',
       });
-      expect(payload.sessions).toEqual({ claude: [], codex: [], opencode: [] });
+      expect(payload.sessions).toEqual({ claude: [], codex: [], opencode: [], amp: [] });
     });
   });
 
