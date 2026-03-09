@@ -106,7 +106,6 @@ export class ConversationSessionController {
 		// while the server round-trip completes.
 		const restored = deps.chatState.restoreMessages(chatId);
 		if (restored) {
-			deps.chatState.loadStatus = 'loaded';
 			requestAnimationFrame(() => deps.scrollToBottom());
 		}
 
@@ -177,6 +176,7 @@ export class ConversationSessionController {
 			if (deps.sessions.selectedChatId !== chatId) return;
 
 			deps.chatState.setMessages(messages);
+			deps.chatState.snapshotCache.markValidated(chatId);
 			deps.setNeedsServerLoad(false);
 			requestAnimationFrame(() => deps.scrollToBottom());
 

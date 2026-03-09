@@ -151,17 +151,15 @@
 			const selected = sessions.selectedChat;
 			const chatId = sessions.selectedChatId;
 
-			if (!hasConnectedBefore) {
-				hasConnectedBefore = true;
-				if (selected && selected.status === 'running') {
-					ws.sendMessage(new QueueQueryRequest(selected.id));
-				}
-				return;
-			}
-
 			if (selected && selected.status === 'running') {
 				ws.sendMessage(new QueueQueryRequest(selected.id));
 			}
+
+			if (!hasConnectedBefore) {
+				hasConnectedBefore = true;
+				return;
+			}
+
 			if (chatId) {
 				chatState.snapshotCache.markStale(chatId);
 				controller.loadChat(chatId);
