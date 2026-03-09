@@ -245,7 +245,7 @@ export class NewChatFormState {
 				return false;
 			}
 			await this.loadWorktrees();
-			this.selectWorktree(worktreePath);
+			this.selectWorktree(result.worktreePath || worktreePath);
 			return true;
 		} catch (err) {
 			this.worktreeError = err instanceof Error ? err.message : 'Failed to create worktree.';

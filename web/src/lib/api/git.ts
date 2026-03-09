@@ -116,6 +116,7 @@ interface SuccessResponse {
 	message?: string;
 	error?: string;
 	details?: string;
+	worktreePath?: string;
 }
 
 function projectParam(project: string): string {

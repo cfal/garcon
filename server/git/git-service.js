@@ -1428,15 +1428,28 @@ export function createGitService({ providers, classifyGitError }) {
 
     const args = ['worktree', 'add'];
     if (detach) {
-      args.push('--detach');
+      args.push('--detach', worktreePath);
+      if (baseRef) args.push(baseRef);
     } else if (branch) {
-      args.push('-b', branch);
+      // Check if the branch already exists to avoid `-b` failure.
+      const branchExists = await runGit(projectPath, ['rev-parse', '--verify', `refs/heads/${branch}`])
+        .then(() => true)
+        .catch(() => false);
+      if (branchExists) {
+        // Checkout existing branch into the new worktree path.
+        args.push(worktreePath, branch);
+      } else {
+        args.push('-b', branch, worktreePath);
+        if (baseRef) args.push(baseRef);
+      }
+    } else {
+      args.push(worktreePath);
+      if (baseRef) args.push(baseRef);
     }
-    args.push(worktreePath);
-    if (baseRef) args.push(baseRef);
 
     const { stdout } = await runGit(projectPath, args);
-    return { success: true, output: stdout || 'Worktree created' };
+    const resolvedPath = path.resolve(projectPath, worktreePath);
+    return { success: true, output: stdout || 'Worktree created', worktreePath: resolvedPath };
   }
 
   async function removeWorktree({ projectPath, worktreePath, force }) {
