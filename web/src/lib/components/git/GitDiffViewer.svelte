@@ -467,7 +467,7 @@
 		</div>
 	{:else}
 		<!-- File path header -->
-		<div class="group/diffheader px-3 py-1.5 border-b border-border bg-muted/30 flex items-center gap-2">
+		<div class="px-3 py-1.5 border-b border-border bg-muted/30 flex items-center gap-2">
 			<span class="font-mono text-foreground truncate" style:font-size={`${fontSize}px`}>{reviewData.path}</span>
 			<button
 				onclick={handleCopyPath}
@@ -476,9 +476,9 @@
 				aria-label={pathCopied ? 'Path copied' : 'Copy file path'}
 			>
 				{#if pathCopied}
-					<Check class="w-3.5 h-3.5" />
+					<Check class="w-3 h-3" />
 				{:else}
-					<Copy class="w-3.5 h-3.5" />
+					<Copy class="w-3 h-3" />
 				{/if}
 			</button>
 		</div>

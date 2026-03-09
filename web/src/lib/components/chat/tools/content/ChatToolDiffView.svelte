@@ -99,7 +99,7 @@
 	{#if showHeader}
 		<!-- Header -->
 		<div
-			class="group/diffheader flex items-center justify-between px-2.5 py-1 bg-muted/40 border-b border-border"
+			class="flex items-center justify-between px-2.5 py-1 bg-muted/40 border-b border-border"
 		>
 			<div class="flex items-center gap-1.5 min-w-0">
 				{#if onFileClick}
