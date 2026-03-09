@@ -35,7 +35,7 @@ describe('GET /api/v1/models', () => {
 
     const codex = body.catalog.providers.find((p) => p.id === 'codex');
     expect(codex.supportsFork).toBe(true);
-    expect(codex.supportsImages).toBe(false);
+    expect(codex.supportsImages).toBe(true);
 
     const opencode = body.catalog.providers.find((p) => p.id === 'opencode');
     expect(opencode.supportsFork).toBe(false);
