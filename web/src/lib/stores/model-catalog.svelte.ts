@@ -59,12 +59,21 @@ function normalizeProviderModels(value: unknown): ProviderModels {
 	return normalized;
 }
 
+// Ensures static models for claude/codex are always present in the result,
+// even when a cached or server list is missing newly added entries.
+function mergeStaticModels(remote: ModelOption[] | undefined, fallback: ModelOption[]): ModelOption[] {
+	if (!remote?.length) return fallback;
+	const seen = new Set(remote.map((m) => m.value));
+	const missing = fallback.filter((m) => !seen.has(m.value));
+	return missing.length ? [...remote, ...missing] : remote;
+}
+
 function mergeWithFallbacks(models: ProviderModels): ProviderModels {
 	return {
-		claude: models.claude?.length ? models.claude : STATIC_FALLBACKS.claude,
-		codex: models.codex?.length ? models.codex : STATIC_FALLBACKS.codex,
-		opencode: models.opencode?.length ? models.opencode : STATIC_FALLBACKS.opencode,
-		amp: models.amp?.length ? models.amp : STATIC_FALLBACKS.amp
+		claude: mergeStaticModels(models.claude, STATIC_FALLBACKS.claude!),
+		codex: mergeStaticModels(models.codex, STATIC_FALLBACKS.codex!),
+		amp: mergeStaticModels(models.amp, STATIC_FALLBACKS.amp!),
+		opencode: models.opencode?.length ? models.opencode : STATIC_FALLBACKS.opencode
 	};
 }
 
