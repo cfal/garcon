@@ -7,6 +7,9 @@
 	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import Copy from '@lucide/svelte/icons/copy';
+	import Check from '@lucide/svelte/icons/check';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import type { GitFileReviewData, GitReviewCommentDraft, GitDiffTab } from '$lib/api/git.js';
 	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
 
@@ -83,7 +86,16 @@
 	}: GitDiffViewerProps = $props();
 
 	let lastClickedKey = $state<string | null>(null);
+	let pathCopied = $state(false);
 	let headerFontSize = $derived(Math.max(fontSize - 1, 10));
+
+	async function handleCopyPath() {
+		if (!reviewData) return;
+		const didCopy = await copyToClipboard(reviewData.path);
+		if (!didCopy) return;
+		pathCopied = true;
+		setTimeout(() => (pathCopied = false), 2000);
+	}
 	let rowLineHeight = $derived(Math.max(Math.round(fontSize * 1.5), 16));
 
 	// Build renderable rows from review data (unified mode)
@@ -457,6 +469,18 @@
 		<!-- File path header -->
 		<div class="px-3 py-1.5 border-b border-border bg-muted/30 flex items-center gap-2">
 			<span class="font-mono text-foreground truncate" style:font-size={`${fontSize}px`}>{reviewData.path}</span>
+			<button
+				onclick={handleCopyPath}
+				class="p-0.5 rounded transition-colors shrink-0 {pathCopied ? 'text-status-success-foreground' : 'text-muted-foreground/60 hover:text-foreground hover:bg-accent'}"
+				title={pathCopied ? 'Copied!' : 'Copy file path'}
+				aria-label={pathCopied ? 'Path copied' : 'Copy file path'}
+			>
+				{#if pathCopied}
+					<Check class="w-3 h-3" />
+				{:else}
+					<Copy class="w-3 h-3" />
+				{/if}
+			</button>
 		</div>
 
 		<!-- Diff content -->
