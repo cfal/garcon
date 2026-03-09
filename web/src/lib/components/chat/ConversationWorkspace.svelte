@@ -140,15 +140,26 @@
 	// Reloads the current chat when WS reconnects after a disconnect.
 	// Marks the active snapshot stale before revalidating so the cache
 	// reflects that messages may have been missed while offline.
+	// Skips the first connection since handleChatSwitch already loads.
+	let hasConnectedBefore = false;
+
 	$effect(() => {
 		const connected = ws.isConnected;
 		untrack(() => {
 			if (!connected) return;
+
 			const selected = sessions.selectedChat;
 			const chatId = sessions.selectedChatId;
+
 			if (selected && selected.status === 'running') {
 				ws.sendMessage(new QueueQueryRequest(selected.id));
 			}
+
+			if (!hasConnectedBefore) {
+				hasConnectedBefore = true;
+				return;
+			}
+
 			if (chatId) {
 				chatState.snapshotCache.markStale(chatId);
 				controller.loadChat(chatId);

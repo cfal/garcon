@@ -101,6 +101,14 @@ export class ConversationSessionController {
 		if (!selected?.projectPath) return;
 
 		deps.chatState.resetForNewChat();
+
+		// Restore cached messages immediately so the user sees content
+		// while the server round-trip completes.
+		const restored = deps.chatState.restoreMessages(chatId);
+		if (restored) {
+			requestAnimationFrame(() => deps.scrollToBottom());
+		}
+
 		deps.composerState.inputText = '';
 		deps.composerState.clearImages();
 		deps.lifecycle.clearLoading();
@@ -151,19 +159,24 @@ export class ConversationSessionController {
 
 	async loadChat(chatId: string): Promise<void> {
 		const { deps } = this;
-		deps.chatState.restoreMessages(chatId);
+
+		// Restore from cache if no messages are loaded yet (e.g., WS reconnect path).
+		// The primary restore happens earlier in handleChatSwitch.
+		if (deps.chatState.chatMessages.length === 0) {
+			deps.chatState.restoreMessages(chatId);
+		}
+
 		if (deps.chatState.chatMessages.length > 0) {
 			requestAnimationFrame(() => deps.scrollToBottom());
 		}
 
 		try {
-			// Wait for WS to be connected before attempting to load messages.
-			// Prevents the race where chat selection fires before WS connects.
 			await deps.ws.waitForConnection();
 			const messages = await deps.chatState.loadMessages(chatId, deps.ws);
 			if (deps.sessions.selectedChatId !== chatId) return;
 
 			deps.chatState.setMessages(messages);
+			deps.chatState.snapshotCache.markValidated(chatId);
 			deps.setNeedsServerLoad(false);
 			requestAnimationFrame(() => deps.scrollToBottom());
 

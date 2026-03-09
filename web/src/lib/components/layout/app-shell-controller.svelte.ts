@@ -13,6 +13,7 @@ export interface AppShellControllerDeps {
 
 export class AppShellController {
 	private deps: AppShellControllerDeps;
+	#inFlightFetch: Promise<void> | null = null;
 
 	constructor(deps: AppShellControllerDeps) {
 		this.deps = deps;
@@ -20,25 +21,38 @@ export class AppShellController {
 
 	/** Full chat list fetch with loading indicator. */
 	async fetchChats(): Promise<void> {
+		if (this.#inFlightFetch) return this.#inFlightFetch;
+
 		this.deps.setLoadingChats(true);
-		try {
-			const res = await listChats();
-			this.deps.upsertFromServer(res.sessions ?? []);
-		} catch (err) {
-			console.error('[AppShellController] Failed to fetch chats:', err);
-		} finally {
-			this.deps.setLoadingChats(false);
-		}
+		this.#inFlightFetch = (async () => {
+			try {
+				const res = await listChats();
+				this.deps.upsertFromServer(res.sessions ?? []);
+			} catch (err) {
+				console.error('[AppShellController] Failed to fetch chats:', err);
+			} finally {
+				this.deps.setLoadingChats(false);
+				this.#inFlightFetch = null;
+			}
+		})();
+		return this.#inFlightFetch;
 	}
 
 	/** Silent refresh without loading indicator. */
 	async quietRefresh(): Promise<void> {
-		try {
-			const res = await listChats();
-			this.deps.upsertFromServer(res.sessions ?? []);
-		} catch (err) {
-			console.error('[AppShellController] Quiet refresh failed:', err);
-		}
+		if (this.#inFlightFetch) return this.#inFlightFetch;
+
+		this.#inFlightFetch = (async () => {
+			try {
+				const res = await listChats();
+				this.deps.upsertFromServer(res.sessions ?? []);
+			} catch (err) {
+				console.error('[AppShellController] Quiet refresh failed:', err);
+			} finally {
+				this.#inFlightFetch = null;
+			}
+		})();
+		return this.#inFlightFetch;
 	}
 
 	async deleteChat(chatId: string): Promise<void> {
