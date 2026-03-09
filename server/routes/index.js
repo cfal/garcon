@@ -1,6 +1,7 @@
 import identityRoutes from './identity.js';
 import codexRoutes from './codex.js';
 import claudeRoutes from './claude.js';
+import ampRoutes from './amp.js';
 import staticRoutes from './static.js';
 import createFilesRoutes from './files.js';
 import createOpenCodeRoutes from './opencode.js';
@@ -15,6 +16,7 @@ export default function createAllRoutes(registry, settings, queue, pathCache, me
     ...identityRoutes,
     ...codexRoutes,
     ...claudeRoutes,
+    ...ampRoutes,
     ...createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers),
     ...createFilesRoutes(registry),
     ...createWorkspaceRoutes(settings, providers),

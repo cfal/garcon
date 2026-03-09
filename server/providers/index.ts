@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { findCodexSessionFileBySessionId } from '../projects/codex.js';
 import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude } from './claude-cli.js';
 import { runSingleQuery as runSingleQueryCodex } from './codex.js';
+import { runSingleQuery as runSingleQueryAmp } from './amp-cli.js';
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { getCodexAuthStatus } from './codex-auth.js';
 import { getOpenCodeAuthStatus } from './opencode-auth.js';
@@ -109,22 +110,39 @@ interface OpenCodeProviderInstance {
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
 }
 
+interface AmpProviderInstance {
+  startSession(command: string, opts: { chatId: string; cwd: string; model?: string; [key: string]: unknown }): Promise<string>;
+  runTurn(command: string, opts: { sessionId: string; chatId: string; cwd?: string; [key: string]: unknown }): Promise<void>;
+  isRunning(providerSessionId: string): boolean;
+  abort(providerSessionId: string): boolean;
+  getRunningSessions(): Array<{ id: string; status: string; startedAt: string }>;
+  startPurgeTimer(): ReturnType<typeof setInterval>;
+  onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
+  onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
+  onSessionCreated(cb: (chatId: string) => void): void;
+  onFinished(cb: (chatId: string, exitCode: number) => void): void;
+  onFailed(cb: (chatId: string, errorMessage: string) => void): void;
+}
+
 export class ProviderRegistry {
   #registry: ChatRegistry;
   #claude: ClaudeProviderInstance;
   #codex: CodexProviderInstance;
   #opencode: OpenCodeProviderInstance;
+  #amp: AmpProviderInstance;
 
   constructor(
     registry: ChatRegistry,
     claude: ClaudeProviderInstance,
     codex: CodexProviderInstance,
     opencode: OpenCodeProviderInstance,
+    amp: AmpProviderInstance,
   ) {
     this.#registry = registry;
     this.#claude = claude;
     this.#codex = codex;
     this.#opencode = opencode;
+    this.#amp = amp;
   }
 
   // Starts a new provider session. The chat registry entry must already
@@ -178,6 +196,17 @@ export class ProviderRegistry {
       return;
     }
 
+    if (entry.provider === 'amp') {
+      const providerSessionId = await this.#amp.startSession(command, {
+        chatId,
+        cwd: entry.projectPath,
+        model: entry.model,
+      });
+      const nativePath = `amp:${providerSessionId}`;
+      this.#registry.updateChat(chatId, { providerSessionId, nativePath });
+      return;
+    }
+
     throw new Error(`Unsupported provider: ${entry.provider}`);
   }
 
@@ -216,6 +245,12 @@ export class ProviderRegistry {
       await this.#codex.runTurn(request);
     } else if (provider === 'opencode') {
       await this.#opencode.runTurn(request);
+    } else if (provider === 'amp') {
+      await this.#amp.runTurn(command, {
+        sessionId: providerSessionId,
+        chatId,
+        cwd: entry.projectPath,
+      });
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
@@ -241,6 +276,10 @@ export class ProviderRegistry {
       return this.#opencode.abort(providerSessionId);
     }
 
+    if (entry.provider === 'amp') {
+      return this.#amp.abort(providerSessionId);
+    }
+
     return false;
   }
 
@@ -255,6 +294,7 @@ export class ProviderRegistry {
     if (provider === 'claude') return this.#claude.isClaudeInternalSessionRunning(providerSessionId);
     if (provider === 'codex') return this.#codex.isRunning(providerSessionId);
     if (provider === 'opencode') return this.#opencode.isRunning(providerSessionId);
+    if (provider === 'amp') return this.#amp.isRunning(providerSessionId);
     return false;
   }
 
@@ -273,6 +313,7 @@ export class ProviderRegistry {
       claude: mapToChatId(this.#claude.getRunningClaudeInternalSessions()),
       codex: mapToChatId(this.#codex.getRunningSessions()),
       opencode: mapToChatId(this.#opencode.getRunningSessions()),
+      amp: mapToChatId(this.#amp.getRunningSessions()),
     };
   }
 
@@ -316,6 +357,7 @@ export class ProviderRegistry {
     const { provider = 'claude', ...rest } = options;
     if (provider === 'codex') return runSingleQueryCodex(prompt, rest);
     if (provider === 'opencode') return this.#opencode.runSingleQuery(prompt, rest);
+    if (provider === 'amp') return runSingleQueryAmp(prompt, rest);
     return runSingleQueryClaude(prompt, rest);
   }
 
@@ -323,6 +365,9 @@ export class ProviderRegistry {
   async getPreview(session: ProviderChatEntry | null): Promise<unknown> {
     if (!session?.provider) return null;
 
+    if (session.provider === 'amp') {
+      return null; // Amp history loading is not yet supported
+    }
     if (session.provider === 'opencode') {
       const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');
       const getClient = () => this.#opencode.getClient();
@@ -342,6 +387,9 @@ export class ProviderRegistry {
   async loadMessages(session: ProviderChatEntry | null): Promise<unknown[]> {
     if (!session?.provider) return [];
 
+    if (session.provider === 'amp') {
+      return []; // Amp history loading is not yet supported
+    }
     if (session.provider === 'opencode') {
       const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');
       const getClient = () => this.#opencode.getClient();
@@ -372,38 +420,44 @@ export class ProviderRegistry {
   startPurgeTimers(): void {
     this.#codex.startPurgeTimer();
     this.#opencode.startPurgeTimer();
+    this.#amp.startPurgeTimer();
   }
 
-  // Fan-out listener helpers. Registers the callback on all three
+  // Fan-out listener helpers. Registers the callback on all
   // providers so callers don't need to know the individual instances.
 
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void {
     this.#claude.onMessages(cb);
     this.#codex.onMessages(cb);
     this.#opencode.onMessages(cb);
+    this.#amp.onMessages(cb);
   }
 
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void {
     this.#claude.onProcessing(cb);
     this.#codex.onProcessing(cb);
     this.#opencode.onProcessing(cb);
+    this.#amp.onProcessing(cb);
   }
 
   onSessionCreated(cb: (chatId: string) => void): void {
     this.#claude.onSessionCreated(cb);
     this.#codex.onSessionCreated(cb);
     this.#opencode.onSessionCreated(cb);
+    this.#amp.onSessionCreated(cb);
   }
 
   onFinished(cb: (chatId: string, exitCode: number) => void): void {
     this.#claude.onFinished(cb);
     this.#codex.onFinished(cb);
     this.#opencode.onFinished(cb);
+    this.#amp.onFinished(cb);
   }
 
   onFailed(cb: (chatId: string, errorMessage: string) => void): void {
     this.#claude.onFailed(cb);
     this.#codex.onFailed(cb);
     this.#opencode.onFailed(cb);
+    this.#amp.onFailed(cb);
   }
 }

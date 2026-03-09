@@ -2,7 +2,7 @@
 // preferences to localStorage under a consistent key prefix.
 
 import type { SessionProvider } from '$lib/types/app';
-import { CLAUDE_MODELS, CODEX_MODELS } from '$shared/models';
+import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '$shared/models';
 
 // Persisted preference fields.
 export type ThemeMode = 'dark' | 'light' | 'system';
@@ -20,6 +20,7 @@ export interface PreferencesState {
 	claudeModel: string;
 	codexModel: string;
 	opencodeModel: string;
+	ampModel: string;
 	codeEditorTheme: string;
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
@@ -44,6 +45,7 @@ const DEFAULTS: PreferencesState = {
 	claudeModel: CLAUDE_MODELS.DEFAULT,
 	codexModel: CODEX_MODELS.DEFAULT,
 	opencodeModel: 'anthropic/claude-sonnet-4-5',
+	ampModel: AMP_MODELS.DEFAULT,
 	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
@@ -109,6 +111,10 @@ function readPersisted(): PreferencesState {
 						typeof parsed.opencodeModel === 'string'
 							? parsed.opencodeModel
 							: DEFAULTS.opencodeModel,
+					ampModel:
+						typeof parsed.ampModel === 'string'
+							? parsed.ampModel
+							: DEFAULTS.ampModel,
 					codeEditorTheme:
 						typeof parsed.codeEditorTheme === 'string'
 							? parsed.codeEditorTheme
@@ -167,6 +173,7 @@ export class PreferencesStore {
 	claudeModel = $state(DEFAULTS.claudeModel);
 	codexModel = $state(DEFAULTS.codexModel);
 	opencodeModel = $state(DEFAULTS.opencodeModel);
+	ampModel = $state(DEFAULTS.ampModel);
 	codeEditorTheme = $state(DEFAULTS.codeEditorTheme);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
@@ -189,6 +196,7 @@ export class PreferencesStore {
 		this.claudeModel = saved.claudeModel;
 		this.codexModel = saved.codexModel;
 		this.opencodeModel = saved.opencodeModel;
+		this.ampModel = saved.ampModel;
 		this.codeEditorTheme = saved.codeEditorTheme;
 		this.codeEditorWordWrap = saved.codeEditorWordWrap;
 		this.codeEditorLineNumbers = saved.codeEditorLineNumbers;
@@ -213,6 +221,7 @@ export class PreferencesStore {
 			claudeModel: this.claudeModel,
 			codexModel: this.codexModel,
 			opencodeModel: this.opencodeModel,
+			ampModel: this.ampModel,
 			codeEditorTheme: this.codeEditorTheme,
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,

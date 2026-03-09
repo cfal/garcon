@@ -4,10 +4,12 @@
 		DropdownMenuContent,
 		DropdownMenuItem,
 		DropdownMenuTrigger,
+		DropdownMenuSeparator,
+		DropdownMenuLabel,
 	} from '$lib/components/ui/dropdown-menu';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
-	import type { ComposerMenuOption, ComposerModeOption } from '$lib/chat/composer-controls';
+	import type { ComposerMenuOption, ComposerModeOption, ProviderMenuGroup } from '$lib/chat/composer-controls';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
 	import { ChevronDown, ImagePlus, Plus, Send } from '@lucide/svelte';
 
@@ -22,6 +24,7 @@
 		selectedThinking: ThinkingMode;
 		onThinkingSelect: (mode: ThinkingMode) => void;
 		providerOptions?: ComposerMenuOption<SessionProvider>[];
+		providerGroups?: ProviderMenuGroup[];
 		selectedProvider?: SessionProvider;
 		onProviderSelect?: (provider: SessionProvider) => void;
 		modelOptions: ComposerMenuOption[];
@@ -46,6 +49,7 @@
 		selectedThinking,
 		onThinkingSelect,
 		providerOptions,
+		providerGroups,
 		selectedProvider,
 		onProviderSelect,
 		modelOptions,
@@ -85,13 +89,31 @@
 					<ChevronDown class="size-3.5 text-muted-foreground" />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align={align}>
-					{#each providerOptions as option (option.value)}
-						<DropdownMenuItem onclick={() => onProviderSelect(option.value)} class="items-start">
-							<div class="min-w-0">
-								<div class="font-medium">{option.label}</div>
-							</div>
-						</DropdownMenuItem>
-					{/each}
+					{#if providerGroups}
+						{#each providerGroups as group, groupIdx (groupIdx)}
+							{#if groupIdx > 0}
+								<DropdownMenuSeparator />
+								{#if group.label}
+									<DropdownMenuLabel class="text-xs text-muted-foreground font-normal">{group.label}</DropdownMenuLabel>
+								{/if}
+							{/if}
+							{#each group.options as option (option.value)}
+								<DropdownMenuItem onclick={() => onProviderSelect(option.value)} class="items-start">
+									<div class="min-w-0">
+										<div class="font-medium">{option.label}</div>
+									</div>
+								</DropdownMenuItem>
+							{/each}
+						{/each}
+					{:else}
+						{#each providerOptions as option (option.value)}
+							<DropdownMenuItem onclick={() => onProviderSelect(option.value)} class="items-start">
+								<div class="min-w-0">
+									<div class="font-medium">{option.label}</div>
+								</div>
+							</DropdownMenuItem>
+						{/each}
+					{/if}
 				</DropdownMenuContent>
 			</DropdownMenu>
 		{/if}

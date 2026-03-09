@@ -15,7 +15,7 @@
 		error: string | null;
 	}
 
-	type AgentId = 'claude' | 'codex' | 'opencode';
+	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp';
 
 	let {
 		agentId,
@@ -23,7 +23,8 @@
 		auth,
 		open = false,
 		onOpenChange,
-		onLogin
+		onLogin,
+		cliOnly = false
 	}: {
 		agentId: AgentId;
 		agentName: string;
@@ -31,12 +32,14 @@
 		open?: boolean;
 		onOpenChange?: (open: boolean) => void;
 		onLogin: () => void;
+		cliOnly?: boolean;
 	} = $props();
 
 	const borderColorClass: Record<AgentId, string> = {
 		claude: 'border-l-provider-claude-border',
 		codex: 'border-l-provider-codex-border',
-		opencode: 'border-l-provider-opencode-border'
+		opencode: 'border-l-provider-opencode-border',
+		amp: 'border-l-provider-amp-border'
 	};
 </script>
 
@@ -70,22 +73,32 @@
 
 	<Collapsible.Content>
 		<div class="border-t border-border px-4 py-3 space-y-4">
-			<div class="flex items-center justify-between">
-				<div>
-					<div class="text-sm font-medium text-foreground">
-						{auth.authenticated ? m.settings_agents_login_re_authenticate() : m.settings_agents_login_title()}
-					</div>
-					<div class="text-xs text-muted-foreground">
-						{auth.authenticated
-							? m.settings_agents_login_re_auth_description()
-							: m.settings_agents_login_description({ agent: agentName })}
-					</div>
+			{#if cliOnly}
+				<div class="text-xs text-muted-foreground">
+					{#if auth.authenticated}
+						Authenticated via CLI. To switch accounts, run <code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{agentName.toLowerCase()} login</code> in your terminal.
+					{:else}
+						Run <code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{agentName.toLowerCase()} login</code> in your terminal to authenticate.
+					{/if}
 				</div>
-				<Button variant={auth.authenticated ? 'outline' : 'default'} size="sm" onclick={onLogin}>
-					<LogInIcon class="size-3.5 mr-1.5" />
-					{auth.authenticated ? m.settings_agents_login_re_login_button() : m.settings_agents_login_button()}
-				</Button>
-			</div>
+			{:else}
+				<div class="flex items-center justify-between">
+					<div>
+						<div class="text-sm font-medium text-foreground">
+							{auth.authenticated ? m.settings_agents_login_re_authenticate() : m.settings_agents_login_title()}
+						</div>
+						<div class="text-xs text-muted-foreground">
+							{auth.authenticated
+								? m.settings_agents_login_re_auth_description()
+								: m.settings_agents_login_description({ agent: agentName })}
+						</div>
+					</div>
+					<Button variant={auth.authenticated ? 'outline' : 'default'} size="sm" onclick={onLogin}>
+						<LogInIcon class="size-3.5 mr-1.5" />
+						{auth.authenticated ? m.settings_agents_login_re_login_button() : m.settings_agents_login_button()}
+					</Button>
+				</div>
+			{/if}
 
 			{#if auth.error}
 				<div class="text-sm text-destructive">

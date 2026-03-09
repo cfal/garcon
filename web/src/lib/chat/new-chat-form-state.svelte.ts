@@ -23,6 +23,7 @@ export class NewChatFormState {
 	claudeModel = $state('');
 	codexModel = $state('');
 	opencodeModel = $state('');
+	ampModel = $state('');
 
 	// Path
 	projectPath = $state('');
@@ -66,6 +67,7 @@ export class NewChatFormState {
 	constructor(appShell: AppShellStore, modelCatalog: ModelCatalogStore) {
 		this.#appShell = appShell;
 		this.#modelCatalog = modelCatalog;
+
 	}
 
 	// Derived accessors
@@ -98,6 +100,11 @@ export class NewChatFormState {
 				? this.#modelCatalog.getModels('opencode')
 				: this.opencodeModel
 					? [{ value: this.opencodeModel, label: this.opencodeModel }]
+					: [],
+			amp: this.#modelCatalog.getModels('amp').length
+				? this.#modelCatalog.getModels('amp')
+				: this.ampModel
+					? [{ value: this.ampModel, label: this.ampModel }]
 					: []
 		};
 		return opts[this.provider];
@@ -107,7 +114,8 @@ export class NewChatFormState {
 		const map: Record<SessionProvider, string> = {
 			claude: this.claudeModel,
 			codex: this.codexModel,
-			opencode: this.opencodeModel
+			opencode: this.opencodeModel,
+			amp: this.ampModel
 		};
 		return map[this.provider];
 	}
@@ -124,7 +132,8 @@ export class NewChatFormState {
 		const setterMap: Record<SessionProvider, (v: string) => void> = {
 			claude: (v) => { this.claudeModel = v; },
 			codex: (v) => { this.codexModel = v; },
-			opencode: (v) => { this.opencodeModel = v; }
+			opencode: (v) => { this.opencodeModel = v; },
+			amp: (v) => { this.ampModel = v; }
 		};
 		setterMap[this.provider](value);
 	}
@@ -142,6 +151,9 @@ export class NewChatFormState {
 		}
 		if (provider === 'codex' && !liveModels.some((m) => m.value === this.codexModel)) {
 			this.codexModel = liveModels[0].value;
+		}
+		if (provider === 'amp' && !liveModels.some((m) => m.value === this.ampModel)) {
+			this.ampModel = liveModels[0].value;
 		}
 	}
 
@@ -393,6 +405,7 @@ export class NewChatFormState {
 			this.validateModelAgainstLive('claude');
 			this.validateModelAgainstLive('codex');
 			this.validateModelAgainstLive('opencode');
+			this.validateModelAgainstLive('amp');
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings and models', err);
 			this.applyResolvedModel('claude', this.#modelCatalog.getDefaultModel('claude'));

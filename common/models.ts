@@ -21,3 +21,10 @@ export const CODEX_MODELS = {
   ],
   DEFAULT: 'gpt-5.4',
 };
+
+export const AMP_MODELS = {
+  OPTIONS: [
+    { value: 'default', label: 'Amp Default' },
+  ],
+  DEFAULT: 'default',
+};
