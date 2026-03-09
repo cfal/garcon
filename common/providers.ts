@@ -13,7 +13,7 @@ export interface ProviderCapabilities {
 
 export const PROVIDER_CAPABILITIES: Record<ProviderId, ProviderCapabilities> = {
   claude: { supportsFork: true, supportsImages: true },
-  codex: { supportsFork: true, supportsImages: false },
+  codex: { supportsFork: true, supportsImages: true },
   opencode: { supportsFork: false, supportsImages: false },
   amp: { supportsFork: false, supportsImages: false },
 };
