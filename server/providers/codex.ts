@@ -9,7 +9,7 @@ import { normalizeToolResultContent } from '../chats/normalize.js';
 import { AssistantMessage, ThinkingMessage, BashToolUseMessage, EditToolUseMessage, WebSearchToolUseMessage, TodoWriteToolUseMessage, ToolResultMessage, ErrorMessage } from '../../common/chat-types.js';
 import { AbsProvider } from './base.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
-import type { StartSessionRequest, ResumeTurnRequest } from './types.js';
+import type { StartSessionRequest, ResumeTurnRequest, AgentCommandImage } from './types.js';
 
 interface CodexItem {
   type: string;
@@ -215,6 +215,50 @@ export function humanizeCodexError(error: any): string {
   return `Codex error: ${raw}`;
 }
 
+// Mime type to file extension mapping for image temp files.
+const MIME_EXTENSIONS: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+};
+
+// Decodes base64 data-URL images to temp files for the Codex SDK,
+// which only accepts local file paths via { type: "local_image" }.
+async function writeImagesToTempFiles(images: AgentCommandImage[]): Promise<{ paths: string[]; cleanup: () => Promise<void> }> {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-images-'));
+  const paths: string[] = [];
+
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    const match = img.data?.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) continue;
+
+    const mimeType = match[1];
+    const base64Data = match[2];
+    const ext = MIME_EXTENSIONS[mimeType] || '.png';
+    const filePath = path.join(tmpDir, `image-${i}${ext}`);
+
+    await fs.writeFile(filePath, Buffer.from(base64Data, 'base64'));
+    paths.push(filePath);
+  }
+
+  const cleanup = async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  };
+
+  return { paths, cleanup };
+}
+
+// Builds the Codex SDK Input type from a command string and optional images.
+function buildCodexInput(command: string, imagePaths?: string[]): string | Array<{ type: string; text?: string; path?: string }> {
+  if (!imagePaths?.length) return command;
+  return [
+    { type: 'text', text: command },
+    ...imagePaths.map((p) => ({ type: 'local_image', path: p })),
+  ];
+}
+
 async function runCodexExec(args: string[], input: string): Promise<{ stdout: string; stderr: string }> {
   const proc = Bun.spawn(['codex', ...args], {
     stdin: new Blob([input]),
@@ -301,7 +345,7 @@ interface CodexRunTurnRequest extends Omit<ResumeTurnRequest, 'providerSessionId
 
 async function runCodexStreamedTurn({
   thread,
-  command,
+  input,
   abortController,
   getSessionId,
   isAborted,
@@ -309,14 +353,14 @@ async function runCodexStreamedTurn({
   onEvent,
 }: {
   thread: any;
-  command: string;
+  input: string | Array<{ type: string; text?: string; path?: string }>;
   abortController: AbortController;
   getSessionId: () => string | null;
   isAborted: (id: string) => boolean;
   onThreadStarted: (threadId: string) => void;
   onEvent: (transformed: NormalizedEvent) => void;
 }): Promise<void> {
-  const streamedTurn = await thread.runStreamed(command, {
+  const streamedTurn = await thread.runStreamed(input, {
     signal: abortController.signal,
   });
 
@@ -356,8 +400,6 @@ export class CodexProvider extends AbsProvider {
     projectPath,
     thinkingMode,
   }: StartSessionRequest): Promise<string> {
-    void images;
-
     return await new Promise<string>((resolve, reject) => {
       let settled = false;
       const onThreadStarted = (providerSessionId: string) => {
@@ -369,6 +411,7 @@ export class CodexProvider extends AbsProvider {
       this.runTurn({
         command,
         chatId,
+        images,
         model,
         permissionMode,
         projectPath,
@@ -386,6 +429,7 @@ export class CodexProvider extends AbsProvider {
     command,
     providerSessionId,
     chatId,
+    images,
     projectPath,
     model,
     permissionMode = 'default',
@@ -400,10 +444,20 @@ export class CodexProvider extends AbsProvider {
     let thread: any;
     let currentProviderSessionId = providerSessionId || null;
     const abortController = new AbortController();
+    let imageCleanup: (() => Promise<void>) | undefined;
 
     let chatCreatedEmitted = false;
 
     try {
+      // Convert base64 images to temp files for the Codex SDK.
+      let imagePaths: string[] | undefined;
+      if (images?.length) {
+        const result = await writeImagesToTempFiles(images);
+        imagePaths = result.paths;
+        imageCleanup = result.cleanup;
+      }
+      const input = buildCodexInput(command, imagePaths);
+
       codex = new Codex();
 
       const threadOptions: Record<string, unknown> = {
@@ -441,7 +495,7 @@ export class CodexProvider extends AbsProvider {
 
       await runCodexStreamedTurn({
         thread,
-        command,
+        input,
         abortController,
         getSessionId: () => currentProviderSessionId,
         isAborted: (id: string) => {
@@ -487,6 +541,7 @@ export class CodexProvider extends AbsProvider {
       }
 
     } finally {
+      if (imageCleanup) await imageCleanup();
       if (currentProviderSessionId) {
         const session = this.#sessions.get(currentProviderSessionId);
         if (session) {
