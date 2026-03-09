@@ -210,8 +210,8 @@ export class ProviderRegistry {
     throw new Error(`Unsupported provider: ${entry.provider}`);
   }
 
-  // Sends a follow-up turn to an existing session.
-  async runTurn(chatId: string, command: string, opts: {
+  // Resumes an existing session via the appropriate provider.
+  async runProviderTurn(chatId: string, command: string, opts: {
     images?: AgentCommandImage[];
     model?: string;
     permissionMode?: PermissionMode;
