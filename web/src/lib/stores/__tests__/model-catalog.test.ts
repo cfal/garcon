@@ -25,7 +25,7 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('codex')).toBe(true);
 		expect(store.supportsFork('opencode')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
-		expect(store.supportsImages('codex')).toBe(false);
+		expect(store.supportsImages('codex')).toBe(true);
 		expect(store.supportsImages('opencode')).toBe(false);
 	});
 
