@@ -1,6 +1,10 @@
 <script lang="ts">
 	// LCS-based line diff viewer with color-coded additions/removals.
 
+	import Copy from '@lucide/svelte/icons/copy';
+	import Check from '@lucide/svelte/icons/check';
+	import { copyToClipboard } from '$lib/utils/clipboard';
+
 	interface DiffLine {
 		type: 'added' | 'removed';
 		content: string;
@@ -81,15 +85,24 @@
 	);
 
 	let diffLines = $derived(computeDiff(oldContent ?? '', newContent ?? ''));
+
+	let pathCopied = $state(false);
+	async function handleCopyPath() {
+		const didCopy = await copyToClipboard(filePath);
+		if (!didCopy) return;
+		pathCopied = true;
+		setTimeout(() => (pathCopied = false), 2000);
+	}
 </script>
 
 <div class="border border-border rounded overflow-hidden">
 	{#if showHeader}
 		<!-- Header -->
 		<div
-			class="flex items-center justify-between px-2.5 py-1 bg-muted/40 border-b border-border"
+			class="group/diffheader flex items-center justify-between px-2.5 py-1 bg-muted/40 border-b border-border"
 		>
-			{#if onFileClick}
+			<div class="flex items-center gap-1.5 min-w-0">
+				{#if onFileClick}
 					<button
 						onclick={onFileClick}
 						class="text-[11px] font-mono text-primary hover:text-primary/80 truncate cursor-pointer transition-colors"
@@ -100,7 +113,20 @@
 					<span class="text-[11px] font-mono text-foreground/80 truncate">
 						{filePath}
 					</span>
-			{/if}
+				{/if}
+				<button
+					onclick={handleCopyPath}
+					class="p-0.5 rounded transition-colors shrink-0 {pathCopied ? 'text-status-success-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent opacity-0 group-hover/diffheader:opacity-100 focus-visible:opacity-100'}"
+					title={pathCopied ? 'Copied!' : 'Copy file path'}
+					aria-label={pathCopied ? 'Path copied' : 'Copy file path'}
+				>
+					{#if pathCopied}
+						<Check class="w-3 h-3" />
+					{:else}
+						<Copy class="w-3 h-3" />
+					{/if}
+				</button>
+			</div>
 			<span
 				class="text-[10px] font-medium px-1.5 py-px rounded {badgeClasses} flex-shrink-0 ml-2"
 			>

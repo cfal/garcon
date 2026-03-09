@@ -4,8 +4,11 @@
 
 	import * as m from '$lib/paraglide/messages.js';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import Copy from '@lucide/svelte/icons/copy';
+	import Check from '@lucide/svelte/icons/check';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import type { ConfirmAction } from '$lib/api/git';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface GitFileItemProps {
 		filePath: string;
@@ -48,11 +51,20 @@
 		'bg-status-neutral text-status-neutral-foreground border-status-neutral-border';
 
 	let cls = $derived(statusClasses[status] || defaultStatusClass);
+
+	let pathCopied = $state(false);
+	async function handleCopyPath(e: MouseEvent) {
+		e.stopPropagation();
+		const didCopy = await copyToClipboard(filePath);
+		if (!didCopy) return;
+		pathCopied = true;
+		setTimeout(() => (pathCopied = false), 2000);
+	}
 </script>
 
 <div class="border-b border-border last:border-0">
 	<!-- File row -->
-	<div class="flex items-center hover:bg-accent/50 {isMobile ? 'px-2 py-1.5' : 'px-3 py-2'}">
+	<div class="group/filerow flex items-center hover:bg-accent/50 {isMobile ? 'px-2 py-1.5' : 'px-3 py-2'}">
 		<input
 			type="checkbox"
 			checked={isSelected}
@@ -73,6 +85,18 @@
 				title={m.git_file_item_open_file()}
 			>
 				{filePath}
+			</button>
+			<button
+				onclick={handleCopyPath}
+				class="p-1 rounded text-muted-foreground transition-colors shrink-0 {pathCopied ? 'text-status-success-foreground' : 'hover:text-foreground hover:bg-accent opacity-0 group-hover/filerow:opacity-100 focus-visible:opacity-100'}"
+				title={pathCopied ? 'Copied!' : 'Copy file path'}
+				aria-label={pathCopied ? 'Path copied' : 'Copy file path'}
+			>
+				{#if pathCopied}
+					<Check class="w-3 h-3" />
+				{:else}
+					<Copy class="w-3 h-3" />
+				{/if}
 			</button>
 			<div class="flex items-center gap-1">
 				{#if status === 'M' || status === 'D'}
