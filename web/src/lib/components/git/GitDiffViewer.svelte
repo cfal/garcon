@@ -471,7 +471,7 @@
 			<span class="font-mono text-foreground truncate" style:font-size={`${fontSize}px`}>{reviewData.path}</span>
 			<button
 				onclick={handleCopyPath}
-				class="p-0.5 rounded transition-colors shrink-0 {pathCopied ? 'text-status-success-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent opacity-0 group-hover/diffheader:opacity-100 focus-visible:opacity-100'}"
+				class="p-0.5 rounded transition-colors shrink-0 {pathCopied ? 'text-status-success-foreground' : 'text-muted-foreground/60 hover:text-foreground hover:bg-accent'}"
 				title={pathCopied ? 'Copied!' : 'Copy file path'}
 				aria-label={pathCopied ? 'Path copied' : 'Copy file path'}
 			>
