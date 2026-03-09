@@ -123,7 +123,37 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('opencode')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(false);
-		expect(store.getModels('claude')).toEqual([{ value: 'opus', label: 'Opus' }]);
+		// Remote had only opus; static sonnet+haiku are appended
+		const claudeModels = store.getModels('claude');
+		expect(claudeModels[0]).toEqual({ value: 'opus', label: 'Opus' });
+		expect(claudeModels.find((m) => m.value === 'sonnet')).toBeTruthy();
+	});
+
+	it('merges missing static models into cached results', async () => {
+		vi.mocked(clientApi.apiFetch).mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				catalog: {
+					providers: [
+						{
+							id: 'codex',
+							supportsFork: true,
+							supportsImages: false,
+							models: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' }],
+						},
+					],
+				},
+			})
+		} as unknown as Response);
+
+		const store = createModelCatalogStore();
+		await store.forceRefresh();
+
+		const codexModels = store.getModels('codex');
+		expect(codexModels[0]).toEqual({ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' });
+		// Static gpt-5.4 should be appended
+		expect(codexModels.find((m) => m.value === 'gpt-5.4')).toBeTruthy();
+		expect(codexModels.length).toBeGreaterThan(1);
 	});
 
 	it('falls back to legacy shape when catalog is absent', async () => {
@@ -139,7 +169,10 @@ describe('ModelCatalogStore', () => {
 		const store = createModelCatalogStore();
 		await store.forceRefresh();
 
-		expect(store.getModels('claude')).toEqual([{ value: 'opus', label: 'Opus' }]);
+		// Remote had only opus; static sonnet+haiku are merged in
+		const claudeModels = store.getModels('claude');
+		expect(claudeModels[0]).toEqual({ value: 'opus', label: 'Opus' });
+		expect(claudeModels.find((m) => m.value === 'sonnet')).toBeTruthy();
 		// Falls back to default capabilities from common contract
 		expect(store.supportsFork('claude')).toBe(true);
 		expect(store.supportsImages('claude')).toBe(true);
