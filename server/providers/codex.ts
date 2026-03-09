@@ -187,6 +187,34 @@ function codexSandboxOptions(permissionMode: PermissionMode): { sandboxMode: str
   return CODEX_SANDBOX[permissionMode] ?? CODEX_SANDBOX.default;
 }
 
+// Translates raw Codex SDK/CLI errors into actionable user-facing messages.
+export function humanizeCodexError(error: any): string {
+  const raw = String(error?.message || error || '');
+
+  if (/not found|ENOENT.*codex|spawn codex/i.test(raw)) {
+    return 'Codex CLI is not installed or not in PATH. Install it with: npm i -g @openai/codex';
+  }
+  if (/authentication|unauthorized|401|api.?key/i.test(raw)) {
+    return 'Codex authentication failed. Run "codex" in your terminal to sign in.';
+  }
+  if (/rate.?limit|429/i.test(raw)) {
+    return 'Codex rate limit exceeded. Please wait a moment and try again.';
+  }
+  if (/model.*not.?found|invalid.*model|does not exist/i.test(raw)) {
+    return `Codex model not available. Check your model selection or Codex configuration.`;
+  }
+  if (/ECONNREFUSED|ENOTFOUND|network|timeout|ETIMEDOUT/i.test(raw)) {
+    return 'Codex could not connect to the API. Check your network connection.';
+  }
+  if (/exited with (code|signal)/i.test(raw)) {
+    // Strip internal stack trace paths, keep the meaningful part.
+    const cleaned = raw.replace(/\s+at\s+\S+.*$/gm, '').trim();
+    return `Codex process failed: ${cleaned}`;
+  }
+
+  return `Codex error: ${raw}`;
+}
+
 async function runCodexExec(args: string[], input: string): Promise<{ stdout: string; stderr: string }> {
   const proc = Bun.spawn(['codex', ...args], {
     stdin: new Blob([input]),
@@ -455,7 +483,7 @@ export class CodexProvider extends AbsProvider {
 
       if (!wasAborted) {
         console.error('codex: error:', error);
-        this.emitFailed(chatId, error.message);
+        this.emitFailed(chatId, humanizeCodexError(error));
       }
 
     } finally {
