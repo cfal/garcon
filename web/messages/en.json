@@ -270,6 +270,7 @@
   "settings_chat_send_by_shift_enter": "Send by Shift+Enter",
   "settings_chat_always_show_chat_header": "Always show chat header",
   "settings_chat_show_thinking": "Show thinking",
+  "settings_accessibility_colorblind_mode": "Colorblind-friendly colors",
   "settings_display_show_fullscreen_button": "Always full screen on Git panel",
   "settings_sections_agents": "Agents",
   "settings_sections_chat": "Chat",
