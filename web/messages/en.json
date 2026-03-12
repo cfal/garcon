@@ -122,6 +122,8 @@
   "command_switch_to_files": "Switch to Files",
   "command_switch_to_git": "Switch to Git",
   "command_switch_to_shell": "Switch to Shell",
+  "command_toggle_colorblind": "Toggle Colorblind Mode",
+  "command_toggle_colorblind_desc": "Switch to colorblind-friendly colors",
   "editor_actions_close": "Close",
   "editor_settings_button_label": "Editor settings",
   "editor_actions_collapse": "Collapse",

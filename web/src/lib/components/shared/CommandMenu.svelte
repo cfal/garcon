@@ -8,7 +8,8 @@
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
 	import Settings from '@lucide/svelte/icons/settings';
 	import FileCode from '@lucide/svelte/icons/file-code';
-	import { getNavigation, getAppShell } from '$lib/context';
+	import Eye from '@lucide/svelte/icons/eye';
+	import { getNavigation, getAppShell, getPreferences } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface CommandItem {
@@ -21,6 +22,7 @@
 
 	const navigation = getNavigation();
 	const appShell = getAppShell();
+	const preferences = getPreferences();
 
 	let isOpen = $state(false);
 	let query = $state('');
@@ -44,6 +46,13 @@
 					description: m.command_open_settings_desc(),
 					category: 'Navigation',
 					action: () => appShell.openSettings()
+				},
+				{
+					id: 'toggle-colorblind',
+					label: m.command_toggle_colorblind(),
+					description: m.command_toggle_colorblind_desc(),
+					category: 'Accessibility',
+					action: () => preferences.setPreference('colorblindMode', !preferences.colorblindMode)
 				},
 				{
 					id: 'tab-chat',
@@ -142,6 +151,7 @@
 		switch (category) {
 			case 'Chat': return MessageSquarePlus;
 			case 'Navigation': return Settings;
+			case 'Accessibility': return Eye;
 			case 'Tabs': return FileCode;
 			default: return Search;
 		}
