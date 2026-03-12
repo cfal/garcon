@@ -21,7 +21,7 @@
 	}
 
 	function togglePref(
-		key: 'autoExpandTools' | 'showThinking' | 'autoScrollToBottom' | 'sendByShiftEnter' | 'showChatHeader' | 'alwaysFullscreenOnGitPanel'
+		key: 'colorblindMode' | 'autoExpandTools' | 'showThinking' | 'autoScrollToBottom' | 'sendByShiftEnter' | 'showChatHeader' | 'alwaysFullscreenOnGitPanel'
 	) {
 		preferences.setPreference(key, !preferences[key]);
 	}
@@ -131,6 +131,11 @@
 		</div>
 
 		<div class="px-4">
+			{@render settingRow(
+				m.settings_accessibility_colorblind_mode(),
+				preferences.colorblindMode,
+				() => togglePref('colorblindMode')
+			)}
 			{@render settingRow(
 				m.settings_display_show_fullscreen_button(),
 				preferences.alwaysFullscreenOnGitPanel,

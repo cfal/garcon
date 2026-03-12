@@ -427,6 +427,56 @@
 	--markdown-code-deletion-fg: 9 100% 92%;
 	}
 
+/* Colorblind-friendly overrides. Uses blue/orange/teal palette
+   distinguishable across protanopia, deuteranopia, and tritanopia. */
+.colorblind {
+	--git-added: 210 80% 45%;
+	--git-deleted: 30 90% 50%;
+	--git-modified: 180 60% 38%;
+	--git-untracked: 260 60% 55%;
+	--git-renamed: 310 50% 50%;
+
+	--diff-addition: 210 80% 45%;
+	--diff-deletion: 30 90% 50%;
+	--diff-add-bg: 210 70% 93%;
+	--diff-add-fg: 210 80% 30%;
+	--diff-add-line-num: 210 50% 50%;
+	--diff-del-bg: 30 80% 93%;
+	--diff-del-fg: 30 90% 32%;
+	--diff-del-line-num: 30 50% 50%;
+
+	--status-success: 210 60% 90%;
+	--status-success-foreground: 210 80% 30%;
+	--status-success-border: 210 60% 60%;
+	--status-error: 30 80% 92%;
+	--status-error-foreground: 30 90% 32%;
+	--status-error-border: 30 60% 58%;
+}
+
+.dark.colorblind {
+	--git-added: 210 85% 65%;
+	--git-deleted: 30 92% 65%;
+	--git-modified: 180 65% 60%;
+	--git-untracked: 260 70% 72%;
+	--git-renamed: 310 60% 72%;
+
+	--diff-addition: 210 85% 65%;
+	--diff-deletion: 30 92% 65%;
+	--diff-add-bg: 210 60% 14%;
+	--diff-add-fg: 210 80% 82%;
+	--diff-add-line-num: 210 50% 55%;
+	--diff-del-bg: 30 60% 14%;
+	--diff-del-fg: 30 85% 82%;
+	--diff-del-line-num: 30 50% 55%;
+
+	--status-success: 210 50% 24%;
+	--status-success-foreground: 210 80% 86%;
+	--status-success-border: 210 50% 40%;
+	--status-error: 30 50% 24%;
+	--status-error-foreground: 30 85% 86%;
+	--status-error-border: 30 50% 40%;
+}
+
 @layer components {
 	/* Prevent prose from overriding highlight.js styles inside code blocks */
 	.markdown-body pre {
