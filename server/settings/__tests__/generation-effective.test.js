@@ -83,4 +83,24 @@ describe('resolveEffectiveGenerationConfig', () => {
       source: 'manual',
     });
   });
+
+  it('preserves a persisted amp provider and fills its default model', () => {
+    const result = resolveEffectiveGenerationConfig({
+      persisted: { enabled: true, provider: 'amp' },
+      authByProvider: {
+        claude: { authenticated: false },
+        codex: { authenticated: false },
+        opencode: { authenticated: false },
+        amp: { authenticated: false },
+      },
+      modelsByProvider: { opencode: [], amp: [] },
+    });
+
+    expect(result).toEqual({
+      enabled: true,
+      provider: 'amp',
+      model: 'default',
+      source: 'manual',
+    });
+  });
 });

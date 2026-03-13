@@ -5,7 +5,7 @@ import {
 } from '../../common/generation-defaults.ts';
 
 function isProvider(value) {
-  return value === 'claude' || value === 'codex' || value === 'opencode';
+  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'amp';
 }
 
 function pickAutoProvider(authByProvider) {
@@ -47,3 +47,10 @@ export function resolveEffectiveGenerationConfig({ persisted, authByProvider, mo
   };
 }
 
+export function resolveEffectiveGenerationUiConfig({ persisted, authByProvider, modelsByProvider }) {
+  const config = persisted && typeof persisted === 'object' ? persisted : {};
+  return {
+    ...config,
+    ...resolveEffectiveGenerationConfig({ persisted: config, authByProvider, modelsByProvider }),
+  };
+}

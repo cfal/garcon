@@ -21,7 +21,7 @@ export default function createAllRoutes(registry, settings, queue, pathCache, me
     ...createFilesRoutes(registry),
     ...createWorkspaceRoutes(settings, providers),
     ...createModelsRoutes(providers),
-    ...createGitRoutes(providers),
+    ...createGitRoutes(providers, settings),
     ...createOpenCodeRoutes(opencode),
   };
 }

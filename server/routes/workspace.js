@@ -1,7 +1,7 @@
 import { parseJsonBody } from '../lib/http-native.js';
 import { getProjectBasePath } from '../config.js';
-import { CLAUDE_MODELS, CODEX_MODELS } from '../../common/models.js';
-import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
+import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '../../common/models.js';
+import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 
 export default function createWorkspaceRoutes(settings, providers) {
   function asPlainObject(value) {
@@ -48,26 +48,19 @@ export default function createWorkspaceRoutes(settings, providers) {
         claude: CLAUDE_MODELS.OPTIONS,
         codex: CODEX_MODELS.OPTIONS,
         opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
+        amp: AMP_MODELS.OPTIONS,
       };
-      const persistedChatTitle = asPlainObject(ui?.chatTitle);
-      const persistedCommitMessage = asPlainObject(ui?.commitMessage);
       const uiEffective = {
-        chatTitle: {
-          ...persistedChatTitle,
-          ...resolveEffectiveGenerationConfig({
-            persisted: persistedChatTitle,
-            authByProvider,
-            modelsByProvider,
-          }),
-        },
-        commitMessage: {
-          ...persistedCommitMessage,
-          ...resolveEffectiveGenerationConfig({
-            persisted: persistedCommitMessage,
-            authByProvider,
-            modelsByProvider,
-          }),
-        },
+        chatTitle: resolveEffectiveGenerationUiConfig({
+          persisted: asPlainObject(ui?.chatTitle),
+          authByProvider,
+          modelsByProvider,
+        }),
+        commitMessage: resolveEffectiveGenerationUiConfig({
+          persisted: asPlainObject(ui?.commitMessage),
+          authByProvider,
+          modelsByProvider,
+        }),
       };
       const projectBasePath = getProjectBasePath();
       return Response.json({

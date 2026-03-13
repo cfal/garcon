@@ -16,9 +16,12 @@ const ctx = {
   providers: {
     runSingleQuery: mock(() => Promise.resolve('feat: auto commit')),
   },
+  settings: {
+    getUiSettings: mock(() => Promise.resolve({})),
+  },
 };
 
-const routes = createGitRoutes(ctx);
+const routes = createGitRoutes(ctx.providers, ctx.settings);
 
 function makeUrl(path, params = {}) {
   const url = new URL(`http://localhost${path}`);

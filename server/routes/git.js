@@ -1,6 +1,8 @@
 import { createGitService } from '../git/git-service.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
 import { parseJsonBody, MalformedJsonError } from '../lib/http-native.js';
+import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '../../common/models.js';
+import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 
 const MALFORMED_BODY = () =>
   Response.json({ error: 'Request body is not valid JSON.' }, { status: 400 });
@@ -19,7 +21,36 @@ async function readJsonBody(request) {
 // Thin HTTP adapter for git operations. Each handler extracts request
 // parameters, delegates to the git service, and maps errors to HTTP
 // responses via git.toHttpError(). No business logic lives here.
-export default function createGitRoutes(providers) {
+function isAllowedGenerationProvider(value) {
+  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'amp';
+}
+
+function hasOwn(source, key) {
+  return Boolean(source) && Object.prototype.hasOwnProperty.call(source, key);
+}
+
+async function resolveCommitMessageConfig(settings, providers) {
+  const ui = await settings?.getUiSettings?.() ?? {};
+  const authByProvider = await providers?.getAuthStatusMap?.() ?? {
+    claude: { authenticated: false },
+    codex: { authenticated: false },
+    opencode: { authenticated: false },
+    amp: { authenticated: false },
+  };
+  const opencodeModels = await providers?.getModels?.('opencode') ?? [];
+  return resolveEffectiveGenerationUiConfig({
+    persisted: ui?.commitMessage,
+    authByProvider,
+    modelsByProvider: {
+      claude: CLAUDE_MODELS.OPTIONS,
+      codex: CODEX_MODELS.OPTIONS,
+      opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
+      amp: AMP_MODELS.OPTIONS,
+    },
+  });
+}
+
+export default function createGitRoutes(providers, settings) {
   const git = createGitService({ providers, classifyGitError });
 
   async function getStatus(request, url) {
@@ -178,13 +209,22 @@ export default function createGitRoutes(providers) {
     try {
       const body = await readJsonBody(request);
       if (body === null) return MALFORMED_BODY();
-      const { project, files, provider = 'claude', model = '', customPrompt = '' } = body;
+      const { project, files } = body;
       if (!project || !files || files.length === 0) {
         return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
       }
-      if (!['claude', 'codex', 'opencode', 'amp'].includes(provider)) {
+      if (hasOwn(body, 'provider') && !isAllowedGenerationProvider(body.provider)) {
         return Response.json({ error: 'Invalid provider. Expected one of: claude, codex, opencode, amp.' }, { status: 400 });
       }
+
+      const persistedConfig = await resolveCommitMessageConfig(settings, providers);
+      const provider = hasOwn(body, 'provider') ? body.provider : persistedConfig.provider;
+      const model = hasOwn(body, 'model')
+        ? (typeof body.model === 'string' ? body.model : '')
+        : (typeof persistedConfig.model === 'string' ? persistedConfig.model : '');
+      const customPrompt = hasOwn(body, 'customPrompt')
+        ? (typeof body.customPrompt === 'string' ? body.customPrompt : '')
+        : (typeof persistedConfig.customPrompt === 'string' ? persistedConfig.customPrompt : '');
 
       const result = await git.generateCommitMessageForFiles({ projectPath: project, files, provider, model, customPrompt });
       return Response.json(result);

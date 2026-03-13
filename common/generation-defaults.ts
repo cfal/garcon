@@ -7,6 +7,7 @@ export const GENERATION_PROVIDER_PRIORITY = ['claude', 'codex', 'opencode'] as c
 export const GENERATION_MODEL_DEFAULTS = {
   claude: 'haiku',
   codex: 'gpt-5.1-codex-mini',
+  amp: 'default',
 } as const;
 
 // Preference order for OpenCode model auto-selection.
@@ -16,4 +17,3 @@ export const OPENCODE_PREFERRED_MODEL_PATTERNS = [
   /kimi[-\s]?2\.?5/i,
   /deepseek[-\s]?v3/i,
 ] as const;
-
