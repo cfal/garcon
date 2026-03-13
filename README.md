@@ -104,24 +104,6 @@ Otherwise the server reads from `web/build`.
 
 ### Docker
 
-Published image:
-
-```bash
-docker pull garconide/garcon:latest
-```
-
-Run with Docker Compose (builds local image):
-
-```bash
-GARCON_PROJECT_DIR=~/repos docker compose up -d
-```
-
-Custom port:
-
-```bash
-GARCON_PROJECT_DIR=~/repos GARCON_PORT=3000 docker compose up -d
-```
-
 Run with Docker Hub image:
 
 ```bash
@@ -139,7 +121,23 @@ docker run -d \
   -v "$HOME/.claude":/home/garcon/.claude \
   -v "$HOME/.codex":/home/garcon/.codex \
   -v "$HOME/.opencode":/home/garcon/.opencode \
+  -v "$HOME/.opencode/opencode-data":/home/garcon/.local/share/opencode \
+  -v "$HOME/.opencode/opencode-state":/home/garcon/.local/state/opencode \
+  -v "$HOME/.opencode/opencode-cache":/home/garcon/.local/cache/opencode \
+  -v "$HOME/.amp":/home/garcon/.amp \
   garconide/garcon:latest
+```
+
+Run with Docker Compose (builds local image):
+
+```bash
+GARCON_PROJECT_DIR=~/repos docker compose up -d
+```
+
+Custom port:
+
+```bash
+GARCON_PROJECT_DIR=~/repos GARCON_PORT=3000 docker compose up -d
 ```
 
 Set `GARCON_PROJECT_DIR` (compose) or the `/projects` bind mount (`docker run`) to the directory containing your repos. Pass any API keys (e.g. `OPENAI_API_KEY`) as needed. Config is persisted in `garcon-data`.
