@@ -104,7 +104,10 @@ Otherwise the server reads from `web/build`.
 
 ### Docker
 
-Run with Docker Hub image:
+Docker Hub images are published periodically but may lag behind the latest commits.
+For the most up-to-date version, build the image locally with `docker compose build` (see the Docker Compose section below).
+
+Test with Docker Hub image:
 
 ```bash
 docker run -d \
