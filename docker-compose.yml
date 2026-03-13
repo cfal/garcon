@@ -11,6 +11,9 @@ services:
       - ${CLAUDE_CONFIG_DIR:-~/.claude}:/home/garcon/.claude
       - ${CODEX_HOME:-~/.codex}:/home/garcon/.codex
       - ${OPENCODE_CONFIG_DIR:-~/.opencode}:/home/garcon/.opencode
+      - ${OPENCODE_CONFIG_DIR:-~/.opencode}/opencode-data:/home/garcon/.local/share/opencode
+      - ${OPENCODE_CONFIG_DIR:-~/.opencode}/opencode-state:/home/garcon/.local/state/opencode
+      - ${OPENCODE_CONFIG_DIR:-~/.opencode}/opencode-cache:/home/garcon/.local/cache/opencode
       - ~/.amp:/home/garcon/.amp
     environment:
       - GARCON_PORT=${GARCON_PORT:-8080}
