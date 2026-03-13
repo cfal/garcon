@@ -11,6 +11,7 @@ services:
       - ${CLAUDE_CONFIG_DIR:-~/.claude}:/home/garcon/.claude
       - ${CODEX_HOME:-~/.codex}:/home/garcon/.codex
       - ${OPENCODE_CONFIG_DIR:-~/.opencode}:/home/garcon/.opencode
+      - ~/.amp:/home/garcon/.amp
     environment:
       - GARCON_PORT=${GARCON_PORT:-8080}
       - GARCON_BIND_ADDRESS=0.0.0.0
