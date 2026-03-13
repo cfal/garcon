@@ -46,11 +46,8 @@ VOLUME ["${HOME}/.codex"]
 # Install Opencode
 RUN bun install -g opencode-ai@latest
 
-# Setup opencode XDG symlinks
-RUN mkdir -p $HOME/.local/share $HOME/.local/state $HOME/.local/cache && \
-  ln -s $HOME/.opencode/opencode-data $HOME/.local/share/opencode && \
-  ln -s $HOME/.opencode/opencode-state $HOME/.local/state/opencode && \
-  ln -s $HOME/.opencode/opencode-cache $HOME/.local/cache/opencode
+# Prepare opencode XDG symlinks
+RUN mkdir -p $HOME/.local/share/opencode $HOME/.local/state/opencode $HOME/.local/cache/opencode
 
 # Install ampcode (links to ~/.local/bin)
 RUN curl -fsSL https://ampcode.com/install.sh | bash
