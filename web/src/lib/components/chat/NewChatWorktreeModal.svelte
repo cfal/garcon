@@ -3,6 +3,7 @@
 	// Provides a branch-name-driven create flow with smart path defaults.
 
 	import { tick } from 'svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import X from '@lucide/svelte/icons/x';
 	import Check from '@lucide/svelte/icons/check';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -62,7 +63,7 @@
 		}
 	});
 
-	// Scroll the selected item into view, matching CommandMenu pattern
+	// Scroll the selected item into view, matching CommandMenu pattern.
 	$effect(() => {
 		if (selectedIndex < 0) return;
 		const el = document.querySelector(`[data-wt-index="${selectedIndex}"]`);
@@ -70,12 +71,10 @@
 	});
 
 	function handleKeydown(e: KeyboardEvent): void {
-		if (e.key === 'Escape') {
-			if (showCreateForm) {
-				resetCreateForm();
-			} else {
-				onClose();
-			}
+		if (e.key === 'Escape' && showCreateForm) {
+			e.preventDefault();
+			e.stopPropagation();
+			resetCreateForm();
 			return;
 		}
 
@@ -122,220 +121,210 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-<!-- Backdrop -->
-<div class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" role="presentation">
-	<button
-		class="absolute inset-0 w-full h-full cursor-default"
-		onclick={onClose}
-		aria-label="Close worktree selector"
-		tabindex="-1"
-	></button>
-
-	<!-- Dialog -->
-	<div
-		role="dialog"
-		aria-modal="true"
+<Dialog.Root open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
+	<Dialog.Content
+		showCloseButton={false}
 		aria-label="Select worktree"
-		tabindex="-1"
-		class="fixed top-[20%] left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-lg bg-popover border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[60dvh]"
+		onkeydown={handleKeydown}
+		class="w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-xl border border-border bg-popover p-0 shadow-2xl max-h-[80dvh]"
 	>
-		<!-- Header -->
-		<div class="flex items-center gap-3 px-4 py-3 border-b border-border shrink-0">
-			<FolderGit2 class="w-4 h-4 text-muted-foreground shrink-0" />
-			<h2 class="text-sm font-medium text-foreground flex-1">Select worktree</h2>
-			<div class="flex items-center gap-1">
-				<button
-					onclick={onRefresh}
-					disabled={isLoading}
-					class="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground disabled:opacity-50"
-					title="Refresh worktrees"
-					aria-label="Refresh worktrees"
-				>
-					<RefreshCw class="w-3.5 h-3.5 {isLoading ? 'animate-spin' : ''}" />
-				</button>
-				<button
-					onclick={onClose}
-					class="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-					aria-label="Close"
-				>
-					<X class="w-3.5 h-3.5" />
-				</button>
-			</div>
-		</div>
-
-		<!-- Error banner -->
-		{#if errorMessage}
-			<div class="flex items-center gap-2 px-4 py-2.5 text-xs bg-destructive/10 border-b border-border">
-				<AlertTriangle class="w-3.5 h-3.5 shrink-0 text-destructive" />
-				<span class="flex-1 text-destructive">{errorMessage}</span>
-				<button
-					onclick={onRefresh}
-					class="px-2 py-1 text-[10px] font-medium rounded-md bg-muted hover:bg-accent transition-colors text-foreground"
-				>
-					Retry
-				</button>
-			</div>
-		{/if}
-
-		<!-- Body (scrollable worktree list) -->
-		<div class="flex-1 overflow-y-auto min-h-0 p-1.5" role="listbox">
-			{#if isLoading}
-				<div class="flex items-center justify-center py-10">
-					<LoaderCircle class="w-5 h-5 animate-spin text-muted-foreground" />
-				</div>
-			{:else if worktrees.length === 0 && !errorMessage}
-				<div class="flex flex-col items-center justify-center py-10 gap-2">
-					<GitBranch class="w-5 h-5 text-muted-foreground/50" />
-					<span class="text-sm text-muted-foreground">No worktrees found</span>
-				</div>
-			{:else}
-				{#each worktrees as wt, i (wt.path)}
+		<div class="flex max-h-[80dvh] flex-col">
+			<div class="flex items-center gap-3 border-b border-border px-4 py-3 shrink-0">
+				<FolderGit2 class="h-4 w-4 shrink-0 text-muted-foreground" />
+				<h2 class="flex-1 text-sm font-medium text-foreground">Select worktree</h2>
+				<div class="flex items-center gap-1">
 					<button
-						data-wt-index={i}
-						role="option"
-						aria-selected={i === selectedIndex}
-						onclick={() => {
-							if (!wt.isPathMissing) onSelect(wt.path);
-						}}
-						onmouseenter={() => { if (!wt.isPathMissing) selectedIndex = i; }}
-						disabled={wt.isPathMissing}
-						class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors
-							{i === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}
-							{wt.isPathMissing ? 'opacity-40 cursor-not-allowed' : ''}
-							{wt.isCurrent ? 'ring-1 ring-interactive-accent/30' : ''}"
+						type="button"
+						onclick={onRefresh}
+						disabled={isLoading}
+						class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+						title="Refresh worktrees"
+						aria-label="Refresh worktrees"
 					>
-						<div class="flex items-center justify-center w-5 h-5 shrink-0">
-							{#if wt.isCurrent}
-								<Check class="w-4 h-4 text-interactive-accent" />
-							{:else}
-								<GitBranch class="w-3.5 h-3.5 text-muted-foreground" />
-							{/if}
-						</div>
-						<div class="flex-1 min-w-0">
-							<div class="flex items-center gap-2">
-								<span class="text-sm font-medium truncate">{wt.branch || wt.name}</span>
-								{#if wt.isMain}
-									<span class="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground leading-none">main</span>
-								{/if}
-								{#if wt.isPathMissing}
-									<span class="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-destructive/15 text-destructive leading-none">missing</span>
-								{/if}
-							</div>
-							<div class="text-xs text-muted-foreground truncate mt-0.5 font-mono">{wt.path}</div>
-						</div>
+						<RefreshCw class="h-3.5 w-3.5 {isLoading ? 'animate-spin' : ''}" />
 					</button>
-				{/each}
-			{/if}
-		</div>
-
-		<!-- Create form (pinned below scroll area) -->
-		{#if showCreateForm}
-			<div class="border-t border-border px-4 py-3 space-y-3 shrink-0 bg-muted/30">
-				<div class="flex items-center gap-2">
-					<Plus class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-					<span class="text-xs font-medium text-muted-foreground">New worktree</span>
+					<button
+						type="button"
+						onclick={onClose}
+						class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+						aria-label="Close"
+					>
+						<X class="h-3.5 w-3.5" />
+					</button>
 				</div>
+			</div>
 
-				<input
-					bind:this={branchInputRef}
-					type="text"
-					bind:value={branchName}
-					placeholder="Branch name (e.g. fix/login-bug)"
-					class="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg
-						focus-visible:ring-2 focus-visible:ring-interactive-accent/50 focus-visible:border-interactive-accent
-						text-foreground placeholder-muted-foreground/50 transition-shadow"
-					onkeydown={(e) => { if (e.key === 'Enter') handleCreate(); }}
-				/>
+			{#if errorMessage}
+				<div class="flex items-center gap-2 border-b border-border bg-destructive/10 px-4 py-2.5 text-xs">
+					<AlertTriangle class="h-3.5 w-3.5 shrink-0 text-destructive" />
+					<span class="flex-1 text-destructive">{errorMessage}</span>
+					<button
+						type="button"
+						onclick={onRefresh}
+						class="rounded-md bg-muted px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-accent"
+					>
+						Retry
+					</button>
+				</div>
+			{/if}
 
-				{#if derivedPath}
-					<div class="flex items-center gap-2 text-xs text-muted-foreground">
-						<span class="truncate font-mono text-[11px]">{effectivePath}</span>
+			<div class="min-h-0 flex-1 overflow-y-auto p-1.5" role="listbox">
+				{#if isLoading}
+					<div class="flex items-center justify-center py-10">
+						<LoaderCircle class="h-5 w-5 animate-spin text-muted-foreground" />
+					</div>
+				{:else if worktrees.length === 0 && !errorMessage}
+					<div class="flex flex-col items-center justify-center gap-2 py-10">
+						<GitBranch class="h-5 w-5 text-muted-foreground/50" />
+						<span class="text-sm text-muted-foreground">No worktrees found</span>
+					</div>
+				{:else}
+					{#each worktrees as wt, i (wt.path)}
 						<button
-							onclick={() => { showAdvanced = !showAdvanced; }}
-							class="flex items-center gap-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors shrink-0 px-1.5 py-0.5 rounded-md hover:bg-muted"
+							type="button"
+							data-wt-index={i}
+							role="option"
+							aria-selected={i === selectedIndex}
+							onclick={() => {
+								if (!wt.isPathMissing) onSelect(wt.path);
+							}}
+							onmouseenter={() => { if (!wt.isPathMissing) selectedIndex = i; }}
+							disabled={wt.isPathMissing}
+							class="w-full rounded-lg px-3 py-2.5 text-left transition-colors
+								{i === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}
+								{wt.isPathMissing ? 'cursor-not-allowed opacity-40' : ''}
+								{wt.isCurrent ? 'ring-1 ring-interactive-accent/30' : ''}"
 						>
-							{#if showAdvanced}
-								<ChevronDown class="w-3 h-3" />
+							<div class="flex items-center gap-3">
+								<div class="flex h-5 w-5 shrink-0 items-center justify-center">
+									{#if wt.isCurrent}
+										<Check class="h-4 w-4 text-interactive-accent" />
+									{:else}
+										<GitBranch class="h-3.5 w-3.5 text-muted-foreground" />
+									{/if}
+								</div>
+								<div class="min-w-0 flex-1">
+									<div class="flex items-center gap-2">
+										<span class="truncate text-sm font-medium">{wt.branch || wt.name}</span>
+										{#if wt.isMain}
+											<span class="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">main</span>
+										{/if}
+										{#if wt.isPathMissing}
+											<span class="rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive">missing</span>
+										{/if}
+									</div>
+									<div class="mt-0.5 truncate font-mono text-xs text-muted-foreground">{wt.path}</div>
+								</div>
+							</div>
+						</button>
+					{/each}
+				{/if}
+			</div>
+
+			{#if showCreateForm}
+				<div class="shrink-0 space-y-3 border-t border-border bg-muted/30 px-4 py-3">
+					<div class="flex items-center gap-2">
+						<Plus class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+						<span class="text-xs font-medium text-muted-foreground">New worktree</span>
+					</div>
+
+					<input
+						bind:this={branchInputRef}
+						type="text"
+						bind:value={branchName}
+						placeholder="Branch name (e.g. fix/login-bug)"
+						class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
+						onkeydown={(e) => { if (e.key === 'Enter') handleCreate(); }}
+					/>
+
+					{#if derivedPath}
+						<div class="flex items-center gap-2 text-xs text-muted-foreground">
+							<span class="truncate font-mono text-[11px]">{effectivePath}</span>
+							<button
+								type="button"
+								onclick={() => { showAdvanced = !showAdvanced; }}
+								class="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+							>
+								<span class="flex items-center gap-0.5">
+									{#if showAdvanced}
+										<ChevronDown class="h-3 w-3" />
+									{:else}
+										<ChevronRight class="h-3 w-3" />
+									{/if}
+									Advanced
+								</span>
+							</button>
+						</div>
+					{/if}
+
+					{#if showAdvanced}
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+							<input
+								type="text"
+								bind:value={pathOverride}
+								placeholder="Path override"
+								class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
+							/>
+							<input
+								type="text"
+								bind:value={baseRefOverride}
+								placeholder="Base ref (HEAD)"
+								class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
+							/>
+						</div>
+					{/if}
+
+					<div class="flex justify-end gap-2 pt-1">
+						<button
+							type="button"
+							onclick={resetCreateForm}
+							class="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+						>
+							Cancel
+						</button>
+						<button
+							type="button"
+							onclick={handleCreate}
+							disabled={!canCreate || isCreating}
+							class="rounded-lg px-4 py-1.5 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50
+								{canCreate && !isCreating
+									? 'bg-interactive-accent text-interactive-accent-foreground shadow-sm hover:brightness-110'
+									: 'bg-muted text-muted-foreground'}"
+						>
+							{#if isCreating}
+								<span class="flex items-center gap-1.5">
+									<LoaderCircle class="h-3 w-3 animate-spin" />
+									Creating...
+								</span>
 							{:else}
-								<ChevronRight class="w-3 h-3" />
+								Create
 							{/if}
-							Advanced
 						</button>
 					</div>
-				{/if}
+				</div>
+			{/if}
 
-				{#if showAdvanced}
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-						<input
-							type="text"
-							bind:value={pathOverride}
-							placeholder="Path override"
-							class="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg
-								focus-visible:ring-2 focus-visible:ring-interactive-accent/50 focus-visible:border-interactive-accent
-								text-foreground placeholder-muted-foreground/50 transition-shadow"
-						/>
-						<input
-							type="text"
-							bind:value={baseRefOverride}
-							placeholder="Base ref (HEAD)"
-							class="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg
-								focus-visible:ring-2 focus-visible:ring-interactive-accent/50 focus-visible:border-interactive-accent
-								text-foreground placeholder-muted-foreground/50 transition-shadow"
-						/>
-					</div>
+			<div class="flex items-center justify-between border-t border-border bg-popover px-4 py-2.5 shrink-0">
+				{#if !showCreateForm}
+					<button
+						type="button"
+						onclick={openCreateForm}
+						class="flex items-center gap-1.5 rounded-lg bg-interactive-accent px-3 py-1.5 text-xs font-medium text-interactive-accent-foreground shadow-sm transition-all hover:brightness-110"
+					>
+						<Plus class="h-3.5 w-3.5" />
+						New worktree
+					</button>
+				{:else}
+					<div></div>
 				{/if}
-
-				<div class="flex gap-2 justify-end pt-1">
-					<button
-						onclick={resetCreateForm}
-						class="px-3 py-1.5 text-xs font-medium rounded-lg bg-muted text-muted-foreground hover:text-foreground transition-colors"
-					>
-						Cancel
-					</button>
-					<button
-						onclick={handleCreate}
-						disabled={!canCreate || isCreating}
-						class="px-4 py-1.5 text-xs font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed
-							{canCreate && !isCreating
-								? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110 shadow-sm'
-								: 'bg-muted text-muted-foreground'}"
-					>
-						{#if isCreating}
-							<span class="flex items-center gap-1.5">
-								<LoaderCircle class="w-3 h-3 animate-spin" />
-								Creating...
-							</span>
-						{:else}
-							Create
-						{/if}
-					</button>
+				<div class="flex items-center gap-2 text-[10px] text-muted-foreground">
+					{#if selectableWorktrees.length > 0}
+						<span>{selectableWorktrees.length} worktree{selectableWorktrees.length === 1 ? '' : 's'}</span>
+						<span class="text-border">|</span>
+					{/if}
+					<kbd class="hidden items-center rounded border border-border bg-muted px-1.5 py-0.5 font-mono leading-none sm:inline-flex">ESC</kbd>
 				</div>
 			</div>
-		{/if}
-
-		<!-- Footer -->
-		<div class="flex items-center justify-between px-4 py-2.5 border-t border-border shrink-0 bg-popover">
-			{#if !showCreateForm}
-				<button
-					onclick={openCreateForm}
-					class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
-						bg-interactive-accent text-interactive-accent-foreground hover:brightness-110 shadow-sm transition-all"
-				>
-					<Plus class="w-3.5 h-3.5" />
-					New worktree
-				</button>
-			{:else}
-				<div></div>
-			{/if}
-			<div class="flex items-center gap-2 text-[10px] text-muted-foreground">
-				{#if selectableWorktrees.length > 0}
-					<span>{selectableWorktrees.length} worktree{selectableWorktrees.length === 1 ? '' : 's'}</span>
-					<span class="text-border">|</span>
-				{/if}
-				<kbd class="hidden sm:inline-flex items-center px-1.5 py-0.5 font-mono bg-muted rounded border border-border leading-none">ESC</kbd>
-			</div>
 		</div>
-	</div>
-</div>
+	</Dialog.Content>
+</Dialog.Root>
