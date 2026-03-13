@@ -16,6 +16,7 @@ import { getOpenCodeAuthStatus } from './opencode-auth.js';
 import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loaders/claude-history-loader.js';
 import { getCodexPreviewFromNativePath, loadCodexChatMessages } from './loaders/codex-history-loader.js';
 import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loaders/opencode-history-loader.js';
+import type { IChatRegistry } from '../chats/store.js';
 
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
@@ -54,13 +55,6 @@ function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | unde
     ...entry,
     ...execution,
   };
-}
-
-interface ChatRegistry {
-  getChat(chatId: string): ProviderChatEntry | null;
-  getChatByProviderSessionId(id: string): [string, ProviderChatEntry] | null;
-  updateChat(chatId: string, updates: Record<string, unknown>): void;
-  listAllChats(): Record<string, ProviderChatEntry>;
 }
 
 interface ClaudeProviderInstance {
@@ -125,14 +119,14 @@ interface AmpProviderInstance {
 }
 
 export class ProviderRegistry {
-  #registry: ChatRegistry;
+  #registry: IChatRegistry;
   #claude: ClaudeProviderInstance;
   #codex: CodexProviderInstance;
   #opencode: OpenCodeProviderInstance;
   #amp: AmpProviderInstance;
 
   constructor(
-    registry: ChatRegistry,
+    registry: IChatRegistry,
     claude: ClaudeProviderInstance,
     codex: CodexProviderInstance,
     opencode: OpenCodeProviderInstance,

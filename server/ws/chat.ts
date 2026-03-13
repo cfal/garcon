@@ -30,7 +30,8 @@ import {
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { QueueState } from '../../common/queue-state.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
-import type { PersistedChatExecutionConfig, RunProviderTurnOptions } from '../providers/types.js';
+import type { IChatRegistry } from '../chats/store.js';
+import type { RunProviderTurnOptions } from '../providers/types.js';
 import { requireChatExecutionConfig } from '../providers/types.js';
 
 const PERMISSION_DEDUP_TTL = 30_000;
@@ -72,11 +73,6 @@ interface HistoryCacheDep {
   };
 }
 
-interface ChatRegistryDep {
-  getChat(chatId: string): PersistedChatExecutionConfig | null;
-  updateChat(chatId: string, updates: Record<string, unknown>): void | Promise<void>;
-}
-
 class WebSocketWriter {
   #ws: WS;
   constructor(ws: WS) {
@@ -100,14 +96,14 @@ export class ChatHandler {
   #providers: ProviderRegistryDep;
   #queue: QueueManagerDep;
   #historyCache: HistoryCacheDep;
-  #registry: ChatRegistryDep;
+  #registry: IChatRegistry;
   #recentPermissionDecisions = new Map<string, number>();
 
   constructor(
     providers: ProviderRegistryDep,
     queue: QueueManagerDep,
     historyCache: HistoryCacheDep,
-    registry: ChatRegistryDep,
+    registry: IChatRegistry,
   ) {
     this.#providers = providers;
     this.#queue = queue;

@@ -5,6 +5,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { parseJsonBody } from '../lib/http-native.js';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
+import type { IChatRegistry } from '../chats/store.js';
 import { UserMessage } from '../../common/chat-types.ts';
 import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { PROVIDERS as VALID_PROVIDERS, supportsFork as providerSupportsFork, supportsImages as providerSupportsImages } from '../../common/providers.ts';
@@ -14,14 +15,6 @@ const PROJECT_BASE_PATH = getProjectBasePath();
 
 type RouteHandler = (request: Request, url: URL) => Promise<Response> | Response;
 type RouteMap = Record<string, Record<string, RouteHandler>>;
-
-interface ChatRegistryDep {
-  getChat(chatId: string): Record<string, unknown> | null;
-  listAllChats(): Record<string, Record<string, unknown>>;
-  addChat(entry: Record<string, unknown>): boolean;
-  removeChat(chatId: string): void;
-  updateChat(chatId: string, updates: Record<string, unknown>): void;
-}
 
 interface SettingsDep {
   getPinnedChatIds(): Promise<string[]>;
@@ -101,7 +94,7 @@ function extractFirstLine(text: string | null | undefined): string {
 }
 
 export default function createChatRoutes(
-  registry: ChatRegistryDep,
+  registry: IChatRegistry,
   settings: SettingsDep,
   queue: QueueDep,
   pathCache: PathCacheDep,
