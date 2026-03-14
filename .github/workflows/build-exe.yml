@@ -32,8 +32,6 @@ jobs:
         run: |
           VERSION="$(bun -e 'console.log(require("./package.json").version)')"
           echo "PACKAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "BINARY_NAME=garcon-v${VERSION}-linux-x64" >> "$GITHUB_ENV"
-          echo "RELEASE_ARCHIVE_NAME=garcon-v${VERSION}-linux-x64.tar.gz" >> "$GITHUB_ENV"
 
       - name: Install server dependencies
         working-directory: server
@@ -56,35 +54,45 @@ jobs:
       - name: Build web app
         run: bun run build
 
-      - name: Compile Linux x64 executable
+      - name: Compile executables
         run: bun run build-exe:compile
 
-      - name: Smoke test executable
-        run: bun run build-exe:smoke
+      - name: Smoke test Linux x64 executable
+        run: bun run build-exe:smoke:linux-x64
 
-      - name: Verify executable exists
+      - name: Verify executables exist
         run: |
-          if [ ! -f "dist/garcon" ]; then
-            echo "Expected executable at dist/garcon"
-            ls -la dist || true
-            exit 1
-          fi
+          for executable in dist/garcon-linux-x64 dist/garcon-darwin-arm64; do
+            if [ ! -f "$executable" ]; then
+              echo "Expected executable at $executable"
+              ls -la dist || true
+              exit 1
+            fi
 
-          ls -la dist/garcon
-          file dist/garcon || true
+            ls -la "$executable"
+            file "$executable" || true
+          done
 
-      - name: Prepare executable artifact
+      - name: Prepare executable artifacts
         run: |
           mkdir -p artifacts
-          cp dist/garcon "artifacts/${BINARY_NAME}"
+          cp dist/garcon-linux-x64 "artifacts/garcon-v${PACKAGE_VERSION}-linux-x64"
+          cp dist/garcon-darwin-arm64 "artifacts/garcon-v${PACKAGE_VERSION}-darwin-arm64"
 
           ls -la artifacts
 
-      - name: Upload executable artifact
+      - name: Upload Linux x64 executable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.BINARY_NAME }}
-          path: artifacts/${{ env.BINARY_NAME }}
+          name: garcon-v${{ env.PACKAGE_VERSION }}-linux-x64
+          path: artifacts/garcon-v${{ env.PACKAGE_VERSION }}-linux-x64
+          if-no-files-found: error
+
+      - name: Upload Darwin arm64 executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: garcon-v${{ env.PACKAGE_VERSION }}-darwin-arm64
+          path: artifacts/garcon-v${{ env.PACKAGE_VERSION }}-darwin-arm64
           if-no-files-found: error
 
   release:
@@ -103,24 +111,30 @@ jobs:
         run: |
           VERSION="$(bun -e 'console.log(require("./package.json").version)')"
           echo "PACKAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "BINARY_NAME=garcon-v${VERSION}-linux-x64" >> "$GITHUB_ENV"
-          echo "RELEASE_ARCHIVE_NAME=garcon-v${VERSION}-linux-x64.tar.gz" >> "$GITHUB_ENV"
 
-      - name: Download executable artifact
+      - name: Download Linux x64 executable artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ env.BINARY_NAME }}
+          name: garcon-v${{ env.PACKAGE_VERSION }}-linux-x64
           path: artifacts
 
-      - name: Package release asset
-        run: |
-          if [ ! -f "artifacts/${BINARY_NAME}" ]; then
-            echo "Missing downloaded executable artifact"
-            ls -la artifacts || true
-            exit 1
-          fi
+      - name: Download Darwin arm64 executable artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: garcon-v${{ env.PACKAGE_VERSION }}-darwin-arm64
+          path: artifacts
 
-          tar -C artifacts -czf "artifacts/${RELEASE_ARCHIVE_NAME}" "${BINARY_NAME}"
+      - name: Package release assets
+        run: |
+          for artifact in "garcon-v${PACKAGE_VERSION}-linux-x64" "garcon-v${PACKAGE_VERSION}-darwin-arm64"; do
+            if [ ! -f "artifacts/${artifact}" ]; then
+              echo "Missing downloaded executable artifact: ${artifact}"
+              ls -la artifacts || true
+              exit 1
+            fi
+
+            tar -C artifacts -czf "artifacts/${artifact}.tar.gz" "${artifact}"
+          done
 
       - name: List release artifacts
         run: |
