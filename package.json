@@ -1,6 +1,6 @@
 {
   "name": "garcon",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A cross-platform agentic coding UI for Claude Code, Codex, and Opencode",
   "type": "module",
   "main": "server/main.js",
