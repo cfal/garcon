@@ -10,14 +10,15 @@
 
 	interface AuthStatus {
 		authenticated: boolean;
-		email: string | null;
+		canReauth: boolean;
+		label: string;
 		loading: boolean;
 		error: string | null;
 	}
 
 	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp';
 
-	const DEFAULT_AUTH: AuthStatus = { authenticated: false, email: null, loading: true, error: null };
+	const DEFAULT_AUTH: AuthStatus = { authenticated: false, canReauth: true, label: '', loading: true, error: null };
 
 	const primaryAgents: { id: AgentId; name: string }[] = [
 		{ id: 'claude', name: 'Claude' },
@@ -71,17 +72,19 @@
 		};
 
 		try {
-			const data = await getAuthStatus(agent) as Record<string, unknown>;
+			const data = await getAuthStatus(agent);
 			setAuth({
-				authenticated: Boolean(data.authenticated),
-				email: (data.email as string) || null,
+				authenticated: data.authenticated,
+				canReauth: data.canReauth,
+				label: data.label,
 				loading: false,
-				error: (data.error as string) || null
+				error: null
 			});
 		} catch (err) {
 			setAuth({
 				authenticated: false,
-				email: null,
+				canReauth: true,
+				label: '',
 				loading: false,
 				error: err instanceof Error ? err.message : String(err)
 			});

@@ -10,7 +10,8 @@
 
 	interface AuthStatus {
 		authenticated: boolean;
-		email: string | null;
+		canReauth: boolean;
+		label: string;
 		loading: boolean;
 		error: string | null;
 	}
@@ -41,8 +42,12 @@
 		opencode: 'border-l-provider-opencode-border',
 		amp: 'border-l-provider-amp-border'
 	};
+
+	// Authenticated with no reauth option and no CLI-only content -- nothing to expand.
+	let expandable = $derived(!auth.loading && !(auth.authenticated && !auth.canReauth && !cliOnly));
 </script>
 
+{#if expandable}
 <Collapsible.Root {open} {onOpenChange} class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass[agentId]}">
 	<div class="flex items-center gap-3 px-4 py-3">
 		<Collapsible.Trigger class="flex flex-1 items-center gap-3 text-left cursor-pointer">
@@ -52,7 +57,7 @@
 				<Badge variant="secondary" class="text-xs">{m.settings_agents_auth_status_checking()}</Badge>
 			{:else if auth.authenticated}
 				<Badge class="text-xs bg-status-success text-status-success-foreground border-status-success-border">
-					{auth.email || m.settings_agents_auth_status_connected()}
+					{auth.label || m.settings_agents_auth_status_connected()}
 				</Badge>
 			{:else}
 				<Badge class="text-xs bg-status-neutral text-status-neutral-foreground border-status-neutral-border">
@@ -63,7 +68,7 @@
 			<ChevronDownIcon class="size-4 text-muted-foreground shrink-0 transition-transform duration-200 {open ? 'rotate-180' : ''}" />
 		</Collapsible.Trigger>
 
-		{#if !auth.loading && !auth.authenticated && !open}
+		{#if !auth.loading && !auth.authenticated && !open && auth.canReauth}
 			<Button variant="outline" size="sm" onclick={onLogin}>
 				<LogInIcon class="size-3.5 mr-1.5" />
 				{m.settings_agents_login_button()}
@@ -81,7 +86,7 @@
 						Run <code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{agentName.toLowerCase()} login</code> in your terminal to authenticate.
 					{/if}
 				</div>
-			{:else}
+			{:else if auth.canReauth}
 				<div class="flex items-center justify-between">
 					<div>
 						<div class="text-sm font-medium text-foreground">
@@ -108,3 +113,18 @@
 		</div>
 	</Collapsible.Content>
 </Collapsible.Root>
+{:else}
+<div class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass[agentId]}">
+	<div class="flex items-center gap-3 px-4 py-3">
+		<span class="font-medium text-foreground">{agentName}</span>
+
+		{#if auth.loading}
+			<Badge variant="secondary" class="text-xs">{m.settings_agents_auth_status_checking()}</Badge>
+		{:else if auth.authenticated}
+			<Badge class="text-xs bg-status-success text-status-success-foreground border-status-success-border">
+				{auth.label || m.settings_agents_auth_status_connected()}
+			</Badge>
+		{/if}
+	</div>
+</div>
+{/if}

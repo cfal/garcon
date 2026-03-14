@@ -11,6 +11,7 @@ import { runSingleQuery as runSingleQueryAmp } from './amp-cli.js';
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { getCodexAuthStatus } from './codex-auth.js';
 import { getOpenCodeAuthStatus } from './opencode-auth.js';
+import { getAmpAuthStatus } from './amp-auth.js';
 
 // Stateless loaders and preview functions
 import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loaders/claude-history-loader.js';
@@ -30,15 +31,12 @@ import type {
 } from './types.js';
 import { requireChatExecutionConfig } from './types.js';
 
-async function getAllProviderAuthStatus(opencode: OpenCodeProviderInstance): Promise<Record<string, unknown>> {
-  const [claude, codex, opencodeStatus] = await Promise.all([
-    getClaudeAuthStatus(),
-    getCodexAuthStatus(),
-    getOpenCodeAuthStatus(opencode),
-  ]);
-
-  return { claude, codex, opencode: opencodeStatus };
-}
+const AUTH_DISPATCHERS: Record<string, (opencode: OpenCodeProviderInstance) => Promise<unknown>> = {
+  claude: () => getClaudeAuthStatus(),
+  codex: () => getCodexAuthStatus(),
+  opencode: (oc) => getOpenCodeAuthStatus(oc),
+  amp: () => getAmpAuthStatus(),
+};
 
 // Validates that a registry entry has all required execution fields.
 function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | undefined): ProviderChatEntry & {
@@ -405,9 +403,18 @@ export class ProviderRegistry {
     return [];
   }
 
+  // Returns auth status for a single provider, or null if unknown.
+  async getAuthStatus(provider: string): Promise<unknown | null> {
+    const dispatcher = AUTH_DISPATCHERS[provider];
+    if (!dispatcher) return null;
+    return dispatcher(this.#opencode);
+  }
+
   // Returns current auth status for all providers.
   async getAuthStatusMap(): Promise<Record<string, unknown>> {
-    return getAllProviderAuthStatus(this.#opencode);
+    const entries = Object.entries(AUTH_DISPATCHERS);
+    const results = await Promise.all(entries.map(([, fn]) => fn(this.#opencode)));
+    return Object.fromEntries(entries.map(([name], i) => [name, results[i]]));
   }
 
   // Starts purge timers on providers that maintain session maps.

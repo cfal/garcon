@@ -105,7 +105,7 @@ export async function startServer() {
     // Build route and WS handler tables
     const routes = createAllRoutes(
       chatRegistry, settings, queue, pathCache, metadata, historyCache,
-      providerRegistry, opencodeProvider,
+      providerRegistry,
     );
 
     const chatHandler = new ChatHandler(providerRegistry, queue, historyCache, chatRegistry);
