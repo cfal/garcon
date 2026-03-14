@@ -6,10 +6,11 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { normalizeToolResultContent } from '../chats/normalize.js';
+import { findCodexSessionFileBySessionId } from '../projects/codex.js';
 import { AssistantMessage, ThinkingMessage, BashToolUseMessage, EditToolUseMessage, WebSearchToolUseMessage, TodoWriteToolUseMessage, ToolResultMessage, ErrorMessage } from '../../common/chat-types.js';
 import { AbsProvider } from './base.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
-import type { StartSessionRequest, ResumeTurnRequest, AgentCommandImage } from './types.js';
+import type { StartSessionRequest, ResumeTurnRequest, AgentCommandImage, StartedProviderSession } from './types.js';
 
 interface CodexItem {
   type: string;
@@ -87,11 +88,11 @@ function normalizeCodexItem(item: CodexItem): NormalizedEvent {
 }
 
 function normalizeCodexStreamEvent(event: CodexStreamEvent): NormalizedEvent {
-  if (event.type === 'turn.started')   return { type: 'turn_started' };
+  if (event.type === 'turn.started') return { type: 'turn_started' };
   if (event.type === 'turn.completed') return { type: 'turn_complete', usage: event.usage };
-  if (event.type === 'turn.failed')    return { type: 'turn_failed', error: event.error };
+  if (event.type === 'turn.failed') return { type: 'turn_failed', error: event.error };
   if (event.type === 'thread.started') return { type: 'thread_started', threadId: event.thread_id };
-  if (event.type === 'error')          return { type: 'error', message: { role: 'error', content: event.message || '' } };
+  if (event.type === 'error') return { type: 'error', message: { role: 'error', content: event.message || '' } };
 
   if (event.type === 'item.started' || event.type === 'item.updated' || event.type === 'item.completed') {
     return event.item ? normalizeCodexItem(event.item) : { type: event.type, item: null };
@@ -178,8 +179,8 @@ function mapThinkingModeToCodexEffort(thinkingMode: ThinkingMode | undefined): s
 }
 
 const CODEX_SANDBOX: Record<string, { sandboxMode: string; approvalPolicy: string }> = {
-  default:           { sandboxMode: 'workspace-write',    approvalPolicy: 'never' },
-  acceptEdits:       { sandboxMode: 'workspace-write',    approvalPolicy: 'never' },
+  default: { sandboxMode: 'workspace-write', approvalPolicy: 'never' },
+  acceptEdits: { sandboxMode: 'workspace-write', approvalPolicy: 'never' },
   bypassPermissions: { sandboxMode: 'danger-full-access', approvalPolicy: 'never' },
 };
 
@@ -244,7 +245,7 @@ async function writeImagesToTempFiles(images: AgentCommandImage[]): Promise<{ pa
   }
 
   const cleanup = async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => { });
   };
 
   return { paths, cleanup };
@@ -340,48 +341,45 @@ interface CodexSession {
 
 interface CodexRunTurnRequest extends Omit<ResumeTurnRequest, 'providerSessionId'> {
   providerSessionId?: string;
-  onThreadStarted?: (id: string) => void;
 }
 
-async function runCodexStreamedTurn({
-  thread,
-  input,
-  abortController,
-  getSessionId,
-  isAborted,
-  onThreadStarted,
-  onEvent,
-}: {
+interface StartedSessionTracker {
+  resolved: boolean;
+  promise: Promise<StartedProviderSession>;
+  reject: (error: unknown) => void;
+  resolve: (session: StartedProviderSession) => void;
+}
+
+interface CodexTurnExecution {
+  chatId: string;
+  codex: any;
   thread: any;
   input: string | Array<{ type: string; text?: string; path?: string }>;
   abortController: AbortController;
-  getSessionId: () => string | null;
-  isAborted: (id: string) => boolean;
-  onThreadStarted: (threadId: string) => void;
-  onEvent: (transformed: NormalizedEvent) => void;
-}): Promise<void> {
-  const streamedTurn = await thread.runStreamed(input, {
-    signal: abortController.signal,
+  providerSessionId: string | null;
+  imageCleanup?: (() => Promise<void>) | undefined;
+  emitSessionCreated: boolean;
+  sessionCreatedEmitted: boolean;
+  startedSession: StartedSessionTracker | null;
+}
+
+function createStartedSessionTracker(): StartedSessionTracker {
+  let resolveRef: ((session: StartedProviderSession) => void) | null = null;
+  let rejectRef: ((error: unknown) => void) | null = null;
+  const promise = new Promise<StartedProviderSession>((resolve, reject) => {
+    resolveRef = resolve;
+    rejectRef = reject;
   });
-
-  for await (const event of streamedTurn.events) {
-    if (event.type === 'thread.started' && event.thread_id) {
-      const currentId = getSessionId();
-      if (!currentId) onThreadStarted(event.thread_id);
-    }
-
-    const providerSessionId = getSessionId();
-    if (providerSessionId && isAborted(providerSessionId)) {
-      break;
-    }
-
-    if (event.type === 'item.started' || event.type === 'item.updated') {
-      continue;
-    }
-
-    const transformed = normalizeCodexStreamEvent(event);
-    onEvent(transformed);
-  }
+  return {
+    resolved: false,
+    promise,
+    resolve: (session) => {
+      if (resolveRef) resolveRef(session);
+    },
+    reject: (error) => {
+      if (rejectRef) rejectRef(error);
+    },
+  };
 }
 
 export class CodexProvider extends AbsProvider {
@@ -399,30 +397,21 @@ export class CodexProvider extends AbsProvider {
     permissionMode,
     projectPath,
     thinkingMode,
-  }: StartSessionRequest): Promise<string> {
-    return await new Promise<string>((resolve, reject) => {
-      let settled = false;
-      const onThreadStarted = (providerSessionId: string) => {
-        if (settled) return;
-        settled = true;
-        resolve(providerSessionId);
-      };
-
-      this.runTurn({
-        command,
-        chatId,
-        images,
-        model,
-        permissionMode,
-        projectPath,
-        thinkingMode,
-        onThreadStarted,
-      }).catch((error: Error) => {
-        if (settled) return;
-        settled = true;
-        reject(error);
-      });
+  }: StartSessionRequest): Promise<StartedProviderSession> {
+    const execution = await this.#createTurnExecution({
+      command,
+      chatId,
+      images,
+      model,
+      permissionMode,
+      projectPath,
+      thinkingMode,
+      providerSessionId: null,
+      emitSessionCreated: true,
+      captureStartedSession: true,
     });
+    void this.#runExecution(execution);
+    return execution.startedSession!.promise;
   }
 
   async runTurn({
@@ -434,32 +423,54 @@ export class CodexProvider extends AbsProvider {
     model,
     permissionMode = 'default',
     thinkingMode,
-    onThreadStarted,
   }: CodexRunTurnRequest): Promise<void> {
+    const execution = await this.#createTurnExecution({
+      command,
+      chatId,
+      images,
+      model,
+      permissionMode,
+      projectPath,
+      thinkingMode,
+      providerSessionId: providerSessionId || null,
+      emitSessionCreated: false,
+      captureStartedSession: false,
+    });
+    await this.#runExecution(execution);
+  }
+
+  async #createTurnExecution({
+    command,
+    chatId,
+    images,
+    model,
+    permissionMode = 'default',
+    projectPath,
+    thinkingMode,
+    providerSessionId,
+    emitSessionCreated,
+    captureStartedSession,
+  }: CodexRunTurnRequest & {
+    emitSessionCreated: boolean;
+    captureStartedSession: boolean;
+  }): Promise<CodexTurnExecution> {
     const workingDirectory = projectPath;
     const effectivePermissionMode = permissionMode === 'plan' ? 'default' : permissionMode;
     const { sandboxMode, approvalPolicy } = codexSandboxOptions(effectivePermissionMode);
-
-    let codex: any;
-    let thread: any;
-    let currentProviderSessionId = providerSessionId || null;
     const abortController = new AbortController();
+
     let imageCleanup: (() => Promise<void>) | undefined;
 
-    let chatCreatedEmitted = false;
-
     try {
-      // Convert base64 images to temp files for the Codex SDK.
       let imagePaths: string[] | undefined;
       if (images?.length) {
         const result = await writeImagesToTempFiles(images);
         imagePaths = result.paths;
         imageCleanup = result.cleanup;
       }
+
       const input = buildCodexInput(command, imagePaths);
-
-      codex = new Codex();
-
+      const codex = new Codex();
       const threadOptions: Record<string, unknown> = {
         workingDirectory,
         skipGitRepoCheck: true,
@@ -468,88 +479,123 @@ export class CodexProvider extends AbsProvider {
         model,
         modelReasoningEffort: mapThinkingModeToCodexEffort(thinkingMode),
       };
+      const thread = providerSessionId
+        ? codex.resumeThread(providerSessionId, threadOptions)
+        : codex.startThread(threadOptions);
 
-      if (providerSessionId) {
-        thread = codex.resumeThread(providerSessionId, threadOptions);
-      } else {
-        thread = codex.startThread(threadOptions);
-      }
-
-      currentProviderSessionId = providerSessionId || thread.id || null;
-      if (currentProviderSessionId) {
-        this.#sessions.set(currentProviderSessionId, {
-          thread,
-          codex,
-          status: 'running',
-          abortController,
-          startedAt: new Date().toISOString(),
-        });
-        this.emitProcessing(chatId, true);
-
-        if (!chatCreatedEmitted) {
-          this.emitSessionCreated(chatId);
-          chatCreatedEmitted = true;
-        }
-        if (typeof onThreadStarted === 'function') onThreadStarted(currentProviderSessionId);
-      }
-
-      await runCodexStreamedTurn({
+      return {
+        chatId,
+        codex,
         thread,
         input,
         abortController,
-        getSessionId: () => currentProviderSessionId,
-        isAborted: (id: string) => {
-          const session = this.#sessions.get(id);
-          return Boolean(session && session.status === 'aborted');
-        },
-        onThreadStarted: (threadId: string) => {
-          currentProviderSessionId = threadId;
-          this.#sessions.set(currentProviderSessionId, {
-            thread,
-            codex,
-            status: 'running',
-            abortController,
-            startedAt: new Date().toISOString(),
-          });
-          this.emitProcessing(chatId, true);
-          if (!chatCreatedEmitted) {
-            this.emitSessionCreated(chatId);
-            chatCreatedEmitted = true;
-          }
-          if (typeof onThreadStarted === 'function') onThreadStarted(currentProviderSessionId);
-        },
-        onEvent: (transformed: NormalizedEvent) => {
-          const chatMessages = convertCodexEventToChatMessages(transformed);
-          if (chatMessages.length > 0) {
-            this.emitMessages(chatId, chatMessages);
-          }
-        },
-      });
+        providerSessionId: providerSessionId || thread.id || null,
+        imageCleanup,
+        emitSessionCreated,
+        sessionCreatedEmitted: false,
+        startedSession: captureStartedSession ? createStartedSessionTracker() : null,
+      };
+    } catch (error) {
+      if (imageCleanup) await imageCleanup();
+      throw error;
+    }
+  }
 
-      this.emitFinished(chatId);
-
+  async #runExecution(execution: CodexTurnExecution): Promise<void> {
+    try {
+      await this.#activateSession(execution, execution.providerSessionId);
+      await this.#streamExecution(execution);
+      this.emitFinished(execution.chatId);
     } catch (error: any) {
-      const session = currentProviderSessionId ? this.#sessions.get(currentProviderSessionId) : null;
+      const session = execution.providerSessionId
+        ? this.#sessions.get(execution.providerSessionId)
+        : null;
       const wasAborted =
         session?.status === 'aborted' ||
         error?.name === 'AbortError' ||
         String(error?.message || '').toLowerCase().includes('aborted');
 
-      if (!wasAborted) {
-        console.error('codex: error:', error);
-        this.emitFailed(chatId, humanizeCodexError(error));
+      if (execution.startedSession && !execution.startedSession.resolved) {
+        execution.startedSession.resolved = true;
+        execution.startedSession.reject(error);
       }
 
+      if (!wasAborted) {
+        console.error('codex: error:', error);
+        this.emitFailed(execution.chatId, humanizeCodexError(error));
+      }
     } finally {
-      if (imageCleanup) await imageCleanup();
-      if (currentProviderSessionId) {
-        const session = this.#sessions.get(currentProviderSessionId);
+      if (execution.imageCleanup) await execution.imageCleanup();
+      if (execution.providerSessionId) {
+        const session = this.#sessions.get(execution.providerSessionId);
         if (session) {
           session.status = session.status === 'aborted' ? 'aborted' : 'completed';
-          this.emitProcessing(chatId, false);
+          this.emitProcessing(execution.chatId, false);
         }
       }
     }
+  }
+
+  async #streamExecution(execution: CodexTurnExecution): Promise<void> {
+    const streamedTurn = await execution.thread.runStreamed(execution.input, {
+      signal: execution.abortController.signal,
+    });
+
+    for await (const event of streamedTurn.events) {
+      if (event.type === 'thread.started' && event.thread_id) {
+        await this.#activateSession(execution, event.thread_id);
+      }
+
+      if (execution.providerSessionId && this.#isAborted(execution.providerSessionId)) {
+        break;
+      }
+
+      if (event.type === 'item.started' || event.type === 'item.updated') {
+        continue;
+      }
+
+      const transformed = normalizeCodexStreamEvent(event);
+      const chatMessages = convertCodexEventToChatMessages(transformed);
+      if (chatMessages.length > 0) {
+        this.emitMessages(execution.chatId, chatMessages);
+      }
+    }
+  }
+
+  async #activateSession(
+    execution: CodexTurnExecution,
+    providerSessionId: string | null | undefined,
+  ): Promise<void> {
+    if (!providerSessionId) return;
+    if (execution.providerSessionId === providerSessionId && this.#sessions.has(providerSessionId)) {
+      return;
+    }
+
+    execution.providerSessionId = providerSessionId;
+    this.#sessions.set(providerSessionId, {
+      thread: execution.thread,
+      codex: execution.codex,
+      status: 'running',
+      abortController: execution.abortController,
+      startedAt: new Date().toISOString(),
+    });
+    this.emitProcessing(execution.chatId, true);
+
+    if (execution.emitSessionCreated && !execution.sessionCreatedEmitted) {
+      this.emitSessionCreated(execution.chatId);
+      execution.sessionCreatedEmitted = true;
+    }
+
+    if (execution.startedSession && !execution.startedSession.resolved) {
+      const nativePath = await findCodexSessionFileBySessionId(providerSessionId);
+      execution.startedSession.resolved = true;
+      execution.startedSession.resolve({ providerSessionId, nativePath });
+    }
+  }
+
+  #isAborted(providerSessionId: string): boolean {
+    const session = this.#sessions.get(providerSessionId);
+    return Boolean(session && session.status === 'aborted');
   }
 
   abort(providerSessionId: string): boolean {

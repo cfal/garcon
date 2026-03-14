@@ -93,7 +93,10 @@ describe('ProviderRegistry session option hydration', () => {
       runClaudeTurn: mock(() => Promise.resolve(undefined)),
     };
     mockCodex = {
-      startSession: mock(() => Promise.resolve('codex-session')),
+      startSession: mock(() => Promise.resolve({
+        providerSessionId: 'codex-session',
+        nativePath: null,
+      })),
       runTurn: mock(() => Promise.resolve(undefined)),
     };
     mockOpencode = {
