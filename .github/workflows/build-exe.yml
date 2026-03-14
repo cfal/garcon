@@ -28,6 +28,13 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Read package version
+        run: |
+          VERSION="$(bun -e 'console.log(require("./package.json").version)')"
+          echo "PACKAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "BINARY_NAME=garcon-v${VERSION}-linux-x64" >> "$GITHUB_ENV"
+          echo "RELEASE_ARCHIVE_NAME=garcon-v${VERSION}-linux-x64.tar.gz" >> "$GITHUB_ENV"
+
       - name: Install server dependencies
         working-directory: server
         run: bun install --frozen-lockfile
@@ -69,15 +76,15 @@ jobs:
       - name: Prepare executable artifact
         run: |
           mkdir -p artifacts
-          cp dist/garcon artifacts/garcon-linux-x64
+          cp dist/garcon "artifacts/${BINARY_NAME}"
 
           ls -la artifacts
 
       - name: Upload executable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: garcon-linux-x64
-          path: artifacts/garcon-linux-x64
+          name: ${{ env.BINARY_NAME }}
+          path: artifacts/${{ env.BINARY_NAME }}
           if-no-files-found: error
 
   release:
@@ -89,21 +96,31 @@ jobs:
       contents: write
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read package version
+        run: |
+          VERSION="$(bun -e 'console.log(require("./package.json").version)')"
+          echo "PACKAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "BINARY_NAME=garcon-v${VERSION}-linux-x64" >> "$GITHUB_ENV"
+          echo "RELEASE_ARCHIVE_NAME=garcon-v${VERSION}-linux-x64.tar.gz" >> "$GITHUB_ENV"
+
       - name: Download executable artifact
         uses: actions/download-artifact@v4
         with:
-          name: garcon-linux-x64
+          name: ${{ env.BINARY_NAME }}
           path: artifacts
 
       - name: Package release asset
         run: |
-          if [ ! -f "artifacts/garcon-linux-x64" ]; then
+          if [ ! -f "artifacts/${BINARY_NAME}" ]; then
             echo "Missing downloaded executable artifact"
             ls -la artifacts || true
             exit 1
           fi
 
-          tar -C artifacts -czf artifacts/garcon-linux-x64.tar.gz garcon-linux-x64
+          tar -C artifacts -czf "artifacts/${RELEASE_ARCHIVE_NAME}" "${BINARY_NAME}"
 
       - name: List release artifacts
         run: |
