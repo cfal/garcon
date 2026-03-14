@@ -35,10 +35,12 @@ describe('Codex path lookup', () => {
     const testRoot = path.join(CODEX_SESSIONS_ROOT, `__test-${sessionId}`);
     const nestedDir = path.join(testRoot, 'nested', 'deep');
     const filePath = path.join(nestedDir, `rollout-123-${sessionId}.jsonl`);
-    const logger = {
-      info: mock(),
-      warn: mock(),
-    };
+    const infoSpy = mock(() => undefined);
+    const warnSpy = mock(() => undefined);
+    const originalInfo = console.info;
+    const originalWarn = console.warn;
+    console.info = infoSpy;
+    console.warn = warnSpy;
 
     await fs.mkdir(nestedDir, { recursive: true });
     const delayedWrite = new Promise((resolve, reject) => {
@@ -51,33 +53,40 @@ describe('Codex path lookup', () => {
       const found = await findCodexSessionFileBySessionId(sessionId, {
         waitTimeoutMs: 200,
         pollIntervalMs: 10,
-        logger,
       });
 
       expect(found).toBe(filePath);
-      expect(logger.info).toHaveBeenCalledTimes(2);
-      expect(logger.warn).not.toHaveBeenCalled();
+      expect(infoSpy).toHaveBeenCalledTimes(2);
+      expect(warnSpy).not.toHaveBeenCalled();
       await delayedWrite;
     } finally {
+      console.info = originalInfo;
+      console.warn = originalWarn;
       await fs.rm(testRoot, { recursive: true, force: true });
     }
   });
 
   it('logs a timeout when the rollout file never appears', async () => {
     const sessionId = `sid-${randomUUID()}`;
-    const logger = {
-      info: mock(),
-      warn: mock(),
-    };
+    const infoSpy = mock(() => undefined);
+    const warnSpy = mock(() => undefined);
+    const originalInfo = console.info;
+    const originalWarn = console.warn;
+    console.info = infoSpy;
+    console.warn = warnSpy;
 
-    const found = await findCodexSessionFileBySessionId(sessionId, {
-      waitTimeoutMs: 25,
-      pollIntervalMs: 10,
-      logger,
-    });
+    try {
+      const found = await findCodexSessionFileBySessionId(sessionId, {
+        waitTimeoutMs: 25,
+        pollIntervalMs: 10,
+      });
 
-    expect(found).toBeNull();
-    expect(logger.info).toHaveBeenCalledTimes(1);
-    expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(found).toBeNull();
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      console.info = originalInfo;
+      console.warn = originalWarn;
+    }
   });
 });

@@ -195,11 +195,9 @@ export async function findCodexSessionFileBySessionId(
   {
     waitTimeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
-    logger = console,
   }: {
     waitTimeoutMs?: number;
     pollIntervalMs?: number;
-    logger?: Pick<typeof console, 'info' | 'warn'>;
   } = {},
 ): Promise<string | null> {
   if (!sessionId) {
@@ -219,18 +217,18 @@ export async function findCodexSessionFileBySessionId(
 
   const normalizedPollIntervalMs = Math.max(1, pollIntervalMs);
   const startedAt = Date.now();
-  logger.info?.(`codex: waiting up to ${normalizedWaitTimeoutMs}ms for rollout file for session ${sessionId}`);
+  console.info(`codex: waiting up to ${normalizedWaitTimeoutMs}ms for rollout file for session ${sessionId}`);
 
   while (Date.now() - startedAt < normalizedWaitTimeoutMs) {
     await sleep(Math.min(normalizedPollIntervalMs, normalizedWaitTimeoutMs));
     const match = await findFileWithSuffix(CODEX_SESSIONS_ROOT, suffix);
     if (match) {
-      logger.info?.(`codex: resolved rollout file for session ${sessionId} after ${Date.now() - startedAt}ms: ${match}`);
+      console.info(`codex: resolved rollout file for session ${sessionId} after ${Date.now() - startedAt}ms: ${match}`);
       return match;
     }
   }
 
-  logger.warn?.(`codex: rollout file not found for session ${sessionId} after ${normalizedWaitTimeoutMs}ms`);
+  console.warn(`codex: rollout file not found for session ${sessionId} after ${normalizedWaitTimeoutMs}ms`);
   return null;
 }
 
