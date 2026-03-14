@@ -4,15 +4,7 @@ on:
   push:
     branches:
       - main
-    paths:
-      - '.github/workflows/server-tests.yml'
-      - 'common/**'
-      - 'server/**'
   pull_request:
-    paths:
-      - '.github/workflows/server-tests.yml'
-      - 'common/**'
-      - 'server/**'
   workflow_dispatch:
 
 concurrency:

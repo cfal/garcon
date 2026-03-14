@@ -1,0 +1,118 @@
+name: Build Executable
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-exe:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install server dependencies
+        working-directory: server
+        run: bun install --frozen-lockfile
+
+      - name: Install web dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Compile Paraglide messages
+        working-directory: web
+        run: bun run i18n:compile
+
+      - name: Run checks
+        run: bun run check
+
+      - name: Run tests
+        run: bun run test
+
+      - name: Build web app
+        run: bun run build
+
+      - name: Compile Linux x64 executable
+        run: bun run build-exe:compile
+
+      - name: Smoke test executable
+        run: bun run build-exe:smoke
+
+      - name: Verify executable exists
+        run: |
+          if [ ! -f "dist/garcon" ]; then
+            echo "Expected executable at dist/garcon"
+            ls -la dist || true
+            exit 1
+          fi
+
+          ls -la dist/garcon
+          file dist/garcon || true
+
+      - name: Prepare executable artifact
+        run: |
+          mkdir -p artifacts
+          cp dist/garcon artifacts/garcon-linux-x64
+
+          ls -la artifacts
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: garcon-linux-x64
+          path: artifacts/garcon-linux-x64
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build-exe
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download executable artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: garcon-linux-x64
+          path: artifacts
+
+      - name: Package release asset
+        run: |
+          if [ ! -f "artifacts/garcon-linux-x64" ]; then
+            echo "Missing downloaded executable artifact"
+            ls -la artifacts || true
+            exit 1
+          fi
+
+          tar -C artifacts -czf artifacts/garcon-linux-x64.tar.gz garcon-linux-x64
+
+      - name: List release artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f -name '*.tar.gz' | sort
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.tar.gz
+          draft: true
+          generate_release_notes: true
