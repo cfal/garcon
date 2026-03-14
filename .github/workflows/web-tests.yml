@@ -1,0 +1,49 @@
+name: Web Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/web-tests.yml'
+      - 'web/**'
+  pull_request:
+    paths:
+      - '.github/workflows/web-tests.yml'
+      - 'web/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install web dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Compile Paraglide messages
+        working-directory: web
+        run: bun run i18n:compile
+
+      - name: Run web checks
+        working-directory: web
+        run: bun run check
+
+      - name: Run web tests
+        working-directory: web
+        run: bun run test
