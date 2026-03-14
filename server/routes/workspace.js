@@ -1,4 +1,4 @@
-import { parseJsonBody } from '../lib/http-native.js';
+import { parseJsonBody } from '../lib/http-request.js';
 import { getProjectBasePath } from '../config.js';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';

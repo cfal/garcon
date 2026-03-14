@@ -7,7 +7,7 @@ class MalformedJsonError extends Error {
 const parseJsonBody = mock(() => Promise.resolve({}));
 const generateCommitMessageForFiles = mock(() => Promise.resolve({ message: 'feat: generated' }));
 
-mock.module('../../lib/http-native.js', () => ({
+mock.module('../../lib/http-request.js', () => ({
   parseJsonBody,
   MalformedJsonError,
 }));

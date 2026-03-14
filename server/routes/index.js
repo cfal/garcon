@@ -1,4 +1,4 @@
-import identityRoutes from './identity.js';
+import authRoutes from './auth.js';
 import staticRoutes from './static.js';
 import createFilesRoutes from './files.js';
 import createProviderRoutes from './providers.js';
@@ -10,7 +10,7 @@ import createWorkspaceRoutes from './workspace.js';
 export default function createAllRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers) {
   return {
     ...staticRoutes,
-    ...identityRoutes,
+    ...authRoutes,
     ...createProviderRoutes(providers),
     ...createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers),
     ...createFilesRoutes(registry),

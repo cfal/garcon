@@ -5,7 +5,7 @@ import os from 'os';
 
 const testBasePath = path.join(os.tmpdir(), 'garcon-chats-start-test');
 
-mock.module('../../lib/http-native.js', () => ({
+mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => Promise.resolve({})),
 }));
 
@@ -18,7 +18,7 @@ mock.module('../../config.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { parseJsonBody } from '../../lib/http-native.js';
+import { parseJsonBody } from '../../lib/http-request.js';
 
 const registry = {
   getChat: mock(() => undefined),

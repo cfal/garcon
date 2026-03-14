@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
-mock.module('../../lib/http-native.js', () => ({
+mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => undefined),
 }));
 
@@ -9,7 +9,7 @@ mock.module('../../config.js', () => ({
 }));
 
 import createWorkspaceRoutes from '../workspace.js';
-import { parseJsonBody } from '../../lib/http-native.js';
+import { parseJsonBody } from '../../lib/http-request.js';
 
 function createMockCtx() {
   return {

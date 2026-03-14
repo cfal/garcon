@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import mime from 'mime-types';
-import { parseJsonBody } from '../lib/http-native.js';
+import { parseJsonBody } from '../lib/http-request.js';
 import { listDirectory, listDirectoryNames } from './projects.utils.js';
 import { getProjectBasePath } from '../config.js';
 

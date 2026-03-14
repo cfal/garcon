@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
-mock.module('../../lib/http-native.js', () => ({
+mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => undefined),
 }));
 

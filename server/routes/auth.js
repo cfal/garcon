@@ -1,8 +1,8 @@
 import { needsSetup, getUserByUsername, createUser, getUser } from '../auth/store.js';
 import { generateAuthToken } from '../auth/token.js';
-import { parseJsonBody } from '../lib/http-native.js';
+import { parseJsonBody } from '../lib/http-request.js';
 import { createRateLimiter } from '../lib/rate-limit.js';
-import { markRouteNoAuth } from '../lib/route-auth.js';
+import { markRouteNoAuth } from '../lib/http-route.js';
 import { isAuthDisabled } from '../config.js';
 
 const loginLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });

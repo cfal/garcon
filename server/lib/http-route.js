@@ -1,4 +1,4 @@
-import { authenticateHttpRequest } from './http-native.js';
+import { authenticateHttpRequest } from './http-request.js';
 import { isAuthDisabled } from '../config.js';
 
 const noAuthRouteMarker = Symbol('no-auth-route');

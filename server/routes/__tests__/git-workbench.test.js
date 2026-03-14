@@ -4,13 +4,13 @@ class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
 }
 
-mock.module('../../lib/http-native.js', () => ({
+mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => Promise.resolve({})),
   MalformedJsonError,
 }));
 
 import createGitRoutes from '../git.js';
-import { parseJsonBody } from '../../lib/http-native.js';
+import { parseJsonBody } from '../../lib/http-request.js';
 
 const ctx = {
   providers: {

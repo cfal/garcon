@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
-mock.module('../../lib/http-native.js', () => ({
+mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => undefined),
 }));
 
@@ -25,7 +25,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { parseJsonBody } from '../../lib/http-native.js';
+import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 
 const registry = {

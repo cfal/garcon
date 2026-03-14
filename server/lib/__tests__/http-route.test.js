@@ -3,16 +3,16 @@ import { describe, it, expect, mock, beforeEach } from 'bun:test';
 const authenticateHttpRequest = mock(() => Promise.resolve({ errorResponse: null }));
 const isAuthDisabled = mock(() => false);
 
-mock.module('../http-native.js', () => ({
+mock.module('../http-request.js', () => ({
   authenticateHttpRequest,
 }));
 mock.module('../../config.js', () => ({
   isAuthDisabled,
 }));
 
-import { markRouteNoAuth, isNoAuthHandler, wrapRoute, wrapRoutes } from '../route-auth.js';
+import { markRouteNoAuth, isNoAuthHandler, wrapRoute, wrapRoutes } from '../http-route.js';
 
-describe('route auth wrapping', () => {
+describe('http route wrapping', () => {
   beforeEach(() => {
     authenticateHttpRequest.mockClear();
     isAuthDisabled.mockReset();

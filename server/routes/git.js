@@ -1,6 +1,6 @@
 import { createGitService } from '../git/git-service.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
-import { parseJsonBody, MalformedJsonError } from '../lib/http-native.js';
+import { parseJsonBody, MalformedJsonError } from '../lib/http-request.js';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 

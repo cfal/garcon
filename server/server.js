@@ -15,7 +15,7 @@ import {
   isAuthDisabled,
 } from './config.js';
 import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
-import { wrapRoutes } from './lib/route-auth.js';
+import { wrapRoutes } from './lib/http-route.js';
 import { verifyAuthToken } from './auth/token.js';
 import { init as initAuthStore } from './auth/store.js';
 import { resolveMissingNativePath } from './chats/resolve-native-path.js';

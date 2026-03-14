@@ -3,7 +3,7 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { parseJsonBody } from '../lib/http-native.js';
+import { parseJsonBody } from '../lib/http-request.js';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { UserMessage } from '../../common/chat-types.ts';
