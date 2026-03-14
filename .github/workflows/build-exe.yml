@@ -4,21 +4,9 @@ on:
   push:
     branches:
       - main
-    paths:
-      - '.github/workflows/build-exe.yml'
-      - 'common/**'
-      - 'package.json'
-      - 'scripts/**'
-      - 'server/**'
-      - 'web/**'
+    tags:
+      - 'v*'
   pull_request:
-    paths:
-      - '.github/workflows/build-exe.yml'
-      - 'common/**'
-      - 'package.json'
-      - 'scripts/**'
-      - 'server/**'
-      - 'web/**'
   workflow_dispatch:
 
 concurrency:
@@ -57,3 +45,61 @@ jobs:
 
       - name: Smoke test executable
         run: bun run build-exe:smoke
+
+      - name: Verify executable exists
+        run: |
+          if [ ! -f "dist/garcon" ]; then
+            echo "Expected executable at dist/garcon"
+            ls -la dist || true
+            exit 1
+          fi
+
+          ls -la dist/garcon
+          file dist/garcon || true
+
+      - name: Package executable artifact
+        run: |
+          mkdir -p artifacts
+          cp dist/garcon artifacts/garcon
+
+          if command -v strip >/dev/null 2>&1; then
+            strip artifacts/garcon || true
+          fi
+
+          tar -C artifacts -czf artifacts/garcon-linux-x64.tar.gz garcon
+          rm artifacts/garcon
+          ls -la artifacts
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: garcon-linux-x64
+          path: artifacts/garcon-linux-x64.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build-exe
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download executable artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: garcon-linux-x64
+          path: artifacts
+
+      - name: List release artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f -name '*.tar.gz' | sort
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.tar.gz
+          draft: true
+          generate_release_notes: true
