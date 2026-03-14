@@ -1,5 +1,5 @@
 import { needsSetup, getUserByUsername, createUser, getUser } from '../auth/store.js';
-import { generateAuthToken } from '../middleware/auth.js';
+import { generateAuthToken } from '../auth/token.js';
 import { parseJsonBody } from '../lib/http-native.js';
 import { createRateLimiter } from '../lib/rate-limit.js';
 import { markRouteNoAuth } from '../lib/route-auth.js';

@@ -1,15 +1,4 @@
-import jwt from 'jsonwebtoken';
-import { getJwtSecret } from '../auth/store.js';
-
-// Lazily resolved on first use and cached for the process lifetime.
-let cachedSecret = null;
-
-async function resolveSecret() {
-  if (!cachedSecret) {
-    cachedSecret = await getJwtSecret();
-  }
-  return cachedSecret;
-}
+import { verifyAuthToken } from '../auth/token.js';
 
 // Thrown by parseJsonBody when the request body is syntactically invalid JSON.
 // Consumers should check `instanceof` rather than matching the message string.
@@ -51,12 +40,10 @@ export async function authenticateHttpRequest(request) {
     return { errorResponse: Response.json({ error: 'Access denied. No token provided.' }, { status: 401 }) };
   }
 
-  try {
-    const secret = await resolveSecret();
-    jwt.verify(token, secret);
-    return { errorResponse: null };
-  } catch (error) {
-    console.error('Token verification error:', error);
+  const isAuthorized = await verifyAuthToken(token);
+  if (!isAuthorized) {
     return { errorResponse: Response.json({ error: 'Invalid token' }, { status: 403 }) };
   }
+
+  return { errorResponse: null };
 }
