@@ -4,7 +4,7 @@
 import { promises as fs } from 'fs';
 import fsSync from 'fs';
 import readline from 'readline';
-import { readJsonlTailLines } from '../../projects/shared.js';
+import { readJsonlTailLines } from './common.ts';
 import { normalizeCodexJsonlEntry, extractTextContent } from './codex-history-normalizer.js';
 
 // Reads a Codex JSONL file and returns ChatMessage[].

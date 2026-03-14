@@ -3,10 +3,12 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { readJsonlTailLines, getMessageText, isSystemUserMessage, isSystemAssistantMessage, HEAD_READ_BYTES } from '../../projects/shared.js';
+import { readJsonlTailLines } from './common.ts';
 import { normalizeToolResultContent } from '../../chats/normalize.js';
 import { UserMessage, AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage } from '../../../common/chat-types.js';
 import { convertClaudeToolUse } from '../converters/claude-tool-use.js';
+
+const HEAD_READ_BYTES = 32 * 1024;
 
 function decodeHtmlEntities(text) {
   if (!text) return text;
@@ -16,6 +18,44 @@ function decodeHtmlEntities(text) {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, '&');
+}
+
+function getMessageText(content) {
+  if (Array.isArray(content)) {
+    const textParts = content
+      .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+      .map((part) => part.text.trim())
+      .filter(Boolean);
+    return textParts.join('\n');
+  }
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  return '';
+}
+
+function isSystemUserMessage(text) {
+  return (
+    text.startsWith('<command-name>') ||
+    text.startsWith('<command-message>') ||
+    text.startsWith('<command-args>') ||
+    text.startsWith('<local-command-stdout>') ||
+    text.startsWith('<system-reminder>') ||
+    text.startsWith('Caveat:') ||
+    text.startsWith('This session is being continued from a previous') ||
+    text.startsWith('Invalid API key') ||
+    text.includes('{"subtasks":') ||
+    text.includes('CRITICAL: You MUST respond with ONLY a JSON') ||
+    text === 'Warmup'
+  );
+}
+
+function isSystemAssistantMessage(text) {
+  return (
+    text.startsWith('Invalid API key') ||
+    text.includes('{"subtasks":') ||
+    text.includes('CRITICAL: You MUST respond with ONLY a JSON')
+  );
 }
 
 // Reads a Claude JSONL file and returns ChatMessage[].
