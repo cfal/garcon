@@ -40,8 +40,17 @@ jobs:
         working-directory: web
         run: bun run i18n:compile
 
-      - name: Build Linux x64 executable
-        run: bun run build-exe
+      - name: Run checks
+        run: bun run check
+
+      - name: Run tests
+        run: bun run test
+
+      - name: Build web app
+        run: bun run build
+
+      - name: Compile Linux x64 executable
+        run: bun run build-exe:compile
 
       - name: Smoke test executable
         run: bun run build-exe:smoke
