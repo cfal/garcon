@@ -24,6 +24,7 @@
     "build-exe:smoke": "bun scripts/smoke-exe.js",
     "build-exe:smoke:linux-x64": "bun scripts/smoke-exe.js --target=linux-x64",
     "build-exe:smoke:darwin-arm64": "bun scripts/smoke-exe.js --target=darwin-arm64",
+    "build-exe:smoke:windows-x64": "bun scripts/smoke-exe.js --target=windows-x64",
     "build-exe": "bun run check && bun run test && bun run build && bun run build-exe:compile && bun run build-exe:smoke",
     "server": "bun server/main.js",
     "start": "bun run build && bun run server",
