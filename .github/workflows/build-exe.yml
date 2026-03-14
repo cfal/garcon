@@ -71,10 +71,6 @@ jobs:
           mkdir -p artifacts
           cp dist/garcon artifacts/garcon-linux-x64
 
-          if command -v strip >/dev/null 2>&1; then
-            strip artifacts/garcon-linux-x64 || true
-          fi
-
           ls -la artifacts
 
       - name: Upload executable artifact
