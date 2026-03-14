@@ -62,7 +62,8 @@ jobs:
 
       - name: Verify executables exist
         run: |
-          for executable in dist/garcon-linux-x64 dist/garcon-darwin-arm64; do
+          # Leaves Darwin arm64 disabled until the produced binary stops failing Gatekeeper with "damaged and can't be opened".
+          for executable in dist/garcon-linux-x64 dist/garcon-windows-x64.exe; do
             if [ ! -f "$executable" ]; then
               echo "Expected executable at $executable"
               ls -la dist || true
@@ -77,7 +78,7 @@ jobs:
         run: |
           mkdir -p artifacts
           cp dist/garcon-linux-x64 "artifacts/garcon-v${PACKAGE_VERSION}-linux-x64"
-          cp dist/garcon-darwin-arm64 "artifacts/garcon-v${PACKAGE_VERSION}-darwin-arm64"
+          cp dist/garcon-windows-x64.exe "artifacts/garcon-v${PACKAGE_VERSION}-windows-x64.exe"
 
           ls -la artifacts
 
@@ -88,11 +89,11 @@ jobs:
           path: artifacts/garcon-v${{ env.PACKAGE_VERSION }}-linux-x64
           if-no-files-found: error
 
-      - name: Upload Darwin arm64 executable artifact
+      - name: Upload Windows x64 executable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: garcon-v${{ env.PACKAGE_VERSION }}-darwin-arm64
-          path: artifacts/garcon-v${{ env.PACKAGE_VERSION }}-darwin-arm64
+          name: garcon-v${{ env.PACKAGE_VERSION }}-windows-x64.exe
+          path: artifacts/garcon-v${{ env.PACKAGE_VERSION }}-windows-x64.exe
           if-no-files-found: error
 
   release:
@@ -118,15 +119,15 @@ jobs:
           name: garcon-v${{ env.PACKAGE_VERSION }}-linux-x64
           path: artifacts
 
-      - name: Download Darwin arm64 executable artifact
+      - name: Download Windows x64 executable artifact
         uses: actions/download-artifact@v4
         with:
-          name: garcon-v${{ env.PACKAGE_VERSION }}-darwin-arm64
+          name: garcon-v${{ env.PACKAGE_VERSION }}-windows-x64.exe
           path: artifacts
 
       - name: Package release assets
         run: |
-          for artifact in "garcon-v${PACKAGE_VERSION}-linux-x64" "garcon-v${PACKAGE_VERSION}-darwin-arm64"; do
+          for artifact in "garcon-v${PACKAGE_VERSION}-linux-x64" "garcon-v${PACKAGE_VERSION}-windows-x64.exe"; do
             if [ ! -f "artifacts/${artifact}" ]; then
               echo "Missing downloaded executable artifact: ${artifact}"
               ls -la artifacts || true

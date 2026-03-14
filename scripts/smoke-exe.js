@@ -7,7 +7,7 @@ const STARTUP_TIMEOUT_MS = 15000;
 const SHUTDOWN_TIMEOUT_MS = 5000;
 const executableNamesByHost = {
   'linux-x64': 'garcon-linux-x64',
-  'darwin-arm64': 'garcon-darwin-arm64',
+  'windows-x64': 'garcon-windows-x64.exe',
 };
 
 function delay(ms) {
