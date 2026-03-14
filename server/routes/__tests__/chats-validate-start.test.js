@@ -6,6 +6,7 @@ import os from 'os';
 import createChatRoutes from '../chats.js';
 
 const testBasePath = path.join(os.homedir(), 'garcon-chats-validate-start-test');
+const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
 
 const registry = {
   getChat: mock(() => undefined),
@@ -61,10 +62,16 @@ async function runGit(cwd, args) {
 
 describe('GET /api/v1/chats/validate-start', () => {
   beforeEach(async () => {
+    process.env.GARCON_PROJECT_BASE_DIR = testBasePath;
     await ensureCleanBase();
   });
 
   afterEach(async () => {
+    if (originalProjectBaseDir === undefined) {
+      delete process.env.GARCON_PROJECT_BASE_DIR;
+    } else {
+      process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
+    }
     await fs.rm(testBasePath, { recursive: true, force: true });
   });
 
