@@ -4,7 +4,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { readJsonlTailLines } from './common.ts';
-import { normalizeToolResultContent } from '../../chats/normalize.js';
+import { normalizeToolResultContent } from '../normalize-util.js';
 import { UserMessage, AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage } from '../../../common/chat-types.js';
 import { convertClaudeToolUse } from '../converters/claude-tool-use.js';
 

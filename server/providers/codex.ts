@@ -5,7 +5,7 @@ import { Codex } from '@openai/codex-sdk';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { normalizeToolResultContent } from '../chats/normalize.js';
+import { normalizeToolResultContent } from './normalize-util.js';
 import { AssistantMessage, ThinkingMessage, BashToolUseMessage, EditToolUseMessage, WebSearchToolUseMessage, TodoWriteToolUseMessage, ToolResultMessage, ErrorMessage } from '../../common/chat-types.js';
 import { AbsProvider } from './base.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';

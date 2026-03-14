@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { normalizeToolResultContent } from '../chats/normalize.js';
+import { normalizeToolResultContent } from './normalize-util.js';
 import { getClaudeBinary } from '../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
 import { convertClaudeToolUse } from './converters/claude-tool-use.js';
