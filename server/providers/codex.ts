@@ -6,7 +6,6 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { normalizeToolResultContent } from '../chats/normalize.js';
-import { findCodexSessionFileBySessionId } from '../projects/codex.js';
 import { AssistantMessage, ThinkingMessage, BashToolUseMessage, EditToolUseMessage, WebSearchToolUseMessage, TodoWriteToolUseMessage, ToolResultMessage, ErrorMessage } from '../../common/chat-types.js';
 import { AbsProvider } from './base.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
@@ -183,9 +182,56 @@ const CODEX_SANDBOX: Record<string, { sandboxMode: string; approvalPolicy: strin
   acceptEdits: { sandboxMode: 'workspace-write', approvalPolicy: 'never' },
   bypassPermissions: { sandboxMode: 'danger-full-access', approvalPolicy: 'never' },
 };
+export const CODEX_SESSIONS_ROOT = path.join(os.homedir(), '.codex', 'sessions');
+const DEFAULT_WAIT_TIMEOUT_MS = 10_000;
+const DEFAULT_POLL_INTERVAL_MS = 250;
 
 function codexSandboxOptions(permissionMode: PermissionMode): { sandboxMode: string; approvalPolicy: string } {
   return CODEX_SANDBOX[permissionMode] ?? CODEX_SANDBOX.default;
+}
+
+export async function findCodexSessionFileBySessionId(
+  sessionId: string | null | undefined,
+  {
+    waitTimeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
+    pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
+    logger = console,
+  }: {
+    waitTimeoutMs?: number;
+    pollIntervalMs?: number;
+    logger?: Pick<typeof console, 'info' | 'warn'>;
+  } = {},
+): Promise<string | null> {
+  if (!sessionId) {
+    return null;
+  }
+
+  const suffix = `${sessionId}.jsonl`;
+  const initialMatch = await findFileWithSuffix(CODEX_SESSIONS_ROOT, suffix);
+  if (initialMatch) {
+    return initialMatch;
+  }
+
+  const normalizedWaitTimeoutMs = Math.max(0, waitTimeoutMs);
+  if (normalizedWaitTimeoutMs === 0) {
+    return null;
+  }
+
+  const normalizedPollIntervalMs = Math.max(1, pollIntervalMs);
+  const startedAt = Date.now();
+  logger.info?.(`codex: waiting up to ${normalizedWaitTimeoutMs}ms for rollout file for session ${sessionId}`);
+
+  while (Date.now() - startedAt < normalizedWaitTimeoutMs) {
+    await sleep(Math.min(normalizedPollIntervalMs, normalizedWaitTimeoutMs));
+    const match = await findFileWithSuffix(CODEX_SESSIONS_ROOT, suffix);
+    if (match) {
+      logger.info?.(`codex: resolved rollout file for session ${sessionId} after ${Date.now() - startedAt}ms: ${match}`);
+      return match;
+    }
+  }
+
+  logger.warn?.(`codex: rollout file not found for session ${sessionId} after ${normalizedWaitTimeoutMs}ms`);
+  return null;
 }
 
 // Translates raw Codex SDK/CLI errors into actionable user-facing messages.
@@ -380,6 +426,56 @@ function createStartedSessionTracker(): StartedSessionTracker {
       if (rejectRef) rejectRef(error);
     },
   };
+}
+
+async function findFileWithSuffix(dir: string, suffix: string): Promise<string | null> {
+  if (!dir || !suffix) {
+    return null;
+  }
+
+  if (typeof Bun !== 'undefined' && typeof Bun.Glob === 'function') {
+    try {
+      const escapedSuffix = suffix
+        .replace(/\\/g, '\\\\')
+        .replace(/\[/g, '\\[')
+        .replace(/\]/g, '\\]')
+        .replace(/\*/g, '\\*')
+        .replace(/\?/g, '\\?');
+      const glob = new Bun.Glob(`**/*${escapedSuffix}`);
+      for await (const filePath of glob.scan({
+        cwd: dir,
+        absolute: true,
+        onlyFiles: true,
+        followSymlinks: false,
+      })) {
+        return filePath;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory() && !entry.isSymbolicLink()) {
+      const found = await findFileWithSuffix(fullPath, suffix);
+      if (found) return found;
+    } else if (entry.name.endsWith(suffix)) {
+      return fullPath;
+    }
+  }
+  return null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class CodexProvider extends AbsProvider {

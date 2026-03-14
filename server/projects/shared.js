@@ -21,6 +21,7 @@ export function getMessageText(content) {
   return '';
 }
 
+// TODO: this should not be provider agnostic, only used by Claude.
 export function isSystemUserMessage(text) {
   return (
     text.startsWith('<command-name>') ||
