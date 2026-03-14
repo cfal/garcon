@@ -57,24 +57,22 @@ jobs:
           ls -la dist/garcon
           file dist/garcon || true
 
-      - name: Package executable artifact
+      - name: Prepare executable artifact
         run: |
           mkdir -p artifacts
-          cp dist/garcon artifacts/garcon
+          cp dist/garcon artifacts/garcon-linux-x64
 
           if command -v strip >/dev/null 2>&1; then
-            strip artifacts/garcon || true
+            strip artifacts/garcon-linux-x64 || true
           fi
 
-          tar -C artifacts -czf artifacts/garcon-linux-x64.tar.gz garcon
-          rm artifacts/garcon
           ls -la artifacts
 
       - name: Upload executable artifact
         uses: actions/upload-artifact@v4
         with:
           name: garcon-linux-x64
-          path: artifacts/garcon-linux-x64.tar.gz
+          path: artifacts/garcon-linux-x64
           if-no-files-found: error
 
   release:
@@ -91,6 +89,16 @@ jobs:
         with:
           name: garcon-linux-x64
           path: artifacts
+
+      - name: Package release asset
+        run: |
+          if [ ! -f "artifacts/garcon-linux-x64" ]; then
+            echo "Missing downloaded executable artifact"
+            ls -la artifacts || true
+            exit 1
+          fi
+
+          tar -C artifacts -czf artifacts/garcon-linux-x64.tar.gz garcon-linux-x64
 
       - name: List release artifacts
         run: |
