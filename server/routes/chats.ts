@@ -11,8 +11,6 @@ import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { PROVIDERS as VALID_PROVIDERS, supportsFork as providerSupportsFork, supportsImages as providerSupportsImages } from '../../common/providers.ts';
 import { getProjectBasePath } from '../config.js';
 
-const PROJECT_BASE_PATH = getProjectBasePath();
-
 type RouteHandler = (request: Request, url: URL) => Promise<Response> | Response;
 type RouteMap = Record<string, Record<string, RouteHandler>>;
 
@@ -58,9 +56,10 @@ interface ProvidersDep {
 }
 
 function isWithinBasePath(targetPath: string): boolean {
+  const projectBasePath = getProjectBasePath();
   const resolved = path.resolve(targetPath);
-  const projectBasePathPrefix = PROJECT_BASE_PATH.endsWith(path.sep) ? PROJECT_BASE_PATH : PROJECT_BASE_PATH + path.sep;
-  return resolved === PROJECT_BASE_PATH || resolved.startsWith(projectBasePathPrefix);
+  const projectBasePathPrefix = projectBasePath.endsWith(path.sep) ? projectBasePath : projectBasePath + path.sep;
+  return resolved === projectBasePath || resolved.startsWith(projectBasePathPrefix);
 }
 
 async function isGitRepository(projectPath: string): Promise<boolean> {
