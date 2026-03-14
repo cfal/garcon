@@ -15,6 +15,10 @@ const executableTargets = {
     bunTarget: 'bun-linux-x64-baseline',
     outputName: 'garcon-linux-x64',
   },
+  'darwin-arm64': {
+    bunTarget: 'bun-darwin-arm64',
+    outputName: 'garcon-darwin-arm64',
+  },
   'windows-x64': {
     bunTarget: 'bun-windows-x64-baseline',
     outputName: 'garcon-windows-x64.exe',
