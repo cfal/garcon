@@ -661,7 +661,11 @@ export class CodexProvider extends AbsProvider {
     providerSessionId: string | null | undefined,
   ): Promise<void> {
     if (!providerSessionId) return;
-    if (execution.providerSessionId === providerSessionId && this.#sessions.has(providerSessionId)) {
+    const existingSession = this.#sessions.get(providerSessionId);
+    if (
+      execution.providerSessionId === providerSessionId &&
+      existingSession?.status === 'running'
+    ) {
       return;
     }
 
