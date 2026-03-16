@@ -315,7 +315,7 @@
 			<div class="flex items-center justify-between py-2 pb-3">
 				<div class="flex items-center gap-2">
 					{#if telegramTestResult}
-						<span class="text-xs {telegramTestResult.ok ? 'text-emerald-500' : 'text-red-500'}">
+						<span class="text-xs {telegramTestResult.ok ? 'text-accent-foreground' : 'text-destructive'}">
 							{telegramTestResult.message}
 						</span>
 					{/if}
