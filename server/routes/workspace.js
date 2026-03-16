@@ -1,9 +1,9 @@
 import { parseJsonBody } from '../lib/http-request.js';
-import { getProjectBasePath } from '../config.js';
+import { getProjectBasePath, getTelegramBotToken } from '../config.js';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 
-export default function createWorkspaceRoutes(settings, providers) {
+export default function createWorkspaceRoutes(settings, providers, telegramNotifier) {
   function asPlainObject(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
@@ -75,6 +75,7 @@ export default function createWorkspaceRoutes(settings, providers) {
         lastPermissionMode,
         lastThinkingMode,
         projectBasePath,
+        telegramBotTokenAvailable: Boolean(getTelegramBotToken()),
       });
     } catch (error) {
       return Response.json({ success: false, error: error.message }, { status: 500 });
@@ -111,8 +112,32 @@ export default function createWorkspaceRoutes(settings, providers) {
     }
   }
 
+  async function postTelegramTest(request) {
+    try {
+      if (!telegramNotifier?.isConfigured) {
+        return Response.json({ success: false, error: 'GARCON_TELEGRAM_BOT_TOKEN is not set' }, { status: 400 });
+      }
+      const body = await parseJsonBody(request);
+      const chatId = typeof body.chatId === 'string' ? body.chatId.trim() : '';
+      if (!chatId) {
+        return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
+      }
+      const ok = await telegramNotifier.send(chatId, 'Garcon: test notification. Your Telegram integration is working.');
+      if (!ok) {
+        return Response.json({ success: false, error: 'Telegram delivery failed. Check your bot token and chat ID.' }, { status: 502 });
+      }
+      return Response.json({ success: true });
+    } catch (error) {
+      if (error.message === 'Malformed JSON') {
+        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
+      }
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
   return {
     '/api/v1/app/session-name': { PUT: putSessionNameHandler },
     '/api/v1/app/settings': { GET: getAppSettings, PUT: putAppSettings },
+    '/api/v1/app/telegram/test': { POST: postTelegramTest },
   };
 }

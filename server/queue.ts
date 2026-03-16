@@ -32,9 +32,11 @@ interface HistoryCacheDep {
 type QueueUpdatedCallback = (chatId: string, state: QueueState) => void;
 type DispatchingCallback = (chatId: string, entryId: string, content: string) => void;
 type SessionStoppedCallback = (chatId: string, success: boolean) => void;
+type ChatIdleCallback = (chatId: string) => void;
 
 export class QueueManager extends EventEmitter {
   #busy = new Map<string, boolean>();
+  #draining = new Set<string>();
   #workspaceDir: string;
   #providers: ProvidersDep | null;
   #historyCache: HistoryCacheDep | null;
@@ -51,6 +53,21 @@ export class QueueManager extends EventEmitter {
   onQueueUpdated(cb: QueueUpdatedCallback): void { this.on('queue-updated', cb); }
   onDispatching(cb: DispatchingCallback): void { this.on('dispatching', cb); }
   onSessionStopped(cb: SessionStoppedCallback): void { this.on('session-stopped', cb); }
+  onChatIdle(cb: ChatIdleCallback): void { this.on('chat-idle', cb); }
+
+  // Emits chat-idle if the chat has no queued items and the provider is not
+  // running. Call after a provider turn finishes to cover the initial-session
+  // path where #drain is never invoked. Skips when a drain loop is active
+  // for this chat to avoid duplicate emissions.
+  async checkChatIdle(chatId: string): Promise<void> {
+    if (this.#draining.has(chatId)) return;
+    if (this.#providers?.isChatRunning(chatId)) return;
+    const queue = await this.readChatQueue(chatId);
+    const hasPending = queue.entries.some(e => e.status === 'queued' || e.status === 'sending');
+    if (!hasPending) {
+      this.emit('chat-idle', chatId);
+    }
+  }
 
   #chatQueueFilePath(chatId: string): string {
     return path.join(this.#workspaceDir, 'queues', `${chatId}.queue.json`);
@@ -236,11 +253,16 @@ export class QueueManager extends EventEmitter {
 
   // Pops queued entries one at a time, appends to history, and runs provider turns.
   async #drain(chatId: string, options: RunProviderTurnOptions): Promise<void> {
+    this.#draining.add(chatId);
+    try {
     while (true) {
       if (this.#providers!.isChatRunning(chatId)) break;
 
       const result = await this.popNextChat(chatId);
-      if (!result) break;
+      if (!result) {
+        this.emit('chat-idle', chatId);
+        break;
+      }
 
       const { entry } = result;
       this.emit('dispatching', chatId, entry.id, entry.content);
@@ -260,6 +282,9 @@ export class QueueManager extends EventEmitter {
         await this.resetAndPauseChat(chatId, entry.id);
         break;
       }
+    }
+    } finally {
+      this.#draining.delete(chatId);
     }
   }
 
