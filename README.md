@@ -1,6 +1,6 @@
 # Garcon
 
-Garcon is a coding workspace for Claude, Codex, OpenCode, and Amp.
+Garcon is a coding workspace for Claude Code, Codex, OpenCode, and Amp.
 
 <table>
   <tr>
