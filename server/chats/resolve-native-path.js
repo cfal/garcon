@@ -3,7 +3,7 @@
 // TODO: can we deprecate this?
 
 import { promises as fs } from 'fs';
-import { findCodexSessionFileBySessionId } from '../projects/codex.js';
+import { findCodexSessionFileBySessionId } from '../providers/codex.js';
 import { createClaudeNativePath } from '../providers/claude-cli.js';
 
 export async function resolveMissingNativePath(session) {

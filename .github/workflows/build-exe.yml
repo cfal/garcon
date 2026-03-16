@@ -32,8 +32,6 @@ jobs:
         run: |
           VERSION="$(bun -e 'console.log(require("./package.json").version)')"
           echo "PACKAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "BINARY_NAME=garcon-v${VERSION}-linux-x64" >> "$GITHUB_ENV"
-          echo "RELEASE_ARCHIVE_NAME=garcon-v${VERSION}-linux-x64.tar.gz" >> "$GITHUB_ENV"
 
       - name: Install server dependencies
         working-directory: server
@@ -56,35 +54,46 @@ jobs:
       - name: Build web app
         run: bun run build
 
-      - name: Compile Linux x64 executable
+      - name: Compile executables
         run: bun run build-exe:compile
 
-      - name: Smoke test executable
-        run: bun run build-exe:smoke
+      - name: Smoke test Linux x64 executable
+        run: bun run build-exe:smoke:linux-x64
 
-      - name: Verify executable exists
+      - name: Verify executables exist
         run: |
-          if [ ! -f "dist/garcon" ]; then
-            echo "Expected executable at dist/garcon"
-            ls -la dist || true
-            exit 1
-          fi
+          # Leaves Darwin arm64 disabled until the produced binary stops failing Gatekeeper with "damaged and can't be opened".
+          for executable in dist/garcon-linux-x64 dist/garcon-windows-x64.exe; do
+            if [ ! -f "$executable" ]; then
+              echo "Expected executable at $executable"
+              ls -la dist || true
+              exit 1
+            fi
 
-          ls -la dist/garcon
-          file dist/garcon || true
+            ls -la "$executable"
+            file "$executable" || true
+          done
 
-      - name: Prepare executable artifact
+      - name: Prepare executable artifacts
         run: |
           mkdir -p artifacts
-          cp dist/garcon "artifacts/${BINARY_NAME}"
+          cp dist/garcon-linux-x64 "artifacts/garcon-v${PACKAGE_VERSION}-linux-x64"
+          cp dist/garcon-windows-x64.exe "artifacts/garcon-v${PACKAGE_VERSION}-windows-x64.exe"
 
           ls -la artifacts
 
-      - name: Upload executable artifact
+      - name: Upload Linux x64 executable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.BINARY_NAME }}
-          path: artifacts/${{ env.BINARY_NAME }}
+          name: garcon-v${{ env.PACKAGE_VERSION }}-linux-x64
+          path: artifacts/garcon-v${{ env.PACKAGE_VERSION }}-linux-x64
+          if-no-files-found: error
+
+      - name: Upload Windows x64 executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: garcon-v${{ env.PACKAGE_VERSION }}-windows-x64.exe
+          path: artifacts/garcon-v${{ env.PACKAGE_VERSION }}-windows-x64.exe
           if-no-files-found: error
 
   release:
@@ -99,37 +108,51 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Read package version
         run: |
           VERSION="$(bun -e 'console.log(require("./package.json").version)')"
           echo "PACKAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "BINARY_NAME=garcon-v${VERSION}-linux-x64" >> "$GITHUB_ENV"
-          echo "RELEASE_ARCHIVE_NAME=garcon-v${VERSION}-linux-x64.tar.gz" >> "$GITHUB_ENV"
 
-      - name: Download executable artifact
+      - name: Download Linux x64 executable artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ env.BINARY_NAME }}
+          name: garcon-v${{ env.PACKAGE_VERSION }}-linux-x64
           path: artifacts
 
-      - name: Package release asset
-        run: |
-          if [ ! -f "artifacts/${BINARY_NAME}" ]; then
-            echo "Missing downloaded executable artifact"
-            ls -la artifacts || true
-            exit 1
-          fi
+      - name: Download Windows x64 executable artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: garcon-v${{ env.PACKAGE_VERSION }}-windows-x64.exe
+          path: artifacts
 
-          tar -C artifacts -czf "artifacts/${RELEASE_ARCHIVE_NAME}" "${BINARY_NAME}"
+      - name: Package release assets
+        run: |
+          for artifact in "garcon-v${PACKAGE_VERSION}-linux-x64" "garcon-v${PACKAGE_VERSION}-windows-x64.exe"; do
+            if [ ! -f "artifacts/${artifact}" ]; then
+              echo "Missing downloaded executable artifact: ${artifact}"
+              ls -la artifacts || true
+              exit 1
+            fi
+
+            (
+              cd artifacts
+              zip -q "${artifact}.zip" "${artifact}"
+            )
+          done
 
       - name: List release artifacts
         run: |
           echo "Downloaded artifacts:"
-          find artifacts -type f -name '*.tar.gz' | sort
+          find artifacts -type f -name '*.zip' | sort
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.tar.gz
+          files: artifacts/*.zip
           draft: true
           generate_release_notes: true

@@ -71,7 +71,7 @@ function extractTextFromParts(parts) {
     .join('\n');
 }
 
-import { normalizeToolResultContent } from '../../chats/normalize.js';
+import { normalizeToolResultContent } from '../normalize-util.js';
 
 // Fetches messages for an OpenCode session and returns ChatMessage[].
 // getClient: () => Promise<OpenCodeClient>
