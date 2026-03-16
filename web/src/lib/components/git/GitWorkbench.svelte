@@ -14,8 +14,9 @@
 	import GitAllFilesVirtualList from './GitAllFilesVirtualList.svelte';
 	import GitReviewChangesModal from './GitReviewChangesModal.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
+	import GitConfirmModal from './GitConfirmModal.svelte';
 	import { GitWorkbenchStore } from '$lib/stores/git-workbench.svelte.js';
-	import type { GitFileReviewData } from '$lib/api/git.js';
+	import type { GitFileReviewData, ConfirmAction } from '$lib/api/git.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface GitWorkbenchProps {
@@ -134,6 +135,20 @@
 		if (!projectPath) return;
 		wb.unstageDirectory(projectPath, dirPath);
 	}
+
+	function handleDiscardFile(filePath: string): void {
+		wb.requestDiscard(filePath);
+	}
+
+	let discardConfirmAction = $derived.by((): ConfirmAction | null => {
+		if (!wb.pendingDiscardFile) return null;
+		const name = wb.pendingDiscardFile.split('/').pop() ?? wb.pendingDiscardFile;
+		return {
+			type: 'discard',
+			file: wb.pendingDiscardFile,
+			message: `Are you sure you want to discard changes in "${name}"? This cannot be undone.`,
+		};
+	});
 </script>
 
 {#if !projectPath}
@@ -204,6 +219,7 @@
 						onUnstageFile={handleUnstageFile}
 						onStageDir={handleStageDir}
 						onUnstageDir={handleUnstageDir}
+						onDiscardFile={handleDiscardFile}
 						alwaysShowActions
 					/>
 				{:else}
@@ -288,6 +304,7 @@
 							onUnstageFile={handleUnstageFile}
 							onStageDir={handleStageDir}
 							onUnstageDir={handleUnstageDir}
+							onDiscardFile={handleDiscardFile}
 						/>
 				</div>
 				<button
@@ -395,6 +412,15 @@
 			onSeverityChange={(s) => { wb.commentComposer = { ...wb.commentComposer, severity: s }; }}
 			onSubmit={() => wb.commitCommentComposer()}
 			onClose={() => wb.closeCommentComposer()}
+		/>
+	{/if}
+
+	<!-- Discard file confirmation -->
+	{#if discardConfirmAction}
+		<GitConfirmModal
+			confirmAction={discardConfirmAction}
+			onConfirm={() => { if (projectPath) wb.confirmDiscard(projectPath); }}
+			onCancel={() => wb.cancelDiscard()}
 		/>
 	{/if}
 {/if}
