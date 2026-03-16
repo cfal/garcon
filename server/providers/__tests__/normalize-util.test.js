@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { normalizeToolInput, normalizeToolResultContent } from '../normalize.js';
+import { normalizeToolInput, normalizeToolResultContent } from '../normalize-util.js';
 
 describe('normalizeToolInput', () => {
   it('returns empty object for null', () => {

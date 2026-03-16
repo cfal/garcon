@@ -3,7 +3,7 @@
 // Parses JSONL stdout and routes messages through AbsProvider events.
 
 import crypto from 'crypto';
-import { normalizeToolResultContent } from '../chats/normalize.js';
+import { normalizeToolResultContent } from './normalize-util.js';
 import { getAmpBinary } from '../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage } from '../../common/chat-types.js';
 import { convertClaudeToolUse } from './converters/claude-tool-use.js';

@@ -9,7 +9,7 @@ import {
   UpdatePlanToolUseMessage,
   UnknownToolUseMessage,
 } from '../../../common/chat-types.js';
-import { normalizeToolInput } from '../../chats/normalize.js';
+import { normalizeToolInput } from '../normalize-util.js';
 
 function asObject(v) {
   return v && typeof v === 'object' && !Array.isArray(v) ? v : {};

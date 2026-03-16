@@ -9,6 +9,7 @@ export type ThemeMode = 'dark' | 'light' | 'system';
 
 export interface PreferencesState {
 	theme: ThemeMode;
+	colorblindMode: boolean;
 	autoExpandTools: boolean;
 	showThinking: boolean;
 	autoScrollToBottom: boolean;
@@ -34,6 +35,7 @@ const STORAGE_KEY = 'pref_preferences';
 
 const DEFAULTS: PreferencesState = {
 	theme: 'system',
+	colorblindMode: false,
 	autoExpandTools: false,
 	showThinking: true,
 	autoScrollToBottom: true,
@@ -67,6 +69,10 @@ function readPersisted(): PreferencesState {
 						typeof parsed.theme === 'string' && ['dark', 'light', 'system'].includes(parsed.theme)
 							? (parsed.theme as ThemeMode)
 							: DEFAULTS.theme,
+					colorblindMode:
+						typeof parsed.colorblindMode === 'boolean'
+							? parsed.colorblindMode
+							: DEFAULTS.colorblindMode,
 					autoExpandTools:
 						typeof parsed.autoExpandTools === 'boolean'
 							? parsed.autoExpandTools
@@ -162,6 +168,7 @@ function persist(state: PreferencesState): void {
 
 export class PreferencesStore {
 	theme = $state<ThemeMode>(DEFAULTS.theme);
+	colorblindMode = $state(DEFAULTS.colorblindMode);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
 	showThinking = $state(DEFAULTS.showThinking);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
@@ -185,6 +192,7 @@ export class PreferencesStore {
 	constructor() {
 		const saved = readPersisted();
 		this.theme = saved.theme;
+		this.colorblindMode = saved.colorblindMode;
 		this.autoExpandTools = saved.autoExpandTools;
 		this.showThinking = saved.showThinking;
 		this.autoScrollToBottom = saved.autoScrollToBottom;
@@ -210,6 +218,7 @@ export class PreferencesStore {
 	private snapshot(): PreferencesState {
 		return {
 			theme: this.theme,
+			colorblindMode: this.colorblindMode,
 			autoExpandTools: this.autoExpandTools,
 			showThinking: this.showThinking,
 			autoScrollToBottom: this.autoScrollToBottom,

@@ -1,4 +1,7 @@
 export async function getOpenCodeAuthStatus(opencode) {
+  if (!opencode.isAvailable()) {
+    return { authenticated: false, canReauth: false, label: '' };
+  }
   try {
     const client = await opencode.getClient();
     const result = await client.provider.list();

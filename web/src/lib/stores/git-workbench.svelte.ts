@@ -20,6 +20,8 @@ import {
 	gitCreateWorktree,
 	gitRemoveWorktree,
 	gitRevertLastCommit,
+	gitDiscard,
+	gitDeleteUntracked,
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -99,6 +101,9 @@ export class GitWorkbenchStore {
 	commitModel = $state('');
 	commitCustomPrompt = $state('');
 	commitUseCommonDirPrefix = $state(false);
+
+	// Pending discard confirmation (file path awaiting user confirmation)
+	pendingDiscardFile = $state<string | null>(null);
 
 	// Error feedback surfaced to UI
 	lastError = $state<string | null>(null);
@@ -758,6 +763,55 @@ export class GitWorkbenchStore {
 			this.surfaceError(`Unstage directory failed: ${err instanceof Error ? err.message : String(err)}`);
 			return false;
 		}
+	}
+
+	// File discard (revert unstaged changes)
+
+	requestDiscard(filePath: string): void {
+		this.pendingDiscardFile = filePath;
+	}
+
+	cancelDiscard(): void {
+		this.pendingDiscardFile = null;
+	}
+
+	async confirmDiscard(projectPath: string): Promise<boolean> {
+		const filePath = this.pendingDiscardFile;
+		if (!filePath) return false;
+		this.pendingDiscardFile = null;
+		try {
+			const node = this.findTreeNode(filePath);
+			const isUntracked = node?.changeKind === 'untracked';
+			const result = isUntracked
+				? await gitDeleteUntracked(projectPath, filePath)
+				: await gitDiscard(projectPath, filePath);
+			if (result.success) {
+				this.refreshAllData();
+				await this.loadTree(projectPath);
+				if (this.selectedFile === filePath && !this.visibleFilePaths.includes(filePath)) {
+					const first = this.visibleFilePaths[0];
+					this.selectedFile = first ?? null;
+				}
+			}
+			return result.success ?? false;
+		} catch (err) {
+			this.surfaceError(`Discard failed: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
+		}
+	}
+
+	private findTreeNode(filePath: string): GitTreeNode | undefined {
+		const search = (nodes: GitTreeNode[]): GitTreeNode | undefined => {
+			for (const node of nodes) {
+				if (node.path === filePath) return node;
+				if (node.children) {
+					const found = search(node.children);
+					if (found) return found;
+				}
+			}
+			return undefined;
+		};
+		return search(this.tree);
 	}
 
 	// Commit actions

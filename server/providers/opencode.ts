@@ -2,7 +2,7 @@
 // through typed events wired in the composition root.
 
 import crypto from 'crypto';
-import { normalizeToolResultContent } from '../chats/normalize.js';
+import { normalizeToolResultContent } from './normalize-util.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
 import { convertOpenCodeToolUse } from './converters/opencode-tool-use.js';
 import { AbsProvider } from './base.js';
@@ -160,8 +160,25 @@ export class OpenCodeProvider extends AbsProvider {
   #messageRoles = new Map<string, Map<string, string>>();
   #assistantPartTypes = new Map<string, Map<string, string>>();
 
+  #available: boolean | null = null;
+
   constructor() {
     super();
+  }
+
+  // Returns true if the opencode binary is on $PATH, without spawning a server.
+  isAvailable(): boolean {
+    if (this.#available !== null) return this.#available;
+    if (process.env.NODE_ENV === 'test') {
+      this.#available = true;
+      return true;
+    }
+    if (typeof Bun !== 'undefined' && typeof Bun.which === 'function') {
+      this.#available = Boolean(Bun.which('opencode'));
+    } else {
+      this.#available = false;
+    }
+    return this.#available;
   }
 
   #createTurnWaiter(providerSessionId: string): PendingTurnWaiter {
@@ -419,11 +436,13 @@ export class OpenCodeProvider extends AbsProvider {
   }
 
   async getClient(): Promise<any> {
+    if (!this.isAvailable()) throw new Error('opencode is not installed');
     const instance = await this.#ensureOpenCodeServer();
     return instance.client;
   }
 
   async getModels(): Promise<Array<{ value: string; label: string }>> {
+    if (!this.isAvailable()) return [];
     const client = await this.getClient();
     const result = await client.provider.list();
     const data = result.data;
@@ -460,6 +479,7 @@ export class OpenCodeProvider extends AbsProvider {
     void projectPath;
     void thinkingMode;
 
+    if (!this.isAvailable()) throw new Error('opencode is not installed');
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();
 
@@ -510,6 +530,7 @@ export class OpenCodeProvider extends AbsProvider {
     void projectPath;
     void thinkingMode;
 
+    if (!this.isAvailable()) throw new Error('opencode is not installed');
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();
 
