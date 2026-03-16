@@ -81,6 +81,11 @@
 		return () => mql.removeEventListener('change', onChange);
 	});
 
+	// Toggles colorblind-friendly color overrides on the root element.
+	$effect(() => {
+		document.documentElement.classList.toggle('colorblind', preferences.colorblindMode);
+	});
+
 	// Connects WebSocket after authentication.
 	// Uses untrack to prevent the effect from re-running when connect() mutates
 	// internal $state fields (which would cause an infinite reconnect loop).
