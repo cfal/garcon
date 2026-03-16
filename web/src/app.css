@@ -428,7 +428,8 @@
 	}
 
 /* Colorblind-friendly overrides. Uses blue/orange/teal palette
-   distinguishable across protanopia, deuteranopia, and tritanopia. */
+   distinguishable across protanopia and deuteranopia. The +/- symbols
+   in diffs provide a redundant non-color channel for tritanopia. */
 .colorblind {
 	--git-added: 210 80% 45%;
 	--git-deleted: 30 90% 50%;
@@ -438,12 +439,20 @@
 
 	--diff-addition: 210 80% 45%;
 	--diff-deletion: 30 90% 50%;
+	--diff-modified: 180 50% 90%;
+	--diff-modified-foreground: 180 60% 30%;
+	--diff-modified-border: 180 40% 65%;
 	--diff-add-bg: 210 70% 93%;
 	--diff-add-fg: 210 80% 30%;
 	--diff-add-line-num: 210 50% 50%;
 	--diff-del-bg: 30 80% 93%;
 	--diff-del-fg: 30 90% 32%;
 	--diff-del-line-num: 30 50% 50%;
+
+	--markdown-code-addition-bg: 210 70% 93%;
+	--markdown-code-addition-fg: 210 80% 30%;
+	--markdown-code-deletion-bg: 30 80% 93%;
+	--markdown-code-deletion-fg: 30 90% 32%;
 
 	--status-success: 210 60% 90%;
 	--status-success-foreground: 210 80% 30%;
@@ -462,12 +471,20 @@
 
 	--diff-addition: 210 85% 65%;
 	--diff-deletion: 30 92% 65%;
+	--diff-modified: 180 40% 22%;
+	--diff-modified-foreground: 180 65% 75%;
+	--diff-modified-border: 180 40% 40%;
 	--diff-add-bg: 210 60% 14%;
 	--diff-add-fg: 210 80% 82%;
 	--diff-add-line-num: 210 50% 55%;
 	--diff-del-bg: 30 60% 14%;
 	--diff-del-fg: 30 85% 82%;
 	--diff-del-line-num: 30 50% 55%;
+
+	--markdown-code-addition-bg: 210 60% 14%;
+	--markdown-code-addition-fg: 210 80% 82%;
+	--markdown-code-deletion-bg: 30 60% 14%;
+	--markdown-code-deletion-fg: 30 85% 82%;
 
 	--status-success: 210 50% 24%;
 	--status-success-foreground: 210 80% 86%;

@@ -49,8 +49,12 @@
 				},
 				{
 					id: 'toggle-colorblind',
-					label: m.command_toggle_colorblind(),
-					description: m.command_toggle_colorblind_desc(),
+					label: preferences.colorblindMode
+						? m.command_colorblind_disable()
+						: m.command_colorblind_enable(),
+					description: preferences.colorblindMode
+						? m.command_colorblind_disable_desc()
+						: m.command_colorblind_enable_desc(),
 					category: 'Accessibility',
 					action: () => preferences.setPreference('colorblindMode', !preferences.colorblindMode)
 				},
