@@ -85,6 +85,7 @@ interface CodexProviderInstance {
 }
 
 interface OpenCodeProviderInstance {
+  isAvailable(): boolean;
   startSession(request: StartSessionRequest): Promise<string>;
   runTurn(request: ResumeTurnRequest): Promise<void>;
   isRunning(providerSessionId: string): boolean;
