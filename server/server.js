@@ -237,6 +237,11 @@ export async function startServer() {
     });
     providerRegistry.onFailed((chatId, errorMessage) => {
       broadcast(new AgentRunFailedMessage(chatId, errorMessage));
+      queueMicrotask(() => {
+        queue.checkChatIdle(chatId).catch((err) => {
+          console.warn('queue: checkChatIdle error:', err.message);
+        });
+      });
     });
 
     // Wire store events to broadcast. SettingsStore and ChatRegistry emit

@@ -1,11 +1,12 @@
 // Translates low-level provider and queue events into Telegram
 // notifications when a chat requires user attention.
 //
-// Two notification triggers:
+// Three notification triggers:
 // 1. Permission request  - immediate, deduped by permissionRequestId
-// 2. Chat idle            - turn finished and queue drained (completed/failed/stopped)
+// 2. Chat idle           - turn finished and queue drained (completed/failed)
+// 3. Session stopped     - user-initiated abort
 
-import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, UserMessage, AssistantMessage } from '../../common/chat-types.js';
+import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, AssistantMessage } from '../../common/chat-types.js';
 import type { TelegramNotifier } from './telegram.js';
 
 function escapeHtml(text: string): string {
@@ -208,7 +209,7 @@ export class AttentionTracker {
   //   response or status          provider · path
   //   provider · path
   #formatMessage(
-    meta: { title: string; provider: string; projectPath: string },
+    meta: { title: string; hasGeneratedTitle: boolean; provider: string; projectPath: string },
     userMsg: string | null,
     assistantMsg: string | null,
     status: string | null,

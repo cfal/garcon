@@ -255,34 +255,34 @@ export class QueueManager extends EventEmitter {
   async #drain(chatId: string, options: RunProviderTurnOptions): Promise<void> {
     this.#draining.add(chatId);
     try {
-    while (true) {
-      if (this.#providers!.isChatRunning(chatId)) break;
+      while (true) {
+        if (this.#providers!.isChatRunning(chatId)) break;
 
-      const result = await this.popNextChat(chatId);
-      if (!result) {
-        this.emit('chat-idle', chatId);
-        break;
+        const result = await this.popNextChat(chatId);
+        if (!result) {
+          this.emit('chat-idle', chatId);
+          break;
+        }
+
+        const { entry } = result;
+        this.emit('dispatching', chatId, entry.id, entry.content);
+
+        if (this.#historyCache) {
+          const userMsg = new UserMessage(new Date().toISOString(), String(entry.content));
+          this.#historyCache.appendMessages(chatId, [userMsg]).catch((err: Error) => {
+            console.warn(`queue: failed to append queued message for ${chatId}:`, err.message);
+          });
+        }
+
+        try {
+          await this.#providers!.runProviderTurn(chatId, entry.content, options);
+          await this.removeSentChat(chatId, entry.id);
+        } catch (error: unknown) {
+          console.error('queue: error processing queued message:', (error as Error).message);
+          await this.resetAndPauseChat(chatId, entry.id);
+          break;
+        }
       }
-
-      const { entry } = result;
-      this.emit('dispatching', chatId, entry.id, entry.content);
-
-      if (this.#historyCache) {
-        const userMsg = new UserMessage(new Date().toISOString(), String(entry.content));
-        this.#historyCache.appendMessages(chatId, [userMsg]).catch((err: Error) => {
-          console.warn(`queue: failed to append queued message for ${chatId}:`, err.message);
-        });
-      }
-
-      try {
-        await this.#providers!.runProviderTurn(chatId, entry.content, options);
-        await this.removeSentChat(chatId, entry.id);
-      } catch (error: unknown) {
-        console.error('queue: error processing queued message:', (error as Error).message);
-        await this.resetAndPauseChat(chatId, entry.id);
-        break;
-      }
-    }
     } finally {
       this.#draining.delete(chatId);
     }
