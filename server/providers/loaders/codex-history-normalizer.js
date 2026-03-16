@@ -1,7 +1,7 @@
 // Pure normalization functions for converting Codex JSONL entries into
 // ChatMessage objects. Tool conversion is delegated to codex-tool-use.js.
 
-import { normalizeToolResultContent } from '../../chats/normalize.js';
+import { normalizeToolResultContent } from '../normalize-util.js';
 import { UserMessage, AssistantMessage, ThinkingMessage, WebSearchToolUseMessage, ToolResultMessage } from '../../../common/chat-types.js';
 import { convertCodexFunctionCall, convertCodexCustomToolCall } from '../converters/codex-tool-use.js';
 

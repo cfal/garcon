@@ -8,10 +8,6 @@ mock.module('../../providers/loaders/claude-history-loader.js', () => ({
   getClaudeSessionMessagesFromNativePath: mock(() => undefined),
 }));
 
-mock.module('../../projects/codex.js', () => ({
-  findCodexSessionFileBySessionId: mock(() => undefined),
-}));
-
 mock.module('../../chats/resolve-native-path.js', () => ({
   resolveMissingNativePath: mock(() => null),
 }));

@@ -10,6 +10,7 @@
 	import Search from '@lucide/svelte/icons/search';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Minus from '@lucide/svelte/icons/minus';
+	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import type { GitTreeNode, GitChangeKind } from '$lib/api/git.js';
 
 	interface GitFileTreeProps {
@@ -26,6 +27,7 @@
 		onUnstageFile?: (path: string) => void;
 		onStageDir?: (path: string) => void;
 		onUnstageDir?: (path: string) => void;
+		onDiscardFile?: (path: string) => void;
 		/** When true, stage/unstage buttons are always visible (for touch). */
 		alwaysShowActions?: boolean;
 	}
@@ -44,6 +46,7 @@
 		onUnstageFile,
 		onStageDir,
 		onUnstageDir,
+		onDiscardFile,
 		alwaysShowActions = false,
 	}: GitFileTreeProps = $props();
 
@@ -246,6 +249,15 @@
 					<Minus class="w-3 h-3 text-git-deleted" />
 				</button>
 			{:else if !node.staged && node.hasUnstaged && onStageFile}
+				{#if onDiscardFile}
+					<button
+						onclick={(e) => { e.stopPropagation(); onDiscardFile(node.path); }}
+						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-status-error/20 transition-opacity shrink-0"
+						title="Discard changes"
+					>
+						<Undo2 class="w-3 h-3 text-muted-foreground hover:text-status-error-foreground" />
+					</button>
+				{/if}
 				<button
 					onclick={(e) => { e.stopPropagation(); onStageFile(node.path); }}
 					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
@@ -254,6 +266,15 @@
 					<Plus class="w-3 h-3 text-git-added" />
 				</button>
 			{:else if node.changeKind === 'untracked' && onStageFile}
+				{#if onDiscardFile}
+					<button
+						onclick={(e) => { e.stopPropagation(); onDiscardFile(node.path); }}
+						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-status-error/20 transition-opacity shrink-0"
+						title="Delete untracked file"
+					>
+						<Undo2 class="w-3 h-3 text-muted-foreground hover:text-status-error-foreground" />
+					</button>
+				{/if}
 				<button
 					onclick={(e) => { e.stopPropagation(); onStageFile(node.path); }}
 					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"

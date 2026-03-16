@@ -4,7 +4,6 @@
 // can resolve chat data without knowing per-provider details.
 
 import crypto from 'crypto';
-import { findCodexSessionFileBySessionId } from '../projects/codex.js';
 import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude } from './claude-cli.js';
 import { runSingleQuery as runSingleQueryCodex } from './codex.js';
 import { runSingleQuery as runSingleQueryAmp } from './amp-cli.js';
@@ -25,6 +24,7 @@ import type {
   ProviderChatEntry,
   ProviderName,
   StartSessionRequest,
+  StartedProviderSession,
   ClaudeStartSessionRequest,
   ResumeTurnRequest,
   RequiredChatExecutionConfig,
@@ -71,7 +71,7 @@ interface ClaudeProviderInstance {
 }
 
 interface CodexProviderInstance {
-  startSession(request: StartSessionRequest): Promise<string>;
+  startSession(request: StartSessionRequest): Promise<StartedProviderSession>;
   runTurn(request: ResumeTurnRequest): Promise<void>;
   isRunning(providerSessionId: string): boolean;
   abort(providerSessionId: string): boolean;
@@ -175,8 +175,7 @@ export class ProviderRegistry {
     }
 
     if (entry.provider === 'codex') {
-      const providerSessionId = await this.#codex.startSession(request);
-      const nativePath = await findCodexSessionFileBySessionId(providerSessionId);
+      const { providerSessionId, nativePath } = await this.#codex.startSession(request);
       this.#registry.updateChat(chatId, { providerSessionId, nativePath });
       return;
     }

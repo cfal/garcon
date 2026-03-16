@@ -5,6 +5,11 @@ import path from 'node:path';
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 15000;
 const SHUTDOWN_TIMEOUT_MS = 5000;
+const executableNamesByHost = {
+  'linux-x64': 'garcon-linux-x64',
+  'darwin-arm64': 'garcon-darwin-arm64',
+  'windows-x64': 'garcon-windows-x64.exe',
+};
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -74,8 +79,38 @@ async function stopProcess(processHandle) {
   ]);
 }
 
+function getHostTarget() {
+  return `${process.platform}-${process.arch}`;
+}
+
+function parseExecutablePath(argv) {
+  const explicitPath = argv.find((argument) => argument.startsWith('--path='));
+  if (explicitPath) {
+    return path.resolve(process.cwd(), explicitPath.slice('--path='.length));
+  }
+
+  const explicitTarget = argv.find((argument) => argument.startsWith('--target='));
+  if (explicitTarget) {
+    const target = explicitTarget.slice('--target='.length).trim();
+    const executableName = executableNamesByHost[target];
+    if (!executableName) {
+      const supportedTargets = Object.keys(executableNamesByHost).join(', ');
+      throw new Error(`Unsupported smoke target "${target}". Supported targets: ${supportedTargets}.`);
+    }
+    return path.resolve(process.cwd(), 'dist', executableName);
+  }
+
+  const executableName = executableNamesByHost[getHostTarget()];
+  if (!executableName) {
+    const supportedTargets = Object.keys(executableNamesByHost).join(', ');
+    throw new Error(`Unsupported host target "${getHostTarget()}". Supported targets: ${supportedTargets}.`);
+  }
+
+  return path.resolve(process.cwd(), 'dist', executableName);
+}
+
 async function run() {
-  const executablePath = path.resolve(process.cwd(), 'dist', 'garcon');
+  const executablePath = parseExecutablePath(Bun.argv.slice(2));
   if (!(await Bun.file(executablePath).exists())) {
     throw new Error(`Missing executable at ${executablePath}. Run "bun run build-exe:compile" first.`);
   }

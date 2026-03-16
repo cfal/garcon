@@ -32,6 +32,11 @@ export interface StartSessionRequest extends ProviderExecutionConfig {
   images?: AgentCommandImage[];
 }
 
+export interface StartedProviderSession {
+  providerSessionId: string;
+  nativePath: string | null;
+}
+
 // Claude start requires a pre-generated providerSessionId.
 export interface ClaudeStartSessionRequest extends StartSessionRequest {
   providerSessionId: string;

@@ -2,7 +2,7 @@
 // through typed events wired in the composition root.
 
 import crypto from 'crypto';
-import { normalizeToolResultContent } from '../chats/normalize.js';
+import { normalizeToolResultContent } from './normalize-util.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
 import { convertOpenCodeToolUse } from './converters/opencode-tool-use.js';
 import { AbsProvider } from './base.js';
