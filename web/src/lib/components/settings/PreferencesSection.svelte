@@ -10,7 +10,8 @@
 	import type { SessionProvider } from '$lib/types/app';
 	import { onMount } from 'svelte';
 	import { getModelCatalog, getPreferences } from '$lib/context';
-	import { getSettings, updateSettings } from '$lib/api/settings.js';
+	import { getSettings, updateSettings, sendTelegramTest } from '$lib/api/settings.js';
+	import SendIcon from '@lucide/svelte/icons/send';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const preferences = getPreferences();
@@ -38,6 +39,13 @@
 	let availableTitleModels = $derived(modelCatalog.getModels(titleProvider));
 	let availableProviders = $derived(modelCatalog.getProviders());
 
+	// Telegram notification settings (server-persisted).
+	let telegramBotAvailable = $state(false);
+	let telegramEnabled = $state(false);
+	let telegramChatId = $state('');
+	let telegramTestSending = $state(false);
+	let telegramTestResult = $state<{ ok: boolean; message: string } | null>(null);
+
 	onMount(async () => {
 		const settings = await getSettings();
 		const ui = (settings.ui ?? {}) as Record<string, unknown>;
@@ -58,6 +66,13 @@
 		if (!titleModel && titleProviderModels.length > 0) {
 			titleModel = titleProviderModels[0].value;
 		}
+
+		// Hydrate Telegram notification settings.
+		telegramBotAvailable = settings.telegramBotTokenAvailable === true;
+		const notifications = (ui.notifications ?? {}) as Record<string, unknown>;
+		const telegram = (notifications.telegram ?? {}) as Record<string, unknown>;
+		telegramEnabled = telegram.enabled === true;
+		telegramChatId = typeof telegram.chatId === 'string' ? telegram.chatId : '';
 	});
 
 	function providerLabel(provider: SessionProvider): string {
@@ -69,6 +84,35 @@
 	async function onPinnedInsertPositionChange(next: PinnedInsertPosition) {
 		pinnedInsertPosition = next;
 		await updateSettings({ ui: { pinnedInsertPosition: next } });
+	}
+
+	async function persistTelegramSettings() {
+		await updateSettings({
+			ui: {
+				notifications: {
+					telegram: {
+						enabled: telegramEnabled,
+						chatId: telegramChatId,
+					},
+				},
+			},
+		});
+	}
+
+	async function handleTelegramTest() {
+		if (!telegramChatId.trim()) return;
+		telegramTestSending = true;
+		telegramTestResult = null;
+		try {
+			const res = await sendTelegramTest(telegramChatId.trim());
+			telegramTestResult = res.success
+				? { ok: true, message: 'Test message sent.' }
+				: { ok: false, message: res.error ?? 'Send failed.' };
+		} catch {
+			telegramTestResult = { ok: false, message: 'Request failed.' };
+		} finally {
+			telegramTestSending = false;
+		}
 	}
 
 	async function persistChatTitleSettings() {
@@ -226,6 +270,65 @@
 						<option value={opt.value}>{opt.label}</option>
 					{/each}
 				</select>
+			</div>
+		{/if}
+	</div>
+
+	<!-- Telegram Notifications -->
+	<div class="bg-muted/50 border border-border rounded-lg px-4" data-section="telegram">
+		<div class="flex items-center justify-between py-2">
+			<div class="text-sm font-medium text-foreground">Telegram notifications</div>
+			<Switch
+				checked={telegramEnabled}
+				disabled={!telegramBotAvailable}
+				onCheckedChange={async (next) => {
+					telegramEnabled = Boolean(next);
+					await persistTelegramSettings();
+				}}
+				aria-label="Telegram notifications"
+			/>
+		</div>
+
+		{#if !telegramBotAvailable}
+			<p class="text-xs text-muted-foreground pb-2">
+				Set <code class="text-xs bg-muted px-1 py-0.5 rounded">GARCON_TELEGRAM_BOT_TOKEN</code> to enable.
+			</p>
+		{/if}
+
+		{#if telegramBotAvailable && telegramEnabled}
+			<div class="flex items-center justify-between py-2 gap-3">
+				<div class="text-sm font-medium text-foreground shrink-0">Chat ID</div>
+				<input
+					type="text"
+					class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground w-40"
+					placeholder="123456789"
+					value={telegramChatId}
+					oninput={(e) => {
+						telegramChatId = (e.currentTarget as HTMLInputElement).value;
+					}}
+					onblur={async () => {
+						await persistTelegramSettings();
+					}}
+				/>
+			</div>
+
+			<div class="flex items-center justify-between py-2 pb-3">
+				<div class="flex items-center gap-2">
+					{#if telegramTestResult}
+						<span class="text-xs {telegramTestResult.ok ? 'text-emerald-500' : 'text-red-500'}">
+							{telegramTestResult.message}
+						</span>
+					{/if}
+				</div>
+				<Button
+					variant="outline"
+					size="sm"
+					disabled={telegramTestSending || !telegramChatId.trim()}
+					onclick={handleTelegramTest}
+				>
+					<SendIcon class="size-3.5 mr-1.5" />
+					{telegramTestSending ? 'Sending...' : 'Send test'}
+				</Button>
 			</div>
 		{/if}
 	</div>

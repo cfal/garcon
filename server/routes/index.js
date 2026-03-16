@@ -7,14 +7,14 @@ import createGitRoutes from './git.js';
 import createChatRoutes from './chats.js';
 import createWorkspaceRoutes from './workspace.js';
 
-export default function createAllRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers) {
+export default function createAllRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers, telegramNotifier) {
   return {
     ...staticRoutes,
     ...authRoutes,
     ...createProviderRoutes(providers),
     ...createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers),
     ...createFilesRoutes(registry),
-    ...createWorkspaceRoutes(settings, providers),
+    ...createWorkspaceRoutes(settings, providers, telegramNotifier),
     ...createModelsRoutes(providers),
     ...createGitRoutes(providers, settings),
   };

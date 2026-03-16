@@ -236,4 +236,67 @@ describe('orchestration', () => {
       ]);
     });
   });
+
+  describe('chat-idle event', () => {
+    it('fires after drain completes with empty queue', async () => {
+      await orchQueue.enqueueChat('c1', 'msg');
+
+      const idleEvents = [];
+      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+
+      await orchQueue.triggerDrain('c1', {});
+      expect(idleEvents).toHaveLength(1);
+      expect(idleEvents[0]).toBe('c1');
+    });
+
+    it('fires after submit drains to empty queue', async () => {
+      const idleEvents = [];
+      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+
+      await orchQueue.submit('c1', 'hello', {});
+      expect(idleEvents).toHaveLength(1);
+      expect(idleEvents[0]).toBe('c1');
+    });
+
+    it('does NOT fire when drain exits because provider is running', async () => {
+      await orchQueue.enqueueChat('c1', 'msg');
+      mockProviders.isChatRunning.mockReturnValue(true);
+
+      const idleEvents = [];
+      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+
+      await orchQueue.triggerDrain('c1', {});
+      expect(idleEvents).toHaveLength(0);
+    });
+  });
+
+  describe('checkChatIdle', () => {
+    it('emits chat-idle when queue is empty and provider not running', async () => {
+      const idleEvents = [];
+      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+
+      await orchQueue.checkChatIdle('c1');
+      expect(idleEvents).toEqual(['c1']);
+    });
+
+    it('does NOT emit when provider is running', async () => {
+      mockProviders.isChatRunning.mockReturnValue(true);
+
+      const idleEvents = [];
+      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+
+      await orchQueue.checkChatIdle('c1');
+      expect(idleEvents).toHaveLength(0);
+    });
+
+    it('does NOT emit when queue has pending entries', async () => {
+      await orchQueue.enqueueChat('c1', 'pending msg');
+
+      const idleEvents = [];
+      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+
+      await orchQueue.checkChatIdle('c1');
+      expect(idleEvents).toHaveLength(0);
+    });
+  });
 });
