@@ -6,6 +6,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 <script lang="ts">
 	import SvelteMarkdown, { defaultRenderers, buildUnsupportedHTML } from '@humanspeak/svelte-markdown';
 	import CodeBlock from './CodeBlock.svelte';
+	import MermaidBlock from './MermaidBlock.svelte';
 	import { parseFileLink } from '$lib/chat/file-link-parser';
 
 	type MarkdownVariant = 'assistant' | 'user' | 'thinking';
@@ -74,7 +75,16 @@ Supports visual variants for assistant, user, and thinking contexts.
 <div class={containerClass}>
 	<SvelteMarkdown {source} options={markdownOptions} renderers={safeRenderers}>
 		{#snippet code({ lang, text })}
-			<CodeBlock {lang} {text} />
+			{#if lang === 'mermaid'}
+				<svelte:boundary>
+					<MermaidBlock {text} />
+					{#snippet failed()}
+						<CodeBlock lang="mermaid" {text} />
+					{/snippet}
+				</svelte:boundary>
+			{:else}
+				<CodeBlock {lang} {text} />
+			{/if}
 		{/snippet}
 
 		{#snippet codespan({ raw })}
