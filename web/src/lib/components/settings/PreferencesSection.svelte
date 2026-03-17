@@ -63,6 +63,7 @@
 	function providerLabel(provider: SessionProvider): string {
 		if (provider === 'claude') return m.provider_claude();
 		if (provider === 'codex') return m.provider_codex();
+		if (provider === 'amp') return m.provider_amp();
 		return m.provider_opencode();
 	}
 
