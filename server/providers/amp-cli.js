@@ -174,7 +174,7 @@ async function runSingleQuery(prompt, { cwd } = {}) {
   const args = [
     ...AMP_DEFAULT_FLAGS,
     '--dangerously-allow-all',
-    '--stream-json',
+    '--stream-json-thinking',
     '-x',
   ];
   let raw = '';
@@ -387,7 +387,7 @@ class AmpProvider extends AbsProvider {
       'threads', 'continue', threadId,
       ...AMP_DEFAULT_FLAGS,
       '--dangerously-allow-all',
-      '--stream-json',
+      '--stream-json-thinking',
       '-x',
     ];
 
@@ -444,7 +444,7 @@ class AmpProvider extends AbsProvider {
       'threads', 'continue', threadId,
       ...AMP_DEFAULT_FLAGS,
       '--dangerously-allow-all',
-      '--stream-json',
+      '--stream-json-thinking',
       '-x',
     ];
 
