@@ -309,6 +309,10 @@ class AmpProvider extends AbsProvider {
         this.#finalizeTurn(session);
         break;
 
+      case 'user':
+        // skip user messages
+        break;
+
       default:
         console.info(`amp(${session.id.slice(0, 8)}): unrecognized message type: ${msg.type}`);
         break;
