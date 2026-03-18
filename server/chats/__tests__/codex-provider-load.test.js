@@ -88,6 +88,71 @@ describe('loadCodexChatMessages', () => {
     ]);
   });
 
+  it('prefers event_msg user content over duplicate response_item user wrappers', async () => {
+    const ts = '2026-02-21T11:30:00.000Z';
+    const lines = [
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '# AGENTS.md instructions for /garcon\n\n<INSTRUCTIONS>...' }],
+        },
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '<environment_context>\n  <cwd>/garcon</cwd>\n</environment_context>' }],
+        },
+      }),
+      JSON.stringify({
+        type: 'event_msg',
+        timestamp: ts,
+        payload: { type: 'user_message', message: 'actual user prompt' },
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'actual user prompt' }],
+        },
+      }),
+    ];
+
+    const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
+
+    expect(messages).toEqual([
+      { type: 'user-message', timestamp: ts, content: 'actual user prompt' },
+    ]);
+  });
+
+  it('falls back to response_item user content when event_msg user entries are missing', async () => {
+    const ts = '2026-02-21T11:35:00.000Z';
+    const lines = [
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'user prompt from response item' }],
+        },
+      }),
+    ];
+
+    const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
+
+    expect(messages).toEqual([
+      { type: 'user-message', timestamp: ts, content: 'user prompt from response item' },
+    ]);
+  });
+
   it('per-content-class dedup: canonical assistant suppresses fallback assistant but keeps fallback thinking', async () => {
     const ts1 = '2026-02-21T12:00:00.000Z';
     const ts2 = '2026-02-21T12:00:01.000Z';
@@ -267,4 +332,3 @@ describe('loadCodexChatMessages', () => {
     expect(result).toEqual([]);
   });
 });
-

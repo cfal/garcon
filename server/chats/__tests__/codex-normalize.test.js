@@ -130,6 +130,8 @@ describe('normalizeCodexJsonlEntry', () => {
       expect(result.canonical).toEqual([
         { type: 'user-message', timestamp: ts, content: 'hello world' },
       ]);
+      expect(result.isCanonicalUser).toBe(true);
+      expect(result.fallbackUser).toEqual([]);
       expect(result.fallbackAssistant).toEqual([]);
       expect(result.fallbackThinking).toEqual([]);
     });
@@ -208,7 +210,7 @@ describe('normalizeCodexJsonlEntry', () => {
   });
 
   describe('response_item message role=user', () => {
-    it('produces canonical user-message', () => {
+    it('produces fallback user-message', () => {
       const entry = {
         type: 'response_item',
         timestamp: ts,
@@ -219,7 +221,9 @@ describe('normalizeCodexJsonlEntry', () => {
         },
       };
       const result = normalizeCodexJsonlEntry(entry);
-      expect(result.canonical).toEqual([
+      expect(result.isCanonicalUser).toBe(false);
+      expect(result.canonical).toEqual([]);
+      expect(result.fallbackUser).toEqual([
         { type: 'user-message', timestamp: ts, content: 'user instruction' },
       ]);
     });

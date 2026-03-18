@@ -42,12 +42,12 @@ export function parseApplyPatch(input) {
 
 // Normalizes a single parsed JSONL entry into zero or more ChatMessage
 // objects. Returns an object describing the messages produced and whether
-// they represent canonical (response_item) or fallback (event_msg)
-// content for dedup purposes.
+// they represent canonical or fallback content for dedup purposes.
 //
 // Return shape:
-//   { canonical: ChatMessage[], fallbackAssistant: ChatMessage[],
-//     fallbackThinking: ChatMessage[], isCanonicalAssistant: bool,
+//   { canonical: ChatMessage[], fallbackUser: ChatMessage[],
+//     fallbackAssistant: ChatMessage[], fallbackThinking: ChatMessage[],
+//     isCanonicalUser: bool, isCanonicalAssistant: bool,
 //     isCanonicalThinking: bool }
 //   or null when the entry should be skipped entirely.
 export function normalizeCodexJsonlEntry(entry) {
@@ -71,8 +71,10 @@ function normalizeEventMsg(payload, ts) {
   if (!payload) return null;
   const result = {
     canonical: [],
+    fallbackUser: [],
     fallbackAssistant: [],
     fallbackThinking: [],
+    isCanonicalUser: false,
     isCanonicalAssistant: false,
     isCanonicalThinking: false,
   };
@@ -81,6 +83,7 @@ function normalizeEventMsg(payload, ts) {
     case 'user_message': {
       const text = payload.message;
       if (text?.trim()) {
+        result.isCanonicalUser = true;
         result.canonical.push(new UserMessage(ts, text));
       }
       return result;
@@ -120,8 +123,10 @@ function normalizeResponseItem(payload, ts) {
   if (!payload) return null;
   const result = {
     canonical: [],
+    fallbackUser: [],
     fallbackAssistant: [],
     fallbackThinking: [],
+    isCanonicalUser: false,
     isCanonicalAssistant: false,
     isCanonicalThinking: false,
   };
@@ -142,7 +147,7 @@ function normalizeResponseItem(payload, ts) {
       if (payload.role === 'user') {
         const textContent = extractTextContent(payload.content);
         if (textContent?.trim()) {
-          result.canonical.push(new UserMessage(ts, textContent));
+          result.fallbackUser.push(new UserMessage(ts, textContent));
         }
         return result;
       }
