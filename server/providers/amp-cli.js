@@ -8,7 +8,7 @@ import path from 'path';
 import { normalizeToolResultContent } from './normalize-util.js';
 import { getAmpBinary } from '../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage } from '../../common/chat-types.js';
-import { convertClaudeToolUse } from './converters/claude-tool-use.js';
+import { convertAmpToolUse } from './converters/amp-tool-use.js';
 import { AbsProvider } from './base.js';
 import { createArtificialNativePath } from '../chats/artificial-native-path.js';
 
@@ -38,7 +38,7 @@ function convertAmpMessageToChatMessages(msg) {
       chatMessages.push(new ThinkingMessage(now, part.thinking));
     }
     if (part.type === 'tool_use') {
-      chatMessages.push(convertClaudeToolUse(now, part));
+      chatMessages.push(convertAmpToolUse(now, part));
     }
     if (part.type === 'tool_result') {
       chatMessages.push(new ToolResultMessage(now, part.tool_use_id || '', normalizeToolResultContent(part.content), Boolean(part.is_error)));

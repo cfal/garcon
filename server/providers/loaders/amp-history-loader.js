@@ -1,5 +1,5 @@
 import { AssistantMessage, ErrorMessage, ThinkingMessage, ToolResultMessage, UserMessage } from '../../../common/chat-types.js';
-import { convertClaudeToolUse } from '../converters/claude-tool-use.js';
+import { convertAmpToolUse } from '../converters/amp-tool-use.js';
 import { normalizeToolResultContent } from '../normalize-util.js';
 
 function toIsoString(value) {
@@ -98,7 +98,7 @@ export function loadAmpChatMessages(threadExport) {
         } else if (part?.type === 'text' && part.text?.trim()) {
           messages.push(new AssistantMessage(timestamp, part.text));
         } else if (part?.type === 'tool_use') {
-          messages.push(convertClaudeToolUse(timestamp, part));
+          messages.push(convertAmpToolUse(timestamp, part));
         }
       }
       continue;
