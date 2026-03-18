@@ -49,6 +49,35 @@ function createFakeProc() {
   return proc;
 }
 
+function createFakeCommandProc(stdoutText, exitCode = 0) {
+  const encoder = new TextEncoder();
+  const stdout = new ReadableStream({
+    start(controller) {
+      if (stdoutText) {
+        controller.enqueue(encoder.encode(stdoutText));
+      }
+      controller.close();
+    },
+  });
+
+  const stderr = new ReadableStream({
+    start(controller) {
+      controller.close();
+    },
+  });
+
+  return {
+    stdout,
+    stderr,
+    stdin: {
+      write() { },
+      end() { },
+    },
+    killed: false,
+    exited: Promise.resolve(exitCode),
+  };
+}
+
 describe('AmpProvider lifecycle', () => {
   let originalSpawn;
   let spawnMock;
@@ -65,8 +94,10 @@ describe('AmpProvider lifecycle', () => {
 
   it('resolves startSession on thread init before the turn finishes', async () => {
     const provider = new AmpProvider();
+    const threadId = 'T-11111111-1111-1111-1111-111111111111';
+    const createThreadProc = createFakeCommandProc(`${threadId}\n`);
     const proc = createFakeProc();
-    spawnMock.mockReturnValue(proc);
+    spawnMock.mockReturnValueOnce(createThreadProc).mockReturnValueOnce(proc);
 
     const startedPromise = provider.startSession('hello', {
       chatId: 'chat-1',
@@ -74,17 +105,11 @@ describe('AmpProvider lifecycle', () => {
       model: 'default',
     });
 
-    proc.pushJson({
-      type: 'system',
-      subtype: 'init',
-      thread_id: 'T-amp-1',
-    });
-
     const started = await startedPromise;
 
     expect(started).toEqual({
-      providerSessionId: 'T-amp-1',
-      nativePath: '!amp:T-amp-1',
+      providerSessionId: threadId,
+      nativePath: `!amp:${threadId}`,
     });
 
     proc.pushJson({
@@ -101,20 +126,19 @@ describe('AmpProvider lifecycle', () => {
     provider.onFailed(failed);
     provider.onMessages(messages);
 
+    const threadId = 'T-22222222-2222-2222-2222-222222222222';
+    const createThreadProc = createFakeCommandProc(`${threadId}\n`);
     const firstProc = createFakeProc();
     const secondProc = createFakeProc();
-    spawnMock.mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc);
+    spawnMock
+      .mockReturnValueOnce(createThreadProc)
+      .mockReturnValueOnce(firstProc)
+      .mockReturnValueOnce(secondProc);
 
     const startedPromise = provider.startSession('hello', {
       chatId: 'chat-2',
       cwd: '/proj',
       model: 'default',
-    });
-
-    firstProc.pushJson({
-      type: 'system',
-      subtype: 'init',
-      thread_id: 'T-amp-2',
     });
 
     const started = await startedPromise;
