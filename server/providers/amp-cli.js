@@ -8,6 +8,33 @@ import { getAmpBinary } from '../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage } from '../../common/chat-types.js';
 import { convertClaudeToolUse } from './converters/claude-tool-use.js';
 import { AbsProvider } from './base.js';
+import { createArtificialNativePath } from '../chats/artificial-native-path.js';
+
+const AMP_DEFAULT_FLAGS = [
+  '--no-ide',
+  '--no-color',
+  '--no-jetbrains',
+  '--no-notifications',
+];
+
+function createStartedSessionTracker() {
+  let resolveRef = null;
+  let rejectRef = null;
+  const promise = new Promise((resolve, reject) => {
+    resolveRef = resolve;
+    rejectRef = reject;
+  });
+  return {
+    resolved: false,
+    promise,
+    resolve: (session) => {
+      if (resolveRef) resolveRef(session);
+    },
+    reject: (error) => {
+      if (rejectRef) rejectRef(error);
+    },
+  };
+}
 
 // Converts an Amp CLI assistant message to ChatMessage objects.
 function convertAmpMessageToChatMessages(msg) {
@@ -38,45 +65,83 @@ function convertAmpMessageToChatMessages(msg) {
   return chatMessages;
 }
 
-// Runs a one-shot Amp CLI query and returns the plain text output.
-async function runSingleQuery(prompt, { cwd } = {}) {
-  const ampBinary = getAmpBinary();
-  const args = [
-    '--no-ide',
-    '--no-notifications',
-    '--dangerously-allow-all',
-    '--stream-json',
-    '-x',
-  ];
-
-  const proc = Bun.spawn([ampBinary, ...args], {
-    cwd: cwd || process.cwd(),
-    stdin: 'pipe',
-    stdout: 'pipe',
-    stderr: 'ignore',
-  });
-
-  proc.stdin.write(prompt);
-  proc.stdin.end();
-
+async function readAmpStdout(proc) {
   const chunks = [];
   const reader = proc.stdout.getReader();
   const decoder = new TextDecoder();
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-  } catch (err) {
-    console.error('amp: one-shot stdout read error:', err.message);
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
   }
 
-  await proc.exited;
+  return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
+}
+
+async function runAmpCommand(args, { cwd, input } = {}) {
+  const ampBinary = getAmpBinary();
+  const proc = Bun.spawn([ampBinary, ...args], {
+    cwd: cwd || process.cwd(),
+    stdin: input == null ? 'ignore' : 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  if (input != null) {
+    proc.stdin.write(input);
+    proc.stdin.end();
+  }
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    readAmpStdout(proc),
+    proc.stderr ? new Response(proc.stderr).text() : Promise.resolve(''),
+    proc.exited,
+  ]);
+
+  if (exitCode !== 0) {
+    const details = (stderr || stdout || '').trim();
+    throw new Error(`Amp command failed with code ${exitCode}${details ? `: ${details}` : ''}`);
+  }
+
+  return stdout;
+}
+
+async function exportThread(threadId, { cwd } = {}) {
+  if (!threadId) throw new Error('threadId is required');
+
+  const raw = await runAmpCommand([
+    'threads',
+    'export',
+    threadId,
+    ...AMP_DEFAULT_FLAGS,
+  ], { cwd });
+
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`Failed to parse Amp thread export JSON: ${error.message}`);
+  }
+}
+
+// Runs a one-shot Amp CLI query and returns the plain text output.
+async function runSingleQuery(prompt, { cwd } = {}) {
+  const args = [
+    ...AMP_DEFAULT_FLAGS,
+    '--dangerously-allow-all',
+    '--stream-json',
+    '-x',
+  ];
+  let raw = '';
+
+  try {
+    raw = await runAmpCommand(args, { cwd, input: prompt });
+  } catch (err) {
+    console.error('amp: one-shot stdout read error:', err.message);
+    throw err;
+  }
 
   // Parse JSONL and concatenate assistant text parts.
-  const raw = chunks.map((c) => decoder.decode(c, { stream: true })).join('') + decoder.decode();
   const textParts = [];
 
   for (const line of raw.split('\n')) {
@@ -109,6 +174,22 @@ class AmpProvider extends AbsProvider {
     super();
   }
 
+  #resolveStartedSession(session) {
+    if (session.startedSession?.resolved || !session.threadId) return;
+    session.startedSession.resolved = true;
+    session.startedSession.resolve({
+      providerSessionId: session.threadId,
+      nativePath: createArtificialNativePath('amp', session.threadId),
+    });
+  }
+
+  #rekeySession(session, nextId) {
+    if (!nextId || session.id === nextId) return;
+    this.#runningSessions.delete(session.id);
+    session.id = nextId;
+    this.#runningSessions.set(nextId, session);
+  }
+
   #routeMessage(session, msg) {
     switch (msg.type) {
       case 'system':
@@ -117,6 +198,8 @@ class AmpProvider extends AbsProvider {
           console.log(`amp(${session.id.slice(0, 8)}): init, thread_id=${threadId}`);
           if (threadId) {
             session.threadId = threadId;
+            this.#rekeySession(session, threadId);
+            this.#resolveStartedSession(session);
           }
         }
         break;
@@ -187,7 +270,16 @@ class AmpProvider extends AbsProvider {
     session.isRunning = false;
     if (wasRunning) this.emitProcessing(session.chatId, false);
 
-    if (!session.resultSeen) {
+    if (session.startedSession && !session.startedSession.resolved) {
+      if (session.threadId) {
+        this.#resolveStartedSession(session);
+      } else {
+        session.startedSession.resolved = true;
+        session.startedSession.reject(new Error(`Amp session exited before thread ID was initialized${exitCode != null ? ` (code ${exitCode})` : ''}`));
+      }
+    }
+
+    if (!session.resultSeen && !session.aborted) {
       this.emitFailed(session.chatId, `Amp process exited before result${exitCode != null ? ` (code ${exitCode})` : ''}`);
     }
 
@@ -256,26 +348,28 @@ class AmpProvider extends AbsProvider {
   async startSession(command, { chatId, cwd, model, ...opts }) {
     if (!chatId) throw new Error('chatId is required when starting an Amp session');
 
-    const providerSessionId = crypto.randomUUID();
+    const provisionalSessionId = crypto.randomUUID();
+    const startedSession = createStartedSessionTracker();
 
     const session = {
-      id: providerSessionId,
+      id: provisionalSessionId,
       chatId,
       threadId: null,
       isRunning: true,
       resultSeen: false,
       finalized: false,
+      aborted: false,
       turnResolve: null,
       startTime: Date.now(),
       process: null,
+      startedSession,
     };
-    this.#runningSessions.set(providerSessionId, session);
+    this.#runningSessions.set(provisionalSessionId, session);
     this.emitProcessing(chatId, true);
     this.emitSessionCreated(chatId);
 
     const args = [
-      '--no-ide',
-      '--no-notifications',
+      ...AMP_DEFAULT_FLAGS,
       '--dangerously-allow-all',
       '--stream-json',
       '-x',
@@ -284,15 +378,13 @@ class AmpProvider extends AbsProvider {
     try {
       this.#spawnAmp(session, { cwd }, args, command);
     } catch (err) {
-      this.#runningSessions.delete(providerSessionId);
+      this.#runningSessions.delete(provisionalSessionId);
       this.emitProcessing(chatId, false);
       this.emitFailed(chatId, `Amp spawn failed: ${err.message}`);
       throw err;
     }
 
-    await this.#waitForTurnComplete(session);
-
-    return session.threadId || providerSessionId;
+    return startedSession.promise;
   }
 
   async runTurn(command, { sessionId: threadId, chatId, cwd, ...opts }) {
@@ -308,9 +400,11 @@ class AmpProvider extends AbsProvider {
         isRunning: true,
         resultSeen: false,
         finalized: false,
+        aborted: false,
         turnResolve: null,
         startTime: Date.now(),
         process: null,
+        startedSession: null,
       };
       this.#runningSessions.set(threadId, session);
     } else {
@@ -323,14 +417,14 @@ class AmpProvider extends AbsProvider {
       session.isRunning = true;
       session.resultSeen = false;
       session.finalized = false;
+      session.aborted = false;
     }
 
     this.emitProcessing(chatId, true);
 
     const args = [
       'threads', 'continue', threadId,
-      '--no-ide',
-      '--no-notifications',
+      ...AMP_DEFAULT_FLAGS,
       '--dangerously-allow-all',
       '--stream-json',
       '-x',
@@ -348,10 +442,15 @@ class AmpProvider extends AbsProvider {
     await this.#waitForTurnComplete(session);
   }
 
+  async exportThread(threadId, { cwd } = {}) {
+    return exportThread(threadId, { cwd });
+  }
+
   abort(providerSessionId) {
     const session = this.#runningSessions.get(providerSessionId);
     if (!session?.process) return false;
 
+    session.aborted = true;
     session.process.kill();
     return true;
   }
@@ -388,4 +487,4 @@ class AmpProvider extends AbsProvider {
   }
 }
 
-export { AmpProvider, convertAmpMessageToChatMessages, runSingleQuery };
+export { AMP_DEFAULT_FLAGS, AmpProvider, convertAmpMessageToChatMessages, exportThread, runSingleQuery };

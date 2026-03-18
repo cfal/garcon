@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { ProviderName } from '../providers/types.js';
+import { isArtificialNativePath } from './artificial-native-path.js';
 
 const NATIVE_PATH_LRU_MAX = 64;
 const ALLOWED_PATCH_FIELDS = [
@@ -153,7 +154,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       }
 
       if (session.nativePath) {
-        if (session.provider === 'opencode') continue;
+        if (isArtificialNativePath(session.nativePath)) continue;
         try {
           await fs.access(session.nativePath);
           continue;

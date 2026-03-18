@@ -5,6 +5,7 @@
 import { promises as fs } from 'fs';
 import { findCodexSessionFileBySessionId } from '../providers/codex.js';
 import { createClaudeNativePath } from '../providers/claude-cli.js';
+import { createArtificialNativePath } from './artificial-native-path.js';
 
 export async function resolveMissingNativePath(session) {
   if (!session || !session.providerSessionId) {
@@ -27,7 +28,11 @@ export async function resolveMissingNativePath(session) {
   }
 
   if (session.provider === 'opencode') {
-    return `opencode:${session.providerSessionId}`;
+    return createArtificialNativePath(session.provider, session.providerSessionId);
+  }
+
+  if (session.provider === 'amp') {
+    return createArtificialNativePath(session.provider, session.providerSessionId);
   }
 
   return null;

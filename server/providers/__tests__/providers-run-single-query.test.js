@@ -8,6 +8,7 @@ import { describe, it, expect, mock, beforeEach } from 'bun:test';
 
 const claudeMock = mock(async () => 'claude-response');
 const codexMock = mock(async () => 'codex-response');
+const ampSingleQueryMock = mock(async () => 'amp-response');
 
 mock.module('../claude-cli.js', () => ({
   runSingleQuery: claudeMock,
@@ -18,6 +19,12 @@ mock.module('../claude-cli.js', () => ({
 mock.module('../codex.js', () => ({
   runSingleQuery: codexMock,
   CodexProvider: class { constructor() {} },
+}));
+
+mock.module('../amp-cli.js', () => ({
+  runSingleQuery: ampSingleQueryMock,
+  exportThread: mock(() => Promise.resolve({ messages: [] })),
+  AmpProvider: class { constructor() {} },
 }));
 
 // Mock the stateless loader imports that ProviderRegistry pulls in
@@ -34,6 +41,11 @@ mock.module('../loaders/codex-history-loader.js', () => ({
 mock.module('../loaders/opencode-history-loader.js', () => ({
   getOpenCodePreviewFromSessionId: mock(() => Promise.resolve(null)),
   loadOpenCodeChatMessages: mock(() => Promise.resolve([])),
+}));
+
+mock.module('../loaders/amp-history-loader.js', () => ({
+  getAmpPreview: mock(() => Promise.resolve(null)),
+  loadAmpChatMessages: mock(() => Promise.resolve([])),
 }));
 
 const opencodeMock = mock(async () => 'opencode-response');
@@ -65,6 +77,11 @@ describe('providers registry runSingleQuery', () => {
   it('routes to opencode provider', async () => {
     const result = await registry.runSingleQuery('test prompt', { provider: 'opencode' });
     expect(result).toBe('opencode-response');
+  });
+
+  it('routes to amp provider', async () => {
+    const result = await registry.runSingleQuery('test prompt', { provider: 'amp' });
+    expect(result).toBe('amp-response');
   });
 
   it('passes options through to the provider', async () => {
@@ -104,8 +121,12 @@ describe('ProviderRegistry session option hydration', () => {
       runTurn: mock(() => Promise.resolve(undefined)),
     };
     mockAmp = {
-      startSession: mock(() => Promise.resolve('amp-session')),
+      startSession: mock(() => Promise.resolve({
+        providerSessionId: 'amp-session',
+        nativePath: '!amp:amp-session',
+      })),
       runTurn: mock(() => Promise.resolve(undefined)),
+      exportThread: mock(() => Promise.resolve({ messages: [] })),
     };
     registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp);
   });
@@ -241,6 +262,23 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'sonnet',
       permissionMode: 'acceptEdits',
       thinkingMode: 'ultrathink',
+    });
+  });
+
+  it('stores the derived native path when starting an Amp session', async () => {
+    mockRegistry.getChat.mockReturnValue({
+      provider: 'amp',
+      projectPath: '/proj',
+      model: 'default',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    await registry.startSession('123', 'hello', {});
+
+    expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+      providerSessionId: 'amp-session',
+      nativePath: '!amp:amp-session',
     });
   });
 });
