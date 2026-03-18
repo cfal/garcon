@@ -28,8 +28,8 @@ describe('plan mode handler', () => {
 		handlePlanModeMessages(message, ctx);
 		const pending = read();
 		expect(pending).toHaveLength(1);
-		expect(pending[0].toolName).toBe('ExitPlanMode');
-		expect(pending[0].toolInput).toEqual({ plan: 'Do X', allowedPrompts: [] });
+		expect(pending[0].requestedTool).toBeInstanceOf(ExitPlanModeToolUseMessage);
+		expect((pending[0].requestedTool as ExitPlanModeToolUseMessage).plan).toBe('Do X');
 	});
 
 	it('sets plan permission mode on EnterPlanMode tool-use', () => {
@@ -64,7 +64,7 @@ describe('plan mode handler', () => {
 		const pending = read();
 		expect(pending).toHaveLength(1);
 		expect(pending[0].permissionRequestId).toBe('plan-exit-tool-sc-exit');
-		expect(pending[0].toolName).toBe('ExitPlanMode');
+		expect(pending[0].requestedTool.type).toBe('exit-plan-mode-tool-use');
 	});
 
 	it('does not call setPreviousPermissionMode when already in plan mode', () => {

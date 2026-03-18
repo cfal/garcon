@@ -17,6 +17,7 @@ import {
 	EnterPlanModeToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	UnknownToolUseMessage,
+	PermissionRequestMessage,
 	parseChatMessage,
 } from '$shared/chat-types';
 
@@ -287,5 +288,54 @@ describe('direct constructor round-trip', () => {
 		expect(parsed.filePath).toBe('/tmp/f.ts');
 		expect(parsed.oldString).toBe('a');
 		expect(parsed.newString).toBe('b');
+	});
+});
+
+describe('PermissionRequestMessage round-trip', () => {
+	it('round-trips PermissionRequestMessage with Bash requestedTool', () => {
+		const requestedTool = new BashToolUseMessage(TS, 'tool-1', 'ls -la');
+		const msg = new PermissionRequestMessage(TS, 'perm-1', requestedTool);
+		const parsed = roundTrip(msg) as PermissionRequestMessage;
+
+		expect(parsed).toBeInstanceOf(PermissionRequestMessage);
+		expect(parsed.requestedTool).toBeInstanceOf(BashToolUseMessage);
+		expect((parsed.requestedTool as BashToolUseMessage).command).toBe('ls -la');
+	});
+
+	it('round-trips PermissionRequestMessage with ExitPlanMode requestedTool', () => {
+		const requestedTool = new ExitPlanModeToolUseMessage(TS, 'tool-2', 'Do X', []);
+		const msg = new PermissionRequestMessage(TS, 'perm-2', requestedTool);
+		const parsed = roundTrip(msg) as PermissionRequestMessage;
+
+		expect(parsed.requestedTool).toBeInstanceOf(ExitPlanModeToolUseMessage);
+		expect((parsed.requestedTool as ExitPlanModeToolUseMessage).plan).toBe('Do X');
+	});
+
+	it('round-trips PermissionRequestMessage with UnknownToolUse requestedTool', () => {
+		const requestedTool = new UnknownToolUseMessage(TS, 'tool-3', 'custom', { key: 'val' });
+		const msg = new PermissionRequestMessage(TS, 'perm-3', requestedTool);
+		const parsed = roundTrip(msg) as PermissionRequestMessage;
+
+		expect(parsed.requestedTool).toBeInstanceOf(UnknownToolUseMessage);
+		expect((parsed.requestedTool as UnknownToolUseMessage).rawName).toBe('custom');
+	});
+
+	it('returns null for permission-request with missing requestedTool', () => {
+		const msg = parseChatMessage({
+			type: 'permission-request',
+			timestamp: TS,
+			permissionRequestId: 'perm-bad',
+		});
+		expect(msg).toBeNull();
+	});
+
+	it('returns null for permission-request with non-tool requestedTool', () => {
+		const msg = parseChatMessage({
+			type: 'permission-request',
+			timestamp: TS,
+			permissionRequestId: 'perm-bad',
+			requestedTool: { type: 'assistant-message', timestamp: TS, content: 'hi' },
+		});
+		expect(msg).toBeNull();
 	});
 });

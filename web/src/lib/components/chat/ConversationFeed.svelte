@@ -84,7 +84,7 @@
 	const pendingExitPlanIds = $derived(
 		new Set(
 			pendingPermissionRequests
-				.filter((r) => r.toolName === 'ExitPlanMode' || r.toolName === 'exit_plan_mode')
+				.filter((r) => r.requestedTool.type === 'exit-plan-mode-tool-use')
 				.map((r) => r.permissionRequestId),
 		),
 	);
@@ -195,7 +195,7 @@
 		{#each chatState.visibleMessages as message, index (getMessageId(message))}
 			{@const isToolResult = message instanceof ToolResultMessage}
 			{@const isPermissionTerminal = message instanceof PermissionResolvedMessage || message instanceof PermissionCancelledMessage}
-			{@const isServerExitPlanPermission = message instanceof PermissionRequestMessage && (message.toolName === 'ExitPlanMode' || message.toolName === 'exit_plan_mode')}
+			{@const isServerExitPlanPermission = message instanceof PermissionRequestMessage && message.requestedTool.type === 'exit-plan-mode-tool-use'}
 			{#if !isToolResult && !isPermissionTerminal && !isServerExitPlanPermission}
 				{@const prevMessage = index > 0 ? chatState.visibleMessages[index - 1] : null}
 				{@const toolResult = isToolUseMessage(message)

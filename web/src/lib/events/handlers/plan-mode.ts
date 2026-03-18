@@ -36,8 +36,7 @@ export function handlePlanModeMessages(msg: AgentRunOutputMessage, ctx: PlanMode
 					...prev,
 					{
 						permissionRequestId,
-						toolName: 'ExitPlanMode',
-						toolInput: { plan: chatMsg.plan, allowedPrompts: chatMsg.allowedPrompts },
+						requestedTool: chatMsg,
 						chatId: msg.chatId || ctx.currentChatId,
 						receivedAt: new Date(),
 					},

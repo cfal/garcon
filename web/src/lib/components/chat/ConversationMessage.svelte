@@ -251,13 +251,11 @@
 					{:else if asToolUse && asToolUse.type === 'exit-plan-mode-tool-use'}
 						{@const exitPlanMsg = asToolUse}
 						<PermissionRequestRow
-							request={{
-								type: 'permission-request',
-								timestamp: message.timestamp,
-								permissionRequestId: `plan-exit-${exitPlanMsg.toolId}`,
-								toolName: 'ExitPlanMode',
-								toolInput: { plan: exitPlanMsg.plan, allowedPrompts: exitPlanMsg.allowedPrompts },
-							}}
+							request={new PermissionRequestMessage(
+								message.timestamp,
+								`plan-exit-${exitPlanMsg.toolId}`,
+								exitPlanMsg,
+							)}
 							terminal={permissionTerminal}
 							onDecision={onPermissionDecision ?? (() => {})}
 							{onExitPlanMode}

@@ -37,8 +37,7 @@ export function handlePermissionLifecycleFromBatch(
 					...previous,
 					{
 						permissionRequestId: entry.permissionRequestId,
-						toolName: entry.toolName || 'UnknownTool',
-						toolInput: entry.toolInput,
+						requestedTool: entry.requestedTool,
 						chatId: msg.chatId || null,
 						receivedAt: new Date(),
 					},

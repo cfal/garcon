@@ -50,7 +50,7 @@ describe('deriveMessageId', () => {
 	});
 
 	it('handles permission-request messages', () => {
-		const msg = new PermissionRequestMessage(NOW, 'perm-123', 'Bash', { command: 'rm -rf /' });
+		const msg = new PermissionRequestMessage(NOW, 'perm-123', new BashToolUseMessage(NOW, 'tool-1', 'rm -rf /'));
 		const id = deriveMessageId(msg);
 		expect(id).toMatch(/^msg_/);
 	});

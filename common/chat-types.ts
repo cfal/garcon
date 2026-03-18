@@ -250,7 +250,7 @@ export class ErrorMessage {
 
 export class PermissionRequestMessage {
   readonly type = 'permission-request' as const;
-  constructor(public timestamp: string, public permissionRequestId: string, public toolName: string, public toolInput?: Record<string, unknown>) {}
+  constructor(public timestamp: string, public permissionRequestId: string, public requestedTool: ToolUseChatMessage) {}
 }
 
 export class PermissionResolvedMessage {
@@ -473,8 +473,12 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
       return new ToolResultMessage(str(data.timestamp), str(data.toolId), (data.content ?? {}) as Record<string, unknown>, Boolean(data.isError));
     case 'error':
       return new ErrorMessage(str(data.timestamp), str(data.content));
-    case 'permission-request':
-      return new PermissionRequestMessage(str(data.timestamp), str(data.permissionRequestId), str(data.toolName), data.toolInput as Record<string, unknown> | undefined);
+    case 'permission-request': {
+      const requestedToolData = asRecord(data.requestedTool);
+      const requestedTool = parseChatMessage(requestedToolData);
+      if (!requestedTool || !isToolUseMessage(requestedTool)) return null;
+      return new PermissionRequestMessage(str(data.timestamp), str(data.permissionRequestId), requestedTool);
+    }
     case 'permission-resolved':
       return new PermissionResolvedMessage(str(data.timestamp), str(data.permissionRequestId), Boolean(data.allowed));
     case 'permission-cancelled':

@@ -33,7 +33,7 @@ function fingerprintBase(message: ChatMessage): string {
 		return `tool-result|${message.toolId}|${message.isError ? 'err' : 'ok'}|${content}|${ts}`;
 	}
 	if (message instanceof PermissionRequestMessage) {
-		return `perm-req|${message.permissionRequestId}|${message.toolName}|${ts}`;
+		return `perm-req|${message.permissionRequestId}|${message.requestedTool.type}|${message.requestedTool.toolId}|${ts}`;
 	}
 	if (message instanceof PermissionResolvedMessage) {
 		return `perm-res|${message.permissionRequestId}|${message.allowed ? '1' : '0'}|${ts}`;
