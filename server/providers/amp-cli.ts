@@ -7,10 +7,49 @@ import os from 'os';
 import path from 'path';
 import { normalizeToolResultContent } from './normalize-util.js';
 import { getAmpBinary } from '../config.js';
-import { AssistantMessage, ThinkingMessage, ToolResultMessage } from '../../common/chat-types.js';
+import { AssistantMessage, ThinkingMessage, ToolResultMessage, type ChatMessage } from '../../common/chat-types.js';
 import { convertAmpToolUse } from './converters/amp-tool-use.js';
 import { AbsProvider } from './base.js';
 import { createArtificialNativePath } from '../chats/artificial-native-path.js';
+import type { AmpThreadExport } from './loaders/amp-history-loader.js';
+import type { StartSessionRequest, ResumeTurnRequest, StartedProviderSession } from './types.js';
+
+interface AmpSession {
+  id: string;
+  chatId: string;
+  threadId: string;
+  isRunning: boolean;
+  resultSeen: boolean;
+  finalized: boolean;
+  aborted: boolean;
+  turnResolve: ((value?: unknown) => void) | null;
+  startTime: number;
+  process: ReturnType<typeof Bun.spawn> | null;
+  turnGeneration: number;
+}
+
+// Represents a JSONL message emitted by the Amp CLI on stdout.
+interface AmpCliMessage {
+  type: string;
+  subtype?: string;
+  thread_id?: string;
+  session_id?: string;
+  is_error?: boolean;
+  content?: AmpCliContentPart[];
+  message?: { content?: AmpCliContentPart[] };
+}
+
+interface AmpCliContentPart {
+  type: string;
+  text?: string;
+  thinking?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  tool_use_id?: string;
+  content?: unknown;
+  is_error?: boolean;
+}
 
 const AMP_DEFAULT_FLAGS = [
   '--no-ide',
@@ -19,16 +58,20 @@ const AMP_DEFAULT_FLAGS = [
   '--no-notifications',
 ];
 
-// Converts an Amp CLI assistant message to ChatMessage objects.
-function convertAmpMessageToChatMessages(msg) {
+// Extracts the content array from an Amp CLI assistant message,
+// handling both top-level and nested `.message.content` shapes.
+function getAssistantContent(msg: AmpCliMessage): AmpCliContentPart[] {
+  if (Array.isArray(msg.content)) return msg.content;
+  if (Array.isArray(msg.message?.content)) return msg.message!.content!;
+  return [];
+}
+
+function convertAmpMessageToChatMessages(msg: AmpCliMessage): ChatMessage[] {
   if (msg.type !== 'assistant') return [];
 
-  const chatMessages = [];
+  const chatMessages: ChatMessage[] = [];
   const now = new Date().toISOString();
-  const content =
-    Array.isArray(msg.content) ? msg.content
-      : Array.isArray(msg.message?.content) ? msg.message.content
-        : [];
+  const content = getAssistantContent(msg);
 
   for (const part of content) {
     if (part.type === 'text' && part.text?.trim()) {
@@ -48,9 +91,9 @@ function convertAmpMessageToChatMessages(msg) {
   return chatMessages;
 }
 
-async function readAmpStdout(proc) {
-  const chunks = [];
-  const reader = proc.stdout.getReader();
+async function readAmpStdout(proc: ReturnType<typeof Bun.spawn>): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
   const decoder = new TextDecoder();
 
   while (true) {
@@ -62,7 +105,7 @@ async function readAmpStdout(proc) {
   return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
 }
 
-async function runAmpCommand(args, { cwd, input } = {}) {
+async function runAmpCommand(args: string[], { cwd, input }: { cwd?: string; input?: string } = {}): Promise<string> {
   const ampBinary = getAmpBinary();
   const proc = Bun.spawn([ampBinary, ...args], {
     cwd: cwd || process.cwd(),
@@ -72,8 +115,9 @@ async function runAmpCommand(args, { cwd, input } = {}) {
   });
 
   if (input != null) {
-    proc.stdin.write(input);
-    proc.stdin.end();
+    const stdin = proc.stdin as unknown as { write(s: string): void; end(): void };
+    stdin.write(input);
+    stdin.end();
   }
 
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -90,7 +134,7 @@ async function runAmpCommand(args, { cwd, input } = {}) {
   return stdout;
 }
 
-async function exportThread(threadId, { cwd } = {}) {
+async function exportThread(threadId: string, { cwd }: { cwd?: string } = {}): Promise<AmpThreadExport> {
   if (!threadId) throw new Error('threadId is required');
 
   const raw = await runAmpCommandToTempFile([
@@ -101,16 +145,16 @@ async function exportThread(threadId, { cwd } = {}) {
   ], { cwd });
 
   try {
-    return JSON.parse(raw);
+    return JSON.parse(raw) as AmpThreadExport;
   } catch (error) {
-    throw new Error(`Failed to parse Amp thread export JSON: ${error.message}`);
+    throw new Error(`Failed to parse Amp thread export JSON: ${(error as Error).message}`);
   }
 }
 
 // Works around a Bun async stdout pipe truncation bug seen with
 // `amp threads export`.
 // TODO: Retry the normal pipe path after Bun fixes it.
-async function runAmpCommandToTempFile(args, { cwd } = {}) {
+async function runAmpCommandToTempFile(args: string[], { cwd }: { cwd?: string } = {}): Promise<string> {
   const ampBinary = getAmpBinary();
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-amp-export-'));
   const outputPath = path.join(tmpDir, 'stdout.json');
@@ -148,7 +192,7 @@ async function runAmpCommandToTempFile(args, { cwd } = {}) {
   }
 }
 
-async function createThread({ cwd } = {}) {
+async function createThread({ cwd }: { cwd?: string } = {}): Promise<string> {
   const raw = await runAmpCommand([
     'threads',
     'new',
@@ -163,14 +207,13 @@ async function createThread({ cwd } = {}) {
   return threadId;
 }
 
-function parseAmpThreadId(raw) {
+function parseAmpThreadId(raw: string): string | null {
   if (typeof raw !== 'string') return null;
   const match = raw.match(/T-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   return match?.[0] || null;
 }
 
-// Runs a one-shot Amp CLI query and returns the plain text output.
-async function runSingleQuery(prompt, { cwd } = {}) {
+async function runSingleQuery(prompt: string, { cwd }: { cwd?: string } = {}): Promise<string> {
   const args = [
     ...AMP_DEFAULT_FLAGS,
     '--dangerously-allow-all',
@@ -182,23 +225,18 @@ async function runSingleQuery(prompt, { cwd } = {}) {
   try {
     raw = await runAmpCommand(args, { cwd, input: prompt });
   } catch (err) {
-    console.error('amp: one-shot stdout read error:', err.message);
+    console.error('amp: one-shot stdout read error:', (err as Error).message);
     throw err;
   }
 
-  // Parse JSONL and concatenate assistant text parts.
-  const textParts = [];
+  const textParts: string[] = [];
 
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     try {
-      const msg = JSON.parse(line);
+      const msg = JSON.parse(line) as AmpCliMessage;
       if (msg.type === 'assistant') {
-        const content =
-          Array.isArray(msg.content) ? msg.content
-            : Array.isArray(msg.message?.content) ? msg.message.content
-              : [];
-        for (const part of content) {
+        for (const part of getAssistantContent(msg)) {
           if (part.type === 'text' && part.text?.trim()) {
             textParts.push(part.text);
           }
@@ -212,14 +250,40 @@ async function runSingleQuery(prompt, { cwd } = {}) {
   return textParts.join('\n');
 }
 
+function createSession(threadId: string, chatId: string): AmpSession {
+  return {
+    id: threadId,
+    chatId,
+    threadId,
+    isRunning: true,
+    resultSeen: false,
+    finalized: false,
+    aborted: false,
+    turnResolve: null,
+    startTime: Date.now(),
+    process: null,
+    turnGeneration: 0,
+  };
+}
+
+function buildContinueArgs(threadId: string): string[] {
+  return [
+    'threads', 'continue', threadId,
+    ...AMP_DEFAULT_FLAGS,
+    '--dangerously-allow-all',
+    '--stream-json-thinking',
+    '-x',
+  ];
+}
+
 class AmpProvider extends AbsProvider {
-  #runningSessions = new Map();
+  #runningSessions = new Map<string, AmpSession>();
 
   constructor() {
     super();
   }
 
-  #routeMessage(session, msg) {
+  #routeMessage(session: AmpSession, msg: AmpCliMessage): void {
     switch (msg.type) {
       case 'system':
         if (msg.subtype === 'init') {
@@ -251,11 +315,12 @@ class AmpProvider extends AbsProvider {
     }
   }
 
-  async #readStdout(session, proc) {
+  async #readStdout(session: AmpSession, proc: ReturnType<typeof Bun.spawn>): Promise<void> {
     if (!proc.stdout) return;
-    const reader = proc.stdout.getReader();
+    const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    const generation = session.turnGeneration;
 
     try {
       while (true) {
@@ -264,13 +329,13 @@ class AmpProvider extends AbsProvider {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop();
+        buffer = lines.pop()!;
 
         for (const line of lines) {
           if (!line.trim()) continue;
-          let msg;
+          let msg: AmpCliMessage;
           try {
-            msg = JSON.parse(line);
+            msg = JSON.parse(line) as AmpCliMessage;
           } catch {
             console.warn(`amp(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
             continue;
@@ -280,16 +345,19 @@ class AmpProvider extends AbsProvider {
       }
     } catch (err) {
       if (!proc.killed) {
-        console.error(`amp(${session.id.slice(0, 8)}): stdout read error:`, err.message);
+        console.error(`amp(${session.id.slice(0, 8)}): stdout read error:`, (err as Error).message);
       }
     } finally {
-      this.#finalizeTurn(session);
+      const exitCode = await proc.exited;
+      if (session.turnGeneration === generation) {
+        this.#finalizeTurn(session, exitCode);
+      }
     }
   }
 
   // Idempotent turn finalizer. Safe to call from both the result message
   // handler and the stdout-closed / process-exit paths.
-  #finalizeTurn(session, exitCode) {
+  #finalizeTurn(session: AmpSession, exitCode?: number): void {
     if (session.finalized) return;
     session.finalized = true;
 
@@ -306,9 +374,9 @@ class AmpProvider extends AbsProvider {
     resolve?.();
   }
 
-  async #pipeStderr(sessionId, proc) {
+  async #pipeStderr(sessionId: string, proc: ReturnType<typeof Bun.spawn>): Promise<void> {
     if (!proc.stderr) return;
-    const reader = proc.stderr.getReader();
+    const reader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
     try {
       while (true) {
@@ -324,7 +392,7 @@ class AmpProvider extends AbsProvider {
     } catch { /* stream closed */ }
   }
 
-  #spawnAmp(session, { cwd }, args, prompt) {
+  #spawnAmp(session: AmpSession, cwd: string, args: string[], prompt?: string): ReturnType<typeof Bun.spawn> {
     const ampBinary = getAmpBinary();
 
     console.log(`amp: spawning: ${ampBinary} ${args.join(' ')}`);
@@ -337,8 +405,8 @@ class AmpProvider extends AbsProvider {
     });
 
     if (prompt) {
-      proc.stdin.write(prompt);
-      proc.stdin.end();
+      (proc as { stdin: { write(s: string): void; end(): void } }).stdin.write(prompt);
+      (proc as { stdin: { write(s: string): void; end(): void } }).stdin.end();
     }
 
     session.process = proc;
@@ -355,7 +423,7 @@ class AmpProvider extends AbsProvider {
     return proc;
   }
 
-  #waitForTurnComplete(session) {
+  #waitForTurnComplete(session: AmpSession): Promise<void> {
     if (!session.isRunning) return Promise.resolve();
 
     return new Promise(resolve => {
@@ -363,40 +431,23 @@ class AmpProvider extends AbsProvider {
     });
   }
 
-  async startSession(command, { chatId, cwd, model, ...opts }) {
+  async startSession({ command, chatId, projectPath }: StartSessionRequest): Promise<StartedProviderSession> {
     if (!chatId) throw new Error('chatId is required when starting an Amp session');
-    const threadId = await createThread({ cwd });
+    const threadId = await createThread({ cwd: projectPath });
 
-    const session = {
-      id: threadId,
-      chatId,
-      threadId,
-      isRunning: true,
-      resultSeen: false,
-      finalized: false,
-      aborted: false,
-      turnResolve: null,
-      startTime: Date.now(),
-      process: null,
-    };
+    const session = createSession(threadId, chatId);
     this.#runningSessions.set(threadId, session);
     this.emitProcessing(chatId, true);
     this.emitSessionCreated(chatId);
 
-    const args = [
-      'threads', 'continue', threadId,
-      ...AMP_DEFAULT_FLAGS,
-      '--dangerously-allow-all',
-      '--stream-json-thinking',
-      '-x',
-    ];
+    const args = buildContinueArgs(threadId);
 
     try {
-      this.#spawnAmp(session, { cwd }, args, command);
+      this.#spawnAmp(session, projectPath, args, command);
     } catch (err) {
       this.#runningSessions.delete(threadId);
       this.emitProcessing(chatId, false);
-      this.emitFailed(chatId, `Amp spawn failed: ${err.message}`);
+      this.emitFailed(chatId, `Amp spawn failed: ${(err as Error).message}`);
       throw err;
     }
 
@@ -406,24 +457,13 @@ class AmpProvider extends AbsProvider {
     };
   }
 
-  async runTurn(command, { sessionId: threadId, chatId, cwd, ...opts }) {
+  async runTurn({ command, providerSessionId: threadId, chatId, projectPath }: ResumeTurnRequest): Promise<void> {
     if (!threadId) throw new Error('Cannot resume without thread ID');
     if (!chatId) throw new Error('Cannot resume without chat ID');
 
     let session = this.#runningSessions.get(threadId);
     if (!session) {
-      session = {
-        id: threadId,
-        chatId,
-        threadId,
-        isRunning: true,
-        resultSeen: false,
-        finalized: false,
-        aborted: false,
-        turnResolve: null,
-        startTime: Date.now(),
-        process: null,
-      };
+      session = createSession(threadId, chatId);
       this.#runningSessions.set(threadId, session);
     } else {
       if (session.isRunning) {
@@ -432,6 +472,7 @@ class AmpProvider extends AbsProvider {
       if (chatId !== session.chatId) {
         throw new Error('Chat ID mismatch');
       }
+      session.turnGeneration++;
       session.isRunning = true;
       session.resultSeen = false;
       session.finalized = false;
@@ -440,45 +481,40 @@ class AmpProvider extends AbsProvider {
 
     this.emitProcessing(chatId, true);
 
-    const args = [
-      'threads', 'continue', threadId,
-      ...AMP_DEFAULT_FLAGS,
-      '--dangerously-allow-all',
-      '--stream-json-thinking',
-      '-x',
-    ];
+    const args = buildContinueArgs(threadId);
 
     try {
-      this.#spawnAmp(session, { cwd }, args, command);
+      this.#spawnAmp(session, projectPath, args, command);
     } catch (err) {
       session.isRunning = false;
       this.emitProcessing(chatId, false);
-      this.emitFailed(chatId, `Amp spawn failed: ${err.message}`);
+      this.emitFailed(chatId, `Amp spawn failed: ${(err as Error).message}`);
       throw err;
     }
 
     await this.#waitForTurnComplete(session);
   }
 
-  async exportThread(threadId, { cwd } = {}) {
+  async exportThread(threadId: string, { cwd }: { cwd?: string } = {}): Promise<AmpThreadExport> {
     return exportThread(threadId, { cwd });
   }
 
-  abort(providerSessionId) {
+  abort(providerSessionId: string): boolean {
     const session = this.#runningSessions.get(providerSessionId);
     if (!session?.process) return false;
 
     session.aborted = true;
     session.process.kill();
+    this.#finalizeTurn(session);
     return true;
   }
 
-  isRunning(providerSessionId) {
+  isRunning(providerSessionId: string): boolean {
     const session = this.#runningSessions.get(providerSessionId);
     return session?.isRunning === true;
   }
 
-  getRunningSessions() {
+  getRunningSessions(): Array<{ id: string; status: string; startedAt: string }> {
     return Array.from(this.#runningSessions.entries())
       .filter(([, s]) => s.isRunning)
       .map(([id, s]) => ({
@@ -488,7 +524,7 @@ class AmpProvider extends AbsProvider {
       }));
   }
 
-  startPurgeTimer() {
+  startPurgeTimer(): ReturnType<typeof setInterval> {
     const maxAge = 30 * 60 * 1000;
 
     return setInterval(() => {

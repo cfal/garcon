@@ -121,11 +121,11 @@ describe('ProviderRegistry session option hydration', () => {
       runTurn: mock(() => Promise.resolve(undefined)),
     };
     mockAmp = {
-      startSession: mock(() => Promise.resolve({
+      startSession: mock((request) => Promise.resolve({
         providerSessionId: 'amp-session',
         nativePath: '!amp:amp-session',
       })),
-      runTurn: mock(() => Promise.resolve(undefined)),
+      runTurn: mock((request) => Promise.resolve(undefined)),
       exportThread: mock(() => Promise.resolve({ messages: [] })),
     };
     registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp);

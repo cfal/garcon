@@ -99,10 +99,13 @@ describe('AmpProvider lifecycle', () => {
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(createThreadProc).mockReturnValueOnce(proc);
 
-    const startedPromise = provider.startSession('hello', {
+    const startedPromise = provider.startSession({
+      command: 'hello',
       chatId: 'chat-1',
-      cwd: '/proj',
+      projectPath: '/proj',
       model: 'default',
+      permissionMode: 'default',
+      thinkingMode: 'none',
     });
 
     const started = await startedPromise;
@@ -135,10 +138,13 @@ describe('AmpProvider lifecycle', () => {
       .mockReturnValueOnce(firstProc)
       .mockReturnValueOnce(secondProc);
 
-    const startedPromise = provider.startSession('hello', {
+    const startedPromise = provider.startSession({
+      command: 'hello',
       chatId: 'chat-2',
-      cwd: '/proj',
+      projectPath: '/proj',
       model: 'default',
+      permissionMode: 'default',
+      thinkingMode: 'none',
     });
 
     const started = await startedPromise;
@@ -146,10 +152,14 @@ describe('AmpProvider lifecycle', () => {
     firstProc.kill();
     await firstProc.exited;
 
-    const resumedTurn = provider.runTurn('resume', {
-      sessionId: started.providerSessionId,
+    const resumedTurn = provider.runTurn({
+      command: 'resume',
+      providerSessionId: started.providerSessionId,
       chatId: 'chat-2',
-      cwd: '/proj',
+      projectPath: '/proj',
+      model: 'default',
+      permissionMode: 'default',
+      thinkingMode: 'none',
     });
 
     secondProc.pushJson({

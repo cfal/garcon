@@ -10,17 +10,34 @@ import {
   UnknownToolUseMessage,
 } from '../../../common/chat-types.js';
 
-function asObject(v) {
-  return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+type AmpToolUseResult =
+  | BashToolUseMessage
+  | ReadToolUseMessage
+  | EditToolUseMessage
+  | WriteToolUseMessage
+  | GlobToolUseMessage
+  | GrepToolUseMessage
+  | WebSearchToolUseMessage
+  | WebFetchToolUseMessage
+  | UnknownToolUseMessage;
+
+interface AmpToolUsePart {
+  name?: string;
+  id?: string;
+  input?: Record<string, unknown>;
 }
 
-function asInput(v) {
+function asObject(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+function asInput(v: unknown): Record<string, unknown> {
   if (v === null || v === undefined || v === '') return {};
-  if (typeof v === 'object' && !Array.isArray(v)) return v;
+  if (typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>;
   if (typeof v === 'string') {
     try {
-      const parsed = JSON.parse(v);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+      const parsed: unknown = JSON.parse(v);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
       return { raw: v };
     } catch {
       return { raw: v };
@@ -29,16 +46,15 @@ function asInput(v) {
   return {};
 }
 
-function asString(v) {
+function asString(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
 
-function canonicalize(raw) {
-  if (typeof raw !== 'string') return '';
+function canonicalize(raw: string): string {
   return raw.trim().toLowerCase().replace(/[\s_\-]+/g, '');
 }
 
-function firstString(values) {
+function firstString(values: unknown[]): string | undefined {
   for (const value of values) {
     const next = asString(value);
     if (next !== undefined) return next;
@@ -46,17 +62,17 @@ function firstString(values) {
   return undefined;
 }
 
-function inferWebSearchQuery(input) {
+function inferWebSearchQuery(input: Record<string, unknown>): string | undefined {
   const objective = asString(input.objective);
   if (objective) return objective;
   if (Array.isArray(input.search_queries)) {
-    const firstQuery = input.search_queries.find((value) => typeof value === 'string' && value.trim());
+    const firstQuery = input.search_queries.find((value: unknown) => typeof value === 'string' && (value as string).trim());
     if (typeof firstQuery === 'string') return firstQuery;
   }
   return undefined;
 }
 
-export function convertAmpToolUse(ts, part) {
+export function convertAmpToolUse(ts: string, part: AmpToolUsePart): AmpToolUseResult {
   const rawName = typeof part?.name === 'string' ? part.name : 'Unknown';
   const toolId = part?.id || '';
   const input = asObject(part?.input);

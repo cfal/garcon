@@ -4,6 +4,7 @@ import {
   BashToolUseMessage,
   EditToolUseMessage,
   GlobToolUseMessage,
+  GrepToolUseMessage,
   ReadToolUseMessage,
   UnknownToolUseMessage,
   WebFetchToolUseMessage,
@@ -71,6 +72,18 @@ describe('convertAmpToolUse', () => {
 
     expect(msg).toBeInstanceOf(GlobToolUseMessage);
     expect(msg.pattern).toBe('**/*.ts');
+  });
+
+  it('maps Grep pattern and path to GrepToolUseMessage', () => {
+    const msg = convertAmpToolUse(TS, {
+      id: 't-grep',
+      name: 'Grep',
+      input: { pattern: 'TODO:', path: '/garcon/server' },
+    });
+
+    expect(msg).toBeInstanceOf(GrepToolUseMessage);
+    expect(msg.pattern).toBe('TODO:');
+    expect(msg.path).toBe('/garcon/server');
   });
 
   it('maps web_search objective to WebSearchToolUseMessage', () => {

@@ -16,7 +16,7 @@ import { getAmpAuthStatus } from './amp-auth.js';
 import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loaders/claude-history-loader.js';
 import { getCodexPreviewFromNativePath, loadCodexChatMessages } from './loaders/codex-history-loader.js';
 import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loaders/opencode-history-loader.js';
-import { getAmpPreview, loadAmpChatMessages } from './loaders/amp-history-loader.js';
+import { getAmpPreview, loadAmpChatMessages, type AmpThreadExport } from './loaders/amp-history-loader.js';
 import { createArtificialNativePath, getArtificialProviderSessionId } from '../chats/artificial-native-path.js';
 import type { IChatRegistry } from '../chats/store.js';
 
@@ -106,13 +106,13 @@ interface OpenCodeProviderInstance {
 }
 
 interface AmpProviderInstance {
-  startSession(command: string, opts: { chatId: string; cwd: string; model?: string; [key: string]: unknown }): Promise<StartedProviderSession>;
-  runTurn(command: string, opts: { sessionId: string; chatId: string; cwd?: string; [key: string]: unknown }): Promise<void>;
+  startSession(request: StartSessionRequest): Promise<StartedProviderSession>;
+  runTurn(request: ResumeTurnRequest): Promise<void>;
   isRunning(providerSessionId: string): boolean;
   abort(providerSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }>;
   startPurgeTimer(): ReturnType<typeof setInterval>;
-  exportThread(threadId: string, opts?: { cwd?: string; [key: string]: unknown }): Promise<unknown>;
+  exportThread(threadId: string, opts?: { cwd?: string }): Promise<AmpThreadExport>;
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
@@ -192,11 +192,7 @@ export class ProviderRegistry {
     }
 
     if (entry.provider === 'amp') {
-      const started = await this.#amp.startSession(command, {
-        chatId,
-        cwd: entry.projectPath,
-        model: entry.model,
-      });
+      const started = await this.#amp.startSession(request);
       this.#registry.updateChat(chatId, {
         providerSessionId: started.providerSessionId,
         nativePath: started.nativePath,
@@ -243,11 +239,7 @@ export class ProviderRegistry {
     } else if (provider === 'opencode') {
       await this.#opencode.runTurn(request);
     } else if (provider === 'amp') {
-      await this.#amp.runTurn(command, {
-        sessionId: providerSessionId,
-        chatId,
-        cwd: entry.projectPath,
-      });
+      await this.#amp.runTurn(request);
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
