@@ -9,7 +9,7 @@ import {
   UpdatePlanToolUseMessage,
   UnknownToolUseMessage,
 } from '../../../common/chat-types.js';
-import { normalizeToolInput } from '../normalize-util.js';
+import { normalizeToolInput, normalizeTodoItems } from '../normalize-util.js';
 
 function asObject(v) {
   return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
@@ -48,7 +48,7 @@ export function convertCodexFunctionCall(ts, payload) {
 
   if (rawName === 'update_plan') {
     const input = asObject(normalizeToolInput(rawArgs));
-    return new UpdatePlanToolUseMessage(ts, callId, rawName, input.items ?? input.todos);
+    return new UpdatePlanToolUseMessage(ts, callId, rawName, normalizeTodoItems(input.items ?? input.todos ?? input.plan));
   }
 
   return new UnknownToolUseMessage(ts, callId, rawName, asObject(normalizeToolInput(rawArgs)));

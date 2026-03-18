@@ -7,6 +7,8 @@ export type {
 } from '$shared/chat-modes';
 
 export type {
+	TodoItem,
+	TodoStatus,
 	ChatImage,
 	UserMessage,
 	AssistantMessage,

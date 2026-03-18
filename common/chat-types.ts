@@ -7,6 +7,35 @@ export interface ChatImage {
   name: string;
 }
 
+// Canonical shape for a single todo/plan item. All provider-specific
+// formats are normalized to this at the converter boundary.
+export type TodoStatus = 'pending' | 'in_progress' | 'completed';
+
+export interface TodoItem {
+  content: string;
+  status: TodoStatus;
+}
+
+// Lightweight coercion for already-serialized TodoItem arrays.
+// Provider-specific normalization lives in server/providers/normalize-util.
+function asTodoItems(raw: unknown): TodoItem[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const items: TodoItem[] = [];
+  for (const entry of raw) {
+    if (entry == null || typeof entry !== 'object') continue;
+    const obj = entry as Record<string, unknown>;
+    const content = obj.content ?? obj.text ?? obj.step;
+    if (typeof content !== 'string') continue;
+    const s = obj.status;
+    const completed = obj.completed;
+    const status: TodoStatus =
+      completed === true || s === 'completed' || s === 'done' ? 'completed' :
+      s === 'in_progress' || s === 'in-progress' ? 'in_progress' : 'pending';
+    items.push({ content, status });
+  }
+  return items.length > 0 ? items : undefined;
+}
+
 export class UserMessage {
   readonly type = 'user-message' as const;
   constructor(public timestamp: string, public content: string, public images?: ChatImage[]) {}
@@ -152,7 +181,7 @@ export class TodoWriteToolUseMessage extends ToolUseMessage {
     timestamp: string,
     toolId: string,
     rawName: string,
-    public todos?: unknown,
+    public todos?: TodoItem[],
   ) {
     super(timestamp, toolId, rawName);
   }
@@ -188,7 +217,7 @@ export class UpdatePlanToolUseMessage extends ToolUseMessage {
     timestamp: string,
     toolId: string,
     rawName: string,
-    public todos?: unknown,
+    public todos?: TodoItem[],
   ) {
     super(timestamp, toolId, rawName);
   }
@@ -429,7 +458,7 @@ function buildToolUseMessage(
 
     case 'TodoWrite':
       return new TodoWriteToolUseMessage(ts, id, rawName,
-        input.todos ?? input.items);
+        asTodoItems(input.todos ?? input.items));
 
     case 'TodoRead':
       return new TodoReadToolUseMessage(ts, id, rawName);
@@ -444,7 +473,7 @@ function buildToolUseMessage(
 
     case 'UpdatePlan':
       return new UpdatePlanToolUseMessage(ts, id, rawName,
-        input.items ?? input.todos);
+        asTodoItems(input.items ?? input.todos));
 
     case 'WriteStdin':
       return new WriteStdinToolUseMessage(ts, id, rawName, input);

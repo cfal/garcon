@@ -20,6 +20,7 @@ import {
   ExitPlanModeToolUseMessage,
   UnknownToolUseMessage,
 } from '../../../common/chat-types.js';
+import { normalizeTodoItems } from '../normalize-util.js';
 
 function asObject(v) {
   return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
@@ -134,7 +135,7 @@ export function convertClaudeToolUse(ts, part) {
     }
 
     case 'todowrite':
-      return new TodoWriteToolUseMessage(ts, toolId, rawName, input.todos ?? input.items);
+      return new TodoWriteToolUseMessage(ts, toolId, rawName, normalizeTodoItems(input.todos ?? input.items));
 
     case 'todoread':
       return new TodoReadToolUseMessage(ts, toolId, rawName);
@@ -148,7 +149,7 @@ export function convertClaudeToolUse(ts, part) {
         asString(input.resume));
 
     case 'updateplan':
-      return new UpdatePlanToolUseMessage(ts, toolId, rawName, input.items ?? input.todos);
+      return new UpdatePlanToolUseMessage(ts, toolId, rawName, normalizeTodoItems(input.items ?? input.todos));
 
     case 'writestdin':
       return new WriteStdinToolUseMessage(ts, toolId, rawName, input);

@@ -2,6 +2,7 @@
 // controls layout mode, content rendering, and action behavior.
 
 import * as m from '$lib/paraglide/messages.js';
+import type { TodoItem, TodoStatus } from '$lib/types/chat';
 import type { ToolDisplayRule } from './tool-display-contract';
 import {
 	readRangePresenter,
@@ -10,6 +11,29 @@ import {
 	fileTitlePresenter,
 	diffProps,
 } from './tool-display-presenters';
+
+// Coerces a raw tool-result todo array into canonical TodoItem[].
+// Tool results bypass converter normalization so this is needed here.
+function coerceTodoResult(raw: unknown): TodoItem[] | undefined {
+	if (!Array.isArray(raw)) return undefined;
+	const items: TodoItem[] = [];
+	for (const entry of raw) {
+		if (entry == null || typeof entry !== 'object') continue;
+		const obj = entry as Record<string, unknown>;
+		const content = (obj.content ?? obj.text ?? obj.step) as string | undefined;
+		if (typeof content !== 'string') continue;
+		const s = obj.status;
+		const completed = obj.completed;
+		const status: TodoStatus =
+			completed === true || s === 'completed' || s === 'done'
+				? 'completed'
+				: s === 'in_progress' || s === 'in-progress'
+					? 'in_progress'
+					: 'pending';
+		items.push({ content, status });
+	}
+	return items.length > 0 ? items : undefined;
+}
 
 // Plan-mode result is rendered by a dedicated banner; suppress the
 // default tool_result rendering to avoid a misleading is_error box.
@@ -254,7 +278,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 			contentKind: 'todoList',
 			getContentProps: (result) => {
 				const content = (result?.content || {}) as Record<string, unknown>;
-				const todos = content.items || content.todos || null;
+				const todos = coerceTodoResult(content.items || content.todos);
 				return { todos, isResult: true };
 			},
 		},

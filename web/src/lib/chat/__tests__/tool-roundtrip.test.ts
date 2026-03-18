@@ -131,9 +131,9 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('UpdatePlanToolUseMessage preserves todos', () => {
-		const msg = new UpdatePlanToolUseMessage(TS, 'id-14', 'UpdatePlan', [{ text: 'step 1' }]);
+		const msg = new UpdatePlanToolUseMessage(TS, 'id-14', 'UpdatePlan', [{ content: 'step 1', status: 'pending' }]);
 		const parsed = roundTrip(msg);
-		expect(parsed.todos).toEqual([{ text: 'step 1' }]);
+		expect(parsed.todos).toEqual([{ content: 'step 1', status: 'pending' }]);
 	});
 
 	it('WriteStdinToolUseMessage preserves input record', () => {

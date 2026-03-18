@@ -5,7 +5,7 @@ import { Codex } from '@openai/codex-sdk';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { normalizeToolResultContent } from './normalize-util.js';
+import { normalizeToolResultContent, normalizeTodoItems } from './normalize-util.js';
 import { AssistantMessage, ThinkingMessage, BashToolUseMessage, EditToolUseMessage, WebSearchToolUseMessage, TodoWriteToolUseMessage, ToolResultMessage, ErrorMessage } from '../../common/chat-types.js';
 import { AbsProvider } from './base.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
@@ -152,7 +152,7 @@ export function convertCodexEventToChatMessages(transformed: NormalizedEvent): u
       }
       case 'todo_list': {
         const todoId = `codex-todo-${Date.now()}`;
-        chatMessages.push(new TodoWriteToolUseMessage(now, todoId, 'TodoWrite', transformed.items || []));
+        chatMessages.push(new TodoWriteToolUseMessage(now, todoId, 'TodoWrite', normalizeTodoItems(transformed.items)));
         chatMessages.push(new ToolResultMessage(now, todoId, normalizeToolResultContent(transformed.items), false));
         break;
       }

@@ -1,24 +1,16 @@
 <script lang="ts">
 	// Renders a todo/plan list as a compact checklist.
 
-	interface TodoItem {
-		content: string;
-		status: string;
-		activeForm?: string;
-	}
+	import type { TodoItem } from '$lib/types/chat';
 
 	interface Props {
-		todos: unknown;
+		todos: TodoItem[] | undefined;
+		isResult?: boolean;
 	}
 
 	let { todos }: Props = $props();
 
-	let items = $derived.by((): TodoItem[] => {
-		if (!Array.isArray(todos)) return [];
-		return todos.filter(
-			(t): t is TodoItem => t != null && typeof t === 'object' && typeof t.content === 'string'
-		);
-	});
+	let items = $derived(todos ?? []);
 </script>
 
 {#if items.length > 0}

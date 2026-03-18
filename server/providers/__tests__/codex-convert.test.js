@@ -112,11 +112,11 @@ describe('convertCodexEventToChatMessages', () => {
     const result = convertCodexEventToChatMessages({
       type: 'item',
       itemType: 'todo_list',
-      items: [{ text: 'task 1', done: false }],
+      items: [{ text: 'task 1', completed: false }],
     });
     expect(result).toHaveLength(2);
     expect(result[0].rawName).toBe('TodoWrite');
-    expect(result[0].todos).toEqual([{ text: 'task 1', done: false }]);
+    expect(result[0].todos).toEqual([{ content: 'task 1', status: 'pending' }]);
   });
 
   it('converts error to error message', () => {

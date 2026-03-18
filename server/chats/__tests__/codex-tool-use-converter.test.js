@@ -83,11 +83,14 @@ describe('convertCodexFunctionCall', () => {
   it('maps update_plan to UpdatePlanToolUseMessage', () => {
     const msg = convertCodexFunctionCall(TS, {
       name: 'update_plan',
-      arguments: '{"items":["step 1","step 2"]}',
+      arguments: '{"plan":[{"step":"step 1","status":"pending"},{"step":"step 2","status":"completed"}]}',
       call_id: 'call-6',
     });
     expect(msg).toBeInstanceOf(UpdatePlanToolUseMessage);
-    expect(msg.todos).toEqual(['step 1', 'step 2']);
+    expect(msg.todos).toEqual([
+      { content: 'step 1', status: 'pending' },
+      { content: 'step 2', status: 'completed' },
+    ]);
   });
 
   it('passes through unmapped function names as Unknown', () => {
