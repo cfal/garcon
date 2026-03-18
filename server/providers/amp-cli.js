@@ -2,6 +2,9 @@
 // spawns a fresh `amp` process (new chat or `amp threads continue`).
 // Parses JSONL stdout and routes messages through AbsProvider events.
 
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
 import { normalizeToolResultContent } from './normalize-util.js';
 import { getAmpBinary } from '../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage } from '../../common/chat-types.js';
@@ -90,17 +93,58 @@ async function runAmpCommand(args, { cwd, input } = {}) {
 async function exportThread(threadId, { cwd } = {}) {
   if (!threadId) throw new Error('threadId is required');
 
-  const raw = await runAmpCommand([
+  const raw = await runAmpCommandToTempFile([
     'threads',
     'export',
-    threadId,
     ...AMP_DEFAULT_FLAGS,
+    threadId,
   ], { cwd });
 
   try {
     return JSON.parse(raw);
   } catch (error) {
     throw new Error(`Failed to parse Amp thread export JSON: ${error.message}`);
+  }
+}
+
+// Works around a Bun async stdout pipe truncation bug seen with
+// `amp threads export`.
+// TODO: Retry the normal pipe path after Bun fixes it.
+async function runAmpCommandToTempFile(args, { cwd } = {}) {
+  const ampBinary = getAmpBinary();
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-amp-export-'));
+  const outputPath = path.join(tmpDir, 'stdout.json');
+  const handle = await fs.open(outputPath, 'w');
+  let closed = false;
+
+  try {
+    const proc = Bun.spawn([ampBinary, ...args], {
+      cwd: cwd || process.cwd(),
+      stdin: 'ignore',
+      stdout: handle.fd,
+      stderr: 'pipe',
+    });
+
+    const [stderr, exitCode] = await Promise.all([
+      proc.stderr ? new Response(proc.stderr).text() : Promise.resolve(''),
+      proc.exited,
+    ]);
+
+    await handle.close();
+    closed = true;
+    const stdout = await fs.readFile(outputPath, 'utf8');
+
+    if (exitCode !== 0) {
+      const details = (stderr || stdout || '').trim();
+      throw new Error(`Amp command failed with code ${exitCode}${details ? `: ${details}` : ''}`);
+    }
+
+    return stdout;
+  } finally {
+    if (!closed) {
+      await handle.close().catch(() => { });
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => { });
   }
 }
 
