@@ -35,15 +35,15 @@ function roundTrip<T>(message: T): T {
 
 describe('tool-use serialization round-trip', () => {
 	it('BashToolUseMessage preserves command and description', () => {
-		const msg = new BashToolUseMessage(TS, 'id-1', 'Bash', 'ls -la', 'List files');
+		const msg = new BashToolUseMessage(TS, 'id-1', 'ls -la', 'List files');
 		const parsed = roundTrip(msg);
 		expect(parsed.command).toBe('ls -la');
 		expect(parsed.description).toBe('List files');
-		expect(parsed.rawName).toBe('Bash');
+		expect(parsed.type).toBe('bash-tool-use');
 	});
 
 	it('ReadToolUseMessage preserves filePath and range fields', () => {
-		const msg = new ReadToolUseMessage(TS, 'id-2', 'Read', '/tmp/test.ts', 10, 50, 60);
+		const msg = new ReadToolUseMessage(TS, 'id-2', '/tmp/test.ts', 10, 50, 60);
 		const parsed = roundTrip(msg);
 		expect(parsed.filePath).toBe('/tmp/test.ts');
 		expect(parsed.offset).toBe(10);
@@ -52,7 +52,7 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('EditToolUseMessage preserves diff fields', () => {
-		const msg = new EditToolUseMessage(TS, 'id-3', 'Edit', '/tmp/a.ts', 'old', 'new');
+		const msg = new EditToolUseMessage(TS, 'id-3', '/tmp/a.ts', 'old', 'new');
 		const parsed = roundTrip(msg);
 		expect(parsed.filePath).toBe('/tmp/a.ts');
 		expect(parsed.oldString).toBe('old');
@@ -61,20 +61,20 @@ describe('tool-use serialization round-trip', () => {
 
 	it('EditToolUseMessage preserves changes array', () => {
 		const changes = [{ path: '/tmp/b.ts', kind: 'update' }];
-		const msg = new EditToolUseMessage(TS, 'id-4', 'Edit', undefined, undefined, undefined, changes);
+		const msg = new EditToolUseMessage(TS, 'id-4', undefined, undefined, undefined, changes);
 		const parsed = roundTrip(msg);
 		expect(parsed.changes).toEqual(changes);
 	});
 
 	it('WriteToolUseMessage preserves filePath and content', () => {
-		const msg = new WriteToolUseMessage(TS, 'id-5', 'Write', '/tmp/out.ts', 'file content');
+		const msg = new WriteToolUseMessage(TS, 'id-5', '/tmp/out.ts', 'file content');
 		const parsed = roundTrip(msg);
 		expect(parsed.filePath).toBe('/tmp/out.ts');
 		expect(parsed.content).toBe('file content');
 	});
 
 	it('ApplyPatchToolUseMessage preserves diff fields', () => {
-		const msg = new ApplyPatchToolUseMessage(TS, 'id-6', 'ApplyPatch', '/tmp/p.ts', 'before', 'after');
+		const msg = new ApplyPatchToolUseMessage(TS, 'id-6', '/tmp/p.ts', 'before', 'after');
 		const parsed = roundTrip(msg);
 		expect(parsed.filePath).toBe('/tmp/p.ts');
 		expect(parsed.oldString).toBe('before');
@@ -82,47 +82,47 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('GrepToolUseMessage preserves pattern and path', () => {
-		const msg = new GrepToolUseMessage(TS, 'id-7', 'Grep', 'TODO', '/src');
+		const msg = new GrepToolUseMessage(TS, 'id-7', 'TODO', '/src');
 		const parsed = roundTrip(msg);
 		expect(parsed.pattern).toBe('TODO');
 		expect(parsed.path).toBe('/src');
 	});
 
 	it('GlobToolUseMessage preserves pattern and path', () => {
-		const msg = new GlobToolUseMessage(TS, 'id-8', 'Glob', '**/*.ts', '/src');
+		const msg = new GlobToolUseMessage(TS, 'id-8', '**/*.ts', '/src');
 		const parsed = roundTrip(msg);
 		expect(parsed.pattern).toBe('**/*.ts');
 		expect(parsed.path).toBe('/src');
 	});
 
 	it('WebSearchToolUseMessage preserves query', () => {
-		const msg = new WebSearchToolUseMessage(TS, 'id-9', 'WebSearch', 'svelte 5 runes');
+		const msg = new WebSearchToolUseMessage(TS, 'id-9', 'svelte 5 runes');
 		const parsed = roundTrip(msg);
 		expect(parsed.query).toBe('svelte 5 runes');
 	});
 
 	it('WebFetchToolUseMessage preserves url and prompt', () => {
-		const msg = new WebFetchToolUseMessage(TS, 'id-10', 'WebFetch', 'https://example.com', 'summarize');
+		const msg = new WebFetchToolUseMessage(TS, 'id-10', 'https://example.com', 'summarize');
 		const parsed = roundTrip(msg);
 		expect(parsed.url).toBe('https://example.com');
 		expect(parsed.prompt).toBe('summarize');
 	});
 
 	it('TodoWriteToolUseMessage preserves todos', () => {
-		const todos = [{ content: 'task 1', status: 'pending' }];
-		const msg = new TodoWriteToolUseMessage(TS, 'id-11', 'TodoWrite', todos);
+		const todos = [{ content: 'task 1', status: 'pending' as const }];
+		const msg = new TodoWriteToolUseMessage(TS, 'id-11', todos);
 		const parsed = roundTrip(msg);
 		expect(parsed.todos).toEqual(todos);
 	});
 
 	it('TodoReadToolUseMessage round-trips', () => {
-		const msg = new TodoReadToolUseMessage(TS, 'id-12', 'TodoRead');
+		const msg = new TodoReadToolUseMessage(TS, 'id-12');
 		const parsed = roundTrip(msg);
-		expect(parsed.rawName).toBe('TodoRead');
+		expect(parsed.type).toBe('todo-read-tool-use');
 	});
 
 	it('TaskToolUseMessage preserves all fields', () => {
-		const msg = new TaskToolUseMessage(TS, 'id-13', 'Task', 'Explore', 'Find files', 'search for X', 'sonnet');
+		const msg = new TaskToolUseMessage(TS, 'id-13', 'Explore', 'Find files', 'search for X', 'sonnet');
 		const parsed = roundTrip(msg);
 		expect(parsed.subagentType).toBe('Explore');
 		expect(parsed.description).toBe('Find files');
@@ -131,26 +131,26 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('UpdatePlanToolUseMessage preserves todos', () => {
-		const msg = new UpdatePlanToolUseMessage(TS, 'id-14', 'UpdatePlan', [{ content: 'step 1', status: 'pending' }]);
+		const msg = new UpdatePlanToolUseMessage(TS, 'id-14', [{ content: 'step 1', status: 'pending' as const }]);
 		const parsed = roundTrip(msg);
 		expect(parsed.todos).toEqual([{ content: 'step 1', status: 'pending' }]);
 	});
 
 	it('WriteStdinToolUseMessage preserves input record', () => {
-		const msg = new WriteStdinToolUseMessage(TS, 'id-15', 'WriteStdin', { session_id: 42 });
+		const msg = new WriteStdinToolUseMessage(TS, 'id-15', { session_id: 42 });
 		const parsed = roundTrip(msg);
-		expect(parsed.rawName).toBe('WriteStdin');
+		expect(parsed.type).toBe('write-stdin-tool-use');
 	});
 
 	it('EnterPlanModeToolUseMessage round-trips', () => {
-		const msg = new EnterPlanModeToolUseMessage(TS, 'id-16', 'EnterPlanMode');
+		const msg = new EnterPlanModeToolUseMessage(TS, 'id-16');
 		const parsed = roundTrip(msg);
-		expect(parsed.rawName).toBe('EnterPlanMode');
+		expect(parsed.type).toBe('enter-plan-mode-tool-use');
 	});
 
 	it('ExitPlanModeToolUseMessage preserves plan and allowedPrompts', () => {
 		const prompts = [{ tool: 'Bash', prompt: 'run tests' }];
-		const msg = new ExitPlanModeToolUseMessage(TS, 'id-17', 'ExitPlanMode', 'The plan text', prompts);
+		const msg = new ExitPlanModeToolUseMessage(TS, 'id-17', 'The plan text', prompts);
 		const parsed = roundTrip(msg);
 		expect(parsed.plan).toBe('The plan text');
 		expect(parsed.allowedPrompts).toEqual(prompts);
@@ -164,139 +164,125 @@ describe('tool-use serialization round-trip', () => {
 	});
 });
 
-describe('legacy wire format (toolName + toolInput)', () => {
-	it('parses legacy Bash format with toolName and toolInput', () => {
-		const legacy = {
-			type: 'tool-use',
-			timestamp: TS,
-			toolId: 'id-legacy',
-			toolName: 'Bash',
-			toolInput: { command: 'echo hello' },
-		};
-		const parsed = parseChatMessage(legacy);
+describe('wire format parsing', () => {
+	it('parses bash-tool-use from wire data', () => {
+		const data = { type: 'bash-tool-use', timestamp: TS, toolId: 'id-legacy', command: 'echo hello' };
+		const parsed = parseChatMessage(data);
 		expect(parsed).toBeInstanceOf(BashToolUseMessage);
 		expect((parsed as BashToolUseMessage).command).toBe('echo hello');
 	});
 
-	it('parses legacy Read format with string numeric offset', () => {
-		const legacy = {
-			type: 'tool-use',
+	it('parses read-tool-use with numeric offset from wire data', () => {
+		const data = {
+			type: 'read-tool-use',
 			timestamp: TS,
 			toolId: 'id-str-num',
-			toolName: 'Read',
-			toolInput: { file_path: '/tmp/x.ts', offset: '10', limit: '50' },
+			filePath: '/tmp/x.ts',
+			offset: '10',
+			limit: '50',
 		};
-		const parsed = parseChatMessage(legacy) as ReadToolUseMessage;
+		const parsed = parseChatMessage(data) as ReadToolUseMessage;
 		expect(parsed).toBeInstanceOf(ReadToolUseMessage);
 		expect(parsed.filePath).toBe('/tmp/x.ts');
 		expect(parsed.offset).toBe(10);
 		expect(parsed.limit).toBe(50);
 	});
 
-	it('parses legacy unknown tool without metadata pollution', () => {
-		const legacy = {
-			type: 'tool-use',
+	it('parses unknown-tool-use from wire data without metadata pollution', () => {
+		const data = {
+			type: 'unknown-tool-use',
 			timestamp: TS,
 			toolId: 'id-unk-legacy',
-			toolName: 'customX',
-			toolInput: { a: 1, b: 'two' },
+			rawName: 'customX',
+			input: { a: 1, b: 'two' },
 		};
-		const parsed = parseChatMessage(legacy) as UnknownToolUseMessage;
+		const parsed = parseChatMessage(data) as UnknownToolUseMessage;
 		expect(parsed).toBeInstanceOf(UnknownToolUseMessage);
 		expect(parsed.rawName).toBe('customX');
-		// Must contain only tool payload -- no message envelope keys
 		expect(parsed.input).toEqual({ a: 1, b: 'two' });
-		expect(parsed.input).not.toHaveProperty('type');
-		expect(parsed.input).not.toHaveProperty('timestamp');
-		expect(parsed.input).not.toHaveProperty('toolId');
-		expect(parsed.input).not.toHaveProperty('toolName');
-		expect(parsed.input).not.toHaveProperty('toolInput');
 	});
 });
 
-describe('malformed known-tool fallback', () => {
-	it('Bash with missing command falls back to UnknownToolUseMessage', () => {
+describe('unrecognized type returns null', () => {
+	it('parseChatMessage returns null for type "tool-use"', () => {
 		const msg = parseChatMessage({
 			type: 'tool-use',
 			timestamp: TS,
-			toolId: 'id-bad-bash',
+			toolId: 'id-bad',
 			toolName: 'Bash',
-			toolInput: { description: 'no command here' },
+			toolInput: { command: 'echo hello' },
 		});
-		expect(msg).toBeInstanceOf(UnknownToolUseMessage);
-		expect((msg as UnknownToolUseMessage).rawName).toBe('Bash');
+		expect(msg).toBeNull();
 	});
 
-	it('Read with missing file_path falls back to UnknownToolUseMessage', () => {
+	it('parseChatMessage returns null for completely unknown type', () => {
 		const msg = parseChatMessage({
-			type: 'tool-use',
+			type: 'nonexistent-type',
 			timestamp: TS,
-			toolId: 'id-bad-read',
-			toolName: 'Read',
-			toolInput: { offset: 10 },
 		});
-		expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+		expect(msg).toBeNull();
+	});
+});
+
+describe('malformed known-type payloads return null', () => {
+	it('bash-tool-use without command returns null', () => {
+		const msg = parseChatMessage({
+			type: 'bash-tool-use',
+			timestamp: TS,
+			toolId: 'id-bad',
+		});
+		expect(msg).toBeNull();
 	});
 
-	it('WebSearch with missing query falls back to UnknownToolUseMessage', () => {
+	it('read-tool-use without filePath returns null', () => {
 		const msg = parseChatMessage({
-			type: 'tool-use',
+			type: 'read-tool-use',
 			timestamp: TS,
-			toolId: 'id-bad-ws',
-			toolName: 'WebSearch',
-			toolInput: {},
+			toolId: 'id-bad',
 		});
-		expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+		expect(msg).toBeNull();
 	});
 
-	it('WebFetch with missing url falls back to UnknownToolUseMessage', () => {
+	it('write-tool-use without filePath returns null', () => {
 		const msg = parseChatMessage({
-			type: 'tool-use',
+			type: 'write-tool-use',
 			timestamp: TS,
-			toolId: 'id-bad-wf',
-			toolName: 'WebFetch',
-			toolInput: { prompt: 'summarize' },
+			toolId: 'id-bad',
 		});
-		expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+		expect(msg).toBeNull();
 	});
 
-	it('Write with missing file_path falls back to UnknownToolUseMessage', () => {
+	it('web-search-tool-use without query returns null', () => {
 		const msg = parseChatMessage({
-			type: 'tool-use',
+			type: 'web-search-tool-use',
 			timestamp: TS,
-			toolId: 'id-bad-write',
-			toolName: 'Write',
-			toolInput: { content: 'some content' },
+			toolId: 'id-bad',
 		});
-		expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+		expect(msg).toBeNull();
 	});
 
-	it('ExitPlanMode with missing plan falls back to UnknownToolUseMessage', () => {
+	it('web-fetch-tool-use without url returns null', () => {
 		const msg = parseChatMessage({
-			type: 'tool-use',
+			type: 'web-fetch-tool-use',
 			timestamp: TS,
-			toolId: 'id-bad-epm',
-			toolName: 'ExitPlanMode',
-			toolInput: {},
+			toolId: 'id-bad',
 		});
-		expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+		expect(msg).toBeNull();
 	});
 
-	it('Edit with all-optional fields still produces EditToolUseMessage', () => {
+	it('exit-plan-mode-tool-use without plan returns null', () => {
 		const msg = parseChatMessage({
-			type: 'tool-use',
+			type: 'exit-plan-mode-tool-use',
 			timestamp: TS,
-			toolId: 'id-edit-empty',
-			toolName: 'Edit',
-			toolInput: {},
+			toolId: 'id-bad',
 		});
-		expect(msg).toBeInstanceOf(EditToolUseMessage);
+		expect(msg).toBeNull();
 	});
 });
 
 describe('direct constructor round-trip', () => {
 	it('directly constructed messages survive JSON serialization', () => {
-		const msg = new EditToolUseMessage(TS, 'id-factory', 'Edit', '/tmp/f.ts', 'a', 'b');
+		const msg = new EditToolUseMessage(TS, 'id-factory', '/tmp/f.ts', 'a', 'b');
 		const parsed = roundTrip(msg);
 		expect(parsed.filePath).toBe('/tmp/f.ts');
 		expect(parsed.oldString).toBe('a');

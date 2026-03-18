@@ -20,7 +20,6 @@ describe('convertCodexFunctionCall', () => {
     expect(msg).toBeInstanceOf(BashToolUseMessage);
     expect(msg.command).toBe('ls -la');
     expect(msg.toolId).toBe('call-1');
-    expect(msg.rawName).toBe('shell_command');
   });
 
   it('maps exec_command to BashToolUseMessage using cmd field', () => {
@@ -136,7 +135,6 @@ describe('convertCodexCustomToolCall', () => {
     expect(msg.filePath).toBe('/project/file.js');
     expect(msg.oldString).toBe('old line');
     expect(msg.newString).toBe('new line');
-    expect(msg.rawName).toBe('apply_patch');
   });
 
   it('passes through non-apply_patch custom tools as Unknown', () => {

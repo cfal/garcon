@@ -3,13 +3,11 @@
 		UserMessage,
 		AssistantMessage,
 		ThinkingMessage,
-		ToolUseMessage,
-		EnterPlanModeToolUseMessage,
-		ExitPlanModeToolUseMessage,
+		isToolUseMessage,
 		ErrorMessage,
 		PermissionRequestMessage,
 	} from '$shared/chat-types';
-	import type { ChatMessage, ToolResultMessage } from '$shared/chat-types';
+	import type { ChatMessage, ToolResultMessage, ToolUseChatMessage } from '$shared/chat-types';
 	import type { SessionProvider } from '$lib/types/app';
 	import { ChevronRight } from '@lucide/svelte';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
@@ -82,22 +80,22 @@
 	const shouldHideThinking = $derived(message instanceof ThinkingMessage && !showThinking);
 
 	// Maps message type to a simplified CSS class name.
-	function getCssType(type: string): string {
-		switch (type) {
+	function getCssType(msg: ChatMessage): string {
+		if (isToolUseMessage(msg)) return 'tool';
+		switch (msg.type) {
 			case 'user-message': return 'user';
 			case 'assistant-message': return 'assistant';
-			case 'tool-use': return 'tool';
-			default: return type;
+			default: return msg.type;
 		}
 	}
 
-	const cssType = $derived(getCssType(message.type));
+	const cssType = $derived(getCssType(message));
 
-	// Instanceof helpers for type narrowing in the template.
+	// Type narrowing helpers for the template.
 	const asUser = $derived(message instanceof UserMessage ? message : null);
 	const asAssistant = $derived(message instanceof AssistantMessage ? message : null);
 	const asThinking = $derived(message instanceof ThinkingMessage ? message : null);
-	const asToolUse = $derived(message instanceof ToolUseMessage ? message : null);
+	const asToolUse = $derived(isToolUseMessage(message) ? message : null);
 	const asError = $derived(message instanceof ErrorMessage ? message : null);
 	const asPermissionRequest = $derived(message instanceof PermissionRequestMessage ? message : null);
 
@@ -242,7 +240,7 @@
 					{/if}
 
 					<div class="w-full">
-						{#if asToolUse instanceof EnterPlanModeToolUseMessage}
+						{#if asToolUse && asToolUse.type === 'enter-plan-mode-tool-use'}
 							<ChatEventCard variant="info" compact>
 								{#snippet body()}
 									<span class="text-xs font-medium">
@@ -250,7 +248,7 @@
 									</span>
 								{/snippet}
 							</ChatEventCard>
-					{:else if asToolUse instanceof ExitPlanModeToolUseMessage}
+					{:else if asToolUse && asToolUse.type === 'exit-plan-mode-tool-use'}
 						{@const exitPlanMsg = asToolUse}
 						<PermissionRequestRow
 							request={{

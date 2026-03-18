@@ -187,7 +187,7 @@ function normalizeResponseItem(payload, ts) {
       const query = payload.action?.query
         || (payload.action?.queries || []).join(', ')
         || '';
-      result.canonical.push(new WebSearchToolUseMessage(ts, payload.id || `web-search-${Date.now()}`, 'web_search_call', query));
+      result.canonical.push(new WebSearchToolUseMessage(ts, payload.id || `web-search-${Date.now()}`, query));
       // Synthetic tool-result summarizing status
       if (payload.status === 'completed' || payload.status === 'searching') {
         result.canonical.push(new ToolResultMessage(ts, payload.id || `web-search-${Date.now()}`, normalizeToolResultContent(query ? `Searched: ${query}` : 'Web search completed'), false));

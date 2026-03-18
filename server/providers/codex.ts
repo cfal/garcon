@@ -121,7 +121,7 @@ export function convertCodexEventToChatMessages(transformed: NormalizedEvent): u
       case 'command_execution':
         if (transformed.command) {
           const toolId = `codex-cmd-${Date.now()}`;
-          chatMessages.push(new BashToolUseMessage(now, toolId, 'Bash', transformed.command));
+          chatMessages.push(new BashToolUseMessage(now, toolId, transformed.command));
           if (transformed.output !== undefined) {
             chatMessages.push(new ToolResultMessage(now, toolId, normalizeToolResultContent(transformed.output), transformed.exitCode !== 0));
           }
@@ -135,7 +135,7 @@ export function convertCodexEventToChatMessages(transformed: NormalizedEvent): u
             ? [transformed.changes]
             : [];
         if (changes.length > 0) {
-          chatMessages.push(new EditToolUseMessage(now, editId, 'Edit', undefined, undefined, undefined, changes));
+          chatMessages.push(new EditToolUseMessage(now, editId, undefined, undefined, undefined, changes));
           if (transformed.status === 'completed') {
             chatMessages.push(new ToolResultMessage(now, editId, normalizeToolResultContent('File changes applied'), false));
           }
@@ -144,7 +144,7 @@ export function convertCodexEventToChatMessages(transformed: NormalizedEvent): u
       }
       case 'web_search': {
         const searchId = `codex-search-${Date.now()}`;
-        chatMessages.push(new WebSearchToolUseMessage(now, searchId, 'WebSearch', transformed.query || ''));
+        chatMessages.push(new WebSearchToolUseMessage(now, searchId, transformed.query || ''));
         if (transformed.query) {
           chatMessages.push(new ToolResultMessage(now, searchId, normalizeToolResultContent(`Searched: ${transformed.query}`), false));
         }
@@ -152,7 +152,7 @@ export function convertCodexEventToChatMessages(transformed: NormalizedEvent): u
       }
       case 'todo_list': {
         const todoId = `codex-todo-${Date.now()}`;
-        chatMessages.push(new TodoWriteToolUseMessage(now, todoId, 'TodoWrite', normalizeTodoItems(transformed.items)));
+        chatMessages.push(new TodoWriteToolUseMessage(now, todoId, normalizeTodoItems(transformed.items)));
         chatMessages.push(new ToolResultMessage(now, todoId, normalizeToolResultContent(transformed.items), false));
         break;
       }

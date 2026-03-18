@@ -38,7 +38,7 @@ describe('deriveMessageId', () => {
 	});
 
 	it('handles tool-use messages via toolId', () => {
-		const msg = new BashToolUseMessage(NOW, 'tool-abc', 'Bash', 'ls');
+		const msg = new BashToolUseMessage(NOW, 'tool-abc', 'ls');
 		const id = deriveMessageId(msg);
 		expect(id).toMatch(/^msg_/);
 	});
@@ -62,7 +62,7 @@ describe('deriveMessageId', () => {
 	});
 
 	it('differentiates tool-use from tool-result with same toolId', () => {
-		const toolUse = new BashToolUseMessage(NOW, 'tool-1', 'Bash', 'echo hi');
+		const toolUse = new BashToolUseMessage(NOW, 'tool-1', 'echo hi');
 		const toolResult = new ToolResultMessage(NOW, 'tool-1', { raw: 'hi' }, false);
 		expect(deriveMessageId(toolUse)).not.toBe(deriveMessageId(toolResult));
 	});
@@ -98,7 +98,7 @@ describe('createMessageIdAllocator', () => {
 
 	it('returns same ID when same object is called twice', () => {
 		const allocator = createMessageIdAllocator();
-		const msg = new ReadToolUseMessage(NOW, 'tool-1', 'Read', '/a.ts');
+		const msg = new ReadToolUseMessage(NOW, 'tool-1', '/a.ts');
 		expect(allocator(msg)).toBe(allocator(msg));
 	});
 

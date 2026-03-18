@@ -1,8 +1,8 @@
 // Handles plan mode transitions from tool-use messages with
-// EnterPlanMode / ExitPlanMode tool names.
+// EnterPlanMode / ExitPlanMode tool types.
 
 import type { AgentRunOutputMessage } from '$shared/ws-events';
-import { ToolUseMessage, EnterPlanModeToolUseMessage, ExitPlanModeToolUseMessage } from '$shared/chat-types';
+import { isToolUseMessage } from '$shared/chat-types';
 import type { PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
 
 export interface PlanModeContext {
@@ -19,16 +19,16 @@ export function handlePlanModeMessages(msg: AgentRunOutputMessage, ctx: PlanMode
 	if (!msg.messages) return;
 
 	for (const chatMsg of msg.messages) {
-		if (!(chatMsg instanceof ToolUseMessage)) continue;
+		if (!isToolUseMessage(chatMsg)) continue;
 
-		if (chatMsg instanceof EnterPlanModeToolUseMessage) {
+		if (chatMsg.type === 'enter-plan-mode-tool-use') {
 			if (ctx.permissionMode !== 'plan') {
 				ctx.setPreviousPermissionMode(ctx.permissionMode);
 			}
 			ctx.setPermissionMode('plan');
 		}
 
-		if (chatMsg instanceof ExitPlanModeToolUseMessage) {
+		if (chatMsg.type === 'exit-plan-mode-tool-use') {
 			const permissionRequestId = `plan-exit-${chatMsg.toolId}`;
 			ctx.setPendingPermissionRequests((prev) => {
 				if (prev.some((r) => r.permissionRequestId === permissionRequestId)) return prev;

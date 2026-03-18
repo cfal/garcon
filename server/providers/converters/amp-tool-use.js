@@ -66,20 +66,19 @@ export function convertAmpToolUse(ts, part) {
     case 'bash': {
       const command = firstString([input.cmd, input.command]);
       if (command === undefined) break;
-      return new BashToolUseMessage(ts, toolId, rawName, command, asString(input.description));
+      return new BashToolUseMessage(ts, toolId, command, asString(input.description));
     }
 
     case 'read': {
       const filePath = firstString([input.path, input.file_path, input.filePath]);
       if (filePath === undefined) break;
-      return new ReadToolUseMessage(ts, toolId, rawName, filePath);
+      return new ReadToolUseMessage(ts, toolId, filePath);
     }
 
     case 'grep':
       return new GrepToolUseMessage(
         ts,
         toolId,
-        rawName,
         asString(input.pattern),
         firstString([input.path, input.file_path, input.filePath]),
       );
@@ -89,7 +88,6 @@ export function convertAmpToolUse(ts, part) {
       return new GlobToolUseMessage(
         ts,
         toolId,
-        rawName,
         pattern,
         firstString([input.path, input.file_path, input.filePath]),
       );
@@ -99,7 +97,6 @@ export function convertAmpToolUse(ts, part) {
       return new EditToolUseMessage(
         ts,
         toolId,
-        rawName,
         firstString([input.path, input.file_path, input.filePath]),
         firstString([input.old_str, input.old_string, input.oldString]),
         firstString([input.new_str, input.new_string, input.newString]),
@@ -108,19 +105,19 @@ export function convertAmpToolUse(ts, part) {
     case 'createfile': {
       const filePath = firstString([input.path, input.file_path, input.filePath]);
       if (filePath === undefined) break;
-      return new WriteToolUseMessage(ts, toolId, rawName, filePath, asString(input.content));
+      return new WriteToolUseMessage(ts, toolId, filePath, asString(input.content));
     }
 
     case 'websearch': {
       const query = inferWebSearchQuery(input);
       if (query === undefined) break;
-      return new WebSearchToolUseMessage(ts, toolId, rawName, query);
+      return new WebSearchToolUseMessage(ts, toolId, query);
     }
 
     case 'readwebpage': {
       const url = asString(input.url);
       if (url === undefined) break;
-      return new WebFetchToolUseMessage(ts, toolId, rawName, url, asString(input.objective));
+      return new WebFetchToolUseMessage(ts, toolId, url, asString(input.objective));
     }
   }
 

@@ -42,13 +42,13 @@ describe('applyChatMessages', () => {
 		const result = applyChatMessages([], [
 			new UserMessage('2026-01-01T00:00:00Z', 'Question'),
 			new AssistantMessage('2026-01-01T00:00:01Z', 'I will help you.'),
-			new ReadToolUseMessage('2026-01-01T00:00:02Z', 't1', 'Read', '/tmp/file.ts'),
+			new ReadToolUseMessage('2026-01-01T00:00:02Z', 't1', '/tmp/file.ts'),
 			new ToolResultMessage('2026-01-01T00:00:03Z', 't1', { raw: 'file content' }, false),
 		]);
 		expect(result).toHaveLength(4);
 		expect(result[0].type).toBe('user-message');
 		expect(result[1].type).toBe('assistant-message');
-		expect(result[2].type).toBe('tool-use');
+		expect(result[2].type).toBe('read-tool-use');
 		expect(result[3].type).toBe('tool-result');
 	});
 

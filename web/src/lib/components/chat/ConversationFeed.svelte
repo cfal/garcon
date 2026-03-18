@@ -1,13 +1,11 @@
 <script lang="ts">
 	import ConversationMessage from './ConversationMessage.svelte';
 	import {
-		ToolUseMessage,
-		ExitPlanModeToolUseMessage,
+		isToolUseMessage,
 		ToolResultMessage,
 		PermissionRequestMessage,
 		PermissionResolvedMessage,
 		PermissionCancelledMessage,
-		normalizeToolName,
 	} from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import { getChatState, getProviderState, getPreferences, getAppShell } from '$lib/context';
@@ -81,10 +79,12 @@
 
 	// Tracks which ExitPlanMode synthetic permission requests are still
 	// pending so we can derive terminal state for the tool-use rendering.
+	// Matches both PascalCase and snake_case variants since claude-cli
+	// forwards tool_name verbatim from the provider.
 	const pendingExitPlanIds = $derived(
 		new Set(
 			pendingPermissionRequests
-				.filter((r) => normalizeToolName(r.toolName) === 'ExitPlanMode')
+				.filter((r) => r.toolName === 'ExitPlanMode' || r.toolName === 'exit_plan_mode')
 				.map((r) => r.permissionRequestId),
 		),
 	);
@@ -195,13 +195,13 @@
 		{#each chatState.visibleMessages as message, index (getMessageId(message))}
 			{@const isToolResult = message instanceof ToolResultMessage}
 			{@const isPermissionTerminal = message instanceof PermissionResolvedMessage || message instanceof PermissionCancelledMessage}
-			{@const isServerExitPlanPermission = message instanceof PermissionRequestMessage && normalizeToolName(message.toolName) === 'ExitPlanMode'}
+			{@const isServerExitPlanPermission = message instanceof PermissionRequestMessage && (message.toolName === 'ExitPlanMode' || message.toolName === 'exit_plan_mode')}
 			{#if !isToolResult && !isPermissionTerminal && !isServerExitPlanPermission}
 				{@const prevMessage = index > 0 ? chatState.visibleMessages[index - 1] : null}
-				{@const toolResult = message instanceof ToolUseMessage
+				{@const toolResult = isToolUseMessage(message)
 					? toolResultIndex.get(message.toolId)
 					: undefined}
-				{@const exitPlanId = message instanceof ExitPlanModeToolUseMessage
+				{@const exitPlanId = message.type === 'exit-plan-mode-tool-use'
 					? `plan-exit-${message.toolId}`
 					: null}
 				{@const permTerminal = message instanceof PermissionRequestMessage

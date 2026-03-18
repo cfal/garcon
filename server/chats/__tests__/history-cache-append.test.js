@@ -39,13 +39,13 @@ describe('appendMessages', () => {
 
   it('appends tool-use and tool-result messages', async () => {
     await cache.appendMessages(chatId, [
-      { type: 'tool-use', timestamp: ts, toolId: 't1', toolName: 'Read', toolInput: '{}' },
+      { type: 'read-tool-use', timestamp: ts, toolId: 't1', filePath: '/tmp/test.ts' },
       { type: 'tool-result', timestamp: ts, toolId: 't1', content: 'ok', isError: false },
     ]);
 
     const entry = cache._cacheByChatId.get(chatId);
     expect(entry.messages).toHaveLength(2);
-    expect(entry.messages[0].type).toBe('tool-use');
+    expect(entry.messages[0].type).toBe('read-tool-use');
     expect(entry.messages[1].type).toBe('tool-result');
   });
 
@@ -64,14 +64,14 @@ describe('appendMessages', () => {
     await cache.appendMessages(chatId, [
       { type: 'thinking', timestamp: ts, content: 'Think' },
       { type: 'assistant-message', timestamp: ts, content: 'Response' },
-      { type: 'tool-use', timestamp: ts, toolId: 't1', toolName: 'Bash', toolInput: '{}' },
+      { type: 'bash-tool-use', timestamp: ts, toolId: 't1', command: 'ls' },
     ]);
 
     const entry = cache._cacheByChatId.get(chatId);
     expect(entry.messages).toHaveLength(3);
     expect(entry.messages[0].type).toBe('thinking');
     expect(entry.messages[1].type).toBe('assistant-message');
-    expect(entry.messages[2].type).toBe('tool-use');
+    expect(entry.messages[2].type).toBe('bash-tool-use');
   });
 
   it('calls updateFromAppendedMessages with all messages', async () => {
@@ -79,7 +79,7 @@ describe('appendMessages', () => {
 
     const messages = [
       { type: 'assistant-message', timestamp: ts, content: 'hi' },
-      { type: 'tool-use', timestamp: ts, toolId: 't1', toolName: 'Read', toolInput: '{}' },
+      { type: 'read-tool-use', timestamp: ts, toolId: 't1', filePath: '/tmp/test.ts' },
     ];
     await cache.appendMessages(chatId, messages);
 

@@ -13,7 +13,7 @@ export type {
 	UserMessage,
 	AssistantMessage,
 	ThinkingMessage,
-	ToolUseMessage,
+	ToolUseChatMessage,
 	BashToolUseMessage,
 	ReadToolUseMessage,
 	EditToolUseMessage,

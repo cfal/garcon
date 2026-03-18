@@ -36,19 +36,19 @@ export function convertCodexFunctionCall(ts, payload) {
     }
 
     if (typeof command === 'string' && command.length > 0) {
-      return new BashToolUseMessage(ts, callId, rawName, command);
+      return new BashToolUseMessage(ts, callId, command);
     }
 
     return new UnknownToolUseMessage(ts, callId, rawName, asObject(normalizeToolInput(rawArgs)));
   }
 
   if (rawName === 'write_stdin') {
-    return new WriteStdinToolUseMessage(ts, callId, rawName, asObject(normalizeToolInput(rawArgs)));
+    return new WriteStdinToolUseMessage(ts, callId, asObject(normalizeToolInput(rawArgs)));
   }
 
   if (rawName === 'update_plan') {
     const input = asObject(normalizeToolInput(rawArgs));
-    return new UpdatePlanToolUseMessage(ts, callId, rawName, normalizeTodoItems(input.items ?? input.todos ?? input.plan));
+    return new UpdatePlanToolUseMessage(ts, callId, normalizeTodoItems(input.items ?? input.todos ?? input.plan));
   }
 
   return new UnknownToolUseMessage(ts, callId, rawName, asObject(normalizeToolInput(rawArgs)));
@@ -68,7 +68,6 @@ export function convertCodexCustomToolCall(ts, payload, parseApplyPatch) {
     return new EditToolUseMessage(
       ts,
       callId,
-      rawName,
       parsed.file_path,
       parsed.old_string,
       parsed.new_string,

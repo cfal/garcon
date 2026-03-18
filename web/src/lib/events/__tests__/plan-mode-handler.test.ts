@@ -22,7 +22,7 @@ describe('plan mode handler', () => {
 	it('maps ExitPlanMode tool-use into pending permission request', () => {
 		const { ctx, read } = makeContext();
 		const message = new AgentRunOutputMessage('chat-1', [
-			new ExitPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-123', 'ExitPlanMode', 'Do X', []),
+			new ExitPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-123', 'Do X', []),
 		]);
 
 		handlePlanModeMessages(message, ctx);
@@ -35,7 +35,7 @@ describe('plan mode handler', () => {
 	it('sets plan permission mode on EnterPlanMode tool-use', () => {
 		const { ctx } = makeContext('default');
 		const message = new AgentRunOutputMessage('chat-1', [
-			new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-456', 'EnterPlanMode'),
+			new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-456'),
 		]);
 
 		handlePlanModeMessages(message, ctx);
@@ -46,7 +46,7 @@ describe('plan mode handler', () => {
 	it('handles enter_plan_mode (snake_case variant)', () => {
 		const { ctx } = makeContext('default');
 		const message = new AgentRunOutputMessage('chat-1', [
-			new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-sc', 'enter_plan_mode'),
+			new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-sc'),
 		]);
 
 		handlePlanModeMessages(message, ctx);
@@ -57,7 +57,7 @@ describe('plan mode handler', () => {
 	it('handles exit_plan_mode (snake_case variant)', () => {
 		const { ctx, read } = makeContext();
 		const message = new AgentRunOutputMessage('chat-1', [
-			new ExitPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-sc-exit', 'exit_plan_mode', 'Do Y'),
+			new ExitPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-sc-exit', 'Do Y'),
 		]);
 
 		handlePlanModeMessages(message, ctx);
@@ -70,7 +70,7 @@ describe('plan mode handler', () => {
 	it('does not call setPreviousPermissionMode when already in plan mode', () => {
 		const { ctx } = makeContext('plan');
 		const message = new AgentRunOutputMessage('chat-1', [
-			new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-dup', 'EnterPlanMode'),
+			new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-dup'),
 		]);
 
 		handlePlanModeMessages(message, ctx);
@@ -81,7 +81,7 @@ describe('plan mode handler', () => {
 	it('deduplicates ExitPlanMode with the same toolId', () => {
 		const { ctx, read } = makeContext();
 		const message = new AgentRunOutputMessage('chat-1', [
-			new ExitPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-dedup', 'ExitPlanMode', 'Do Z'),
+			new ExitPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-dedup', 'Do Z'),
 		]);
 
 		handlePlanModeMessages(message, ctx);
@@ -104,7 +104,7 @@ describe('plan mode handler', () => {
 	it('ignores non-plan-mode tool-use messages', () => {
 		const { ctx, read } = makeContext();
 		const message = new AgentRunOutputMessage('chat-1', [
-			new BashToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-789', 'Bash', 'ls'),
+			new BashToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-789', 'ls'),
 		]);
 
 		handlePlanModeMessages(message, ctx);

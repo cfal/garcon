@@ -54,8 +54,7 @@ describe('convertCodexEventToChatMessages', () => {
       exitCode: 0,
     });
     expect(result).toHaveLength(2);
-    expect(result[0].type).toBe('tool-use');
-    expect(result[0].rawName).toBe('Bash');
+    expect(result[0].type).toBe('bash-tool-use');
     expect(result[0].command).toBe('ls -la');
     expect(result[1].type).toBe('tool-result');
     expect(result[1].toolId).toBe(result[0].toolId);
@@ -81,8 +80,7 @@ describe('convertCodexEventToChatMessages', () => {
       status: 'completed',
     });
     expect(result).toHaveLength(2);
-    expect(result[0].type).toBe('tool-use');
-    expect(result[0].rawName).toBe('Edit');
+    expect(result[0].type).toBe('edit-tool-use');
     expect(result[0].changes).toEqual([{ path: '/tmp/x.js', kind: 'update' }]);
     expect(result[1].type).toBe('tool-result');
     expect(result[1].content).toEqual({ raw: 'File changes applied' });
@@ -103,7 +101,7 @@ describe('convertCodexEventToChatMessages', () => {
       query: 'React performance tips',
     });
     expect(result).toHaveLength(2);
-    expect(result[0].rawName).toBe('WebSearch');
+    expect(result[0].type).toBe('web-search-tool-use');
     expect(result[0].query).toBe('React performance tips');
     expect(result[1].content.raw).toContain('React performance tips');
   });
@@ -115,7 +113,7 @@ describe('convertCodexEventToChatMessages', () => {
       items: [{ text: 'task 1', completed: false }],
     });
     expect(result).toHaveLength(2);
-    expect(result[0].rawName).toBe('TodoWrite');
+    expect(result[0].type).toBe('todo-write-tool-use');
     expect(result[0].todos).toEqual([{ content: 'task 1', status: 'pending' }]);
   });
 

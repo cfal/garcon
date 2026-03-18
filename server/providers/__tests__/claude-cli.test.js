@@ -57,8 +57,7 @@ describe('convertCLIMessageToChatMessages', () => {
     };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(1);
-    expect(result[0].type).toBe('tool-use');
-    expect(result[0].rawName).toBe('Read');
+    expect(result[0].type).toBe('read-tool-use');
     expect(result[0].toolId).toBe('tool-1');
   });
 
@@ -87,7 +86,7 @@ describe('convertCLIMessageToChatMessages', () => {
     expect(result).toHaveLength(3);
     expect(result[0].type).toBe('assistant-message');
     expect(result[1].type).toBe('thinking');
-    expect(result[2].type).toBe('tool-use');
+    expect(result[2].type).toBe('read-tool-use');
   });
 
   it('reads content from message.content wrapper shape', () => {
@@ -100,8 +99,7 @@ describe('convertCLIMessageToChatMessages', () => {
     };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(1);
-    expect(result[0].type).toBe('tool-use');
-    expect(result[0].rawName).toBe('Bash');
+    expect(result[0].type).toBe('bash-tool-use');
   });
 
   it('skips empty or whitespace-only text parts', () => {
@@ -120,8 +118,7 @@ describe('convertCLIMessageToChatMessages', () => {
     };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(1);
-    expect(result[0].type).toBe('tool-use');
-    expect(result[0].rawName).toBe('EnterPlanMode');
+    expect(result[0].type).toBe('enter-plan-mode-tool-use');
     expect(result[0].toolId).toBe('p1');
   });
 
@@ -132,8 +129,7 @@ describe('convertCLIMessageToChatMessages', () => {
     };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(1);
-    expect(result[0].type).toBe('tool-use');
-    expect(result[0].rawName).toBe('exit_plan_mode');
+    expect(result[0].type).toBe('exit-plan-mode-tool-use');
     expect(result[0].plan).toBe('Do X');
   });
 
@@ -144,7 +140,7 @@ describe('convertCLIMessageToChatMessages', () => {
     };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(1);
-    expect(result[0].type).toBe('tool-use');
+    expect(result[0].type).toBe('unknown-tool-use');
     expect(result[0].rawName).toBe('exit_plan_mode');
     expect(result[0].plan).toBeUndefined();
   });
@@ -176,7 +172,7 @@ describe('convertCLIMessageToChatMessages', () => {
       content: [{ type: 'tool_use', id: 'n1', name: 'Read', input: null }],
     };
     const result = convertCLIMessageToChatMessages(msg);
-    expect(result[0].type).toBe('tool-use');
+    expect(result[0].type).toBe('unknown-tool-use');
     expect(result[0].rawName).toBe('Read');
     expect(result[0].filePath).toBeUndefined();
   });
@@ -187,7 +183,7 @@ describe('convertCLIMessageToChatMessages', () => {
       content: [{ type: 'tool_use', id: 'a1', name: 'Read', input: [1, 2, 3] }],
     };
     const result = convertCLIMessageToChatMessages(msg);
-    expect(result[0].type).toBe('tool-use');
+    expect(result[0].type).toBe('unknown-tool-use');
     expect(result[0].rawName).toBe('Read');
     expect(result[0].filePath).toBeUndefined();
   });

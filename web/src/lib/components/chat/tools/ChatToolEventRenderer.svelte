@@ -2,7 +2,7 @@
 	// Dispatches tool rendering to ChatToolInlineEvent or ChatToolExpandableEvent
 	// based on the config-driven registry in tool-display-registry.ts.
 
-	import { ToolUseMessage } from '$shared/chat-types';
+	import type { ToolUseChatMessage, TodoItem } from '$shared/chat-types';
 	import { toRenderToolPayload } from '$lib/chat/tool-render-payload';
 	import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tool-display-registry';
 	import { resolveDisplayRule } from '$lib/chat/tool-display-policy';
@@ -17,7 +17,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ToolRendererProps {
-		toolMessage: ToolUseMessage;
+		toolMessage: ToolUseChatMessage;
 		toolResult?: Record<string, unknown>;
 		mode: 'input' | 'result';
 		onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
@@ -274,7 +274,7 @@
 							{successMessage}
 						</div>
 					{:else if displayConfig.contentKind === 'todoList'}
-						<ChatToolTodoListView todos={contentProps.todos} />
+						<ChatToolTodoListView todos={contentProps.todos as TodoItem[] | undefined} />
 					{:else if displayConfig.contentKind === 'task'}
 						<ChatToolPlainTextView
 							content={(contentProps.content as string) || ''}
@@ -321,7 +321,7 @@
 						{resultSuccessMessage}
 					</div>
 				{:else if resultConfig.contentKind === 'todoList'}
-					<ChatToolTodoListView todos={resultContentProps.todos} />
+					<ChatToolTodoListView todos={resultContentProps.todos as TodoItem[] | undefined} />
 				{:else if resultConfig.contentKind === 'task'}
 					<ChatToolPlainTextView
 						content={(resultContentProps.content as string) || ''}

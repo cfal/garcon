@@ -4,7 +4,7 @@
 // a type-aware fingerprint for collision resistance.
 
 import {
-	ToolUseMessage,
+	isToolUseMessage,
 	ToolResultMessage,
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
@@ -14,7 +14,7 @@ import {
 	ThinkingMessage,
 	ErrorMessage,
 } from '$shared/chat-types';
-import type { ChatMessage } from '$shared/chat-types';
+import type { ChatMessage, ToolUseChatMessage } from '$shared/chat-types';
 
 function normalizeString(value: unknown): string {
 	return typeof value === 'string' ? value.trim() : '';
@@ -25,8 +25,8 @@ function fingerprintBase(message: ChatMessage): string {
 		? String(new Date(message.timestamp).getTime())
 		: 'no-ts';
 
-	if (message instanceof ToolUseMessage) {
-		return `tool-use|${message.rawName}|${message.toolId}|${ts}`;
+	if (isToolUseMessage(message)) {
+		return `${message.type}|${message.toolId}|${ts}`;
 	}
 	if (message instanceof ToolResultMessage) {
 		const content = JSON.stringify(message.content ?? {});

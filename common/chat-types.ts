@@ -51,220 +51,191 @@ export class ThinkingMessage {
   constructor(public timestamp: string, public content: string) {}
 }
 
-// Abstract base for all tool-use messages. Concrete subclasses carry
-// typed domain-specific fields; UnknownToolUseMessage handles runtime
-// tools not in the canonical set.
-export abstract class ToolUseMessage {
-  readonly type = 'tool-use' as const;
+export class BashToolUseMessage {
+  readonly type = 'bash-tool-use' as const;
 
   constructor(
     public timestamp: string,
     public toolId: string,
-    public rawName: string,
+    public command: string,
+    public description?: string,
   ) {}
 }
 
-export class BashToolUseMessage extends ToolUseMessage {
-  constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
-    public command: string,
-    public description?: string,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
-}
+export class ReadToolUseMessage {
+  readonly type = 'read-tool-use' as const;
 
-export class ReadToolUseMessage extends ToolUseMessage {
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public filePath: string,
     public offset?: number,
     public limit?: number,
     public endLine?: number,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class EditToolUseMessage extends ToolUseMessage {
+export class EditToolUseMessage {
+  readonly type = 'edit-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public filePath?: string,
     public oldString?: string,
     public newString?: string,
     public changes?: Array<{ path?: string; kind?: string }>,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class WriteToolUseMessage extends ToolUseMessage {
+export class WriteToolUseMessage {
+  readonly type = 'write-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public filePath: string,
     public content?: string,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class ApplyPatchToolUseMessage extends ToolUseMessage {
+export class ApplyPatchToolUseMessage {
+  readonly type = 'apply-patch-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public filePath?: string,
     public oldString?: string,
     public newString?: string,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class GrepToolUseMessage extends ToolUseMessage {
+export class GrepToolUseMessage {
+  readonly type = 'grep-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public pattern?: string,
     public path?: string,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class GlobToolUseMessage extends ToolUseMessage {
+export class GlobToolUseMessage {
+  readonly type = 'glob-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public pattern?: string,
     public path?: string,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class WebSearchToolUseMessage extends ToolUseMessage {
+export class WebSearchToolUseMessage {
+  readonly type = 'web-search-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public query: string,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class WebFetchToolUseMessage extends ToolUseMessage {
+export class WebFetchToolUseMessage {
+  readonly type = 'web-fetch-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public url: string,
     public prompt?: string,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class TodoWriteToolUseMessage extends ToolUseMessage {
+export class TodoWriteToolUseMessage {
+  readonly type = 'todo-write-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public todos?: TodoItem[],
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class TodoReadToolUseMessage extends ToolUseMessage {
+export class TodoReadToolUseMessage {
+  readonly type = 'todo-read-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+    public timestamp: string,
+    public toolId: string,
+  ) {}
 }
 
-export class TaskToolUseMessage extends ToolUseMessage {
+export class TaskToolUseMessage {
+  readonly type = 'task-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public subagentType?: string,
     public description?: string,
     public prompt?: string,
     public model?: string,
     public resume?: string,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class UpdatePlanToolUseMessage extends ToolUseMessage {
+export class UpdatePlanToolUseMessage {
+  readonly type = 'update-plan-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public todos?: TodoItem[],
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class WriteStdinToolUseMessage extends ToolUseMessage {
+export class WriteStdinToolUseMessage {
+  readonly type = 'write-stdin-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public input: Record<string, unknown>,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class EnterPlanModeToolUseMessage extends ToolUseMessage {
+export class EnterPlanModeToolUseMessage {
+  readonly type = 'enter-plan-mode-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+    public timestamp: string,
+    public toolId: string,
+  ) {}
 }
 
-export class ExitPlanModeToolUseMessage extends ToolUseMessage {
+export class ExitPlanModeToolUseMessage {
+  readonly type = 'exit-plan-mode-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
     public plan: string,
     public allowedPrompts?: Array<{ tool: string; prompt: string }>,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
-export class UnknownToolUseMessage extends ToolUseMessage {
+export class UnknownToolUseMessage {
+  readonly type = 'unknown-tool-use' as const;
+
   constructor(
-    timestamp: string,
-    toolId: string,
-    rawName: string,
+    public timestamp: string,
+    public toolId: string,
+    public rawName: string,
     public input: Record<string, unknown>,
-  ) {
-    super(timestamp, toolId, rawName);
-  }
+  ) {}
 }
 
 export class ToolResultMessage {
@@ -292,10 +263,8 @@ export class PermissionCancelledMessage {
   constructor(public timestamp: string, public permissionRequestId: string, public reason?: 'cancelled' | 'session-complete' | 'aborted') {}
 }
 
-export type ChatMessage =
-  | UserMessage
-  | AssistantMessage
-  | ThinkingMessage
+// Union of all explicit tool-use message classes.
+export type ToolUseChatMessage =
   | BashToolUseMessage
   | ReadToolUseMessage
   | EditToolUseMessage
@@ -312,50 +281,44 @@ export type ChatMessage =
   | WriteStdinToolUseMessage
   | EnterPlanModeToolUseMessage
   | ExitPlanModeToolUseMessage
-  | UnknownToolUseMessage
+  | UnknownToolUseMessage;
+
+export type ChatMessage =
+  | UserMessage
+  | AssistantMessage
+  | ThinkingMessage
+  | ToolUseChatMessage
   | ToolResultMessage
   | ErrorMessage
   | PermissionRequestMessage
   | PermissionResolvedMessage
   | PermissionCancelledMessage;
 
-// Canonical tool names recognized by the typed factory.
-type CanonicalToolName =
-  | 'Bash' | 'Read' | 'Edit' | 'Write' | 'ApplyPatch'
-  | 'Grep' | 'Glob' | 'WebSearch' | 'WebFetch'
-  | 'TodoWrite' | 'TodoRead' | 'Task' | 'UpdatePlan'
-  | 'WriteStdin' | 'EnterPlanMode' | 'ExitPlanMode';
-
-// Maps lowercased, stripped names to canonical tool identifiers.
-const TOOL_ALIASES: Record<string, CanonicalToolName> = {
-  bash: 'Bash',
-  shellcommand: 'Bash',
-  execcommand: 'Bash',
-  read: 'Read',
-  edit: 'Edit',
-  write: 'Write',
-  applypatch: 'ApplyPatch',
-  grep: 'Grep',
-  glob: 'Glob',
-  websearch: 'WebSearch',
-  webfetch: 'WebFetch',
-  todowrite: 'TodoWrite',
-  todoread: 'TodoRead',
-  task: 'Task',
-  updateplan: 'UpdatePlan',
-  writestdin: 'WriteStdin',
-  enterplanmode: 'EnterPlanMode',
-  planenter: 'EnterPlanMode',
-  exitplanmode: 'ExitPlanMode',
-  exitplan: 'ExitPlanMode',
-  planexit: 'ExitPlanMode',
-};
-
-// Resolves a raw provider tool name to a canonical name. Returns null
-// for names not matching any known alias.
-export function normalizeToolName(raw: string): CanonicalToolName | null {
-  const key = raw.trim().toLowerCase().replace(/[\s_\-]+/g, '');
-  return TOOL_ALIASES[key] ?? null;
+// Runtime guard for tool-use messages. Replaces the former base-class
+// instanceof check.
+export function isToolUseMessage(message: ChatMessage): message is ToolUseChatMessage {
+  switch (message.type) {
+    case 'bash-tool-use':
+    case 'read-tool-use':
+    case 'edit-tool-use':
+    case 'write-tool-use':
+    case 'apply-patch-tool-use':
+    case 'grep-tool-use':
+    case 'glob-tool-use':
+    case 'web-search-tool-use':
+    case 'web-fetch-tool-use':
+    case 'todo-write-tool-use':
+    case 'todo-read-tool-use':
+    case 'task-tool-use':
+    case 'update-plan-tool-use':
+    case 'write-stdin-tool-use':
+    case 'enter-plan-mode-tool-use':
+    case 'exit-plan-mode-tool-use':
+    case 'unknown-tool-use':
+      return true;
+    default:
+      return false;
+  }
 }
 
 // Narrows an unknown value to string, defaulting to ''.
@@ -386,151 +349,6 @@ function asOptionalChanges(v: unknown): Array<{ path?: string; kind?: string }> 
   return v as Array<{ path?: string; kind?: string }>;
 }
 
-// Constructs a concrete ToolUseMessage subclass from a canonical name
-// and a generic input record. Shared by the wire-format parser and
-// the server-side factory.
-function buildToolUseMessage(
-  ts: string,
-  id: string,
-  rawName: string,
-  canonical: CanonicalToolName | null,
-  input: Record<string, unknown>,
-): ToolUseMessage {
-  switch (canonical) {
-    case 'Bash': {
-      const command = asOptionalString(input.command);
-      if (command === undefined) break;
-      return new BashToolUseMessage(ts, id, rawName, command,
-        asOptionalString(input.description));
-    }
-
-    case 'Read': {
-      const filePath = asOptionalString(input.file_path ?? input.filePath ?? input.path);
-      if (filePath === undefined) break;
-      return new ReadToolUseMessage(ts, id, rawName, filePath,
-        asOptionalNumber(input.offset ?? input.start_line ?? input.startLine),
-        asOptionalNumber(input.limit ?? input.num_lines ?? input.numLines),
-        asOptionalNumber(input.end_line ?? input.endLine));
-    }
-
-    case 'Edit':
-      return new EditToolUseMessage(ts, id, rawName,
-        asOptionalString(input.file_path ?? input.filePath),
-        asOptionalString(input.old_string ?? input.oldString),
-        asOptionalString(input.new_string ?? input.newString),
-        asOptionalChanges(input.changes));
-
-    case 'Write': {
-      const filePath = asOptionalString(input.file_path ?? input.filePath);
-      if (filePath === undefined) break;
-      return new WriteToolUseMessage(ts, id, rawName, filePath,
-        asOptionalString(input.content));
-    }
-
-    case 'ApplyPatch':
-      return new ApplyPatchToolUseMessage(ts, id, rawName,
-        asOptionalString(input.file_path ?? input.filePath),
-        asOptionalString(input.old_string ?? input.oldString),
-        asOptionalString(input.new_string ?? input.newString));
-
-    case 'Grep':
-      return new GrepToolUseMessage(ts, id, rawName,
-        asOptionalString(input.pattern),
-        asOptionalString(input.path));
-
-    case 'Glob':
-      return new GlobToolUseMessage(ts, id, rawName,
-        asOptionalString(input.pattern),
-        asOptionalString(input.path));
-
-    case 'WebSearch': {
-      const query = asOptionalString(input.query);
-      if (query === undefined) break;
-      return new WebSearchToolUseMessage(ts, id, rawName, query);
-    }
-
-    case 'WebFetch': {
-      const url = asOptionalString(input.url);
-      if (url === undefined) break;
-      return new WebFetchToolUseMessage(ts, id, rawName, url,
-        asOptionalString(input.prompt));
-    }
-
-    case 'TodoWrite':
-      return new TodoWriteToolUseMessage(ts, id, rawName,
-        asTodoItems(input.todos ?? input.items));
-
-    case 'TodoRead':
-      return new TodoReadToolUseMessage(ts, id, rawName);
-
-    case 'Task':
-      return new TaskToolUseMessage(ts, id, rawName,
-        asOptionalString(input.subagent_type ?? input.subagentType),
-        asOptionalString(input.description),
-        asOptionalString(input.prompt),
-        asOptionalString(input.model),
-        asOptionalString(input.resume));
-
-    case 'UpdatePlan':
-      return new UpdatePlanToolUseMessage(ts, id, rawName,
-        asTodoItems(input.items ?? input.todos));
-
-    case 'WriteStdin':
-      return new WriteStdinToolUseMessage(ts, id, rawName, input);
-
-    case 'EnterPlanMode':
-      return new EnterPlanModeToolUseMessage(ts, id, rawName);
-
-    case 'ExitPlanMode': {
-      const plan = asOptionalString(input.plan);
-      if (plan === undefined) break;
-      return new ExitPlanModeToolUseMessage(ts, id, rawName, plan,
-        input.allowedPrompts as Array<{ tool: string; prompt: string }> | undefined);
-    }
-  }
-
-  // Fallback: unrecognized canonical name, or known name with
-  // malformed/missing required fields. Extract the nested `input`
-  // record (from serialized UnknownToolUseMessage) if present.
-  const unknownInput = input.input !== undefined
-    ? asRecord(input.input)
-    : input;
-  return new UnknownToolUseMessage(ts, id, rawName, unknownInput);
-}
-
-// Message envelope keys that must not leak into domain input records.
-const MESSAGE_META_KEYS = new Set(['type', 'timestamp', 'toolId', 'rawName', 'toolName', 'toolInput']);
-
-// Strips envelope metadata from a data object, returning only
-// domain-relevant fields for use as tool input.
-function stripMeta(data: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(data)) {
-    if (!MESSAGE_META_KEYS.has(key)) result[key] = data[key];
-  }
-  return result;
-}
-
-// Parses a tool-use message from wire-format data. Handles two
-// distinct formats with explicit branches:
-// - Legacy: toolName + toolInput record (from provider events)
-// - Typed:  rawName + subclass fields directly on the object
-function parseToolUseMessage(data: Record<string, unknown>): ToolUseMessage {
-  const ts = str(data.timestamp);
-  const toolId = str(data.toolId);
-  const rawName = str(data.rawName ?? data.toolName);
-  const canonical = normalizeToolName(rawName);
-
-  // Legacy wire format: toolInput is an explicit record of domain fields.
-  if (data.toolInput !== undefined) {
-    return buildToolUseMessage(ts, toolId, rawName, canonical, asRecord(data.toolInput));
-  }
-
-  // Typed serialization: domain fields live directly on the data object
-  // alongside envelope metadata. Strip metadata before dispatching.
-  return buildToolUseMessage(ts, toolId, rawName, canonical, stripMeta(data));
-}
-
 // Constructs a typed ChatMessage class instance from raw data.
 // Returns null for unrecognized message types.
 export function parseChatMessage(data: Record<string, unknown>): ChatMessage | null {
@@ -541,8 +359,116 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
       return new AssistantMessage(str(data.timestamp), str(data.content));
     case 'thinking':
       return new ThinkingMessage(str(data.timestamp), str(data.content));
-    case 'tool-use':
-      return parseToolUseMessage(data);
+
+    case 'bash-tool-use': {
+      const command = asOptionalString(data.command);
+      if (command === undefined) return null;
+      return new BashToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        command, asOptionalString(data.description));
+    }
+
+    case 'read-tool-use': {
+      const filePath = asOptionalString(data.filePath);
+      if (filePath === undefined) return null;
+      return new ReadToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        filePath,
+        asOptionalNumber(data.offset), asOptionalNumber(data.limit),
+        asOptionalNumber(data.endLine));
+    }
+
+    case 'edit-tool-use':
+      return new EditToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.filePath),
+        asOptionalString(data.oldString),
+        asOptionalString(data.newString),
+        asOptionalChanges(data.changes));
+
+    case 'write-tool-use': {
+      const filePath = asOptionalString(data.filePath);
+      if (filePath === undefined) return null;
+      return new WriteToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        filePath, asOptionalString(data.content));
+    }
+
+    case 'apply-patch-tool-use':
+      return new ApplyPatchToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.filePath),
+        asOptionalString(data.oldString),
+        asOptionalString(data.newString));
+
+    case 'grep-tool-use':
+      return new GrepToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.pattern), asOptionalString(data.path));
+
+    case 'glob-tool-use':
+      return new GlobToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.pattern), asOptionalString(data.path));
+
+    case 'web-search-tool-use': {
+      const query = asOptionalString(data.query);
+      if (query === undefined) return null;
+      return new WebSearchToolUseMessage(
+        str(data.timestamp), str(data.toolId), query);
+    }
+
+    case 'web-fetch-tool-use': {
+      const url = asOptionalString(data.url);
+      if (url === undefined) return null;
+      return new WebFetchToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        url, asOptionalString(data.prompt));
+    }
+
+    case 'todo-write-tool-use':
+      return new TodoWriteToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asTodoItems(data.todos));
+
+    case 'todo-read-tool-use':
+      return new TodoReadToolUseMessage(str(data.timestamp), str(data.toolId));
+
+    case 'task-tool-use':
+      return new TaskToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.subagentType),
+        asOptionalString(data.description),
+        asOptionalString(data.prompt),
+        asOptionalString(data.model),
+        asOptionalString(data.resume));
+
+    case 'update-plan-tool-use':
+      return new UpdatePlanToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asTodoItems(data.todos));
+
+    case 'write-stdin-tool-use':
+      return new WriteStdinToolUseMessage(
+        str(data.timestamp), str(data.toolId), asRecord(data.input));
+
+    case 'enter-plan-mode-tool-use':
+      return new EnterPlanModeToolUseMessage(str(data.timestamp), str(data.toolId));
+
+    case 'exit-plan-mode-tool-use': {
+      const plan = asOptionalString(data.plan);
+      if (plan === undefined) return null;
+      return new ExitPlanModeToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        plan,
+        data.allowedPrompts as Array<{ tool: string; prompt: string }> | undefined);
+    }
+
+    case 'unknown-tool-use':
+      return new UnknownToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        str(data.rawName), asRecord(data.input));
+
     case 'tool-result':
       return new ToolResultMessage(str(data.timestamp), str(data.toolId), (data.content ?? {}) as Record<string, unknown>, Boolean(data.isError));
     case 'error':

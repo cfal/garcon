@@ -83,20 +83,20 @@ export function convertClaudeToolUse(ts, part) {
     case 'execcommand': {
       const command = asString(input.command);
       if (command === undefined) break;
-      return new BashToolUseMessage(ts, toolId, rawName, command, asString(input.description));
+      return new BashToolUseMessage(ts, toolId, command, asString(input.description));
     }
 
     case 'read': {
       const filePath = asString(input.file_path ?? input.filePath ?? input.path);
       if (filePath === undefined) break;
-      return new ReadToolUseMessage(ts, toolId, rawName, filePath,
+      return new ReadToolUseMessage(ts, toolId, filePath,
         asNumber(input.offset ?? input.start_line ?? input.startLine),
         asNumber(input.limit ?? input.num_lines ?? input.numLines),
         asNumber(input.end_line ?? input.endLine));
     }
 
     case 'edit':
-      return new EditToolUseMessage(ts, toolId, rawName,
+      return new EditToolUseMessage(ts, toolId,
         asString(input.file_path ?? input.filePath),
         asString(input.old_string ?? input.oldString),
         asString(input.new_string ?? input.newString),
@@ -105,43 +105,43 @@ export function convertClaudeToolUse(ts, part) {
     case 'write': {
       const filePath = asString(input.file_path ?? input.filePath);
       if (filePath === undefined) break;
-      return new WriteToolUseMessage(ts, toolId, rawName, filePath, asString(input.content));
+      return new WriteToolUseMessage(ts, toolId, filePath, asString(input.content));
     }
 
     case 'applypatch':
-      return new ApplyPatchToolUseMessage(ts, toolId, rawName,
+      return new ApplyPatchToolUseMessage(ts, toolId,
         asString(input.file_path ?? input.filePath),
         asString(input.old_string ?? input.oldString),
         asString(input.new_string ?? input.newString));
 
     case 'grep':
-      return new GrepToolUseMessage(ts, toolId, rawName,
+      return new GrepToolUseMessage(ts, toolId,
         asString(input.pattern), asString(input.path));
 
     case 'glob':
-      return new GlobToolUseMessage(ts, toolId, rawName,
+      return new GlobToolUseMessage(ts, toolId,
         asString(input.pattern), asString(input.path));
 
     case 'websearch': {
       const query = asString(input.query);
       if (query === undefined) break;
-      return new WebSearchToolUseMessage(ts, toolId, rawName, query);
+      return new WebSearchToolUseMessage(ts, toolId, query);
     }
 
     case 'webfetch': {
       const url = asString(input.url);
       if (url === undefined) break;
-      return new WebFetchToolUseMessage(ts, toolId, rawName, url, asString(input.prompt));
+      return new WebFetchToolUseMessage(ts, toolId, url, asString(input.prompt));
     }
 
     case 'todowrite':
-      return new TodoWriteToolUseMessage(ts, toolId, rawName, normalizeTodoItems(input.todos ?? input.items));
+      return new TodoWriteToolUseMessage(ts, toolId, normalizeTodoItems(input.todos ?? input.items));
 
     case 'todoread':
-      return new TodoReadToolUseMessage(ts, toolId, rawName);
+      return new TodoReadToolUseMessage(ts, toolId);
 
     case 'task':
-      return new TaskToolUseMessage(ts, toolId, rawName,
+      return new TaskToolUseMessage(ts, toolId,
         asString(input.subagent_type ?? input.subagentType),
         asString(input.description),
         asString(input.prompt),
@@ -149,21 +149,21 @@ export function convertClaudeToolUse(ts, part) {
         asString(input.resume));
 
     case 'updateplan':
-      return new UpdatePlanToolUseMessage(ts, toolId, rawName, normalizeTodoItems(input.items ?? input.todos));
+      return new UpdatePlanToolUseMessage(ts, toolId, normalizeTodoItems(input.items ?? input.todos));
 
     case 'writestdin':
-      return new WriteStdinToolUseMessage(ts, toolId, rawName, input);
+      return new WriteStdinToolUseMessage(ts, toolId, input);
 
     case 'enterplanmode':
     case 'planenter':
-      return new EnterPlanModeToolUseMessage(ts, toolId, rawName);
+      return new EnterPlanModeToolUseMessage(ts, toolId);
 
     case 'exitplanmode':
     case 'exitplan':
     case 'planexit': {
       const plan = asString(input.plan);
       if (plan === undefined) break;
-      return new ExitPlanModeToolUseMessage(ts, toolId, rawName, plan,
+      return new ExitPlanModeToolUseMessage(ts, toolId, plan,
         Array.isArray(input.allowedPrompts) ? input.allowedPrompts : undefined);
     }
   }

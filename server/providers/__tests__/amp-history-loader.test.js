@@ -66,8 +66,7 @@ describe('amp history loader', () => {
     expect(messages[1].content).toBe('thinking text');
     expect(messages[2].type).toBe('assistant-message');
     expect(messages[2].content).toBe('assistant reply');
-    expect(messages[3].type).toBe('tool-use');
-    expect(messages[3].rawName).toBe('Read');
+    expect(messages[3].type).toBe('read-tool-use');
     expect(messages[3].filePath).toBe('/tmp/example.ts');
     expect(messages[4].type).toBe('tool-result');
     expect(messages[4].toolId).toBe('tool-1');

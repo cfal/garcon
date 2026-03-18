@@ -152,8 +152,7 @@ describe('loadCodexChatMessages', () => {
     const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
 
     expect(messages).toHaveLength(2);
-    expect(messages[0].type).toBe('tool-use');
-    expect(messages[0].rawName).toBe('exec_command');
+    expect(messages[0].type).toBe('bash-tool-use');
     expect(messages[0].command).toBe('rg --files');
     expect(messages[1].type).toBe('tool-result');
     expect(messages[1].toolId).toBe('call_abc');
@@ -180,8 +179,7 @@ describe('loadCodexChatMessages', () => {
     const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
 
     expect(messages).toHaveLength(2);
-    expect(messages[0].type).toBe('tool-use');
-    expect(messages[0].rawName).toBe('web_search_call');
+    expect(messages[0].type).toBe('web-search-tool-use');
     expect(messages[1].type).toBe('tool-result');
   });
 
@@ -259,11 +257,9 @@ describe('loadCodexChatMessages', () => {
     expect(messages).toHaveLength(7);
     expect(messages.map(m => m.type)).toEqual([
       'user-message', 'thinking', 'assistant-message',
-      'tool-use', 'tool-result',
-      'tool-use', 'tool-result',
+      'bash-tool-use', 'tool-result',
+      'edit-tool-use', 'tool-result',
     ]);
-    expect(messages[3].rawName).toBe('shell_command');
-    expect(messages[5].rawName).toBe('apply_patch');
   });
 
   it('returns empty array for null path', async () => {
