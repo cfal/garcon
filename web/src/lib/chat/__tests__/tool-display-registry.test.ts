@@ -15,6 +15,8 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 			'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'Task',
 			'exit_plan_mode', 'ExitPlanMode',
 			'WebSearch', 'WebFetch', 'WriteStdin', 'UpdatePlan', 'Default',
+			'finder', 'oracle', 'librarian', 'skill', 'mermaid', 'handoff',
+			'look_at', 'read_web_page', 'web_search', 'find_thread', 'read_thread', 'task_list',
 		];
 		for (const name of expected) {
 			expect(TOOL_DISPLAY_REGISTRY[name]).toBeDefined();
@@ -160,6 +162,86 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 			expect(TOOL_DISPLAY_REGISTRY.exit_plan_mode).toBe(
 				TOOL_DISPLAY_REGISTRY.ExitPlanMode,
 			);
+		});
+	});
+
+	describe('agent tool display rules', () => {
+		it('finder uses inline mode with search label', () => {
+			const rule = TOOL_DISPLAY_REGISTRY.finder;
+			expect(rule.input.mode).toBe('inline');
+			expect(rule.input.label).toBe('Search');
+			expect(rule.input.getValue!({ query: 'find auth handlers' })).toBe('find auth handlers');
+		});
+
+		it('oracle uses collapsible mode with task in title', () => {
+			const rule = TOOL_DISPLAY_REGISTRY.oracle;
+			expect(rule.input.mode).toBe('collapsible');
+			const title = typeof rule.input.title === 'function' ? rule.input.title({ task: 'Review auth flow' }) : rule.input.title;
+			expect(title).toContain('Oracle');
+			expect(title).toContain('Review auth flow');
+		});
+
+		it('librarian uses collapsible mode with query in title', () => {
+			const rule = TOOL_DISPLAY_REGISTRY.librarian;
+			expect(rule.input.mode).toBe('collapsible');
+			const title = typeof rule.input.title === 'function' ? rule.input.title({ query: 'How does auth work' }) : rule.input.title;
+			expect(title).toContain('Librarian');
+			expect(title).toContain('How does auth work');
+		});
+
+		it('skill uses inline mode with skill name', () => {
+			const rule = TOOL_DISPLAY_REGISTRY.skill;
+			expect(rule.input.mode).toBe('inline');
+			expect(rule.input.label).toBe('Skill');
+			expect(rule.input.getValue!({ name: 'lsp' })).toBe('lsp');
+			expect(rule.result?.hidden).toBe(true);
+		});
+
+		it('mermaid uses inline mode', () => {
+			const rule = TOOL_DISPLAY_REGISTRY.mermaid;
+			expect(rule.input.mode).toBe('inline');
+			expect(rule.result?.hidden).toBe(true);
+		});
+
+		it('handoff uses inline mode with goal', () => {
+			const rule = TOOL_DISPLAY_REGISTRY.handoff;
+			expect(rule.input.mode).toBe('inline');
+			expect(rule.input.label).toBe('Handoff');
+			expect(rule.result?.hidden).toBe(true);
+		});
+
+		it('look_at uses inline mode with file path', () => {
+			const rule = TOOL_DISPLAY_REGISTRY.look_at;
+			expect(rule.input.mode).toBe('inline');
+			expect(rule.input.label).toBe('Analyze');
+			expect(rule.input.getValue!({ path: '/home/user/project/image.png' })).toBe('image.png');
+		});
+
+		it('read_web_page aliases WebFetch', () => {
+			expect(TOOL_DISPLAY_REGISTRY.read_web_page).toBe(TOOL_DISPLAY_REGISTRY.WebFetch);
+		});
+
+		it('web_search aliases WebSearch', () => {
+			expect(TOOL_DISPLAY_REGISTRY.web_search).toBe(TOOL_DISPLAY_REGISTRY.WebSearch);
+		});
+
+		it('find_thread uses inline mode with query', () => {
+			const rule = TOOL_DISPLAY_REGISTRY.find_thread;
+			expect(rule.input.mode).toBe('inline');
+			expect(rule.input.label).toBe('Threads');
+		});
+
+		it('read_thread uses inline mode with thread ID', () => {
+			const rule = TOOL_DISPLAY_REGISTRY.read_thread;
+			expect(rule.input.mode).toBe('inline');
+			expect(rule.input.label).toBe('Thread');
+			expect(rule.input.getValue!({ threadID: 'T-abc123' })).toBe('T-abc123');
+		});
+
+		it('task_list uses inline mode', () => {
+			const rule = TOOL_DISPLAY_REGISTRY.task_list;
+			expect(rule.input.mode).toBe('inline');
+			expect(rule.input.label).toBe('Tasks');
 		});
 	});
 
