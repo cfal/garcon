@@ -35,8 +35,8 @@ function coerceTodoResult(raw: unknown): TodoItem[] | undefined {
 	return items.length > 0 ? items : undefined;
 }
 
-// Plan-mode result is rendered by a dedicated banner; suppress the
-// default tool_result rendering to avoid a misleading is_error box.
+const truncate = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '...' : s);
+
 const EXIT_PLAN_MODE_RULE: ToolDisplayRule = {
 	input: {
 		mode: 'collapsible',
@@ -49,6 +49,55 @@ const EXIT_PLAN_MODE_RULE: ToolDisplayRule = {
 	},
 	result: {
 		hidden: true,
+	},
+};
+
+const WEB_SEARCH_RULE: ToolDisplayRule = {
+	input: {
+		mode: 'inline',
+		label: 'WebSearch',
+		getValue: (input) => String(input.query ?? ''),
+		action: 'jumpToResult',
+		colorScheme: {
+			primary: 'text-foreground',
+			secondary: 'text-muted-foreground',
+			background: '',
+			border: 'border-status-neutral-border',
+		},
+	},
+	result: {
+		mode: 'collapsible',
+		defaultOpen: false,
+		contentKind: 'text',
+		getContentProps: (result) => ({
+			content: extractContentString(result?.content),
+			format: 'plain',
+		}),
+	},
+};
+
+const WEB_FETCH_RULE: ToolDisplayRule = {
+	input: {
+		mode: 'inline',
+		label: m.chat_tool_web_fetch_label(),
+		getValue: (input) => String(input.url ?? ''),
+		getSecondary: (input) => webFetchSecondaryPresenter(input),
+		action: 'none',
+		colorScheme: {
+			primary: 'text-foreground',
+			secondary: 'text-muted-foreground',
+			background: '',
+			border: 'border-status-neutral-border',
+		},
+	},
+	result: {
+		mode: 'collapsible',
+		defaultOpen: false,
+		contentKind: 'text',
+		getContentProps: (result) => ({
+			content: extractContentString(result?.content),
+			format: 'plain',
+		}),
 	},
 };
 
@@ -417,54 +466,9 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 	exit_plan_mode: EXIT_PLAN_MODE_RULE,
 	ExitPlanMode: EXIT_PLAN_MODE_RULE,
 
-	WebSearch: {
-		input: {
-			mode: 'inline',
-			label: 'WebSearch',
-			getValue: (input) => String(input.query ?? ''),
-			action: 'jumpToResult',
-			colorScheme: {
-				primary: 'text-foreground',
-				secondary: 'text-muted-foreground',
-				background: '',
-				border: 'border-status-neutral-border',
-			},
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-				format: 'plain',
-			}),
-		},
-	},
+	WebSearch: WEB_SEARCH_RULE,
 
-	WebFetch: {
-		input: {
-			mode: 'inline',
-			label: m.chat_tool_web_fetch_label(),
-			getValue: (input) => String(input.url ?? ''),
-			getSecondary: (input) => webFetchSecondaryPresenter(input),
-			action: 'none',
-			colorScheme: {
-				primary: 'text-foreground',
-				secondary: 'text-muted-foreground',
-				background: '',
-				border: 'border-status-neutral-border',
-			},
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-				format: 'plain',
-			}),
-		},
-	},
+	WebFetch: WEB_FETCH_RULE,
 
 	WriteStdin: {
 		input: {
@@ -489,6 +493,216 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 			mode: 'collapsible',
 			contentKind: 'successMessage',
 			getMessage: () => 'Plan updated',
+		},
+	},
+
+	finder: {
+		input: {
+			mode: 'inline',
+			label: 'Search',
+			getValue: (input) => String(input.query ?? ''),
+			action: 'jumpToResult',
+			colorScheme: {
+				border: 'border-status-neutral-border',
+			},
+		},
+		result: {
+			mode: 'collapsible',
+			defaultOpen: false,
+			contentKind: 'markdown',
+			getContentProps: (result) => ({
+				content: extractContentString(result?.content),
+				format: 'plain',
+			}),
+		},
+	},
+
+	oracle: {
+		input: {
+			mode: 'collapsible',
+			title: (input) => `Oracle: ${truncate(String(input.task || 'analyzing'), 80)}`,
+			defaultOpen: false,
+			contentKind: 'markdown',
+			getContentProps: (input) => {
+				const parts: string[] = [];
+				if (input.task) parts.push(`**Task:** ${input.task}`);
+				if (input.context) parts.push(`**Context:** ${input.context}`);
+				if (Array.isArray(input.files) && input.files.length > 0)
+					parts.push(`**Files:**\n${(input.files as string[]).map((f) => `- ${f}`).join('\n')}`);
+				return { content: parts.join('\n\n') };
+			},
+		},
+		result: {
+			mode: 'collapsible',
+			defaultOpen: true,
+			title: 'Oracle Response',
+			contentKind: 'markdown',
+			getContentProps: (result) => ({
+				content: extractContentString(result?.content),
+			}),
+		},
+	},
+
+	librarian: {
+		input: {
+			mode: 'collapsible',
+			title: (input) => `Librarian: ${truncate(String(input.query || 'exploring'), 80)}`,
+			defaultOpen: false,
+			contentKind: 'markdown',
+			getContentProps: (input) => {
+				const parts: string[] = [];
+				if (input.query) parts.push(`**Query:** ${input.query}`);
+				if (input.context) parts.push(`**Context:** ${input.context}`);
+				return { content: parts.join('\n\n') };
+			},
+		},
+		result: {
+			mode: 'collapsible',
+			defaultOpen: true,
+			title: 'Librarian Response',
+			contentKind: 'markdown',
+			getContentProps: (result) => ({
+				content: extractContentString(result?.content),
+			}),
+		},
+	},
+
+	skill: {
+		input: {
+			mode: 'inline',
+			label: 'Skill',
+			getValue: (input) => String(input.name ?? ''),
+			action: 'none',
+			colorScheme: {
+				border: 'border-status-info-border',
+			},
+		},
+		result: {
+			hidden: true,
+		},
+	},
+
+	mermaid: {
+		input: {
+			mode: 'inline',
+			label: 'Diagram',
+			getValue: () => 'rendering',
+			action: 'none',
+			colorScheme: {
+				primary: 'text-muted-foreground',
+				border: 'border-status-neutral-border',
+			},
+		},
+		result: {
+			hidden: true,
+		},
+	},
+
+	handoff: {
+		input: {
+			mode: 'inline',
+			label: 'Handoff',
+			getValue: (input) => truncate(String(input.goal ?? ''), 60),
+			action: 'none',
+			colorScheme: {
+				primary: 'text-foreground',
+				border: 'border-status-info-border',
+			},
+		},
+		result: {
+			hidden: true,
+		},
+	},
+
+	look_at: {
+		input: {
+			mode: 'inline',
+			label: 'Analyze',
+			getValue: (input) => String(input.path ?? '').split('/').pop() || String(input.path ?? ''),
+			getSecondary: (input) => truncate(String(input.objective ?? ''), 60),
+			action: 'none',
+			colorScheme: {
+				primary: 'text-foreground',
+				border: 'border-border',
+			},
+		},
+		result: {
+			hidden: true,
+		},
+	},
+
+	read_web_page: WEB_FETCH_RULE,
+
+	web_search: WEB_SEARCH_RULE,
+
+	find_thread: {
+		input: {
+			mode: 'inline',
+			label: 'Threads',
+			getValue: (input) => truncate(String(input.query ?? ''), 60),
+			action: 'none',
+			colorScheme: {
+				primary: 'text-foreground',
+				border: 'border-status-neutral-border',
+			},
+		},
+		result: {
+			mode: 'collapsible',
+			defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (result) => ({
+				content: extractContentString(result?.content),
+				format: 'plain',
+			}),
+		},
+	},
+
+	read_thread: {
+		input: {
+			mode: 'inline',
+			label: 'Thread',
+			getValue: (input) => String(input.threadID ?? 'reading'),
+			getSecondary: (input) => truncate(String(input.goal ?? ''), 60),
+			action: 'none',
+			colorScheme: {
+				primary: 'text-foreground',
+				border: 'border-status-neutral-border',
+			},
+		},
+		result: {
+			mode: 'collapsible',
+			defaultOpen: false,
+			contentKind: 'markdown',
+			getContentProps: (result) => ({
+				content: extractContentString(result?.content),
+			}),
+		},
+	},
+
+	task_list: {
+		input: {
+			mode: 'inline',
+			label: 'Tasks',
+			getValue: (input) => {
+				const action = String(input.action ?? '');
+				if (action === 'create') return `creating: ${input.title || 'task'}`;
+				if (action === 'update') return `updating #${input.taskID || ''}`;
+				if (action === 'get') return `fetching #${input.taskID || ''}`;
+				if (action === 'delete') return `deleting #${input.taskID || ''}`;
+				return 'listing';
+			},
+			action: 'none',
+			colorScheme: {
+				border: 'border-status-info-border',
+			},
+		},
+		result: {
+			mode: 'collapsible',
+			defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (result) => ({
+				content: extractContentString(result?.content),
+			}),
 		},
 	},
 
