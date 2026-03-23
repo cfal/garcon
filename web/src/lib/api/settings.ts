@@ -1,6 +1,6 @@
 // App settings API for session naming and global settings.
 
-import { apiGet, apiPut } from './client.js';
+import { apiGet, apiPut, apiPost } from './client.js';
 import type { AppSettings } from '$lib/types/session.js';
 
 export interface UpdateSessionNameResponse {
@@ -24,4 +24,14 @@ export interface UpdateSettingsResponse {
 /** Applies a partial update to application settings. */
 export async function updateSettings(patch: Record<string, unknown>): Promise<UpdateSettingsResponse> {
 	return apiPut<UpdateSettingsResponse>('/api/v1/app/settings', patch);
+}
+
+export interface TelegramTestResponse {
+	success: boolean;
+	error?: string;
+}
+
+/** Sends a test Telegram notification. */
+export async function sendTelegramTest(chatId: string): Promise<TelegramTestResponse> {
+	return apiPost<TelegramTestResponse>('/api/v1/app/telegram/test', { chatId });
 }
