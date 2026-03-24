@@ -42,4 +42,5 @@ export interface AppSettings {
 	lastPermissionMode: PermissionMode;
 	lastThinkingMode: ThinkingMode;
 	projectBasePath?: string;
+	telegramBotTokenAvailable?: boolean;
 }

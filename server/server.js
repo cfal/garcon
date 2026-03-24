@@ -13,6 +13,7 @@ import {
   getHttpIdleTimeoutSeconds,
   getWorkspaceDir,
   isAuthDisabled,
+  getTelegramBotToken,
 } from './config.js';
 import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/http-route.js';
@@ -34,6 +35,8 @@ import { OpenCodeProvider } from './providers/opencode.js';
 import { AmpProvider } from './providers/amp-cli.js';
 import { ProviderRegistry } from './providers/index.js';
 import { ChatHandler } from './ws/chat.js';
+import { TelegramNotifier } from './notifications/telegram.js';
+import { AttentionTracker } from './notifications/attention-tracker.js';
 import {
   AgentRunOutputMessage,
   AgentRunFinishedMessage,
@@ -92,6 +95,11 @@ export async function startServer() {
 
     const queue = new QueueManager(workspaceDir, providerRegistry, historyCache);
 
+    // Telegram notifications (wires itself to provider + queue events).
+    const telegramNotifier = new TelegramNotifier(getTelegramBotToken());
+    // eslint-disable-next-line no-unused-vars
+    const _attentionTracker = new AttentionTracker(providerRegistry, queue, settings, chatRegistry, historyCache, telegramNotifier);
+
     // Start provider purge timers
     providerRegistry.startPurgeTimers();
 
@@ -105,7 +113,7 @@ export async function startServer() {
     // Build route and WS handler tables
     const routes = createAllRoutes(
       chatRegistry, settings, queue, pathCache, metadata, historyCache,
-      providerRegistry,
+      providerRegistry, telegramNotifier,
     );
 
     const chatHandler = new ChatHandler(providerRegistry, queue, historyCache, chatRegistry);
@@ -219,9 +227,21 @@ export async function startServer() {
     });
     providerRegistry.onFinished((chatId, exitCode) => {
       broadcast(new AgentRunFinishedMessage(chatId, exitCode));
+      // Defer idle check to next microtask so the provider has time to
+      // clear its isRunning flag (emitFinished fires before the flag flip).
+      queueMicrotask(() => {
+        queue.checkChatIdle(chatId).catch((err) => {
+          console.warn('queue: checkChatIdle error:', err.message);
+        });
+      });
     });
     providerRegistry.onFailed((chatId, errorMessage) => {
       broadcast(new AgentRunFailedMessage(chatId, errorMessage));
+      queueMicrotask(() => {
+        queue.checkChatIdle(chatId).catch((err) => {
+          console.warn('queue: checkChatIdle error:', err.message);
+        });
+      });
     });
 
     // Wire store events to broadcast. SettingsStore and ChatRegistry emit

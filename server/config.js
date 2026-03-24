@@ -177,6 +177,11 @@ export function getHttpIdleTimeoutSeconds() {
   return envInt('HTTP_IDLE_TIMEOUT_SECONDS', 60 * 2);
 }
 
+// Telegram Bot API token for notifications.
+export function getTelegramBotToken() {
+  return process.env.GARCON_TELEGRAM_BOT_TOKEN || '';
+}
+
 // Global authentication toggle.
 // Env takes precedence over CLI to match the rest of config behavior.
 export function isAuthDisabled() {
