@@ -56,7 +56,7 @@ export class QueueManager extends EventEmitter {
   onChatIdle(cb: ChatIdleCallback): void { this.on('chat-idle', cb); }
 
   // Emits chat-idle if the chat has no queued items and the provider is not
-  // running. Call after a provider turn finishes to cover the initial-session
+  // running. Called after a provider turn finishes to cover the initial-session
   // path where #drain is never invoked. Skips when a drain loop is active
   // for this chat to avoid duplicate emissions.
   async checkChatIdle(chatId: string): Promise<void> {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { EventEmitter } from 'events';
 import { AttentionTracker } from '../../notifications/attention-tracker.js';
-import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, UserMessage, AssistantMessage } from '../../../common/chat-types.js';
+import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, UserMessage, AssistantMessage, BashToolUseMessage } from '../../../common/chat-types.js';
 
 function createMockProviderRegistry() {
   const emitter = new EventEmitter();
@@ -85,7 +85,8 @@ describe('AttentionTracker', () => {
     it('sends HTML notification with user message and permission info', async () => {
       createTracker();
       historyMessages.push({ type: 'user-message', content: 'deploy the app' });
-      const msg = new PermissionRequestMessage('2024-01-01T00:00:01Z', 'perm-1', 'Bash');
+      const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
+      const msg = new PermissionRequestMessage('2024-01-01T00:00:01Z', 'perm-1', bashTool);
       providers.emitMessages('c1', [msg]);
 
       await new Promise(r => setTimeout(r, 10));
@@ -101,7 +102,8 @@ describe('AttentionTracker', () => {
 
     it('deduplicates permission notifications by ID', async () => {
       createTracker();
-      const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', 'Bash');
+      const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
+      const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
       providers.emitMessages('c1', [msg]);
       providers.emitMessages('c1', [msg]);
 
@@ -111,7 +113,8 @@ describe('AttentionTracker', () => {
 
     it('clears pending permission on resolved', async () => {
       createTracker();
-      const reqMsg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', 'Bash');
+      const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
+      const reqMsg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
       const resMsg = new PermissionResolvedMessage('2024-01-01T00:00:01Z', 'perm-1', true);
 
       providers.emitMessages('c1', [reqMsg]);
@@ -126,7 +129,8 @@ describe('AttentionTracker', () => {
 
     it('clears pending permission on cancelled', async () => {
       createTracker();
-      const reqMsg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', 'Bash');
+      const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
+      const reqMsg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
       const cancelMsg = new PermissionCancelledMessage('2024-01-01T00:00:01Z', 'perm-1', 'cancelled');
 
       providers.emitMessages('c1', [reqMsg]);
@@ -207,7 +211,8 @@ describe('AttentionTracker', () => {
 
     it('does NOT send idle notification when permission is pending', async () => {
       createTracker();
-      const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', 'Bash');
+      const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
+      const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
       providers.emitMessages('c1', [msg]);
       queue.emitChatIdle('c1');
 

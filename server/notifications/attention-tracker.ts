@@ -1,10 +1,9 @@
 // Translates low-level provider and queue events into Telegram
 // notifications when a chat requires user attention.
 //
-// Three notification triggers:
+// Two notification triggers:
 // 1. Permission request  - immediate, deduped by permissionRequestId
-// 2. Chat idle           - turn finished and queue drained (completed/failed)
-// 3. Session stopped     - user-initiated abort
+// 2. Chat idle            - turn finished and queue drained (completed/failed/stopped)
 
 import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, AssistantMessage } from '../../common/chat-types.js';
 import type { TelegramNotifier } from './telegram.js';
@@ -17,6 +16,18 @@ function truncate(text: string, maxLen: number): string {
   const oneLine = text.replace(/\n+/g, ' ').trim();
   if (oneLine.length <= maxLen) return oneLine;
   return oneLine.slice(0, maxLen - 1) + '\u2026';
+}
+
+// Derives a human-readable tool name from a ToolUseChatMessage type field.
+function toolDisplayName(requestedTool: unknown): string {
+  const t = requestedTool as { type?: string; rawName?: string } | undefined;
+  if (!t) return 'unknown';
+  if (t.rawName) return t.rawName;
+  if (typeof t.type === 'string') {
+    return t.type.replace(/-tool-use$/, '').replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  }
+  return 'unknown';
 }
 
 // Minimal interfaces for injected dependencies. Avoids importing concrete
@@ -107,7 +118,7 @@ export class AttentionTracker {
       if (msg instanceof AssistantMessage) {
         this.#lastAssistantMessage.set(chatId, msg.content);
       } else if (msg instanceof PermissionRequestMessage) {
-        this.#trackPermission(chatId, msg.permissionRequestId, msg.toolName);
+        this.#trackPermission(chatId, msg.permissionRequestId, toolDisplayName(msg.requestedTool));
       } else if (msg instanceof PermissionResolvedMessage) {
         this.#clearPermission(chatId, msg.permissionRequestId);
       } else if (msg instanceof PermissionCancelledMessage) {
