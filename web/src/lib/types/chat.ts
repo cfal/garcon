@@ -7,11 +7,13 @@ export type {
 } from '$shared/chat-modes';
 
 export type {
+	TodoItem,
+	TodoStatus,
 	ChatImage,
 	UserMessage,
 	AssistantMessage,
 	ThinkingMessage,
-	ToolUseMessage,
+	ToolUseChatMessage,
 	BashToolUseMessage,
 	ReadToolUseMessage,
 	EditToolUseMessage,
@@ -45,8 +47,7 @@ export type PendingViewChat = {
 
 export interface PendingPermissionRequest {
 	permissionRequestId: string;
-	toolName: string;
-	toolInput?: Record<string, unknown>;
+	requestedTool: import('$shared/chat-types').ToolUseChatMessage;
 	chatId?: string | null;
 	receivedAt?: Date;
 }

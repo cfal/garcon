@@ -6,6 +6,9 @@ import {
 	PermissionResolvedMessage,
 	PermissionCancelledMessage,
 	AssistantMessage,
+	BashToolUseMessage,
+	ReadToolUseMessage,
+	WriteToolUseMessage,
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
@@ -41,20 +44,21 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, read } = makeContext();
 
 		handlePermissionLifecycleFromBatch(makeAgentResponse('chat-1', [
-			new PermissionRequestMessage(new Date().toISOString(), 'claude-abc123', 'Bash', { command: 'ls' }),
+			new PermissionRequestMessage(new Date().toISOString(), 'claude-abc123', new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls')),
 		]), ctx);
 
 		const pending = read();
 		expect(pending).toHaveLength(1);
 		expect(pending[0].permissionRequestId).toBe('claude-abc123');
-		expect(pending[0].toolName).toBe('Bash');
+		expect(pending[0].requestedTool).toBeInstanceOf(BashToolUseMessage);
+		expect((pending[0].requestedTool as BashToolUseMessage).command).toBe('ls');
 	});
 
 	it('pushes WAITING_FOR_PERMISSION status on permission request', () => {
 		const { ctx, pushLoadingStatus } = makeContext();
 
 		handlePermissionLifecycleFromBatch(makeAgentResponse('chat-1', [
-			new PermissionRequestMessage(new Date().toISOString(), 'claude-abc123', 'Bash', { command: 'ls' }),
+			new PermissionRequestMessage(new Date().toISOString(), 'claude-abc123', new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls')),
 		]), ctx);
 
 		expect(pushLoadingStatus).toHaveBeenCalledWith(
@@ -66,8 +70,8 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, pushLoadingStatus } = makeContext();
 
 		handlePermissionLifecycleFromBatch(makeAgentResponse('chat-1', [
-			new PermissionRequestMessage(new Date().toISOString(), 'claude-aaa', 'Bash', { command: 'ls' }),
-			new PermissionRequestMessage(new Date().toISOString(), 'claude-bbb', 'Read', { file: 'foo.txt' }),
+			new PermissionRequestMessage(new Date().toISOString(), 'claude-aaa', new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls')),
+			new PermissionRequestMessage(new Date().toISOString(), 'claude-bbb', new ReadToolUseMessage(new Date().toISOString(), 'tool-2', 'foo.txt')),
 		]), ctx);
 
 		expect(pushLoadingStatus).toHaveBeenCalledTimes(2);
@@ -77,7 +81,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, read, popLoadingStatus } = makeContext([
 			{
 				permissionRequestId: 'claude-abc123',
-				toolName: 'Read',
+				requestedTool: new ReadToolUseMessage(new Date().toISOString(), 'tool-1', '/tmp/test'),
 				chatId: 'chat-1',
 			},
 		]);
@@ -94,7 +98,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, read, popLoadingStatus } = makeContext([
 			{
 				permissionRequestId: 'claude-abc123',
-				toolName: 'Bash',
+				requestedTool: new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls'),
 				chatId: 'chat-1',
 			},
 		]);
@@ -111,7 +115,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, read, pushLoadingStatus, popLoadingStatus } = makeContext();
 
 		handlePermissionLifecycleFromBatch(makeAgentResponse('chat-1', [
-			new PermissionRequestMessage(new Date().toISOString(), 'claude-xyz', 'Write', { file: 'test.txt' }),
+			new PermissionRequestMessage(new Date().toISOString(), 'claude-xyz', new WriteToolUseMessage(new Date().toISOString(), 'tool-1', 'test.txt')),
 			new PermissionResolvedMessage(new Date().toISOString(), 'claude-xyz', true),
 		]), ctx);
 
@@ -124,13 +128,13 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, read } = makeContext([
 			{
 				permissionRequestId: 'claude-abc123',
-				toolName: 'Bash',
+				requestedTool: new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls'),
 				chatId: 'chat-1',
 			},
 		]);
 
 		handlePermissionLifecycleFromBatch(makeAgentResponse('chat-1', [
-			new PermissionRequestMessage(new Date().toISOString(), 'claude-abc123', 'Bash', { command: 'ls' }),
+			new PermissionRequestMessage(new Date().toISOString(), 'claude-abc123', new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls')),
 		]), ctx);
 
 		expect(read()).toHaveLength(1);

@@ -9,7 +9,9 @@ import path from 'path';
 import { normalizeToolResultContent } from './normalize-util.js';
 import { getClaudeBinary } from '../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
+import type { ToolUseChatMessage } from '../../common/chat-types.js';
 import { convertClaudeToolUse } from './converters/claude-tool-use.js';
+import { convertClaudePermissionTool } from './converters/claude-permission-tool.js';
 import { AbsProvider } from './base.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { ClaudeStartSessionRequest, ResumeTurnRequest } from './types.js';
@@ -63,12 +65,41 @@ interface PendingPermission {
   cliRequestId: string;
   providerSessionId: string;
   chatId: string;
-  toolName: string;
-  toolInput: Record<string, unknown>;
+  providerToolName: string;
+  providerToolInput: Record<string, unknown>;
+  requestedTool: ToolUseChatMessage;
 }
 
 interface PendingControlRequest {
   resolve: (value: unknown) => void;
+}
+
+export function buildClaudePermissionApprovalResponse(
+  pending: Pick<PendingPermission, 'providerToolName' | 'providerToolInput'>,
+  decision: { allow: boolean; alwaysAllow?: boolean },
+): Record<string, unknown> {
+  if (!decision.allow) {
+    return {
+      behavior: 'deny',
+      message: 'Denied by user',
+    };
+  }
+
+  const response: Record<string, unknown> = {
+    behavior: 'allow',
+    updatedInput: pending.providerToolInput ?? {},
+  };
+
+  if (decision.alwaysAllow) {
+    response.updatedPermissions = [{
+      type: 'addRules',
+      rules: [{ toolName: pending.providerToolName }],
+      behavior: 'allow',
+      destination: 'session',
+    }];
+  }
+
+  return response;
 }
 
 // Builds the Claude session file path from the canonicalized project path.
@@ -268,17 +299,26 @@ class ClaudeProvider extends AbsProvider {
     if (msg.request?.subtype !== 'can_use_tool') return;
 
     const permissionRequestId = `claude-${crypto.randomBytes(8).toString('hex')}`;
-    const toolName = msg.request.tool_name || 'Unknown';
+    const providerToolName = msg.request.tool_name || 'Unknown';
+    const providerToolInput = msg.request.input || {};
+    const now = new Date().toISOString();
+    const requestedTool = convertClaudePermissionTool(
+      now,
+      `perm-${permissionRequestId}`,
+      providerToolName,
+      providerToolInput,
+    );
 
     this.#pendingPermissions.set(permissionRequestId, {
       cliRequestId: msg.request_id!,
       providerSessionId: session.id,
       chatId: session.chatId,
-      toolName,
-      toolInput: msg.request.input || {},
+      providerToolName,
+      providerToolInput,
+      requestedTool,
     });
 
-    this.#emitPermissionMessages(session.chatId, [new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, toolName, msg.request.input)]);
+    this.#emitPermissionMessages(session.chatId, [new PermissionRequestMessage(now, permissionRequestId, requestedTool)]);
   }
 
   #handleControlResponse(session: ClaudeRunningSession, msg: CLIMessage): void {
@@ -319,26 +359,7 @@ class ClaudeProvider extends AbsProvider {
     }
     this.#pendingPermissions.delete(permissionRequestId);
 
-    let response: Record<string, unknown>;
-    if (decision.allow) {
-      response = {
-        behavior: 'allow',
-        updatedInput: pending.toolInput ?? {},
-      };
-      if (decision.alwaysAllow) {
-        response.updatedPermissions = [{
-          type: 'addRules',
-          rules: [{ toolName: pending.toolName }],
-          behavior: 'allow',
-          destination: 'session',
-        }];
-      }
-    } else {
-      response = {
-        behavior: 'deny',
-        message: 'Denied by user',
-      };
-    }
+    const response = buildClaudePermissionApprovalResponse(pending, decision);
 
     this.#sendToCLI(pending.providerSessionId, JSON.stringify({
       type: 'control_response',

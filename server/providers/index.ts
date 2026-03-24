@@ -16,6 +16,8 @@ import { getAmpAuthStatus } from './amp-auth.js';
 import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loaders/claude-history-loader.js';
 import { getCodexPreviewFromNativePath, loadCodexChatMessages } from './loaders/codex-history-loader.js';
 import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loaders/opencode-history-loader.js';
+import { getAmpPreview, loadAmpChatMessages, type AmpThreadExport } from './loaders/amp-history-loader.js';
+import { createArtificialNativePath, getArtificialProviderSessionId } from '../chats/artificial-native-path.js';
 import type { IChatRegistry } from '../chats/store.js';
 
 import type { AgentCommandImage } from '../../common/ws-requests.js';
@@ -104,12 +106,13 @@ interface OpenCodeProviderInstance {
 }
 
 interface AmpProviderInstance {
-  startSession(command: string, opts: { chatId: string; cwd: string; model?: string; [key: string]: unknown }): Promise<string>;
-  runTurn(command: string, opts: { sessionId: string; chatId: string; cwd?: string; [key: string]: unknown }): Promise<void>;
+  startSession(request: StartSessionRequest): Promise<StartedProviderSession>;
+  runTurn(request: ResumeTurnRequest): Promise<void>;
   isRunning(providerSessionId: string): boolean;
   abort(providerSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }>;
   startPurgeTimer(): ReturnType<typeof setInterval>;
+  exportThread(threadId: string, opts?: { cwd?: string }): Promise<AmpThreadExport>;
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
@@ -183,19 +186,17 @@ export class ProviderRegistry {
 
     if (entry.provider === 'opencode') {
       const providerSessionId = await this.#opencode.startSession(request);
-      const nativePath = `opencode:${providerSessionId}`;
+      const nativePath = createArtificialNativePath(entry.provider, providerSessionId);
       this.#registry.updateChat(chatId, { providerSessionId, nativePath });
       return;
     }
 
     if (entry.provider === 'amp') {
-      const providerSessionId = await this.#amp.startSession(command, {
-        chatId,
-        cwd: entry.projectPath,
-        model: entry.model,
+      const started = await this.#amp.startSession(request);
+      this.#registry.updateChat(chatId, {
+        providerSessionId: started.providerSessionId,
+        nativePath: started.nativePath,
       });
-      const nativePath = `amp:${providerSessionId}`;
-      this.#registry.updateChat(chatId, { providerSessionId, nativePath });
       return;
     }
 
@@ -238,11 +239,7 @@ export class ProviderRegistry {
     } else if (provider === 'opencode') {
       await this.#opencode.runTurn(request);
     } else if (provider === 'amp') {
-      await this.#amp.runTurn(command, {
-        sessionId: providerSessionId,
-        chatId,
-        cwd: entry.projectPath,
-      });
+      await this.#amp.runTurn(request);
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
@@ -358,10 +355,13 @@ export class ProviderRegistry {
     if (!session?.provider) return null;
 
     if (session.provider === 'amp') {
-      return null; // Amp history loading is not yet supported
+      const threadId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, session.provider);
+      if (!threadId) return null;
+      const exportedThread = await this.#amp.exportThread(threadId, { cwd: session.projectPath });
+      return getAmpPreview(exportedThread);
     }
     if (session.provider === 'opencode') {
-      const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, session.provider);
       const getClient = () => this.#opencode.getClient();
       return getOpenCodePreviewFromSessionId(sessionId, getClient);
     }
@@ -380,10 +380,13 @@ export class ProviderRegistry {
     if (!session?.provider) return [];
 
     if (session.provider === 'amp') {
-      return []; // Amp history loading is not yet supported
+      const threadId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, session.provider);
+      if (!threadId) return [];
+      const exportedThread = await this.#amp.exportThread(threadId, { cwd: session.projectPath });
+      return loadAmpChatMessages(exportedThread);
     }
     if (session.provider === 'opencode') {
-      const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, session.provider);
       const getClient = () => this.#opencode.getClient();
       return loadOpenCodeChatMessages(sessionId, getClient);
     }

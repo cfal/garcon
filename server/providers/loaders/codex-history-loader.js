@@ -8,16 +8,18 @@ import { readJsonlTailLines } from './common.ts';
 import { normalizeCodexJsonlEntry, extractTextContent } from './codex-history-normalizer.js';
 
 // Reads a Codex JSONL file and returns ChatMessage[].
-// Uses per-content-class dedup: event_msg assistant/thinking entries are
-// only included when no canonical response_item counterpart exists for
-// that class.
+// Uses per-content-class dedup. event_msg user messages are treated as
+// canonical transcript content, while response_item user messages are
+// only included as fallback when event_msg user entries are missing.
 export async function loadCodexChatMessages(nativePath) {
   if (!nativePath) return [];
 
   try {
     const canonical = [];
+    const fallbackUser = [];
     const fallbackAssistant = [];
     const fallbackThinking = [];
+    let hasCanonicalUser = false;
     let hasCanonicalAssistant = false;
     let hasCanonicalThinking = false;
 
@@ -32,14 +34,17 @@ export async function loadCodexChatMessages(nativePath) {
         if (!result) continue;
 
         canonical.push(...result.canonical);
+        fallbackUser.push(...result.fallbackUser);
         fallbackAssistant.push(...result.fallbackAssistant);
         fallbackThinking.push(...result.fallbackThinking);
+        if (result.isCanonicalUser) hasCanonicalUser = true;
         if (result.isCanonicalAssistant) hasCanonicalAssistant = true;
         if (result.isCanonicalThinking) hasCanonicalThinking = true;
       } catch { }
     }
 
     const messages = [...canonical];
+    if (!hasCanonicalUser) messages.push(...fallbackUser);
     if (!hasCanonicalAssistant) messages.push(...fallbackAssistant);
     if (!hasCanonicalThinking) messages.push(...fallbackThinking);
 

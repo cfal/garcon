@@ -2,7 +2,9 @@ import { describe, it, expect } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { convertCLIMessageToChatMessages, createClaudeNativePath } from '../claude-cli.js';
+import { buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, createClaudeNativePath } from '../claude-cli.js';
+import { convertClaudePermissionTool } from '../converters/claude-permission-tool.js';
+import { BashToolUseMessage, ExitPlanModeToolUseMessage } from '../../../common/chat-types.js';
 
 describe('createClaudeNativePath', () => {
   it('uses the canonical project path before encoding', async () => {
@@ -57,8 +59,7 @@ describe('convertCLIMessageToChatMessages', () => {
     };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(1);
-    expect(result[0].type).toBe('tool-use');
-    expect(result[0].rawName).toBe('Read');
+    expect(result[0].type).toBe('read-tool-use');
     expect(result[0].toolId).toBe('tool-1');
   });
 
@@ -87,7 +88,7 @@ describe('convertCLIMessageToChatMessages', () => {
     expect(result).toHaveLength(3);
     expect(result[0].type).toBe('assistant-message');
     expect(result[1].type).toBe('thinking');
-    expect(result[2].type).toBe('tool-use');
+    expect(result[2].type).toBe('read-tool-use');
   });
 
   it('reads content from message.content wrapper shape', () => {
@@ -100,8 +101,7 @@ describe('convertCLIMessageToChatMessages', () => {
     };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(1);
-    expect(result[0].type).toBe('tool-use');
-    expect(result[0].rawName).toBe('Bash');
+    expect(result[0].type).toBe('bash-tool-use');
   });
 
   it('skips empty or whitespace-only text parts', () => {
@@ -120,8 +120,7 @@ describe('convertCLIMessageToChatMessages', () => {
     };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(1);
-    expect(result[0].type).toBe('tool-use');
-    expect(result[0].rawName).toBe('EnterPlanMode');
+    expect(result[0].type).toBe('enter-plan-mode-tool-use');
     expect(result[0].toolId).toBe('p1');
   });
 
@@ -132,8 +131,7 @@ describe('convertCLIMessageToChatMessages', () => {
     };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(1);
-    expect(result[0].type).toBe('tool-use');
-    expect(result[0].rawName).toBe('exit_plan_mode');
+    expect(result[0].type).toBe('exit-plan-mode-tool-use');
     expect(result[0].plan).toBe('Do X');
   });
 
@@ -144,7 +142,7 @@ describe('convertCLIMessageToChatMessages', () => {
     };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(1);
-    expect(result[0].type).toBe('tool-use');
+    expect(result[0].type).toBe('unknown-tool-use');
     expect(result[0].rawName).toBe('exit_plan_mode');
     expect(result[0].plan).toBeUndefined();
   });
@@ -176,7 +174,7 @@ describe('convertCLIMessageToChatMessages', () => {
       content: [{ type: 'tool_use', id: 'n1', name: 'Read', input: null }],
     };
     const result = convertCLIMessageToChatMessages(msg);
-    expect(result[0].type).toBe('tool-use');
+    expect(result[0].type).toBe('unknown-tool-use');
     expect(result[0].rawName).toBe('Read');
     expect(result[0].filePath).toBeUndefined();
   });
@@ -187,7 +185,7 @@ describe('convertCLIMessageToChatMessages', () => {
       content: [{ type: 'tool_use', id: 'a1', name: 'Read', input: [1, 2, 3] }],
     };
     const result = convertCLIMessageToChatMessages(msg);
-    expect(result[0].type).toBe('tool-use');
+    expect(result[0].type).toBe('unknown-tool-use');
     expect(result[0].rawName).toBe('Read');
     expect(result[0].filePath).toBeUndefined();
   });
@@ -196,5 +194,58 @@ describe('convertCLIMessageToChatMessages', () => {
     const msg = { type: 'assistant', content: [] };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(0);
+  });
+});
+
+describe('convertClaudePermissionTool', () => {
+  it('converts bash permission requests into canonical requested tools', () => {
+    const msg = convertClaudePermissionTool('2026-01-01T00:00:00.000Z', 'perm-tool-1', 'Bash', {
+      command: 'ls -la',
+    });
+
+    expect(msg).toBeInstanceOf(BashToolUseMessage);
+    expect(msg.command).toBe('ls -la');
+  });
+
+  it('converts exit_plan_mode permission requests into canonical requested tools', () => {
+    const msg = convertClaudePermissionTool('2026-01-01T00:00:00.000Z', 'perm-tool-2', 'exit_plan_mode', {
+      plan: 'Do X',
+      allowedPrompts: [],
+    });
+
+    expect(msg).toBeInstanceOf(ExitPlanModeToolUseMessage);
+    expect(msg.plan).toBe('Do X');
+  });
+});
+
+describe('buildClaudePermissionApprovalResponse', () => {
+  it('preserves the raw provider tool name when alwaysAllow adds a session rule', () => {
+    const response = buildClaudePermissionApprovalResponse({
+      providerToolName: 'exit_plan_mode',
+      providerToolInput: { plan: 'Do X' },
+    }, { allow: true, alwaysAllow: true });
+
+    expect(response).toEqual({
+      behavior: 'allow',
+      updatedInput: { plan: 'Do X' },
+      updatedPermissions: [{
+        type: 'addRules',
+        rules: [{ toolName: 'exit_plan_mode' }],
+        behavior: 'allow',
+        destination: 'session',
+      }],
+    });
+  });
+
+  it('omits updatedPermissions for allow-once decisions', () => {
+    const response = buildClaudePermissionApprovalResponse({
+      providerToolName: 'Bash',
+      providerToolInput: { command: 'ls' },
+    }, { allow: true, alwaysAllow: false });
+
+    expect(response).toEqual({
+      behavior: 'allow',
+      updatedInput: { command: 'ls' },
+    });
   });
 });

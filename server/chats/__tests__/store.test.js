@@ -225,5 +225,21 @@ describe('ChatRegistry', () => {
       expect(changed).toBe(true);
       expect(registry.getChat('c1')?.nativePath).toBe('/resolved/path.jsonl');
     });
+
+    it('keeps Amp pseudo native paths without filesystem checks', async () => {
+      registry.addChat({
+        id: 'c1',
+        provider: 'amp',
+        model: 'default',
+        projectPath: '/p',
+        providerSessionId: 'amp-thread-1',
+        nativePath: '!amp:amp-thread-1',
+      });
+
+      const changed = await registry.reconcileSessions(async () => '/should-not-be-used');
+
+      expect(changed).toBe(false);
+      expect(registry.getChat('c1')?.nativePath).toBe('!amp:amp-thread-1');
+    });
   });
 });

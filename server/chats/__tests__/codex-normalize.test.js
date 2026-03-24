@@ -130,6 +130,8 @@ describe('normalizeCodexJsonlEntry', () => {
       expect(result.canonical).toEqual([
         { type: 'user-message', timestamp: ts, content: 'hello world' },
       ]);
+      expect(result.isCanonicalUser).toBe(true);
+      expect(result.fallbackUser).toEqual([]);
       expect(result.fallbackAssistant).toEqual([]);
       expect(result.fallbackThinking).toEqual([]);
     });
@@ -208,7 +210,7 @@ describe('normalizeCodexJsonlEntry', () => {
   });
 
   describe('response_item message role=user', () => {
-    it('produces canonical user-message', () => {
+    it('produces fallback user-message', () => {
       const entry = {
         type: 'response_item',
         timestamp: ts,
@@ -219,7 +221,9 @@ describe('normalizeCodexJsonlEntry', () => {
         },
       };
       const result = normalizeCodexJsonlEntry(entry);
-      expect(result.canonical).toEqual([
+      expect(result.isCanonicalUser).toBe(false);
+      expect(result.canonical).toEqual([]);
+      expect(result.fallbackUser).toEqual([
         { type: 'user-message', timestamp: ts, content: 'user instruction' },
       ]);
     });
@@ -277,8 +281,7 @@ describe('normalizeCodexJsonlEntry', () => {
       expect(result.canonical).toHaveLength(1);
       const msg = result.canonical[0];
       expect(msg).toBeInstanceOf(BashToolUseMessage);
-      expect(msg.type).toBe('tool-use');
-      expect(msg.rawName).toBe('exec_command');
+      expect(msg.type).toBe('bash-tool-use');
       expect(msg.toolId).toBe('call_abc');
       expect(msg.command).toBe('rg --files');
     });
@@ -297,7 +300,6 @@ describe('normalizeCodexJsonlEntry', () => {
       const result = normalizeCodexJsonlEntry(entry);
       const msg = result.canonical[0];
       expect(msg).toBeInstanceOf(BashToolUseMessage);
-      expect(msg.rawName).toBe('shell_command');
       expect(msg.command).toBe('ls -la');
     });
 
@@ -365,7 +367,6 @@ describe('normalizeCodexJsonlEntry', () => {
       const result = normalizeCodexJsonlEntry(entry);
       const msg = result.canonical[0];
       expect(msg).toBeInstanceOf(EditToolUseMessage);
-      expect(msg.rawName).toBe('apply_patch');
       expect(msg.filePath).toBe('/project/file.js');
       expect(msg.oldString).toBe('old line');
       expect(msg.newString).toBe('new line');
@@ -425,8 +426,7 @@ describe('normalizeCodexJsonlEntry', () => {
       expect(result.canonical).toHaveLength(2);
 
       const toolUse = result.canonical[0];
-      expect(toolUse.type).toBe('tool-use');
-      expect(toolUse.rawName).toBe('web_search_call');
+      expect(toolUse.type).toBe('web-search-tool-use');
       expect(toolUse.query).toBe('React lazy Suspense issues');
 
       const toolResult = result.canonical[1];

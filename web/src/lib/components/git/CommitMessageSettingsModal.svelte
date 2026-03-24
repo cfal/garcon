@@ -112,6 +112,7 @@ Return only the commit message now.`;
 	function providerLabel(currentProvider: SessionProvider): string {
 		if (currentProvider === 'claude') return m.provider_claude();
 		if (currentProvider === 'codex') return m.provider_codex();
+		if (currentProvider === 'amp') return m.provider_amp();
 		return m.provider_opencode();
 	}
 

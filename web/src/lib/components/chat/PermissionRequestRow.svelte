@@ -3,6 +3,7 @@
 	// pending/resolved/cancelled state via ChatEventCard status variants.
 
 	import type { PermissionRequestMessage } from '$shared/chat-types';
+	import { toRenderToolPayload } from '$lib/chat/tool-render-payload';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ShieldAlert, FileCode, ChevronDown, Check, X } from '@lucide/svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
@@ -76,29 +77,27 @@
 		return true;
 	}
 
-	function isExitPlanMode(toolName: string): boolean {
-		return toolName === 'ExitPlanMode' || toolName === 'exit_plan_mode';
-	}
+	const isExitPlanMode = $derived(
+		request.requestedTool.type === 'exit-plan-mode-tool-use',
+	);
 
-	function formatInput(input: unknown): string {
-		if (!input) return '';
-		if (typeof input === 'string') return input;
-		return JSON.stringify(input, null, 2);
-	}
+	const exitPlanRequest = $derived(
+		request.requestedTool.type === 'exit-plan-mode-tool-use'
+			? request.requestedTool
+			: null,
+	);
 
-	function getPlanContent(input: unknown): string {
-		if (!input || typeof input !== 'object') return '';
-		const record = input as Record<string, unknown>;
-		const raw = record.plan ?? record.content ?? '';
-		return String(raw).replace(/\\n/g, '\n');
-	}
+	const plan = $derived(
+		exitPlanRequest ? exitPlanRequest.plan.replace(/\\n/g, '\n') : '',
+	);
 
-	function getAllowedPrompts(input: unknown): Array<Record<string, unknown>> {
-		if (!input || typeof input !== 'object') return [];
-		const record = input as Record<string, unknown>;
-		if (!Array.isArray(record.allowedPrompts)) return [];
-		return record.allowedPrompts as Array<Record<string, unknown>>;
-	}
+	const prompts = $derived(
+		exitPlanRequest?.allowedPrompts ?? [],
+	);
+
+	const renderPayload = $derived(toRenderToolPayload(request.requestedTool));
+	const toolLabel = $derived(renderPayload.name);
+	const rawInput = $derived(JSON.stringify(renderPayload.input ?? {}, null, 2));
 
 	const planTitle = $derived.by(() => {
 		if (isPending) return m.chat_permission_plan_ready();
@@ -113,14 +112,9 @@
 		if (isResolved) return m.chat_permission_permission_denied();
 		return m.chat_permission_permission_cancelled();
 	});
-
-	const rawInput = $derived(formatInput(request.toolInput));
 </script>
 
-{#if isExitPlanMode(request.toolName)}
-	{@const plan = getPlanContent(request.toolInput)}
-	{@const prompts = getAllowedPrompts(request.toolInput)}
-
+{#if isExitPlanMode}
 	<ChatEventCard variant={planCardVariant} class={resolvedOpacity}>
 		{#snippet header()}
 			<div class="flex items-center gap-2">
@@ -232,7 +226,7 @@
 						{permTitle}
 					</div>
 					<div class="text-xs opacity-80">
-						Tool: <span class="font-mono">{request.toolName}</span>
+						Tool: <span class="font-mono">{toolLabel}</span>
 					</div>
 				</div>
 			</div>

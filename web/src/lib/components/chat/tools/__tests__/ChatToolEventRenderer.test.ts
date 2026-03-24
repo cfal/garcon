@@ -13,7 +13,7 @@ import {
 describe('ChatToolEventRenderer', () => {
 	it('keeps Edit collapsed when autoExpandTools is disabled and defaultOpen is false', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new EditToolUseMessage('', 'tool-1', 'Edit', '/tmp/example.ts', 'const a = 1;', 'const a = 2;'),
+			toolMessage: new EditToolUseMessage('', 'tool-1', '/tmp/example.ts', 'const a = 1;', 'const a = 2;'),
 			mode: 'input',
 			autoExpandTools: false
 		});
@@ -23,7 +23,7 @@ describe('ChatToolEventRenderer', () => {
 
 	it('opens tools with defaultOpen=true when autoExpandTools is disabled', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new ExitPlanModeToolUseMessage('', 'tool-2', 'ExitPlanMode', 'Implement the migration.'),
+			toolMessage: new ExitPlanModeToolUseMessage('', 'tool-2', 'Implement the migration.'),
 			mode: 'input',
 			autoExpandTools: false
 		});
@@ -33,7 +33,7 @@ describe('ChatToolEventRenderer', () => {
 
 	it('forces Edit open when autoExpandTools is enabled even with defaultOpen=false', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new EditToolUseMessage('', 'tool-3', 'Edit', '/tmp/example.ts', 'const a = 1;', 'const a = 2;'),
+			toolMessage: new EditToolUseMessage('', 'tool-3', '/tmp/example.ts', 'const a = 1;', 'const a = 2;'),
 			mode: 'input',
 			autoExpandTools: true
 		});
@@ -44,7 +44,7 @@ describe('ChatToolEventRenderer', () => {
 	it('renders streaming Edit without diff as non-expandable single row', () => {
 		const onFileOpen = () => {};
 		render(ChatToolEventRenderer, {
-			toolMessage: new EditToolUseMessage('', 'tool-4', 'Edit', undefined, undefined, undefined, [{ path: '/tmp/ChatEventCard.svelte', kind: 'update' }]),
+			toolMessage: new EditToolUseMessage('', 'tool-4', undefined, undefined, undefined, [{ path: '/tmp/ChatEventCard.svelte', kind: 'update' }]),
 			mode: 'input',
 			onFileOpen
 		});
@@ -55,7 +55,7 @@ describe('ChatToolEventRenderer', () => {
 
 	it('renders Grep input without jump-to-results affordance', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new GrepToolUseMessage('', 'tool-5', 'Grep', 'border-dotted', '/tmp/ChatEventCard.svelte'),
+			toolMessage: new GrepToolUseMessage('', 'tool-5', 'border-dotted', '/tmp/ChatEventCard.svelte'),
 			mode: 'input'
 		});
 
@@ -66,7 +66,7 @@ describe('ChatToolEventRenderer', () => {
 
 	it('renders WebFetch as url + instruction details without jump affordance', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new WebFetchToolUseMessage('', 'tool-6', 'WebFetch', 'https://example.com/spec', 'Extract the API version.'),
+			toolMessage: new WebFetchToolUseMessage('', 'tool-6', 'https://example.com/spec', 'Extract the API version.'),
 			mode: 'input'
 		});
 
@@ -78,7 +78,7 @@ describe('ChatToolEventRenderer', () => {
 
 	it('suppresses WriteStdin rows entirely', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new WriteStdinToolUseMessage('', 'tool-7', 'WriteStdin', {
+			toolMessage: new WriteStdinToolUseMessage('', 'tool-7', {
 				session_id: 123,
 				yield_time_ms: 30000,
 				max_output_tokens: 4000
@@ -97,7 +97,7 @@ describe('tool result and jump behavior', () => {
 			content: { filenames: ['a.ts', 'b.ts'], numFiles: 2 }
 		};
 		render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-1', 'Glob', '**/*.ts'),
+			toolMessage: new GlobToolUseMessage('', 'tool-glob-1', '**/*.ts'),
 			toolResult,
 			mode: 'input'
 		});
@@ -109,7 +109,7 @@ describe('tool result and jump behavior', () => {
 
 	it('does not render jump link for Glob when toolResult is absent', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-2', 'Glob', '**/*.ts'),
+			toolMessage: new GlobToolUseMessage('', 'tool-glob-2', '**/*.ts'),
 			mode: 'input'
 		});
 
@@ -121,7 +121,7 @@ describe('tool result and jump behavior', () => {
 			content: { filenames: ['src/a.ts', 'src/b.ts'], numFiles: 2 }
 		};
 		const { container } = render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-3', 'Glob', '**/*.ts'),
+			toolMessage: new GlobToolUseMessage('', 'tool-glob-3', '**/*.ts'),
 			toolResult,
 			mode: 'input'
 		});
@@ -135,7 +135,7 @@ describe('tool result and jump behavior', () => {
 			content: { filenames: ['one.ts'], numFiles: 1 }
 		};
 		render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-4', 'Glob', '*.ts'),
+			toolMessage: new GlobToolUseMessage('', 'tool-glob-4', '*.ts'),
 			toolResult,
 			mode: 'input',
 			autoExpandTools: true
@@ -149,7 +149,7 @@ describe('tool result and jump behavior', () => {
 			content: { filenames: ['a.ts', 'b.ts', 'c.ts'], numFiles: 3 }
 		};
 		render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-5', 'Glob', '*.ts'),
+			toolMessage: new GlobToolUseMessage('', 'tool-glob-5', '*.ts'),
 			toolResult,
 			mode: 'input',
 			autoExpandTools: true

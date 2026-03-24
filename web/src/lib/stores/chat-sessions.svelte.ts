@@ -97,6 +97,11 @@ export class ChatSessionsStore {
 			if (prev && sameRecord(prev, next)) {
 				nextById[next.id] = prev;
 			} else {
+				// Preserve WS-authoritative isProcessing flag; the REST
+				// isActive snapshot can lag behind real-time WS events.
+				if (prev?.isProcessing && !next.isProcessing) {
+					next.isProcessing = true;
+				}
 				nextById[next.id] = next;
 			}
 			nextOrder.push(next.id);

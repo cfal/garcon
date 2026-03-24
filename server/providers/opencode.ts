@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { normalizeToolResultContent } from './normalize-util.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
 import { convertOpenCodeToolUse } from './converters/opencode-tool-use.js';
+import { convertOpencodePermissionTool } from './converters/opencode-permission-tool.js';
 import { AbsProvider } from './base.js';
 import type { PermissionMode } from '../../common/chat-modes.js';
 import type { StartSessionRequest, ResumeTurnRequest } from './types.js';
@@ -105,10 +106,10 @@ export function mapPermissionDecision(decision: { allow?: boolean; alwaysAllow?:
 }
 
 // Extracts a normalized permission request from a V2 permission.asked event.
+// Returns the provider-native permission data for conversion at the call site.
 export function extractPermissionRequest(event: SSEEvent): {
   requestId: string;
-  toolName: string;
-  toolInput: Record<string, unknown>;
+  providerPermission: Record<string, unknown>;
   sessionID: string | null;
 } | null {
   if (event.type !== 'permission.asked') return null;
@@ -119,8 +120,7 @@ export function extractPermissionRequest(event: SSEEvent): {
 
   return {
     requestId: String(requestId),
-    toolName: props.permission || 'Unknown',
-    toolInput: {
+    providerPermission: {
       permission: props.permission || null,
       patterns: Array.isArray(props.patterns) ? props.patterns : [],
       metadata: props.metadata || {},
@@ -398,13 +398,19 @@ export class OpenCodeProvider extends AbsProvider {
             const permission = this.#extractPermissionRequestFromEvent(event);
             if (!permission) continue;
             const permissionRequestId = `opencode-${crypto.randomBytes(8).toString('hex')}`;
+            const now = new Date().toISOString();
+            const requestedTool = convertOpencodePermissionTool(
+              now,
+              `perm-${permissionRequestId}`,
+              permission.providerPermission,
+            );
             this.#pendingPermissions.set(permissionRequestId, {
               originalRequestId: permission.requestId,
               providerSessionId: sessionId,
               chatId,
             });
 
-            this.#emitPermissionMessages(chatId, [new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, permission.toolName, permission.toolInput)]);
+            this.#emitPermissionMessages(chatId, [new PermissionRequestMessage(now, permissionRequestId, requestedTool)]);
 
             continue;
           }

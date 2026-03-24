@@ -20,7 +20,6 @@ describe('convertCodexFunctionCall', () => {
     expect(msg).toBeInstanceOf(BashToolUseMessage);
     expect(msg.command).toBe('ls -la');
     expect(msg.toolId).toBe('call-1');
-    expect(msg.rawName).toBe('shell_command');
   });
 
   it('maps exec_command to BashToolUseMessage using cmd field', () => {
@@ -83,11 +82,14 @@ describe('convertCodexFunctionCall', () => {
   it('maps update_plan to UpdatePlanToolUseMessage', () => {
     const msg = convertCodexFunctionCall(TS, {
       name: 'update_plan',
-      arguments: '{"items":["step 1","step 2"]}',
+      arguments: '{"plan":[{"step":"step 1","status":"pending"},{"step":"step 2","status":"completed"}]}',
       call_id: 'call-6',
     });
     expect(msg).toBeInstanceOf(UpdatePlanToolUseMessage);
-    expect(msg.todos).toEqual(['step 1', 'step 2']);
+    expect(msg.todos).toEqual([
+      { content: 'step 1', status: 'pending' },
+      { content: 'step 2', status: 'completed' },
+    ]);
   });
 
   it('passes through unmapped function names as Unknown', () => {
@@ -133,7 +135,6 @@ describe('convertCodexCustomToolCall', () => {
     expect(msg.filePath).toBe('/project/file.js');
     expect(msg.oldString).toBe('old line');
     expect(msg.newString).toBe('new line');
-    expect(msg.rawName).toBe('apply_patch');
   });
 
   it('passes through non-apply_patch custom tools as Unknown', () => {

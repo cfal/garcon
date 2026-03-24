@@ -64,7 +64,7 @@ describe('metadata-store', () => {
       const prevMessage = metaBefore.lastMessage;
 
       metadata.updateFromAppendedMessages(chatId, [
-        { type: 'tool-use', timestamp: '2026-01-02T00:00:00Z', toolId: 't1', toolName: 'Read', toolInput: '{}' },
+        { type: 'read-tool-use', timestamp: '2026-01-02T00:00:00Z', toolId: 't1', filePath: '/tmp/test.ts' },
       ]);
 
       const meta = metadata.getChatMetadata(chatId);
@@ -75,7 +75,7 @@ describe('metadata-store', () => {
   describe('updateFromAppendedMessages', () => {
     it('updates lastActivity from message timestamps', () => {
       metadata.updateFromAppendedMessages(chatId, [
-        { type: 'tool-use', timestamp: '2099-01-01T00:00:00Z', toolId: 't1', toolName: 'X', toolInput: '{}' },
+        { type: 'bash-tool-use', timestamp: '2099-01-01T00:00:00Z', toolId: 't1', command: 'ls' },
       ]);
 
       const meta = metadata.getChatMetadata(chatId);

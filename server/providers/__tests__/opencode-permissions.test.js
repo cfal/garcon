@@ -9,6 +9,8 @@ import {
   mapPermissionMode,
   OPENCODE_PERMISSION_KEYS,
 } from '../opencode.js';
+import { convertOpencodePermissionTool } from '../converters/opencode-permission-tool.js';
+import { EnterPlanModeToolUseMessage, UnknownToolUseMessage } from '../../../common/chat-types.js';
 
 describe('mapPermissionDecision', () => {
   it('returns "once" for allow=true, alwaysAllow=false', () => {
@@ -57,8 +59,7 @@ describe('extractPermissionRequest', () => {
     const result = extractPermissionRequest(event);
     expect(result).toEqual({
       requestId: 'req-abc',
-      toolName: 'bash',
-      toolInput: {
+      providerPermission: {
         permission: 'bash',
         patterns: ['*.sh'],
         metadata: { desc: 'run shell' },
@@ -110,8 +111,7 @@ describe('extractPermissionRequest', () => {
     const result = extractPermissionRequest(event);
     expect(result).toEqual({
       requestId: 'req-2',
-      toolName: 'Unknown',
-      toolInput: {
+      providerPermission: {
         permission: null,
         patterns: [],
         metadata: {},
@@ -128,7 +128,31 @@ describe('extractPermissionRequest', () => {
       properties: { requestID: 'req-3', patterns: 'not-an-array' },
     };
     const result = extractPermissionRequest(event);
-    expect(result.toolInput.patterns).toEqual([]);
+    expect(result.providerPermission.patterns).toEqual([]);
+  });
+});
+
+describe('convertOpencodePermissionTool', () => {
+  it('canonicalizes bash permission names before emitting to the client', () => {
+    const msg = convertOpencodePermissionTool('2026-01-01T00:00:00.000Z', 'perm-1', {
+      permission: 'bash',
+      patterns: ['*.sh'],
+      metadata: { desc: 'run shell' },
+      always: ['/bin/bash'],
+      tool: { name: 'bash' },
+    });
+
+    expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+    expect(msg.rawName).toBe('Bash');
+    expect(msg.input.patterns).toEqual(['*.sh']);
+  });
+
+  it('maps plan_enter to EnterPlanMode', () => {
+    const msg = convertOpencodePermissionTool('2026-01-01T00:00:00.000Z', 'perm-2', {
+      permission: 'plan_enter',
+    });
+
+    expect(msg).toBeInstanceOf(EnterPlanModeToolUseMessage);
   });
 });
 

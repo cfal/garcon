@@ -6,6 +6,7 @@ import path from 'path';
 import { parseJsonBody } from '../lib/http-request.js';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import type { IChatRegistry } from '../chats/store.js';
+import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import { UserMessage } from '../../common/chat-types.ts';
 import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { PROVIDERS as VALID_PROVIDERS, supportsFork as providerSupportsFork, supportsImages as providerSupportsImages } from '../../common/providers.ts';
@@ -339,7 +340,7 @@ export default function createChatRoutes(
         return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
       }
 
-      if (session.nativePath) {
+      if (session.nativePath && !isArtificialNativePath(session.nativePath)) {
         try {
           await fs.unlink(session.nativePath as string);
         } catch (error: unknown) {

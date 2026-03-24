@@ -401,7 +401,7 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId).toBe(ref);
 	});
 
-	it('upsertFromServer resets isProcessing from server isActive snapshot', () => {
+	it('upsertFromServer preserves WS-authoritative isProcessing over stale REST snapshot', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
@@ -409,7 +409,7 @@ describe('ChatSessionsStore', () => {
 
 		store.upsertFromServer([makeServerSession({ id: 'a', title: 'Updated' })]);
 
-		expect(store.byId['a']?.isProcessing).toBe(false);
+		expect(store.byId['a']?.isProcessing).toBe(true);
 		expect(store.byId['a']?.title).toBe('Updated');
 	});
 
