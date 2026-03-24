@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude } from './claude-cli.js';
 import { runSingleQuery as runSingleQueryCodex } from './codex.js';
 import { runSingleQuery as runSingleQueryAmp } from './amp-cli.js';
+import { getMaxSessions } from '../config.js';
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { getCodexAuthStatus } from './codex-auth.js';
 import { getOpenCodeAuthStatus } from './opencode-auth.js';
@@ -16,8 +17,6 @@ import { getAmpAuthStatus } from './amp-auth.js';
 import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loaders/claude-history-loader.js';
 import { getCodexPreviewFromNativePath, loadCodexChatMessages } from './loaders/codex-history-loader.js';
 import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loaders/opencode-history-loader.js';
-import { getAmpPreview, loadAmpChatMessages, type AmpThreadExport } from './loaders/amp-history-loader.js';
-import { createArtificialNativePath, getArtificialProviderSessionId } from '../chats/artificial-native-path.js';
 import type { IChatRegistry } from '../chats/store.js';
 
 import type { AgentCommandImage } from '../../common/ws-requests.js';
@@ -65,6 +64,7 @@ interface ClaudeProviderInstance {
   getRunningClaudeInternalSessions(): Array<{ id: string; status: string; startedAt: string }>;
   resolveInternalToolApproval(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void;
   setInternalPermissionMode(providerSessionId: string, mode: PermissionMode): void;
+  startPurgeTimer(): ReturnType<typeof setInterval>;
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
@@ -97,6 +97,7 @@ interface OpenCodeProviderInstance {
   getModels(): Promise<Array<{ value: string; label: string }>>;
   runSingleQuery(prompt: string, options?: Record<string, unknown>): Promise<string>;
   resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void>;
+  evictChat(chatId: string): void;
   startPurgeTimer(): ReturnType<typeof setInterval>;
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
@@ -106,13 +107,12 @@ interface OpenCodeProviderInstance {
 }
 
 interface AmpProviderInstance {
-  startSession(request: StartSessionRequest): Promise<StartedProviderSession>;
-  runTurn(request: ResumeTurnRequest): Promise<void>;
+  startSession(command: string, opts: { chatId: string; cwd: string; model?: string; [key: string]: unknown }): Promise<string>;
+  runTurn(command: string, opts: { sessionId: string; chatId: string; cwd?: string; [key: string]: unknown }): Promise<void>;
   isRunning(providerSessionId: string): boolean;
   abort(providerSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }>;
   startPurgeTimer(): ReturnType<typeof setInterval>;
-  exportThread(threadId: string, opts?: { cwd?: string }): Promise<AmpThreadExport>;
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
@@ -139,6 +139,12 @@ export class ProviderRegistry {
     this.#codex = codex;
     this.#opencode = opencode;
     this.#amp = amp;
+
+    if (typeof registry.onChatRemoved === 'function') {
+      registry.onChatRemoved((chatId: string) => {
+        this.#opencode.evictChat(chatId);
+      });
+    }
   }
 
   // Starts a new provider session. The chat registry entry must already
@@ -151,6 +157,15 @@ export class ProviderRegistry {
     projectPath?: string;
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
+
+    const maxSessions = getMaxSessions();
+    if (maxSessions > 0) {
+      const running = this.getRunningSessionCount();
+      if (running >= maxSessions) {
+        throw new Error(`Session limit reached (${maxSessions}). Wait for existing sessions to complete or increase GARCON_MAX_SESSIONS.`);
+      }
+    }
+
     const entry = requireChatEntry(chatId, rawEntry);
     const request: StartSessionRequest = {
       chatId,
@@ -186,17 +201,19 @@ export class ProviderRegistry {
 
     if (entry.provider === 'opencode') {
       const providerSessionId = await this.#opencode.startSession(request);
-      const nativePath = createArtificialNativePath(entry.provider, providerSessionId);
+      const nativePath = `opencode:${providerSessionId}`;
       this.#registry.updateChat(chatId, { providerSessionId, nativePath });
       return;
     }
 
     if (entry.provider === 'amp') {
-      const started = await this.#amp.startSession(request);
-      this.#registry.updateChat(chatId, {
-        providerSessionId: started.providerSessionId,
-        nativePath: started.nativePath,
+      const providerSessionId = await this.#amp.startSession(command, {
+        chatId,
+        cwd: entry.projectPath,
+        model: entry.model,
       });
+      const nativePath = `amp:${providerSessionId}`;
+      this.#registry.updateChat(chatId, { providerSessionId, nativePath });
       return;
     }
 
@@ -239,7 +256,11 @@ export class ProviderRegistry {
     } else if (provider === 'opencode') {
       await this.#opencode.runTurn(request);
     } else if (provider === 'amp') {
-      await this.#amp.runTurn(request);
+      await this.#amp.runTurn(command, {
+        sessionId: providerSessionId,
+        chatId,
+        cwd: entry.projectPath,
+      });
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
@@ -306,6 +327,15 @@ export class ProviderRegistry {
     };
   }
 
+  getRunningSessionCount(): number {
+    return (
+      (this.#claude.getRunningClaudeInternalSessions?.()?.length ?? 0) +
+      (this.#codex.getRunningSessions?.()?.length ?? 0) +
+      (this.#opencode.getRunningSessions?.()?.length ?? 0) +
+      (this.#amp.getRunningSessions?.()?.length ?? 0)
+    );
+  }
+
   // Routes a tool-approval decision to the correct provider.
   resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void {
     if (!chatId || !permissionRequestId) return;
@@ -355,13 +385,10 @@ export class ProviderRegistry {
     if (!session?.provider) return null;
 
     if (session.provider === 'amp') {
-      const threadId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, session.provider);
-      if (!threadId) return null;
-      const exportedThread = await this.#amp.exportThread(threadId, { cwd: session.projectPath });
-      return getAmpPreview(exportedThread);
+      return null; // Amp history loading is not yet supported
     }
     if (session.provider === 'opencode') {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, session.provider);
+      const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');
       const getClient = () => this.#opencode.getClient();
       return getOpenCodePreviewFromSessionId(sessionId, getClient);
     }
@@ -380,13 +407,10 @@ export class ProviderRegistry {
     if (!session?.provider) return [];
 
     if (session.provider === 'amp') {
-      const threadId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, session.provider);
-      if (!threadId) return [];
-      const exportedThread = await this.#amp.exportThread(threadId, { cwd: session.projectPath });
-      return loadAmpChatMessages(exportedThread);
+      return []; // Amp history loading is not yet supported
     }
     if (session.provider === 'opencode') {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, session.provider);
+      const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');
       const getClient = () => this.#opencode.getClient();
       return loadOpenCodeChatMessages(sessionId, getClient);
     }
@@ -425,6 +449,7 @@ export class ProviderRegistry {
     this.#codex.startPurgeTimer();
     this.#opencode.startPurgeTimer();
     this.#amp.startPurgeTimer();
+    this.#claude.startPurgeTimer();
   }
 
   // Fan-out listener helpers. Registers the callback on all

@@ -5,6 +5,7 @@
 const CACHE_LIMIT = 100;
 const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 5 * 60 * 1000;
+const MAX_MESSAGES_PER_ENTRY = 500;
 
 export class HistoryCache {
   #cacheByChatId = new Map();
@@ -107,6 +108,11 @@ export class HistoryCache {
     for (const m of appendedMessages) {
       entry.messages.push(m);
     }
+
+    if (entry.messages.length > MAX_MESSAGES_PER_ENTRY) {
+      entry.messages = entry.messages.slice(-MAX_MESSAGES_PER_ENTRY);
+    }
+
     entry.lastAccessAt = Date.now();
 
     try {
@@ -175,4 +181,4 @@ export class HistoryCache {
   get _cacheByChatId() { return this.#cacheByChatId; }
 }
 
-export { CACHE_LIMIT as _CACHE_LIMIT, STALE_NON_ACTIVE_MS as _STALE_NON_ACTIVE_MS };
+export { CACHE_LIMIT as _CACHE_LIMIT, STALE_NON_ACTIVE_MS as _STALE_NON_ACTIVE_MS, MAX_MESSAGES_PER_ENTRY as _MAX_MESSAGES_PER_ENTRY };

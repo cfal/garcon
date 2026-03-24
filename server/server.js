@@ -97,6 +97,12 @@ export async function startServer() {
 
     // Telegram notifications (wires itself to provider + queue events).
     const telegramNotifier = new TelegramNotifier(getTelegramBotToken());
+    // Fall back to persisted bot token if env var is empty.
+    if (!telegramNotifier.isConfigured) {
+      const uiSettings = await settings.getUiSettings();
+      const persistedToken = uiSettings?.notifications?.telegram?.botToken;
+      if (persistedToken) telegramNotifier.setBotToken(persistedToken);
+    }
     // eslint-disable-next-line no-unused-vars
     const _attentionTracker = new AttentionTracker(providerRegistry, queue, settings, chatRegistry, historyCache, telegramNotifier);
 
@@ -277,6 +283,14 @@ export async function startServer() {
       shuttingDown = true;
       console.log('server: shutting down...');
       try {
+        const running = providerRegistry.getRunningSessions();
+        for (const [, sessions] of Object.entries(running)) {
+          for (const session of sessions) {
+            if (session.id) {
+              providerRegistry.abortSession(session.id).catch(() => {});
+            }
+          }
+        }
         historyCache.destroy();
         await chatRegistry.flush();
       } catch (err) {
