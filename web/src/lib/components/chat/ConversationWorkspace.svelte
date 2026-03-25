@@ -23,6 +23,7 @@
 	import type { PendingPermissionRequest, QueueState, PermissionMode, PendingViewChat } from '$lib/types/chat';
 	import { ArrowDown } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface ConversationWorkspaceProps {
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
@@ -261,7 +262,7 @@
 {#if !projectPath}
 	<div class="flex items-center justify-center h-full">
 		<div class="text-center text-muted-foreground">
-			<p>Select a project to start chatting</p>
+			<p>{m.chat_workspace_select_project()}</p>
 		</div>
 	</div>
 {:else}

@@ -111,7 +111,7 @@
 		<div class="text-center text-muted-foreground mt-8">
 			<div class="flex items-center justify-center space-x-2">
 				<TriangleAlert class="h-4 w-4 text-destructive" />
-				<p class="text-sm">Failed to load messages</p>
+				<p class="text-sm">{m.chat_feed_failed_to_load()}</p>
 			</div>
 			{#if chatState.loadError}
 				<p class="text-xs mt-1 text-muted-foreground/70">{chatState.loadError}</p>
@@ -124,7 +124,7 @@
 					onclick={onRetry}
 				>
 					<RefreshCw class="h-3 w-3 mr-1" />
-					Retry
+					{m.chat_feed_retry()}
 				</Button>
 			{/if}
 		</div>
@@ -138,7 +138,7 @@
 			<div class="text-center text-sm text-muted-foreground py-2 border-b border-border bg-destructive/5">
 				<div class="flex items-center justify-center space-x-2">
 					<TriangleAlert class="h-3 w-3 text-destructive" />
-					<span>Failed to refresh messages</span>
+					<span>{m.chat_feed_failed_to_refresh()}</span>
 					{#if onRetry}
 						<Button
 							variant="ghost"
@@ -147,7 +147,7 @@
 							onclick={onRetry}
 						>
 							<RefreshCw class="h-3 w-3 mr-1" />
-							Retry
+							{m.chat_feed_retry()}
 						</Button>
 					{/if}
 				</div>
