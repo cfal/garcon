@@ -5,6 +5,8 @@
 	import { getAuth } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import Shield from '@lucide/svelte/icons/shield';
+	import Eye from '@lucide/svelte/icons/eye';
+	import EyeOff from '@lucide/svelte/icons/eye-off';
 
 	const auth = getAuth();
 
@@ -13,6 +15,8 @@
 	let confirmPassword = $state('');
 	let isSubmitting = $state(false);
 	let error = $state('');
+	let showPassword = $state(false);
+	let showConfirmPassword = $state(false);
 
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
@@ -95,28 +99,62 @@
 					<label for="password" class="mb-1 block text-sm font-medium text-foreground">
 						{m.auth_login_password()}
 					</label>
-					<Input
-						type="password"
-						id="password"
-						bind:value={password}
-						placeholder={m.auth_login_placeholders_password()}
-						required
-						disabled={isSubmitting}
-					/>
+					<div class="relative">
+						<Input
+							type={showPassword ? 'text' : 'password'}
+							id="password"
+							bind:value={password}
+							placeholder={m.auth_login_placeholders_password()}
+							required
+							disabled={isSubmitting}
+							class="pr-10"
+						/>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon"
+							class="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:text-foreground"
+							onclick={() => (showPassword = !showPassword)}
+							aria-label={showPassword ? m.auth_password_hide() : m.auth_password_show()}
+						>
+							{#if showPassword}
+								<EyeOff class="size-4" />
+							{:else}
+								<Eye class="size-4" />
+							{/if}
+						</Button>
+					</div>
 				</div>
 
 				<div>
 					<label for="confirmPassword" class="mb-1 block text-sm font-medium text-foreground">
 						{m.auth_setup_confirm_password()}
 					</label>
-					<Input
-						type="password"
-						id="confirmPassword"
-						bind:value={confirmPassword}
-						placeholder={m.auth_setup_confirm_password_placeholder()}
-						required
-						disabled={isSubmitting}
-					/>
+					<div class="relative">
+						<Input
+							type={showConfirmPassword ? 'text' : 'password'}
+							id="confirmPassword"
+							bind:value={confirmPassword}
+							placeholder={m.auth_setup_confirm_password_placeholder()}
+							required
+							disabled={isSubmitting}
+							class="pr-10"
+						/>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon"
+							class="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:text-foreground"
+							onclick={() => (showConfirmPassword = !showConfirmPassword)}
+							aria-label={showConfirmPassword ? m.auth_password_hide() : m.auth_password_show()}
+						>
+							{#if showConfirmPassword}
+								<EyeOff class="size-4" />
+							{:else}
+								<Eye class="size-4" />
+							{/if}
+						</Button>
+					</div>
 				</div>
 
 				{#if error}
