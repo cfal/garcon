@@ -55,7 +55,7 @@ async function noauthPostRegister(request) {
 
     const setupNeeded = await needsSetup();
     if (!setupNeeded) {
-      return Response.json({ error: 'Account already configured' }, { status: 403 });
+      return Response.json({ error: 'Account already configured' }, { status: 409 });
     }
 
     const passwordHash = await Bun.password.hash(password, { algorithm: 'bcrypt', cost: 12 });
