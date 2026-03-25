@@ -121,10 +121,7 @@ describe('ProviderRegistry session option hydration', () => {
       runTurn: mock(() => Promise.resolve(undefined)),
     };
     mockAmp = {
-      startSession: mock((request) => Promise.resolve({
-        providerSessionId: 'amp-session',
-        nativePath: '!amp:amp-session',
-      })),
+      startSession: mock(() => Promise.resolve('amp-session')),
       runTurn: mock((request) => Promise.resolve(undefined)),
       exportThread: mock(() => Promise.resolve({ messages: [] })),
     };
@@ -278,7 +275,7 @@ describe('ProviderRegistry session option hydration', () => {
 
     expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
       providerSessionId: 'amp-session',
-      nativePath: '!amp:amp-session',
+      nativePath: 'amp:amp-session',
     });
   });
 });

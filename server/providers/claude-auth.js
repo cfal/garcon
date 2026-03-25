@@ -35,8 +35,22 @@ export async function getClaudeAuthStatus() {
       }
       return { authenticated: true, canReauth: true, label };
     }
-    return { authenticated: false, canReauth: true, label: '' };
+    // Fall through to config.json check below.
   } catch {
-    return { authenticated: false, canReauth: true, label: '' };
+    // .credentials.json missing or unreadable; fall through.
   }
+
+  // Check for primaryApiKey in ~/.claude/config.json (CLI API key auth).
+  try {
+    const configPath = path.join(os.homedir(), '.claude', 'config.json');
+    const configContent = await fs.readFile(configPath, 'utf8');
+    const config = JSON.parse(configContent);
+    if (typeof config.primaryApiKey === 'string' && config.primaryApiKey.trim()) {
+      return { authenticated: true, canReauth: false, label: '' };
+    }
+  } catch {
+    // config.json missing or unreadable
+  }
+
+  return { authenticated: false, canReauth: true, label: '' };
 }

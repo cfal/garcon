@@ -9,9 +9,7 @@ import path from 'path';
 import { normalizeToolResultContent } from './normalize-util.js';
 import { getClaudeBinary } from '../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
-import type { ToolUseChatMessage } from '../../common/chat-types.js';
 import { convertClaudeToolUse } from './converters/claude-tool-use.js';
-import { convertClaudePermissionTool } from './converters/claude-permission-tool.js';
 import { AbsProvider } from './base.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { ClaudeStartSessionRequest, ResumeTurnRequest } from './types.js';
@@ -65,40 +63,36 @@ interface PendingPermission {
   cliRequestId: string;
   providerSessionId: string;
   chatId: string;
-  providerToolName: string;
-  providerToolInput: Record<string, unknown>;
-  requestedTool: ToolUseChatMessage;
+  toolName: string;
+  toolInput: Record<string, unknown>;
 }
 
 interface PendingControlRequest {
   resolve: (value: unknown) => void;
 }
 
-export function buildClaudePermissionApprovalResponse(
-  pending: Pick<PendingPermission, 'providerToolName' | 'providerToolInput'>,
+// Builds the permission approval/deny response sent back to the CLI.
+function buildClaudePermissionApprovalResponse(
+  pending: Pick<PendingPermission, 'toolName' | 'toolInput'> & { providerToolName?: string; providerToolInput?: Record<string, unknown> },
   decision: { allow: boolean; alwaysAllow?: boolean },
 ): Record<string, unknown> {
   if (!decision.allow) {
-    return {
-      behavior: 'deny',
-      message: 'Denied by user',
-    };
+    return { behavior: 'deny', message: 'Denied by user' };
   }
-
+  const toolInput = pending.providerToolInput ?? pending.toolInput ?? {};
+  const toolName = pending.providerToolName ?? pending.toolName;
   const response: Record<string, unknown> = {
     behavior: 'allow',
-    updatedInput: pending.providerToolInput ?? {},
+    updatedInput: toolInput,
   };
-
   if (decision.alwaysAllow) {
     response.updatedPermissions = [{
       type: 'addRules',
-      rules: [{ toolName: pending.providerToolName }],
+      rules: [{ toolName }],
       behavior: 'allow',
       destination: 'session',
     }];
   }
-
   return response;
 }
 
@@ -299,26 +293,17 @@ class ClaudeProvider extends AbsProvider {
     if (msg.request?.subtype !== 'can_use_tool') return;
 
     const permissionRequestId = `claude-${crypto.randomBytes(8).toString('hex')}`;
-    const providerToolName = msg.request.tool_name || 'Unknown';
-    const providerToolInput = msg.request.input || {};
-    const now = new Date().toISOString();
-    const requestedTool = convertClaudePermissionTool(
-      now,
-      `perm-${permissionRequestId}`,
-      providerToolName,
-      providerToolInput,
-    );
+    const toolName = msg.request.tool_name || 'Unknown';
 
     this.#pendingPermissions.set(permissionRequestId, {
       cliRequestId: msg.request_id!,
       providerSessionId: session.id,
       chatId: session.chatId,
-      providerToolName,
-      providerToolInput,
-      requestedTool,
+      toolName,
+      toolInput: msg.request.input || {},
     });
 
-    this.#emitPermissionMessages(session.chatId, [new PermissionRequestMessage(now, permissionRequestId, requestedTool)]);
+    this.#emitPermissionMessages(session.chatId, [new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, toolName, msg.request.input)]);
   }
 
   #handleControlResponse(session: ClaudeRunningSession, msg: CLIMessage): void {
@@ -706,6 +691,15 @@ class ClaudeProvider extends AbsProvider {
       request_id: crypto.randomUUID(),
       request: { subtype: 'interrupt' },
     }));
+
+    const proc = session.process;
+    setTimeout(() => {
+      if (session.process === proc && !proc.killed) {
+        console.warn(`cli(${providerSessionId.slice(0, 8)}): interrupt not acknowledged, force-killing process`);
+        proc.kill();
+      }
+    }, 5000);
+
     return true;
   }
 
@@ -723,6 +717,22 @@ class ClaudeProvider extends AbsProvider {
         startedAt: new Date(s.startTime).toISOString(),
       }));
   }
+
+  startPurgeTimer(): ReturnType<typeof setInterval> {
+    const maxAge = 30 * 60 * 1000;
+
+    return setInterval(() => {
+      const now = Date.now();
+
+      for (const [id, session] of this.#runningSessions.entries()) {
+        if (!session.isRunning) {
+          if (now - session.startTime > maxAge) {
+            this.#runningSessions.delete(id);
+          }
+        }
+      }
+    }, 5 * 60 * 1000);
+  }
 }
 
-export { ClaudeProvider, convertCLIMessageToChatMessages, createClaudeNativePath, runSingleQuery };
+export { ClaudeProvider, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, createClaudeNativePath, runSingleQuery };

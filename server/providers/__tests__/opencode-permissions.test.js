@@ -59,7 +59,8 @@ describe('extractPermissionRequest', () => {
     const result = extractPermissionRequest(event);
     expect(result).toEqual({
       requestId: 'req-abc',
-      providerPermission: {
+      toolName: 'bash',
+      toolInput: {
         permission: 'bash',
         patterns: ['*.sh'],
         metadata: { desc: 'run shell' },
@@ -111,7 +112,8 @@ describe('extractPermissionRequest', () => {
     const result = extractPermissionRequest(event);
     expect(result).toEqual({
       requestId: 'req-2',
-      providerPermission: {
+      toolName: 'Unknown',
+      toolInput: {
         permission: null,
         patterns: [],
         metadata: {},
@@ -128,7 +130,7 @@ describe('extractPermissionRequest', () => {
       properties: { requestID: 'req-3', patterns: 'not-an-array' },
     };
     const result = extractPermissionRequest(event);
-    expect(result.providerPermission.patterns).toEqual([]);
+    expect(result.toolInput.patterns).toEqual([]);
   });
 });
 
