@@ -1,5 +1,7 @@
 {
   "auth_login_errors_invalid_credentials": "Invalid username or password",
+  "auth_password_hide": "Hide password",
+  "auth_password_show": "Show password",
   "auth_login_errors_required_fields": "All fields required",
   "auth_login_loading": "Signing in...",
   "auth_login_password": "Password",

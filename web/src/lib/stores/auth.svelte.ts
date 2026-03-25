@@ -16,6 +16,7 @@ function describeAuthError(err: unknown): string {
 	if (err instanceof ApiError) {
 		if (err.status === 401) return 'Invalid credentials. Please try again.';
 		if (err.status === 403) return 'Access denied. You do not have permission.';
+		if (err.status === 409) return err.message;
 		if (err.status >= 500) return 'Server error. Please try again later.';
 		return err.message;
 	}

@@ -116,15 +116,23 @@
 		ws.disconnect();
 	});
 
-	// Redirects unauthenticated users, checks onboarding status
+	// Redirects unauthenticated users, checks onboarding status.
+	// Also guards /setup when account already exists.
 	$effect(() => {
 		if (auth.isLoading) return;
-		if (isPublicRoute) return;
 		if (auth.authDisabled) return;
+
+		if (page.url.pathname === '/setup' && !auth.needsSetup && !auth.isAuthenticated) {
+			goto('/login');
+			return;
+		}
+
+		if (isPublicRoute) return;
 		if (auth.needsSetup) {
 			goto('/setup');
 		} else if (!auth.isAuthenticated) {
-			goto('/login');
+			const returnTo = page.url.pathname;
+			goto(returnTo === '/' ? '/login' : `/login?returnTo=${encodeURIComponent(returnTo)}`);
 		}
 	});
 
