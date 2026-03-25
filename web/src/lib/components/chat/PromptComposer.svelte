@@ -193,7 +193,7 @@
 	// Composer resize via drag handle. Persists height to localStorage and
 	// mutates the DOM directly during drag to avoid render latency.
 	const COMPOSER_STORAGE_KEY = 'composerHeight';
-	const COMPOSER_DEFAULT_HEIGHT = 360;
+	const COMPOSER_DEFAULT_HEIGHT = 140;
 	const COMPOSER_MIN_HEIGHT = 52;
 	const COMPOSER_MAX_HEIGHT = 500;
 
