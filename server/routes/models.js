@@ -2,7 +2,7 @@
 // static; OpenCode models are fetched periodically. Serves a single
 // GET /api/models endpoint.
 
-import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '../../common/models.js';
+import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, OPENROUTER_MODELS } from '../../common/models.js';
 import { PROVIDERS, supportsFork, supportsImages } from '../../common/providers.ts';
 
 const OPENCODE_REFRESH_INTERVAL = 5 * 60 * 1000;
@@ -11,6 +11,7 @@ function getDefaultModel(provider, cache) {
   if (provider === 'claude') return CLAUDE_MODELS.DEFAULT;
   if (provider === 'codex') return CODEX_MODELS.DEFAULT;
   if (provider === 'amp') return AMP_MODELS.DEFAULT;
+  if (provider === 'openrouter') return OPENROUTER_MODELS.DEFAULT;
   return cache.opencode[0]?.value ?? '';
 }
 
@@ -32,6 +33,7 @@ export default function createModelsRoutes(providers) {
     claude: CLAUDE_MODELS.OPTIONS,
     codex: CODEX_MODELS.OPTIONS,
     amp: AMP_MODELS.OPTIONS,
+    openrouter: OPENROUTER_MODELS.OPTIONS,
     opencode: [],
   };
 

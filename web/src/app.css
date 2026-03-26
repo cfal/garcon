@@ -59,6 +59,9 @@
 	--color-provider-amp-bg: hsl(var(--provider-amp-bg));
 	--color-provider-amp-foreground: hsl(var(--provider-amp-foreground));
 	--color-provider-amp-border: hsl(var(--provider-amp-border));
+	--color-provider-openrouter-bg: hsl(var(--provider-openrouter-bg));
+	--color-provider-openrouter-foreground: hsl(var(--provider-openrouter-foreground));
+	--color-provider-openrouter-border: hsl(var(--provider-openrouter-border));
 	--color-indicator-unread: hsl(var(--indicator-unread));
 		--color-status-processing: hsl(var(--status-processing));
 		--color-status-processing-foreground: hsl(var(--status-processing-foreground));
@@ -193,6 +196,9 @@
 	--provider-amp-bg: 28 90% 95%;
 	--provider-amp-foreground: 28 80% 28%;
 	--provider-amp-border: 28 50% 78%;
+	--provider-openrouter-bg: 200 90% 95%;
+	--provider-openrouter-foreground: 200 70% 28%;
+	--provider-openrouter-border: 200 45% 78%;
 	--indicator-unread: 214 90% 48%;
 		--status-processing: 214 90% 48%;
 		--status-processing-foreground: 214 85% 32%;
@@ -343,6 +349,9 @@
 	--provider-amp-bg: 28 46% 22%;
 	--provider-amp-foreground: 28 90% 86%;
 	--provider-amp-border: 28 36% 36%;
+	--provider-openrouter-bg: 200 42% 22%;
+	--provider-openrouter-foreground: 200 90% 86%;
+	--provider-openrouter-border: 200 34% 36%;
 	--indicator-unread: 214 95% 68%;
 		--status-processing: 214 95% 68%;
 		--status-processing-foreground: 214 95% 86%;

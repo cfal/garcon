@@ -12,6 +12,7 @@ import { getClaudeAuthStatus } from './claude-auth.js';
 import { getCodexAuthStatus } from './codex-auth.js';
 import { getOpenCodeAuthStatus } from './opencode-auth.js';
 import { getAmpAuthStatus } from './amp-auth.js';
+import { getOpenRouterAuthStatus } from './openrouter-auth.js';
 
 // Stateless loaders and preview functions
 import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loaders/claude-history-loader.js';
@@ -37,6 +38,7 @@ const AUTH_DISPATCHERS: Record<string, (opencode: OpenCodeProviderInstance) => P
   codex: () => getCodexAuthStatus(),
   opencode: (oc) => getOpenCodeAuthStatus(oc),
   amp: () => getAmpAuthStatus(),
+  openrouter: () => getOpenRouterAuthStatus(),
 };
 
 // Validates that a registry entry has all required execution fields.
@@ -120,12 +122,27 @@ interface AmpProviderInstance {
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
 }
 
+interface OpenRouterProviderInstance {
+  startSession(request: StartSessionRequest): Promise<StartedProviderSession>;
+  runTurn(request: ResumeTurnRequest): Promise<void>;
+  isRunning(providerSessionId: string): boolean;
+  abort(providerSessionId: string): boolean;
+  getRunningSessions(): Array<{ id: string; status: string; startedAt: string }>;
+  startPurgeTimer(): ReturnType<typeof setInterval>;
+  onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
+  onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
+  onSessionCreated(cb: (chatId: string) => void): void;
+  onFinished(cb: (chatId: string, exitCode: number) => void): void;
+  onFailed(cb: (chatId: string, errorMessage: string) => void): void;
+}
+
 export class ProviderRegistry {
   #registry: IChatRegistry;
   #claude: ClaudeProviderInstance;
   #codex: CodexProviderInstance;
   #opencode: OpenCodeProviderInstance;
   #amp: AmpProviderInstance;
+  #openrouter: OpenRouterProviderInstance;
 
   constructor(
     registry: IChatRegistry,
@@ -133,12 +150,14 @@ export class ProviderRegistry {
     codex: CodexProviderInstance,
     opencode: OpenCodeProviderInstance,
     amp: AmpProviderInstance,
+    openrouter: OpenRouterProviderInstance,
   ) {
     this.#registry = registry;
     this.#claude = claude;
     this.#codex = codex;
     this.#opencode = opencode;
     this.#amp = amp;
+    this.#openrouter = openrouter;
 
     if (typeof registry.onChatRemoved === 'function') {
       registry.onChatRemoved((chatId: string) => {
@@ -217,6 +236,12 @@ export class ProviderRegistry {
       return;
     }
 
+    if (entry.provider === 'openrouter') {
+      const { providerSessionId, nativePath } = await this.#openrouter.startSession(request);
+      this.#registry.updateChat(chatId, { providerSessionId, nativePath });
+      return;
+    }
+
     throw new Error(`Unsupported provider: ${entry.provider}`);
   }
 
@@ -261,6 +286,8 @@ export class ProviderRegistry {
         chatId,
         cwd: entry.projectPath,
       });
+    } else if (provider === 'openrouter') {
+      await this.#openrouter.runTurn(request);
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
@@ -290,6 +317,10 @@ export class ProviderRegistry {
       return this.#amp.abort(providerSessionId);
     }
 
+    if (entry.provider === 'openrouter') {
+      return this.#openrouter.abort(providerSessionId);
+    }
+
     return false;
   }
 
@@ -305,6 +336,7 @@ export class ProviderRegistry {
     if (provider === 'codex') return this.#codex.isRunning(providerSessionId);
     if (provider === 'opencode') return this.#opencode.isRunning(providerSessionId);
     if (provider === 'amp') return this.#amp.isRunning(providerSessionId);
+    if (provider === 'openrouter') return this.#openrouter.isRunning(providerSessionId);
     return false;
   }
 
@@ -324,6 +356,7 @@ export class ProviderRegistry {
       codex: mapToChatId(this.#codex.getRunningSessions()),
       opencode: mapToChatId(this.#opencode.getRunningSessions()),
       amp: mapToChatId(this.#amp.getRunningSessions()),
+      openrouter: mapToChatId(this.#openrouter.getRunningSessions()),
     };
   }
 
@@ -332,7 +365,8 @@ export class ProviderRegistry {
       (this.#claude.getRunningClaudeInternalSessions?.()?.length ?? 0) +
       (this.#codex.getRunningSessions?.()?.length ?? 0) +
       (this.#opencode.getRunningSessions?.()?.length ?? 0) +
-      (this.#amp.getRunningSessions?.()?.length ?? 0)
+      (this.#amp.getRunningSessions?.()?.length ?? 0) +
+      (this.#openrouter.getRunningSessions?.()?.length ?? 0)
     );
   }
 
@@ -384,8 +418,8 @@ export class ProviderRegistry {
   async getPreview(session: ProviderChatEntry | null): Promise<unknown> {
     if (!session?.provider) return null;
 
-    if (session.provider === 'amp') {
-      return null; // Amp history loading is not yet supported
+    if (session.provider === 'amp' || session.provider === 'openrouter') {
+      return null;
     }
     if (session.provider === 'opencode') {
       const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');
@@ -406,8 +440,8 @@ export class ProviderRegistry {
   async loadMessages(session: ProviderChatEntry | null): Promise<unknown[]> {
     if (!session?.provider) return [];
 
-    if (session.provider === 'amp') {
-      return []; // Amp history loading is not yet supported
+    if (session.provider === 'amp' || session.provider === 'openrouter') {
+      return [];
     }
     if (session.provider === 'opencode') {
       const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');
@@ -450,6 +484,7 @@ export class ProviderRegistry {
     this.#opencode.startPurgeTimer();
     this.#amp.startPurgeTimer();
     this.#claude.startPurgeTimer();
+    this.#openrouter.startPurgeTimer();
   }
 
   // Fan-out listener helpers. Registers the callback on all
@@ -460,6 +495,7 @@ export class ProviderRegistry {
     this.#codex.onMessages(cb);
     this.#opencode.onMessages(cb);
     this.#amp.onMessages(cb);
+    this.#openrouter.onMessages(cb);
   }
 
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void {
@@ -467,6 +503,7 @@ export class ProviderRegistry {
     this.#codex.onProcessing(cb);
     this.#opencode.onProcessing(cb);
     this.#amp.onProcessing(cb);
+    this.#openrouter.onProcessing(cb);
   }
 
   onSessionCreated(cb: (chatId: string) => void): void {
@@ -474,6 +511,7 @@ export class ProviderRegistry {
     this.#codex.onSessionCreated(cb);
     this.#opencode.onSessionCreated(cb);
     this.#amp.onSessionCreated(cb);
+    this.#openrouter.onSessionCreated(cb);
   }
 
   onFinished(cb: (chatId: string, exitCode: number) => void): void {
@@ -481,6 +519,7 @@ export class ProviderRegistry {
     this.#codex.onFinished(cb);
     this.#opencode.onFinished(cb);
     this.#amp.onFinished(cb);
+    this.#openrouter.onFinished(cb);
   }
 
   onFailed(cb: (chatId: string, errorMessage: string) => void): void {
@@ -488,5 +527,6 @@ export class ProviderRegistry {
     this.#codex.onFailed(cb);
     this.#opencode.onFailed(cb);
     this.#amp.onFailed(cb);
+    this.#openrouter.onFailed(cb);
   }
 }

@@ -2,7 +2,7 @@
 
 import { apiGet } from './client.js';
 
-export type ProviderName = 'claude' | 'codex' | 'opencode' | 'amp';
+export type ProviderName = 'claude' | 'codex' | 'opencode' | 'amp' | 'openrouter';
 
 export interface ProviderAuthStatus {
 	authenticated: boolean;

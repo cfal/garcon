@@ -22,7 +22,7 @@ async function readJsonBody(request) {
 // parameters, delegates to the git service, and maps errors to HTTP
 // responses via git.toHttpError(). No business logic lives here.
 function isAllowedGenerationProvider(value) {
-  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'amp';
+  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'amp' || value === 'openrouter';
 }
 
 function hasOwn(source, key) {
@@ -214,7 +214,7 @@ export default function createGitRoutes(providers, settings) {
         return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
       }
       if (hasOwn(body, 'provider') && !isAllowedGenerationProvider(body.provider)) {
-        return Response.json({ error: 'Invalid provider. Expected one of: claude, codex, opencode, amp.' }, { status: 400 });
+        return Response.json({ error: 'Invalid provider. Expected one of: claude, codex, opencode, amp, openrouter.' }, { status: 400 });
       }
 
       const persistedConfig = await resolveCommitMessageConfig(settings, providers);

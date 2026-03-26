@@ -5,7 +5,7 @@ import {
 } from '../../common/generation-defaults.ts';
 
 function isProvider(value) {
-  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'amp';
+  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'amp' || value === 'openrouter';
 }
 
 function pickAutoProvider(authByProvider) {

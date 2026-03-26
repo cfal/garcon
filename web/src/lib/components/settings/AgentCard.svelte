@@ -16,7 +16,7 @@
 		error: string | null;
 	}
 
-	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp';
+	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp' | 'openrouter';
 
 	let {
 		agentId,
@@ -25,7 +25,8 @@
 		open = false,
 		onOpenChange,
 		onLogin,
-		cliOnly = false
+		cliOnly = false,
+		authHint = ''
 	}: {
 		agentId: AgentId;
 		agentName: string;
@@ -34,17 +35,19 @@
 		onOpenChange?: (open: boolean) => void;
 		onLogin: () => void;
 		cliOnly?: boolean;
+		authHint?: string;
 	} = $props();
 
 	const borderColorClass: Record<AgentId, string> = {
 		claude: 'border-l-provider-claude-border',
 		codex: 'border-l-provider-codex-border',
 		opencode: 'border-l-provider-opencode-border',
-		amp: 'border-l-provider-amp-border'
+		amp: 'border-l-provider-amp-border',
+		openrouter: 'border-l-provider-openrouter-border'
 	};
 
-	// Authenticated with no reauth option and no CLI-only content -- nothing to expand.
-	let expandable = $derived(!auth.loading && !(auth.authenticated && !auth.canReauth && !cliOnly));
+	// Authenticated with no reauth option and no CLI-only/hint content -- nothing to expand.
+	let expandable = $derived(!auth.loading && !(auth.authenticated && !auth.canReauth && !cliOnly && !authHint));
 </script>
 
 {#if expandable}
@@ -78,7 +81,9 @@
 
 	<Collapsible.Content>
 		<div class="border-t border-border px-4 py-3 space-y-4">
-			{#if cliOnly}
+			{#if authHint}
+				<div class="text-xs text-muted-foreground">{authHint}</div>
+			{:else if cliOnly}
 				<div class="text-xs text-muted-foreground">
 					{#if auth.authenticated}
 						Authenticated via CLI. To switch accounts, run <code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{agentName.toLowerCase()} login</code> in your terminal.
