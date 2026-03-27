@@ -1,10 +1,18 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { Button } from '$lib/components/ui/button';
+	import {
+		DropdownMenu,
+		DropdownMenuContent,
+		DropdownMenuItem,
+		DropdownMenuTrigger,
+	} from '$lib/components/ui/dropdown-menu';
 	import Input from '$lib/components/ui/input/input.svelte';
 	import Search from '@lucide/svelte/icons/search';
 	import X from '@lucide/svelte/icons/x';
 	import Settings from '@lucide/svelte/icons/settings';
+	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
+	import SquareCheck from '@lucide/svelte/icons/square-check';
 
 	interface SidebarFooterProps {
 		isLoading: boolean;
@@ -61,19 +69,6 @@
 		</button>
 
 			{#if !isReorderMode}
-				{#if showMarkAllRead}
-					<div class="flex justify-end">
-						<Button
-							variant="ghost"
-							size="sm"
-							class="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
-							onclick={handleMarkAllRead}
-							disabled={isMarkAllReadDisabled}
-						>
-							{m.sidebar_chats_mark_all_read()}
-						</Button>
-					</div>
-				{/if}
 				<div class="flex items-center gap-1.5">
 					<div class="relative flex-1">
 						<Search class="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -93,15 +88,25 @@
 							</button>
 						{/if}
 					</div>
-					<Button
-						variant="ghost"
-						size="sm"
-						class={`${footerControlHeightClass} w-9 px-0 border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-background transition-colors duration-200 rounded-md flex-shrink-0`}
-						onclick={onShowSettings}
-						title={m.sidebar_actions_settings()}
-					>
-						<Settings class="w-3.5 h-3.5" />
-					</Button>
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							class={`${footerControlHeightClass} inline-flex w-9 flex-shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-muted/50 px-0 text-muted-foreground transition-colors duration-200 hover:bg-background hover:text-foreground`}
+							aria-label={m.sidebar_actions_more()}
+							title={m.sidebar_actions_more()}
+						>
+							<EllipsisVertical class="w-3.5 h-3.5" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end">
+							<DropdownMenuItem onclick={handleMarkAllRead} disabled={!showMarkAllRead || isMarkAllReadDisabled}>
+								<SquareCheck class="w-3.5 h-3.5" />
+								{m.sidebar_chats_mark_all_read()}
+							</DropdownMenuItem>
+							<DropdownMenuItem onclick={onShowSettings}>
+								<Settings class="w-3.5 h-3.5" />
+								{m.sidebar_actions_settings()}
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
 				</div>
 			{/if}
 		</div>
@@ -121,19 +126,6 @@
 
 		{#if !isReorderMode}
 			<div class="px-3 pt-1 pb-2">
-				{#if showMarkAllRead}
-					<div class="flex justify-end pb-1">
-						<Button
-							variant="ghost"
-							size="sm"
-							class="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
-							onclick={handleMarkAllRead}
-							disabled={isMarkAllReadDisabled}
-						>
-							{m.sidebar_chats_mark_all_read()}
-						</Button>
-					</div>
-				{/if}
 				<div class="flex items-center gap-1.5">
 					<div class="relative flex-1">
 						<Search class="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -154,15 +146,25 @@
 							</button>
 						{/if}
 					</div>
-					<Button
-						variant="ghost"
-						size="sm"
-						class={`${footerControlHeightClass} w-9 px-0 border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-background transition-colors duration-200 rounded-md flex-shrink-0`}
-						onclick={onShowSettings}
-						title={m.sidebar_actions_settings()}
-					>
-						<Settings class="w-3.5 h-3.5" />
-					</Button>
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							class={`${footerControlHeightClass} inline-flex w-9 flex-shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-muted/50 px-0 text-muted-foreground transition-colors duration-200 hover:bg-background hover:text-foreground`}
+							aria-label={m.sidebar_actions_more()}
+							title={m.sidebar_actions_more()}
+						>
+							<EllipsisVertical class="w-3.5 h-3.5" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end">
+							<DropdownMenuItem onclick={handleMarkAllRead} disabled={!showMarkAllRead || isMarkAllReadDisabled}>
+								<SquareCheck class="w-3.5 h-3.5" />
+								{m.sidebar_chats_mark_all_read()}
+							</DropdownMenuItem>
+							<DropdownMenuItem onclick={onShowSettings}>
+								<Settings class="w-3.5 h-3.5" />
+								{m.sidebar_actions_settings()}
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
 				</div>
 			</div>
 		{/if}
