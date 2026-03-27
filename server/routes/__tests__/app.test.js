@@ -326,9 +326,10 @@ describe('folders API', () => {
         tags: [' triage ', null],
         providers: [' codex '],
         models: [' gpt-5.4 ', false],
-        ignored: ['value'],
-      },
-    }));
+        status: ' unread ',
+				ignored: ['value'],
+			},
+		}));
 
     const response = await postHandler(makeRequest('http://localhost/api/app/folders', 'POST', {}));
     const body = await response.json();
@@ -343,10 +344,11 @@ describe('folders API', () => {
         tags: ['triage'],
         providers: ['codex'],
         models: ['gpt-5.4'],
+					status: 'unread',
       },
-      createdAt: expect.any(String),
-    }));
-  });
+				createdAt: expect.any(String),
+			}));
+		});
 
   it('sanitizes folder filters when updating a folder', async () => {
     ctx.settings.updateFolder.mockImplementation(async (_id, patch) => ({ id: 'folder-1', name: 'Saved', createdAt: '2026-03-27T00:00:00.000Z', ...patch }));
@@ -357,8 +359,9 @@ describe('folders API', () => {
         tags: [' alpha ', ''],
         providers: [' codex '],
         models: [' gpt-5 '],
-      },
-    }));
+				status: 'invalid',
+			},
+		}));
 
     const response = await putHandler(makeRequest('http://localhost/api/app/folders', 'PUT', {}));
     const body = await response.json();
@@ -373,6 +376,20 @@ describe('folders API', () => {
         models: ['gpt-5'],
       },
     });
+  });
+
+  it('rejects whitespace-only folder names when updating a folder', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      id: 'folder-1',
+      name: '   ',
+    }));
+
+    const response = await putHandler(makeRequest('http://localhost/api/app/folders', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('name is required');
+    expect(ctx.settings.updateFolder).not.toHaveBeenCalled();
   });
 
   it('deletes a folder by id', async () => {

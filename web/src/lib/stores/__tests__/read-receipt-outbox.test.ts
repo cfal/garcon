@@ -112,6 +112,65 @@ describe('ReadReceiptOutboxStore', () => {
 		expect(sessions.byId['a']?.isUnread).toBe(false);
 	});
 
+	it('marks visible unread chats read immediately and skips already-read chats', async () => {
+		const { outbox, sessions } = createTestStore();
+
+		sessions.upsertFromServer([
+			{
+				id: 'a',
+				provider: 'claude',
+				model: 'opus',
+				title: 'Unread',
+				projectPath: '/p',
+				tags: [],
+				native: { path: null },
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T12:00:00.000Z',
+					lastReadAt: null,
+				},
+				preview: { lastMessage: '' },
+				isPinned: false,
+				isArchived: false,
+				isActive: false,
+				isUnread: true,
+			},
+			{
+				id: 'b',
+				provider: 'claude',
+				model: 'opus',
+				title: 'Read',
+				projectPath: '/p',
+				tags: [],
+				native: { path: null },
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T12:00:00.000Z',
+					lastReadAt: '2026-02-25T12:00:00.000Z',
+				},
+				preview: { lastMessage: '' },
+				isPinned: false,
+				isArchived: false,
+				isActive: false,
+				isUnread: false,
+			},
+		]);
+
+		mockMarkBatch.mockResolvedValue({
+			success: true,
+			results: [{ chatId: 'a', lastReadAt: '2026-02-25T12:00:00.000Z' }],
+		});
+
+		await outbox.markChatsReadNow(['a', 'b', 'missing']);
+
+		expect(mockMarkBatch).toHaveBeenCalledWith([
+			{ chatId: 'a', lastReadAt: '2026-02-25T12:00:00.000Z' },
+		]);
+		expect(sessions.byId['a']?.isUnread).toBe(false);
+		expect(sessions.byId['a']?.lastReadAt).toBe('2026-02-25T12:00:00.000Z');
+		expect(sessions.byId['b']?.lastReadAt).toBe('2026-02-25T12:00:00.000Z');
+	});
+
 	it('retries with backoff on failure', async () => {
 		const { outbox } = createTestStore();
 		mockMarkBatch.mockRejectedValue(new Error('Network error'));

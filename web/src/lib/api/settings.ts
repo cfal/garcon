@@ -36,15 +36,18 @@ export async function sendTelegramTest(chatId: string): Promise<TelegramTestResp
 	return apiPost<TelegramTestResponse>('/api/v1/app/telegram/test', { chatId });
 }
 
+export interface ChatFolderFilter {
+	textTokens: string[];
+	tags: string[];
+	providers: string[];
+	models: string[];
+	status?: 'active' | 'unread';
+}
+
 export interface ChatFolder {
 	id: string;
 	name: string;
-	filter: {
-		textTokens: string[];
-		tags: string[];
-		providers: string[];
-		models: string[];
-	};
+	filter: ChatFolderFilter;
 	createdAt: string;
 }
 

@@ -9,6 +9,8 @@
 	interface SidebarFoldersProps {
 		folders: FolderEntry[];
 		selectedFolderId: string;
+		canCreateFolder?: boolean;
+		createFolderHint?: string;
 		onSelectFolder: (id: string) => void;
 		onCreateFolder?: () => void;
 		onDeleteFolder?: (id: string) => void;
@@ -17,6 +19,8 @@
 	let {
 		folders,
 		selectedFolderId,
+		canCreateFolder = true,
+		createFolderHint = m.sidebar_folders_save_current_filter(),
 		onSelectFolder,
 		onCreateFolder,
 		onDeleteFolder,
@@ -29,10 +33,11 @@
 		{#if onCreateFolder}
 			<button
 				type="button"
-				class="p-0.5 text-muted-foreground hover:text-foreground transition-colors rounded"
+				class="p-0.5 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 transition-colors rounded"
 				onclick={onCreateFolder}
+				disabled={!canCreateFolder}
 				aria-label={m.sidebar_folders_save_current_filter()}
-				title={m.sidebar_folders_save_current_filter()}
+				title={createFolderHint}
 			>
 				<Plus class="w-3 h-3" />
 			</button>
@@ -40,33 +45,40 @@
 	</div>
 	<div class="flex flex-col">
 		{#each folders as folder (folder.id)}
-			<button
-				type="button"
+			<div
 				class={cn(
-					'group flex items-center gap-1.5 px-3 py-1 text-xs transition-colors w-full text-left',
+					'group flex items-center text-xs transition-colors',
 					selectedFolderId === folder.id
 						? 'bg-accent text-accent-foreground font-medium'
 						: 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
 				)}
-				onclick={() => onSelectFolder(folder.id)}
 			>
-				<FolderOpen class="w-3 h-3 shrink-0" />
-				<span class="truncate flex-1">{folder.name}</span>
+				<button
+					type="button"
+					class="flex min-w-0 flex-1 items-center gap-1.5 px-3 py-1 text-left"
+					onclick={() => onSelectFolder(folder.id)}
+					aria-pressed={selectedFolderId === folder.id}
+				>
+					<FolderOpen class="w-3 h-3 shrink-0" />
+					<span class="truncate flex-1">{folder.name}</span>
+				</button>
 				{#if !folder.isSystem && onDeleteFolder}
-					<!-- svelte-ignore node_invalid_placement_ssr — nested interactive element; SPA-only so no SSR hydration concern -->
-					<span
-						role="button"
-						tabindex="-1"
-						class="opacity-0 group-hover:opacity-100 p-0.5 text-muted-foreground hover:text-destructive transition-all rounded"
-						onclick={(e) => { e.stopPropagation(); onDeleteFolder?.(folder.id); }}
-						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onDeleteFolder?.(folder.id); } }}
+					<button
+						type="button"
+						class={cn(
+							'mr-2 rounded p-0.5 opacity-0 transition-all group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
+							selectedFolderId === folder.id
+								? 'text-accent-foreground/70 hover:text-destructive'
+								: 'text-muted-foreground hover:text-destructive',
+						)}
+						onclick={() => onDeleteFolder?.(folder.id)}
 						aria-label={m.sidebar_folders_delete()}
 						title={m.sidebar_folders_delete()}
 					>
 						<Trash2 class="w-3 h-3" />
-					</span>
+					</button>
 				{/if}
-			</button>
+			</div>
 		{/each}
 	</div>
 </div>

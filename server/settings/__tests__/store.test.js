@@ -193,6 +193,45 @@ describe('settings store', () => {
 
       await expect(store.addFolder(folder)).rejects.toThrow('Folder with ID folder-1 already exists');
     });
+
+		it('sanitizes malformed persisted folders on load', async () => {
+			await writeRaw({
+				ui: {},
+				paths: {},
+				chatNames: {},
+				chatFolders: [
+					{
+						id: ' folder-1 ',
+						name: ' Saved unread ',
+						filter: {
+							textTokens: [' follow-up ', 7],
+							tags: [' ops ', null],
+							providers: [' codex '],
+							models: [' gpt-5 '],
+							status: ' unread ',
+						},
+						createdAt: ' 2026-03-27T00:00:00.000Z ',
+					},
+					null,
+					{ id: '', name: 'Missing id', filter: {}, createdAt: '2026-03-27T00:00:00.000Z' },
+				],
+			});
+
+			expect(await store.getFolders()).toEqual([
+				{
+					id: 'folder-1',
+					name: 'Saved unread',
+					filter: {
+						textTokens: ['follow-up'],
+						tags: ['ops'],
+						providers: ['codex'],
+						models: ['gpt-5'],
+						status: 'unread',
+					},
+					createdAt: '2026-03-27T00:00:00.000Z',
+				},
+			]);
+		});
   });
 
   describe('ordering list getters', () => {

@@ -9,17 +9,22 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
   }
 
   const FILTER_KEYS = ['textTokens', 'tags', 'providers', 'models'];
-  function sanitizeFilter(raw) {
+  const VALID_FILTER_STATUS = new Set(['active', 'unread']);
+	function sanitizeFilter(raw) {
     const empty = { textTokens: [], tags: [], providers: [], models: [] };
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return empty;
     const out = {};
-    for (const key of FILTER_KEYS) {
-      out[key] = Array.isArray(raw[key])
+		for (const key of FILTER_KEYS) {
+			out[key] = Array.isArray(raw[key])
         ? raw[key].filter((v) => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
-        : [];
+				: [];
     }
-    return out;
-  }
+		if (typeof raw.status === 'string') {
+			const status = raw.status.trim();
+			if (VALID_FILTER_STATUS.has(status)) out.status = status;
+		}
+		return out;
+	}
 
   async function putSessionNameHandler(request) {
     try {
@@ -188,7 +193,13 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
         return Response.json({ success: false, error: 'id is required' }, { status: 400 });
       }
       const patch = {};
-      if (typeof body.name === 'string') patch.name = body.name.trim();
+      if (typeof body.name === 'string') {
+        const name = body.name.trim();
+        if (!name) {
+          return Response.json({ success: false, error: 'name is required' }, { status: 400 });
+        }
+        patch.name = name;
+      }
       if (body.filter && typeof body.filter === 'object') patch.filter = sanitizeFilter(body.filter);
       const result = await settings.updateFolder(folderId, patch);
       return Response.json({ success: true, folder: result });

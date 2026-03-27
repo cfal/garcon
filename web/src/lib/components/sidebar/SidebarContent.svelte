@@ -17,6 +17,8 @@
 		isReorderMode: boolean;
 		folders: FolderEntry[];
 		selectedFolderId: string;
+		canCreateFolder?: boolean;
+		createFolderHint?: string;
 		onSelectFolder: (id: string) => void;
 		onCreateFolder?: () => void;
 		onDeleteFolder?: (id: string) => void;
@@ -44,6 +46,8 @@
 		isReorderMode,
 		folders,
 		selectedFolderId,
+		canCreateFolder,
+		createFolderHint,
 		onSelectFolder,
 		onCreateFolder,
 		onDeleteFolder,
@@ -65,6 +69,8 @@
 <SidebarFolders
 	{folders}
 	{selectedFolderId}
+	{canCreateFolder}
+	{createFolderHint}
 	{onSelectFolder}
 	{onCreateFolder}
 	{onDeleteFolder}

@@ -4,7 +4,8 @@
 
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatFolder } from '$lib/api/settings';
-import { parseChatSearch, matchesChatFilter, isEmptyFilter, type ChatFilterSpec } from './sidebar-search';
+import * as m from '$lib/paraglide/messages.js';
+import { emptyFilterSpec, parseChatSearch, matchesChatFilter, isEmptyFilter, type ChatFilterSpec } from './sidebar-search';
 
 export type SystemFolderId = 'all' | 'active' | 'unread';
 
@@ -15,11 +16,23 @@ export interface FolderEntry {
 	filter: ChatFilterSpec | null;
 }
 
-const SYSTEM_FOLDERS: FolderEntry[] = [
-	{ id: 'all', name: 'All', isSystem: true, filter: null },
-	{ id: 'active', name: 'Active', isSystem: true, filter: null },
-	{ id: 'unread', name: 'Unread', isSystem: true, filter: null },
-];
+function getSystemFolders(): FolderEntry[] {
+	return [
+		{ id: 'all', name: m.sidebar_folders_system_all(), isSystem: true, filter: null },
+		{ id: 'active', name: m.sidebar_folders_system_active(), isSystem: true, filter: { ...emptyFilterSpec(), status: 'active' } },
+		{ id: 'unread', name: m.sidebar_folders_system_unread(), isSystem: true, filter: { ...emptyFilterSpec(), status: 'unread' } },
+	];
+}
+
+function mergeChatFilters(base: ChatFilterSpec | null, search: ChatFilterSpec): ChatFilterSpec {
+	const merged = emptyFilterSpec();
+	merged.textTokens = Array.from(new Set([...(base?.textTokens ?? []), ...search.textTokens]));
+	merged.tags = Array.from(new Set([...(base?.tags ?? []), ...search.tags]));
+	merged.providers = Array.from(new Set([...(base?.providers ?? []), ...search.providers]));
+	merged.models = Array.from(new Set([...(base?.models ?? []), ...search.models]));
+	merged.status = base?.status;
+	return merged;
+}
 
 export class SidebarFilterState {
 	searchQuery = $state('');
@@ -37,41 +50,33 @@ export class SidebarFilterState {
 	}
 
 	get folders(): FolderEntry[] {
+		const systemFolders = getSystemFolders();
 		const user: FolderEntry[] = this.userFolders.map((f) => ({
 			id: f.id,
 			name: f.name,
 			isSystem: false,
 			filter: f.filter as ChatFilterSpec,
 		}));
-		return [...SYSTEM_FOLDERS, ...user];
+		return [...systemFolders, ...user];
 	}
 
 	get selectedFolder(): FolderEntry {
-		return this.folders.find((f) => f.id === this.selectedFolderId) ?? SYSTEM_FOLDERS[0];
+		return this.folders.find((f) => f.id === this.selectedFolderId) ?? getSystemFolders()[0];
+	}
+
+	get currentFilter(): ChatFilterSpec {
+		return mergeChatFilters(this.selectedFolder.filter, this.parsedSearch);
+	}
+
+	get canSaveCurrentFilter(): boolean {
+		return !isEmptyFilter(this.currentFilter);
 	}
 
 	get filteredChats(): ChatSessionRecord[] {
 		const chats = this.#getChats();
-		const search = this.parsedSearch;
-		const folder = this.selectedFolder;
-
-		let result = chats;
-
-		// Apply system folder filter
-		if (folder.id === 'active') {
-			result = result.filter((c) => c.isProcessing);
-		} else if (folder.id === 'unread') {
-			result = result.filter((c) => c.isUnread);
-		} else if (!folder.isSystem && folder.filter) {
-			result = result.filter((c) => matchesChatFilter(c, folder.filter!));
-		}
-
-		// Apply search filter
-		if (!isEmptyFilter(search)) {
-			result = result.filter((c) => matchesChatFilter(c, search));
-		}
-
-		return result;
+		const filter = this.currentFilter;
+		if (isEmptyFilter(filter)) return chats;
+		return chats.filter((chat) => matchesChatFilter(chat, filter));
 	}
 
 	get allKnownTags(): string[] {

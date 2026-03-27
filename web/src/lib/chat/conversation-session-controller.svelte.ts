@@ -151,6 +151,11 @@ export class ConversationSessionController {
 		deps.composerState.restoreDraft(chatId);
 		deps.ws.sendMessage(new QueueQueryRequest(chatId));
 
+		if (selected.lastActivityAt && (!selected.lastReadAt || selected.lastReadAt < selected.lastActivityAt)) {
+			deps.readReceiptOutbox.enqueue(chatId, selected.lastActivityAt);
+			deps.sessions.patchLastReadAt(chatId, selected.lastActivityAt);
+		}
+
 		deps.providerState.permissionMode = selected.permissionMode ?? 'default';
 		deps.providerState.thinkingMode = selected.thinkingMode ?? 'none';
 

@@ -10,9 +10,12 @@
 		isLoading: boolean;
 		searchFilter: string;
 		isReorderMode: boolean;
+		visibleUnreadCount?: number;
+		isMarkingAllRead?: boolean;
 		onSearchFilterChange: (value: string) => void;
 		onClearSearchFilter: () => void;
 		onCreateChat: () => void;
+		onMarkAllRead?: () => void;
 		primaryLabel?: string;
 		onShowSettings: () => void;
 	}
@@ -21,19 +24,28 @@
 		isLoading,
 		searchFilter,
 		isReorderMode,
+		visibleUnreadCount = 0,
+		isMarkingAllRead = false,
 		onSearchFilterChange,
 		onClearSearchFilter,
 		onCreateChat,
+		onMarkAllRead,
 		primaryLabel,
 		onShowSettings,
 	}: SidebarFooterProps = $props();
 
 	let buttonLabel = $derived(primaryLabel ?? m.sidebar_chats_new_chat());
+	let showMarkAllRead = $derived(visibleUnreadCount > 0 && !isReorderMode);
+	let isMarkAllReadDisabled = $derived(isLoading || isMarkingAllRead);
 	const footerControlHeightClass = 'h-9';
 
 	function handleSearchInput(e: Event) {
 		const target = e.target as HTMLInputElement;
 		onSearchFilterChange(target.value);
+	}
+
+	function handleMarkAllRead() {
+		onMarkAllRead?.();
 	}
 </script>
 
@@ -49,6 +61,19 @@
 		</button>
 
 			{#if !isReorderMode}
+				{#if showMarkAllRead}
+					<div class="flex justify-end">
+						<Button
+							variant="ghost"
+							size="sm"
+							class="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+							onclick={handleMarkAllRead}
+							disabled={isMarkAllReadDisabled}
+						>
+							{m.sidebar_chats_mark_all_read()}
+						</Button>
+					</div>
+				{/if}
 				<div class="flex items-center gap-1.5">
 					<div class="relative flex-1">
 						<Search class="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -96,6 +121,19 @@
 
 		{#if !isReorderMode}
 			<div class="px-3 pt-1 pb-2">
+				{#if showMarkAllRead}
+					<div class="flex justify-end pb-1">
+						<Button
+							variant="ghost"
+							size="sm"
+							class="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+							onclick={handleMarkAllRead}
+							disabled={isMarkAllReadDisabled}
+						>
+							{m.sidebar_chats_mark_all_read()}
+						</Button>
+					</div>
+				{/if}
 				<div class="flex items-center gap-1.5">
 					<div class="relative flex-1">
 						<Search class="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />

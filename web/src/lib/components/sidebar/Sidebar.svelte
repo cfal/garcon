@@ -4,7 +4,8 @@
 	import SidebarFooter from './SidebarFooter.svelte';
 	import SidebarChatDialogs from './SidebarChatDialogs.svelte';
 	import SidebarTagDialog from './SidebarTagDialog.svelte';
-	import { getAppShell } from '$lib/context';
+	import SidebarSaveFolderDialog from './SidebarSaveFolderDialog.svelte';
+	import { getAppShell, getReadReceiptOutbox } from '$lib/context';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { reorderChats } from '$lib/api/chats.js';
@@ -12,7 +13,7 @@
 	import { createReorderWriteQueue } from './reorder-write-queue';
 	import { SidebarController } from './sidebar-controller.svelte';
 	import { SidebarFilterState } from './sidebar-filter-state.svelte';
-	import { getFolders, createFolder, deleteFolder as deleteFolderApi } from '$lib/api/settings';
+	import { getFolders, createFolder, deleteFolder as deleteFolderApi, type ChatFolderFilter } from '$lib/api/settings';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ChatDeleteConfirmation {
@@ -35,6 +36,11 @@
 		nativePath: string | null;
 		isLoading: boolean;
 		error: string | null;
+	}
+
+	interface SaveFolderDialogState {
+		filter: ChatFolderFilter;
+		suggestedName: string;
 	}
 
 	interface SidebarProps {
@@ -61,6 +67,7 @@
 		onShowSettings,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
+	const readReceiptOutbox = getReadReceiptOutbox();
 	const controller = new SidebarController({
 		get onQuietRefresh() { return onQuietRefresh; },
 	});
@@ -74,7 +81,19 @@
 	let chatRenameConfirmation = $state<ChatRenameConfirmation | null>(null);
 	let chatDetailsDialog = $state<ChatDetailsDialog | null>(null);
 	let tagDialog = $state<{ chatId: string; chatTitle: string; tags: string[] } | null>(null);
+	let saveFolderDialog = $state<SaveFolderDialogState | null>(null);
 	let currentTime = $state(new Date());
+	let isMarkingAllRead = $state(false);
+	let visibleUnreadChatIds = $derived.by(() =>
+		filterState.filteredChats
+			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
+			.map((chat) => chat.id)
+	);
+	let createFolderHint = $derived(
+		filterState.canSaveCurrentFilter
+			? m.sidebar_folders_save_current_filter()
+			: m.sidebar_folders_save_disabled_hint()
+	);
 
 	// Refresh timestamp every minute.
 	$effect(() => {
@@ -287,12 +306,43 @@
 		filterState.selectFolder(id);
 	}
 
-	async function handleCreateFolder() {
-		const search = filterState.parsedSearch;
-		const name = filterState.searchQuery.trim() || m.sidebar_folders_new_folder();
+	function cloneFilter(filter: ChatFolderFilter): ChatFolderFilter {
+		return {
+			textTokens: [...filter.textTokens],
+			tags: [...filter.tags],
+			providers: [...filter.providers],
+			models: [...filter.models],
+			...(filter.status ? { status: filter.status } : {}),
+		};
+	}
+
+	function suggestFolderName(filter: ChatFolderFilter): string {
+		const trimmedSearch = filterState.searchQuery.trim();
+		if (trimmedSearch) return trimmedSearch;
+		if (filterState.selectedFolderId !== 'all') return filterState.selectedFolder.name;
+		if (filter.tags.length === 1) return `tag:${filter.tags[0]}`;
+		if (filter.providers.length === 1) return `provider:${filter.providers[0]}`;
+		if (filter.models.length === 1) return `model:${filter.models[0]}`;
+		if (filter.textTokens.length > 0) return filter.textTokens.join(' ');
+		return m.sidebar_folders_new_folder();
+	}
+
+	function handleCreateFolder() {
+		if (!filterState.canSaveCurrentFilter) return;
+		const filter = cloneFilter(filterState.currentFilter);
+		saveFolderDialog = {
+			filter,
+			suggestedName: suggestFolderName(filter),
+		};
+	}
+
+	async function handleSaveFolder(name: string, filter: ChatFolderFilter) {
+		saveFolderDialog = null;
 		try {
-			const res = await createFolder(name, search);
+			const res = await createFolder(name, filter);
 			filterState.setUserFolders([...filterState.userFolders, res.folder]);
+			filterState.searchQuery = '';
+			filterState.selectFolder(res.folder.id);
 		} catch (err) {
 			console.error('Failed to create folder:', err);
 		}
@@ -307,6 +357,18 @@
 			}
 		} catch (err) {
 			console.error('Failed to delete folder:', err);
+		}
+	}
+
+	async function handleMarkAllRead() {
+		if (isMarkingAllRead || visibleUnreadChatIds.length === 0) return;
+		isMarkingAllRead = true;
+		try {
+			await readReceiptOutbox.markChatsReadNow(visibleUnreadChatIds);
+		} catch (error) {
+			console.error('Failed to mark chats read:', error);
+		} finally {
+			isMarkingAllRead = false;
 		}
 	}
 
@@ -338,8 +400,10 @@
 		{isReorderMode}
 		folders={filterState.folders}
 		selectedFolderId={filterState.selectedFolderId}
+		canCreateFolder={filterState.canSaveCurrentFilter}
+		{createFolderHint}
 		onSelectFolder={handleSelectFolder}
-		onCreateFolder={handleCreateFolder}
+		onCreateFolder={() => handleCreateFolder()}
 		onDeleteFolder={handleDeleteFolder}
 		onEnterReorderMode={enterReorderMode}
 		onReorderGroup={handleReorderGroup}
@@ -359,9 +423,12 @@
 			{isLoading}
 			searchFilter={filterState.searchQuery}
 			{isReorderMode}
+			visibleUnreadCount={visibleUnreadChatIds.length}
+			{isMarkingAllRead}
 			onSearchFilterChange={(v) => filterState.searchQuery = v}
 			onClearSearchFilter={() => filterState.searchQuery = ''}
 			onCreateChat={handlePrimaryAction}
+			onMarkAllRead={() => { void handleMarkAllRead(); }}
 			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
 			{onShowSettings}
 		/>
@@ -383,4 +450,10 @@
 	allKnownTags={filterState.allKnownTags}
 	onClose={() => tagDialog = null}
 	onSave={handleSaveTags}
+/>
+
+<SidebarSaveFolderDialog
+	{saveFolderDialog}
+	onClose={() => saveFolderDialog = null}
+	onSave={handleSaveFolder}
 />

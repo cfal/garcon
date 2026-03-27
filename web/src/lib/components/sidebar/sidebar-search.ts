@@ -8,6 +8,7 @@ export interface ChatFilterSpec {
 	tags: string[];
 	providers: string[];
 	models: string[];
+	status?: 'active' | 'unread';
 }
 
 export function emptyFilterSpec(): ChatFilterSpec {
@@ -19,7 +20,8 @@ export function isEmptyFilter(spec: ChatFilterSpec): boolean {
 		spec.textTokens.length === 0 &&
 		spec.tags.length === 0 &&
 		spec.providers.length === 0 &&
-		spec.models.length === 0
+		spec.models.length === 0 &&
+		spec.status === undefined
 	);
 }
 
@@ -94,6 +96,8 @@ export interface ChatFilterTarget {
 	provider: string;
 	model: string | null;
 	tags: string[];
+	isProcessing: boolean;
+	isUnread: boolean;
 	firstMessage?: string;
 	lastMessage?: string;
 }
@@ -104,6 +108,9 @@ export interface ChatFilterTarget {
  *  - Provider filters match any (OR)
  *  - Model filters match any (OR) */
 export function matchesChatFilter(chat: ChatFilterTarget, spec: ChatFilterSpec): boolean {
+	if (spec.status === 'active' && !chat.isProcessing) return false;
+	if (spec.status === 'unread' && !chat.isUnread) return false;
+
 	// Tag filter: chat must have ALL specified tags
 	if (spec.tags.length > 0) {
 		const chatTags = new Set(chat.tags.map((t) => t.toLowerCase()));

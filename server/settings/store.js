@@ -25,20 +25,61 @@ function createEmpty() {
   };
 }
 
+const FILTER_KEYS = ['textTokens', 'tags', 'providers', 'models'];
+const VALID_FILTER_STATUS = new Set(['active', 'unread']);
+
+function sanitizeStringArray(value) {
+  return Array.isArray(value)
+    ? value.filter((entry) => typeof entry === 'string').map((entry) => entry.trim()).filter(Boolean)
+    : [];
+}
+
+function sanitizeFolderFilter(raw) {
+  const filter = { textTokens: [], tags: [], providers: [], models: [] };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return filter;
+
+  for (const key of FILTER_KEYS) {
+    filter[key] = sanitizeStringArray(raw[key]);
+  }
+
+  if (typeof raw.status === 'string') {
+    const status = raw.status.trim();
+    if (VALID_FILTER_STATUS.has(status)) filter.status = status;
+  }
+
+  return filter;
+}
+
+function sanitizeFolder(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+  const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+  const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+  const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt.trim() : '';
+  if (!id || !name || !createdAt) return null;
+
+  return {
+    id,
+    name,
+    filter: sanitizeFolderFilter(raw.filter),
+    createdAt,
+  };
+}
+
 function sanitize(parsed) {
   return {
     ui: parsed.ui && typeof parsed.ui === 'object' ? parsed.ui : {},
     paths: parsed.paths && typeof parsed.paths === 'object' ? parsed.paths : {},
     chatNames: parsed.chatNames && typeof parsed.chatNames === 'object' ? parsed.chatNames : {},
-    pinnedChatIds: Array.isArray(parsed.pinnedChatIds) ? parsed.pinnedChatIds : [],
-    normalChatIds: Array.isArray(parsed.normalChatIds) ? parsed.normalChatIds : [],
-    archivedChatIds: Array.isArray(parsed.archivedChatIds) ? parsed.archivedChatIds : [],
+    pinnedChatIds: sanitizeStringArray(parsed.pinnedChatIds),
+    normalChatIds: sanitizeStringArray(parsed.normalChatIds),
+    archivedChatIds: sanitizeStringArray(parsed.archivedChatIds),
     lastProvider: typeof parsed.lastProvider === 'string' ? parsed.lastProvider : 'claude',
     lastProjectPath: typeof parsed.lastProjectPath === 'string' ? parsed.lastProjectPath : '',
     lastModel: typeof parsed.lastModel === 'string' ? parsed.lastModel : '',
     lastPermissionMode: typeof parsed.lastPermissionMode === 'string' ? parsed.lastPermissionMode : 'default',
     lastThinkingMode: typeof parsed.lastThinkingMode === 'string' ? parsed.lastThinkingMode : 'none',
-    chatFolders: Array.isArray(parsed.chatFolders) ? parsed.chatFolders : [],
+    chatFolders: Array.isArray(parsed.chatFolders) ? parsed.chatFolders.map(sanitizeFolder).filter(Boolean) : [],
   };
 }
 

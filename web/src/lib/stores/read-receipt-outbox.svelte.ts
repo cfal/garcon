@@ -21,23 +21,26 @@ export class ReadReceiptOutboxStore {
 		this.sessions = sessions;
 	}
 
+	/** Marks the given chats read immediately using their current lastActivityAt. */
+	async markChatsReadNow(chatIds: string[]): Promise<void> {
+		const batch = chatIds.flatMap((chatId) => {
+			const chat = this.sessions.byId[chatId];
+			if (!chat?.lastActivityAt || !chat.isUnread) return [];
+			return [{ chatId, lastReadAt: chat.lastActivityAt }];
+		});
+
+		if (batch.length === 0) return;
+
+		this.enqueueEntries(batch);
+		for (const entry of batch) {
+			this.sessions.patchLastReadAt(entry.chatId, entry.lastReadAt);
+		}
+		await this.flushNow();
+	}
+
 	/** Merges a read timestamp for a chat, resets debounce, checks maxWait. */
 	enqueue(chatId: string, readAt: string): void {
-		const existing = this.pendingByChatId[chatId];
-		if (existing && existing >= readAt) return;
-		this.pendingByChatId[chatId] = readAt;
-
-		if (this.firstPendingAt === null) {
-			this.firstPendingAt = Date.now();
-		}
-
-		// Force flush if maxWait exceeded.
-		if (Date.now() - this.firstPendingAt >= MAX_WAIT_MS) {
-			this.flushNow();
-			return;
-		}
-
-		this.resetDebounce();
+		this.enqueueEntries([{ chatId, lastReadAt: readAt }]);
 	}
 
 	/** Cancels debounce and flushes immediately. */
@@ -63,6 +66,30 @@ export class ReadReceiptOutboxStore {
 			clearTimeout(this.debounceTimer);
 			this.debounceTimer = null;
 		}
+	}
+
+	private enqueueEntries(entries: Array<{ chatId: string; lastReadAt: string }>): void {
+		let didChange = false;
+		for (const entry of entries) {
+			const existing = this.pendingByChatId[entry.chatId];
+			if (existing && existing >= entry.lastReadAt) continue;
+			this.pendingByChatId[entry.chatId] = entry.lastReadAt;
+			didChange = true;
+		}
+
+		if (!didChange) return;
+
+		if (this.firstPendingAt === null) {
+			this.firstPendingAt = Date.now();
+		}
+
+		// Force flush if maxWait exceeded.
+		if (Date.now() - this.firstPendingAt >= MAX_WAIT_MS) {
+			void this.flushNow();
+			return;
+		}
+
+		this.resetDebounce();
 	}
 
 	private async flush(): Promise<void> {
