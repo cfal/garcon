@@ -7,6 +7,16 @@ import {
   GrepToolUseMessage,
   WebSearchToolUseMessage,
   WebFetchToolUseMessage,
+  AmpFinderToolUseMessage,
+  AmpOracleToolUseMessage,
+  AmpLibrarianToolUseMessage,
+  AmpSkillToolUseMessage,
+  AmpMermaidToolUseMessage,
+  AmpHandoffToolUseMessage,
+  AmpLookAtToolUseMessage,
+  AmpFindThreadToolUseMessage,
+  AmpReadThreadToolUseMessage,
+  AmpTaskListToolUseMessage,
   UnknownToolUseMessage,
 } from '../../../common/chat-types.js';
 
@@ -19,6 +29,16 @@ type AmpToolUseResult =
   | GrepToolUseMessage
   | WebSearchToolUseMessage
   | WebFetchToolUseMessage
+  | AmpFinderToolUseMessage
+  | AmpOracleToolUseMessage
+  | AmpLibrarianToolUseMessage
+  | AmpSkillToolUseMessage
+  | AmpMermaidToolUseMessage
+  | AmpHandoffToolUseMessage
+  | AmpLookAtToolUseMessage
+  | AmpFindThreadToolUseMessage
+  | AmpReadThreadToolUseMessage
+  | AmpTaskListToolUseMessage
   | UnknownToolUseMessage;
 
 interface AmpToolUsePart {
@@ -60,6 +80,12 @@ function firstString(values: unknown[]): string | undefined {
     if (next !== undefined) return next;
   }
   return undefined;
+}
+
+function asStringArray(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const items = v.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  return items.length > 0 ? items : undefined;
 }
 
 function inferWebSearchQuery(input: Record<string, unknown>): string | undefined {
@@ -135,6 +161,80 @@ export function convertAmpToolUse(ts: string, part: AmpToolUsePart): AmpToolUseR
       if (url === undefined) break;
       return new WebFetchToolUseMessage(ts, toolId, url, asString(input.objective));
     }
+
+    case 'finder':
+      return new AmpFinderToolUseMessage(
+        ts,
+        toolId,
+        firstString([input.query, input.objective]),
+      );
+
+    case 'oracle':
+      return new AmpOracleToolUseMessage(
+        ts,
+        toolId,
+        asString(input.task),
+        asString(input.context),
+        asStringArray(input.files),
+      );
+
+    case 'librarian':
+      return new AmpLibrarianToolUseMessage(
+        ts,
+        toolId,
+        asString(input.query),
+        asString(input.context),
+      );
+
+    case 'skill':
+      return new AmpSkillToolUseMessage(
+        ts,
+        toolId,
+        asString(input.name),
+      );
+
+    case 'mermaid':
+      return new AmpMermaidToolUseMessage(ts, toolId);
+
+    case 'handoff':
+      return new AmpHandoffToolUseMessage(
+        ts,
+        toolId,
+        asString(input.goal),
+      );
+
+    case 'lookat':
+      return new AmpLookAtToolUseMessage(
+        ts,
+        toolId,
+        asString(input.path),
+        asString(input.objective),
+      );
+
+    case 'findthread':
+      return new AmpFindThreadToolUseMessage(
+        ts,
+        toolId,
+        asString(input.query),
+      );
+
+    case 'readthread':
+      return new AmpReadThreadToolUseMessage(
+        ts,
+        toolId,
+        firstString([input.threadID, input.threadId]),
+        asString(input.goal),
+      );
+
+    case 'tasklist':
+      return new AmpTaskListToolUseMessage(
+        ts,
+        toolId,
+        asString(input.action),
+        firstString([input.taskID, input.taskId]),
+        asString(input.title),
+        asString(input.status),
+      );
   }
 
   return new UnknownToolUseMessage(ts, toolId, rawName, asInput(part?.input));

@@ -227,6 +227,113 @@ export class ExitPlanModeToolUseMessage {
   ) {}
 }
 
+export class AmpFinderToolUseMessage {
+  readonly type = 'amp-finder-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public query?: string,
+  ) {}
+}
+
+export class AmpOracleToolUseMessage {
+  readonly type = 'amp-oracle-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public task?: string,
+    public context?: string,
+    public files?: string[],
+  ) {}
+}
+
+export class AmpLibrarianToolUseMessage {
+  readonly type = 'amp-librarian-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public query?: string,
+    public context?: string,
+  ) {}
+}
+
+export class AmpSkillToolUseMessage {
+  readonly type = 'amp-skill-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public name?: string,
+  ) {}
+}
+
+export class AmpMermaidToolUseMessage {
+  readonly type = 'amp-mermaid-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+  ) {}
+}
+
+export class AmpHandoffToolUseMessage {
+  readonly type = 'amp-handoff-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public goal?: string,
+  ) {}
+}
+
+export class AmpLookAtToolUseMessage {
+  readonly type = 'amp-look-at-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public path?: string,
+    public objective?: string,
+  ) {}
+}
+
+export class AmpFindThreadToolUseMessage {
+  readonly type = 'amp-find-thread-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public query?: string,
+  ) {}
+}
+
+export class AmpReadThreadToolUseMessage {
+  readonly type = 'amp-read-thread-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public threadId?: string,
+    public goal?: string,
+  ) {}
+}
+
+export class AmpTaskListToolUseMessage {
+  readonly type = 'amp-task-list-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public action?: string,
+    public taskId?: string,
+    public title?: string,
+    public status?: string,
+  ) {}
+}
+
 export class UnknownToolUseMessage {
   readonly type = 'unknown-tool-use' as const;
 
@@ -281,6 +388,16 @@ export type ToolUseChatMessage =
   | WriteStdinToolUseMessage
   | EnterPlanModeToolUseMessage
   | ExitPlanModeToolUseMessage
+  | AmpFinderToolUseMessage
+  | AmpOracleToolUseMessage
+  | AmpLibrarianToolUseMessage
+  | AmpSkillToolUseMessage
+  | AmpMermaidToolUseMessage
+  | AmpHandoffToolUseMessage
+  | AmpLookAtToolUseMessage
+  | AmpFindThreadToolUseMessage
+  | AmpReadThreadToolUseMessage
+  | AmpTaskListToolUseMessage
   | UnknownToolUseMessage;
 
 export type ChatMessage =
@@ -314,6 +431,16 @@ export function isToolUseMessage(message: ChatMessage): message is ToolUseChatMe
     case 'write-stdin-tool-use':
     case 'enter-plan-mode-tool-use':
     case 'exit-plan-mode-tool-use':
+    case 'amp-finder-tool-use':
+    case 'amp-oracle-tool-use':
+    case 'amp-librarian-tool-use':
+    case 'amp-skill-tool-use':
+    case 'amp-mermaid-tool-use':
+    case 'amp-handoff-tool-use':
+    case 'amp-look-at-tool-use':
+    case 'amp-find-thread-tool-use':
+    case 'amp-read-thread-tool-use':
+    case 'amp-task-list-tool-use':
     case 'unknown-tool-use':
       return true;
     default:
@@ -342,6 +469,12 @@ function asOptionalNumber(v: unknown): number | undefined {
 function asRecord(v: unknown): Record<string, unknown> {
   if (v && typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>;
   return {};
+}
+
+function asStringArray(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const items = v.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  return items.length > 0 ? items : undefined;
 }
 
 function asOptionalChanges(v: unknown): Array<{ path?: string; kind?: string }> | undefined {
@@ -463,6 +596,63 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
         plan,
         data.allowedPrompts as Array<{ tool: string; prompt: string }> | undefined);
     }
+
+    case 'amp-finder-tool-use':
+      return new AmpFinderToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.query));
+
+    case 'amp-oracle-tool-use':
+      return new AmpOracleToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.task),
+        asOptionalString(data.context),
+        asStringArray(data.files));
+
+    case 'amp-librarian-tool-use':
+      return new AmpLibrarianToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.query),
+        asOptionalString(data.context));
+
+    case 'amp-skill-tool-use':
+      return new AmpSkillToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.name));
+
+    case 'amp-mermaid-tool-use':
+      return new AmpMermaidToolUseMessage(
+        str(data.timestamp), str(data.toolId));
+
+    case 'amp-handoff-tool-use':
+      return new AmpHandoffToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.goal));
+
+    case 'amp-look-at-tool-use':
+      return new AmpLookAtToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.path),
+        asOptionalString(data.objective));
+
+    case 'amp-find-thread-tool-use':
+      return new AmpFindThreadToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.query));
+
+    case 'amp-read-thread-tool-use':
+      return new AmpReadThreadToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.threadId),
+        asOptionalString(data.goal));
+
+    case 'amp-task-list-tool-use':
+      return new AmpTaskListToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.action),
+        asOptionalString(data.taskId),
+        asOptionalString(data.title),
+        asOptionalString(data.status));
 
     case 'unknown-tool-use':
       return new UnknownToolUseMessage(

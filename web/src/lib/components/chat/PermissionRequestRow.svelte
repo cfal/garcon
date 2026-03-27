@@ -3,7 +3,7 @@
 	// pending/resolved/cancelled state via ChatEventCard status variants.
 
 	import type { PermissionRequestMessage } from '$shared/chat-types';
-	import { toRenderToolPayload } from '$lib/chat/tool-render-payload';
+	import { getToolDisplayDetails, getToolDisplayLabel } from '$lib/chat/tool-display-registry';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ShieldAlert, FileCode, ChevronDown, Check, X } from '@lucide/svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
@@ -95,9 +95,8 @@
 		exitPlanRequest?.allowedPrompts ?? [],
 	);
 
-	const renderPayload = $derived(toRenderToolPayload(request.requestedTool));
-	const toolLabel = $derived(renderPayload.name);
-	const rawInput = $derived(JSON.stringify(renderPayload.input ?? {}, null, 2));
+	const toolLabel = $derived(getToolDisplayLabel(request.requestedTool));
+	const rawInput = $derived(JSON.stringify(getToolDisplayDetails(request.requestedTool), null, 2));
 
 	const planTitle = $derived.by(() => {
 		if (isPending) return m.chat_permission_plan_ready();

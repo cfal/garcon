@@ -16,9 +16,9 @@ export function asFiniteNumber(value: unknown): number | null {
 
 /** Formats a human-readable line range string from Read tool input. */
 export function readRangePresenter(input: ToolPayload): string | undefined {
-	const offset = asFiniteNumber(input.offset ?? input.start_line ?? input.startLine);
-	const limit = asFiniteNumber(input.limit ?? input.num_lines ?? input.numLines);
-	const endLine = asFiniteNumber(input.end_line ?? input.endLine);
+	const offset = asFiniteNumber(input.offset ?? input.startLine);
+	const limit = asFiniteNumber(input.limit ?? input.numLines);
+	const endLine = asFiniteNumber(input.endLine);
 
 	if (offset !== null && limit !== null && limit > 0) {
 		const start = Math.max(1, Math.trunc(offset));
@@ -61,9 +61,9 @@ export function extractContentString(content: unknown): string {
 	return JSON.stringify(rec, null, 2);
 }
 
-/** Derives a short file name from a tool input's file_path field. */
+/** Derives a short file name from a tool input's filePath field. */
 export function fileTitlePresenter(input: ToolPayload): string {
-	const fp = input.file_path as string | undefined;
+	const fp = input.filePath as string | undefined;
 	return fp?.split('/').pop() || fp || 'file';
 }
 
@@ -74,9 +74,9 @@ export function diffProps(
 	badgeColor: string,
 ): Record<string, unknown> {
 	return {
-		oldContent: input.old_string,
-		newContent: input.new_string,
-		filePath: input.file_path,
+		oldContent: input.oldString,
+		newContent: input.newString,
+		filePath: input.filePath,
 		showHeader: false,
 		badge,
 		badgeColor,

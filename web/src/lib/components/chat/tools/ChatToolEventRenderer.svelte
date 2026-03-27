@@ -3,8 +3,7 @@
 	// based on the config-driven registry in tool-display-registry.ts.
 
 	import type { ToolUseChatMessage, TodoItem } from '$shared/chat-types';
-	import { toRenderToolPayload } from '$lib/chat/tool-render-payload';
-	import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tool-display-registry';
+	import { TOOL_DISPLAY_REGISTRY, getToolDisplayLabel } from '$lib/chat/tool-display-registry';
 	import { resolveDisplayRule } from '$lib/chat/tool-display-policy';
 	import type { ToolInlineAction, ToolInputDisplayRule, ToolResultDisplayRule } from '$lib/chat/tool-display-contract';
 	import ChatToolInlineEvent from './ChatToolInlineEvent.svelte';
@@ -34,22 +33,15 @@
 		autoExpandTools = false
 	}: ToolRendererProps = $props();
 
-	const renderPayload = $derived(toRenderToolPayload(toolMessage));
-	const toolName = $derived(renderPayload.name);
-	const toolInput = $derived(renderPayload.input);
+	const toolName = $derived(getToolDisplayLabel(toolMessage));
 	const toolId = $derived(toolMessage.toolId);
 
-	let config = $derived(resolveDisplayRule(TOOL_DISPLAY_REGISTRY, toolName));
+	let config = $derived(resolveDisplayRule(TOOL_DISPLAY_REGISTRY, toolMessage.type));
 	let displayConfig = $derived(mode === 'input' ? config.input : config.result);
 
-	let parsedData = $derived.by(() => {
-		try {
-			const rawData = mode === 'input' ? toolInput : toolResult;
-			return typeof rawData === 'string' ? JSON.parse(rawData as string) : rawData;
-		} catch {
-			return mode === 'input' ? toolInput : toolResult;
-		}
-	});
+	let parsedData = $derived(
+		mode === 'input' ? (toolMessage as unknown as Record<string, unknown>) : (toolResult ?? {})
+	);
 
 	function handleAction() {
 		const cfg = displayConfig as ToolInputDisplayRule | undefined;
@@ -98,7 +90,9 @@
 
 	let handleTitleClick = $derived.by(() => {
 		if (
-			(toolName === 'Edit' || toolName === 'Write' || toolName === 'ApplyPatch') &&
+			(toolMessage.type === 'edit-tool-use' ||
+				toolMessage.type === 'write-tool-use' ||
+				toolMessage.type === 'apply-patch-tool-use') &&
 			contentProps.filePath &&
 			onFileOpen
 		) {

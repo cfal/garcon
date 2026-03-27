@@ -2,11 +2,20 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   BashToolUseMessage,
+  AmpFinderToolUseMessage,
+  AmpFindThreadToolUseMessage,
+  AmpHandoffToolUseMessage,
+  AmpLibrarianToolUseMessage,
+  AmpLookAtToolUseMessage,
+  AmpMermaidToolUseMessage,
+  AmpOracleToolUseMessage,
+  AmpReadThreadToolUseMessage,
+  AmpSkillToolUseMessage,
+  AmpTaskListToolUseMessage,
   EditToolUseMessage,
   GlobToolUseMessage,
   GrepToolUseMessage,
   ReadToolUseMessage,
-  UnknownToolUseMessage,
   WebFetchToolUseMessage,
   WebSearchToolUseMessage,
   WriteToolUseMessage,
@@ -115,25 +124,120 @@ describe('convertAmpToolUse', () => {
     expect(msg.prompt).toBe('Find initial_window_size docs');
   });
 
-  it('leaves finder as UnknownToolUseMessage', () => {
+  it('maps finder to AmpFinderToolUseMessage', () => {
     const msg = convertAmpToolUse(TS, {
       id: 't8',
       name: 'finder',
       input: { query: 'Find amp provider startup code' },
     });
 
-    expect(msg).toBeInstanceOf(UnknownToolUseMessage);
-    expect(msg.rawName).toBe('finder');
+    expect(msg).toBeInstanceOf(AmpFinderToolUseMessage);
+    expect(msg.query).toBe('Find amp provider startup code');
   });
 
-  it('leaves oracle as UnknownToolUseMessage', () => {
+  it('maps oracle to AmpOracleToolUseMessage', () => {
     const msg = convertAmpToolUse(TS, {
       id: 't9',
       name: 'oracle',
-      input: { task: 'Review code', files: ['src/a.ts'] },
+      input: { task: 'Review code', context: 'Focus on auth', files: ['src/a.ts'] },
     });
 
-    expect(msg).toBeInstanceOf(UnknownToolUseMessage);
-    expect(msg.input).toEqual({ task: 'Review code', files: ['src/a.ts'] });
+    expect(msg).toBeInstanceOf(AmpOracleToolUseMessage);
+    expect(msg.task).toBe('Review code');
+    expect(msg.context).toBe('Focus on auth');
+    expect(msg.files).toEqual(['src/a.ts']);
+  });
+
+  it('maps librarian to AmpLibrarianToolUseMessage', () => {
+    const msg = convertAmpToolUse(TS, {
+      id: 't10',
+      name: 'librarian',
+      input: { query: 'Find auth docs', context: 'middleware review' },
+    });
+
+    expect(msg).toBeInstanceOf(AmpLibrarianToolUseMessage);
+    expect(msg.query).toBe('Find auth docs');
+    expect(msg.context).toBe('middleware review');
+  });
+
+  it('maps skill to AmpSkillToolUseMessage', () => {
+    const msg = convertAmpToolUse(TS, {
+      id: 't11',
+      name: 'skill',
+      input: { name: 'lsp' },
+    });
+
+    expect(msg).toBeInstanceOf(AmpSkillToolUseMessage);
+    expect(msg.name).toBe('lsp');
+  });
+
+  it('maps mermaid to AmpMermaidToolUseMessage', () => {
+    const msg = convertAmpToolUse(TS, {
+      id: 't12',
+      name: 'mermaid',
+      input: {},
+    });
+
+    expect(msg).toBeInstanceOf(AmpMermaidToolUseMessage);
+  });
+
+  it('maps handoff to AmpHandoffToolUseMessage', () => {
+    const msg = convertAmpToolUse(TS, {
+      id: 't13',
+      name: 'handoff',
+      input: { goal: 'Continue the migration' },
+    });
+
+    expect(msg).toBeInstanceOf(AmpHandoffToolUseMessage);
+    expect(msg.goal).toBe('Continue the migration');
+  });
+
+  it('maps look_at to AmpLookAtToolUseMessage', () => {
+    const msg = convertAmpToolUse(TS, {
+      id: 't14',
+      name: 'look_at',
+      input: { path: '/garcon/app.css', objective: 'Check theme tokens' },
+    });
+
+    expect(msg).toBeInstanceOf(AmpLookAtToolUseMessage);
+    expect(msg.path).toBe('/garcon/app.css');
+    expect(msg.objective).toBe('Check theme tokens');
+  });
+
+  it('maps find_thread to AmpFindThreadToolUseMessage', () => {
+    const msg = convertAmpToolUse(TS, {
+      id: 't15',
+      name: 'find_thread',
+      input: { query: 'auth session bug' },
+    });
+
+    expect(msg).toBeInstanceOf(AmpFindThreadToolUseMessage);
+    expect(msg.query).toBe('auth session bug');
+  });
+
+  it('maps read_thread to AmpReadThreadToolUseMessage', () => {
+    const msg = convertAmpToolUse(TS, {
+      id: 't16',
+      name: 'read_thread',
+      input: { threadID: 'thread-123', goal: 'Summarize decisions' },
+    });
+
+    expect(msg).toBeInstanceOf(AmpReadThreadToolUseMessage);
+    expect(msg.threadId).toBe('thread-123');
+    expect(msg.goal).toBe('Summarize decisions');
+  });
+
+  it('maps task_list to AmpTaskListToolUseMessage', () => {
+    const msg = convertAmpToolUse(TS, {
+      id: 't17',
+      name: 'task_list',
+      input: { action: 'update', taskID: '42', title: 'Ship migration', status: 'done' },
+    });
+
+    expect(msg).toBeInstanceOf(AmpTaskListToolUseMessage);
+    expect(msg.action).toBe('update');
+    expect(msg.taskId).toBe('42');
+    expect(msg.title).toBe('Ship migration');
+    expect(msg.status).toBe('done');
   });
 });

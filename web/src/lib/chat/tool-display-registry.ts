@@ -1,19 +1,20 @@
-// Registry mapping tool names to their display rules. Each entry
-// controls layout mode, content rendering, and action behavior.
+// Registry mapping explicit tool-use message types to display rules.
+// Known provider-specific tools must arrive here as typed messages.
 
+import type { ToolUseChatMessage, TodoStatus } from '$shared/chat-types';
 import * as m from '$lib/paraglide/messages.js';
-import type { TodoItem, TodoStatus } from '$lib/types/chat';
+import type { TodoItem } from '$lib/types/chat';
 import type { ToolDisplayRule } from './tool-display-contract';
 import {
-	readRangePresenter,
-	webFetchSecondaryPresenter,
+	diffProps,
 	extractContentString,
 	fileTitlePresenter,
-	diffProps,
+	readRangePresenter,
+	webFetchSecondaryPresenter,
 } from './tool-display-presenters';
 
-// Coerces a raw tool-result todo array into canonical TodoItem[].
-// Tool results bypass converter normalization so this is needed here.
+type ToolDisplayRegistry = Record<string, ToolDisplayRule>;
+
 function coerceTodoResult(raw: unknown): TodoItem[] | undefined {
 	if (!Array.isArray(raw)) return undefined;
 	const items: TodoItem[] = [];
@@ -37,9 +38,47 @@ function coerceTodoResult(raw: unknown): TodoItem[] | undefined {
 
 const truncate = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '...' : s);
 
+const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
+	'bash-tool-use': 'Bash',
+	'read-tool-use': 'Read',
+	'edit-tool-use': 'Edit',
+	'write-tool-use': 'Write',
+	'apply-patch-tool-use': 'ApplyPatch',
+	'grep-tool-use': 'Grep',
+	'glob-tool-use': 'Glob',
+	'web-search-tool-use': 'WebSearch',
+	'web-fetch-tool-use': 'WebFetch',
+	'todo-write-tool-use': 'TodoWrite',
+	'todo-read-tool-use': 'TodoRead',
+	'task-tool-use': 'Task',
+	'update-plan-tool-use': 'UpdatePlan',
+	'write-stdin-tool-use': 'WriteStdin',
+	'enter-plan-mode-tool-use': 'EnterPlanMode',
+	'exit-plan-mode-tool-use': 'ExitPlanMode',
+	'amp-finder-tool-use': 'Finder',
+	'amp-oracle-tool-use': 'Oracle',
+	'amp-librarian-tool-use': 'Librarian',
+	'amp-skill-tool-use': 'Skill',
+	'amp-mermaid-tool-use': 'Mermaid',
+	'amp-handoff-tool-use': 'Handoff',
+	'amp-look-at-tool-use': 'Analyze',
+	'amp-find-thread-tool-use': 'Threads',
+	'amp-read-thread-tool-use': 'Thread',
+	'amp-task-list-tool-use': 'Tasks',
+};
+
+function fallbackDisplayName(type: string): string {
+	return type
+		.replace(/-tool-use$/, '')
+		.split('-')
+		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+		.join(' ');
+}
+
 const EXIT_PLAN_MODE_RULE: ToolDisplayRule = {
 	input: {
 		mode: 'collapsible',
+		label: 'Implementation plan',
 		title: 'Implementation plan',
 		defaultOpen: true,
 		contentKind: 'markdown',
@@ -101,10 +140,11 @@ const WEB_FETCH_RULE: ToolDisplayRule = {
 	},
 };
 
-export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
-	Bash: {
+export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
+	'bash-tool-use': {
 		input: {
 			mode: 'inline',
+			label: 'Bash',
 			getValue: (input) => String(input.command ?? ''),
 			getSecondary: (input) => input.description as string | undefined,
 			action: 'copyValue',
@@ -123,11 +163,11 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	Read: {
+	'read-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'Read',
-			getValue: (input) => String(input.file_path ?? ''),
+			getValue: (input) => String(input.filePath ?? ''),
 			getSecondary: (input) => readRangePresenter(input),
 			action: 'openFile',
 			colorScheme: {
@@ -141,11 +181,12 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	Edit: {
+	'edit-tool-use': {
 		input: {
 			mode: 'collapsible',
+			label: 'Edit',
 			title: (input) => {
-				const fp = input.file_path as string | undefined;
+				const fp = input.filePath as string | undefined;
 				const changes = Array.isArray(input.changes)
 					? (input.changes as Array<{ path?: unknown }>)
 					: [];
@@ -163,9 +204,9 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 			actionButton: 'none',
 			getContentProps: (input) => {
 				const changes = Array.isArray(input.changes)
-					? (input.changes as Array<{ path?: unknown; kind?: unknown }>)
+					? (input.changes as Array<{ path?: unknown }>)
 					: [];
-				if (!input.file_path && !input.old_string && !input.new_string && changes.length > 0) {
+				if (!input.filePath && !input.oldString && !input.newString && changes.length > 0) {
 					const files = changes
 						.map((change) => String(change?.path ?? '').trim())
 						.filter(Boolean);
@@ -179,9 +220,10 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	Write: {
+	'write-tool-use': {
 		input: {
 			mode: 'collapsible',
+			label: 'Write',
 			title: fileTitlePresenter,
 			defaultOpen: false,
 			contentKind: 'diff',
@@ -189,7 +231,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 			getContentProps: (input) => ({
 				oldContent: '',
 				newContent: input.content,
-				filePath: input.file_path,
+				filePath: input.filePath,
 				badge: 'New',
 				badgeColor: 'green',
 			}),
@@ -199,9 +241,10 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	ApplyPatch: {
+	'apply-patch-tool-use': {
 		input: {
 			mode: 'collapsible',
+			label: 'ApplyPatch',
 			title: fileTitlePresenter,
 			defaultOpen: false,
 			contentKind: 'diff',
@@ -213,7 +256,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	Grep: {
+	'grep-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'Grep',
@@ -257,7 +300,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	Glob: {
+	'glob-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'Glob',
@@ -294,9 +337,10 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	TodoWrite: {
+	'todo-write-tool-use': {
 		input: {
 			mode: 'collapsible',
+			label: 'TodoWrite',
 			title: 'Updating todo list',
 			defaultOpen: true,
 			contentKind: 'todoList',
@@ -311,7 +355,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	TodoRead: {
+	'todo-read-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'TodoRead',
@@ -333,94 +377,12 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	TaskCreate: {
-		input: {
-			mode: 'inline',
-			label: 'Task',
-			getValue: (input) => String(input.subject ?? 'Creating task'),
-			getSecondary: (input) => (input.status as string) || undefined,
-			action: 'none',
-			colorScheme: {
-				primary: 'text-foreground',
-				border: 'border-status-info-border',
-			},
-		},
-		result: {
-			hideOnSuccess: true,
-		},
-	},
-
-	TaskUpdate: {
-		input: {
-			mode: 'inline',
-			label: 'Task',
-			getValue: (input) => {
-				const parts: string[] = [];
-				if (input.taskId) parts.push(`#${input.taskId}`);
-				if (input.status) parts.push(input.status as string);
-				if (input.subject) parts.push(`"${input.subject}"`);
-				return parts.join(' -> ') || 'updating';
-			},
-			action: 'none',
-			colorScheme: {
-				primary: 'text-foreground',
-				border: 'border-status-info-border',
-			},
-		},
-		result: {
-			hideOnSuccess: true,
-		},
-	},
-
-	TaskList: {
-		input: {
-			mode: 'inline',
-			label: 'Tasks',
-			getValue: () => 'listing tasks',
-			action: 'none',
-			colorScheme: {
-				primary: 'text-muted-foreground',
-				border: 'border-status-info-border',
-			},
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: true,
-			title: 'Task list',
-			contentKind: 'task',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-			}),
-		},
-	},
-
-	TaskGet: {
-		input: {
-			mode: 'inline',
-			label: 'Task',
-			getValue: (input) => (input.taskId ? `#${input.taskId}` : 'fetching'),
-			action: 'none',
-			colorScheme: {
-				primary: 'text-foreground',
-				border: 'border-status-info-border',
-			},
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: true,
-			title: 'Task details',
-			contentKind: 'task',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-			}),
-		},
-	},
-
-	Task: {
+	'task-tool-use': {
 		input: {
 			mode: 'collapsible',
+			label: 'Task',
 			title: (input) => {
-				const subagentType = input.subagent_type || 'Agent';
+				const subagentType = input.subagentType || 'Agent';
 				const description = input.description || 'Running task';
 				return `Subagent / ${subagentType}: ${description}`;
 			},
@@ -428,9 +390,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 			contentKind: 'markdown',
 			getContentProps: (input) => {
 				const hasOnlyPrompt = input.prompt && !input.model && !input.resume;
-				if (hasOnlyPrompt) {
-					return { content: input.prompt || '' };
-				}
+				if (hasOnlyPrompt) return { content: input.prompt || '' };
 				const parts: string[] = [];
 				if (input.model) parts.push(`**Model:** ${input.model}`);
 				if (input.prompt) parts.push(`**Prompt:**\n${input.prompt}`);
@@ -463,30 +423,41 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	exit_plan_mode: EXIT_PLAN_MODE_RULE,
-	ExitPlanMode: EXIT_PLAN_MODE_RULE,
-
-	WebSearch: WEB_SEARCH_RULE,
-
-	WebFetch: WEB_FETCH_RULE,
-
-	WriteStdin: {
+	'enter-plan-mode-tool-use': {
 		input: {
 			mode: 'hidden',
+			label: 'EnterPlanMode',
 		},
 		result: {
 			hidden: true,
 		},
 	},
 
-	UpdatePlan: {
+	'exit-plan-mode-tool-use': EXIT_PLAN_MODE_RULE,
+
+	'web-search-tool-use': WEB_SEARCH_RULE,
+
+	'web-fetch-tool-use': WEB_FETCH_RULE,
+
+	'write-stdin-tool-use': {
+		input: {
+			mode: 'hidden',
+			label: 'WriteStdin',
+		},
+		result: {
+			hidden: true,
+		},
+	},
+
+	'update-plan-tool-use': {
 		input: {
 			mode: 'collapsible',
+			label: 'UpdatePlan',
 			title: 'Updating plan',
 			defaultOpen: false,
 			contentKind: 'todoList',
 			getContentProps: (input) => ({
-				todos: input.items || input.todos,
+				todos: input.todos,
 			}),
 		},
 		result: {
@@ -496,7 +467,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	finder: {
+	'amp-finder-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'Search',
@@ -512,14 +483,14 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 			contentKind: 'markdown',
 			getContentProps: (result) => ({
 				content: extractContentString(result?.content),
-				format: 'plain',
 			}),
 		},
 	},
 
-	oracle: {
+	'amp-oracle-tool-use': {
 		input: {
 			mode: 'collapsible',
+			label: 'Oracle',
 			title: (input) => `Oracle: ${truncate(String(input.task || 'analyzing'), 80)}`,
 			defaultOpen: false,
 			contentKind: 'markdown',
@@ -527,8 +498,9 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 				const parts: string[] = [];
 				if (input.task) parts.push(`**Task:** ${input.task}`);
 				if (input.context) parts.push(`**Context:** ${input.context}`);
-				if (Array.isArray(input.files) && input.files.length > 0)
-					parts.push(`**Files:**\n${(input.files as string[]).map((f) => `- ${f}`).join('\n')}`);
+				if (Array.isArray(input.files) && input.files.length > 0) {
+					parts.push(`**Files:**\n${(input.files as string[]).map((file) => `- ${file}`).join('\n')}`);
+				}
 				return { content: parts.join('\n\n') };
 			},
 		},
@@ -543,9 +515,10 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	librarian: {
+	'amp-librarian-tool-use': {
 		input: {
 			mode: 'collapsible',
+			label: 'Librarian',
 			title: (input) => `Librarian: ${truncate(String(input.query || 'exploring'), 80)}`,
 			defaultOpen: false,
 			contentKind: 'markdown',
@@ -567,7 +540,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	skill: {
+	'amp-skill-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'Skill',
@@ -582,7 +555,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	mermaid: {
+	'amp-mermaid-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'Diagram',
@@ -598,7 +571,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	handoff: {
+	'amp-handoff-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'Handoff',
@@ -614,7 +587,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	look_at: {
+	'amp-look-at-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'Analyze',
@@ -631,11 +604,7 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	read_web_page: WEB_FETCH_RULE,
-
-	web_search: WEB_SEARCH_RULE,
-
-	find_thread: {
+	'amp-find-thread-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'Threads',
@@ -657,11 +626,11 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	read_thread: {
+	'amp-read-thread-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'Thread',
-			getValue: (input) => String(input.threadID ?? 'reading'),
+			getValue: (input) => String(input.threadId ?? 'reading'),
 			getSecondary: (input) => truncate(String(input.goal ?? ''), 60),
 			action: 'none',
 			colorScheme: {
@@ -679,16 +648,16 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	task_list: {
+	'amp-task-list-tool-use': {
 		input: {
 			mode: 'inline',
 			label: 'Tasks',
 			getValue: (input) => {
 				const action = String(input.action ?? '');
 				if (action === 'create') return `creating: ${input.title || 'task'}`;
-				if (action === 'update') return `updating #${input.taskID || ''}`;
-				if (action === 'get') return `fetching #${input.taskID || ''}`;
-				if (action === 'delete') return `deleting #${input.taskID || ''}`;
+				if (action === 'update') return `updating #${input.taskId || ''}`;
+				if (action === 'get') return `fetching #${input.taskId || ''}`;
+				if (action === 'delete') return `deleting #${input.taskId || ''}`;
 				return 'listing';
 			},
 			action: 'none',
@@ -706,9 +675,32 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 
-	Default: {
+	'unknown-tool-use': {
 		input: {
 			mode: 'collapsible',
+			label: 'Tool',
+			title: 'Parameters',
+			defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (input) => ({
+				content: typeof input === 'string' ? input : JSON.stringify(input, null, 2),
+				format: 'code',
+			}),
+		},
+		result: {
+			mode: 'collapsible',
+			contentKind: 'text',
+			getContentProps: (result) => ({
+				content: extractContentString(result?.content),
+				format: 'plain',
+			}),
+		},
+	},
+
+	default: {
+		input: {
+			mode: 'collapsible',
+			label: 'Tool',
 			title: 'Parameters',
 			defaultOpen: false,
 			contentKind: 'text',
@@ -727,3 +719,18 @@ export const TOOL_DISPLAY_REGISTRY: Record<string, ToolDisplayRule> = {
 		},
 	},
 };
+
+export function getToolDisplayLabel(toolMessage: ToolUseChatMessage): string {
+	if (toolMessage.type === 'unknown-tool-use') {
+		return toolMessage.rawName || 'Tool';
+	}
+	return DISPLAY_NAME_BY_TYPE[toolMessage.type] || fallbackDisplayName(toolMessage.type);
+}
+
+export function getToolDisplayDetails(toolMessage: ToolUseChatMessage): Record<string, unknown> {
+	return Object.fromEntries(
+		Object.entries(toolMessage as unknown as Record<string, unknown>).filter(([key]) =>
+			key !== 'timestamp' && key !== 'toolId' && key !== 'type',
+		),
+	);
+}

@@ -16,6 +16,16 @@ import {
 	WriteStdinToolUseMessage,
 	EnterPlanModeToolUseMessage,
 	ExitPlanModeToolUseMessage,
+	AmpFinderToolUseMessage,
+	AmpOracleToolUseMessage,
+	AmpLibrarianToolUseMessage,
+	AmpSkillToolUseMessage,
+	AmpMermaidToolUseMessage,
+	AmpHandoffToolUseMessage,
+	AmpLookAtToolUseMessage,
+	AmpFindThreadToolUseMessage,
+	AmpReadThreadToolUseMessage,
+	AmpTaskListToolUseMessage,
 	UnknownToolUseMessage,
 	PermissionRequestMessage,
 	parseChatMessage,
@@ -155,6 +165,74 @@ describe('tool-use serialization round-trip', () => {
 		const parsed = roundTrip(msg);
 		expect(parsed.plan).toBe('The plan text');
 		expect(parsed.allowedPrompts).toEqual(prompts);
+	});
+
+	it('AmpFinderToolUseMessage preserves query', () => {
+		const msg = new AmpFinderToolUseMessage(TS, 'id-amp-1', 'find auth handlers');
+		const parsed = roundTrip(msg);
+		expect(parsed.query).toBe('find auth handlers');
+	});
+
+	it('AmpOracleToolUseMessage preserves structured fields', () => {
+		const msg = new AmpOracleToolUseMessage(TS, 'id-amp-2', 'Review auth', 'Focus on websocket flow', ['src/auth.ts']);
+		const parsed = roundTrip(msg);
+		expect(parsed.task).toBe('Review auth');
+		expect(parsed.context).toBe('Focus on websocket flow');
+		expect(parsed.files).toEqual(['src/auth.ts']);
+	});
+
+	it('AmpLibrarianToolUseMessage preserves query and context', () => {
+		const msg = new AmpLibrarianToolUseMessage(TS, 'id-amp-3', 'Find docs', 'auth subsystem');
+		const parsed = roundTrip(msg);
+		expect(parsed.query).toBe('Find docs');
+		expect(parsed.context).toBe('auth subsystem');
+	});
+
+	it('AmpSkillToolUseMessage preserves name', () => {
+		const msg = new AmpSkillToolUseMessage(TS, 'id-amp-4', 'lsp');
+		const parsed = roundTrip(msg);
+		expect(parsed.name).toBe('lsp');
+	});
+
+	it('AmpMermaidToolUseMessage round-trips', () => {
+		const msg = new AmpMermaidToolUseMessage(TS, 'id-amp-5');
+		const parsed = roundTrip(msg);
+		expect(parsed.type).toBe('amp-mermaid-tool-use');
+	});
+
+	it('AmpHandoffToolUseMessage preserves goal', () => {
+		const msg = new AmpHandoffToolUseMessage(TS, 'id-amp-6', 'Continue the migration');
+		const parsed = roundTrip(msg);
+		expect(parsed.goal).toBe('Continue the migration');
+	});
+
+	it('AmpLookAtToolUseMessage preserves path and objective', () => {
+		const msg = new AmpLookAtToolUseMessage(TS, 'id-amp-7', '/tmp/app.css', 'Review theme tokens');
+		const parsed = roundTrip(msg);
+		expect(parsed.path).toBe('/tmp/app.css');
+		expect(parsed.objective).toBe('Review theme tokens');
+	});
+
+	it('AmpFindThreadToolUseMessage preserves query', () => {
+		const msg = new AmpFindThreadToolUseMessage(TS, 'id-amp-8', 'auth race condition');
+		const parsed = roundTrip(msg);
+		expect(parsed.query).toBe('auth race condition');
+	});
+
+	it('AmpReadThreadToolUseMessage preserves threadId and goal', () => {
+		const msg = new AmpReadThreadToolUseMessage(TS, 'id-amp-9', 'thread-123', 'Summarize decisions');
+		const parsed = roundTrip(msg);
+		expect(parsed.threadId).toBe('thread-123');
+		expect(parsed.goal).toBe('Summarize decisions');
+	});
+
+	it('AmpTaskListToolUseMessage preserves task metadata', () => {
+		const msg = new AmpTaskListToolUseMessage(TS, 'id-amp-10', 'update', '42', 'Ship migration', 'done');
+		const parsed = roundTrip(msg);
+		expect(parsed.action).toBe('update');
+		expect(parsed.taskId).toBe('42');
+		expect(parsed.title).toBe('Ship migration');
+		expect(parsed.status).toBe('done');
 	});
 
 	it('UnknownToolUseMessage preserves rawName and input without metadata', () => {
