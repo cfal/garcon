@@ -8,6 +8,19 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
 
+  const FILTER_KEYS = ['textTokens', 'tags', 'providers', 'models'];
+  function sanitizeFilter(raw) {
+    const empty = { textTokens: [], tags: [], providers: [], models: [] };
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return empty;
+    const out = {};
+    for (const key of FILTER_KEYS) {
+      out[key] = Array.isArray(raw[key])
+        ? raw[key].filter((v) => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
+        : [];
+    }
+    return out;
+  }
+
   async function putSessionNameHandler(request) {
     try {
       const { chatId, title } = await parseJsonBody(request);
@@ -135,9 +148,78 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
     }
   }
 
+  async function getFolders() {
+    try {
+      const folders = await settings.getFolders();
+      return Response.json({ folders });
+    } catch (error) {
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
+  async function postFolder(request) {
+    try {
+      const body = await parseJsonBody(request);
+      const name = String(body.name || '').trim();
+      if (!name) {
+        return Response.json({ success: false, error: 'name is required' }, { status: 400 });
+      }
+      const folder = {
+        id: crypto.randomUUID(),
+        name,
+        filter: sanitizeFilter(body.filter),
+        createdAt: new Date().toISOString(),
+      };
+      const result = await settings.addFolder(folder);
+      return Response.json({ success: true, folder: result });
+    } catch (error) {
+      if (error.message === 'Malformed JSON') {
+        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
+      }
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
+  async function putFolder(request) {
+    try {
+      const body = await parseJsonBody(request);
+      const folderId = String(body.id || '').trim();
+      if (!folderId) {
+        return Response.json({ success: false, error: 'id is required' }, { status: 400 });
+      }
+      const patch = {};
+      if (typeof body.name === 'string') patch.name = body.name.trim();
+      if (body.filter && typeof body.filter === 'object') patch.filter = sanitizeFilter(body.filter);
+      const result = await settings.updateFolder(folderId, patch);
+      return Response.json({ success: true, folder: result });
+    } catch (error) {
+      if (error.message === 'Malformed JSON') {
+        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
+      }
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
+  async function deleteFolder(_request, url) {
+    const folderId = url.searchParams.get('id');
+    if (!folderId) {
+      return Response.json({ success: false, error: 'id query parameter is required' }, { status: 400 });
+    }
+    try {
+      const removed = await settings.removeFolder(folderId);
+      if (!removed) {
+        return Response.json({ success: false, error: 'Folder not found' }, { status: 404 });
+      }
+      return Response.json({ success: true });
+    } catch (error) {
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
   return {
     '/api/v1/app/session-name': { PUT: putSessionNameHandler },
     '/api/v1/app/settings': { GET: getAppSettings, PUT: putAppSettings },
     '/api/v1/app/telegram/test': { POST: postTelegramTest },
+    '/api/v1/app/folders': { GET: getFolders, POST: postFolder, PUT: putFolder, DELETE: deleteFolder },
   };
 }

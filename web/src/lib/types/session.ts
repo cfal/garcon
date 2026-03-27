@@ -21,6 +21,7 @@ export interface ChatSession {
 	};
 	preview: {
 		lastMessage: string;
+		firstMessage?: string;
 	};
 	isPinned: boolean;
 	isArchived: boolean;

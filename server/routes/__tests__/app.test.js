@@ -6,6 +6,7 @@ mock.module('../../lib/http-request.js', () => ({
 
 mock.module('../../config.js', () => ({
   getProjectBasePath: mock(() => '/home'),
+  getTelegramBotToken: mock(() => ''),
 }));
 
 import createWorkspaceRoutes from '../workspace.js';
@@ -25,6 +26,10 @@ function createMockCtx() {
       getLastModel: mock(() => Promise.resolve('')),
       getLastPermissionMode: mock(() => Promise.resolve('default')),
       getLastThinkingMode: mock(() => Promise.resolve('none')),
+      getFolders: mock(() => Promise.resolve([])),
+      addFolder: mock(() => Promise.resolve(undefined)),
+      updateFolder: mock(() => Promise.resolve(undefined)),
+      removeFolder: mock(() => Promise.resolve(false)),
     },
     providers: {
       getAuthStatusMap: mock(() => Promise.resolve({
@@ -40,9 +45,9 @@ function createMockCtx() {
 const ctx = createMockCtx();
 const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.providers);
 
-function makeRequest(body) {
-  return new Request('http://localhost/api/app/session-name', {
-    method: 'PUT',
+function makeRequest(url, method, body) {
+  return new Request(url, {
+    method,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -71,7 +76,7 @@ describe('PUT /api/app/session-name', () => {
   it('sets a session name with valid payload', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ chatId: '123', title: 'My Chat' }));
 
-    const response = await handler(makeRequest({ chatId: '123', title: 'My Chat' }));
+    const response = await handler(makeRequest('http://localhost/api/app/session-name', 'PUT', { chatId: '123', title: 'My Chat' }));
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -82,7 +87,7 @@ describe('PUT /api/app/session-name', () => {
   it('returns 400 when chatId is missing', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ title: 'My Chat' }));
 
-    const response = await handler(makeRequest({ title: 'My Chat' }));
+    const response = await handler(makeRequest('http://localhost/api/app/session-name', 'PUT', { title: 'My Chat' }));
     const body = await response.json();
 
     expect(response.status).toBe(400);
@@ -92,7 +97,7 @@ describe('PUT /api/app/session-name', () => {
   it('returns 400 when title is empty', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ chatId: '123', title: '' }));
 
-    const response = await handler(makeRequest({ chatId: '123', title: '' }));
+    const response = await handler(makeRequest('http://localhost/api/app/session-name', 'PUT', { chatId: '123', title: '' }));
     const body = await response.json();
 
     expect(response.status).toBe(400);
@@ -102,7 +107,7 @@ describe('PUT /api/app/session-name', () => {
   it('returns 400 when title is whitespace-only', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ chatId: '123', title: '   ' }));
 
-    const response = await handler(makeRequest({ chatId: '123', title: '   ' }));
+    const response = await handler(makeRequest('http://localhost/api/app/session-name', 'PUT', { chatId: '123', title: '   ' }));
     const body = await response.json();
 
     expect(response.status).toBe(400);
@@ -112,7 +117,7 @@ describe('PUT /api/app/session-name', () => {
   it('trims the title before saving', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ chatId: '123', title: '  Trimmed  ' }));
 
-    await handler(makeRequest({ chatId: '123', title: '  Trimmed  ' }));
+    await handler(makeRequest('http://localhost/api/app/session-name', 'PUT', { chatId: '123', title: '  Trimmed  ' }));
 
     expect(ctx.settings.setSessionName).toHaveBeenCalledWith('123', 'Trimmed');
   });
@@ -241,7 +246,7 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({ fontSize: 14 }));
     ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
 
-    const response = await handler(makeRequest({ ui: { fontSize: 14 } }));
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { ui: { fontSize: 14 } }));
     const body = await response.json();
 
     expect(body.success).toBe(true);
@@ -253,7 +258,7 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
     ctx.settings.setPathSettings.mockImplementation(() => Promise.resolve({ lastDir: '/tmp' }));
 
-    const response = await handler(makeRequest({ paths: { lastDir: '/tmp' } }));
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { paths: { lastDir: '/tmp' } }));
     const body = await response.json();
 
     expect(body.success).toBe(true);
@@ -266,7 +271,7 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({ chatTitle: chatTitleConfig }));
     ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
 
-    const response = await handler(makeRequest({ ui: { chatTitle: chatTitleConfig } }));
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { ui: { chatTitle: chatTitleConfig } }));
     const body = await response.json();
 
     expect(body.success).toBe(true);
@@ -278,11 +283,106 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
     ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
 
-    const response = await handler(makeRequest({ lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard' }));
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard' }));
     const body = await response.json();
 
     expect(body.success).toBe(true);
     expect(body.lastPermissionMode).toBeUndefined();
     expect(body.lastThinkingMode).toBeUndefined();
+  });
+});
+
+describe('folders API', () => {
+  const getHandler = appRoutes['/api/v1/app/folders'].GET;
+  const postHandler = appRoutes['/api/v1/app/folders'].POST;
+  const putHandler = appRoutes['/api/v1/app/folders'].PUT;
+  const deleteHandler = appRoutes['/api/v1/app/folders'].DELETE;
+
+  beforeEach(() => {
+    ctx.settings.getFolders.mockClear();
+    ctx.settings.addFolder.mockClear();
+    ctx.settings.updateFolder.mockClear();
+    ctx.settings.removeFolder.mockClear();
+    parseJsonBody.mockClear();
+  });
+
+  it('returns saved folders', async () => {
+    const folders = [{ id: 'folder-1', name: 'Review', filter: { textTokens: ['bug'], tags: [], providers: [], models: [] }, createdAt: '2026-03-27T00:00:00.000Z' }];
+    ctx.settings.getFolders.mockImplementation(() => Promise.resolve(folders));
+
+    const response = await getHandler();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.folders).toEqual(folders);
+  });
+
+  it('sanitizes folder filters when creating a folder', async () => {
+    ctx.settings.addFolder.mockImplementation(async (folder) => folder);
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      name: ' Important review ',
+      filter: {
+        textTokens: [' bug ', '', 7],
+        tags: [' triage ', null],
+        providers: [' codex '],
+        models: [' gpt-5.4 ', false],
+        ignored: ['value'],
+      },
+    }));
+
+    const response = await postHandler(makeRequest('http://localhost/api/app/folders', 'POST', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(ctx.settings.addFolder).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.any(String),
+      name: 'Important review',
+      filter: {
+        textTokens: ['bug'],
+        tags: ['triage'],
+        providers: ['codex'],
+        models: ['gpt-5.4'],
+      },
+      createdAt: expect.any(String),
+    }));
+  });
+
+  it('sanitizes folder filters when updating a folder', async () => {
+    ctx.settings.updateFolder.mockImplementation(async (_id, patch) => ({ id: 'folder-1', name: 'Saved', createdAt: '2026-03-27T00:00:00.000Z', ...patch }));
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      id: 'folder-1',
+      filter: {
+        textTokens: [' one '],
+        tags: [' alpha ', ''],
+        providers: [' codex '],
+        models: [' gpt-5 '],
+      },
+    }));
+
+    const response = await putHandler(makeRequest('http://localhost/api/app/folders', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(ctx.settings.updateFolder).toHaveBeenCalledWith('folder-1', {
+      filter: {
+        textTokens: ['one'],
+        tags: ['alpha'],
+        providers: ['codex'],
+        models: ['gpt-5'],
+      },
+    });
+  });
+
+  it('deletes a folder by id', async () => {
+    ctx.settings.removeFolder.mockImplementation(() => Promise.resolve(true));
+
+    const response = await deleteHandler(undefined, new URL('http://localhost/api/app/folders?id=folder-1'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(ctx.settings.removeFolder).toHaveBeenCalledWith('folder-1');
   });
 });

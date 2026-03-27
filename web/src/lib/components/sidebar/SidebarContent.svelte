@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import SidebarChatList from './SidebarChatList.svelte';
+	import SidebarFolders from './SidebarFolders.svelte';
+	import type { FolderEntry } from './sidebar-filter-state.svelte';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList } from '$lib/api/chats.js';
@@ -13,6 +15,11 @@
 		currentTime: Date;
 		searchFilter: string;
 		isReorderMode: boolean;
+		folders: FolderEntry[];
+		selectedFolderId: string;
+		onSelectFolder: (id: string) => void;
+		onCreateFolder?: () => void;
+		onDeleteFolder?: (id: string) => void;
 		onEnterReorderMode: () => void;
 		onReorderGroup: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 		onChatSelect: (chatId: string) => void;
@@ -20,6 +27,7 @@
 		onStartRenameChat: (chatId: string, currentName: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
+		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onImmediateReorder: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
@@ -34,6 +42,11 @@
 		currentTime,
 		searchFilter,
 		isReorderMode,
+		folders,
+		selectedFolderId,
+		onSelectFolder,
+		onCreateFolder,
+		onDeleteFolder,
 		onEnterReorderMode,
 		onReorderGroup,
 		onChatSelect,
@@ -41,12 +54,21 @@
 		onStartRenameChat,
 		onShowDetails,
 		onForkChat,
+		onManageTags,
 		onTogglePinned,
 		onToggleArchive,
 		onImmediateReorder,
 		onQuickMove,
 	}: SidebarContentProps = $props();
 </script>
+
+<SidebarFolders
+	{folders}
+	{selectedFolderId}
+	{onSelectFolder}
+	{onCreateFolder}
+	{onDeleteFolder}
+/>
 
 <ScrollArea
 	class="flex-1 overflow-y-auto overscroll-contain"
@@ -67,6 +89,7 @@
 		{onStartRenameChat}
 		{onShowDetails}
 		{onForkChat}
+		{onManageTags}
 		{onTogglePinned}
 		{onToggleArchive}
 		{onImmediateReorder}

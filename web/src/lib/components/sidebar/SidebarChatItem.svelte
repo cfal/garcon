@@ -14,6 +14,7 @@
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Info from '@lucide/svelte/icons/info';
 	import Copy from '@lucide/svelte/icons/copy';
+	import Tag from '@lucide/svelte/icons/tag';
 	import {
 		DropdownMenu,
 		DropdownMenuTrigger,
@@ -39,6 +40,7 @@
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
+		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onEnterReorderMode?: () => void;
 		hasPinnedChats?: boolean;
 		onMoveToTop?: () => void;
@@ -59,6 +61,7 @@
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
+		onManageTags,
 		onEnterReorderMode,
 		hasPinnedChats = false,
 		onMoveToTop,
@@ -67,6 +70,9 @@
 
 	let isProcessing = $derived(session.isProcessing);
 	let isUnread = $derived(session.isUnread && selectedChatId !== session.id);
+
+	let visibleTags = $derived(session.tags.slice(0, 2));
+	let overflowCount = $derived(Math.max(0, session.tags.length - 2));
 
 	// Truncates a long path from the left, keeping the rightmost segments.
 	function prefixEllipsis(pathStr: string, maxLen = 40): string {
@@ -204,7 +210,7 @@
 			<div class="min-w-0 flex-1">
 						<div class="text-[14px] font-medium truncate flex items-center gap-1.5 {isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground'}">
 						{#if isUnread}
-							<span class="w-1.5 h-1.5 shrink-0 rounded-full bg-indicator-unread" aria-label="Unread"></span>
+							<span class="w-1.5 h-1.5 shrink-0 rounded-full bg-indicator-unread" aria-label={m.sidebar_chat_unread()}></span>
 						{/if}
 					{chatName}
 				</div>
@@ -218,6 +224,12 @@
 						</div>
 					<div class="mt-1 flex items-center gap-1">
 						<ColoredTag label={providerTagLabel} variant={providerTagVariant} />
+						{#each visibleTags as tag (tag)}
+							<ColoredTag label={tag} variant="border-border bg-muted text-muted-foreground" />
+						{/each}
+						{#if overflowCount > 0}
+							<span class="text-[10px] text-muted-foreground">+{overflowCount}</span>
+						{/if}
 					</div>
 			</div>
 		</button>
@@ -238,7 +250,7 @@
 			<div class="min-w-0 w-full">
 						<div class="text-[14px] font-medium truncate flex items-center gap-1.5 {isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground'}">
 					{#if isUnread}
-						<span class="w-1.5 h-1.5 shrink-0 rounded-full bg-indicator-unread" aria-label="Unread"></span>
+						<span class="w-1.5 h-1.5 shrink-0 rounded-full bg-indicator-unread" aria-label={m.sidebar_chat_unread()}></span>
 					{/if}
 					{chatName}
 				</div>
@@ -252,6 +264,12 @@
 						</div>
 					<div class="mt-1 flex items-center gap-1">
 						<ColoredTag label={providerTagLabel} variant={providerTagVariant} />
+						{#each visibleTags as tag (tag)}
+							<ColoredTag label={tag} variant="border-border bg-muted text-muted-foreground" />
+						{/each}
+						{#if overflowCount > 0}
+							<span class="text-[10px] text-muted-foreground">+{overflowCount}</span>
+						{/if}
 					</div>
 			</div>
 		</Button>
@@ -271,6 +289,7 @@
 					class={isAtCursor
 						? "block w-px h-px opacity-0 pointer-events-none"
 						: "inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"}
+					aria-label={m.sidebar_chat_more_actions()}
 					tabindex={isAtCursor ? -1 : 0}
 				>
 				{#if !isAtCursor}
@@ -308,6 +327,12 @@
 						<Info />
 						{m.sidebar_chats_details()}
 					</DropdownMenuItem>
+					{#if onManageTags}
+						<DropdownMenuItem onclick={() => onManageTags?.(session.id, session.tags)}>
+							<Tag />
+							{m.sidebar_tags_manage()}
+						</DropdownMenuItem>
+					{/if}
 					{#if modelCatalog.supportsFork(session.provider)}
 						<DropdownMenuItem onclick={() => onForkChat(session.id)}>
 							<Copy />

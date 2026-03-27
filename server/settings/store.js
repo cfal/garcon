@@ -21,6 +21,7 @@ function createEmpty() {
     lastModel: '',
     lastPermissionMode: 'default',
     lastThinkingMode: 'none',
+    chatFolders: [],
   };
 }
 
@@ -37,6 +38,7 @@ function sanitize(parsed) {
     lastModel: typeof parsed.lastModel === 'string' ? parsed.lastModel : '',
     lastPermissionMode: typeof parsed.lastPermissionMode === 'string' ? parsed.lastPermissionMode : 'default',
     lastThinkingMode: typeof parsed.lastThinkingMode === 'string' ? parsed.lastThinkingMode : 'none',
+    chatFolders: Array.isArray(parsed.chatFolders) ? parsed.chatFolders : [],
   };
 }
 
@@ -498,6 +500,51 @@ export class SettingsStore extends EventEmitter {
       const anchorChatId = normNew[0] || list;
       this.emitListChanged('chats-reordered', anchorChatId);
       return { success: true };
+    });
+  }
+
+  async getFolders() {
+    const settings = await this.loadSettings();
+    return settings.chatFolders || [];
+  }
+
+  async addFolder(folder) {
+    return this.#withLock(async () => {
+      const s = await this.loadSettings();
+      const folders = s.chatFolders || [];
+      if (folders.some((f) => f.id === folder.id)) {
+        throw new Error(`Folder with ID ${folder.id} already exists`);
+      }
+      s.chatFolders = [...folders, folder];
+      await this.saveSettings(s);
+      return folder;
+    });
+  }
+
+  async updateFolder(folderId, patch) {
+    return this.#withLock(async () => {
+      const s = await this.loadSettings();
+      const folders = s.chatFolders || [];
+      const idx = folders.findIndex((f) => f.id === folderId);
+      if (idx < 0) {
+        throw new Error(`Folder not found: ${folderId}`);
+      }
+      folders[idx] = { ...folders[idx], ...patch };
+      s.chatFolders = folders;
+      await this.saveSettings(s);
+      return folders[idx];
+    });
+  }
+
+  async removeFolder(folderId) {
+    return this.#withLock(async () => {
+      const s = await this.loadSettings();
+      const folders = s.chatFolders || [];
+      const idx = folders.findIndex((f) => f.id === folderId);
+      if (idx < 0) return false;
+      s.chatFolders = folders.filter((f) => f.id !== folderId);
+      await this.saveSettings(s);
+      return true;
     });
   }
 

@@ -151,6 +151,50 @@ describe('settings store', () => {
     });
   });
 
+  describe('folder CRUD', () => {
+    it('returns no folders by default', async () => {
+      expect(await store.getFolders()).toEqual([]);
+    });
+
+    it('adds, updates, and removes folders', async () => {
+      const folder = {
+        id: 'folder-1',
+        name: 'Pinned bugs',
+        filter: { textTokens: ['bug'], tags: ['triage'], providers: ['codex'], models: ['gpt-5.4'] },
+        createdAt: '2026-03-27T00:00:00.000Z',
+      };
+
+      await store.addFolder(folder);
+      expect(await store.getFolders()).toEqual([folder]);
+
+      const updated = await store.updateFolder('folder-1', {
+        name: 'Pinned reviews',
+        filter: { textTokens: ['review'], tags: ['triage'], providers: ['claude'], models: [] },
+      });
+      expect(updated).toEqual({
+        ...folder,
+        name: 'Pinned reviews',
+        filter: { textTokens: ['review'], tags: ['triage'], providers: ['claude'], models: [] },
+      });
+
+      expect(await store.removeFolder('folder-1')).toBe(true);
+      expect(await store.getFolders()).toEqual([]);
+    });
+
+    it('rejects duplicate folder IDs', async () => {
+      const folder = {
+        id: 'folder-1',
+        name: 'Pinned bugs',
+        filter: { textTokens: [], tags: [], providers: [], models: [] },
+        createdAt: '2026-03-27T00:00:00.000Z',
+      };
+
+      await store.addFolder(folder);
+
+      await expect(store.addFolder(folder)).rejects.toThrow('Folder with ID folder-1 already exists');
+    });
+  });
+
   describe('ordering list getters', () => {
     it('getPinnedChatIds returns empty array by default', async () => {
       expect(await store.getPinnedChatIds()).toEqual([]);
@@ -208,6 +252,7 @@ describe('settings store', () => {
       expect(settings).toEqual({
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
+        chatFolders: [],
         lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
       });
@@ -219,6 +264,7 @@ describe('settings store', () => {
       expect(settings).toEqual({
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
+        chatFolders: [],
         lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
       });

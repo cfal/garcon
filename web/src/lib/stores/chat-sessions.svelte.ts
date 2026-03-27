@@ -23,7 +23,17 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 		isUnread: session.isUnread ?? false,
 		status: 'running',
 		lastMessage: session.preview?.lastMessage || undefined,
+		tags: session.tags ?? [],
+		firstMessage: session.preview?.firstMessage || undefined,
 	};
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i++) {
+		if (a[i] !== b[i]) return false;
+	}
+	return true;
 }
 
 function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
@@ -42,7 +52,9 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.isArchived === b.isArchived &&
 		a.isUnread === b.isUnread &&
 		a.status === b.status &&
-		a.lastMessage === b.lastMessage
+		a.lastMessage === b.lastMessage &&
+		a.firstMessage === b.firstMessage &&
+		arraysEqual(a.tags, b.tags)
 	);
 }
 
@@ -150,6 +162,8 @@ export class ChatSessionsStore {
 			isProcessing: false,
 			isUnread: false,
 			status: 'draft',
+			tags: [],
+			firstMessage: undefined,
 		};
 
 		this.byId = { ...this.byId, [id]: draft };

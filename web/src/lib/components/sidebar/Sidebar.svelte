@@ -3,6 +3,7 @@
 	import SidebarContent from './SidebarContent.svelte';
 	import SidebarFooter from './SidebarFooter.svelte';
 	import SidebarChatDialogs from './SidebarChatDialogs.svelte';
+	import SidebarTagDialog from './SidebarTagDialog.svelte';
 	import { getAppShell } from '$lib/context';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -10,6 +11,8 @@
 	import type { ChatOrderList } from '$lib/api/chats.js';
 	import { createReorderWriteQueue } from './reorder-write-queue';
 	import { SidebarController } from './sidebar-controller.svelte';
+	import { SidebarFilterState } from './sidebar-filter-state.svelte';
+	import { getFolders, createFolder, deleteFolder as deleteFolderApi } from '$lib/api/settings';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ChatDeleteConfirmation {
@@ -62,11 +65,15 @@
 		get onQuietRefresh() { return onQuietRefresh; },
 	});
 
+	const filterState = new SidebarFilterState({
+		get chats() { return chats; },
+	});
+
 	// Sidebar UI state.
-	let searchFilter = $state('');
 	let chatDeleteConfirmation = $state<ChatDeleteConfirmation | null>(null);
 	let chatRenameConfirmation = $state<ChatRenameConfirmation | null>(null);
 	let chatDetailsDialog = $state<ChatDetailsDialog | null>(null);
+	let tagDialog = $state<{ chatId: string; chatTitle: string; tags: string[] } | null>(null);
 	let currentTime = $state(new Date());
 
 	// Refresh timestamp every minute.
@@ -75,16 +82,6 @@
 			currentTime = new Date();
 		}, 60_000);
 		return () => clearInterval(timer);
-	});
-
-	let filteredChats = $derived.by(() => {
-		const q = searchFilter.trim().toLowerCase();
-		if (!q) return chats;
-		return chats.filter((s) => {
-			const title = (s.title || '').toLowerCase();
-			const path = (s.projectPath || '').toLowerCase();
-			return title.includes(q) || path.includes(q);
-		});
 	});
 
 	function handleChatClick(chatId: string) {
@@ -197,12 +194,30 @@
 		})();
 	}
 
+	function showTagDialog(chatId: string, currentTags: string[]) {
+		const chat = chats.find((s) => s.id === chatId);
+		tagDialog = {
+			chatId,
+			chatTitle: chat?.title || m.sidebar_chats_unnamed(),
+			tags: currentTags,
+		};
+	}
+
+	async function handleSaveTags(chatId: string, tags: string[]) {
+		tagDialog = null;
+		try {
+			await controller.updateTags(chatId, tags);
+		} catch (error) {
+			console.error('Failed to update tags:', error);
+		}
+	}
+
 	// Reorder mode state.
 	let isReorderMode = $state(false);
 	let pendingReorder = $state<{ list: ChatOrderList; oldOrder: string[]; newOrder: string[] } | null>(null);
 
 	function enterReorderMode() {
-		searchFilter = '';
+		filterState.searchQuery = '';
 		pendingReorder = null;
 		isReorderMode = true;
 	}
@@ -268,6 +283,42 @@
 		}
 	}
 
+	function handleSelectFolder(id: string) {
+		filterState.selectFolder(id);
+	}
+
+	async function handleCreateFolder() {
+		const search = filterState.parsedSearch;
+		const name = filterState.searchQuery.trim() || m.sidebar_folders_new_folder();
+		try {
+			const res = await createFolder(name, search);
+			filterState.setUserFolders([...filterState.userFolders, res.folder]);
+		} catch (err) {
+			console.error('Failed to create folder:', err);
+		}
+	}
+
+	async function handleDeleteFolder(id: string) {
+		try {
+			await deleteFolderApi(id);
+			filterState.setUserFolders(filterState.userFolders.filter((f) => f.id !== id));
+			if (filterState.selectedFolderId === id) {
+				filterState.selectFolder('all');
+			}
+		} catch (err) {
+			console.error('Failed to delete folder:', err);
+		}
+	}
+
+	onMount(async () => {
+		try {
+			const res = await getFolders();
+			filterState.setUserFolders(res.folders);
+		} catch (err) {
+			console.error('Failed to load folders:', err);
+		}
+	});
+
 	onMount(() => appShell.onRenameSelectedChatRequested(() => {
 		if (!selectedChatId) return;
 		const selected = chats.find((chat) => chat.id === selectedChatId);
@@ -279,12 +330,17 @@
 <div class="h-full flex flex-col bg-card md:select-none">
 	<SidebarContent
 		{chats}
-		{filteredChats}
+		filteredChats={filterState.filteredChats}
 		{selectedChatId}
 		{isLoading}
 		{currentTime}
-		{searchFilter}
+		searchFilter={filterState.searchQuery}
 		{isReorderMode}
+		folders={filterState.folders}
+		selectedFolderId={filterState.selectedFolderId}
+		onSelectFolder={handleSelectFolder}
+		onCreateFolder={handleCreateFolder}
+		onDeleteFolder={handleDeleteFolder}
 		onEnterReorderMode={enterReorderMode}
 		onReorderGroup={handleReorderGroup}
 		onChatSelect={handleChatClick}
@@ -294,16 +350,17 @@
 		onToggleArchive={(id) => { void handleToggleArchive(id); }}
 		onShowDetails={showChatDetails}
 		onForkChat={(id) => { void handleForkChat(id); }}
+		onManageTags={showTagDialog}
 		onImmediateReorder={handleImmediateReorder}
 		onQuickMove={handleQuickMove}
 	/>
 
 		<SidebarFooter
 			{isLoading}
-			{searchFilter}
+			searchFilter={filterState.searchQuery}
 			{isReorderMode}
-			onSearchFilterChange={(v) => searchFilter = v}
-			onClearSearchFilter={() => searchFilter = ''}
+			onSearchFilterChange={(v) => filterState.searchQuery = v}
+			onClearSearchFilter={() => filterState.searchQuery = ''}
 			onCreateChat={handlePrimaryAction}
 			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
 			{onShowSettings}
@@ -319,4 +376,11 @@
 	onConfirmRename={confirmRenameChat}
 	{chatDetailsDialog}
 	onCloseDetails={closeChatDetails}
+/>
+
+<SidebarTagDialog
+	{tagDialog}
+	allKnownTags={filterState.allKnownTags}
+	onClose={() => tagDialog = null}
+	onSave={handleSaveTags}
 />
