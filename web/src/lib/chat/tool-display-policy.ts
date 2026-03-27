@@ -16,10 +16,10 @@ export function shouldHideToolResult(
 	return false;
 }
 
-/** Resolves the display rule for a given tool name, falling back to Default. */
+/** Resolves the display rule for a given tool type, falling back to default. */
 export function resolveDisplayRule(
 	registry: Record<string, ToolDisplayRule>,
-	toolName: string,
+	toolType: string,
 ): ToolDisplayRule {
-	return registry[toolName] || registry.Default;
+	return registry[toolType] || registry.default;
 }

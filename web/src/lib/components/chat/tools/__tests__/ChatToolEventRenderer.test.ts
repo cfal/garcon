@@ -2,6 +2,9 @@ import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
 import {
+	AmpFinderToolUseMessage,
+	AmpOracleToolUseMessage,
+	AmpTaskListToolUseMessage,
 	EditToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
@@ -74,6 +77,44 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.getByText('https://example.com/spec')).toBeTruthy();
 		expect(screen.getByText('Instruction: Extract the API version.')).toBeTruthy();
 		expect(screen.queryByLabelText('Jump to results')).toBeNull();
+	});
+
+	it('renders AmpFinder as a typed inline search event', () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new AmpFinderToolUseMessage('', 'tool-finder-1', 'find auth handlers'),
+			mode: 'input'
+		});
+
+		expect(screen.getByText('Search')).toBeTruthy();
+		expect(screen.getByText('find auth handlers')).toBeTruthy();
+	});
+
+	it('renders AmpOracle as a typed collapsible event', () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new AmpOracleToolUseMessage(
+				'',
+				'tool-oracle-1',
+				'Review auth flow',
+				'Focus on websocket permissions',
+				['src/auth.ts']
+			),
+			mode: 'input',
+			autoExpandTools: true
+		});
+
+		expect(screen.getByText('Task:')).toBeTruthy();
+		expect(screen.getByText('Review auth flow')).toBeTruthy();
+		expect(screen.getByText('Context:')).toBeTruthy();
+	});
+
+	it('renders AmpTaskList using its typed task summary', () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new AmpTaskListToolUseMessage('', 'tool-task-list-1', 'update', '42', 'Ship migration', 'done'),
+			mode: 'input'
+		});
+
+		expect(screen.getByText('Tasks')).toBeTruthy();
+		expect(screen.getByText('updating #42')).toBeTruthy();
 	});
 
 	it('suppresses WriteStdin rows entirely', () => {

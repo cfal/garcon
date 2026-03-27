@@ -68,12 +68,12 @@ describe('resolveDisplayRule', () => {
 		result: { hidden: true },
 	};
 	const registry: Record<string, ToolDisplayRule> = {
-		Read: readRule,
-		Default: defaultRule,
+		'read-tool-use': readRule,
+		default: defaultRule,
 	};
 
 	it('returns the matching rule for a known tool', () => {
-		expect(resolveDisplayRule(registry, 'Read')).toBe(readRule);
+		expect(resolveDisplayRule(registry, 'read-tool-use')).toBe(readRule);
 	});
 
 	it('falls back to Default for an unknown tool', () => {
