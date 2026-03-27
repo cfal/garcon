@@ -78,6 +78,50 @@ describe('ReadReceiptOutboxStore', () => {
 		expect(mockMarkBatch).toHaveBeenCalledTimes(1);
 	});
 
+	it('flushes pending receipts that arrive while a batch is already in flight', async () => {
+		const { outbox } = createTestStore();
+		let resolveFirstBatch:
+			| ((value: { success: boolean; results: Array<{ chatId: string; lastReadAt: string }> }) => void)
+			| undefined;
+
+		mockMarkBatch.mockImplementationOnce(
+			() => new Promise((resolve) => {
+				resolveFirstBatch = resolve;
+			}),
+		);
+		mockMarkBatch.mockResolvedValueOnce({
+			success: true,
+			results: [{ chatId: 'b', lastReadAt: '2026-02-25T11:00:00.000Z' }],
+		});
+
+		outbox.enqueue('a', '2026-02-25T10:00:00.000Z');
+		const firstFlush = outbox.flushNow();
+		await Promise.resolve();
+
+		outbox.enqueue('b', '2026-02-25T11:00:00.000Z');
+		const secondFlush = outbox.flushNow();
+
+		expect(mockMarkBatch).toHaveBeenCalledTimes(1);
+
+		if (!resolveFirstBatch) {
+			throw new Error('First batch did not start');
+		}
+
+		resolveFirstBatch({
+			success: true,
+			results: [{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' }],
+		});
+
+		await firstFlush;
+		await secondFlush;
+
+		expect(mockMarkBatch).toHaveBeenCalledTimes(2);
+		expect(mockMarkBatch.mock.calls[1]?.[0]).toEqual([
+			{ chatId: 'b', lastReadAt: '2026-02-25T11:00:00.000Z' },
+		]);
+		expect(outbox.pendingByChatId['b']).toBeUndefined();
+	});
+
 	it('acknowledged entries cleared after success', async () => {
 		const { outbox, sessions } = createTestStore();
 
@@ -110,6 +154,65 @@ describe('ReadReceiptOutboxStore', () => {
 
 		expect(outbox.pendingByChatId['a']).toBeUndefined();
 		expect(sessions.byId['a']?.isUnread).toBe(false);
+	});
+
+	it('marks visible unread chats read immediately and skips already-read chats', async () => {
+		const { outbox, sessions } = createTestStore();
+
+		sessions.upsertFromServer([
+			{
+				id: 'a',
+				provider: 'claude',
+				model: 'opus',
+				title: 'Unread',
+				projectPath: '/p',
+				tags: [],
+				native: { path: null },
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T12:00:00.000Z',
+					lastReadAt: null,
+				},
+				preview: { lastMessage: '' },
+				isPinned: false,
+				isArchived: false,
+				isActive: false,
+				isUnread: true,
+			},
+			{
+				id: 'b',
+				provider: 'claude',
+				model: 'opus',
+				title: 'Read',
+				projectPath: '/p',
+				tags: [],
+				native: { path: null },
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T12:00:00.000Z',
+					lastReadAt: '2026-02-25T12:00:00.000Z',
+				},
+				preview: { lastMessage: '' },
+				isPinned: false,
+				isArchived: false,
+				isActive: false,
+				isUnread: false,
+			},
+		]);
+
+		mockMarkBatch.mockResolvedValue({
+			success: true,
+			results: [{ chatId: 'a', lastReadAt: '2026-02-25T12:00:00.000Z' }],
+		});
+
+		await outbox.markChatsReadNow(['a', 'b', 'missing']);
+
+		expect(mockMarkBatch).toHaveBeenCalledWith([
+			{ chatId: 'a', lastReadAt: '2026-02-25T12:00:00.000Z' },
+		]);
+		expect(sessions.byId['a']?.isUnread).toBe(false);
+		expect(sessions.byId['a']?.lastReadAt).toBe('2026-02-25T12:00:00.000Z');
+		expect(sessions.byId['b']?.lastReadAt).toBe('2026-02-25T12:00:00.000Z');
 	});
 
 	it('retries with backoff on failure', async () => {

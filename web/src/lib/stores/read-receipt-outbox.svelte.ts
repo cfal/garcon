@@ -16,34 +16,39 @@ export class ReadReceiptOutboxStore {
 	retryIndex = 0;
 
 	private sessions: ChatSessionsStore;
+	private flushRequested = false;
+	private flushPromise: Promise<void> | null = null;
 
 	constructor(sessions: ChatSessionsStore) {
 		this.sessions = sessions;
 	}
 
+	/** Marks the given chats read immediately using their current lastActivityAt. */
+	async markChatsReadNow(chatIds: string[]): Promise<void> {
+		const batch = chatIds.flatMap((chatId) => {
+			const chat = this.sessions.byId[chatId];
+			if (!chat?.lastActivityAt || !chat.isUnread) return [];
+			return [{ chatId, lastReadAt: chat.lastActivityAt }];
+		});
+
+		if (batch.length === 0) return;
+
+		this.enqueueEntries(batch);
+		for (const entry of batch) {
+			this.sessions.patchLastReadAt(entry.chatId, entry.lastReadAt);
+		}
+		await this.flushNow();
+	}
+
 	/** Merges a read timestamp for a chat, resets debounce, checks maxWait. */
 	enqueue(chatId: string, readAt: string): void {
-		const existing = this.pendingByChatId[chatId];
-		if (existing && existing >= readAt) return;
-		this.pendingByChatId[chatId] = readAt;
-
-		if (this.firstPendingAt === null) {
-			this.firstPendingAt = Date.now();
-		}
-
-		// Force flush if maxWait exceeded.
-		if (Date.now() - this.firstPendingAt >= MAX_WAIT_MS) {
-			this.flushNow();
-			return;
-		}
-
-		this.resetDebounce();
+		this.enqueueEntries([{ chatId, lastReadAt: readAt }]);
 	}
 
 	/** Cancels debounce and flushes immediately. */
 	async flushNow(): Promise<void> {
 		this.clearDebounce();
-		await this.flush();
+		await this.requestFlush();
 	}
 
 	destroy(): void {
@@ -54,7 +59,7 @@ export class ReadReceiptOutboxStore {
 		this.clearDebounce();
 		this.debounceTimer = setTimeout(() => {
 			this.debounceTimer = null;
-			this.flush();
+			void this.requestFlush();
 		}, DEBOUNCE_MS);
 	}
 
@@ -65,13 +70,60 @@ export class ReadReceiptOutboxStore {
 		}
 	}
 
-	private async flush(): Promise<void> {
-		if (this.inFlight) return;
+	private enqueueEntries(entries: Array<{ chatId: string; lastReadAt: string }>): void {
+		let didChange = false;
+		for (const entry of entries) {
+			const existing = this.pendingByChatId[entry.chatId];
+			if (existing && existing >= entry.lastReadAt) continue;
+			this.pendingByChatId[entry.chatId] = entry.lastReadAt;
+			didChange = true;
+		}
 
+		if (!didChange) return;
+
+		if (this.firstPendingAt === null) {
+			this.firstPendingAt = Date.now();
+		}
+
+		// Force flush if maxWait exceeded.
+		if (Date.now() - this.firstPendingAt >= MAX_WAIT_MS) {
+			void this.flushNow();
+			return;
+		}
+
+		this.resetDebounce();
+	}
+
+	private async requestFlush(): Promise<void> {
+		this.flushRequested = true;
+		if (this.flushPromise) {
+			await this.flushPromise;
+			return;
+		}
+
+		this.flushPromise = this.drainFlushRequests();
+		try {
+			await this.flushPromise;
+		} finally {
+			this.flushPromise = null;
+		}
+	}
+
+	private async drainFlushRequests(): Promise<void> {
+		while (this.flushRequested) {
+			this.flushRequested = false;
+			const waitingForRetry = await this.flush();
+			if (waitingForRetry) {
+				return;
+			}
+		}
+	}
+
+	private async flush(): Promise<boolean> {
 		const entries = Object.entries(this.pendingByChatId);
 		if (entries.length === 0) {
 			this.firstPendingAt = null;
-			return;
+			return false;
 		}
 
 		this.inFlight = true;
@@ -91,14 +143,16 @@ export class ReadReceiptOutboxStore {
 			this.firstPendingAt = Object.keys(this.pendingByChatId).length > 0
 				? this.firstPendingAt
 				: null;
+			return false;
 		} catch {
 			// Retry with backoff; pending entries remain.
 			const delay = RETRY_DELAYS[Math.min(this.retryIndex, RETRY_DELAYS.length - 1)];
 			this.retryIndex++;
 			this.debounceTimer = setTimeout(() => {
 				this.debounceTimer = null;
-				this.flush();
+				void this.requestFlush();
 			}, delay);
+			return true;
 		} finally {
 			this.inFlight = false;
 		}

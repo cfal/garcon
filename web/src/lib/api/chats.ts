@@ -1,6 +1,6 @@
 // Chat session API for listing, starting, messaging, and managing chats.
 
-import { apiGet, apiPost, apiDelete } from './client.js';
+import { apiGet, apiPost, apiPatch, apiDelete } from './client.js';
 import type { ChatSession } from '$lib/types/session.js';
 import type { SessionProvider } from '$lib/types/app.js';
 import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
@@ -145,4 +145,15 @@ export async function reorderChats(body: ReorderChatsRequest): Promise<{ success
 /** Moves a single chat relative to a neighbor within the same group. */
 export async function reorderChatsQuick(body: ReorderQuickRequest): Promise<{ success: boolean }> {
 	return apiPost('/api/v1/chats/reorder-quick', body);
+}
+
+export interface SetChatTagsResponse {
+	success: boolean;
+	chatId: string;
+	tags: string[];
+}
+
+/** Updates the tags for a chat session. */
+export async function setChatTags(chatId: string, tags: string[]): Promise<SetChatTagsResponse> {
+	return apiPatch<SetChatTagsResponse>('/api/v1/chats/tags', { chatId, tags });
 }

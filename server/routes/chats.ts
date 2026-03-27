@@ -56,6 +56,19 @@ interface ProvidersDep {
   runSingleQuery(prompt: string, opts?: Record<string, unknown>): Promise<string>;
 }
 
+function normalizeTags(raw: unknown[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const tag = item.trim().toLowerCase();
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    result.push(tag);
+  }
+  return result.sort();
+}
+
 function isWithinBasePath(targetPath: string): boolean {
   const projectBasePath = getProjectBasePath();
   const resolved = path.resolve(targetPath);
@@ -175,7 +188,10 @@ export default function createChatRoutes(
           projectPath: session.projectPath,
           tags: session.tags || [],
           activity: { createdAt: (meta?.createdAt as string) || inferredCreatedAt, lastActivityAt, lastReadAt },
-          preview: { lastMessage: extractFirstLine(meta?.lastMessage as string) },
+          preview: {
+            lastMessage: extractFirstLine(meta?.lastMessage as string),
+            firstMessage: extractFirstLine(meta?.firstMessage as string),
+          },
           isActive: providers.isProviderSessionRunning(session.provider as string, session.providerSessionId as string | null),
           isPinned,
           isArchived,
@@ -550,6 +566,32 @@ export default function createChatRoutes(
     }
   }
 
+  async function patchChatTags(request: Request): Promise<Response> {
+    try {
+      const body = await parseJsonBody(request);
+      const chatId = String(body.chatId || '').trim();
+      if (!chatId) {
+        return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
+      }
+
+      const session = registry.getChat(chatId);
+      if (!session) {
+        return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
+      }
+
+      const rawTags = Array.isArray(body.tags) ? body.tags : [];
+      const tags = normalizeTags(rawTags);
+
+      registry.updateChat(chatId, { tags });
+      return Response.json({ success: true, chatId, tags });
+    } catch (error: unknown) {
+      if ((error as Error).message === 'Malformed JSON') {
+        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
+      }
+      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+    }
+  }
+
   async function postForkChat(request: Request): Promise<Response> {
     try {
       const body = await parseJsonBody(request);
@@ -610,5 +652,6 @@ export default function createChatRoutes(
     '/api/v1/chats/read': { POST: postMarkRead },
     '/api/v1/chats/reorder': { POST: postReorderChats },
     '/api/v1/chats/reorder-quick': { POST: postReorderQuick },
+    '/api/v1/chats/tags': { PATCH: patchChatTags },
   };
 }

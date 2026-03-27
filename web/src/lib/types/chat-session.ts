@@ -32,4 +32,6 @@ export interface ChatSessionRecord {
 	isUnread: boolean;
 	status: ChatStatus;
 	lastMessage?: string;
+	tags: string[];
+	firstMessage?: string;
 }

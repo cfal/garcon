@@ -8,6 +8,7 @@ import {
 	reorderChatsQuick,
 	getChatDetails,
 	forkChat,
+	setChatTags,
 } from '$lib/api/chats.js';
 
 export interface SidebarControllerDeps {
@@ -38,6 +39,11 @@ export class SidebarController {
 
 	async loadDetails(chatId: string) {
 		return getChatDetails(chatId);
+	}
+
+	async updateTags(chatId: string, tags: string[]): Promise<void> {
+		await setChatTags(chatId, tags);
+		await this.deps.onQuietRefresh();
 	}
 
 	async forkChat(sourceChatId: string): Promise<string> {

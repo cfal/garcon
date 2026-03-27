@@ -151,6 +151,11 @@ export class ConversationSessionController {
 		deps.composerState.restoreDraft(chatId);
 		deps.ws.sendMessage(new QueueQueryRequest(chatId));
 
+		if (selected.lastActivityAt && (!selected.lastReadAt || selected.lastReadAt < selected.lastActivityAt)) {
+			deps.readReceiptOutbox.enqueue(chatId, selected.lastActivityAt);
+			deps.sessions.patchLastReadAt(chatId, selected.lastActivityAt);
+		}
+
 		deps.providerState.permissionMode = selected.permissionMode ?? 'default';
 		deps.providerState.thinkingMode = selected.thinkingMode ?? 'none';
 
@@ -181,7 +186,7 @@ export class ConversationSessionController {
 			requestAnimationFrame(() => deps.scrollToBottom());
 
 			const record = deps.sessions.byId[chatId];
-			if (record?.lastActivityAt) {
+			if (record?.lastActivityAt && (!record.lastReadAt || record.lastReadAt < record.lastActivityAt)) {
 				deps.readReceiptOutbox.enqueue(chatId, record.lastActivityAt);
 				deps.sessions.patchLastReadAt(chatId, record.lastActivityAt);
 			}
