@@ -16,6 +16,8 @@ export class ReadReceiptOutboxStore {
 	retryIndex = 0;
 
 	private sessions: ChatSessionsStore;
+	private flushRequested = false;
+	private flushPromise: Promise<void> | null = null;
 
 	constructor(sessions: ChatSessionsStore) {
 		this.sessions = sessions;
@@ -46,7 +48,7 @@ export class ReadReceiptOutboxStore {
 	/** Cancels debounce and flushes immediately. */
 	async flushNow(): Promise<void> {
 		this.clearDebounce();
-		await this.flush();
+		await this.requestFlush();
 	}
 
 	destroy(): void {
@@ -57,7 +59,7 @@ export class ReadReceiptOutboxStore {
 		this.clearDebounce();
 		this.debounceTimer = setTimeout(() => {
 			this.debounceTimer = null;
-			this.flush();
+			void this.requestFlush();
 		}, DEBOUNCE_MS);
 	}
 
@@ -92,13 +94,36 @@ export class ReadReceiptOutboxStore {
 		this.resetDebounce();
 	}
 
-	private async flush(): Promise<void> {
-		if (this.inFlight) return;
+	private async requestFlush(): Promise<void> {
+		this.flushRequested = true;
+		if (this.flushPromise) {
+			await this.flushPromise;
+			return;
+		}
 
+		this.flushPromise = this.drainFlushRequests();
+		try {
+			await this.flushPromise;
+		} finally {
+			this.flushPromise = null;
+		}
+	}
+
+	private async drainFlushRequests(): Promise<void> {
+		while (this.flushRequested) {
+			this.flushRequested = false;
+			const waitingForRetry = await this.flush();
+			if (waitingForRetry) {
+				return;
+			}
+		}
+	}
+
+	private async flush(): Promise<boolean> {
 		const entries = Object.entries(this.pendingByChatId);
 		if (entries.length === 0) {
 			this.firstPendingAt = null;
-			return;
+			return false;
 		}
 
 		this.inFlight = true;
@@ -118,14 +143,16 @@ export class ReadReceiptOutboxStore {
 			this.firstPendingAt = Object.keys(this.pendingByChatId).length > 0
 				? this.firstPendingAt
 				: null;
+			return false;
 		} catch {
 			// Retry with backoff; pending entries remain.
 			const delay = RETRY_DELAYS[Math.min(this.retryIndex, RETRY_DELAYS.length - 1)];
 			this.retryIndex++;
 			this.debounceTimer = setTimeout(() => {
 				this.debounceTimer = null;
-				this.flush();
+				void this.requestFlush();
 			}, delay);
+			return true;
 		} finally {
 			this.inFlight = false;
 		}

@@ -118,4 +118,20 @@ describe('ConversationSessionController', () => {
 		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
 	});
+
+	it('does not enqueue a second read receipt after chat load when the optimistic mark already applied', async () => {
+		const chat = createRunningChat({
+			lastReadAt: '2026-03-27T08:00:00.000Z',
+			isUnread: false,
+		});
+		const { deps } = createDeps(chat);
+		deps.ws.waitForConnection = vi.fn().mockResolvedValue(undefined);
+		deps.chatState.loadMessages = vi.fn().mockResolvedValue([]);
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.loadChat('chat-1');
+
+		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
+		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
+	});
 });

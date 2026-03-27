@@ -78,6 +78,50 @@ describe('ReadReceiptOutboxStore', () => {
 		expect(mockMarkBatch).toHaveBeenCalledTimes(1);
 	});
 
+	it('flushes pending receipts that arrive while a batch is already in flight', async () => {
+		const { outbox } = createTestStore();
+		let resolveFirstBatch:
+			| ((value: { success: boolean; results: Array<{ chatId: string; lastReadAt: string }> }) => void)
+			| undefined;
+
+		mockMarkBatch.mockImplementationOnce(
+			() => new Promise((resolve) => {
+				resolveFirstBatch = resolve;
+			}),
+		);
+		mockMarkBatch.mockResolvedValueOnce({
+			success: true,
+			results: [{ chatId: 'b', lastReadAt: '2026-02-25T11:00:00.000Z' }],
+		});
+
+		outbox.enqueue('a', '2026-02-25T10:00:00.000Z');
+		const firstFlush = outbox.flushNow();
+		await Promise.resolve();
+
+		outbox.enqueue('b', '2026-02-25T11:00:00.000Z');
+		const secondFlush = outbox.flushNow();
+
+		expect(mockMarkBatch).toHaveBeenCalledTimes(1);
+
+		if (!resolveFirstBatch) {
+			throw new Error('First batch did not start');
+		}
+
+		resolveFirstBatch({
+			success: true,
+			results: [{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' }],
+		});
+
+		await firstFlush;
+		await secondFlush;
+
+		expect(mockMarkBatch).toHaveBeenCalledTimes(2);
+		expect(mockMarkBatch.mock.calls[1]?.[0]).toEqual([
+			{ chatId: 'b', lastReadAt: '2026-02-25T11:00:00.000Z' },
+		]);
+		expect(outbox.pendingByChatId['b']).toBeUndefined();
+	});
+
 	it('acknowledged entries cleared after success', async () => {
 		const { outbox, sessions } = createTestStore();
 

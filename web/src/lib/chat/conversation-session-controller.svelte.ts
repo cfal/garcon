@@ -186,7 +186,7 @@ export class ConversationSessionController {
 			requestAnimationFrame(() => deps.scrollToBottom());
 
 			const record = deps.sessions.byId[chatId];
-			if (record?.lastActivityAt) {
+			if (record?.lastActivityAt && (!record.lastReadAt || record.lastReadAt < record.lastActivityAt)) {
 				deps.readReceiptOutbox.enqueue(chatId, record.lastActivityAt);
 				deps.sessions.patchLastReadAt(chatId, record.lastActivityAt);
 			}
