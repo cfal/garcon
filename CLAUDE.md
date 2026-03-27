@@ -41,6 +41,25 @@ Required for every WS/API contract change:
 - Add or update tests.
 - Add migration note in PR description if behavior changed.
 
+## Tool Use Contract Discipline
+- Normalize tool-use messages on the server side before they cross the shared boundary.
+- Keep the client provider agnostic at the registry and renderer layers.
+- Map generic cross-provider tools to shared canonical message types such as `bash-tool-use`, `read-tool-use`, `edit-tool-use`, `write-tool-use`, `web-search-tool-use`, and `web-fetch-tool-use`.
+- When a provider emits a tool that cannot be represented cleanly as an existing generic tool-use message, add an explicit provider-specific shared message type instead of leaking the raw provider tool name into the client.
+- Name provider-specific tool-use messages with an explicit provider prefix, for example `amp-oracle-tool-use`.
+- Do not ship known tool behavior through `UnknownToolUseMessage`.
+- Do not add or preserve client parsing or rendering paths that depend on `unknown-tool-use` for known tool families.
+- Do not key frontend display behavior off `UnknownToolUseMessage.rawName`.
+- Keep provider-specific translation logic inside `server/providers/converters/*`.
+- Keep `common/chat-types.ts` as the single shared contract for all rendered tool-use messages, including provider-specific explicit variants.
+
+Required for every known tool-use addition or change:
+- Update `common/chat-types.ts` with the explicit message class, parser support, and union membership.
+- Update the relevant provider converter to emit the explicit tool-use class instead of `UnknownToolUseMessage`.
+- Update frontend display contracts and registry entries to resolve by message `type`, not provider raw name.
+- Add or update converter tests, shared round-trip tests, and frontend rendering tests.
+- Remove any client-side aliasing or raw-name rule that the new explicit type replaces.
+
 ## Clean Code Rules (Practical)
 - Name by domain intent, not implementation detail.
 - Keep functions small and single-purpose.
