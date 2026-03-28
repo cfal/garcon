@@ -23,7 +23,12 @@
 		selectedChat: {
 			id: 'chat-1',
 			title: 'Header Test Chat',
-			projectPath: '/tmp/header-test'
+			projectPath: '/tmp/header-test',
+			provider: 'claude',
+			model: 'claude-sonnet-4-5',
+			status: 'running',
+			turnState: 'completed',
+			isProcessing: false,
 		}
 	} as never);
 
@@ -38,11 +43,14 @@
 
 	setModelCatalog({
 		version: 0,
-		getModels() {
+		getModels(provider: string) {
+			if (provider === 'claude') {
+				return [{ value: 'claude-sonnet-4-5', label: 'Sonnet 4.5' }];
+			}
 			return [];
 		},
 		getProviders() {
-			return ['claude', 'codex', 'opencode'];
+			return ['claude', 'codex', 'opencode', 'amp'];
 		}
 	} as never);
 

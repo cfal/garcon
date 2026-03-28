@@ -60,6 +60,21 @@ describe('PreferencesStore', () => {
 		expect(second.autoExpandTools).toBe(true);
 	});
 
+	it('accepts oled theme from persisted storage', () => {
+		localStorage.setItem('pref_preferences', JSON.stringify({ theme: 'oled' }));
+
+		const store = createPreferencesStore();
+		expect(store.theme).toBe('oled');
+	});
+
+	it('persists oled theme through storage', () => {
+		const first = createPreferencesStore();
+		first.setPreference('theme', 'oled');
+
+		const second = createPreferencesStore();
+		expect(second.theme).toBe('oled');
+	});
+
 	it('persists alwaysFullscreenOnGitPanel through storage', () => {
 		const first = createPreferencesStore();
 		first.setPreference('alwaysFullscreenOnGitPanel', false);

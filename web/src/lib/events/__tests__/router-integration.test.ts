@@ -41,6 +41,10 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		onExternalChatCreated: vi.fn(),
 		reconcileProcessing: vi.fn(),
 		setChatProcessing: vi.fn(),
+		markChatRunning: vi.fn(),
+		markChatCompleted: vi.fn(),
+		markChatIdle: vi.fn(),
+		markChatFailed: vi.fn(),
 		patchLastReadAt: vi.fn(),
 		enqueueReadReceipt: vi.fn(),
 		...overrides,
@@ -92,5 +96,16 @@ describe('event router integration', () => {
 
 		expect(stores.setIsLoading).not.toHaveBeenCalled();
 		expect(stores.setCanAbort).not.toHaveBeenCalled();
+		expect(stores.markChatCompleted).toHaveBeenCalledWith('chat-b');
+	});
+
+	it('marks background failures without touching the active transcript', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages([
+			{ type: 'agent-run-failed', chatId: 'chat-b', error: 'boom' },
+		], stores);
+
+		expect(stores.markChatFailed).toHaveBeenCalledWith('chat-b');
+		expect(stores.setChatMessages).not.toHaveBeenCalled();
 	});
 });

@@ -23,12 +23,16 @@ export interface ConversationRouterDeps {
 		byId: Record<string, ChatSessionRecord>;
 		order: string[];
 		hasChat: (chatId: string) => boolean;
-		patchPreview: (chatId: string, content: string) => void;
+		patchPreview: (chatId: string, content: string, timestamp?: string) => void;
 		patchChat: (chatId: string, patch: Record<string, unknown>) => void;
 		patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 		removeChat: (chatId: string) => void;
 		setSelectedChatId: (id: string | null) => void;
 		setChatProcessing: (chatId: string, isProcessing: boolean) => void;
+		markChatRunning: (chatId: string) => void;
+		markChatCompleted: (chatId: string) => void;
+		markChatIdle: (chatId: string) => void;
+		markChatFailed: (chatId: string) => void;
 		reconcileProcessing: (activeChatIds: Set<string>) => void;
 	};
 	chatState: ChatState;
@@ -95,9 +99,13 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 		setPreviousPermissionMode: deps.setPreviousPermissionMode,
 		reconcileProcessing: (activeChatIds) => deps.sessions.reconcileProcessing(activeChatIds),
 		setChatProcessing: (chatId, isProcessing) => deps.sessions.setChatProcessing(chatId, isProcessing),
+		markChatRunning: (chatId) => deps.sessions.markChatRunning(chatId),
+		markChatCompleted: (chatId) => deps.sessions.markChatCompleted(chatId),
+		markChatIdle: (chatId) => deps.sessions.markChatIdle(chatId),
+		markChatFailed: (chatId) => deps.sessions.markChatFailed(chatId),
 		startupCoordinator: deps.startupCoordinator,
 		onLocalStartupConfirmed: (chatId) => {
-			deps.sessions.setChatProcessing(chatId, true);
+			deps.sessions.markChatRunning(chatId);
 			deps.lifecycle.setCurrentChatId(chatId);
 			deps.sessions.setSelectedChatId(chatId);
 			goto(`/chat/${chatId}`);
@@ -109,7 +117,7 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			}
 		},
 		patchChatPreview: (chatId, content, _timestamp) => {
-			deps.sessions.patchPreview(chatId, content);
+			deps.sessions.patchPreview(chatId, content, _timestamp);
 		},
 		refreshChats: () => deps.appShell.quietRefreshChats(),
 		hasChat: (chatId) => deps.sessions.hasChat(chatId),

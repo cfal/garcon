@@ -59,6 +59,29 @@ describe('WorkspaceView header visibility', () => {
 		expect(screen.getByTitle('Fullscreen')).toBeTruthy();
 	});
 
+	it('shows provider, model, and status context in the top header', () => {
+		render(WorkspaceViewTestHarness, {
+			activeTab: 'chat',
+			showChatHeader: true,
+			isMobile: false
+		});
+
+		expect(screen.getByText('Claude')).toBeTruthy();
+		expect(screen.getByText('Sonnet 4.5')).toBeTruthy();
+		expect(screen.getByText('Ready')).toBeTruthy();
+	});
+
+	it('shows floating active-chat context when the chat header is hidden on desktop', () => {
+		render(WorkspaceViewTestHarness, {
+			activeTab: 'chat',
+			showChatHeader: false,
+			isMobile: false
+		});
+
+		expect(screen.getByText('Active chat')).toBeTruthy();
+		expect(screen.getByText('Ready')).toBeTruthy();
+	});
+
 	it('shows exit fullscreen title when desktop fullscreen is active', () => {
 		render(WorkspaceViewTestHarness, {
 			activeTab: 'chat',

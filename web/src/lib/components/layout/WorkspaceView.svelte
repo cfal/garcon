@@ -1,12 +1,14 @@
 <script lang="ts">
 	import type { AppTab } from '$lib/types/app';
-	import { getChatSessions, getPreferences } from '$lib/context';
+	import { getChatSessions, getModelCatalog, getPreferences } from '$lib/context';
 	import Menu from '@lucide/svelte/icons/menu';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
 	import ConversationWorkspace from '$lib/components/chat/ConversationWorkspace.svelte';
+	import ProviderBadge from '$lib/components/shared/ProviderBadge.svelte';
+	import { getChatVisualStatus } from '$lib/chat/chat-visual-status';
 	import { cn } from '$lib/utils/cn';
 	import { CHAT_TOOLBAR_TABS } from './chat-toolbar-tabs';
 
@@ -34,6 +36,7 @@
 
 	const sessions = getChatSessions();
 	const preferences = getPreferences();
+	const modelCatalog = getModelCatalog();
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
@@ -53,6 +56,18 @@
 
 	// Holds the chat submit function registered by ConversationWorkspace.
 	let chatSubmitFn = $state<((message: string) => Promise<boolean>) | null>(null);
+	const selectedChatProvider = $derived(selectedChat?.provider ?? 'claude');
+	const selectedChatTitle = $derived(selectedChat?.title || m.main_new_chat());
+	const selectedChatProjectPath = $derived(selectedChat?.projectPath ?? '');
+	const selectedChatStatus = $derived(selectedChat ? getChatVisualStatus(selectedChat) : null);
+	const selectedProjectLabel = $derived(selectedChat?.projectPath ? projectDisplayName(selectedChat.projectPath) : null);
+	const selectedChatModelLabel = $derived.by(() => {
+		if (!selectedChat?.provider || !selectedChat.model) return null;
+		return (
+			modelCatalog.getModels(selectedChat.provider).find((model) => model.value === selectedChat.model)?.label ??
+			selectedChat.model
+		);
+	});
 
 	function handleRegisterSubmit(fn: (message: string) => Promise<boolean>): void {
 		chatSubmitFn = fn;
@@ -64,7 +79,7 @@
 	}
 
 	function projectDisplayName(projectPath: string | undefined): string {
-		if (!projectPath) return 'Unknown';
+		if (!projectPath) return m.sidebar_details_unavailable();
 		const parts = projectPath.split('/').filter(Boolean);
 		return parts[parts.length - 1] || projectPath;
 	}
@@ -85,6 +100,31 @@
 		);
 	}
 </script>
+
+{#snippet chatContextMeta()}
+	<div class="mt-2 flex flex-wrap items-center gap-2">
+		<ProviderBadge provider={selectedChatProvider} />
+		{#if selectedChatModelLabel}
+			<span class="inline-flex items-center rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+				{selectedChatModelLabel}
+			</span>
+		{/if}
+		{#if selectedChatStatus?.label}
+			<span class={cn('inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold leading-none', selectedChatStatus.chipClass)}>
+				<span class={cn('size-1.5 rounded-full', selectedChatStatus.dotClass)}></span>
+				{selectedChatStatus.label}
+			</span>
+		{/if}
+		{#if selectedProjectLabel}
+			<span
+				class="inline-flex items-center rounded-full border border-border/70 bg-muted/45 px-2 py-1 text-[11px] font-medium text-muted-foreground"
+				title={selectedChatProjectPath}
+			>
+				{selectedProjectLabel}
+			</span>
+		{/if}
+	</div>
+{/snippet}
 
 <div class="h-full flex flex-col relative">
 	{#if !selectedChat?.projectPath}
@@ -108,11 +148,9 @@
 						{/if}
 						<div class="min-w-0 flex-1">
 							<h2 class="text-[15px] font-semibold text-foreground truncate">
-								{selectedChat.title || m.main_new_chat()}
+								{selectedChatTitle}
 							</h2>
-							<div class="text-xs text-muted-foreground truncate">
-								{projectDisplayName(selectedChat.projectPath)}
-							</div>
+							{@render chatContextMeta()}
 						</div>
 					</div>
 
@@ -161,6 +199,18 @@
 		{/if}
 
 		{#if showFloatingDesktopTabs}
+			<div class="absolute left-2 top-2 z-20 hidden sm:block">
+				<div class="max-w-[min(32rem,calc(100vw-16rem))] rounded-2xl border border-border/70 bg-background/92 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80">
+					<div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+						{m.workspace_active_chat_label()}
+					</div>
+					<div class="mt-1 truncate text-sm font-semibold text-foreground">
+						{selectedChatTitle}
+					</div>
+					{@render chatContextMeta()}
+				</div>
+			</div>
+
 			<div class="absolute right-2 top-2 z-20 hidden sm:block">
 				<div class="flex items-center gap-1.5">
 					<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-0.5 border border-chat-tabs-rail-border shadow-sm">
@@ -203,7 +253,7 @@
 
 		<!-- Tab content: ConversationWorkspace stays mounted, other tabs lazy-loaded -->
 		<div class="flex-1 min-h-0 overflow-hidden">
-			<div class="h-full" class:hidden={activeTab !== 'chat'}>
+			<div class={cn('h-full', showFloatingDesktopTabs && 'box-border pt-20')} class:hidden={activeTab !== 'chat'}>
 				<ConversationWorkspace onRegisterSubmit={handleRegisterSubmit} />
 			</div>
 			{#if activeTab === 'files'}

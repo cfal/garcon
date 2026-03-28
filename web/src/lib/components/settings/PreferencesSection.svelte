@@ -6,6 +6,7 @@
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
+	import CircleIcon from '@lucide/svelte/icons/circle';
 	import type { ThemeMode } from '$lib/stores/preferences.svelte.js';
 	import type { SessionProvider } from '$lib/types/app';
 	import { onMount } from 'svelte';
@@ -152,7 +153,7 @@
 					variant={preferences.theme === 'light' ? 'default' : 'ghost'}
 					size="icon-sm"
 					onclick={() => setTheme('light')}
-					title="Light"
+					title={m.settings_theme_light()}
 				>
 					<SunIcon class="size-3.5" />
 				</Button>
@@ -160,15 +161,23 @@
 					variant={preferences.theme === 'dark' ? 'default' : 'ghost'}
 					size="icon-sm"
 					onclick={() => setTheme('dark')}
-					title="Dark"
+					title={m.settings_theme_dark()}
 				>
 					<MoonIcon class="size-3.5" />
+				</Button>
+				<Button
+					variant={preferences.theme === 'oled' ? 'default' : 'ghost'}
+					size="icon-sm"
+					onclick={() => setTheme('oled')}
+					title={m.settings_theme_oled()}
+				>
+					<CircleIcon class="size-3.5 fill-current" />
 				</Button>
 				<Button
 					variant={preferences.theme === 'system' ? 'default' : 'ghost'}
 					size="icon-sm"
 					onclick={() => setTheme('system')}
-					title="System"
+					title={m.settings_theme_system()}
 				>
 					<MonitorIcon class="size-3.5" />
 				</Button>

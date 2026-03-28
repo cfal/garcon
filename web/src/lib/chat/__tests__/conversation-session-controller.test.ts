@@ -39,6 +39,7 @@ function createDeps(chat = createRunningChat()) {
 				patchLastReadAt: vi.fn(),
 				promoteDraft: vi.fn(),
 				setChatProcessing: vi.fn(),
+				markChatRunning: vi.fn(),
 				setSelectedChatId: vi.fn(),
 			},
 			chatState: {

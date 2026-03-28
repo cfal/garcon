@@ -184,6 +184,27 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.lastMessage).toBe('Hello world');
 	});
 
+	it('patchPreview advances activity timestamp and unread state when provided', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				activity: {
+					createdAt: '2026-03-28T00:00:00.000Z',
+					lastActivityAt: '2026-03-28T00:00:00.000Z',
+					lastReadAt: '2026-03-28T00:05:00.000Z',
+				},
+			}),
+		]);
+
+		store.patchPreview('a', 'Updated preview', '2026-03-28T00:06:00.000Z');
+
+		expect(store.byId['a']?.lastMessage).toBe('Updated preview');
+		expect(store.byId['a']?.lastActivityAt).toBe('2026-03-28T00:06:00.000Z');
+		expect(store.byId['a']?.isUnread).toBe(true);
+	});
+
 	it('patchChat updates arbitrary fields', () => {
 		const store = new ChatSessionsStore();
 
@@ -327,9 +348,11 @@ describe('ChatSessionsStore', () => {
 
 		store.setChatProcessing('a', true);
 		expect(store.byId['a']?.isProcessing).toBe(true);
+		expect(store.byId['a']?.turnState).toBe('running');
 
 		store.setChatProcessing('a', false);
 		expect(store.byId['a']?.isProcessing).toBe(false);
+		expect(store.byId['a']?.turnState).toBe('running');
 	});
 
 	it('setChatProcessing is a no-op for unknown chats', () => {
@@ -352,6 +375,65 @@ describe('ChatSessionsStore', () => {
 		store.setChatProcessing('a', false);
 
 		expect(store.byId).toBe(ref);
+	});
+
+	it('tracks completed, failed, and idle turn states', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		store.setChatProcessing('a', true);
+		store.markChatCompleted('a');
+
+		expect(store.byId['a']?.turnState).toBe('completed');
+		expect(store.byId['a']?.isProcessing).toBe(false);
+
+		store.setChatProcessing('a', true);
+		store.markChatFailed('a');
+
+		expect(store.byId['a']?.turnState).toBe('failed');
+		expect(store.byId['a']?.isProcessing).toBe(false);
+
+		store.setChatProcessing('a', true);
+		store.markChatIdle('a');
+
+		expect(store.byId['a']?.turnState).toBe('idle');
+		expect(store.byId['a']?.isProcessing).toBe(false);
+	});
+
+	it('markChatCompleted clears processing for consecutive completed turns', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		store.markChatCompleted('a');
+		store.markChatRunning('a');
+		store.markChatCompleted('a');
+
+		expect(store.byId['a']?.isProcessing).toBe(false);
+		expect(store.byId['a']?.turnState).toBe('completed');
+	});
+
+	it('markChatFailed clears processing for consecutive failed turns', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		store.markChatFailed('a');
+		store.markChatRunning('a');
+		store.markChatFailed('a');
+
+		expect(store.byId['a']?.isProcessing).toBe(false);
+		expect(store.byId['a']?.turnState).toBe('failed');
+	});
+
+	it('markChatRunning clears the previous terminal turn state for a new run', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		store.markChatCompleted('a');
+		store.markChatRunning('a');
+		store.setChatProcessing('a', false);
+
+		expect(store.byId['a']?.turnState).toBe('running');
+		expect(store.byId['a']?.isProcessing).toBe(false);
 	});
 
 	it('reconcileProcessing sets active chats to processing', () => {
@@ -384,6 +466,7 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['a']?.isProcessing).toBe(false);
 		expect(store.byId['b']?.isProcessing).toBe(true);
+		expect(store.byId['a']?.turnState).toBe('running');
 	});
 
 	it('reconcileProcessing does not mutate when nothing changes', () => {
@@ -401,16 +484,101 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId).toBe(ref);
 	});
 
-	it('upsertFromServer preserves WS-authoritative isProcessing over stale REST snapshot', () => {
+	it('upsertFromServer preserves terminal turn state over later server snapshots', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		store.setChatProcessing('a', true);
+		store.markChatCompleted('a');
 
 		store.upsertFromServer([makeServerSession({ id: 'a', title: 'Updated' })]);
 
-		expect(store.byId['a']?.isProcessing).toBe(true);
+		expect(store.byId['a']?.isProcessing).toBe(false);
+		expect(store.byId['a']?.turnState).toBe('completed');
 		expect(store.byId['a']?.title).toBe('Updated');
+	});
+
+	it('upsertFromServer clears stale processing when only isActive changes', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({ id: 'a', isActive: true })]);
+		expect(store.byId['a']?.isProcessing).toBe(true);
+
+		store.upsertFromServer([makeServerSession({ id: 'a', isActive: false })]);
+
+		expect(store.byId['a']?.isProcessing).toBe(false);
+		expect(store.byId['a']?.turnState).toBe('running');
+	});
+
+	it('upsertFromServer clears stale terminal state when the server reports an active chat', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		store.markChatFailed('a');
+
+		store.upsertFromServer([makeServerSession({ id: 'a', isActive: true })]);
+
+		expect(store.byId['a']?.isProcessing).toBe(true);
+		expect(store.byId['a']?.turnState).toBe('running');
+	});
+
+	it('buffers terminal state for chats that arrive after lifecycle events', () => {
+		const store = new ChatSessionsStore();
+
+		store.markChatFailed('late-chat');
+		store.upsertFromServer([makeServerSession({ id: 'late-chat' })]);
+
+		expect(store.byId['late-chat']?.turnState).toBe('failed');
+		expect(store.byId['late-chat']?.isProcessing).toBe(false);
+		expect(store.pendingTurnStateByChatId['late-chat']).toBeUndefined();
+	});
+
+	it('reconcileProcessing clears stale terminal state when a new run only appears in snapshots', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		store.markChatFailed('a');
+
+		store.reconcileProcessing(new Set(['a']));
+		store.reconcileProcessing(new Set());
+
+		expect(store.byId['a']?.isProcessing).toBe(false);
+		expect(store.byId['a']?.turnState).toBe('running');
+	});
+
+	it('drops buffered terminal state when the server says the chat is already active', () => {
+		const store = new ChatSessionsStore();
+
+		store.markChatCompleted('late-chat');
+		store.upsertFromServer([makeServerSession({ id: 'late-chat', isActive: true })]);
+
+		expect(store.byId['late-chat']?.isProcessing).toBe(true);
+		expect(store.byId['late-chat']?.turnState).toBe('running');
+		expect(store.pendingTurnStateByChatId['late-chat']).toBeUndefined();
+	});
+
+	it('preserves a completed turn that finishes before a draft is promoted', () => {
+		const store = new ChatSessionsStore();
+
+		store.createDraft({
+			id: 'draft-fast',
+			projectPath: '/repo',
+			startup: {
+				provider: 'claude',
+				model: 'opus',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				firstMessage: 'Hello',
+			},
+		});
+
+		store.markChatRunning('draft-fast');
+		store.markChatCompleted('draft-fast');
+		store.promoteDraft('draft-fast');
+
+		expect(store.byId['draft-fast']?.status).toBe('running');
+		expect(store.byId['draft-fast']?.isProcessing).toBe(false);
+		expect(store.byId['draft-fast']?.turnState).toBe('completed');
 	});
 
 	it('reconcileProcessing after upsertFromServer correctly sets processing state', () => {

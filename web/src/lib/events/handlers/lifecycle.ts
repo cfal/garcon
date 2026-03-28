@@ -17,6 +17,8 @@ export interface LifecycleContext {
 	) => void;
 	clearLoadingIndicators: (chatId?: string | null) => void;
 	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
+	markChatsAsIdle: (...ids: Array<string | null | undefined>) => void;
+	markChatsAsFailed: (...ids: Array<string | null | undefined>) => void;
 	onNavigateToChat?: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	clearPendingChatId: () => void;
@@ -28,7 +30,11 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	const completedChatId = msg.chatId || ctx.currentChatId || pendingChatId;
 
 	ctx.clearLoadingIndicators(completedChatId);
-	ctx.markChatsAsCompleted(completedChatId);
+	if (msg.exitCode === 1) {
+		ctx.markChatsAsIdle(completedChatId);
+	} else {
+		ctx.markChatsAsCompleted(completedChatId);
+	}
 
 	// Navigate to completed chat if it was pending and didn't error
 	if (pendingChatId && !ctx.currentChatId && msg.exitCode !== 1) {
@@ -54,7 +60,7 @@ export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleConte
 	const errorChatId = msg.chatId || ctx.currentChatId;
 
 	ctx.clearLoadingIndicators(errorChatId);
-	ctx.markChatsAsCompleted(errorChatId);
+	ctx.markChatsAsFailed(errorChatId);
 
 	ctx.setChatMessages((prev) => [
 		...prev,

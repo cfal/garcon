@@ -22,12 +22,38 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 		isProcessing: session.isActive,
 		isUnread: session.isUnread ?? false,
 		status: 'running',
+		turnState: session.isActive ? 'running' : 'idle',
 		lastMessage: session.preview?.lastMessage || undefined,
 		tags: session.tags ?? [],
 		firstMessage: session.preview?.firstMessage || undefined,
 	};
 }
 
+function withTurnState(record: ChatSessionRecord, turnState: ChatSessionRecord['turnState']): ChatSessionRecord {
+	return {
+		...record,
+		isProcessing: turnState === 'running',
+		turnState,
+	};
+}
+
+function withProcessingState(record: ChatSessionRecord, isProcessing: boolean): ChatSessionRecord {
+	return {
+		...record,
+		isProcessing,
+	};
+}
+
+function reconcileServerRecord(next: ChatSessionRecord, prev?: ChatSessionRecord): ChatSessionRecord {
+	if (!prev) {
+		return next;
+	}
+
+	return {
+		...next,
+		turnState: next.isProcessing ? 'running' : (prev.turnState ?? next.turnState),
+	};
+}
 function arraysEqual(a: string[], b: string[]): boolean {
 	if (a.length !== b.length) return false;
 	for (let i = 0; i < a.length; i++) {
@@ -50,8 +76,10 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.lastReadAt === b.lastReadAt &&
 		a.isPinned === b.isPinned &&
 		a.isArchived === b.isArchived &&
+		a.isProcessing === b.isProcessing &&
 		a.isUnread === b.isUnread &&
 		a.status === b.status &&
+		a.turnState === b.turnState &&
 		a.lastMessage === b.lastMessage &&
 		a.firstMessage === b.firstMessage &&
 		arraysEqual(a.tags, b.tags)
@@ -63,6 +91,7 @@ export class ChatSessionsStore {
 	order = $state<string[]>([]);
 	selectedChatId = $state<string | null>(null);
 	startupByChatId = $state<Record<string, ChatStartupConfig>>({});
+	pendingTurnStateByChatId = $state<Record<string, ChatSessionRecord['turnState']>>({});
 
 	get selectedChat(): ChatSessionRecord | null {
 		if (!this.selectedChatId) return null;
@@ -95,6 +124,7 @@ export class ChatSessionsStore {
 	upsertFromServer(sessions: ChatSession[]): void {
 		const nextById: Record<string, ChatSessionRecord> = {};
 		const nextOrder: string[] = [];
+		const nextPendingTurnStateByChatId = { ...this.pendingTurnStateByChatId };
 
 		// Preserve drafts that the server doesn't know about yet.
 		for (const [id, record] of Object.entries(this.byId)) {
@@ -106,16 +136,17 @@ export class ChatSessionsStore {
 		for (const session of sessions) {
 			const next = toRecord(session);
 			const prev = this.byId[next.id];
-			if (prev && sameRecord(prev, next)) {
+			const pendingTurnState = nextPendingTurnStateByChatId[next.id];
+			const reconciled = reconcileServerRecord(next, prev);
+			if (prev && sameRecord(prev, reconciled)) {
 				nextById[next.id] = prev;
 			} else {
-				// Preserve WS-authoritative isProcessing flag; the REST
-				// isActive snapshot can lag behind real-time WS events.
-				if (prev?.isProcessing && !next.isProcessing) {
-					next.isProcessing = true;
-				}
-				nextById[next.id] = next;
+				nextById[next.id] = reconciled;
 			}
+			if (pendingTurnState && !nextById[next.id].isProcessing) {
+				nextById[next.id] = withTurnState(nextById[next.id], pendingTurnState);
+			}
+			delete nextPendingTurnStateByChatId[next.id];
 			nextOrder.push(next.id);
 
 			// Cleanup stale startup state once server has authoritative chat.
@@ -137,6 +168,7 @@ export class ChatSessionsStore {
 
 		this.byId = nextById;
 		this.order = [...draftOrder, ...nextOrder];
+		this.pendingTurnStateByChatId = nextPendingTurnStateByChatId;
 	}
 
 	createDraft(params: {
@@ -162,6 +194,7 @@ export class ChatSessionsStore {
 			isProcessing: false,
 			isUnread: false,
 			status: 'draft',
+			turnState: 'idle',
 			tags: [],
 			firstMessage: undefined,
 		};
@@ -196,6 +229,7 @@ export class ChatSessionsStore {
 			[chatId]: {
 				...chat,
 				status: 'running',
+				turnState: chat.turnState ?? 'idle',
 			},
 		};
 
@@ -214,9 +248,12 @@ export class ChatSessionsStore {
 
 		const nextStartup = { ...this.startupByChatId };
 		delete nextStartup[chatId];
+		const nextPendingTurnState = { ...this.pendingTurnStateByChatId };
+		delete nextPendingTurnState[chatId];
 
 		this.byId = nextById;
 		this.startupByChatId = nextStartup;
+		this.pendingTurnStateByChatId = nextPendingTurnState;
 		this.order = this.order.filter((id) => id !== chatId);
 
 		if (this.selectedChatId === chatId) {
@@ -225,13 +262,32 @@ export class ChatSessionsStore {
 	}
 
 	/** Patches preview text for a chat in the sidebar. */
-	patchPreview(chatId: string, content: string): void {
+	patchPreview(chatId: string, content: string, timestamp?: string): void {
 		const chat = this.byId[chatId];
 		if (!chat) return;
-		if ((chat.lastMessage || '') === content) return;
+		const nextLastActivityAt =
+			timestamp && (!chat.lastActivityAt || timestamp > chat.lastActivityAt)
+				? timestamp
+				: chat.lastActivityAt;
+		const nextIsUnread =
+			timestamp && timestamp !== chat.lastReadAt
+				? !chat.lastReadAt || timestamp > chat.lastReadAt
+				: chat.isUnread;
+		if (
+			(chat.lastMessage || '') === content &&
+			nextLastActivityAt === chat.lastActivityAt &&
+			nextIsUnread === chat.isUnread
+		) {
+			return;
+		}
 		this.byId = {
 			...this.byId,
-			[chatId]: { ...chat, lastMessage: content },
+			[chatId]: {
+				...chat,
+				lastMessage: content,
+				lastActivityAt: nextLastActivityAt,
+				isUnread: nextIsUnread,
+			},
 		};
 	}
 
@@ -263,10 +319,63 @@ export class ChatSessionsStore {
 	 *  doesn't exist or the value is already correct. */
 	setChatProcessing(chatId: string, isProcessing: boolean): void {
 		const chat = this.byId[chatId];
-		if (!chat || chat.isProcessing === isProcessing) return;
+		if (!chat) return;
+		const nextChat = isProcessing ? withTurnState(chat, 'running') : withProcessingState(chat, false);
+		if (chat.isProcessing === nextChat.isProcessing && chat.turnState === nextChat.turnState) return;
 		this.byId = {
 			...this.byId,
-			[chatId]: { ...chat, isProcessing },
+			[chatId]: nextChat,
+		};
+	}
+
+	markChatRunning(chatId: string): void {
+		const chat = this.byId[chatId];
+		if (!chat || (chat.isProcessing && chat.turnState === 'running')) return;
+		this.byId = {
+			...this.byId,
+			[chatId]: withTurnState(chat, 'running'),
+		};
+	}
+
+	markChatCompleted(chatId: string): void {
+		const chat = this.byId[chatId];
+		if (!chat) {
+			if (this.pendingTurnStateByChatId[chatId] === 'completed') return;
+			this.pendingTurnStateByChatId = { ...this.pendingTurnStateByChatId, [chatId]: 'completed' };
+			return;
+		}
+		if (chat.turnState === 'completed' && !chat.isProcessing) return;
+		this.byId = {
+			...this.byId,
+			[chatId]: withTurnState(chat, 'completed'),
+		};
+	}
+
+	markChatIdle(chatId: string): void {
+		const chat = this.byId[chatId];
+		if (!chat) {
+			if (this.pendingTurnStateByChatId[chatId] === 'idle') return;
+			this.pendingTurnStateByChatId = { ...this.pendingTurnStateByChatId, [chatId]: 'idle' };
+			return;
+		}
+		if (!chat || (chat.turnState === 'idle' && !chat.isProcessing)) return;
+		this.byId = {
+			...this.byId,
+			[chatId]: withTurnState(chat, 'idle'),
+		};
+	}
+
+	markChatFailed(chatId: string): void {
+		const chat = this.byId[chatId];
+		if (!chat) {
+			if (this.pendingTurnStateByChatId[chatId] === 'failed') return;
+			this.pendingTurnStateByChatId = { ...this.pendingTurnStateByChatId, [chatId]: 'failed' };
+			return;
+		}
+		if (chat.turnState === 'failed' && !chat.isProcessing) return;
+		this.byId = {
+			...this.byId,
+			[chatId]: withTurnState(chat, 'failed'),
 		};
 	}
 
@@ -284,10 +393,11 @@ export class ChatSessionsStore {
 
 		for (const [id, record] of Object.entries(nextById)) {
 			const shouldBeProcessing = activeChatIds.has(id);
-			if (record.isProcessing !== shouldBeProcessing) {
-				nextById[id] = { ...record, isProcessing: shouldBeProcessing };
+			const nextRecord = shouldBeProcessing ? withTurnState(record, 'running') : withProcessingState(record, false);
+			if (record.isProcessing !== nextRecord.isProcessing || record.turnState !== nextRecord.turnState) {
+				nextById[id] = nextRecord;
 				changed = true;
-			}
+		}
 		}
 
 		if (changed) {

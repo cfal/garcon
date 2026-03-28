@@ -6,7 +6,6 @@ import {
 import {
 	UserMessage,
 	AssistantMessage,
-	ThinkingMessage,
 	ToolResultMessage,
 	UnknownToolUseMessage,
 } from '$shared/chat-types';
@@ -64,14 +63,14 @@ describe('selectPreviewFromBatch', () => {
 		expect(selectPreviewFromBatch(messages)).toBeNull();
 	});
 
-	it('returns first line of thinking content when no assistant/user message is newer', () => {
+	it('ignores thinking content when choosing a sidebar preview', () => {
 		const messages: ChatMessage[] = [
 			new UserMessage('2024-01-01T00:00:00Z', 'hello'),
-			new ThinkingMessage('2024-01-01T00:00:01Z', 'working on it\nstep two'),
+			new ToolResultMessage('2024-01-01T00:00:01Z', 't1', {}, false),
 		];
 
 		const preview = selectPreviewFromBatch(messages);
-		expect(preview).toEqual({ content: 'working on it', timestamp: '2024-01-01T00:00:01Z' });
+		expect(preview).toEqual({ content: 'hello', timestamp: '2024-01-01T00:00:00Z' });
 	});
 
 	it('truncates content to 200 characters', () => {

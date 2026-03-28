@@ -23,6 +23,8 @@
 		DropdownMenuSeparator
 	} from '$lib/components/ui/dropdown-menu';
 	import ColoredTag from '../shared/ColoredTag.svelte';
+	import ProviderBadge from '../shared/ProviderBadge.svelte';
+	import { getChatVisualStatus } from '$lib/chat/chat-visual-status';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -68,7 +70,6 @@
 		onMoveToBottom,
 	}: SidebarChatItemProps = $props();
 
-	let isProcessing = $derived(session.isProcessing);
 	let isUnread = $derived(session.isUnread && selectedChatId !== session.id);
 
 	let visibleTags = $derived(session.tags.slice(0, 2));
@@ -92,20 +93,8 @@
 	let isSelected = $derived(selectedChatId === session.id);
 	let projectPath = $derived(session.projectPath || '');
 	let provider = $derived(session.provider || 'claude');
-
-	const PROVIDER_TAG_VARIANTS: Record<SessionProvider, string> = {
-		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
-		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
-		opencode: 'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
-		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
-	};
-	let providerTagVariant = $derived(PROVIDER_TAG_VARIANTS[provider] ?? PROVIDER_TAG_VARIANTS.claude);
-	let providerTagLabel = $derived(
-		provider === 'codex' ? m.provider_codex()
-		: provider === 'opencode' ? m.provider_opencode()
-		: provider === 'amp' ? m.provider_amp()
-		: m.provider_claude()
-	);
+	let visualStatus = $derived(getChatVisualStatus(session));
+	let activityLabel = $derived(formatRelativeActivity(session.lastActivityAt ?? session.createdAt, currentTime));
 
 	let cornerBadgeClass = $derived(
 		isPinned
@@ -130,6 +119,21 @@
 
 	function requestDetails() {
 		onShowDetails(session.id, chatName);
+	}
+
+	function formatRelativeActivity(timestamp: string | null, now: Date): string {
+		if (!timestamp) return '';
+		const date = new Date(timestamp);
+		const diffMs = now.getTime() - date.getTime();
+		if (!Number.isFinite(diffMs) || diffMs < 0) return '';
+		const minutes = Math.floor(diffMs / 60_000);
+		if (minutes < 1) return m.filetree_just_now();
+		if (minutes < 60) return `${minutes}m`;
+		const hours = Math.floor(minutes / 60);
+		if (hours < 24) return `${hours}h`;
+		const days = Math.floor(hours / 24);
+		if (days < 7) return `${days}d`;
+		return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
 	}
 
 	let menuOpen = $state(false);
@@ -182,6 +186,56 @@
 	}));
 </script>
 
+{#snippet chatItemContent()}
+	<div class="min-w-0 w-full">
+		<div class="flex items-start gap-2">
+			<div class="min-w-0 flex-1">
+				<div class="flex items-center gap-1.5 truncate text-[14px] font-medium {isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground'}">
+					{#if isUnread}
+						<span class="size-1.5 shrink-0 rounded-full bg-indicator-unread" aria-label={m.sidebar_chat_unread()}></span>
+					{/if}
+					<span class="truncate">{chatName}</span>
+				</div>
+				{#if projectPath}
+					<div
+						class="mt-0.5 truncate text-[11px] {isSelected ? 'text-sidebar-chat-item-selected-foreground/80' : 'text-muted-foreground'}"
+						title={projectPath}
+					>
+						{prefixEllipsis(projectPath)}
+					</div>
+				{/if}
+			</div>
+			<div class="ml-2 flex shrink-0 flex-col items-end gap-1 text-right">
+				{#if activityLabel}
+					<span class="text-[10px] font-medium uppercase tracking-[0.14em] {isSelected ? 'text-sidebar-chat-item-selected-foreground/70' : 'text-muted-foreground'}">
+						{activityLabel}
+					</span>
+				{/if}
+				{#if visualStatus.label}
+					<span class={cn('inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-none', visualStatus.chipClass)}>
+						<span class={cn('size-1.5 rounded-full', visualStatus.dotClass)}></span>
+						{visualStatus.label}
+					</span>
+				{/if}
+			</div>
+		</div>
+
+		<div class="mt-1.5 truncate text-[12px] leading-4 {isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-muted-foreground'}">
+			{lastMessage || m.chat_messages_no_messages()}
+		</div>
+
+		<div class="mt-2 flex items-center gap-1.5 flex-wrap">
+			<ProviderBadge provider={provider} />
+			{#each visibleTags as tag (tag)}
+				<ColoredTag label={tag} variant="border-border bg-muted text-muted-foreground" />
+			{/each}
+			{#if overflowCount > 0}
+				<span class="text-[10px] font-medium text-muted-foreground">+{overflowCount}</span>
+			{/if}
+		</div>
+	</div>
+{/snippet}
+
 <div class="chat-item-root group relative" bind:this={itemEl}>
 	<!-- Status corner badge stays away from the top-right menu trigger. -->
 		{#if isPinned || isArchived}
@@ -201,37 +255,13 @@
 	<div class="md:hidden">
 			<button
 					class={cn(
-						'w-full text-left py-[5px] pr-2 pl-[7px] mx-0 my-0 rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg border-b border-border/30 active:scale-[0.98] transition-all duration-150 relative',
-					isSelected ? 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground' : '',
-						isProcessing ? 'border-l-[3px] border-l-status-processing' : '',
+						'w-full text-left py-[7px] pr-2 pl-[7px] mx-0 my-0 rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg border-b border-border/30 border-l-2 active:scale-[0.98] transition-all duration-150 relative',
+						isSelected && 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
+						visualStatus.accentClass,
 				)}
 				onclick={selectChat}
 			>
-			<div class="min-w-0 flex-1">
-						<div class="text-[14px] font-medium truncate flex items-center gap-1.5 {isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground'}">
-						{#if isUnread}
-							<span class="w-1.5 h-1.5 shrink-0 rounded-full bg-indicator-unread" aria-label={m.sidebar_chat_unread()}></span>
-						{/if}
-					{chatName}
-				</div>
-						{#if projectPath}
-							<div class="text-[11px] truncate {isSelected ? 'text-sidebar-chat-item-selected-foreground/80' : 'text-muted-foreground'}" title={projectPath}>
-							{prefixEllipsis(projectPath)}
-						</div>
-					{/if}
-						<div class="text-[13px] italic truncate {isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80'}">
-							{lastMessage || '\u00A0'}
-						</div>
-					<div class="mt-1 flex items-center gap-1">
-						<ColoredTag label={providerTagLabel} variant={providerTagVariant} />
-						{#each visibleTags as tag (tag)}
-							<ColoredTag label={tag} variant="border-border bg-muted text-muted-foreground" />
-						{/each}
-						{#if overflowCount > 0}
-							<span class="text-[10px] text-muted-foreground">+{overflowCount}</span>
-						{/if}
-					</div>
-			</div>
+				{@render chatItemContent()}
 		</button>
 	</div>
 
@@ -241,37 +271,13 @@
 				variant="ghost"
 				oncontextmenu={handleRightClick}
 					class={cn(
-						'w-full justify-start py-[5px] pr-2 pl-[7px] h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30 border-l-2 border-l-transparent',
+						'w-full justify-start py-[7px] pr-2 pl-[7px] h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30 border-l-2',
 					isSelected && 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
-					isProcessing && 'border-l-[3px] border-l-status-processing',
+					visualStatus.accentClass,
 				)}
 			onclick={selectChat}
 		>
-			<div class="min-w-0 w-full">
-						<div class="text-[14px] font-medium truncate flex items-center gap-1.5 {isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground'}">
-					{#if isUnread}
-						<span class="w-1.5 h-1.5 shrink-0 rounded-full bg-indicator-unread" aria-label={m.sidebar_chat_unread()}></span>
-					{/if}
-					{chatName}
-				</div>
-						{#if projectPath}
-								<div class="text-[11px] truncate {isSelected ? 'text-sidebar-chat-item-selected-foreground/80' : 'text-muted-foreground'}" title={projectPath}>
-							{prefixEllipsis(projectPath)}
-						</div>
-					{/if}
-							<div class="text-[13px] italic truncate {isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80'}">
-							{lastMessage || '\u00A0'}
-						</div>
-					<div class="mt-1 flex items-center gap-1">
-						<ColoredTag label={providerTagLabel} variant={providerTagVariant} />
-						{#each visibleTags as tag (tag)}
-							<ColoredTag label={tag} variant="border-border bg-muted text-muted-foreground" />
-						{/each}
-						{#if overflowCount > 0}
-							<span class="text-[10px] text-muted-foreground">+{overflowCount}</span>
-						{/if}
-					</div>
-			</div>
+				{@render chatItemContent()}
 		</Button>
 	</div>
 

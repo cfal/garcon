@@ -20,6 +20,7 @@ function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 		activateLoadingFor: vi.fn(),
 		clearLoadingIndicators: vi.fn(),
 		markChatsAsCompleted: vi.fn(),
+		markChatsAsIdle: vi.fn(),
 		setCanAbort: vi.fn(),
 		startupCoordinator: new StartupCoordinator(),
 		onChatProcessing: vi.fn(),

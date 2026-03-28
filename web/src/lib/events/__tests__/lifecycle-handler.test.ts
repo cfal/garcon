@@ -11,6 +11,8 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 		setPendingPermissionRequests: vi.fn(),
 		clearLoadingIndicators: vi.fn(),
 		markChatsAsCompleted: vi.fn(),
+		markChatsAsIdle: vi.fn(),
+		markChatsAsFailed: vi.fn(),
 		getPendingChatId: () => null,
 		clearPendingChatId: vi.fn(),
 		markChatSnapshotValidated: vi.fn(),
@@ -29,6 +31,7 @@ describe('handleAgentComplete', () => {
 		const ctx = createCtx();
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 1), ctx);
 		expect(ctx.markChatSnapshotValidated).not.toHaveBeenCalled();
+		expect(ctx.markChatsAsIdle).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('clears loading indicators and marks completed', () => {
@@ -78,7 +81,7 @@ describe('handleAgentError', () => {
 		handleAgentError(new AgentRunFailedMessage('chat-1', 'Something broke'), ctx);
 
 		expect(ctx.clearLoadingIndicators).toHaveBeenCalledWith('chat-1');
-		expect(ctx.markChatsAsCompleted).toHaveBeenCalledWith('chat-1');
+		expect(ctx.markChatsAsFailed).toHaveBeenCalledWith('chat-1');
 		expect(ctx.setChatMessages).toHaveBeenCalledWith(expect.any(Function));
 		expect(ctx.setPendingPermissionRequests).toHaveBeenCalledWith([]);
 	});

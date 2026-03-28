@@ -5,7 +5,7 @@ import type { SessionProvider } from '$lib/types/app';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '$shared/models';
 
 // Persisted preference fields.
-export type ThemeMode = 'dark' | 'light' | 'system';
+export type ThemeMode = 'dark' | 'light' | 'system' | 'oled';
 
 export interface PreferencesState {
 	theme: ThemeMode;
@@ -32,6 +32,8 @@ export interface PreferencesState {
 }
 
 const STORAGE_KEY = 'pref_preferences';
+const VALID_THEMES = ['dark', 'light', 'system', 'oled'] as const;
+const VALID_PROVIDERS: SessionProvider[] = ['claude', 'codex', 'opencode', 'amp'];
 
 const DEFAULTS: PreferencesState = {
 	theme: 'system',
@@ -66,7 +68,7 @@ function readPersisted(): PreferencesState {
 			if (parsed && typeof parsed === 'object') {
 				return {
 					theme:
-						typeof parsed.theme === 'string' && ['dark', 'light', 'system'].includes(parsed.theme)
+						typeof parsed.theme === 'string' && VALID_THEMES.includes(parsed.theme as ThemeMode)
 							? (parsed.theme as ThemeMode)
 							: DEFAULTS.theme,
 					colorblindMode:
@@ -102,7 +104,7 @@ function readPersisted(): PreferencesState {
 							? parsed.sidebarVisible
 							: DEFAULTS.sidebarVisible,
 					selectedProvider:
-						typeof parsed.selectedProvider === 'string'
+						typeof parsed.selectedProvider === 'string' && VALID_PROVIDERS.includes(parsed.selectedProvider as SessionProvider)
 							? (parsed.selectedProvider as SessionProvider)
 							: DEFAULTS.selectedProvider,
 					claudeModel:

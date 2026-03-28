@@ -5,6 +5,7 @@ import type { SessionProvider } from '$lib/types/app';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 
 export type ChatStatus = 'draft' | 'running';
+export type ChatTurnState = 'idle' | 'running' | 'completed' | 'failed';
 
 export interface ChatStartupConfig {
 	provider: SessionProvider;
@@ -31,6 +32,7 @@ export interface ChatSessionRecord {
 	isProcessing: boolean;
 	isUnread: boolean;
 	status: ChatStatus;
+	turnState?: ChatTurnState;
 	lastMessage?: string;
 	tags: string[];
 	firstMessage?: string;

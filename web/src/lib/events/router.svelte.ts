@@ -21,7 +21,7 @@ import {
 	ChatReadUpdatedV1Message,
 	ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
-import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
+import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { ChatMessage, PendingPermissionRequest, PendingViewChat, PermissionMode, QueueState } from '$lib/types/chat';
 import type { ChatEntry, SessionProvider } from '$lib/types/app';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
@@ -89,6 +89,10 @@ export interface EventRouterStores {
 	// Session store reconciliation for chat-sessions-running snapshot
 	reconcileProcessing: (runningChatIds: Set<string>) => void;
 	setChatProcessing: (chatId: string, isProcessing: boolean) => void;
+	markChatRunning: (chatId: string) => void;
+	markChatCompleted: (chatId: string) => void;
+	markChatIdle: (chatId: string) => void;
+	markChatFailed: (chatId: string) => void;
 	// Read state for unread indicators
 	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 	enqueueReadReceipt: (chatId: string, readAt: string) => void;
@@ -113,7 +117,7 @@ export function selectPreviewFromBatch(
 ): { content: string; timestamp: string } | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
-		if (msg instanceof AssistantMessage || msg instanceof UserMessage || msg instanceof ThinkingMessage) {
+		if (msg instanceof AssistantMessage || msg instanceof UserMessage) {
 			return {
 				content: extractFirstLine(String(msg.content || '')).slice(0, 200),
 				timestamp: msg.timestamp,
@@ -153,16 +157,34 @@ function createHelpers(stores: EventRouterStores) {
 			chatIds.filter((id): id is string => typeof id === 'string' && id.length > 0),
 		);
 		for (const id of unique) {
-			stores.setChatProcessing(id, false);
+			stores.markChatCompleted(id);
 		}
 	};
 
-	return { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted };
+	const markChatsAsIdle = (...chatIds: Array<string | null | undefined>) => {
+		const unique = new Set(
+			chatIds.filter((id): id is string => typeof id === 'string' && id.length > 0),
+		);
+		for (const id of unique) {
+			stores.markChatIdle(id);
+		}
+	};
+
+	const markChatsAsFailed = (...chatIds: Array<string | null | undefined>) => {
+		const unique = new Set(
+			chatIds.filter((id): id is string => typeof id === 'string' && id.length > 0),
+		);
+		for (const id of unique) {
+			stores.markChatFailed(id);
+		}
+	};
+
+	return { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted, markChatsAsIdle, markChatsAsFailed };
 }
 
 // Builds the dispatch table mapping EventKey to handler functions.
 function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
-	const { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted } = createHelpers(stores);
+	const { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted, markChatsAsIdle, markChatsAsFailed } = createHelpers(stores);
 
 	const selectedChat = stores.selectedChat();
 	const currentChatId = stores.currentChatId();
@@ -173,7 +195,7 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 		? (chatId: string) => stores.navigateToChat!(chatId)
 		: undefined;
 	const onChatProcessing = (chatId?: string | null) => {
-		if (chatId) stores.setChatProcessing(chatId, true);
+		if (chatId) stores.markChatRunning(chatId);
 	};
 	const onChatNotProcessing = (chatId?: string | null) => {
 		if (chatId) stores.setChatProcessing(chatId, false);
@@ -201,6 +223,8 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 		setPendingPermissionRequests: stores.setPendingPermissionRequests,
 		clearLoadingIndicators,
 		markChatsAsCompleted,
+		markChatsAsIdle,
+		markChatsAsFailed,
 		onNavigateToChat,
 		getPendingChatId,
 		clearPendingChatId,
@@ -222,6 +246,7 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 		activateLoadingFor,
 		clearLoadingIndicators,
 		markChatsAsCompleted,
+		markChatsAsIdle,
 		setCanAbort: stores.setCanAbort,
 		onChatProcessing,
 		onChatNotProcessing,
@@ -345,6 +370,26 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 	};
 }
 
+function applySkippedLifecycleState(message: ServerWsMessage, stores: EventRouterStores): void {
+	if (message instanceof AgentRunFinishedMessage && message.chatId) {
+		if (message.exitCode === 1) {
+			stores.markChatIdle(message.chatId);
+			return;
+		}
+		stores.markChatCompleted(message.chatId);
+		return;
+	}
+
+	if (message instanceof AgentRunFailedMessage && message.chatId) {
+		stores.markChatFailed(message.chatId);
+		return;
+	}
+
+	if (message instanceof ChatSessionStoppedMessage && message.chatId) {
+		stores.markChatIdle(message.chatId);
+	}
+}
+
 // Creates a Svelte 5 $effect that drains the WsConnection on each
 // messageVersion tick and dispatches normalized events to handlers.
 // Returns a cleanup function to unregister the drain cursor.
@@ -364,15 +409,12 @@ export function createEventRouter(
 			const newMessages = drainHandle.drain();
 			if (newMessages.length === 0) return;
 
-			const dispatch = buildDispatch(stores);
-
-			const selectedChat = stores.selectedChat();
-			const currentChatId = stores.currentChatId();
-			const pendingViewChatId = stores.pendingViewChat()?.chatId || null;
-
 			for (const wsMsg of newMessages) {
 				const event = normalizeEvent(wsMsg.data);
 				if (!event) continue;
+				const selectedChat = stores.selectedChat();
+				const currentChatId = stores.currentChatId();
+				const pendingViewChatId = stores.pendingViewChat()?.chatId || null;
 
 				// Pre-filter: patch sidebar preview for any chat so background
 				// chats update even when the filter skips full dispatch.
@@ -398,8 +440,12 @@ export function createEventRouter(
 					pendingViewChatId,
 				});
 
-				if (filterResult.action === 'skip') continue;
+				if (filterResult.action === 'skip') {
+					applySkippedLifecycleState(event.message, stores);
+					continue;
+				}
 
+				const dispatch = buildDispatch(stores);
 				const handler = dispatch[event.key];
 				if (handler) handler(event.message);
 			}

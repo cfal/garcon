@@ -50,16 +50,18 @@
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
 	const DARK_THEME_COLOR = '#0c1117';
+	const OLED_THEME_COLOR = '#000000';
 	const LIGHT_THEME_COLOR = '#ffffff';
 
-	function applyThemeDom(isDark: boolean): void {
+	function applyThemeDom(isDark: boolean, isOled = false): void {
 		document.documentElement.classList.toggle('dark', isDark);
+		document.documentElement.classList.toggle('oled', isOled);
 		document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
 
 		const statusBarMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
 		statusBarMeta?.setAttribute('content', isDark ? 'black-translucent' : 'default');
 
-		const themeColor = isDark ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
+		const themeColor = isOled ? OLED_THEME_COLOR : isDark ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
 		const themeColorMetas = document.querySelectorAll('meta[name="theme-color"]');
 		themeColorMetas.forEach((meta) => meta.setAttribute('content', themeColor));
 	}
@@ -68,6 +70,10 @@
 	// OS-level preference changes (e.g. Dark Reader or system toggle).
 	$effect(() => {
 		const theme = preferences.theme;
+		if (theme === 'oled') {
+			applyThemeDom(true, true);
+			return;
+		}
 		if (theme !== 'system') {
 			applyThemeDom(theme === 'dark');
 			return;

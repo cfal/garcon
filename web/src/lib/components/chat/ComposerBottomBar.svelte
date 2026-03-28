@@ -11,6 +11,7 @@
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import type { ComposerMenuOption, ComposerModeOption, ProviderMenuGroup } from '$lib/chat/composer-controls';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
+	import ProviderBadge from '$lib/components/shared/ProviderBadge.svelte';
 	import { ChevronDown, ImagePlus, Plus, Send } from '@lucide/svelte';
 
 	interface Props {
@@ -82,10 +83,10 @@
 		{#if providerOptions && activeProvider && onProviderSelect}
 			<DropdownMenu>
 				<DropdownMenuTrigger
-					class="inline-flex h-9 max-w-[7rem] items-center gap-1.5 rounded-lg px-2.5 text-sm text-foreground transition-colors hover:bg-muted min-w-0 sm:max-w-[10rem]"
+					class="inline-flex h-9 max-w-[8rem] items-center gap-1.5 rounded-lg px-2 text-sm text-foreground transition-colors hover:bg-muted min-w-0 sm:max-w-[11rem]"
 					title={activeProvider.label}
 				>
-					<span class="truncate max-w-[4.5rem] sm:max-w-[7rem]">{activeProvider.label}</span>
+					<ProviderBadge provider={activeProvider.value} class="max-w-[6.25rem] sm:max-w-[9rem]" labelClass="max-w-[3.8rem] sm:max-w-[6.4rem]" />
 					<ChevronDown class="size-3.5 text-muted-foreground" />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align={align}>
@@ -100,7 +101,7 @@
 							{#each group.options as option (option.value)}
 								<DropdownMenuItem onclick={() => onProviderSelect(option.value)} class="items-start">
 									<div class="min-w-0">
-										<div class="font-medium">{option.label}</div>
+										<ProviderBadge provider={option.value} appearance="plain" size="md" />
 									</div>
 								</DropdownMenuItem>
 							{/each}
@@ -109,7 +110,7 @@
 						{#each providerOptions as option (option.value)}
 							<DropdownMenuItem onclick={() => onProviderSelect(option.value)} class="items-start">
 								<div class="min-w-0">
-									<div class="font-medium">{option.label}</div>
+									<ProviderBadge provider={option.value} appearance="plain" size="md" />
 								</div>
 							</DropdownMenuItem>
 						{/each}

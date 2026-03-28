@@ -275,6 +275,8 @@
 	--diff-del-fg: 355 72% 36%;
 	--diff-del-line-num: 355 40% 50%;
 	--diff-hunk-header-bg: 214 60% 95%;
+	--selection: 214 100% 90%;
+	--selection-foreground: 0 0% 10%;
 
 	--safe-area-inset-top: env(safe-area-inset-top);
 	--safe-area-inset-right: env(safe-area-inset-right);
@@ -410,6 +412,8 @@
 	--diff-del-fg: 9 100% 88%;
 	--diff-del-line-num: 9 50% 55%;
 	--diff-hunk-header-bg: 214 40% 18%;
+	--selection: 214 62% 30%;
+	--selection-foreground: 214 100% 96%;
 
 	--markdown-code-background: 220 26% 10%;
 	--markdown-code-foreground: 213 15% 83%;
@@ -426,6 +430,36 @@
 	--markdown-code-deletion-bg: 356 89% 22%;
 	--markdown-code-deletion-fg: 9 100% 92%;
 	}
+
+.dark.oled {
+	--background: 0 0% 0%;
+	--card: 0 0% 2%;
+	--popover: 0 0% 2%;
+	--secondary: 0 0% 8%;
+	--muted: 0 0% 8%;
+	--accent: 0 0% 10%;
+	--border: 0 0% 12%;
+	--input: 0 0% 22%;
+	--chat-header-bg: 0 0% 2%;
+	--chat-header-border: 0 0% 12%;
+	--chat-tabs-rail-bg: 0 0% 4%;
+	--chat-tabs-rail-border: 0 0% 12%;
+	--sidebar-background: 0 0% 0%;
+	--sidebar-accent: 0 0% 10%;
+	--sidebar-border: 0 0% 12%;
+	--sidebar-chat-item-bg: 0 0% 0%;
+	--sidebar-chat-item-hover-bg: 0 0% 6%;
+	--sidebar-chat-item-selected-bg: 0 0% 10%;
+	--sidebar-badge-pinned-bg: 42 54% 18%;
+	--sidebar-badge-pinned-border: 42 36% 30%;
+	--sidebar-badge-archived-bg: 220 12% 12%;
+	--sidebar-badge-archived-border: 220 8% 24%;
+	--status-neutral: 220 12% 14%;
+	--status-neutral-border: 220 8% 26%;
+	--terminal-bg: 0 0% 2%;
+	--selection: 214 78% 34%;
+	--selection-foreground: 214 100% 97%;
+}
 
 /* Colorblind-friendly overrides. Uses blue/orange/teal palette
    distinguishable across protanopia and deuteranopia. The +/- symbols
@@ -639,5 +673,15 @@
 		-moz-osx-font-smoothing: grayscale;
 		overscroll-behavior: none;
 		overflow: hidden;
+	}
+
+	::selection {
+		background-color: hsl(var(--selection));
+		color: hsl(var(--selection-foreground));
+	}
+
+	::-moz-selection {
+		background-color: hsl(var(--selection));
+		color: hsl(var(--selection-foreground));
 	}
 }

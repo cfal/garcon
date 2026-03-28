@@ -30,6 +30,7 @@ export interface ChatEventContext {
 	activateLoadingFor: (chatId?: string | null) => void;
 	clearLoadingIndicators: (chatId?: string | null) => void;
 	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
+	markChatsAsIdle: (...ids: Array<string | null | undefined>) => void;
 	setCanAbort: (v: boolean) => void;
 	onChatProcessing?: (chatId?: string | null) => void;
 	onChatNotProcessing?: (chatId?: string | null) => void;
@@ -77,7 +78,7 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 
 	if (abortSucceeded) {
 		ctx.clearLoadingIndicators(abortedChatId);
-		ctx.markChatsAsCompleted(abortedChatId);
+		ctx.markChatsAsIdle(abortedChatId);
 		if (pendingChatId && (!abortedChatId || pendingChatId === abortedChatId)) {
 			ctx.clearPendingChatId();
 		}

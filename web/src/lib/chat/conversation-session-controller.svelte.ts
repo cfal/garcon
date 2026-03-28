@@ -40,6 +40,7 @@ export interface SessionControllerDeps {
 		patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 		promoteDraft: (chatId: string) => void;
 		setChatProcessing: (chatId: string, isProcessing: boolean) => void;
+		markChatRunning: (chatId: string) => void;
 		setSelectedChatId: (id: string | null) => void;
 	};
 	chatState: ChatState;
@@ -253,7 +254,7 @@ export class ConversationSessionController {
 		deps.lifecycle.setCanAbort(true);
 		deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
 		deps.lifecycle.setCurrentChatId(chatId);
-		deps.sessions.setChatProcessing(chatId, true);
+		deps.sessions.markChatRunning(chatId);
 
 		if (isDraft) {
 			deps.startupCoordinator.beginLocalStartup(chatId);
