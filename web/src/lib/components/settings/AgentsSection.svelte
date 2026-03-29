@@ -1,10 +1,10 @@
 <!-- Agents settings section. Renders collapsible cards for each provider
-     with auth status and CLI auth instructions. Primary providers (Claude,
-     Codex, OpenCode) are always visible; Amp is grouped under a collapsible
-     "More providers" toggle. -->
+     with auth status and either UI login actions or CLI instructions.
+     Primary providers are always visible; Amp is grouped under a
+     collapsible "More providers" toggle. -->
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getAuthStatus } from '$lib/api/providers.js';
+	import { getAuthStatus, launchAuthLogin } from '$lib/api/providers.js';
 	import AgentCard from './AgentCard.svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 
@@ -17,19 +17,26 @@
 	}
 
 	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp';
-	type AgentConfig = { id: AgentId; name: string; loginCommand: string };
+	type BrowserLoginAgentId = 'claude' | 'codex';
+	type AgentConfig = { id: AgentId; name: string; cliOnly?: boolean; loginCommand?: string };
+
+	const AUTH_POLL_INTERVAL_MS = 1500;
+	const AUTH_POLL_TIMEOUT_MS = 5 * 60_000;
 
 	const DEFAULT_AUTH: AuthStatus = { authenticated: false, canReauth: true, label: '', loading: true, error: null };
 
 	const primaryAgents: AgentConfig[] = [
-		{ id: 'claude', name: 'Claude', loginCommand: 'claude login' },
-		{ id: 'codex', name: 'Codex', loginCommand: 'codex login' },
-		{ id: 'opencode', name: 'OpenCode', loginCommand: 'opencode auth login' }
+		{ id: 'claude', name: 'Claude' },
+		{ id: 'codex', name: 'Codex' },
+		{ id: 'opencode', name: 'OpenCode', cliOnly: true, loginCommand: 'opencode auth login' }
 	];
 
 	const secondaryAgents: AgentConfig[] = [
-		{ id: 'amp', name: 'Amp', loginCommand: 'amp login' }
+		{ id: 'amp', name: 'Amp', cliOnly: true, loginCommand: 'amp login' }
 	];
+
+	const authPollTimers: Partial<Record<AgentId, ReturnType<typeof setTimeout>>> = {};
+	const authPollStartedAt: Partial<Record<AgentId, number>> = {};
 
 	let claudeAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 	let codexAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
@@ -64,17 +71,17 @@
 		else opencodeOpen = value;
 	}
 
-	async function checkAuth(agent: AgentId) {
-		const setAuth = (status: AuthStatus) => {
-			if (agent === 'claude') claudeAuth = status;
-			else if (agent === 'codex') codexAuth = status;
-			else if (agent === 'amp') ampAuth = status;
-			else opencodeAuth = status;
-		};
+	function setAuth(agent: AgentId, status: AuthStatus) {
+		if (agent === 'claude') claudeAuth = status;
+		else if (agent === 'codex') codexAuth = status;
+		else if (agent === 'amp') ampAuth = status;
+		else opencodeAuth = status;
+	}
 
+	async function checkAuth(agent: AgentId) {
 		try {
 			const data = await getAuthStatus(agent);
-			setAuth({
+			setAuth(agent, {
 				authenticated: data.authenticated,
 				canReauth: data.canReauth,
 				label: data.label,
@@ -82,10 +89,62 @@
 				error: null
 			});
 		} catch (err) {
-			setAuth({
+			setAuth(agent, {
 				authenticated: false,
 				canReauth: true,
 				label: '',
+				loading: false,
+				error: err instanceof Error ? err.message : String(err)
+			});
+		}
+	}
+
+	function stopAuthPolling(agent: AgentId) {
+		const timer = authPollTimers[agent];
+		if (timer) clearTimeout(timer);
+		delete authPollTimers[agent];
+		delete authPollStartedAt[agent];
+	}
+
+	async function pollAuthUntilAuthenticated(agent: AgentId) {
+		await checkAuth(agent);
+		if (authFor(agent).authenticated) {
+			stopAuthPolling(agent);
+			return;
+		}
+
+		const startedAt = authPollStartedAt[agent] ?? Date.now();
+		if (Date.now() - startedAt >= AUTH_POLL_TIMEOUT_MS) {
+			stopAuthPolling(agent);
+			return;
+		}
+
+		authPollTimers[agent] = setTimeout(() => {
+			void pollAuthUntilAuthenticated(agent);
+		}, AUTH_POLL_INTERVAL_MS);
+	}
+
+	function startAuthPolling(agent: AgentId) {
+		stopAuthPolling(agent);
+		authPollStartedAt[agent] = Date.now();
+		authPollTimers[agent] = setTimeout(() => {
+			void pollAuthUntilAuthenticated(agent);
+		}, AUTH_POLL_INTERVAL_MS);
+	}
+
+	async function handleLogin(agent: BrowserLoginAgentId) {
+		setAuth(agent, { ...authFor(agent), error: null });
+
+		try {
+			await launchAuthLogin(agent);
+			await checkAuth(agent);
+			if (!authFor(agent).authenticated) {
+				startAuthPolling(agent);
+			}
+		} catch (err) {
+			stopAuthPolling(agent);
+			setAuth(agent, {
+				...authFor(agent),
 				loading: false,
 				error: err instanceof Error ? err.message : String(err)
 			});
@@ -114,10 +173,17 @@
 	});
 
 	onMount(() => {
-		checkAuth('claude');
-		checkAuth('codex');
-		checkAuth('opencode');
-		checkAuth('amp');
+		void checkAuth('claude');
+		void checkAuth('codex');
+		void checkAuth('opencode');
+		void checkAuth('amp');
+
+		return () => {
+			stopAuthPolling('claude');
+			stopAuthPolling('codex');
+			stopAuthPolling('opencode');
+			stopAuthPolling('amp');
+		};
 	});
 </script>
 
@@ -129,7 +195,8 @@
 			auth={authFor(agent.id)}
 			open={isOpen(agent.id)}
 			onOpenChange={(v) => setOpen(agent.id, v)}
-			cliOnly={true}
+			onLogin={agent.cliOnly ? undefined : () => void handleLogin(agent.id as BrowserLoginAgentId)}
+			cliOnly={agent.cliOnly ?? false}
 			loginCommand={agent.loginCommand}
 		/>
 	{/each}
@@ -157,7 +224,7 @@
 						auth={authFor(agent.id)}
 						open={isOpen(agent.id)}
 						onOpenChange={(v) => setOpen(agent.id, v)}
-						cliOnly={true}
+						cliOnly={agent.cliOnly ?? false}
 						loginCommand={agent.loginCommand}
 					/>
 				{/each}
