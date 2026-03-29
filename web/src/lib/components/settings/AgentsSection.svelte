@@ -1,6 +1,6 @@
 <!-- Agents settings section. Renders collapsible cards for each provider
-     with auth status and login actions. Primary providers (Claude, Codex,
-     OpenCode) are always visible; Amp is grouped under a collapsible
+     with auth status and CLI auth instructions. Primary providers (Claude,
+     Codex, OpenCode) are always visible; Amp is grouped under a collapsible
      "More providers" toggle. -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -17,17 +17,18 @@
 	}
 
 	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp';
+	type AgentConfig = { id: AgentId; name: string; loginCommand: string };
 
 	const DEFAULT_AUTH: AuthStatus = { authenticated: false, canReauth: true, label: '', loading: true, error: null };
 
-	const primaryAgents: { id: AgentId; name: string }[] = [
-		{ id: 'claude', name: 'Claude' },
-		{ id: 'codex', name: 'Codex' },
-		{ id: 'opencode', name: 'OpenCode' }
+	const primaryAgents: AgentConfig[] = [
+		{ id: 'claude', name: 'Claude', loginCommand: 'claude login' },
+		{ id: 'codex', name: 'Codex', loginCommand: 'codex login' },
+		{ id: 'opencode', name: 'OpenCode', loginCommand: 'opencode auth login' }
 	];
 
-	const secondaryAgents: { id: AgentId; name: string }[] = [
-		{ id: 'amp', name: 'Amp' }
+	const secondaryAgents: AgentConfig[] = [
+		{ id: 'amp', name: 'Amp', loginCommand: 'amp login' }
 	];
 
 	let claudeAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
@@ -91,12 +92,6 @@
 		}
 	}
 
-	function handleLogin(agent: AgentId) {
-		if (agent === 'amp') return;
-		const loginUrl = `/api/v1/${agent}/auth/login`;
-		window.open(loginUrl, '_blank', 'width=800,height=600');
-	}
-
 	// Count how many secondary providers are connected
 	let secondaryConnectedCount = $derived(
 		[ampAuth].filter((a) => a.authenticated).length
@@ -134,7 +129,8 @@
 			auth={authFor(agent.id)}
 			open={isOpen(agent.id)}
 			onOpenChange={(v) => setOpen(agent.id, v)}
-			onLogin={() => handleLogin(agent.id)}
+			cliOnly={true}
+			loginCommand={agent.loginCommand}
 		/>
 	{/each}
 
@@ -161,8 +157,8 @@
 						auth={authFor(agent.id)}
 						open={isOpen(agent.id)}
 						onOpenChange={(v) => setOpen(agent.id, v)}
-						onLogin={() => handleLogin(agent.id)}
-						cliOnly={agent.id === 'amp'}
+						cliOnly={true}
+						loginCommand={agent.loginCommand}
 					/>
 				{/each}
 			</div>

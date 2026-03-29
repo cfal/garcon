@@ -1,5 +1,5 @@
 <!-- Collapsible card for a single agent in settings. Shows auth status and
-     login action when expanded. -->
+     either CLI instructions or a login action when expanded. -->
 <script lang="ts">
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -24,16 +24,18 @@
 		auth,
 		open = false,
 		onOpenChange,
-		onLogin,
-		cliOnly = false
+		onLogin = () => undefined,
+		cliOnly = false,
+		loginCommand = `${agentName.toLowerCase()} login`
 	}: {
 		agentId: AgentId;
 		agentName: string;
 		auth: AuthStatus;
 		open?: boolean;
 		onOpenChange?: (open: boolean) => void;
-		onLogin: () => void;
+		onLogin?: () => void;
 		cliOnly?: boolean;
+		loginCommand?: string;
 	} = $props();
 
 	const borderColorClass: Record<AgentId, string> = {
@@ -68,7 +70,7 @@
 			<ChevronDownIcon class="size-4 text-muted-foreground shrink-0 transition-transform duration-200 {open ? 'rotate-180' : ''}" />
 		</Collapsible.Trigger>
 
-		{#if !auth.loading && !auth.authenticated && !open && auth.canReauth}
+		{#if !cliOnly && !auth.loading && !auth.authenticated && !open && auth.canReauth}
 			<Button variant="outline" size="sm" onclick={onLogin}>
 				<LogInIcon class="size-3.5 mr-1.5" />
 				{m.settings_agents_login_button()}
@@ -81,9 +83,9 @@
 			{#if cliOnly}
 				<div class="text-xs text-muted-foreground">
 					{#if auth.authenticated}
-						Authenticated via CLI. To switch accounts, run <code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{agentName.toLowerCase()} login</code> in your terminal.
+						Authenticated via CLI. To switch accounts, run <code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{loginCommand}</code> in your terminal.
 					{:else}
-						Run <code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{agentName.toLowerCase()} login</code> in your terminal to authenticate.
+						Run <code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{loginCommand}</code> in your terminal to authenticate.
 					{/if}
 				</div>
 			{:else if auth.canReauth}
