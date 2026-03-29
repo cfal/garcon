@@ -13,7 +13,7 @@
 	interface SidebarSaveFolderDialogProps {
 		saveFolderDialog: SaveFolderDialogState | null;
 		onClose: () => void;
-		onSave: (name: string, filter: ChatFolderFilter) => void;
+		onSave: (name: string, filter: ChatFolderFilter) => Promise<void> | void;
 	}
 
 	let {
@@ -25,10 +25,14 @@
 	let isOpen = $derived(saveFolderDialog !== null);
 	let folderName = $state('');
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let isSaving = $state(false);
+	let saveError = $state<string | null>(null);
 
 	$effect(() => {
 		if (saveFolderDialog) {
 			folderName = saveFolderDialog.suggestedName;
+			saveError = null;
+			isSaving = false;
 		}
 	});
 
@@ -57,11 +61,19 @@
 		if (!open) onClose();
 	}
 
-	function handleSave() {
+	async function handleSave() {
 		if (!saveFolderDialog) return;
 		const name = folderName.trim();
 		if (!name) return;
-		onSave(name, saveFolderDialog.filter);
+		isSaving = true;
+		saveError = null;
+		try {
+			await onSave(name, saveFolderDialog.filter);
+		} catch (error) {
+			saveError = error instanceof Error ? error.message : String(error);
+		} finally {
+			isSaving = false;
+		}
 	}
 
 	function handleInputKeydown(event: KeyboardEvent) {
@@ -108,11 +120,15 @@
 					{/each}
 				</div>
 			</div>
+
+			{#if saveError}
+				<p class="text-sm text-destructive">{saveError}</p>
+			{/if}
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="outline" onclick={onClose}>{m.sidebar_actions_cancel()}</Button>
-			<Button onclick={handleSave} disabled={!folderName.trim()}>{m.sidebar_actions_save()}</Button>
+			<Button variant="outline" onclick={onClose} disabled={isSaving}>{m.sidebar_actions_cancel()}</Button>
+			<Button onclick={() => { void handleSave(); }} disabled={!folderName.trim() || isSaving}>{m.sidebar_actions_save()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

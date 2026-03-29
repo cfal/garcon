@@ -13,7 +13,7 @@
 	import { createReorderWriteQueue } from './reorder-write-queue';
 	import { SidebarController } from './sidebar-controller.svelte';
 	import { SidebarFilterState } from './sidebar-filter-state.svelte';
-	import { getFolders, createFolder, deleteFolder as deleteFolderApi, type ChatFolderFilter } from '$lib/api/settings';
+	import { getFolders, createFolder, deleteFolder as deleteFolderApi, type ChatFolder, type ChatFolderFilter } from '$lib/api/settings';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ChatDeleteConfirmation {
@@ -223,12 +223,8 @@
 	}
 
 	async function handleSaveTags(chatId: string, tags: string[]) {
+		await controller.updateTags(chatId, tags);
 		tagDialog = null;
-		try {
-			await controller.updateTags(chatId, tags);
-		} catch (error) {
-			console.error('Failed to update tags:', error);
-		}
 	}
 
 	// Reorder mode state.
@@ -327,6 +323,11 @@
 		return m.sidebar_folders_new_folder();
 	}
 
+	function mergeUserFolders(existing: ChatFolder[], incoming: ChatFolder[]): ChatFolder[] {
+		const incomingIds = new Set(incoming.map((folder) => folder.id));
+		return [...incoming, ...existing.filter((folder) => !incomingIds.has(folder.id))];
+	}
+
 	function handleCreateFolder() {
 		if (!filterState.canSaveCurrentFilter) return;
 		const filter = cloneFilter(filterState.currentFilter);
@@ -337,15 +338,11 @@
 	}
 
 	async function handleSaveFolder(name: string, filter: ChatFolderFilter) {
+		const res = await createFolder(name, filter);
+		filterState.setUserFolders(mergeUserFolders(filterState.userFolders, [res.folder]));
+		filterState.searchQuery = '';
+		filterState.selectFolder(res.folder.id);
 		saveFolderDialog = null;
-		try {
-			const res = await createFolder(name, filter);
-			filterState.setUserFolders([...filterState.userFolders, res.folder]);
-			filterState.searchQuery = '';
-			filterState.selectFolder(res.folder.id);
-		} catch (err) {
-			console.error('Failed to create folder:', err);
-		}
 	}
 
 	async function handleDeleteFolder(id: string) {
@@ -375,7 +372,7 @@
 	onMount(async () => {
 		try {
 			const res = await getFolders();
-			filterState.setUserFolders(res.folders);
+			filterState.setUserFolders(mergeUserFolders(filterState.userFolders, res.folders));
 		} catch (err) {
 			console.error('Failed to load folders:', err);
 		}

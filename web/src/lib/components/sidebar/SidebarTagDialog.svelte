@@ -15,7 +15,7 @@
 		tagDialog: TagDialogState | null;
 		allKnownTags: string[];
 		onClose: () => void;
-		onSave: (chatId: string, tags: string[]) => void;
+		onSave: (chatId: string, tags: string[]) => Promise<void> | void;
 	}
 
 	let {
@@ -29,11 +29,15 @@
 	let editingTags = $state<string[]>([]);
 	let inputValue = $state('');
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let isSaving = $state(false);
+	let saveError = $state<string | null>(null);
 
 	$effect(() => {
 		if (tagDialog) {
 			editingTags = [...tagDialog.tags];
 			inputValue = '';
+			saveError = null;
+			isSaving = false;
 		}
 	});
 
@@ -62,6 +66,7 @@
 	function handleInputKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter' || e.key === ',') {
 			e.preventDefault();
+			saveError = null;
 			if (inputValue.trim()) {
 				addTag(inputValue);
 			}
@@ -72,9 +77,27 @@
 		}
 	}
 
-	function handleSave() {
+	function tagsForSave(): string[] {
+		const pending = inputValue.trim();
+		if (!pending) return editingTags;
+		const normalized = pending.toLowerCase();
+		if (editingTags.some((tag) => tag.toLowerCase() === normalized)) {
+			return editingTags;
+		}
+		return [...editingTags, normalized];
+	}
+
+	async function handleSave() {
 		if (!tagDialog) return;
-		onSave(tagDialog.chatId, editingTags);
+		isSaving = true;
+		saveError = null;
+		try {
+			await onSave(tagDialog.chatId, tagsForSave());
+		} catch (error) {
+			saveError = error instanceof Error ? error.message : String(error);
+		} finally {
+			isSaving = false;
+		}
 	}
 
 	function handleOpenChange(open: boolean) {
@@ -132,11 +155,15 @@
 					</div>
 				{/if}
 			</div>
+
+			{#if saveError}
+				<p class="text-sm text-destructive">{saveError}</p>
+			{/if}
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="outline" onclick={onClose}>{m.sidebar_actions_cancel()}</Button>
-			<Button onclick={handleSave}>{m.sidebar_actions_save()}</Button>
+			<Button variant="outline" onclick={onClose} disabled={isSaving}>{m.sidebar_actions_cancel()}</Button>
+			<Button onclick={() => { void handleSave(); }} disabled={isSaving}>{m.sidebar_actions_save()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
