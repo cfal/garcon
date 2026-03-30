@@ -36,7 +36,9 @@
 	];
 
 	const authPollTimers: Partial<Record<AgentId, ReturnType<typeof setTimeout>>> = {};
+	const authPollSessionIds: Partial<Record<AgentId, number>> = {};
 	const authPollStartedAt: Partial<Record<AgentId, number>> = {};
+	let nextAuthPollSessionId = 0;
 
 	let claudeAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 	let codexAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
@@ -103,32 +105,47 @@
 		const timer = authPollTimers[agent];
 		if (timer) clearTimeout(timer);
 		delete authPollTimers[agent];
+		delete authPollSessionIds[agent];
 		delete authPollStartedAt[agent];
 	}
 
-	async function pollAuthUntilAuthenticated(agent: AgentId) {
+	async function pollAuthUntilAuthenticated(agent: AgentId, sessionId: number) {
+		if (authPollSessionIds[agent] !== sessionId) {
+			return;
+		}
+
 		await checkAuth(agent);
+		if (authPollSessionIds[agent] !== sessionId) {
+			return;
+		}
+
 		if (authFor(agent).authenticated) {
 			stopAuthPolling(agent);
 			return;
 		}
 
-		const startedAt = authPollStartedAt[agent] ?? Date.now();
+		const startedAt = authPollStartedAt[agent];
+		if (startedAt === undefined) {
+			return;
+		}
+
 		if (Date.now() - startedAt >= AUTH_POLL_TIMEOUT_MS) {
 			stopAuthPolling(agent);
 			return;
 		}
 
 		authPollTimers[agent] = setTimeout(() => {
-			void pollAuthUntilAuthenticated(agent);
+			void pollAuthUntilAuthenticated(agent, sessionId);
 		}, AUTH_POLL_INTERVAL_MS);
 	}
 
 	function startAuthPolling(agent: AgentId) {
 		stopAuthPolling(agent);
+		const sessionId = ++nextAuthPollSessionId;
+		authPollSessionIds[agent] = sessionId;
 		authPollStartedAt[agent] = Date.now();
 		authPollTimers[agent] = setTimeout(() => {
-			void pollAuthUntilAuthenticated(agent);
+			void pollAuthUntilAuthenticated(agent, sessionId);
 		}, AUTH_POLL_INTERVAL_MS);
 	}
 
