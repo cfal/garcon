@@ -1,6 +1,38 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
+import { getClaudeBinary } from '../config.js';
+
+async function runClaudeAuthStatus() {
+  // Uses the CLI itself so Garcon follows CLAUDE_CONFIG_DIR and other auth storage rules.
+  const proc = Bun.spawn([getClaudeBinary(), 'auth', 'status'], {
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+
+  return {
+    exitCode,
+    output: [stdout.trim(), stderr.trim()].filter(Boolean).join('\n'),
+  };
+}
+
+function parseClaudeAuthStatus(output) {
+  const jsonStart = output.indexOf('{');
+  const jsonEnd = output.lastIndexOf('}');
+  if (jsonStart === -1 || jsonEnd === -1 || jsonEnd < jsonStart) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(output.slice(jsonStart, jsonEnd + 1));
+  } catch {
+    return null;
+  }
+}
 
 export async function getClaudeAuthStatus() {
   if (typeof process.env.ANTHROPIC_API_KEY === 'string' && process.env.ANTHROPIC_API_KEY.trim()) {
@@ -8,49 +40,22 @@ export async function getClaudeAuthStatus() {
   }
 
   try {
-    const credPath = path.join(os.homedir(), '.claude', '.credentials.json');
-    const content = await fs.readFile(credPath, 'utf8');
-    const creds = JSON.parse(content);
-    const oauth = creds.claudeAiOauth;
-    let isValid = false;
-    if (oauth && oauth.refreshToken) {
-      isValid = true;
-    } else if (oauth && oauth.accessToken) {
-      const isExpired = oauth.expiresAt && Date.now() >= oauth.expiresAt;
-      if (!isExpired) {
-        isValid = true;
-      }
+    const { exitCode, output } = await runClaudeAuthStatus();
+    if (exitCode !== 0) {
+      return { authenticated: false, canReauth: true, label: '' };
     }
-    if (isValid) {
-      let label = '';
-      try {
-        const configPath = path.join(os.homedir(), '.claude', '.claude.json');
-        const configContent = await fs.readFile(configPath, 'utf8');
-        const config = JSON.parse(configContent);
-        if (config.oauthAccount && config.oauthAccount.emailAddress) {
-          label = config.oauthAccount.emailAddress;
-        }
-      } catch {
-        // .claude.json not found or unreadable
-      }
-      return { authenticated: true, canReauth: true, label };
-    }
-    // Fall through to config.json check below.
-  } catch {
-    // .credentials.json missing or unreadable; fall through.
-  }
 
-  // Check for primaryApiKey in ~/.claude/config.json (CLI API key auth).
-  try {
-    const configPath = path.join(os.homedir(), '.claude', 'config.json');
-    const configContent = await fs.readFile(configPath, 'utf8');
-    const config = JSON.parse(configContent);
-    if (typeof config.primaryApiKey === 'string' && config.primaryApiKey.trim()) {
-      return { authenticated: true, canReauth: false, label: '' };
+    const status = parseClaudeAuthStatus(output);
+    if (status?.loggedIn === true) {
+      return {
+        authenticated: true,
+        canReauth: status.authMethod !== 'api_key',
+        label: typeof status.email === 'string' ? status.email : '',
+      };
     }
-  } catch {
-    // config.json missing or unreadable
-  }
 
-  return { authenticated: false, canReauth: true, label: '' };
+    return { authenticated: true, canReauth: true, label: '' };
+  } catch {
+    return { authenticated: false, canReauth: true, label: '' };
+  }
 }
