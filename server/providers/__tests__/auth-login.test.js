@@ -23,15 +23,19 @@ function createFakePty() {
 
 describe('ProviderAuthLoginManager', () => {
   const originalClaudeCode = process.env.CLAUDECODE;
+  const originalClaudeBinary = process.env.CLAUDE_BINARY;
 
   beforeEach(() => {
     spawn.mockReset();
     if (originalClaudeCode === undefined) delete process.env.CLAUDECODE;
     else process.env.CLAUDECODE = originalClaudeCode;
+    if (originalClaudeBinary === undefined) delete process.env.CLAUDE_BINARY;
+    else process.env.CLAUDE_BINARY = originalClaudeBinary;
   });
 
-  it('launches Claude auth login in a PTY and strips nested Claude env', () => {
+  it('launches Claude auth login with the configured binary and strips nested Claude env', () => {
     process.env.CLAUDECODE = '1';
+    process.env.CLAUDE_BINARY = '/tmp/custom-claude';
     const manager = new ProviderAuthLoginManager();
     const pty = createFakePty();
     spawn.mockImplementation(() => pty);
@@ -41,8 +45,12 @@ describe('ProviderAuthLoginManager', () => {
 
     expect(spawn).toHaveBeenCalledTimes(1);
     const [command, args, options] = spawn.mock.calls[0];
-    expect(command).toBe('claude');
-    expect(args).toEqual(['auth', 'login']);
+    expect(command).toBe(process.execPath);
+    expect(args[0]).toBe('-e');
+    expect(args[1]).toContain('delete process.env.CLAUDECODE');
+    expect(args[1]).toContain('process.argv.slice(1)');
+    expect(args[1]).toContain('env: process.env');
+    expect(args.slice(2)).toEqual(['/tmp/custom-claude', 'auth', 'login']);
     expect(options.cwd).toBe(os.homedir());
     expect(options.env.CLAUDECODE).toBeUndefined();
 
