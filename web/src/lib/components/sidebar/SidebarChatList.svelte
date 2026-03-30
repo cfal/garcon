@@ -62,6 +62,7 @@
 
 	let showChats = $derived(!isLoading && chats.length > 0 && filteredChats.length > 0);
 	let isSearchActive = $derived(searchFilter.trim().length > 0);
+	let isFiltered = $derived(isSearchActive || filteredChats.length !== chats.length);
 
 	// Partition all chats in a single pass.
 	let allPartitioned = $derived.by(() => {
@@ -378,7 +379,7 @@
 	</div>
 {:else}
 	<div class="h-full pb-28 md:pb-4">
-			{#if isSearchActive}
+			{#if isFiltered}
 				{#each pinnedFiltered as gs (gs.id)}
 					<SidebarChatItem
 						session={gs}
@@ -434,7 +435,7 @@
 				{/each}
 			</DragDropProvider>
 		{/if}
-		{#if isSearchActive}
+		{#if isFiltered}
 			{#each normal as gs (gs.id)}
 				<SidebarChatItem
 					session={gs}
