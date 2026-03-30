@@ -62,7 +62,7 @@
 
 	let showChats = $derived(!isLoading && chats.length > 0 && filteredChats.length > 0);
 	let isSearchActive = $derived(searchFilter.trim().length > 0);
-	let isFiltered = $derived(filteredChats !== chats);
+	let isFiltered = $derived(isSearchActive || filteredChats.length !== chats.length);
 
 	// Partition all chats in a single pass.
 	let allPartitioned = $derived.by(() => {
