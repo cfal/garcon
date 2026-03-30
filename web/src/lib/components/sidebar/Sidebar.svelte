@@ -12,8 +12,8 @@
 	import type { ChatOrderList } from '$lib/api/chats.js';
 	import { createReorderWriteQueue } from './reorder-write-queue';
 	import { SidebarController } from './sidebar-controller.svelte';
-	import { SidebarFilterState, type FolderEntry, type FilterChip } from './sidebar-filter-state.svelte';
-	import { addTagToQuery, removeTagFromQuery, matchesChatFilter, serializeChatFilter } from './sidebar-search';
+	import { SidebarFilterState, type FolderEntry } from './sidebar-filter-state.svelte';
+	import { addTagToQuery, matchesChatFilter } from './sidebar-search';
 	import { getFolders, createFolder, updateFolder as updateFolderApi, deleteFolder as deleteFolderApi, type ChatFolder, type ChatFolderFilter } from '$lib/api/settings';
 	import type { FolderDialogState } from './SidebarSaveFolderDialog.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -266,37 +266,6 @@
 		}
 	}
 
-	function handleRemoveFilterChip(chip: FilterChip) {
-		if (!chip.removable) return;
-		switch (chip.type) {
-			case 'tag':
-				filterState.searchQuery = removeTagFromQuery(filterState.searchQuery, chip.value);
-				break;
-			case 'provider': {
-				const spec = filterState.parsedSearch;
-				spec.providers = spec.providers.filter(p => p !== chip.value);
-				filterState.searchQuery = serializeChatFilter(spec);
-				break;
-			}
-			case 'model': {
-				const spec = filterState.parsedSearch;
-				spec.models = spec.models.filter(mdl => mdl !== chip.value);
-				filterState.searchQuery = serializeChatFilter(spec);
-				break;
-			}
-			case 'text': {
-				const spec = filterState.parsedSearch;
-				spec.textTokens = spec.textTokens.filter(t => t !== chip.value);
-				filterState.searchQuery = serializeChatFilter(spec);
-				break;
-			}
-		}
-	}
-
-	function handleClearAllFilters() {
-		filterState.searchQuery = '';
-	}
-
 	function handlePrimaryAction() {
 		if (isReorderMode) {
 			void exitReorderMode();
@@ -494,9 +463,6 @@
 		onManageTags={showTagDialog}
 		onImmediateReorder={handleImmediateReorder}
 		onQuickMove={handleQuickMove}
-		activeFilterChips={filterState.activeFilterChips}
-		onRemoveFilterChip={handleRemoveFilterChip}
-		onClearAllFilters={handleClearAllFilters}
 	/>
 
 		<SidebarFooter
