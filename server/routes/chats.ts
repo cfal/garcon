@@ -56,12 +56,22 @@ interface ProvidersDep {
   runSingleQuery(prompt: string, opts?: Record<string, unknown>): Promise<string>;
 }
 
+function normalizeTagSlug(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
 function normalizeTags(raw: unknown[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const item of raw) {
     if (typeof item !== 'string') continue;
-    const tag = item.trim().toLowerCase();
+    const tag = normalizeTagSlug(item);
     if (!tag || seen.has(tag)) continue;
     seen.add(tag);
     result.push(tag);

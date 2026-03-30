@@ -5,7 +5,14 @@
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatFolder } from '$lib/api/settings';
 import * as m from '$lib/paraglide/messages.js';
-import { emptyFilterSpec, parseChatSearch, matchesChatFilter, isEmptyFilter, type ChatFilterSpec } from './sidebar-search';
+import { emptyFilterSpec, parseChatSearch, matchesChatFilter, isEmptyFilter, serializeChatFilter, type ChatFilterSpec } from './sidebar-search';
+
+export interface FilterChip {
+	type: 'tag' | 'provider' | 'model' | 'text' | 'status' | 'folder';
+	label: string;
+	value: string;
+	removable: boolean;
+}
 
 export type SystemFolderId = 'all' | 'active' | 'unread';
 
@@ -82,6 +89,36 @@ export class SidebarFilterState {
 	get allKnownTags(): string[] {
 		const chats = this.#getChats();
 		return Array.from(new Set(chats.flatMap((c) => c.tags))).sort();
+	}
+
+	get activeFilterChips(): FilterChip[] {
+		const chips: FilterChip[] = [];
+		const folder = this.selectedFolder;
+		const folderFilter = folder.filter;
+		const searchFilter = this.parsedSearch;
+
+		const folderTags = new Set(folderFilter?.tags ?? []);
+		const folderProviders = new Set(folderFilter?.providers ?? []);
+		const folderModels = new Set(folderFilter?.models ?? []);
+
+		if (folderFilter?.status) {
+			chips.push({ type: 'status', label: folderFilter.status, value: folderFilter.status, removable: false });
+		}
+
+		for (const tag of this.currentFilter.tags) {
+			chips.push({ type: 'tag', label: `tag:${tag}`, value: tag, removable: !folderTags.has(tag) });
+		}
+		for (const provider of this.currentFilter.providers) {
+			chips.push({ type: 'provider', label: `provider:${provider}`, value: provider, removable: !folderProviders.has(provider) });
+		}
+		for (const model of this.currentFilter.models) {
+			chips.push({ type: 'model', label: `model:${model}`, value: model, removable: !folderModels.has(model) });
+		}
+		for (const text of searchFilter.textTokens) {
+			chips.push({ type: 'text', label: text, value: text, removable: true });
+		}
+
+		return chips;
 	}
 
 	get isFiltered(): boolean {

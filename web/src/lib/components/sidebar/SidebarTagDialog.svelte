@@ -4,6 +4,8 @@
 	import Input from '$lib/components/ui/input/input.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import X from '@lucide/svelte/icons/x';
+	import ColoredTag from '../shared/ColoredTag.svelte';
+	import { getTagColorClasses } from '$lib/utils/tag-colors';
 
 	interface TagDialogState {
 		chatId: string;
@@ -50,8 +52,23 @@
 			.slice(0, 5);
 	});
 
+	let unassignedTags = $derived.by(() => {
+		const currentSet = new Set(editingTags.map((t) => t.toLowerCase()));
+		return allKnownTags.filter((t) => !currentSet.has(t.toLowerCase()));
+	});
+
+	function normalizeTagSlug(raw: string): string {
+		return raw
+			.trim()
+			.toLowerCase()
+			.replace(/\s+/g, '-')
+			.replace(/[^a-z0-9-]/g, '')
+			.replace(/-{2,}/g, '-')
+			.replace(/^-|-$/g, '');
+	}
+
 	function addTag(tag: string) {
-		const normalized = tag.trim().toLowerCase();
+		const normalized = normalizeTagSlug(tag);
 		if (!normalized) return;
 		if (editingTags.some((t) => t.toLowerCase() === normalized)) return;
 		editingTags = [...editingTags, normalized];
@@ -100,13 +117,23 @@
 		}
 	}
 
+	function requestClose() {
+		if (isSaving) return;
+		onClose();
+	}
+
 	function handleOpenChange(open: boolean) {
-		if (!open) onClose();
+		if (!open) requestClose();
 	}
 </script>
 
 <Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
-	<Dialog.Content class="max-w-md">
+	<Dialog.Content
+		class="max-w-md"
+		showCloseButton={!isSaving}
+		escapeKeydownBehavior={isSaving ? 'ignore' : 'close'}
+		interactOutsideBehavior={isSaving ? 'ignore' : 'close'}
+	>
 		<Dialog.Header>
 			<Dialog.Title>{m.sidebar_tags_manage()}</Dialog.Title>
 			<Dialog.Description class="truncate">
@@ -120,8 +147,9 @@
 					{#each editingTags as tag (tag)}
 						<button
 							type="button"
-							class="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+							class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity {getTagColorClasses(tag)}"
 							aria-label={m.sidebar_tags_remove({ tag })}
+							disabled={isSaving}
 							onclick={() => removeTag(tag)}
 						>
 							{tag}
@@ -138,6 +166,7 @@
 					placeholder={m.sidebar_tags_input_placeholder()}
 					aria-label={m.sidebar_tags_input_placeholder()}
 					bind:value={inputValue}
+					disabled={isSaving}
 					onkeydown={handleInputKeydown}
 					class="text-sm"
 				/>
@@ -147,6 +176,7 @@
 							<button
 								type="button"
 								class="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors first:rounded-t-md last:rounded-b-md"
+								disabled={isSaving}
 								onclick={() => addTag(suggestion)}
 							>
 								{suggestion}
@@ -156,13 +186,33 @@
 				{/if}
 			</div>
 
+			{#if unassignedTags.length > 0 && !inputValue.trim()}
+				<div class="space-y-1.5">
+					<span class="text-xs font-medium text-muted-foreground">{m.sidebar_tags_quick_assign()}</span>
+					<div class="flex flex-wrap gap-1.5">
+						{#each unassignedTags as tag (tag)}
+							<ColoredTag
+								label={tag}
+								autoColor
+								onclick={() => addTag(tag)}
+								class="cursor-pointer hover:opacity-80 transition-opacity"
+							/>
+						{/each}
+					</div>
+				</div>
+			{/if}
+
+			{#if editingTags.length === 0 && allKnownTags.length === 0}
+				<p class="text-sm text-muted-foreground italic">{m.sidebar_tags_no_tags()}</p>
+			{/if}
+
 			{#if saveError}
 				<p class="text-sm text-destructive">{saveError}</p>
 			{/if}
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="outline" onclick={onClose} disabled={isSaving}>{m.sidebar_actions_cancel()}</Button>
+			<Button variant="outline" onclick={requestClose} disabled={isSaving}>{m.sidebar_actions_cancel()}</Button>
 			<Button onclick={() => { void handleSave(); }} disabled={isSaving}>{m.sidebar_actions_save()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

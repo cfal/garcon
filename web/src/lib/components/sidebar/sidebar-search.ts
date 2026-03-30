@@ -152,3 +152,34 @@ function buildHaystack(chat: ChatFilterTarget): string {
 	];
 	return parts.join(' ').toLowerCase();
 }
+
+/** Serializes a ChatFilterSpec back into a search query string. */
+export function serializeChatFilter(spec: ChatFilterSpec): string {
+	const parts: string[] = [];
+	for (const tag of spec.tags) parts.push(`tag:${tag}`);
+	for (const provider of spec.providers) parts.push(`provider:${provider}`);
+	for (const model of spec.models) parts.push(`model:${model}`);
+	for (const text of spec.textTokens) {
+		parts.push(text.includes(' ') ? `"${text}"` : text);
+	}
+	return parts.join(' ');
+}
+
+/** Adds a tag filter to the current search query without duplicating. */
+export function addTagToQuery(query: string, tag: string): string {
+	if (queryHasTag(query, tag)) return query;
+	const prefix = query.trim();
+	return prefix ? `${prefix} tag:${tag}` : `tag:${tag}`;
+}
+
+/** Removes a tag filter from the current search query. */
+export function removeTagFromQuery(query: string, tag: string): string {
+	const pattern = new RegExp(`\\btag:${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+	return query.replace(pattern, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+/** Checks if a query already contains a specific tag filter. */
+export function queryHasTag(query: string, tag: string): boolean {
+	const spec = parseChatSearch(query);
+	return spec.tags.includes(tag.toLowerCase());
+}
