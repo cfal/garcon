@@ -2,7 +2,8 @@
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import SidebarChatList from './SidebarChatList.svelte';
 	import SidebarFolders from './SidebarFolders.svelte';
-	import type { FolderEntry } from './sidebar-filter-state.svelte';
+	import SidebarActiveFilters from './SidebarActiveFilters.svelte';
+	import type { FolderEntry, FilterChip } from './sidebar-filter-state.svelte';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList } from '$lib/api/chats.js';
@@ -22,6 +23,8 @@
 		onSelectFolder: (id: string) => void;
 		onCreateFolder?: () => void;
 		onDeleteFolder?: (id: string) => void;
+		onEditFolder?: (folder: FolderEntry) => void;
+		folderCounts?: Map<string, number>;
 		onEnterReorderMode: () => void;
 		onReorderGroup: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 		onChatSelect: (chatId: string) => void;
@@ -29,11 +32,15 @@
 		onStartRenameChat: (chatId: string, currentName: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
+		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onImmediateReorder: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 		onQuickMove: (chatId: string, chatIdAbove?: string, chatIdBelow?: string) => void;
+		activeFilterChips: FilterChip[];
+		onRemoveFilterChip: (chip: FilterChip) => void;
+		onClearAllFilters: () => void;
 	}
 
 	let {
@@ -51,6 +58,8 @@
 		onSelectFolder,
 		onCreateFolder,
 		onDeleteFolder,
+		onEditFolder,
+		folderCounts,
 		onEnterReorderMode,
 		onReorderGroup,
 		onChatSelect,
@@ -58,11 +67,15 @@
 		onStartRenameChat,
 		onShowDetails,
 		onForkChat,
+		onTagClick,
 		onManageTags,
 		onTogglePinned,
 		onToggleArchive,
 		onImmediateReorder,
 		onQuickMove,
+		activeFilterChips,
+		onRemoveFilterChip,
+		onClearAllFilters,
 	}: SidebarContentProps = $props();
 </script>
 
@@ -74,6 +87,14 @@
 	{onSelectFolder}
 	{onCreateFolder}
 	{onDeleteFolder}
+	{onEditFolder}
+	{folderCounts}
+/>
+
+<SidebarActiveFilters
+	chips={activeFilterChips}
+	onRemoveChip={onRemoveFilterChip}
+	onClearAll={onClearAllFilters}
 />
 
 <ScrollArea
@@ -95,6 +116,7 @@
 		{onStartRenameChat}
 		{onShowDetails}
 		{onForkChat}
+		{onTagClick}
 		{onManageTags}
 		{onTogglePinned}
 		{onToggleArchive}

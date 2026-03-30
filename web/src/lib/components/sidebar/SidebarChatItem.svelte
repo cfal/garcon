@@ -40,6 +40,7 @@
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
+		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onEnterReorderMode?: () => void;
 		hasPinnedChats?: boolean;
@@ -61,6 +62,7 @@
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
+		onTagClick,
 		onManageTags,
 		onEnterReorderMode,
 		hasPinnedChats = false,
@@ -225,10 +227,16 @@
 					<div class="mt-1 flex items-center gap-1">
 						<ColoredTag label={providerTagLabel} variant={providerTagVariant} />
 						{#each visibleTags as tag (tag)}
-							<ColoredTag label={tag} variant="border-border bg-muted text-muted-foreground" />
+							<ColoredTag label={tag} autoColor onclick={(e) => { e.stopPropagation(); onTagClick?.(tag); }} />
 						{/each}
 						{#if overflowCount > 0}
-							<span class="text-[10px] text-muted-foreground">+{overflowCount}</span>
+							<span
+								role="button"
+								tabindex="0"
+								class="text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+								onclick={(e) => { e.stopPropagation(); onManageTags?.(session.id, session.tags); }}
+								onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); onManageTags?.(session.id, session.tags); } }}
+							>+{overflowCount}</span>
 						{/if}
 					</div>
 			</div>
@@ -265,10 +273,14 @@
 					<div class="mt-1 flex items-center gap-1">
 						<ColoredTag label={providerTagLabel} variant={providerTagVariant} />
 						{#each visibleTags as tag (tag)}
-							<ColoredTag label={tag} variant="border-border bg-muted text-muted-foreground" />
+							<ColoredTag label={tag} autoColor onclick={(e) => { e.stopPropagation(); onTagClick?.(tag); }} />
 						{/each}
 						{#if overflowCount > 0}
-							<span class="text-[10px] text-muted-foreground">+{overflowCount}</span>
+							<button
+								type="button"
+								class="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+								onclick={(e) => { e.stopPropagation(); onManageTags?.(session.id, session.tags); }}
+							>+{overflowCount}</button>
 						{/if}
 					</div>
 			</div>

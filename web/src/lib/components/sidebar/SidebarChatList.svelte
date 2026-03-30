@@ -31,6 +31,7 @@
 			onToggleArchive: (chatId: string) => void;
 			onShowDetails: (chatId: string, chatTitle: string) => void;
 			onForkChat: (sourceChatId: string) => void;
+			onTagClick?: (tag: string) => void;
 			onManageTags?: (chatId: string, currentTags: string[]) => void;
 			onImmediateReorder: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 			onQuickMove: (chatId: string, chatIdAbove?: string, chatIdBelow?: string) => void;
@@ -53,6 +54,7 @@
 			onToggleArchive,
 			onShowDetails,
 			onForkChat,
+			onTagClick,
 			onManageTags,
 			onImmediateReorder,
 			onQuickMove,
@@ -259,6 +261,7 @@
 										{onToggleArchive}
 										{onShowDetails}
 										{onForkChat}
+									{onTagClick}
 									{onManageTags}
 										{onEnterReorderMode}
 									onMoveToTop={idx > 0 ? () => moveToTop('pinned', chatId) : undefined}
@@ -306,6 +309,7 @@
 										{onToggleArchive}
 										{onShowDetails}
 										{onForkChat}
+									{onTagClick}
 									{onManageTags}
 										{onEnterReorderMode}
 									onMoveToTop={idx > 0 ? () => moveToTop('normal', chatId) : undefined}
@@ -353,6 +357,7 @@
 										{onToggleArchive}
 										{onShowDetails}
 										{onForkChat}
+									{onTagClick}
 									{onManageTags}
 										{onEnterReorderMode}
 									onMoveToTop={idx > 0 ? () => moveToTop('archived', chatId) : undefined}
@@ -388,6 +393,7 @@
 							{onToggleArchive}
 							{onShowDetails}
 							{onForkChat}
+									{onTagClick}
 									{onManageTags}
 							{onEnterReorderMode}
 						{hasPinnedChats}
@@ -418,6 +424,7 @@
 								{onToggleArchive}
 								{onShowDetails}
 								{onForkChat}
+									{onTagClick}
 									{onManageTags}
 								{onEnterReorderMode}
 								{hasPinnedChats}
@@ -442,6 +449,7 @@
 						{onToggleArchive}
 						{onShowDetails}
 						{onForkChat}
+									{onTagClick}
 									{onManageTags}
 						{onEnterReorderMode}
 					{hasPinnedChats}
@@ -472,6 +480,7 @@
 									{onToggleArchive}
 									{onShowDetails}
 									{onForkChat}
+									{onTagClick}
 									{onManageTags}
 									{onEnterReorderMode}
 								{hasPinnedChats}
@@ -495,6 +504,7 @@
 					{onToggleArchive}
 					{onShowDetails}
 					{onForkChat}
+									{onTagClick}
 									{onManageTags}
 					{onEnterReorderMode}
 				{hasPinnedChats}

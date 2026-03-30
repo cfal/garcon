@@ -100,4 +100,105 @@ describe('SidebarFilterState', () => {
 			status: 'unread',
 		});
 	});
+
+	describe('activeFilterChips', () => {
+		it('is empty when no filters applied (all folder, no search)', () => {
+			const chats = [makeChat({ id: 'chat-1' })];
+			const state = new SidebarFilterState({
+				get chats() {
+					return chats;
+				},
+			});
+
+			state.selectFolder('all');
+			state.searchQuery = '';
+
+			expect(state.activeFilterChips).toEqual([]);
+		});
+
+		it('shows folder-contributed tags as non-removable', () => {
+			const chats = [makeChat({ id: 'chat-1', tags: ['ops'] })];
+			const state = new SidebarFilterState({
+				get chats() {
+					return chats;
+				},
+			});
+
+			state.setUserFolders([
+				{
+					id: 'folder-ops',
+					name: 'Ops',
+					filter: { textTokens: [], tags: ['ops'], providers: [], models: [] },
+					createdAt: '2026-03-27T00:00:00.000Z',
+				},
+			]);
+			state.selectFolder('folder-ops');
+
+			const tagChips = state.activeFilterChips.filter((c) => c.type === 'tag');
+			expect(tagChips).toHaveLength(1);
+			expect(tagChips[0].value).toBe('ops');
+			expect(tagChips[0].removable).toBe(false);
+		});
+
+		it('shows search-contributed tags as removable', () => {
+			const chats = [makeChat({ id: 'chat-1', tags: ['ops'] })];
+			const state = new SidebarFilterState({
+				get chats() {
+					return chats;
+				},
+			});
+
+			state.selectFolder('all');
+			state.searchQuery = 'tag:ops';
+
+			const tagChips = state.activeFilterChips.filter((c) => c.type === 'tag');
+			expect(tagChips).toHaveLength(1);
+			expect(tagChips[0].value).toBe('ops');
+			expect(tagChips[0].removable).toBe(true);
+		});
+
+		it('includes status chip from folder filter', () => {
+			const chats = [makeChat({ id: 'chat-1', isUnread: true })];
+			const state = new SidebarFilterState({
+				get chats() {
+					return chats;
+				},
+			});
+
+			state.selectFolder('unread');
+
+			const statusChips = state.activeFilterChips.filter((c) => c.type === 'status');
+			expect(statusChips).toHaveLength(1);
+			expect(statusChips[0].value).toBe('unread');
+			expect(statusChips[0].removable).toBe(false);
+		});
+
+		it('mixed folder + search produces correct removable/non-removable mix', () => {
+			const chats = [makeChat({ id: 'chat-1', tags: ['ops', 'bugs'] })];
+			const state = new SidebarFilterState({
+				get chats() {
+					return chats;
+				},
+			});
+
+			state.setUserFolders([
+				{
+					id: 'folder-ops',
+					name: 'Ops',
+					filter: { textTokens: [], tags: ['ops'], providers: [], models: [] },
+					createdAt: '2026-03-27T00:00:00.000Z',
+				},
+			]);
+			state.selectFolder('folder-ops');
+			state.searchQuery = 'tag:bugs';
+
+			const tagChips = state.activeFilterChips.filter((c) => c.type === 'tag');
+			expect(tagChips).toHaveLength(2);
+
+			const opsChip = tagChips.find((c) => c.value === 'ops');
+			const bugsChip = tagChips.find((c) => c.value === 'bugs');
+			expect(opsChip?.removable).toBe(false);
+			expect(bugsChip?.removable).toBe(true);
+		});
+	});
 });
