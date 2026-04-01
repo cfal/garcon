@@ -3,6 +3,7 @@
 // AppShell's local chats array and NavigationStore's selectedChat snapshot.
 
 import {
+	normalizeAmpAgentMode,
 	normalizeClaudeThinkingMode,
 	normalizePermissionMode,
 	normalizeThinkingMode,
@@ -14,11 +15,13 @@ function normalizeModeFields<T extends {
 	permissionMode?: unknown;
 	thinkingMode?: unknown;
 	claudeThinkingMode?: unknown;
-}>(value: T): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'claudeThinkingMode'> {
+	ampAgentMode?: unknown;
+}>(value: T): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'claudeThinkingMode' | 'ampAgentMode'> {
 	return {
 		permissionMode: normalizePermissionMode(value.permissionMode),
 		thinkingMode: normalizeThinkingMode(value.thinkingMode),
 		claudeThinkingMode: normalizeClaudeThinkingMode(value.claudeThinkingMode),
+		ampAgentMode: normalizeAmpAgentMode(value.ampAgentMode),
 	};
 }
 

@@ -24,7 +24,7 @@ import { getFactoryPreviewFromSessionId, loadFactoryChatMessagesBySessionId } fr
 import type { IChatRegistry } from '../chats/store.js';
 
 import type { AgentCommandImage } from '../../common/ws-requests.js';
-import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
+import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type {
   ProviderChatEntry,
   ProviderName,
@@ -51,6 +51,7 @@ function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | unde
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
   claudeThinkingMode: ClaudeThinkingMode;
+  ampAgentMode: AmpAgentMode;
 } {
   const execution = requireChatExecutionConfig(chatId, entry);
   if (!entry) {
@@ -167,6 +168,7 @@ export class ProviderRegistry {
     permissionMode?: PermissionMode;
     thinkingMode?: ThinkingMode;
     claudeThinkingMode?: ClaudeThinkingMode;
+    ampAgentMode?: AmpAgentMode;
     projectPath?: string;
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
@@ -221,7 +223,10 @@ export class ProviderRegistry {
     }
 
     if (entry.provider === 'amp') {
-      const { providerSessionId, nativePath } = await this.#amp.startSession(request);
+      const { providerSessionId, nativePath } = await this.#amp.startSession({
+        ...request,
+        ampAgentMode: entry.ampAgentMode,
+      });
       this.#registry.updateChat(chatId, { providerSessionId, nativePath });
       return;
     }
@@ -242,6 +247,7 @@ export class ProviderRegistry {
     permissionMode?: PermissionMode;
     thinkingMode?: ThinkingMode;
     claudeThinkingMode?: ClaudeThinkingMode;
+    ampAgentMode?: AmpAgentMode;
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
     if (!rawEntry) {
@@ -273,7 +279,10 @@ export class ProviderRegistry {
     } else if (provider === 'opencode') {
       await this.#opencode.runTurn(request);
     } else if (provider === 'amp') {
-      await this.#amp.runTurn(request);
+      await this.#amp.runTurn({
+        ...request,
+        ampAgentMode: entry.ampAgentMode,
+      });
     } else if (provider === 'factory') {
       await this.#factory.runTurn(request);
     } else {
@@ -403,6 +412,9 @@ export class ProviderRegistry {
     if (!providerSessionId || entry.provider !== 'claude') return;
     this.#claude.setInternalClaudeThinkingMode(providerSessionId, mode);
   }
+
+  // Amp agent mode changes are applied on the next CLI spawn; no-op here.
+  async setAmpAgentMode(_chatId: string, _mode: AmpAgentMode): Promise<void> { }
 
   // Model changes are applied on the next CLI spawn; no-op here.
   async setModel(_chatId: string, _model: string): Promise<void> { }

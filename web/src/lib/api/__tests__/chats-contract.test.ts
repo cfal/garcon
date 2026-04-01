@@ -60,6 +60,7 @@ describe('chats API contract', () => {
 			permissionMode: 'default',
 			thinkingMode: 'none',
 			claudeThinkingMode: 'auto',
+			ampAgentMode: 'smart',
 			command: 'hello',
 		});
 
@@ -90,6 +91,7 @@ describe('chats API contract', () => {
 			permissionMode: 'acceptEdits',
 			thinkingMode: 'think-hard',
 			claudeThinkingMode: 'off',
+			ampAgentMode: 'smart',
 			command: 'test',
 			options: { cwd: '/p' },
 			tags: ['fast'],
@@ -114,6 +116,7 @@ describe('chats API contract', () => {
 			permissionMode: 'bogus' as any,
 			thinkingMode: 'very-hard' as any,
 			claudeThinkingMode: 'sometimes' as any,
+			ampAgentMode: 'smart',
 			command: 'test',
 		});
 

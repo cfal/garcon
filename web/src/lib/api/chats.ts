@@ -4,9 +4,11 @@ import { apiGet, apiPost, apiPatch, apiDelete } from './client.js';
 import type { ChatSession } from '$lib/types/session.js';
 import type { SessionProvider } from '$lib/types/app.js';
 import {
+	normalizeAmpAgentMode,
 	normalizeClaudeThinkingMode,
 	normalizePermissionMode,
 	normalizeThinkingMode,
+	type AmpAgentMode,
 	type ClaudeThinkingMode,
 	type PermissionMode,
 	type ThinkingMode,
@@ -20,6 +22,7 @@ export interface StartChatParams {
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
 	claudeThinkingMode: ClaudeThinkingMode;
+	ampAgentMode: AmpAgentMode;
 	command: string;
 	options?: Record<string, unknown>;
 	tags?: string[];
@@ -54,6 +57,7 @@ export async function startChat(params: StartChatParams): Promise<StartChatRespo
 		permissionMode,
 		thinkingMode,
 		claudeThinkingMode,
+		ampAgentMode,
 		options = {},
 		tags = [],
 		...rest
@@ -63,6 +67,7 @@ export async function startChat(params: StartChatParams): Promise<StartChatRespo
 		permissionMode: normalizePermissionMode(permissionMode),
 		thinkingMode: normalizeThinkingMode(thinkingMode),
 		claudeThinkingMode: normalizeClaudeThinkingMode(claudeThinkingMode),
+		ampAgentMode: normalizeAmpAgentMode(ampAgentMode),
 		options,
 		tags,
 	});

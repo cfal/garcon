@@ -6,9 +6,11 @@ import path from 'path';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import {
+  normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
+  type AmpAgentMode,
   type ClaudeThinkingMode,
   type PermissionMode,
   type ThinkingMode,
@@ -27,6 +29,7 @@ const ALLOWED_PATCH_FIELDS = [
   'permissionMode',
   'thinkingMode',
   'claudeThinkingMode',
+  'ampAgentMode',
 ] as const;
 
 export interface ChatRegistryEntry {
@@ -40,6 +43,7 @@ export interface ChatRegistryEntry {
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
   claudeThinkingMode: ClaudeThinkingMode;
+  ampAgentMode: AmpAgentMode;
 }
 
 export interface ChatRegistrySnapshot {
@@ -58,6 +62,7 @@ export interface NewChatRegistryEntry {
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
+  ampAgentMode?: AmpAgentMode;
 }
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
@@ -95,11 +100,13 @@ function normalizeRegistryModes(entry: {
   permissionMode?: unknown;
   thinkingMode?: unknown;
   claudeThinkingMode?: unknown;
-}): Pick<ChatRegistryEntry, 'permissionMode' | 'thinkingMode' | 'claudeThinkingMode'> {
+  ampAgentMode?: unknown;
+}): Pick<ChatRegistryEntry, 'permissionMode' | 'thinkingMode' | 'claudeThinkingMode' | 'ampAgentMode'> {
   return {
     permissionMode: normalizePermissionMode(entry.permissionMode),
     thinkingMode: normalizeThinkingMode(entry.thinkingMode),
     claudeThinkingMode: normalizeClaudeThinkingMode(entry.claudeThinkingMode),
+    ampAgentMode: normalizeAmpAgentMode(entry.ampAgentMode),
   };
 }
 
@@ -240,6 +247,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     permissionMode = 'default',
     thinkingMode = 'none',
     claudeThinkingMode = 'auto',
+    ampAgentMode = 'smart',
   }: NewChatRegistryEntry): boolean {
     if (!provider) throw new Error('Provider not specified');
     if (!model) throw new Error('Model not specified');
@@ -248,7 +256,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     if (id in registry.sessions) {
       throw new Error(`Chat with ID ${id} already exists`);
     }
-    const normalizedModes = normalizeRegistryModes({ permissionMode, thinkingMode, claudeThinkingMode });
+    const normalizedModes = normalizeRegistryModes({ permissionMode, thinkingMode, claudeThinkingMode, ampAgentMode });
     registry.sessions[id] = {
       provider,
       nativePath,
@@ -275,6 +283,9 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     }
     if ('claudeThinkingMode' in normalizedPatch) {
       normalizedPatch.claudeThinkingMode = normalizeClaudeThinkingMode(normalizedPatch.claudeThinkingMode);
+    }
+    if ('ampAgentMode' in normalizedPatch) {
+      normalizedPatch.ampAgentMode = normalizeAmpAgentMode(normalizedPatch.ampAgentMode);
     }
     for (const key of ALLOWED_PATCH_FIELDS) {
       if (key in normalizedPatch) {

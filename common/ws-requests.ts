@@ -2,11 +2,12 @@
 // Shared between server and frontend to enforce a typed contract.
 
 import {
+  isAmpAgentMode,
   isClaudeThinkingMode,
   isPermissionMode,
   isThinkingMode,
 } from './chat-modes.js';
-import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from './chat-modes.js';
+import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from './chat-modes.js';
 
 // Narrows an unknown value to string | null for chatId fields.
 function strOrNull(v: unknown): string | null {
@@ -49,6 +50,14 @@ function requireClaudeThinkingMode(v: unknown): ClaudeThinkingMode {
   return s;
 }
 
+function requireAmpAgentMode(v: unknown): AmpAgentMode {
+  const s = requireNonEmptyString(v, 'ampAgentMode');
+  if (!isAmpAgentMode(s)) {
+    throw new Error(`Invalid ampAgentMode: ${s}`);
+  }
+  return s;
+}
+
 function parseAgentRunImages(v: unknown): AgentCommandImage[] | undefined {
   if (!Array.isArray(v)) return undefined;
   return v;
@@ -68,6 +77,7 @@ export class AgentRunRequest {
     public thinkingMode: ThinkingMode,
     public model: string,
     public claudeThinkingMode?: ClaudeThinkingMode,
+    public ampAgentMode?: AmpAgentMode,
     public images?: AgentCommandImage[],
   ) { }
 
@@ -86,6 +96,7 @@ export class AgentRunRequest {
       requireThinkingMode(data.thinkingMode),
       requireNonEmptyString(data.model, 'model'),
       data.claudeThinkingMode === undefined ? undefined : requireClaudeThinkingMode(data.claudeThinkingMode),
+      data.ampAgentMode === undefined ? undefined : requireAmpAgentMode(data.ampAgentMode),
       images,
     );
   }
@@ -175,6 +186,16 @@ export class ClaudeThinkingModeSetRequest {
   }
 }
 
+export class AmpAgentModeSetRequest {
+  readonly type = 'amp-agent-mode-set' as const;
+  constructor(public chatId: string | null, public mode?: AmpAgentMode) { }
+
+  static fromJson(data: Record<string, unknown>): AmpAgentModeSetRequest {
+    const mode = data.mode === undefined ? undefined : requireAmpAgentMode(data.mode);
+    return new AmpAgentModeSetRequest(strOrNull(data.chatId), mode);
+  }
+}
+
 export class ModelSetRequest {
   readonly type = 'model-set' as const;
   constructor(public chatId: string | null, public model?: string) { }
@@ -259,6 +280,7 @@ export type ClientWsMessage =
   | PermissionModeSetRequest
   | ThinkingModeSetRequest
   | ClaudeThinkingModeSetRequest
+  | AmpAgentModeSetRequest
   | ModelSetRequest
   | QueueEnqueueRequest
   | QueueDropRequest
@@ -285,6 +307,8 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
       return ThinkingModeSetRequest.fromJson(data);
     case 'claude-thinking-mode-set':
       return ClaudeThinkingModeSetRequest.fromJson(data);
+    case 'amp-agent-mode-set':
+      return AmpAgentModeSetRequest.fromJson(data);
     case 'model-set':
       return ModelSetRequest.fromJson(data);
     case 'queue-enqueue':
