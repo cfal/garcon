@@ -8,6 +8,11 @@ import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import { UserMessage } from '../../common/chat-types.ts';
+import {
+  normalizeClaudeThinkingMode,
+  normalizePermissionMode,
+  normalizeThinkingMode,
+} from '../../common/chat-modes.js';
 import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { PROVIDERS as VALID_PROVIDERS, supportsFork as providerSupportsFork, supportsImages as providerSupportsImages } from '../../common/providers.ts';
 import { getProjectBasePath } from '../config.js';
@@ -192,8 +197,9 @@ export default function createChatRoutes(
           id: chatId,
           provider: session.provider,
           model: session.model || null,
-          permissionMode: session.permissionMode || 'default',
-          thinkingMode: session.thinkingMode || 'none',
+          permissionMode: normalizePermissionMode(session.permissionMode),
+          thinkingMode: normalizeThinkingMode(session.thinkingMode),
+          claudeThinkingMode: normalizeClaudeThinkingMode(session.claudeThinkingMode),
           title: extractFirstLine((overrideTitle || meta?.firstMessage || 'New Session') as string),
           projectPath: session.projectPath,
           tags: session.tags || [],
@@ -283,16 +289,9 @@ export default function createChatRoutes(
       }
 
       const model = typeof body.model === 'string' ? body.model : '';
-
-      const permissionMode =
-        typeof body.permissionMode === 'string'
-          ? body.permissionMode
-          : 'default';
-
-      const thinkingMode =
-        typeof body.thinkingMode === 'string'
-          ? body.thinkingMode
-          : 'none';
+      const permissionMode = normalizePermissionMode(body.permissionMode);
+      const thinkingMode = normalizeThinkingMode(body.thinkingMode);
+      const claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);
 
       const created = registry.addChat({
         id: chatId,
@@ -304,6 +303,7 @@ export default function createChatRoutes(
         model,
         permissionMode,
         thinkingMode,
+        claudeThinkingMode,
       });
       if (!created) {
         return Response.json({ success: false, error: `Session ID collision: ${chatId}` }, { status: 409 });
@@ -316,6 +316,7 @@ export default function createChatRoutes(
         model,
         permissionMode,
         thinkingMode,
+        claudeThinkingMode,
       });
       await settings.ensureInNormal(chatId);
 

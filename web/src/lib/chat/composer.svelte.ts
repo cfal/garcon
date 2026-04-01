@@ -2,8 +2,13 @@
 // and message submission. Manages the input area lifecycle for a single chat.
 
 import type { WsConnection } from '$lib/ws/connection.svelte';
+import {
+	normalizeClaudeThinkingMode,
+	normalizePermissionMode,
+	normalizeThinkingMode,
+} from '$shared/chat-modes';
 import { AgentRunRequest } from '$shared/ws-requests';
-import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
 
 const DRAFT_PREFIX = 'chat_draft_';
 
@@ -90,6 +95,7 @@ export class ComposerState {
 			model: string;
 			permissionMode: PermissionMode;
 			thinkingMode: ThinkingMode;
+			claudeThinkingMode: ClaudeThinkingMode;
 		}
 	): Promise<boolean> {
 		const text = this.inputText.trim();
@@ -121,9 +127,10 @@ export class ComposerState {
 			const sent = ws.sendMessage(new AgentRunRequest(
 				chatId,
 				text,
-				options.permissionMode,
-				options.thinkingMode,
+				normalizePermissionMode(options.permissionMode),
+				normalizeThinkingMode(options.thinkingMode),
 				options.model,
+				normalizeClaudeThinkingMode(options.claudeThinkingMode),
 				imageData.length > 0 ? imageData : undefined
 			));
 

@@ -294,6 +294,7 @@ describe('settings store', () => {
         chatFolders: [],
         lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
+        lastClaudeThinkingMode: 'auto',
       });
     });
 
@@ -306,7 +307,25 @@ describe('settings store', () => {
         chatFolders: [],
         lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
+        lastClaudeThinkingMode: 'auto',
       });
+    });
+
+    it('normalizes invalid persisted mode settings on load', async () => {
+      await writeRaw({
+        ui: {}, paths: {}, chatNames: {},
+        pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
+        chatFolders: [],
+        lastProvider: 'claude', lastProjectPath: '', lastModel: '',
+        lastPermissionMode: 'bogus',
+        lastThinkingMode: 'very-hard',
+        lastClaudeThinkingMode: 'sometimes',
+      });
+
+      const settings = await store.loadSettings();
+      expect(settings.lastPermissionMode).toBe('default');
+      expect(settings.lastThinkingMode).toBe('none');
+      expect(settings.lastClaudeThinkingMode).toBe('auto');
     });
   });
 
@@ -324,6 +343,7 @@ describe('settings store', () => {
         lastModel: '',
         lastPermissionMode: 'default',
         lastThinkingMode: 'none',
+        lastClaudeThinkingMode: 'auto',
       });
 
       await store.reconcileWithRegistry(mockRegistry);
@@ -347,6 +367,7 @@ describe('settings store', () => {
         lastModel: '',
         lastPermissionMode: 'default',
         lastThinkingMode: 'none',
+        lastClaudeThinkingMode: 'auto',
       });
 
       await store.reconcileWithRegistry(mockRegistry);
@@ -369,6 +390,7 @@ describe('settings store', () => {
         lastModel: '',
         lastPermissionMode: 'default',
         lastThinkingMode: 'none',
+        lastClaudeThinkingMode: 'auto',
       });
 
       await store.reconcileWithRegistry(mockRegistry);
@@ -506,6 +528,7 @@ describe('settings store', () => {
         archivedChatIds: [],
         lastProvider: 'claude', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
+        lastClaudeThinkingMode: 'auto',
       });
 
       // Fire both mutations concurrently — without the lock, the second
@@ -527,6 +550,7 @@ describe('settings store', () => {
         archivedChatIds: [],
         lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
+        lastClaudeThinkingMode: 'auto',
       });
 
       await Promise.all([
@@ -537,6 +561,7 @@ describe('settings store', () => {
           model: 'gpt-5.4',
           permissionMode: 'bypassPermissions',
           thinkingMode: 'think-hard',
+          claudeThinkingMode: 'off',
         }),
         store.ensureInNormal('chat-2'),
       ]);
@@ -549,6 +574,7 @@ describe('settings store', () => {
       expect(settings.lastModel).toBe('gpt-5.4');
       expect(settings.lastPermissionMode).toBe('bypassPermissions');
       expect(settings.lastThinkingMode).toBe('think-hard');
+      expect(settings.lastClaudeThinkingMode).toBe('off');
     });
   });
 
@@ -572,12 +598,14 @@ describe('settings store', () => {
         model: 'gpt-5.4',
         permissionMode: 'bypassPermissions',
         thinkingMode: 'think-hard',
+        claudeThinkingMode: 'on',
       });
       expect(await store.getLastProvider()).toBe('codex');
       expect(await store.getLastProjectPath()).toBe('/workspace/project-a');
       expect(await store.getLastModel()).toBe('gpt-5.4');
       expect(await store.getLastPermissionMode()).toBe('bypassPermissions');
       expect(await store.getLastThinkingMode()).toBe('think-hard');
+      expect(await store.getLastClaudeThinkingMode()).toBe('on');
     });
 
     it('preserves unspecified fields when updating only one startup setting', async () => {
@@ -587,6 +615,7 @@ describe('settings store', () => {
         model: 'gpt-5.4',
         permissionMode: 'bypassPermissions',
         thinkingMode: 'think-hard',
+        claudeThinkingMode: 'on',
       });
       await store.setLastPermissionMode('acceptEdits');
       expect(await store.getLastProvider()).toBe('codex');
@@ -594,6 +623,7 @@ describe('settings store', () => {
       expect(await store.getLastModel()).toBe('gpt-5.4');
       expect(await store.getLastPermissionMode()).toBe('acceptEdits');
       expect(await store.getLastThinkingMode()).toBe('think-hard');
+      expect(await store.getLastClaudeThinkingMode()).toBe('on');
     });
 
     it('getLastPermissionMode defaults to "default"', async () => {
@@ -612,6 +642,36 @@ describe('settings store', () => {
     it('setLastThinkingMode persists the mode', async () => {
       await store.setLastThinkingMode('think-hard');
       expect(await store.getLastThinkingMode()).toBe('think-hard');
+    });
+
+    it('getLastClaudeThinkingMode defaults to "auto"', async () => {
+      expect(await store.getLastClaudeThinkingMode()).toBe('auto');
+    });
+
+    it('setLastClaudeThinkingMode persists the mode', async () => {
+      await store.setLastClaudeThinkingMode('off');
+      expect(await store.getLastClaudeThinkingMode()).toBe('off');
+    });
+
+    it('preserves existing startup modes when an update provides invalid values', async () => {
+      await store.setLastChatDefaults({
+        provider: 'claude',
+        projectPath: '/workspace/project-a',
+        model: 'opus',
+        permissionMode: 'acceptEdits',
+        thinkingMode: 'think-hard',
+        claudeThinkingMode: 'off',
+      });
+
+      await store.setLastChatDefaults({
+        permissionMode: 'bogus',
+        thinkingMode: 'very-hard',
+        claudeThinkingMode: 'sometimes',
+      });
+
+      expect(await store.getLastPermissionMode()).toBe('acceptEdits');
+      expect(await store.getLastThinkingMode()).toBe('think-hard');
+      expect(await store.getLastClaudeThinkingMode()).toBe('off');
     });
   });
 });

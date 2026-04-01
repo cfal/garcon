@@ -48,6 +48,7 @@ describe('NewChatFormState', () => {
 				lastModel: 'opus',
 				lastPermissionMode: 'default',
 				lastThinkingMode: 'none',
+				lastClaudeThinkingMode: 'auto',
 			projectBasePath: '/workspace'
 		});
 		vi.mocked(settingsApi.updateSettings).mockResolvedValue({ success: true });
@@ -70,6 +71,7 @@ describe('NewChatFormState', () => {
 				lastModel: 'gpt-5.4',
 				lastPermissionMode: 'acceptEdits',
 			lastThinkingMode: 'think-hard',
+			lastClaudeThinkingMode: 'off',
 			projectBasePath: '/workspace'
 		});
 
@@ -80,7 +82,29 @@ describe('NewChatFormState', () => {
 		expect(state.modelValue).toBe('gpt-5.4');
 		expect(state.permissionMode).toBe('acceptEdits');
 		expect(state.thinkingMode).toBe('think-hard');
+		expect(state.claudeThinkingMode).toBe('off');
 		expect(state.projectPath).toBe('/workspace/project');
+	});
+
+	it('normalizes invalid startup defaults from server settings', async () => {
+		vi.mocked(settingsApi.getSettings).mockResolvedValue({
+			ui: {},
+			paths: {},
+			pinnedChatIds: [],
+			lastProvider: 'claude',
+			lastProjectPath: '/workspace/project',
+			lastModel: 'opus',
+			lastPermissionMode: 'bogus' as any,
+			lastThinkingMode: 'very-hard' as any,
+			lastClaudeThinkingMode: 'sometimes' as any,
+			projectBasePath: '/workspace'
+		});
+
+		await state.loadSettingsAndModels();
+
+		expect(state.permissionMode).toBe('default');
+		expect(state.thinkingMode).toBe('none');
+		expect(state.claudeThinkingMode).toBe('auto');
 	});
 
 	it('debounces directory validation', async () => {
@@ -151,6 +175,7 @@ describe('NewChatFormState', () => {
 		state.handleModelChange('gpt-5.4');
 		state.permissionMode = 'acceptEdits';
 		state.thinkingMode = 'think-hard';
+		state.claudeThinkingMode = 'on';
 
 		const config = state.buildConfig();
 
@@ -160,6 +185,7 @@ describe('NewChatFormState', () => {
 				model: 'gpt-5.4',
 				permissionMode: 'acceptEdits',
 				thinkingMode: 'think-hard',
+				claudeThinkingMode: 'on',
 			});
 			expect(settingsApi.updateSettings).not.toHaveBeenCalled();
 		});

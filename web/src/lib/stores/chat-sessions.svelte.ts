@@ -2,8 +2,25 @@
 // selection state, and draft lifecycle. Replaces split ownership between
 // AppShell's local chats array and NavigationStore's selectedChat snapshot.
 
+import {
+	normalizeClaudeThinkingMode,
+	normalizePermissionMode,
+	normalizeThinkingMode,
+} from '$shared/chat-modes';
 import type { ChatSession } from '$lib/types/session';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
+
+function normalizeModeFields<T extends {
+	permissionMode?: unknown;
+	thinkingMode?: unknown;
+	claudeThinkingMode?: unknown;
+}>(value: T): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'claudeThinkingMode'> {
+	return {
+		permissionMode: normalizePermissionMode(value.permissionMode),
+		thinkingMode: normalizeThinkingMode(value.thinkingMode),
+		claudeThinkingMode: normalizeClaudeThinkingMode(value.claudeThinkingMode),
+	};
+}
 
 function toRecord(session: ChatSession): ChatSessionRecord {
 	return {
@@ -12,8 +29,7 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 		title: session.title,
 		provider: session.provider,
 		model: session.model,
-		permissionMode: (session.permissionMode as ChatSessionRecord['permissionMode']) ?? 'default',
-		thinkingMode: session.thinkingMode ?? 'none',
+		...normalizeModeFields(session),
 		createdAt: session.activity?.createdAt ?? null,
 		lastActivityAt: session.activity?.lastActivityAt ?? null,
 		lastReadAt: session.activity?.lastReadAt ?? null,
@@ -45,6 +61,7 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.model === b.model &&
 		a.permissionMode === b.permissionMode &&
 		a.thinkingMode === b.thinkingMode &&
+		a.claudeThinkingMode === b.claudeThinkingMode &&
 		a.createdAt === b.createdAt &&
 		a.lastActivityAt === b.lastActivityAt &&
 		a.lastReadAt === b.lastReadAt &&
@@ -145,15 +162,18 @@ export class ChatSessionsStore {
 		startup: ChatStartupConfig;
 	}): void {
 		const { id, projectPath, startup } = params;
+		const normalizedStartup = {
+			...startup,
+			...normalizeModeFields(startup),
+		};
 
 		const draft: ChatSessionRecord = {
 			id,
 			projectPath,
-			title: startup.firstMessage.trim() || 'New Session',
-			provider: startup.provider,
-			model: startup.model,
-			permissionMode: startup.permissionMode ?? 'default',
-			thinkingMode: startup.thinkingMode ?? 'none',
+			title: normalizedStartup.firstMessage.trim() || 'New Session',
+			provider: normalizedStartup.provider,
+			model: normalizedStartup.model,
+			...normalizeModeFields(normalizedStartup),
 			createdAt: null,
 			lastActivityAt: null,
 			lastReadAt: null,
@@ -168,7 +188,7 @@ export class ChatSessionsStore {
 
 		this.byId = { ...this.byId, [id]: draft };
 		this.order = this.order.includes(id) ? this.order : [id, ...this.order];
-		this.startupByChatId = { ...this.startupByChatId, [id]: startup };
+		this.startupByChatId = { ...this.startupByChatId, [id]: normalizedStartup };
 		this.selectedChatId = id;
 	}
 
@@ -178,12 +198,14 @@ export class ChatSessionsStore {
 		if (!chat || chat.status !== 'draft') return;
 		const startup = this.startupByChatId[chatId];
 		if (!startup) return;
+		const nextStartup = {
+			...startup,
+			...patch,
+			...normalizeModeFields({ ...startup, ...patch }),
+		};
 		this.startupByChatId = {
 			...this.startupByChatId,
-			[chatId]: {
-				...startup,
-				...patch,
-			},
+			[chatId]: nextStartup,
 		};
 	}
 
@@ -239,9 +261,14 @@ export class ChatSessionsStore {
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void {
 		const chat = this.byId[chatId];
 		if (!chat) return;
+		const nextChat = {
+			...chat,
+			...patch,
+			...normalizeModeFields({ ...chat, ...patch }),
+		};
 		this.byId = {
 			...this.byId,
-			[chatId]: { ...chat, ...patch },
+			[chatId]: nextChat,
 		};
 	}
 

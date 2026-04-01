@@ -2,7 +2,7 @@
 // ad-hoc ChatEntry snapshots with a single authoritative record shape.
 
 import type { SessionProvider } from '$lib/types/app';
-import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
 
 export type ChatStatus = 'draft' | 'running';
 
@@ -11,6 +11,7 @@ export interface ChatStartupConfig {
 	model: string;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
+	claudeThinkingMode: ClaudeThinkingMode;
 	firstMessage: string;
 	initialImages?: File[];
 }
@@ -23,6 +24,7 @@ export interface ChatSessionRecord {
 	model: string | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
+	claudeThinkingMode: ClaudeThinkingMode;
 	createdAt: string | null;
 	lastActivityAt: string | null;
 	lastReadAt: string | null;

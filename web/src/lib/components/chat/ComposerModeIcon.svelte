@@ -44,6 +44,19 @@
 		<path d="M8 12a4 4 0 014-4h1" />
 		<path d="M10.5 18H13a4 4 0 004-4" />
 		<path d="M16.5 6.5l.8 1.6 1.8.2-1.3 1.3.3 1.8-1.6-.8-1.6.8.3-1.8-1.3-1.3 1.8-.2z" />
+	{:else if iconId === 'claude-thinking-auto'}
+		<path d="M7 4h6l4 4v12H7z" />
+		<path d="M13 4v4h4" />
+		<path d="M10 14a2 2 0 114 0c0 1.2-1 1.7-1.5 2.3-.3.3-.5.7-.5 1.2" />
+		<circle cx="12" cy="19" r="0.9" fill="currentColor" stroke="none" />
+	{:else if iconId === 'claude-thinking-on'}
+		<path d="M7 4h6l4 4v12H7z" />
+		<path d="M13 4v4h4" />
+		<path d="M10 14l1.5 1.5L14.5 12.5" />
+	{:else if iconId === 'claude-thinking-off'}
+		<path d="M7 4h6l4 4v12H7z" />
+		<path d="M13 4v4h4" />
+		<path d="M10 14h4" />
 	{:else}
 		<path d="M12 3l2.4 4.8L20 10l-4 4 .9 6-4.9-2.5L7 20l1-6-4-4 5.6-2.2z" />
 	{/if}

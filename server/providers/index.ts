@@ -20,7 +20,7 @@ import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loa
 import type { IChatRegistry } from '../chats/store.js';
 
 import type { AgentCommandImage } from '../../common/ws-requests.js';
-import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
+import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type {
   ProviderChatEntry,
   ProviderName,
@@ -45,6 +45,7 @@ function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | unde
   model: string;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
+  claudeThinkingMode: ClaudeThinkingMode;
 } {
   const execution = requireChatExecutionConfig(chatId, entry);
   if (!entry) {
@@ -64,6 +65,8 @@ interface ClaudeProviderInstance {
   getRunningClaudeInternalSessions(): Array<{ id: string; status: string; startedAt: string }>;
   resolveInternalToolApproval(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void;
   setInternalPermissionMode(providerSessionId: string, mode: PermissionMode): void;
+  setInternalThinkingMode(providerSessionId: string, mode: ThinkingMode): void;
+  setInternalClaudeThinkingMode(providerSessionId: string, mode: ClaudeThinkingMode): void;
   startPurgeTimer(): ReturnType<typeof setInterval>;
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
@@ -154,6 +157,7 @@ export class ProviderRegistry {
     model?: string;
     permissionMode?: PermissionMode;
     thinkingMode?: ThinkingMode;
+    claudeThinkingMode?: ClaudeThinkingMode;
     projectPath?: string;
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
@@ -174,6 +178,7 @@ export class ProviderRegistry {
       model: entry.model,
       permissionMode: entry.permissionMode,
       thinkingMode: entry.thinkingMode,
+      claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
       images: opts.images,
     };
 
@@ -226,6 +231,7 @@ export class ProviderRegistry {
     model?: string;
     permissionMode?: PermissionMode;
     thinkingMode?: ThinkingMode;
+    claudeThinkingMode?: ClaudeThinkingMode;
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
     if (!rawEntry) {
@@ -246,6 +252,7 @@ export class ProviderRegistry {
       model: opts.model ?? entry.model,
       permissionMode: opts.permissionMode ?? entry.permissionMode,
       thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
+      claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
       images: opts.images,
     };
 
@@ -366,6 +373,20 @@ export class ProviderRegistry {
     const providerSessionId = entry?.providerSessionId;
     if (!providerSessionId || entry.provider !== 'claude') return;
     this.#claude.setInternalPermissionMode(providerSessionId, mode);
+  }
+
+  async setThinkingMode(chatId: string, mode: ThinkingMode): Promise<void> {
+    const entry = this.#registry.getChat(chatId);
+    const providerSessionId = entry?.providerSessionId;
+    if (!providerSessionId || entry.provider !== 'claude') return;
+    this.#claude.setInternalThinkingMode(providerSessionId, mode);
+  }
+
+  async setClaudeThinkingMode(chatId: string, mode: ClaudeThinkingMode): Promise<void> {
+    const entry = this.#registry.getChat(chatId);
+    const providerSessionId = entry?.providerSessionId;
+    if (!providerSessionId || entry.provider !== 'claude') return;
+    this.#claude.setInternalClaudeThinkingMode(providerSessionId, mode);
   }
 
   // Model changes are applied on the next CLI spawn; no-op here.

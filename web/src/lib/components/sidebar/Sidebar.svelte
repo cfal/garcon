@@ -84,6 +84,7 @@
 	let tagDialog = $state<{ chatId: string; chatTitle: string; tags: string[] } | null>(null);
 	let saveFolderDialog = $state<FolderDialogState | null>(null);
 	let folderDeleteConfirmation = $state<{ id: string; name: string } | null>(null);
+	let folderDeleteButtonRef = $state<HTMLButtonElement | null>(null);
 	let currentTime = $state(new Date());
 	let isMarkingAllRead = $state(false);
 	let visibleUnreadChatIds = $derived.by(() =>
@@ -505,14 +506,14 @@
 />
 
 <Dialog.Root open={folderDeleteConfirmation !== null} onOpenChange={(open) => { if (!open) folderDeleteConfirmation = null; }}>
-	<Dialog.Content>
+	<Dialog.Content onOpenAutoFocus={(e) => { e.preventDefault(); folderDeleteButtonRef?.focus(); }}>
 		<Dialog.Header>
 			<Dialog.Title>{m.sidebar_folders_confirm_delete({ name: folderDeleteConfirmation?.name ?? '' })}</Dialog.Title>
 			<Dialog.Description>{m.sidebar_folders_confirm_delete_description()}</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => folderDeleteConfirmation = null}>{m.sidebar_actions_cancel()}</Button>
-			<Button variant="destructive" onclick={() => { void confirmDeleteFolder(); }}>{m.sidebar_actions_delete()}</Button>
+			<Button variant="destructive" onclick={() => { void confirmDeleteFolder(); }} bind:ref={folderDeleteButtonRef}>{m.sidebar_actions_delete()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

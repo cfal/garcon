@@ -17,6 +17,8 @@ const mockProviders = {
   getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [] })),
   resolvePermission: mock(() => undefined),
   setPermissionMode: mock(() => Promise.resolve(undefined)),
+  setThinkingMode: mock(() => Promise.resolve(undefined)),
+  setClaudeThinkingMode: mock(() => Promise.resolve(undefined)),
   setModel: mock(() => Promise.resolve(undefined)),
 };
 
@@ -51,7 +53,8 @@ const mockHistoryCache = {
 
 const injectedMocks = [
   mockProviders.getRunningSessions, mockProviders.resolvePermission,
-  mockProviders.setPermissionMode, mockProviders.setModel,
+  mockProviders.setPermissionMode, mockProviders.setThinkingMode,
+  mockProviders.setClaudeThinkingMode, mockProviders.setModel,
   mockRegistry.getChat, mockRegistry.updateChat,
   mockQueue.submit, mockQueue.abort, mockQueue.triggerDrain,
   mockQueue.readChatQueue, mockQueue.enqueueChat, mockQueue.dequeueChat,
@@ -108,6 +111,7 @@ describe('chat WebSocket handler', () => {
       expect(mockQueue.submit).toHaveBeenCalledWith('123', 'hello', {
         permissionMode: 'default',
         thinkingMode: 'none',
+        claudeThinkingMode: undefined,
         model: 'opus',
       });
     });
@@ -189,6 +193,7 @@ describe('chat WebSocket handler', () => {
         images: [{ data: 'data:image/png;base64,abc', name: 'a.png' }],
         permissionMode: 'default',
         thinkingMode: 'none',
+        claudeThinkingMode: undefined,
         model: 'opus',
       });
     });
@@ -344,13 +349,14 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('thinking-mode-set', () => {
-    it('persists thinking mode to registry', async () => {
+    it('persists thinking mode to registry and provider session', async () => {
       await chatHandler.message(ws, {
         type: 'thinking-mode-set',
         chatId: '123',
         mode: 'think-hard',
       });
       expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { thinkingMode: 'think-hard' });
+      expect(mockProviders.setThinkingMode).toHaveBeenCalledWith('123', 'think-hard');
     });
 
     it('sends error for missing chatId', async () => {
@@ -369,7 +375,30 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
       });
       expect(mockRegistry.updateChat).not.toHaveBeenCalled();
+      expect(mockProviders.setThinkingMode).not.toHaveBeenCalled();
     });
+  });
+
+  describe('claude-thinking-mode-set', () => {
+	it('persists Claude thinking mode to registry and provider session', async () => {
+	  await chatHandler.message(ws, {
+	    type: 'claude-thinking-mode-set',
+	    chatId: '123',
+	    mode: 'off',
+	  });
+	  expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { claudeThinkingMode: 'off' });
+	  expect(mockProviders.setClaudeThinkingMode).toHaveBeenCalledWith('123', 'off');
+	});
+
+	it('sends error for missing chatId', async () => {
+	  await chatHandler.message(ws, {
+	    type: 'claude-thinking-mode-set',
+	    mode: 'auto',
+	  });
+	  const payload = lastSentPayload();
+	  expect(payload).toMatchObject({ type: 'ws-fault' });
+	  expect(payload.error).toContain('Missing chatId');
+	});
   });
 
   describe('model-set', () => {
@@ -510,6 +539,30 @@ describe('chat WebSocket handler', () => {
       expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123', {
         permissionMode: 'default',
         thinkingMode: 'none',
+        claudeThinkingMode: 'auto',
+        model: 'opus',
+      });
+    });
+
+    it('normalizes invalid persisted drain settings before triggering the next turn', async () => {
+      mockRegistry.getChat.mockReturnValue({
+        projectPath: '/repo',
+        permissionMode: 'bogus',
+        thinkingMode: 'very-hard',
+        claudeThinkingMode: 'sometimes',
+        model: 'opus',
+      });
+
+      await chatHandler.message(ws, {
+        type: 'queue-enqueue',
+        chatId: '123',
+        content: 'queued text',
+      });
+
+      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123', {
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        claudeThinkingMode: 'auto',
         model: 'opus',
       });
     });
@@ -601,6 +654,7 @@ describe('chat WebSocket handler', () => {
       expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123', {
         permissionMode: 'default',
         thinkingMode: 'none',
+        claudeThinkingMode: 'auto',
         model: 'opus',
       });
     });

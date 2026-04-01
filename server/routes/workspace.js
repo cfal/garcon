@@ -46,7 +46,7 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
 
   async function getAppSettings() {
     try {
-      const [ui, paths, pinnedChatIds, lastProvider, lastProjectPath, lastModel, lastPermissionMode, lastThinkingMode, authByProvider, opencodeModels] = await Promise.all([
+      const [ui, paths, pinnedChatIds, lastProvider, lastProjectPath, lastModel, lastPermissionMode, lastThinkingMode, lastClaudeThinkingMode, authByProvider, opencodeModels] = await Promise.all([
         settings.getUiSettings(),
         settings.getPathSettings(),
         settings.getPinnedChatIds(),
@@ -55,6 +55,7 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
         settings.getLastModel(),
         settings.getLastPermissionMode(),
         settings.getLastThinkingMode(),
+        settings.getLastClaudeThinkingMode(),
         providers?.getAuthStatusMap?.() ?? Promise.resolve({
           claude: { authenticated: false },
           codex: { authenticated: false },
@@ -92,6 +93,7 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
         lastModel,
         lastPermissionMode,
         lastThinkingMode,
+        lastClaudeThinkingMode,
         projectBasePath,
         telegramBotTokenAvailable: Boolean(getTelegramBotToken()),
       });

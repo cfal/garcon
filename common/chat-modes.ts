@@ -9,6 +9,7 @@ export const PERMISSION_MODE_VALUES = [
 ] as const;
 
 export type PermissionMode = typeof PERMISSION_MODE_VALUES[number];
+export const DEFAULT_PERMISSION_MODE: PermissionMode = 'default';
 
 export const THINKING_MODE_VALUES = [
   'none',
@@ -19,9 +20,20 @@ export const THINKING_MODE_VALUES = [
 ] as const;
 
 export type ThinkingMode = typeof THINKING_MODE_VALUES[number];
+export const DEFAULT_THINKING_MODE: ThinkingMode = 'none';
+
+export const CLAUDE_THINKING_MODE_VALUES = [
+  'auto',
+  'on',
+  'off',
+] as const;
+
+export type ClaudeThinkingMode = typeof CLAUDE_THINKING_MODE_VALUES[number];
+export const DEFAULT_CLAUDE_THINKING_MODE: ClaudeThinkingMode = 'auto';
 
 const PERMISSION_MODE_SET = new Set<string>(PERMISSION_MODE_VALUES);
 const THINKING_MODE_SET = new Set<string>(THINKING_MODE_VALUES);
+const CLAUDE_THINKING_MODE_SET = new Set<string>(CLAUDE_THINKING_MODE_VALUES);
 
 export function isPermissionMode(value: unknown): value is PermissionMode {
   return typeof value === 'string' && PERMISSION_MODE_SET.has(value);
@@ -29,4 +41,29 @@ export function isPermissionMode(value: unknown): value is PermissionMode {
 
 export function isThinkingMode(value: unknown): value is ThinkingMode {
   return typeof value === 'string' && THINKING_MODE_SET.has(value);
+}
+
+export function isClaudeThinkingMode(value: unknown): value is ClaudeThinkingMode {
+  return typeof value === 'string' && CLAUDE_THINKING_MODE_SET.has(value);
+}
+
+export function normalizePermissionMode(
+  value: unknown,
+  fallback: PermissionMode = DEFAULT_PERMISSION_MODE,
+): PermissionMode {
+  return isPermissionMode(value) ? value : fallback;
+}
+
+export function normalizeThinkingMode(
+  value: unknown,
+  fallback: ThinkingMode = DEFAULT_THINKING_MODE,
+): ThinkingMode {
+  return isThinkingMode(value) ? value : fallback;
+}
+
+export function normalizeClaudeThinkingMode(
+  value: unknown,
+  fallback: ClaudeThinkingMode = DEFAULT_CLAUDE_THINKING_MODE,
+): ClaudeThinkingMode {
+  return isClaudeThinkingMode(value) ? value : fallback;
 }

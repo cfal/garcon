@@ -1,6 +1,11 @@
 import crypto from 'crypto';
 import path from 'path';
 import { promises as fs } from 'fs';
+import {
+  normalizeClaudeThinkingMode,
+  normalizePermissionMode,
+  normalizeThinkingMode,
+} from '../../common/chat-modes.ts';
 import { supportsFork } from '../../common/providers.ts';
 
 function escapeRegExp(input) {
@@ -74,8 +79,9 @@ export async function forkChatFileCopy({
     nativePath: destinationNativePath,
     tags: Array.isArray(sourceSession.tags) ? [...sourceSession.tags] : [],
     providerSessionId: newProviderSessionId,
-    permissionMode: sourceSession.permissionMode || 'default',
-    thinkingMode: sourceSession.thinkingMode || 'none',
+    permissionMode: normalizePermissionMode(sourceSession.permissionMode),
+    thinkingMode: normalizeThinkingMode(sourceSession.thinkingMode),
+    claudeThinkingMode: normalizeClaudeThinkingMode(sourceSession.claudeThinkingMode),
   });
 
   if (!created) {
