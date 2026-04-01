@@ -10,7 +10,12 @@ import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import type { NewChatConfig, SessionProvider } from '$lib/types/app.js';
 import type { AppSettings } from '$lib/types/session.js';
-import type { PermissionMode, ThinkingMode } from '$lib/types/chat.js';
+import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat.js';
+import {
+	normalizeClaudeThinkingMode,
+	normalizePermissionMode,
+	normalizeThinkingMode,
+} from '$shared/chat-modes';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
 import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
@@ -41,6 +46,7 @@ export class NewChatFormState {
 	// Modes
 	permissionMode = $state<PermissionMode>('default');
 	thinkingMode = $state<ThinkingMode>('none');
+	claudeThinkingMode = $state<ClaudeThinkingMode>('auto');
 
 	// Form
 	firstMessage = $state('');
@@ -380,8 +386,9 @@ export class NewChatFormState {
 			provider: this.provider,
 			projectPath: this.trimmedPath,
 			model: this.modelValue,
-			permissionMode: this.permissionMode,
-			thinkingMode: this.thinkingMode,
+			permissionMode: normalizePermissionMode(this.permissionMode),
+			thinkingMode: normalizeThinkingMode(this.thinkingMode),
+			claudeThinkingMode: normalizeClaudeThinkingMode(this.claudeThinkingMode),
 			firstMessage: this.firstMessage.trim(),
 			initialImages: this.attachedImages
 		};
@@ -473,12 +480,9 @@ export class NewChatFormState {
 			this.applyResolvedModel('amp', this.#modelCatalog.getDefaultModel('amp'));
 			this.applyResolvedModel('factory', this.#modelCatalog.getDefaultModel('factory'));
 		}
-		if (typeof settingsData.lastPermissionMode === 'string' && settingsData.lastPermissionMode) {
-			this.permissionMode = settingsData.lastPermissionMode;
-		}
-		if (typeof settingsData.lastThinkingMode === 'string') {
-			this.thinkingMode = settingsData.lastThinkingMode;
-		}
+		this.permissionMode = normalizePermissionMode(settingsData.lastPermissionMode);
+		this.thinkingMode = normalizeThinkingMode(settingsData.lastThinkingMode);
+		this.claudeThinkingMode = normalizeClaudeThinkingMode(settingsData.lastClaudeThinkingMode);
 	}
 
 	// Auto-open browser on first path focus

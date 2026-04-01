@@ -59,6 +59,7 @@ describe('chats API contract', () => {
 			model: 'opus',
 			permissionMode: 'default',
 			thinkingMode: 'none',
+			claudeThinkingMode: 'auto',
 			command: 'hello',
 		});
 
@@ -72,6 +73,7 @@ describe('chats API contract', () => {
 		expect(body.provider).toBe('claude');
 		expect(body.permissionMode).toBe('default');
 		expect(body.thinkingMode).toBe('none');
+		expect(body.claudeThinkingMode).toBe('auto');
 		expect(body.command).toBe('hello');
 		expect(body.options).toEqual({});
 		expect(body.tags).toEqual([]);
@@ -87,6 +89,7 @@ describe('chats API contract', () => {
 			model: 'm',
 			permissionMode: 'acceptEdits',
 			thinkingMode: 'think-hard',
+			claudeThinkingMode: 'off',
 			command: 'test',
 			options: { cwd: '/p' },
 			tags: ['fast'],
@@ -95,8 +98,29 @@ describe('chats API contract', () => {
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.permissionMode).toBe('acceptEdits');
 		expect(body.thinkingMode).toBe('think-hard');
+		expect(body.claudeThinkingMode).toBe('off');
 		expect(body.options).toEqual({ cwd: '/p' });
 		expect(body.tags).toEqual(['fast']);
+	});
+
+	it('startChat normalizes invalid mode values before sending the request', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+
+		await startChat({
+			chatId: 'c-3',
+			provider: 'claude',
+			projectPath: '/p',
+			model: 'm',
+			permissionMode: 'bogus' as any,
+			thinkingMode: 'very-hard' as any,
+			claudeThinkingMode: 'sometimes' as any,
+			command: 'test',
+		});
+
+		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(body.permissionMode).toBe('default');
+		expect(body.thinkingMode).toBe('none');
+		expect(body.claudeThinkingMode).toBe('auto');
 	});
 
 	it('deleteChat encodes chatId in query string', async () => {

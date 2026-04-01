@@ -26,6 +26,7 @@ function createMockCtx() {
       getLastModel: mock(() => Promise.resolve('')),
       getLastPermissionMode: mock(() => Promise.resolve('default')),
       getLastThinkingMode: mock(() => Promise.resolve('none')),
+      getLastClaudeThinkingMode: mock(() => Promise.resolve('auto')),
       getFolders: mock(() => Promise.resolve([])),
       addFolder: mock(() => Promise.resolve(undefined)),
       updateFolder: mock(() => Promise.resolve(undefined)),
@@ -68,6 +69,7 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
+    ctx.settings.getLastClaudeThinkingMode.mockClear();
     ctx.providers.getAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
@@ -138,6 +140,7 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
+    ctx.settings.getLastClaudeThinkingMode.mockClear();
     ctx.providers.getAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
@@ -152,6 +155,7 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getLastModel.mockImplementation(() => Promise.resolve('gpt-5.4'));
     ctx.settings.getLastPermissionMode.mockImplementation(() => Promise.resolve('acceptEdits'));
     ctx.settings.getLastThinkingMode.mockImplementation(() => Promise.resolve('think-hard'));
+    ctx.settings.getLastClaudeThinkingMode.mockImplementation(() => Promise.resolve('on'));
 
     const response = await handler();
     const body = await response.json();
@@ -165,6 +169,7 @@ describe('GET /api/app/settings', () => {
     expect(body.lastModel).toBe('gpt-5.4');
     expect(body.lastPermissionMode).toBe('acceptEdits');
     expect(body.lastThinkingMode).toBe('think-hard');
+    expect(body.lastClaudeThinkingMode).toBe('on');
     expect(body.uiEffective.chatTitle.enabled).toBe(false);
     expect(body.uiEffective.chatTitle.provider).toBe('claude');
     expect(body.uiEffective.chatTitle.model).toBe('haiku');
@@ -236,6 +241,7 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
+    ctx.settings.getLastClaudeThinkingMode.mockClear();
     ctx.providers.getAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
@@ -279,16 +285,17 @@ describe('PUT /api/app/settings', () => {
   });
 
   it('does not patch last startup settings through app settings', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({ lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard' }));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard', lastClaudeThinkingMode: 'off' }));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
     ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
 
-    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard' }));
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard', lastClaudeThinkingMode: 'off' }));
     const body = await response.json();
 
     expect(body.success).toBe(true);
     expect(body.lastPermissionMode).toBeUndefined();
     expect(body.lastThinkingMode).toBeUndefined();
+    expect(body.lastClaudeThinkingMode).toBeUndefined();
   });
 });
 

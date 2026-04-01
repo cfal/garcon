@@ -95,6 +95,7 @@ describe('POST /api/v1/chats/start', () => {
       model: 'gpt-5.4',
       permissionMode: 'acceptEdits',
       thinkingMode: 'think-hard',
+      claudeThinkingMode: 'off',
       command: 'hello',
       options: { images: [] },
       tags: ['codex'],
@@ -111,6 +112,7 @@ describe('POST /api/v1/chats/start', () => {
       model: 'gpt-5.4',
       permissionMode: 'acceptEdits',
       thinkingMode: 'think-hard',
+      claudeThinkingMode: 'off',
     });
     expect(providers.startSession).toHaveBeenCalledWith('123', 'hello', {
       images: [],
@@ -128,6 +130,7 @@ describe('POST /api/v1/chats/start', () => {
       model: 'opus',
       permissionMode: 'default',
       thinkingMode: 'none',
+      claudeThinkingMode: 'on',
       command: 'hello again',
       options: {},
       tags: ['claude'],
@@ -145,6 +148,7 @@ describe('POST /api/v1/chats/start', () => {
       model: 'opus',
       permissionMode: 'default',
       thinkingMode: 'none',
+      claudeThinkingMode: 'on',
     });
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('456');
   });
@@ -173,5 +177,38 @@ describe('POST /api/v1/chats/start', () => {
     expect(response.status).toBe(422);
     expect(body.error).toBe('Images unsupported for provider: factory');
     expect(providers.startSession).not.toHaveBeenCalled();
+  });
+
+  it('normalizes invalid mode values from the REST payload before persisting them', async () => {
+    const projectPath = path.join(testBasePath, 'project-d');
+    await fs.mkdir(projectPath, { recursive: true });
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      chatId: '790',
+      provider: 'claude',
+      projectPath,
+      model: 'opus',
+      permissionMode: 'bogus',
+      thinkingMode: 'very-hard',
+      claudeThinkingMode: 'sometimes',
+      command: 'normalize this',
+      options: {},
+      tags: ['claude'],
+    }));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(registry.addChat).toHaveBeenCalledWith(expect.objectContaining({
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    }));
+    expect(settings.setLastChatDefaults).toHaveBeenCalledWith(expect.objectContaining({
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    }));
   });
 });

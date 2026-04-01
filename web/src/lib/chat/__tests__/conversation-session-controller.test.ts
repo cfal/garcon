@@ -11,6 +11,7 @@ function createRunningChat(overrides: Partial<Record<string, unknown>> = {}) {
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'none',
+		claudeThinkingMode: 'auto',
 		createdAt: null,
 		lastActivityAt: '2026-03-27T08:00:00.000Z',
 		lastReadAt: null,
@@ -62,6 +63,7 @@ function createDeps(chat = createRunningChat()) {
 				model: '',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 			},
 			lifecycle: {
 				clearLoading: vi.fn(),
@@ -133,5 +135,19 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
+	});
+
+	it('persists Claude thinking mode changes for running chats', () => {
+		const { deps } = createDeps();
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleClaudeThinkingModeChange('off');
+
+		expect(deps.ws.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+			type: 'claude-thinking-mode-set',
+			chatId: 'chat-1',
+			mode: 'off',
+		}));
+		expect(deps.sessions.patchChat).toHaveBeenCalledWith('chat-1', { claudeThinkingMode: 'off' });
 	});
 });

@@ -3,7 +3,14 @@
 import { apiGet, apiPost, apiPatch, apiDelete } from './client.js';
 import type { ChatSession } from '$lib/types/session.js';
 import type { SessionProvider } from '$lib/types/app.js';
-import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
+import {
+	normalizeClaudeThinkingMode,
+	normalizePermissionMode,
+	normalizeThinkingMode,
+	type ClaudeThinkingMode,
+	type PermissionMode,
+	type ThinkingMode,
+} from '$shared/chat-modes';
 
 export interface StartChatParams {
 	chatId: string;
@@ -12,6 +19,7 @@ export interface StartChatParams {
 	model: string;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
+	claudeThinkingMode: ClaudeThinkingMode;
 	command: string;
 	options?: Record<string, unknown>;
 	tags?: string[];
@@ -42,8 +50,22 @@ export interface StartChatResponse {
 
 /** Starts a new chat session. */
 export async function startChat(params: StartChatParams): Promise<StartChatResponse> {
-	const { options = {}, tags = [], ...rest } = params;
-	return apiPost<StartChatResponse>('/api/v1/chats/start', { ...rest, options, tags });
+	const {
+		permissionMode,
+		thinkingMode,
+		claudeThinkingMode,
+		options = {},
+		tags = [],
+		...rest
+	} = params;
+	return apiPost<StartChatResponse>('/api/v1/chats/start', {
+		...rest,
+		permissionMode: normalizePermissionMode(permissionMode),
+		thinkingMode: normalizeThinkingMode(thinkingMode),
+		claudeThinkingMode: normalizeClaudeThinkingMode(claudeThinkingMode),
+		options,
+		tags,
+	});
 }
 
 export interface DeleteChatResponse {

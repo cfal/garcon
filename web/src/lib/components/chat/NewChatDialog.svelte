@@ -32,6 +32,7 @@
 				model: config.model,
 				permissionMode: config.permissionMode,
 				thinkingMode: config.thinkingMode,
+				claudeThinkingMode: config.claudeThinkingMode,
 				firstMessage: config.firstMessage,
 				initialImages: config.initialImages,
 			},

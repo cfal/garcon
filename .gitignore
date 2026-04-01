@@ -6,3 +6,4 @@ out
 .vscode
 .DS_Store
 .claude
+.env

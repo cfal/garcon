@@ -2,6 +2,7 @@
 // types from the canonical definitions in $shared/chat-types.
 
 export type {
+	ClaudeThinkingMode,
 	PermissionMode,
 	ThinkingMode,
 } from '$shared/chat-modes';

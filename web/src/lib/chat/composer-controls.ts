@@ -1,6 +1,6 @@
 import type { SessionProvider } from '$lib/types/app';
-import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
-import { THINKING_MODES } from '$lib/chat/chat-ui-constants';
+import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import { CLAUDE_THINKING_MODES, THINKING_MODES } from '$lib/chat/chat-ui-constants';
 
 export type ComposerModeIconId =
 	| 'permission-default'
@@ -11,7 +11,10 @@ export type ComposerModeIconId =
 	| 'thinking-think'
 	| 'thinking-think-hard'
 	| 'thinking-think-harder'
-	| 'thinking-ultrathink';
+	| 'thinking-ultrathink'
+	| 'claude-thinking-auto'
+	| 'claude-thinking-on'
+	| 'claude-thinking-off';
 
 export interface ComposerMenuOption<T extends string = string> {
 	value: T;
@@ -79,6 +82,23 @@ const THINKING_ICON_METADATA: Record<ThinkingMode, Pick<ComposerModeOption<Think
 	}
 };
 
+const CLAUDE_THINKING_ICON_METADATA: Record<ClaudeThinkingMode, Pick<ComposerModeOption<ClaudeThinkingMode>, 'iconId' | 'toneClass'>> = {
+	auto: {
+		iconId: 'claude-thinking-auto',
+		toneClass:
+			'bg-muted text-foreground border-border hover:bg-accent hover:text-accent-foreground'
+	},
+	on: {
+		iconId: 'claude-thinking-on',
+		toneClass: 'bg-status-info text-status-info-foreground border-status-info-border hover:bg-status-info/90'
+	},
+	off: {
+		iconId: 'claude-thinking-off',
+		toneClass:
+			'bg-card text-card-foreground border-border hover:bg-muted'
+	}
+};
+
 export interface ProviderMenuGroup {
 	label?: string;
 	options: ComposerMenuOption<SessionProvider>[];
@@ -139,6 +159,19 @@ export function buildThinkingOptions(): ComposerModeOption<ThinkingMode>[] {
 			value: mode.id,
 			label: mode.name,
 			description: mode.description || 'Default thinking behavior.',
+			iconId: iconMeta.iconId,
+			toneClass: iconMeta.toneClass
+		};
+	});
+}
+
+export function buildClaudeThinkingOptions(): ComposerModeOption<ClaudeThinkingMode>[] {
+	return CLAUDE_THINKING_MODES.map((mode) => {
+		const iconMeta = CLAUDE_THINKING_ICON_METADATA[mode.id] ?? CLAUDE_THINKING_ICON_METADATA.auto;
+		return {
+			value: mode.id,
+			label: mode.name,
+			description: mode.description,
 			iconId: iconMeta.iconId,
 			toneClass: iconMeta.toneClass
 		};

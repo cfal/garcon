@@ -15,6 +15,7 @@ import {
   AgentRunRequest,
   AgentStopRequest,
   PermissionDecisionRequest,
+  ClaudeThinkingModeSetRequest,
   PermissionModeSetRequest,
   ThinkingModeSetRequest,
   ModelSetRequest,
@@ -27,7 +28,7 @@ import {
   QueueResumeRequest,
   QueueQueryRequest,
 } from '../../common/ws-requests.ts';
-import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
+import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { QueueState } from '../../common/queue-state.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
 import type { IChatRegistry } from '../chats/store.js';
@@ -49,6 +50,8 @@ interface ProviderRegistryDep {
   };
   resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
   setPermissionMode(chatId: string, mode: PermissionMode): Promise<void>;
+  setThinkingMode(chatId: string, mode: ThinkingMode): Promise<void>;
+  setClaudeThinkingMode(chatId: string, mode: ClaudeThinkingMode): Promise<void>;
   setModel(chatId: string, model: string): Promise<void>;
 }
 
@@ -138,6 +141,7 @@ export class ChatHandler {
         images: data.images,
         permissionMode: data.permissionMode,
         thinkingMode: data.thinkingMode,
+        claudeThinkingMode: data.claudeThinkingMode,
         model: data.model,
       });
     } catch (error: unknown) {
@@ -248,6 +252,13 @@ export class ChatHandler {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
           await this.#registry.updateChat(chatId, { thinkingMode: data.mode });
+          await this.#providers.setThinkingMode(chatId, data.mode);
+        }
+      } else if (data instanceof ClaudeThinkingModeSetRequest) {
+        if (!chatId) return this.#sendMissingSessionError(writer, data.type);
+        if (typeof data.mode === 'string') {
+          await this.#registry.updateChat(chatId, { claudeThinkingMode: data.mode });
+          await this.#providers.setClaudeThinkingMode(chatId, data.mode);
         }
       } else if (data instanceof ModelSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
@@ -304,6 +315,7 @@ export class ChatHandler {
     return {
       permissionMode: entry.permissionMode,
       thinkingMode: entry.thinkingMode,
+      claudeThinkingMode: entry.claudeThinkingMode,
       model: entry.model,
     };
   }

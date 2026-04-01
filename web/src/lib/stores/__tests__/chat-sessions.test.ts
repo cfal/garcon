@@ -17,6 +17,7 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		isArchived: false,
 		isActive: false,
 		isUnread: false,
+		claudeThinkingMode: 'auto',
 		...overrides,
 	};
 }
@@ -60,6 +61,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Hello',
 			},
 		});
@@ -112,6 +114,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Test',
 			},
 		});
@@ -137,6 +140,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Test',
 			},
 		});
@@ -161,6 +165,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Pending',
 			},
 		});
@@ -216,6 +221,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: '   ',
 			},
 		});
@@ -243,6 +249,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Hello',
 			},
 		});
@@ -261,6 +268,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Hello',
 			},
 		});
@@ -282,6 +290,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Hello',
 			},
 		});
@@ -312,6 +321,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Hello',
 			},
 		});
@@ -543,6 +553,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Hello',
 			},
 		});
@@ -561,6 +572,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Hello',
 			},
 		});
@@ -569,26 +581,46 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['draft-1']?.isUnread).toBe(false);
 	});
 
-	it('toRecord maps permissionMode and thinkingMode from server session', () => {
+	it('toRecord maps permissionMode, thinkingMode, and claudeThinkingMode from server session', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({
 			id: 'a',
 			permissionMode: 'acceptEdits',
 			thinkingMode: 'think-hard',
+			claudeThinkingMode: 'off',
 		} as any)]);
 
 		expect(store.byId['a']?.permissionMode).toBe('acceptEdits');
 		expect(store.byId['a']?.thinkingMode).toBe('think-hard');
+		expect(store.byId['a']?.claudeThinkingMode).toBe('off');
 	});
 
-	it('toRecord defaults permissionMode and thinkingMode for legacy sessions', () => {
+	it('toRecord defaults permissionMode, thinkingMode, and claudeThinkingMode for legacy sessions', () => {
 		const store = new ChatSessionsStore();
 
-		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		const legacy = makeServerSession({ id: 'a' }) as Partial<ChatSession> & { claudeThinkingMode?: string };
+		delete legacy.claudeThinkingMode;
+		store.upsertFromServer([legacy as ChatSession]);
 
 		expect(store.byId['a']?.permissionMode).toBe('default');
 		expect(store.byId['a']?.thinkingMode).toBe('none');
+		expect(store.byId['a']?.claudeThinkingMode).toBe('auto');
+	});
+
+	it('toRecord normalizes invalid permissionMode, thinkingMode, and claudeThinkingMode values', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({
+			id: 'a',
+			permissionMode: 'bogus' as any,
+			thinkingMode: 'very-hard' as any,
+			claudeThinkingMode: 'sometimes' as any,
+		} as any)]);
+
+		expect(store.byId['a']?.permissionMode).toBe('default');
+		expect(store.byId['a']?.thinkingMode).toBe('none');
+		expect(store.byId['a']?.claudeThinkingMode).toBe('auto');
 	});
 
 	it('sameRecord detects permissionMode changes', () => {
@@ -615,6 +647,7 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([makeServerSession({
 			id: 'a',
 			thinkingMode: 'ultrathink',
+				claudeThinkingMode: 'auto',
 		} as any)]);
 
 		expect(store.byId['a']).not.toBe(ref);
@@ -632,6 +665,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'acceptEdits',
 				thinkingMode: 'think-hard',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Hello',
 			},
 		});
@@ -644,10 +678,11 @@ describe('ChatSessionsStore', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
-		store.patchChat('a', { permissionMode: 'bypassPermissions', thinkingMode: 'think' });
+		store.patchChat('a', { permissionMode: 'bypassPermissions', thinkingMode: 'think', claudeThinkingMode: 'on' });
 
 		expect(store.byId['a']?.permissionMode).toBe('bypassPermissions');
 		expect(store.byId['a']?.thinkingMode).toBe('think');
+		expect(store.byId['a']?.claudeThinkingMode).toBe('on');
 	});
 
 	it('patchDraftStartup updates startup config for draft chats', () => {
@@ -661,6 +696,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
 				firstMessage: 'Hello',
 			},
 		});
@@ -669,11 +705,13 @@ describe('ChatSessionsStore', () => {
 			model: 'sonnet',
 			permissionMode: 'acceptEdits',
 			thinkingMode: 'think-hard',
+			claudeThinkingMode: 'off',
 		});
 
 		expect(store.startupByChatId['draft-1']?.model).toBe('sonnet');
 		expect(store.startupByChatId['draft-1']?.permissionMode).toBe('acceptEdits');
 		expect(store.startupByChatId['draft-1']?.thinkingMode).toBe('think-hard');
+		expect(store.startupByChatId['draft-1']?.claudeThinkingMode).toBe('off');
 	});
 
 	it('patchDraftStartup is a no-op for non-draft chats', () => {

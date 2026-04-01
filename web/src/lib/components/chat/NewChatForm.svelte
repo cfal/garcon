@@ -9,6 +9,7 @@
 	} from '$lib/chat/new-chat-form-state.svelte.js';
 	import { shouldSubmitOnEnter } from '$lib/chat/composer-shortcuts';
 	import {
+		buildClaudeThinkingOptions,
 		buildPermissionOptions,
 		buildThinkingOptions,
 		PROVIDER_MENU_OPTIONS,
@@ -182,6 +183,9 @@
 		buildPermissionOptions(form.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES)
 	);
 	const thinkingOptions = $derived(buildThinkingOptions());
+	const claudeThinkingOptions = $derived(
+		form.provider === 'claude' ? buildClaudeThinkingOptions() : undefined
+	);
 	const modelOptions = $derived(toModelMenuOptions(form.modelOptions));
 	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 </script>
@@ -346,6 +350,11 @@
 					selectedThinking={form.thinkingMode}
 					onThinkingSelect={(mode) => {
 						form.thinkingMode = mode;
+					}}
+					claudeThinkingOptions={claudeThinkingOptions}
+					selectedClaudeThinking={form.claudeThinkingMode}
+					onClaudeThinkingSelect={(mode) => {
+						form.claudeThinkingMode = mode;
 					}}
 					providerOptions={PROVIDER_MENU_OPTIONS}
 					providerGroups={PROVIDER_MENU_GROUPS}

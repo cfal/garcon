@@ -1,6 +1,6 @@
 // Application-level types shared across the Svelte frontend.
 
-import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
+import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$shared/chat-modes';
 
 export type SessionProvider = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory';
 
@@ -36,6 +36,7 @@ export interface NewChatConfig {
 	model: string;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
+	claudeThinkingMode: ClaudeThinkingMode;
 	firstMessage: string;
 	initialImages?: File[];
 }

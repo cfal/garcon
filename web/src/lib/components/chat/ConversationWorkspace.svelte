@@ -316,6 +316,7 @@
 				onModelChange={(m) => controller.handleModelChange(m)}
 				onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
 				onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
+				onClaudeThinkingModeChange={(m) => controller.handleClaudeThinkingModeChange(m)}
 			/>
 		</div>
 		{/if}

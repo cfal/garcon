@@ -12,6 +12,7 @@ import {
 	QueuePauseRequest,
 	QueueDropRequest,
 	ModelSetRequest,
+	ClaudeThinkingModeSetRequest,
 	PermissionModeSetRequest,
 	ThinkingModeSetRequest,
 	QueueEnqueueRequest,
@@ -24,7 +25,7 @@ import type { ProviderState } from '$lib/chat/provider-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { WsConnection } from '$lib/ws/connection.svelte';
-import type { PendingPermissionRequest, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { ClaudeThinkingMode, PendingPermissionRequest, PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { AppTab } from '$lib/types/app';
 
@@ -33,7 +34,7 @@ export interface SessionControllerDeps {
 		selectedChatId: string | null;
 		selectedChat: ChatSessionRecord | null;
 		byId: Record<string, ChatSessionRecord>;
-		startupByChatId: Record<string, { provider: string; model: string; permissionMode: PermissionMode; thinkingMode: ThinkingMode; firstMessage: string; initialImages?: File[] }>;
+		startupByChatId: Record<string, { provider: string; model: string; permissionMode: PermissionMode; thinkingMode: ThinkingMode; claudeThinkingMode: ClaudeThinkingMode; firstMessage: string; initialImages?: File[] }>;
 		isDraft: (chatId: string) => boolean;
 		patchDraftStartup: (chatId: string, patch: Record<string, unknown>) => void;
 		patchChat: (chatId: string, patch: Record<string, unknown>) => void;
@@ -134,6 +135,9 @@ export class ConversationSessionController {
 				if (startup.thinkingMode) {
 					deps.providerState.thinkingMode = startup.thinkingMode;
 				}
+				if (startup.claudeThinkingMode) {
+					deps.providerState.claudeThinkingMode = startup.claudeThinkingMode;
+				}
 				if (startup.firstMessage?.trim() || (startup.initialImages?.length ?? 0) > 0) {
 					const startupText = startup.firstMessage.trim();
 					const startupImages = startup.initialImages ?? [];
@@ -158,6 +162,7 @@ export class ConversationSessionController {
 
 		deps.providerState.permissionMode = selected.permissionMode ?? 'default';
 		deps.providerState.thinkingMode = selected.thinkingMode ?? 'none';
+		deps.providerState.claudeThinkingMode = selected.claudeThinkingMode ?? 'auto';
 
 		this.loadChat(chatId);
 	}
@@ -261,6 +266,7 @@ export class ConversationSessionController {
 			const model = startup?.model ?? selected.model ?? deps.providerState.model;
 			const permissionMode = startup?.permissionMode ?? deps.providerState.permissionMode;
 			const thinkingMode = startup?.thinkingMode ?? deps.providerState.thinkingMode;
+			const claudeThinkingMode = startup?.claudeThinkingMode ?? deps.providerState.claudeThinkingMode;
 
 			deps.composerState.clearAfterSubmit(chatId);
 			try {
@@ -271,6 +277,7 @@ export class ConversationSessionController {
 					model,
 					permissionMode,
 					thinkingMode,
+					claudeThinkingMode,
 					command: text,
 					options: {
 						cwd: selected.projectPath,
@@ -299,6 +306,7 @@ export class ConversationSessionController {
 				model: selected.model ?? deps.providerState.model,
 				permissionMode: deps.providerState.permissionMode,
 				thinkingMode: deps.providerState.thinkingMode,
+				claudeThinkingMode: deps.providerState.claudeThinkingMode,
 			});
 			if (!sent) {
 				deps.lifecycle.clearLoading();
@@ -358,6 +366,7 @@ export class ConversationSessionController {
 					mode,
 					deps.providerState.thinkingMode,
 					deps.providerState.model,
+					deps.providerState.claudeThinkingMode,
 				),
 			);
 		};
@@ -442,5 +451,18 @@ export class ConversationSessionController {
 		}
 		deps.ws.sendMessage(new ThinkingModeSetRequest(chatId, mode));
 		deps.sessions.patchChat(chatId, { thinkingMode: mode });
+	}
+
+	handleClaudeThinkingModeChange(mode: ClaudeThinkingMode): void {
+		const { deps } = this;
+		const chatId = deps.sessions.selectedChatId;
+		if (!chatId) return;
+		if (deps.sessions.isDraft(chatId)) {
+			deps.sessions.patchDraftStartup(chatId, { claudeThinkingMode: mode });
+			deps.sessions.patchChat(chatId, { claudeThinkingMode: mode });
+			return;
+		}
+		deps.ws.sendMessage(new ClaudeThinkingModeSetRequest(chatId, mode));
+		deps.sessions.patchChat(chatId, { claudeThinkingMode: mode });
 	}
 }

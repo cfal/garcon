@@ -31,6 +31,7 @@
 			onToggleArchive: (chatId: string) => void;
 			onShowDetails: (chatId: string, chatTitle: string) => void;
 			onForkChat: (sourceChatId: string) => void;
+			onTagClick?: (tag: string) => void;
 			onManageTags?: (chatId: string, currentTags: string[]) => void;
 			onImmediateReorder: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 			onQuickMove: (chatId: string, chatIdAbove?: string, chatIdBelow?: string) => void;
@@ -53,6 +54,7 @@
 			onToggleArchive,
 			onShowDetails,
 			onForkChat,
+			onTagClick,
 			onManageTags,
 			onImmediateReorder,
 			onQuickMove,
@@ -60,6 +62,7 @@
 
 	let showChats = $derived(!isLoading && chats.length > 0 && filteredChats.length > 0);
 	let isSearchActive = $derived(searchFilter.trim().length > 0);
+	let isFiltered = $derived(isSearchActive || filteredChats.length !== chats.length);
 
 	// Partition all chats in a single pass.
 	let allPartitioned = $derived.by(() => {
@@ -259,6 +262,7 @@
 										{onToggleArchive}
 										{onShowDetails}
 										{onForkChat}
+									{onTagClick}
 									{onManageTags}
 										{onEnterReorderMode}
 									onMoveToTop={idx > 0 ? () => moveToTop('pinned', chatId) : undefined}
@@ -306,6 +310,7 @@
 										{onToggleArchive}
 										{onShowDetails}
 										{onForkChat}
+									{onTagClick}
 									{onManageTags}
 										{onEnterReorderMode}
 									onMoveToTop={idx > 0 ? () => moveToTop('normal', chatId) : undefined}
@@ -353,6 +358,7 @@
 										{onToggleArchive}
 										{onShowDetails}
 										{onForkChat}
+									{onTagClick}
 									{onManageTags}
 										{onEnterReorderMode}
 									onMoveToTop={idx > 0 ? () => moveToTop('archived', chatId) : undefined}
@@ -373,7 +379,7 @@
 	</div>
 {:else}
 	<div class="h-full pb-28 md:pb-4">
-			{#if isSearchActive}
+			{#if isFiltered}
 				{#each pinnedFiltered as gs (gs.id)}
 					<SidebarChatItem
 						session={gs}
@@ -388,6 +394,7 @@
 							{onToggleArchive}
 							{onShowDetails}
 							{onForkChat}
+									{onTagClick}
 									{onManageTags}
 							{onEnterReorderMode}
 						{hasPinnedChats}
@@ -418,6 +425,7 @@
 								{onToggleArchive}
 								{onShowDetails}
 								{onForkChat}
+									{onTagClick}
 									{onManageTags}
 								{onEnterReorderMode}
 								{hasPinnedChats}
@@ -427,7 +435,7 @@
 				{/each}
 			</DragDropProvider>
 		{/if}
-		{#if isSearchActive}
+		{#if isFiltered}
 			{#each normal as gs (gs.id)}
 				<SidebarChatItem
 					session={gs}
@@ -442,6 +450,7 @@
 						{onToggleArchive}
 						{onShowDetails}
 						{onForkChat}
+									{onTagClick}
 									{onManageTags}
 						{onEnterReorderMode}
 					{hasPinnedChats}
@@ -472,6 +481,7 @@
 									{onToggleArchive}
 									{onShowDetails}
 									{onForkChat}
+									{onTagClick}
 									{onManageTags}
 									{onEnterReorderMode}
 								{hasPinnedChats}
@@ -495,6 +505,7 @@
 					{onToggleArchive}
 					{onShowDetails}
 					{onForkChat}
+									{onTagClick}
 									{onManageTags}
 					{onEnterReorderMode}
 				{hasPinnedChats}

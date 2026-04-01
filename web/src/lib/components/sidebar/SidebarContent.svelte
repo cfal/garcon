@@ -22,6 +22,8 @@
 		onSelectFolder: (id: string) => void;
 		onCreateFolder?: () => void;
 		onDeleteFolder?: (id: string) => void;
+		onEditFolder?: (folder: FolderEntry) => void;
+		folderCounts?: Map<string, number>;
 		onEnterReorderMode: () => void;
 		onReorderGroup: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 		onChatSelect: (chatId: string) => void;
@@ -29,6 +31,7 @@
 		onStartRenameChat: (chatId: string, currentName: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
+		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
@@ -51,6 +54,8 @@
 		onSelectFolder,
 		onCreateFolder,
 		onDeleteFolder,
+		onEditFolder,
+		folderCounts,
 		onEnterReorderMode,
 		onReorderGroup,
 		onChatSelect,
@@ -58,6 +63,7 @@
 		onStartRenameChat,
 		onShowDetails,
 		onForkChat,
+		onTagClick,
 		onManageTags,
 		onTogglePinned,
 		onToggleArchive,
@@ -74,6 +80,8 @@
 	{onSelectFolder}
 	{onCreateFolder}
 	{onDeleteFolder}
+	{onEditFolder}
+	{folderCounts}
 />
 
 <ScrollArea
@@ -95,6 +103,7 @@
 		{onStartRenameChat}
 		{onShowDetails}
 		{onForkChat}
+		{onTagClick}
 		{onManageTags}
 		{onTogglePinned}
 		{onToggleArchive}

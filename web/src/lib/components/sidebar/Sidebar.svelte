@@ -12,8 +12,12 @@
 	import type { ChatOrderList } from '$lib/api/chats.js';
 	import { createReorderWriteQueue } from './reorder-write-queue';
 	import { SidebarController } from './sidebar-controller.svelte';
-	import { SidebarFilterState } from './sidebar-filter-state.svelte';
-	import { getFolders, createFolder, deleteFolder as deleteFolderApi, type ChatFolder, type ChatFolderFilter } from '$lib/api/settings';
+	import { SidebarFilterState, type FolderEntry } from './sidebar-filter-state.svelte';
+	import { addTagToQuery, matchesChatFilter } from './sidebar-search';
+	import { getFolders, createFolder, updateFolder as updateFolderApi, deleteFolder as deleteFolderApi, type ChatFolder, type ChatFolderFilter } from '$lib/api/settings';
+	import type { FolderDialogState } from './SidebarSaveFolderDialog.svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ChatDeleteConfirmation {
@@ -38,10 +42,7 @@
 		error: string | null;
 	}
 
-	interface SaveFolderDialogState {
-		filter: ChatFolderFilter;
-		suggestedName: string;
-	}
+	// FolderDialogState is imported from SidebarSaveFolderDialog
 
 	interface SidebarProps {
 		chats: ChatSessionRecord[];
@@ -81,7 +82,9 @@
 	let chatRenameConfirmation = $state<ChatRenameConfirmation | null>(null);
 	let chatDetailsDialog = $state<ChatDetailsDialog | null>(null);
 	let tagDialog = $state<{ chatId: string; chatTitle: string; tags: string[] } | null>(null);
-	let saveFolderDialog = $state<SaveFolderDialogState | null>(null);
+	let saveFolderDialog = $state<FolderDialogState | null>(null);
+	let folderDeleteConfirmation = $state<{ id: string; name: string } | null>(null);
+	let folderDeleteButtonRef = $state<HTMLButtonElement | null>(null);
 	let currentTime = $state(new Date());
 	let isMarkingAllRead = $state(false);
 	let visibleUnreadChatIds = $derived.by(() =>
@@ -94,6 +97,15 @@
 			? m.sidebar_folders_save_current_filter()
 			: m.sidebar_folders_save_disabled_hint()
 	);
+	let folderCounts = $derived.by(() => {
+		const counts = new Map<string, number>();
+		for (const folder of filterState.folders) {
+			if (!folder.filter) continue;
+			const count = chats.filter(chat => matchesChatFilter(chat, folder.filter!)).length;
+			counts.set(folder.id, count);
+		}
+		return counts;
+	});
 
 	// Refresh timestamp every minute.
 	$effect(() => {
@@ -222,6 +234,10 @@
 		};
 	}
 
+	function handleTagClick(tag: string) {
+		filterState.searchQuery = addTagToQuery(filterState.searchQuery, tag);
+	}
+
 	async function handleSaveTags(chatId: string, tags: string[]) {
 		await controller.updateTags(chatId, tags);
 		tagDialog = null;
@@ -332,17 +348,48 @@
 		if (!filterState.canSaveCurrentFilter) return;
 		const filter = cloneFilter(filterState.currentFilter);
 		saveFolderDialog = {
+			mode: 'create',
 			filter,
 			suggestedName: suggestFolderName(filter),
 		};
 	}
 
-	async function handleSaveFolder(name: string, filter: ChatFolderFilter) {
-		const res = await createFolder(name, filter);
-		filterState.setUserFolders(mergeUserFolders(filterState.userFolders, [res.folder]));
-		filterState.searchQuery = '';
-		filterState.selectFolder(res.folder.id);
+	function handleEditFolder(folder: FolderEntry) {
+		if (!folder.filter) return;
+		saveFolderDialog = {
+			mode: 'edit',
+			folderId: folder.id,
+			filter: cloneFilter(folder.filter as ChatFolderFilter),
+			suggestedName: folder.name,
+		};
+	}
+
+	async function handleSaveFolder(name: string, filter: ChatFolderFilter, folderId?: string) {
+		if (folderId) {
+			const res = await updateFolderApi(folderId, { name, filter });
+			filterState.setUserFolders(
+				filterState.userFolders.map(f => f.id === folderId ? res.folder : f)
+			);
+		} else {
+			const res = await createFolder(name, filter);
+			filterState.setUserFolders(mergeUserFolders(filterState.userFolders, [res.folder]));
+			filterState.searchQuery = '';
+			filterState.selectFolder(res.folder.id);
+		}
 		saveFolderDialog = null;
+	}
+
+	function showFolderDeleteConfirmation(id: string) {
+		const folder = filterState.folders.find(f => f.id === id);
+		if (!folder) return;
+		folderDeleteConfirmation = { id, name: folder.name };
+	}
+
+	async function confirmDeleteFolder() {
+		if (!folderDeleteConfirmation) return;
+		const { id } = folderDeleteConfirmation;
+		folderDeleteConfirmation = null;
+		await handleDeleteFolder(id);
 	}
 
 	async function handleDeleteFolder(id: string) {
@@ -401,7 +448,9 @@
 		{createFolderHint}
 		onSelectFolder={handleSelectFolder}
 		onCreateFolder={() => handleCreateFolder()}
-		onDeleteFolder={handleDeleteFolder}
+		onDeleteFolder={showFolderDeleteConfirmation}
+		onEditFolder={handleEditFolder}
+		{folderCounts}
 		onEnterReorderMode={enterReorderMode}
 		onReorderGroup={handleReorderGroup}
 		onChatSelect={handleChatClick}
@@ -411,6 +460,7 @@
 		onToggleArchive={(id) => { void handleToggleArchive(id); }}
 		onShowDetails={showChatDetails}
 		onForkChat={(id) => { void handleForkChat(id); }}
+		onTagClick={handleTagClick}
 		onManageTags={showTagDialog}
 		onImmediateReorder={handleImmediateReorder}
 		onQuickMove={handleQuickMove}
@@ -454,3 +504,16 @@
 	onClose={() => saveFolderDialog = null}
 	onSave={handleSaveFolder}
 />
+
+<Dialog.Root open={folderDeleteConfirmation !== null} onOpenChange={(open) => { if (!open) folderDeleteConfirmation = null; }}>
+	<Dialog.Content onOpenAutoFocus={(e) => { e.preventDefault(); folderDeleteButtonRef?.focus(); }}>
+		<Dialog.Header>
+			<Dialog.Title>{m.sidebar_folders_confirm_delete({ name: folderDeleteConfirmation?.name ?? '' })}</Dialog.Title>
+			<Dialog.Description>{m.sidebar_folders_confirm_delete_description()}</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Button variant="outline" onclick={() => folderDeleteConfirmation = null}>{m.sidebar_actions_cancel()}</Button>
+			<Button variant="destructive" onclick={() => { void confirmDeleteFolder(); }} bind:ref={folderDeleteButtonRef}>{m.sidebar_actions_delete()}</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>

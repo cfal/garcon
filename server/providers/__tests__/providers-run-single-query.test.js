@@ -125,6 +125,7 @@ describe('ProviderRegistry session option hydration', () => {
     mockClaude = {
       startClaudeCliSession: mock(() => Promise.resolve('claude-session')),
       runClaudeTurn: mock(() => Promise.resolve(undefined)),
+      setInternalThinkingMode: mock(() => undefined),
     };
     mockCodex = {
       startSession: mock(() => Promise.resolve({
@@ -175,6 +176,7 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'openai/gpt-5',
       permissionMode: 'bypassPermissions',
       thinkingMode: 'think-hard',
+      claudeThinkingMode: 'auto',
       chatId: '123',
     });
   });
@@ -199,6 +201,7 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'gpt-5.4',
       permissionMode: 'bypassPermissions',
       thinkingMode: 'think-hard',
+      claudeThinkingMode: 'auto',
     });
   });
 
@@ -222,6 +225,7 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'opus',
       permissionMode: 'default',
       thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
     });
   });
 
@@ -262,6 +266,7 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'openai/gpt-5',
       permissionMode: 'acceptEdits',
       thinkingMode: 'think-hard',
+      claudeThinkingMode: 'auto',
     });
   });
 
@@ -279,6 +284,7 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'sonnet',
       permissionMode: 'acceptEdits',
       thinkingMode: 'ultrathink',
+      claudeThinkingMode: undefined,
     });
 
     expect(mockClaude.runClaudeTurn).toHaveBeenCalledWith({
@@ -289,7 +295,19 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'sonnet',
       permissionMode: 'acceptEdits',
       thinkingMode: 'ultrathink',
+      claudeThinkingMode: 'auto',
     });
+  });
+
+  it('forwards thinking-mode changes to warm Claude sessions', async () => {
+    mockRegistry.getChat.mockReturnValue({
+      provider: 'claude',
+      providerSessionId: 'sess-2',
+    });
+
+    await registry.setThinkingMode('123', 'think-hard');
+
+    expect(mockClaude.setInternalThinkingMode).toHaveBeenCalledWith('sess-2', 'think-hard');
   });
 
   it('stores the derived native path when starting an Amp session', async () => {

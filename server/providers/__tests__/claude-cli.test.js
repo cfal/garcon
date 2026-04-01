@@ -2,7 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, createClaudeNativePath } from '../claude-cli.js';
+import { buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, createClaudeNativePath } from '../claude-cli.js';
 import { convertClaudePermissionTool } from '../converters/claude-permission-tool.js';
 import { BashToolUseMessage, ExitPlanModeToolUseMessage } from '../../../common/chat-types.js';
 
@@ -22,6 +22,39 @@ describe('createClaudeNativePath', () => {
 
     expect(nativePath).toBe(path.join(os.homedir(), '.claude', 'projects', encodedProjectPath, 'session-1.jsonl'));
     expect(nativePath).not.toContain('alias-root');
+  });
+});
+
+describe('buildClaudeCLIArgs', () => {
+  it('maps Claude extended thinking modes to CLI --thinking values', () => {
+    expect(buildClaudeCLIArgs({ claudeThinkingMode: 'auto', prompt: 'hi' })).toContain('--thinking');
+    expect(buildClaudeCLIArgs({ claudeThinkingMode: 'auto', prompt: 'hi' })).toContain('adaptive');
+    expect(buildClaudeCLIArgs({ claudeThinkingMode: 'on', prompt: 'hi' })).toContain('enabled');
+    expect(buildClaudeCLIArgs({ claudeThinkingMode: 'off', prompt: 'hi' })).toContain('disabled');
+  });
+
+  it('includes stream-json session flags, effort, and Claude thinking mode for sessions', () => {
+    expect(buildClaudeCLIArgs({
+      model: 'sonnet',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'think-hard',
+      claudeThinkingMode: 'off',
+      sessionId: 'session-1',
+      prompt: '',
+      streamJson: true,
+    })).toEqual([
+      '--print',
+      '--output-format', 'stream-json',
+      '--input-format', 'stream-json',
+      '--verbose',
+      '--model', 'sonnet',
+      '--permission-mode', 'acceptEdits',
+      '--permission-prompt-tool', 'stdio',
+      '--effort', 'medium',
+      '--thinking', 'disabled',
+      '--session-id', 'session-1',
+      '-p', '',
+    ]);
   });
 });
 
