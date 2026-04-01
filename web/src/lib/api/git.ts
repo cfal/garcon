@@ -1,6 +1,7 @@
 // Typed API client for git operations. All functions require the `project`
 // parameter (the project path on disk) to scope operations.
 
+import type { SessionProvider } from '$lib/types/app';
 import { apiGet, apiPost } from './client.js';
 
 // Workbench V2 types
@@ -189,7 +190,7 @@ export async function getCommitDiff(
 export async function generateCommitMessage(
 	project: string,
 	files: string[],
-	provider = 'claude',
+	provider: SessionProvider = 'claude',
 	model = '',
 	customPrompt = '',
 ): Promise<{ message?: string; error?: string }> {

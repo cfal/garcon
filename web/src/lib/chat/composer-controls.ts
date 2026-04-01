@@ -111,6 +111,11 @@ export const PROVIDER_MENU_GROUPS: ProviderMenuGroup[] = [
 				value: 'amp',
 				label: 'Amp',
 				description: 'Amp agent with multi-tool workflows.'
+			},
+			{
+				value: 'factory',
+				label: 'Factory',
+				description: 'Factory Droid via the external droid CLI.'
 			}
 		]
 	}

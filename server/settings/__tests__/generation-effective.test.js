@@ -9,8 +9,9 @@ describe('resolveEffectiveGenerationConfig', () => {
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: false },
+        factory: { authenticated: false },
       },
-      modelsByProvider: { opencode: [] },
+      modelsByProvider: { opencode: [], factory: [] },
     });
 
     expect(result).toEqual({
@@ -28,8 +29,9 @@ describe('resolveEffectiveGenerationConfig', () => {
         claude: { authenticated: false },
         codex: { authenticated: true },
         opencode: { authenticated: true },
+        factory: { authenticated: false },
       },
-      modelsByProvider: { opencode: [] },
+      modelsByProvider: { opencode: [], factory: [] },
     });
 
     expect(result).toEqual({
@@ -47,6 +49,7 @@ describe('resolveEffectiveGenerationConfig', () => {
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: true },
+        factory: { authenticated: false },
       },
       modelsByProvider: {
         opencode: [
@@ -72,8 +75,9 @@ describe('resolveEffectiveGenerationConfig', () => {
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: false },
+        factory: { authenticated: false },
       },
-      modelsByProvider: { opencode: [] },
+      modelsByProvider: { opencode: [], factory: [] },
     });
 
     expect(result).toEqual({
@@ -100,6 +104,27 @@ describe('resolveEffectiveGenerationConfig', () => {
       enabled: true,
       provider: 'amp',
       model: 'default',
+      source: 'manual',
+    });
+  });
+
+  it('preserves a persisted factory provider and fills its default model', () => {
+    const result = resolveEffectiveGenerationConfig({
+      persisted: { enabled: true, provider: 'factory' },
+      authByProvider: {
+        claude: { authenticated: false },
+        codex: { authenticated: false },
+        opencode: { authenticated: false },
+        amp: { authenticated: false },
+        factory: { authenticated: false },
+      },
+      modelsByProvider: { opencode: [], amp: [], factory: [] },
+    });
+
+    expect(result).toEqual({
+      enabled: true,
+      provider: 'factory',
+      model: 'claude-opus-4-6',
       source: 'manual',
     });
   });

@@ -57,6 +57,7 @@ const historyCache = {
 };
 const providers = {
   startSession: mock(() => Promise.resolve(undefined)),
+  getModels: mock(() => Promise.resolve([])),
   isProviderSessionRunning: mock(() => false),
 };
 
@@ -77,6 +78,7 @@ describe('POST /api/v1/chats/start', () => {
     metadata.addNewChatMetadata.mockClear();
     historyCache.appendMessages.mockClear();
     providers.startSession.mockClear();
+    providers.getModels.mockClear();
   });
 
   afterEach(async () => {
@@ -145,5 +147,31 @@ describe('POST /api/v1/chats/start', () => {
       thinkingMode: 'none',
     });
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('456');
+  });
+
+  it('rejects image attachments when the selected factory model does not support images', async () => {
+    const projectPath = path.join(testBasePath, 'project-c');
+    await fs.mkdir(projectPath, { recursive: true });
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      chatId: '789',
+      provider: 'factory',
+      projectPath,
+      model: 'glm-5',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      command: 'review the diagram',
+      options: { images: [{ data: 'data:image/png;base64,abc', name: 'diagram.png' }] },
+      tags: ['factory'],
+    }));
+    providers.getModels.mockResolvedValueOnce([
+      { value: 'glm-5', label: 'Droid Core (GLM-5)', supportsImages: false },
+    ]);
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.error).toBe('Images unsupported for provider: factory');
+    expect(providers.startSession).not.toHaveBeenCalled();
   });
 });

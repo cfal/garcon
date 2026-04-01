@@ -1,7 +1,7 @@
 import { createGitService } from '../git/git-service.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
 import { parseJsonBody, MalformedJsonError } from '../lib/http-request.js';
-import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '../../common/models.js';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 
 const MALFORMED_BODY = () =>
@@ -22,7 +22,7 @@ async function readJsonBody(request) {
 // parameters, delegates to the git service, and maps errors to HTTP
 // responses via git.toHttpError(). No business logic lives here.
 function isAllowedGenerationProvider(value) {
-  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'amp';
+  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'amp' || value === 'factory';
 }
 
 function hasOwn(source, key) {
@@ -36,8 +36,12 @@ async function resolveCommitMessageConfig(settings, providers) {
     codex: { authenticated: false },
     opencode: { authenticated: false },
     amp: { authenticated: false },
+    factory: { authenticated: false },
   };
-  const opencodeModels = await providers?.getModels?.('opencode') ?? [];
+  const [opencodeModels, factoryModels] = await Promise.all([
+    providers?.getModels?.('opencode') ?? [],
+    providers?.getModels?.('factory') ?? [],
+  ]);
   return resolveEffectiveGenerationUiConfig({
     persisted: ui?.commitMessage,
     authByProvider,
@@ -46,6 +50,7 @@ async function resolveCommitMessageConfig(settings, providers) {
       codex: CODEX_MODELS.OPTIONS,
       opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
       amp: AMP_MODELS.OPTIONS,
+      factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
     },
   });
 }
@@ -214,7 +219,7 @@ export default function createGitRoutes(providers, settings) {
         return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
       }
       if (hasOwn(body, 'provider') && !isAllowedGenerationProvider(body.provider)) {
-        return Response.json({ error: 'Invalid provider. Expected one of: claude, codex, opencode, amp.' }, { status: 400 });
+        return Response.json({ error: 'Invalid provider. Expected one of: claude, codex, opencode, amp, factory.' }, { status: 400 });
       }
 
       const persistedConfig = await resolveCommitMessageConfig(settings, providers);

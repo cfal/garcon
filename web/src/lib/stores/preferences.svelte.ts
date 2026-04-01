@@ -2,7 +2,7 @@
 // preferences to localStorage under a consistent key prefix.
 
 import type { SessionProvider } from '$lib/types/app';
-import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '$shared/models';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '$shared/models';
 
 // Persisted preference fields.
 export type ThemeMode = 'dark' | 'light' | 'system';
@@ -22,6 +22,7 @@ export interface PreferencesState {
 	codexModel: string;
 	opencodeModel: string;
 	ampModel: string;
+	factoryModel: string;
 	codeEditorTheme: string;
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
@@ -48,6 +49,7 @@ const DEFAULTS: PreferencesState = {
 	codexModel: CODEX_MODELS.DEFAULT,
 	opencodeModel: 'anthropic/claude-sonnet-4-5',
 	ampModel: AMP_MODELS.DEFAULT,
+	factoryModel: FACTORY_MODELS.DEFAULT,
 	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
@@ -121,6 +123,10 @@ function readPersisted(): PreferencesState {
 						typeof parsed.ampModel === 'string'
 							? parsed.ampModel
 							: DEFAULTS.ampModel,
+					factoryModel:
+						typeof parsed.factoryModel === 'string'
+							? parsed.factoryModel
+							: DEFAULTS.factoryModel,
 					codeEditorTheme:
 						typeof parsed.codeEditorTheme === 'string'
 							? parsed.codeEditorTheme
@@ -181,6 +187,7 @@ export class PreferencesStore {
 	codexModel = $state(DEFAULTS.codexModel);
 	opencodeModel = $state(DEFAULTS.opencodeModel);
 	ampModel = $state(DEFAULTS.ampModel);
+	factoryModel = $state(DEFAULTS.factoryModel);
 	codeEditorTheme = $state(DEFAULTS.codeEditorTheme);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
@@ -205,6 +212,7 @@ export class PreferencesStore {
 		this.codexModel = saved.codexModel;
 		this.opencodeModel = saved.opencodeModel;
 		this.ampModel = saved.ampModel;
+		this.factoryModel = saved.factoryModel;
 		this.codeEditorTheme = saved.codeEditorTheme;
 		this.codeEditorWordWrap = saved.codeEditorWordWrap;
 		this.codeEditorLineNumbers = saved.codeEditorLineNumbers;
@@ -231,6 +239,7 @@ export class PreferencesStore {
 			codexModel: this.codexModel,
 			opencodeModel: this.opencodeModel,
 			ampModel: this.ampModel,
+			factoryModel: this.factoryModel,
 			codeEditorTheme: this.codeEditorTheme,
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,

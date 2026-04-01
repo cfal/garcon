@@ -16,13 +16,12 @@
 		error: string | null;
 	}
 
-	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp';
+	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory';
 	type BrowserLoginAgentId = 'claude' | 'codex';
 	type AgentConfig = { id: AgentId; name: string; cliOnly?: boolean; loginCommand?: string };
 
 	const AUTH_POLL_INTERVAL_MS = 1500;
 	const AUTH_POLL_TIMEOUT_MS = 5 * 60_000;
-
 	const DEFAULT_AUTH: AuthStatus = { authenticated: false, canReauth: true, label: '', loading: true, error: null };
 
 	const primaryAgents: AgentConfig[] = [
@@ -32,7 +31,8 @@
 	];
 
 	const secondaryAgents: AgentConfig[] = [
-		{ id: 'amp', name: 'Amp', cliOnly: true, loginCommand: 'amp login' }
+		{ id: 'amp', name: 'Amp', cliOnly: true, loginCommand: 'amp login' },
+		{ id: 'factory', name: 'Factory', cliOnly: true, loginCommand: 'droid' }
 	];
 
 	const authPollTimers: Partial<Record<AgentId, ReturnType<typeof setTimeout>>> = {};
@@ -44,11 +44,13 @@
 	let codexAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 	let opencodeAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 	let ampAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
+	let factoryAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 
 	let claudeOpen = $state(false);
 	let codexOpen = $state(false);
 	let opencodeOpen = $state(false);
 	let ampOpen = $state(false);
+	let factoryOpen = $state(false);
 
 	let moreProvidersOpen = $state(false);
 
@@ -56,6 +58,7 @@
 		if (agent === 'claude') return claudeAuth;
 		if (agent === 'codex') return codexAuth;
 		if (agent === 'amp') return ampAuth;
+		if (agent === 'factory') return factoryAuth;
 		return opencodeAuth;
 	}
 
@@ -63,6 +66,7 @@
 		if (agent === 'claude') return claudeOpen;
 		if (agent === 'codex') return codexOpen;
 		if (agent === 'amp') return ampOpen;
+		if (agent === 'factory') return factoryOpen;
 		return opencodeOpen;
 	}
 
@@ -70,6 +74,7 @@
 		if (agent === 'claude') claudeOpen = value;
 		else if (agent === 'codex') codexOpen = value;
 		else if (agent === 'amp') ampOpen = value;
+		else if (agent === 'factory') factoryOpen = value;
 		else opencodeOpen = value;
 	}
 
@@ -77,6 +82,7 @@
 		if (agent === 'claude') claudeAuth = status;
 		else if (agent === 'codex') codexAuth = status;
 		else if (agent === 'amp') ampAuth = status;
+		else if (agent === 'factory') factoryAuth = status;
 		else opencodeAuth = status;
 	}
 
@@ -170,22 +176,22 @@
 
 	// Count how many secondary providers are connected
 	let secondaryConnectedCount = $derived(
-		[ampAuth].filter((a) => a.authenticated).length
+		[ampAuth, factoryAuth].filter((a) => a.authenticated).length
 	);
 
 	let authExpandDone = $state(false);
 	$effect(() => {
-		const allLoaded = !claudeAuth.loading && !codexAuth.loading && !opencodeAuth.loading && !ampAuth.loading;
+		const allLoaded = !claudeAuth.loading && !codexAuth.loading && !opencodeAuth.loading && !ampAuth.loading && !factoryAuth.loading;
 		if (allLoaded && !authExpandDone) {
 			authExpandDone = true;
 			if (!claudeAuth.authenticated) claudeOpen = true;
 			if (!codexAuth.authenticated) codexOpen = true;
 			if (!opencodeAuth.authenticated) opencodeOpen = true;
-			// Auto-expand the "More providers" section if Amp is connected
-			if (ampAuth.authenticated) {
+			if (ampAuth.authenticated || factoryAuth.authenticated) {
 				moreProvidersOpen = true;
 			}
 			if (!ampAuth.authenticated) ampOpen = true;
+			if (!factoryAuth.authenticated) factoryOpen = true;
 		}
 	});
 
@@ -194,12 +200,14 @@
 		void checkAuth('codex');
 		void checkAuth('opencode');
 		void checkAuth('amp');
+		void checkAuth('factory');
 
 		return () => {
 			stopAuthPolling('claude');
 			stopAuthPolling('codex');
 			stopAuthPolling('opencode');
 			stopAuthPolling('amp');
+			stopAuthPolling('factory');
 		};
 	});
 </script>

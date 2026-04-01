@@ -16,6 +16,7 @@ describe('ModelCatalogStore', () => {
 		const store = createModelCatalogStore();
 		expect(store.getModels('claude').length).toBeGreaterThan(0);
 		expect(store.getModels('codex').length).toBeGreaterThan(0);
+		expect(store.getModels('factory').length).toBeGreaterThan(0);
 		expect(store.getDefaultModel('claude')).toBe('opus');
 	});
 
@@ -27,6 +28,8 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(true);
 		expect(store.supportsImages('opencode')).toBe(false);
+		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
+		expect(store.supportsImages('factory', 'glm-5')).toBe(false);
 	});
 
 	it('hydrates cached models from localStorage', () => {
@@ -56,6 +59,7 @@ describe('ModelCatalogStore', () => {
 					claude: { supportsFork: true, supportsImages: true },
 					codex: { supportsFork: true, supportsImages: false },
 					opencode: { supportsFork: false, supportsImages: false },
+					factory: { supportsFork: false, supportsImages: false },
 				},
 				lastFetchedAt: Date.now()
 			})
@@ -97,19 +101,25 @@ describe('ModelCatalogStore', () => {
 							id: 'claude',
 							supportsFork: true,
 							supportsImages: true,
-							models: [{ value: 'opus', label: 'Opus' }],
+							models: [{ value: 'opus', label: 'Opus', supportsImages: true }],
 						},
 						{
 							id: 'codex',
 							supportsFork: true,
 							supportsImages: false,
-							models: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' }],
+							models: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsImages: false }],
 						},
 						{
 							id: 'opencode',
 							supportsFork: false,
 							supportsImages: false,
 							models: [],
+						},
+						{
+							id: 'factory',
+							supportsFork: false,
+							supportsImages: false,
+							models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', supportsImages: true }],
 						},
 					],
 				},
@@ -123,9 +133,10 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('opencode')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(false);
+		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
 		// Remote had only opus; static sonnet+haiku are appended
 		const claudeModels = store.getModels('claude');
-		expect(claudeModels[0]).toEqual({ value: 'opus', label: 'Opus' });
+		expect(claudeModels[0]).toMatchObject({ value: 'opus', label: 'Opus', supportsImages: true });
 		expect(claudeModels.find((m) => m.value === 'sonnet')).toBeTruthy();
 	});
 
@@ -150,7 +161,7 @@ describe('ModelCatalogStore', () => {
 		await store.forceRefresh();
 
 		const codexModels = store.getModels('codex');
-		expect(codexModels[0]).toEqual({ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' });
+		expect(codexModels[0]).toMatchObject({ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' });
 		// Static gpt-5.4 should be appended
 		expect(codexModels.find((m) => m.value === 'gpt-5.4')).toBeTruthy();
 		expect(codexModels.length).toBeGreaterThan(1);
@@ -171,10 +182,37 @@ describe('ModelCatalogStore', () => {
 
 		// Remote had only opus; static sonnet+haiku are merged in
 		const claudeModels = store.getModels('claude');
-		expect(claudeModels[0]).toEqual({ value: 'opus', label: 'Opus' });
+		expect(claudeModels[0]).toMatchObject({ value: 'opus', label: 'Opus' });
 		expect(claudeModels.find((m) => m.value === 'sonnet')).toBeTruthy();
 		// Falls back to default capabilities from common contract
 		expect(store.supportsFork('claude')).toBe(true);
 		expect(store.supportsImages('claude')).toBe(true);
+	});
+
+	it('prefers model-level image capability when present', async () => {
+		vi.mocked(clientApi.apiFetch).mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				catalog: {
+					providers: [
+						{
+							id: 'factory',
+							supportsFork: false,
+							supportsImages: false,
+							models: [
+								{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', supportsImages: true },
+								{ value: 'glm-5', label: 'Droid Core (GLM-5)', supportsImages: false },
+							],
+						},
+					],
+				},
+			})
+		} as unknown as Response);
+
+		const store = createModelCatalogStore();
+		await store.forceRefresh();
+
+		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
+		expect(store.supportsImages('factory', 'glm-5')).toBe(false);
 	});
 });

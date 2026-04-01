@@ -4,6 +4,7 @@
 import crypto from 'crypto';
 import { normalizeToolResultContent } from './normalize-util.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
+import { convertOpencodePermissionTool } from './converters/opencode-permission-tool.js';
 import { convertOpenCodeToolUse } from './converters/opencode-tool-use.js';
 import { AbsProvider } from './base.js';
 import type { PermissionMode } from '../../common/chat-modes.js';
@@ -404,7 +405,14 @@ export class OpenCodeProvider extends AbsProvider {
               chatId,
             });
 
-            this.#emitPermissionMessages(chatId, [new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, permission.toolName, permission.toolInput)]);
+            const now = new Date().toISOString();
+            this.#emitPermissionMessages(chatId, [
+              new PermissionRequestMessage(
+                now,
+                permissionRequestId,
+                convertOpencodePermissionTool(now, permissionRequestId, permission.toolInput),
+              ),
+            ]);
 
             continue;
           }

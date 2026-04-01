@@ -44,6 +44,8 @@ interface ProviderRegistryDep {
     claude: Array<{ id: string; [key: string]: unknown }>;
     codex: Array<{ id: string; [key: string]: unknown }>;
     opencode: Array<{ id: string; [key: string]: unknown }>;
+    amp: Array<{ id: string; [key: string]: unknown }>;
+    factory: Array<{ id: string; [key: string]: unknown }>;
   };
   resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
   setPermissionMode(chatId: string, mode: PermissionMode): Promise<void>;

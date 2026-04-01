@@ -1,11 +1,12 @@
 import { apiFetch } from '$lib/api/client.js';
 import type { SessionProvider } from '$lib/types/app';
-import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '$shared/models';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '$shared/models';
 import { PROVIDERS, PROVIDER_CAPABILITIES, type ProviderId } from '$shared/providers';
 
 export interface ModelOption {
 	value: string;
 	label: string;
+	supportsImages?: boolean;
 }
 
 type ProviderModels = Partial<Record<SessionProvider, ModelOption[]>>;
@@ -28,7 +29,8 @@ const STATIC_FALLBACKS: ProviderModels = {
 	claude: CLAUDE_MODELS.OPTIONS,
 	codex: CODEX_MODELS.OPTIONS,
 	opencode: [],
-	amp: AMP_MODELS.OPTIONS
+	amp: AMP_MODELS.OPTIONS,
+	factory: FACTORY_MODELS.OPTIONS,
 };
 
 // Default capabilities derived from the shared common contract. Used when
@@ -41,7 +43,11 @@ function normalizeModelOption(value: unknown): ModelOption | null {
 	if (!value || typeof value !== 'object') return null;
 	const maybe = value as Record<string, unknown>;
 	if (typeof maybe.value !== 'string' || typeof maybe.label !== 'string') return null;
-	return { value: maybe.value, label: maybe.label };
+	return {
+		value: maybe.value,
+		label: maybe.label,
+		supportsImages: typeof maybe.supportsImages === 'boolean' ? maybe.supportsImages : undefined,
+	};
 }
 
 function normalizeProviderModels(value: unknown): ProviderModels {
@@ -73,6 +79,7 @@ function mergeWithFallbacks(models: ProviderModels): ProviderModels {
 		claude: mergeStaticModels(models.claude, STATIC_FALLBACKS.claude!),
 		codex: mergeStaticModels(models.codex, STATIC_FALLBACKS.codex!),
 		amp: mergeStaticModels(models.amp, STATIC_FALLBACKS.amp!),
+		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
 		opencode: models.opencode?.length ? models.opencode : STATIC_FALLBACKS.opencode
 	};
 }
@@ -193,6 +200,7 @@ export class ModelCatalogStore {
 		if (provider === 'claude') return CLAUDE_MODELS.DEFAULT;
 		if (provider === 'codex') return CODEX_MODELS.DEFAULT;
 		if (provider === 'amp') return AMP_MODELS.DEFAULT;
+		if (provider === 'factory') return FACTORY_MODELS.DEFAULT;
 		return this.getModels('opencode')[0]?.value ?? '';
 	}
 
@@ -200,7 +208,13 @@ export class ModelCatalogStore {
 		return this.providerCapabilities[provider]?.supportsFork ?? false;
 	}
 
-	supportsImages(provider: SessionProvider): boolean {
+	supportsImages(provider: SessionProvider, model?: string): boolean {
+		if (model) {
+			const selected = this.getModels(provider).find((entry) => entry.value === model);
+			if (selected && typeof selected.supportsImages === 'boolean') {
+				return selected.supportsImages;
+			}
+		}
 		return this.providerCapabilities[provider]?.supportsImages ?? false;
 	}
 

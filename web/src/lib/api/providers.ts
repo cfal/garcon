@@ -2,7 +2,7 @@
 
 import { apiGet, apiPost } from './client.js';
 
-export type ProviderName = 'claude' | 'codex' | 'opencode' | 'amp';
+export type ProviderName = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory';
 export type BrowserLoginProviderName = 'claude' | 'codex';
 
 export interface ProviderAuthStatus {

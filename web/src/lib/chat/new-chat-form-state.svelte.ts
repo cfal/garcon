@@ -24,6 +24,7 @@ export class NewChatFormState {
 	codexModel = $state('');
 	opencodeModel = $state('');
 	ampModel = $state('');
+	factoryModel = $state('');
 
 	// Path
 	projectPath = $state('');
@@ -105,6 +106,11 @@ export class NewChatFormState {
 				? this.#modelCatalog.getModels('amp')
 				: this.ampModel
 					? [{ value: this.ampModel, label: this.ampModel }]
+					: [],
+			factory: this.#modelCatalog.getModels('factory').length
+				? this.#modelCatalog.getModels('factory')
+				: this.factoryModel
+					? [{ value: this.factoryModel, label: this.factoryModel }]
 					: []
 		};
 		return opts[this.provider];
@@ -115,7 +121,8 @@ export class NewChatFormState {
 			claude: this.claudeModel,
 			codex: this.codexModel,
 			opencode: this.opencodeModel,
-			amp: this.ampModel
+			amp: this.ampModel,
+			factory: this.factoryModel
 		};
 		return map[this.provider];
 	}
@@ -133,7 +140,8 @@ export class NewChatFormState {
 			claude: (v) => { this.claudeModel = v; },
 			codex: (v) => { this.codexModel = v; },
 			opencode: (v) => { this.opencodeModel = v; },
-			amp: (v) => { this.ampModel = v; }
+			amp: (v) => { this.ampModel = v; },
+			factory: (v) => { this.factoryModel = v; }
 		};
 		setterMap[this.provider](value);
 	}
@@ -155,6 +163,9 @@ export class NewChatFormState {
 		if (provider === 'amp' && !liveModels.some((m) => m.value === this.ampModel)) {
 			this.ampModel = liveModels[0].value;
 		}
+		if (provider === 'factory' && !liveModels.some((m) => m.value === this.factoryModel)) {
+			this.factoryModel = liveModels[0].value;
+		}
 	}
 
 	applyResolvedModel(provider: SessionProvider, model: string): void {
@@ -165,6 +176,8 @@ export class NewChatFormState {
 		if (provider === 'claude') this.claudeModel = resolvedModel;
 		if (provider === 'codex') this.codexModel = resolvedModel;
 		if (provider === 'opencode') this.opencodeModel = resolvedModel;
+		if (provider === 'amp') this.ampModel = resolvedModel;
+		if (provider === 'factory') this.factoryModel = resolvedModel;
 	}
 
 	// Images (delegated to ImageAttachmentState)
@@ -406,11 +419,14 @@ export class NewChatFormState {
 			this.validateModelAgainstLive('codex');
 			this.validateModelAgainstLive('opencode');
 			this.validateModelAgainstLive('amp');
+			this.validateModelAgainstLive('factory');
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings and models', err);
 			this.applyResolvedModel('claude', this.#modelCatalog.getDefaultModel('claude'));
 			this.applyResolvedModel('codex', this.#modelCatalog.getDefaultModel('codex'));
 			this.applyResolvedModel('opencode', this.#modelCatalog.getDefaultModel('opencode'));
+			this.applyResolvedModel('amp', this.#modelCatalog.getDefaultModel('amp'));
+			this.applyResolvedModel('factory', this.#modelCatalog.getDefaultModel('factory'));
 			if (!this.projectPath) {
 				this.projectPath = this.projectBasePath;
 			}
@@ -454,6 +470,8 @@ export class NewChatFormState {
 			this.applyResolvedModel('claude', this.#modelCatalog.getDefaultModel('claude'));
 			this.applyResolvedModel('codex', this.#modelCatalog.getDefaultModel('codex'));
 			this.applyResolvedModel('opencode', this.#modelCatalog.getDefaultModel('opencode'));
+			this.applyResolvedModel('amp', this.#modelCatalog.getDefaultModel('amp'));
+			this.applyResolvedModel('factory', this.#modelCatalog.getDefaultModel('factory'));
 		}
 		if (typeof settingsData.lastPermissionMode === 'string' && settingsData.lastPermissionMode) {
 			this.permissionMode = settingsData.lastPermissionMode;

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	BashToolUseMessage,
 	ReadToolUseMessage,
+	ListToolUseMessage,
 	EditToolUseMessage,
 	WriteToolUseMessage,
 	ApplyPatchToolUseMessage,
@@ -60,6 +61,13 @@ describe('tool-use serialization round-trip', () => {
 		expect(parsed.offset).toBe(10);
 		expect(parsed.limit).toBe(50);
 		expect(parsed.endLine).toBe(60);
+	});
+
+	it('ListToolUseMessage preserves directory path', () => {
+		const msg = new ListToolUseMessage(TS, 'id-2b', '/tmp');
+		const parsed = roundTrip(msg);
+		expect(parsed.path).toBe('/tmp');
+		expect(parsed.type).toBe('list-tool-use');
 	});
 
 	it('EditToolUseMessage preserves diff fields', () => {
@@ -265,6 +273,18 @@ describe('wire format parsing', () => {
 		expect(parsed.filePath).toBe('/tmp/x.ts');
 		expect(parsed.offset).toBe(10);
 		expect(parsed.limit).toBe(50);
+	});
+
+	it('parses list-tool-use from wire data', () => {
+		const data = {
+			type: 'list-tool-use',
+			timestamp: TS,
+			toolId: 'id-list',
+			path: '/tmp',
+		};
+		const parsed = parseChatMessage(data) as ListToolUseMessage;
+		expect(parsed).toBeInstanceOf(ListToolUseMessage);
+		expect(parsed.path).toBe('/tmp');
 	});
 
 	it('parses unknown-tool-use from wire data without metadata pollution', () => {

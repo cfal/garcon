@@ -1,6 +1,6 @@
 import { parseJsonBody } from '../lib/http-request.js';
 import { getProjectBasePath, getTelegramBotToken } from '../config.js';
-import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS } from '../../common/models.js';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 
 export default function createWorkspaceRoutes(settings, providers, telegramNotifier) {
@@ -46,7 +46,7 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
 
   async function getAppSettings() {
     try {
-      const [ui, paths, pinnedChatIds, lastProvider, lastProjectPath, lastModel, lastPermissionMode, lastThinkingMode, authByProvider, opencodeModels] = await Promise.all([
+      const [ui, paths, pinnedChatIds, lastProvider, lastProjectPath, lastModel, lastPermissionMode, lastThinkingMode, authByProvider, opencodeModels, factoryModels] = await Promise.all([
         settings.getUiSettings(),
         settings.getPathSettings(),
         settings.getPinnedChatIds(),
@@ -59,14 +59,18 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
           claude: { authenticated: false },
           codex: { authenticated: false },
           opencode: { authenticated: false },
+          amp: { authenticated: false },
+          factory: { authenticated: false },
         }),
         providers?.getModels?.('opencode') ?? Promise.resolve([]),
+        providers?.getModels?.('factory') ?? Promise.resolve([]),
       ]);
       const modelsByProvider = {
         claude: CLAUDE_MODELS.OPTIONS,
         codex: CODEX_MODELS.OPTIONS,
         opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
         amp: AMP_MODELS.OPTIONS,
+        factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
       };
       const uiEffective = {
         chatTitle: resolveEffectiveGenerationUiConfig({

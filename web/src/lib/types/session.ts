@@ -4,7 +4,7 @@ import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
 
 export interface ChatSession {
 	id: string;
-	provider: 'claude' | 'codex' | 'opencode';
+	provider: 'claude' | 'codex' | 'opencode' | 'amp' | 'factory';
 	model: string | null;
 	permissionMode?: PermissionMode;
 	thinkingMode?: ThinkingMode;

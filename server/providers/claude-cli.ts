@@ -9,6 +9,7 @@ import path from 'path';
 import { normalizeToolResultContent } from './normalize-util.js';
 import { getClaudeBinary } from '../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
+import { convertClaudePermissionTool } from './converters/claude-permission-tool.js';
 import { convertClaudeToolUse } from './converters/claude-tool-use.js';
 import { AbsProvider } from './base.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
@@ -303,7 +304,14 @@ class ClaudeProvider extends AbsProvider {
       toolInput: msg.request.input || {},
     });
 
-    this.#emitPermissionMessages(session.chatId, [new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, toolName, msg.request.input)]);
+    const now = new Date().toISOString();
+    this.#emitPermissionMessages(session.chatId, [
+      new PermissionRequestMessage(
+        now,
+        permissionRequestId,
+        convertClaudePermissionTool(now, permissionRequestId, toolName, msg.request.input),
+      ),
+    ]);
   }
 
   #handleControlResponse(session: ClaudeRunningSession, msg: CLIMessage): void {

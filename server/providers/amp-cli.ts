@@ -22,7 +22,7 @@ interface AmpSession {
   resultSeen: boolean;
   finalized: boolean;
   aborted: boolean;
-  turnResolve: ((value?: unknown) => void) | null;
+  turnResolve: (() => void) | null;
   startTime: number;
   process: ReturnType<typeof Bun.spawn> | null;
   turnGeneration: number;

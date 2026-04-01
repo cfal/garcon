@@ -10,6 +10,7 @@ import {
 	AmpOracleToolUseMessage,
 	BashToolUseMessage,
 	ExitPlanModeToolUseMessage,
+	ListToolUseMessage,
 } from '$shared/chat-types';
 
 describe('TOOL_DISPLAY_REGISTRY', () => {
@@ -22,6 +23,7 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 		const expected = [
 			'bash-tool-use',
 			'read-tool-use',
+			'list-tool-use',
 			'edit-tool-use',
 			'write-tool-use',
 			'apply-patch-tool-use',
@@ -57,6 +59,7 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 	it('uses canonical type keys for core tools', () => {
 		expect(TOOL_DISPLAY_REGISTRY['bash-tool-use'].input.mode).toBe('inline');
 		expect(TOOL_DISPLAY_REGISTRY['read-tool-use'].input.mode).toBe('inline');
+		expect(TOOL_DISPLAY_REGISTRY['list-tool-use'].input.mode).toBe('inline');
 		expect(TOOL_DISPLAY_REGISTRY['edit-tool-use'].input.mode).toBe('collapsible');
 		expect(TOOL_DISPLAY_REGISTRY['write-stdin-tool-use'].input.mode).toBe('hidden');
 	});
@@ -82,6 +85,11 @@ describe('tool display helpers', () => {
 	it('returns the display label for generic tool-use messages', () => {
 		const label = getToolDisplayLabel(new BashToolUseMessage('', 'tool-1', 'ls -la'));
 		expect(label).toBe('Bash');
+	});
+
+	it('returns the display label for list tool-use messages', () => {
+		const label = getToolDisplayLabel(new ListToolUseMessage('', 'tool-list-1', '/tmp'));
+		expect(label).toBe('List');
 	});
 
 	it('returns the display label for Amp-specific tool-use messages', () => {

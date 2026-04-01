@@ -16,6 +16,7 @@ export type {
 	ToolUseChatMessage,
 	BashToolUseMessage,
 	ReadToolUseMessage,
+	ListToolUseMessage,
 	EditToolUseMessage,
 	WriteToolUseMessage,
 	ApplyPatchToolUseMessage,

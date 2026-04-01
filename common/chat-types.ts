@@ -75,6 +75,16 @@ export class ReadToolUseMessage {
   ) {}
 }
 
+export class ListToolUseMessage {
+  readonly type = 'list-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public path?: string,
+  ) {}
+}
+
 export class EditToolUseMessage {
   readonly type = 'edit-tool-use' as const;
 
@@ -374,6 +384,7 @@ export class PermissionCancelledMessage {
 export type ToolUseChatMessage =
   | BashToolUseMessage
   | ReadToolUseMessage
+  | ListToolUseMessage
   | EditToolUseMessage
   | WriteToolUseMessage
   | ApplyPatchToolUseMessage
@@ -417,6 +428,7 @@ export function isToolUseMessage(message: ChatMessage): message is ToolUseChatMe
   switch (message.type) {
     case 'bash-tool-use':
     case 'read-tool-use':
+    case 'list-tool-use':
     case 'edit-tool-use':
     case 'write-tool-use':
     case 'apply-patch-tool-use':
@@ -510,6 +522,11 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
         asOptionalNumber(data.offset), asOptionalNumber(data.limit),
         asOptionalNumber(data.endLine));
     }
+
+    case 'list-tool-use':
+      return new ListToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asOptionalString(data.path));
 
     case 'edit-tool-use':
       return new EditToolUseMessage(
