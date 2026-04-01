@@ -5,7 +5,14 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
-import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
+import {
+  normalizeClaudeThinkingMode,
+  normalizePermissionMode,
+  normalizeThinkingMode,
+  type ClaudeThinkingMode,
+  type PermissionMode,
+  type ThinkingMode,
+} from '../../common/chat-modes.js';
 import type { ProviderName } from '../providers/types.js';
 import { isArtificialNativePath } from './artificial-native-path.js';
 
@@ -19,6 +26,7 @@ const ALLOWED_PATCH_FIELDS = [
   'lastReadAt',
   'permissionMode',
   'thinkingMode',
+  'claudeThinkingMode',
 ] as const;
 
 export interface ChatRegistryEntry {
@@ -31,6 +39,7 @@ export interface ChatRegistryEntry {
   lastReadAt?: string | null;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
+  claudeThinkingMode: ClaudeThinkingMode;
 }
 
 export interface ChatRegistrySnapshot {
@@ -48,6 +57,7 @@ export interface NewChatRegistryEntry {
   providerSessionId?: string | null;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
 }
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
@@ -79,6 +89,18 @@ function createEmptyRegistry(): ChatRegistrySnapshot {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeRegistryModes(entry: {
+  permissionMode?: unknown;
+  thinkingMode?: unknown;
+  claudeThinkingMode?: unknown;
+}): Pick<ChatRegistryEntry, 'permissionMode' | 'thinkingMode' | 'claudeThinkingMode'> {
+  return {
+    permissionMode: normalizePermissionMode(entry.permissionMode),
+    thinkingMode: normalizeThinkingMode(entry.thinkingMode),
+    claudeThinkingMode: normalizeClaudeThinkingMode(entry.claudeThinkingMode),
+  };
 }
 
 export class ChatRegistry extends EventEmitter implements IChatRegistry {
@@ -117,9 +139,17 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         this.#registry = createEmptyRegistry();
         return this.#registry;
       }
+      const sessions: Record<string, ChatRegistryEntry> = {};
+      for (const [chatId, rawEntry] of Object.entries(parsed.sessions)) {
+        if (!isObjectRecord(rawEntry)) continue;
+        sessions[chatId] = {
+          ...(rawEntry as Record<string, unknown>),
+          ...normalizeRegistryModes(rawEntry),
+        } as ChatRegistryEntry;
+      }
       this.#registry = {
         version: typeof parsed.version === 'number' ? parsed.version : 1,
-        sessions: parsed.sessions as Record<string, ChatRegistryEntry>,
+        sessions,
       };
       return this.#registry;
     } catch (error: unknown) {
@@ -209,6 +239,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     providerSessionId = null,
     permissionMode = 'default',
     thinkingMode = 'none',
+    claudeThinkingMode = 'auto',
   }: NewChatRegistryEntry): boolean {
     if (!provider) throw new Error('Provider not specified');
     if (!model) throw new Error('Model not specified');
@@ -217,6 +248,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     if (id in registry.sessions) {
       throw new Error(`Chat with ID ${id} already exists`);
     }
+    const normalizedModes = normalizeRegistryModes({ permissionMode, thinkingMode, claudeThinkingMode });
     registry.sessions[id] = {
       provider,
       nativePath,
@@ -224,8 +256,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       tags,
       providerSessionId,
       model,
-      permissionMode,
-      thinkingMode,
+      ...normalizedModes,
     };
     this.#scheduleRegistrySave();
     return true;
@@ -235,14 +266,24 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     const registry = this.getRegistry();
     const existing = registry.sessions[id];
     if (!existing) return null;
+    const normalizedPatch: ChatRegistryPatch = { ...patch };
+    if ('permissionMode' in normalizedPatch) {
+      normalizedPatch.permissionMode = normalizePermissionMode(normalizedPatch.permissionMode);
+    }
+    if ('thinkingMode' in normalizedPatch) {
+      normalizedPatch.thinkingMode = normalizeThinkingMode(normalizedPatch.thinkingMode);
+    }
+    if ('claudeThinkingMode' in normalizedPatch) {
+      normalizedPatch.claudeThinkingMode = normalizeClaudeThinkingMode(normalizedPatch.claudeThinkingMode);
+    }
     for (const key of ALLOWED_PATCH_FIELDS) {
-      if (key in patch) {
-        existing[key] = patch[key] as never;
+      if (key in normalizedPatch) {
+        existing[key] = normalizedPatch[key] as never;
       }
     }
     this.#scheduleRegistrySave();
-    if ('lastReadAt' in patch) {
-      this.#emitChatReadUpdated(id, patch.lastReadAt);
+    if ('lastReadAt' in normalizedPatch) {
+      this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
     }
     return { id, ...existing };
   }

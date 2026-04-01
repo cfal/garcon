@@ -33,6 +33,23 @@ describe('ChatRegistry', () => {
     it('returns null for unknown chat', () => {
       expect(registry.getChat('unknown')).toBeNull();
     });
+
+    it('normalizes invalid mode values on add', () => {
+      registry.addChat({
+        id: 'c1',
+        provider: 'claude',
+        model: 'opus',
+        projectPath: '/p',
+        permissionMode: 'bogus',
+        thinkingMode: 'very-hard',
+        claudeThinkingMode: 'sometimes',
+      });
+
+      const entry = registry.getChat('c1');
+      expect(entry?.permissionMode).toBe('default');
+      expect(entry?.thinkingMode).toBe('none');
+      expect(entry?.claudeThinkingMode).toBe('auto');
+    });
   });
 
   describe('updateChat', () => {
@@ -47,6 +64,21 @@ describe('ChatRegistry', () => {
     it('returns null for unknown chat', () => {
       const result = registry.updateChat('unknown', { model: 'opus' });
       expect(result).toBeNull();
+    });
+
+    it('normalizes invalid mode patches', () => {
+      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+
+      registry.updateChat('c1', {
+        permissionMode: 'bogus',
+        thinkingMode: 'very-hard',
+        claudeThinkingMode: 'sometimes',
+      });
+
+      const entry = registry.getChat('c1');
+      expect(entry?.permissionMode).toBe('default');
+      expect(entry?.thinkingMode).toBe('none');
+      expect(entry?.claudeThinkingMode).toBe('auto');
     });
   });
 
@@ -146,6 +178,32 @@ describe('ChatRegistry', () => {
       const fresh = new ChatRegistry(emptyDir);
       await fresh.init();
       expect(Object.keys(fresh.listAllChats())).toEqual([]);
+    });
+
+    it('normalizes invalid persisted mode values on init', async () => {
+      await fs.writeFile(path.join(tmpDir, 'chats.json'), JSON.stringify({
+        version: 1,
+        sessions: {
+          c1: {
+            provider: 'claude',
+            nativePath: null,
+            projectPath: '/p',
+            tags: [],
+            providerSessionId: 'ps1',
+            model: 'opus',
+            permissionMode: 'bogus',
+            thinkingMode: 'very-hard',
+            claudeThinkingMode: 'sometimes',
+          },
+        },
+      }, null, 2), 'utf8');
+
+      const fresh = new ChatRegistry(tmpDir);
+      await fresh.init();
+
+      expect(fresh.getChat('c1')?.permissionMode).toBe('default');
+      expect(fresh.getChat('c1')?.thinkingMode).toBe('none');
+      expect(fresh.getChat('c1')?.claudeThinkingMode).toBe('auto');
     });
   });
 

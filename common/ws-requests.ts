@@ -2,10 +2,11 @@
 // Shared between server and frontend to enforce a typed contract.
 
 import {
+  isClaudeThinkingMode,
   isPermissionMode,
   isThinkingMode,
 } from './chat-modes.js';
-import type { PermissionMode, ThinkingMode } from './chat-modes.js';
+import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from './chat-modes.js';
 
 // Narrows an unknown value to string | null for chatId fields.
 function strOrNull(v: unknown): string | null {
@@ -40,6 +41,14 @@ function requireThinkingMode(v: unknown): ThinkingMode {
   return s;
 }
 
+function requireClaudeThinkingMode(v: unknown): ClaudeThinkingMode {
+  const s = requireNonEmptyString(v, 'claudeThinkingMode');
+  if (!isClaudeThinkingMode(s)) {
+    throw new Error(`Invalid claudeThinkingMode: ${s}`);
+  }
+  return s;
+}
+
 function parseAgentRunImages(v: unknown): AgentCommandImage[] | undefined {
   if (!Array.isArray(v)) return undefined;
   return v;
@@ -58,6 +67,7 @@ export class AgentRunRequest {
     public permissionMode: PermissionMode,
     public thinkingMode: ThinkingMode,
     public model: string,
+    public claudeThinkingMode?: ClaudeThinkingMode,
     public images?: AgentCommandImage[],
   ) { }
 
@@ -75,6 +85,7 @@ export class AgentRunRequest {
       requirePermissionMode(data.permissionMode),
       requireThinkingMode(data.thinkingMode),
       requireNonEmptyString(data.model, 'model'),
+      data.claudeThinkingMode === undefined ? undefined : requireClaudeThinkingMode(data.claudeThinkingMode),
       images,
     );
   }
@@ -151,6 +162,16 @@ export class ThinkingModeSetRequest {
   static fromJson(data: Record<string, unknown>): ThinkingModeSetRequest {
     const mode = data.mode === undefined ? undefined : requireThinkingMode(data.mode);
     return new ThinkingModeSetRequest(strOrNull(data.chatId), mode);
+  }
+}
+
+export class ClaudeThinkingModeSetRequest {
+  readonly type = 'claude-thinking-mode-set' as const;
+  constructor(public chatId: string | null, public mode?: ClaudeThinkingMode) { }
+
+  static fromJson(data: Record<string, unknown>): ClaudeThinkingModeSetRequest {
+    const mode = data.mode === undefined ? undefined : requireClaudeThinkingMode(data.mode);
+    return new ClaudeThinkingModeSetRequest(strOrNull(data.chatId), mode);
   }
 }
 
@@ -237,6 +258,7 @@ export type ClientWsMessage =
   | PermissionDecisionRequest
   | PermissionModeSetRequest
   | ThinkingModeSetRequest
+  | ClaudeThinkingModeSetRequest
   | ModelSetRequest
   | QueueEnqueueRequest
   | QueueDropRequest
@@ -261,6 +283,8 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
       return PermissionModeSetRequest.fromJson(data);
     case 'thinking-mode-set':
       return ThinkingModeSetRequest.fromJson(data);
+    case 'claude-thinking-mode-set':
+      return ClaudeThinkingModeSetRequest.fromJson(data);
     case 'model-set':
       return ModelSetRequest.fromJson(data);
     case 'queue-enqueue':

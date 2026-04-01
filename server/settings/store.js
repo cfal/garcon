@@ -7,6 +7,14 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
+import {
+  DEFAULT_CLAUDE_THINKING_MODE,
+  DEFAULT_PERMISSION_MODE,
+  DEFAULT_THINKING_MODE,
+  normalizeClaudeThinkingMode,
+  normalizePermissionMode,
+  normalizeThinkingMode,
+} from '../../common/chat-modes.ts';
 
 function createEmpty() {
   return {
@@ -19,8 +27,9 @@ function createEmpty() {
     lastProvider: 'claude',
     lastProjectPath: '',
     lastModel: '',
-    lastPermissionMode: 'default',
-    lastThinkingMode: 'none',
+    lastPermissionMode: DEFAULT_PERMISSION_MODE,
+    lastThinkingMode: DEFAULT_THINKING_MODE,
+    lastClaudeThinkingMode: DEFAULT_CLAUDE_THINKING_MODE,
     chatFolders: [],
   };
 }
@@ -77,8 +86,9 @@ function sanitize(parsed) {
     lastProvider: typeof parsed.lastProvider === 'string' ? parsed.lastProvider : 'claude',
     lastProjectPath: typeof parsed.lastProjectPath === 'string' ? parsed.lastProjectPath : '',
     lastModel: typeof parsed.lastModel === 'string' ? parsed.lastModel : '',
-    lastPermissionMode: typeof parsed.lastPermissionMode === 'string' ? parsed.lastPermissionMode : 'default',
-    lastThinkingMode: typeof parsed.lastThinkingMode === 'string' ? parsed.lastThinkingMode : 'none',
+    lastPermissionMode: normalizePermissionMode(parsed.lastPermissionMode),
+    lastThinkingMode: normalizeThinkingMode(parsed.lastThinkingMode),
+    lastClaudeThinkingMode: normalizeClaudeThinkingMode(parsed.lastClaudeThinkingMode),
     chatFolders: Array.isArray(parsed.chatFolders) ? parsed.chatFolders.map(sanitizeFolder).filter(Boolean) : [],
   };
 }
@@ -361,7 +371,7 @@ export class SettingsStore extends EventEmitter {
 
   async getLastPermissionMode() {
     const settings = await this.loadSettings();
-    return settings.lastPermissionMode || 'default';
+    return normalizePermissionMode(settings.lastPermissionMode);
   }
 
   async getLastProvider() {
@@ -391,12 +401,18 @@ export class SettingsStore extends EventEmitter {
       settings.lastModel = typeof defaults?.model === 'string'
         ? defaults.model
         : (settings.lastModel || '');
-      settings.lastPermissionMode = typeof defaults?.permissionMode === 'string'
-        ? defaults.permissionMode
-        : (settings.lastPermissionMode || 'default');
-      settings.lastThinkingMode = typeof defaults?.thinkingMode === 'string'
-        ? defaults.thinkingMode
-        : (settings.lastThinkingMode || 'none');
+      settings.lastPermissionMode = normalizePermissionMode(
+        defaults?.permissionMode,
+        normalizePermissionMode(settings.lastPermissionMode),
+      );
+      settings.lastThinkingMode = normalizeThinkingMode(
+        defaults?.thinkingMode,
+        normalizeThinkingMode(settings.lastThinkingMode),
+      );
+      settings.lastClaudeThinkingMode = normalizeClaudeThinkingMode(
+        defaults?.claudeThinkingMode,
+        normalizeClaudeThinkingMode(settings.lastClaudeThinkingMode),
+      );
       await this.saveSettings(settings);
     });
   }
@@ -407,11 +423,20 @@ export class SettingsStore extends EventEmitter {
 
   async getLastThinkingMode() {
     const settings = await this.loadSettings();
-    return settings.lastThinkingMode || 'none';
+    return normalizeThinkingMode(settings.lastThinkingMode);
   }
 
   async setLastThinkingMode(mode) {
     return this.setLastChatDefaults({ thinkingMode: mode });
+  }
+
+  async getLastClaudeThinkingMode() {
+    const settings = await this.loadSettings();
+    return normalizeClaudeThinkingMode(settings.lastClaudeThinkingMode);
+  }
+
+  async setLastClaudeThinkingMode(mode) {
+    return this.setLastChatDefaults({ claudeThinkingMode: mode });
   }
 
   async getNormalChatIds() {

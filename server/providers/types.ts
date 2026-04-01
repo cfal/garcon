@@ -2,11 +2,18 @@
 // lifecycle operations so that callers and providers share a single
 // source of truth for required fields.
 
-import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
+import {
+  normalizeClaudeThinkingMode,
+  normalizePermissionMode,
+  normalizeThinkingMode,
+  type ClaudeThinkingMode,
+  type PermissionMode,
+  type ThinkingMode,
+} from '../../common/chat-modes.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 import type { ProviderId } from '../../common/providers.js';
 
-export type { AgentCommandImage, PermissionMode, ThinkingMode };
+export type { AgentCommandImage, ClaudeThinkingMode, PermissionMode, ThinkingMode };
 export type ProviderName = ProviderId;
 
 // Persisted chat execution state read from the registry.
@@ -15,6 +22,7 @@ export interface PersistedChatExecutionConfig {
   model?: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
 }
 
 // Core execution context shared by all session operations.
@@ -55,6 +63,7 @@ export interface SingleQueryRequest {
   model?: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
   cwd?: string;
   projectPath?: string;
 }
@@ -67,6 +76,7 @@ export interface ProviderChatEntry {
   model?: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
   nativePath?: string | null;
 }
 
@@ -75,6 +85,7 @@ export interface RequiredChatExecutionConfig extends PersistedChatExecutionConfi
   model: string;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
+  claudeThinkingMode: ClaudeThinkingMode;
 }
 
 // Validates persisted execution settings before they reach providers or queue drain.
@@ -91,18 +102,13 @@ export function requireChatExecutionConfig(
   if (!entry.model) {
     throw new Error(`Chat ${chatId} is missing model`);
   }
-  if (!entry.permissionMode) {
-    throw new Error(`Chat ${chatId} is missing permissionMode`);
-  }
-  if (!entry.thinkingMode) {
-    throw new Error(`Chat ${chatId} is missing thinkingMode`);
-  }
 
   return {
     projectPath: entry.projectPath,
     model: entry.model,
-    permissionMode: entry.permissionMode,
-    thinkingMode: entry.thinkingMode,
+    permissionMode: normalizePermissionMode(entry.permissionMode),
+    thinkingMode: normalizeThinkingMode(entry.thinkingMode),
+    claudeThinkingMode: normalizeClaudeThinkingMode(entry.claudeThinkingMode),
   };
 }
 
@@ -115,6 +121,7 @@ export interface StartProviderSessionRequest {
   model?: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
 }
 
 // Public API request for ProviderRegistry.runProviderTurn().
@@ -125,6 +132,7 @@ export interface RunProviderTurnRequest {
   model?: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
 }
 
 // Runtime-supplied turn fields forwarded through the queue and WS layers.

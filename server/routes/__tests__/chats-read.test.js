@@ -279,9 +279,9 @@ describe('GET /api/chats includes read state', () => {
     expect(body.sessions[0].activity.lastReadAt).toBeNull();
   });
 
-  it('returns permissionMode and thinkingMode in session response', async () => {
+  it('returns permissionMode, thinkingMode, and claudeThinkingMode in session response', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'claude', projectPath: '/proj', tags: [], permissionMode: 'acceptEdits', thinkingMode: 'think-hard' },
+      '100': { provider: 'claude', projectPath: '/proj', tags: [], permissionMode: 'acceptEdits', thinkingMode: 'think-hard', claudeThinkingMode: 'on' },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
@@ -292,9 +292,10 @@ describe('GET /api/chats includes read state', () => {
 
     expect(body.sessions[0].permissionMode).toBe('acceptEdits');
     expect(body.sessions[0].thinkingMode).toBe('think-hard');
+    expect(body.sessions[0].claudeThinkingMode).toBe('on');
   });
 
-  it('defaults permissionMode and thinkingMode for legacy sessions', async () => {
+  it('defaults permissionMode, thinkingMode, and claudeThinkingMode for legacy sessions', async () => {
     registry.listAllChats.mockImplementation(() => ({
       '100': { provider: 'claude', projectPath: '/proj', tags: [] },
     }));
@@ -307,6 +308,30 @@ describe('GET /api/chats includes read state', () => {
 
     expect(body.sessions[0].permissionMode).toBe('default');
     expect(body.sessions[0].thinkingMode).toBe('none');
+    expect(body.sessions[0].claudeThinkingMode).toBe('auto');
+  });
+
+  it('normalizes invalid permissionMode, thinkingMode, and claudeThinkingMode values', async () => {
+    registry.listAllChats.mockImplementation(() => ({
+      '100': {
+        provider: 'claude',
+        projectPath: '/proj',
+        tags: [],
+        permissionMode: 'bogus',
+        thinkingMode: 'very-hard',
+        claudeThinkingMode: 'sometimes',
+      },
+    }));
+    metadata.listAllChatMetadata.mockImplementation(() => new Map());
+    settings.getChatName.mockImplementation(() => null);
+    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(body.sessions[0].permissionMode).toBe('default');
+    expect(body.sessions[0].thinkingMode).toBe('none');
+    expect(body.sessions[0].claudeThinkingMode).toBe('auto');
   });
 });
 

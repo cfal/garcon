@@ -12,6 +12,7 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'none',
+		claudeThinkingMode: 'auto',
 		createdAt: null,
 		lastActivityAt: '2026-03-27T08:00:00.000Z',
 		lastReadAt: null,
