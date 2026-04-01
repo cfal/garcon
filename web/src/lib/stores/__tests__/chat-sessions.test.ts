@@ -62,6 +62,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Hello',
 			},
 		});
@@ -115,6 +116,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Test',
 			},
 		});
@@ -141,6 +143,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Test',
 			},
 		});
@@ -166,6 +169,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Pending',
 			},
 		});
@@ -222,6 +226,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: '   ',
 			},
 		});
@@ -250,6 +255,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Hello',
 			},
 		});
@@ -269,6 +275,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Hello',
 			},
 		});
@@ -291,6 +298,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Hello',
 			},
 		});
@@ -322,6 +330,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Hello',
 			},
 		});
@@ -554,6 +563,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Hello',
 			},
 		});
@@ -573,6 +583,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Hello',
 			},
 		});
@@ -648,6 +659,7 @@ describe('ChatSessionsStore', () => {
 			id: 'a',
 			thinkingMode: 'ultrathink',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 		} as any)]);
 
 		expect(store.byId['a']).not.toBe(ref);
@@ -666,6 +678,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'acceptEdits',
 				thinkingMode: 'think-hard',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Hello',
 			},
 		});
@@ -697,6 +710,7 @@ describe('ChatSessionsStore', () => {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 				firstMessage: 'Hello',
 			},
 		});

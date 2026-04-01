@@ -12,6 +12,7 @@ import { convertAmpToolUse } from './converters/amp-tool-use.js';
 import { AbsProvider } from './base.js';
 import { createArtificialNativePath } from '../chats/artificial-native-path.js';
 import type { AmpThreadExport } from './loaders/amp-history-loader.js';
+import type { AmpAgentMode } from '../../common/chat-modes.js';
 import type { StartSessionRequest, ResumeTurnRequest, StartedProviderSession } from './types.js';
 
 interface AmpSession {
@@ -266,14 +267,18 @@ function createSession(threadId: string, chatId: string): AmpSession {
   };
 }
 
-function buildContinueArgs(threadId: string): string[] {
-  return [
+function buildContinueArgs(threadId: string, ampAgentMode?: AmpAgentMode): string[] {
+  const args = [
     'threads', 'continue', threadId,
     ...AMP_DEFAULT_FLAGS,
     '--dangerously-allow-all',
     '--stream-json-thinking',
-    '-x',
   ];
+  if (ampAgentMode) {
+    args.push('-m', ampAgentMode);
+  }
+  args.push('-x');
+  return args;
 }
 
 class AmpProvider extends AbsProvider {
@@ -435,7 +440,7 @@ class AmpProvider extends AbsProvider {
     });
   }
 
-  async startSession({ command, chatId, projectPath }: StartSessionRequest): Promise<StartedProviderSession> {
+  async startSession({ command, chatId, projectPath, ampAgentMode }: StartSessionRequest & { ampAgentMode?: AmpAgentMode }): Promise<StartedProviderSession> {
     if (!chatId) throw new Error('chatId is required when starting an Amp session');
     const threadId = await createThread({ cwd: projectPath });
 
@@ -444,7 +449,7 @@ class AmpProvider extends AbsProvider {
     this.emitProcessing(chatId, true);
     this.emitSessionCreated(chatId);
 
-    const args = buildContinueArgs(threadId);
+    const args = buildContinueArgs(threadId, ampAgentMode);
 
     try {
       this.#spawnAmp(session, projectPath, args, command);
@@ -461,7 +466,7 @@ class AmpProvider extends AbsProvider {
     };
   }
 
-  async runTurn({ command, providerSessionId: threadId, chatId, projectPath }: ResumeTurnRequest): Promise<void> {
+  async runTurn({ command, providerSessionId: threadId, chatId, projectPath, ampAgentMode }: ResumeTurnRequest & { ampAgentMode?: AmpAgentMode }): Promise<void> {
     if (!threadId) throw new Error('Cannot resume without thread ID');
     if (!chatId) throw new Error('Cannot resume without chat ID');
 
@@ -485,7 +490,7 @@ class AmpProvider extends AbsProvider {
 
     this.emitProcessing(chatId, true);
 
-    const args = buildContinueArgs(threadId);
+    const args = buildContinueArgs(threadId, ampAgentMode);
 
     try {
       this.#spawnAmp(session, projectPath, args, command);

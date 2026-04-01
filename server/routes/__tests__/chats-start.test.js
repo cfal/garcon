@@ -111,6 +111,7 @@ describe('POST /api/v1/chats/start', () => {
       permissionMode: 'acceptEdits',
       thinkingMode: 'think-hard',
       claudeThinkingMode: 'off',
+      ampAgentMode: 'smart',
     });
     expect(providers.startSession).toHaveBeenCalledWith('123', 'hello', {
       images: [],
@@ -147,6 +148,7 @@ describe('POST /api/v1/chats/start', () => {
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'on',
+      ampAgentMode: 'smart',
     });
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('456');
   });

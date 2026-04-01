@@ -27,6 +27,7 @@ function createMockCtx() {
       getLastPermissionMode: mock(() => Promise.resolve('default')),
       getLastThinkingMode: mock(() => Promise.resolve('none')),
       getLastClaudeThinkingMode: mock(() => Promise.resolve('auto')),
+      getLastAmpAgentMode: mock(() => Promise.resolve('smart')),
       getFolders: mock(() => Promise.resolve([])),
       addFolder: mock(() => Promise.resolve(undefined)),
       updateFolder: mock(() => Promise.resolve(undefined)),
