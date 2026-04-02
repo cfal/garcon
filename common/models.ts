@@ -30,9 +30,10 @@ export const CODEX_MODELS = {
 
 export const AMP_MODELS = {
   OPTIONS: [
-    { value: 'default', label: 'Amp Default', supportsImages: false },
+    { value: 'smart', label: 'Amp Smart', supportsImages: false },
+    { value: 'deep', label: 'Amp Deep', supportsImages: false },
   ] satisfies SharedModelOption[],
-  DEFAULT: 'default',
+  DEFAULT: 'smart',
 };
 
 export const FACTORY_MODELS = {
