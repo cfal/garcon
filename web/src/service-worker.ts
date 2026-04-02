@@ -8,8 +8,11 @@ import { build, files, version } from '$service-worker';
 
 const CACHE_NAME = `garcon-${version}`;
 
+const CACHE_PREFIX = 'garcon-';
+
 // App shell: Vite-built JS/CSS chunks + static assets (icons, manifest, etc.)
-const PRECACHE_URLS = [...build, ...files];
+// Include '/' so the offline navigation fallback has a guaranteed cache hit.
+const PRECACHE_URLS = ['/', ...build, ...files];
 
 // Paths that must never be cached (API, WebSocket upgrades).
 const PASSTHROUGH_PREFIXES = ['/api', '/ws', '/shell'];
@@ -28,11 +31,15 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-	// Evict old caches from previous deploys.
+	// Evict old garcon caches from previous deploys. Only touch our own prefix.
 	event.waitUntil(
 		caches
 			.keys()
-			.then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
+			.then((keys) =>
+				Promise.all(
+					keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME).map((k) => caches.delete(k))
+				)
+			)
 			.then(() => self.clients.claim())
 	);
 });
@@ -53,11 +60,13 @@ self.addEventListener('fetch', (event) => {
 		event.respondWith(
 			fetch(event.request)
 				.then((response) => {
-					const clone = response.clone();
-					caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+					if (response.ok && response.type === 'basic') {
+						const clone = response.clone();
+						caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+					}
 					return response;
 				})
-				.catch(() => caches.match('/index.html').then((r) => r ?? Response.error()))
+				.catch(() => caches.match('/').then((r) => r ?? Response.error()))
 		);
 		return;
 	}

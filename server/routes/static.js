@@ -10,6 +10,10 @@ export function cacheHeaders(requestPath) {
   if (requestPath.endsWith('.html')) {
     return { 'Cache-Control': 'no-cache, no-store, must-revalidate' };
   }
+  // Service workers must not be aggressively cached so browsers detect updates.
+  if (requestPath === '/service-worker.js') {
+    return { 'Cache-Control': 'no-cache, no-store, must-revalidate' };
+  }
   if (/\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|map|json|webmanifest)$/.test(requestPath)) {
     return { 'Cache-Control': 'public, max-age=31536000, immutable' };
   }
@@ -102,6 +106,7 @@ routes['/apple-touch-icon.png'] = { GET: noauthServeStatic('apple-touch-icon.png
 routes['/icon-192.png'] = { GET: noauthServeStatic('icon-192.png') };
 routes['/icon-512.png'] = { GET: noauthServeStatic('icon-512.png') };
 routes['/site.webmanifest'] = { GET: noauthServeStatic('site.webmanifest') };
+routes['/service-worker.js'] = { GET: noauthServeStatic('service-worker.js') };
 routes['/_app/*'] = { GET: noauthServeFile };
 routes['/chat/:id'] = { GET: noauthServeStatic('index.html') };
 routes['/setup'] = { GET: noauthServeStatic('index.html') };

@@ -57,7 +57,7 @@ describe('providers registry runSingleQuery', () => {
     getChatByProviderSessionId: mock(() => null),
   };
   const mockOpencode = { runSingleQuery: opencodeMock };
-  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode, {});
+  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode, {}, {});
 
   it('routes to claude by default', async () => {
     const result = await registry.runSingleQuery('test prompt', {});
@@ -121,14 +121,16 @@ describe('ProviderRegistry session option hydration', () => {
       runTurn: mock(() => Promise.resolve(undefined)),
     };
     mockAmp = {
-      startSession: mock(() => Promise.resolve({
-        providerSessionId: 'amp-session',
-        nativePath: 'amp:amp-session',
-      })),
+      startSession: mock(() => Promise.resolve({ providerSessionId: 'amp-session', nativePath: 'amp:amp-session' })),
       runTurn: mock((request) => Promise.resolve(undefined)),
       exportThread: mock(() => Promise.resolve({ messages: [] })),
     };
-    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp);
+    const mockFactory = {
+      startSession: mock(() => Promise.resolve({ providerSessionId: 'factory-session', nativePath: null })),
+      runTurn: mock(() => Promise.resolve(undefined)),
+      getRunningSessions: mock(() => []),
+    };
+    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp, mockFactory);
   });
 
   it('hydrates permission and thinking modes from the registry on new-session startup', async () => {
@@ -148,6 +150,8 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'openai/gpt-5',
       permissionMode: 'bypassPermissions',
       thinkingMode: 'think-hard',
+      claudeThinkingMode: 'auto',
+      images: undefined,
       chatId: '123',
     });
   });
@@ -172,6 +176,8 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'gpt-5.4',
       permissionMode: 'bypassPermissions',
       thinkingMode: 'think-hard',
+      claudeThinkingMode: 'auto',
+      images: undefined,
     });
   });
 
@@ -195,6 +201,8 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'opus',
       permissionMode: 'default',
       thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+      images: undefined,
     });
   });
 
@@ -235,6 +243,8 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'openai/gpt-5',
       permissionMode: 'acceptEdits',
       thinkingMode: 'think-hard',
+      claudeThinkingMode: 'auto',
+      images: undefined,
     });
   });
 
@@ -262,6 +272,8 @@ describe('ProviderRegistry session option hydration', () => {
       model: 'sonnet',
       permissionMode: 'acceptEdits',
       thinkingMode: 'ultrathink',
+      claudeThinkingMode: 'auto',
+      images: undefined,
     });
   });
 
