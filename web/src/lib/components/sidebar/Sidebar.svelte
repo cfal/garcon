@@ -5,6 +5,7 @@
 	import SidebarChatDialogs from './SidebarChatDialogs.svelte';
 	import SidebarTagDialog from './SidebarTagDialog.svelte';
 	import SidebarSaveFolderDialog from './SidebarSaveFolderDialog.svelte';
+	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import { getAppShell, getReadReceiptOutbox } from '$lib/context';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -85,6 +86,7 @@
 	let saveFolderDialog = $state<FolderDialogState | null>(null);
 	let folderDeleteConfirmation = $state<{ id: string; name: string } | null>(null);
 	let folderDeleteButtonRef = $state<HTMLButtonElement | null>(null);
+	let shareChatDialog = $state<{ chatId: string; chatTitle: string } | null>(null);
 	let currentTime = $state(new Date());
 	let isMarkingAllRead = $state(false);
 	let visibleUnreadChatIds = $derived.by(() =>
@@ -460,6 +462,7 @@
 		onToggleArchive={(id) => { void handleToggleArchive(id); }}
 		onShowDetails={showChatDetails}
 		onForkChat={(id) => { void handleForkChat(id); }}
+		onShareChat={(id, title) => { shareChatDialog = { chatId: id, chatTitle: title }; }}
 		onTagClick={handleTagClick}
 		onManageTags={showTagDialog}
 		onImmediateReorder={handleImmediateReorder}
@@ -503,6 +506,12 @@
 	{saveFolderDialog}
 	onClose={() => saveFolderDialog = null}
 	onSave={handleSaveFolder}
+/>
+
+<ShareChatDialog
+	chatId={shareChatDialog?.chatId ?? null}
+	chatTitle={shareChatDialog?.chatTitle ?? ''}
+	onClose={() => { shareChatDialog = null; }}
 />
 
 <Dialog.Root open={folderDeleteConfirmation !== null} onOpenChange={(open) => { if (!open) folderDeleteConfirmation = null; }}>

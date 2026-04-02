@@ -46,7 +46,10 @@
 	setModelCatalog(modelCatalog);
 
 	const publicRoutes = ['/login', '/setup'];
-	let isPublicRoute = $derived(publicRoutes.includes(page.url.pathname));
+	let isPublicRoute = $derived(
+		publicRoutes.includes(page.url.pathname) ||
+		page.url.pathname.startsWith('/shared/')
+	);
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
 	const DARK_THEME_COLOR = '#0c1117';
