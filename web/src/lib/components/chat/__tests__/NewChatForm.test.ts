@@ -103,31 +103,4 @@ describe('NewChatForm', () => {
 		expect(worktreeDialog.textContent).toContain('New worktree');
 	});
 
-	it('shows the Claude extended thinking selector only for the Claude provider', async () => {
-		vi.mocked(settingsApi.getSettings).mockResolvedValueOnce({
-			ui: {},
-			paths: {},
-			pinnedChatIds: [],
-			lastProvider: 'claude',
-			lastProjectPath: '/workspace/project',
-			lastModel: 'opus',
-			lastPermissionMode: 'default',
-			lastThinkingMode: 'none',
-			lastClaudeThinkingMode: 'auto',
-			projectBasePath: '/workspace'
-		});
-
-		render(NewChatFormTestHarness);
-
-		await waitFor(() => {
-			expect(screen.getByTitle('Auto')).toBeTruthy();
-		});
-
-		await fireEvent.click(screen.getByTitle('Claude'));
-		await fireEvent.click(await screen.findByText('Codex'));
-
-		await waitFor(() => {
-			expect(screen.queryByTitle('Auto')).toBeNull();
-		});
-	});
 });

@@ -3,19 +3,18 @@
 // selections to localStorage.
 
 import type { SessionProvider } from '$lib/types/app';
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
 import {
 	AMP_AGENT_MODES,
-	CLAUDE_THINKING_MODES,
 	THINKING_MODES,
 	CYCLABLE_PERMISSION_MODES,
 	MODE_LABELS,
 } from '$lib/chat/chat-ui-constants';
-import type { AmpAgentModeOption, ClaudeThinkingModeOption, ThinkingModeOption } from '$lib/chat/chat-ui-constants';
+import type { AmpAgentModeOption, ThinkingModeOption } from '$lib/chat/chat-ui-constants';
 
 // Re-export for backwards compatibility with existing consumers.
-export { AMP_AGENT_MODES, CLAUDE_THINKING_MODES, THINKING_MODES, MODE_LABELS };
-export type { AmpAgentModeOption, ClaudeThinkingModeOption, ThinkingModeOption };
+export { AMP_AGENT_MODES, THINKING_MODES, MODE_LABELS };
+export type { AmpAgentModeOption, ThinkingModeOption };
 
 export const MODE_STYLES: Record<string, { button: string; dot: string }> = {
 	default: {
@@ -49,7 +48,6 @@ export class ProviderState {
 	model = $state('opus');
 	permissionMode = $state<PermissionMode>('default');
 	thinkingMode = $state<ThinkingMode>('none');
-	claudeThinkingMode = $state<ClaudeThinkingMode>('auto');
 	ampAgentMode = $state<AmpAgentMode>('smart');
 
 	/** Cycles to the next user-cyclable permission mode. */
@@ -69,11 +67,6 @@ export class ProviderState {
 	/** Returns the current thinking mode option. */
 	get currentThinkingMode(): ThinkingModeOption {
 		return THINKING_MODES.find((m) => m.id === this.thinkingMode) || THINKING_MODES[0];
-	}
-
-	/** Returns the current Claude extended thinking option. */
-	get currentClaudeThinkingMode(): ClaudeThinkingModeOption {
-		return CLAUDE_THINKING_MODES.find((m) => m.id === this.claudeThinkingMode) || CLAUDE_THINKING_MODES[0];
 	}
 
 	/** Returns the current Amp agent mode option. */

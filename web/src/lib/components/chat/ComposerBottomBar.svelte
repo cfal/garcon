@@ -8,7 +8,7 @@
 		DropdownMenuLabel,
 	} from '$lib/components/ui/dropdown-menu';
 	import type { SessionProvider } from '$lib/types/app';
-	import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import type { ComposerMenuOption, ComposerModeOption, ProviderMenuGroup } from '$lib/chat/composer-controls';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
 	import { ChevronDown, ImagePlus, Plus, Send } from '@lucide/svelte';
@@ -23,9 +23,6 @@
 		thinkingOptions: ComposerModeOption<ThinkingMode>[];
 		selectedThinking: ThinkingMode;
 		onThinkingSelect: (mode: ThinkingMode) => void;
-		claudeThinkingOptions?: ComposerModeOption<ClaudeThinkingMode>[];
-		selectedClaudeThinking?: ClaudeThinkingMode;
-		onClaudeThinkingSelect?: (mode: ClaudeThinkingMode) => void;
 		providerOptions?: ComposerMenuOption<SessionProvider>[];
 		providerGroups?: ProviderMenuGroup[];
 		selectedProvider?: SessionProvider;
@@ -51,9 +48,6 @@
 		thinkingOptions,
 		selectedThinking,
 		onThinkingSelect,
-		claudeThinkingOptions,
-		selectedClaudeThinking,
-		onClaudeThinkingSelect,
 		providerOptions,
 		providerGroups,
 		selectedProvider,
@@ -74,9 +68,6 @@
 	);
 	const activeThinking = $derived(
 		thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0]
-	);
-	const activeClaudeThinking = $derived(
-		claudeThinkingOptions?.find((option) => option.value === selectedClaudeThinking) ?? claudeThinkingOptions?.[0]
 	);
 	const activeProvider = $derived(
 		providerOptions?.find((option) => option.value === selectedProvider) ?? providerOptions?.[0]
@@ -215,29 +206,7 @@
 				</DropdownMenuContent>
 			</DropdownMenu>
 
-			{#if claudeThinkingOptions && activeClaudeThinking && onClaudeThinkingSelect}
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activeClaudeThinking.toneClass}"
-						title={activeClaudeThinking.label ?? 'Extended Thinking'}
-					>
-						<ComposerModeIcon iconId={activeClaudeThinking.iconId} class="size-4" />
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="start">
-						{#each claudeThinkingOptions as option (option.value)}
-							<DropdownMenuItem onclick={() => onClaudeThinkingSelect(option.value)} class="items-start">
-								<ComposerModeIcon iconId={option.iconId} class="mt-0.5 size-4" />
-								<div class="min-w-0">
-									<div class="font-medium">{option.label}</div>
-									<div class="text-xs text-muted-foreground">{option.description}</div>
-								</div>
-							</DropdownMenuItem>
-						{/each}
-					</DropdownMenuContent>
-				</DropdownMenu>
-			{/if}
-
-			{#if selectorsSide === 'left'}
+				{#if selectorsSide === 'left'}
 				{@render providerAndModelSelectors('start')}
 			{/if}
 		</div>

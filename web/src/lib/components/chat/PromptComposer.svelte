@@ -6,21 +6,20 @@
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
-	import { buildClaudeThinkingOptions, buildPermissionOptions, buildThinkingOptions, toModelMenuOptions } from '$lib/chat/composer-controls';
+	import { buildPermissionOptions, buildThinkingOptions, toModelMenuOptions } from '$lib/chat/composer-controls';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ImagePlus } from '@lucide/svelte';
-	import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 
 	interface Props {
 		onsubmit: () => void;
 		onModelChange?: (model: string) => void;
 		onPermissionModeChange?: (mode: PermissionMode) => void;
 		onThinkingModeChange?: (mode: ThinkingMode) => void;
-		onClaudeThinkingModeChange?: (mode: ClaudeThinkingMode) => void;
 	}
 
-	let { onsubmit, onModelChange, onPermissionModeChange, onThinkingModeChange, onClaudeThinkingModeChange }: Props = $props();
+	let { onsubmit, onModelChange, onPermissionModeChange, onThinkingModeChange }: Props = $props();
 
 	const composerState = getComposerState();
 	const lifecycle = getChatLifecycle();
@@ -185,9 +184,6 @@
 		)
 	);
 	const thinkingOptions = $derived(buildThinkingOptions());
-	const claudeThinkingOptions = $derived(
-		providerState.provider === 'claude' ? buildClaudeThinkingOptions() : undefined
-	);
 	const modelOptions = $derived(
 		toModelMenuOptions(modelCatalog.getModels(providerState.provider))
 	);
@@ -372,12 +368,6 @@
 					onThinkingSelect={(mode) => {
 						providerState.thinkingMode = mode;
 						onThinkingModeChange?.(mode);
-					}}
-					claudeThinkingOptions={claudeThinkingOptions}
-					selectedClaudeThinking={providerState.claudeThinkingMode}
-					onClaudeThinkingSelect={(mode) => {
-						providerState.claudeThinkingMode = mode;
-						onClaudeThinkingModeChange?.(mode);
 					}}
 					modelOptions={modelOptions}
 					selectedModel={providerState.model}

@@ -137,17 +137,4 @@ describe('ConversationSessionController', () => {
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
 	});
 
-	it('persists Claude thinking mode changes for running chats', () => {
-		const { deps } = createDeps();
-		const controller = new ConversationSessionController(deps as never);
-
-		controller.handleClaudeThinkingModeChange('off');
-
-		expect(deps.ws.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
-			type: 'claude-thinking-mode-set',
-			chatId: 'chat-1',
-			mode: 'off',
-		}));
-		expect(deps.sessions.patchChat).toHaveBeenCalledWith('chat-1', { claudeThinkingMode: 'off' });
-	});
 });
