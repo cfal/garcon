@@ -2,7 +2,7 @@
 // UI labels. Consolidates duplicated definitions from provider-state
 // and new-chat-form-state into a single source of truth.
 
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
 
 export interface ThinkingModeOption {
 	id: ThinkingMode;
@@ -12,24 +12,12 @@ export interface ThinkingModeOption {
 	color?: string;
 }
 
-export interface ClaudeThinkingModeOption {
-	id: ClaudeThinkingMode;
-	name: string;
-	description: string;
-}
-
 export const THINKING_MODES: ThinkingModeOption[] = [
 	{ id: 'none', name: 'Standard', description: 'Regular Claude response', prefix: '', color: 'text-muted-foreground' },
 	{ id: 'think', name: 'Think', description: 'Basic extended thinking', prefix: 'think', color: 'text-foreground' },
 	{ id: 'think-hard', name: 'Think Hard', description: 'More thorough evaluation', prefix: 'think hard', color: 'text-foreground' },
 	{ id: 'think-harder', name: 'Think Harder', description: 'Deep analysis with alternatives', prefix: 'think harder', color: 'text-foreground' },
 	{ id: 'ultrathink', name: 'Ultrathink', description: 'Maximum thinking budget', prefix: 'ultrathink', color: 'text-foreground' },
-];
-
-export const CLAUDE_THINKING_MODES: ClaudeThinkingModeOption[] = [
-	{ id: 'auto', name: 'Auto', description: 'Lets Claude decide when to use extended thinking.' },
-	{ id: 'on', name: 'On', description: 'Requests Claude extended thinking for every turn.' },
-	{ id: 'off', name: 'Off', description: 'Disables Claude extended thinking.' },
 ];
 
 export const CLAUDE_PERMISSION_MODES: PermissionMode[] = [
