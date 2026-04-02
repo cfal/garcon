@@ -16,7 +16,7 @@
 		onClose: () => void;
 		onSettingsChanged: (settings: {
 			enabled: boolean;
-			provider: string;
+			provider: SessionProvider;
 			model: string;
 			customPrompt: string;
 			useCommonDirPrefix: boolean;
@@ -68,7 +68,7 @@ Return only the commit message now.`;
 				const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
 				const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
 				enabled = cm.enabled !== false;
-			if (['claude', 'codex', 'opencode', 'amp'].includes(cm.provider as string)) {
+			if (['claude', 'codex', 'opencode', 'amp', 'factory'].includes(cm.provider as string)) {
 				provider = cm.provider as SessionProvider;
 			}
 			if (typeof cm.model === 'string') model = cm.model;
@@ -113,6 +113,7 @@ Return only the commit message now.`;
 		if (currentProvider === 'claude') return m.provider_claude();
 		if (currentProvider === 'codex') return m.provider_codex();
 		if (currentProvider === 'amp') return m.provider_amp();
+		if (currentProvider === 'factory') return m.provider_factory();
 		return m.provider_opencode();
 	}
 

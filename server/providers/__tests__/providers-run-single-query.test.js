@@ -9,6 +9,7 @@ import { describe, it, expect, mock, beforeEach } from 'bun:test';
 const claudeMock = mock(async () => 'claude-response');
 const codexMock = mock(async () => 'codex-response');
 const ampSingleQueryMock = mock(async () => 'amp-response');
+const factorySingleQueryMock = mock(async () => 'factory-response');
 
 mock.module('../claude-cli.js', () => ({
   runSingleQuery: claudeMock,
@@ -25,6 +26,11 @@ mock.module('../amp-cli.js', () => ({
   runSingleQuery: ampSingleQueryMock,
   exportThread: mock(() => Promise.resolve({ messages: [] })),
   AmpProvider: class { constructor() {} },
+}));
+
+mock.module('../factory-cli.js', () => ({
+  runSingleQuery: factorySingleQueryMock,
+  FactoryProvider: class { constructor() {} },
 }));
 
 // Mock the stateless loader imports that ProviderRegistry pulls in
@@ -48,6 +54,11 @@ mock.module('../loaders/amp-history-loader.js', () => ({
   loadAmpChatMessages: mock(() => Promise.resolve([])),
 }));
 
+mock.module('../loaders/factory-history-loader.js', () => ({
+  getFactoryPreviewFromSessionId: mock(() => Promise.resolve(null)),
+  loadFactoryChatMessagesBySessionId: mock(() => Promise.resolve([])),
+}));
+
 const opencodeMock = mock(async () => 'opencode-response');
 import { ProviderRegistry } from '../index.js';
 
@@ -57,7 +68,7 @@ describe('providers registry runSingleQuery', () => {
     getChatByProviderSessionId: mock(() => null),
   };
   const mockOpencode = { runSingleQuery: opencodeMock };
-  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode, {});
+  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode, {}, {});
 
   it('routes to claude by default', async () => {
     const result = await registry.runSingleQuery('test prompt', {});
@@ -89,6 +100,11 @@ describe('providers registry runSingleQuery', () => {
     await registry.runSingleQuery('hello', { provider: 'claude', model: 'opus', cwd: '/proj' });
     expect(claudeMock).toHaveBeenCalledWith('hello', { model: 'opus', cwd: '/proj' });
   });
+
+  it('routes to factory provider', async () => {
+    const result = await registry.runSingleQuery('test prompt', { provider: 'factory' });
+    expect(result).toBe('factory-response');
+  });
 });
 
 describe('ProviderRegistry session option hydration', () => {
@@ -97,6 +113,7 @@ describe('ProviderRegistry session option hydration', () => {
   let mockCodex;
   let mockOpencode;
   let mockAmp;
+  let mockFactory;
   let registry;
 
   beforeEach(() => {
@@ -122,11 +139,24 @@ describe('ProviderRegistry session option hydration', () => {
       runTurn: mock(() => Promise.resolve(undefined)),
     };
     mockAmp = {
-      startSession: mock(() => Promise.resolve('amp-session')),
+      startSession: mock(() => Promise.resolve({
+        providerSessionId: 'amp-session',
+        nativePath: '!amp:amp-session',
+      })),
       runTurn: mock((request) => Promise.resolve(undefined)),
       exportThread: mock(() => Promise.resolve({ messages: [] })),
+      getRunningSessions: mock(() => []),
     };
-    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp);
+    mockFactory = {
+      startSession: mock(() => Promise.resolve({
+        providerSessionId: 'factory-session',
+        nativePath: '!factory:factory-session',
+      })),
+      runTurn: mock(() => Promise.resolve(undefined)),
+      getModels: mock(() => Promise.resolve([])),
+      getRunningSessions: mock(() => []),
+    };
+    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp, mockFactory);
   });
 
   it('hydrates permission and thinking modes from the registry on new-session startup', async () => {
@@ -293,7 +323,24 @@ describe('ProviderRegistry session option hydration', () => {
 
     expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
       providerSessionId: 'amp-session',
-      nativePath: 'amp:amp-session',
+      nativePath: '!amp:amp-session',
+    });
+  });
+
+  it('stores the derived native path when starting a Factory session', async () => {
+    mockRegistry.getChat.mockReturnValue({
+      provider: 'factory',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    await registry.startSession('123', 'hello', {});
+
+    expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+      providerSessionId: 'factory-session',
+      nativePath: '!factory:factory-session',
     });
   });
 });

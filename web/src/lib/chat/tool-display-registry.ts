@@ -41,6 +41,7 @@ const truncate = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '...'
 const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'bash-tool-use': 'Bash',
 	'read-tool-use': 'Read',
+	'list-tool-use': 'List',
 	'edit-tool-use': 'Edit',
 	'write-tool-use': 'Write',
 	'apply-patch-tool-use': 'ApplyPatch',
@@ -178,6 +179,23 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 		result: {
 			hidden: true,
+		},
+	},
+
+	'list-tool-use': {
+		input: {
+			mode: 'inline',
+			label: 'List',
+			getValue: (input) => String(input.path ?? 'current directory'),
+			action: 'none',
+			colorScheme: {
+				primary: 'text-foreground',
+				background: '',
+				border: 'border-border',
+			},
+		},
+		result: {
+			hideOnSuccess: true,
 		},
 	},
 

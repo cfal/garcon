@@ -56,6 +56,7 @@ export class ChatSessionsRunningMessage {
     codex: Array<{ id: string }>;
     opencode: Array<{ id: string }>;
     amp: Array<{ id: string }>;
+    factory: Array<{ id: string }>;
   }) { }
 }
 

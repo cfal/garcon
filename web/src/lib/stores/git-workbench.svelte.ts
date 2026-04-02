@@ -24,6 +24,7 @@ import {
 	gitDeleteUntracked,
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
+import type { SessionProvider } from '$lib/types/app';
 import * as m from '$lib/paraglide/messages.js';
 import {
 	computeCommonDirPrefix as computeCommonDirPrefixSync,
@@ -35,7 +36,7 @@ export type { GitDiffTab } from '$lib/api/git.js';
 
 export interface GitWorkbenchStoreOptions {
 	/** Reactive getter for the active provider name. */
-	get provider(): string;
+	get provider(): SessionProvider;
 }
 
 /** Injectable dependencies for testing. Defaults load the real
@@ -97,7 +98,7 @@ export class GitWorkbenchStore {
 
 	// Commit message generation settings (persisted via app settings)
 	commitGenerationEnabled = $state(true);
-	commitProvider = $state('claude');
+	commitProvider = $state<SessionProvider>('claude');
 	commitModel = $state('');
 	commitCustomPrompt = $state('');
 	commitUseCommonDirPrefix = $state(false);
@@ -150,7 +151,7 @@ export class GitWorkbenchStore {
 	}
 
 	constructor(opts?: GitWorkbenchStoreOptions, deps?: GitWorkbenchDeps) {
-		this.opts = opts ?? { get provider() { return 'claude'; } };
+		this.opts = opts ?? { get provider() { return 'claude' as SessionProvider; } };
 		this.deps = deps ?? {
 			getSettings: async () => {
 				const { getSettings } = await import('$lib/api/settings.js');
@@ -161,7 +162,7 @@ export class GitWorkbenchStore {
 		this.hydrateCommitSettings();
 	}
 
-	private get provider(): string {
+	private get provider(): SessionProvider {
 		return this.opts.provider;
 	}
 
@@ -910,8 +911,8 @@ export class GitWorkbenchStore {
 			const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
 			this.commitGenerationEnabled = cm.enabled !== false;
 			const provider = cm.provider as string;
-			if (['claude', 'codex', 'opencode', 'amp'].includes(provider)) {
-				this.commitProvider = provider;
+			if (['claude', 'codex', 'opencode', 'amp', 'factory'].includes(provider)) {
+				this.commitProvider = provider as SessionProvider;
 			}
 			if (typeof cm.model === 'string' && cm.model) {
 				this.commitModel = cm.model;

@@ -58,7 +58,28 @@ interface HistoryCacheDep {
 interface ProvidersDep {
   isProviderSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
   startSession(chatId: string, command: string, opts: Record<string, unknown>): Promise<void>;
+  getModels(provider: import('../../common/providers.ts').ProviderId): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
   runSingleQuery(prompt: string, opts?: Record<string, unknown>): Promise<string>;
+}
+
+async function modelSupportsImages(
+  provider: import('../../common/providers.ts').ProviderId,
+  model: string,
+  providers: ProvidersDep,
+): Promise<boolean> {
+  if (!model) return providerSupportsImages(provider);
+
+  try {
+    const models = await providers.getModels(provider);
+    const selected = models.find((entry) => entry.value === model);
+    if (selected && typeof selected.supportsImages === 'boolean') {
+      return selected.supportsImages;
+    }
+  } catch {
+    // Fall back to provider-level capability below.
+  }
+
+  return providerSupportsImages(provider);
 }
 
 function normalizeTagSlug(raw: string): string {
@@ -255,11 +276,12 @@ export default function createChatRoutes(
       const tags = Array.isArray(body.tags) ? body.tags : [provider];
       const requestOptions = body.options && typeof body.options === 'object' ? body.options : {};
       const initialImages = Array.isArray((requestOptions as Record<string, unknown>).images) ? (requestOptions as Record<string, unknown>).images as unknown[] : [];
+      const model = typeof body.model === 'string' ? body.model : '';
 
       if (!chatId || !/^\d+$/.test(chatId)) {
         return Response.json({ success: false, error: 'Valid numeric chatId is required' }, { status: 400 });
       }
-      if (initialImages.length > 0 && !providerSupportsImages(provider)) {
+      if (initialImages.length > 0 && !await modelSupportsImages(provider, model, providers)) {
         return Response.json({ success: false, error: `Images unsupported for provider: ${provider}` }, { status: 422 });
       }
       if (!projectPath) {
@@ -288,7 +310,6 @@ export default function createChatRoutes(
         );
       }
 
-      const model = typeof body.model === 'string' ? body.model : '';
       const permissionMode = normalizePermissionMode(body.permissionMode);
       const thinkingMode = normalizeThinkingMode(body.thinkingMode);
       const claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);

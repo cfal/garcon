@@ -56,7 +56,7 @@
 		// Hydrate chat title settings.
 		const chatTitleEffective = (uiEffective.chatTitle ?? ui.chatTitle ?? {}) as Record<string, unknown>;
 		titleEnabled = chatTitleEffective.enabled !== false;
-		titleProvider = (['claude', 'codex', 'opencode'].includes(chatTitleEffective.provider as string)
+		titleProvider = (['claude', 'codex', 'opencode', 'amp', 'factory'].includes(chatTitleEffective.provider as string)
 			? chatTitleEffective.provider as SessionProvider
 			: 'claude');
 		titleModel = typeof chatTitleEffective.model === 'string' ? chatTitleEffective.model : '';
@@ -79,6 +79,7 @@
 		if (provider === 'claude') return m.provider_claude();
 		if (provider === 'codex') return m.provider_codex();
 		if (provider === 'amp') return m.provider_amp();
+		if (provider === 'factory') return m.provider_factory();
 		return m.provider_opencode();
 	}
 

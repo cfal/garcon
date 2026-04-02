@@ -1,7 +1,7 @@
 // Automatic chat title generation. Runs a one-shot LLM query to
 // produce a concise title from the first user prompt, then persists
 // via setSessionName (which emits 'session-name-changed' for broadcast).
-import { CLAUDE_MODELS, CODEX_MODELS } from '../../common/models.js';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 
 // Modified from Open WebUI
@@ -40,13 +40,16 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
   if (!firstPrompt?.trim()) return;
 
   const ui = await settings.getUiSettings();
-  const [authByProvider, opencodeModels] = await Promise.all([
+  const [authByProvider, opencodeModels, factoryModels] = await Promise.all([
     providers?.getAuthStatusMap?.() ?? Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
+      amp: { authenticated: false },
+      factory: { authenticated: false },
     }),
     providers?.getModels?.('opencode') ?? Promise.resolve([]),
+    providers?.getModels?.('factory') ?? Promise.resolve([]),
   ]);
   const cfg = resolveEffectiveGenerationConfig({
     persisted: ui?.chatTitle,
@@ -55,6 +58,8 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
       claude: CLAUDE_MODELS.OPTIONS,
       codex: CODEX_MODELS.OPTIONS,
       opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
+      amp: AMP_MODELS.OPTIONS,
+      factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
     },
   });
   if (!cfg.enabled) return;

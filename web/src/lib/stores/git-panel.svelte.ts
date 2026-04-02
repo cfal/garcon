@@ -3,6 +3,7 @@
 // rendering shell.
 
 import * as m from '$lib/paraglide/messages.js';
+import type { SessionProvider } from '$lib/types/app';
 import {
 	type GitStatus,
 	type GitRemoteStatus,
@@ -39,7 +40,7 @@ const EMPTY_STATUS: GitStatus = {
 
 export interface GitPanelStoreOptions {
 	/** Reactive getter for the active provider name. */
-	get provider(): string;
+	get provider(): SessionProvider;
 }
 
 export class GitPanelStore {
@@ -77,10 +78,10 @@ export class GitPanelStore {
 	private readonly opts: GitPanelStoreOptions;
 
 	constructor(opts?: GitPanelStoreOptions) {
-		this.opts = opts ?? { get provider() { return 'claude'; } };
+		this.opts = opts ?? { get provider() { return 'claude' as SessionProvider; } };
 	}
 
-	private get provider(): string {
+	private get provider(): SessionProvider {
 		return this.opts.provider;
 	}
 

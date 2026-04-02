@@ -500,7 +500,7 @@ export class CodexProvider extends AbsProvider {
       permissionMode,
       projectPath,
       thinkingMode,
-      providerSessionId: null,
+      providerSessionId: undefined,
       emitSessionCreated: true,
       captureStartedSession: true,
     });
@@ -526,7 +526,7 @@ export class CodexProvider extends AbsProvider {
       permissionMode,
       projectPath,
       thinkingMode,
-      providerSessionId: providerSessionId || null,
+      providerSessionId: providerSessionId || undefined,
       emitSessionCreated: false,
       captureStartedSession: false,
     });

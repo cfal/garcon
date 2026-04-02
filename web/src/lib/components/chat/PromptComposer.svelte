@@ -191,7 +191,7 @@
 	const modelOptions = $derived(
 		toModelMenuOptions(modelCatalog.getModels(providerState.provider))
 	);
-	const canAttachImages = $derived(modelCatalog.supportsImages(providerState.provider));
+	const canAttachImages = $derived(modelCatalog.supportsImages(providerState.provider, providerState.model));
 	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 
 	// Composer resize via drag handle. Persists height to localStorage and

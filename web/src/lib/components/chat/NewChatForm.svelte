@@ -84,6 +84,8 @@
 		form.validateModelAgainstLive('claude');
 		form.validateModelAgainstLive('codex');
 		form.validateModelAgainstLive('opencode');
+		form.validateModelAgainstLive('amp');
+		form.validateModelAgainstLive('factory');
 	});
 
 	// Focus textarea when path validates successfully, but not while browsing.
@@ -336,7 +338,7 @@
 				></textarea>
 
 				<ComposerBottomBar
-					canAttachImages={modelCatalog.supportsImages(form.provider)}
+					canAttachImages={modelCatalog.supportsImages(form.provider, form.modelValue)}
 					attachImagesTooltip="Image attachments are unavailable for this provider."
 					onAddImage={openImagePicker}
 					permissionOptions={permissionOptions}

@@ -115,6 +115,11 @@ export function getAmpBinary() {
   return process.env.AMP_BINARY || 'amp';
 }
 
+// Factory Droid CLI binary path
+export function getFactoryBinary() {
+  return process.env.FACTORY_BINARY || 'droid';
+}
+
 // JWT token expiry (secret is managed by auth/store.js).
 export function getJwtTokenExpiry() {
   return process.env.GARCON_JWT_TOKEN_EXPIRY || '30d';
