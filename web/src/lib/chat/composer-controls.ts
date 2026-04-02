@@ -1,6 +1,6 @@
 import type { SessionProvider } from '$lib/types/app';
-import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
-import { CLAUDE_THINKING_MODES, THINKING_MODES } from '$lib/chat/chat-ui-constants';
+import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import { AMP_AGENT_MODES, CLAUDE_THINKING_MODES, THINKING_MODES } from '$lib/chat/chat-ui-constants';
 
 export type ComposerModeIconId =
 	| 'permission-default'
@@ -14,7 +14,9 @@ export type ComposerModeIconId =
 	| 'thinking-ultrathink'
 	| 'claude-thinking-auto'
 	| 'claude-thinking-on'
-	| 'claude-thinking-off';
+	| 'claude-thinking-off'
+	| 'amp-mode-smart'
+	| 'amp-mode-deep';
 
 export interface ComposerMenuOption<T extends string = string> {
 	value: T;
@@ -99,6 +101,19 @@ const CLAUDE_THINKING_ICON_METADATA: Record<ClaudeThinkingMode, Pick<ComposerMod
 	}
 };
 
+const AMP_AGENT_MODE_ICON_METADATA: Record<AmpAgentMode, Pick<ComposerModeOption<AmpAgentMode>, 'iconId' | 'toneClass'>> = {
+	smart: {
+		iconId: 'amp-mode-smart',
+		toneClass:
+			'bg-status-info text-status-info-foreground border-status-info-border hover:bg-status-info/90'
+	},
+	deep: {
+		iconId: 'amp-mode-deep',
+		toneClass:
+			'bg-status-warning text-status-warning-foreground border-status-warning-border hover:bg-status-warning/90'
+	}
+};
+
 export interface ProviderMenuGroup {
 	label?: string;
 	options: ComposerMenuOption<SessionProvider>[];
@@ -168,6 +183,19 @@ export function buildThinkingOptions(): ComposerModeOption<ThinkingMode>[] {
 export function buildClaudeThinkingOptions(): ComposerModeOption<ClaudeThinkingMode>[] {
 	return CLAUDE_THINKING_MODES.map((mode) => {
 		const iconMeta = CLAUDE_THINKING_ICON_METADATA[mode.id] ?? CLAUDE_THINKING_ICON_METADATA.auto;
+		return {
+			value: mode.id,
+			label: mode.name,
+			description: mode.description,
+			iconId: iconMeta.iconId,
+			toneClass: iconMeta.toneClass
+		};
+	});
+}
+
+export function buildAmpAgentModeOptions(): ComposerModeOption<AmpAgentMode>[] {
+	return AMP_AGENT_MODES.map((mode) => {
+		const iconMeta = AMP_AGENT_MODE_ICON_METADATA[mode.id] ?? AMP_AGENT_MODE_ICON_METADATA.smart;
 		return {
 			value: mode.id,
 			label: mode.name,

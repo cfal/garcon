@@ -33,6 +33,7 @@
 				permissionMode: config.permissionMode,
 				thinkingMode: config.thinkingMode,
 				claudeThinkingMode: config.claudeThinkingMode,
+				ampAgentMode: config.ampAgentMode ?? 'smart',
 				firstMessage: config.firstMessage,
 				initialImages: config.initialImages,
 			},

@@ -3,12 +3,13 @@
 
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import {
+	normalizeAmpAgentMode,
 	normalizeClaudeThinkingMode,
 	normalizePermissionMode,
 	normalizeThinkingMode,
 } from '$shared/chat-modes';
 import { AgentRunRequest } from '$shared/ws-requests';
-import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
 
 const DRAFT_PREFIX = 'chat_draft_';
 
@@ -96,6 +97,7 @@ export class ComposerState {
 			permissionMode: PermissionMode;
 			thinkingMode: ThinkingMode;
 			claudeThinkingMode: ClaudeThinkingMode;
+			ampAgentMode?: AmpAgentMode;
 		}
 	): Promise<boolean> {
 		const text = this.inputText.trim();
@@ -131,6 +133,7 @@ export class ComposerState {
 				normalizeThinkingMode(options.thinkingMode),
 				options.model,
 				normalizeClaudeThinkingMode(options.claudeThinkingMode),
+				options.ampAgentMode ? normalizeAmpAgentMode(options.ampAgentMode) : undefined,
 				imageData.length > 0 ? imageData : undefined
 			));
 

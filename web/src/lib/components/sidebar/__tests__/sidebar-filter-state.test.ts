@@ -13,6 +13,7 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		permissionMode: 'default',
 		thinkingMode: 'none',
 		claudeThinkingMode: 'auto',
+		ampAgentMode: 'smart' as const,
 		createdAt: null,
 		lastActivityAt: '2026-03-27T08:00:00.000Z',
 		lastReadAt: null,

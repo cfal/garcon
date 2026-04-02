@@ -10,8 +10,9 @@ import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import type { NewChatConfig, SessionProvider } from '$lib/types/app.js';
 import type { AppSettings } from '$lib/types/session.js';
-import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat.js';
+import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat.js';
 import {
+	normalizeAmpAgentMode,
 	normalizeClaudeThinkingMode,
 	normalizePermissionMode,
 	normalizeThinkingMode,
@@ -47,6 +48,7 @@ export class NewChatFormState {
 	permissionMode = $state<PermissionMode>('default');
 	thinkingMode = $state<ThinkingMode>('none');
 	claudeThinkingMode = $state<ClaudeThinkingMode>('auto');
+	ampAgentMode = $state<AmpAgentMode>('smart');
 
 	// Form
 	firstMessage = $state('');
@@ -389,6 +391,7 @@ export class NewChatFormState {
 			permissionMode: normalizePermissionMode(this.permissionMode),
 			thinkingMode: normalizeThinkingMode(this.thinkingMode),
 			claudeThinkingMode: normalizeClaudeThinkingMode(this.claudeThinkingMode),
+			ampAgentMode: this.provider === 'amp' ? normalizeAmpAgentMode(this.ampAgentMode) : undefined,
 			firstMessage: this.firstMessage.trim(),
 			initialImages: this.attachedImages
 		};
@@ -483,6 +486,7 @@ export class NewChatFormState {
 		this.permissionMode = normalizePermissionMode(settingsData.lastPermissionMode);
 		this.thinkingMode = normalizeThinkingMode(settingsData.lastThinkingMode);
 		this.claudeThinkingMode = normalizeClaudeThinkingMode(settingsData.lastClaudeThinkingMode);
+		this.ampAgentMode = normalizeAmpAgentMode(settingsData.lastAmpAgentMode);
 	}
 
 	// Auto-open browser on first path focus
