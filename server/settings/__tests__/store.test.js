@@ -295,6 +295,7 @@ describe('settings store', () => {
         lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
+        lastAmpAgentMode: 'smart',
       });
     });
 
@@ -308,6 +309,7 @@ describe('settings store', () => {
         lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
+        lastAmpAgentMode: 'smart',
       });
     });
 
@@ -326,6 +328,7 @@ describe('settings store', () => {
       expect(settings.lastPermissionMode).toBe('default');
       expect(settings.lastThinkingMode).toBe('none');
       expect(settings.lastClaudeThinkingMode).toBe('auto');
+      expect(settings.lastAmpAgentMode).toBe('smart');
     });
   });
 
@@ -344,6 +347,7 @@ describe('settings store', () => {
         lastPermissionMode: 'default',
         lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
+        lastAmpAgentMode: 'smart',
       });
 
       await store.reconcileWithRegistry(mockRegistry);
@@ -368,6 +372,7 @@ describe('settings store', () => {
         lastPermissionMode: 'default',
         lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
+        lastAmpAgentMode: 'smart',
       });
 
       await store.reconcileWithRegistry(mockRegistry);
@@ -391,6 +396,7 @@ describe('settings store', () => {
         lastPermissionMode: 'default',
         lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
+        lastAmpAgentMode: 'smart',
       });
 
       await store.reconcileWithRegistry(mockRegistry);
@@ -529,6 +535,7 @@ describe('settings store', () => {
         lastProvider: 'claude', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
+        lastAmpAgentMode: 'smart',
       });
 
       // Fire both mutations concurrently — without the lock, the second
@@ -551,6 +558,7 @@ describe('settings store', () => {
         lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
+        lastAmpAgentMode: 'smart',
       });
 
       await Promise.all([
@@ -599,6 +607,7 @@ describe('settings store', () => {
         permissionMode: 'bypassPermissions',
         thinkingMode: 'think-hard',
         claudeThinkingMode: 'on',
+        ampAgentMode: 'deep',
       });
       expect(await store.getLastProvider()).toBe('codex');
       expect(await store.getLastProjectPath()).toBe('/workspace/project-a');
@@ -606,6 +615,7 @@ describe('settings store', () => {
       expect(await store.getLastPermissionMode()).toBe('bypassPermissions');
       expect(await store.getLastThinkingMode()).toBe('think-hard');
       expect(await store.getLastClaudeThinkingMode()).toBe('on');
+      expect(await store.getLastAmpAgentMode()).toBe('deep');
     });
 
     it('preserves unspecified fields when updating only one startup setting', async () => {
@@ -616,6 +626,7 @@ describe('settings store', () => {
         permissionMode: 'bypassPermissions',
         thinkingMode: 'think-hard',
         claudeThinkingMode: 'on',
+        ampAgentMode: 'deep',
       });
       await store.setLastPermissionMode('acceptEdits');
       expect(await store.getLastProvider()).toBe('codex');
@@ -624,6 +635,7 @@ describe('settings store', () => {
       expect(await store.getLastPermissionMode()).toBe('acceptEdits');
       expect(await store.getLastThinkingMode()).toBe('think-hard');
       expect(await store.getLastClaudeThinkingMode()).toBe('on');
+      expect(await store.getLastAmpAgentMode()).toBe('deep');
     });
 
     it('getLastPermissionMode defaults to "default"', async () => {
@@ -653,6 +665,15 @@ describe('settings store', () => {
       expect(await store.getLastClaudeThinkingMode()).toBe('off');
     });
 
+    it('getLastAmpAgentMode defaults to "smart"', async () => {
+      expect(await store.getLastAmpAgentMode()).toBe('smart');
+    });
+
+    it('setLastAmpAgentMode persists the mode', async () => {
+      await store.setLastAmpAgentMode('deep');
+      expect(await store.getLastAmpAgentMode()).toBe('deep');
+    });
+
     it('preserves existing startup modes when an update provides invalid values', async () => {
       await store.setLastChatDefaults({
         provider: 'claude',
@@ -661,17 +682,20 @@ describe('settings store', () => {
         permissionMode: 'acceptEdits',
         thinkingMode: 'think-hard',
         claudeThinkingMode: 'off',
+        ampAgentMode: 'deep',
       });
 
       await store.setLastChatDefaults({
         permissionMode: 'bogus',
         thinkingMode: 'very-hard',
         claudeThinkingMode: 'sometimes',
+        ampAgentMode: 'bogus',
       });
 
       expect(await store.getLastPermissionMode()).toBe('acceptEdits');
       expect(await store.getLastThinkingMode()).toBe('think-hard');
       expect(await store.getLastClaudeThinkingMode()).toBe('off');
+      expect(await store.getLastAmpAgentMode()).toBe('deep');
     });
   });
 });

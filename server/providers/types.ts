@@ -3,9 +3,11 @@
 // source of truth for required fields.
 
 import {
+  normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
+  type AmpAgentMode,
   type ClaudeThinkingMode,
   type PermissionMode,
   type ThinkingMode,
@@ -13,7 +15,7 @@ import {
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 import type { ProviderId } from '../../common/providers.js';
 
-export type { AgentCommandImage, ClaudeThinkingMode, PermissionMode, ThinkingMode };
+export type { AgentCommandImage, AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode };
 export type ProviderName = ProviderId;
 
 // Persisted chat execution state read from the registry.
@@ -23,6 +25,7 @@ export interface PersistedChatExecutionConfig {
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
+  ampAgentMode?: AmpAgentMode;
 }
 
 // Core execution context shared by all session operations.
@@ -77,6 +80,7 @@ export interface ProviderChatEntry {
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
+  ampAgentMode?: AmpAgentMode;
   nativePath?: string | null;
 }
 
@@ -86,6 +90,7 @@ export interface RequiredChatExecutionConfig extends PersistedChatExecutionConfi
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
   claudeThinkingMode: ClaudeThinkingMode;
+  ampAgentMode: AmpAgentMode;
 }
 
 // Validates persisted execution settings before they reach providers or queue drain.
@@ -109,6 +114,7 @@ export function requireChatExecutionConfig(
     permissionMode: normalizePermissionMode(entry.permissionMode),
     thinkingMode: normalizeThinkingMode(entry.thinkingMode),
     claudeThinkingMode: normalizeClaudeThinkingMode(entry.claudeThinkingMode),
+    ampAgentMode: normalizeAmpAgentMode(entry.ampAgentMode),
   };
 }
 
@@ -122,6 +128,7 @@ export interface StartProviderSessionRequest {
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
+  ampAgentMode?: AmpAgentMode;
 }
 
 // Public API request for ProviderRegistry.runProviderTurn().
@@ -133,6 +140,7 @@ export interface RunProviderTurnRequest {
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
+  ampAgentMode?: AmpAgentMode;
 }
 
 // Runtime-supplied turn fields forwarded through the queue and WS layers.

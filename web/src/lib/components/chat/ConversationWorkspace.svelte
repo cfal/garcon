@@ -317,6 +317,7 @@
 				onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
 				onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
 				onClaudeThinkingModeChange={(m) => controller.handleClaudeThinkingModeChange(m)}
+				onAmpAgentModeChange={(m) => controller.handleAmpAgentModeChange(m)}
 			/>
 		</div>
 		{/if}

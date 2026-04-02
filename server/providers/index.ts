@@ -20,7 +20,7 @@ import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loa
 import type { IChatRegistry } from '../chats/store.js';
 
 import type { AgentCommandImage } from '../../common/ws-requests.js';
-import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
+import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type {
   ProviderChatEntry,
   ProviderName,
@@ -46,6 +46,7 @@ function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | unde
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
   claudeThinkingMode: ClaudeThinkingMode;
+  ampAgentMode: AmpAgentMode;
 } {
   const execution = requireChatExecutionConfig(chatId, entry);
   if (!entry) {
@@ -110,8 +111,8 @@ interface OpenCodeProviderInstance {
 }
 
 interface AmpProviderInstance {
-  startSession(command: string, opts: { chatId: string; cwd: string; model?: string; [key: string]: unknown }): Promise<string>;
-  runTurn(command: string, opts: { sessionId: string; chatId: string; cwd?: string; [key: string]: unknown }): Promise<void>;
+  startSession(request: StartSessionRequest): Promise<StartedProviderSession>;
+  runTurn(request: ResumeTurnRequest): Promise<void>;
   isRunning(providerSessionId: string): boolean;
   abort(providerSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }>;
@@ -158,6 +159,7 @@ export class ProviderRegistry {
     permissionMode?: PermissionMode;
     thinkingMode?: ThinkingMode;
     claudeThinkingMode?: ClaudeThinkingMode;
+    ampAgentMode?: AmpAgentMode;
     projectPath?: string;
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
@@ -212,12 +214,10 @@ export class ProviderRegistry {
     }
 
     if (entry.provider === 'amp') {
-      const providerSessionId = await this.#amp.startSession(command, {
-        chatId,
-        cwd: entry.projectPath,
-        model: entry.model,
+      const { providerSessionId, nativePath } = await this.#amp.startSession({
+        ...request,
+        ampAgentMode: entry.ampAgentMode,
       });
-      const nativePath = `amp:${providerSessionId}`;
       this.#registry.updateChat(chatId, { providerSessionId, nativePath });
       return;
     }
@@ -232,6 +232,7 @@ export class ProviderRegistry {
     permissionMode?: PermissionMode;
     thinkingMode?: ThinkingMode;
     claudeThinkingMode?: ClaudeThinkingMode;
+    ampAgentMode?: AmpAgentMode;
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
     if (!rawEntry) {
@@ -263,10 +264,9 @@ export class ProviderRegistry {
     } else if (provider === 'opencode') {
       await this.#opencode.runTurn(request);
     } else if (provider === 'amp') {
-      await this.#amp.runTurn(command, {
-        sessionId: providerSessionId,
-        chatId,
-        cwd: entry.projectPath,
+      await this.#amp.runTurn({
+        ...request,
+        ampAgentMode: entry.ampAgentMode,
       });
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
@@ -388,6 +388,9 @@ export class ProviderRegistry {
     if (!providerSessionId || entry.provider !== 'claude') return;
     this.#claude.setInternalClaudeThinkingMode(providerSessionId, mode);
   }
+
+  // Amp agent mode changes are applied on the next CLI spawn; no-op here.
+  async setAmpAgentMode(_chatId: string, _mode: AmpAgentMode): Promise<void> { }
 
   // Model changes are applied on the next CLI spawn; no-op here.
   async setModel(_chatId: string, _model: string): Promise<void> { }

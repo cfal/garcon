@@ -540,6 +540,7 @@ describe('chat WebSocket handler', () => {
         permissionMode: 'default',
         thinkingMode: 'none',
         claudeThinkingMode: 'auto',
+        ampAgentMode: 'smart',
         model: 'opus',
       });
     });
@@ -563,6 +564,7 @@ describe('chat WebSocket handler', () => {
         permissionMode: 'default',
         thinkingMode: 'none',
         claudeThinkingMode: 'auto',
+        ampAgentMode: 'smart',
         model: 'opus',
       });
     });
@@ -655,6 +657,7 @@ describe('chat WebSocket handler', () => {
         permissionMode: 'default',
         thinkingMode: 'none',
         claudeThinkingMode: 'auto',
+        ampAgentMode: 'smart',
         model: 'opus',
       });
     });

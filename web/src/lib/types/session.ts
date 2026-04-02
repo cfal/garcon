@@ -1,14 +1,15 @@
 // Session and settings types used by app.ts and components.
 
-import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$shared/chat-modes';
+import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$shared/chat-modes';
 
 export interface ChatSession {
 	id: string;
-	provider: 'claude' | 'codex' | 'opencode';
+	provider: 'claude' | 'codex' | 'opencode' | 'amp';
 	model: string | null;
 	permissionMode?: PermissionMode;
 	thinkingMode?: ThinkingMode;
 	claudeThinkingMode?: ClaudeThinkingMode;
+	ampAgentMode?: AmpAgentMode;
 	title: string;
 	projectPath: string;
 	tags: string[];
@@ -44,6 +45,7 @@ export interface AppSettings {
 	lastPermissionMode: PermissionMode;
 	lastThinkingMode: ThinkingMode;
 	lastClaudeThinkingMode: ClaudeThinkingMode;
+	lastAmpAgentMode?: AmpAgentMode;
 	projectBasePath?: string;
 	telegramBotTokenAvailable?: boolean;
 }

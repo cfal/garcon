@@ -13,6 +13,7 @@ import {
 	QueueDropRequest,
 	ModelSetRequest,
 	ClaudeThinkingModeSetRequest,
+	AmpAgentModeSetRequest,
 	PermissionModeSetRequest,
 	ThinkingModeSetRequest,
 	QueueEnqueueRequest,
@@ -25,7 +26,7 @@ import type { ProviderState } from '$lib/chat/provider-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { WsConnection } from '$lib/ws/connection.svelte';
-import type { ClaudeThinkingMode, PendingPermissionRequest, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AmpAgentMode, ClaudeThinkingMode, PendingPermissionRequest, PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { AppTab } from '$lib/types/app';
 
@@ -34,7 +35,7 @@ export interface SessionControllerDeps {
 		selectedChatId: string | null;
 		selectedChat: ChatSessionRecord | null;
 		byId: Record<string, ChatSessionRecord>;
-		startupByChatId: Record<string, { provider: string; model: string; permissionMode: PermissionMode; thinkingMode: ThinkingMode; claudeThinkingMode: ClaudeThinkingMode; firstMessage: string; initialImages?: File[] }>;
+		startupByChatId: Record<string, { provider: string; model: string; permissionMode: PermissionMode; thinkingMode: ThinkingMode; claudeThinkingMode: ClaudeThinkingMode; ampAgentMode: AmpAgentMode; firstMessage: string; initialImages?: File[] }>;
 		isDraft: (chatId: string) => boolean;
 		patchDraftStartup: (chatId: string, patch: Record<string, unknown>) => void;
 		patchChat: (chatId: string, patch: Record<string, unknown>) => void;
@@ -138,6 +139,9 @@ export class ConversationSessionController {
 				if (startup.claudeThinkingMode) {
 					deps.providerState.claudeThinkingMode = startup.claudeThinkingMode;
 				}
+				if (startup.ampAgentMode) {
+					deps.providerState.ampAgentMode = startup.ampAgentMode;
+				}
 				if (startup.firstMessage?.trim() || (startup.initialImages?.length ?? 0) > 0) {
 					const startupText = startup.firstMessage.trim();
 					const startupImages = startup.initialImages ?? [];
@@ -163,6 +167,7 @@ export class ConversationSessionController {
 		deps.providerState.permissionMode = selected.permissionMode ?? 'default';
 		deps.providerState.thinkingMode = selected.thinkingMode ?? 'none';
 		deps.providerState.claudeThinkingMode = selected.claudeThinkingMode ?? 'auto';
+		deps.providerState.ampAgentMode = selected.ampAgentMode ?? 'smart';
 
 		this.loadChat(chatId);
 	}
@@ -267,6 +272,7 @@ export class ConversationSessionController {
 			const permissionMode = startup?.permissionMode ?? deps.providerState.permissionMode;
 			const thinkingMode = startup?.thinkingMode ?? deps.providerState.thinkingMode;
 			const claudeThinkingMode = startup?.claudeThinkingMode ?? deps.providerState.claudeThinkingMode;
+			const ampAgentMode = startup?.ampAgentMode ?? deps.providerState.ampAgentMode;
 
 			deps.composerState.clearAfterSubmit(chatId);
 			try {
@@ -278,6 +284,7 @@ export class ConversationSessionController {
 					permissionMode,
 					thinkingMode,
 					claudeThinkingMode,
+					ampAgentMode,
 					command: text,
 					options: {
 						cwd: selected.projectPath,
@@ -307,6 +314,7 @@ export class ConversationSessionController {
 				permissionMode: deps.providerState.permissionMode,
 				thinkingMode: deps.providerState.thinkingMode,
 				claudeThinkingMode: deps.providerState.claudeThinkingMode,
+				ampAgentMode: deps.providerState.ampAgentMode,
 			});
 			if (!sent) {
 				deps.lifecycle.clearLoading();
@@ -367,6 +375,7 @@ export class ConversationSessionController {
 					deps.providerState.thinkingMode,
 					deps.providerState.model,
 					deps.providerState.claudeThinkingMode,
+					deps.providerState.ampAgentMode,
 				),
 			);
 		};
@@ -464,5 +473,18 @@ export class ConversationSessionController {
 		}
 		deps.ws.sendMessage(new ClaudeThinkingModeSetRequest(chatId, mode));
 		deps.sessions.patchChat(chatId, { claudeThinkingMode: mode });
+	}
+
+	handleAmpAgentModeChange(mode: AmpAgentMode): void {
+		const { deps } = this;
+		const chatId = deps.sessions.selectedChatId;
+		if (!chatId) return;
+		if (deps.sessions.isDraft(chatId)) {
+			deps.sessions.patchDraftStartup(chatId, { ampAgentMode: mode });
+			deps.sessions.patchChat(chatId, { ampAgentMode: mode });
+			return;
+		}
+		deps.ws.sendMessage(new AmpAgentModeSetRequest(chatId, mode));
+		deps.sessions.patchChat(chatId, { ampAgentMode: mode });
 	}
 }

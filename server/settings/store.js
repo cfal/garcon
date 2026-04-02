@@ -8,9 +8,11 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
 import {
+  DEFAULT_AMP_AGENT_MODE,
   DEFAULT_CLAUDE_THINKING_MODE,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_THINKING_MODE,
+  normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
@@ -30,6 +32,7 @@ function createEmpty() {
     lastPermissionMode: DEFAULT_PERMISSION_MODE,
     lastThinkingMode: DEFAULT_THINKING_MODE,
     lastClaudeThinkingMode: DEFAULT_CLAUDE_THINKING_MODE,
+    lastAmpAgentMode: DEFAULT_AMP_AGENT_MODE,
     chatFolders: [],
   };
 }
@@ -89,6 +92,7 @@ function sanitize(parsed) {
     lastPermissionMode: normalizePermissionMode(parsed.lastPermissionMode),
     lastThinkingMode: normalizeThinkingMode(parsed.lastThinkingMode),
     lastClaudeThinkingMode: normalizeClaudeThinkingMode(parsed.lastClaudeThinkingMode),
+    lastAmpAgentMode: normalizeAmpAgentMode(parsed.lastAmpAgentMode),
     chatFolders: Array.isArray(parsed.chatFolders) ? parsed.chatFolders.map(sanitizeFolder).filter(Boolean) : [],
   };
 }
@@ -413,6 +417,10 @@ export class SettingsStore extends EventEmitter {
         defaults?.claudeThinkingMode,
         normalizeClaudeThinkingMode(settings.lastClaudeThinkingMode),
       );
+      settings.lastAmpAgentMode = normalizeAmpAgentMode(
+        defaults?.ampAgentMode,
+        normalizeAmpAgentMode(settings.lastAmpAgentMode),
+      );
       await this.saveSettings(settings);
     });
   }
@@ -437,6 +445,15 @@ export class SettingsStore extends EventEmitter {
 
   async setLastClaudeThinkingMode(mode) {
     return this.setLastChatDefaults({ claudeThinkingMode: mode });
+  }
+
+  async getLastAmpAgentMode() {
+    const settings = await this.loadSettings();
+    return normalizeAmpAgentMode(settings.lastAmpAgentMode);
+  }
+
+  async setLastAmpAgentMode(mode) {
+    return this.setLastChatDefaults({ ampAgentMode: mode });
   }
 
   async getNormalChatIds() {

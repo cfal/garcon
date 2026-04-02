@@ -67,3 +67,24 @@ export function normalizeClaudeThinkingMode(
 ): ClaudeThinkingMode {
   return isClaudeThinkingMode(value) ? value : fallback;
 }
+
+export const AMP_AGENT_MODE_VALUES = [
+  'smart',
+  'deep',
+] as const;
+
+export type AmpAgentMode = typeof AMP_AGENT_MODE_VALUES[number];
+export const DEFAULT_AMP_AGENT_MODE: AmpAgentMode = 'smart';
+
+const AMP_AGENT_MODE_SET = new Set<string>(AMP_AGENT_MODE_VALUES);
+
+export function isAmpAgentMode(value: unknown): value is AmpAgentMode {
+  return typeof value === 'string' && AMP_AGENT_MODE_SET.has(value);
+}
+
+export function normalizeAmpAgentMode(
+  value: unknown,
+  fallback: AmpAgentMode = DEFAULT_AMP_AGENT_MODE,
+): AmpAgentMode {
+  return isAmpAgentMode(value) ? value : fallback;
+}

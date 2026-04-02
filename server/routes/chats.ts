@@ -9,6 +9,7 @@ import type { IChatRegistry } from '../chats/store.js';
 import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import { UserMessage } from '../../common/chat-types.ts';
 import {
+  normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
@@ -200,6 +201,7 @@ export default function createChatRoutes(
           permissionMode: normalizePermissionMode(session.permissionMode),
           thinkingMode: normalizeThinkingMode(session.thinkingMode),
           claudeThinkingMode: normalizeClaudeThinkingMode(session.claudeThinkingMode),
+          ampAgentMode: normalizeAmpAgentMode(session.ampAgentMode),
           title: extractFirstLine((overrideTitle || meta?.firstMessage || 'New Session') as string),
           projectPath: session.projectPath,
           tags: session.tags || [],
@@ -292,6 +294,7 @@ export default function createChatRoutes(
       const permissionMode = normalizePermissionMode(body.permissionMode);
       const thinkingMode = normalizeThinkingMode(body.thinkingMode);
       const claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);
+      const ampAgentMode = normalizeAmpAgentMode(body.ampAgentMode);
 
       const created = registry.addChat({
         id: chatId,
@@ -304,6 +307,7 @@ export default function createChatRoutes(
         permissionMode,
         thinkingMode,
         claudeThinkingMode,
+        ampAgentMode,
       });
       if (!created) {
         return Response.json({ success: false, error: `Session ID collision: ${chatId}` }, { status: 409 });
@@ -317,6 +321,7 @@ export default function createChatRoutes(
         permissionMode,
         thinkingMode,
         claudeThinkingMode,
+        ampAgentMode,
       });
       await settings.ensureInNormal(chatId);
 
