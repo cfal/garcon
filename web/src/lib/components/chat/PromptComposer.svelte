@@ -6,11 +6,11 @@
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
-	import { buildAmpAgentModeOptions, buildClaudeThinkingOptions, buildPermissionOptions, buildThinkingOptions, toModelMenuOptions } from '$lib/chat/composer-controls';
+	import { buildClaudeThinkingOptions, buildPermissionOptions, buildThinkingOptions, toModelMenuOptions } from '$lib/chat/composer-controls';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ImagePlus } from '@lucide/svelte';
-	import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+	import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
 
 	interface Props {
 		onsubmit: () => void;
@@ -18,10 +18,9 @@
 		onPermissionModeChange?: (mode: PermissionMode) => void;
 		onThinkingModeChange?: (mode: ThinkingMode) => void;
 		onClaudeThinkingModeChange?: (mode: ClaudeThinkingMode) => void;
-		onAmpAgentModeChange?: (mode: AmpAgentMode) => void;
 	}
 
-	let { onsubmit, onModelChange, onPermissionModeChange, onThinkingModeChange, onClaudeThinkingModeChange, onAmpAgentModeChange }: Props = $props();
+	let { onsubmit, onModelChange, onPermissionModeChange, onThinkingModeChange, onClaudeThinkingModeChange }: Props = $props();
 
 	const composerState = getComposerState();
 	const lifecycle = getChatLifecycle();
@@ -188,9 +187,6 @@
 	const thinkingOptions = $derived(buildThinkingOptions());
 	const claudeThinkingOptions = $derived(
 		providerState.provider === 'claude' ? buildClaudeThinkingOptions() : undefined
-	);
-	const ampAgentModeOptions = $derived(
-		providerState.provider === 'amp' ? buildAmpAgentModeOptions() : undefined
 	);
 	const modelOptions = $derived(
 		toModelMenuOptions(modelCatalog.getModels(providerState.provider))
@@ -382,12 +378,6 @@
 					onClaudeThinkingSelect={(mode) => {
 						providerState.claudeThinkingMode = mode;
 						onClaudeThinkingModeChange?.(mode);
-					}}
-					ampAgentModeOptions={ampAgentModeOptions}
-					selectedAmpAgentMode={providerState.ampAgentMode}
-					onAmpAgentModeSelect={(mode) => {
-						providerState.ampAgentMode = mode;
-						onAmpAgentModeChange?.(mode);
 					}}
 					modelOptions={modelOptions}
 					selectedModel={providerState.model}

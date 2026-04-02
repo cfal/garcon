@@ -8,7 +8,7 @@
 		DropdownMenuLabel,
 	} from '$lib/components/ui/dropdown-menu';
 	import type { SessionProvider } from '$lib/types/app';
-	import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+	import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import type { ComposerMenuOption, ComposerModeOption, ProviderMenuGroup } from '$lib/chat/composer-controls';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
 	import { ChevronDown, ImagePlus, Plus, Send } from '@lucide/svelte';
@@ -26,9 +26,6 @@
 		claudeThinkingOptions?: ComposerModeOption<ClaudeThinkingMode>[];
 		selectedClaudeThinking?: ClaudeThinkingMode;
 		onClaudeThinkingSelect?: (mode: ClaudeThinkingMode) => void;
-		ampAgentModeOptions?: ComposerModeOption<AmpAgentMode>[];
-		selectedAmpAgentMode?: AmpAgentMode;
-		onAmpAgentModeSelect?: (mode: AmpAgentMode) => void;
 		providerOptions?: ComposerMenuOption<SessionProvider>[];
 		providerGroups?: ProviderMenuGroup[];
 		selectedProvider?: SessionProvider;
@@ -57,9 +54,6 @@
 		claudeThinkingOptions,
 		selectedClaudeThinking,
 		onClaudeThinkingSelect,
-		ampAgentModeOptions,
-		selectedAmpAgentMode,
-		onAmpAgentModeSelect,
 		providerOptions,
 		providerGroups,
 		selectedProvider,
@@ -83,9 +77,6 @@
 	);
 	const activeClaudeThinking = $derived(
 		claudeThinkingOptions?.find((option) => option.value === selectedClaudeThinking) ?? claudeThinkingOptions?.[0]
-	);
-	const activeAmpAgentMode = $derived(
-		ampAgentModeOptions?.find((option) => option.value === selectedAmpAgentMode) ?? ampAgentModeOptions?.[0]
 	);
 	const activeProvider = $derived(
 		providerOptions?.find((option) => option.value === selectedProvider) ?? providerOptions?.[0]
@@ -235,28 +226,6 @@
 					<DropdownMenuContent align="start">
 						{#each claudeThinkingOptions as option (option.value)}
 							<DropdownMenuItem onclick={() => onClaudeThinkingSelect(option.value)} class="items-start">
-								<ComposerModeIcon iconId={option.iconId} class="mt-0.5 size-4" />
-								<div class="min-w-0">
-									<div class="font-medium">{option.label}</div>
-									<div class="text-xs text-muted-foreground">{option.description}</div>
-								</div>
-							</DropdownMenuItem>
-						{/each}
-					</DropdownMenuContent>
-				</DropdownMenu>
-			{/if}
-
-			{#if ampAgentModeOptions && activeAmpAgentMode && onAmpAgentModeSelect}
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activeAmpAgentMode.toneClass}"
-						title={activeAmpAgentMode.label ?? 'Amp Agent Mode'}
-					>
-						<ComposerModeIcon iconId={activeAmpAgentMode.iconId} class="size-4" />
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="start">
-						{#each ampAgentModeOptions as option (option.value)}
-							<DropdownMenuItem onclick={() => onAmpAgentModeSelect(option.value)} class="items-start">
 								<ComposerModeIcon iconId={option.iconId} class="mt-0.5 size-4" />
 								<div class="min-w-0">
 									<div class="font-medium">{option.label}</div>

@@ -103,7 +103,7 @@ describe('resolveEffectiveGenerationConfig', () => {
     expect(result).toEqual({
       enabled: true,
       provider: 'amp',
-      model: 'default',
+      model: 'smart',
       source: 'manual',
     });
   });

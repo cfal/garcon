@@ -78,7 +78,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       projectPath: '/proj',
       files: ['src/a.ts'],
       provider: 'amp',
-      model: 'default',
+      model: 'smart',
       customPrompt: 'Summarize {{files}}',
     });
   });
@@ -95,7 +95,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       commitMessage: {
         enabled: true,
         provider: 'amp',
-        model: 'default',
+        model: 'smart',
         customPrompt: 'Persisted prompt',
       },
     }));

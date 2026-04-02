@@ -223,10 +223,7 @@ export class ProviderRegistry {
     }
 
     if (entry.provider === 'amp') {
-      const { providerSessionId, nativePath } = await this.#amp.startSession({
-        ...request,
-        ampAgentMode: entry.ampAgentMode,
-      });
+      const { providerSessionId, nativePath } = await this.#amp.startSession(request);
       this.#registry.updateChat(chatId, { providerSessionId, nativePath });
       return;
     }
@@ -279,10 +276,7 @@ export class ProviderRegistry {
     } else if (provider === 'opencode') {
       await this.#opencode.runTurn(request);
     } else if (provider === 'amp') {
-      await this.#amp.runTurn({
-        ...request,
-        ampAgentMode: entry.ampAgentMode,
-      });
+      await this.#amp.runTurn(request);
     } else if (provider === 'factory') {
       await this.#factory.runTurn(request);
     } else {

@@ -7,7 +7,7 @@ export const GENERATION_PROVIDER_PRIORITY = ['claude', 'codex', 'opencode'] as c
 export const GENERATION_MODEL_DEFAULTS = {
   claude: 'haiku',
   codex: 'gpt-5.1-codex-mini',
-  amp: 'default',
+  amp: 'smart',
   factory: 'claude-opus-4-6',
 } as const;
 
