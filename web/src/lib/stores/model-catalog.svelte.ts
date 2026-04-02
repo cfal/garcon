@@ -78,7 +78,7 @@ function mergeWithFallbacks(models: ProviderModels): ProviderModels {
 	return {
 		claude: mergeStaticModels(models.claude, STATIC_FALLBACKS.claude!),
 		codex: mergeStaticModels(models.codex, STATIC_FALLBACKS.codex!),
-		amp: mergeStaticModels(models.amp, STATIC_FALLBACKS.amp!),
+		amp: STATIC_FALLBACKS.amp!,
 		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
 		opencode: models.opencode?.length ? models.opencode : STATIC_FALLBACKS.opencode
 	};
