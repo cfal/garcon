@@ -1,7 +1,13 @@
 // App settings API for session naming and global settings.
 
 import { apiGet, apiPut, apiPost, apiDelete } from './client.js';
-import type { AppSettings } from '$lib/types/session.js';
+import type { AppSettings, SidebarSearchBarPosition } from '$lib/types/session.js';
+
+export const APP_SETTINGS_UPDATED_EVENT = 'garcon:app-settings-updated';
+
+export interface AppSettingsUpdatedDetail {
+	patch: Record<string, unknown>;
+}
 
 export interface UpdateSessionNameResponse {
 	success: boolean;
@@ -23,7 +29,19 @@ export interface UpdateSettingsResponse {
 
 /** Applies a partial update to application settings. */
 export async function updateSettings(patch: Record<string, unknown>): Promise<UpdateSettingsResponse> {
-	return apiPut<UpdateSettingsResponse>('/api/v1/app/settings', patch);
+	const response = await apiPut<UpdateSettingsResponse>('/api/v1/app/settings', patch);
+	if (typeof window !== 'undefined') {
+		window.dispatchEvent(
+			new CustomEvent<AppSettingsUpdatedDetail>(APP_SETTINGS_UPDATED_EVENT, {
+				detail: { patch },
+			}),
+		);
+	}
+	return response;
+}
+
+export function normalizeSidebarSearchBarPosition(value: unknown): SidebarSearchBarPosition {
+	return value === 'top' ? 'top' : 'bottom';
 }
 
 export interface TelegramTestResponse {

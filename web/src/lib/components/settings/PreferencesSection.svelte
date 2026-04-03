@@ -8,9 +8,15 @@
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import type { ThemeMode } from '$lib/stores/preferences.svelte.js';
 	import type { SessionProvider } from '$lib/types/app';
+	import type { PinnedInsertPosition, SidebarSearchBarPosition } from '$lib/types/session.js';
 	import { onMount } from 'svelte';
 	import { getModelCatalog, getPreferences } from '$lib/context';
-	import { getSettings, updateSettings, sendTelegramTest } from '$lib/api/settings.js';
+	import {
+		getSettings,
+		normalizeSidebarSearchBarPosition,
+		updateSettings,
+		sendTelegramTest,
+	} from '$lib/api/settings.js';
 	import SendIcon from '@lucide/svelte/icons/send';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -27,8 +33,8 @@
 		preferences.setPreference(key, !preferences[key]);
 	}
 
-	type PinnedInsertPosition = 'top' | 'bottom';
 	let pinnedInsertPosition = $state<PinnedInsertPosition>('top');
+	let searchBarPosition = $state<SidebarSearchBarPosition>('bottom');
 
 	// Chat title auto-generation settings (server-persisted).
 	let titleEnabled = $state(false);
@@ -48,10 +54,11 @@
 
 	onMount(async () => {
 		const settings = await getSettings();
-		const ui = (settings.ui ?? {}) as Record<string, unknown>;
-		const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
+		const ui = settings.ui ?? {};
+		const uiEffective = settings.uiEffective ?? {};
 		const raw = ui.pinnedInsertPosition;
 		pinnedInsertPosition = raw === 'bottom' ? 'bottom' : 'top';
+		searchBarPosition = normalizeSidebarSearchBarPosition(ui.searchBarPosition);
 
 		// Hydrate chat title settings.
 		const chatTitleEffective = (uiEffective.chatTitle ?? ui.chatTitle ?? {}) as Record<string, unknown>;
@@ -86,6 +93,11 @@
 	async function onPinnedInsertPositionChange(next: PinnedInsertPosition) {
 		pinnedInsertPosition = next;
 		await updateSettings({ ui: { pinnedInsertPosition: next } });
+	}
+
+	async function onSearchBarPositionChange(next: SidebarSearchBarPosition) {
+		searchBarPosition = next;
+		await updateSettings({ ui: { searchBarPosition: next } });
 	}
 
 	async function persistTelegramSettings() {
@@ -187,6 +199,18 @@
 				preferences.alwaysFullscreenOnGitPanel,
 				() => togglePref('alwaysFullscreenOnGitPanel')
 			)}
+		</div>
+
+		<div class="flex items-center justify-between px-4 py-2">
+			<div class="text-sm font-medium text-foreground">{m.settings_display_search_bar_position()}</div>
+			<select
+				class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
+				value={searchBarPosition}
+				onchange={(e) => onSearchBarPositionChange((e.currentTarget as HTMLSelectElement).value as SidebarSearchBarPosition)}
+			>
+				<option value="top">{m.sidebar_chats_pinned_insert_top()}</option>
+				<option value="bottom">{m.sidebar_chats_pinned_insert_bottom()}</option>
+			</select>
 		</div>
 
 		<div class="flex items-center justify-between px-4 py-2" data-section="chat">

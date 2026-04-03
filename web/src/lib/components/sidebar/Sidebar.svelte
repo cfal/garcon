@@ -15,11 +15,23 @@
 	import { SidebarController } from './sidebar-controller.svelte';
 	import { SidebarFilterState, type FolderEntry } from './sidebar-filter-state.svelte';
 	import { addTagToQuery, matchesChatFilter } from './sidebar-search';
-	import { getFolders, createFolder, updateFolder as updateFolderApi, deleteFolder as deleteFolderApi, type ChatFolder, type ChatFolderFilter } from '$lib/api/settings';
+	import {
+		APP_SETTINGS_UPDATED_EVENT,
+		createFolder,
+		deleteFolder as deleteFolderApi,
+		getFolders,
+		getSettings,
+		normalizeSidebarSearchBarPosition,
+		updateFolder as updateFolderApi,
+		type AppSettingsUpdatedDetail,
+		type ChatFolder,
+		type ChatFolderFilter,
+	} from '$lib/api/settings';
 	import type { FolderDialogState } from './SidebarSaveFolderDialog.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { SidebarSearchBarPosition } from '$lib/types/session.js';
 
 	interface ChatDeleteConfirmation {
 		chatId: string;
@@ -89,6 +101,7 @@
 	let shareChatDialog = $state<{ chatId: string; chatTitle: string } | null>(null);
 	let currentTime = $state(new Date());
 	let isMarkingAllRead = $state(false);
+	let searchBarPosition = $state<SidebarSearchBarPosition>('bottom');
 	let visibleUnreadChatIds = $derived.by(() =>
 		filterState.filteredChats
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
@@ -420,6 +433,32 @@
 
 	onMount(async () => {
 		try {
+			const settings = await getSettings();
+			searchBarPosition = normalizeSidebarSearchBarPosition(settings.ui?.searchBarPosition);
+		} catch (err) {
+			console.error('Failed to load sidebar settings:', err);
+		}
+	});
+
+	onMount(() => {
+		function handleAppSettingsUpdated(event: Event) {
+			const detail = (event as CustomEvent<AppSettingsUpdatedDetail>).detail;
+			const ui = detail?.patch?.ui;
+			if (!ui || typeof ui !== 'object' || Array.isArray(ui)) return;
+			if (!Object.prototype.hasOwnProperty.call(ui, 'searchBarPosition')) return;
+			searchBarPosition = normalizeSidebarSearchBarPosition(
+				(ui as Record<string, unknown>).searchBarPosition,
+			);
+		}
+
+		window.addEventListener(APP_SETTINGS_UPDATED_EVENT, handleAppSettingsUpdated as EventListener);
+		return () => {
+			window.removeEventListener(APP_SETTINGS_UPDATED_EVENT, handleAppSettingsUpdated as EventListener);
+		};
+	});
+
+	onMount(async () => {
+		try {
 			const res = await getFolders();
 			filterState.setUserFolders(mergeUserFolders(filterState.userFolders, res.folders));
 		} catch (err) {
@@ -436,6 +475,23 @@
 </script>
 
 <div class="h-full flex flex-col bg-card md:select-none">
+	{#if searchBarPosition === 'top'}
+		<SidebarFooter
+			dockPlacement="top"
+			{isLoading}
+			searchFilter={filterState.searchQuery}
+			{isReorderMode}
+			visibleUnreadCount={visibleUnreadChatIds.length}
+			{isMarkingAllRead}
+			onSearchFilterChange={(v) => filterState.searchQuery = v}
+			onClearSearchFilter={() => filterState.searchQuery = ''}
+			onCreateChat={handlePrimaryAction}
+			onMarkAllRead={() => { void handleMarkAllRead(); }}
+			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
+			{onShowSettings}
+		/>
+	{/if}
+
 	<SidebarContent
 		{chats}
 		filteredChats={filterState.filteredChats}
@@ -469,7 +525,9 @@
 		onQuickMove={handleQuickMove}
 	/>
 
+	{#if searchBarPosition === 'bottom'}
 		<SidebarFooter
+			dockPlacement="bottom"
 			{isLoading}
 			searchFilter={filterState.searchQuery}
 			{isReorderMode}
@@ -482,6 +540,7 @@
 			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
 			{onShowSettings}
 		/>
+	{/if}
 </div>
 
 <SidebarChatDialogs
