@@ -75,8 +75,12 @@ export class SidebarFilterState {
 	get filteredChats(): ChatSessionRecord[] {
 		const chats = this.#getChats();
 		const filter = this.currentFilter;
-		if (isEmptyFilter(filter)) return chats;
-		return chats.filter((chat) => matchesChatFilter(chat, filter));
+		const result = isEmptyFilter(filter) ? [...chats] : chats.filter((chat) => matchesChatFilter(chat, filter));
+		return result.sort((a, b) => {
+			const aTime = a.lastActivityAt ? new Date(a.lastActivityAt).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+			const bTime = b.lastActivityAt ? new Date(b.lastActivityAt).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+			return bTime - aTime;
+		});
 	}
 
 	get allKnownTags(): string[] {
