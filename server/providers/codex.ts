@@ -168,12 +168,15 @@ export function convertCodexEventToChatMessages(transformed: NormalizedEvent): u
 }
 
 function mapThinkingModeToCodexEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
+  // Forces a safe provider default so Codex chats do not inherit
+  // unsupported global reasoning settings such as xhigh on mini models.
   switch (thinkingMode) {
+    case 'none': return 'low';
     case 'think': return 'low';
     case 'think-hard': return 'medium';
     case 'think-harder': return 'high';
     case 'ultrathink': return 'xhigh';
-    default: return undefined;
+    default: return 'low';
   }
 }
 

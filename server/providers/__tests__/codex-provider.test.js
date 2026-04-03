@@ -68,8 +68,47 @@ describe('CodexProvider session startup', () => {
         providerSessionId: sessionId,
         nativePath,
       });
+      expect(startThreadMock).toHaveBeenCalledWith(expect.objectContaining({
+        model: 'gpt-5.4',
+        modelReasoningEffort: 'low',
+      }));
       expect(created).toHaveBeenCalledTimes(1);
       expect(created).toHaveBeenCalledWith('chat-1');
+    } finally {
+      await fs.rm(testRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('maps ultrathink to xhigh reasoning effort for Codex threads', async () => {
+    const provider = new CodexProvider();
+    const sessionId = `codex-session-${randomUUID()}`;
+    const testRoot = path.join(CODEX_SESSIONS_ROOT, `__test-${sessionId}`);
+    const nestedDir = path.join(testRoot, 'nested');
+    const nativePath = path.join(nestedDir, `rollout-123-${sessionId}.jsonl`);
+
+    startThreadMock.mockImplementation(() => ({
+      id: sessionId,
+      runStreamed: mock(() => Promise.resolve({
+        events: createEventStream([{ type: 'turn.completed' }]),
+      })),
+    }));
+    await fs.mkdir(nestedDir, { recursive: true });
+    await fs.writeFile(nativePath, '{}\n');
+
+    try {
+      await provider.startSession({
+        chatId: 'chat-xhigh',
+        command: 'hello',
+        projectPath: '/proj',
+        model: 'gpt-5.4',
+        permissionMode: 'default',
+        thinkingMode: 'ultrathink',
+      });
+
+      expect(startThreadMock).toHaveBeenCalledWith(expect.objectContaining({
+        model: 'gpt-5.4',
+        modelReasoningEffort: 'xhigh',
+      }));
     } finally {
       await fs.rm(testRoot, { recursive: true, force: true });
     }
