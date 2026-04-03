@@ -35,6 +35,24 @@ function buildForkDestination(sourcePath, newProviderSessionId) {
   return path.join(dir, `${newProviderSessionId}.jsonl`);
 }
 
+function extractFirstLine(text) {
+  if (!text) return '';
+  const nl = text.indexOf('\n');
+  if (nl < 0) return text.trim();
+  return text.slice(0, nl).trim();
+}
+
+function normalizeNextForkOrdinal(value) {
+  const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : value;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function resolveVisibleChatTitle(chatId, settings, metadata) {
+  const overrideTitle = settings.getChatName(chatId);
+  const fallbackTitle = metadata.getChatMetadata(chatId)?.firstMessage;
+  return extractFirstLine(overrideTitle || fallbackTitle || 'New Session') || 'New Session';
+}
+
 export async function forkChatFileCopy({
   sourceSession,
   sourceChatId,
@@ -58,6 +76,10 @@ export async function forkChatFileCopy({
     throw new Error(`Source providerSessionId missing for chat ${sourceChatId}`);
   }
 
+  const sourceTitle = resolveVisibleChatTitle(sourceChatId, settings, metadata);
+  const nextForkOrdinal = normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1;
+  const forkTitle = `${sourceTitle} (${nextForkOrdinal})`;
+
   const newProviderSessionId = crypto.randomUUID();
   const destinationNativePath = buildForkDestination(sourceNativePath, newProviderSessionId);
 
@@ -79,6 +101,7 @@ export async function forkChatFileCopy({
     nativePath: destinationNativePath,
     tags: Array.isArray(sourceSession.tags) ? [...sourceSession.tags] : [],
     providerSessionId: newProviderSessionId,
+    nextForkOrdinal: 1,
     permissionMode: normalizePermissionMode(sourceSession.permissionMode),
     thinkingMode: normalizeThinkingMode(sourceSession.thinkingMode),
     claudeThinkingMode: normalizeClaudeThinkingMode(sourceSession.claudeThinkingMode),
@@ -89,12 +112,15 @@ export async function forkChatFileCopy({
     throw new Error(`Chat ID collision: ${targetChatId}`);
   }
 
+  registry.updateChat(sourceChatId, { nextForkOrdinal: nextForkOrdinal + 1 });
   await settings.ensureInNormal(targetChatId);
 
   const sourceMeta = metadata.getChatMetadata(sourceChatId);
   if (sourceMeta?.firstMessage) {
     metadata.addNewChatMetadata(targetChatId, sourceMeta.firstMessage);
   }
+
+  await settings.setSessionName(targetChatId, forkTitle);
 
   return {
     sourceChatId,

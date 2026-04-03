@@ -24,6 +24,7 @@ const ALLOWED_PATCH_FIELDS = [
   'projectPath',
   'tags',
   'providerSessionId',
+  'nextForkOrdinal',
   'model',
   'lastReadAt',
   'permissionMode',
@@ -38,6 +39,7 @@ export interface ChatRegistryEntry {
   projectPath: string;
   tags: string[];
   providerSessionId: string | null;
+  nextForkOrdinal?: number;
   model: string;
   lastReadAt?: string | null;
   permissionMode: PermissionMode;
@@ -59,6 +61,7 @@ export interface NewChatRegistryEntry {
   nativePath?: string | null;
   tags?: string[];
   providerSessionId?: string | null;
+  nextForkOrdinal?: number;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
@@ -110,6 +113,11 @@ function normalizeRegistryModes(entry: {
   };
 }
 
+function normalizeNextForkOrdinal(value: unknown): number | undefined {
+  const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : value;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export class ChatRegistry extends EventEmitter implements IChatRegistry {
   #registry: ChatRegistrySnapshot | null = null;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -152,6 +160,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         sessions[chatId] = {
           ...(rawEntry as Record<string, unknown>),
           ...normalizeRegistryModes(rawEntry),
+          nextForkOrdinal: normalizeNextForkOrdinal(rawEntry.nextForkOrdinal),
         } as ChatRegistryEntry;
       }
       this.#registry = {
@@ -244,6 +253,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     nativePath = null,
     tags = [],
     providerSessionId = null,
+    nextForkOrdinal = 1,
     permissionMode = 'default',
     thinkingMode = 'none',
     claudeThinkingMode = 'auto',
@@ -263,6 +273,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       projectPath,
       tags,
       providerSessionId,
+      nextForkOrdinal: normalizeNextForkOrdinal(nextForkOrdinal) ?? 1,
       model,
       ...normalizedModes,
     };
@@ -286,6 +297,9 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     }
     if ('ampAgentMode' in normalizedPatch) {
       normalizedPatch.ampAgentMode = normalizeAmpAgentMode(normalizedPatch.ampAgentMode);
+    }
+    if ('nextForkOrdinal' in normalizedPatch) {
+      normalizedPatch.nextForkOrdinal = normalizeNextForkOrdinal(normalizedPatch.nextForkOrdinal);
     }
     for (const key of ALLOWED_PATCH_FIELDS) {
       if (key in normalizedPatch) {
