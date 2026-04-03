@@ -102,71 +102,65 @@
 			<Dialog.Description>{m.share_dialog_description()}</Dialog.Description>
 		</Dialog.Header>
 
-		<div class="space-y-4">
-			{#if isLoading}
-				<div class="flex items-center justify-center gap-2 py-8 text-muted-foreground">
-					<Loader2 class="w-4 h-4 animate-spin" />
-					<span class="text-sm">{m.share_dialog_creating()}</span>
-				</div>
-			{:else if error}
-				<div class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-					{error}
-				</div>
-			{:else if shareUrl}
-				<div class="space-y-3">
-					<div class="rounded-lg border bg-muted/50 px-3 py-2.5 flex items-center gap-2.5 min-w-0">
-						<Link class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
-						<span class="text-sm truncate select-all flex-1" title={shareUrl}>{shareUrl}</span>
-					</div>
-					<div class="flex items-center gap-2">
-						<Button onclick={handleCopyLink} class="flex-1" variant={copied ? 'outline' : 'default'}>
-							{#if copied}
-								<Check class="w-4 h-4" />
-								{m.share_dialog_link_copied()}
+		{#if isLoading}
+			<div class="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+				<Loader2 class="w-4 h-4 animate-spin" />
+				<span class="text-sm">{m.share_dialog_creating()}</span>
+			</div>
+		{:else if error}
+			<div class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+				{error}
+			</div>
+		{:else if shareUrl}
+			<div class="rounded-lg border bg-muted/50 px-3 py-2.5 flex items-center gap-2.5 min-w-0">
+				<Link class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
+				<span class="text-sm truncate select-all flex-1" title={shareUrl}>{shareUrl}</span>
+			</div>
+
+			<Dialog.Footer class="sm:justify-between">
+				{#if !showRevokeConfirm}
+					<button
+						type="button"
+						class="text-xs text-muted-foreground hover:text-destructive transition-colors"
+						onclick={() => { showRevokeConfirm = true; }}
+					>
+						{m.share_dialog_revoke()}
+					</button>
+				{:else}
+					<div class="flex items-center gap-2 flex-1 p-2.5 rounded-lg bg-destructive/5 border border-destructive/20">
+						<span class="text-xs text-destructive flex-1">{m.share_dialog_revoke_confirm()}</span>
+						<Button
+							variant="destructive"
+							size="sm"
+							onclick={handleRevoke}
+							disabled={isRevoking}
+						>
+							{#if isRevoking}
+								<Loader2 class="w-3 h-3 animate-spin" />
 							{:else}
-								<Copy class="w-4 h-4" />
-								{m.share_dialog_copy_link()}
+								<Trash2 class="w-3 h-3" />
 							{/if}
+							{m.share_dialog_revoke()}
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							onclick={() => { showRevokeConfirm = false; }}
+						>
+							{m.sidebar_actions_cancel()}
 						</Button>
 					</div>
-
-					{#if !showRevokeConfirm}
-						<div class="pt-1 flex justify-between items-center">
-							<button
-								type="button"
-								class="text-xs text-muted-foreground hover:text-destructive transition-colors"
-								onclick={() => { showRevokeConfirm = true; }}
-							>
-								{m.share_dialog_revoke()}
-							</button>
-						</div>
+				{/if}
+				<Button onclick={handleCopyLink} variant={copied ? 'outline' : 'default'}>
+					{#if copied}
+						<Check class="w-4 h-4" />
+						{m.share_dialog_link_copied()}
 					{:else}
-						<div class="flex items-center gap-2 p-2.5 rounded-lg bg-destructive/5 border border-destructive/20">
-							<span class="text-xs text-destructive flex-1">{m.share_dialog_revoke_confirm()}</span>
-							<Button
-								variant="destructive"
-								size="sm"
-								onclick={handleRevoke}
-								disabled={isRevoking}
-							>
-								{#if isRevoking}
-									<Loader2 class="w-3 h-3 animate-spin" />
-								{:else}
-									<Trash2 class="w-3 h-3" />
-								{/if}
-								{m.share_dialog_revoke()}
-							</Button>
-							<Button
-								variant="ghost"
-								size="sm"
-								onclick={() => { showRevokeConfirm = false; }}
-							>
-								{m.sidebar_actions_cancel()}
-							</Button>
-						</div>
+						<Copy class="w-4 h-4" />
+						{m.share_dialog_copy_link()}
 					{/if}
-				</div>
-			{/if}
-		</div>
+				</Button>
+			</Dialog.Footer>
+		{/if}
 	</Dialog.Content>
 </Dialog.Root>
