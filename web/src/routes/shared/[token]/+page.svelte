@@ -87,35 +87,39 @@
 
 <svelte:head>
 	<title>{title || m.shared_view_title()} - Garcon</title>
+	<!-- Overrides the app-wide overflow:hidden on html/body for this standalone page. -->
+	{@html '<style>html, body { overflow: auto !important; height: auto !important; }</style>'}
 </svelte:head>
 
-<div class="min-h-dvh bg-background text-foreground">
+<div class="min-h-dvh bg-background text-foreground flex flex-col">
 	<!-- Header -->
 	<header class="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border">
-		<div class="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
-			<div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
+		<div class="max-w-4xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3">
+			<a href="/" class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0 hover:opacity-90 transition-opacity" title="Garcon">
 				<MessageSquare class="w-4 h-4 text-primary-foreground" />
-			</div>
+			</a>
 			<div class="min-w-0 flex-1">
 				{#if title}
 					<h1 class="text-sm font-semibold text-foreground truncate">{title}</h1>
 				{:else}
 					<h1 class="text-sm font-semibold text-foreground">{m.shared_view_title()}</h1>
 				{/if}
-				{#if sharedAt}
-					<p class="text-xs text-muted-foreground">{formattedSharedDate()}</p>
-				{/if}
+				<div class="flex items-center gap-2">
+					{#if sharedAt}
+						<p class="text-xs text-muted-foreground">{formattedSharedDate()}</p>
+					{/if}
+					{#if provider}
+						<span class="text-[10px] px-1.5 py-0.5 rounded-full border bg-muted text-muted-foreground capitalize flex-shrink-0">
+							{provider}
+						</span>
+					{/if}
+				</div>
 			</div>
-			{#if provider}
-				<span class="text-xs px-2 py-0.5 rounded-full border bg-muted text-muted-foreground capitalize flex-shrink-0">
-					{provider}
-				</span>
-			{/if}
 		</div>
 	</header>
 
 	<!-- Content -->
-	<main class="max-w-4xl mx-auto px-4 py-6">
+	<main class="max-w-4xl mx-auto px-4 sm:px-6 py-6 flex-1 w-full">
 		{#if isLoading}
 			<div class="flex items-center justify-center py-16 gap-2 text-muted-foreground">
 				<Loader2 class="w-5 h-5 animate-spin" />
@@ -202,4 +206,12 @@
 			</div>
 		{/if}
 	</main>
+
+	<!-- Footer -->
+	<footer class="border-t border-border py-4 mt-auto">
+		<div class="max-w-4xl mx-auto px-4 sm:px-6 flex items-center justify-between text-xs text-muted-foreground">
+			<span>Shared via Garcon</span>
+			<span>{messages.length} messages</span>
+		</div>
+	</footer>
 </div>
