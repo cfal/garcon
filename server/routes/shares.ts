@@ -6,6 +6,7 @@ import { markRouteNoAuth } from '../lib/http-route.js';
 import type { IShareStore } from '../chats/share-store.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ShareChatResponse, ShareStatusResponse, GetSharedChatResponse, RevokeShareResponse } from '../../common/share-types.ts';
+import { renderSharedChatHtml, renderSharedChatText } from '../chats/share-transcript.ts';
 
 type RouteHandler = (request: Request, url: URL) => Promise<Response> | Response;
 type RouteMap = Record<string, Record<string, RouteHandler>>;
@@ -28,6 +29,32 @@ function extractFirstLine(text: string | null | undefined): string {
   const nl = text.indexOf('\n');
   if (nl < 0) return text.trim();
   return text.slice(0, nl).trim();
+}
+
+function extractShareTokenFromPath(pathname: string): string | null {
+  const match = pathname.match(/^\/shared\/([^/]+)$/);
+  if (!match?.[1]) return null;
+
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function wantsPlainText(url: URL): boolean {
+  const format = url.searchParams.get('format');
+  return format === 'text' || format === 'txt' || format === 'plain';
+}
+
+function createSharedPaths(token: string) {
+  const encodedToken = encodeURIComponent(token);
+  return {
+    canonicalPath: `/shared/${encodedToken}`,
+    appPath: `/shared-app/${encodedToken}`,
+    jsonPath: `/api/v1/shared?token=${encodedToken}`,
+    plainTextPath: `/shared/${encodedToken}?format=text`,
+  };
 }
 
 export default function createShareRoutes(
@@ -144,9 +171,39 @@ export default function createShareRoutes(
     return Response.json(resp);
   });
 
+  const getSharedTranscript = markRouteNoAuth(function getSharedTranscript(_request: Request, url: URL): Response {
+    const token = extractShareTokenFromPath(url.pathname);
+    if (!token) {
+      return Response.json({ error: 'Share token is required' }, { status: 400 });
+    }
+
+    const snapshot = shareStore.getShare(token);
+    if (!snapshot) {
+      return Response.json({ error: 'Share not found' }, { status: 404 });
+    }
+
+    if (wantsPlainText(url)) {
+      return new Response(renderSharedChatText(snapshot), {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        },
+      });
+    }
+
+    const links = createSharedPaths(snapshot.shareToken);
+    return new Response(renderSharedChatHtml(snapshot, links), {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      },
+    });
+  });
+
   return {
     '/api/v1/chats/share': { POST: postShareChat, DELETE: deleteShareChat },
     '/api/v1/chats/share/status': { GET: getShareStatus },
     '/api/v1/shared': { GET: getSharedChat },
+    '/shared/:token': { GET: getSharedTranscript },
   };
 }
