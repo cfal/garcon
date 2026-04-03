@@ -4,7 +4,7 @@
      collapsible "More providers" toggle. -->
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getAuthStatus, launchAuthLogin } from '$lib/api/providers.js';
+	import { getAuthStatus, launchAuthLogin, type DeviceAuthInfo } from '$lib/api/providers.js';
 	import AgentCard from './AgentCard.svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 
@@ -53,6 +53,10 @@
 	let factoryOpen = $state(false);
 
 	let moreProvidersOpen = $state(false);
+
+	// Device auth state for providers that use device-code flow (e.g. Codex).
+	let deviceAuthInfo = $state<Partial<Record<AgentId, DeviceAuthInfo>>>({});
+	let loginPending = $state<Partial<Record<AgentId, boolean>>>({});
 
 	function authFor(agent: AgentId): AuthStatus {
 		if (agent === 'claude') return claudeAuth;
@@ -127,6 +131,7 @@
 
 		if (authFor(agent).authenticated) {
 			stopAuthPolling(agent);
+			clearDeviceAuth(agent);
 			return;
 		}
 
@@ -155,17 +160,34 @@
 		}, AUTH_POLL_INTERVAL_MS);
 	}
 
+	function clearDeviceAuth(agent: AgentId) {
+		deviceAuthInfo = { ...deviceAuthInfo, [agent]: undefined };
+		loginPending = { ...loginPending, [agent]: false };
+	}
+
 	async function handleLogin(agent: BrowserLoginAgentId) {
 		setAuth(agent, { ...authFor(agent), error: null });
+		loginPending = { ...loginPending, [agent]: true };
 
 		try {
-			await launchAuthLogin(agent);
+			const result = await launchAuthLogin(agent);
+
+			if (result.deviceAuth) {
+				deviceAuthInfo = { ...deviceAuthInfo, [agent]: result.deviceAuth };
+				loginPending = { ...loginPending, [agent]: false };
+				window.open(result.deviceAuth.url, '_blank', 'noopener');
+				startAuthPolling(agent);
+				return;
+			}
+
 			await checkAuth(agent);
+			loginPending = { ...loginPending, [agent]: false };
 			if (!authFor(agent).authenticated) {
 				startAuthPolling(agent);
 			}
 		} catch (err) {
 			stopAuthPolling(agent);
+			clearDeviceAuth(agent);
 			setAuth(agent, {
 				...authFor(agent),
 				loading: false,
@@ -223,6 +245,8 @@
 			onLogin={agent.cliOnly ? undefined : () => void handleLogin(agent.id as BrowserLoginAgentId)}
 			cliOnly={agent.cliOnly ?? false}
 			loginCommand={agent.loginCommand}
+			deviceAuth={deviceAuthInfo[agent.id]}
+			pending={loginPending[agent.id] ?? false}
 		/>
 	{/each}
 

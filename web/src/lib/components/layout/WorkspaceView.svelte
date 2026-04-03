@@ -4,9 +4,11 @@
 	import Menu from '@lucide/svelte/icons/menu';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
+	import Share2 from '@lucide/svelte/icons/share-2';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
 	import ConversationWorkspace from '$lib/components/chat/ConversationWorkspace.svelte';
+	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import { cn } from '$lib/utils/cn';
 	import { CHAT_TOOLBAR_TABS } from './chat-toolbar-tabs';
 
@@ -53,6 +55,21 @@
 
 	// Holds the chat submit function registered by ConversationWorkspace.
 	let chatSubmitFn = $state<((message: string) => Promise<boolean>) | null>(null);
+
+	// Share dialog state.
+	let shareChatId = $state<string | null>(null);
+	let shareChatTitle = $state('');
+
+	function openShareDialog() {
+		if (!selectedChat) return;
+		shareChatId = selectedChat.id;
+		shareChatTitle = selectedChat.title || 'Untitled Chat';
+	}
+
+	function closeShareDialog() {
+		shareChatId = null;
+		shareChatTitle = '';
+	}
 
 	function handleRegisterSubmit(fn: (message: string) => Promise<boolean>): void {
 		chatSubmitFn = fn;
@@ -135,6 +152,18 @@
 										</button>
 									{/each}
 								</div>
+									<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border">
+										<button
+											type="button"
+											onclick={openShareDialog}
+											class={getUtilityButtonClasses()}
+											title={m.share_button()}
+										>
+											<span class="flex items-center justify-center">
+												<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+											</span>
+										</button>
+									</div>
 										{#if canToggleDesktopFullscreen}
 											<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border">
 											<button
@@ -179,6 +208,18 @@
 							</button>
 						{/each}
 					</div>
+						<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border shadow-sm">
+							<button
+								type="button"
+								onclick={openShareDialog}
+								class={getUtilityButtonClasses()}
+								title={m.share_button()}
+							>
+								<span class="flex items-center justify-center">
+									<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+								</span>
+							</button>
+						</div>
 							{#if canToggleDesktopFullscreen}
 								<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border shadow-sm">
 								<button
@@ -226,4 +267,6 @@
 			{/if}
 		</div>
 	{/if}
+
+	<ShareChatDialog chatId={shareChatId} chatTitle={shareChatTitle} onClose={closeShareDialog} />
 </div>

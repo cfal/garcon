@@ -5,14 +5,16 @@ import createProviderRoutes from './providers.js';
 import createModelsRoutes from './models.js';
 import createGitRoutes from './git.js';
 import createChatRoutes from './chats.js';
+import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 
-export default function createAllRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers, telegramNotifier) {
+export default function createAllRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers, telegramNotifier, shareStore) {
   return {
     ...staticRoutes,
     ...authRoutes,
     ...createProviderRoutes(providers),
     ...createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers),
+    ...createShareRoutes(shareStore, registry, settings, metadata, historyCache),
     ...createFilesRoutes(registry),
     ...createWorkspaceRoutes(settings, providers, telegramNotifier),
     ...createModelsRoutes(providers),
