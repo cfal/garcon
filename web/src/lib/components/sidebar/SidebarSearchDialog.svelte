@@ -64,6 +64,7 @@
 		}
 
 		if (key === 'enter') {
+			if (e.target !== inputRef) return;
 			e.preventDefault();
 			const selected = filteredChats[highlightedIndex];
 			if (selected) onSelectChat(selected.id);
