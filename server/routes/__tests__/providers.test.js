@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
-const launchProviderAuthLogin = mock(() => ({ launched: true, alreadyRunning: false }));
+const launchProviderAuthLogin = mock(() => Promise.resolve({ launched: true, alreadyRunning: false }));
 
 mock.module('../../providers/auth-login.js', () => ({
   launchProviderAuthLogin,

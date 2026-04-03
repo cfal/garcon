@@ -14,6 +14,7 @@
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Info from '@lucide/svelte/icons/info';
 	import Copy from '@lucide/svelte/icons/copy';
+	import Share2 from '@lucide/svelte/icons/share-2';
 	import Tag from '@lucide/svelte/icons/tag';
 	import {
 		DropdownMenu,
@@ -40,6 +41,7 @@
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
+		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onEnterReorderMode?: () => void;
@@ -62,6 +64,7 @@
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
+		onShareChat,
 		onTagClick,
 		onManageTags,
 		onEnterReorderMode,
@@ -340,6 +343,10 @@
 					<DropdownMenuItem onclick={requestDetails}>
 						<Info />
 						{m.sidebar_chats_details()}
+					</DropdownMenuItem>
+					<DropdownMenuItem onclick={() => onShareChat(session.id, chatName)}>
+						<Share2 />
+						{m.share_button()}
 					</DropdownMenuItem>
 					{#if onManageTags}
 						<DropdownMenuItem onclick={() => onManageTags?.(session.id, session.tags)}>
