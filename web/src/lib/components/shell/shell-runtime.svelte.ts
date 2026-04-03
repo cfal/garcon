@@ -10,6 +10,7 @@ import { attachShellSocket, sendShellMessage } from '$lib/ws/shell-transport';
 import type { ShellServerMessage } from '$lib/types/shell';
 import * as m from '$lib/paraglide/messages.js';
 import { copyToClipboard } from '$lib/utils/clipboard';
+import type { ShellMobileControlsState, ShellToolbarKey } from './shell-mobile-controls.svelte';
 
 const VSCODE_DARK_THEME: import('@xterm/xterm').ITheme = {
 	background: '#1e1e1e',
@@ -61,6 +62,7 @@ const VSCODE_LIGHT_THEME: import('@xterm/xterm').ITheme = {
 
 export interface ShellRuntimeOptions {
 	get isDark(): boolean;
+	get mobileControls(): ShellMobileControlsState;
 }
 
 export class ShellRuntime {
@@ -70,6 +72,7 @@ export class ShellRuntime {
 	isRestarting = $state(false);
 	isConnecting = $state(false);
 	clipboardMessage = $state('');
+	isTerminalFocused = $state(false);
 
 	// Internal (non-reactive) references
 	private terminal: Terminal | null = null;
@@ -77,6 +80,7 @@ export class ShellRuntime {
 	private ws: WebSocket | null = null;
 	private resizeObserver: ResizeObserver | null = null;
 	private pasteCleanup: (() => void) | null = null;
+	private focusCleanup: (() => void) | null = null;
 	private resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 	private lastProjectPath: string | null = null;
 	private lastChatId: string | null = null;
@@ -122,9 +126,12 @@ export class ShellRuntime {
 		terminal.open(terminalEl);
 
 		terminal.attachCustomKeyEventHandler((event: KeyboardEvent): boolean => {
+			const hasMobileModifiers = this.opts.mobileControls.hasActiveModifiers;
+
 			// Ctrl/Cmd+C with selection copies text
 			if (
 				event.type === 'keydown' &&
+				!hasMobileModifiers &&
 				(event.ctrlKey || event.metaKey) &&
 				event.key?.toLowerCase() === 'c' &&
 				terminal.hasSelection()
@@ -138,6 +145,7 @@ export class ShellRuntime {
 			// Ctrl/Cmd+V pastes from clipboard
 			if (
 				event.type === 'keydown' &&
+				!hasMobileModifiers &&
 				(event.ctrlKey || event.metaKey) &&
 				event.key?.toLowerCase() === 'v'
 			) {
@@ -165,7 +173,10 @@ export class ShellRuntime {
 
 		this.isInitialized = true;
 
-		terminal.onData((data: string) => this.sendInputToShell(data));
+		terminal.onData((data: string) => {
+			const transformed = this.opts.mobileControls.transformTerminalInput(data);
+			this.sendInputToShell(transformed);
+		});
 
 		const pasteTarget = terminal.textarea;
 		const handleTerminalPaste = (event: ClipboardEvent) => {
@@ -177,6 +188,19 @@ export class ShellRuntime {
 		};
 		pasteTarget?.addEventListener('paste', handleTerminalPaste);
 		this.pasteCleanup = () => pasteTarget?.removeEventListener('paste', handleTerminalPaste);
+
+		const syncFocusState = () => {
+			this.isTerminalFocused = document.activeElement === pasteTarget;
+		};
+		const handleBlur = () => {
+			requestAnimationFrame(syncFocusState);
+		};
+		pasteTarget?.addEventListener('focus', syncFocusState);
+		pasteTarget?.addEventListener('blur', handleBlur);
+		this.focusCleanup = () => {
+			pasteTarget?.removeEventListener('focus', syncFocusState);
+			pasteTarget?.removeEventListener('blur', handleBlur);
+		};
 
 		this.resizeObserver = new ResizeObserver(() => {
 			if (this.fitAddon && this.terminal) {
@@ -323,7 +347,9 @@ export class ShellRuntime {
 		}
 		this.isConnected = false;
 		this.isConnecting = false;
+		this.isTerminalFocused = false;
 		this.clipboardMessage = '';
+		this.opts.mobileControls.reset();
 	}
 
 	restartShell(): void {
@@ -337,6 +363,10 @@ export class ShellRuntime {
 			this.ws = null;
 		}
 		if (this.terminal) {
+			this.pasteCleanup?.();
+			this.pasteCleanup = null;
+			this.focusCleanup?.();
+			this.focusCleanup = null;
 			this.terminal.dispose();
 			this.terminal = null;
 			this.fitAddon = null;
@@ -344,7 +374,9 @@ export class ShellRuntime {
 
 		this.isConnected = false;
 		this.isInitialized = false;
+		this.isTerminalFocused = false;
 		this.clipboardMessage = '';
+		this.opts.mobileControls.reset();
 
 		setTimeout(() => {
 			this.isRestarting = false;
@@ -354,6 +386,17 @@ export class ShellRuntime {
 	sendInputToShell(text: string): boolean {
 		if (!text) return false;
 		return sendShellMessage(this.ws, { type: 'input', data: text });
+	}
+
+	sendToolbarKey(key: ShellToolbarKey): boolean {
+		const sequence = this.opts.mobileControls.buildToolbarSequence(key);
+		this.focusTerminal();
+		return this.sendInputToShell(sequence);
+	}
+
+	focusTerminal(): void {
+		this.terminal?.focus();
+		this.terminal?.textarea?.focus();
 	}
 
 	async pasteFromClipboard(): Promise<boolean> {
@@ -388,6 +431,8 @@ export class ShellRuntime {
 		this.clearReconnectTimer();
 		this.pasteCleanup?.();
 		this.pasteCleanup = null;
+		this.focusCleanup?.();
+		this.focusCleanup = null;
 		if (this.resizeTimeout) {
 			clearTimeout(this.resizeTimeout);
 			this.resizeTimeout = null;
@@ -400,6 +445,8 @@ export class ShellRuntime {
 			this.ws.close();
 		}
 		this.ws = null;
+		this.isTerminalFocused = false;
+		this.opts.mobileControls.reset();
 		this.terminal?.dispose();
 		this.terminal = null;
 	}
