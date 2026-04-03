@@ -44,6 +44,40 @@ describe('parseChatSearch', () => {
 		expect(spec.textTokens).toEqual(['some text']);
 		expect(spec.providers).toEqual(['claude']);
 	});
+
+	it('parses status:active', () => {
+		const spec = parseChatSearch('status:active');
+		expect(spec).toEqual({
+			textTokens: [],
+			tags: [],
+			providers: [],
+			models: [],
+			status: 'active',
+		});
+	});
+
+	it('parses status:unread', () => {
+		const spec = parseChatSearch('status:unread');
+		expect(spec).toEqual({
+			textTokens: [],
+			tags: [],
+			providers: [],
+			models: [],
+			status: 'unread',
+		});
+	});
+
+	it('parses mixed status and tag filters', () => {
+		const spec = parseChatSearch('status:unread tag:ops');
+		expect(spec.status).toBe('unread');
+		expect(spec.tags).toEqual(['ops']);
+	});
+
+	it('ignores unknown status values', () => {
+		const spec = parseChatSearch('status:bogus hello');
+		expect(spec.status).toBeUndefined();
+		expect(spec.textTokens).toEqual(['hello']);
+	});
 });
 
 describe('serializeChatFilter', () => {
@@ -63,6 +97,19 @@ describe('serializeChatFilter', () => {
 
 	it('returns empty string for empty spec', () => {
 		expect(serializeChatFilter(emptyFilterSpec())).toBe('');
+	});
+
+	it('serializes status filter', () => {
+		const spec = { ...emptyFilterSpec(), status: 'active' as const };
+		expect(serializeChatFilter(spec)).toBe('status:active');
+	});
+
+	it('round-trips status with tags', () => {
+		const query = 'status:unread tag:ops';
+		const spec = parseChatSearch(query);
+		const serialized = serializeChatFilter(spec);
+		const reparsed = parseChatSearch(serialized);
+		expect(reparsed).toEqual(spec);
 	});
 });
 

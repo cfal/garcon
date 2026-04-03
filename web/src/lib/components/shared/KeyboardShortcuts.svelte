@@ -38,6 +38,11 @@
 			onToggleCommandMenu?.();
 			return;
 		}
+		if (isMeta && key === 'o') {
+			e.preventDefault();
+			appShell.openSidebarSearch();
+			return;
+		}
 		if (e.ctrlKey && key === 'n') {
 			e.preventDefault();
 			appShell.requestNewChat();

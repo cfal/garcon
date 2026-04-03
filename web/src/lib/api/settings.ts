@@ -54,6 +54,43 @@ export async function sendTelegramTest(chatId: string): Promise<TelegramTestResp
 	return apiPost<TelegramTestResponse>('/api/v1/app/telegram/test', { chatId });
 }
 
+export interface SavedChatSearch {
+	id: string;
+	title: string | null;
+	query: string;
+	showInQuickMenu: boolean;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export async function getSavedSearches(): Promise<{ savedSearches: SavedChatSearch[] }> {
+	return apiGet('/api/v1/app/saved-searches');
+}
+
+export async function createSavedSearch(
+	input: Pick<SavedChatSearch, 'title' | 'query' | 'showInQuickMenu'>
+): Promise<{ success: boolean; savedSearch: SavedChatSearch }> {
+	return apiPost('/api/v1/app/saved-searches', input);
+}
+
+export async function updateSavedSearch(
+	id: string,
+	patch: Partial<Pick<SavedChatSearch, 'title' | 'query' | 'showInQuickMenu'>>
+): Promise<{ success: boolean; savedSearch: SavedChatSearch }> {
+	return apiPut('/api/v1/app/saved-searches', { id, ...patch });
+}
+
+export async function deleteSavedSearch(id: string): Promise<{ success: boolean }> {
+	return apiDelete(`/api/v1/app/saved-searches?id=${encodeURIComponent(id)}`);
+}
+
+export async function reorderSavedSearches(
+	oldOrder: string[],
+	newOrder: string[]
+): Promise<{ success: boolean }> {
+	return apiPut('/api/v1/app/saved-searches/reorder', { oldOrder, newOrder });
+}
+
 export interface ChatFolderFilter {
 	textTokens: string[];
 	tags: string[];

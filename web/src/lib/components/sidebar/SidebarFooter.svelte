@@ -5,14 +5,14 @@
 		DropdownMenu,
 		DropdownMenuContent,
 		DropdownMenuItem,
+		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
-	import Input from '$lib/components/ui/input/input.svelte';
-	import Search from '@lucide/svelte/icons/search';
-	import X from '@lucide/svelte/icons/x';
+	import SidebarSearchTrigger from './SidebarSearchTrigger.svelte';
 	import Settings from '@lucide/svelte/icons/settings';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
+	import type { SavedChatSearch } from '$lib/api/settings';
 
 	interface SidebarFooterProps {
 		dockPlacement?: 'top' | 'bottom';
@@ -21,10 +21,12 @@
 		isReorderMode: boolean;
 		visibleUnreadCount?: number;
 		isMarkingAllRead?: boolean;
-		onSearchFilterChange: (value: string) => void;
+		quickMenuSearches?: SavedChatSearch[];
+		onOpenSearchDialog: () => void;
 		onClearSearchFilter: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
+		onApplyQuickSearch?: (query: string) => void;
 		primaryLabel?: string;
 		onShowSettings: () => void;
 	}
@@ -36,10 +38,12 @@
 		isReorderMode,
 		visibleUnreadCount = 0,
 		isMarkingAllRead = false,
-		onSearchFilterChange,
+		quickMenuSearches = [],
+		onOpenSearchDialog,
 		onClearSearchFilter,
 		onCreateChat,
 		onMarkAllRead,
+		onApplyQuickSearch,
 		primaryLabel,
 		onShowSettings,
 	}: SidebarFooterProps = $props();
@@ -49,11 +53,6 @@
 	let isMarkAllReadDisabled = $derived(isLoading || isMarkingAllRead);
 	const footerControlHeightClass = 'h-9';
 	let isTopDock = $derived(dockPlacement === 'top');
-
-	function handleSearchInput(e: Event) {
-		const target = e.target as HTMLInputElement;
-		onSearchFilterChange(target.value);
-	}
 
 	function handleMarkAllRead() {
 		onMarkAllRead?.();
@@ -75,23 +74,12 @@
 
 		{#if !isReorderMode}
 			<div class="flex items-center gap-1.5">
-				<div class="relative flex-1">
-					<Search class="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-					<Input
-						type="text"
-						placeholder={m.sidebar_projects_search_placeholder()}
-						value={searchFilter}
-						oninput={handleSearchInput}
-						class={`pl-8 ${footerControlHeightClass} text-sm bg-muted/50 border border-sidebar-border/70 focus-visible:bg-background focus-visible:ring-1 focus-visible:ring-primary/20`}
+				<div class="flex-1">
+					<SidebarSearchTrigger
+						query={searchFilter}
+						onOpen={onOpenSearchDialog}
+						onClear={onClearSearchFilter}
 					/>
-					{#if searchFilter}
-						<button
-							onclick={onClearSearchFilter}
-							class="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 hover:bg-accent rounded"
-						>
-							<X class="w-3 h-3 text-muted-foreground" />
-						</button>
-					{/if}
 				</div>
 				<DropdownMenu>
 					<DropdownMenuTrigger
@@ -102,6 +90,14 @@
 						<EllipsisVertical class="w-3.5 h-3.5" />
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
+						{#if quickMenuSearches.length > 0}
+							{#each quickMenuSearches as search (search.id)}
+								<DropdownMenuItem onclick={() => onApplyQuickSearch?.(search.query)}>
+									{search.title}
+								</DropdownMenuItem>
+							{/each}
+							<DropdownMenuSeparator />
+						{/if}
 						<DropdownMenuItem onclick={handleMarkAllRead} disabled={!showMarkAllRead || isMarkAllReadDisabled}>
 							<SquareCheck class="w-3.5 h-3.5" />
 							{m.sidebar_chats_mark_all_read()}
@@ -144,24 +140,12 @@
 	{#if !isReorderMode}
 		<div class={`px-3 ${isTopDock ? 'pt-1 pb-2' : 'pt-2 pb-1'}`}>
 			<div class="flex items-center gap-1.5">
-				<div class="relative flex-1">
-					<Search class="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-					<Input
-						type="text"
-						placeholder={m.sidebar_projects_search_placeholder()}
-						value={searchFilter}
-						oninput={handleSearchInput}
-						class={`pl-8 ${footerControlHeightClass} text-xs bg-muted/50 border border-sidebar-border/70 focus-visible:bg-background focus-visible:ring-1 focus-visible:ring-primary/20 disabled:opacity-100`}
-						disabled={isLoading}
+				<div class="flex-1">
+					<SidebarSearchTrigger
+						query={searchFilter}
+						onOpen={onOpenSearchDialog}
+						onClear={onClearSearchFilter}
 					/>
-					{#if searchFilter}
-						<button
-							onclick={onClearSearchFilter}
-							class="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 hover:bg-accent rounded"
-						>
-							<X class="w-3 h-3 text-muted-foreground" />
-						</button>
-					{/if}
 				</div>
 				<DropdownMenu>
 					<DropdownMenuTrigger
@@ -172,6 +156,14 @@
 						<EllipsisVertical class="w-3.5 h-3.5" />
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
+						{#if quickMenuSearches.length > 0}
+							{#each quickMenuSearches as search (search.id)}
+								<DropdownMenuItem onclick={() => onApplyQuickSearch?.(search.query)}>
+									{search.title}
+								</DropdownMenuItem>
+							{/each}
+							<DropdownMenuSeparator />
+						{/if}
 						<DropdownMenuItem onclick={handleMarkAllRead} disabled={!showMarkAllRead || isMarkAllReadDisabled}>
 							<SquareCheck class="w-3.5 h-3.5" />
 							{m.sidebar_chats_mark_all_read()}

@@ -161,6 +161,130 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
     }
   }
 
+  function sanitizeSavedSearchInput(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const titleRaw = typeof raw.title === 'string' ? raw.title.trim() : '';
+    const query = typeof raw.query === 'string' ? raw.query.trim() : '';
+    const showInQuickMenu = raw.showInQuickMenu === true;
+    return { title: titleRaw || null, query, showInQuickMenu };
+  }
+
+  async function getSavedSearches() {
+    try {
+      const savedSearches = await settings.getSavedSearches();
+      return Response.json({ savedSearches });
+    } catch (error) {
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
+  async function postSavedSearch(request) {
+    try {
+      const body = await parseJsonBody(request);
+      const input = sanitizeSavedSearchInput(body);
+      if (!input || !input.query) {
+        return Response.json({ success: false, error: 'query is required' }, { status: 400 });
+      }
+      if (input.showInQuickMenu && !input.title) {
+        return Response.json({ success: false, error: 'title is required when showInQuickMenu is true' }, { status: 400 });
+      }
+      const now = new Date().toISOString();
+      const savedSearch = {
+        id: crypto.randomUUID(),
+        title: input.title,
+        query: input.query,
+        showInQuickMenu: input.showInQuickMenu,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const result = await settings.addSavedSearch(savedSearch);
+      return Response.json({ success: true, savedSearch: result });
+    } catch (error) {
+      if (error.message === 'Malformed JSON') {
+        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
+      }
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
+  async function putSavedSearch(request) {
+    try {
+      const body = await parseJsonBody(request);
+      const id = String(body.id || '').trim();
+      if (!id) {
+        return Response.json({ success: false, error: 'id is required' }, { status: 400 });
+      }
+      const patch = {};
+      if (typeof body.title === 'string') {
+        const title = body.title.trim();
+        patch.title = title || null;
+      }
+      if (typeof body.query === 'string') {
+        const query = body.query.trim();
+        if (!query) {
+          return Response.json({ success: false, error: 'query must not be empty' }, { status: 400 });
+        }
+        patch.query = query;
+      }
+      if (typeof body.showInQuickMenu === 'boolean') {
+        patch.showInQuickMenu = body.showInQuickMenu;
+      }
+      // Validate quick-menu title requirement against the merged state.
+      // The patch may omit title/showInQuickMenu, so we need the stored record.
+      const existing = (await settings.getSavedSearches()).find((s) => s.id === id);
+      if (!existing) {
+        return Response.json({ success: false, error: 'Saved search not found' }, { status: 404 });
+      }
+      const mergedShowInQuickMenu = patch.showInQuickMenu !== undefined ? patch.showInQuickMenu : existing.showInQuickMenu;
+      const mergedTitle = patch.title !== undefined ? patch.title : existing.title;
+      if (mergedShowInQuickMenu === true && !mergedTitle) {
+        return Response.json({ success: false, error: 'title is required when showInQuickMenu is true' }, { status: 400 });
+      }
+      patch.updatedAt = new Date().toISOString();
+      const result = await settings.updateSavedSearch(id, patch);
+      return Response.json({ success: true, savedSearch: result });
+    } catch (error) {
+      if (error.message === 'Malformed JSON') {
+        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
+      }
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
+  async function deleteSavedSearch(_request, url) {
+    const id = url.searchParams.get('id');
+    if (!id) {
+      return Response.json({ success: false, error: 'id query parameter is required' }, { status: 400 });
+    }
+    try {
+      const removed = await settings.removeSavedSearch(id);
+      if (!removed) {
+        return Response.json({ success: false, error: 'Saved search not found' }, { status: 404 });
+      }
+      return Response.json({ success: true });
+    } catch (error) {
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
+  async function putSavedSearchReorder(request) {
+    try {
+      const body = await parseJsonBody(request);
+      const oldOrder = Array.isArray(body.oldOrder) ? body.oldOrder : [];
+      const newOrder = Array.isArray(body.newOrder) ? body.newOrder : [];
+      const result = await settings.reorderSavedSearches(oldOrder, newOrder);
+      if (!result.success) {
+        return Response.json({ success: false, error: result.error }, { status: 400 });
+      }
+      return Response.json({ success: true });
+    } catch (error) {
+      if (error.message === 'Malformed JSON') {
+        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
+      }
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
   async function getFolders() {
     try {
       const folders = await settings.getFolders();
@@ -240,5 +364,7 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
     '/api/v1/app/settings': { GET: getAppSettings, PUT: putAppSettings },
     '/api/v1/app/telegram/test': { POST: postTelegramTest },
     '/api/v1/app/folders': { GET: getFolders, POST: postFolder, PUT: putFolder, DELETE: deleteFolder },
+    '/api/v1/app/saved-searches': { GET: getSavedSearches, POST: postSavedSearch, PUT: putSavedSearch, DELETE: deleteSavedSearch },
+    '/api/v1/app/saved-searches/reorder': { PUT: putSavedSearchReorder },
   };
 }

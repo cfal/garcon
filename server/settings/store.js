@@ -34,6 +34,7 @@ function createEmpty() {
     lastClaudeThinkingMode: DEFAULT_CLAUDE_THINKING_MODE,
     lastAmpAgentMode: DEFAULT_AMP_AGENT_MODE,
     chatFolders: [],
+    savedChatSearches: [],
   };
 }
 
@@ -90,7 +91,70 @@ function sanitizeFolder(raw) {
   };
 }
 
+function sanitizeSavedSearch(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+  const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+  const titleRaw = typeof raw.title === 'string' ? raw.title.trim() : '';
+  const query = typeof raw.query === 'string' ? raw.query.trim() : '';
+  const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt.trim() : '';
+  const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt.trim() : '';
+  const showInQuickMenu = raw.showInQuickMenu === true;
+
+  if (!id || !query || !createdAt || !updatedAt) return null;
+  if (showInQuickMenu && !titleRaw) return null;
+
+  return {
+    id,
+    title: titleRaw || null,
+    query,
+    showInQuickMenu,
+    createdAt,
+    updatedAt,
+  };
+}
+
+// Serializes a folder filter object into a search query string.
+function serializeFolderFilterToQuery(filter) {
+  const parts = [];
+  if (filter.status === 'active') parts.push('status:active');
+  if (filter.status === 'unread') parts.push('status:unread');
+  for (const tag of (filter.tags || [])) parts.push(`tag:${tag}`);
+  for (const provider of (filter.providers || [])) parts.push(`provider:${provider}`);
+  for (const model of (filter.models || [])) parts.push(`model:${model}`);
+  for (const text of (filter.textTokens || [])) {
+    parts.push(text.includes(' ') ? `"${text}"` : text);
+  }
+  return parts.join(' ');
+}
+
+// TODO: Remove folder-to-saved-search migration once deployed migrations are complete.
+function migrateFoldersToSavedSearches(chatFolders) {
+  return chatFolders
+    .map((folder) => {
+      const query = serializeFolderFilterToQuery(folder.filter || {});
+      if (!query) return null;
+      return {
+        id: folder.id,
+        title: folder.name,
+        query,
+        showInQuickMenu: false,
+        createdAt: folder.createdAt,
+        updatedAt: folder.createdAt,
+      };
+    })
+    .filter(Boolean);
+}
+
 function sanitize(parsed) {
+  const chatFolders = Array.isArray(parsed.chatFolders)
+    ? parsed.chatFolders.map(sanitizeFolder).filter(Boolean)
+    : [];
+
+  const savedChatSearches = Array.isArray(parsed.savedChatSearches)
+    ? parsed.savedChatSearches.map(sanitizeSavedSearch).filter(Boolean)
+    : [];
+
   return {
     ui: normalizeUiSettings(parsed.ui),
     paths: parsed.paths && typeof parsed.paths === 'object' ? parsed.paths : {},
@@ -105,7 +169,10 @@ function sanitize(parsed) {
     lastThinkingMode: normalizeThinkingMode(parsed.lastThinkingMode),
     lastClaudeThinkingMode: normalizeClaudeThinkingMode(parsed.lastClaudeThinkingMode),
     lastAmpAgentMode: normalizeAmpAgentMode(parsed.lastAmpAgentMode),
-    chatFolders: Array.isArray(parsed.chatFolders) ? parsed.chatFolders.map(sanitizeFolder).filter(Boolean) : [],
+    chatFolders,
+    savedChatSearches: savedChatSearches.length > 0
+      ? savedChatSearches
+      : migrateFoldersToSavedSearches(chatFolders),
   };
 }
 
@@ -594,6 +661,82 @@ export class SettingsStore extends EventEmitter {
 
       const anchorChatId = normNew[0] || list;
       this.emitListChanged('chats-reordered', anchorChatId);
+      return { success: true };
+    });
+  }
+
+  async getSavedSearches() {
+    const settings = await this.loadSettings();
+    return settings.savedChatSearches || [];
+  }
+
+  async addSavedSearch(savedSearch) {
+    return this.#withLock(async () => {
+      const s = await this.loadSettings();
+      const searches = s.savedChatSearches || [];
+      if (searches.some((entry) => entry.id === savedSearch.id)) {
+        throw new Error(`Saved search with ID ${savedSearch.id} already exists`);
+      }
+      s.savedChatSearches = [...searches, savedSearch];
+      await this.saveSettings(s);
+      return savedSearch;
+    });
+  }
+
+  async updateSavedSearch(searchId, patch) {
+    return this.#withLock(async () => {
+      const s = await this.loadSettings();
+      const searches = s.savedChatSearches || [];
+      const idx = searches.findIndex((entry) => entry.id === searchId);
+      if (idx < 0) {
+        throw new Error(`Saved search not found: ${searchId}`);
+      }
+      searches[idx] = { ...searches[idx], ...patch };
+      s.savedChatSearches = searches;
+      await this.saveSettings(s);
+      return searches[idx];
+    });
+  }
+
+  async removeSavedSearch(searchId) {
+    return this.#withLock(async () => {
+      const s = await this.loadSettings();
+      const searches = s.savedChatSearches || [];
+      const idx = searches.findIndex((entry) => entry.id === searchId);
+      if (idx < 0) return false;
+      s.savedChatSearches = searches.filter((entry) => entry.id !== searchId);
+      await this.saveSettings(s);
+      return true;
+    });
+  }
+
+  async reorderSavedSearches(oldOrder, newOrder) {
+    const normOld = dedup(oldOrder);
+    const normNew = dedup(newOrder);
+
+    if (normOld.length === 0) return { success: false, error: 'oldOrder must not be empty' };
+    if (normOld.length !== normNew.length) return { success: false, error: 'oldOrder and newOrder must have the same length' };
+
+    const oldSet = new Set(normOld);
+    const newSet = new Set(normNew);
+    if (normOld.length !== oldSet.size || normNew.length !== newSet.size) {
+      return { success: false, error: 'oldOrder and newOrder must contain unique IDs' };
+    }
+    for (const id of normNew) {
+      if (!oldSet.has(id)) return { success: false, error: 'oldOrder and newOrder must contain the same IDs' };
+    }
+
+    return this.#withLock(async () => {
+      const s = await this.loadSettings();
+      const searches = s.savedChatSearches || [];
+      const currentIds = searches.map((entry) => entry.id);
+
+      const result = applyWindowReorder(currentIds, normOld, normNew);
+      if (!result) return { success: false, error: 'oldOrder is not a contiguous subsequence of the current list' };
+
+      const byId = new Map(searches.map((entry) => [entry.id, entry]));
+      s.savedChatSearches = result.map((id) => byId.get(id)).filter(Boolean);
+      await this.saveSettings(s);
       return { success: true };
     });
   }

@@ -38,7 +38,12 @@ export function parseChatSearch(query: string): ChatFilterSpec {
 
 	for (const token of tokens) {
 		const lower = token.toLowerCase();
-		if (lower.startsWith('tag:')) {
+		if (lower.startsWith('status:')) {
+			const value = token.slice(7).trim().toLowerCase();
+			if (value === 'active' || value === 'unread') {
+				spec.status = value;
+			}
+		} else if (lower.startsWith('tag:')) {
 			const value = token.slice(4).trim();
 			if (value) spec.tags.push(value.toLowerCase());
 		} else if (lower.startsWith('provider:')) {
@@ -156,6 +161,7 @@ function buildHaystack(chat: ChatFilterTarget): string {
 /** Serializes a ChatFilterSpec back into a search query string. */
 export function serializeChatFilter(spec: ChatFilterSpec): string {
 	const parts: string[] = [];
+	if (spec.status) parts.push(`status:${spec.status}`);
 	for (const tag of spec.tags) parts.push(`tag:${tag}`);
 	for (const provider of spec.providers) parts.push(`provider:${provider}`);
 	for (const model of spec.models) parts.push(`model:${model}`);
