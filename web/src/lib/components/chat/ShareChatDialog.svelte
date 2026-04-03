@@ -96,8 +96,8 @@
 </script>
 
 <Dialog.Root open={dialogOpen} onOpenChange={handleOpenChange}>
-	<Dialog.Content class="sm:max-w-lg gap-0">
-		<Dialog.Header class="pb-4">
+	<Dialog.Content class="sm:max-w-xl">
+		<Dialog.Header>
 			<Dialog.Title>{m.share_dialog_title()}</Dialog.Title>
 			<Dialog.Description>{m.share_dialog_description()}</Dialog.Description>
 		</Dialog.Header>
