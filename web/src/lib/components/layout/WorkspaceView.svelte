@@ -163,9 +163,7 @@
 												<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 											</span>
 										</button>
-									</div>
 										{#if canToggleDesktopFullscreen}
-											<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border">
 											<button
 												type="button"
 												onclick={onToggleDesktopFullscreen}
@@ -180,8 +178,8 @@
 													{/if}
 												</span>
 											</button>
-										</div>
-									{/if}
+										{/if}
+									</div>
 							</div>
 						</div>
 					{/if}
@@ -219,9 +217,7 @@
 									<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 								</span>
 							</button>
-						</div>
 							{#if canToggleDesktopFullscreen}
-								<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border shadow-sm">
 								<button
 									type="button"
 									onclick={onToggleDesktopFullscreen}
@@ -236,8 +232,8 @@
 										{/if}
 									</span>
 								</button>
-							</div>
-						{/if}
+							{/if}
+						</div>
 				</div>
 			</div>
 		{/if}

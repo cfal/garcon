@@ -139,10 +139,12 @@
 		}
 	});
 
-	// Redirects authenticated users away from public routes
+	// Redirects authenticated users away from login/setup routes.
+	// Shared view routes are excluded -- they are public by design.
 	$effect(() => {
 		if (auth.isLoading) return;
 		if (!isPublicRoute) return;
+		if (page.url.pathname.startsWith('/shared/')) return;
 		if (auth.authDisabled || (auth.isAuthenticated && !auth.needsSetup)) {
 			goto('/');
 		}
