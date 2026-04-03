@@ -87,8 +87,9 @@
 
 <svelte:head>
 	<title>{title || m.shared_view_title()} - Garcon</title>
-	<!-- Overrides the app-wide overflow:hidden on html/body for this standalone page. -->
-	{@html '<style>html, body { overflow: auto !important; height: auto !important; }</style>'}
+	<!-- Overrides the app-wide overflow:hidden on html/body for this standalone page.
+	     html stays at 100% height so body overflows within it, enabling trackpad scroll. -->
+	{@html '<style>html { overflow: auto !important; } body { overflow: visible !important; height: auto !important; }</style>'}
 </svelte:head>
 
 <div class="min-h-dvh bg-background text-foreground flex flex-col">
