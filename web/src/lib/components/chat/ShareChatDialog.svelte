@@ -96,15 +96,15 @@
 </script>
 
 <Dialog.Root open={dialogOpen} onOpenChange={handleOpenChange}>
-	<Dialog.Content class="sm:max-w-md">
-		<Dialog.Header>
+	<Dialog.Content class="sm:max-w-lg gap-0">
+		<Dialog.Header class="pb-4">
 			<Dialog.Title>{m.share_dialog_title()}</Dialog.Title>
 			<Dialog.Description>{m.share_dialog_description()}</Dialog.Description>
 		</Dialog.Header>
 
-		<div class="space-y-4 py-2">
+		<div class="space-y-4">
 			{#if isLoading}
-				<div class="flex items-center justify-center gap-2 py-6 text-muted-foreground">
+				<div class="flex items-center justify-center gap-2 py-8 text-muted-foreground">
 					<Loader2 class="w-4 h-4 animate-spin" />
 					<span class="text-sm">{m.share_dialog_creating()}</span>
 				</div>
@@ -114,14 +114,12 @@
 				</div>
 			{:else if shareUrl}
 				<div class="space-y-3">
+					<div class="rounded-lg border bg-muted/50 px-3 py-2.5 flex items-center gap-2.5 min-w-0">
+						<Link class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
+						<span class="text-sm truncate select-all flex-1" title={shareUrl}>{shareUrl}</span>
+					</div>
 					<div class="flex items-center gap-2">
-						<div class="flex-1 min-w-0">
-							<div class="flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2">
-								<Link class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
-								<span class="text-sm truncate select-all">{shareUrl}</span>
-							</div>
-						</div>
-						<Button variant="outline" size="sm" onclick={handleCopyLink} class="flex-shrink-0">
+						<Button onclick={handleCopyLink} class="flex-1" variant={copied ? 'outline' : 'default'}>
 							{#if copied}
 								<Check class="w-4 h-4" />
 								{m.share_dialog_link_copied()}
@@ -133,15 +131,17 @@
 					</div>
 
 					{#if !showRevokeConfirm}
-						<button
-							type="button"
-							class="text-xs text-muted-foreground hover:text-destructive transition-colors"
-							onclick={() => { showRevokeConfirm = true; }}
-						>
-							{m.share_dialog_revoke()}
-						</button>
+						<div class="pt-1 flex justify-between items-center">
+							<button
+								type="button"
+								class="text-xs text-muted-foreground hover:text-destructive transition-colors"
+								onclick={() => { showRevokeConfirm = true; }}
+							>
+								{m.share_dialog_revoke()}
+							</button>
+						</div>
 					{:else}
-						<div class="flex items-center gap-2 p-2 rounded-md bg-destructive/5 border border-destructive/20">
+						<div class="flex items-center gap-2 p-2.5 rounded-lg bg-destructive/5 border border-destructive/20">
 							<span class="text-xs text-destructive flex-1">{m.share_dialog_revoke_confirm()}</span>
 							<Button
 								variant="destructive"
@@ -168,11 +168,5 @@
 				</div>
 			{/if}
 		</div>
-
-		<Dialog.Footer>
-			<Button variant="outline" onclick={onClose}>
-				{m.share_dialog_close()}
-			</Button>
-		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
