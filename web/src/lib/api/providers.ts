@@ -11,9 +11,15 @@ export interface ProviderAuthStatus {
 	label: string;
 }
 
+export interface DeviceAuthInfo {
+	url: string;
+	code: string;
+}
+
 export interface ProviderAuthLoginResult {
 	launched: boolean;
 	alreadyRunning: boolean;
+	deviceAuth?: DeviceAuthInfo;
 }
 
 /** Fetches the auth/connection status for a provider. */

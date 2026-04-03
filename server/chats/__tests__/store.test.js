@@ -22,6 +22,7 @@ describe('ChatRegistry', () => {
       expect(entry).not.toBeNull();
       expect(entry.provider).toBe('claude');
       expect(entry.model).toBe('opus');
+      expect(entry.nextForkOrdinal).toBe(1);
     });
 
     it('throws on duplicate chat ID', () => {
@@ -49,6 +50,19 @@ describe('ChatRegistry', () => {
       expect(entry?.permissionMode).toBe('default');
       expect(entry?.thinkingMode).toBe('none');
       expect(entry?.claudeThinkingMode).toBe('auto');
+    });
+
+    it('normalizes invalid nextForkOrdinal values on add', () => {
+      registry.addChat({
+        id: 'c1',
+        provider: 'claude',
+        model: 'opus',
+        projectPath: '/p',
+        nextForkOrdinal: 0,
+      });
+
+      const entry = registry.getChat('c1');
+      expect(entry?.nextForkOrdinal).toBe(1);
     });
   });
 
@@ -79,6 +93,16 @@ describe('ChatRegistry', () => {
       expect(entry?.permissionMode).toBe('default');
       expect(entry?.thinkingMode).toBe('none');
       expect(entry?.claudeThinkingMode).toBe('auto');
+    });
+
+    it('patches nextForkOrdinal with positive integers only', () => {
+      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+
+      registry.updateChat('c1', { nextForkOrdinal: 4 });
+      expect(registry.getChat('c1')?.nextForkOrdinal).toBe(4);
+
+      registry.updateChat('c1', { nextForkOrdinal: 0 });
+      expect(registry.getChat('c1')?.nextForkOrdinal).toBeUndefined();
     });
   });
 

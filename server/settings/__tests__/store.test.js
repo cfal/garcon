@@ -138,6 +138,26 @@ describe('settings store', () => {
       expect(ui.fontSize).toBe(14);
     });
 
+    it('normalizes persisted sidebar position settings on load and save', async () => {
+      await writeRaw({
+        ui: { pinnedInsertPosition: 'sideways', searchBarPosition: 'ceiling' },
+        paths: {},
+        chatNames: {},
+        pinnedChatIds: [],
+        normalChatIds: [],
+        archivedChatIds: [],
+      });
+
+      const loaded = await store.getUiSettings();
+      expect(loaded.pinnedInsertPosition).toBe('top');
+      expect(loaded.searchBarPosition).toBe('bottom');
+
+      await store.setUiSettings({ searchBarPosition: 'top', pinnedInsertPosition: 'bottom' });
+      const saved = await store.getUiSettings();
+      expect(saved.searchBarPosition).toBe('top');
+      expect(saved.pinnedInsertPosition).toBe('bottom');
+    });
+
     it('getPathSettings returns empty object by default', async () => {
       expect(await store.getPathSettings()).toEqual({});
     });

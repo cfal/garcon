@@ -23,6 +23,7 @@ import { resolveMissingNativePath } from './chats/resolve-native-path.js';
 
 // Classes
 import { ChatRegistry } from './chats/store.js';
+import { ShareStore } from './chats/share-store.js';
 import { SettingsStore } from './settings/store.js';
 import { QueueManager } from './queue.js';
 import { PathCache } from './chats/path-cache.js';
@@ -95,6 +96,9 @@ export async function startServer() {
     const historyCache = new HistoryCache(chatRegistry, metadata, providerRegistry);
     historyCache.init();
 
+    const shareStore = new ShareStore(workspaceDir);
+    await shareStore.init();
+
     const queue = new QueueManager(workspaceDir, providerRegistry, historyCache);
 
     // Telegram notifications (wires itself to provider + queue events).
@@ -121,7 +125,7 @@ export async function startServer() {
     // Build route and WS handler tables
     const routes = createAllRoutes(
       chatRegistry, settings, queue, pathCache, metadata, historyCache,
-      providerRegistry, telegramNotifier,
+      providerRegistry, telegramNotifier, shareStore,
     );
 
     const chatHandler = new ChatHandler(providerRegistry, queue, historyCache, chatRegistry);
@@ -262,6 +266,9 @@ export async function startServer() {
     });
     chatRegistry.onChatRemoved((chatId) => {
       broadcast(new ChatSessionDeletedWsMessage(chatId));
+      shareStore.revokeShareByChatId(chatId).catch((err) => {
+        console.warn('share-store: failed to revoke share on chat removal:', err.message);
+      });
     });
     chatRegistry.onChatReadUpdated((chatId, lastReadAt) => {
       broadcast(new ChatReadUpdatedV1Message(chatId, lastReadAt));

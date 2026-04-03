@@ -31,6 +31,7 @@
 			onToggleArchive: (chatId: string) => void;
 			onShowDetails: (chatId: string, chatTitle: string) => void;
 			onForkChat: (sourceChatId: string) => void;
+			onShareChat: (chatId: string, chatTitle: string) => void;
 			onTagClick?: (tag: string) => void;
 			onManageTags?: (chatId: string, currentTags: string[]) => void;
 			onImmediateReorder: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
@@ -54,6 +55,7 @@
 			onToggleArchive,
 			onShowDetails,
 			onForkChat,
+			onShareChat,
 			onTagClick,
 			onManageTags,
 			onImmediateReorder,
@@ -262,6 +264,7 @@
 										{onToggleArchive}
 										{onShowDetails}
 										{onForkChat}
+									{onShareChat}
 									{onTagClick}
 									{onManageTags}
 										{onEnterReorderMode}
@@ -310,6 +313,7 @@
 										{onToggleArchive}
 										{onShowDetails}
 										{onForkChat}
+									{onShareChat}
 									{onTagClick}
 									{onManageTags}
 										{onEnterReorderMode}
@@ -358,6 +362,7 @@
 										{onToggleArchive}
 										{onShowDetails}
 										{onForkChat}
+									{onShareChat}
 									{onTagClick}
 									{onManageTags}
 										{onEnterReorderMode}
@@ -394,6 +399,7 @@
 							{onToggleArchive}
 							{onShowDetails}
 							{onForkChat}
+									{onShareChat}
 									{onTagClick}
 									{onManageTags}
 							{onEnterReorderMode}
@@ -425,6 +431,7 @@
 								{onToggleArchive}
 								{onShowDetails}
 								{onForkChat}
+									{onShareChat}
 									{onTagClick}
 									{onManageTags}
 								{onEnterReorderMode}
@@ -450,6 +457,7 @@
 						{onToggleArchive}
 						{onShowDetails}
 						{onForkChat}
+									{onShareChat}
 									{onTagClick}
 									{onManageTags}
 						{onEnterReorderMode}
@@ -481,6 +489,7 @@
 									{onToggleArchive}
 									{onShowDetails}
 									{onForkChat}
+									{onShareChat}
 									{onTagClick}
 									{onManageTags}
 									{onEnterReorderMode}
@@ -505,6 +514,7 @@
 					{onToggleArchive}
 					{onShowDetails}
 					{onForkChat}
+									{onShareChat}
 									{onTagClick}
 									{onManageTags}
 					{onEnterReorderMode}

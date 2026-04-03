@@ -2,6 +2,24 @@
 
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$shared/chat-modes';
 
+export type SidebarSearchBarPosition = 'top' | 'bottom';
+export type PinnedInsertPosition = 'top' | 'bottom';
+
+export interface AppUiSettings {
+	pinnedInsertPosition?: PinnedInsertPosition;
+	searchBarPosition?: SidebarSearchBarPosition;
+	chatTitle?: Record<string, unknown>;
+	commitMessage?: Record<string, unknown>;
+	notifications?: Record<string, unknown>;
+	[key: string]: unknown;
+}
+
+export interface AppUiEffectiveSettings {
+	chatTitle?: Record<string, unknown>;
+	commitMessage?: Record<string, unknown>;
+	[key: string]: unknown;
+}
+
 export interface ChatSession {
 	id: string;
 	provider: 'claude' | 'codex' | 'opencode' | 'amp' | 'factory';
@@ -32,8 +50,8 @@ export interface ChatSession {
 }
 
 export interface AppSettings {
-	ui: Record<string, unknown>;
-	uiEffective?: Record<string, unknown>;
+	ui: AppUiSettings;
+	uiEffective?: AppUiEffectiveSettings;
 	paths: {
 		pinnedProjectPaths?: string[];
 		browseStartPath?: string;

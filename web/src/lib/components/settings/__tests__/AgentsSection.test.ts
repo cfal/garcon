@@ -29,9 +29,15 @@ describe('AgentsSection', () => {
 			}
 			return { authenticated: false, canReauth: true, label: '' };
 		});
-		vi.mocked(providersApi.launchAuthLogin).mockResolvedValue({
-			launched: true,
-			alreadyRunning: false,
+		vi.mocked(providersApi.launchAuthLogin).mockImplementation(async (provider) => {
+			if (provider === 'codex') {
+				return {
+					launched: true,
+					alreadyRunning: false,
+					deviceAuth: { url: 'https://auth.openai.com/codex/device', code: 'AB12-CD34' },
+				};
+			}
+			return { launched: true, alreadyRunning: false };
 		});
 
 		const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
@@ -41,14 +47,21 @@ describe('AgentsSection', () => {
 		const signInButtons = await screen.findAllByRole('button', { name: 'Sign in' });
 		expect(signInButtons).toHaveLength(2);
 
+		// Claude uses browser auth -- no window.open
 		await fireEvent.click(signInButtons[0]);
 		expect(providersApi.launchAuthLogin).toHaveBeenCalledWith('claude');
+		expect(openSpy).not.toHaveBeenCalled();
+
+		// Codex uses device auth -- opens URL in new tab
+		await fireEvent.click(signInButtons[1]);
+		expect(providersApi.launchAuthLogin).toHaveBeenCalledWith('codex');
+		expect(openSpy).toHaveBeenCalledWith('https://auth.openai.com/codex/device', '_blank', 'noopener');
+		expect(screen.getByText('AB12-CD34')).toBeTruthy();
 
 		expect(screen.getByText('opencode auth login')).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'More providers' }));
 		expect(await screen.findByText('amp login')).toBeTruthy();
-		expect(openSpy).not.toHaveBeenCalled();
 
 		openSpy.mockRestore();
 	});

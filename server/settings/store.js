@@ -40,6 +40,18 @@ function createEmpty() {
 const FILTER_KEYS = ['textTokens', 'tags', 'providers', 'models'];
 const VALID_FILTER_STATUS = new Set(['active', 'unread']);
 
+function normalizeUiSettings(ui) {
+  if (!ui || typeof ui !== 'object' || Array.isArray(ui)) return {};
+  const normalized = { ...ui };
+  if ('pinnedInsertPosition' in normalized) {
+    normalized.pinnedInsertPosition = normalized.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
+  }
+  if ('searchBarPosition' in normalized) {
+    normalized.searchBarPosition = normalized.searchBarPosition === 'top' ? 'top' : 'bottom';
+  }
+  return normalized;
+}
+
 function sanitizeStringArray(value) {
   return Array.isArray(value)
     ? value.filter((entry) => typeof entry === 'string').map((entry) => entry.trim()).filter(Boolean)
@@ -80,7 +92,7 @@ function sanitizeFolder(raw) {
 
 function sanitize(parsed) {
   return {
-    ui: parsed.ui && typeof parsed.ui === 'object' ? parsed.ui : {},
+    ui: normalizeUiSettings(parsed.ui),
     paths: parsed.paths && typeof parsed.paths === 'object' ? parsed.paths : {},
     chatNames: parsed.chatNames && typeof parsed.chatNames === 'object' ? parsed.chatNames : {},
     pinnedChatIds: sanitizeStringArray(parsed.pinnedChatIds),
@@ -343,7 +355,7 @@ export class SettingsStore extends EventEmitter {
   async setUiSettings(patch) {
     return this.#withLock(async () => {
       const settings = await this.loadSettings();
-      settings.ui = { ...(settings.ui || {}), ...patch };
+      settings.ui = normalizeUiSettings({ ...(settings.ui || {}), ...patch });
       await this.saveSettings(settings);
       return settings.ui;
     });

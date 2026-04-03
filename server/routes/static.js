@@ -111,6 +111,7 @@ routes['/_app/*'] = { GET: noauthServeFile };
 routes['/chat/:id'] = { GET: noauthServeStatic('index.html') };
 routes['/setup'] = { GET: noauthServeStatic('index.html') };
 routes['/login'] = { GET: noauthServeStatic('index.html') };
+routes['/shared/:token'] = { GET: noauthServeStatic('index.html') };
 //routes['/*'] = { GET: noauthServeFile };
 
 export default routes;
