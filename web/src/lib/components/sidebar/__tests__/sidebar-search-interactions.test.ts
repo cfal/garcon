@@ -93,6 +93,66 @@ describe('sidebar search interactions', () => {
 		expect(onApplySavedSearch).not.toHaveBeenCalled();
 	});
 
+	it('closes from the header close button', async () => {
+		const onClose = vi.fn();
+
+		render(SidebarSearchDialogHarness, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+			onClose,
+		});
+
+		await fireEvent.click(await screen.findByRole('button', { name: 'Close search' }));
+
+		expect(onClose).toHaveBeenCalledTimes(1);
+		await waitFor(() => {
+			expect(screen.queryByRole('textbox')).toBeNull();
+		});
+	});
+
+	it('uses a command-palette shell with a fixed scrollable results pane', async () => {
+		render(SidebarSearchDialogHarness, {
+			filteredChats: [
+				createChat('chat-1', 'First chat'),
+				createChat('chat-2', 'Second chat'),
+			],
+		});
+
+		const dialogContent = document.querySelector('[data-slot="search-dialog-content"]');
+		expect(dialogContent?.className).toContain('sm:h-[min(44rem,calc(100dvh-8rem))]');
+		expect(dialogContent?.className).toContain('sm:w-full');
+		expect(dialogContent?.className).toContain('sm:max-w-3xl');
+		expect(dialogContent?.className).toContain('sm:rounded-2xl');
+
+		expect(await screen.findByRole('listbox')).toBeTruthy();
+		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain('flex-1');
+		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain('overflow-y-auto');
+	});
+
+	it('keeps chat rows shrinkable within the dialog width', async () => {
+		render(SidebarSearchDialogHarness, {
+			filteredChats: [
+				createChat(
+					'chat-1',
+					'Extremely long chat title that should truncate instead of pushing the row past the modal width'
+				),
+			],
+		});
+
+		const option = await screen.findByRole('option');
+		expect(option.className).toContain('min-w-0');
+
+		const title = option.querySelector('.text-sm.font-medium');
+		if (!title) throw new Error('Expected title element');
+		expect(title.className).toContain('min-w-0');
+		expect(title.className).toContain('truncate');
+
+		const preview = option.querySelector('.text-xs');
+		if (!preview) throw new Error('Expected preview element');
+		expect(preview.className).toContain('block');
+		expect(preview.className).toContain('min-w-0');
+		expect(preview.className).toContain('truncate');
+	});
+
 	it('renders quick searches ahead of the footer actions and inserts a separator', async () => {
 		render(SidebarFooter, {
 			isLoading: false,

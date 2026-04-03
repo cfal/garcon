@@ -1,9 +1,9 @@
 <script lang="ts">
-	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import Input from '$lib/components/ui/input/input.svelte';
-	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import SavedSearchPills from './SavedSearchPills.svelte';
+	import Search from '@lucide/svelte/icons/search';
+	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -38,10 +38,6 @@
 	}: SidebarSearchDialogProps = $props();
 
 	let inputRef = $state<HTMLInputElement | null>(null);
-
-	function handleOpenChange(nextOpen: boolean) {
-		if (!nextOpen) onClose();
-	}
 
 	function handleQueryInput(e: Event) {
 		const target = e.target as HTMLInputElement;
@@ -81,74 +77,125 @@
 		requestAnimationFrame(() => inputRef?.focus());
 	}
 
+	function handleBackdropClick() {
+		onClose();
+	}
+
 	function formatPreview(chat: ChatSessionRecord): string {
 		if (chat.lastMessage) return chat.lastMessage;
 		if (chat.firstMessage) return chat.firstMessage;
 		return '';
 	}
+
+	$effect(() => {
+		if (!open) return;
+		focusInput();
+	});
+
+	$effect(() => {
+		if (!open) return;
+		const item = document.querySelector<HTMLElement>(`[data-search-index="${highlightedIndex}"]`);
+		item?.scrollIntoView({ block: 'nearest' });
+	});
 </script>
 
-<Dialog.Root {open} onOpenChange={handleOpenChange}>
-	<Dialog.Content
-		class="h-dvh w-full max-w-full rounded-none border-0 p-0 gap-0 sm:h-auto sm:max-h-[85vh] sm:max-w-2xl sm:rounded-lg sm:border"
-		onOpenAutoFocus={(e) => { e.preventDefault(); focusInput(); }}
-		onkeydown={handleDialogKeydown}
-	>
-		<div class="flex items-center gap-2 border-b border-border p-3">
-			<Input
-				bind:ref={inputRef}
-				type="text"
-				value={query}
-				oninput={handleQueryInput}
-				placeholder={m.sidebar_projects_search_placeholder()}
-				class="flex-1 border-0 shadow-none focus-visible:ring-0 h-9 text-sm"
-			/>
-			<Button variant="outline" size="sm" onclick={onOpenManager}>
-				{m.sidebar_saved_searches_edit()}
-			</Button>
-		</div>
+{#if open}
+	<div class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" role="presentation">
+		<button
+			class="absolute inset-0 h-full w-full cursor-default"
+			onclick={handleBackdropClick}
+			aria-label="Close search"
+			tabindex="-1"
+		></button>
 
-		<div class="px-3 pt-3">
-			<SavedSearchPills
-				searches={savedSearches}
-				onApply={onApplySavedSearch}
-			/>
-		</div>
+		<div class="fixed inset-0 flex items-stretch justify-center sm:items-start sm:p-4 sm:pt-[10vh]" role="presentation">
+			<div
+				data-slot="search-dialog-content"
+				class="flex h-dvh w-screen min-w-0 flex-col overflow-hidden bg-background shadow-2xl sm:h-[min(44rem,calc(100dvh-8rem))] sm:w-full sm:max-w-3xl sm:rounded-2xl sm:border sm:border-border"
+				role="dialog"
+				aria-label={m.sidebar_projects_search_placeholder()}
+				aria-modal="true"
+				tabindex="-1"
+				onkeydown={handleDialogKeydown}
+			>
+				<div class="shrink-0 border-b border-border">
+					<div class="flex min-w-0 items-center gap-2 px-4 py-3">
+						<Search class="h-4 w-4 shrink-0 text-muted-foreground" />
+						<Input
+							bind:ref={inputRef}
+							type="text"
+							value={query}
+							oninput={handleQueryInput}
+							placeholder={m.sidebar_projects_search_placeholder()}
+							class="h-9 flex-1 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+						/>
+						<kbd class="hidden shrink-0 items-center rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline-flex">
+							ESC
+						</kbd>
+						<Button variant="outline" size="sm" class="shrink-0" onclick={onOpenManager}>
+							{m.sidebar_saved_searches_edit()}
+						</Button>
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							class="shrink-0"
+							onclick={onClose}
+							title="Close search"
+							aria-label="Close search"
+						>
+							<X class="h-4 w-4" />
+						</Button>
+					</div>
 
-		<ScrollArea class="flex-1 min-h-0 max-h-[calc(100dvh-8rem)] p-1 sm:max-h-[60vh]">
-			{#if filteredChats.length === 0}
-				<div class="px-3 py-8 text-center text-sm text-muted-foreground">
-					{m.sidebar_chats_no_matching_chats()}
+					<div class="px-4 pb-4">
+						<SavedSearchPills
+							searches={savedSearches}
+							onApply={onApplySavedSearch}
+						/>
+					</div>
 				</div>
-			{:else}
-				{#each filteredChats as chat, i (chat.id)}
-					<button
-						type="button"
-						class={cn(
-							'w-full text-left px-3 py-2 rounded-md flex flex-col gap-0.5 transition-colors',
-							i === highlightedIndex
-								? 'bg-accent text-accent-foreground'
-								: 'hover:bg-accent/50',
-						)}
-						onclick={() => onSelectChat(chat.id)}
-						onmouseenter={() => onHighlightChange(i)}
-					>
-						<div class="flex items-center gap-2">
-							<span class="text-sm font-medium truncate flex-1">
-								{chat.title || m.sidebar_chats_unnamed()}
-							</span>
-							<span class="text-[10px] text-muted-foreground shrink-0">
-								{chat.provider}
-							</span>
+
+				<div class="min-h-0 flex-1 overflow-y-auto" data-slot="search-dialog-results">
+					{#if filteredChats.length === 0}
+						<div class="px-4 py-10 text-center text-sm text-muted-foreground">
+							{m.sidebar_chats_no_matching_chats()}
 						</div>
-						{#if formatPreview(chat)}
-							<span class="text-xs text-muted-foreground truncate">
-								{formatPreview(chat)}
-							</span>
-						{/if}
-					</button>
-				{/each}
-			{/if}
-		</ScrollArea>
-	</Dialog.Content>
-</Dialog.Root>
+					{:else}
+						<div class="p-2 sm:p-3" role="listbox">
+							{#each filteredChats as chat, i (chat.id)}
+								<button
+									data-search-index={i}
+									type="button"
+									role="option"
+									aria-selected={i === highlightedIndex}
+									class={cn(
+										'flex min-w-0 w-full flex-col gap-1 rounded-xl px-3 py-3 text-left transition-colors',
+										i === highlightedIndex
+											? 'bg-accent text-accent-foreground'
+											: 'hover:bg-accent/50',
+									)}
+									onclick={() => onSelectChat(chat.id)}
+									onmouseenter={() => onHighlightChange(i)}
+								>
+									<div class="flex min-w-0 items-center gap-2">
+										<span class="min-w-0 flex-1 truncate text-sm font-medium">
+											{chat.title || m.sidebar_chats_unnamed()}
+										</span>
+										<span class="shrink-0 text-[10px] text-muted-foreground">
+											{chat.provider}
+										</span>
+									</div>
+									{#if formatPreview(chat)}
+										<span class="block min-w-0 truncate text-xs text-muted-foreground">
+											{formatPreview(chat)}
+										</span>
+									{/if}
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}

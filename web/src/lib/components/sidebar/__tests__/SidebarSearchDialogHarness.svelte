@@ -23,6 +23,7 @@
 
 	let query = $state('');
 	let highlightedIndex = $state(0);
+	let isOpen = $state(true);
 
 	function handleQueryChange(nextQuery: string) {
 		query = nextQuery;
@@ -41,7 +42,7 @@
 </script>
 
 <SidebarSearchDialog
-	open={true}
+	open={isOpen}
 	{query}
 	{filteredChats}
 	{savedSearches}
@@ -51,5 +52,8 @@
 	onApplySavedSearch={handleApplySavedSearch}
 	onOpenManager={() => onOpenManager?.()}
 	onHighlightChange={handleHighlightChange}
-	onClose={() => onClose?.()}
+	onClose={() => {
+		isOpen = false;
+		onClose?.();
+	}}
 />
