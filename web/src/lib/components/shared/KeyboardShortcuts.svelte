@@ -32,10 +32,15 @@
 		const isMeta = e.metaKey || e.ctrlKey;
 		const inEditable = isEditableTarget(e.target);
 
-		// Allow command-menu/new-chat/rename shortcuts even inside inputs.
+		// Allow command-menu/search/new-chat/rename shortcuts even inside inputs.
 		if (isMeta && key === 'p') {
 			e.preventDefault();
 			onToggleCommandMenu?.();
+			return;
+		}
+		if (isMeta && key === 's') {
+			e.preventDefault();
+			appShell.openSidebarSearch();
 			return;
 		}
 		if (e.ctrlKey && key === 'n') {

@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import SidebarContent from './SidebarContent.svelte';
-	import SidebarFooter from './SidebarFooter.svelte';
+	import SidebarControlsRow from './SidebarControlsRow.svelte';
+	import SidebarSearchContext from './SidebarSearchContext.svelte';
 	import SidebarChatDialogs from './SidebarChatDialogs.svelte';
 	import SidebarTagDialog from './SidebarTagDialog.svelte';
-	import SidebarSaveFolderDialog from './SidebarSaveFolderDialog.svelte';
+	import SidebarSearchDialog from './SidebarSearchDialog.svelte';
+	import SavedSearchManagerDialog from './SavedSearchManagerDialog.svelte';
+	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import { getAppShell, getReadReceiptOutbox } from '$lib/context';
 	import type { SessionProvider } from '$lib/types/app';
@@ -13,21 +16,21 @@
 	import type { ChatOrderList } from '$lib/api/chats.js';
 	import { createReorderWriteQueue } from './reorder-write-queue';
 	import { SidebarController } from './sidebar-controller.svelte';
-	import { SidebarFilterState, type FolderEntry } from './sidebar-filter-state.svelte';
-	import { addTagToQuery, matchesChatFilter } from './sidebar-search';
+	import { SidebarSearchState } from './sidebar-search-state.svelte';
+	import { addTagToQuery } from './sidebar-search';
 	import {
 		APP_SETTINGS_UPDATED_EVENT,
-		createFolder,
-		deleteFolder as deleteFolderApi,
-		getFolders,
+		getSavedSearches,
+		createSavedSearch,
+		updateSavedSearch as updateSavedSearchApi,
+		deleteSavedSearch as deleteSavedSearchApi,
+		reorderSavedSearches as reorderSavedSearchesApi,
 		getSettings,
 		normalizeSidebarSearchBarPosition,
-		updateFolder as updateFolderApi,
 		type AppSettingsUpdatedDetail,
-		type ChatFolder,
-		type ChatFolderFilter,
+		type SavedChatSearch,
 	} from '$lib/api/settings';
-	import type { FolderDialogState } from './SidebarSaveFolderDialog.svelte';
+	import type { SavedSearchEditorState } from './SavedSearchEditorDialog.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
@@ -54,8 +57,6 @@
 		isLoading: boolean;
 		error: string | null;
 	}
-
-	// FolderDialogState is imported from SidebarSaveFolderDialog
 
 	interface SidebarProps {
 		chats: ChatSessionRecord[];
@@ -86,7 +87,7 @@
 		get onQuietRefresh() { return onQuietRefresh; },
 	});
 
-	const filterState = new SidebarFilterState({
+	const searchState = new SidebarSearchState({
 		get chats() { return chats; },
 	});
 
@@ -95,32 +96,24 @@
 	let chatRenameConfirmation = $state<ChatRenameConfirmation | null>(null);
 	let chatDetailsDialog = $state<ChatDetailsDialog | null>(null);
 	let tagDialog = $state<{ chatId: string; chatTitle: string; tags: string[] } | null>(null);
-	let saveFolderDialog = $state<FolderDialogState | null>(null);
-	let folderDeleteConfirmation = $state<{ id: string; name: string } | null>(null);
-	let folderDeleteButtonRef = $state<HTMLButtonElement | null>(null);
 	let shareChatDialog = $state<{ chatId: string; chatTitle: string } | null>(null);
 	let currentTime = $state(new Date());
 	let isMarkingAllRead = $state(false);
 	let searchBarPosition = $state<SidebarSearchBarPosition>('bottom');
-	let visibleUnreadChatIds = $derived.by(() =>
-		filterState.filteredChats
-			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
-			.map((chat) => chat.id)
-	);
-	let createFolderHint = $derived(
-		filterState.canSaveCurrentFilter
-			? m.sidebar_folders_save_current_filter()
-			: m.sidebar_folders_save_disabled_hint()
-	);
-	let folderCounts = $derived.by(() => {
-		const counts = new Map<string, number>();
-		for (const folder of filterState.folders) {
-			if (!folder.filter) continue;
-			const count = chats.filter(chat => matchesChatFilter(chat, folder.filter!)).length;
-			counts.set(folder.id, count);
-		}
-		return counts;
-	});
+
+	// Saved search management state.
+	let editorState = $state<SavedSearchEditorState | null>(null);
+	let savedSearchDeleteConfirmation = $state<{ id: string } | null>(null);
+	let savedSearchDeleteButtonRef = $state<HTMLButtonElement | null>(null);
+
+		let visibleUnreadChatIds = $derived.by(() =>
+			searchState.filteredChats
+				.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
+				.map((chat) => chat.id)
+		);
+		let showSidebarSearchContext = $derived(
+			searchState.sidebarPillSearches.length > 0 || searchState.hasActiveQuery
+		);
 
 	// Refresh timestamp every minute.
 	$effect(() => {
@@ -250,7 +243,7 @@
 	}
 
 	function handleTagClick(tag: string) {
-		filterState.searchQuery = addTagToQuery(filterState.searchQuery, tag);
+		searchState.activeQuery = addTagToQuery(searchState.activeQuery, tag);
 	}
 
 	async function handleSaveTags(chatId: string, tags: string[]) {
@@ -263,7 +256,7 @@
 	let pendingReorder = $state<{ list: ChatOrderList; oldOrder: string[]; newOrder: string[] } | null>(null);
 
 	function enterReorderMode() {
-		filterState.searchQuery = '';
+		searchState.activeQuery = '';
 		pendingReorder = null;
 		isReorderMode = true;
 	}
@@ -290,14 +283,10 @@
 		onNewChat();
 	}
 
-	// Stores local draft order on each drag; persisted on exit.
 	function handleReorderGroup(list: ChatOrderList, oldOrder: string[], newOrder: string[]) {
 		pendingReorder = { list, oldOrder, newOrder };
 	}
 
-	// Fire-and-forget persist for normal-mode inline drags.
-	// Serializes writes and coalesces by list so rapid drag bursts
-	// do not race against each other after heavy list churn.
 	const immediateReorderQueue = createReorderWriteQueue<ChatOrderList>(
 		async ({ list, oldOrder, newOrder }) => {
 			await reorderChats({ list, oldOrder, newOrder });
@@ -311,7 +300,6 @@
 		immediateReorderQueue.enqueue({ list, oldOrder, newOrder });
 	}
 
-	// Quick reorder for context menu actions.
 	async function handleQuickMove(chatId: string, chatIdAbove?: string, chatIdBelow?: string) {
 		try {
 			await controller.quickMove(chatId, chatIdAbove, chatIdBelow);
@@ -329,96 +317,6 @@
 		}
 	}
 
-	function handleSelectFolder(id: string) {
-		filterState.selectFolder(id);
-	}
-
-	function cloneFilter(filter: ChatFolderFilter): ChatFolderFilter {
-		return {
-			textTokens: [...filter.textTokens],
-			tags: [...filter.tags],
-			providers: [...filter.providers],
-			models: [...filter.models],
-			...(filter.status ? { status: filter.status } : {}),
-		};
-	}
-
-	function suggestFolderName(filter: ChatFolderFilter): string {
-		const trimmedSearch = filterState.searchQuery.trim();
-		if (trimmedSearch) return trimmedSearch;
-		if (filterState.selectedFolderId !== 'all') return filterState.selectedFolder.name;
-		if (filter.tags.length === 1) return `tag:${filter.tags[0]}`;
-		if (filter.providers.length === 1) return `provider:${filter.providers[0]}`;
-		if (filter.models.length === 1) return `model:${filter.models[0]}`;
-		if (filter.textTokens.length > 0) return filter.textTokens.join(' ');
-		return m.sidebar_folders_new_folder();
-	}
-
-	function mergeUserFolders(existing: ChatFolder[], incoming: ChatFolder[]): ChatFolder[] {
-		const incomingIds = new Set(incoming.map((folder) => folder.id));
-		return [...incoming, ...existing.filter((folder) => !incomingIds.has(folder.id))];
-	}
-
-	function handleCreateFolder() {
-		if (!filterState.canSaveCurrentFilter) return;
-		const filter = cloneFilter(filterState.currentFilter);
-		saveFolderDialog = {
-			mode: 'create',
-			filter,
-			suggestedName: suggestFolderName(filter),
-		};
-	}
-
-	function handleEditFolder(folder: FolderEntry) {
-		if (!folder.filter) return;
-		saveFolderDialog = {
-			mode: 'edit',
-			folderId: folder.id,
-			filter: cloneFilter(folder.filter as ChatFolderFilter),
-			suggestedName: folder.name,
-		};
-	}
-
-	async function handleSaveFolder(name: string, filter: ChatFolderFilter, folderId?: string) {
-		if (folderId) {
-			const res = await updateFolderApi(folderId, { name, filter });
-			filterState.setUserFolders(
-				filterState.userFolders.map(f => f.id === folderId ? res.folder : f)
-			);
-		} else {
-			const res = await createFolder(name, filter);
-			filterState.setUserFolders(mergeUserFolders(filterState.userFolders, [res.folder]));
-			filterState.searchQuery = '';
-			filterState.selectFolder(res.folder.id);
-		}
-		saveFolderDialog = null;
-	}
-
-	function showFolderDeleteConfirmation(id: string) {
-		const folder = filterState.folders.find(f => f.id === id);
-		if (!folder) return;
-		folderDeleteConfirmation = { id, name: folder.name };
-	}
-
-	async function confirmDeleteFolder() {
-		if (!folderDeleteConfirmation) return;
-		const { id } = folderDeleteConfirmation;
-		folderDeleteConfirmation = null;
-		await handleDeleteFolder(id);
-	}
-
-	async function handleDeleteFolder(id: string) {
-		try {
-			await deleteFolderApi(id);
-			filterState.setUserFolders(filterState.userFolders.filter((f) => f.id !== id));
-			if (filterState.selectedFolderId === id) {
-				filterState.selectFolder('all');
-			}
-		} catch (err) {
-			console.error('Failed to delete folder:', err);
-		}
-	}
-
 	async function handleMarkAllRead() {
 		if (isMarkingAllRead || visibleUnreadChatIds.length === 0) return;
 		isMarkingAllRead = true;
@@ -430,6 +328,117 @@
 			isMarkingAllRead = false;
 		}
 	}
+
+	// Search dialog actions.
+
+	function handleSearchSelectChat(chatId: string) {
+		searchState.confirmSearchDialog();
+		onChatSelect(chatId);
+	}
+
+	function handleApplySavedSearch(search: SavedChatSearch) {
+		searchState.updateDraftQuery(search.query);
+	}
+
+	function handleApplySidebarMenuSearch(query: string) {
+		searchState.applyQuery(query);
+	}
+
+	function handleApplySidebarPillSearch(search: SavedChatSearch) {
+		searchState.applyQuery(search.query);
+	}
+
+	function handleClearActiveQuery() {
+		searchState.applyQuery('');
+	}
+
+	function openSavedSearchManager() {
+		searchState.suspendSearchDialog();
+		searchState.manageSavedSearchesOpen = true;
+	}
+
+	function closeSavedSearchManager() {
+		searchState.manageSavedSearchesOpen = false;
+	}
+
+	function openEditorForCreate() {
+		searchState.manageSavedSearchesOpen = false;
+		editorState = {
+			mode: 'create',
+			title: '',
+			query: searchState.draftQuery,
+			showAsSidebarPill: false,
+			showInSidebarMenu: false,
+			showInSearchDialog: true,
+		};
+	}
+
+	function openEditorForEdit(search: SavedChatSearch) {
+		searchState.manageSavedSearchesOpen = false;
+		editorState = {
+			mode: 'edit',
+			searchId: search.id,
+			title: search.title || '',
+			query: search.query,
+			showAsSidebarPill: search.showAsSidebarPill,
+			showInSidebarMenu: search.showInSidebarMenu,
+			showInSearchDialog: search.showInSearchDialog,
+		};
+	}
+
+	async function handleSaveSearchEditor(
+		data: {
+			title: string | null;
+			query: string;
+			showAsSidebarPill: boolean;
+			showInSidebarMenu: boolean;
+			showInSearchDialog: boolean;
+		},
+		searchId?: string
+	) {
+		if (searchId) {
+			const res = await updateSavedSearchApi(searchId, data);
+			searchState.setSavedSearches(
+				searchState.savedSearches.map((s) => s.id === searchId ? res.savedSearch : s)
+			);
+		} else {
+			const res = await createSavedSearch(data);
+			searchState.setSavedSearches([...searchState.savedSearches, res.savedSearch]);
+		}
+		editorState = null;
+		searchState.manageSavedSearchesOpen = true;
+	}
+
+	function requestDeleteSavedSearch(id: string) {
+		savedSearchDeleteConfirmation = { id };
+	}
+
+	async function confirmDeleteSavedSearch() {
+		if (!savedSearchDeleteConfirmation) return;
+		const { id } = savedSearchDeleteConfirmation;
+		savedSearchDeleteConfirmation = null;
+		try {
+			await deleteSavedSearchApi(id);
+			searchState.setSavedSearches(searchState.savedSearches.filter((s) => s.id !== id));
+		} catch (error) {
+			console.error('Failed to delete saved search:', error);
+		}
+	}
+
+	async function handleReorderSavedSearches(oldOrder: string[], newOrder: string[]) {
+		// Optimistically reorder locally.
+		const byId = new Map(searchState.savedSearches.map((s) => [s.id, s]));
+		searchState.setSavedSearches(newOrder.map((id) => byId.get(id)!).filter(Boolean));
+		try {
+			await reorderSavedSearchesApi(oldOrder, newOrder);
+		} catch (error) {
+			console.error('Failed to reorder saved searches:', error);
+			// Rollback on failure.
+			searchState.setSavedSearches(oldOrder.map((id) => byId.get(id)!).filter(Boolean));
+		}
+	}
+
+	// Lifecycle.
 
 	onMount(async () => {
 		try {
@@ -459,10 +468,10 @@
 
 	onMount(async () => {
 		try {
-			const res = await getFolders();
-			filterState.setUserFolders(mergeUserFolders(filterState.userFolders, res.folders));
+			const res = await getSavedSearches();
+			searchState.setSavedSearches(res.savedSearches);
 		} catch (err) {
-			console.error('Failed to load folders:', err);
+			console.error('Failed to load saved searches:', err);
 		}
 	});
 
@@ -472,43 +481,48 @@
 		if (!selected) return;
 		startRenameChat(selected.id, selected.title || m.sidebar_chats_new_chat());
 	}));
+
+	onMount(() => appShell.onSidebarSearchRequested(() => {
+			searchState.toggleSearchDialog();
+	}));
 </script>
 
 <div class="h-full flex flex-col bg-card md:select-none">
 	{#if searchBarPosition === 'top'}
-		<SidebarFooter
-			dockPlacement="top"
-			{isLoading}
-			searchFilter={filterState.searchQuery}
-			{isReorderMode}
-			visibleUnreadCount={visibleUnreadChatIds.length}
-			{isMarkingAllRead}
-			onSearchFilterChange={(v) => filterState.searchQuery = v}
-			onClearSearchFilter={() => filterState.searchQuery = ''}
-			onCreateChat={handlePrimaryAction}
-			onMarkAllRead={() => { void handleMarkAllRead(); }}
+			<SidebarControlsRow
+				dockPlacement="top"
+				{isLoading}
+				{isReorderMode}
+				visibleUnreadCount={visibleUnreadChatIds.length}
+				{isMarkingAllRead}
+				sidebarMenuSearches={searchState.sidebarMenuSearches}
+				hasSearchContextBelow={showSidebarSearchContext}
+				onOpenSearchDialog={() => searchState.openSearchDialog()}
+				onOpenSavedSearchManager={openSavedSearchManager}
+				onCreateChat={handlePrimaryAction}
+				onMarkAllRead={() => { void handleMarkAllRead(); }}
+				onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
 			{onShowSettings}
 		/>
 	{/if}
 
+	<SidebarSearchContext
+		sidebarPillSearches={searchState.sidebarPillSearches}
+		activeQuery={searchState.activeQuery}
+		hasControlsRowAbove={searchBarPosition === 'top'}
+		onApplyPillSearch={handleApplySidebarPillSearch}
+		onClearActiveQuery={handleClearActiveQuery}
+	/>
+
 	<SidebarContent
 		{chats}
-		filteredChats={filterState.filteredChats}
+		filteredChats={searchState.filteredChats}
 		{selectedChatId}
 		{isLoading}
 		{currentTime}
-		searchFilter={filterState.searchQuery}
+		searchFilter={searchState.activeQuery}
 		{isReorderMode}
-		folders={filterState.folders}
-		selectedFolderId={filterState.selectedFolderId}
-		canCreateFolder={filterState.canSaveCurrentFilter}
-		{createFolderHint}
-		onSelectFolder={handleSelectFolder}
-		onCreateFolder={() => handleCreateFolder()}
-		onDeleteFolder={showFolderDeleteConfirmation}
-		onEditFolder={handleEditFolder}
-		{folderCounts}
 		onEnterReorderMode={enterReorderMode}
 		onReorderGroup={handleReorderGroup}
 		onChatSelect={handleChatClick}
@@ -526,17 +540,18 @@
 	/>
 
 	{#if searchBarPosition === 'bottom'}
-		<SidebarFooter
+		<SidebarControlsRow
 			dockPlacement="bottom"
 			{isLoading}
-			searchFilter={filterState.searchQuery}
 			{isReorderMode}
 			visibleUnreadCount={visibleUnreadChatIds.length}
 			{isMarkingAllRead}
-			onSearchFilterChange={(v) => filterState.searchQuery = v}
-			onClearSearchFilter={() => filterState.searchQuery = ''}
+			sidebarMenuSearches={searchState.sidebarMenuSearches}
+			onOpenSearchDialog={() => searchState.openSearchDialog()}
+			onOpenSavedSearchManager={openSavedSearchManager}
 			onCreateChat={handlePrimaryAction}
 			onMarkAllRead={() => { void handleMarkAllRead(); }}
+			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
 			{onShowSettings}
 		/>
@@ -556,15 +571,39 @@
 
 <SidebarTagDialog
 	{tagDialog}
-	allKnownTags={filterState.allKnownTags}
+	allKnownTags={searchState.allKnownTags}
 	onClose={() => tagDialog = null}
 	onSave={handleSaveTags}
 />
 
-<SidebarSaveFolderDialog
-	{saveFolderDialog}
-	onClose={() => saveFolderDialog = null}
-	onSave={handleSaveFolder}
+	<SidebarSearchDialog
+		open={searchState.searchDialogOpen}
+		query={searchState.draftQuery}
+		filteredChats={searchState.dialogFilteredChats}
+		savedSearches={searchState.searchDialogSavedSearches}
+		highlightedIndex={searchState.highlightedResultIndex}
+		onQueryChange={(q) => searchState.updateDraftQuery(q)}
+		onSelectChat={handleSearchSelectChat}
+		onApplySavedSearch={handleApplySavedSearch}
+		onOpenManager={openSavedSearchManager}
+		onHighlightChange={(i) => { searchState.highlightedResultIndex = i; }}
+		onClose={() => searchState.closeSearchDialog()}
+/>
+
+<SavedSearchManagerDialog
+	open={searchState.manageSavedSearchesOpen}
+	searches={searchState.savedSearches}
+	onClose={closeSavedSearchManager}
+	onAdd={openEditorForCreate}
+	onEdit={openEditorForEdit}
+	onDelete={requestDeleteSavedSearch}
+	onReorder={handleReorderSavedSearches}
+/>
+
+<SavedSearchEditorDialog
+	{editorState}
+	onClose={() => { editorState = null; searchState.manageSavedSearchesOpen = true; }}
+	onSave={handleSaveSearchEditor}
 />
 
 <ShareChatDialog
@@ -573,15 +612,15 @@
 	onClose={() => { shareChatDialog = null; }}
 />
 
-<Dialog.Root open={folderDeleteConfirmation !== null} onOpenChange={(open) => { if (!open) folderDeleteConfirmation = null; }}>
-	<Dialog.Content onOpenAutoFocus={(e) => { e.preventDefault(); folderDeleteButtonRef?.focus(); }}>
+<Dialog.Root open={savedSearchDeleteConfirmation !== null} onOpenChange={(open) => { if (!open) savedSearchDeleteConfirmation = null; }}>
+	<Dialog.Content onOpenAutoFocus={(e) => { e.preventDefault(); savedSearchDeleteButtonRef?.focus(); }}>
 		<Dialog.Header>
-			<Dialog.Title>{m.sidebar_folders_confirm_delete({ name: folderDeleteConfirmation?.name ?? '' })}</Dialog.Title>
-			<Dialog.Description>{m.sidebar_folders_confirm_delete_description()}</Dialog.Description>
+			<Dialog.Title>{m.sidebar_saved_searches_confirm_delete()}</Dialog.Title>
+			<Dialog.Description>{m.sidebar_saved_searches_confirm_delete_description()}</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => folderDeleteConfirmation = null}>{m.sidebar_actions_cancel()}</Button>
-			<Button variant="destructive" onclick={() => { void confirmDeleteFolder(); }} bind:ref={folderDeleteButtonRef}>{m.sidebar_actions_delete()}</Button>
+			<Button variant="outline" onclick={() => savedSearchDeleteConfirmation = null}>{m.sidebar_actions_cancel()}</Button>
+			<Button variant="destructive" onclick={() => { void confirmDeleteSavedSearch(); }} bind:ref={savedSearchDeleteButtonRef}>{m.sidebar_actions_delete()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

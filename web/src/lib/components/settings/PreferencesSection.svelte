@@ -202,7 +202,7 @@
 		</div>
 
 		<div class="flex items-center justify-between px-4 py-2">
-			<div class="text-sm font-medium text-foreground">{m.settings_display_search_bar_position()}</div>
+			<div class="text-sm font-medium text-foreground">{m.settings_display_sidebar_controls_position()}</div>
 			<select
 				class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
 				value={searchBarPosition}

@@ -131,28 +131,30 @@
 
 	{#if !isMobile}
 		<div class="flex h-dvh w-screen overflow-hidden bg-background text-foreground">
-			{#if !effectiveWorkspaceFullscreen}
-				<div
-					class="relative flex-shrink-0 h-full border-r border-border"
-					style:width="{appShell.sidebarWidth}px"
-				>
-					<Sidebar
-						chats={sessions.orderedChats}
-						selectedChatId={sessions.selectedChatId}
-						isLoading={chatRuntime.isLoadingChats}
-						onChatSelect={handleChatSelect}
-						onNewChat={handleNewChat}
-						onChatDelete={handleChatDelete}
-						onQuietRefresh={quietRefresh}
-						onChatRenamed={handleChatRenamed}
-						onShowSettings={() => appShell.openSettings()}
-					/>
+			<div
+				class={`relative h-full overflow-hidden ${effectiveWorkspaceFullscreen ? 'w-0 border-r-0 pointer-events-none' : 'flex-shrink-0 border-r border-border'}`}
+				style:width={effectiveWorkspaceFullscreen ? '0px' : `${appShell.sidebarWidth}px`}
+				aria-hidden={effectiveWorkspaceFullscreen}
+				inert={effectiveWorkspaceFullscreen}
+			>
+				<Sidebar
+					chats={sessions.orderedChats}
+					selectedChatId={sessions.selectedChatId}
+					isLoading={chatRuntime.isLoadingChats}
+					onChatSelect={handleChatSelect}
+					onNewChat={handleNewChat}
+					onChatDelete={handleChatDelete}
+					onQuietRefresh={quietRefresh}
+					onChatRenamed={handleChatRenamed}
+					onShowSettings={() => appShell.openSettings()}
+				/>
+				{#if !effectiveWorkspaceFullscreen}
 					<ResizeHandle
 						width={appShell.sidebarWidth}
 						onResize={(w) => appShell.setSidebarWidth(w)}
 					/>
-				</div>
-			{/if}
+				{/if}
+			</div>
 
 			<div class="flex-1 min-w-0 h-full overflow-hidden">
 				<WorkspaceView

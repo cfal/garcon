@@ -23,7 +23,7 @@
 		DropdownMenuItem,
 		DropdownMenuSeparator
 	} from '$lib/components/ui/dropdown-menu';
-	import ColoredTag from '../shared/ColoredTag.svelte';
+	import SidebarChatSummary from './SidebarChatSummary.svelte';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -53,7 +53,6 @@
 	let {
 		session,
 		selectedChatId,
-		currentTime,
 		isPinned,
 		isArchived,
 		isReorderMode = false,
@@ -68,60 +67,14 @@
 		onTagClick,
 		onManageTags,
 		onEnterReorderMode,
-		hasPinnedChats = false,
 		onMoveToTop,
 		onMoveToBottom,
 	}: SidebarChatItemProps = $props();
 
 	let isProcessing = $derived(session.isProcessing);
-	let isUnread = $derived(session.isUnread && selectedChatId !== session.id);
-
-	let visibleTags = $derived(session.tags.slice(0, 2));
-	let overflowCount = $derived(Math.max(0, session.tags.length - 2));
-
-	// Truncates a long path from the left, keeping the rightmost segments.
-	function prefixEllipsis(pathStr: string, maxLen = 40): string {
-		if (!pathStr || pathStr.length <= maxLen) return pathStr;
-		const segments = pathStr.split('/');
-		let result = segments[segments.length - 1];
-		for (let i = segments.length - 2; i >= 0; i--) {
-			const candidate = segments[i] + '/' + result;
-			if (candidate.length + 4 > maxLen) break;
-			result = candidate;
-		}
-		return '\u2026/' + result;
-	}
-
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
-	let lastMessage = $derived(session.lastMessage || '');
 	let isSelected = $derived(selectedChatId === session.id);
-	let projectPath = $derived(session.projectPath || '');
 	let provider = $derived(session.provider || 'claude');
-
-	const PROVIDER_TAG_VARIANTS: Record<SessionProvider, string> = {
-		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
-		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
-		opencode: 'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
-		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
-		factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
-	};
-	let providerTagVariant = $derived(PROVIDER_TAG_VARIANTS[provider] ?? PROVIDER_TAG_VARIANTS.claude);
-	let providerTagLabel = $derived(
-		provider === 'codex' ? m.provider_codex()
-		: provider === 'opencode' ? m.provider_opencode()
-		: provider === 'amp' ? m.provider_amp()
-		: provider === 'factory' ? m.provider_factory()
-		: m.provider_claude()
-	);
-
-	let cornerBadgeClass = $derived(
-		isPinned
-			? 'border-sidebar-badge-pinned-border bg-sidebar-badge-pinned-bg'
-			: 'border-sidebar-badge-archived-border bg-sidebar-badge-archived-bg'
-	);
-	let cornerBadgeIconClass = $derived(
-		isPinned ? 'text-sidebar-badge-pinned-foreground' : 'text-sidebar-badge-archived-foreground'
-	);
 
 	function selectChat() {
 		onChatSelect(session.id);
@@ -190,19 +143,23 @@
 </script>
 
 <div class="chat-item-root group relative" bind:this={itemEl}>
-	<!-- Status corner badge stays away from the top-right menu trigger. -->
-		{#if isPinned || isArchived}
-			<div
-				class={cn("absolute right-1 bottom-[5px] z-10 pointer-events-none w-5 h-5 rounded-full border flex items-center justify-center", cornerBadgeClass)}
-				aria-hidden="true"
-			>
-				{#if isPinned}
-					<Pin class="size-3 {cornerBadgeIconClass}" />
-				{:else}
-					<Archive class="size-3 {cornerBadgeIconClass}" />
-				{/if}
-			</div>
-		{/if}
+	{#if isPinned || isArchived}
+		<div
+			class={cn(
+				'pointer-events-none absolute bottom-[5px] right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full border',
+				isPinned
+					? 'border-sidebar-badge-pinned-border bg-sidebar-badge-pinned-bg'
+					: 'border-sidebar-badge-archived-border bg-sidebar-badge-archived-bg',
+			)}
+			aria-hidden="true"
+		>
+			{#if isPinned}
+				<Pin class="size-3 text-sidebar-badge-pinned-foreground" />
+			{:else}
+				<Archive class="size-3 text-sidebar-badge-archived-foreground" />
+			{/if}
+		</div>
+	{/if}
 
 	<!-- Mobile layout -->
 	<div class="md:hidden">
@@ -214,37 +171,14 @@
 				)}
 				onclick={selectChat}
 			>
-			<div class="min-w-0 flex-1">
-						<div class="text-[14px] font-medium truncate flex items-center gap-1.5 {isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground'}">
-						{#if isUnread}
-							<span class="w-1.5 h-1.5 shrink-0 rounded-full bg-indicator-unread" aria-label={m.sidebar_chat_unread()}></span>
-						{/if}
-					{chatName}
-				</div>
-						{#if projectPath}
-							<div class="text-[11px] truncate {isSelected ? 'text-sidebar-chat-item-selected-foreground/80' : 'text-muted-foreground'}" title={projectPath}>
-							{prefixEllipsis(projectPath)}
-						</div>
-					{/if}
-						<div class="text-[13px] italic truncate {isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80'}">
-							{lastMessage || '\u00A0'}
-						</div>
-					<div class="mt-1 flex items-center gap-1">
-						<ColoredTag label={providerTagLabel} variant={providerTagVariant} />
-						{#each visibleTags as tag (tag)}
-							<ColoredTag label={tag} autoColor onclick={(e) => { e.stopPropagation(); onTagClick?.(tag); }} />
-						{/each}
-						{#if overflowCount > 0}
-							<span
-								role="button"
-								tabindex="0"
-								class="text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-								onclick={(e) => { e.stopPropagation(); onManageTags?.(session.id, session.tags); }}
-								onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); onManageTags?.(session.id, session.tags); } }}
-							>+{overflowCount}</span>
-						{/if}
-					</div>
-			</div>
+				<SidebarChatSummary
+					{session}
+					{isSelected}
+					{isPinned}
+					{isArchived}
+					{onTagClick}
+					{onManageTags}
+				/>
 		</button>
 	</div>
 
@@ -260,35 +194,14 @@
 				)}
 			onclick={selectChat}
 		>
-			<div class="min-w-0 w-full">
-						<div class="text-[14px] font-medium truncate flex items-center gap-1.5 {isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground'}">
-					{#if isUnread}
-						<span class="w-1.5 h-1.5 shrink-0 rounded-full bg-indicator-unread" aria-label={m.sidebar_chat_unread()}></span>
-					{/if}
-					{chatName}
-				</div>
-						{#if projectPath}
-								<div class="text-[11px] truncate {isSelected ? 'text-sidebar-chat-item-selected-foreground/80' : 'text-muted-foreground'}" title={projectPath}>
-							{prefixEllipsis(projectPath)}
-						</div>
-					{/if}
-							<div class="text-[13px] italic truncate {isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80'}">
-							{lastMessage || '\u00A0'}
-						</div>
-					<div class="mt-1 flex items-center gap-1">
-						<ColoredTag label={providerTagLabel} variant={providerTagVariant} />
-						{#each visibleTags as tag (tag)}
-							<ColoredTag label={tag} autoColor onclick={(e) => { e.stopPropagation(); onTagClick?.(tag); }} />
-						{/each}
-						{#if overflowCount > 0}
-							<button
-								type="button"
-								class="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-								onclick={(e) => { e.stopPropagation(); onManageTags?.(session.id, session.tags); }}
-							>+{overflowCount}</button>
-						{/if}
-					</div>
-			</div>
+			<SidebarChatSummary
+				{session}
+				{isSelected}
+				{isPinned}
+				{isArchived}
+				{onTagClick}
+				{onManageTags}
+			/>
 		</Button>
 	</div>
 

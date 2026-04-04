@@ -254,6 +254,191 @@ describe('settings store', () => {
 		});
   });
 
+  describe('saved search CRUD', () => {
+    it('returns no saved searches by default', async () => {
+      expect(await store.getSavedSearches()).toEqual([]);
+    });
+
+    it('adds, updates, and removes saved searches', async () => {
+      const search = {
+        id: 'search-1',
+        title: 'Unread ops',
+        query: 'status:unread tag:ops',
+        showAsSidebarPill: true,
+        showInSidebarMenu: false,
+        showInSearchDialog: true,
+        createdAt: '2026-03-27T00:00:00.000Z',
+        updatedAt: '2026-03-27T00:00:00.000Z',
+      };
+
+      await store.addSavedSearch(search);
+      expect(await store.getSavedSearches()).toEqual([search]);
+
+      const updated = await store.updateSavedSearch('search-1', {
+        title: 'Active ops',
+        query: 'status:active tag:ops',
+      });
+      expect(updated.title).toBe('Active ops');
+      expect(updated.query).toBe('status:active tag:ops');
+
+      expect(await store.removeSavedSearch('search-1')).toBe(true);
+      expect(await store.getSavedSearches()).toEqual([]);
+    });
+
+    it('rejects duplicate saved search IDs', async () => {
+      const search = {
+        id: 'search-1',
+        title: null,
+        query: 'status:active',
+        showAsSidebarPill: false,
+        showInSidebarMenu: true,
+        showInSearchDialog: false,
+        createdAt: '2026-03-27T00:00:00.000Z',
+        updatedAt: '2026-03-27T00:00:00.000Z',
+      };
+
+      await store.addSavedSearch(search);
+      await expect(store.addSavedSearch(search)).rejects.toThrow('Saved search with ID search-1 already exists');
+    });
+
+    it('reorders saved searches', async () => {
+      const a = { id: 'a', title: null, query: 'qa', showAsSidebarPill: false, showInSidebarMenu: true, showInSearchDialog: false, createdAt: 't', updatedAt: 't' };
+      const b = { id: 'b', title: null, query: 'qb', showAsSidebarPill: true, showInSidebarMenu: false, showInSearchDialog: false, createdAt: 't', updatedAt: 't' };
+      const c = { id: 'c', title: null, query: 'qc', showAsSidebarPill: false, showInSidebarMenu: false, showInSearchDialog: true, createdAt: 't', updatedAt: 't' };
+
+      await store.addSavedSearch(a);
+      await store.addSavedSearch(b);
+      await store.addSavedSearch(c);
+
+      const result = await store.reorderSavedSearches(['a', 'b', 'c'], ['c', 'a', 'b']);
+      expect(result).toEqual({ success: true });
+
+      const searches = await store.getSavedSearches();
+      expect(searches.map(s => s.id)).toEqual(['c', 'a', 'b']);
+    });
+
+    it('sanitizes malformed persisted saved searches on load', async () => {
+      await writeRaw({
+        ui: {},
+        paths: {},
+        chatNames: {},
+        savedChatSearches: [
+          {
+            id: ' search-1 ',
+            title: ' My search ',
+            query: ' status:unread ',
+            showAsSidebarPill: true,
+            showInSidebarMenu: false,
+            showInSearchDialog: false,
+            createdAt: ' 2026-03-27T00:00:00.000Z ',
+            updatedAt: ' 2026-03-27T00:00:00.000Z ',
+          },
+          null,
+          { id: '', query: 'missing-id', createdAt: 't', updatedAt: 't' },
+          { id: 'no-query', title: null, query: '', createdAt: 't', updatedAt: 't' },
+          { id: 'no-visibility', title: '', query: 'status:active', showAsSidebarPill: false, showInSidebarMenu: false, showInSearchDialog: false, createdAt: 't', updatedAt: 't' },
+        ],
+      });
+
+      const searches = await store.getSavedSearches();
+      expect(searches).toEqual([
+        {
+          id: 'search-1',
+          title: 'My search',
+          query: 'status:unread',
+          showAsSidebarPill: true,
+          showInSidebarMenu: false,
+          showInSearchDialog: false,
+          createdAt: '2026-03-27T00:00:00.000Z',
+          updatedAt: '2026-03-27T00:00:00.000Z',
+        },
+      ]);
+    });
+  });
+
+  describe('folder-to-saved-search migration', () => {
+    it('migrates folders to saved searches when savedChatSearches is empty', async () => {
+      await writeRaw({
+        ui: {},
+        paths: {},
+        chatNames: {},
+        chatFolders: [
+          {
+            id: 'folder-1',
+            name: 'Unread ops',
+            filter: { textTokens: ['bug'], tags: ['ops'], providers: ['claude'], models: ['sonnet'], status: 'unread' },
+            createdAt: '2026-03-27T00:00:00.000Z',
+          },
+        ],
+        savedChatSearches: [],
+      });
+
+      const searches = await store.getSavedSearches();
+      expect(searches).toEqual([
+        {
+          id: 'folder-1',
+          title: 'Unread ops',
+          query: 'status:unread tag:ops provider:claude model:sonnet bug',
+          showAsSidebarPill: false,
+          showInSidebarMenu: false,
+          showInSearchDialog: true,
+          createdAt: '2026-03-27T00:00:00.000Z',
+          updatedAt: '2026-03-27T00:00:00.000Z',
+        },
+      ]);
+    });
+
+    it('does not migrate when savedChatSearches already has entries', async () => {
+      const existing = {
+        id: 'search-1',
+        title: 'My search',
+        query: 'status:active',
+        showAsSidebarPill: false,
+        showInSidebarMenu: true,
+        showInSearchDialog: false,
+        createdAt: '2026-03-28T00:00:00.000Z',
+        updatedAt: '2026-03-28T00:00:00.000Z',
+      };
+      await writeRaw({
+        ui: {},
+        paths: {},
+        chatNames: {},
+        chatFolders: [
+          {
+            id: 'folder-1',
+            name: 'Unread ops',
+            filter: { textTokens: [], tags: ['ops'], providers: [], models: [], status: 'unread' },
+            createdAt: '2026-03-27T00:00:00.000Z',
+          },
+        ],
+        savedChatSearches: [existing],
+      });
+
+      const searches = await store.getSavedSearches();
+      expect(searches).toEqual([existing]);
+    });
+
+    it('migrates status:active folders correctly', async () => {
+      await writeRaw({
+        ui: {},
+        paths: {},
+        chatNames: {},
+        chatFolders: [
+          {
+            id: 'folder-active',
+            name: 'Active',
+            filter: { textTokens: [], tags: [], providers: [], models: [], status: 'active' },
+            createdAt: '2026-03-27T00:00:00.000Z',
+          },
+        ],
+      });
+
+      const searches = await store.getSavedSearches();
+      expect(searches.length).toBe(1);
+      expect(searches[0].query).toBe('status:active');
+    });
+  });
+
   describe('ordering list getters', () => {
     it('getPinnedChatIds returns empty array by default', async () => {
       expect(await store.getPinnedChatIds()).toEqual([]);
@@ -312,6 +497,7 @@ describe('settings store', () => {
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         chatFolders: [],
+        savedChatSearches: [],
         lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
@@ -326,6 +512,7 @@ describe('settings store', () => {
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         chatFolders: [],
+        savedChatSearches: [],
         lastProvider: 'claude', lastProjectPath: '', lastModel: '',
         lastPermissionMode: 'default', lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',

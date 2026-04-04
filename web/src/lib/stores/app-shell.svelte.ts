@@ -44,6 +44,7 @@ export class AppShellStore {
 	#composerFocusCallbacks = new Set<() => void>();
 	#renameSelectedCallbacks = new Set<() => void>();
 	#newChatDialogSeedCallbacks = new Set<() => void>();
+	#sidebarSearchCallbacks = new Set<() => void>();
 
 	constructor() {
 		this.sidebarWidth = readInitialSidebarWidth();
@@ -146,6 +147,16 @@ export class AppShellStore {
 	/** Closes the new-chat dialog without clearing the seed. */
 	closeNewChatDialog(): void {
 		this.newChatDialogOpen = false;
+	}
+
+	onSidebarSearchRequested(cb: () => void): () => void {
+		this.#sidebarSearchCallbacks.add(cb);
+		return () => { this.#sidebarSearchCallbacks.delete(cb); };
+	}
+
+	/** Toggles the sidebar search dialog via registered callbacks. */
+	openSidebarSearch(): void {
+		for (const cb of this.#sidebarSearchCallbacks) cb();
 	}
 }
 
