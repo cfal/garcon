@@ -264,7 +264,9 @@ describe('settings store', () => {
         id: 'search-1',
         title: 'Unread ops',
         query: 'status:unread tag:ops',
-        showInQuickMenu: false,
+        showAsSidebarPill: true,
+        showInSidebarMenu: false,
+        showInSearchDialog: true,
         createdAt: '2026-03-27T00:00:00.000Z',
         updatedAt: '2026-03-27T00:00:00.000Z',
       };
@@ -288,7 +290,9 @@ describe('settings store', () => {
         id: 'search-1',
         title: null,
         query: 'status:active',
-        showInQuickMenu: false,
+        showAsSidebarPill: false,
+        showInSidebarMenu: true,
+        showInSearchDialog: false,
         createdAt: '2026-03-27T00:00:00.000Z',
         updatedAt: '2026-03-27T00:00:00.000Z',
       };
@@ -298,9 +302,9 @@ describe('settings store', () => {
     });
 
     it('reorders saved searches', async () => {
-      const a = { id: 'a', title: null, query: 'qa', showInQuickMenu: false, createdAt: 't', updatedAt: 't' };
-      const b = { id: 'b', title: null, query: 'qb', showInQuickMenu: false, createdAt: 't', updatedAt: 't' };
-      const c = { id: 'c', title: null, query: 'qc', showInQuickMenu: false, createdAt: 't', updatedAt: 't' };
+      const a = { id: 'a', title: null, query: 'qa', showAsSidebarPill: false, showInSidebarMenu: true, showInSearchDialog: false, createdAt: 't', updatedAt: 't' };
+      const b = { id: 'b', title: null, query: 'qb', showAsSidebarPill: true, showInSidebarMenu: false, showInSearchDialog: false, createdAt: 't', updatedAt: 't' };
+      const c = { id: 'c', title: null, query: 'qc', showAsSidebarPill: false, showInSidebarMenu: false, showInSearchDialog: true, createdAt: 't', updatedAt: 't' };
 
       await store.addSavedSearch(a);
       await store.addSavedSearch(b);
@@ -323,14 +327,16 @@ describe('settings store', () => {
             id: ' search-1 ',
             title: ' My search ',
             query: ' status:unread ',
-            showInQuickMenu: true,
+            showAsSidebarPill: true,
+            showInSidebarMenu: false,
+            showInSearchDialog: false,
             createdAt: ' 2026-03-27T00:00:00.000Z ',
             updatedAt: ' 2026-03-27T00:00:00.000Z ',
           },
           null,
           { id: '', query: 'missing-id', createdAt: 't', updatedAt: 't' },
           { id: 'no-query', title: null, query: '', createdAt: 't', updatedAt: 't' },
-          { id: 'quick-no-title', title: '', query: 'status:active', showInQuickMenu: true, createdAt: 't', updatedAt: 't' },
+          { id: 'no-visibility', title: '', query: 'status:active', showAsSidebarPill: false, showInSidebarMenu: false, showInSearchDialog: false, createdAt: 't', updatedAt: 't' },
         ],
       });
 
@@ -340,7 +346,9 @@ describe('settings store', () => {
           id: 'search-1',
           title: 'My search',
           query: 'status:unread',
-          showInQuickMenu: true,
+          showAsSidebarPill: true,
+          showInSidebarMenu: false,
+          showInSearchDialog: false,
           createdAt: '2026-03-27T00:00:00.000Z',
           updatedAt: '2026-03-27T00:00:00.000Z',
         },
@@ -371,7 +379,9 @@ describe('settings store', () => {
           id: 'folder-1',
           title: 'Unread ops',
           query: 'status:unread tag:ops provider:claude model:sonnet bug',
-          showInQuickMenu: false,
+          showAsSidebarPill: false,
+          showInSidebarMenu: false,
+          showInSearchDialog: true,
           createdAt: '2026-03-27T00:00:00.000Z',
           updatedAt: '2026-03-27T00:00:00.000Z',
         },
@@ -383,7 +393,9 @@ describe('settings store', () => {
         id: 'search-1',
         title: 'My search',
         query: 'status:active',
-        showInQuickMenu: false,
+        showAsSidebarPill: false,
+        showInSidebarMenu: true,
+        showInSearchDialog: false,
         createdAt: '2026-03-28T00:00:00.000Z',
         updatedAt: '2026-03-28T00:00:00.000Z',
       };

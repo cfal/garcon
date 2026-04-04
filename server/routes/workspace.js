@@ -165,8 +165,14 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const titleRaw = typeof raw.title === 'string' ? raw.title.trim() : '';
     const query = typeof raw.query === 'string' ? raw.query.trim() : '';
-    const showInQuickMenu = raw.showInQuickMenu === true;
-    return { title: titleRaw || null, query, showInQuickMenu };
+    const showAsSidebarPill = raw.showAsSidebarPill === true;
+    const showInSidebarMenu = raw.showInSidebarMenu === true;
+    const showInSearchDialog = raw.showInSearchDialog === true;
+    return { title: titleRaw || null, query, showAsSidebarPill, showInSidebarMenu, showInSearchDialog };
+  }
+
+  function hasAnySavedSearchVisibility(input) {
+    return input.showAsSidebarPill || input.showInSidebarMenu || input.showInSearchDialog;
   }
 
   async function getSavedSearches() {
@@ -185,15 +191,17 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
       if (!input || !input.query) {
         return Response.json({ success: false, error: 'query is required' }, { status: 400 });
       }
-      if (input.showInQuickMenu && !input.title) {
-        return Response.json({ success: false, error: 'title is required when showInQuickMenu is true' }, { status: 400 });
+      if (!hasAnySavedSearchVisibility(input)) {
+        return Response.json({ success: false, error: 'at least one visibility option is required' }, { status: 400 });
       }
       const now = new Date().toISOString();
       const savedSearch = {
         id: crypto.randomUUID(),
         title: input.title,
         query: input.query,
-        showInQuickMenu: input.showInQuickMenu,
+        showAsSidebarPill: input.showAsSidebarPill,
+        showInSidebarMenu: input.showInSidebarMenu,
+        showInSearchDialog: input.showInSearchDialog,
         createdAt: now,
         updatedAt: now,
       };
@@ -226,19 +234,26 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
         }
         patch.query = query;
       }
-      if (typeof body.showInQuickMenu === 'boolean') {
-        patch.showInQuickMenu = body.showInQuickMenu;
+      if (typeof body.showAsSidebarPill === 'boolean') {
+        patch.showAsSidebarPill = body.showAsSidebarPill;
       }
-      // Validate quick-menu title requirement against the merged state.
-      // The patch may omit title/showInQuickMenu, so we need the stored record.
+      if (typeof body.showInSidebarMenu === 'boolean') {
+        patch.showInSidebarMenu = body.showInSidebarMenu;
+      }
+      if (typeof body.showInSearchDialog === 'boolean') {
+        patch.showInSearchDialog = body.showInSearchDialog;
+      }
       const existing = (await settings.getSavedSearches()).find((s) => s.id === id);
       if (!existing) {
         return Response.json({ success: false, error: 'Saved search not found' }, { status: 404 });
       }
-      const mergedShowInQuickMenu = patch.showInQuickMenu !== undefined ? patch.showInQuickMenu : existing.showInQuickMenu;
-      const mergedTitle = patch.title !== undefined ? patch.title : existing.title;
-      if (mergedShowInQuickMenu === true && !mergedTitle) {
-        return Response.json({ success: false, error: 'title is required when showInQuickMenu is true' }, { status: 400 });
+      const mergedVisibility = {
+        showAsSidebarPill: patch.showAsSidebarPill !== undefined ? patch.showAsSidebarPill : existing.showAsSidebarPill,
+        showInSidebarMenu: patch.showInSidebarMenu !== undefined ? patch.showInSidebarMenu : existing.showInSidebarMenu,
+        showInSearchDialog: patch.showInSearchDialog !== undefined ? patch.showInSearchDialog : existing.showInSearchDialog,
+      };
+      if (!hasAnySavedSearchVisibility(mergedVisibility)) {
+        return Response.json({ success: false, error: 'at least one visibility option is required' }, { status: 400 });
       }
       patch.updatedAt = new Date().toISOString();
       const result = await settings.updateSavedSearch(id, patch);

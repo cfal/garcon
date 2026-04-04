@@ -3,21 +3,31 @@
 	import { Button } from '$lib/components/ui/button';
 	import Input from '$lib/components/ui/input/input.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { SavedChatSearch } from '$lib/api/settings';
 
-	export interface SavedSearchEditorState {
-		mode: 'create' | 'edit';
-		searchId?: string;
-		title: string;
-		query: string;
-		showInQuickMenu: boolean;
-	}
+export interface SavedSearchEditorState {
+	mode: 'create' | 'edit';
+	searchId?: string;
+	title: string;
+	query: string;
+	showAsSidebarPill: boolean;
+	showInSidebarMenu: boolean;
+	showInSearchDialog: boolean;
+}
 
 	interface SavedSearchEditorDialogProps {
-		editorState: SavedSearchEditorState | null;
-		onClose: () => void;
-		onSave: (data: { title: string | null; query: string; showInQuickMenu: boolean }, searchId?: string) => Promise<void>;
-	}
+	editorState: SavedSearchEditorState | null;
+	onClose: () => void;
+	onSave: (
+		data: {
+			title: string | null;
+			query: string;
+			showAsSidebarPill: boolean;
+			showInSidebarMenu: boolean;
+			showInSearchDialog: boolean;
+		},
+		searchId?: string
+	) => Promise<void>;
+}
 
 	let {
 		editorState,
@@ -25,11 +35,13 @@
 		onSave,
 	}: SavedSearchEditorDialogProps = $props();
 
-	let isOpen = $derived(editorState !== null);
-	let titleValue = $state('');
-	let queryValue = $state('');
-	let showInQuickMenuValue = $state(false);
-	let validationError = $state<string | null>(null);
+let isOpen = $derived(editorState !== null);
+let titleValue = $state('');
+let queryValue = $state('');
+let showAsSidebarPillValue = $state(false);
+let showInSidebarMenuValue = $state(false);
+let showInSearchDialogValue = $state(true);
+let validationError = $state<string | null>(null);
 	let isSaving = $state(false);
 	let inputRef = $state<HTMLInputElement | null>(null);
 
@@ -37,7 +49,9 @@
 		if (editorState) {
 			titleValue = editorState.title;
 			queryValue = editorState.query;
-			showInQuickMenuValue = editorState.showInQuickMenu;
+			showAsSidebarPillValue = editorState.showAsSidebarPill;
+			showInSidebarMenuValue = editorState.showInSidebarMenu;
+			showInSearchDialogValue = editorState.showInSearchDialog;
 			validationError = null;
 			isSaving = false;
 		}
@@ -51,8 +65,8 @@
 
 	function validate(): string | null {
 		if (!queryValue.trim()) return m.sidebar_saved_searches_query_required();
-		if (showInQuickMenuValue && !titleValue.trim()) {
-			return m.sidebar_saved_searches_title_required_for_quick_menu();
+		if (!showAsSidebarPillValue && !showInSidebarMenuValue && !showInSearchDialogValue) {
+			return 'At least one visibility option is required';
 		}
 		return null;
 	}
@@ -67,7 +81,16 @@
 		try {
 			const title = titleValue.trim() || null;
 			const query = queryValue.trim();
-			await onSave({ title, query, showInQuickMenu: showInQuickMenuValue }, editorState?.searchId);
+			await onSave(
+				{
+					title,
+					query,
+					showAsSidebarPill: showAsSidebarPillValue,
+					showInSidebarMenu: showInSidebarMenuValue,
+					showInSearchDialog: showInSearchDialogValue,
+				},
+				editorState?.searchId
+			);
 		} catch (err) {
 			validationError = err instanceof Error ? err.message : String(err);
 		} finally {
@@ -123,15 +146,36 @@
 				/>
 			</label>
 
-			<label class="flex items-center gap-2 text-sm">
-				<input
-					type="checkbox"
-					bind:checked={showInQuickMenuValue}
-					disabled={isSaving}
-					class="rounded border-border"
-				/>
-				{m.sidebar_saved_searches_show_in_quick_menu()}
-			</label>
+			<div class="space-y-2">
+				<span class="text-sm font-medium text-foreground">Visibility</span>
+				<label class="flex items-center gap-2 text-sm">
+					<input
+						type="checkbox"
+						bind:checked={showAsSidebarPillValue}
+						disabled={isSaving}
+						class="rounded border-border"
+					/>
+					Show as sidebar pill
+				</label>
+				<label class="flex items-center gap-2 text-sm">
+					<input
+						type="checkbox"
+						bind:checked={showInSidebarMenuValue}
+						disabled={isSaving}
+						class="rounded border-border"
+					/>
+					Show in sidebar menu
+				</label>
+				<label class="flex items-center gap-2 text-sm">
+					<input
+						type="checkbox"
+						bind:checked={showInSearchDialogValue}
+						disabled={isSaving}
+						class="rounded border-border"
+					/>
+					Show in search dialog
+				</label>
+			</div>
 
 			{#if validationError}
 				<p class="text-sm text-destructive">{validationError}</p>

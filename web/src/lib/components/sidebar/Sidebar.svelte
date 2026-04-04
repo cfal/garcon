@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import SidebarContent from './SidebarContent.svelte';
-	import SidebarFooter from './SidebarFooter.svelte';
+	import SidebarControlsRow from './SidebarControlsRow.svelte';
+	import SidebarSearchContext from './SidebarSearchContext.svelte';
 	import SidebarChatDialogs from './SidebarChatDialogs.svelte';
 	import SidebarTagDialog from './SidebarTagDialog.svelte';
 	import SidebarSearchDialog from './SidebarSearchDialog.svelte';
@@ -105,11 +106,14 @@
 	let savedSearchDeleteConfirmation = $state<{ id: string } | null>(null);
 	let savedSearchDeleteButtonRef = $state<HTMLButtonElement | null>(null);
 
-	let visibleUnreadChatIds = $derived.by(() =>
-		searchState.filteredChats
-			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
-			.map((chat) => chat.id)
-	);
+		let visibleUnreadChatIds = $derived.by(() =>
+			searchState.filteredChats
+				.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
+				.map((chat) => chat.id)
+		);
+		let showSidebarSearchContext = $derived(
+			searchState.sidebarPillSearches.length > 0 || searchState.hasActiveQuery
+		);
 
 	// Refresh timestamp every minute.
 	$effect(() => {
@@ -336,8 +340,16 @@
 		searchState.updateDraftQuery(search.query);
 	}
 
-	function handleApplyQuickSearch(query: string) {
+	function handleApplySidebarMenuSearch(query: string) {
 		searchState.applyQuery(query);
+	}
+
+	function handleApplySidebarPillSearch(search: SavedChatSearch) {
+		searchState.applyQuery(search.query);
+	}
+
+	function handleClearActiveQuery() {
+		searchState.applyQuery('');
 	}
 
 	function openSavedSearchManager() {
@@ -351,13 +363,15 @@
 
 	function openEditorForCreate() {
 		searchState.manageSavedSearchesOpen = false;
-			editorState = {
-				mode: 'create',
-				title: '',
-				query: searchState.draftQuery,
-				showInQuickMenu: false,
-			};
-		}
+		editorState = {
+			mode: 'create',
+			title: '',
+			query: searchState.draftQuery,
+			showAsSidebarPill: false,
+			showInSidebarMenu: false,
+			showInSearchDialog: true,
+		};
+	}
 
 	function openEditorForEdit(search: SavedChatSearch) {
 		searchState.manageSavedSearchesOpen = false;
@@ -366,12 +380,20 @@
 			searchId: search.id,
 			title: search.title || '',
 			query: search.query,
-			showInQuickMenu: search.showInQuickMenu,
+			showAsSidebarPill: search.showAsSidebarPill,
+			showInSidebarMenu: search.showInSidebarMenu,
+			showInSearchDialog: search.showInSearchDialog,
 		};
 	}
 
 	async function handleSaveSearchEditor(
-		data: { title: string | null; query: string; showInQuickMenu: boolean },
+		data: {
+			title: string | null;
+			query: string;
+			showAsSidebarPill: boolean;
+			showInSidebarMenu: boolean;
+			showInSearchDialog: boolean;
+		},
 		searchId?: string
 	) {
 		if (searchId) {
@@ -467,23 +489,30 @@
 
 <div class="h-full flex flex-col bg-card md:select-none">
 	{#if searchBarPosition === 'top'}
-		<SidebarFooter
-			dockPlacement="top"
-			{isLoading}
-			searchFilter={searchState.activeQuery}
-			{isReorderMode}
-			visibleUnreadCount={visibleUnreadChatIds.length}
-			{isMarkingAllRead}
-			quickMenuSearches={searchState.quickMenuSearches}
-			onOpenSearchDialog={() => searchState.openSearchDialog()}
-			onClearSearchFilter={() => searchState.applyQuery('')}
-			onCreateChat={handlePrimaryAction}
-			onMarkAllRead={() => { void handleMarkAllRead(); }}
-			onApplyQuickSearch={handleApplyQuickSearch}
+			<SidebarControlsRow
+				dockPlacement="top"
+				{isLoading}
+				{isReorderMode}
+				visibleUnreadCount={visibleUnreadChatIds.length}
+				{isMarkingAllRead}
+				sidebarMenuSearches={searchState.sidebarMenuSearches}
+				hasSearchContextBelow={showSidebarSearchContext}
+				onOpenSearchDialog={() => searchState.openSearchDialog()}
+				onCreateChat={handlePrimaryAction}
+				onMarkAllRead={() => { void handleMarkAllRead(); }}
+				onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
 			{onShowSettings}
 		/>
 	{/if}
+
+	<SidebarSearchContext
+		sidebarPillSearches={searchState.sidebarPillSearches}
+		activeQuery={searchState.activeQuery}
+		hasControlsRowAbove={searchBarPosition === 'top'}
+		onApplyPillSearch={handleApplySidebarPillSearch}
+		onClearActiveQuery={handleClearActiveQuery}
+	/>
 
 	<SidebarContent
 		{chats}
@@ -510,19 +539,17 @@
 	/>
 
 	{#if searchBarPosition === 'bottom'}
-		<SidebarFooter
+		<SidebarControlsRow
 			dockPlacement="bottom"
 			{isLoading}
-			searchFilter={searchState.activeQuery}
 			{isReorderMode}
 			visibleUnreadCount={visibleUnreadChatIds.length}
 			{isMarkingAllRead}
-			quickMenuSearches={searchState.quickMenuSearches}
+			sidebarMenuSearches={searchState.sidebarMenuSearches}
 			onOpenSearchDialog={() => searchState.openSearchDialog()}
-			onClearSearchFilter={() => searchState.applyQuery('')}
 			onCreateChat={handlePrimaryAction}
 			onMarkAllRead={() => { void handleMarkAllRead(); }}
-			onApplyQuickSearch={handleApplyQuickSearch}
+			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
 			{onShowSettings}
 		/>
@@ -551,7 +578,7 @@
 		open={searchState.searchDialogOpen}
 		query={searchState.draftQuery}
 		filteredChats={searchState.dialogFilteredChats}
-		savedSearches={searchState.savedSearches}
+		savedSearches={searchState.searchDialogSavedSearches}
 		highlightedIndex={searchState.highlightedResultIndex}
 		onQueryChange={(q) => searchState.updateDraftQuery(q)}
 		onSelectChat={handleSearchSelectChat}

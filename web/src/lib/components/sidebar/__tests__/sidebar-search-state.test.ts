@@ -33,7 +33,9 @@ function makeSavedSearch(overrides: Partial<SavedChatSearch>): SavedChatSearch {
 		id: 'search-1',
 		title: null,
 		query: 'status:active',
-		showInQuickMenu: false,
+		showAsSidebarPill: false,
+		showInSidebarMenu: false,
+		showInSearchDialog: true,
 		createdAt: '2026-03-27T00:00:00.000Z',
 		updatedAt: '2026-03-27T00:00:00.000Z',
 		...overrides,
@@ -198,25 +200,64 @@ describe('SidebarSearchState', () => {
 		});
 	});
 
-	describe('quickMenuSearches', () => {
-		it('returns only searches with showInQuickMenu true', () => {
+	describe('sidebarPillSearches', () => {
+		it('returns only searches with showAsSidebarPill true', () => {
 			const searchState = createState();
 			searchState.setSavedSearches([
-				makeSavedSearch({ id: 's1', showInQuickMenu: true, title: 'Quick' }),
-				makeSavedSearch({ id: 's2', showInQuickMenu: false }),
-				makeSavedSearch({ id: 's3', showInQuickMenu: true, title: 'Also Quick' }),
+				makeSavedSearch({ id: 's1', showAsSidebarPill: true, title: 'Quick' }),
+				makeSavedSearch({ id: 's2', showAsSidebarPill: false }),
+				makeSavedSearch({ id: 's3', showAsSidebarPill: true, title: 'Also Quick' }),
 			]);
 
-			expect(searchState.quickMenuSearches.map((s) => s.id)).toEqual(['s1', 's3']);
+			expect(searchState.sidebarPillSearches.map((s) => s.id)).toEqual(['s1', 's3']);
 		});
 
-		it('returns empty array when no searches are marked for quick menu', () => {
+		it('returns empty array when no searches are marked for sidebar pills', () => {
 			const searchState = createState();
 			searchState.setSavedSearches([
-				makeSavedSearch({ id: 's1', showInQuickMenu: false }),
+				makeSavedSearch({ id: 's1', showAsSidebarPill: false }),
 			]);
 
-			expect(searchState.quickMenuSearches).toEqual([]);
+			expect(searchState.sidebarPillSearches).toEqual([]);
+		});
+	});
+
+	describe('sidebarMenuSearches', () => {
+		it('returns only searches with showInSidebarMenu true', () => {
+			const searchState = createState();
+			searchState.setSavedSearches([
+				makeSavedSearch({ id: 's1', showInSidebarMenu: true }),
+				makeSavedSearch({ id: 's2', showInSidebarMenu: false }),
+				makeSavedSearch({ id: 's3', showInSidebarMenu: true }),
+			]);
+
+			expect(searchState.sidebarMenuSearches.map((s) => s.id)).toEqual(['s1', 's3']);
+		});
+	});
+
+	describe('searchDialogSavedSearches', () => {
+		it('returns only searches with showInSearchDialog true', () => {
+			const searchState = createState();
+			searchState.setSavedSearches([
+				makeSavedSearch({ id: 's1', showInSearchDialog: true }),
+				makeSavedSearch({ id: 's2', showInSearchDialog: false }),
+				makeSavedSearch({ id: 's3', showInSearchDialog: true }),
+			]);
+
+			expect(searchState.searchDialogSavedSearches.map((s) => s.id)).toEqual(['s1', 's3']);
+		});
+	});
+
+	describe('hasActiveQuery', () => {
+		it('returns true when activeQuery is non-empty', () => {
+			const searchState = createState();
+			searchState.applyQuery('status:active');
+			expect(searchState.hasActiveQuery).toBe(true);
+		});
+
+		it('returns false when activeQuery is empty', () => {
+			const searchState = createState();
+			expect(searchState.hasActiveQuery).toBe(false);
 		});
 	});
 

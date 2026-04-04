@@ -99,16 +99,20 @@ function sanitizeSavedSearch(raw) {
   const query = typeof raw.query === 'string' ? raw.query.trim() : '';
   const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt.trim() : '';
   const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt.trim() : '';
-  const showInQuickMenu = raw.showInQuickMenu === true;
+  const showAsSidebarPill = raw.showAsSidebarPill === true;
+  const showInSidebarMenu = raw.showInSidebarMenu === true;
+  const showInSearchDialog = raw.showInSearchDialog === true;
 
   if (!id || !query || !createdAt || !updatedAt) return null;
-  if (showInQuickMenu && !titleRaw) return null;
+  if (!showAsSidebarPill && !showInSidebarMenu && !showInSearchDialog) return null;
 
   return {
     id,
     title: titleRaw || null,
     query,
-    showInQuickMenu,
+    showAsSidebarPill,
+    showInSidebarMenu,
+    showInSearchDialog,
     createdAt,
     updatedAt,
   };
@@ -138,7 +142,9 @@ function migrateFoldersToSavedSearches(chatFolders) {
         id: folder.id,
         title: folder.name,
         query,
-        showInQuickMenu: false,
+        showAsSidebarPill: false,
+        showInSidebarMenu: false,
+        showInSearchDialog: true,
         createdAt: folder.createdAt,
         updatedAt: folder.createdAt,
       };

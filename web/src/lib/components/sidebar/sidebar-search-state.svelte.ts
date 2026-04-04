@@ -42,11 +42,23 @@ export class SidebarSearchState {
 		return chats.filter((chat) => matchesChatFilter(chat, filter));
 	}
 
-	get quickMenuSearches(): SavedChatSearch[] {
-		return this.savedSearches.filter((search) => search.showInQuickMenu);
+	get sidebarPillSearches(): SavedChatSearch[] {
+		return this.savedSearches.filter((search) => search.showAsSidebarPill);
+	}
+
+	get sidebarMenuSearches(): SavedChatSearch[] {
+		return this.savedSearches.filter((search) => search.showInSidebarMenu);
+	}
+
+	get searchDialogSavedSearches(): SavedChatSearch[] {
+		return this.savedSearches.filter((search) => search.showInSearchDialog);
 	}
 
 	get isFiltered(): boolean {
+		return this.activeQuery.trim().length > 0;
+	}
+
+	get hasActiveQuery(): boolean {
 		return this.activeQuery.trim().length > 0;
 	}
 

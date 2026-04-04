@@ -58,7 +58,9 @@ export interface SavedChatSearch {
 	id: string;
 	title: string | null;
 	query: string;
-	showInQuickMenu: boolean;
+	showAsSidebarPill: boolean;
+	showInSidebarMenu: boolean;
+	showInSearchDialog: boolean;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -68,14 +70,22 @@ export async function getSavedSearches(): Promise<{ savedSearches: SavedChatSear
 }
 
 export async function createSavedSearch(
-	input: Pick<SavedChatSearch, 'title' | 'query' | 'showInQuickMenu'>
+	input: Pick<
+		SavedChatSearch,
+		'title' | 'query' | 'showAsSidebarPill' | 'showInSidebarMenu' | 'showInSearchDialog'
+	>
 ): Promise<{ success: boolean; savedSearch: SavedChatSearch }> {
 	return apiPost('/api/v1/app/saved-searches', input);
 }
 
 export async function updateSavedSearch(
 	id: string,
-	patch: Partial<Pick<SavedChatSearch, 'title' | 'query' | 'showInQuickMenu'>>
+	patch: Partial<
+		Pick<
+			SavedChatSearch,
+			'title' | 'query' | 'showAsSidebarPill' | 'showInSidebarMenu' | 'showInSearchDialog'
+		>
+	>
 ): Promise<{ success: boolean; savedSearch: SavedChatSearch }> {
 	return apiPut('/api/v1/app/saved-searches', { id, ...patch });
 }

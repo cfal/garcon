@@ -322,7 +322,7 @@ describe('saved searches API', () => {
   });
 
   it('returns saved searches', async () => {
-    const searches = [{ id: 's1', title: 'Ops', query: 'tag:ops', showInQuickMenu: true, createdAt: 't', updatedAt: 't' }];
+    const searches = [{ id: 's1', title: 'Ops', query: 'tag:ops', showAsSidebarPill: false, showInSidebarMenu: true, showInSearchDialog: true, createdAt: 't', updatedAt: 't' }];
     ctx.settings.getSavedSearches.mockImplementation(() => Promise.resolve(searches));
 
     const response = await getHandler();
@@ -337,7 +337,9 @@ describe('saved searches API', () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       title: 'My search',
       query: 'status:unread',
-      showInQuickMenu: false,
+      showAsSidebarPill: true,
+      showInSidebarMenu: false,
+      showInSearchDialog: true,
     }));
 
     const response = await postHandler(makeRequest('http://localhost/api/v1/app/saved-searches', 'POST', {}));
@@ -348,7 +350,9 @@ describe('saved searches API', () => {
     expect(ctx.settings.addSavedSearch).toHaveBeenCalledWith(expect.objectContaining({
       title: 'My search',
       query: 'status:unread',
-      showInQuickMenu: false,
+      showAsSidebarPill: true,
+      showInSidebarMenu: false,
+      showInSearchDialog: true,
     }));
   });
 
@@ -362,18 +366,19 @@ describe('saved searches API', () => {
     expect(body.error).toBe('query is required');
   });
 
-  it('rejects create when showInQuickMenu is true but title is empty', async () => {
+  it('rejects create when no visibility options are enabled', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       query: 'status:active',
-      showInQuickMenu: true,
-      title: '',
+      showAsSidebarPill: false,
+      showInSidebarMenu: false,
+      showInSearchDialog: false,
     }));
 
     const response = await postHandler(makeRequest('http://localhost/api/v1/app/saved-searches', 'POST', {}));
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('title is required when showInQuickMenu is true');
+    expect(body.error).toBe('at least one visibility option is required');
   });
 
   it('deletes a saved search by id', async () => {
@@ -387,27 +392,37 @@ describe('saved searches API', () => {
     expect(ctx.settings.removeSavedSearch).toHaveBeenCalledWith('s1');
   });
 
-  it('rejects update that enables showInQuickMenu on untitled search', async () => {
+  it('rejects update that disables all visibility options', async () => {
     ctx.settings.getSavedSearches.mockImplementation(() => Promise.resolve([
-      { id: 's1', title: null, query: 'status:active', showInQuickMenu: false, createdAt: 't', updatedAt: 't' },
+      { id: 's1', title: null, query: 'status:active', showAsSidebarPill: true, showInSidebarMenu: false, showInSearchDialog: false, createdAt: 't', updatedAt: 't' },
     ]));
-    parseJsonBody.mockImplementation(() => Promise.resolve({ id: 's1', showInQuickMenu: true }));
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      id: 's1',
+      showAsSidebarPill: false,
+      showInSidebarMenu: false,
+      showInSearchDialog: false,
+    }));
 
     const response = await putHandler(makeRequest('http://localhost/api/v1/app/saved-searches', 'PUT', {}));
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('title is required when showInQuickMenu is true');
+    expect(body.error).toBe('at least one visibility option is required');
   });
 
-  it('allows update that enables showInQuickMenu when title is provided in patch', async () => {
+  it('allows update that changes visibility targets', async () => {
     ctx.settings.getSavedSearches.mockImplementation(() => Promise.resolve([
-      { id: 's1', title: null, query: 'status:active', showInQuickMenu: false, createdAt: 't', updatedAt: 't' },
+      { id: 's1', title: null, query: 'status:active', showAsSidebarPill: true, showInSidebarMenu: false, showInSearchDialog: false, createdAt: 't', updatedAt: 't' },
     ]));
     ctx.settings.updateSavedSearch.mockImplementation(async (_id, patch) => ({
-      id: 's1', title: 'Titled', query: 'status:active', showInQuickMenu: true, createdAt: 't', updatedAt: patch.updatedAt,
+      id: 's1', title: null, query: 'status:active', showAsSidebarPill: false, showInSidebarMenu: true, showInSearchDialog: true, createdAt: 't', updatedAt: patch.updatedAt,
     }));
-    parseJsonBody.mockImplementation(() => Promise.resolve({ id: 's1', title: 'Titled', showInQuickMenu: true }));
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      id: 's1',
+      showAsSidebarPill: false,
+      showInSidebarMenu: true,
+      showInSearchDialog: true,
+    }));
 
     const response = await putHandler(makeRequest('http://localhost/api/v1/app/saved-searches', 'PUT', {}));
     const body = await response.json();

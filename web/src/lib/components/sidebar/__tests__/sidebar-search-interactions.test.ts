@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
+import SavedSearchEditorDialog from '../SavedSearchEditorDialog.svelte';
 import SavedSearchManagerDialog from '../SavedSearchManagerDialog.svelte';
-import SidebarFooter from '../SidebarFooter.svelte';
+import SidebarControlsRow from '../SidebarControlsRow.svelte';
+import SidebarSearchContext from '../SidebarSearchContext.svelte';
 import SidebarSearchDialogHarness from './SidebarSearchDialogHarness.svelte';
 
 import type { SavedChatSearch } from '$lib/api/settings';
@@ -38,7 +40,9 @@ function createSavedSearch(id: string, title: string, query: string): SavedChatS
 		id,
 		title,
 		query,
-		showInQuickMenu: true,
+		showAsSidebarPill: true,
+		showInSidebarMenu: true,
+		showInSearchDialog: true,
 		createdAt: '2025-01-01T00:00:00.000Z',
 		updatedAt: '2025-01-01T00:00:00.000Z',
 	};
@@ -194,20 +198,18 @@ describe('sidebar search interactions', () => {
 		expect(preview.className).toContain('truncate');
 	});
 
-	it('renders quick searches ahead of the footer actions and inserts a separator', async () => {
-		render(SidebarFooter, {
-			isLoading: false,
-			searchFilter: '',
-			isReorderMode: false,
-			visibleUnreadCount: 0,
-			quickMenuSearches: [
+		it('renders sidebar menu searches ahead of the row actions and inserts a separator', async () => {
+			render(SidebarControlsRow, {
+				isLoading: false,
+				isReorderMode: false,
+				visibleUnreadCount: 0,
+			sidebarMenuSearches: [
 				createSavedSearch('search-1', 'Unread', 'status:unread'),
 				createSavedSearch('search-2', 'Active', 'status:active'),
 			],
 			onOpenSearchDialog: vi.fn(),
-			onClearSearchFilter: vi.fn(),
 			onCreateChat: vi.fn(),
-			onApplyQuickSearch: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -222,21 +224,37 @@ describe('sidebar search interactions', () => {
 		expect(items[0]?.textContent).toContain('Unread');
 		expect(items[1]?.textContent).toContain('Active');
 		expect(items[2]?.textContent).toContain('Mark all as read');
-		expect(items[3]?.textContent).toContain('Settings');
-		expect(document.querySelector('[data-slot="dropdown-menu-separator"]')).toBeTruthy();
-	});
+			expect(items[3]?.textContent).toContain('Settings');
+			expect(document.querySelector('[data-slot="dropdown-menu-separator"]')).toBeTruthy();
+		});
 
-	it('omits the separator when no quick searches are shown', async () => {
-		render(SidebarFooter, {
+		it('suppresses the top divider when search context sits directly below the controls row', () => {
+			render(SidebarControlsRow, {
+				dockPlacement: 'top',
+				isLoading: false,
+				isReorderMode: false,
+				visibleUnreadCount: 0,
+				hasSearchContextBelow: true,
+				sidebarMenuSearches: [],
+				onOpenSearchDialog: vi.fn(),
+				onCreateChat: vi.fn(),
+				onApplySidebarMenuSearch: vi.fn(),
+				onShowSettings: vi.fn(),
+			});
+
+			const controlsRow = document.querySelector('[data-slot="sidebar-controls-row"]');
+			expect(controlsRow?.className ?? '').not.toMatch(/\bborder-b\b/);
+		});
+
+	it('omits the separator when no sidebar menu searches are shown', async () => {
+		render(SidebarControlsRow, {
 			isLoading: false,
-			searchFilter: '',
 			isReorderMode: false,
 			visibleUnreadCount: 0,
-			quickMenuSearches: [],
+			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
-			onClearSearchFilter: vi.fn(),
 			onCreateChat: vi.fn(),
-			onApplyQuickSearch: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -248,6 +266,65 @@ describe('sidebar search interactions', () => {
 		});
 
 		expect(screen.queryByRole('separator')).toBeNull();
+	});
+
+	it('renders sidebar pill searches and clears the active search banner', async () => {
+		const onApplyPillSearch = vi.fn();
+		const onClearActiveQuery = vi.fn();
+
+		render(SidebarSearchContext, {
+			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
+			activeQuery: 'tag:ops',
+			onApplyPillSearch,
+			onClearActiveQuery,
+		});
+
+		expect(screen.getByRole('button', { name: 'Unread' })).toBeTruthy();
+		expect(document.querySelector('[data-slot="active-search-banner"]')?.textContent).toContain('tag:ops');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Unread' }));
+		expect(onApplyPillSearch).toHaveBeenCalledTimes(1);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+		expect(onClearActiveQuery).toHaveBeenCalledTimes(1);
+	});
+
+	it('tightens the top seam only when the controls row is above the search context', () => {
+		const { rerender } = render(SidebarSearchContext, {
+			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
+			activeQuery: '',
+			hasControlsRowAbove: true,
+			onApplyPillSearch: vi.fn(),
+			onClearActiveQuery: vi.fn(),
+		});
+
+		const compactContext = document.querySelector('[data-slot="sidebar-search-pills"]')?.parentElement;
+		expect(compactContext?.className).toContain('pb-2');
+		expect(compactContext?.className).not.toContain('pt-');
+		expect(compactContext?.className).not.toContain('py-2');
+
+		rerender({
+			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
+			activeQuery: '',
+			hasControlsRowAbove: false,
+			onApplyPillSearch: vi.fn(),
+			onClearActiveQuery: vi.fn(),
+		});
+
+		const defaultContext = document.querySelector('[data-slot="sidebar-search-pills"]')?.parentElement;
+		expect(defaultContext?.className).toContain('py-2');
+	});
+
+	it('omits sidebar search context when there are no pills and no active query', () => {
+		render(SidebarSearchContext, {
+			sidebarPillSearches: [],
+			activeQuery: '',
+			onApplyPillSearch: vi.fn(),
+			onClearActiveQuery: vi.fn(),
+		});
+
+		expect(document.querySelector('[data-slot="sidebar-search-pills"]')).toBeNull();
+		expect(document.querySelector('[data-slot="active-search-banner"]')).toBeNull();
 	});
 
 	it('supports button-based reordering for saved searches', async () => {
@@ -276,5 +353,23 @@ describe('sidebar search interactions', () => {
 		);
 		expect((screen.getByRole('button', { name: 'Move Unread up' }) as HTMLButtonElement).disabled).toBe(true);
 		expect((screen.getByRole('button', { name: 'Move Tagged down' }) as HTMLButtonElement).disabled).toBe(true);
+	});
+
+	it('requires at least one saved-search visibility target in the editor', async () => {
+		render(SavedSearchEditorDialog, {
+			editorState: {
+				mode: 'create',
+				title: '',
+				query: 'status:active',
+				showAsSidebarPill: false,
+				showInSidebarMenu: false,
+				showInSearchDialog: false,
+			},
+			onClose: vi.fn(),
+			onSave: vi.fn(async () => undefined),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		expect(await screen.findByText('At least one visibility option is required')).toBeTruthy();
 	});
 });

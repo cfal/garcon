@@ -130,6 +130,17 @@
 								{#if search.title}
 									<div class="text-xs text-muted-foreground truncate">{search.query}</div>
 								{/if}
+								<div class="flex flex-wrap gap-1 pt-1">
+									{#if search.showAsSidebarPill}
+										<span class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">Pill</span>
+									{/if}
+									{#if search.showInSidebarMenu}
+										<span class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">Menu</span>
+									{/if}
+									{#if search.showInSearchDialog}
+										<span class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">Dialog</span>
+									{/if}
+								</div>
 							</div>
 							<div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity shrink-0">
 								<button
