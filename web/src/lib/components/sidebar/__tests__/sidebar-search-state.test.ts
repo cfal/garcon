@@ -42,15 +42,31 @@ function makeSavedSearch(overrides: Partial<SavedChatSearch>): SavedChatSearch {
 	};
 }
 
-function createState(chats: ChatSessionRecord[] = []) {
+function createState(chats: ChatSessionRecord[] = [], selectedChatId: string | null = null) {
 	return new SidebarSearchState({
 		get chats() { return chats; },
+		get selectedChatId() { return selectedChatId; },
 	});
 }
 
 describe('SidebarSearchState', () => {
 	describe('dialog lifecycle', () => {
-			it('opens search dialog, seeds the draft query, and resets highlight index', () => {
+			it('opens search dialog, seeds the draft query, and highlights the selected chat when present', () => {
+				const chats = [
+					makeChat({ id: 'c1', title: 'First chat' }),
+					makeChat({ id: 'c2', title: 'Second chat' }),
+				];
+				const searchState = createState(chats, 'c2');
+				searchState.activeQuery = '';
+				searchState.highlightedResultIndex = 5;
+				searchState.openSearchDialog();
+
+				expect(searchState.searchDialogOpen).toBe(true);
+				expect(searchState.draftQuery).toBe('');
+				expect(searchState.highlightedResultIndex).toBe(1);
+			});
+
+			it('falls back to the first result when the selected chat is not in the filtered dialog results', () => {
 				const searchState = createState();
 				searchState.activeQuery = 'status:unread';
 				searchState.highlightedResultIndex = 5;

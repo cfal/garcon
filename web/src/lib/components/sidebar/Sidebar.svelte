@@ -89,6 +89,7 @@
 
 	const searchState = new SidebarSearchState({
 		get chats() { return chats; },
+		get selectedChatId() { return selectedChatId; },
 	});
 
 	// Sidebar UI state.

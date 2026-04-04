@@ -15,9 +15,11 @@ export class SidebarSearchState {
 	highlightedResultIndex = $state(0);
 
 	#getChats: () => ChatSessionRecord[];
+	#getSelectedChatId: () => string | null;
 
-	constructor(deps: { get chats(): ChatSessionRecord[] }) {
+	constructor(deps: { get chats(): ChatSessionRecord[]; get selectedChatId(): string | null }) {
 		this.#getChats = () => deps.chats;
+		this.#getSelectedChatId = () => deps.selectedChatId;
 	}
 
 	get parsedQuery(): ChatFilterSpec {
@@ -67,10 +69,18 @@ export class SidebarSearchState {
 		return Array.from(new Set(chats.flatMap((c) => c.tags))).sort();
 	}
 
+	get initialHighlightedResultIndex(): number {
+		const selectedChatId = this.#getSelectedChatId();
+		if (!selectedChatId) return 0;
+
+		const selectedIndex = this.dialogFilteredChats.findIndex((chat) => chat.id === selectedChatId);
+		return selectedIndex >= 0 ? selectedIndex : 0;
+	}
+
 	openSearchDialog(): void {
 		this.searchDialogOpen = true;
 		this.draftQuery = this.activeQuery;
-		this.highlightedResultIndex = 0;
+		this.highlightedResultIndex = this.initialHighlightedResultIndex;
 	}
 
 	toggleSearchDialog(): void {
