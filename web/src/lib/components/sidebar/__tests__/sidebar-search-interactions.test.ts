@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import SavedSearchEditorDialog from '../SavedSearchEditorDialog.svelte';
 import SavedSearchManagerDialog from '../SavedSearchManagerDialog.svelte';
 import SidebarControlsRow from '../SidebarControlsRow.svelte';
+import SidebarSearchDock from '../SidebarSearchDock.svelte';
 import SidebarSearchContext from '../SidebarSearchContext.svelte';
 import SidebarSearchDialogHarness from './SidebarSearchDialogHarness.svelte';
 
@@ -293,24 +294,40 @@ describe('sidebar search interactions', () => {
 		expect(screen.queryByRole('separator')).toBeNull();
 	});
 
-		it('suppresses the top divider when search context sits directly below the controls row', () => {
-			render(SidebarControlsRow, {
-				dockPlacement: 'top',
-				isLoading: false,
-				isReorderMode: false,
-				visibleUnreadCount: 0,
-				hasSearchContextBelow: true,
-				sidebarMenuSearches: [],
-				onOpenSearchDialog: vi.fn(),
-				onCreateChat: vi.fn(),
-				onApplySidebarMenuSearch: vi.fn(),
-				onShowSettings: vi.fn(),
-			});
+	it('suppresses the dock divider when search context sits directly against the controls row', () => {
+		const { rerender } = render(SidebarControlsRow, {
+			dockPlacement: 'top',
+			isLoading: false,
+			isReorderMode: false,
+			visibleUnreadCount: 0,
+			hasAdjacentSearchContext: true,
+			sidebarMenuSearches: [],
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
+			onShowSettings: vi.fn(),
+		});
 
 		const controlsRow = document.querySelector('[data-slot="sidebar-controls-row"]');
 		expect(controlsRow?.className ?? '').not.toMatch(/\bborder-b\b/);
 		expect(controlsRow?.className ?? '').toContain('px-2');
+
+		rerender({
+			dockPlacement: 'bottom',
+			isLoading: false,
+			isReorderMode: false,
+			visibleUnreadCount: 0,
+			hasAdjacentSearchContext: true,
+			sidebarMenuSearches: [],
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
+			onShowSettings: vi.fn(),
 		});
+
+		const bottomControlsRow = document.querySelector('[data-slot="sidebar-controls-row"]');
+		expect(bottomControlsRow?.className ?? '').not.toMatch(/\bborder-t\b/);
+	});
 
 	it('omits the separator when no sidebar menu searches are shown', async () => {
 		render(SidebarControlsRow, {
@@ -335,12 +352,14 @@ describe('sidebar search interactions', () => {
 	});
 
 	it('renders sidebar pill searches and clears the active search banner', async () => {
+		const onOpenSearchDialog = vi.fn();
 		const onApplyPillSearch = vi.fn();
 		const onClearActiveQuery = vi.fn();
 
 		render(SidebarSearchContext, {
 			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
 			activeQuery: 'tag:ops',
+			onOpenSearchDialog,
 			onApplyPillSearch,
 			onClearActiveQuery,
 		});
@@ -348,51 +367,123 @@ describe('sidebar search interactions', () => {
 		expect(screen.getByRole('button', { name: 'Unread' })).toBeTruthy();
 		expect(document.querySelector('[data-slot="active-search-banner"]')?.textContent).toContain('tag:ops');
 
+		await fireEvent.click(screen.getByRole('button', { name: 'Search chats: tag:ops' }));
+		expect(onOpenSearchDialog).toHaveBeenCalledTimes(1);
+
 		await fireEvent.click(screen.getByRole('button', { name: 'Unread' }));
 		expect(onApplyPillSearch).toHaveBeenCalledTimes(1);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
 		expect(onClearActiveQuery).toHaveBeenCalledTimes(1);
+		expect(onOpenSearchDialog).toHaveBeenCalledTimes(1);
 	});
 
-	it('tightens the top seam only when the controls row is above the search context', () => {
+	it('tightens the dock seam for both top and bottom placements', () => {
 		const { rerender } = render(SidebarSearchContext, {
 			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
 			activeQuery: '',
-			hasControlsRowAbove: true,
+			dockPlacement: 'top',
+			hasAdjacentControlsRow: true,
+			onOpenSearchDialog: vi.fn(),
 			onApplyPillSearch: vi.fn(),
 			onClearActiveQuery: vi.fn(),
 		});
 
-		const compactContext = document.querySelector('[data-slot="sidebar-search-pills"]')?.parentElement;
-		expect(compactContext?.className).toContain('px-2');
-		expect(compactContext?.className).toContain('pb-2');
-		expect(compactContext?.className).not.toContain('pt-');
-		expect(compactContext?.className).not.toContain('py-2');
+		const topContext = document.querySelector('[data-slot="sidebar-search-context"]');
+		expect(topContext?.className).toContain('border-b');
+		expect(topContext?.className).toContain('px-2');
+		expect(topContext?.className).toContain('pb-2');
+		expect(topContext?.className).not.toContain('pt-');
+		expect(topContext?.className).not.toContain('py-2');
+		const topChildSlots = Array.from(topContext?.children ?? []).map((element) =>
+			element.getAttribute('data-slot')
+		);
+		expect(topChildSlots).toEqual(['sidebar-search-pills']);
 
 		rerender({
 			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
-			activeQuery: '',
-			hasControlsRowAbove: false,
+			activeQuery: 'tag:ops',
+			dockPlacement: 'bottom',
+			hasAdjacentControlsRow: true,
+			onOpenSearchDialog: vi.fn(),
 			onApplyPillSearch: vi.fn(),
 			onClearActiveQuery: vi.fn(),
 		});
 
-		const defaultContext = document.querySelector('[data-slot="sidebar-search-pills"]')?.parentElement;
-		expect(defaultContext?.className).toContain('px-2');
-		expect(defaultContext?.className).toContain('py-2');
+		const bottomContext = document.querySelector('[data-slot="sidebar-search-context"]');
+		expect(bottomContext?.className).toContain('border-t');
+		expect(bottomContext?.className).toContain('px-2');
+		expect(bottomContext?.className).toContain('pt-2');
+		expect(bottomContext?.className).not.toContain('pb-2');
+		expect(bottomContext?.className).not.toContain('py-2');
+
+		const childSlots = Array.from(bottomContext?.children ?? []).map((element) =>
+			element.getAttribute('data-slot')
+		);
+		expect(childSlots).toEqual(['active-search-banner', 'sidebar-search-pills']);
 	});
 
 	it('omits sidebar search context when there are no pills and no active query', () => {
 		render(SidebarSearchContext, {
 			sidebarPillSearches: [],
 			activeQuery: '',
+			onOpenSearchDialog: vi.fn(),
 			onApplyPillSearch: vi.fn(),
 			onClearActiveQuery: vi.fn(),
 		});
 
 		expect(document.querySelector('[data-slot="sidebar-search-pills"]')).toBeNull();
 		expect(document.querySelector('[data-slot="active-search-banner"]')).toBeNull();
+	});
+
+	it('mirrors the dock order when the search section is placed at the bottom', () => {
+		const { rerender } = render(SidebarSearchDock, {
+			dockPlacement: 'top',
+			isLoading: false,
+			isReorderMode: false,
+			visibleUnreadCount: 0,
+			sidebarMenuSearches: [],
+			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
+			activeQuery: 'tag:ops',
+			onOpenSearchDialog: vi.fn(),
+			onOpenSavedSearchManager: vi.fn(),
+			onCreateChat: vi.fn(),
+			onMarkAllRead: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
+			onApplyPillSearch: vi.fn(),
+			onClearActiveQuery: vi.fn(),
+			onShowSettings: vi.fn(),
+		});
+
+		const topDock = document.querySelector('[data-slot="sidebar-search-dock"]');
+		const topChildSlots = Array.from(topDock?.children ?? []).map((element) =>
+			element.getAttribute('data-slot')
+		);
+		expect(topChildSlots).toEqual(['sidebar-controls-row', 'sidebar-search-context']);
+
+		rerender({
+			dockPlacement: 'bottom',
+			isLoading: false,
+			isReorderMode: false,
+			visibleUnreadCount: 0,
+			sidebarMenuSearches: [],
+			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
+			activeQuery: 'tag:ops',
+			onOpenSearchDialog: vi.fn(),
+			onOpenSavedSearchManager: vi.fn(),
+			onCreateChat: vi.fn(),
+			onMarkAllRead: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
+			onApplyPillSearch: vi.fn(),
+			onClearActiveQuery: vi.fn(),
+			onShowSettings: vi.fn(),
+		});
+
+		const bottomDock = document.querySelector('[data-slot="sidebar-search-dock"]');
+		const bottomChildSlots = Array.from(bottomDock?.children ?? []).map((element) =>
+			element.getAttribute('data-slot')
+		);
+		expect(bottomChildSlots).toEqual(['sidebar-search-context', 'sidebar-controls-row']);
 	});
 
 	it('supports button-based reordering for saved searches', async () => {

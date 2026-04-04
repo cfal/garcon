@@ -22,7 +22,7 @@
 		visibleUnreadCount?: number;
 		isMarkingAllRead?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
-		hasSearchContextBelow?: boolean;
+		hasAdjacentSearchContext?: boolean;
 		onOpenSearchDialog: () => void;
 		onOpenSavedSearchManager?: () => void;
 		onCreateChat: () => void;
@@ -39,7 +39,7 @@
 		visibleUnreadCount = 0,
 		isMarkingAllRead = false,
 		sidebarMenuSearches = [],
-		hasSearchContextBelow = false,
+		hasAdjacentSearchContext = false,
 		onOpenSearchDialog,
 		onOpenSavedSearchManager,
 		onCreateChat,
@@ -54,7 +54,7 @@
 	let showQuickSearchSeparator = $derived(sidebarMenuSearches.length > 0);
 	let isMarkAllReadDisabled = $derived(isLoading || isMarkingAllRead);
 	let isTopDock = $derived(dockPlacement === 'top');
-	let showDockDivider = $derived(!isTopDock || !hasSearchContextBelow);
+	let showDockDivider = $derived(!hasAdjacentSearchContext);
 	let primaryButtonRef = $state<HTMLButtonElement | null>(null);
 	let primaryButtonWidth = $state(0);
 	let showPrimaryLabel = $derived(isReorderMode || primaryButtonWidth === 0 || primaryButtonWidth >= 136);

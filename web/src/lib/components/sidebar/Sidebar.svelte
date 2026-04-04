@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import SidebarContent from './SidebarContent.svelte';
-	import SidebarControlsRow from './SidebarControlsRow.svelte';
-	import SidebarSearchContext from './SidebarSearchContext.svelte';
+	import SidebarSearchDock from './SidebarSearchDock.svelte';
 	import SidebarChatDialogs from './SidebarChatDialogs.svelte';
 	import SidebarTagDialog from './SidebarTagDialog.svelte';
 	import SidebarSearchDialog from './SidebarSearchDialog.svelte';
@@ -108,9 +107,9 @@
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
 			.map((chat) => chat.id)
 	);
-	let showSidebarSearchContext = $derived(
-		searchState.sidebarPillSearches.length > 0 || searchState.hasActiveQuery
-	);
+	let isTopSearchDock = $derived(searchBarPosition === 'top');
+	let dockOrderClass = $derived(isTopSearchDock ? 'order-1' : 'order-2');
+	let contentOrderClass = $derived(isTopSearchDock ? 'order-2' : 'order-1');
 
 	// Refresh timestamp every minute.
 	$effect(() => {
@@ -459,74 +458,53 @@
 </script>
 
 <div class="h-full flex flex-col bg-card md:select-none">
-	{#if searchBarPosition === 'top'}
-		<SidebarControlsRow
-			dockPlacement="top"
+	<div class={`${dockOrderClass} flex-shrink-0`}>
+		<SidebarSearchDock
+			dockPlacement={searchBarPosition}
 			{isLoading}
 			{isReorderMode}
 			visibleUnreadCount={visibleUnreadChatIds.length}
 			{isMarkingAllRead}
 			sidebarMenuSearches={searchState.sidebarMenuSearches}
-			hasSearchContextBelow={showSidebarSearchContext}
+			sidebarPillSearches={searchState.sidebarPillSearches}
+			activeQuery={searchState.activeQuery}
 			onOpenSearchDialog={() => searchState.openSearchDialog()}
 			onOpenSavedSearchManager={openSavedSearchManager}
 			onCreateChat={handlePrimaryAction}
 			onMarkAllRead={() => { void handleMarkAllRead(); }}
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
+			onApplyPillSearch={handleApplySidebarPillSearch}
+			onClearActiveQuery={handleClearActiveQuery}
 			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
 			{onShowSettings}
 		/>
-	{/if}
+	</div>
 
-	<SidebarSearchContext
-		sidebarPillSearches={searchState.sidebarPillSearches}
-		activeQuery={searchState.activeQuery}
-		hasControlsRowAbove={searchBarPosition === 'top'}
-		onApplyPillSearch={handleApplySidebarPillSearch}
-		onClearActiveQuery={handleClearActiveQuery}
-	/>
-
-	<SidebarContent
-		{chats}
-		filteredChats={searchState.filteredChats}
-		{selectedChatId}
-		{isLoading}
-		{currentTime}
-		searchFilter={searchState.activeQuery}
-		{isReorderMode}
-		onEnterReorderMode={enterReorderMode}
-		onReorderGroup={handleReorderGroup}
-		onChatSelect={handleChatClick}
-		onDeleteChat={showDeleteConfirmation}
-		onStartRenameChat={startRenameChat}
-		onTogglePinned={(id) => { void handleTogglePinned(id); }}
-		onToggleArchive={(id) => { void handleToggleArchive(id); }}
-		onShowDetails={showChatDetails}
-		onForkChat={(id) => { void handleForkChat(id); }}
-		onShareChat={(id, title) => { shareChatDialog = { chatId: id, chatTitle: title }; }}
-		onTagClick={handleTagClick}
-		onManageTags={showTagDialog}
-		onImmediateReorder={handleImmediateReorder}
-		onQuickMove={handleQuickMove}
-	/>
-
-	{#if searchBarPosition === 'bottom'}
-		<SidebarControlsRow
-			dockPlacement="bottom"
+	<div class={`${contentOrderClass} flex min-h-0 flex-1`}>
+		<SidebarContent
+			{chats}
+			filteredChats={searchState.filteredChats}
+			{selectedChatId}
 			{isLoading}
+			{currentTime}
+			searchFilter={searchState.activeQuery}
 			{isReorderMode}
-			visibleUnreadCount={visibleUnreadChatIds.length}
-			{isMarkingAllRead}
-			sidebarMenuSearches={searchState.sidebarMenuSearches}
-			onOpenSearchDialog={() => searchState.openSearchDialog()}
-			onOpenSavedSearchManager={openSavedSearchManager}
-			onCreateChat={handlePrimaryAction}
-			onMarkAllRead={() => { void handleMarkAllRead(); }}
-			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
-			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
-			{onShowSettings}
+			onEnterReorderMode={enterReorderMode}
+			onReorderGroup={handleReorderGroup}
+			onChatSelect={handleChatClick}
+			onDeleteChat={showDeleteConfirmation}
+			onStartRenameChat={startRenameChat}
+			onTogglePinned={(id) => { void handleTogglePinned(id); }}
+			onToggleArchive={(id) => { void handleToggleArchive(id); }}
+			onShowDetails={showChatDetails}
+			onForkChat={(id) => { void handleForkChat(id); }}
+			onShareChat={(id, title) => { shareChatDialog = { chatId: id, chatTitle: title }; }}
+			onTagClick={handleTagClick}
+			onManageTags={showTagDialog}
+			onImmediateReorder={handleImmediateReorder}
+			onQuickMove={handleQuickMove}
 		/>
-	{/if}
+	</div>
 </div>
 
 <SidebarChatDialogs
