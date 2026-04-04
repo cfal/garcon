@@ -102,6 +102,11 @@ export class SidebarSearchState {
 		this.highlightedResultIndex = 0;
 	}
 
+	resumeSearchDialog(): void {
+		this.searchDialogOpen = true;
+		this.highlightedResultIndex = this.initialHighlightedResultIndex;
+	}
+
 	applyQuery(query: string): void {
 		this.activeQuery = query;
 		this.highlightedResultIndex = 0;

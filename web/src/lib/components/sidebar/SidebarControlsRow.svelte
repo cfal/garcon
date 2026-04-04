@@ -24,7 +24,6 @@
 		sidebarMenuSearches?: SavedChatSearch[];
 		hasAdjacentSearchContext?: boolean;
 		onOpenSearchDialog: () => void;
-		onOpenSavedSearchManager?: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
@@ -41,7 +40,6 @@
 		sidebarMenuSearches = [],
 		hasAdjacentSearchContext = false,
 		onOpenSearchDialog,
-		onOpenSavedSearchManager,
 		onCreateChat,
 		onMarkAllRead,
 		onApplySidebarMenuSearch,
@@ -125,10 +123,6 @@
 					{#if showQuickSearchSeparator}
 						<DropdownMenuSeparator />
 					{/if}
-					<DropdownMenuItem onclick={() => onOpenSavedSearchManager?.()}>
-						<Search class="h-3.5 w-3.5" />
-						{m.sidebar_saved_searches_manage_menu_item()}
-					</DropdownMenuItem>
 					<DropdownMenuItem onclick={handleMarkAllRead} disabled={!showMarkAllRead || isMarkAllReadDisabled}>
 						<SquareCheck class="h-3.5 w-3.5" />
 						{m.sidebar_chats_mark_all_read()}

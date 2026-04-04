@@ -3,6 +3,7 @@
 	import SavedSearchPills from './SavedSearchPills.svelte';
 	import SidebarChatSummary from './SidebarChatSummary.svelte';
 	import Search from '@lucide/svelte/icons/search';
+	import Save from '@lucide/svelte/icons/save';
 	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
@@ -19,6 +20,7 @@
 		onQueryChange: (query: string) => void;
 		onSelectChat: (chatId: string) => void;
 		onApplySavedSearch: (search: SavedChatSearch) => void;
+		onCreateSavedSearch: () => void;
 		onOpenManager: () => void;
 		onHighlightChange: (index: number) => void;
 		onClose: () => void;
@@ -33,12 +35,15 @@
 		onQueryChange,
 		onSelectChat,
 		onApplySavedSearch,
+		onCreateSavedSearch,
 		onOpenManager,
 		onHighlightChange,
 		onClose,
 	}: SidebarSearchDialogProps = $props();
 
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let trimmedQuery = $derived(query.trim());
+	let canCreateSavedSearch = $derived(trimmedQuery.length > 0);
 
 	function handleQueryInput(e: Event) {
 		const target = e.target as HTMLInputElement;
@@ -85,6 +90,11 @@
 		requestAnimationFrame(() => inputRef?.focus());
 	}
 
+	function clearQuery() {
+		onQueryChange('');
+		focusInput();
+	}
+
 	function handleBackdropClick() {
 		onClose();
 	}
@@ -111,7 +121,7 @@
 		<button
 			class="absolute inset-0 h-full w-full cursor-default"
 			onclick={handleBackdropClick}
-			aria-label="Close search"
+			aria-label={m.editor_actions_close()}
 			tabindex="-1"
 		></button>
 
@@ -131,34 +141,51 @@
 			>
 				<div class="shrink-0 border-b border-border">
 					<div class="flex min-w-0 items-center gap-2 px-4 py-3">
-						<Search class="h-4 w-4 shrink-0 text-muted-foreground" />
-						<input
-							bind:this={inputRef}
-							type="text"
-							value={query}
-							oninput={handleQueryInput}
-							placeholder={m.sidebar_projects_search_placeholder()}
-							class="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
-						/>
+						<div
+							data-slot="search-dialog-input-shell"
+							class="relative h-9 min-w-0 flex-1 rounded-lg border border-sidebar-border/70 bg-muted/50 text-sm text-foreground transition-colors focus-within:border-border focus-within:bg-background"
+						>
+							<Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+							<input
+								bind:this={inputRef}
+								type="text"
+								value={query}
+								oninput={handleQueryInput}
+								placeholder={m.sidebar_projects_search_placeholder()}
+								class="h-full w-full rounded-[inherit] bg-transparent pl-9 pr-8 text-sm text-foreground placeholder:text-muted-foreground outline-none"
+							/>
+							{#if query.length > 0}
+								<button
+									type="button"
+									class="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+									onclick={clearQuery}
+									aria-label={m.filetree_clear_search()}
+									title={m.filetree_clear_search()}
+								>
+									<X class="h-3 w-3" />
+								</button>
+							{/if}
+						</div>
 						<Button
 							variant="ghost"
 							size="icon-sm"
-							class="shrink-0"
-							onclick={onOpenManager}
-							title={m.sidebar_saved_searches_edit()}
-							aria-label={m.sidebar_saved_searches_edit()}
+							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
+							onclick={onCreateSavedSearch}
+							title={m.sidebar_saved_searches_add()}
+							aria-label={m.sidebar_saved_searches_add()}
+							disabled={!canCreateSavedSearch}
 						>
-							<Settings class="h-4 w-4" />
+							<Save class="h-4 w-4" />
 						</Button>
 						<Button
 							variant="ghost"
 							size="icon-sm"
-							class="shrink-0"
-							onclick={onClose}
-							title="Close search"
-							aria-label="Close search"
+							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
+							onclick={onOpenManager}
+							title={m.sidebar_saved_searches_manage_menu_item()}
+							aria-label={m.sidebar_saved_searches_manage_menu_item()}
 						>
-							<X class="h-4 w-4" />
+							<Settings class="h-4 w-4" />
 						</Button>
 					</div>
 

@@ -13,7 +13,6 @@
 		sidebarPillSearches: SavedChatSearch[];
 		activeQuery: string;
 		onOpenSearchDialog: () => void;
-		onOpenSavedSearchManager?: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
@@ -33,7 +32,6 @@
 		sidebarPillSearches,
 		activeQuery,
 		onOpenSearchDialog,
-		onOpenSavedSearchManager,
 		onCreateChat,
 		onMarkAllRead,
 		onApplySidebarMenuSearch,
@@ -58,7 +56,6 @@
 			{sidebarMenuSearches}
 			hasAdjacentSearchContext={hasSearchContext}
 			{onOpenSearchDialog}
-			{onOpenSavedSearchManager}
 			onCreateChat={onCreateChat}
 			{onMarkAllRead}
 			{onApplySidebarMenuSearch}
@@ -93,7 +90,6 @@
 			{sidebarMenuSearches}
 			hasAdjacentSearchContext={hasSearchContext}
 			{onOpenSearchDialog}
-			{onOpenSavedSearchManager}
 			onCreateChat={onCreateChat}
 			{onMarkAllRead}
 			{onApplySidebarMenuSearch}

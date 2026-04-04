@@ -72,9 +72,10 @@ describe('sidebar search interactions', () => {
 		expect(onSelectChat).toHaveBeenNthCalledWith(2, 'chat-2');
 	});
 
-	it('does not let Enter on the edit button or saved-search pills open a chat', async () => {
+	it('does not let Enter on the manage button, add button, or saved-search pills open a chat', async () => {
 		const onSelectChat = vi.fn();
 		const onOpenManager = vi.fn();
+		const onCreateSavedSearch = vi.fn();
 		const onApplySavedSearch = vi.fn();
 
 		render(SidebarSearchDialogHarness, {
@@ -82,12 +83,20 @@ describe('sidebar search interactions', () => {
 			savedSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
 			onSelectChat,
 			onOpenManager,
+			onCreateSavedSearch,
 			onApplySavedSearch,
 		});
 
-		const editButton = await screen.findByRole('button', { name: 'Edit' });
-		editButton.focus();
-		await fireEvent.keyDown(editButton, { key: 'Enter' });
+		const input = await screen.findByRole('textbox');
+		await fireEvent.input(input, { target: { value: 'tag:ops' } });
+
+		const addButton = screen.getByRole('button', { name: 'Add saved search' });
+		addButton.focus();
+		await fireEvent.keyDown(addButton, { key: 'Enter' });
+
+		const manageButton = screen.getByRole('button', { name: 'Manage searches' });
+		manageButton.focus();
+		await fireEvent.keyDown(manageButton, { key: 'Enter' });
 
 		const pillButton = screen.getByRole('button', { name: 'Unread' });
 		pillButton.focus();
@@ -95,24 +104,17 @@ describe('sidebar search interactions', () => {
 
 		expect(onSelectChat).not.toHaveBeenCalled();
 		expect(onOpenManager).not.toHaveBeenCalled();
+		expect(onCreateSavedSearch).not.toHaveBeenCalled();
 		expect(onApplySavedSearch).not.toHaveBeenCalled();
 	});
 
-	it('closes from the header close button', async () => {
-		const onClose = vi.fn();
-
+	it('removes the dedicated close button from the search dialog header', async () => {
 		render(SidebarSearchDialogHarness, {
 			filteredChats: [createChat('chat-1', 'First chat')],
-			onClose,
 		});
 
-		const closeButtons = await screen.findAllByRole('button', { name: 'Close search' });
-		await fireEvent.click(closeButtons[1]!);
-
-		expect(onClose).toHaveBeenCalledTimes(1);
-		await waitFor(() => {
-			expect(screen.queryByRole('textbox')).toBeNull();
-		});
+		await screen.findByRole('textbox');
+		expect(screen.queryByRole('button', { name: 'Close search' })).toBeNull();
 	});
 
 	it('closes when clicking outside the dialog panel', async () => {
@@ -166,14 +168,58 @@ describe('sidebar search interactions', () => {
 		expect(dialogContent?.className).toContain('sm:max-w-3xl');
 		expect(dialogContent?.className).toContain('sm:rounded-2xl');
 
+		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
+		expect(inputShell?.className).toContain('relative');
+		expect(inputShell?.className).toContain('rounded-lg');
+		expect(inputShell?.className).toContain('border');
+		expect(inputShell?.className).toContain('bg-muted/50');
+
 		const input = await screen.findByRole('textbox');
 		expect(input.className).toContain('bg-transparent');
+		expect(input.className).toContain('pl-9');
+		expect(input.className).toContain('pr-8');
 		expect(input.className).toContain('outline-none');
-		expect(input.className).not.toContain('pl-1');
 
 		expect(await screen.findByRole('listbox')).toBeTruthy();
 		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain('flex-1');
 		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain('overflow-y-auto');
+	});
+
+	it('disables save for an empty query, enables it for a non-empty query, and opens the add dialog callback', async () => {
+		const onCreateSavedSearch = vi.fn();
+
+		render(SidebarSearchDialogHarness, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+			onCreateSavedSearch,
+		});
+
+		const saveButton = await screen.findByRole('button', { name: 'Add saved search' });
+		expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+
+		const input = screen.getByRole('textbox');
+		await fireEvent.input(input, { target: { value: 'tag:ops' } });
+
+		expect((screen.getByRole('button', { name: 'Add saved search' }) as HTMLButtonElement).disabled).toBe(false);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Add saved search' }));
+		expect(onCreateSavedSearch).toHaveBeenCalledTimes(1);
+	});
+
+	it('clears the query from the inline input control without closing the dialog', async () => {
+		render(SidebarSearchDialogHarness, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+		});
+
+		const input = await screen.findByRole('textbox');
+		await fireEvent.input(input, { target: { value: 'tag:ops' } });
+
+		const clearButton = screen.getByRole('button', { name: 'Clear search' });
+		expect(document.querySelector('[data-slot="search-dialog-input-shell"]')?.contains(clearButton)).toBe(true);
+		await fireEvent.click(clearButton);
+
+		expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('');
+		expect(screen.queryByRole('button', { name: 'Clear search' })).toBeNull();
+		expect(screen.getByRole('dialog')).toBeTruthy();
 	});
 
 	it('omits the saved-search pill container when there are no saved searches', async () => {
@@ -228,7 +274,6 @@ describe('sidebar search interactions', () => {
 				createSavedSearch('search-2', 'Active', 'status:active'),
 			],
 			onOpenSearchDialog: vi.fn(),
-			onOpenSavedSearchManager: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowSettings: vi.fn(),
@@ -244,42 +289,18 @@ describe('sidebar search interactions', () => {
 		const items = screen.getAllByRole('menuitem');
 		expect(items[0]?.textContent).toContain('Unread');
 		expect(items[1]?.textContent).toContain('Active');
-		expect(items[2]?.textContent).toContain('Manage searches');
-		expect(items[3]?.textContent).toContain('Mark all as read');
-		expect(items[4]?.textContent).toContain('Settings');
+		expect(items[2]?.textContent).toContain('Mark all as read');
+		expect(items[3]?.textContent).toContain('Settings');
 		expect(document.querySelector('[data-slot="dropdown-menu-separator"]')).toBeTruthy();
 	});
 
-	it('opens the saved-search manager from the quick search menu section', async () => {
-		const onOpenSavedSearchManager = vi.fn();
-
-		render(SidebarControlsRow, {
-			isLoading: false,
-			isReorderMode: false,
-			visibleUnreadCount: 0,
-			sidebarMenuSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
-			onOpenSearchDialog: vi.fn(),
-			onOpenSavedSearchManager,
-			onCreateChat: vi.fn(),
-			onApplySidebarMenuSearch: vi.fn(),
-			onShowSettings: vi.fn(),
-		});
-
-		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
-		await fireEvent.click(mobileTrigger);
-		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Manage searches' }));
-
-		expect(onOpenSavedSearchManager).toHaveBeenCalledTimes(1);
-	});
-
-	it('shows manage searches before mark all as read even without quick search entries', async () => {
+	it('shows mark all as read before settings even without quick search entries', async () => {
 		render(SidebarControlsRow, {
 			isLoading: false,
 			isReorderMode: false,
 			visibleUnreadCount: 1,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
-			onOpenSavedSearchManager: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowSettings: vi.fn(),
@@ -289,8 +310,8 @@ describe('sidebar search interactions', () => {
 		await fireEvent.click(mobileTrigger);
 
 		const items = await screen.findAllByRole('menuitem');
-		expect(items[0]?.textContent).toContain('Manage searches');
-		expect(items[1]?.textContent).toContain('Mark all as read');
+		expect(items[0]?.textContent).toContain('Mark all as read');
+		expect(items[1]?.textContent).toContain('Settings');
 		expect(screen.queryByRole('separator')).toBeNull();
 	});
 
@@ -446,7 +467,6 @@ describe('sidebar search interactions', () => {
 			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
 			activeQuery: 'tag:ops',
 			onOpenSearchDialog: vi.fn(),
-			onOpenSavedSearchManager: vi.fn(),
 			onCreateChat: vi.fn(),
 			onMarkAllRead: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
@@ -470,7 +490,6 @@ describe('sidebar search interactions', () => {
 			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
 			activeQuery: 'tag:ops',
 			onOpenSearchDialog: vi.fn(),
-			onOpenSavedSearchManager: vi.fn(),
 			onCreateChat: vi.fn(),
 			onMarkAllRead: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),

@@ -111,6 +111,23 @@ describe('SidebarSearchState', () => {
 				expect(searchState.draftQuery).toBe('tag:ops');
 			});
 
+			it('resumes search dialog without discarding the suspended draft query', () => {
+				const chats = [
+					makeChat({ id: 'c1', title: 'First chat' }),
+					makeChat({ id: 'c2', title: 'Second chat' }),
+				];
+				const searchState = createState(chats, 'c2');
+				searchState.openSearchDialog();
+				searchState.updateDraftQuery('tag:ops');
+
+				searchState.suspendSearchDialog();
+				searchState.resumeSearchDialog();
+
+				expect(searchState.searchDialogOpen).toBe(true);
+				expect(searchState.draftQuery).toBe('tag:ops');
+				expect(searchState.highlightedResultIndex).toBe(0);
+			});
+
 			it('toggleSearchDialog closes when open and reopens from the applied query when closed', () => {
 				const searchState = createState();
 				searchState.activeQuery = 'status:unread';

@@ -41,16 +41,18 @@
 		currentName: string;
 	}
 
-	interface ChatDetailsDialog {
-		chatId: string;
+interface ChatDetailsDialog {
+	chatId: string;
 		chatTitle: string;
 		firstMessage: string | null;
 		createdAt: string | null;
 		lastActivityAt: string | null;
 		nativePath: string | null;
 		isLoading: boolean;
-		error: string | null;
-	}
+	error: string | null;
+}
+
+type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 
 	interface SidebarProps {
 		chats: ChatSessionRecord[];
@@ -99,6 +101,8 @@
 
 	// Saved search management state.
 	let editorState = $state<SavedSearchEditorState | null>(null);
+	let savedSearchManagerOrigin = $state<'search-dialog' | null>(null);
+	let savedSearchEditorOrigin = $state<SavedSearchDialogOrigin | null>(null);
 	let savedSearchDeleteConfirmation = $state<{ id: string } | null>(null);
 	let savedSearchDeleteButtonRef = $state<HTMLButtonElement | null>(null);
 
@@ -348,17 +352,36 @@
 		searchState.applyQuery('');
 	}
 
-	function openSavedSearchManager() {
+	function openSavedSearchManagerFromSearchDialog() {
 		searchState.suspendSearchDialog();
+		savedSearchManagerOrigin = 'search-dialog';
 		searchState.manageSavedSearchesOpen = true;
 	}
 
 	function closeSavedSearchManager() {
 		searchState.manageSavedSearchesOpen = false;
+		if (savedSearchManagerOrigin === 'search-dialog') {
+			searchState.resumeSearchDialog();
+		}
+		savedSearchManagerOrigin = null;
 	}
 
 	function openEditorForCreate() {
 		searchState.manageSavedSearchesOpen = false;
+		savedSearchEditorOrigin = 'manager';
+		editorState = {
+			mode: 'create',
+			title: '',
+			query: searchState.draftQuery,
+			showAsSidebarPill: false,
+			showInSidebarMenu: false,
+			showInSearchDialog: true,
+		};
+	}
+
+	function openEditorForCreateFromSearchDialog() {
+		searchState.suspendSearchDialog();
+		savedSearchEditorOrigin = 'search-dialog';
 		editorState = {
 			mode: 'create',
 			title: '',
@@ -371,6 +394,7 @@
 
 	function openEditorForEdit(search: SavedChatSearch) {
 		searchState.manageSavedSearchesOpen = false;
+		savedSearchEditorOrigin = 'manager';
 		editorState = {
 			mode: 'edit',
 			searchId: search.id,
@@ -380,6 +404,18 @@
 			showInSidebarMenu: search.showInSidebarMenu,
 			showInSearchDialog: search.showInSearchDialog,
 		};
+	}
+
+	function restoreSavedSearchEditorOrigin() {
+		const origin = savedSearchEditorOrigin;
+		savedSearchEditorOrigin = null;
+		if (origin === 'manager') {
+			searchState.manageSavedSearchesOpen = true;
+			return;
+		}
+		if (origin === 'search-dialog') {
+			searchState.resumeSearchDialog();
+		}
 	}
 
 	async function handleSaveSearchEditor(
@@ -402,7 +438,7 @@
 			searchState.setSavedSearches([...searchState.savedSearches, res.savedSearch]);
 		}
 		editorState = null;
-		searchState.manageSavedSearchesOpen = true;
+		restoreSavedSearchEditorOrigin();
 	}
 
 	function requestDeleteSavedSearch(id: string) {
@@ -469,7 +505,6 @@
 			sidebarPillSearches={searchState.sidebarPillSearches}
 			activeQuery={searchState.activeQuery}
 			onOpenSearchDialog={() => searchState.openSearchDialog()}
-			onOpenSavedSearchManager={openSavedSearchManager}
 			onCreateChat={handlePrimaryAction}
 			onMarkAllRead={() => { void handleMarkAllRead(); }}
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
@@ -534,7 +569,8 @@
 		onQueryChange={(q) => searchState.updateDraftQuery(q)}
 		onSelectChat={handleSearchSelectChat}
 		onApplySavedSearch={handleApplySavedSearch}
-		onOpenManager={openSavedSearchManager}
+		onOpenManager={openSavedSearchManagerFromSearchDialog}
+		onCreateSavedSearch={openEditorForCreateFromSearchDialog}
 		onHighlightChange={(i) => { searchState.highlightedResultIndex = i; }}
 		onClose={() => searchState.closeSearchDialog()}
 />
@@ -551,7 +587,10 @@
 
 <SavedSearchEditorDialog
 	{editorState}
-	onClose={() => { editorState = null; searchState.manageSavedSearchesOpen = true; }}
+	onClose={() => {
+		editorState = null;
+		restoreSavedSearchEditorOrigin();
+	}}
 	onSave={handleSaveSearchEditor}
 />
 

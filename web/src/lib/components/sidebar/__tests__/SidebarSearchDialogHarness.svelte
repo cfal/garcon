@@ -8,6 +8,7 @@
 		savedSearches?: SavedChatSearch[];
 		onSelectChat?: (chatId: string) => void;
 		onApplySavedSearch?: (search: SavedChatSearch) => void;
+		onCreateSavedSearch?: () => void;
 		onOpenManager?: () => void;
 		onClose?: () => void;
 	}
@@ -17,6 +18,7 @@
 		savedSearches = [],
 		onSelectChat,
 		onApplySavedSearch,
+		onCreateSavedSearch,
 		onOpenManager,
 		onClose,
 	}: SidebarSearchDialogHarnessProps = $props();
@@ -50,6 +52,7 @@
 	onQueryChange={handleQueryChange}
 	onSelectChat={(chatId) => onSelectChat?.(chatId)}
 	onApplySavedSearch={handleApplySavedSearch}
+	onCreateSavedSearch={() => onCreateSavedSearch?.()}
 	onOpenManager={() => onOpenManager?.()}
 	onHighlightChange={handleHighlightChange}
 	onClose={() => {
