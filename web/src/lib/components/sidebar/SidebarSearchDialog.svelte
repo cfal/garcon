@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
-	import Input from '$lib/components/ui/input/input.svelte';
 	import SavedSearchPills from './SavedSearchPills.svelte';
+	import SidebarChatSummary from './SidebarChatSummary.svelte';
 	import Search from '@lucide/svelte/icons/search';
 	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
@@ -89,12 +89,6 @@
 		onClose();
 	}
 
-	function formatPreview(chat: ChatSessionRecord): string {
-		if (chat.lastMessage) return chat.lastMessage;
-		if (chat.firstMessage) return chat.firstMessage;
-		return '';
-	}
-
 	$effect(() => {
 		if (!open) return;
 		focusInput();
@@ -129,24 +123,24 @@
 				<div class="shrink-0 border-b border-border">
 					<div class="flex min-w-0 items-center gap-2 px-4 py-3">
 						<Search class="h-4 w-4 shrink-0 text-muted-foreground" />
-					<Input
-						bind:ref={inputRef}
-						type="text"
-						value={query}
-						oninput={handleQueryInput}
-						placeholder={m.sidebar_projects_search_placeholder()}
-						class="h-9 flex-1 border-0 bg-transparent pl-1 pr-0 text-sm shadow-none focus-visible:ring-0"
-					/>
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						class="shrink-0"
-						onclick={onOpenManager}
-						title={m.sidebar_saved_searches_edit()}
-						aria-label={m.sidebar_saved_searches_edit()}
-					>
-						<Settings class="h-4 w-4" />
-					</Button>
+						<input
+							bind:this={inputRef}
+							type="text"
+							value={query}
+							oninput={handleQueryInput}
+							placeholder={m.sidebar_projects_search_placeholder()}
+							class="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
+						/>
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							class="shrink-0"
+							onclick={onOpenManager}
+							title={m.sidebar_saved_searches_edit()}
+							aria-label={m.sidebar_saved_searches_edit()}
+						>
+							<Settings class="h-4 w-4" />
+						</Button>
 						<Button
 							variant="ghost"
 							size="icon-sm"
@@ -159,12 +153,14 @@
 						</Button>
 					</div>
 
-					<div class="px-4 pb-4">
-						<SavedSearchPills
-							searches={savedSearches}
-							onApply={onApplySavedSearch}
-						/>
-					</div>
+					{#if savedSearches.length > 0}
+						<div class="px-4 pb-4" data-slot="saved-search-pills">
+							<SavedSearchPills
+								searches={savedSearches}
+								onApply={onApplySavedSearch}
+							/>
+						</div>
+					{/if}
 				</div>
 
 				<div class="min-h-0 flex-1 overflow-y-auto" data-slot="search-dialog-results">
@@ -173,7 +169,7 @@
 							{m.sidebar_chats_no_matching_chats()}
 						</div>
 					{:else}
-						<div class="p-2 sm:p-3" role="listbox">
+						<div role="listbox">
 							{#each filteredChats as chat, i (chat.id)}
 								<button
 									data-search-index={i}
@@ -181,27 +177,21 @@
 									role="option"
 									aria-selected={i === highlightedIndex}
 									class={cn(
-										'flex min-w-0 w-full flex-col gap-1 rounded-xl px-3 py-3 text-left transition-colors',
+										'min-w-0 w-full border-b border-border/40 border-l-2 border-l-transparent bg-transparent px-3 py-2.5 text-left font-normal transition-colors duration-150 last:border-b-0',
 										i === highlightedIndex
 											? 'bg-accent text-accent-foreground'
-											: 'hover:bg-accent/50',
+											: 'hover:bg-accent/40',
+										chat.isProcessing && 'border-l-[3px] border-l-status-processing',
 									)}
 									onclick={() => onSelectChat(chat.id)}
 									onmouseenter={() => onHighlightChange(i)}
 								>
-									<div class="flex min-w-0 items-center gap-2">
-										<span class="min-w-0 flex-1 truncate text-sm font-medium">
-											{chat.title || m.sidebar_chats_unnamed()}
-										</span>
-										<span class="shrink-0 text-[10px] text-muted-foreground">
-											{chat.provider}
-										</span>
-									</div>
-									{#if formatPreview(chat)}
-										<span class="block min-w-0 truncate text-xs text-muted-foreground">
-											{formatPreview(chat)}
-										</span>
-									{/if}
+									<SidebarChatSummary
+										session={chat}
+										isSelected={i === highlightedIndex}
+										isPinned={chat.isPinned}
+										isArchived={chat.isArchived}
+									/>
 								</button>
 							{/each}
 						</div>

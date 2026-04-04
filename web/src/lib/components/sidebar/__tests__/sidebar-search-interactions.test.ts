@@ -101,7 +101,8 @@ describe('sidebar search interactions', () => {
 			onClose,
 		});
 
-		await fireEvent.click(await screen.findByRole('button', { name: 'Close search' }));
+		const closeButtons = await screen.findAllByRole('button', { name: 'Close search' });
+		await fireEvent.click(closeButtons[1]!);
 
 		expect(onClose).toHaveBeenCalledTimes(1);
 		await waitFor(() => {
@@ -141,9 +142,25 @@ describe('sidebar search interactions', () => {
 		expect(dialogContent?.className).toContain('sm:max-w-3xl');
 		expect(dialogContent?.className).toContain('sm:rounded-2xl');
 
+		const input = await screen.findByRole('textbox');
+		expect(input.className).toContain('bg-transparent');
+		expect(input.className).toContain('outline-none');
+		expect(input.className).not.toContain('pl-1');
+
 		expect(await screen.findByRole('listbox')).toBeTruthy();
 		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain('flex-1');
 		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain('overflow-y-auto');
+	});
+
+	it('omits the saved-search pill container when there are no saved searches', async () => {
+		render(SidebarSearchDialogHarness, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+			savedSearches: [],
+		});
+
+		await screen.findByRole('textbox');
+		expect(screen.queryByText('Saved searches')).toBeNull();
+		expect(document.querySelector('[data-slot="saved-search-pills"]')).toBeNull();
 	});
 
 	it('keeps chat rows shrinkable within the dialog width', async () => {
@@ -158,16 +175,22 @@ describe('sidebar search interactions', () => {
 
 		const option = await screen.findByRole('option');
 		expect(option.className).toContain('min-w-0');
+		expect(option.className).toContain('bg-accent');
+		expect(option.className).toContain('px-3');
+		expect(option.className).not.toContain('bg-sidebar-chat-item-bg');
 
-		const title = option.querySelector('.text-sm.font-medium');
-		if (!title) throw new Error('Expected title element');
-		expect(title.className).toContain('min-w-0');
+		const summary = option.querySelector('[data-slot="sidebar-chat-summary"]');
+		if (!summary) throw new Error('Expected shared summary element');
+		expect(summary.className).toContain('min-w-0');
+
+		const title = screen.getByText(
+			'Extremely long chat title that should truncate instead of pushing the row past the modal width'
+		);
 		expect(title.className).toContain('truncate');
 
-		const preview = option.querySelector('.text-xs');
-		if (!preview) throw new Error('Expected preview element');
-		expect(preview.className).toContain('block');
-		expect(preview.className).toContain('min-w-0');
+		const preview = screen.getByText(
+			'Extremely long chat title that should truncate instead of pushing the row past the modal width preview'
+		);
 		expect(preview.className).toContain('truncate');
 	});
 
