@@ -20,7 +20,7 @@
 	}: SidebarSearchContextProps = $props();
 
 	let hasActiveQuery = $derived(activeQuery.trim().length > 0);
-	let containerPaddingClass = $derived(hasControlsRowAbove ? 'px-3 pb-2' : 'px-3 py-2');
+	let containerPaddingClass = $derived(hasControlsRowAbove ? 'px-2 pb-2' : 'px-2 py-2');
 </script>
 
 {#if sidebarPillSearches.length > 0 || hasActiveQuery}
@@ -32,7 +32,7 @@
 		{/if}
 
 		{#if hasActiveQuery}
-			<div data-slot="active-search-banner" class="relative rounded-lg border border-border bg-muted/40 px-3 py-2 pr-10">
+			<div data-slot="active-search-banner" class="relative rounded-lg border border-border bg-muted/40 px-2.5 py-2 pr-10">
 				<div class="truncate text-xs font-medium text-foreground">{activeQuery}</div>
 				<button
 					type="button"

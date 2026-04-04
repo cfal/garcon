@@ -74,7 +74,7 @@
 
 <div
 	data-slot="sidebar-controls-row"
-	class={`flex-shrink-0 ${showDockDivider ? (isTopDock ? 'border-b' : 'border-t') : ''} border-border/60 bg-card px-3 py-2`}
+	class={`flex-shrink-0 ${showDockDivider ? (isTopDock ? 'border-b' : 'border-t') : ''} border-border/60 bg-card px-2 py-2`}
 >
 	{#if !isReorderMode}
 		<div class="flex items-center gap-1.5">

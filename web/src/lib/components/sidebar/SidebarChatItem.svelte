@@ -146,7 +146,7 @@
 	{#if isPinned || isArchived}
 		<div
 			class={cn(
-				'pointer-events-none absolute bottom-[5px] right-1 z-10 flex h-5 w-5 items-center justify-center rounded-full border',
+				'pointer-events-none absolute bottom-[5px] right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full border',
 				isPinned
 					? 'border-sidebar-badge-pinned-border bg-sidebar-badge-pinned-bg'
 					: 'border-sidebar-badge-archived-border bg-sidebar-badge-archived-bg',

@@ -242,8 +242,9 @@ describe('sidebar search interactions', () => {
 				onShowSettings: vi.fn(),
 			});
 
-			const controlsRow = document.querySelector('[data-slot="sidebar-controls-row"]');
-			expect(controlsRow?.className ?? '').not.toMatch(/\bborder-b\b/);
+		const controlsRow = document.querySelector('[data-slot="sidebar-controls-row"]');
+		expect(controlsRow?.className ?? '').not.toMatch(/\bborder-b\b/);
+		expect(controlsRow?.className ?? '').toContain('px-2');
 		});
 
 	it('omits the separator when no sidebar menu searches are shown', async () => {
@@ -299,6 +300,7 @@ describe('sidebar search interactions', () => {
 		});
 
 		const compactContext = document.querySelector('[data-slot="sidebar-search-pills"]')?.parentElement;
+		expect(compactContext?.className).toContain('px-2');
 		expect(compactContext?.className).toContain('pb-2');
 		expect(compactContext?.className).not.toContain('pt-');
 		expect(compactContext?.className).not.toContain('py-2');
@@ -312,6 +314,7 @@ describe('sidebar search interactions', () => {
 		});
 
 		const defaultContext = document.querySelector('[data-slot="sidebar-search-pills"]')?.parentElement;
+		expect(defaultContext?.className).toContain('px-2');
 		expect(defaultContext?.className).toContain('py-2');
 	});
 
