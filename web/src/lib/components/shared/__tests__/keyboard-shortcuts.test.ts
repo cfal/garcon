@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import KeyboardShortcutsHarness from './KeyboardShortcutsHarness.svelte';
 
 describe('KeyboardShortcuts', () => {
-	it('opens sidebar search on Ctrl-O with the same global scope as the command palette', async () => {
+	it('opens sidebar search on Ctrl-S with the same global scope as the command palette', async () => {
 		const appShell = {
 			openSidebarSearch: vi.fn(),
 			requestNewChat: vi.fn(),
@@ -17,12 +17,12 @@ describe('KeyboardShortcuts', () => {
 			onToggleCommandMenu: vi.fn(),
 		});
 
-		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true }));
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }));
 
 		expect(appShell.openSidebarSearch).toHaveBeenCalledTimes(1);
 	});
 
-	it('opens sidebar search on Ctrl-O even when focus is inside an input', async () => {
+	it('opens sidebar search on Ctrl-S even when focus is inside an input', async () => {
 		const appShell = {
 			openSidebarSearch: vi.fn(),
 			requestNewChat: vi.fn(),
@@ -40,7 +40,7 @@ describe('KeyboardShortcuts', () => {
 		input.focus();
 
 		try {
-			input.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true }));
+				input.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }));
 			expect(appShell.openSidebarSearch).toHaveBeenCalledTimes(1);
 		} finally {
 			input.remove();

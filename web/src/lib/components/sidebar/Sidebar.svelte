@@ -328,12 +328,12 @@
 	// Search dialog actions.
 
 	function handleSearchSelectChat(chatId: string) {
-		searchState.closeSearchDialog();
+		searchState.confirmSearchDialog();
 		onChatSelect(chatId);
 	}
 
 	function handleApplySavedSearch(search: SavedChatSearch) {
-		searchState.applyQuery(search.query);
+		searchState.updateDraftQuery(search.query);
 	}
 
 	function handleApplyQuickSearch(query: string) {
@@ -341,7 +341,7 @@
 	}
 
 	function openSavedSearchManager() {
-		searchState.closeSearchDialog();
+		searchState.suspendSearchDialog();
 		searchState.manageSavedSearchesOpen = true;
 	}
 
@@ -351,13 +351,13 @@
 
 	function openEditorForCreate() {
 		searchState.manageSavedSearchesOpen = false;
-		editorState = {
-			mode: 'create',
-			title: '',
-			query: searchState.activeQuery,
-			showInQuickMenu: false,
-		};
-	}
+			editorState = {
+				mode: 'create',
+				title: '',
+				query: searchState.draftQuery,
+				showInQuickMenu: false,
+			};
+		}
 
 	function openEditorForEdit(search: SavedChatSearch) {
 		searchState.manageSavedSearchesOpen = false;
@@ -461,7 +461,7 @@
 	}));
 
 	onMount(() => appShell.onSidebarSearchRequested(() => {
-		searchState.openSearchDialog();
+			searchState.toggleSearchDialog();
 	}));
 </script>
 
@@ -547,18 +547,18 @@
 	onSave={handleSaveTags}
 />
 
-<SidebarSearchDialog
-	open={searchState.searchDialogOpen}
-	query={searchState.activeQuery}
-	filteredChats={searchState.filteredChats}
-	savedSearches={searchState.savedSearches}
-	highlightedIndex={searchState.highlightedResultIndex}
-	onQueryChange={(q) => searchState.applyQuery(q)}
-	onSelectChat={handleSearchSelectChat}
-	onApplySavedSearch={handleApplySavedSearch}
-	onOpenManager={openSavedSearchManager}
-	onHighlightChange={(i) => { searchState.highlightedResultIndex = i; }}
-	onClose={() => searchState.closeSearchDialog()}
+	<SidebarSearchDialog
+		open={searchState.searchDialogOpen}
+		query={searchState.draftQuery}
+		filteredChats={searchState.dialogFilteredChats}
+		savedSearches={searchState.savedSearches}
+		highlightedIndex={searchState.highlightedResultIndex}
+		onQueryChange={(q) => searchState.updateDraftQuery(q)}
+		onSelectChat={handleSearchSelectChat}
+		onApplySavedSearch={handleApplySavedSearch}
+		onOpenManager={openSavedSearchManager}
+		onHighlightChange={(i) => { searchState.highlightedResultIndex = i; }}
+		onClose={() => searchState.closeSearchDialog()}
 />
 
 <SavedSearchManagerDialog

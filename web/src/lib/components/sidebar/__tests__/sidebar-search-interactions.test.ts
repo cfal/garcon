@@ -109,6 +109,24 @@ describe('sidebar search interactions', () => {
 		});
 	});
 
+	it('closes from Ctrl-S inside the dialog', async () => {
+		const onClose = vi.fn();
+
+		render(SidebarSearchDialogHarness, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+			onClose,
+		});
+
+		const input = await screen.findByRole('textbox');
+		input.focus();
+		await fireEvent.keyDown(input, { key: 's', ctrlKey: true, bubbles: true });
+
+		expect(onClose).toHaveBeenCalledTimes(1);
+		await waitFor(() => {
+			expect(screen.queryByRole('textbox')).toBeNull();
+		});
+	});
+
 	it('uses a command-palette shell with a fixed scrollable results pane', async () => {
 		render(SidebarSearchDialogHarness, {
 			filteredChats: [

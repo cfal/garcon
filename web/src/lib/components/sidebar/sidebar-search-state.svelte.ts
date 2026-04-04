@@ -8,6 +8,7 @@ import { parseChatSearch, isEmptyFilter, matchesChatFilter, type ChatFilterSpec 
 
 export class SidebarSearchState {
 	activeQuery = $state('');
+	draftQuery = $state('');
 	savedSearches = $state<SavedChatSearch[]>([]);
 	searchDialogOpen = $state(false);
 	manageSavedSearchesOpen = $state(false);
@@ -23,8 +24,19 @@ export class SidebarSearchState {
 		return parseChatSearch(this.activeQuery);
 	}
 
+	get parsedDraftQuery(): ChatFilterSpec {
+		return parseChatSearch(this.draftQuery);
+	}
+
 	get filteredChats(): ChatSessionRecord[] {
 		const filter = this.parsedQuery;
+		const chats = this.#getChats();
+		if (isEmptyFilter(filter)) return chats;
+		return chats.filter((chat) => matchesChatFilter(chat, filter));
+	}
+
+	get dialogFilteredChats(): ChatSessionRecord[] {
+		const filter = this.parsedDraftQuery;
 		const chats = this.#getChats();
 		if (isEmptyFilter(filter)) return chats;
 		return chats.filter((chat) => matchesChatFilter(chat, filter));
@@ -45,16 +57,42 @@ export class SidebarSearchState {
 
 	openSearchDialog(): void {
 		this.searchDialogOpen = true;
+		this.draftQuery = this.activeQuery;
 		this.highlightedResultIndex = 0;
 	}
 
+	toggleSearchDialog(): void {
+		if (this.searchDialogOpen) {
+			this.closeSearchDialog();
+			return;
+		}
+		this.openSearchDialog();
+	}
+
 	closeSearchDialog(): void {
+		this.searchDialogOpen = false;
+		this.draftQuery = this.activeQuery;
+		this.highlightedResultIndex = 0;
+	}
+
+	suspendSearchDialog(): void {
 		this.searchDialogOpen = false;
 		this.highlightedResultIndex = 0;
 	}
 
 	applyQuery(query: string): void {
 		this.activeQuery = query;
+		this.highlightedResultIndex = 0;
+	}
+
+	updateDraftQuery(query: string): void {
+		this.draftQuery = query;
+		this.highlightedResultIndex = 0;
+	}
+
+	confirmSearchDialog(): void {
+		this.activeQuery = this.draftQuery;
+		this.searchDialogOpen = false;
 		this.highlightedResultIndex = 0;
 	}
 

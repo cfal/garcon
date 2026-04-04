@@ -154,7 +154,7 @@ export class AppShellStore {
 		return () => { this.#sidebarSearchCallbacks.delete(cb); };
 	}
 
-	/** Opens the sidebar search dialog via registered callbacks. */
+	/** Toggles the sidebar search dialog via registered callbacks. */
 	openSidebarSearch(): void {
 		for (const cb of this.#sidebarSearchCallbacks) cb();
 	}

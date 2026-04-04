@@ -3,6 +3,7 @@
 	import Input from '$lib/components/ui/input/input.svelte';
 	import SavedSearchPills from './SavedSearchPills.svelte';
 	import Search from '@lucide/svelte/icons/search';
+	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
@@ -46,6 +47,13 @@
 
 	function handleDialogKeydown(e: KeyboardEvent) {
 		const key = e.key.toLowerCase();
+
+		if ((e.ctrlKey || e.metaKey) && key === 's') {
+			e.preventDefault();
+			e.stopPropagation();
+			onClose();
+			return;
+		}
 
 		if (e.ctrlKey && key === 'j') {
 			e.preventDefault();
@@ -121,20 +129,24 @@
 				<div class="shrink-0 border-b border-border">
 					<div class="flex min-w-0 items-center gap-2 px-4 py-3">
 						<Search class="h-4 w-4 shrink-0 text-muted-foreground" />
-						<Input
-							bind:ref={inputRef}
-							type="text"
-							value={query}
-							oninput={handleQueryInput}
-							placeholder={m.sidebar_projects_search_placeholder()}
-							class="h-9 flex-1 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
-						/>
-						<kbd class="hidden shrink-0 items-center rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline-flex">
-							ESC
-						</kbd>
-						<Button variant="outline" size="sm" class="shrink-0" onclick={onOpenManager}>
-							{m.sidebar_saved_searches_edit()}
-						</Button>
+					<Input
+						bind:ref={inputRef}
+						type="text"
+						value={query}
+						oninput={handleQueryInput}
+						placeholder={m.sidebar_projects_search_placeholder()}
+						class="h-9 flex-1 border-0 bg-transparent pl-1 pr-0 text-sm shadow-none focus-visible:ring-0"
+					/>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						class="shrink-0"
+						onclick={onOpenManager}
+						title={m.sidebar_saved_searches_edit()}
+						aria-label={m.sidebar_saved_searches_edit()}
+					>
+						<Settings class="h-4 w-4" />
+					</Button>
 						<Button
 							variant="ghost"
 							size="icon-sm"
