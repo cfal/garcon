@@ -114,6 +114,25 @@ describe('sidebar search interactions', () => {
 		});
 	});
 
+	it('closes when clicking outside the dialog panel', async () => {
+		const onClose = vi.fn();
+
+		render(SidebarSearchDialogHarness, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+			onClose,
+		});
+
+		const container = document.querySelector('.fixed.inset-0.flex.items-stretch.justify-center');
+		if (!(container instanceof HTMLElement)) throw new Error('Expected search dialog container');
+
+		await fireEvent.click(container);
+
+		expect(onClose).toHaveBeenCalledTimes(1);
+		await waitFor(() => {
+			expect(screen.queryByRole('textbox')).toBeNull();
+		});
+	});
+
 	it('closes from Ctrl-S inside the dialog', async () => {
 		const onClose = vi.fn();
 
@@ -198,7 +217,7 @@ describe('sidebar search interactions', () => {
 		expect(preview.className).toContain('truncate');
 	});
 
-		it('renders sidebar menu searches ahead of the row actions and inserts a separator', async () => {
+	it('renders sidebar menu searches ahead of the row actions and inserts a separator', async () => {
 			render(SidebarControlsRow, {
 				isLoading: false,
 				isReorderMode: false,
@@ -208,6 +227,7 @@ describe('sidebar search interactions', () => {
 				createSavedSearch('search-2', 'Active', 'status:active'),
 			],
 			onOpenSearchDialog: vi.fn(),
+			onOpenSavedSearchManager: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowSettings: vi.fn(),
@@ -223,10 +243,55 @@ describe('sidebar search interactions', () => {
 		const items = screen.getAllByRole('menuitem');
 		expect(items[0]?.textContent).toContain('Unread');
 		expect(items[1]?.textContent).toContain('Active');
-		expect(items[2]?.textContent).toContain('Mark all as read');
-			expect(items[3]?.textContent).toContain('Settings');
-			expect(document.querySelector('[data-slot="dropdown-menu-separator"]')).toBeTruthy();
+		expect(items[2]?.textContent).toContain('Manage searches');
+		expect(items[3]?.textContent).toContain('Mark all as read');
+		expect(items[4]?.textContent).toContain('Settings');
+		expect(document.querySelector('[data-slot="dropdown-menu-separator"]')).toBeTruthy();
+	});
+
+	it('opens the saved-search manager from the quick search menu section', async () => {
+		const onOpenSavedSearchManager = vi.fn();
+
+		render(SidebarControlsRow, {
+			isLoading: false,
+			isReorderMode: false,
+			visibleUnreadCount: 0,
+			sidebarMenuSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
+			onOpenSearchDialog: vi.fn(),
+			onOpenSavedSearchManager,
+			onCreateChat: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
+			onShowSettings: vi.fn(),
 		});
+
+		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(mobileTrigger);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Manage searches' }));
+
+		expect(onOpenSavedSearchManager).toHaveBeenCalledTimes(1);
+	});
+
+	it('shows manage searches before mark all as read even without quick search entries', async () => {
+		render(SidebarControlsRow, {
+			isLoading: false,
+			isReorderMode: false,
+			visibleUnreadCount: 1,
+			sidebarMenuSearches: [],
+			onOpenSearchDialog: vi.fn(),
+			onOpenSavedSearchManager: vi.fn(),
+			onCreateChat: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
+			onShowSettings: vi.fn(),
+		});
+
+		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(mobileTrigger);
+
+		const items = await screen.findAllByRole('menuitem');
+		expect(items[0]?.textContent).toContain('Manage searches');
+		expect(items[1]?.textContent).toContain('Mark all as read');
+		expect(screen.queryByRole('separator')).toBeNull();
+	});
 
 		it('suppresses the top divider when search context sits directly below the controls row', () => {
 			render(SidebarControlsRow, {

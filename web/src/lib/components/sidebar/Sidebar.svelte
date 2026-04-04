@@ -498,6 +498,7 @@
 				sidebarMenuSearches={searchState.sidebarMenuSearches}
 				hasSearchContextBelow={showSidebarSearchContext}
 				onOpenSearchDialog={() => searchState.openSearchDialog()}
+				onOpenSavedSearchManager={openSavedSearchManager}
 				onCreateChat={handlePrimaryAction}
 				onMarkAllRead={() => { void handleMarkAllRead(); }}
 				onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
@@ -547,6 +548,7 @@
 			{isMarkingAllRead}
 			sidebarMenuSearches={searchState.sidebarMenuSearches}
 			onOpenSearchDialog={() => searchState.openSearchDialog()}
+			onOpenSavedSearchManager={openSavedSearchManager}
 			onCreateChat={handlePrimaryAction}
 			onMarkAllRead={() => { void handleMarkAllRead(); }}
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}

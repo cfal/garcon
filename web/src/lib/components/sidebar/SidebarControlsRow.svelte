@@ -24,6 +24,7 @@
 		sidebarMenuSearches?: SavedChatSearch[];
 		hasSearchContextBelow?: boolean;
 		onOpenSearchDialog: () => void;
+		onOpenSavedSearchManager?: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
@@ -40,6 +41,7 @@
 		sidebarMenuSearches = [],
 		hasSearchContextBelow = false,
 		onOpenSearchDialog,
+		onOpenSavedSearchManager,
 		onCreateChat,
 		onMarkAllRead,
 		onApplySidebarMenuSearch,
@@ -49,6 +51,7 @@
 
 	let buttonLabel = $derived(primaryLabel ?? m.sidebar_chats_new_chat());
 	let showMarkAllRead = $derived(visibleUnreadCount > 0 && !isReorderMode);
+	let showQuickSearchSeparator = $derived(sidebarMenuSearches.length > 0);
 	let isMarkAllReadDisabled = $derived(isLoading || isMarkingAllRead);
 	let isTopDock = $derived(dockPlacement === 'top');
 	let showDockDivider = $derived(!isTopDock || !hasSearchContextBelow);
@@ -118,8 +121,14 @@
 								{search.title || search.query}
 							</DropdownMenuItem>
 						{/each}
+					{/if}
+					{#if showQuickSearchSeparator}
 						<DropdownMenuSeparator />
 					{/if}
+					<DropdownMenuItem onclick={() => onOpenSavedSearchManager?.()}>
+						<Search class="h-3.5 w-3.5" />
+						{m.sidebar_saved_searches_manage_menu_item()}
+					</DropdownMenuItem>
 					<DropdownMenuItem onclick={handleMarkAllRead} disabled={!showMarkAllRead || isMarkAllReadDisabled}>
 						<SquareCheck class="h-3.5 w-3.5" />
 						{m.sidebar_chats_mark_all_read()}

@@ -89,6 +89,11 @@
 		onClose();
 	}
 
+	function handleContainerClick(event: MouseEvent) {
+		if (event.target !== event.currentTarget) return;
+		onClose();
+	}
+
 	$effect(() => {
 		if (!open) return;
 		focusInput();
@@ -110,7 +115,11 @@
 			tabindex="-1"
 		></button>
 
-		<div class="fixed inset-0 flex items-stretch justify-center sm:items-start sm:p-4 sm:pt-[10vh]" role="presentation">
+		<div
+			class="fixed inset-0 flex items-stretch justify-center sm:items-start sm:p-4 sm:pt-[10vh]"
+			role="presentation"
+			onclick={handleContainerClick}
+		>
 			<div
 				data-slot="search-dialog-content"
 				class="flex h-dvh w-screen min-w-0 flex-col overflow-hidden bg-background shadow-2xl sm:h-[min(44rem,calc(100dvh-8rem))] sm:w-full sm:max-w-3xl sm:rounded-2xl sm:border sm:border-border"
