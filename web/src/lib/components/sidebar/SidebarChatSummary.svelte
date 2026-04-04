@@ -108,7 +108,7 @@
 
 		<div
 			class={cn(
-				'truncate text-[13px] italic',
+				'mb-1 mt-0.5 truncate text-[13px] italic',
 				isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80',
 			)}
 		>

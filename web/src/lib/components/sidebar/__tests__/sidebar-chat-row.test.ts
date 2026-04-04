@@ -49,7 +49,10 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getAllByText('Shared row chat')).toHaveLength(2);
 		expect(screen.getAllByLabelText('Unread')).toHaveLength(2);
 		expect(screen.getAllByTitle('/very/long/workspace/projects/feature-branch/app')).toHaveLength(2);
-		expect(screen.getAllByText('Latest preview text')).toHaveLength(2);
+		const sidebarPreview = screen.getAllByText('Latest preview text');
+		expect(sidebarPreview).toHaveLength(2);
+		expect(sidebarPreview[0]?.className).toContain('mt-0.5');
+		expect(sidebarPreview[0]?.className).toContain('mb-1');
 		expect(screen.getAllByText('Claude')).toHaveLength(2);
 		expect(screen.getAllByText('ops')).toHaveLength(2);
 		expect(screen.getAllByText('prod')).toHaveLength(2);
@@ -77,7 +80,8 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('Shared row chat')).toBeTruthy();
 		expect(screen.queryByLabelText('Unread')).toBeNull();
 		expect(screen.getByTitle('/very/long/workspace/projects/feature-branch/app')).toBeTruthy();
-		expect(screen.getByText('Latest preview text')).toBeTruthy();
+		expect(screen.getByText('Latest preview text').className).toContain('mt-0.5');
+		expect(screen.getByText('Latest preview text').className).toContain('mb-1');
 		expect(screen.getByText('Claude')).toBeTruthy();
 		expect(screen.getByText('ops')).toBeTruthy();
 		expect(screen.getByText('prod')).toBeTruthy();
