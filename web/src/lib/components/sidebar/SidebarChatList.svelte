@@ -64,8 +64,8 @@
 
 	let showChats = $derived(!isLoading && chats.length > 0 && filteredChats.length > 0);
 	// Chats are sorted by recent activity; flat list is always used.
-	// Drag-and-drop is only available in explicit reorder mode.
-	let isFiltered = true;
+	// Normal-mode drag is disabled while a search filter is active.
+	let isFiltered = $derived(searchFilter.trim().length > 0);
 
 	// Partition all chats in a single pass.
 	let allPartitioned = $derived.by(() => {
