@@ -4,24 +4,24 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import * as Select from '$lib/components/ui/select';
 	import Settings from '@lucide/svelte/icons/settings';
-	import { getPreferences } from '$lib/context';
+	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 	const fontSizeOptions = ['10', '11', '12', '13', '14', '15', '16', '18', '20'];
 
 	let menuOpen = $state(false);
 
 	function setCodeEditorFontSize(size: string): void {
-		preferences.setPreference('codeEditorFontSize', size);
+		localSettings.set('codeEditorFontSize', size);
 	}
 
 	function toggleWordWrap(): void {
-		preferences.setPreference('codeEditorWordWrap', !preferences.codeEditorWordWrap);
+		localSettings.toggle('codeEditorWordWrap');
 	}
 
 	function toggleLineNumbers(): void {
-		preferences.setPreference('codeEditorLineNumbers', !preferences.codeEditorLineNumbers);
+		localSettings.toggle('codeEditorLineNumbers');
 	}
 </script>
 
@@ -45,13 +45,13 @@
 				</div>
 				<Select.Root
 					type="single"
-					value={preferences.codeEditorFontSize}
+					value={localSettings.codeEditorFontSize}
 					onValueChange={(value) => {
 						if (value) setCodeEditorFontSize(value);
 					}}
 				>
 					<Select.Trigger class="w-[80px]" size="sm">
-						{preferences.codeEditorFontSize}px
+						{localSettings.codeEditorFontSize}px
 					</Select.Trigger>
 					<Select.Content>
 						{#each fontSizeOptions as size}
@@ -66,7 +66,7 @@
 					{m.settings_appearance_settings_code_editor_word_wrap_label()}
 				</div>
 				<Switch
-					checked={preferences.codeEditorWordWrap}
+					checked={localSettings.codeEditorWordWrap}
 					onCheckedChange={toggleWordWrap}
 					aria-label={m.settings_appearance_settings_code_editor_word_wrap_label()}
 				/>
@@ -77,7 +77,7 @@
 					{m.settings_appearance_settings_code_editor_line_numbers_label()}
 				</div>
 				<Switch
-					checked={preferences.codeEditorLineNumbers}
+					checked={localSettings.codeEditorLineNumbers}
 					onCheckedChange={toggleLineNumbers}
 					aria-label={m.settings_appearance_settings_code_editor_line_numbers_label()}
 				/>

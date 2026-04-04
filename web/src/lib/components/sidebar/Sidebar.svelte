@@ -9,7 +9,7 @@
 	import SavedSearchManagerDialog from './SavedSearchManagerDialog.svelte';
 	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
-	import { getAppShell, getReadReceiptOutbox } from '$lib/context';
+	import { getAppShell, getLocalSettings, getReadReceiptOutbox } from '$lib/context';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { reorderChats } from '$lib/api/chats.js';
@@ -19,22 +19,17 @@
 	import { SidebarSearchState } from './sidebar-search-state.svelte';
 	import { addTagToQuery } from './sidebar-search';
 	import {
-		APP_SETTINGS_UPDATED_EVENT,
 		getSavedSearches,
 		createSavedSearch,
 		updateSavedSearch as updateSavedSearchApi,
 		deleteSavedSearch as deleteSavedSearchApi,
 		reorderSavedSearches as reorderSavedSearchesApi,
-		getSettings,
-		normalizeSidebarSearchBarPosition,
-		type AppSettingsUpdatedDetail,
 		type SavedChatSearch,
 	} from '$lib/api/settings';
 	import type { SavedSearchEditorState } from './SavedSearchEditorDialog.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { SidebarSearchBarPosition } from '$lib/types/session.js';
 
 	interface ChatDeleteConfirmation {
 		chatId: string;
@@ -82,6 +77,7 @@
 		onShowSettings,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
+	const localSettings = getLocalSettings();
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const controller = new SidebarController({
 		get onQuietRefresh() { return onQuietRefresh; },
@@ -100,21 +96,21 @@
 	let shareChatDialog = $state<{ chatId: string; chatTitle: string } | null>(null);
 	let currentTime = $state(new Date());
 	let isMarkingAllRead = $state(false);
-	let searchBarPosition = $state<SidebarSearchBarPosition>('bottom');
+	let searchBarPosition = $derived(localSettings.searchBarPosition);
 
 	// Saved search management state.
 	let editorState = $state<SavedSearchEditorState | null>(null);
 	let savedSearchDeleteConfirmation = $state<{ id: string } | null>(null);
 	let savedSearchDeleteButtonRef = $state<HTMLButtonElement | null>(null);
 
-		let visibleUnreadChatIds = $derived.by(() =>
-			searchState.filteredChats
-				.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
-				.map((chat) => chat.id)
-		);
-		let showSidebarSearchContext = $derived(
-			searchState.sidebarPillSearches.length > 0 || searchState.hasActiveQuery
-		);
+	let visibleUnreadChatIds = $derived.by(() =>
+		searchState.filteredChats
+			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
+			.map((chat) => chat.id)
+	);
+	let showSidebarSearchContext = $derived(
+		searchState.sidebarPillSearches.length > 0 || searchState.hasActiveQuery
+	);
 
 	// Refresh timestamp every minute.
 	$effect(() => {
@@ -443,32 +439,6 @@
 
 	onMount(async () => {
 		try {
-			const settings = await getSettings();
-			searchBarPosition = normalizeSidebarSearchBarPosition(settings.ui?.searchBarPosition);
-		} catch (err) {
-			console.error('Failed to load sidebar settings:', err);
-		}
-	});
-
-	onMount(() => {
-		function handleAppSettingsUpdated(event: Event) {
-			const detail = (event as CustomEvent<AppSettingsUpdatedDetail>).detail;
-			const ui = detail?.patch?.ui;
-			if (!ui || typeof ui !== 'object' || Array.isArray(ui)) return;
-			if (!Object.prototype.hasOwnProperty.call(ui, 'searchBarPosition')) return;
-			searchBarPosition = normalizeSidebarSearchBarPosition(
-				(ui as Record<string, unknown>).searchBarPosition,
-			);
-		}
-
-		window.addEventListener(APP_SETTINGS_UPDATED_EVENT, handleAppSettingsUpdated as EventListener);
-		return () => {
-			window.removeEventListener(APP_SETTINGS_UPDATED_EVENT, handleAppSettingsUpdated as EventListener);
-		};
-	});
-
-	onMount(async () => {
-		try {
 			const res = await getSavedSearches();
 			searchState.setSavedSearches(res.savedSearches);
 		} catch (err) {
@@ -484,25 +454,25 @@
 	}));
 
 	onMount(() => appShell.onSidebarSearchRequested(() => {
-			searchState.toggleSearchDialog();
+		searchState.toggleSearchDialog();
 	}));
 </script>
 
 <div class="h-full flex flex-col bg-card md:select-none">
 	{#if searchBarPosition === 'top'}
-			<SidebarControlsRow
-				dockPlacement="top"
-				{isLoading}
-				{isReorderMode}
-				visibleUnreadCount={visibleUnreadChatIds.length}
-				{isMarkingAllRead}
-				sidebarMenuSearches={searchState.sidebarMenuSearches}
-				hasSearchContextBelow={showSidebarSearchContext}
-				onOpenSearchDialog={() => searchState.openSearchDialog()}
-				onOpenSavedSearchManager={openSavedSearchManager}
-				onCreateChat={handlePrimaryAction}
-				onMarkAllRead={() => { void handleMarkAllRead(); }}
-				onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
+		<SidebarControlsRow
+			dockPlacement="top"
+			{isLoading}
+			{isReorderMode}
+			visibleUnreadCount={visibleUnreadChatIds.length}
+			{isMarkingAllRead}
+			sidebarMenuSearches={searchState.sidebarMenuSearches}
+			hasSearchContextBelow={showSidebarSearchContext}
+			onOpenSearchDialog={() => searchState.openSearchDialog()}
+			onOpenSavedSearchManager={openSavedSearchManager}
+			onCreateChat={handlePrimaryAction}
+			onMarkAllRead={() => { void handleMarkAllRead(); }}
+			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
 			{onShowSettings}
 		/>

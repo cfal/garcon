@@ -18,7 +18,7 @@
 	import GitRevertModal from './GitRevertModal.svelte';
 	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
 	import { GitWorkbenchStore } from '$lib/stores/git-workbench.svelte.js';
-	import { getPreferences, getFileViewer } from '$lib/context';
+	import { getLocalSettings, getFileViewer, getRemoteSettings } from '$lib/context';
 
 	interface GitPanelProps {
 		chatId: string;
@@ -29,15 +29,22 @@
 
 	let { chatId, projectPath, isMobile, onSendToChat }: GitPanelProps = $props();
 
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 	const fileViewer = getFileViewer();
-	const store = new GitPanelStore({
-		get provider() { return preferences.selectedProvider; },
-	});
+	const remoteSettings = getRemoteSettings();
+	const store = new GitPanelStore();
 	const wb = new GitWorkbenchStore({
-		get provider() { return preferences.selectedProvider; },
+		getSettings: async () => {
+			const snap = await remoteSettings.ensureLoaded();
+			return { ui: snap.ui as Record<string, unknown>, uiEffective: snap.uiEffective as Record<string, unknown> };
+		},
+		remoteSnapshot: () => {
+			const snap = remoteSettings.snapshot;
+			if (!snap) return null;
+			return { ui: snap.ui as Record<string, unknown>, uiEffective: snap.uiEffective as Record<string, unknown> };
+		},
 	});
-	let gitDiffFontSize = $derived(parseInt(preferences.gitDiffFontSize, 10) || 12);
+	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
 
 	// Commit modal state
 	let showCommitModal = $state(false);
@@ -124,7 +131,7 @@
 			{canPush}
 			diffMode={wb.diffMode}
 			contextLines={wb.contextLines}
-			diffFontSize={preferences.gitDiffFontSize}
+			diffFontSize={localSettings.gitDiffFontSize}
 			onToggleBranchDropdown={() => (store.showBranchDropdown = !store.showBranchDropdown)}
 			onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
 			onShowNewBranchModal={() => (store.showNewBranchModal = true)}
@@ -136,7 +143,7 @@
 			onPush={() => store.handleToolbarPush(projectPath)}
 			onSetDiffMode={(m) => wb.setDiffMode(m)}
 			onSetContextLines={(n) => wb.setContextLines(n)}
-			onSetDiffFontSize={(size) => preferences.setPreference('gitDiffFontSize', size)}
+			onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
 			onOpenCommitSettings={() => { showCommitSettings = true; }}
 			onRevert={() => {
 				revertStrategy = 'revert';

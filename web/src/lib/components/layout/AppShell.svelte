@@ -9,7 +9,7 @@
 	import type { AppTab } from '$lib/types/app';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
-	import { getNavigation, getChatRuntime, getChatSessions, getAppShell, getWs, getPreferences } from '$lib/context';
+	import { getNavigation, getChatRuntime, getChatSessions, getAppShell, getWs, getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ChatRunningQueryRequest } from '$shared/ws-requests';
 	import { AppShellController } from './app-shell-controller.svelte';
@@ -21,7 +21,7 @@
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
 	const ws = getWs();
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 	const shellController = new AppShellController({
 		upsertFromServer: (s) => sessions.upsertFromServer(s),
 		setLoadingChats: (v) => { chatRuntime.isLoadingChats = v; },
@@ -32,7 +32,7 @@
 	const isAutoFullscreenOnGitTab = $derived(
 		!isMobile &&
 		navigation.activeTab === 'git' &&
-		preferences.alwaysFullscreenOnGitPanel
+		localSettings.alwaysFullscreenOnGitPanel
 	);
 	const effectiveWorkspaceFullscreen = $derived(isWorkspaceFullscreen || isAutoFullscreenOnGitTab);
 
@@ -133,7 +133,7 @@
 		<div class="flex h-dvh w-screen overflow-hidden bg-background text-foreground">
 			<div
 				class={`relative h-full overflow-hidden ${effectiveWorkspaceFullscreen ? 'w-0 border-r-0 pointer-events-none' : 'flex-shrink-0 border-r border-border'}`}
-				style:width={effectiveWorkspaceFullscreen ? '0px' : `${appShell.sidebarWidth}px`}
+				style:width={effectiveWorkspaceFullscreen ? '0px' : `${localSettings.sidebarWidth}px`}
 				aria-hidden={effectiveWorkspaceFullscreen}
 				inert={effectiveWorkspaceFullscreen}
 			>
@@ -150,8 +150,8 @@
 				/>
 				{#if !effectiveWorkspaceFullscreen}
 					<ResizeHandle
-						width={appShell.sidebarWidth}
-						onResize={(w) => appShell.setSidebarWidth(w)}
+						width={localSettings.sidebarWidth}
+						onResize={(w) => localSettings.set('sidebarWidth', w)}
 					/>
 				{/if}
 			</div>

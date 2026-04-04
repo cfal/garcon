@@ -1,10 +1,13 @@
 <script lang="ts">
 	import NewChatForm from '../NewChatForm.svelte';
-	import { setAppShell, setModelCatalog, setPreferences } from '$lib/context';
+	import { setAppShell, setModelCatalog, setLocalSettings, setRemoteSettings } from '$lib/context';
+	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 
-	setPreferences({
+	setLocalSettings({
 		sendByShiftEnter: false
 	} as never);
+
+	setRemoteSettings(createRemoteSettingsStore());
 
 	setAppShell({
 		projectBasePath: '/workspace',

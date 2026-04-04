@@ -8,7 +8,7 @@
 		PermissionCancelledMessage,
 	} from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
-	import { getChatState, getProviderState, getPreferences, getAppShell } from '$lib/context';
+	import { getChatState, getProviderState, getLocalSettings, getAppShell } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createMessageIdAllocator } from '$lib/chat/message-id';
 	import { Loader2, TriangleAlert, RefreshCw } from '@lucide/svelte';
@@ -27,7 +27,7 @@
 
 	const chatState = getChatState();
 	const providerState = getProviderState();
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
 
 	function handleMessagePaneFocusIntent() {
@@ -219,7 +219,7 @@
 						{onPermissionDecision}
 						{onExitPlanMode}
 						provider={providerState.provider}
-						showThinking={preferences.showThinking}
+						showThinking={localSettings.showThinking}
 					/>
 					{#snippet failed(error)}
 						<div class="px-4 py-2 text-sm text-destructive bg-destructive/10 rounded border border-destructive/20">

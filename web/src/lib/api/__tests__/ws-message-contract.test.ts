@@ -12,6 +12,7 @@ import {
 	ChatSessionDeletedWsMessage,
 	ChatReadUpdatedV1Message,
 	ChatListRefreshRequestedMessage,
+	SettingsChangedMessage,
 	ChatLogResponseMessage,
 	ClientRequestErrorMessage,
 	WsFaultMessage,
@@ -96,6 +97,41 @@ describe('parseServerWsMessage', () => {
 		});
 		expect(msg).toBeInstanceOf(ChatListRefreshRequestedMessage);
 		expect((msg as ChatListRefreshRequestedMessage).reason).toBe('pinned-toggled');
+	});
+
+	it('parses chat-list-refresh-requested for chat-added', () => {
+		const msg = parseServerWsMessage({
+			type: 'chat-list-refresh-requested',
+			reason: 'chat-added',
+			chatId: 'c-1',
+		});
+		expect(msg).toBeInstanceOf(ChatListRefreshRequestedMessage);
+		expect((msg as ChatListRefreshRequestedMessage).reason).toBe('chat-added');
+	});
+
+	it('parses settings-changed', () => {
+		const msg = parseServerWsMessage({
+			type: 'settings-changed',
+			settings: {
+				version: 2,
+				ui: { pinnedInsertPosition: 'bottom' },
+				uiEffective: {},
+				paths: { pinnedProjectPaths: [], browseStartPath: '/workspace' },
+				pinnedChatIds: ['chat-1'],
+				lastProvider: 'claude',
+				lastProjectPath: '/workspace/project',
+				lastModel: 'opus',
+				lastPermissionMode: 'default',
+				lastThinkingMode: 'none',
+				lastClaudeThinkingMode: 'auto',
+				lastAmpAgentMode: 'smart',
+				projectBasePath: '/workspace',
+				telegramBotTokenAvailable: false,
+			},
+		});
+		expect(msg).toBeInstanceOf(SettingsChangedMessage);
+		expect((msg as SettingsChangedMessage).settings.version).toBe(2);
+		expect((msg as SettingsChangedMessage).settings.ui.pinnedInsertPosition).toBe('bottom');
 	});
 
 	it('parses chat-log-response', () => {
@@ -187,6 +223,25 @@ describe('parseServerWsMessage', () => {
 			code: 'SESSION_NOT_FOUND',
 			message: 'not found',
 			retryable: false,
+		});
+		expect(msg).toBeNull();
+	});
+
+	it('returns null for settings-changed when snapshot is malformed', () => {
+		const msg = parseServerWsMessage({
+			type: 'settings-changed',
+			settings: {
+				version: 'oops',
+			},
+		});
+		expect(msg).toBeNull();
+	});
+
+	it('returns null for chat-list-refresh-requested when reason is invalid', () => {
+		const msg = parseServerWsMessage({
+			type: 'chat-list-refresh-requested',
+			reason: 'mystery-reason',
+			chatId: 'c-1',
 		});
 		expect(msg).toBeNull();
 	});

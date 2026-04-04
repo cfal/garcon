@@ -1,13 +1,11 @@
-// App settings API for session naming and global settings.
+// App settings API for session naming, remote settings, and sidebar management.
 
 import { apiGet, apiPut, apiPost, apiDelete } from './client.js';
-import type { AppSettings, SidebarSearchBarPosition } from '$lib/types/session.js';
-
-export const APP_SETTINGS_UPDATED_EVENT = 'garcon:app-settings-updated';
-
-export interface AppSettingsUpdatedDetail {
-	patch: Record<string, unknown>;
-}
+import {
+	type RemoteSettingsSnapshot,
+	type UpdateRemoteSettingsInput,
+	normalizeRemoteSettingsSnapshot,
+} from '$shared/settings';
 
 export interface UpdateSessionNameResponse {
 	success: boolean;
@@ -18,30 +16,31 @@ export async function updateSessionName(chatId: string, title: string): Promise<
 	return apiPut<UpdateSessionNameResponse>('/api/v1/app/session-name', { chatId, title });
 }
 
-/** Fetches the current application settings. */
-export async function getSettings(): Promise<AppSettings> {
-	return apiGet<AppSettings>('/api/v1/app/settings');
-}
-
-export interface UpdateSettingsResponse {
-	success: boolean;
-}
-
-/** Applies a partial update to application settings. */
-export async function updateSettings(patch: Record<string, unknown>): Promise<UpdateSettingsResponse> {
-	const response = await apiPut<UpdateSettingsResponse>('/api/v1/app/settings', patch);
-	if (typeof window !== 'undefined') {
-		window.dispatchEvent(
-			new CustomEvent<AppSettingsUpdatedDetail>(APP_SETTINGS_UPDATED_EVENT, {
-				detail: { patch },
-			}),
-		);
+/** Fetches the current remote settings snapshot. */
+export async function getRemoteSettings(): Promise<RemoteSettingsSnapshot> {
+	const payload = await apiGet<unknown>('/api/v1/app/settings');
+	const snapshot = normalizeRemoteSettingsSnapshot(payload);
+	if (!snapshot) {
+		throw new Error('Invalid remote settings response');
 	}
-	return response;
+	return snapshot;
 }
 
-export function normalizeSidebarSearchBarPosition(value: unknown): SidebarSearchBarPosition {
-	return value === 'top' ? 'top' : 'bottom';
+export interface UpdateRemoteSettingsResponse {
+	success: boolean;
+	settings: RemoteSettingsSnapshot;
+}
+
+/** Applies a partial update to remote settings and returns the canonical snapshot. */
+export async function updateRemoteSettings(
+	patch: UpdateRemoteSettingsInput,
+): Promise<UpdateRemoteSettingsResponse> {
+	const payload = await apiPut<UpdateRemoteSettingsResponse>('/api/v1/app/settings', patch);
+	const snapshot = normalizeRemoteSettingsSnapshot(payload.settings);
+	if (!snapshot) {
+		throw new Error('Invalid remote settings update response');
+	}
+	return { ...payload, settings: snapshot };
 }
 
 export interface TelegramTestResponse {

@@ -6,7 +6,8 @@
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 
 	import { createAuthStore } from '$lib/stores/auth.svelte.js';
-	import { createPreferencesStore } from '$lib/stores/preferences.svelte.js';
+	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 	import { createChatRuntimeStore } from '$lib/stores/chat-runtime.svelte.js';
 	import { createChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
@@ -15,7 +16,8 @@
 	import { createFileViewerStore } from '$lib/stores/file-viewer.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
-	import { setAuth, setPreferences, setNavigation, setChatRuntime, setChatSessions, setAppShell, setWs, setFileViewer, setReadReceiptOutbox, setModelCatalog } from '$lib/context';
+	import { setAuth, setNavigation, setChatRuntime, setChatSessions, setAppShell, setWs, setFileViewer, setReadReceiptOutbox, setModelCatalog, setLocalSettings, setRemoteSettings } from '$lib/context';
+	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
@@ -24,7 +26,8 @@
 	let { children } = $props();
 
 	const auth = createAuthStore();
-	const preferences = createPreferencesStore();
+	const localSettings = createLocalSettingsStore();
+	const remoteSettings = createRemoteSettingsStore();
 	const navigation = createNavigationStore();
 	const chatRuntime = createChatRuntimeStore();
 	const chatSessions = createChatSessionsStore();
@@ -35,7 +38,8 @@
 	const modelCatalog = createModelCatalogStore();
 
 	setAuth(auth);
-	setPreferences(preferences);
+	setLocalSettings(localSettings);
+	setRemoteSettings(remoteSettings);
 	setNavigation(navigation);
 	setChatRuntime(chatRuntime);
 	setChatSessions(chatSessions);
@@ -71,7 +75,7 @@
 	// Applies theme class to document element. When 'system', listens for
 	// OS-level preference changes (e.g. Dark Reader or system toggle).
 	$effect(() => {
-		const theme = preferences.theme;
+		const theme = localSettings.theme;
 		if (theme !== 'system') {
 			applyThemeDom(theme === 'dark');
 			return;
@@ -87,7 +91,7 @@
 
 	// Toggles colorblind-friendly color overrides on the root element.
 	$effect(() => {
-		document.documentElement.classList.toggle('colorblind', preferences.colorblindMode);
+		document.documentElement.classList.toggle('colorblind', localSettings.colorblindMode);
 	});
 
 	// Connects WebSocket after authentication.
@@ -99,6 +103,14 @@
 			const authDisabled = auth.authDisabled;
 			untrack(() => ws.connect(token, authDisabled));
 		}
+	});
+
+	// Pushes settings-changed WebSocket messages into the remote store.
+	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
+	settingsRouter.start();
+	$effect(() => {
+		ws.messageVersion;
+		settingsRouter.tick();
 	});
 
 	onMount(() => {
@@ -114,8 +126,29 @@
 		window.addEventListener('pagehide', handlePageHide);
 	});
 
+	// Preload remote settings after authentication so root-global values
+	// (projectBasePath, etc.) are available before feature-specific fetches.
+	$effect(() => {
+		if (!auth.isAuthenticated) return;
+		void remoteSettings.ensureLoadedInBackground();
+	});
+
+	// Keeps root-global remote values synchronized after both HTTP refreshes
+	// and settings-changed WebSocket updates.
+	$effect(() => {
+		if (!auth.isAuthenticated) {
+			appShell.projectBasePath = '/';
+			return;
+		}
+		const projectBasePath = remoteSettings.snapshot?.projectBasePath;
+		if (!projectBasePath) return;
+		appShell.projectBasePath = projectBasePath;
+	});
+
 	onDestroy(() => {
 		window.removeEventListener('pagehide', handlePageHide);
+		settingsRouter.destroy();
+		localSettings.destroy();
 		readReceiptOutbox.destroy();
 		ws.disconnect();
 	});

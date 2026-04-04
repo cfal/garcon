@@ -13,7 +13,7 @@
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Copy from '@lucide/svelte/icons/copy';
 	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
-	import { getChatSessions, getFileViewer, getAppShell, getPreferences } from '$lib/context';
+	import { getChatSessions, getFileViewer, getAppShell, getLocalSettings } from '$lib/context';
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { parseFileLink } from '$lib/chat/file-link-parser';
@@ -62,7 +62,7 @@
 	const sessions = getChatSessions();
 	const fileViewer = getFileViewer();
 	const appShell = getAppShell();
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 
 	const projectBasePath = $derived(appShell.projectBasePath);
 	const chatProjectPath = $derived(sessions.selectedChat?.projectPath ?? null);
@@ -265,7 +265,7 @@
 							toolMessage={asToolUse}
 							toolResult={toolResult ? { content: toolResult.content, isError: toolResult.isError } : undefined}
 							mode="input"
-							autoExpandTools={preferences.autoExpandTools}
+							autoExpandTools={localSettings.autoExpandTools}
 							onFileOpen={handleToolFileOpen}
 						/>
 						{:else if asThinking}

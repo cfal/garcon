@@ -23,6 +23,7 @@ function createEmpty() {
     ui: {},
     paths: {},
     chatNames: {},
+    remoteSettingsVersion: 0,
     pinnedChatIds: [],
     normalChatIds: [],
     archivedChatIds: [],
@@ -48,7 +49,9 @@ function normalizeUiSettings(ui) {
     normalized.pinnedInsertPosition = normalized.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
   }
   if ('searchBarPosition' in normalized) {
-    normalized.searchBarPosition = normalized.searchBarPosition === 'top' ? 'top' : 'bottom';
+    // Stores sidebar controls position in browser-local settings instead of
+    // the shared remote settings snapshot.
+    delete normalized.searchBarPosition;
   }
   return normalized;
 }
@@ -118,40 +121,6 @@ function sanitizeSavedSearch(raw) {
   };
 }
 
-// Serializes a folder filter object into a search query string.
-function serializeFolderFilterToQuery(filter) {
-  const parts = [];
-  if (filter.status === 'active') parts.push('status:active');
-  if (filter.status === 'unread') parts.push('status:unread');
-  for (const tag of (filter.tags || [])) parts.push(`tag:${tag}`);
-  for (const provider of (filter.providers || [])) parts.push(`provider:${provider}`);
-  for (const model of (filter.models || [])) parts.push(`model:${model}`);
-  for (const text of (filter.textTokens || [])) {
-    parts.push(text.includes(' ') ? `"${text}"` : text);
-  }
-  return parts.join(' ');
-}
-
-// TODO: Remove folder-to-saved-search migration once deployed migrations are complete.
-function migrateFoldersToSavedSearches(chatFolders) {
-  return chatFolders
-    .map((folder) => {
-      const query = serializeFolderFilterToQuery(folder.filter || {});
-      if (!query) return null;
-      return {
-        id: folder.id,
-        title: folder.name,
-        query,
-        showAsSidebarPill: false,
-        showInSidebarMenu: false,
-        showInSearchDialog: true,
-        createdAt: folder.createdAt,
-        updatedAt: folder.createdAt,
-      };
-    })
-    .filter(Boolean);
-}
-
 function sanitize(parsed) {
   const chatFolders = Array.isArray(parsed.chatFolders)
     ? parsed.chatFolders.map(sanitizeFolder).filter(Boolean)
@@ -165,6 +134,7 @@ function sanitize(parsed) {
     ui: normalizeUiSettings(parsed.ui),
     paths: parsed.paths && typeof parsed.paths === 'object' ? parsed.paths : {},
     chatNames: parsed.chatNames && typeof parsed.chatNames === 'object' ? parsed.chatNames : {},
+    remoteSettingsVersion: normalizeRemoteSettingsVersion(parsed.remoteSettingsVersion),
     pinnedChatIds: sanitizeStringArray(parsed.pinnedChatIds),
     normalChatIds: sanitizeStringArray(parsed.normalChatIds),
     archivedChatIds: sanitizeStringArray(parsed.archivedChatIds),
@@ -176,10 +146,26 @@ function sanitize(parsed) {
     lastClaudeThinkingMode: normalizeClaudeThinkingMode(parsed.lastClaudeThinkingMode),
     lastAmpAgentMode: normalizeAmpAgentMode(parsed.lastAmpAgentMode),
     chatFolders,
-    savedChatSearches: savedChatSearches.length > 0
-      ? savedChatSearches
-      : migrateFoldersToSavedSearches(chatFolders),
+    savedChatSearches,
   };
+}
+
+function normalizeRemoteSettingsVersion(value) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : 0;
+}
+
+function bumpRemoteSettingsVersion(settings) {
+  settings.remoteSettingsVersion = normalizeRemoteSettingsVersion(settings.remoteSettingsVersion) + 1;
+}
+
+function sameOrderedStringArray(left, right) {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
 }
 
 // Deduplicates an array of string IDs, preserving first occurrence.
@@ -269,6 +255,8 @@ export class SettingsStore extends EventEmitter {
   onSessionNameChanged(cb) { this.on('session-name-changed', cb); }
   emitListChanged(reason, chatId) { this.emit('list-changed', reason, chatId); }
   onListChanged(cb) { this.on('list-changed', cb); }
+  emitRemoteSettingsChanged() { this.emit('remote-settings-changed'); }
+  onRemoteSettingsChanged(cb) { this.on('remote-settings-changed', cb); }
 
   #settingsPath() {
     return path.join(this.#workspaceDir, 'project-settings.json');
@@ -319,6 +307,7 @@ export class SettingsStore extends EventEmitter {
       const sessions = registry.listAllChats();
       const allChatIds = new Set(Object.keys(sessions));
       const currentSettings = await this.loadSettings();
+      const beforePinned = dedup(currentSettings.pinnedChatIds || []);
 
       let pinned = dedup(currentSettings.pinnedChatIds || []);
       let normal = dedup(currentSettings.normalChatIds || []);
@@ -384,6 +373,9 @@ export class SettingsStore extends EventEmitter {
         currentSettings.pinnedChatIds = pinned;
         currentSettings.normalChatIds = normal;
         currentSettings.archivedChatIds = archived;
+        if (!sameOrderedStringArray(beforePinned, pinned)) {
+          bumpRemoteSettingsVersion(currentSettings);
+        }
         await this.saveSettings(currentSettings);
       }
     });
@@ -429,7 +421,9 @@ export class SettingsStore extends EventEmitter {
     return this.#withLock(async () => {
       const settings = await this.loadSettings();
       settings.ui = normalizeUiSettings({ ...(settings.ui || {}), ...patch });
+      bumpRemoteSettingsVersion(settings);
       await this.saveSettings(settings);
+      this.emitRemoteSettingsChanged();
       return settings.ui;
     });
   }
@@ -443,7 +437,9 @@ export class SettingsStore extends EventEmitter {
     return this.#withLock(async () => {
       const settings = await this.loadSettings();
       settings.paths = { ...(settings.paths || {}), ...patch };
+      bumpRemoteSettingsVersion(settings);
       await this.saveSettings(settings);
+      this.emitRemoteSettingsChanged();
       return settings.paths;
     });
   }
@@ -451,6 +447,28 @@ export class SettingsStore extends EventEmitter {
   async getPinnedChatIds() {
     const settings = await this.loadSettings();
     return settings.pinnedChatIds || [];
+  }
+
+  async getRemoteSettingsVersion() {
+    const settings = await this.loadSettings();
+    return normalizeRemoteSettingsVersion(settings.remoteSettingsVersion);
+  }
+
+  async getRemoteSettingsSnapshotSource() {
+    const settings = await this.loadSettings();
+    return {
+      version: normalizeRemoteSettingsVersion(settings.remoteSettingsVersion),
+      ui: settings.ui || {},
+      paths: settings.paths || {},
+      pinnedChatIds: settings.pinnedChatIds || [],
+      lastProvider: settings.lastProvider || 'claude',
+      lastProjectPath: settings.lastProjectPath || '',
+      lastModel: settings.lastModel || '',
+      lastPermissionMode: normalizePermissionMode(settings.lastPermissionMode),
+      lastThinkingMode: normalizeThinkingMode(settings.lastThinkingMode),
+      lastClaudeThinkingMode: normalizeClaudeThinkingMode(settings.lastClaudeThinkingMode),
+      lastAmpAgentMode: normalizeAmpAgentMode(settings.lastAmpAgentMode),
+    };
   }
 
   async getArchivedChatIds() {
@@ -506,7 +524,9 @@ export class SettingsStore extends EventEmitter {
         defaults?.ampAgentMode,
         normalizeAmpAgentMode(settings.lastAmpAgentMode),
       );
+      bumpRemoteSettingsVersion(settings);
       await this.saveSettings(settings);
+      this.emitRemoteSettingsChanged();
     });
   }
 
@@ -551,6 +571,7 @@ export class SettingsStore extends EventEmitter {
   async ensureInNormal(chatId) {
     return this.#withLock(async () => {
       const settings = await this.loadSettings();
+      const beforePinned = dedup(settings.pinnedChatIds || []);
       for (const key of ['pinnedChatIds', 'normalChatIds', 'archivedChatIds']) {
         const ids = settings[key] || [];
         if (ids.includes(chatId)) {
@@ -558,7 +579,15 @@ export class SettingsStore extends EventEmitter {
         }
       }
       settings.normalChatIds = [chatId, ...(settings.normalChatIds || [])];
+      const afterPinned = dedup(settings.pinnedChatIds || []);
+      const pinnedChanged = !sameOrderedStringArray(beforePinned, afterPinned);
+      if (pinnedChanged) {
+        bumpRemoteSettingsVersion(settings);
+      }
       await this.saveSettings(settings);
+      if (pinnedChanged) {
+        this.emitRemoteSettingsChanged();
+      }
       this.emitListChanged('chat-added', chatId);
     });
   }
@@ -575,6 +604,7 @@ export class SettingsStore extends EventEmitter {
   async removeFromAllOrderLists(chatId) {
     return this.#withLock(async () => {
       const settings = await this.loadSettings();
+      const beforePinned = dedup(settings.pinnedChatIds || []);
       let dirty = false;
       for (const key of ['pinnedChatIds', 'normalChatIds', 'archivedChatIds']) {
         const ids = settings[key] || [];
@@ -583,7 +613,17 @@ export class SettingsStore extends EventEmitter {
           dirty = true;
         }
       }
-      if (dirty) await this.saveSettings(settings);
+      if (!dirty) return;
+
+      const afterPinned = dedup(settings.pinnedChatIds || []);
+      const pinnedChanged = !sameOrderedStringArray(beforePinned, afterPinned);
+      if (pinnedChanged) {
+        bumpRemoteSettingsVersion(settings);
+      }
+      await this.saveSettings(settings);
+      if (pinnedChanged) {
+        this.emitRemoteSettingsChanged();
+      }
     });
   }
 
@@ -604,7 +644,9 @@ export class SettingsStore extends EventEmitter {
         s.pinnedChatIds = position === 'bottom' ? [...pinned, chatId] : [chatId, ...pinned];
       }
 
+      bumpRemoteSettingsVersion(s);
       await this.saveSettings(s);
+      this.emitRemoteSettingsChanged();
       this.emitListChanged('pinned-toggled', chatId);
       return { isPinned: !isPinned };
     });
@@ -614,6 +656,7 @@ export class SettingsStore extends EventEmitter {
   async toggleArchive(chatId) {
     return this.#withLock(async () => {
       const s = await this.loadSettings();
+      const beforePinned = dedup(s.pinnedChatIds || []);
       const archived = s.archivedChatIds || [];
       const isArchived = archived.includes(chatId);
 
@@ -626,7 +669,15 @@ export class SettingsStore extends EventEmitter {
         s.archivedChatIds = [chatId, ...archived.filter((id) => id !== chatId)];
       }
 
+      const afterPinned = dedup(s.pinnedChatIds || []);
+      const pinnedChanged = !sameOrderedStringArray(beforePinned, afterPinned);
+      if (pinnedChanged) {
+        bumpRemoteSettingsVersion(s);
+      }
       await this.saveSettings(s);
+      if (pinnedChanged) {
+        this.emitRemoteSettingsChanged();
+      }
       this.emitListChanged('archive-toggled', chatId);
       return { isArchived: !isArchived };
     });
@@ -663,9 +714,15 @@ export class SettingsStore extends EventEmitter {
       if (!result) return { success: false, error: 'oldOrder is not a contiguous subsequence of the current list' };
 
       s[key] = result;
+      if (list === 'pinned') {
+        bumpRemoteSettingsVersion(s);
+      }
       await this.saveSettings(s);
 
       const anchorChatId = normNew[0] || list;
+      if (list === 'pinned') {
+        this.emitRemoteSettingsChanged();
+      }
       this.emitListChanged('chats-reordered', anchorChatId);
       return { success: true };
     });
@@ -806,7 +863,13 @@ export class SettingsStore extends EventEmitter {
       if (!result) return { success: false, error: 'Chat positions could not be resolved' };
 
       s[chatGroup.key] = result;
+      if (chatGroup.group === 'pinned') {
+        bumpRemoteSettingsVersion(s);
+      }
       await this.saveSettings(s);
+      if (chatGroup.group === 'pinned') {
+        this.emitRemoteSettingsChanged();
+      }
       this.emitListChanged('chats-reordered-quick', chatId);
       return { success: true };
     });

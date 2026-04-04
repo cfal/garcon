@@ -6,7 +6,7 @@ export type SessionProvider = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory
 
 export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'preview';
 
-export { type ChatSession, type AppSettings } from './session';
+export { type ChatSession } from './session';
 
 export interface ChatEntry {
 	id: string;

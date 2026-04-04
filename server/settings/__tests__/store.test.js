@@ -138,7 +138,7 @@ describe('settings store', () => {
       expect(ui.fontSize).toBe(14);
     });
 
-    it('normalizes persisted sidebar position settings on load and save', async () => {
+    it('keeps pinnedInsertPosition remote and drops legacy sidebar controls position', async () => {
       await writeRaw({
         ui: { pinnedInsertPosition: 'sideways', searchBarPosition: 'ceiling' },
         paths: {},
@@ -150,11 +150,11 @@ describe('settings store', () => {
 
       const loaded = await store.getUiSettings();
       expect(loaded.pinnedInsertPosition).toBe('top');
-      expect(loaded.searchBarPosition).toBe('bottom');
+      expect(loaded.searchBarPosition).toBeUndefined();
 
       await store.setUiSettings({ searchBarPosition: 'top', pinnedInsertPosition: 'bottom' });
       const saved = await store.getUiSettings();
-      expect(saved.searchBarPosition).toBe('top');
+      expect(saved.searchBarPosition).toBeUndefined();
       expect(saved.pinnedInsertPosition).toBe('bottom');
     });
 
@@ -168,6 +168,20 @@ describe('settings store', () => {
       const paths = await store.getPathSettings();
       expect(paths.lastDir).toBe('/home');
       expect(paths.recentDirs).toEqual(['/a']);
+    });
+
+    it('increments remote settings version and emits changes for ui/path updates', async () => {
+      const events = [];
+      store.onRemoteSettingsChanged(() => events.push('changed'));
+
+      expect(await store.getRemoteSettingsVersion()).toBe(0);
+
+      await store.setUiSettings({ theme: 'dark' });
+      expect(await store.getRemoteSettingsVersion()).toBe(1);
+
+      await store.setPathSettings({ lastDir: '/home' });
+      expect(await store.getRemoteSettingsVersion()).toBe(2);
+      expect(events).toEqual(['changed', 'changed']);
     });
   });
 
@@ -356,89 +370,6 @@ describe('settings store', () => {
     });
   });
 
-  describe('folder-to-saved-search migration', () => {
-    it('migrates folders to saved searches when savedChatSearches is empty', async () => {
-      await writeRaw({
-        ui: {},
-        paths: {},
-        chatNames: {},
-        chatFolders: [
-          {
-            id: 'folder-1',
-            name: 'Unread ops',
-            filter: { textTokens: ['bug'], tags: ['ops'], providers: ['claude'], models: ['sonnet'], status: 'unread' },
-            createdAt: '2026-03-27T00:00:00.000Z',
-          },
-        ],
-        savedChatSearches: [],
-      });
-
-      const searches = await store.getSavedSearches();
-      expect(searches).toEqual([
-        {
-          id: 'folder-1',
-          title: 'Unread ops',
-          query: 'status:unread tag:ops provider:claude model:sonnet bug',
-          showAsSidebarPill: false,
-          showInSidebarMenu: false,
-          showInSearchDialog: true,
-          createdAt: '2026-03-27T00:00:00.000Z',
-          updatedAt: '2026-03-27T00:00:00.000Z',
-        },
-      ]);
-    });
-
-    it('does not migrate when savedChatSearches already has entries', async () => {
-      const existing = {
-        id: 'search-1',
-        title: 'My search',
-        query: 'status:active',
-        showAsSidebarPill: false,
-        showInSidebarMenu: true,
-        showInSearchDialog: false,
-        createdAt: '2026-03-28T00:00:00.000Z',
-        updatedAt: '2026-03-28T00:00:00.000Z',
-      };
-      await writeRaw({
-        ui: {},
-        paths: {},
-        chatNames: {},
-        chatFolders: [
-          {
-            id: 'folder-1',
-            name: 'Unread ops',
-            filter: { textTokens: [], tags: ['ops'], providers: [], models: [], status: 'unread' },
-            createdAt: '2026-03-27T00:00:00.000Z',
-          },
-        ],
-        savedChatSearches: [existing],
-      });
-
-      const searches = await store.getSavedSearches();
-      expect(searches).toEqual([existing]);
-    });
-
-    it('migrates status:active folders correctly', async () => {
-      await writeRaw({
-        ui: {},
-        paths: {},
-        chatNames: {},
-        chatFolders: [
-          {
-            id: 'folder-active',
-            name: 'Active',
-            filter: { textTokens: [], tags: [], providers: [], models: [], status: 'active' },
-            createdAt: '2026-03-27T00:00:00.000Z',
-          },
-        ],
-      });
-
-      const searches = await store.getSavedSearches();
-      expect(searches.length).toBe(1);
-      expect(searches[0].query).toBe('status:active');
-    });
-  });
-
   describe('ordering list getters', () => {
     it('getPinnedChatIds returns empty array by default', async () => {
       expect(await store.getPinnedChatIds()).toEqual([]);
@@ -472,13 +403,34 @@ describe('settings store', () => {
     });
   });
 
+  describe('ensureInNormal', () => {
+    it('removes pinned chats, bumps the remote version, and emits changes', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a'], normalChatIds: ['b'], archivedChatIds: [] });
+      const events = [];
+      store.onRemoteSettingsChanged(() => events.push('changed'));
+
+      await store.ensureInNormal('a');
+
+      expect(await store.getPinnedChatIds()).toEqual([]);
+      expect(await store.getNormalChatIds()).toEqual(['a', 'b']);
+      expect(await store.getRemoteSettingsVersion()).toBe(1);
+      expect(events).toEqual(['changed']);
+    });
+  });
+
   describe('removeFromAllOrderLists', () => {
     it('removes the id from pinned, normal, and archived', async () => {
       await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a', 'b'], normalChatIds: ['c', 'a'], archivedChatIds: ['a', 'd'] });
+      const events = [];
+      store.onRemoteSettingsChanged(() => events.push('changed'));
+
       await store.removeFromAllOrderLists('a');
+
       expect(await store.getPinnedChatIds()).toEqual(['b']);
       expect(await store.getNormalChatIds()).toEqual(['c']);
       expect(await store.getArchivedChatIds()).toEqual(['d']);
+      expect(await store.getRemoteSettingsVersion()).toBe(1);
+      expect(events).toEqual(['changed']);
     });
 
     it('is a no-op when id is not in any list', async () => {
@@ -494,7 +446,7 @@ describe('settings store', () => {
     it('returns empty settings for missing file', async () => {
       const settings = await store.loadSettings();
       expect(settings).toEqual({
-        ui: {}, paths: {}, chatNames: {},
+        ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         chatFolders: [],
         savedChatSearches: [],
@@ -509,7 +461,7 @@ describe('settings store', () => {
       await fs.writeFile(settingsFile(), 'not json{{{', 'utf8');
       const settings = await store.loadSettings();
       expect(settings).toEqual({
-        ui: {}, paths: {}, chatNames: {},
+        ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         chatFolders: [],
         savedChatSearches: [],
@@ -616,10 +568,12 @@ describe('settings store', () => {
   });
 
   describe('togglePin', () => {
-    it('pins a normal chat and emits list-changed', async () => {
+    it('pins a normal chat and emits list-changed plus remote-settings-changed', async () => {
       await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a', 'b'], archivedChatIds: [] });
       const events = [];
+      const remoteEvents = [];
       store.onListChanged((reason, chatId) => events.push({ reason, chatId }));
+      store.onRemoteSettingsChanged(() => remoteEvents.push('changed'));
 
       const result = await store.togglePin('a');
 
@@ -627,7 +581,9 @@ describe('settings store', () => {
       const settings = await store.loadSettings();
       expect(settings.pinnedChatIds).toEqual(['a']);
       expect(settings.normalChatIds).toEqual(['b']);
+      expect(settings.remoteSettingsVersion).toBe(1);
       expect(events).toEqual([{ reason: 'pinned-toggled', chatId: 'a' }]);
+      expect(remoteEvents).toEqual(['changed']);
     });
 
     it('unpins a pinned chat and moves to normal', async () => {
@@ -655,7 +611,9 @@ describe('settings store', () => {
     it('archives a normal chat and emits list-changed', async () => {
       await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a', 'b'], archivedChatIds: [] });
       const events = [];
+      const remoteEvents = [];
       store.onListChanged((reason, chatId) => events.push({ reason, chatId }));
+      store.onRemoteSettingsChanged(() => remoteEvents.push('changed'));
 
       const result = await store.toggleArchive('a');
 
@@ -663,7 +621,9 @@ describe('settings store', () => {
       const settings = await store.loadSettings();
       expect(settings.archivedChatIds).toEqual(['a']);
       expect(settings.normalChatIds).toEqual(['b']);
+      expect(settings.remoteSettingsVersion).toBe(0);
       expect(events).toEqual([{ reason: 'archive-toggled', chatId: 'a' }]);
+      expect(remoteEvents).toEqual([]);
     });
 
     it('unarchives a chat and moves to normal', async () => {
@@ -677,14 +637,18 @@ describe('settings store', () => {
       expect(settings.normalChatIds).toEqual(['a', 'b']);
     });
 
-    it('removes from pinned when archiving', async () => {
+    it('removes from pinned when archiving and emits remote-settings-changed', async () => {
       await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a', 'b'], normalChatIds: [], archivedChatIds: [] });
+      const remoteEvents = [];
+      store.onRemoteSettingsChanged(() => remoteEvents.push('changed'));
 
       await store.toggleArchive('a');
 
       const settings = await store.loadSettings();
       expect(settings.pinnedChatIds).toEqual(['b']);
       expect(settings.archivedChatIds).toEqual(['a']);
+      expect(settings.remoteSettingsVersion).toBe(1);
+      expect(remoteEvents).toEqual(['changed']);
     });
   });
 
@@ -700,6 +664,19 @@ describe('settings store', () => {
       const settings = await store.loadSettings();
       expect(settings.normalChatIds).toEqual(['a', 'c', 'b', 'd']);
       expect(events[0].reason).toBe('chats-reordered');
+    });
+
+    it('bumps remote settings version when reordering pinned chats', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a', 'b', 'c'], normalChatIds: [], archivedChatIds: [] });
+      const remoteEvents = [];
+      store.onRemoteSettingsChanged(() => remoteEvents.push('changed'));
+
+      const result = await store.reorderWindow('pinned', ['a', 'b'], ['b', 'a']);
+
+      expect(result).toEqual({ success: true });
+      expect(await store.getPinnedChatIds()).toEqual(['b', 'a', 'c']);
+      expect(await store.getRemoteSettingsVersion()).toBe(1);
+      expect(remoteEvents).toEqual(['changed']);
     });
 
     it('rejects empty oldOrder', async () => {
@@ -722,6 +699,19 @@ describe('settings store', () => {
       expect(result).toEqual({ success: true });
       const settings = await store.loadSettings();
       expect(settings.normalChatIds).toEqual(['c', 'a', 'b']);
+    });
+
+    it('bumps remote settings version when quickly reordering pinned chats', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a', 'b', 'c'], normalChatIds: [], archivedChatIds: [] });
+      const remoteEvents = [];
+      store.onRemoteSettingsChanged(() => remoteEvents.push('changed'));
+
+      const result = await store.reorderRelative('c', 'a', 'above');
+
+      expect(result).toEqual({ success: true });
+      expect(await store.getPinnedChatIds()).toEqual(['c', 'a', 'b']);
+      expect(await store.getRemoteSettingsVersion()).toBe(1);
+      expect(remoteEvents).toEqual(['changed']);
     });
 
     it('rejects cross-group reorder', async () => {

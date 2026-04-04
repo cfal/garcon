@@ -19,7 +19,7 @@
 	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
-	import { getChatSessions, getPreferences, getAppShell, getWs, getNavigation, setChatState, setComposerState, setProviderState, setChatLifecycle, getReadReceiptOutbox } from '$lib/context';
+	import { getChatSessions, getLocalSettings, getAppShell, getWs, getNavigation, setChatState, setComposerState, setProviderState, setChatLifecycle, getReadReceiptOutbox } from '$lib/context';
 	import type { PendingPermissionRequest, QueueState, PermissionMode, PendingViewChat } from '$lib/types/chat';
 	import { ArrowDown } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -32,7 +32,7 @@
 	let { onRegisterSubmit }: ConversationWorkspaceProps = $props();
 
 	const sessions = getChatSessions();
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
 	const ws = getWs();
 	const navigation = getNavigation();
@@ -215,7 +215,7 @@
 	// Scrolls to bottom on new messages unless user scrolled up.
 	$effect(() => {
 		const _count = chatState.chatMessages.length;
-		if (!chatState.isUserScrolledUp && preferences.autoScrollToBottom) {
+		if (!chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
 			requestAnimationFrame(() => scroll.scrollToBottom());
 		}
 	});

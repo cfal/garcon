@@ -5,21 +5,6 @@ import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } f
 export type SidebarSearchBarPosition = 'top' | 'bottom';
 export type PinnedInsertPosition = 'top' | 'bottom';
 
-export interface AppUiSettings {
-	pinnedInsertPosition?: PinnedInsertPosition;
-	searchBarPosition?: SidebarSearchBarPosition;
-	chatTitle?: Record<string, unknown>;
-	commitMessage?: Record<string, unknown>;
-	notifications?: Record<string, unknown>;
-	[key: string]: unknown;
-}
-
-export interface AppUiEffectiveSettings {
-	chatTitle?: Record<string, unknown>;
-	commitMessage?: Record<string, unknown>;
-	[key: string]: unknown;
-}
-
 export interface ChatSession {
 	id: string;
 	provider: 'claude' | 'codex' | 'opencode' | 'amp' | 'factory';
@@ -49,21 +34,3 @@ export interface ChatSession {
 	isUnread: boolean;
 }
 
-export interface AppSettings {
-	ui: AppUiSettings;
-	uiEffective?: AppUiEffectiveSettings;
-	paths: {
-		pinnedProjectPaths?: string[];
-		browseStartPath?: string;
-	};
-	pinnedChatIds: string[];
-	lastProvider: ChatSession['provider'];
-	lastProjectPath: string;
-	lastModel: string;
-	lastPermissionMode: PermissionMode;
-	lastThinkingMode: ThinkingMode;
-	lastClaudeThinkingMode: ClaudeThinkingMode;
-	lastAmpAgentMode?: AmpAgentMode;
-	projectBasePath?: string;
-	telegramBotTokenAvailable?: boolean;
-}

@@ -2,7 +2,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
-	import { getComposerState, getChatLifecycle, getPreferences, getChatSessions, getAppShell, getModelCatalog, getProviderState } from '$lib/context';
+	import { getComposerState, getChatLifecycle, getLocalSettings, getChatSessions, getAppShell, getModelCatalog, getProviderState } from '$lib/context';
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
@@ -24,7 +24,7 @@
 	const composerState = getComposerState();
 	const lifecycle = getChatLifecycle();
 	const providerState = getProviderState();
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
@@ -94,7 +94,7 @@
 		if (event.key !== 'Enter') return;
 		if (
 			!shouldSubmitOnEnter({
-				sendByShiftEnter: preferences.sendByShiftEnter,
+				sendByShiftEnter: localSettings.sendByShiftEnter,
 				shiftKey: event.shiftKey,
 				ctrlKey: event.ctrlKey,
 				metaKey: event.metaKey,

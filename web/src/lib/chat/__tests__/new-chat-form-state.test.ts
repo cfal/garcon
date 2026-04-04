@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
 import * as chatsApi from '$lib/api/chats';
-import * as settingsApi from '$lib/api/settings';
+import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 vi.mock('$lib/api/files', () => ({
 	browseDirectory: vi.fn()
@@ -11,10 +11,41 @@ vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn()
 }));
 
-vi.mock('$lib/api/settings', () => ({
-	getSettings: vi.fn(),
-	updateSettings: vi.fn()
-}));
+function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSettingsSnapshot {
+	return {
+		version: 1,
+		ui: {},
+		uiEffective: {},
+		paths: { pinnedProjectPaths: [], browseStartPath: '' },
+		pinnedChatIds: [],
+		lastProvider: 'claude',
+		lastProjectPath: '',
+		lastModel: 'opus',
+		lastPermissionMode: 'default',
+		lastThinkingMode: 'none',
+		lastClaudeThinkingMode: 'auto',
+		lastAmpAgentMode: 'smart',
+		projectBasePath: '/workspace',
+		telegramBotTokenAvailable: false,
+		...overrides,
+	};
+}
+
+function makeMockRemoteSettings(snap?: RemoteSettingsSnapshot) {
+	const store = {
+		status: snap ? 'ready' : 'idle',
+		isRefreshing: false,
+		error: null,
+		snapshot: snap ?? null,
+		loadedAt: snap ? Date.now() : null,
+		get hasSnapshot() { return this.snapshot !== null; },
+		ensureLoaded: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
+		refresh: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
+		update: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
+		applySnapshot: vi.fn(),
+	};
+	return store;
+}
 
 const mockAppShell = {
 	onNewChatDialogSeed: vi.fn().mockReturnValue(() => {}),
@@ -35,95 +66,70 @@ const mockModelCatalog = {
 };
 
 describe('NewChatFormState', () => {
-	let state: NewChatFormState;
+	let formState: NewChatFormState;
+	let mockRemoteSettings: ReturnType<typeof makeMockRemoteSettings>;
 
 	beforeEach(() => {
 		vi.useFakeTimers();
-			vi.mocked(settingsApi.getSettings).mockResolvedValue({
-				ui: {},
-				paths: {},
-				pinnedChatIds: [],
-				lastProvider: 'claude',
-				lastProjectPath: '',
-				lastModel: 'opus',
-				lastPermissionMode: 'default',
-				lastThinkingMode: 'none',
-				lastClaudeThinkingMode: 'auto',
-			projectBasePath: '/workspace'
-		});
-		vi.mocked(settingsApi.updateSettings).mockResolvedValue({ success: true });
-		state = new NewChatFormState(mockAppShell as any, mockModelCatalog as any);
+		mockRemoteSettings = makeMockRemoteSettings();
+		formState = new NewChatFormState(mockAppShell as any, mockModelCatalog as any, mockRemoteSettings as any);
 	});
 
 	it('initializes with default values', () => {
-		expect(state.provider).toBe('claude');
-		expect(state.validationStatus).toBe('idle');
-		expect(state.canSubmit).toBe(false); // Empty path
+		expect(formState.provider).toBe('claude');
+		expect(formState.validationStatus).toBe('idle');
+		expect(formState.canSubmit).toBe(false);
 	});
 
 	it('loads startup defaults from server settings', async () => {
-			vi.mocked(settingsApi.getSettings).mockResolvedValue({
-				ui: {},
-				paths: {},
-				pinnedChatIds: [],
-				lastProvider: 'codex',
-				lastProjectPath: '/workspace/project',
-				lastModel: 'gpt-5.4',
-				lastPermissionMode: 'acceptEdits',
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
+			lastProvider: 'codex',
+			lastProjectPath: '/workspace/project',
+			lastModel: 'gpt-5.4',
+			lastPermissionMode: 'acceptEdits',
 			lastThinkingMode: 'think-hard',
 			lastClaudeThinkingMode: 'off',
-			projectBasePath: '/workspace'
-		});
+		}));
 
-		await state.loadSettingsAndModels();
+		await formState.loadSettingsAndModels();
 
-		expect(state.settingsLoaded).toBe(true);
-		expect(state.provider).toBe('codex');
-		expect(state.modelValue).toBe('gpt-5.4');
-		expect(state.permissionMode).toBe('acceptEdits');
-		expect(state.thinkingMode).toBe('think-hard');
-		expect(state.claudeThinkingMode).toBe('off');
-		expect(state.projectPath).toBe('/workspace/project');
+		expect(formState.settingsLoaded).toBe(true);
+		expect(formState.provider).toBe('codex');
+		expect(formState.modelValue).toBe('gpt-5.4');
+		expect(formState.permissionMode).toBe('acceptEdits');
+		expect(formState.thinkingMode).toBe('think-hard');
+		expect(formState.claudeThinkingMode).toBe('off');
+		expect(formState.projectPath).toBe('/workspace/project');
 	});
 
 	it('normalizes invalid startup defaults from server settings', async () => {
-		vi.mocked(settingsApi.getSettings).mockResolvedValue({
-			ui: {},
-			paths: {},
-			pinnedChatIds: [],
-			lastProvider: 'claude',
-			lastProjectPath: '/workspace/project',
-			lastModel: 'opus',
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
 			lastPermissionMode: 'bogus' as any,
 			lastThinkingMode: 'very-hard' as any,
 			lastClaudeThinkingMode: 'sometimes' as any,
-			projectBasePath: '/workspace'
-		});
+			lastProjectPath: '/workspace/project',
+		}));
 
-		await state.loadSettingsAndModels();
+		await formState.loadSettingsAndModels();
 
-		expect(state.permissionMode).toBe('default');
-		expect(state.thinkingMode).toBe('none');
-		expect(state.claudeThinkingMode).toBe('auto');
+		expect(formState.permissionMode).toBe('default');
+		expect(formState.thinkingMode).toBe('none');
+		expect(formState.claudeThinkingMode).toBe('auto');
 	});
 
 	it('debounces directory validation', async () => {
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
 
-		// Trigger validation
-		state.projectPath = '/fake/path';
-		state.validatePath();
-		expect(state.validationStatus).toBe('checking');
+		formState.projectPath = '/fake/path';
+		formState.validatePath();
+		expect(formState.validationStatus).toBe('checking');
 		expect(chatsApi.validateStart).not.toHaveBeenCalled();
 
-		// Advance time past debounce
 		vi.advanceTimersByTime(500);
-		
-		// Let promises resolve
 		await vi.runAllTimersAsync();
 
 		expect(chatsApi.validateStart).toHaveBeenCalledWith('/fake/path');
-		expect(state.validationStatus).toBe('valid');
+		expect(formState.validationStatus).toBe('valid');
 	});
 
 	it('maps outside-base-dir validation errors to a specific message', async () => {
@@ -133,60 +139,58 @@ describe('NewChatFormState', () => {
 			errorCode: 'outside_base_dir'
 		});
 
-		state.projectPath = '/outside';
-		state.validatePath();
+		formState.projectPath = '/outside';
+		formState.validatePath();
 		vi.advanceTimersByTime(500);
 		await vi.runAllTimersAsync();
 
-		expect(state.validationStatus).toBe('invalid');
-		expect(state.validationError).toBe('Path is outside the allowed base directory.');
+		expect(formState.validationStatus).toBe('invalid');
+		expect(formState.validationError).toBe('Path is outside the allowed base directory.');
 	});
 
 	it('computes canSubmit correctly', () => {
-		// Valid path still requires a first message.
-		state.settingsLoaded = true;
-		state.projectPath = '/valid/path';
-		state.validationStatus = 'valid';
-		expect(state.canSubmit).toBe(false);
+		formState.settingsLoaded = true;
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		expect(formState.canSubmit).toBe(false);
 
-		state.firstMessage = 'Start this task';
-		expect(state.canSubmit).toBe(true);
+		formState.firstMessage = 'Start this task';
+		expect(formState.canSubmit).toBe(true);
 
-		// Invalid path
-		state.validationStatus = 'invalid';
-		expect(state.canSubmit).toBe(false);
+		formState.validationStatus = 'invalid';
+		expect(formState.canSubmit).toBe(false);
 	});
 
 	it('rejects submission while startup defaults are still loading', () => {
-		state.projectPath = '/valid/path';
-		state.validationStatus = 'valid';
-		state.firstMessage = 'Start this task';
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
 
-		expect(state.buildConfig()).toBeNull();
-		expect(state.error).toBe('Chat defaults are still loading.');
+		expect(formState.buildConfig()).toBeNull();
+		expect(formState.error).toBe('Chat defaults are still loading.');
 	});
 
-		it('builds config without persisting startup defaults through app settings', () => {
-			state.settingsLoaded = true;
-			state.projectPath = '/valid/path';
-			state.validationStatus = 'valid';
-		state.firstMessage = 'Start this task';
-		state.provider = 'codex';
-		state.handleModelChange('gpt-5.4');
-		state.permissionMode = 'acceptEdits';
-		state.thinkingMode = 'think-hard';
-		state.claudeThinkingMode = 'on';
+	it('builds config without persisting startup defaults through app settings', () => {
+		formState.settingsLoaded = true;
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
+		formState.provider = 'codex';
+		formState.handleModelChange('gpt-5.4');
+		formState.permissionMode = 'acceptEdits';
+		formState.thinkingMode = 'think-hard';
+		formState.claudeThinkingMode = 'on';
 
-		const config = state.buildConfig();
+		const config = formState.buildConfig();
 
-			expect(config).toMatchObject({
-				provider: 'codex',
-				projectPath: '/valid/path',
-				model: 'gpt-5.4',
-				permissionMode: 'acceptEdits',
-				thinkingMode: 'think-hard',
-				claudeThinkingMode: 'on',
-			});
-			expect(settingsApi.updateSettings).not.toHaveBeenCalled();
+		expect(config).toMatchObject({
+			provider: 'codex',
+			projectPath: '/valid/path',
+			model: 'gpt-5.4',
+			permissionMode: 'acceptEdits',
+			thinkingMode: 'think-hard',
+			claudeThinkingMode: 'on',
 		});
+		expect(mockRemoteSettings.update).not.toHaveBeenCalled();
 	});
+});

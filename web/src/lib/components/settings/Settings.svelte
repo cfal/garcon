@@ -1,34 +1,32 @@
-<!-- Main settings modal. Single scrollable dialog with agents and
-     preferences sections. Scrolls to the target section on open. -->
+<!-- Settings dialog. Renders a single scrollable page with agents at
+     the top, followed by Local and Remote settings sections. -->
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getAppShell } from '$lib/context';
+	import { getAppShell, getRemoteSettings } from '$lib/context';
 	import AgentsSection from './AgentsSection.svelte';
-	import PreferencesSection from './PreferencesSection.svelte';
+	import LocalSettingsSection from './LocalSettingsSection.svelte';
+	import RemoteSettingsSection from './RemoteSettingsSection.svelte';
 
 	const appShell = getAppShell();
-
+	const remoteSettings = getRemoteSettings();
 	let scrollContainer = $state<HTMLDivElement | null>(null);
 
-	// Scroll to the requested section when the dialog opens.
-	// Skips 'agents' since it is already the first visible section.
+	// Refreshes remote settings on open and scrolls to the requested
+	// section without remounting the dialog body.
 	$effect(() => {
-		if (appShell.showSettings && scrollContainer) {
-			const section = appShell.settingsInitialSection;
-			if (section && section !== 'agents') {
-				requestAnimationFrame(() => {
-					const target = scrollContainer?.querySelector(`[data-section="${section}"]`);
-					target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-				});
-			}
-		}
+		if (!appShell.showSettings || !scrollContainer) return;
+		void remoteSettings.refreshInBackground();
+		requestAnimationFrame(() => {
+			const target = scrollContainer?.querySelector(
+				`[data-section="${appShell.settingsInitialTab}"]`
+			);
+			target?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+		});
 	});
 
 	function handleOpenChange(open: boolean) {
-		if (!open) {
-			appShell.closeSettings();
-		}
+		if (!open) appShell.closeSettings();
 	}
 </script>
 
@@ -42,13 +40,35 @@
 			<Dialog.Description class="sr-only">{m.settings_title()}</Dialog.Description>
 		</Dialog.Header>
 
-		<div
-			class="flex-1 min-h-0 overflow-y-auto px-6 py-6"
-			bind:this={scrollContainer}
-		>
+		<div class="flex-1 min-h-0 overflow-y-auto px-6 py-6" bind:this={scrollContainer}>
 			<div class="space-y-8">
-				<AgentsSection />
-				<PreferencesSection />
+				<div data-section="agents" class="space-y-3">
+					<AgentsSection />
+				</div>
+
+				<div data-section="local" class="space-y-3">
+					<div class="space-y-1">
+						<h2 class="text-base font-semibold text-foreground">
+							{m.settings_tab_local()}
+						</h2>
+						<p class="text-sm text-muted-foreground">
+							{m.settings_scope_local_description()}
+						</p>
+					</div>
+					<LocalSettingsSection />
+				</div>
+
+				<div data-section="remote" class="space-y-3">
+					<div class="space-y-1">
+						<h2 class="text-base font-semibold text-foreground">
+							{m.settings_tab_remote()}
+						</h2>
+						<p class="text-sm text-muted-foreground">
+							{m.settings_scope_remote_description()}
+						</p>
+					</div>
+					<RemoteSettingsSection />
+				</div>
 			</div>
 		</div>
 	</Dialog.Content>

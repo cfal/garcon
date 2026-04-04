@@ -1,6 +1,6 @@
 <script lang="ts">
 	import WorkspaceView from '../WorkspaceView.svelte';
-	import { setChatSessions, setModelCatalog, setPreferences } from '$lib/context';
+	import { setChatSessions, setModelCatalog, setLocalSettings } from '$lib/context';
 	import type { AppTab } from '$lib/types/app';
 
 	interface WorkspaceViewTestHarnessProps {
@@ -27,7 +27,7 @@
 		}
 	} as never);
 
-	setPreferences({
+	setLocalSettings({
 		get showChatHeader() {
 			return showChatHeader;
 		},

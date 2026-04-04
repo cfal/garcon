@@ -8,6 +8,8 @@ import type { ChatMessage } from './chat-types';
 import { parseChatMessages } from './chat-types';
 import type { QueueState } from './queue-state';
 import { normalizeQueueState } from './queue-state';
+import type { RemoteSettingsSnapshot } from './settings';
+import { normalizeRemoteSettingsSnapshot } from './settings';
 
 export class AgentRunOutputMessage {
   readonly type = 'agent-run-output' as const;
@@ -86,9 +88,14 @@ export class ChatReadUpdatedV1Message {
   ) { }
 }
 
-export type ChatListInvalidationReason = 'pinned-toggled' | 'archive-toggled' | 'chats-reordered' | 'chats-reordered-quick';
+export type ChatListInvalidationReason =
+  | 'chat-added'
+  | 'pinned-toggled'
+  | 'archive-toggled'
+  | 'chats-reordered'
+  | 'chats-reordered-quick';
 
-// Broadcast when a sidebar list mutation (pin/archive/reorder) occurs.
+// Broadcast when a sidebar list mutation (add/pin/archive/reorder) occurs.
 // Receivers trigger a full chat list refresh for server-authoritative convergence.
 export class ChatListRefreshRequestedMessage {
   readonly type = 'chat-list-refresh-requested' as const;
@@ -96,6 +103,11 @@ export class ChatListRefreshRequestedMessage {
     public reason: ChatListInvalidationReason,
     public chatId: string,
   ) { }
+}
+
+export class SettingsChangedMessage {
+  readonly type = 'settings-changed' as const;
+  constructor(public settings: RemoteSettingsSnapshot) { }
 }
 
 export class ChatLogResponseMessage {
@@ -148,6 +160,7 @@ export type ServerWsMessage =
   | ChatSessionDeletedWsMessage
   | ChatReadUpdatedV1Message
   | ChatListRefreshRequestedMessage
+  | SettingsChangedMessage
   | ChatLogResponseMessage
   | ClientRequestErrorMessage;
 
@@ -168,6 +181,7 @@ export type EventKey =
   | 'chat-session-deleted'
   | 'chat-read-updated-v1'
   | 'chat-list-refresh-requested'
+  | 'settings-changed'
   | 'chat-log-response'
   | 'client-request-error';
 
@@ -182,6 +196,19 @@ function requiredStr(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseChatListInvalidationReason(v: unknown): ChatListInvalidationReason | null {
+  switch (v) {
+    case 'chat-added':
+    case 'pinned-toggled':
+    case 'archive-toggled':
+    case 'chats-reordered':
+    case 'chats-reordered-quick':
+      return v;
+    default:
+      return null;
+  }
 }
 
 // Constructs a typed ServerWsMessage class instance from raw data.
@@ -251,9 +278,15 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
       return new ChatReadUpdatedV1Message(chatId, lastReadAt);
     }
     case 'chat-list-refresh-requested': {
+      const reason = parseChatListInvalidationReason(data.reason);
       const chatId = requiredStr(data.chatId);
-      if (!chatId) return null;
-      return new ChatListRefreshRequestedMessage(data.reason as ChatListInvalidationReason, chatId);
+      if (!reason || !chatId) return null;
+      return new ChatListRefreshRequestedMessage(reason, chatId);
+    }
+    case 'settings-changed': {
+      const settings = normalizeRemoteSettingsSnapshot(data.settings);
+      if (!settings) return null;
+      return new SettingsChangedMessage(settings);
     }
     case 'chat-log-response': {
       const clientRequestId = requiredStr(data.clientRequestId);

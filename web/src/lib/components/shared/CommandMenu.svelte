@@ -9,7 +9,7 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import FileCode from '@lucide/svelte/icons/file-code';
 	import Eye from '@lucide/svelte/icons/eye';
-	import { getNavigation, getAppShell, getPreferences } from '$lib/context';
+	import { getNavigation, getAppShell, getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface CommandItem {
@@ -22,7 +22,7 @@
 
 	const navigation = getNavigation();
 	const appShell = getAppShell();
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 
 	let isOpen = $state(false);
 	let query = $state('');
@@ -49,14 +49,14 @@
 				},
 				{
 					id: 'toggle-colorblind',
-					label: preferences.colorblindMode
+					label: localSettings.colorblindMode
 						? m.command_colorblind_disable()
 						: m.command_colorblind_enable(),
-					description: preferences.colorblindMode
+					description: localSettings.colorblindMode
 						? m.command_colorblind_disable_desc()
 						: m.command_colorblind_enable_desc(),
 					category: 'Accessibility',
-					action: () => preferences.setPreference('colorblindMode', !preferences.colorblindMode)
+					action: () => localSettings.toggle('colorblindMode')
 				},
 				{
 					id: 'tab-chat',

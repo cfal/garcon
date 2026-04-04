@@ -35,7 +35,7 @@ describe('GitWorkbenchStore', () => {
 	let wb: GitWorkbenchStore;
 
 	beforeEach(() => {
-		wb = new GitWorkbenchStore(undefined, mockDeps);
+		wb = new GitWorkbenchStore(mockDeps);
 		vi.clearAllMocks();
 	});
 

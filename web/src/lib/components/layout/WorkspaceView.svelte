@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { AppTab } from '$lib/types/app';
-	import { getChatSessions, getPreferences } from '$lib/context';
+	import { getChatSessions, getLocalSettings } from '$lib/context';
 	import Menu from '@lucide/svelte/icons/menu';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
@@ -35,16 +35,16 @@
 	}: MainContentProps = $props();
 
 	const sessions = getChatSessions();
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
 	const isMobileLayout = $derived(!!onMenuClick);
-	const hideHeaderForChatTab = $derived(!preferences.showChatHeader && activeTab === 'chat');
+	const hideHeaderForChatTab = $derived(!localSettings.showChatHeader && activeTab === 'chat');
 	const showTopHeader = $derived(!hideHeaderForChatTab);
 	const showInlineDesktopTabs = $derived(showTopHeader);
 	const showFloatingDesktopTabs = $derived(hideHeaderForChatTab && !isMobileLayout);
-	const hideFullscreenButtonOnGitTab = $derived(activeTab === 'git' && preferences.alwaysFullscreenOnGitPanel);
+	const hideFullscreenButtonOnGitTab = $derived(activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel);
 	const canToggleDesktopFullscreen = $derived(
 		!isMobileLayout &&
 		!!onToggleDesktopFullscreen &&

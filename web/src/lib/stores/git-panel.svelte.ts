@@ -3,7 +3,6 @@
 // rendering shell.
 
 import * as m from '$lib/paraglide/messages.js';
-import type { SessionProvider } from '$lib/types/app';
 import {
 	type GitStatus,
 	type GitRemoteStatus,
@@ -17,7 +16,6 @@ import {
 	getGitRemotes,
 	getCommitHistory,
 	getCommitDiff,
-	generateCommitMessage as generateCommitMessageApi,
 	gitCommit,
 	gitInitialCommit,
 	gitCheckout,
@@ -37,11 +35,6 @@ const EMPTY_STATUS: GitStatus = {
 	deleted: [],
 	untracked: []
 };
-
-export interface GitPanelStoreOptions {
-	/** Reactive getter for the active provider name. */
-	get provider(): SessionProvider;
-}
 
 export class GitPanelStore {
 	// Git state
@@ -64,7 +57,6 @@ export class GitPanelStore {
 	recentCommits = $state<GitCommit[]>([]);
 	expandedCommits = $state(new Set<string>());
 	commitDiffs = $state<Record<string, string>>({});
-	isGeneratingMessage = $state(false);
 	remoteStatus = $state<GitRemoteStatus | null>(null);
 	isFetching = $state(false);
 	isPulling = $state(false);
@@ -74,16 +66,6 @@ export class GitPanelStore {
 	isCommitAreaCollapsed = $state(false);
 	confirmAction = $state<ConfirmAction | null>(null);
 	isCreatingInitialCommit = $state(false);
-
-	private readonly opts: GitPanelStoreOptions;
-
-	constructor(opts?: GitPanelStoreOptions) {
-		this.opts = opts ?? { get provider() { return 'claude' as SessionProvider; } };
-	}
-
-	private get provider(): SessionProvider {
-		return this.opts.provider;
-	}
 
 	// Data fetching
 
@@ -326,23 +308,6 @@ export class GitPanelStore {
 		}
 	}
 
-	async handleGenerateCommitMessage(projectPath: string): Promise<void> {
-		this.isGeneratingMessage = true;
-		try {
-			const data = await generateCommitMessageApi(
-				projectPath,
-				Array.from(this.selectedFiles),
-				this.provider
-			);
-			if (data.message) this.commitMessage = data.message;
-			else console.error('[Git] Failed to generate message:', data.error);
-		} catch (err) {
-			console.error('[Git] Error generating commit message:', err);
-		} finally {
-			this.isGeneratingMessage = false;
-		}
-	}
-
 	async handleDiscardChanges(projectPath: string, filePath: string): Promise<void> {
 		try {
 			const data = await gitDiscard(projectPath, filePath);
@@ -452,6 +417,6 @@ export class GitPanelStore {
 	}
 }
 
-export function createGitPanelStore(opts?: GitPanelStoreOptions): GitPanelStore {
-	return new GitPanelStore(opts);
+export function createGitPanelStore(): GitPanelStore {
+	return new GitPanelStore();
 }

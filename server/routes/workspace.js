@@ -3,13 +3,124 @@ import { getProjectBasePath, getTelegramBotToken } from '../config.js';
 import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 
-export default function createWorkspaceRoutes(settings, providers, telegramNotifier) {
+// Builds the canonical remote settings snapshot used by GET, PUT, and
+// WebSocket broadcast paths. Single source of truth for the shape.
+export async function buildRemoteSettingsSnapshot({ settings, providers }) {
   function asPlainObject(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
 
+  function sanitizeRemoteUiSnapshot(value) {
+    // Removes browser-local sidebar layout state from the shared snapshot.
+    const ui = asPlainObject(value);
+    if (!('searchBarPosition' in ui)) return ui;
+    const { searchBarPosition: _legacySearchBarPosition, ...rest } = ui;
+    return rest;
+  }
+
+  const settingsSource = typeof settings.getRemoteSettingsSnapshotSource === 'function'
+    ? await settings.getRemoteSettingsSnapshotSource()
+    : null;
+
+  const [
+    authByProvider, opencodeModels, factoryModels,
+  ] = await Promise.all([
+    providers?.getAuthStatusMap?.() ?? Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: false },
+      opencode: { authenticated: false },
+      amp: { authenticated: false },
+      factory: { authenticated: false },
+    }),
+    providers?.getModels?.('opencode') ?? Promise.resolve([]),
+    providers?.getModels?.('factory') ?? Promise.resolve([]),
+  ]);
+
+  const [
+    version, ui, paths, pinnedChatIds, lastProvider, lastProjectPath, lastModel,
+    lastPermissionMode, lastThinkingMode, lastClaudeThinkingMode, lastAmpAgentMode,
+  ] = settingsSource
+    ? [
+      settingsSource.version,
+      sanitizeRemoteUiSnapshot(settingsSource.ui),
+      settingsSource.paths,
+      settingsSource.pinnedChatIds,
+      settingsSource.lastProvider,
+      settingsSource.lastProjectPath,
+      settingsSource.lastModel,
+      settingsSource.lastPermissionMode,
+      settingsSource.lastThinkingMode,
+      settingsSource.lastClaudeThinkingMode,
+      settingsSource.lastAmpAgentMode,
+    ]
+    : await Promise.all([
+      settings.getRemoteSettingsVersion(),
+      settings.getUiSettings(),
+      settings.getPathSettings(),
+      settings.getPinnedChatIds(),
+      settings.getLastProvider(),
+      settings.getLastProjectPath(),
+      settings.getLastModel(),
+      settings.getLastPermissionMode(),
+      settings.getLastThinkingMode(),
+      settings.getLastClaudeThinkingMode(),
+      settings.getLastAmpAgentMode(),
+    ]);
+
+  const modelsByProvider = {
+    claude: CLAUDE_MODELS.OPTIONS,
+    codex: CODEX_MODELS.OPTIONS,
+    opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
+    amp: AMP_MODELS.OPTIONS,
+    factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
+  };
+
+  const uiEffective = {
+    chatTitle: resolveEffectiveGenerationUiConfig({
+      persisted: asPlainObject(ui?.chatTitle),
+      authByProvider,
+      modelsByProvider,
+    }),
+    commitMessage: resolveEffectiveGenerationUiConfig({
+      persisted: asPlainObject(ui?.commitMessage),
+      authByProvider,
+      modelsByProvider,
+    }),
+  };
+
+  return {
+    version,
+    ui: sanitizeRemoteUiSnapshot(ui),
+    uiEffective,
+    paths: {
+      pinnedProjectPaths: Array.isArray(paths?.pinnedProjectPaths)
+        ? paths.pinnedProjectPaths.filter((entry) => typeof entry === 'string')
+        : [],
+      browseStartPath: typeof paths?.browseStartPath === 'string' ? paths.browseStartPath : '',
+    },
+    pinnedChatIds: Array.isArray(pinnedChatIds) ? pinnedChatIds : [],
+    lastProvider,
+    lastProjectPath,
+    lastModel,
+    lastPermissionMode,
+    lastThinkingMode,
+    lastClaudeThinkingMode,
+    lastAmpAgentMode,
+    projectBasePath: getProjectBasePath(),
+    telegramBotTokenAvailable: Boolean(getTelegramBotToken()),
+  };
+}
+
+export default function createWorkspaceRoutes(settings, providers, telegramNotifier) {
+
   const FILTER_KEYS = ['textTokens', 'tags', 'providers', 'models'];
   const VALID_FILTER_STATUS = new Set(['active', 'unread']);
+  function sanitizeRemoteUiPatch(raw) {
+    // Drops legacy browser-local fields before persisting shared settings.
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const { searchBarPosition: _legacySearchBarPosition, ...rest } = raw;
+    return Object.keys(rest).length > 0 ? rest : null;
+  }
 	function sanitizeFilter(raw) {
     const empty = { textTokens: [], tags: [], providers: [], models: [] };
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return empty;
@@ -46,63 +157,8 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
 
   async function getAppSettings() {
     try {
-      const [ui, paths, pinnedChatIds, lastProvider, lastProjectPath, lastModel, lastPermissionMode, lastThinkingMode, lastClaudeThinkingMode, lastAmpAgentMode, authByProvider, opencodeModels, factoryModels] = await Promise.all([
-        settings.getUiSettings(),
-        settings.getPathSettings(),
-        settings.getPinnedChatIds(),
-        settings.getLastProvider(),
-        settings.getLastProjectPath(),
-        settings.getLastModel(),
-        settings.getLastPermissionMode(),
-        settings.getLastThinkingMode(),
-        settings.getLastClaudeThinkingMode(),
-        settings.getLastAmpAgentMode(),
-        providers?.getAuthStatusMap?.() ?? Promise.resolve({
-          claude: { authenticated: false },
-          codex: { authenticated: false },
-          opencode: { authenticated: false },
-          amp: { authenticated: false },
-          factory: { authenticated: false },
-        }),
-        providers?.getModels?.('opencode') ?? Promise.resolve([]),
-        providers?.getModels?.('factory') ?? Promise.resolve([]),
-      ]);
-      const modelsByProvider = {
-        claude: CLAUDE_MODELS.OPTIONS,
-        codex: CODEX_MODELS.OPTIONS,
-        opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
-        amp: AMP_MODELS.OPTIONS,
-        factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
-      };
-      const uiEffective = {
-        chatTitle: resolveEffectiveGenerationUiConfig({
-          persisted: asPlainObject(ui?.chatTitle),
-          authByProvider,
-          modelsByProvider,
-        }),
-        commitMessage: resolveEffectiveGenerationUiConfig({
-          persisted: asPlainObject(ui?.commitMessage),
-          authByProvider,
-          modelsByProvider,
-        }),
-      };
-      const projectBasePath = getProjectBasePath();
-      return Response.json({
-        success: true,
-        ui,
-        uiEffective,
-        paths,
-        pinnedChatIds,
-        lastProvider,
-        lastProjectPath,
-        lastModel,
-        lastPermissionMode,
-        lastThinkingMode,
-        lastClaudeThinkingMode,
-        lastAmpAgentMode,
-        projectBasePath,
-        telegramBotTokenAvailable: Boolean(getTelegramBotToken()),
-      });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, providers });
+      return Response.json(snapshot);
     } catch (error) {
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
@@ -111,25 +167,18 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
   async function putAppSettings(request) {
     try {
       const body = await parseJsonBody(request);
-      let ui, paths;
 
-      if (body.ui && typeof body.ui === 'object') {
-        ui = await settings.setUiSettings(body.ui);
-      } else {
-        ui = await settings.getUiSettings();
+      const uiPatch = sanitizeRemoteUiPatch(body.ui);
+      if (uiPatch) {
+        await settings.setUiSettings(uiPatch);
       }
 
       if (body.paths && typeof body.paths === 'object') {
-        paths = await settings.setPathSettings(body.paths);
-      } else {
-        paths = await settings.getPathSettings();
+        await settings.setPathSettings(body.paths);
       }
 
-      const [pinnedChatIds] = await Promise.all([
-        settings.getPinnedChatIds(),
-      ]);
-
-      return Response.json({ success: true, ui, paths, pinnedChatIds });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, providers });
+      return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       if (error.message === 'Malformed JSON') {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });

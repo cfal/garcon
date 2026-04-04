@@ -7,7 +7,7 @@
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import Markdown from '$lib/components/chat/Markdown.svelte';
 	import MarkdownViewerSettingsMenu from './MarkdownViewerSettingsMenu.svelte';
-	import { getPreferences } from '$lib/context';
+	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface MarkdownViewerProps {
@@ -17,7 +17,7 @@
 		onEdit: () => void;
 	}
 
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 	let { filePath, content, onClose, onEdit }: MarkdownViewerProps = $props();
 	let maximized = $state(false);
 
@@ -25,7 +25,7 @@
 	const WINDOWED_CLASS = 'flex flex-col h-dvh w-full max-w-full rounded-none border-0 p-0 gap-0 overflow-hidden sm:h-[85vh] sm:max-w-5xl sm:rounded-lg sm:border';
 
 	let contentClass = $derived(maximized ? BASE_CLASS : WINDOWED_CLASS);
-	let markdownFontSize = $derived(parseInt(preferences.markdownViewerFontSize, 10) || 12);
+	let markdownFontSize = $derived(parseInt(localSettings.markdownViewerFontSize, 10) || 12);
 
 	function handleOpenChange(open: boolean): void {
 		if (!open) onClose();

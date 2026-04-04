@@ -3,7 +3,8 @@
 import { describe, it, expect } from 'vitest';
 import {
 	getAuth, setAuth,
-	getPreferences, setPreferences,
+	getLocalSettings, setLocalSettings,
+	getRemoteSettings, setRemoteSettings,
 	getNavigation, setNavigation,
 	getChatRuntime, setChatRuntime,
 	getChatSessions, setChatSessions,
@@ -20,8 +21,10 @@ describe('context factories', () => {
 	it('exports getter/setter pairs for all root-level contexts', () => {
 		expect(typeof getAuth).toBe('function');
 		expect(typeof setAuth).toBe('function');
-		expect(typeof getPreferences).toBe('function');
-		expect(typeof setPreferences).toBe('function');
+		expect(typeof getLocalSettings).toBe('function');
+		expect(typeof setLocalSettings).toBe('function');
+		expect(typeof getRemoteSettings).toBe('function');
+		expect(typeof setRemoteSettings).toBe('function');
 		expect(typeof getNavigation).toBe('function');
 		expect(typeof setNavigation).toBe('function');
 		expect(typeof getChatRuntime).toBe('function');

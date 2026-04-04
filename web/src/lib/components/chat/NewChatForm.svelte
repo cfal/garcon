@@ -17,7 +17,7 @@
 	} from '$lib/chat/composer-controls';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
-	import { getPreferences, getAppShell, getModelCatalog } from '$lib/context';
+	import { getLocalSettings, getAppShell, getModelCatalog, getRemoteSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import DirectoryBrowser from './DirectoryBrowser.svelte';
 	import NewChatWorktreeModal from './NewChatWorktreeModal.svelte';
@@ -35,10 +35,11 @@
 
 	let { prefill = '', onStartChat, onCancel }: Props = $props();
 
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
-	const form = new NewChatFormState(appShell, modelCatalog);
+	const remoteSettings = getRemoteSettings();
+	const form = new NewChatFormState(appShell, modelCatalog, remoteSettings);
 	let isMobile = $state(false);
 	let pendingTextareaFocus = $state(true);
 
@@ -161,7 +162,7 @@
 		if (
 			e.key === 'Enter'
 			&& shouldSubmitOnEnter({
-				sendByShiftEnter: preferences.sendByShiftEnter,
+				sendByShiftEnter: localSettings.sendByShiftEnter,
 				shiftKey: e.shiftKey,
 				ctrlKey: e.ctrlKey,
 				metaKey: e.metaKey,

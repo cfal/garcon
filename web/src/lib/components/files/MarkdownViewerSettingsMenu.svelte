@@ -3,16 +3,16 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Select from '$lib/components/ui/select';
 	import Settings from '@lucide/svelte/icons/settings';
-	import { getPreferences } from '$lib/context';
+	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 	const fontSizeOptions = ['10', '11', '12', '13', '14', '15', '16', '18', '20'];
 
 	let menuOpen = $state(false);
 
 	function setFontSize(size: string): void {
-		preferences.setPreference('markdownViewerFontSize', size);
+		localSettings.set('markdownViewerFontSize', size);
 	}
 </script>
 
@@ -36,13 +36,13 @@
 				</div>
 				<Select.Root
 					type="single"
-					value={preferences.markdownViewerFontSize}
+					value={localSettings.markdownViewerFontSize}
 					onValueChange={(value) => {
 						if (value) setFontSize(value);
 					}}
 				>
 					<Select.Trigger class="w-[80px]" size="sm">
-						{preferences.markdownViewerFontSize}px
+						{localSettings.markdownViewerFontSize}px
 					</Select.Trigger>
 					<Select.Content>
 						{#each fontSizeOptions as size}

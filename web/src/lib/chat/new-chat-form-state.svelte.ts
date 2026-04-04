@@ -5,12 +5,11 @@
 import { browseDirectory } from '$lib/api/files.js';
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
 import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
-import * as settingsApi from '$lib/api/settings.js';
 import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import type { NewChatConfig, SessionProvider } from '$lib/types/app.js';
-import type { AppSettings } from '$lib/types/session.js';
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat.js';
+import type { RemoteSettingsSnapshot } from '$shared/settings';
 import {
 	normalizeAmpAgentMode,
 	normalizeClaudeThinkingMode,
@@ -19,6 +18,7 @@ import {
 } from '$shared/chat-modes';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
+import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
 import { canSubmitNewChat, type PathValidationStatus } from '$lib/components/chat/new-chat-submit.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -72,11 +72,12 @@ export class NewChatFormState {
 	// Injected dependencies
 	readonly #appShell: AppShellStore;
 	readonly #modelCatalog: ModelCatalogStore;
+	readonly #remoteSettings: RemoteSettingsStore;
 
-	constructor(appShell: AppShellStore, modelCatalog: ModelCatalogStore) {
+	constructor(appShell: AppShellStore, modelCatalog: ModelCatalogStore, remoteSettings: RemoteSettingsStore) {
 		this.#appShell = appShell;
 		this.#modelCatalog = modelCatalog;
-
+		this.#remoteSettings = remoteSettings;
 	}
 
 	// Derived accessors
@@ -343,7 +344,7 @@ export class NewChatFormState {
 			: [...this.pinnedProjectPaths, this.trimmedPath];
 		this.pinnedProjectPaths = next;
 		try {
-			await settingsApi.updateSettings({
+			await this.#remoteSettings.update({
 				paths: {
 					pinnedProjectPaths: next,
 					browseStartPath: this.browseStartPath || this.trimmedPath
@@ -418,13 +419,11 @@ export class NewChatFormState {
 	async loadSettingsAndModels(): Promise<void> {
 		try {
 			const [settingsData] = await Promise.all([
-				settingsApi.getSettings(),
+				this.#remoteSettings.ensureLoaded(),
 				this.#modelCatalog.refreshIfStale()
 			]);
 
-			if (settingsData) {
-				this.#applySettings(settingsData);
-			}
+			this.#applySettings(settingsData);
 			this.validateModelAgainstLive('claude');
 			this.validateModelAgainstLive('codex');
 			this.validateModelAgainstLive('opencode');
@@ -445,37 +444,24 @@ export class NewChatFormState {
 		}
 	}
 
-	#applySettings(settingsData: AppSettings): void {
-		if (typeof settingsData.projectBasePath === 'string') {
-			this.projectBasePath = settingsData.projectBasePath;
-			this.#appShell.projectBasePath = settingsData.projectBasePath;
-		}
+	#applySettings(snap: RemoteSettingsSnapshot): void {
+		this.projectBasePath = snap.projectBasePath;
 
-			const paths = settingsData.paths as Record<string, unknown> | undefined;
-			if (paths) {
-				const pinned = Array.isArray(paths.pinnedProjectPaths)
-					? (paths.pinnedProjectPaths as string[])
-					: [];
-				const browse =
-					typeof paths.browseStartPath === 'string' ? paths.browseStartPath : '';
-				this.pinnedProjectPaths = pinned;
-				this.browseStartPath = browse;
-				const defaultPath =
-					(typeof settingsData.lastProjectPath === 'string' ? settingsData.lastProjectPath : '') || browse;
-				if (defaultPath && !this.projectPath) {
-					this.projectPath = defaultPath;
-				}
-			}
+		this.pinnedProjectPaths = snap.paths.pinnedProjectPaths ?? [];
+		this.browseStartPath = snap.paths.browseStartPath ?? '';
+
+		const defaultPath = snap.lastProjectPath || this.browseStartPath;
+		if (defaultPath && !this.projectPath) {
+			this.projectPath = defaultPath;
+		}
 
 		if (!this.projectPath) {
 			this.projectPath = this.projectBasePath;
 		}
 
-		if (typeof settingsData.lastProvider === 'string') {
-			this.provider = settingsData.lastProvider as SessionProvider;
-		}
-		if (typeof settingsData.lastModel === 'string' && settingsData.lastModel) {
-			this.applyResolvedModel(this.provider, settingsData.lastModel);
+		this.provider = snap.lastProvider as SessionProvider;
+		if (snap.lastModel) {
+			this.applyResolvedModel(this.provider, snap.lastModel);
 		} else {
 			this.applyResolvedModel('claude', this.#modelCatalog.getDefaultModel('claude'));
 			this.applyResolvedModel('codex', this.#modelCatalog.getDefaultModel('codex'));
@@ -483,10 +469,10 @@ export class NewChatFormState {
 			this.applyResolvedModel('amp', this.#modelCatalog.getDefaultModel('amp'));
 			this.applyResolvedModel('factory', this.#modelCatalog.getDefaultModel('factory'));
 		}
-		this.permissionMode = normalizePermissionMode(settingsData.lastPermissionMode);
-		this.thinkingMode = normalizeThinkingMode(settingsData.lastThinkingMode);
-		this.claudeThinkingMode = normalizeClaudeThinkingMode(settingsData.lastClaudeThinkingMode);
-		this.ampAgentMode = normalizeAmpAgentMode(settingsData.lastAmpAgentMode);
+		this.permissionMode = normalizePermissionMode(snap.lastPermissionMode);
+		this.thinkingMode = normalizeThinkingMode(snap.lastThinkingMode);
+		this.claudeThinkingMode = normalizeClaudeThinkingMode(snap.lastClaudeThinkingMode);
+		this.ampAgentMode = normalizeAmpAgentMode(snap.lastAmpAgentMode);
 	}
 
 	// Auto-open browser on first path focus

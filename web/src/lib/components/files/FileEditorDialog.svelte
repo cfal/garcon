@@ -1,9 +1,9 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import CodeEditor from './CodeEditor.svelte';
-	import { getPreferences } from '$lib/context';
+	import { getLocalSettings } from '$lib/context';
 
-	const preferences = getPreferences();
+	const localSettings = getLocalSettings();
 
 	interface SelectedFile {
 		name: string;
@@ -56,9 +56,9 @@
 				showDiff={Boolean(file.showDiff && file.oldContent != null)}
 				initialLine={file.line}
 				initialColumn={file.col}
-				wordWrap={preferences.codeEditorWordWrap}
-				showLineNumbers={preferences.codeEditorLineNumbers}
-				fontSize={parseInt(preferences.codeEditorFontSize, 10)}
+				wordWrap={localSettings.codeEditorWordWrap}
+				showLineNumbers={localSettings.codeEditorLineNumbers}
+				fontSize={parseInt(localSettings.codeEditorFontSize, 10)}
 				onClose={onRequestClose}
 				{onSave}
 				onChange={onContentChange}

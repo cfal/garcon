@@ -16,6 +16,7 @@ function createMockCtx() {
   return {
     settings: {
       setSessionName: mock(() => Promise.resolve(undefined)),
+      getRemoteSettingsVersion: mock(() => Promise.resolve(0)),
       getUiSettings: mock(() => Promise.resolve({})),
       setUiSettings: mock(() => Promise.resolve({})),
       getPathSettings: mock(() => Promise.resolve({})),
@@ -69,6 +70,7 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.setUiSettings.mockClear();
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
+    ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
     ctx.settings.getLastProvider.mockClear();
     ctx.settings.getLastProjectPath.mockClear();
@@ -140,6 +142,7 @@ describe('GET /api/app/settings', () => {
     ctx.settings.setUiSettings.mockClear();
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
+    ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
     ctx.settings.getLastProvider.mockClear();
     ctx.settings.getLastProjectPath.mockClear();
@@ -153,8 +156,9 @@ describe('GET /api/app/settings', () => {
   });
 
   it('returns ui, paths, pinnedChatIds, and recent startup settings', async () => {
+    ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(7));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({ theme: 'dark' }));
-    ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({ lastDir: '/home' }));
+    ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({ pinnedProjectPaths: ['/home'], browseStartPath: '/workspace' }));
     ctx.settings.getPinnedChatIds.mockImplementation(() => Promise.resolve(['a', 'b']));
     ctx.settings.getLastProvider.mockImplementation(() => Promise.resolve('codex'));
     ctx.settings.getLastProjectPath.mockImplementation(() => Promise.resolve('/workspace/project'));
@@ -166,9 +170,9 @@ describe('GET /api/app/settings', () => {
     const response = await handler();
     const body = await response.json();
 
-    expect(body.success).toBe(true);
+    expect(body.version).toBe(7);
     expect(body.ui).toEqual({ theme: 'dark' });
-    expect(body.paths).toEqual({ lastDir: '/home' });
+    expect(body.paths).toEqual({ pinnedProjectPaths: ['/home'], browseStartPath: '/workspace' });
     expect(body.pinnedChatIds).toEqual(['a', 'b']);
     expect(body.lastProvider).toBe('codex');
     expect(body.lastProjectPath).toBe('/workspace/project');
@@ -185,7 +189,21 @@ describe('GET /api/app/settings', () => {
     expect(body.chatSortOrder).toBeUndefined();
   });
 
+  it('strips the legacy remote sidebar controls position from the snapshot', async () => {
+    ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(2));
+    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({
+      searchBarPosition: 'top',
+      pinnedInsertPosition: 'bottom',
+    }));
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(body.ui).toEqual({ pinnedInsertPosition: 'bottom' });
+  });
+
   it('auto-enables generation defaults from authenticated provider priority', async () => {
+    ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(1));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
     ctx.providers.getAuthStatusMap.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
@@ -200,7 +218,7 @@ describe('GET /api/app/settings', () => {
     const response = await handler();
     const body = await response.json();
 
-    expect(body.success).toBe(true);
+    expect(body.version).toBe(1);
     expect(body.uiEffective.chatTitle.enabled).toBe(true);
     expect(body.uiEffective.chatTitle.provider).toBe('codex');
     expect(body.uiEffective.chatTitle.model).toBe('gpt-5.1-codex-mini');
@@ -210,6 +228,7 @@ describe('GET /api/app/settings', () => {
   });
 
   it('preserves persisted commitMessage extra fields in uiEffective', async () => {
+    ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(3));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({
       commitMessage: {
         enabled: true,
@@ -223,7 +242,7 @@ describe('GET /api/app/settings', () => {
     const response = await handler();
     const body = await response.json();
 
-    expect(body.success).toBe(true);
+    expect(body.version).toBe(3);
     expect(body.uiEffective.commitMessage.enabled).toBe(true);
     expect(body.uiEffective.commitMessage.provider).toBe('codex');
     expect(body.uiEffective.commitMessage.model).toBe('gpt-5.1-codex-mini');
@@ -241,6 +260,7 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.setUiSettings.mockClear();
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
+    ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
     ctx.settings.getLastProvider.mockClear();
     ctx.settings.getLastProjectPath.mockClear();
@@ -263,6 +283,18 @@ describe('PUT /api/app/settings', () => {
 
     expect(body.success).toBe(true);
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ fontSize: 14 });
+  });
+
+  it('drops the legacy sidebar controls position from ui patches', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { searchBarPosition: 'top' } }));
+    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({ pinnedInsertPosition: 'top' }));
+    ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { ui: { searchBarPosition: 'top' } }));
+    const body = await response.json();
+
+    expect(body.success).toBe(true);
+    expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
   });
 
   it('patches paths settings', async () => {

@@ -7,8 +7,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
-	import { getModelCatalog } from '$lib/context';
-	import { getSettings, updateSettings } from '$lib/api/settings.js';
+	import { getModelCatalog, getRemoteSettings } from '$lib/context';
 	import type { SessionProvider } from '$lib/types/app';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -55,19 +54,20 @@ Return only the commit message now.`;
 	let useCommonDirPrefix = $state(false);
 	let isDefaultPrompt = $derived(!customPrompt || customPrompt === DEFAULT_PROMPT);
 	const modelCatalog = getModelCatalog();
+	const remoteSettings = getRemoteSettings();
 	let availableModels = $derived(modelCatalog.getModels(provider));
 	let availableProviders = $derived(modelCatalog.getProviders());
 	let loaded = $state(false);
 
-		onMount(async () => {
-			try {
-				const settings = await getSettings();
-				const ui = (settings.ui ?? {}) as Record<string, unknown>;
-				const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
-				const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;
-				const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
-				const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
-				enabled = cm.enabled !== false;
+	onMount(async () => {
+		try {
+			const snap = await remoteSettings.ensureLoaded();
+			const ui = (snap.ui ?? {}) as Record<string, unknown>;
+			const uiEffective = (snap.uiEffective ?? {}) as Record<string, unknown>;
+			const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;
+			const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
+			const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
+			enabled = cm.enabled !== false;
 			if (['claude', 'codex', 'opencode', 'amp', 'factory'].includes(cm.provider as string)) {
 				provider = cm.provider as SessionProvider;
 			}
@@ -91,7 +91,7 @@ Return only the commit message now.`;
 		// server uses its built-in prompt (avoids drift if the default changes).
 		const promptToStore = isDefaultPrompt ? '' : customPrompt;
 		const payload = { enabled, provider, model, customPrompt: promptToStore, useCommonDirPrefix };
-		await updateSettings({ ui: { commitMessage: payload } });
+		await remoteSettings.update({ ui: { commitMessage: payload } });
 		onSettingsChanged({ enabled, provider, model, customPrompt: promptToStore, useCommonDirPrefix });
 	}
 

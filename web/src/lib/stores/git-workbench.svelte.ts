@@ -24,7 +24,7 @@ import {
 	gitDeleteUntracked,
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
-import type { SessionProvider } from '$lib/types/app';
+import type { SessionProvider } from '$lib/types/app.js';
 import * as m from '$lib/paraglide/messages.js';
 import {
 	computeCommonDirPrefix as computeCommonDirPrefixSync,
@@ -34,11 +34,6 @@ import {
 export type DiffMode = 'unified' | 'split';
 export type { GitDiffTab } from '$lib/api/git.js';
 
-export interface GitWorkbenchStoreOptions {
-	/** Reactive getter for the active provider name. */
-	get provider(): SessionProvider;
-}
-
 /** Injectable dependencies for testing. Defaults load the real
  *  settings API when not overridden. */
 export interface GitWorkbenchDeps {
@@ -46,6 +41,9 @@ export interface GitWorkbenchDeps {
 		ui?: Record<string, unknown>;
 		uiEffective?: Record<string, unknown>;
 	}>;
+	/** When provided, hydrateCommitSettings reads directly from the
+	 *  shared remote settings snapshot instead of issuing a fetch. */
+	remoteSnapshot?: () => { ui?: Record<string, unknown>; uiEffective?: Record<string, unknown> } | null;
 }
 
 export class GitWorkbenchStore {
@@ -115,7 +113,6 @@ export class GitWorkbenchStore {
 
 	// Per-file scroll positions for restore on switch
 	private scrollPositions = new Map<string, number>();
-	private readonly opts: GitWorkbenchStoreOptions;
 	private diffScrollToken = 0;
 	private readonly deps: GitWorkbenchDeps;
 
@@ -150,20 +147,16 @@ export class GitWorkbenchStore {
 		}
 	}
 
-	constructor(opts?: GitWorkbenchStoreOptions, deps?: GitWorkbenchDeps) {
-		this.opts = opts ?? { get provider() { return 'claude' as SessionProvider; } };
+	constructor(deps?: GitWorkbenchDeps) {
 		this.deps = deps ?? {
 			getSettings: async () => {
-				const { getSettings } = await import('$lib/api/settings.js');
-				return getSettings();
+				const { getRemoteSettings } = await import('$lib/api/settings.js');
+				const snap = await getRemoteSettings();
+				return { ui: snap.ui as Record<string, unknown>, uiEffective: snap.uiEffective as Record<string, unknown> };
 			},
 		};
 		this.loadTreePaneWidth();
 		this.hydrateCommitSettings();
-	}
-
-	private get provider(): SessionProvider {
-		return this.opts.provider;
 	}
 
 	// Derived: currently selected file's review data
@@ -903,7 +896,8 @@ export class GitWorkbenchStore {
 	// Reads commit message settings from persisted app settings.
 	private async hydrateCommitSettings(): Promise<void> {
 		try {
-			const settings = await this.deps.getSettings();
+			const snap = this.deps.remoteSnapshot?.();
+			const settings = snap ?? await this.deps.getSettings();
 			const ui = (settings.ui ?? {}) as Record<string, unknown>;
 			const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
 			const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;

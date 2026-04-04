@@ -52,11 +52,13 @@ import {
   ChatSessionStoppedMessage,
   QueueStateUpdatedMessage,
   QueueDispatchingMessage,
+  SettingsChangedMessage,
   WsFaultMessage,
 } from '../common/ws-events.ts';
 
 // Route factory
 import createAllRoutes from './routes/index.js';
+import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 
 export async function startServer() {
   process.on('unhandledRejection', (err) => {
@@ -263,6 +265,14 @@ export async function startServer() {
     });
     settings.onListChanged((reason, chatId) => {
       broadcast(new ChatListRefreshRequestedMessage(reason, chatId));
+    });
+    settings.onRemoteSettingsChanged(async () => {
+      try {
+        const snapshot = await buildRemoteSettingsSnapshot({ settings, providers: providerRegistry });
+        broadcast(new SettingsChangedMessage(snapshot));
+      } catch (err) {
+        console.warn('server: failed to broadcast settings-changed:', err.message);
+      }
     });
     chatRegistry.onChatRemoved((chatId) => {
       broadcast(new ChatSessionDeletedWsMessage(chatId));

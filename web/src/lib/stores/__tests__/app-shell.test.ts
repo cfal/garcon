@@ -116,4 +116,16 @@ describe('AppShellStore', () => {
 			expect(cb).toHaveBeenCalledTimes(1);
 		});
 	});
+
+	describe('settings tabs', () => {
+		it('defaults unknown section requests to agents', () => {
+			const store = new AppShellStore();
+
+			store.openSettings('display');
+			expect(store.settingsInitialTab).toBe('agents');
+
+			store.openSettings('remote');
+			expect(store.settingsInitialTab).toBe('remote');
+		});
+	});
 });

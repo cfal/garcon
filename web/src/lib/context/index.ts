@@ -3,7 +3,8 @@
 
 import { createContext } from 'svelte';
 import type { AuthStore } from '$lib/stores/auth.svelte';
-import type { PreferencesStore } from '$lib/stores/preferences.svelte';
+import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte';
+import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { NavigationStore } from '$lib/stores/navigation.svelte';
 import type { ChatRuntimeStore } from '$lib/stores/chat-runtime.svelte';
 import type { ChatSessionsStore } from '$lib/stores/chat-sessions.svelte';
@@ -19,7 +20,6 @@ import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
-export const [getPreferences, setPreferences] = createContext<PreferencesStore>();
 export const [getNavigation, setNavigation] = createContext<NavigationStore>();
 export const [getChatRuntime, setChatRuntime] = createContext<ChatRuntimeStore>();
 export const [getChatSessions, setChatSessions] = createContext<ChatSessionsStore>();
@@ -28,6 +28,9 @@ export const [getWs, setWs] = createContext<WsConnection>();
 export const [getFileViewer, setFileViewer] = createContext<FileViewerStore>();
 export const [getReadReceiptOutbox, setReadReceiptOutbox] = createContext<ReadReceiptOutboxStore>();
 export const [getModelCatalog, setModelCatalog] = createContext<ModelCatalogStore>();
+
+export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsStore>();
+export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();
 
 // Chat-level contexts (set in ConversationWorkspace.svelte)
 export const [getChatState, setChatState] = createContext<ChatState>();

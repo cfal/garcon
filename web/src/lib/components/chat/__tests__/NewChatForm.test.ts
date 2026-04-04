@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import NewChatFormTestHarness from './NewChatFormTestHarness.svelte';
 import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
+import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn()
@@ -13,8 +14,8 @@ vi.mock('$lib/api/git', () => ({
 }));
 
 vi.mock('$lib/api/settings', () => ({
-	getSettings: vi.fn(),
-	updateSettings: vi.fn()
+	getRemoteSettings: vi.fn(),
+	updateRemoteSettings: vi.fn(),
 }));
 
 function deferred<T>() {
@@ -25,10 +26,30 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
+function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSettingsSnapshot {
+	return {
+		version: 1,
+		ui: {},
+		uiEffective: {},
+		paths: { pinnedProjectPaths: [], browseStartPath: '' },
+		pinnedChatIds: [],
+		lastProvider: 'claude',
+		lastProjectPath: '',
+		lastModel: 'opus',
+		lastPermissionMode: 'default',
+		lastThinkingMode: 'none',
+		lastClaudeThinkingMode: 'auto',
+		lastAmpAgentMode: 'smart',
+		projectBasePath: '/workspace',
+		telegramBotTokenAvailable: false,
+		...overrides,
+	};
+}
+
 describe('NewChatForm', () => {
 	it('shows a centered spinner and hides the composer until settings load', async () => {
-		const pending = deferred<Awaited<ReturnType<typeof settingsApi.getSettings>>>();
-		vi.mocked(settingsApi.getSettings).mockReturnValueOnce(pending.promise);
+		const pending = deferred<Awaited<ReturnType<typeof settingsApi.getRemoteSettings>>>();
+		vi.mocked(settingsApi.getRemoteSettings).mockReturnValueOnce(pending.promise);
 
 		const { container } = render(NewChatFormTestHarness);
 
@@ -41,18 +62,9 @@ describe('NewChatForm', () => {
 		expect(hiddenFormContainer?.contains(projectPathInput)).toBe(true);
 		expect(hiddenFormContainer?.contains(messageInput)).toBe(true);
 
-		pending.resolve({
-			ui: {},
-			paths: {},
-			pinnedChatIds: [],
-			lastProvider: 'claude',
+		pending.resolve(makeSnapshot({
 			lastProjectPath: '/workspace/project',
-			lastModel: 'opus',
-			lastPermissionMode: 'default',
-			lastThinkingMode: 'none',
-			lastClaudeThinkingMode: 'auto',
-			projectBasePath: '/workspace'
-		});
+		}));
 
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
@@ -64,18 +76,9 @@ describe('NewChatForm', () => {
 
 	it('opens the worktree picker as a separate dialog when the project is a git repo', async () => {
 		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(settingsApi.getSettings).mockResolvedValueOnce({
-			ui: {},
-			paths: {},
-			pinnedChatIds: [],
-			lastProvider: 'claude',
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
 			lastProjectPath: '/workspace/project',
-			lastModel: 'opus',
-			lastPermissionMode: 'default',
-			lastThinkingMode: 'none',
-			lastClaudeThinkingMode: 'auto',
-			projectBasePath: '/workspace'
-		});
+		}));
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({
 			valid: true,
 			isGitRepo: true

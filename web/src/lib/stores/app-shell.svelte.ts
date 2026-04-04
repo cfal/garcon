@@ -1,20 +1,13 @@
 // Reactive app shell store using Svelte 5 runes. Controls settings
-// panel visibility, sidebar dimensions, and callback registration
-// for imperative action dispatch.
+// panel visibility, sidebar state, and callback registration for
+// imperative action dispatch.
 
-const SIDEBAR_KEY = 'pref_sidebarWidth';
-const SIDEBAR_DEFAULT_WIDTH = 320;
+export type SettingsTab = 'agents' | 'local' | 'remote';
 
-function readInitialSidebarWidth(): number {
-	if (typeof window === 'undefined') return SIDEBAR_DEFAULT_WIDTH;
-	try {
-		const raw = localStorage.getItem(SIDEBAR_KEY);
-		if (raw === null) return SIDEBAR_DEFAULT_WIDTH;
-		const stored = Number(raw);
-		return Number.isFinite(stored) && stored > 0 ? stored : SIDEBAR_DEFAULT_WIDTH;
-	} catch {
-		return SIDEBAR_DEFAULT_WIDTH;
-	}
+function normalizeSettingsTab(value: string): SettingsTab {
+	if (value === 'local') return 'local';
+	if (value === 'remote') return 'remote';
+	return 'agents';
 }
 
 export type RefreshChatsCallback = () => void;
@@ -25,8 +18,7 @@ export interface NewChatDialogSeed {
 
 export class AppShellStore {
 	showSettings = $state(false);
-	settingsInitialSection = $state<string>('agents');
-	sidebarWidth = $state(SIDEBAR_DEFAULT_WIDTH);
+	settingsInitialTab = $state<SettingsTab>('agents');
 	sidebarOpen = $state(false);
 	refreshChatsCallback = $state<RefreshChatsCallback | null>(null);
 	quietRefreshChatsCallback = $state<RefreshChatsCallback | null>(null);
@@ -46,26 +38,13 @@ export class AppShellStore {
 	#newChatDialogSeedCallbacks = new Set<() => void>();
 	#sidebarSearchCallbacks = new Set<() => void>();
 
-	constructor() {
-		this.sidebarWidth = readInitialSidebarWidth();
-	}
-
 	openSettings(section: string = 'agents'): void {
 		this.showSettings = true;
-		this.settingsInitialSection = section;
+		this.settingsInitialTab = normalizeSettingsTab(section);
 	}
 
 	closeSettings(): void {
 		this.showSettings = false;
-	}
-
-	setSidebarWidth(width: number): void {
-		this.sidebarWidth = width;
-		try {
-			localStorage.setItem(SIDEBAR_KEY, String(width));
-		} catch {
-			// Storage full or unavailable
-		}
 	}
 
 	setSidebarOpen(open: boolean): void {
