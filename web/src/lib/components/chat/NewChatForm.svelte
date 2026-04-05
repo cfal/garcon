@@ -27,7 +27,6 @@
 	import Pin from '@lucide/svelte/icons/pin';
 	import PinOff from '@lucide/svelte/icons/pin-off';
 	import Tag from '@lucide/svelte/icons/tag';
-	import ColoredTag from '../shared/ColoredTag.svelte';
 	import { getTagColorClasses } from '$lib/utils/tag-colors';
 	import { getChatSessions } from '$lib/context';
 
