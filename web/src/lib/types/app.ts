@@ -40,6 +40,7 @@ export interface NewChatConfig {
 	ampAgentMode?: AmpAgentMode;
 	firstMessage: string;
 	initialImages?: File[];
+	tags?: string[];
 }
 
 export type AppSocketMessage =

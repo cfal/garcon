@@ -26,6 +26,10 @@
 	import X from '@lucide/svelte/icons/x';
 	import Pin from '@lucide/svelte/icons/pin';
 	import PinOff from '@lucide/svelte/icons/pin-off';
+	import Tag from '@lucide/svelte/icons/tag';
+	import ColoredTag from '../shared/ColoredTag.svelte';
+	import { getTagColorClasses } from '$lib/utils/tag-colors';
+	import { getChatSessions } from '$lib/context';
 
 	interface Props {
 		prefill?: string;
@@ -39,9 +43,42 @@
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
+	const sessions = getChatSessions();
 	const form = new NewChatFormState(appShell, modelCatalog, remoteSettings);
 	let isMobile = $state(false);
 	let pendingTextareaFocus = $state(true);
+	let tagInputValue = $state('');
+	let tagInputRef = $state<HTMLInputElement | null>(null);
+
+	const allKnownTags = $derived(
+		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort()
+	);
+	const tagSuggestions = $derived.by(() => {
+		const q = tagInputValue.trim().toLowerCase();
+		if (!q) return [];
+		const currentSet = new Set(form.chatTags.map((t) => t.toLowerCase()));
+		return allKnownTags
+			.filter((t) => t.toLowerCase().startsWith(q) && !currentSet.has(t.toLowerCase()))
+			.slice(0, 5);
+	});
+
+	function handleTagAdd(raw: string): void {
+		if (form.addTag(raw)) {
+			tagInputValue = '';
+			tagInputRef?.focus();
+		}
+	}
+
+	function handleTagInputKeydown(e: KeyboardEvent): void {
+		if (e.key === 'Enter' || e.key === ',') {
+			e.preventDefault();
+			if (tagInputValue.trim()) handleTagAdd(tagInputValue);
+		} else if (e.key === 'Backspace' && !tagInputValue && form.chatTags.length > 0) {
+			form.removeTag(form.chatTags[form.chatTags.length - 1]);
+		} else if (e.key === 'Escape') {
+			form.showTagInput = false;
+		}
+	}
 
 	let textareaRef: HTMLTextAreaElement | undefined = $state();
 	let imageInputRef: HTMLInputElement | undefined = $state();
@@ -251,6 +288,19 @@
 								<Pin class="w-4 h-4 text-muted-foreground" />
 							{/if}
 						</button>
+						<button
+							type="button"
+							onclick={() => {
+								form.toggleTagInput();
+								if (form.showTagInput) {
+									setTimeout(() => tagInputRef?.focus(), 50);
+								}
+							}}
+							class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 transition-colors"
+							title={m.chat_new_chat_tags_add()}
+						>
+							<Tag class="w-4 h-4 {form.chatTags.length > 0 ? 'text-primary' : 'text-muted-foreground'}" />
+						</button>
 					</div>
 
 					{#if form.showBrowser}
@@ -307,6 +357,48 @@
 					<p class="text-xs px-2.5 py-1 rounded-md bg-muted/30 text-muted-foreground text-center w-full">
 						{m.chat_new_chat_star_bookmark()}
 					</p>
+				{/if}
+
+				{#if form.showTagInput || form.chatTags.length > 0}
+					<div class="space-y-2">
+						<div class="flex flex-wrap items-center gap-1.5">
+							{#each form.chatTags as tag (tag)}
+								<button
+									type="button"
+									class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity {getTagColorClasses(tag)}"
+									onclick={() => form.removeTag(tag)}
+								>
+									{tag}
+									<X class="w-3 h-3" />
+								</button>
+							{/each}
+							{#if form.showTagInput}
+								<div class="relative flex-1 min-w-[120px]">
+									<input
+										bind:this={tagInputRef}
+										type="text"
+										bind:value={tagInputValue}
+										onkeydown={handleTagInputKeydown}
+										placeholder={m.chat_new_chat_tags_placeholder()}
+										class="w-full px-2 py-1 text-xs bg-transparent border-none outline-none placeholder-muted-foreground/60 text-foreground"
+									/>
+									{#if tagSuggestions.length > 0}
+										<div class="absolute z-10 mt-1 w-full rounded-md border border-border bg-popover shadow-md">
+											{#each tagSuggestions as suggestion (suggestion)}
+												<button
+													type="button"
+													class="w-full text-left px-3 py-1.5 text-xs hover:bg-accent transition-colors first:rounded-t-md last:rounded-b-md"
+													onclick={() => handleTagAdd(suggestion)}
+												>
+													{suggestion}
+												</button>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							{/if}
+						</div>
+					</div>
 				{/if}
 
 				{#if form.error}

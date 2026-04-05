@@ -15,6 +15,7 @@ export interface ChatStartupConfig {
 	ampAgentMode: AmpAgentMode;
 	firstMessage: string;
 	initialImages?: File[];
+	tags?: string[];
 }
 
 export interface ChatSessionRecord {
