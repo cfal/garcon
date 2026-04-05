@@ -98,6 +98,11 @@
 
 	onMount(() => {
 		window.addEventListener('keydown', handleEscape);
+		// Dismiss the virtual keyboard when the fullscreen mobile browser opens
+		// so directory entries are not obscured.
+		if (isMobile && document.activeElement instanceof HTMLElement) {
+			document.activeElement.blur();
+		}
 	});
 
 	onDestroy(() => {
