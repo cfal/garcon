@@ -14,6 +14,7 @@ interface ShareStoreData {
 export interface IShareStore {
   init(): Promise<void>;
   createShare(chatId: string, snapshot: Omit<SharedChatSnapshot, 'shareToken'>): Promise<SharedChatSnapshot>;
+  updateShare(chatId: string, partial: Omit<SharedChatSnapshot, 'shareToken'>): Promise<SharedChatSnapshot>;
   getShare(token: string): SharedChatSnapshot | null;
   getShareByChatId(chatId: string): SharedChatSnapshot | null;
   revokeShareByChatId(chatId: string): Promise<boolean>;
@@ -86,6 +87,21 @@ export class ShareStore implements IShareStore {
 
     this.#data.shares[token] = snapshot;
     this.#chatIdIndex.set(chatId, token);
+    await this.#persist();
+
+    return snapshot;
+  }
+
+  async updateShare(chatId: string, partial: Omit<SharedChatSnapshot, 'shareToken'>): Promise<SharedChatSnapshot> {
+    if (!this.#data) throw new Error('ShareStore not initialized');
+
+    const existingToken = this.#chatIdIndex.get(chatId);
+    if (!existingToken || !this.#data.shares[existingToken]) {
+      throw new Error('No existing share for this chat');
+    }
+
+    const snapshot: SharedChatSnapshot = { ...partial, shareToken: existingToken };
+    this.#data.shares[existingToken] = snapshot;
     await this.#persist();
 
     return snapshot;

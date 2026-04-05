@@ -52,8 +52,7 @@
 	const publicRoutes = ['/login', '/setup'];
 	let isPublicRoute = $derived(
 		publicRoutes.includes(page.url.pathname) ||
-		page.url.pathname.startsWith('/shared/') ||
-		page.url.pathname.startsWith('/shared-app/')
+		page.url.pathname.startsWith('/shared/')
 	);
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
@@ -178,7 +177,7 @@
 	$effect(() => {
 		if (auth.isLoading) return;
 		if (!isPublicRoute) return;
-		if (page.url.pathname.startsWith('/shared/') || page.url.pathname.startsWith('/shared-app/')) return;
+		if (page.url.pathname.startsWith('/shared/')) return;
 		if (auth.authDisabled || (auth.isAuthenticated && !auth.needsSetup)) {
 			goto('/');
 		}
