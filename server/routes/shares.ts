@@ -6,7 +6,7 @@ import { markRouteNoAuth } from '../lib/http-route.js';
 import type { IShareStore } from '../chats/share-store.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ShareChatResponse, ShareStatusResponse, GetSharedChatResponse, RevokeShareResponse } from '../../common/share-types.ts';
-import { renderSharedChatHtml, renderSharedChatText } from '../chats/share-transcript.ts';
+import { renderSharedChatText } from '../chats/share-transcript.ts';
 
 type RouteHandler = (request: Request, url: URL) => Promise<Response> | Response;
 type RouteMap = Record<string, Record<string, RouteHandler>>;
@@ -31,8 +31,8 @@ function extractFirstLine(text: string | null | undefined): string {
   return text.slice(0, nl).trim();
 }
 
-function extractShareTokenFromPath(pathname: string): string | null {
-  const match = pathname.match(/^\/shared\/([^/]+)$/);
+function extractLlmTokenFromPath(pathname: string): string | null {
+  const match = pathname.match(/^\/shared\/llm\/([^/]+)$/);
   if (!match?.[1]) return null;
 
   try {
@@ -40,21 +40,6 @@ function extractShareTokenFromPath(pathname: string): string | null {
   } catch {
     return null;
   }
-}
-
-function wantsPlainText(url: URL): boolean {
-  const format = url.searchParams.get('format');
-  return format === 'text' || format === 'txt' || format === 'plain';
-}
-
-function createSharedPaths(token: string) {
-  const encodedToken = encodeURIComponent(token);
-  return {
-    canonicalPath: `/shared/${encodedToken}`,
-    appPath: `/shared-app/${encodedToken}`,
-    jsonPath: `/api/v1/shared?token=${encodedToken}`,
-    plainTextPath: `/shared/${encodedToken}?format=text`,
-  };
 }
 
 export default function createShareRoutes(
@@ -79,18 +64,7 @@ export default function createShareRoutes(
         return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
       }
 
-      // Idempotent: return existing share if present.
-      const existing = shareStore.getShareByChatId(chatId);
-      if (existing) {
-        const resp: ShareChatResponse = {
-          success: true,
-          shareToken: existing.shareToken,
-          shareUrl: `/shared/${existing.shareToken}`,
-        };
-        return Response.json(resp);
-      }
-
-      // Load all messages for the snapshot.
+      // Load current messages for the snapshot.
       await historyCache.ensureLoaded(chatId);
       const page = historyCache.getPaginatedMessages(chatId, 100_000, 0) as { messages?: unknown[] };
       const messages = page?.messages ?? [];
@@ -101,7 +75,7 @@ export default function createShareRoutes(
         (overrideTitle || meta?.firstMessage || 'Untitled Chat') as string,
       );
 
-      const snapshot = await shareStore.createShare(chatId, {
+      const partial = {
         chatId,
         title,
         provider: session.provider as string,
@@ -109,7 +83,13 @@ export default function createShareRoutes(
         projectPath: session.projectPath as string,
         sharedAt: new Date().toISOString(),
         messages,
-      });
+      };
+
+      // Update existing share with latest messages, or create a new one.
+      const existing = shareStore.getShareByChatId(chatId);
+      const snapshot = existing
+        ? await shareStore.updateShare(chatId, partial)
+        : await shareStore.createShare(chatId, partial);
 
       const resp: ShareChatResponse = {
         success: true,
@@ -171,8 +151,9 @@ export default function createShareRoutes(
     return Response.json(resp);
   });
 
-  const getSharedTranscript = markRouteNoAuth(function getSharedTranscript(_request: Request, url: URL): Response {
-    const token = extractShareTokenFromPath(url.pathname);
+  // Serves a plain text transcript at /shared/llm/:token for LLM consumption.
+  const getLlmTranscript = markRouteNoAuth(function getLlmTranscript(_request: Request, url: URL): Response {
+    const token = extractLlmTokenFromPath(url.pathname);
     if (!token) {
       return Response.json({ error: 'Share token is required' }, { status: 400 });
     }
@@ -182,19 +163,9 @@ export default function createShareRoutes(
       return Response.json({ error: 'Share not found' }, { status: 404 });
     }
 
-    if (wantsPlainText(url)) {
-      return new Response(renderSharedChatText(snapshot), {
-        headers: {
-          'Content-Type': 'text/plain; charset=utf-8',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-        },
-      });
-    }
-
-    const links = createSharedPaths(snapshot.shareToken);
-    return new Response(renderSharedChatHtml(snapshot, links), {
+    return new Response(renderSharedChatText(snapshot), {
       headers: {
-        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Type': 'text/plain; charset=utf-8',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
       },
     });
@@ -204,6 +175,6 @@ export default function createShareRoutes(
     '/api/v1/chats/share': { POST: postShareChat, DELETE: deleteShareChat },
     '/api/v1/chats/share/status': { GET: getShareStatus },
     '/api/v1/shared': { GET: getSharedChat },
-    '/shared/:token': { GET: getSharedTranscript },
+    '/shared/llm/:token': { GET: getLlmTranscript },
   };
 }

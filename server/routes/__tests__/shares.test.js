@@ -45,6 +45,7 @@ function createRoutes(snapshot = createSnapshot()) {
       getShare: mock((token) => token === snapshot.shareToken ? snapshot : null),
       getShareByChatId: mock(() => null),
       createShare: mock(() => Promise.resolve(snapshot)),
+      updateShare: mock(() => Promise.resolve(snapshot)),
       revokeShareByChatId: mock(() => Promise.resolve(true)),
       init: mock(() => Promise.resolve(undefined)),
     },
@@ -56,30 +57,11 @@ function createRoutes(snapshot = createSnapshot()) {
 }
 
 describe('shared transcript routes', () => {
-  it('renders transcript HTML at the public shared URL', async () => {
+  it('renders plain text transcript at /shared/llm/:token', async () => {
     const routes = createRoutes();
-    const response = await routes['/shared/:token'].GET(
-      new Request('http://localhost/shared/share-token'),
-      new URL('http://localhost/shared/share-token'),
-    );
-    const body = await response.text();
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get('content-type')).toContain('text/html');
-    expect(body).toContain('Garcon Shared Thread');
-    expect(body).toContain('Investigate flaky share rendering');
-    expect(body).toContain('Can you summarize this thread for a crawler?');
-    expect(body).toContain('bun run test');
-    expect(body).toContain('/shared/share-token?format=text');
-    expect(body).toContain('/shared-app/share-token');
-    expect(body).toContain('/api/v1/shared?token=share-token');
-  });
-
-  it('renders a plain text variant for machine-friendly access', async () => {
-    const routes = createRoutes();
-    const response = await routes['/shared/:token'].GET(
-      new Request('http://localhost/shared/share-token?format=text'),
-      new URL('http://localhost/shared/share-token?format=text'),
+    const response = await routes['/shared/llm/:token'].GET(
+      new Request('http://localhost/shared/llm/share-token'),
+      new URL('http://localhost/shared/llm/share-token'),
     );
     const body = await response.text();
 
@@ -93,9 +75,9 @@ describe('shared transcript routes', () => {
 
   it('returns 404 when the shared transcript does not exist', async () => {
     const routes = createRoutes();
-    const response = await routes['/shared/:token'].GET(
-      new Request('http://localhost/shared/missing-token'),
-      new URL('http://localhost/shared/missing-token'),
+    const response = await routes['/shared/llm/:token'].GET(
+      new Request('http://localhost/shared/llm/missing-token'),
+      new URL('http://localhost/shared/llm/missing-token'),
     );
     const body = await response.json();
 
@@ -105,9 +87,9 @@ describe('shared transcript routes', () => {
 
   it('rejects malformed percent-encoded share tokens without throwing', async () => {
     const routes = createRoutes();
-    const response = await routes['/shared/:token'].GET(
-      new Request('http://localhost/shared/%'),
-      new URL('http://localhost/shared/%'),
+    const response = await routes['/shared/llm/:token'].GET(
+      new Request('http://localhost/shared/llm/%'),
+      new URL('http://localhost/shared/llm/%'),
     );
     const body = await response.json();
 
