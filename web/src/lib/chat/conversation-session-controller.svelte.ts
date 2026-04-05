@@ -280,6 +280,7 @@ export class ConversationSessionController {
 					claudeThinkingMode: 'auto',
 					ampAgentMode,
 					command: text,
+					tags: startup?.tags,
 					options: {
 						cwd: selected.projectPath,
 						projectPath: selected.projectPath,

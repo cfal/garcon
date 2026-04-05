@@ -36,6 +36,7 @@
 				ampAgentMode: config.ampAgentMode ?? 'smart',
 				firstMessage: config.firstMessage,
 				initialImages: config.initialImages,
+				tags: config.tags,
 			},
 		});
 

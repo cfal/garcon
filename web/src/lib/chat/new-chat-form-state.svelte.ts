@@ -21,6 +21,7 @@ import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.s
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
 import { canSubmitNewChat, type PathValidationStatus } from '$lib/components/chat/new-chat-submit.js';
+import { normalizeTagSlug } from '$lib/utils/tags.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export class NewChatFormState {
@@ -49,6 +50,10 @@ export class NewChatFormState {
 	thinkingMode = $state<ThinkingMode>('none');
 	claudeThinkingMode = $state<ClaudeThinkingMode>('auto');
 	ampAgentMode = $state<AmpAgentMode>('smart');
+
+	// Tags
+	chatTags = $state<string[]>([]);
+	showTagInput = $state(false);
 
 	// Form
 	firstMessage = $state('');
@@ -355,6 +360,24 @@ export class NewChatFormState {
 		}
 	}
 
+	// Tags
+
+	toggleTagInput(): void {
+		this.showTagInput = !this.showTagInput;
+	}
+
+	addTag(raw: string): boolean {
+		const normalized = normalizeTagSlug(raw);
+		if (!normalized) return false;
+		if (this.chatTags.some((t) => t.toLowerCase() === normalized)) return false;
+		this.chatTags = [...this.chatTags, normalized];
+		return true;
+	}
+
+	removeTag(tag: string): void {
+		this.chatTags = this.chatTags.filter((t) => t !== tag);
+	}
+
 	// Form submission
 
 	clearError(): void {
@@ -394,7 +417,8 @@ export class NewChatFormState {
 			claudeThinkingMode: normalizeClaudeThinkingMode(this.claudeThinkingMode),
 			ampAgentMode: this.provider === 'amp' ? normalizeAmpAgentMode(this.ampAgentMode) : undefined,
 			firstMessage: this.firstMessage.trim(),
-			initialImages: this.attachedImages
+			initialImages: this.attachedImages,
+			tags: this.chatTags.length > 0 ? this.chatTags : undefined,
 		};
 	}
 
@@ -411,6 +435,8 @@ export class NewChatFormState {
 			this.worktreeModalOpen = false;
 		this.worktreeItems = [];
 		this.worktreeError = null;
+		this.chatTags = [];
+		this.showTagInput = false;
 	}
 
 	// Initialization

@@ -185,7 +185,7 @@ export class ChatSessionsStore {
 			isProcessing: false,
 			isUnread: false,
 			status: 'draft',
-			tags: [],
+			tags: normalizedStartup.tags ?? [],
 			firstMessage: undefined,
 		};
 
