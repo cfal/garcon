@@ -7,7 +7,7 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Link from '@lucide/svelte/icons/link';
-	import { shareChat, revokeShare, getShareStatus } from '$lib/api/shares.js';
+	import { shareChat, revokeShare } from '$lib/api/shares.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface ShareChatDialogProps {
@@ -38,21 +38,15 @@
 			showRevokeConfirm = false;
 			return;
 		}
-		createOrFetchShare(chatId);
+		createOrUpdateShare(chatId);
 	});
 
-	async function createOrFetchShare(id: string) {
+	// Always calls shareChat which creates or updates the snapshot with
+	// the latest messages, ensuring the shared link is never stale.
+	async function createOrUpdateShare(id: string) {
 		isLoading = true;
 		error = null;
 		try {
-			const status = await getShareStatus(id);
-			if (status.isShared && status.shareUrl) {
-				shareUrl = window.location.origin + status.shareUrl;
-				shareToken = status.shareToken ?? null;
-				isLoading = false;
-				return;
-			}
-
 			const result = await shareChat(id);
 			if (result.success) {
 				shareUrl = window.location.origin + result.shareUrl;
