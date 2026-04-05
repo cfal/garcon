@@ -53,9 +53,11 @@
 		if (typeof window === 'undefined') return;
 		const mql = window.matchMedia('(max-width: 768px)');
 		isMobile = mql.matches;
+		appShell.isMobile = mql.matches;
 
 		function onChange(e: MediaQueryListEvent) {
 			isMobile = e.matches;
+			appShell.isMobile = e.matches;
 			if (!e.matches) appShell.setSidebarOpen(false);
 		}
 

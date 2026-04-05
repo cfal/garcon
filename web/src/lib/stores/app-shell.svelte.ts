@@ -20,6 +20,7 @@ export class AppShellStore {
 	showSettings = $state(false);
 	settingsInitialTab = $state<SettingsTab>('agents');
 	sidebarOpen = $state(false);
+	isMobile = $state(false);
 	refreshChatsCallback = $state<RefreshChatsCallback | null>(null);
 	quietRefreshChatsCallback = $state<RefreshChatsCallback | null>(null);
 	/** Read-only project base path from server config. Set once on settings load. */

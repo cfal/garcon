@@ -85,6 +85,32 @@ describe('shouldSubmitOnEnter', () => {
 			})
 		).toBe(false);
 	});
+
+	it('never submits on mobile (Enter inserts newline)', () => {
+		expect(
+			shouldSubmitOnEnter({
+				sendByShiftEnter: false,
+				shiftKey: false,
+				ctrlKey: false,
+				metaKey: false,
+				isComposing: false,
+				isMobile: true,
+			})
+		).toBe(false);
+	});
+
+	it('never submits on mobile even with Shift+Enter', () => {
+		expect(
+			shouldSubmitOnEnter({
+				sendByShiftEnter: true,
+				shiftKey: true,
+				ctrlKey: false,
+				metaKey: false,
+				isComposing: false,
+				isMobile: true,
+			})
+		).toBe(false);
+	});
 });
 
 describe('canSubmitComposer', () => {
