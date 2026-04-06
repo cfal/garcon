@@ -65,7 +65,6 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let focusIndex = $state(-1);
-	let mobileFilterRef = $state<HTMLInputElement | null>(null);
 
 	// Initialize browsePath from resolvedDir and reset mobile filter.
 	$effect(() => {
@@ -203,9 +202,9 @@
 		<div class="flex items-center gap-2 px-3 py-2 border-b border-border flex-shrink-0">
 			<Search class="w-4 h-4 text-muted-foreground flex-shrink-0" />
 			<input
-				bind:this={mobileFilterRef}
 				type="text"
 				bind:value={mobileFilter}
+				aria-label={m.chat_directory_browser_filter_placeholder()}
 				placeholder={m.chat_directory_browser_filter_placeholder()}
 				class="flex-1 text-sm bg-transparent outline-none placeholder-muted-foreground/60 text-foreground"
 			/>

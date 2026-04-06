@@ -242,9 +242,9 @@
 								id="project-path-input"
 								type="text"
 								bind:value={form.projectPath}
-								onfocus={(e: FocusEvent) => {
+								onfocus={(e: FocusEvent & { currentTarget: HTMLInputElement }) => {
 								if (isMobile) {
-									(e.target as HTMLElement).blur();
+									e.currentTarget.blur();
 								}
 								form.handlePathFocus();
 							}}
