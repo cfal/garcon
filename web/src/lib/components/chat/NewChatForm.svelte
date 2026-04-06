@@ -242,7 +242,12 @@
 								id="project-path-input"
 								type="text"
 								bind:value={form.projectPath}
-								onfocus={() => form.handlePathFocus()}
+								onfocus={(e: FocusEvent) => {
+								if (isMobile) {
+									(e.target as HTMLElement).blur();
+								}
+								form.handlePathFocus();
+							}}
 								oninput={() => { form.clearError(); form.resetTabCompletions(); }}
 								onkeydown={(e: KeyboardEvent) => {
 									if (e.key === 'Tab') {

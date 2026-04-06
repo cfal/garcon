@@ -9,6 +9,7 @@
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import Search from '@lucide/svelte/icons/search';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface DirectoryBrowserProps {
@@ -50,18 +51,26 @@
 
 	let browsePath = $state('');
 	let allEntries = $state<DirectoryEntry[]>([]);
-	let entries = $derived(
-		filterPrefix
+	let mobileFilter = $state('');
+	let entries = $derived.by(() => {
+		let filtered = filterPrefix
 			? allEntries.filter((e) => e.name.toLowerCase().startsWith(filterPrefix))
-			: allEntries
-	);
+			: allEntries;
+		if (isMobile && mobileFilter) {
+			const q = mobileFilter.toLowerCase();
+			filtered = filtered.filter((e) => e.name.toLowerCase().includes(q));
+		}
+		return filtered;
+	});
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let focusIndex = $state(-1);
+	let mobileFilterRef = $state<HTMLInputElement | null>(null);
 
-	// Initialize browsePath from resolvedDir
+	// Initialize browsePath from resolvedDir and reset mobile filter.
 	$effect(() => {
 		browsePath = resolvedDir;
+		mobileFilter = '';
 	});
 
 	// Fetch directory contents whenever browsePath changes.
@@ -98,11 +107,6 @@
 
 	onMount(() => {
 		window.addEventListener('keydown', handleEscape);
-		// Dismiss the virtual keyboard when the fullscreen mobile browser opens
-		// so directory entries are not obscured.
-		if (isMobile && document.activeElement instanceof HTMLElement) {
-			document.activeElement.blur();
-		}
 	});
 
 	onDestroy(() => {
@@ -114,6 +118,7 @@
 	function handleNavigate(navPath: string) {
 		if (!navPath.startsWith(basePath) && navPath !== basePath) return;
 		browsePath = navPath;
+		mobileFilter = '';
 		onSelect(navPath);
 	}
 
@@ -194,6 +199,18 @@
 			{/each}
 		</div>
 
+		<!-- Filter input for mobile -->
+		<div class="flex items-center gap-2 px-3 py-2 border-b border-border flex-shrink-0">
+			<Search class="w-4 h-4 text-muted-foreground flex-shrink-0" />
+			<input
+				bind:this={mobileFilterRef}
+				type="text"
+				bind:value={mobileFilter}
+				placeholder={m.chat_directory_browser_filter_placeholder()}
+				class="flex-1 text-sm bg-transparent outline-none placeholder-muted-foreground/60 text-foreground"
+			/>
+		</div>
+
 		<!-- Directory list -->
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -- listbox div needs focus for arrow key navigation -->
 		<div
@@ -218,7 +235,7 @@
 					<button
 						type="button"
 						onclick={() => handleNavigate(parentPath)}
-						class="flex items-center gap-2 w-full px-3 py-2.5 text-sm hover:bg-muted/50 transition-colors text-muted-foreground"
+						class="flex items-center gap-2 w-full px-4 py-3 text-sm hover:bg-muted/50 active:bg-muted/70 transition-colors text-muted-foreground"
 					>
 						<ArrowUp class="w-4 h-4" />
 						..
@@ -228,16 +245,16 @@
 					<button
 						type="button"
 						onclick={() => handleNavigate(entry.path)}
-						class="flex items-center gap-2 w-full px-3 py-2.5 text-sm transition-colors {i ===
+						class="flex items-center gap-2 w-full px-4 py-3 text-sm transition-colors {i ===
 						focusIndex
 							? 'bg-muted/70 text-foreground'
-							: 'hover:bg-muted/50 text-foreground'}"
+							: 'hover:bg-muted/50 active:bg-muted/70 text-foreground'}"
 					>
 							<Folder class="w-4 h-4 text-primary flex-shrink-0" />
 						<span class="truncate">{entry.name}</span>
 					</button>
 				{/each}
-				{#if entries.length === 0 && atRoot}
+				{#if entries.length === 0}
 					<div class="px-3 py-4 text-sm text-muted-foreground text-center">
 						{m.chat_directory_browser_no_subdirectories()}
 					</div>
@@ -245,11 +262,12 @@
 			{/if}
 		</div>
 
-			<div class="border-t border-border p-3 flex-shrink-0">
+			<div class="border-t border-border p-3 flex-shrink-0 space-y-1.5">
+				<p class="text-xs text-muted-foreground truncate px-1">{browsePath}</p>
 				<button
 					type="button"
 					onclick={() => handleConfirm(browsePath)}
-					class="w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+					class="w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 active:bg-primary/80 transition-colors"
 				>
 				{m.chat_directory_browser_select_this()}
 			</button>

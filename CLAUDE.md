@@ -9,6 +9,7 @@ This is the operating model for how engineers design, implement, review, and evo
 - DO NOT add to tech debt. It is CRITICAL that we keep the architecture clean and rational, even if that means taking longer to fix or refactor what we're working on.
 - Use `bun` instead of `npm` or `npx`.
 - Use `bun run start --port 0` and a timeout to validate that the server can compile and startup iff there have been code changes.
+- DO NOT kill or pkill any running server processes. When testing, always start a NEW server on a different port (e.g. `--port 0` for random or a specific unused port). The user's primary server must never be disrupted.
 - Run `bun run test` to validate your changes
 - DO NOT use `sed`, remove items using tools if needed.
 - DO NOT stop until the goal has been achieved
