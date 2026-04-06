@@ -46,6 +46,7 @@
   "chat_composer_queue_message": "Queue message",
   "chat_composer_send_message": "Send message",
   "chat_directory_browser_cancel": "Cancel",
+  "chat_directory_browser_filter_placeholder": "Filter directories...",
   "chat_directory_browser_no_subdirectories": "No subdirectories",
   "chat_directory_browser_select_directory": "Select Directory",
   "chat_directory_browser_select_this": "Select this directory",
