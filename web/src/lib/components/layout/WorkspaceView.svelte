@@ -1,14 +1,17 @@
 <script lang="ts">
 	import type { AppTab } from '$lib/types/app';
-	import { getChatSessions, getLocalSettings } from '$lib/context';
+	import { getChatSessions, getLocalSettings, getSplitLayout } from '$lib/context';
 	import Menu from '@lucide/svelte/icons/menu';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import Share2 from '@lucide/svelte/icons/share-2';
+	import PanelLeft from '@lucide/svelte/icons/panel-left';
+	import Grid2x2 from '@lucide/svelte/icons/grid-2x2';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
 	import ConversationWorkspace from '$lib/components/chat/ConversationWorkspace.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
+	import SplitContainer from '$lib/components/split/SplitContainer.svelte';
 	import { cn } from '$lib/utils/cn';
 	import { CHAT_TOOLBAR_TABS } from './chat-toolbar-tabs';
 
@@ -36,6 +39,7 @@
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
+	const splitLayout = getSplitLayout();
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
@@ -101,6 +105,48 @@
 			'text-muted-foreground hover:text-foreground hover:bg-accent'
 		);
 	}
+
+	function toggleSplitMode() {
+		if (splitLayout.isEnabled) {
+			const focusedChat = splitLayout.focusedChatId;
+			splitLayout.disable();
+			if (focusedChat) sessions.setSelectedChatId(focusedChat);
+		} else if (selectedChat) {
+			splitLayout.enableWithChat(selectedChat.id);
+		}
+	}
+
+	function setupGrid() {
+		const chatIds = sessions.orderedChats.slice(0, 4).map((c) => c.id);
+		if (chatIds.length >= 2) {
+			splitLayout.setGrid(chatIds);
+		}
+	}
+
+	function handleSplitFocusPane(paneId: string) {
+		splitLayout.focusPane(paneId);
+		const pane = splitLayout.panes.find((p) => p.id === paneId);
+		if (pane) sessions.setSelectedChatId(pane.chatId);
+	}
+
+	function handleSplitClosePane(paneId: string) {
+		splitLayout.closePane(paneId);
+		if (!splitLayout.isEnabled) {
+			const remaining = splitLayout.focusedChatId;
+			if (remaining) sessions.setSelectedChatId(remaining);
+		}
+	}
+
+	function handleSplitSetRatio(path: number[], ratio: number) {
+		splitLayout.setRatioByPath(path, ratio);
+	}
+
+	function handleSplitDropChat(paneId: string, zone: 'left' | 'right' | 'top' | 'bottom') {
+		const draggedChat = splitLayout.draggedChatId;
+		if (!draggedChat) return;
+		splitLayout.addChatToZone(paneId, draggedChat, zone);
+		splitLayout.endDrag();
+	}
 </script>
 
 <div class="h-full flex flex-col relative">
@@ -152,34 +198,56 @@
 										</button>
 									{/each}
 								</div>
-									<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border">
+								<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border">
+									<button
+										type="button"
+										onclick={toggleSplitMode}
+										class={cn(getUtilityButtonClasses(), splitLayout.isEnabled && 'text-primary bg-primary/10')}
+										title={splitLayout.isEnabled ? 'Exit split view' : 'Split view'}
+									>
+										<span class="flex items-center justify-center">
+											<PanelLeft class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+										</span>
+									</button>
+									{#if splitLayout.isEnabled}
 										<button
 											type="button"
-											onclick={openShareDialog}
+											onclick={setupGrid}
 											class={getUtilityButtonClasses()}
-											title={m.share_button()}
+											title="4-up grid (use up to 4 recent chats)"
 										>
 											<span class="flex items-center justify-center">
-												<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+												<Grid2x2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 											</span>
 										</button>
-										{#if canToggleDesktopFullscreen}
-											<button
-												type="button"
-												onclick={onToggleDesktopFullscreen}
-												class={getUtilityButtonClasses()}
-												title={isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen()}
-											>
-												<span class="flex items-center justify-center">
-													{#if isDesktopFullscreen}
-														<Minimize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-													{:else}
-														<Maximize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-													{/if}
-												</span>
-											</button>
-										{/if}
-									</div>
+									{/if}
+									<button
+										type="button"
+										onclick={openShareDialog}
+										class={getUtilityButtonClasses()}
+										title={m.share_button()}
+									>
+										<span class="flex items-center justify-center">
+											<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+										</span>
+									</button>
+									{#if canToggleDesktopFullscreen}
+										<button
+											type="button"
+											onclick={onToggleDesktopFullscreen}
+											class={getUtilityButtonClasses()}
+											title={isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen()}
+										>
+											<span class="flex items-center justify-center">
+												{#if isDesktopFullscreen}
+													<Minimize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+												{:else}
+													<Maximize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+												{/if}
+											</span>
+										</button>
+									{/if}
+								</div>
 							</div>
 						</div>
 					{/if}
@@ -206,43 +274,77 @@
 							</button>
 						{/each}
 					</div>
-						<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border shadow-sm">
+					<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border shadow-sm">
+						<button
+							type="button"
+							onclick={toggleSplitMode}
+							class={cn(getUtilityButtonClasses(), splitLayout.isEnabled && 'text-primary bg-primary/10')}
+							title={splitLayout.isEnabled ? 'Exit split view' : 'Split view'}
+						>
+							<span class="flex items-center justify-center">
+								<PanelLeft class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+							</span>
+						</button>
+						{#if splitLayout.isEnabled}
 							<button
 								type="button"
-								onclick={openShareDialog}
+								onclick={setupGrid}
 								class={getUtilityButtonClasses()}
-								title={m.share_button()}
+								title="4-up grid (use up to 4 recent chats)"
 							>
 								<span class="flex items-center justify-center">
-									<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+									<Grid2x2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 								</span>
 							</button>
-							{#if canToggleDesktopFullscreen}
-								<button
-									type="button"
-									onclick={onToggleDesktopFullscreen}
-									class={getUtilityButtonClasses()}
-									title={isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen()}
-								>
-									<span class="flex items-center justify-center">
-										{#if isDesktopFullscreen}
-											<Minimize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-										{:else}
-											<Maximize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-										{/if}
-									</span>
-								</button>
-							{/if}
-						</div>
+						{/if}
+						<button
+							type="button"
+							onclick={openShareDialog}
+							class={getUtilityButtonClasses()}
+							title={m.share_button()}
+						>
+							<span class="flex items-center justify-center">
+								<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+							</span>
+						</button>
+						{#if canToggleDesktopFullscreen}
+							<button
+								type="button"
+								onclick={onToggleDesktopFullscreen}
+								class={getUtilityButtonClasses()}
+								title={isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen()}
+							>
+								<span class="flex items-center justify-center">
+									{#if isDesktopFullscreen}
+										<Minimize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+									{:else}
+										<Maximize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+									{/if}
+								</span>
+							</button>
+						{/if}
+					</div>
 				</div>
 			</div>
 		{/if}
 
 		<!-- Tab content: ConversationWorkspace stays mounted, other tabs lazy-loaded -->
 		<div class="flex-1 min-h-0 overflow-hidden">
-			<div class="h-full" class:hidden={activeTab !== 'chat'}>
-				<ConversationWorkspace onRegisterSubmit={handleRegisterSubmit} />
-			</div>
+			{#if splitLayout.isEnabled && splitLayout.root && activeTab === 'chat'}
+				<SplitContainer
+					node={splitLayout.root}
+					focusedPaneId={splitLayout.focusedPaneId}
+					draggedChatId={splitLayout.draggedChatId}
+					onFocusPane={handleSplitFocusPane}
+					onClosePane={handleSplitClosePane}
+					onSetRatio={handleSplitSetRatio}
+					onDropChat={handleSplitDropChat}
+				/>
+			{:else}
+				<div class="h-full" class:hidden={activeTab !== 'chat'}>
+					<ConversationWorkspace onRegisterSubmit={handleRegisterSubmit} />
+				</div>
+			{/if}
 			{#if activeTab === 'files'}
 				{#await lazyFilesPanel() then { default: FilesPanel }}
 					<FilesPanel projectPath={selectedChat.projectPath} chatId={selectedChat.id} />

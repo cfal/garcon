@@ -3,7 +3,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { Button } from '$lib/components/ui/button';
-	import { getAppShell, getModelCatalog } from '$lib/context';
+	import { getAppShell, getModelCatalog, getSplitLayout } from '$lib/context';
 	import Pin from '@lucide/svelte/icons/pin';
 	import Archive from '@lucide/svelte/icons/archive';
 	import Edit2 from '@lucide/svelte/icons/pencil';
@@ -114,6 +114,18 @@
 
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
+	const splitLayout = getSplitLayout();
+
+	function handleDragStart(e: DragEvent) {
+		if (!e.dataTransfer) return;
+		e.dataTransfer.effectAllowed = 'move';
+		e.dataTransfer.setData('text/plain', session.id);
+		splitLayout.startDrag(session.id);
+	}
+
+	function handleDragEnd() {
+		splitLayout.endDrag();
+	}
 
 	let itemEl: HTMLDivElement | undefined = $state();
 
@@ -182,8 +194,14 @@
 		</button>
 	</div>
 
-	<!-- Desktop layout with right-click support -->
-	<div class="hidden md:block">
+	<!-- Desktop layout with right-click support and drag-to-split -->
+	<div
+		class="hidden md:block"
+		draggable={splitLayout.isEnabled ? true : undefined}
+		ondragstart={handleDragStart}
+		ondragend={handleDragEnd}
+		role={splitLayout.isEnabled ? 'listitem' : undefined}
+	>
 			<Button
 				variant="ghost"
 				oncontextmenu={handleRightClick}
