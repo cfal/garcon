@@ -289,6 +289,12 @@
 
 	--mobile-nav-height: 60px;
 	--mobile-nav-total: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
+
+	--app-height: 100dvh;
+}
+
+.mobile-shell {
+	height: var(--app-height, 100dvh);
 }
 
 .dark {
