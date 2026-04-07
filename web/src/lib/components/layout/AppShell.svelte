@@ -71,11 +71,14 @@
 		const vv = window.visualViewport;
 
 		function onViewportResize() {
+			// Accounts for both keyboard and iOS URL-bar offset so the
+			// layout height matches the actual visible area.
+			const visibleH = vv.height - vv.offsetTop;
 			const keyboardH = Math.max(0, window.innerHeight - vv.height);
 			appShell.keyboardHeight = keyboardH;
 			document.documentElement.style.setProperty(
 				'--app-height',
-				`${vv.height}px`,
+				`${visibleH}px`,
 			);
 		}
 
