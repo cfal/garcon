@@ -21,6 +21,8 @@ export class AppShellStore {
 	settingsInitialTab = $state<SettingsTab>('agents');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
+	/** Height of the virtual keyboard in px, tracked via visualViewport. */
+	keyboardHeight = $state(0);
 	refreshChatsCallback = $state<RefreshChatsCallback | null>(null);
 	quietRefreshChatsCallback = $state<RefreshChatsCallback | null>(null);
 	/** Read-only project base path from server config. Set once on settings load. */

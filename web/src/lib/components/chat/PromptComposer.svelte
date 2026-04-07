@@ -66,11 +66,16 @@
 		imageAttachments.revokeAll();
 	});
 
-	// Auto-resize textarea to content height.
+	// Auto-resize textarea to content height. On mobile, caps lower to
+	// preserve message feed visibility; on desktop uses the stored height.
+	const MOBILE_AUTO_MAX = 150;
+	const DESKTOP_AUTO_MAX = 300;
+
 	function autoResize() {
 		if (!textarea) return;
+		const cap = appShell.isMobile ? MOBILE_AUTO_MAX : DESKTOP_AUTO_MAX;
 		textarea.style.height = 'auto';
-		textarea.style.height = `${Math.min(textarea.scrollHeight, 300)}px`;
+		textarea.style.height = `${Math.min(textarea.scrollHeight, cap)}px`;
 	}
 
 	/** Detects "@" trigger prefixes relative to caret position. */
@@ -259,12 +264,14 @@
 
 <div class="flex-shrink-0">
 		<div data-composer class="relative bg-card border-t border-border pb-1 sm:pb-2">
-		<!-- Invisible resize grab zone above the composer -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
-		<div
-			onpointerdown={handleResizeStart}
-			class="absolute left-0 right-0 -top-1 h-3 cursor-row-resize z-10 touch-none"
-		></div>
+		{#if !appShell.isMobile}
+			<!-- Invisible resize grab zone above the composer (desktop only) -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
+			<div
+				onpointerdown={handleResizeStart}
+				class="absolute left-0 right-0 -top-1 h-3 cursor-row-resize z-10 touch-none"
+			></div>
+		{/if}
 
 		<FileMentionMenu
 			projectPath={sessions.selectedChat?.projectPath || ''}
@@ -349,7 +356,7 @@
 							placeholder={m.chat_composer_reply_placeholder()}
 							disabled={isDisabled}
 								class="block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
-								style:min-height="{composerHeight}px"
+								style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}
 							></textarea>
 					</div>
 				</div>

@@ -65,6 +65,32 @@
 		return () => mql.removeEventListener('change', onChange);
 	});
 
+	// Tracks virtual keyboard height via visualViewport for mobile layout.
+	$effect(() => {
+		if (typeof window === 'undefined' || !window.visualViewport) return;
+		const vv = window.visualViewport;
+
+		function onViewportResize() {
+			// Accounts for both keyboard and iOS URL-bar offset so the
+			// layout height matches the actual visible area.
+			const visibleH = vv.height - vv.offsetTop;
+			const keyboardH = Math.max(0, window.innerHeight - vv.height);
+			appShell.keyboardHeight = keyboardH;
+			document.documentElement.style.setProperty(
+				'--app-height',
+				`${visibleH}px`,
+			);
+		}
+
+		onViewportResize();
+		vv.addEventListener('resize', onViewportResize);
+		vv.addEventListener('scroll', onViewportResize);
+		return () => {
+			vv.removeEventListener('resize', onViewportResize);
+			vv.removeEventListener('scroll', onViewportResize);
+		};
+	});
+
 	function fetchChats() {
 		return shellController.fetchChats();
 	}
@@ -169,7 +195,7 @@
 		</div>
 
 {:else}
-	<div class="flex flex-col h-dvh w-screen overflow-hidden bg-background text-foreground">
+	<div class="mobile-shell flex flex-col w-screen overflow-hidden bg-background text-foreground">
 		{#if appShell.sidebarOpen}
 			<div class="fixed inset-0 z-40">
 					<button
