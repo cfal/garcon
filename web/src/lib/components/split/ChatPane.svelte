@@ -1,13 +1,12 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { cn } from '$lib/utils/cn';
 	import { getChatSessions, getWs } from '$lib/context';
 	import { LocalChatSnapshotCache } from '$lib/chat/chat-snapshot-cache';
-	import { parseChatMessages, type ChatMessage, UserMessage, AssistantMessage, ThinkingMessage, ErrorMessage } from '$shared/chat-types';
+	import { parseChatMessages, type ChatMessage, UserMessage, AssistantMessage, ErrorMessage } from '$shared/chat-types';
 	import { ChatLogQueryRequest } from '$shared/ws-requests';
 	import X from '@lucide/svelte/icons/x';
-	import Columns2 from '@lucide/svelte/icons/columns-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import DropZoneOverlay from './DropZoneOverlay.svelte';
 
@@ -18,7 +17,7 @@
 		draggedChatId: string | null;
 		onFocus: () => void;
 		onClose: () => void;
-		onDrop: (zone: 'left' | 'right' | 'top' | 'bottom') => void;
+		onDrop: (zone: 'left' | 'right' | 'top' | 'bottom' | 'center') => void;
 		focusedContent?: Snippet;
 	}
 
@@ -37,6 +36,25 @@
 	const providerLabel = $derived(chatRecord?.provider || '');
 	const isProcessing = $derived(chatRecord?.isProcessing ?? false);
 	const showDropZone = $derived(draggedChatId !== null && draggedChatId !== chatId);
+	let headerDropHover = $state(false);
+
+	function handleHeaderDragOver(e: DragEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		headerDropHover = true;
+	}
+
+	function handleHeaderDragLeave() {
+		headerDropHover = false;
+	}
+
+	function handleHeaderDrop(e: DragEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		headerDropHover = false;
+		onDrop('center');
+	}
 
 	// Loads messages from snapshot cache first, then fetches from server.
 	onMount(() => {
@@ -44,10 +62,8 @@
 		if (cached) {
 			messages = cached.messages;
 			isLoading = false;
-			scrollToBottom();
 		}
 
-		// Fetch fresh messages from server.
 		if (ws.isConnected) {
 			fetchMessages();
 		}
@@ -69,22 +85,17 @@
 			// Uses cached messages if fetch fails.
 		} finally {
 			isLoading = false;
-			scrollToBottom();
 		}
 	}
 
-	function scrollToBottom() {
-		requestAnimationFrame(() => {
+	// Scrolls to bottom after DOM updates whenever messages change.
+	$effect(() => {
+		messages;
+		tick().then(() => {
 			if (scrollContainer) {
 				scrollContainer.scrollTop = scrollContainer.scrollHeight;
 			}
 		});
-	}
-
-	// Keeps non-focused panes scrolled to the bottom when messages update.
-	$effect(() => {
-		messages;
-		scrollToBottom();
 	});
 
 	function getMessageText(msg: ChatMessage): string | null {
@@ -111,17 +122,22 @@
 	role="region"
 	aria-label="Chat pane: {chatTitle}"
 >
-	<!-- Pane Header -->
+	<!-- Pane Header (also a drop target for quick chat replacement) -->
 	<div
 		class={cn(
 			'flex items-center gap-2 px-3 py-1.5 flex-shrink-0 select-none cursor-pointer',
 			'border-b transition-colors duration-100',
-			isFocused
-				? 'bg-primary/5 border-primary/20'
-				: 'bg-muted/30 border-border/50 hover:bg-muted/50',
+			headerDropHover
+				? 'bg-accent/30 border-accent/50'
+				: isFocused
+					? 'bg-primary/5 border-primary/20'
+					: 'bg-muted/30 border-border/50 hover:bg-muted/50',
 		)}
 		onclick={onFocus}
 		onkeydown={(e) => { if (e.key === 'Enter') onFocus(); }}
+		ondragover={showDropZone ? handleHeaderDragOver : undefined}
+		ondragleave={showDropZone ? handleHeaderDragLeave : undefined}
+		ondrop={showDropZone ? handleHeaderDrop : undefined}
 		role="button"
 		tabindex="0"
 	>

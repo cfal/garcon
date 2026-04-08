@@ -141,7 +141,7 @@
 		splitLayout.setRatioByPath(path, ratio);
 	}
 
-	function handleSplitDropChat(paneId: string, zone: 'left' | 'right' | 'top' | 'bottom') {
+	function handleSplitDropChat(paneId: string, zone: 'left' | 'right' | 'top' | 'bottom' | 'center') {
 		const draggedChat = splitLayout.draggedChatId;
 		if (!draggedChat) return;
 		splitLayout.addChatToZone(paneId, draggedChat, zone);

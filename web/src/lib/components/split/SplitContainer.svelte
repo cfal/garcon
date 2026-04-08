@@ -13,7 +13,7 @@
 		onFocusPane: (paneId: string) => void;
 		onClosePane: (paneId: string) => void;
 		onSetRatio: (path: number[], ratio: number) => void;
-		onDropChat: (paneId: string, zone: 'left' | 'right' | 'top' | 'bottom') => void;
+		onDropChat: (paneId: string, zone: 'left' | 'right' | 'top' | 'bottom' | 'center') => void;
 		focusedPaneContent?: Snippet;
 	}
 

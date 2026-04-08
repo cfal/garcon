@@ -166,13 +166,28 @@ export class SplitLayoutStore {
 	addChatToZone(
 		targetPaneId: string,
 		chatId: string,
-		zone: 'left' | 'right' | 'top' | 'bottom',
+		zone: 'left' | 'right' | 'top' | 'bottom' | 'center',
 	): void {
+		if (zone === 'center') {
+			this.replacePaneChat(targetPaneId, chatId);
+			return;
+		}
 		const direction: SplitDirection =
 			zone === 'left' || zone === 'right' ? 'horizontal' : 'vertical';
 		const position: 'before' | 'after' =
 			zone === 'left' || zone === 'top' ? 'before' : 'after';
 		this.splitPane(targetPaneId, direction, chatId, position);
+	}
+
+	// Replaces the chat displayed in an existing pane.
+	replacePaneChat(paneId: string, chatId: string): void {
+		if (!this.root) return;
+		const replacement: PaneNode = { type: 'pane', id: paneId, chatId };
+		const result = replacePaneById(this.root, paneId, replacement);
+		if (result) {
+			this.root = result;
+			this.focusedPaneId = paneId;
+		}
 	}
 
 	closePane(paneId: string): void {
