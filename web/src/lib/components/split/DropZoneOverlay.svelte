@@ -33,7 +33,7 @@
 
 	const zoneClass = (zone: DropZone) =>
 		cn(
-			'absolute transition-all duration-150 flex items-center justify-center',
+			'transition-all duration-150 flex items-center justify-center',
 			'border-2 border-dashed rounded-md',
 			hoveredZone === zone
 				? 'bg-primary/15 border-primary/50 scale-[0.98]'

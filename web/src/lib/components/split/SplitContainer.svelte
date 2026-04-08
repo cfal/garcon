@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import type { LayoutNode } from '$lib/stores/split-layout.svelte';
 	import SplitResizer from './SplitResizer.svelte';
 	import ChatPane from './ChatPane.svelte';
@@ -13,6 +14,7 @@
 		onClosePane: (paneId: string) => void;
 		onSetRatio: (path: number[], ratio: number) => void;
 		onDropChat: (paneId: string, zone: 'left' | 'right' | 'top' | 'bottom') => void;
+		focusedPaneContent?: Snippet;
 	}
 
 	let {
@@ -24,6 +26,7 @@
 		onClosePane,
 		onSetRatio,
 		onDropChat,
+		focusedPaneContent,
 	}: SplitContainerProps = $props();
 
 	// Tracks the container element for computing resize ratios.
@@ -56,6 +59,7 @@
 		onFocus={() => onFocusPane(node.id)}
 		onClose={() => onClosePane(node.id)}
 		onDrop={(zone) => onDropChat(node.id, zone)}
+		focusedContent={focusedPaneContent}
 	/>
 {:else}
 	{@const isHorizontal = node.direction === 'horizontal'}
@@ -82,6 +86,7 @@
 				{onClosePane}
 				{onSetRatio}
 				{onDropChat}
+				{focusedPaneContent}
 			/>
 		</div>
 
@@ -103,6 +108,7 @@
 				{onClosePane}
 				{onSetRatio}
 				{onDropChat}
+				{focusedPaneContent}
 			/>
 		</div>
 	</div>

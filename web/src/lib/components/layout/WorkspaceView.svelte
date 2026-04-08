@@ -331,6 +331,9 @@
 		<!-- Tab content: ConversationWorkspace stays mounted, other tabs lazy-loaded -->
 		<div class="flex-1 min-h-0 overflow-hidden">
 			{#if splitLayout.isEnabled && splitLayout.root && activeTab === 'chat'}
+				{#snippet focusedPaneContent()}
+					<ConversationWorkspace onRegisterSubmit={handleRegisterSubmit} />
+				{/snippet}
 				<SplitContainer
 					node={splitLayout.root}
 					focusedPaneId={splitLayout.focusedPaneId}
@@ -339,6 +342,7 @@
 					onClosePane={handleSplitClosePane}
 					onSetRatio={handleSplitSetRatio}
 					onDropChat={handleSplitDropChat}
+					{focusedPaneContent}
 				/>
 			{:else}
 				<div class="h-full" class:hidden={activeTab !== 'chat'}>

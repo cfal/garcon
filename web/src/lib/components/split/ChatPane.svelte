@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { onMount } from 'svelte';
 	import { cn } from '$lib/utils/cn';
 	import { getChatSessions, getWs } from '$lib/context';
@@ -18,9 +19,10 @@
 		onFocus: () => void;
 		onClose: () => void;
 		onDrop: (zone: 'left' | 'right' | 'top' | 'bottom') => void;
+		focusedContent?: Snippet;
 	}
 
-	let { paneId, chatId, isFocused, draggedChatId, onFocus, onClose, onDrop }: ChatPaneProps = $props();
+	let { paneId, chatId, isFocused, draggedChatId, onFocus, onClose, onDrop, focusedContent }: ChatPaneProps = $props();
 
 	const sessions = getChatSessions();
 	const ws = getWs();
@@ -141,46 +143,53 @@
 		</button>
 	</div>
 
-	<!-- Message List -->
-	<!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events -- click delegates focus to this pane -->
-	<div
-		bind:this={scrollContainer}
-		class="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-2"
-		onclick={onFocus}
-		role="log"
-	>
-		{#if isLoading}
-			<div class="flex items-center justify-center h-full">
-				<div class="flex items-center gap-2 text-muted-foreground text-xs">
-					<div class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-					Loading messages...
-				</div>
-			</div>
-		{:else if messages.length === 0}
-			<div class="flex items-center justify-center h-full text-muted-foreground text-xs">
-				No messages yet
-			</div>
-		{:else}
-			{#each messages as msg, i}
-				{@const text = getMessageText(msg)}
-				{@const role = getMessageRole(msg)}
-				{#if text && role}
-					<div
-						class={cn(
-							'text-xs leading-relaxed rounded-lg px-3 py-2 max-w-full',
-							role === 'user'
-								? 'bg-primary/10 text-foreground ml-8'
-								: role === 'assistant'
-									? 'bg-muted/50 text-foreground mr-4'
-									: 'bg-destructive/10 text-destructive',
-						)}
-					>
-						<div class="whitespace-pre-wrap break-words line-clamp-[20]">{text}</div>
+	<!-- Content area: full interactive workspace for focused pane, read-only for others -->
+	{#if focusedContent && isFocused}
+		<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -- click delegates focus to this pane -->
+		<div class="flex-1 min-h-0 overflow-hidden" onclick={onFocus}>
+			{@render focusedContent()}
+		</div>
+	{:else}
+		<!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events -- click delegates focus to this pane -->
+		<div
+			bind:this={scrollContainer}
+			class="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-2"
+			onclick={onFocus}
+			role="log"
+		>
+			{#if isLoading}
+				<div class="flex items-center justify-center h-full">
+					<div class="flex items-center gap-2 text-muted-foreground text-xs">
+						<div class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+						Loading messages...
 					</div>
-				{/if}
-			{/each}
-		{/if}
-	</div>
+				</div>
+			{:else if messages.length === 0}
+				<div class="flex items-center justify-center h-full text-muted-foreground text-xs">
+					No messages yet
+				</div>
+			{:else}
+				{#each messages as msg, i}
+					{@const text = getMessageText(msg)}
+					{@const role = getMessageRole(msg)}
+					{#if text && role}
+						<div
+							class={cn(
+								'text-xs leading-relaxed rounded-lg px-3 py-2 max-w-full',
+								role === 'user'
+									? 'bg-primary/10 text-foreground ml-8'
+									: role === 'assistant'
+										? 'bg-muted/50 text-foreground mr-4'
+										: 'bg-destructive/10 text-destructive',
+							)}
+						>
+							<div class="whitespace-pre-wrap break-words line-clamp-[20]">{text}</div>
+						</div>
+					{/if}
+				{/each}
+			{/if}
+		</div>
+	{/if}
 
 	<!-- Focus indicator bar at bottom -->
 	{#if isFocused}
