@@ -81,6 +81,12 @@
 		});
 	}
 
+	// Keeps non-focused panes scrolled to the bottom when messages update.
+	$effect(() => {
+		messages;
+		scrollToBottom();
+	});
+
 	function getMessageText(msg: ChatMessage): string | null {
 		if (msg instanceof UserMessage) return msg.content;
 		if (msg instanceof AssistantMessage) return msg.content;
