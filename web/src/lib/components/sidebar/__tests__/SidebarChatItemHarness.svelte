@@ -1,6 +1,6 @@
 <script lang="ts">
 	import SidebarChatItem from '../SidebarChatItem.svelte';
-	import { setAppShell, setModelCatalog } from '$lib/context';
+	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarChatItemHarnessProps {
@@ -31,6 +31,12 @@
 		supportsFork() {
 			return true;
 		},
+	} as never);
+
+	setSplitLayout({
+		isEnabled: false,
+		startDrag() {},
+		endDrag() {},
 	} as never);
 </script>
 

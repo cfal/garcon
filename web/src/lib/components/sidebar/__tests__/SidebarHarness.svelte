@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Sidebar from '../Sidebar.svelte';
-	import { setAppShell, setLocalSettings, setModelCatalog, setReadReceiptOutbox } from '$lib/context';
+	import { setAppShell, setLocalSettings, setModelCatalog, setReadReceiptOutbox, setSplitLayout } from '$lib/context';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarHarnessProps {
@@ -37,6 +37,12 @@
 		supportsFork() {
 			return true;
 		},
+	} as never);
+
+	setSplitLayout({
+		isEnabled: false,
+		startDrag() {},
+		endDrag() {},
 	} as never);
 </script>
 

@@ -3,7 +3,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { Button } from '$lib/components/ui/button';
-	import { getAppShell, getModelCatalog } from '$lib/context';
+	import { getAppShell, getModelCatalog, getSplitLayout } from '$lib/context';
 	import Pin from '@lucide/svelte/icons/pin';
 	import Archive from '@lucide/svelte/icons/archive';
 	import Edit2 from '@lucide/svelte/icons/pencil';
@@ -114,6 +114,18 @@
 
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
+	const splitLayout = getSplitLayout();
+
+	function handleDragStart(e: DragEvent) {
+		if (!e.dataTransfer) return;
+		e.dataTransfer.effectAllowed = 'move';
+		e.dataTransfer.setData('text/plain', session.id);
+		splitLayout.startDrag(session.id);
+	}
+
+	function handleDragEnd() {
+		splitLayout.endDrag();
+	}
 
 	let itemEl: HTMLDivElement | undefined = $state();
 
@@ -182,10 +194,13 @@
 		</button>
 	</div>
 
-	<!-- Desktop layout with right-click support -->
+	<!-- Desktop layout with right-click support and drag-to-split -->
 	<div class="hidden md:block">
 			<Button
 				variant="ghost"
+				draggable={true}
+				ondragstart={handleDragStart}
+				ondragend={handleDragEnd}
 				oncontextmenu={handleRightClick}
 					class={cn(
 						'w-full justify-start py-[5px] pr-2 pl-[7px] h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30 border-l-2 border-l-transparent',
