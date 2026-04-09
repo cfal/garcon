@@ -197,10 +197,9 @@
 	<!-- Desktop layout with right-click support and drag-to-split -->
 	<div
 		class="hidden md:block"
-		draggable={splitLayout.isEnabled ? true : undefined}
+		draggable={true}
 		ondragstart={handleDragStart}
 		ondragend={handleDragEnd}
-		role={splitLayout.isEnabled ? 'listitem' : undefined}
 	>
 			<Button
 				variant="ghost"

@@ -148,6 +148,35 @@
 		splitLayout.addChatToZone(paneId, draggedChat, zone);
 		splitLayout.endDrag();
 	}
+
+	// Handles dropping a chat on the main workspace when split mode is off.
+	// Auto-enables split with the current chat, then splits in the dropped chat.
+	let workspaceDragOver = $state(false);
+
+	function handleWorkspaceDragOver(e: DragEvent) {
+		if (splitLayout.isEnabled) return;
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		workspaceDragOver = true;
+	}
+
+	function handleWorkspaceDragLeave() {
+		workspaceDragOver = false;
+	}
+
+	function handleWorkspaceDrop(e: DragEvent) {
+		e.preventDefault();
+		workspaceDragOver = false;
+		const draggedChat = splitLayout.draggedChatId;
+		if (!draggedChat || !selectedChat) return;
+		if (draggedChat === selectedChat.id) return;
+		splitLayout.enableWithChat(selectedChat.id);
+		const pane = splitLayout.panes[0];
+		if (pane) {
+			splitLayout.splitPane(pane.id, 'horizontal', draggedChat);
+		}
+		splitLayout.endDrag();
+	}
 </script>
 
 <div class="h-full flex flex-col relative">
@@ -346,8 +375,20 @@
 					{focusedPaneContent}
 				/>
 			{:else}
-				<div class="h-full" class:hidden={activeTab !== 'chat'}>
+				<!-- svelte-ignore a11y_no_static_element_interactions -- drop target for initiating split mode -->
+				<div
+					class="h-full relative"
+					class:hidden={activeTab !== 'chat'}
+					ondragover={handleWorkspaceDragOver}
+					ondragleave={handleWorkspaceDragLeave}
+					ondrop={handleWorkspaceDrop}
+				>
 					<ConversationWorkspace onRegisterSubmit={handleRegisterSubmit} />
+					{#if workspaceDragOver}
+						<div class="absolute inset-0 z-30 flex items-center justify-center bg-primary/5 border-2 border-dashed border-primary/30 rounded-lg pointer-events-none">
+							<span class="text-sm font-medium text-primary bg-primary/10 px-3 py-1.5 rounded-md">Drop to split view</span>
+						</div>
+					{/if}
 				</div>
 			{/if}
 			{#if activeTab === 'files'}
