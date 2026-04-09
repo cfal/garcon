@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import { onMount, tick } from 'svelte';
 	import { cn } from '$lib/utils/cn';
-	import { getChatSessions, getWs } from '$lib/context';
+	import { getChatSessions, getWs, getSplitLayout } from '$lib/context';
 	import { LocalChatSnapshotCache } from '$lib/chat/chat-snapshot-cache';
 	import { parseChatMessages, type ChatMessage, UserMessage, AssistantMessage, ErrorMessage } from '$shared/chat-types';
 	import { ChatLogQueryRequest } from '$shared/ws-requests';
@@ -25,6 +25,7 @@
 
 	const sessions = getChatSessions();
 	const ws = getWs();
+	const splitLayout = getSplitLayout();
 	const snapshotCache = new LocalChatSnapshotCache();
 
 	let messages = $state<ChatMessage[]>([]);
@@ -38,7 +39,20 @@
 	const showDropZone = $derived(draggedChatId !== null && draggedChatId !== chatId);
 	let headerDropHover = $state(false);
 
+	// Pane header is draggable for rearranging splits.
+	function handlePaneHeaderDragStart(e: DragEvent) {
+		if (!e.dataTransfer) return;
+		e.dataTransfer.effectAllowed = 'move';
+		e.dataTransfer.setData('text/plain', chatId);
+		splitLayout.startPaneDrag(paneId, chatId);
+	}
+
+	function handlePaneHeaderDragEnd() {
+		splitLayout.endDrag();
+	}
+
 	function handleHeaderDragOver(e: DragEvent) {
+		if (!showDropZone) return;
 		e.preventDefault();
 		e.stopPropagation();
 		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
@@ -50,10 +64,17 @@
 	}
 
 	function handleHeaderDrop(e: DragEvent) {
+		if (!showDropZone) return;
 		e.preventDefault();
 		e.stopPropagation();
 		headerDropHover = false;
-		onDrop('center');
+		// Pane-to-pane drag: swap the two panes.
+		if (splitLayout.draggedPaneId) {
+			splitLayout.swapPanes(splitLayout.draggedPaneId, paneId);
+			splitLayout.endDrag();
+		} else {
+			onDrop('center');
+		}
 	}
 
 	// Loads messages from snapshot cache first, then fetches from server.
@@ -122,10 +143,10 @@
 	role="region"
 	aria-label="Chat pane: {chatTitle}"
 >
-	<!-- Pane Header (also a drop target for quick chat replacement) -->
+	<!-- Pane Header: draggable for rearranging, drop target for swap/replace -->
 	<div
 		class={cn(
-			'flex items-center gap-2 px-3 py-1.5 flex-shrink-0 select-none cursor-pointer',
+			'flex items-center gap-2 px-3 py-1.5 flex-shrink-0 select-none cursor-grab',
 			'border-b transition-colors duration-100',
 			headerDropHover
 				? 'bg-accent/30 border-accent/50'
@@ -133,11 +154,14 @@
 					? 'bg-primary/5 border-primary/20'
 					: 'bg-muted/30 border-border/50 hover:bg-muted/50',
 		)}
+		draggable={true}
 		onclick={onFocus}
 		onkeydown={(e) => { if (e.key === 'Enter') onFocus(); }}
-		ondragover={showDropZone ? handleHeaderDragOver : undefined}
-		ondragleave={showDropZone ? handleHeaderDragLeave : undefined}
-		ondrop={showDropZone ? handleHeaderDrop : undefined}
+		ondragstart={handlePaneHeaderDragStart}
+		ondragend={handlePaneHeaderDragEnd}
+		ondragover={handleHeaderDragOver}
+		ondragleave={handleHeaderDragLeave}
+		ondrop={handleHeaderDrop}
 		role="button"
 		tabindex="0"
 	>

@@ -95,6 +95,8 @@ export class SplitLayoutStore {
 	root = $state<LayoutNode | null>(null);
 	focusedPaneId = $state<string | null>(null);
 	draggedChatId = $state<string | null>(null);
+	// Set when the drag originates from a pane header (for swap operations).
+	draggedPaneId = $state<string | null>(null);
 
 	get isEnabled(): boolean {
 		return this.root !== null;
@@ -193,7 +195,7 @@ export class SplitLayoutStore {
 	closePane(paneId: string): void {
 		if (!this.root) return;
 
-		// If only one pane, disable split mode.
+		// If only one pane, disable split mode entirely.
 		if (this.root.type === 'pane') {
 			this.disable();
 			return;
@@ -201,6 +203,12 @@ export class SplitLayoutStore {
 
 		const result = removePaneById(this.root, paneId);
 		if (!result) return;
+
+		// If closing reduced to a single pane, exit split mode.
+		if (result.type === 'pane') {
+			this.disable();
+			return;
+		}
 
 		this.root = result;
 
@@ -265,10 +273,31 @@ export class SplitLayoutStore {
 
 	startDrag(chatId: string): void {
 		this.draggedChatId = chatId;
+		this.draggedPaneId = null;
+	}
+
+	startPaneDrag(paneId: string, chatId: string): void {
+		this.draggedChatId = chatId;
+		this.draggedPaneId = paneId;
 	}
 
 	endDrag(): void {
 		this.draggedChatId = null;
+		this.draggedPaneId = null;
+	}
+
+	// Swaps the chats between two panes.
+	swapPanes(paneIdA: string, paneIdB: string): void {
+		if (!this.root) return;
+		const paneA = this.panes.find((p) => p.id === paneIdA);
+		const paneB = this.panes.find((p) => p.id === paneIdB);
+		if (!paneA || !paneB) return;
+		const chatA = paneA.chatId;
+		const chatB = paneB.chatId;
+		// Rebuild tree immutably via two replacements.
+		let result = replacePaneById(this.root, paneIdA, { type: 'pane', id: paneIdA, chatId: chatB });
+		if (result) result = replacePaneById(result, paneIdB, { type: 'pane', id: paneIdB, chatId: chatA });
+		if (result) this.root = result;
 	}
 }
 

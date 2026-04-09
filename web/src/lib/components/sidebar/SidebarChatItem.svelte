@@ -195,14 +195,12 @@
 	</div>
 
 	<!-- Desktop layout with right-click support and drag-to-split -->
-	<div
-		class="hidden md:block"
-		draggable={true}
-		ondragstart={handleDragStart}
-		ondragend={handleDragEnd}
-	>
+	<div class="hidden md:block">
 			<Button
 				variant="ghost"
+				draggable={true}
+				ondragstart={handleDragStart}
+				ondragend={handleDragEnd}
 				oncontextmenu={handleRightClick}
 					class={cn(
 						'w-full justify-start py-[5px] pr-2 pl-[7px] h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30 border-l-2 border-l-transparent',

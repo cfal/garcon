@@ -131,10 +131,11 @@
 	}
 
 	function handleSplitClosePane(paneId: string) {
+		// Capture the other pane's chatId before closing, since disable() clears state.
+		const otherChat = splitLayout.panes.find((p) => p.id !== paneId)?.chatId;
 		splitLayout.closePane(paneId);
-		if (!splitLayout.isEnabled) {
-			const remaining = splitLayout.focusedChatId;
-			if (remaining) sessions.setSelectedChatId(remaining);
+		if (!splitLayout.isEnabled && otherChat) {
+			sessions.setSelectedChatId(otherChat);
 		}
 	}
 
@@ -145,6 +146,12 @@
 	function handleSplitDropChat(paneId: string, zone: 'left' | 'right' | 'top' | 'bottom' | 'center') {
 		const draggedChat = splitLayout.draggedChatId;
 		if (!draggedChat) return;
+		// Pane-to-pane drag: swap instead of split/replace.
+		if (splitLayout.draggedPaneId && zone === 'center') {
+			splitLayout.swapPanes(splitLayout.draggedPaneId, paneId);
+			splitLayout.endDrag();
+			return;
+		}
 		splitLayout.addChatToZone(paneId, draggedChat, zone);
 		splitLayout.endDrag();
 	}
