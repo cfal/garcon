@@ -22,7 +22,11 @@
 		currentTime: Date;
 		searchFilter: string;
 		isReorderMode: boolean;
+		isMultiSelectMode?: boolean;
+		isMultiSelected?: (chatId: string) => boolean;
 		onEnterReorderMode: () => void;
+		onEnterMultiSelect?: (chatId: string) => void;
+		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onReorderGroup: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chatId: string, chatTitle: string, provider: SessionProvider) => void;
@@ -46,7 +50,11 @@
 		currentTime,
 		searchFilter,
 		isReorderMode,
+		isMultiSelectMode = false,
+		isMultiSelected,
 		onEnterReorderMode,
+		onEnterMultiSelect,
+		onMultiSelectToggle,
 		onReorderGroup,
 		onChatSelect,
 		onDeleteChat,
@@ -393,6 +401,8 @@
 						{currentTime}
 						isPinned={true}
 						isArchived={false}
+						{isMultiSelectMode}
+						isMultiSelected={isMultiSelected?.(gs.id) ?? false}
 						{onChatSelect}
 						{onDeleteChat}
 						{onStartRenameChat}
@@ -404,6 +414,8 @@
 									{onTagClick}
 									{onManageTags}
 							{onEnterReorderMode}
+						{onEnterMultiSelect}
+						{onMultiSelectToggle}
 						{hasPinnedChats}
 					/>
 				{/each}
@@ -425,6 +437,8 @@
 								{currentTime}
 								isPinned={true}
 								isArchived={false}
+								{isMultiSelectMode}
+								isMultiSelected={isMultiSelected?.(chat.id) ?? false}
 								{onChatSelect}
 								{onDeleteChat}
 								{onStartRenameChat}
@@ -436,6 +450,8 @@
 									{onTagClick}
 									{onManageTags}
 								{onEnterReorderMode}
+								{onEnterMultiSelect}
+								{onMultiSelectToggle}
 								{hasPinnedChats}
 							/>
 						</div>
@@ -451,6 +467,8 @@
 					{currentTime}
 					isPinned={false}
 					isArchived={false}
+					{isMultiSelectMode}
+					isMultiSelected={isMultiSelected?.(gs.id) ?? false}
 					{onChatSelect}
 					{onDeleteChat}
 					{onStartRenameChat}
@@ -462,6 +480,8 @@
 									{onTagClick}
 									{onManageTags}
 						{onEnterReorderMode}
+					{onEnterMultiSelect}
+					{onMultiSelectToggle}
 					{hasPinnedChats}
 				/>
 			{/each}
@@ -483,6 +503,8 @@
 								{currentTime}
 								isPinned={false}
 								isArchived={false}
+								{isMultiSelectMode}
+								isMultiSelected={isMultiSelected?.(chat.id) ?? false}
 								{onChatSelect}
 								{onDeleteChat}
 								{onStartRenameChat}
@@ -494,6 +516,8 @@
 									{onTagClick}
 									{onManageTags}
 									{onEnterReorderMode}
+								{onEnterMultiSelect}
+								{onMultiSelectToggle}
 								{hasPinnedChats}
 							/>
 						</div>
@@ -508,6 +532,8 @@
 				{currentTime}
 				isPinned={false}
 				isArchived={true}
+				{isMultiSelectMode}
+				isMultiSelected={isMultiSelected?.(gs.id) ?? false}
 				{onChatSelect}
 				{onDeleteChat}
 				{onStartRenameChat}
@@ -519,6 +545,8 @@
 									{onTagClick}
 									{onManageTags}
 					{onEnterReorderMode}
+				{onEnterMultiSelect}
+				{onMultiSelectToggle}
 				{hasPinnedChats}
 			/>
 		{/each}
