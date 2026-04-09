@@ -124,6 +124,7 @@
 	}
 
 	function handleSplitFocusPane(paneId: string) {
+		if (splitLayout.focusedPaneId === paneId) return;
 		splitLayout.focusPane(paneId);
 		const pane = splitLayout.panes.find((p) => p.id === paneId);
 		if (pane) sessions.setSelectedChatId(pane.chatId);

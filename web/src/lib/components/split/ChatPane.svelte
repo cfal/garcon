@@ -167,8 +167,7 @@
 
 	<!-- Content area: full interactive workspace for focused pane, read-only for others -->
 	{#if focusedContent && isFocused}
-		<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -- click delegates focus to this pane -->
-		<div class="flex-1 min-h-0 overflow-hidden" onclick={onFocus}>
+		<div class="flex-1 min-h-0 overflow-hidden">
 			{@render focusedContent()}
 		</div>
 	{:else}
