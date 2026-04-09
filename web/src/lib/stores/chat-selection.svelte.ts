@@ -37,7 +37,7 @@ export class ChatSelectionStore {
 			next.add(id);
 		}
 		this.selectedIds = next;
-		this.lastClickedId = id;
+		this.lastClickedId = next.size > 0 ? id : null;
 	}
 
 	// Selects a contiguous range from lastClickedId to targetId within

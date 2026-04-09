@@ -286,6 +286,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			void exitReorderMode();
 			return;
 		}
+		if (selection.isActive) selection.exit();
 		onNewChat();
 	}
 
@@ -342,7 +343,16 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		selection.exit();
 	}
 
-	// Derives bulk action visibility from the selection state.
+	// Prunes stale selections when the chat list changes (server refresh,
+	// external delete, filter change).
+	$effect(() => {
+		if (!selection.isActive) return;
+		const visibleIds = new Set(chats.map((c) => c.id));
+		selection.pruneToVisible(visibleIds);
+	});
+
+	// Authoritative list of selected chats that still exist in the current
+	// chat list. All display counts and actions derive from this.
 	let selectedChats = $derived.by(() => {
 		if (!selection.isActive) return [];
 		return chats.filter((c) => selection.isSelected(c.id));
@@ -358,7 +368,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		if (ids.length === 0) return;
 		isBulkOperating = true;
 		try {
-			await controller.bulkPin(ids);
+			await controller.bulkTogglePin(ids);
 		} catch (error) {
 			console.error('Failed to bulk pin:', error);
 		} finally {
@@ -372,7 +382,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		if (ids.length === 0) return;
 		isBulkOperating = true;
 		try {
-			await controller.bulkUnpin(ids);
+			await controller.bulkTogglePin(ids);
 		} catch (error) {
 			console.error('Failed to bulk unpin:', error);
 		} finally {
@@ -387,7 +397,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		const isSelectedChatInBulk = selectedChatId && ids.includes(selectedChatId);
 		isBulkOperating = true;
 		try {
-			await controller.bulkArchive(ids);
+			await controller.bulkToggleArchive(ids);
 			if (isSelectedChatInBulk) {
 				const remaining = chats.find((c) => !ids.includes(c.id) && !c.isArchived);
 				if (remaining) onChatSelect(remaining.id);
@@ -406,7 +416,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		if (ids.length === 0) return;
 		isBulkOperating = true;
 		try {
-			await controller.bulkUnarchive(ids);
+			await controller.bulkToggleArchive(ids);
 		} catch (error) {
 			console.error('Failed to bulk unarchive:', error);
 		} finally {
@@ -416,11 +426,8 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 	}
 
 	function handleBulkDeleteRequest() {
-		const ids = [...selection.selectedIds];
-		const titles = ids.map((id) => {
-			const chat = chats.find((c) => c.id === id);
-			return chat?.title || m.sidebar_chats_unnamed();
-		});
+		const ids = selectedChats.map((c) => c.id);
+		const titles = selectedChats.map((c) => c.title || m.sidebar_chats_unnamed());
 		bulkDeleteConfirmation = { chatIds: ids, chatTitles: titles };
 	}
 
@@ -699,7 +706,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 
 	{#if selection.isActive}
 		<SidebarSelectionBar
-			count={selection.count}
+			count={selectedChats.length}
 			totalVisible={searchState.filteredChats.length}
 			showPin={bulkShowPin}
 			showUnpin={bulkShowUnpin}

@@ -205,8 +205,11 @@
 				onclick={handleItemClick}
 			>
 				{#if isMultiSelectMode}
-					<div class="flex items-center justify-center w-7 shrink-0">
+					<div class="flex items-center justify-center w-7 shrink-0" aria-hidden="true">
 						<div
+							role="checkbox"
+							aria-checked={isMultiSelected}
+							aria-label="Select {chatName}"
 							class={cn(
 								'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
 								isMultiSelected
@@ -253,8 +256,11 @@
 			onclick={handleItemClick}
 		>
 			{#if isMultiSelectMode}
-				<div class="flex items-center justify-center w-7 shrink-0">
+				<div class="flex items-center justify-center w-7 shrink-0" aria-hidden="true">
 					<div
+						role="checkbox"
+						aria-checked={isMultiSelected}
+						aria-label="Select {chatName}"
 						class={cn(
 							'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
 							isMultiSelected
