@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { onMount, tick } from 'svelte';
+	import { tick } from 'svelte';
 	import { cn } from '$lib/utils/cn';
 	import { getChatSessions, getWs, getSplitLayout } from '$lib/context';
 	import { LocalChatSnapshotCache } from '$lib/chat/chat-snapshot-cache';
@@ -77,26 +77,33 @@
 		}
 	}
 
-	// Loads messages from snapshot cache first, then fetches from server.
-	onMount(() => {
-		const cached = snapshotCache.restore(chatId);
+	// Loads messages when chatId changes (on mount and after swap/replace).
+	$effect(() => {
+		const id = chatId;
+		messages = [];
+		isLoading = true;
+
+		const cached = snapshotCache.restore(id);
 		if (cached) {
 			messages = cached.messages;
 			isLoading = false;
 		}
 
 		if (ws.isConnected) {
-			fetchMessages();
+			fetchMessagesForChat(id);
 		}
 	});
 
-	async function fetchMessages() {
+	async function fetchMessagesForChat(targetChatId: string) {
 		try {
 			const data = await ws.sendRequest<{
 				messages?: ChatMessage[];
 				hasMore?: boolean;
 				total?: number;
-			}>(new ChatLogQueryRequest(null, chatId, 50, 0), 10_000);
+			}>(new ChatLogQueryRequest(null, targetChatId, 50, 0), 10_000);
+
+			// Guard against stale responses after rapid chatId changes.
+			if (targetChatId !== chatId) return;
 
 			const parsed = parseChatMessages(data.messages);
 			if (parsed.length > 0) {
@@ -105,7 +112,9 @@
 		} catch {
 			// Uses cached messages if fetch fails.
 		} finally {
-			isLoading = false;
+			if (targetChatId === chatId) {
+				isLoading = false;
+			}
 		}
 	}
 

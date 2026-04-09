@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { AppTab } from '$lib/types/app';
+	import { untrack } from 'svelte';
 	import { getChatSessions, getLocalSettings, getSplitLayout } from '$lib/context';
 	import Menu from '@lucide/svelte/icons/menu';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
@@ -120,6 +121,7 @@
 		const chatIds = sessions.orderedChats.slice(0, 4).map((c) => c.id);
 		if (chatIds.length >= 2) {
 			splitLayout.setGrid(chatIds);
+			sessions.setSelectedChatId(chatIds[0]);
 		}
 	}
 
@@ -146,14 +148,22 @@
 	function handleSplitDropChat(paneId: string, zone: 'left' | 'right' | 'top' | 'bottom' | 'center') {
 		const draggedChat = splitLayout.draggedChatId;
 		if (!draggedChat) return;
-		// Pane-to-pane drag: swap instead of split/replace.
-		if (splitLayout.draggedPaneId && zone === 'center') {
+		// Pane-to-pane drag: always swap regardless of zone to prevent duplication.
+		if (splitLayout.draggedPaneId) {
 			splitLayout.swapPanes(splitLayout.draggedPaneId, paneId);
 			splitLayout.endDrag();
+			syncFocusedChatToSessions();
 			return;
 		}
 		splitLayout.addChatToZone(paneId, draggedChat, zone);
 		splitLayout.endDrag();
+		syncFocusedChatToSessions();
+	}
+
+	// Syncs the focused pane's chat to sessions.selectedChatId.
+	function syncFocusedChatToSessions() {
+		const focusedChat = splitLayout.focusedChatId;
+		if (focusedChat) sessions.setSelectedChatId(focusedChat);
 	}
 
 	// Handles dropping a chat on the main workspace when split mode is off.
@@ -178,12 +188,35 @@
 		if (!draggedChat || !selectedChat) return;
 		if (draggedChat === selectedChat.id) return;
 		splitLayout.enableWithChat(selectedChat.id);
-		const pane = splitLayout.panes[0];
-		if (pane) {
-			splitLayout.splitPane(pane.id, 'horizontal', draggedChat);
+		const initialPane = splitLayout.panes[0];
+		if (initialPane) {
+			splitLayout.splitPane(initialPane.id, 'horizontal', draggedChat);
+			// Keep focus on the original chat pane, not the dragged one.
+			splitLayout.focusPane(initialPane.id);
 		}
 		splitLayout.endDrag();
 	}
+
+	// Keeps sessions.selectedChatId in sync with the split layout's focused pane.
+	// Handles sidebar clicks (which only update sessions) by navigating the focused
+	// pane to the selected chat, or focusing an existing pane that already shows it.
+	$effect(() => {
+		const isEnabled = splitLayout.isEnabled;
+		const selChat = selectedChat;
+		if (!isEnabled || !selChat) return;
+
+		untrack(() => {
+			const focusedChat = splitLayout.focusedChatId;
+			if (selChat.id === focusedChat) return;
+
+			const existingPane = splitLayout.panes.find((p) => p.chatId === selChat.id);
+			if (existingPane) {
+				splitLayout.focusPane(existingPane.id);
+			} else if (splitLayout.focusedPaneId) {
+				splitLayout.replacePaneChat(splitLayout.focusedPaneId, selChat.id);
+			}
+		});
+	});
 </script>
 
 <div class="h-full flex flex-col relative">
