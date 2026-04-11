@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { getSharedChat } from '$lib/api/shares.js';
 	import { parseChatMessage } from '$shared/chat-types';
 	import type { ChatMessage } from '$shared/chat-types';
@@ -70,6 +70,9 @@
 			errorMsg = m.shared_view_not_found();
 		} finally {
 			isLoading = false;
+			// Scroll to bottom after messages render so shared links open at the latest message.
+			await tick();
+			window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
 		}
 	});
 
