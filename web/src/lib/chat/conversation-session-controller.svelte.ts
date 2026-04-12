@@ -27,7 +27,7 @@ import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { AmpAgentMode, PendingPermissionRequest, PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import type { AppTab } from '$lib/types/app';
+import type { AppTab, SessionProvider } from '$lib/types/app';
 
 export interface SessionControllerDeps {
 	sessions: {
@@ -49,6 +49,7 @@ export interface SessionControllerDeps {
 	lifecycle: ChatLifecycleStore;
 	startupCoordinator: StartupCoordinator;
 	ws: WsConnection;
+	modelCatalog: { isLocalModel: (provider: SessionProvider, model: string) => boolean };
 	appShell: { quietRefreshChats: () => void; openNewChatDialog: (opts: { prefill: string }) => void };
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
 	navigation: { setActiveTab: (tab: AppTab) => void };
@@ -423,10 +424,33 @@ export class ConversationSessionController {
 		const chatId = deps.sessions.selectedChatId;
 		if (!chatId) return;
 		if (deps.sessions.isDraft(chatId)) {
+			deps.providerState.setModel(model);
 			deps.sessions.patchDraftStartup(chatId, { model });
 			deps.sessions.patchChat(chatId, { model });
 			return;
 		}
+
+		// Block switching between local and cloud models within an active
+		// session. The CLI conversation history contains provider-specific
+		// artifacts (e.g. thinking-block signatures) that are invalid when
+		// replayed against a different backend.
+		const provider = deps.providerState.provider;
+		const currentModel = deps.sessions.selectedChat?.model ?? deps.providerState.model;
+		const wasLocal = deps.modelCatalog.isLocalModel(provider, currentModel);
+		const isLocal = deps.modelCatalog.isLocalModel(provider, model);
+		if (wasLocal !== isLocal) {
+			const target = isLocal ? 'local' : 'cloud';
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(
+					new Date().toISOString(),
+					`Cannot switch to a ${target} model mid-session. Start a new chat to use ${model}.`,
+				),
+			];
+			return;
+		}
+
+		deps.providerState.setModel(model);
 		deps.ws.sendMessage(new ModelSetRequest(chatId, model));
 		deps.sessions.patchChat(chatId, { model });
 	}

@@ -6,6 +6,7 @@ export default defineConfig({
 	test: {
 		environment: 'happy-dom',
 		globals: true,
+		setupFiles: ['./src/test/vitest-setup.ts'],
 		include: ['src/**/*.test.ts'],
 		alias: {
 			$lib: new URL('./src/lib', import.meta.url).pathname,

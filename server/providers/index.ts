@@ -15,6 +15,7 @@ import { getOpenCodeAuthStatus } from './opencode-auth.js';
 import { getAmpAuthStatus } from './amp-auth.js';
 import { getFactoryAuthStatus } from './factory-auth.js';
 import { getArtificialProviderSessionId } from '../chats/artificial-native-path.js';
+import type { OllamaBridge } from './ollama-bridge.js';
 
 // Stateless loaders and preview functions
 import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loaders/claude-history-loader.js';
@@ -137,6 +138,7 @@ export class ProviderRegistry {
   #opencode: OpenCodeProviderInstance;
   #amp: ExternalCliProviderInstance;
   #factory: ExternalCliProviderInstance;
+  #ollama: OllamaBridge | null;
 
   constructor(
     registry: IChatRegistry,
@@ -145,6 +147,7 @@ export class ProviderRegistry {
     opencode: OpenCodeProviderInstance,
     amp: ExternalCliProviderInstance,
     factory: ExternalCliProviderInstance,
+    ollama?: OllamaBridge | null,
   ) {
     this.#registry = registry;
     this.#claude = claude;
@@ -152,12 +155,28 @@ export class ProviderRegistry {
     this.#opencode = opencode;
     this.#amp = amp;
     this.#factory = factory;
+    this.#ollama = ollama ?? null;
 
     if (typeof registry.onChatRemoved === 'function') {
       registry.onChatRemoved((chatId: string) => {
         this.#opencode.evictChat(chatId);
       });
     }
+  }
+
+  get ollamaBridge(): OllamaBridge | null {
+    return this.#ollama;
+  }
+
+  /** Builds env overrides for a local model on the given provider. */
+  #getLocalModelEnv(provider: string, model: string): Record<string, string> | undefined {
+    if (!this.#ollama?.isOllamaModel(model)) return undefined;
+    if (provider === 'claude') return this.#ollama.getClaudeEnvOverrides();
+    if (provider === 'codex') {
+      const opts = this.#ollama.getCodexSdkOptions();
+      return { OPENAI_BASE_URL: opts.baseUrl, OPENAI_API_KEY: opts.apiKey };
+    }
+    return undefined;
   }
 
   // Starts a new provider session. The chat registry entry must already
@@ -182,6 +201,7 @@ export class ProviderRegistry {
     }
 
     const entry = requireChatEntry(chatId, rawEntry);
+    const envOverrides = this.#getLocalModelEnv(entry.provider, entry.model);
     const request: StartSessionRequest = {
       chatId,
       command,
@@ -191,6 +211,7 @@ export class ProviderRegistry {
       thinkingMode: entry.thinkingMode,
       claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
       images: opts.images,
+      envOverrides,
     };
 
     if (entry.provider === 'claude') {
@@ -257,16 +278,34 @@ export class ProviderRegistry {
     }
 
     const entry = requireChatEntry(chatId, rawEntry);
+    const effectiveModel = opts.model ?? entry.model;
+
+    // Resuming a CLI session across the local/cloud model boundary is
+    // unsupported. The conversation history contains provider-specific
+    // artifacts (e.g. Anthropic thinking-block signatures) that are
+    // invalid when replayed against a different backend.
+    const wasLocal = Boolean(this.#ollama?.isOllamaModel(entry.model));
+    const isLocal = Boolean(this.#ollama?.isOllamaModel(effectiveModel));
+    if (wasLocal !== isLocal) {
+      const direction = wasLocal ? 'local to cloud' : 'cloud to local';
+      throw new Error(
+        `Cannot switch from ${direction} model mid-session. ` +
+        `Start a new chat to use a ${isLocal ? 'local' : 'cloud'} model.`
+      );
+    }
+
+    const envOverrides = this.#getLocalModelEnv(provider, effectiveModel);
     const request: ResumeTurnRequest = {
       chatId,
       providerSessionId,
       command,
       projectPath: entry.projectPath,
-      model: opts.model ?? entry.model,
+      model: effectiveModel,
       permissionMode: opts.permissionMode ?? entry.permissionMode,
       thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
       claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
       images: opts.images,
+      envOverrides,
     };
 
     if (provider === 'claude') {
@@ -410,12 +449,28 @@ export class ProviderRegistry {
   // Amp agent mode changes are applied on the next CLI spawn; no-op here.
   async setAmpAgentMode(_chatId: string, _mode: AmpAgentMode): Promise<void> { }
 
-  // Model changes are applied on the next CLI spawn; no-op here.
-  async setModel(_chatId: string, _model: string): Promise<void> { }
+  // Validates the local/cloud boundary before accepting a model change.
+  // The actual model swap happens on the next CLI spawn via runProviderTurn.
+  async setModel(chatId: string, model: string): Promise<void> {
+    const entry = this.#registry.getChat(chatId);
+    if (!entry) return;
+    const wasLocal = Boolean(this.#ollama?.isOllamaModel(entry.model));
+    const isLocal = Boolean(this.#ollama?.isOllamaModel(model));
+    if (wasLocal !== isLocal) {
+      const direction = wasLocal ? 'local to cloud' : 'cloud to local';
+      throw new Error(
+        `Cannot switch from ${direction} model mid-session. ` +
+        `Start a new chat to use a ${isLocal ? 'local' : 'cloud'} model.`
+      );
+    }
+  }
 
   // Runs a one-shot query against the specified provider.
   async runSingleQuery(prompt: string, options: { provider?: string;[key: string]: unknown } = {}): Promise<string> {
     const { provider = 'claude', ...rest } = options;
+    const model = typeof rest.model === 'string' ? rest.model : '';
+    const localEnv = model ? this.#getLocalModelEnv(provider, model) : undefined;
+    if (localEnv) rest.envOverrides = localEnv;
     if (provider === 'codex') return runSingleQueryCodex(prompt, rest);
     if (provider === 'opencode') return this.#opencode.runSingleQuery(prompt, rest);
     if (provider === 'amp') return runSingleQueryAmp(prompt, rest);

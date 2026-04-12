@@ -48,6 +48,7 @@ interface ClaudeSessionOptions {
   thinkingMode: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
   images?: AgentCommandImage[];
+  envOverrides?: Record<string, string>;
 }
 
 interface ClaudeRunningSession {
@@ -61,6 +62,8 @@ interface ClaudeRunningSession {
   currentPermissionMode: PermissionMode;
   currentThinkingMode: ThinkingMode;
   currentClaudeThinkingMode: ClaudeThinkingMode;
+  currentModel: string;
+  currentEnvOverrides?: Record<string, string>;
 }
 
 interface PendingPermission {
@@ -156,7 +159,7 @@ function convertCLIMessageToChatMessages(msg: CLIMessage): unknown[] {
 }
 
 // Runs a one-shot CLI query and returns the plain text output.
-async function runSingleQuery(prompt: string, { model, cwd, permissionMode, thinkingMode, claudeThinkingMode }: Record<string, any> = {}): Promise<string> {
+async function runSingleQuery(prompt: string, { model, cwd, permissionMode, thinkingMode, claudeThinkingMode, envOverrides }: Record<string, any> = {}): Promise<string> {
   const claudeBinary = getClaudeBinary();
   const args = buildClaudeCLIArgs({ model, permissionMode, thinkingMode, claudeThinkingMode, prompt });
 
@@ -165,7 +168,7 @@ async function runSingleQuery(prompt: string, { model, cwd, permissionMode, thin
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
-    env: (() => { const { CLAUDECODE, ...env } = process.env; return env; })(),
+    env: (() => { const { CLAUDECODE, ...env } = process.env; return { ...env, ...envOverrides }; })(),
   });
 
   const chunks: Uint8Array[] = [];
@@ -272,6 +275,17 @@ class ClaudeProvider extends AbsProvider {
 
   constructor() {
     super();
+  }
+
+  /** Shallow comparison of env override maps; treats undefined and {} as equal. */
+  #envOverridesChanged(a?: Record<string, string>, b?: Record<string, string>): boolean {
+    const keysA = Object.keys(a ?? {});
+    const keysB = Object.keys(b ?? {});
+    if (keysA.length !== keysB.length) return true;
+    for (const k of keysA) {
+      if (a![k] !== b?.[k]) return true;
+    }
+    return false;
   }
 
   #sendToCLI(sessionId: string, jsonl: string): void {
@@ -616,13 +630,15 @@ class ClaudeProvider extends AbsProvider {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
-      env: (() => { const { CLAUDECODE, ...env } = process.env; return env; })(),
+      env: (() => { const { CLAUDECODE, ...env } = process.env; return { ...env, ...options.envOverrides }; })(),
     });
 
     session.options = options;
     session.process = proc;
     session.currentThinkingMode = options.thinkingMode || 'none';
     session.currentClaudeThinkingMode = options.claudeThinkingMode || 'auto';
+    session.currentModel = options.model || '';
+    session.currentEnvOverrides = options.envOverrides;
     this.#readStdout(session, proc);
     this.#pipeStderr(session.id, proc);
 
@@ -643,6 +659,7 @@ class ClaudeProvider extends AbsProvider {
     projectPath,
     thinkingMode,
     claudeThinkingMode,
+    envOverrides,
   }: ClaudeStartSessionRequest): Promise<string> {
     if (!chatId) throw new Error('chatId is required when starting a Claude session');
     if (!providerSessionId) throw new Error('providerSessionId is required when starting a Claude session');
@@ -657,6 +674,7 @@ class ClaudeProvider extends AbsProvider {
       projectPath,
       thinkingMode,
       claudeThinkingMode,
+      envOverrides,
     };
 
     const session: ClaudeRunningSession = {
@@ -670,6 +688,8 @@ class ClaudeProvider extends AbsProvider {
       currentPermissionMode: permissionMode || 'default',
       currentThinkingMode: thinkingMode || 'none',
       currentClaudeThinkingMode: claudeThinkingMode || 'auto',
+      currentModel: model || '',
+      currentEnvOverrides: envOverrides,
     };
     this.#runningSessions.set(providerSessionId, session);
     this.emitProcessing(chatId, true);
@@ -694,6 +714,7 @@ class ClaudeProvider extends AbsProvider {
     projectPath,
     thinkingMode,
     claudeThinkingMode,
+    envOverrides,
   }: ResumeTurnRequest): Promise<void> {
     if (!providerSessionId) {
       throw new Error('Cannot resume without session ID');
@@ -712,6 +733,7 @@ class ClaudeProvider extends AbsProvider {
       projectPath,
       thinkingMode,
       claudeThinkingMode,
+      envOverrides,
     };
 
     let session = this.#runningSessions.get(providerSessionId);
@@ -727,6 +749,8 @@ class ClaudeProvider extends AbsProvider {
         currentPermissionMode: permissionMode || 'default',
         currentThinkingMode: thinkingMode || 'none',
         currentClaudeThinkingMode: claudeThinkingMode || 'auto',
+        currentModel: model || '',
+        currentEnvOverrides: envOverrides,
       };
       this.#runningSessions.set(providerSessionId, session);
     } else {
@@ -744,9 +768,14 @@ class ClaudeProvider extends AbsProvider {
 
     const desiredThinkingMode = session.options.thinkingMode || 'none';
     const desiredClaudeThinkingMode = session.options.claudeThinkingMode || 'auto';
+    const desiredModel = session.options.model || '';
+    const previousModel = session.process ? (session.currentModel || '') : '';
+    const envChanged = this.#envOverridesChanged(session.currentEnvOverrides, session.options.envOverrides);
     if (session.process && (
       desiredThinkingMode !== session.currentThinkingMode
       || desiredClaudeThinkingMode !== session.currentClaudeThinkingMode
+      || desiredModel !== previousModel
+      || envChanged
     )) {
       this.#killSessionProcess(session);
     }
@@ -762,7 +791,11 @@ class ClaudeProvider extends AbsProvider {
         projectPath: allOpts.projectPath ?? session.options?.projectPath,
         thinkingMode: allOpts.thinkingMode ?? session.options?.thinkingMode,
         claudeThinkingMode: allOpts.claudeThinkingMode ?? session.options?.claudeThinkingMode,
+        envOverrides: allOpts.envOverrides ?? session.options?.envOverrides,
       };
+      // Always resume: the session file preserves conversation context.
+      // Cross-boundary local/cloud switches are blocked by
+      // ProviderRegistry.runProviderTurn before reaching here.
       this.#spawnCLI(session, spawnOpts, true);
     }
 

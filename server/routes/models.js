@@ -28,7 +28,7 @@ function buildProviderCatalog(cache, factoryDefaultModel) {
   };
 }
 
-export default function createModelsRoutes(providers) {
+export default function createModelsRoutes(providers, ollamaBridge) {
   // Canonical shape: { value: string, label: string }[]
   const cache = {
     claude: CLAUDE_MODELS.OPTIONS,
@@ -38,6 +38,24 @@ export default function createModelsRoutes(providers) {
     opencode: [],
   };
   let factoryDefaultModel = FACTORY_MODELS.DEFAULT;
+
+  function buildOllamaModelOptions() {
+    if (!ollamaBridge?.available) return [];
+    return ollamaBridge.getModels().map((m) => ({
+      value: m.name,
+      label: `${m.name} (local)`,
+      isLocal: true,
+    }));
+  }
+
+  function getCacheWithOllama() {
+    const ollamaOptions = buildOllamaModelOptions();
+    return {
+      ...cache,
+      claude: [...CLAUDE_MODELS.OPTIONS, ...ollamaOptions],
+      codex: [...CODEX_MODELS.OPTIONS, ...ollamaOptions],
+    };
+  }
 
   async function refreshOpenCodeCache() {
     try {
@@ -57,13 +75,14 @@ export default function createModelsRoutes(providers) {
   }
 
   async function getModels(request, url) {
+    const merged = getCacheWithOllama();
     const provider = url?.searchParams?.get('provider');
-    if (provider && provider in cache) {
-      const catalog = buildProviderCatalog(cache, factoryDefaultModel);
+    if (provider && provider in merged) {
+      const catalog = buildProviderCatalog(merged, factoryDefaultModel);
       const filtered = { providers: catalog.providers.filter((p) => p.id === provider) };
-      return Response.json({ [provider]: cache[provider], catalog: filtered });
+      return Response.json({ [provider]: merged[provider], catalog: filtered });
     }
-    return Response.json({ ...cache, catalog: buildProviderCatalog(cache, factoryDefaultModel) });
+    return Response.json({ ...merged, catalog: buildProviderCatalog(merged, factoryDefaultModel) });
   }
 
   refreshOpenCodeCache();

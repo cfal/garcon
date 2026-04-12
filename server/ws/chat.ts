@@ -272,8 +272,8 @@ export class ChatHandler {
       } else if (data instanceof ModelSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (data.model) {
-          await this.#registry.updateChat(chatId, { model: data.model });
           await this.#providers.setModel(chatId, data.model);
+          await this.#registry.updateChat(chatId, { model: data.model });
         }
       } else if (data instanceof ChatLogQueryRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
