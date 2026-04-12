@@ -1,6 +1,6 @@
 import { apiFetch } from '$lib/api/client.js';
 import type { SessionProvider } from '$lib/types/app';
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '$shared/models';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, OPENROUTER_MODELS } from '$shared/models';
 import { PROVIDERS, PROVIDER_CAPABILITIES, type ProviderId } from '$shared/providers';
 
 export interface ModelOption {
@@ -32,6 +32,7 @@ const STATIC_FALLBACKS: ProviderModels = {
 	opencode: [],
 	amp: AMP_MODELS.OPTIONS,
 	factory: FACTORY_MODELS.OPTIONS,
+	openrouter: OPENROUTER_MODELS.OPTIONS,
 };
 
 // Default capabilities derived from the shared common contract. Used when
@@ -82,6 +83,7 @@ function mergeWithFallbacks(models: ProviderModels): ProviderModels {
 		codex: mergeStaticModels(models.codex, STATIC_FALLBACKS.codex!),
 		amp: STATIC_FALLBACKS.amp!,
 		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
+		openrouter: mergeStaticModels(models.openrouter, STATIC_FALLBACKS.openrouter!),
 		opencode: models.opencode?.length ? models.opencode : STATIC_FALLBACKS.opencode
 	};
 }
@@ -203,6 +205,7 @@ export class ModelCatalogStore {
 		if (provider === 'codex') return CODEX_MODELS.DEFAULT;
 		if (provider === 'amp') return AMP_MODELS.DEFAULT;
 		if (provider === 'factory') return FACTORY_MODELS.DEFAULT;
+		if (provider === 'openrouter') return OPENROUTER_MODELS.DEFAULT;
 		return this.getModels('opencode')[0]?.value ?? '';
 	}
 

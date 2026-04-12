@@ -21,7 +21,7 @@
 		error: string | null;
 	}
 
-	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory';
+	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory' | 'openrouter';
 
 	let {
 		agentId,
@@ -61,7 +61,8 @@
 		codex: 'border-l-provider-codex-border',
 		opencode: 'border-l-provider-opencode-border',
 		amp: 'border-l-provider-amp-border',
-		factory: 'border-l-provider-factory-border'
+		factory: 'border-l-provider-factory-border',
+		openrouter: 'border-l-provider-openrouter-border'
 	};
 
 	// Authenticated with no reauth option and no CLI-only content -- nothing to expand.

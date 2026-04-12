@@ -60,3 +60,19 @@ export const FACTORY_MODELS = {
   ] satisfies SharedModelOption[],
   DEFAULT: 'claude-opus-4-6',
 };
+
+export const OPENROUTER_MODELS = {
+  OPTIONS: [
+    { value: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4', supportsImages: true },
+    { value: 'anthropic/claude-haiku-4', label: 'Claude Haiku 4', supportsImages: true },
+    { value: 'openai/gpt-4o', label: 'GPT-4o', supportsImages: true },
+    { value: 'openai/gpt-4o-mini', label: 'GPT-4o Mini', supportsImages: true },
+    { value: 'google/gemini-2.5-pro-preview', label: 'Gemini 2.5 Pro', supportsImages: true },
+    { value: 'google/gemini-2.5-flash-preview', label: 'Gemini 2.5 Flash', supportsImages: true },
+    { value: 'meta-llama/llama-4-maverick', label: 'Llama 4 Maverick', supportsImages: true },
+    { value: 'deepseek/deepseek-chat-v3-0324', label: 'DeepSeek V3', supportsImages: false },
+    { value: 'qwen/qwen3-235b-a22b', label: 'Qwen3 235B', supportsImages: false },
+    { value: 'mistralai/mistral-large-2411', label: 'Mistral Large', supportsImages: true },
+  ] satisfies SharedModelOption[],
+  DEFAULT: 'anthropic/claude-sonnet-4',
+};

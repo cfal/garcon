@@ -32,6 +32,7 @@ export class NewChatFormState {
 	opencodeModel = $state('');
 	ampModel = $state('');
 	factoryModel = $state('');
+	openrouterModel = $state('');
 
 	// Path
 	projectPath = $state('');
@@ -125,7 +126,8 @@ export class NewChatFormState {
 				? this.#modelCatalog.getModels('factory')
 				: this.factoryModel
 					? [{ value: this.factoryModel, label: this.factoryModel }]
-					: []
+					: [],
+			openrouter: this.#modelCatalog.getModels('openrouter')
 		};
 		return opts[this.provider];
 	}
@@ -136,7 +138,8 @@ export class NewChatFormState {
 			codex: this.codexModel,
 			opencode: this.opencodeModel,
 			amp: this.ampModel,
-			factory: this.factoryModel
+			factory: this.factoryModel,
+			openrouter: this.openrouterModel
 		};
 		return map[this.provider];
 	}
@@ -155,7 +158,8 @@ export class NewChatFormState {
 			codex: (v) => { this.codexModel = v; },
 			opencode: (v) => { this.opencodeModel = v; },
 			amp: (v) => { this.ampModel = v; },
-			factory: (v) => { this.factoryModel = v; }
+			factory: (v) => { this.factoryModel = v; },
+			openrouter: (v) => { this.openrouterModel = v; }
 		};
 		setterMap[this.provider](value);
 	}
@@ -180,6 +184,9 @@ export class NewChatFormState {
 		if (provider === 'factory' && !liveModels.some((m) => m.value === this.factoryModel)) {
 			this.factoryModel = liveModels[0].value;
 		}
+		if (provider === 'openrouter' && !liveModels.some((m) => m.value === this.openrouterModel)) {
+			this.openrouterModel = liveModels[0].value;
+		}
 	}
 
 	applyResolvedModel(provider: SessionProvider, model: string): void {
@@ -192,6 +199,7 @@ export class NewChatFormState {
 		if (provider === 'opencode') this.opencodeModel = resolvedModel;
 		if (provider === 'amp') this.ampModel = resolvedModel;
 		if (provider === 'factory') this.factoryModel = resolvedModel;
+		if (provider === 'openrouter') this.openrouterModel = resolvedModel;
 	}
 
 	// Images (delegated to ImageAttachmentState)

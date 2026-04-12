@@ -116,6 +116,11 @@ export const PROVIDER_MENU_GROUPS: ProviderMenuGroup[] = [
 				value: 'factory',
 				label: 'Factory',
 				description: 'Factory Droid via the external droid CLI.'
+			},
+			{
+				value: 'openrouter',
+				label: 'OpenRouter',
+				description: 'Access many models via OpenRouter API.'
 			}
 		]
 	}

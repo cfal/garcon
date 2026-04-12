@@ -48,6 +48,20 @@ mock.module('../loaders/amp-history-loader.js', () => ({
   loadAmpChatMessages: mock(() => Promise.resolve([])),
 }));
 
+mock.module('../loaders/openrouter-history-loader.js', () => ({
+  getOpenRouterPreviewFromSessionId: mock(() => Promise.resolve(null)),
+  loadOpenRouterChatMessages: mock(() => Promise.resolve([])),
+}));
+
+mock.module('../openrouter-auth.js', () => ({
+  getOpenRouterAuthStatus: mock(() => Promise.resolve({ authenticated: false, canReauth: false, label: '' })),
+}));
+
+mock.module('../openrouter.js', () => ({
+  runSingleQuery: mock(async () => 'openrouter-response'),
+  OpenRouterProvider: class { constructor() {} },
+}));
+
 const opencodeMock = mock(async () => 'opencode-response');
 import { ProviderRegistry } from '../index.js';
 
@@ -57,7 +71,7 @@ describe('providers registry runSingleQuery', () => {
     getChatByProviderSessionId: mock(() => null),
   };
   const mockOpencode = { runSingleQuery: opencodeMock };
-  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode, {}, {});
+  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode, {}, {}, {});
 
   it('routes to claude by default', async () => {
     const result = await registry.runSingleQuery('test prompt', {});
@@ -130,7 +144,12 @@ describe('ProviderRegistry session option hydration', () => {
       runTurn: mock(() => Promise.resolve(undefined)),
       getRunningSessions: mock(() => []),
     };
-    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp, mockFactory);
+    const mockOpenRouter = {
+      startSession: mock(() => Promise.resolve({ providerSessionId: 'openrouter-session', nativePath: null })),
+      runTurn: mock(() => Promise.resolve(undefined)),
+      getRunningSessions: mock(() => []),
+    };
+    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp, mockFactory, mockOpenRouter);
   });
 
   it('hydrates permission and thinking modes from the registry on new-session startup', async () => {

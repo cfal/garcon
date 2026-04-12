@@ -2,7 +2,7 @@
 // and frontend as the single source of truth for provider identity and
 // static capability policy.
 
-export const PROVIDERS = ['claude', 'codex', 'opencode', 'amp', 'factory'] as const;
+export const PROVIDERS = ['claude', 'codex', 'opencode', 'amp', 'factory', 'openrouter'] as const;
 
 export type ProviderId = (typeof PROVIDERS)[number];
 
@@ -17,6 +17,7 @@ export const PROVIDER_CAPABILITIES: Record<ProviderId, ProviderCapabilities> = {
   opencode: { supportsFork: false, supportsImages: false },
   amp: { supportsFork: false, supportsImages: false },
   factory: { supportsFork: false, supportsImages: false },
+  openrouter: { supportsFork: false, supportsImages: true },
 };
 
 export function isProviderId(value: unknown): value is ProviderId {
