@@ -5,6 +5,7 @@
 import {
 	togglePinned,
 	toggleArchive,
+	deleteChat,
 	reorderChatsQuick,
 	getChatDetails,
 	forkChat,
@@ -51,5 +52,24 @@ export class SidebarController {
 		const result = await forkChat({ sourceChatId, chatId: candidateId });
 		await this.deps.onQuietRefresh();
 		return result.chatId;
+	}
+
+	// Bulk operations. Calls individual toggle APIs in parallel then
+	// refreshes once. Callers must pre-filter to only include chats
+	// that need toggling (e.g. only unpinned chats for a "pin" action).
+
+	async bulkDelete(chatIds: string[]): Promise<void> {
+		await Promise.all(chatIds.map((id) => deleteChat(id)));
+		await this.deps.onQuietRefresh();
+	}
+
+	async bulkTogglePin(chatIds: string[]): Promise<void> {
+		await Promise.all(chatIds.map((id) => togglePinned(id)));
+		await this.deps.onQuietRefresh();
+	}
+
+	async bulkToggleArchive(chatIds: string[]): Promise<void> {
+		await Promise.all(chatIds.map((id) => toggleArchive(id)));
+		await this.deps.onQuietRefresh();
 	}
 }

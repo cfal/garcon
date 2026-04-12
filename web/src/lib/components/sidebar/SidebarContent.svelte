@@ -13,7 +13,11 @@
 		currentTime: Date;
 		searchFilter: string;
 		isReorderMode: boolean;
+		isMultiSelectMode?: boolean;
+		isMultiSelected?: (chatId: string) => boolean;
 		onEnterReorderMode: () => void;
+		onEnterMultiSelect?: (chatId: string) => void;
+		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onReorderGroup: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chatId: string, chatTitle: string, provider: SessionProvider) => void;
@@ -37,7 +41,11 @@
 		currentTime,
 		searchFilter,
 		isReorderMode,
+		isMultiSelectMode,
+		isMultiSelected,
 		onEnterReorderMode,
+		onEnterMultiSelect,
+		onMultiSelectToggle,
 		onReorderGroup,
 		onChatSelect,
 		onDeleteChat,
@@ -66,7 +74,11 @@
 		{currentTime}
 		{searchFilter}
 		{isReorderMode}
+		{isMultiSelectMode}
+		{isMultiSelected}
 		{onEnterReorderMode}
+		{onEnterMultiSelect}
+		{onMultiSelectToggle}
 		{onReorderGroup}
 		{onChatSelect}
 		{onDeleteChat}

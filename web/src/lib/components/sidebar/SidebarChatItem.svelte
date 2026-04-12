@@ -3,7 +3,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { Button } from '$lib/components/ui/button';
-	import { getAppShell, getModelCatalog } from '$lib/context';
+	import { getAppShell, getModelCatalog, getSplitLayout } from '$lib/context';
 	import Pin from '@lucide/svelte/icons/pin';
 	import Archive from '@lucide/svelte/icons/archive';
 	import Edit2 from '@lucide/svelte/icons/pencil';
@@ -16,6 +16,7 @@
 	import Copy from '@lucide/svelte/icons/copy';
 	import Share2 from '@lucide/svelte/icons/share-2';
 	import Tag from '@lucide/svelte/icons/tag';
+	import CheckSquare from '@lucide/svelte/icons/check-square';
 	import {
 		DropdownMenu,
 		DropdownMenuTrigger,
@@ -34,6 +35,8 @@
 		isPinned: boolean;
 		isArchived: boolean;
 		isReorderMode?: boolean;
+		isMultiSelectMode?: boolean;
+		isMultiSelected?: boolean;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chatId: string, chatTitle: string, provider: SessionProvider) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
@@ -45,6 +48,8 @@
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onEnterReorderMode?: () => void;
+		onEnterMultiSelect?: (chatId: string) => void;
+		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		hasPinnedChats?: boolean;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
@@ -56,6 +61,8 @@
 		isPinned,
 		isArchived,
 		isReorderMode = false,
+		isMultiSelectMode = false,
+		isMultiSelected = false,
 		onChatSelect,
 		onDeleteChat,
 		onStartRenameChat,
@@ -67,6 +74,8 @@
 		onTagClick,
 		onManageTags,
 		onEnterReorderMode,
+		onEnterMultiSelect,
+		onMultiSelectToggle,
 		onMoveToTop,
 		onMoveToBottom,
 	}: SidebarChatItemProps = $props();
@@ -76,7 +85,16 @@
 	let isSelected = $derived(selectedChatId === session.id);
 	let provider = $derived(session.provider || 'claude');
 
-	function selectChat() {
+	function handleItemClick(e: MouseEvent) {
+		if (isMultiSelectMode) {
+			onMultiSelectToggle?.(session.id, e.shiftKey);
+			return;
+		}
+		// Ctrl/Cmd+Click enters multi-select mode with this chat.
+		if ((e.metaKey || e.ctrlKey) && onEnterMultiSelect) {
+			onEnterMultiSelect(session.id);
+			return;
+		}
 		onChatSelect(session.id);
 	}
 
@@ -105,6 +123,7 @@
 
 	// Positions the dropdown anchor at the cursor for desktop right-click.
 	function handleRightClick(e: MouseEvent) {
+		if (isMultiSelectMode) return;
 		e.preventDefault();
 		if (!itemEl) return;
 		const rect = itemEl.getBoundingClientRect();
@@ -114,6 +133,18 @@
 
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
+	const splitLayout = getSplitLayout();
+
+	function handleDragStart(e: DragEvent) {
+		if (!e.dataTransfer) return;
+		e.dataTransfer.effectAllowed = 'move';
+		e.dataTransfer.setData('text/plain', session.id);
+		splitLayout.startDrag(session.id);
+	}
+
+	function handleDragEnd() {
+		splitLayout.endDrag();
+	}
 
 	let itemEl: HTMLDivElement | undefined = $state();
 
@@ -143,7 +174,7 @@
 </script>
 
 <div class="chat-item-root group relative" bind:this={itemEl}>
-	{#if isPinned || isArchived}
+	{#if !isMultiSelectMode && (isPinned || isArchived)}
 		<div
 			class={cn(
 				'pointer-events-none absolute bottom-[5px] right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full border',
@@ -165,47 +196,101 @@
 	<div class="md:hidden">
 			<button
 					class={cn(
-						'w-full text-left py-[5px] pr-2 pl-[7px] mx-0 my-0 rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg border-b border-border/30 active:scale-[0.98] transition-all duration-150 relative',
-					isSelected ? 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground' : '',
-						isProcessing ? 'border-l-[3px] border-l-status-processing' : '',
+						'w-full text-left py-[5px] pr-2 mx-0 my-0 rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg border-b border-border/30 active:scale-[0.98] transition-all duration-150 relative flex items-center',
+					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
+					!isMultiSelectMode && isSelected ? 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground' : '',
+					isMultiSelectMode && isMultiSelected ? 'bg-primary/8' : '',
+						isProcessing && !isMultiSelectMode ? 'border-l-[3px] border-l-status-processing' : '',
 				)}
-				onclick={selectChat}
+				onclick={handleItemClick}
 			>
+				{#if isMultiSelectMode}
+					<div class="flex items-center justify-center w-7 shrink-0" aria-hidden="true">
+						<div
+							role="checkbox"
+							aria-checked={isMultiSelected}
+							aria-label="Select {chatName}"
+							class={cn(
+								'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
+								isMultiSelected
+									? 'bg-primary border-primary'
+									: 'border-muted-foreground/40 bg-background',
+							)}
+						>
+							{#if isMultiSelected}
+								<svg class="size-3 text-primary-foreground" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<polyline points="2.5 6 5 8.5 9.5 3.5" />
+								</svg>
+							{/if}
+						</div>
+					</div>
+				{/if}
+				<div class="flex-1 min-w-0">
+					<SidebarChatSummary
+						{session}
+						{isSelected}
+						{isPinned}
+						{isArchived}
+						onTagClick={isMultiSelectMode ? undefined : onTagClick}
+						onManageTags={isMultiSelectMode ? undefined : onManageTags}
+					/>
+				</div>
+		</button>
+	</div>
+
+	<!-- Desktop layout with right-click support and drag-to-split -->
+	<div class="hidden md:block">
+			<Button
+				variant="ghost"
+				draggable={!isMultiSelectMode}
+				ondragstart={isMultiSelectMode ? undefined : handleDragStart}
+				ondragend={isMultiSelectMode ? undefined : handleDragEnd}
+				oncontextmenu={handleRightClick}
+					class={cn(
+						'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30',
+					isMultiSelectMode ? 'py-[5px] pl-1 border-l-0' : 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
+					!isMultiSelectMode && isSelected && 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
+					!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
+					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
+				)}
+			onclick={handleItemClick}
+		>
+			{#if isMultiSelectMode}
+				<div class="flex items-center justify-center w-7 shrink-0" aria-hidden="true">
+					<div
+						role="checkbox"
+						aria-checked={isMultiSelected}
+						aria-label="Select {chatName}"
+						class={cn(
+							'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
+							isMultiSelected
+								? 'bg-primary border-primary'
+								: 'border-muted-foreground/40 bg-background',
+						)}
+					>
+						{#if isMultiSelected}
+							<svg class="size-3 text-primary-foreground" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<polyline points="2.5 6 5 8.5 9.5 3.5" />
+							</svg>
+						{/if}
+					</div>
+				</div>
+			{/if}
+			<div class="flex-1 min-w-0">
 				<SidebarChatSummary
 					{session}
 					{isSelected}
 					{isPinned}
 					{isArchived}
-					{onTagClick}
-					{onManageTags}
+					onTagClick={isMultiSelectMode ? undefined : onTagClick}
+					onManageTags={isMultiSelectMode ? undefined : onManageTags}
 				/>
-		</button>
-	</div>
-
-	<!-- Desktop layout with right-click support -->
-	<div class="hidden md:block">
-			<Button
-				variant="ghost"
-				oncontextmenu={handleRightClick}
-					class={cn(
-						'w-full justify-start py-[5px] pr-2 pl-[7px] h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30 border-l-2 border-l-transparent',
-					isSelected && 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
-					isProcessing && 'border-l-[3px] border-l-status-processing',
-				)}
-			onclick={selectChat}
-		>
-			<SidebarChatSummary
-				{session}
-				{isSelected}
-				{isPinned}
-				{isArchived}
-				{onTagClick}
-				{onManageTags}
-			/>
+			</div>
 		</Button>
 	</div>
 
-	<!-- Dropdown anchor: at cursor on right-click, at 3-dots button otherwise -->
+	<!-- Dropdown anchor: hidden in multi-select mode -->
+	{#if !isMultiSelectMode}
 	<div
 		class={cn(
 			"absolute z-20",
@@ -279,6 +364,12 @@
 							{m.sidebar_chats_reorder_chats()}
 						</DropdownMenuItem>
 					{/if}
+					{#if onEnterMultiSelect}
+						<DropdownMenuItem onclick={() => onEnterMultiSelect?.(session.id)}>
+							<CheckSquare />
+							{m.sidebar_select_enter()}
+						</DropdownMenuItem>
+					{/if}
 					<DropdownMenuSeparator />
 					<DropdownMenuItem variant="destructive" onclick={requestDelete}>
 						<Trash2 />
@@ -288,4 +379,5 @@
 			</DropdownMenuContent>
 		</DropdownMenu>
 	</div>
+	{/if}
 </div>

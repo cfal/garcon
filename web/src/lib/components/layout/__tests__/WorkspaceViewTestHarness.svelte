@@ -1,6 +1,6 @@
 <script lang="ts">
 	import WorkspaceView from '../WorkspaceView.svelte';
-	import { setChatSessions, setModelCatalog, setLocalSettings } from '$lib/context';
+	import { setChatSessions, setModelCatalog, setLocalSettings, setSplitLayout } from '$lib/context';
 	import type { AppTab } from '$lib/types/app';
 
 	interface WorkspaceViewTestHarnessProps {
@@ -44,6 +44,15 @@
 		getProviders() {
 			return ['claude', 'codex', 'opencode'];
 		}
+	} as never);
+
+	setSplitLayout({
+		isEnabled: false,
+		root: null,
+		focusedPaneId: null,
+		draggedChatId: null,
+		panes: [],
+		focusedChatId: null,
 	} as never);
 
 	function handleTabChange(_tab: AppTab): void {

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import SidebarContent from './SidebarContent.svelte';
 	import SidebarSearchDock from './SidebarSearchDock.svelte';
+	import SidebarSelectionBar from './SidebarSelectionBar.svelte';
 	import SidebarChatDialogs from './SidebarChatDialogs.svelte';
 	import SidebarTagDialog from './SidebarTagDialog.svelte';
 	import SidebarSearchDialog from './SidebarSearchDialog.svelte';
@@ -16,6 +17,7 @@
 	import { createReorderWriteQueue } from './reorder-write-queue';
 	import { SidebarController } from './sidebar-controller.svelte';
 	import { SidebarSearchState } from './sidebar-search-state.svelte';
+	import { ChatSelectionStore } from '$lib/stores/chat-selection.svelte';
 	import { addTagToQuery } from './sidebar-search';
 	import {
 		getSavedSearches,
@@ -89,7 +91,11 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		get selectedChatId() { return selectedChatId; },
 	});
 
+	const selection = new ChatSelectionStore();
+
 	// Sidebar UI state.
+	let bulkDeleteConfirmation = $state<{ chatIds: string[]; chatTitles: string[] } | null>(null);
+	let isBulkOperating = $state(false);
 	let chatDeleteConfirmation = $state<ChatDeleteConfirmation | null>(null);
 	let chatRenameConfirmation = $state<ChatRenameConfirmation | null>(null);
 	let chatDetailsDialog = $state<ChatDetailsDialog | null>(null);
@@ -280,6 +286,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			void exitReorderMode();
 			return;
 		}
+		if (selection.isActive) selection.exit();
 		onNewChat();
 	}
 
@@ -306,6 +313,157 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		} catch (error) {
 			console.error('Failed to quick reorder:', error);
 		}
+	}
+
+	// Multi-select mode handlers.
+
+	function enterMultiSelect(chatId: string) {
+		if (isReorderMode) return;
+		selection.enter(chatId);
+	}
+
+	function handleMultiSelectToggle(chatId: string, shiftKey: boolean) {
+		if (shiftKey) {
+			const allVisibleIds = searchState.filteredChats.map((c) => c.id);
+			selection.selectRange(allVisibleIds, chatId);
+		} else {
+			selection.toggle(chatId);
+		}
+	}
+
+	function handleSelectAll() {
+		selection.selectAll(searchState.filteredChats.map((c) => c.id));
+	}
+
+	function handleDeselectAll() {
+		selection.deselectAll();
+	}
+
+	function exitMultiSelect() {
+		selection.exit();
+	}
+
+	// Prunes stale selections when the chat list changes (server refresh,
+	// external delete, filter change).
+	$effect(() => {
+		if (!selection.isActive) return;
+		const visibleIds = new Set(chats.map((c) => c.id));
+		selection.pruneToVisible(visibleIds);
+	});
+
+	// Authoritative list of selected chats that still exist in the current
+	// chat list. All display counts and actions derive from this.
+	let selectedChats = $derived.by(() => {
+		if (!selection.isActive) return [];
+		return chats.filter((c) => selection.isSelected(c.id));
+	});
+
+	let bulkShowPin = $derived(selectedChats.some((c) => !c.isPinned));
+	let bulkShowUnpin = $derived(selectedChats.some((c) => c.isPinned));
+	let bulkShowArchive = $derived(selectedChats.some((c) => !c.isArchived));
+	let bulkShowUnarchive = $derived(selectedChats.some((c) => c.isArchived));
+
+	async function handleBulkPin() {
+		const ids = selectedChats.filter((c) => !c.isPinned).map((c) => c.id);
+		if (ids.length === 0) return;
+		isBulkOperating = true;
+		try {
+			await controller.bulkTogglePin(ids);
+		} catch (error) {
+			console.error('Failed to bulk pin:', error);
+		} finally {
+			isBulkOperating = false;
+			selection.exit();
+		}
+	}
+
+	async function handleBulkUnpin() {
+		const ids = selectedChats.filter((c) => c.isPinned).map((c) => c.id);
+		if (ids.length === 0) return;
+		isBulkOperating = true;
+		try {
+			await controller.bulkTogglePin(ids);
+		} catch (error) {
+			console.error('Failed to bulk unpin:', error);
+		} finally {
+			isBulkOperating = false;
+			selection.exit();
+		}
+	}
+
+	async function handleBulkArchive() {
+		const ids = selectedChats.filter((c) => !c.isArchived).map((c) => c.id);
+		if (ids.length === 0) return;
+		const isSelectedChatInBulk = selectedChatId && ids.includes(selectedChatId);
+		isBulkOperating = true;
+		try {
+			await controller.bulkToggleArchive(ids);
+			if (isSelectedChatInBulk) {
+				const remaining = chats.find((c) => !ids.includes(c.id) && !c.isArchived);
+				if (remaining) onChatSelect(remaining.id);
+				else onNewChat();
+			}
+		} catch (error) {
+			console.error('Failed to bulk archive:', error);
+		} finally {
+			isBulkOperating = false;
+			selection.exit();
+		}
+	}
+
+	async function handleBulkUnarchive() {
+		const ids = selectedChats.filter((c) => c.isArchived).map((c) => c.id);
+		if (ids.length === 0) return;
+		isBulkOperating = true;
+		try {
+			await controller.bulkToggleArchive(ids);
+		} catch (error) {
+			console.error('Failed to bulk unarchive:', error);
+		} finally {
+			isBulkOperating = false;
+			selection.exit();
+		}
+	}
+
+	function handleBulkDeleteRequest() {
+		const ids = selectedChats.map((c) => c.id);
+		const titles = selectedChats.map((c) => c.title || m.sidebar_chats_unnamed());
+		bulkDeleteConfirmation = { chatIds: ids, chatTitles: titles };
+	}
+
+	async function confirmBulkDelete() {
+		if (!bulkDeleteConfirmation) return;
+		const ids = bulkDeleteConfirmation.chatIds;
+		bulkDeleteConfirmation = null;
+		const isSelectedChatInBulk = selectedChatId && ids.includes(selectedChatId);
+		isBulkOperating = true;
+		try {
+			await controller.bulkDelete(ids);
+			if (isSelectedChatInBulk) {
+				const remaining = chats.find((c) => !ids.includes(c.id));
+				if (remaining) onChatSelect(remaining.id);
+				else onNewChat();
+			}
+		} catch (error) {
+			console.error('Failed to bulk delete:', error);
+		} finally {
+			isBulkOperating = false;
+			selection.exit();
+		}
+	}
+
+	// Exits multi-select on Escape key.
+	function handleSidebarKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && selection.isActive) {
+			e.stopPropagation();
+			selection.exit();
+		}
+	}
+
+	// Exits multi-select when entering reorder mode.
+	function enterReorderModeClean() {
+		if (selection.isActive) selection.exit();
+		enterReorderMode();
 	}
 
 	async function handleForkChat(sourceChatId: string) {
@@ -493,7 +651,8 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 	}));
 </script>
 
-<div class="h-full flex flex-col bg-card md:select-none">
+<!-- svelte-ignore a11y_no_static_element_interactions -- keydown on container for Escape handling -->
+<div class="h-full flex flex-col bg-card md:select-none relative" onkeydown={handleSidebarKeydown}>
 	<div class={`${dockOrderClass} flex-shrink-0`}>
 		<SidebarSearchDock
 			dockPlacement={searchBarPosition}
@@ -524,7 +683,11 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			{currentTime}
 			searchFilter={searchState.activeQuery}
 			{isReorderMode}
-			onEnterReorderMode={enterReorderMode}
+			isMultiSelectMode={selection.isActive}
+			isMultiSelected={(id) => selection.isSelected(id)}
+			onEnterReorderMode={enterReorderModeClean}
+			onEnterMultiSelect={enterMultiSelect}
+			onMultiSelectToggle={handleMultiSelectToggle}
 			onReorderGroup={handleReorderGroup}
 			onChatSelect={handleChatClick}
 			onDeleteChat={showDeleteConfirmation}
@@ -540,6 +703,26 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			onQuickMove={handleQuickMove}
 		/>
 	</div>
+
+	{#if selection.isActive}
+		<SidebarSelectionBar
+			count={selectedChats.length}
+			totalVisible={searchState.filteredChats.length}
+			showPin={bulkShowPin}
+			showUnpin={bulkShowUnpin}
+			showArchive={bulkShowArchive}
+			showUnarchive={bulkShowUnarchive}
+			isOperating={isBulkOperating}
+			onSelectAll={handleSelectAll}
+			onDeselectAll={handleDeselectAll}
+			onPin={() => { void handleBulkPin(); }}
+			onUnpin={() => { void handleBulkUnpin(); }}
+			onArchive={() => { void handleBulkArchive(); }}
+			onUnarchive={() => { void handleBulkUnarchive(); }}
+			onDelete={handleBulkDeleteRequest}
+			onDone={exitMultiSelect}
+		/>
+	{/if}
 </div>
 
 <SidebarChatDialogs
@@ -552,6 +735,32 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 	{chatDetailsDialog}
 	onCloseDetails={closeChatDetails}
 />
+
+<!-- Bulk delete confirmation dialog -->
+<Dialog.Root open={bulkDeleteConfirmation !== null} onOpenChange={(open) => { if (!open) bulkDeleteConfirmation = null; }}>
+	<Dialog.Content>
+		<Dialog.Header class="min-w-0">
+			<Dialog.Title>{m.sidebar_select_delete_confirm_title({ count: bulkDeleteConfirmation?.chatIds.length ?? 0 })}</Dialog.Title>
+			<Dialog.Description class="min-w-0 max-w-full">
+				<span class="block text-sm text-muted-foreground mb-2">{m.sidebar_select_delete_confirm_description()}</span>
+				{#if bulkDeleteConfirmation}
+					<ul class="list-disc pl-4 space-y-0.5 text-sm text-foreground max-h-32 overflow-y-auto">
+						{#each bulkDeleteConfirmation.chatTitles.slice(0, 5) as title}
+							<li class="truncate">{title}</li>
+						{/each}
+						{#if bulkDeleteConfirmation.chatTitles.length > 5}
+							<li class="text-muted-foreground italic">{m.sidebar_select_delete_confirm_and_more({ count: bulkDeleteConfirmation.chatTitles.length - 5 })}</li>
+						{/if}
+					</ul>
+				{/if}
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Button variant="outline" onclick={() => bulkDeleteConfirmation = null}>{m.sidebar_actions_cancel()}</Button>
+			<Button variant="destructive" onclick={() => { void confirmBulkDelete(); }}>{m.sidebar_actions_delete()}</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
 
 <SidebarTagDialog
 	{tagDialog}

@@ -16,7 +16,8 @@
 	import { createFileViewerStore } from '$lib/stores/file-viewer.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
-	import { setAuth, setNavigation, setChatRuntime, setChatSessions, setAppShell, setWs, setFileViewer, setReadReceiptOutbox, setModelCatalog, setLocalSettings, setRemoteSettings } from '$lib/context';
+	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
+	import { setAuth, setNavigation, setChatRuntime, setChatSessions, setAppShell, setWs, setFileViewer, setReadReceiptOutbox, setModelCatalog, setLocalSettings, setRemoteSettings, setSplitLayout } from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
@@ -36,6 +37,7 @@
 	const fileViewer = createFileViewerStore();
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
+	const splitLayout = createSplitLayoutStore();
 
 	setAuth(auth);
 	setLocalSettings(localSettings);
@@ -48,6 +50,7 @@
 	setFileViewer(fileViewer);
 	setReadReceiptOutbox(readReceiptOutbox);
 	setModelCatalog(modelCatalog);
+	setSplitLayout(splitLayout);
 
 	const publicRoutes = ['/login', '/setup'];
 	let isPublicRoute = $derived(
