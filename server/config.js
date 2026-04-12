@@ -191,6 +191,16 @@ export function getTelegramBotToken() {
   return process.env.GARCON_TELEGRAM_BOT_TOKEN || '';
 }
 
+// Ollama endpoint URL for local model support.
+export function getOllamaUrl() {
+  return process.env.GARCON_OLLAMA_URL || 'http://localhost:11434';
+}
+
+// Whether to auto-detect a running Ollama instance on startup.
+export function isOllamaAutoDetect() {
+  return envBool('OLLAMA_AUTO_DETECT', true);
+}
+
 // Global authentication toggle.
 // Env takes precedence over CLI to match the rest of config behavior.
 export function isAuthDisabled() {

@@ -19,7 +19,7 @@
 	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
-	import { getChatSessions, getLocalSettings, getAppShell, getWs, getNavigation, setChatState, setComposerState, setProviderState, setChatLifecycle, getReadReceiptOutbox } from '$lib/context';
+	import { getChatSessions, getLocalSettings, getAppShell, getWs, getNavigation, setChatState, setComposerState, setProviderState, setChatLifecycle, getReadReceiptOutbox, getModelCatalog } from '$lib/context';
 	import type { PendingPermissionRequest, QueueState, PermissionMode, PendingViewChat } from '$lib/types/chat';
 	import { ArrowDown } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -37,6 +37,7 @@
 	const ws = getWs();
 	const navigation = getNavigation();
 	const readReceiptOutbox = getReadReceiptOutbox();
+	const modelCatalog = getModelCatalog();
 
 	const chatState = new ChatState();
 	const composerState = new ComposerState();
@@ -114,6 +115,7 @@
 		lifecycle,
 		startupCoordinator,
 		ws,
+		modelCatalog,
 		appShell,
 		readReceiptOutbox,
 		navigation,

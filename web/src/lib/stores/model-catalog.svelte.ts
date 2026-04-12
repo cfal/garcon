@@ -7,6 +7,7 @@ export interface ModelOption {
 	value: string;
 	label: string;
 	supportsImages?: boolean;
+	isLocal?: boolean;
 }
 
 type ProviderModels = Partial<Record<SessionProvider, ModelOption[]>>;
@@ -47,6 +48,7 @@ function normalizeModelOption(value: unknown): ModelOption | null {
 		value: maybe.value,
 		label: maybe.label,
 		supportsImages: typeof maybe.supportsImages === 'boolean' ? maybe.supportsImages : undefined,
+		isLocal: typeof maybe.isLocal === 'boolean' ? maybe.isLocal : undefined,
 	};
 }
 
@@ -206,6 +208,11 @@ export class ModelCatalogStore {
 
 	supportsFork(provider: SessionProvider): boolean {
 		return this.providerCapabilities[provider]?.supportsFork ?? false;
+	}
+
+	isLocalModel(provider: SessionProvider, model: string): boolean {
+		const entry = this.getModels(provider).find((m) => m.value === model);
+		return entry?.isLocal === true;
 	}
 
 	supportsImages(provider: SessionProvider, model?: string): boolean {

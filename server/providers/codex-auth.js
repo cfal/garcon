@@ -49,6 +49,9 @@ async function readCodexAuthLabel() {
 }
 
 export async function getCodexAuthStatus() {
+  if (typeof process.env.OPENAI_BASE_URL === 'string' && process.env.OPENAI_BASE_URL.trim()) {
+    return { authenticated: true, canReauth: false, label: '' };
+  }
   if (typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.trim()) {
     return { authenticated: true, canReauth: false, label: '' };
   }

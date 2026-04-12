@@ -19,6 +19,7 @@ function createJwtPayload(payload) {
 
 describe('getCodexAuthStatus', () => {
   const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
+  const originalOpenAiBaseUrl = process.env.OPENAI_BASE_URL;
   const originalCodexHome = process.env.CODEX_HOME;
   let originalSpawn;
   let spawnMock;
@@ -30,8 +31,8 @@ describe('getCodexAuthStatus', () => {
     Bun.spawn = spawnMock;
 
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-codex-auth-'));
-    if (originalOpenAiApiKey === undefined) delete process.env.OPENAI_API_KEY;
-    else process.env.OPENAI_API_KEY = originalOpenAiApiKey;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_BASE_URL;
     if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = originalCodexHome;
   });
@@ -40,6 +41,8 @@ describe('getCodexAuthStatus', () => {
     Bun.spawn = originalSpawn;
     if (originalOpenAiApiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = originalOpenAiApiKey;
+    if (originalOpenAiBaseUrl === undefined) delete process.env.OPENAI_BASE_URL;
+    else process.env.OPENAI_BASE_URL = originalOpenAiBaseUrl;
     if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = originalCodexHome;
     if (tempDir) {
@@ -87,6 +90,18 @@ describe('getCodexAuthStatus', () => {
 
   it('short-circuits OPENAI_API_KEY without spawning the CLI', async () => {
     process.env.OPENAI_API_KEY = 'test-key';
+
+    expect(await getCodexAuthStatus()).toEqual({
+      authenticated: true,
+      canReauth: false,
+      label: '',
+    });
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('short-circuits OPENAI_BASE_URL without spawning the CLI', async () => {
+    delete process.env.OPENAI_API_KEY;
+    process.env.OPENAI_BASE_URL = 'http://localhost:11434/v1';
 
     expect(await getCodexAuthStatus()).toEqual({
       authenticated: true,

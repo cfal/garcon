@@ -36,6 +36,7 @@ import { OpenCodeProvider } from './providers/opencode.js';
 import { AmpProvider } from './providers/amp-cli.js';
 import { FactoryProvider } from './providers/factory-cli.js';
 import { ProviderRegistry } from './providers/index.js';
+import { OllamaBridge } from './providers/ollama-bridge.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
@@ -88,8 +89,19 @@ export async function startServer() {
     const ampProvider = new AmpProvider();
     const factoryProvider = new FactoryProvider();
 
+    // Tier 1.5: Ollama bridge (local model support)
+    const ollamaBridge = new OllamaBridge();
+    const ollamaDetected = await ollamaBridge.detect();
+    if (ollamaDetected) {
+      const modelCount = ollamaBridge.getModels().length;
+      console.log(`ollama: detected at ${ollamaBridge.url} (${modelCount} model${modelCount !== 1 ? 's' : ''})`);
+      ollamaBridge.startRefreshTimer();
+    } else {
+      console.log('ollama: not detected (local models unavailable)');
+    }
+
     // Tier 2: Provider registry wrapping providers + registry
-    const providerRegistry = new ProviderRegistry(chatRegistry, claudeProvider, codexProvider, opencodeProvider, ampProvider, factoryProvider);
+    const providerRegistry = new ProviderRegistry(chatRegistry, claudeProvider, codexProvider, opencodeProvider, ampProvider, factoryProvider, ollamaBridge);
 
     // Tier 3: Chat infrastructure (uses ProviderRegistry)
     const metadata = new MetadataIndex(chatRegistry, providerRegistry);

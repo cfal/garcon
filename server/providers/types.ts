@@ -41,6 +41,7 @@ export interface ProviderExecutionConfig extends PersistedChatExecutionConfig {
 export interface StartSessionRequest extends ProviderExecutionConfig {
   command: string;
   images?: AgentCommandImage[];
+  envOverrides?: Record<string, string>;
 }
 
 export interface StartedProviderSession {
@@ -58,6 +59,7 @@ export interface ResumeTurnRequest extends ProviderExecutionConfig {
   providerSessionId: string;
   command: string;
   images?: AgentCommandImage[];
+  envOverrides?: Record<string, string>;
 }
 
 // One-shot query with relaxed requirements (no session lifecycle).

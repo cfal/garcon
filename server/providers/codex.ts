@@ -307,12 +307,16 @@ function buildCodexInput(command: string, imagePaths?: string[]): string | Array
   ];
 }
 
-async function runCodexExec(args: string[], input: string): Promise<{ stdout: string; stderr: string }> {
-  const proc = Bun.spawn(['codex', ...args], {
+async function runCodexExec(args: string[], input: string, envOverrides?: Record<string, string>): Promise<{ stdout: string; stderr: string }> {
+  const spawnOptions: Record<string, unknown> = {
     stdin: new Blob([input]),
     stdout: 'pipe',
     stderr: 'pipe',
-  });
+  };
+  if (envOverrides && Object.keys(envOverrides).length > 0) {
+    spawnOptions.env = { ...process.env, ...envOverrides };
+  }
+  const proc = Bun.spawn(['codex', ...args], spawnOptions);
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout as ReadableStream).text(),
     new Response(proc.stderr as ReadableStream).text(),
@@ -332,6 +336,7 @@ export async function runSingleQuery(prompt: string, options: Record<string, any
     model,
     permissionMode = 'default',
     thinkingMode,
+    envOverrides,
   } = options;
 
   const workingDirectory = cwd || projectPath || process.cwd();
@@ -365,7 +370,7 @@ export async function runSingleQuery(prompt: string, options: Record<string, any
   args.push('-');
 
   try {
-    const { stdout } = await runCodexExec(args, prompt);
+    const { stdout } = await runCodexExec(args, prompt, envOverrides);
     let text = '';
     try {
       text = await fs.readFile(outputPath, 'utf8');
@@ -520,6 +525,7 @@ export class CodexProvider extends AbsProvider {
     model,
     permissionMode = 'default',
     thinkingMode,
+    envOverrides,
   }: CodexRunTurnRequest): Promise<void> {
     const execution = await this.#createTurnExecution({
       command,
@@ -529,6 +535,7 @@ export class CodexProvider extends AbsProvider {
       permissionMode,
       projectPath,
       thinkingMode,
+      envOverrides,
       providerSessionId: providerSessionId || undefined,
       emitSessionCreated: false,
       captureStartedSession: false,
@@ -544,6 +551,7 @@ export class CodexProvider extends AbsProvider {
     permissionMode = 'default',
     projectPath,
     thinkingMode,
+    envOverrides,
     providerSessionId,
     emitSessionCreated,
     captureStartedSession,
@@ -567,7 +575,10 @@ export class CodexProvider extends AbsProvider {
       }
 
       const input = buildCodexInput(command, imagePaths);
-      const codex = new Codex();
+      const codexOptions: Record<string, unknown> = {};
+      if (envOverrides?.OPENAI_BASE_URL) codexOptions.baseUrl = envOverrides.OPENAI_BASE_URL;
+      if (envOverrides?.OPENAI_API_KEY) codexOptions.apiKey = envOverrides.OPENAI_API_KEY;
+      const codex = new Codex(codexOptions);
       const threadOptions: Record<string, unknown> = {
         workingDirectory,
         skipGitRepoCheck: true,

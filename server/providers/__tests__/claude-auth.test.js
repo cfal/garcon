@@ -18,6 +18,7 @@ function createFakeProc({ stdout = '', stderr = '', exitCode = 0 }) {
 
 describe('getClaudeAuthStatus', () => {
   const originalAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  const originalAnthropicBaseUrl = process.env.ANTHROPIC_BASE_URL;
   let originalSpawn;
   let spawnMock;
 
@@ -30,10 +31,14 @@ describe('getClaudeAuthStatus', () => {
 
     if (originalAnthropicApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = originalAnthropicApiKey;
+    if (originalAnthropicBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
+    else process.env.ANTHROPIC_BASE_URL = originalAnthropicBaseUrl;
   });
 
   afterEach(() => {
     Bun.spawn = originalSpawn;
+    if (originalAnthropicBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
+    else process.env.ANTHROPIC_BASE_URL = originalAnthropicBaseUrl;
   });
 
   it('uses the configured Claude binary and returns the OAuth email from auth status', async () => {
@@ -73,6 +78,18 @@ describe('getClaudeAuthStatus', () => {
 
   it('short-circuits ANTHROPIC_API_KEY without spawning the CLI', async () => {
     process.env.ANTHROPIC_API_KEY = 'test-key';
+
+    expect(await getClaudeAuthStatus()).toEqual({
+      authenticated: true,
+      canReauth: false,
+      label: '',
+    });
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('short-circuits ANTHROPIC_BASE_URL without spawning the CLI', async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_BASE_URL = 'http://localhost:11434';
 
     expect(await getClaudeAuthStatus()).toEqual({
       authenticated: true,

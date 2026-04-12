@@ -35,6 +35,10 @@ function parseClaudeAuthStatus(output) {
 }
 
 export async function getClaudeAuthStatus() {
+  // bypass claude auth check if custom ANTHROPIC_BASE_URL is set
+  if (typeof process.env.ANTHROPIC_BASE_URL === 'string' && process.env.ANTHROPIC_BASE_URL.trim()) {
+    return { authenticated: true, canReauth: false, label: '' };
+  }
   if (typeof process.env.ANTHROPIC_API_KEY === 'string' && process.env.ANTHROPIC_API_KEY.trim()) {
     return { authenticated: true, canReauth: false, label: '' };
   }

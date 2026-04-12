@@ -379,10 +379,9 @@
 					}}
 					modelOptions={modelOptions}
 					selectedModel={providerState.model}
-					onModelSelect={(model) => {
-						providerState.setModel(model);
-						onModelChange?.(model);
-					}}
+				onModelSelect={(model) => {
+					onModelChange?.(model);
+				}}
 					canSend={canSubmit}
 					onSend={handleFormSubmit}
 					sendTitle={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}

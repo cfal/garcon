@@ -78,10 +78,13 @@ function createDeps(chat = createRunningChat()) {
 				quietRefreshChats: vi.fn(),
 				openNewChatDialog: vi.fn(),
 			},
-			readReceiptOutbox: {
-				enqueue: vi.fn(),
-			},
-			navigation: {
+		modelCatalog: {
+			isLocalModel: vi.fn(() => false),
+		},
+		readReceiptOutbox: {
+			enqueue: vi.fn(),
+		},
+		navigation: {
 				setActiveTab: vi.fn(),
 			},
 			getPendingPermissionRequests: vi.fn(() => []),
