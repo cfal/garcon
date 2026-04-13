@@ -26,7 +26,7 @@ describe('GET /api/v1/models', () => {
 
     expect(body.catalog).toBeDefined();
     expect(Array.isArray(body.catalog.providers)).toBe(true);
-    expect(body.catalog.providers.length).toBe(5);
+    expect(body.catalog.providers.length).toBe(6);
 
     const claude = body.catalog.providers.find((p) => p.id === 'claude');
     expect(claude.supportsFork).toBe(true);

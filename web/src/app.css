@@ -62,6 +62,9 @@
 	--color-provider-factory-bg: hsl(var(--provider-factory-bg));
 	--color-provider-factory-foreground: hsl(var(--provider-factory-foreground));
 	--color-provider-factory-border: hsl(var(--provider-factory-border));
+	--color-provider-openrouter-bg: hsl(var(--provider-openrouter-bg));
+	--color-provider-openrouter-foreground: hsl(var(--provider-openrouter-foreground));
+	--color-provider-openrouter-border: hsl(var(--provider-openrouter-border));
 	--color-indicator-unread: hsl(var(--indicator-unread));
 		--color-status-processing: hsl(var(--status-processing));
 		--color-status-processing-foreground: hsl(var(--status-processing-foreground));
@@ -199,6 +202,9 @@
 	--provider-factory-bg: 192 84% 94%;
 	--provider-factory-foreground: 192 84% 24%;
 	--provider-factory-border: 192 44% 76%;
+	--provider-openrouter-bg: 152 68% 93%;
+	--provider-openrouter-foreground: 152 60% 26%;
+	--provider-openrouter-border: 152 40% 74%;
 	--indicator-unread: 214 90% 48%;
 		--status-processing: 214 90% 48%;
 		--status-processing-foreground: 214 85% 32%;
@@ -358,6 +364,9 @@
 	--provider-factory-bg: 192 44% 20%;
 	--provider-factory-foreground: 192 86% 86%;
 	--provider-factory-border: 192 34% 34%;
+	--provider-openrouter-bg: 152 36% 20%;
+	--provider-openrouter-foreground: 152 68% 84%;
+	--provider-openrouter-border: 152 28% 34%;
 	--indicator-unread: 214 95% 68%;
 		--status-processing: 214 95% 68%;
 		--status-processing-foreground: 214 95% 86%;

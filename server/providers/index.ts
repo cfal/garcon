@@ -8,12 +8,14 @@ import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude } from '
 import { runSingleQuery as runSingleQueryCodex } from './codex.js';
 import { runSingleQuery as runSingleQueryAmp } from './amp-cli.js';
 import { runSingleQuery as runSingleQueryFactory } from './factory-cli.js';
+import { runSingleQuery as runSingleQueryOpenRouter } from './openrouter.js';
 import { getMaxSessions } from '../config.js';
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { getCodexAuthStatus } from './codex-auth.js';
 import { getOpenCodeAuthStatus } from './opencode-auth.js';
 import { getAmpAuthStatus } from './amp-auth.js';
 import { getFactoryAuthStatus } from './factory-auth.js';
+import { getOpenRouterAuthStatus } from './openrouter-auth.js';
 import { getArtificialProviderSessionId } from '../chats/artificial-native-path.js';
 import type { OllamaBridge } from './ollama-bridge.js';
 
@@ -22,6 +24,7 @@ import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loader
 import { getCodexPreviewFromNativePath, loadCodexChatMessages } from './loaders/codex-history-loader.js';
 import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loaders/opencode-history-loader.js';
 import { getFactoryPreviewFromSessionId, loadFactoryChatMessagesBySessionId } from './loaders/factory-history-loader.js';
+import { getOpenRouterPreviewFromSessionId, loadOpenRouterChatMessages } from './loaders/openrouter-history-loader.js';
 import type { IChatRegistry } from '../chats/store.js';
 
 import type { AgentCommandImage } from '../../common/ws-requests.js';
@@ -43,6 +46,7 @@ const AUTH_DISPATCHERS: Record<string, (opencode: OpenCodeProviderInstance) => P
   opencode: (oc) => getOpenCodeAuthStatus(oc),
   amp: () => getAmpAuthStatus(),
   factory: () => getFactoryAuthStatus(),
+  openrouter: () => getOpenRouterAuthStatus(),
 };
 
 // Validates that a registry entry has all required execution fields.
@@ -108,6 +112,7 @@ interface OpenCodeProviderInstance {
   runSingleQuery(prompt: string, options?: Record<string, unknown>): Promise<string>;
   resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void>;
   evictChat(chatId: string): void;
+  shutdown?(): void;
   startPurgeTimer(): ReturnType<typeof setInterval>;
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
@@ -138,6 +143,7 @@ export class ProviderRegistry {
   #opencode: OpenCodeProviderInstance;
   #amp: ExternalCliProviderInstance;
   #factory: ExternalCliProviderInstance;
+  #openrouter: ExternalCliProviderInstance;
   #ollama: OllamaBridge | null;
 
   constructor(
@@ -147,6 +153,7 @@ export class ProviderRegistry {
     opencode: OpenCodeProviderInstance,
     amp: ExternalCliProviderInstance,
     factory: ExternalCliProviderInstance,
+    openrouter: ExternalCliProviderInstance,
     ollama?: OllamaBridge | null,
   ) {
     this.#registry = registry;
@@ -155,6 +162,7 @@ export class ProviderRegistry {
     this.#opencode = opencode;
     this.#amp = amp;
     this.#factory = factory;
+    this.#openrouter = openrouter;
     this.#ollama = ollama ?? null;
 
     if (typeof registry.onChatRemoved === 'function') {
@@ -255,6 +263,12 @@ export class ProviderRegistry {
       return;
     }
 
+    if (entry.provider === 'openrouter') {
+      const { providerSessionId, nativePath } = await this.#openrouter.startSession(request);
+      this.#registry.updateChat(chatId, { providerSessionId, nativePath });
+      return;
+    }
+
     throw new Error(`Unsupported provider: ${entry.provider}`);
   }
 
@@ -318,6 +332,8 @@ export class ProviderRegistry {
       await this.#amp.runTurn(request);
     } else if (provider === 'factory') {
       await this.#factory.runTurn(request);
+    } else if (provider === 'openrouter') {
+      await this.#openrouter.runTurn(request);
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
@@ -351,6 +367,10 @@ export class ProviderRegistry {
       return this.#factory.abort(providerSessionId);
     }
 
+    if (entry.provider === 'openrouter') {
+      return this.#openrouter.abort(providerSessionId);
+    }
+
     return false;
   }
 
@@ -367,6 +387,7 @@ export class ProviderRegistry {
     if (provider === 'opencode') return this.#opencode.isRunning(providerSessionId);
     if (provider === 'amp') return this.#amp.isRunning(providerSessionId);
     if (provider === 'factory') return this.#factory.isRunning(providerSessionId);
+    if (provider === 'openrouter') return this.#openrouter.isRunning(providerSessionId);
     return false;
   }
 
@@ -387,6 +408,7 @@ export class ProviderRegistry {
       opencode: mapToChatId(this.#opencode.getRunningSessions()),
       amp: mapToChatId(this.#amp.getRunningSessions()),
       factory: mapToChatId(this.#factory.getRunningSessions()),
+      openrouter: mapToChatId(this.#openrouter.getRunningSessions()),
     };
   }
 
@@ -396,7 +418,8 @@ export class ProviderRegistry {
       (this.#codex.getRunningSessions?.()?.length ?? 0) +
       (this.#opencode.getRunningSessions?.()?.length ?? 0) +
       (this.#amp.getRunningSessions?.()?.length ?? 0) +
-      (this.#factory.getRunningSessions?.()?.length ?? 0)
+      (this.#factory.getRunningSessions?.()?.length ?? 0) +
+      (this.#openrouter.getRunningSessions?.()?.length ?? 0)
     );
   }
 
@@ -475,6 +498,7 @@ export class ProviderRegistry {
     if (provider === 'opencode') return this.#opencode.runSingleQuery(prompt, rest);
     if (provider === 'amp') return runSingleQueryAmp(prompt, rest);
     if (provider === 'factory') return runSingleQueryFactory(prompt, rest);
+    if (provider === 'openrouter') return runSingleQueryOpenRouter(prompt, rest);
     return runSingleQueryClaude(prompt, rest);
   }
 
@@ -499,6 +523,10 @@ export class ProviderRegistry {
     }
     if (session.provider === 'codex') {
       return getCodexPreviewFromNativePath(session.nativePath);
+    }
+    if (session.provider === 'openrouter') {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'openrouter');
+      return getOpenRouterPreviewFromSessionId(sessionId);
     }
 
     return null;
@@ -526,6 +554,10 @@ export class ProviderRegistry {
     if (session.provider === 'codex') {
       return loadCodexChatMessages(session.nativePath);
     }
+    if (session.provider === 'openrouter') {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'openrouter');
+      return loadOpenRouterChatMessages(sessionId);
+    }
 
     return [];
   }
@@ -534,6 +566,7 @@ export class ProviderRegistry {
   async getModels(provider: ProviderName): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
     if (provider === 'opencode') return this.#opencode.getModels();
     if (provider === 'factory') return this.#factory.getModels?.() ?? [];
+    if (provider === 'openrouter') return this.#openrouter.getModels?.() ?? [];
     return [];
   }
 
@@ -557,7 +590,14 @@ export class ProviderRegistry {
     this.#opencode.startPurgeTimer();
     this.#amp.startPurgeTimer();
     this.#factory.startPurgeTimer();
+    this.#openrouter.startPurgeTimer();
     this.#claude.startPurgeTimer();
+  }
+
+  // Shuts down long-lived provider processes (e.g. the opencode server).
+  // Called during garcon graceful shutdown to prevent orphaned processes.
+  shutdown(): void {
+    this.#opencode.shutdown?.();
   }
 
   // Fan-out listener helpers. Registers the callback on all
@@ -569,6 +609,7 @@ export class ProviderRegistry {
     this.#opencode.onMessages(cb);
     this.#amp.onMessages(cb);
     this.#factory.onMessages(cb);
+    this.#openrouter.onMessages(cb);
   }
 
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void {
@@ -577,6 +618,7 @@ export class ProviderRegistry {
     this.#opencode.onProcessing(cb);
     this.#amp.onProcessing(cb);
     this.#factory.onProcessing(cb);
+    this.#openrouter.onProcessing(cb);
   }
 
   onSessionCreated(cb: (chatId: string) => void): void {
@@ -585,6 +627,7 @@ export class ProviderRegistry {
     this.#opencode.onSessionCreated(cb);
     this.#amp.onSessionCreated(cb);
     this.#factory.onSessionCreated(cb);
+    this.#openrouter.onSessionCreated(cb);
   }
 
   onFinished(cb: (chatId: string, exitCode: number) => void): void {
@@ -593,6 +636,7 @@ export class ProviderRegistry {
     this.#opencode.onFinished(cb);
     this.#amp.onFinished(cb);
     this.#factory.onFinished(cb);
+    this.#openrouter.onFinished(cb);
   }
 
   onFailed(cb: (chatId: string, errorMessage: string) => void): void {
@@ -601,5 +645,6 @@ export class ProviderRegistry {
     this.#opencode.onFailed(cb);
     this.#amp.onFailed(cb);
     this.#factory.onFailed(cb);
+    this.#openrouter.onFailed(cb);
   }
 }

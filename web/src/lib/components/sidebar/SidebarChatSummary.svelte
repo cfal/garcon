@@ -36,6 +36,7 @@
 		opencode: 'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
 		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
 		factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
+		openrouter: 'border-provider-openrouter-border bg-provider-openrouter-bg text-provider-openrouter-foreground',
 	};
 
 	let providerTagVariant = $derived(

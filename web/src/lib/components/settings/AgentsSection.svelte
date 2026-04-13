@@ -16,7 +16,7 @@
 		error: string | null;
 	}
 
-	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory';
+	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory' | 'openrouter';
 	type BrowserLoginAgentId = 'claude' | 'codex';
 	type AgentConfig = { id: AgentId; name: string; cliOnly?: boolean; loginCommand?: string };
 
@@ -32,7 +32,8 @@
 
 	const secondaryAgents: AgentConfig[] = [
 		{ id: 'amp', name: 'Amp', cliOnly: true, loginCommand: 'amp login' },
-		{ id: 'factory', name: 'Factory', cliOnly: true, loginCommand: 'droid' }
+		{ id: 'factory', name: 'Factory', cliOnly: true, loginCommand: 'droid' },
+		{ id: 'openrouter', name: 'OpenRouter', cliOnly: true, loginCommand: 'export OPENROUTER_API_KEY=...' }
 	];
 
 	const authPollTimers: Partial<Record<AgentId, ReturnType<typeof setTimeout>>> = {};
@@ -45,12 +46,14 @@
 	let opencodeAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 	let ampAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 	let factoryAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
+	let openrouterAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 
 	let claudeOpen = $state(false);
 	let codexOpen = $state(false);
 	let opencodeOpen = $state(false);
 	let ampOpen = $state(false);
 	let factoryOpen = $state(false);
+	let openrouterOpen = $state(false);
 
 	let moreProvidersOpen = $state(false);
 
@@ -63,6 +66,7 @@
 		if (agent === 'codex') return codexAuth;
 		if (agent === 'amp') return ampAuth;
 		if (agent === 'factory') return factoryAuth;
+		if (agent === 'openrouter') return openrouterAuth;
 		return opencodeAuth;
 	}
 
@@ -71,6 +75,7 @@
 		if (agent === 'codex') return codexOpen;
 		if (agent === 'amp') return ampOpen;
 		if (agent === 'factory') return factoryOpen;
+		if (agent === 'openrouter') return openrouterOpen;
 		return opencodeOpen;
 	}
 
@@ -79,6 +84,7 @@
 		else if (agent === 'codex') codexOpen = value;
 		else if (agent === 'amp') ampOpen = value;
 		else if (agent === 'factory') factoryOpen = value;
+		else if (agent === 'openrouter') openrouterOpen = value;
 		else opencodeOpen = value;
 	}
 
@@ -87,6 +93,7 @@
 		else if (agent === 'codex') codexAuth = status;
 		else if (agent === 'amp') ampAuth = status;
 		else if (agent === 'factory') factoryAuth = status;
+		else if (agent === 'openrouter') openrouterAuth = status;
 		else opencodeAuth = status;
 	}
 

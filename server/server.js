@@ -35,6 +35,7 @@ import { CodexProvider } from './providers/codex.js';
 import { OpenCodeProvider } from './providers/opencode.js';
 import { AmpProvider } from './providers/amp-cli.js';
 import { FactoryProvider } from './providers/factory-cli.js';
+import { OpenRouterProvider } from './providers/openrouter.js';
 import { ProviderRegistry } from './providers/index.js';
 import { OllamaBridge } from './providers/ollama-bridge.js';
 import { ChatHandler } from './ws/chat.js';
@@ -88,6 +89,7 @@ export async function startServer() {
     const opencodeProvider = new OpenCodeProvider();
     const ampProvider = new AmpProvider();
     const factoryProvider = new FactoryProvider();
+    const openrouterProvider = new OpenRouterProvider();
 
     // Tier 1.5: Ollama bridge (local model support)
     const ollamaBridge = new OllamaBridge();
@@ -101,7 +103,7 @@ export async function startServer() {
     }
 
     // Tier 2: Provider registry wrapping providers + registry
-    const providerRegistry = new ProviderRegistry(chatRegistry, claudeProvider, codexProvider, opencodeProvider, ampProvider, factoryProvider, ollamaBridge);
+    const providerRegistry = new ProviderRegistry(chatRegistry, claudeProvider, codexProvider, opencodeProvider, ampProvider, factoryProvider, openrouterProvider, ollamaBridge);
 
     // Tier 3: Chat infrastructure (uses ProviderRegistry)
     const metadata = new MetadataIndex(chatRegistry, providerRegistry);
@@ -322,6 +324,7 @@ export async function startServer() {
             }
           }
         }
+        providerRegistry.shutdown();
         historyCache.destroy();
         await chatRegistry.flush();
       } catch (err) {

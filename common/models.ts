@@ -60,3 +60,20 @@ export const FACTORY_MODELS = {
   ] satisfies SharedModelOption[],
   DEFAULT: 'claude-opus-4-6',
 };
+
+export const OPENROUTER_MODELS = {
+  OPTIONS: [
+    { value: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6', supportsImages: true },
+    { value: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', supportsImages: true },
+    { value: 'openai/gpt-5.4', label: 'GPT-5.4', supportsImages: true },
+    { value: 'openai/gpt-5.4-mini', label: 'GPT-5.4 Mini', supportsImages: true },
+    { value: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', supportsImages: true },
+    { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', supportsImages: true },
+    { value: 'x-ai/grok-4.20', label: 'Grok 4.20', supportsImages: true },
+    { value: 'deepseek/deepseek-v3.2', label: 'DeepSeek V3.2', supportsImages: false },
+    { value: 'deepseek/deepseek-r1', label: 'DeepSeek R1', supportsImages: false },
+    { value: 'meta-llama/llama-4-maverick', label: 'Llama 4 Maverick', supportsImages: true },
+    { value: 'qwen/qwen3.6-plus', label: 'Qwen 3.6 Plus', supportsImages: true },
+  ] satisfies SharedModelOption[],
+  DEFAULT: 'anthropic/claude-sonnet-4.6',
+};

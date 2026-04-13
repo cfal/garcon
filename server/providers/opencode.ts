@@ -167,6 +167,20 @@ export class OpenCodeProvider extends AbsProvider {
     super();
   }
 
+  // Shuts down the spawned opencode server process (if any).
+  // Called during garcon graceful shutdown to prevent orphaned processes.
+  shutdown(): void {
+    if (this.#client && typeof this.#client.close === 'function') {
+      try {
+        this.#client.close();
+      } catch {
+        // Best-effort cleanup.
+      }
+      this.#client = null;
+      this.#initPromise = null;
+    }
+  }
+
   // Returns true if the opencode binary is on $PATH, without spawning a server.
   isAvailable(): boolean {
     if (this.#available !== null) return this.#available;
