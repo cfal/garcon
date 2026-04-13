@@ -63,16 +63,17 @@ export const FACTORY_MODELS = {
 
 export const OPENROUTER_MODELS = {
   OPTIONS: [
-    { value: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4', supportsImages: true },
-    { value: 'anthropic/claude-haiku-4', label: 'Claude Haiku 4', supportsImages: true },
-    { value: 'openai/gpt-4o', label: 'GPT-4o', supportsImages: true },
-    { value: 'openai/gpt-4o-mini', label: 'GPT-4o Mini', supportsImages: true },
-    { value: 'google/gemini-2.5-pro-preview', label: 'Gemini 2.5 Pro', supportsImages: true },
-    { value: 'google/gemini-2.5-flash-preview', label: 'Gemini 2.5 Flash', supportsImages: true },
+    { value: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6', supportsImages: true },
+    { value: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', supportsImages: true },
+    { value: 'openai/gpt-5.4', label: 'GPT-5.4', supportsImages: true },
+    { value: 'openai/gpt-5.4-mini', label: 'GPT-5.4 Mini', supportsImages: true },
+    { value: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', supportsImages: true },
+    { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', supportsImages: true },
+    { value: 'x-ai/grok-4.20', label: 'Grok 4.20', supportsImages: true },
+    { value: 'deepseek/deepseek-v3.2', label: 'DeepSeek V3.2', supportsImages: false },
+    { value: 'deepseek/deepseek-r1', label: 'DeepSeek R1', supportsImages: false },
     { value: 'meta-llama/llama-4-maverick', label: 'Llama 4 Maverick', supportsImages: true },
-    { value: 'deepseek/deepseek-chat-v3-0324', label: 'DeepSeek V3', supportsImages: false },
-    { value: 'qwen/qwen3-235b-a22b', label: 'Qwen3 235B', supportsImages: false },
-    { value: 'mistralai/mistral-large-2411', label: 'Mistral Large', supportsImages: true },
+    { value: 'qwen/qwen3.6-plus', label: 'Qwen 3.6 Plus', supportsImages: true },
   ] satisfies SharedModelOption[],
-  DEFAULT: 'anthropic/claude-sonnet-4',
+  DEFAULT: 'anthropic/claude-sonnet-4.6',
 };
