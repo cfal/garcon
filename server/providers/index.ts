@@ -112,6 +112,7 @@ interface OpenCodeProviderInstance {
   runSingleQuery(prompt: string, options?: Record<string, unknown>): Promise<string>;
   resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void>;
   evictChat(chatId: string): void;
+  shutdown?(): void;
   startPurgeTimer(): ReturnType<typeof setInterval>;
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
@@ -591,6 +592,12 @@ export class ProviderRegistry {
     this.#factory.startPurgeTimer();
     this.#openrouter.startPurgeTimer();
     this.#claude.startPurgeTimer();
+  }
+
+  // Shuts down long-lived provider processes (e.g. the opencode server).
+  // Called during garcon graceful shutdown to prevent orphaned processes.
+  shutdown(): void {
+    this.#opencode.shutdown?.();
   }
 
   // Fan-out listener helpers. Registers the callback on all

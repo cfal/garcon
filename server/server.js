@@ -324,6 +324,7 @@ export async function startServer() {
             }
           }
         }
+        providerRegistry.shutdown();
         historyCache.destroy();
         await chatRegistry.flush();
       } catch (err) {
