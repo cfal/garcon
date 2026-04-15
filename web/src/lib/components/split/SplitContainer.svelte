@@ -12,6 +12,7 @@
 		draggedChatId: string | null;
 		onFocusPane: (paneId: string) => void;
 		onClosePane: (paneId: string) => void;
+		onDeleteChat: (paneId: string) => void;
 		onSetRatio: (path: number[], ratio: number) => void;
 		onDropChat: (paneId: string, zone: 'left' | 'right' | 'top' | 'bottom' | 'center') => void;
 		focusedPaneContent?: Snippet;
@@ -24,6 +25,7 @@
 		draggedChatId,
 		onFocusPane,
 		onClosePane,
+		onDeleteChat,
 		onSetRatio,
 		onDropChat,
 		focusedPaneContent,
@@ -58,6 +60,7 @@
 		{draggedChatId}
 		onFocus={() => onFocusPane(node.id)}
 		onClose={() => onClosePane(node.id)}
+		onDelete={() => onDeleteChat(node.id)}
 		onDrop={(zone) => onDropChat(node.id, zone)}
 		focusedContent={focusedPaneContent}
 	/>
@@ -68,14 +71,14 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -- pointerdown captures resize start position -->
 	<div
 		bind:this={containerEl}
-		class="h-full w-full flex overflow-hidden"
+		class="h-full w-full flex overflow-hidden gap-0.5 p-px"
 		class:flex-row={isHorizontal}
 		class:flex-col={!isHorizontal}
 		onpointerdown={handleResizeStart}
 	>
 		<div
-			class="overflow-hidden min-w-0 min-h-0"
-			style:flex={`0 0 calc(${firstPercent}% - 2px)`}
+			class="overflow-hidden min-w-0 min-h-0 rounded-lg"
+			style:flex={`0 0 calc(${firstPercent}% - 3px)`}
 		>
 			<Self
 				node={node.children[0]}
@@ -84,6 +87,7 @@
 				{draggedChatId}
 				{onFocusPane}
 				{onClosePane}
+				{onDeleteChat}
 				{onSetRatio}
 				{onDropChat}
 				{focusedPaneContent}
@@ -96,8 +100,8 @@
 		/>
 
 		<div
-			class="overflow-hidden min-w-0 min-h-0"
-			style:flex={`0 0 calc(${secondPercent}% - 2px)`}
+			class="overflow-hidden min-w-0 min-h-0 rounded-lg"
+			style:flex={`0 0 calc(${secondPercent}% - 3px)`}
 		>
 			<Self
 				node={node.children[1]}
@@ -106,6 +110,7 @@
 				{draggedChatId}
 				{onFocusPane}
 				{onClosePane}
+				{onDeleteChat}
 				{onSetRatio}
 				{onDropChat}
 				{focusedPaneContent}

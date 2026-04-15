@@ -222,6 +222,17 @@
 		}
 	});
 
+	// Scrolls to bottom when the scroll container mounts (e.g. after
+	// split-pane focus change remounts ConversationWorkspace in a new pane).
+	// The bind:this resolves after initial render, so earlier scrollToBottom
+	// calls from loadChat fire against an undefined container.
+	$effect(() => {
+		const _container = scrollContainer;
+		if (_container && chatState.chatMessages.length > 0) {
+			requestAnimationFrame(() => scroll.scrollToBottom());
+		}
+	});
+
 	// Preserves viewport anchoring when queue controls change height.
 	$effect(() => {
 		const _host = queueControlsContainer;
