@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { AppTab } from '$lib/types/app';
 	import { untrack } from 'svelte';
-	import { getChatSessions, getLocalSettings, getSplitLayout } from '$lib/context';
+	import { getChatSessions, getLocalSettings, getSplitLayout, getAppShell } from '$lib/context';
+	import { deleteChat } from '$lib/api/chats';
 	import Menu from '@lucide/svelte/icons/menu';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
@@ -13,6 +14,8 @@
 	import ConversationWorkspace from '$lib/components/chat/ConversationWorkspace.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SplitContainer from '$lib/components/split/SplitContainer.svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
 	import { CHAT_TOOLBAR_TABS } from './chat-toolbar-tabs';
 
@@ -41,6 +44,7 @@
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
 	const splitLayout = getSplitLayout();
+	const appShell = getAppShell();
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
@@ -74,6 +78,38 @@
 	function closeShareDialog() {
 		shareChatId = null;
 		shareChatTitle = '';
+	}
+
+	// Delete confirmation state for split-pane delete action.
+	let deleteConfirmation = $state<{ paneId: string; chatId: string; chatTitle: string } | null>(null);
+
+	function handleSplitDeleteChat(paneId: string) {
+		const pane = splitLayout.panes.find((p) => p.id === paneId);
+		if (!pane) return;
+		const record = sessions.byId[pane.chatId];
+		deleteConfirmation = {
+			paneId,
+			chatId: pane.chatId,
+			chatTitle: record?.title || 'Untitled',
+		};
+	}
+
+	async function confirmSplitDelete() {
+		if (!deleteConfirmation) return;
+		const { paneId, chatId } = deleteConfirmation;
+		deleteConfirmation = null;
+		// Close the pane first, then delete the chat server-side.
+		handleSplitClosePane(paneId);
+		try {
+			await deleteChat(chatId);
+			appShell.quietRefreshChats();
+		} catch (err) {
+			console.error('[WorkspaceView] Failed to delete chat:', err);
+		}
+	}
+
+	function cancelSplitDelete() {
+		deleteConfirmation = null;
 	}
 
 	function handleRegisterSubmit(fn: (message: string) => Promise<boolean>): void {
@@ -410,6 +446,7 @@
 					draggedChatId={splitLayout.draggedChatId}
 					onFocusPane={handleSplitFocusPane}
 					onClosePane={handleSplitClosePane}
+					onDeleteChat={handleSplitDeleteChat}
 					onSetRatio={handleSplitSetRatio}
 					onDropChat={handleSplitDropChat}
 					{focusedPaneContent}
@@ -453,4 +490,23 @@
 	{/if}
 
 	<ShareChatDialog chatId={shareChatId} chatTitle={shareChatTitle} onClose={closeShareDialog} />
+
+	<!-- Delete confirmation dialog for split-pane delete action -->
+	<Dialog.Root open={deleteConfirmation !== null} onOpenChange={(open) => { if (!open) cancelSplitDelete(); }}>
+		<Dialog.Content>
+			<Dialog.Header class="min-w-0">
+				<Dialog.Title>{m.sidebar_delete_confirmation_delete_chat()}</Dialog.Title>
+				<Dialog.Description class="min-w-0 max-w-full">
+					<span class="font-medium text-foreground block w-full min-w-0 max-w-full truncate">
+						{deleteConfirmation?.chatTitle || m.sidebar_chats_unnamed()}
+					</span>
+					{m.sidebar_delete_confirmation_cannot_undo()}
+				</Dialog.Description>
+			</Dialog.Header>
+			<Dialog.Footer>
+				<Button variant="outline" onclick={cancelSplitDelete}>{m.sidebar_actions_cancel()}</Button>
+				<Button variant="destructive" onclick={() => { void confirmSplitDelete(); }}>{m.sidebar_actions_delete()}</Button>
+			</Dialog.Footer>
+		</Dialog.Content>
+	</Dialog.Root>
 </div>

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import WorkspaceView from '../WorkspaceView.svelte';
-	import { setChatSessions, setModelCatalog, setLocalSettings, setSplitLayout } from '$lib/context';
+	import { setChatSessions, setModelCatalog, setLocalSettings, setSplitLayout, setAppShell } from '$lib/context';
 	import type { AppTab } from '$lib/types/app';
 
 	interface WorkspaceViewTestHarnessProps {
@@ -53,6 +53,10 @@
 		draggedChatId: null,
 		panes: [],
 		focusedChatId: null,
+	} as never);
+
+	setAppShell({
+		quietRefreshChats() {},
 	} as never);
 
 	function handleTabChange(_tab: AppTab): void {
