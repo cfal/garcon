@@ -148,6 +148,15 @@ export class ChatState {
 		this.visibleMessageCount += 100;
 	}
 
+	/** Loads all remaining paginated messages so the full history is available. */
+	async loadAllMessages(chatId: string, ws: WsConnection): Promise<void> {
+		while (this.hasMoreMessages) {
+			const loaded = await this.loadMoreMessages(chatId, ws);
+			if (!loaded) break;
+		}
+		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.chatMessages.length);
+	}
+
 	/** Resets scroll and pagination state for a new chat selection. */
 	resetForNewChat(): void {
 		this.chatMessages = [];

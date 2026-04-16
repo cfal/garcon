@@ -21,7 +21,7 @@
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import { getChatSessions, getPreferences, getAppShell, getWs, getNavigation, setChatState, setComposerState, setProviderState, setChatLifecycle, getReadReceiptOutbox } from '$lib/context';
 	import type { PendingPermissionRequest, QueueState, PermissionMode, PendingViewChat } from '$lib/types/chat';
-	import { ArrowDown } from '@lucide/svelte';
+	import { ArrowDown, ArrowUp, Loader2 } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 
 	interface ConversationWorkspaceProps {
@@ -269,6 +269,20 @@
 			/>
 
 			{#if chatState.isUserScrolledUp && chatState.chatMessages.length > 0}
+				<Button
+					variant="outline"
+					size="icon"
+					class="absolute top-3 right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg"
+					onclick={() => scroll.scrollToTop()}
+					disabled={scroll.isScrollingToTop}
+					title="Scroll to initial prompt"
+				>
+					{#if scroll.isScrollingToTop}
+						<Loader2 class="w-5 h-5 animate-spin" />
+					{:else}
+						<ArrowUp class="w-5 h-5" />
+					{/if}
+				</Button>
 				<Button
 					variant="outline"
 					size="icon"
