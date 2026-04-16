@@ -9,6 +9,7 @@ import { runSingleQuery as runSingleQueryCodex } from './codex.js';
 import { runSingleQuery as runSingleQueryAmp } from './amp-cli.js';
 import { runSingleQuery as runSingleQueryFactory } from './factory-cli.js';
 import { runSingleQuery as runSingleQueryOpenRouter } from './openrouter.js';
+import { runSingleQuery as runSingleQueryZai } from './zai.js';
 import { getMaxSessions } from '../config.js';
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { getCodexAuthStatus } from './codex-auth.js';
@@ -16,6 +17,7 @@ import { getOpenCodeAuthStatus } from './opencode-auth.js';
 import { getAmpAuthStatus } from './amp-auth.js';
 import { getFactoryAuthStatus } from './factory-auth.js';
 import { getOpenRouterAuthStatus } from './openrouter-auth.js';
+import { getZaiAuthStatus } from './zai-auth.js';
 import { getArtificialProviderSessionId } from '../chats/artificial-native-path.js';
 import type { OllamaBridge } from './ollama-bridge.js';
 
@@ -25,6 +27,7 @@ import { getCodexPreviewFromNativePath, loadCodexChatMessages } from './loaders/
 import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loaders/opencode-history-loader.js';
 import { getFactoryPreviewFromSessionId, loadFactoryChatMessagesBySessionId } from './loaders/factory-history-loader.js';
 import { getOpenRouterPreviewFromSessionId, loadOpenRouterChatMessages } from './loaders/openrouter-history-loader.js';
+import { getZaiPreviewFromSessionId, loadZaiChatMessages } from './loaders/zai-history-loader.js';
 import type { IChatRegistry } from '../chats/store.js';
 
 import type { AgentCommandImage } from '../../common/ws-requests.js';
@@ -47,6 +50,7 @@ const AUTH_DISPATCHERS: Record<string, (opencode: OpenCodeProviderInstance) => P
   amp: () => getAmpAuthStatus(),
   factory: () => getFactoryAuthStatus(),
   openrouter: () => getOpenRouterAuthStatus(),
+  zai: () => getZaiAuthStatus(),
 };
 
 // Validates that a registry entry has all required execution fields.
@@ -144,6 +148,7 @@ export class ProviderRegistry {
   #amp: ExternalCliProviderInstance;
   #factory: ExternalCliProviderInstance;
   #openrouter: ExternalCliProviderInstance;
+  #zai: ExternalCliProviderInstance;
   #ollama: OllamaBridge | null;
 
   constructor(
@@ -154,6 +159,7 @@ export class ProviderRegistry {
     amp: ExternalCliProviderInstance,
     factory: ExternalCliProviderInstance,
     openrouter: ExternalCliProviderInstance,
+    zai: ExternalCliProviderInstance,
     ollama?: OllamaBridge | null,
   ) {
     this.#registry = registry;
@@ -163,6 +169,7 @@ export class ProviderRegistry {
     this.#amp = amp;
     this.#factory = factory;
     this.#openrouter = openrouter;
+    this.#zai = zai;
     this.#ollama = ollama ?? null;
 
     if (typeof registry.onChatRemoved === 'function') {
@@ -269,6 +276,12 @@ export class ProviderRegistry {
       return;
     }
 
+    if (entry.provider === 'zai') {
+      const { providerSessionId, nativePath } = await this.#zai.startSession(request);
+      this.#registry.updateChat(chatId, { providerSessionId, nativePath });
+      return;
+    }
+
     throw new Error(`Unsupported provider: ${entry.provider}`);
   }
 
@@ -334,6 +347,8 @@ export class ProviderRegistry {
       await this.#factory.runTurn(request);
     } else if (provider === 'openrouter') {
       await this.#openrouter.runTurn(request);
+    } else if (provider === 'zai') {
+      await this.#zai.runTurn(request);
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
@@ -371,6 +386,10 @@ export class ProviderRegistry {
       return this.#openrouter.abort(providerSessionId);
     }
 
+    if (entry.provider === 'zai') {
+      return this.#zai.abort(providerSessionId);
+    }
+
     return false;
   }
 
@@ -388,6 +407,7 @@ export class ProviderRegistry {
     if (provider === 'amp') return this.#amp.isRunning(providerSessionId);
     if (provider === 'factory') return this.#factory.isRunning(providerSessionId);
     if (provider === 'openrouter') return this.#openrouter.isRunning(providerSessionId);
+    if (provider === 'zai') return this.#zai.isRunning(providerSessionId);
     return false;
   }
 
@@ -409,6 +429,7 @@ export class ProviderRegistry {
       amp: mapToChatId(this.#amp.getRunningSessions()),
       factory: mapToChatId(this.#factory.getRunningSessions()),
       openrouter: mapToChatId(this.#openrouter.getRunningSessions()),
+      zai: mapToChatId(this.#zai.getRunningSessions()),
     };
   }
 
@@ -419,7 +440,8 @@ export class ProviderRegistry {
       (this.#opencode.getRunningSessions?.()?.length ?? 0) +
       (this.#amp.getRunningSessions?.()?.length ?? 0) +
       (this.#factory.getRunningSessions?.()?.length ?? 0) +
-      (this.#openrouter.getRunningSessions?.()?.length ?? 0)
+      (this.#openrouter.getRunningSessions?.()?.length ?? 0) +
+      (this.#zai.getRunningSessions?.()?.length ?? 0)
     );
   }
 
@@ -499,6 +521,7 @@ export class ProviderRegistry {
     if (provider === 'amp') return runSingleQueryAmp(prompt, rest);
     if (provider === 'factory') return runSingleQueryFactory(prompt, rest);
     if (provider === 'openrouter') return runSingleQueryOpenRouter(prompt, rest);
+    if (provider === 'zai') return runSingleQueryZai(prompt, rest);
     return runSingleQueryClaude(prompt, rest);
   }
 
@@ -527,6 +550,10 @@ export class ProviderRegistry {
     if (session.provider === 'openrouter') {
       const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'openrouter');
       return getOpenRouterPreviewFromSessionId(sessionId);
+    }
+    if (session.provider === 'zai') {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'zai');
+      return getZaiPreviewFromSessionId(sessionId);
     }
 
     return null;
@@ -558,6 +585,10 @@ export class ProviderRegistry {
       const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'openrouter');
       return loadOpenRouterChatMessages(sessionId);
     }
+    if (session.provider === 'zai') {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'zai');
+      return loadZaiChatMessages(sessionId);
+    }
 
     return [];
   }
@@ -567,6 +598,7 @@ export class ProviderRegistry {
     if (provider === 'opencode') return this.#opencode.getModels();
     if (provider === 'factory') return this.#factory.getModels?.() ?? [];
     if (provider === 'openrouter') return this.#openrouter.getModels?.() ?? [];
+    if (provider === 'zai') return this.#zai.getModels?.() ?? [];
     return [];
   }
 
@@ -591,6 +623,7 @@ export class ProviderRegistry {
     this.#amp.startPurgeTimer();
     this.#factory.startPurgeTimer();
     this.#openrouter.startPurgeTimer();
+    this.#zai.startPurgeTimer();
     this.#claude.startPurgeTimer();
   }
 
@@ -610,6 +643,7 @@ export class ProviderRegistry {
     this.#amp.onMessages(cb);
     this.#factory.onMessages(cb);
     this.#openrouter.onMessages(cb);
+    this.#zai.onMessages(cb);
   }
 
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void {
@@ -619,6 +653,7 @@ export class ProviderRegistry {
     this.#amp.onProcessing(cb);
     this.#factory.onProcessing(cb);
     this.#openrouter.onProcessing(cb);
+    this.#zai.onProcessing(cb);
   }
 
   onSessionCreated(cb: (chatId: string) => void): void {
@@ -628,6 +663,7 @@ export class ProviderRegistry {
     this.#amp.onSessionCreated(cb);
     this.#factory.onSessionCreated(cb);
     this.#openrouter.onSessionCreated(cb);
+    this.#zai.onSessionCreated(cb);
   }
 
   onFinished(cb: (chatId: string, exitCode: number) => void): void {
@@ -637,6 +673,7 @@ export class ProviderRegistry {
     this.#amp.onFinished(cb);
     this.#factory.onFinished(cb);
     this.#openrouter.onFinished(cb);
+    this.#zai.onFinished(cb);
   }
 
   onFailed(cb: (chatId: string, errorMessage: string) => void): void {
@@ -646,5 +683,6 @@ export class ProviderRegistry {
     this.#amp.onFailed(cb);
     this.#factory.onFailed(cb);
     this.#openrouter.onFailed(cb);
+    this.#zai.onFailed(cb);
   }
 }

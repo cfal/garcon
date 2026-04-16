@@ -29,14 +29,14 @@ describe('getClaudeAuthStatus', () => {
     getClaudeBinary.mockReset();
     getClaudeBinary.mockReturnValue('/tmp/custom-claude');
 
-    if (originalAnthropicApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
-    else process.env.ANTHROPIC_API_KEY = originalAnthropicApiKey;
-    if (originalAnthropicBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
-    else process.env.ANTHROPIC_BASE_URL = originalAnthropicBaseUrl;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_BASE_URL;
   });
 
   afterEach(() => {
     Bun.spawn = originalSpawn;
+    if (originalAnthropicApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = originalAnthropicApiKey;
     if (originalAnthropicBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
     else process.env.ANTHROPIC_BASE_URL = originalAnthropicBaseUrl;
   });

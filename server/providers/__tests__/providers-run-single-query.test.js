@@ -53,13 +53,19 @@ mock.module('../loaders/openrouter-history-loader.js', () => ({
   loadOpenRouterChatMessages: mock(() => Promise.resolve([])),
 }));
 
-mock.module('../openrouter-auth.js', () => ({
-  getOpenRouterAuthStatus: mock(() => Promise.resolve({ authenticated: false, canReauth: false, label: '' })),
+mock.module('../loaders/zai-history-loader.js', () => ({
+  getZaiPreviewFromSessionId: mock(() => Promise.resolve(null)),
+  loadZaiChatMessages: mock(() => Promise.resolve([])),
 }));
 
 mock.module('../openrouter.js', () => ({
   runSingleQuery: mock(async () => 'openrouter-response'),
   OpenRouterProvider: class { constructor() {} },
+}));
+
+mock.module('../zai.js', () => ({
+  runSingleQuery: mock(async () => 'zai-response'),
+  ZaiProvider: class { constructor() {} },
 }));
 
 const opencodeMock = mock(async () => 'opencode-response');
@@ -71,7 +77,7 @@ describe('providers registry runSingleQuery', () => {
     getChatByProviderSessionId: mock(() => null),
   };
   const mockOpencode = { runSingleQuery: opencodeMock };
-  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode, {}, {}, {});
+  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode, {}, {}, {}, {});
 
   it('routes to claude by default', async () => {
     const result = await registry.runSingleQuery('test prompt', {});
@@ -98,6 +104,11 @@ describe('providers registry runSingleQuery', () => {
     expect(result).toBe('amp-response');
   });
 
+  it('routes to zai provider', async () => {
+    const result = await registry.runSingleQuery('test prompt', { provider: 'zai' });
+    expect(result).toBe('zai-response');
+  });
+
   it('passes options through to the provider', async () => {
     claudeMock.mockClear();
     await registry.runSingleQuery('hello', { provider: 'claude', model: 'opus', cwd: '/proj' });
@@ -111,6 +122,7 @@ describe('ProviderRegistry session option hydration', () => {
   let mockCodex;
   let mockOpencode;
   let mockAmp;
+  let mockZai;
   let registry;
 
   beforeEach(() => {
@@ -149,7 +161,12 @@ describe('ProviderRegistry session option hydration', () => {
       runTurn: mock(() => Promise.resolve(undefined)),
       getRunningSessions: mock(() => []),
     };
-    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp, mockFactory, mockOpenRouter);
+    mockZai = {
+      startSession: mock(() => Promise.resolve({ providerSessionId: 'zai-session', nativePath: '!zai:zai-session' })),
+      runTurn: mock(() => Promise.resolve(undefined)),
+      getRunningSessions: mock(() => []),
+    };
+    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp, mockFactory, mockOpenRouter, mockZai);
   });
 
   it('hydrates permission and thinking modes from the registry on new-session startup', async () => {
@@ -310,6 +327,23 @@ describe('ProviderRegistry session option hydration', () => {
     expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
       providerSessionId: 'amp-session',
       nativePath: 'amp:amp-session',
+    });
+  });
+
+  it('stores the derived native path when starting a Z.ai session', async () => {
+    mockRegistry.getChat.mockReturnValue({
+      provider: 'zai',
+      projectPath: '/proj',
+      model: 'glm-5.1',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    await registry.startSession('123', 'hello', {});
+
+    expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+      providerSessionId: 'zai-session',
+      nativePath: '!zai:zai-session',
     });
   });
 });

@@ -17,6 +17,7 @@ describe('GET /api/v1/models', () => {
     expect(body.codex).toBeDefined();
     expect(body.opencode).toBeDefined();
     expect(body.factory).toBeDefined();
+    expect(body.zai).toBeDefined();
     expect(Array.isArray(body.claude)).toBe(true);
   });
 
@@ -26,7 +27,7 @@ describe('GET /api/v1/models', () => {
 
     expect(body.catalog).toBeDefined();
     expect(Array.isArray(body.catalog.providers)).toBe(true);
-    expect(body.catalog.providers.length).toBe(6);
+    expect(body.catalog.providers.length).toBe(7);
 
     const claude = body.catalog.providers.find((p) => p.id === 'claude');
     expect(claude.supportsFork).toBe(true);
@@ -47,6 +48,12 @@ describe('GET /api/v1/models', () => {
     expect(factory.supportsImages).toBe(false);
     expect(Array.isArray(factory.models)).toBe(true);
     expect(factory.defaultModel).toBe('claude-opus-4-6');
+
+    const zai = body.catalog.providers.find((p) => p.id === 'zai');
+    expect(zai.supportsFork).toBe(false);
+    expect(zai.supportsImages).toBe(false);
+    expect(Array.isArray(zai.models)).toBe(true);
+    expect(zai.defaultModel).toBe('glm-5.1');
   });
 
   it('filters both top-level and catalog when provider param is given', async () => {

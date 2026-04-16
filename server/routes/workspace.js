@@ -1,6 +1,6 @@
 import { parseJsonBody } from '../lib/http-request.js';
 import { getProjectBasePath, getTelegramBotToken } from '../config.js';
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, OPENROUTER_MODELS, ZAI_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
@@ -23,7 +23,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
     : null;
 
   const [
-    authByProvider, opencodeModels, factoryModels,
+    authByProvider, opencodeModels, factoryModels, openrouterModels, zaiModels,
   ] = await Promise.all([
     providers?.getAuthStatusMap?.() ?? Promise.resolve({
       claude: { authenticated: false },
@@ -31,9 +31,13 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       opencode: { authenticated: false },
       amp: { authenticated: false },
       factory: { authenticated: false },
+      openrouter: { authenticated: false },
+      zai: { authenticated: false },
     }),
     providers?.getModels?.('opencode') ?? Promise.resolve([]),
     providers?.getModels?.('factory') ?? Promise.resolve([]),
+    providers?.getModels?.('openrouter') ?? Promise.resolve([]),
+    providers?.getModels?.('zai') ?? Promise.resolve([]),
   ]);
 
   const [
@@ -73,6 +77,8 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
     opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
     amp: AMP_MODELS.OPTIONS,
     factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
+    openrouter: Array.isArray(openrouterModels) ? openrouterModels : OPENROUTER_MODELS.OPTIONS,
+    zai: Array.isArray(zaiModels) ? zaiModels : ZAI_MODELS.OPTIONS,
   };
 
   const uiEffective = {

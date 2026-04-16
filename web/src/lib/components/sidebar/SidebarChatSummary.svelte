@@ -37,6 +37,7 @@
 		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
 		factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
 		openrouter: 'border-provider-openrouter-border bg-provider-openrouter-bg text-provider-openrouter-foreground',
+		zai: 'border-provider-zai-border bg-provider-zai-bg text-provider-zai-foreground',
 	};
 
 	let providerTagVariant = $derived(
@@ -47,6 +48,8 @@
 		: provider === 'opencode' ? m.provider_opencode()
 		: provider === 'amp' ? m.provider_amp()
 		: provider === 'factory' ? m.provider_factory()
+		: provider === 'openrouter' ? m.provider_openrouter()
+		: provider === 'zai' ? m.provider_zai()
 		: m.provider_claude()
 	);
 	function prefixEllipsis(pathStr: string, maxLen = 40): string {

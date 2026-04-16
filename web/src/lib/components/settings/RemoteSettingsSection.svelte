@@ -60,9 +60,12 @@
 	function providerLabel(provider: SessionProvider): string {
 		if (provider === 'claude') return m.provider_claude();
 		if (provider === 'codex') return m.provider_codex();
+		if (provider === 'opencode') return m.provider_opencode();
 		if (provider === 'amp') return m.provider_amp();
 		if (provider === 'factory') return m.provider_factory();
-		return m.provider_opencode();
+		if (provider === 'openrouter') return m.provider_openrouter();
+		if (provider === 'zai') return m.provider_zai();
+		return m.provider_claude();
 	}
 
 	async function save(patch: Record<string, unknown>) {

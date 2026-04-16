@@ -2,7 +2,7 @@
 // static; OpenCode models are fetched periodically. Serves a single
 // GET /api/models endpoint.
 
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, OPENROUTER_MODELS } from '../../common/models.js';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, OPENROUTER_MODELS, ZAI_MODELS } from '../../common/models.js';
 import { PROVIDERS, supportsFork, supportsImages } from '../../common/providers.ts';
 import { getFactoryDefaultModel } from '../providers/factory-models.js';
 
@@ -14,6 +14,7 @@ function getDefaultModel(provider, cache, factoryDefaultModel) {
   if (provider === 'amp') return AMP_MODELS.DEFAULT;
   if (provider === 'factory') return factoryDefaultModel;
   if (provider === 'openrouter') return OPENROUTER_MODELS.DEFAULT;
+  if (provider === 'zai') return ZAI_MODELS.DEFAULT;
   return cache.opencode[0]?.value ?? '';
 }
 
@@ -37,6 +38,7 @@ export default function createModelsRoutes(providers, ollamaBridge) {
     amp: AMP_MODELS.OPTIONS,
     factory: FACTORY_MODELS.OPTIONS,
     openrouter: OPENROUTER_MODELS.OPTIONS,
+    zai: ZAI_MODELS.OPTIONS,
     opencode: [],
   };
   let factoryDefaultModel = FACTORY_MODELS.DEFAULT;
@@ -75,6 +77,14 @@ export default function createModelsRoutes(providers, ollamaBridge) {
     }
   }
 
+  async function refreshZaiCache() {
+    try {
+      cache.zai = await providers.getModels('zai');
+    } catch (error) {
+      console.warn('models: zai refresh failed:', error.message);
+    }
+  }
+
   async function refreshFactoryCache() {
     try {
       cache.factory = await providers.getModels('factory');
@@ -98,9 +108,11 @@ export default function createModelsRoutes(providers, ollamaBridge) {
   refreshOpenCodeCache();
   refreshFactoryCache();
   refreshOpenRouterCache();
+  refreshZaiCache();
   setInterval(refreshOpenCodeCache, OPENCODE_REFRESH_INTERVAL);
   setInterval(refreshFactoryCache, OPENCODE_REFRESH_INTERVAL);
   setInterval(refreshOpenRouterCache, OPENCODE_REFRESH_INTERVAL);
+  setInterval(refreshZaiCache, OPENCODE_REFRESH_INTERVAL);
 
   return {
     '/api/v1/models': { GET: getModels },

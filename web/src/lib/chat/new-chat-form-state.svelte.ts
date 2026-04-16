@@ -33,6 +33,7 @@ export class NewChatFormState {
 	ampModel = $state('');
 	factoryModel = $state('');
 	openrouterModel = $state('');
+	zaiModel = $state('');
 
 	// Path
 	projectPath = $state('');
@@ -127,7 +128,12 @@ export class NewChatFormState {
 				: this.factoryModel
 					? [{ value: this.factoryModel, label: this.factoryModel }]
 					: [],
-			openrouter: this.#modelCatalog.getModels('openrouter')
+			openrouter: this.#modelCatalog.getModels('openrouter'),
+			zai: this.#modelCatalog.getModels('zai').length
+				? this.#modelCatalog.getModels('zai')
+				: this.zaiModel
+					? [{ value: this.zaiModel, label: this.zaiModel }]
+					: []
 		};
 		return opts[this.provider];
 	}
@@ -139,7 +145,8 @@ export class NewChatFormState {
 			opencode: this.opencodeModel,
 			amp: this.ampModel,
 			factory: this.factoryModel,
-			openrouter: this.openrouterModel
+			openrouter: this.openrouterModel,
+			zai: this.zaiModel
 		};
 		return map[this.provider];
 	}
@@ -159,7 +166,8 @@ export class NewChatFormState {
 			opencode: (v) => { this.opencodeModel = v; },
 			amp: (v) => { this.ampModel = v; },
 			factory: (v) => { this.factoryModel = v; },
-			openrouter: (v) => { this.openrouterModel = v; }
+			openrouter: (v) => { this.openrouterModel = v; },
+			zai: (v) => { this.zaiModel = v; }
 		};
 		setterMap[this.provider](value);
 	}
@@ -187,6 +195,9 @@ export class NewChatFormState {
 		if (provider === 'openrouter' && !liveModels.some((m) => m.value === this.openrouterModel)) {
 			this.openrouterModel = liveModels[0].value;
 		}
+		if (provider === 'zai' && !liveModels.some((m) => m.value === this.zaiModel)) {
+			this.zaiModel = liveModels[0].value;
+		}
 	}
 
 	applyResolvedModel(provider: SessionProvider, model: string): void {
@@ -200,6 +211,7 @@ export class NewChatFormState {
 		if (provider === 'amp') this.ampModel = resolvedModel;
 		if (provider === 'factory') this.factoryModel = resolvedModel;
 		if (provider === 'openrouter') this.openrouterModel = resolvedModel;
+		if (provider === 'zai') this.zaiModel = resolvedModel;
 	}
 
 	// Images (delegated to ImageAttachmentState)
@@ -463,6 +475,8 @@ export class NewChatFormState {
 			this.validateModelAgainstLive('opencode');
 			this.validateModelAgainstLive('amp');
 			this.validateModelAgainstLive('factory');
+			this.validateModelAgainstLive('openrouter');
+			this.validateModelAgainstLive('zai');
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings and models', err);
 			this.applyResolvedModel('claude', this.#modelCatalog.getDefaultModel('claude'));
@@ -470,6 +484,8 @@ export class NewChatFormState {
 			this.applyResolvedModel('opencode', this.#modelCatalog.getDefaultModel('opencode'));
 			this.applyResolvedModel('amp', this.#modelCatalog.getDefaultModel('amp'));
 			this.applyResolvedModel('factory', this.#modelCatalog.getDefaultModel('factory'));
+			this.applyResolvedModel('openrouter', this.#modelCatalog.getDefaultModel('openrouter'));
+			this.applyResolvedModel('zai', this.#modelCatalog.getDefaultModel('zai'));
 			if (!this.projectPath) {
 				this.projectPath = this.projectBasePath;
 			}
@@ -502,6 +518,8 @@ export class NewChatFormState {
 			this.applyResolvedModel('opencode', this.#modelCatalog.getDefaultModel('opencode'));
 			this.applyResolvedModel('amp', this.#modelCatalog.getDefaultModel('amp'));
 			this.applyResolvedModel('factory', this.#modelCatalog.getDefaultModel('factory'));
+			this.applyResolvedModel('openrouter', this.#modelCatalog.getDefaultModel('openrouter'));
+			this.applyResolvedModel('zai', this.#modelCatalog.getDefaultModel('zai'));
 		}
 		this.permissionMode = normalizePermissionMode(snap.lastPermissionMode);
 		this.thinkingMode = normalizeThinkingMode(snap.lastThinkingMode);

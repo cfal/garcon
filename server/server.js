@@ -36,6 +36,7 @@ import { OpenCodeProvider } from './providers/opencode.js';
 import { AmpProvider } from './providers/amp-cli.js';
 import { FactoryProvider } from './providers/factory-cli.js';
 import { OpenRouterProvider } from './providers/openrouter.js';
+import { ZaiProvider } from './providers/zai.js';
 import { ProviderRegistry } from './providers/index.js';
 import { OllamaBridge } from './providers/ollama-bridge.js';
 import { ChatHandler } from './ws/chat.js';
@@ -90,6 +91,7 @@ export async function startServer() {
     const ampProvider = new AmpProvider();
     const factoryProvider = new FactoryProvider();
     const openrouterProvider = new OpenRouterProvider();
+    const zaiProvider = new ZaiProvider();
 
     // Tier 1.5: Ollama bridge (local model support)
     const ollamaBridge = new OllamaBridge();
@@ -103,7 +105,17 @@ export async function startServer() {
     }
 
     // Tier 2: Provider registry wrapping providers + registry
-    const providerRegistry = new ProviderRegistry(chatRegistry, claudeProvider, codexProvider, opencodeProvider, ampProvider, factoryProvider, openrouterProvider, ollamaBridge);
+    const providerRegistry = new ProviderRegistry(
+      chatRegistry,
+      claudeProvider,
+      codexProvider,
+      opencodeProvider,
+      ampProvider,
+      factoryProvider,
+      openrouterProvider,
+      zaiProvider,
+      ollamaBridge,
+    );
 
     // Tier 3: Chat infrastructure (uses ProviderRegistry)
     const metadata = new MetadataIndex(chatRegistry, providerRegistry);
