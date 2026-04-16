@@ -6,7 +6,7 @@ import {
 } from './openai-compatible-chat-provider.js';
 import { getSessionDir, getSessionFilePath } from './zai-paths.js';
 
-const DEFAULT_ZAI_BASE_URL = 'https://api.z.ai/api/paas/v4';
+const DEFAULT_ZAI_BASE_URL = 'https://api.z.ai/api/coding/paas/v4';
 
 function getApiKey(): string {
   return process.env.ZAI_API_KEY || '';
