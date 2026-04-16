@@ -905,9 +905,9 @@ export class GitWorkbenchStore {
 			const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
 			this.commitGenerationEnabled = cm.enabled !== false;
 			const provider = cm.provider as string;
-			if (['claude', 'codex', 'opencode', 'amp', 'factory'].includes(provider)) {
-				this.commitProvider = provider as SessionProvider;
-			}
+				if (['claude', 'codex', 'opencode', 'amp', 'factory', 'openrouter', 'zai'].includes(provider)) {
+					this.commitProvider = provider as SessionProvider;
+				}
 			if (typeof cm.model === 'string' && cm.model) {
 				this.commitModel = cm.model;
 			}

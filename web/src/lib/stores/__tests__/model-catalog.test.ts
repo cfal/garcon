@@ -17,6 +17,7 @@ describe('ModelCatalogStore', () => {
 		expect(store.getModels('claude').length).toBeGreaterThan(0);
 		expect(store.getModels('codex').length).toBeGreaterThan(0);
 		expect(store.getModels('factory').length).toBeGreaterThan(0);
+		expect(store.getModels('zai')).toEqual([{ value: 'glm-5.1', label: 'GLM-5.1', supportsImages: false }]);
 		expect(store.getDefaultModel('claude')).toBe('opus');
 	});
 
@@ -25,9 +26,11 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('claude')).toBe(true);
 		expect(store.supportsFork('codex')).toBe(true);
 		expect(store.supportsFork('opencode')).toBe(false);
+		expect(store.supportsFork('zai')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(true);
 		expect(store.supportsImages('opencode')).toBe(false);
+		expect(store.supportsImages('zai')).toBe(false);
 		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
 		expect(store.supportsImages('factory', 'glm-5')).toBe(false);
 	});
@@ -121,6 +124,12 @@ describe('ModelCatalogStore', () => {
 							supportsImages: false,
 							models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', supportsImages: true }],
 						},
+						{
+							id: 'zai',
+							supportsFork: false,
+							supportsImages: false,
+							models: [{ value: 'glm-5.1', label: 'GLM-5.1', supportsImages: false }],
+						},
 					],
 				},
 			})
@@ -133,7 +142,9 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('opencode')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(false);
+		expect(store.supportsImages('zai')).toBe(false);
 		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
+		expect(store.getDefaultModel('zai')).toBe('glm-5.1');
 		// Remote had only opus; static sonnet+haiku are appended
 		const claudeModels = store.getModels('claude');
 		expect(claudeModels[0]).toMatchObject({ value: 'opus', label: 'Opus', supportsImages: true });

@@ -118,11 +118,13 @@
 	$effect(() => {
 		void modelCatalog.version;
 		form.validateModelAgainstLive('claude');
-		form.validateModelAgainstLive('codex');
-		form.validateModelAgainstLive('opencode');
-		form.validateModelAgainstLive('amp');
-		form.validateModelAgainstLive('factory');
-	});
+			form.validateModelAgainstLive('codex');
+			form.validateModelAgainstLive('opencode');
+			form.validateModelAgainstLive('amp');
+			form.validateModelAgainstLive('factory');
+			form.validateModelAgainstLive('openrouter');
+			form.validateModelAgainstLive('zai');
+		});
 
 	// Focus textarea when path validates successfully, but not while browsing.
 	$effect(() => {

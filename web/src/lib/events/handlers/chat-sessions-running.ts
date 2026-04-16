@@ -17,6 +17,8 @@ export function extractRunningChatIds(msg: ChatSessionsRunningMessage): Set<stri
       ...((msg.sessions?.opencode as Array<{ id?: string }> | undefined) || []),
       ...((msg.sessions?.amp as Array<{ id?: string }> | undefined) || []),
       ...((msg.sessions?.factory as Array<{ id?: string }> | undefined) || []),
+      ...((msg.sessions?.openrouter as Array<{ id?: string }> | undefined) || []),
+      ...((msg.sessions?.zai as Array<{ id?: string }> | undefined) || []),
     ]
       .map((s) => s?.id)
       .filter((id): id is string => Boolean(id)),

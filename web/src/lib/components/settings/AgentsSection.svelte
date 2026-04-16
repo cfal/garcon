@@ -16,7 +16,7 @@
 		error: string | null;
 	}
 
-	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory' | 'openrouter';
+	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory' | 'openrouter' | 'zai';
 	type BrowserLoginAgentId = 'claude' | 'codex';
 	type AgentConfig = { id: AgentId; name: string; cliOnly?: boolean; loginCommand?: string };
 
@@ -33,7 +33,8 @@
 	const secondaryAgents: AgentConfig[] = [
 		{ id: 'amp', name: 'Amp', cliOnly: true, loginCommand: 'amp login' },
 		{ id: 'factory', name: 'Factory', cliOnly: true, loginCommand: 'droid' },
-		{ id: 'openrouter', name: 'OpenRouter', cliOnly: true, loginCommand: 'export OPENROUTER_API_KEY=...' }
+		{ id: 'openrouter', name: 'OpenRouter', cliOnly: true, loginCommand: 'export OPENROUTER_API_KEY=...' },
+		{ id: 'zai', name: 'Z.AI', cliOnly: true, loginCommand: 'export ZAI_API_KEY=...' }
 	];
 
 	const authPollTimers: Partial<Record<AgentId, ReturnType<typeof setTimeout>>> = {};
@@ -47,6 +48,7 @@
 	let ampAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 	let factoryAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 	let openrouterAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
+	let zaiAuth = $state<AuthStatus>({ ...DEFAULT_AUTH });
 
 	let claudeOpen = $state(false);
 	let codexOpen = $state(false);
@@ -54,6 +56,7 @@
 	let ampOpen = $state(false);
 	let factoryOpen = $state(false);
 	let openrouterOpen = $state(false);
+	let zaiOpen = $state(false);
 
 	let moreProvidersOpen = $state(false);
 
@@ -67,6 +70,7 @@
 		if (agent === 'amp') return ampAuth;
 		if (agent === 'factory') return factoryAuth;
 		if (agent === 'openrouter') return openrouterAuth;
+		if (agent === 'zai') return zaiAuth;
 		return opencodeAuth;
 	}
 
@@ -76,6 +80,7 @@
 		if (agent === 'amp') return ampOpen;
 		if (agent === 'factory') return factoryOpen;
 		if (agent === 'openrouter') return openrouterOpen;
+		if (agent === 'zai') return zaiOpen;
 		return opencodeOpen;
 	}
 
@@ -85,6 +90,7 @@
 		else if (agent === 'amp') ampOpen = value;
 		else if (agent === 'factory') factoryOpen = value;
 		else if (agent === 'openrouter') openrouterOpen = value;
+		else if (agent === 'zai') zaiOpen = value;
 		else opencodeOpen = value;
 	}
 
@@ -94,6 +100,7 @@
 		else if (agent === 'amp') ampAuth = status;
 		else if (agent === 'factory') factoryAuth = status;
 		else if (agent === 'openrouter') openrouterAuth = status;
+		else if (agent === 'zai') zaiAuth = status;
 		else opencodeAuth = status;
 	}
 
@@ -205,22 +212,24 @@
 
 	// Count how many secondary providers are connected
 	let secondaryConnectedCount = $derived(
-		[ampAuth, factoryAuth].filter((a) => a.authenticated).length
+		[ampAuth, factoryAuth, openrouterAuth, zaiAuth].filter((a) => a.authenticated).length
 	);
 
 	let authExpandDone = $state(false);
 	$effect(() => {
-		const allLoaded = !claudeAuth.loading && !codexAuth.loading && !opencodeAuth.loading && !ampAuth.loading && !factoryAuth.loading;
+		const allLoaded = !claudeAuth.loading && !codexAuth.loading && !opencodeAuth.loading && !ampAuth.loading && !factoryAuth.loading && !openrouterAuth.loading && !zaiAuth.loading;
 		if (allLoaded && !authExpandDone) {
 			authExpandDone = true;
 			if (!claudeAuth.authenticated) claudeOpen = true;
 			if (!codexAuth.authenticated) codexOpen = true;
 			if (!opencodeAuth.authenticated) opencodeOpen = true;
-			if (ampAuth.authenticated || factoryAuth.authenticated) {
+			if (ampAuth.authenticated || factoryAuth.authenticated || openrouterAuth.authenticated || zaiAuth.authenticated) {
 				moreProvidersOpen = true;
 			}
 			if (!ampAuth.authenticated) ampOpen = true;
 			if (!factoryAuth.authenticated) factoryOpen = true;
+			if (!openrouterAuth.authenticated) openrouterOpen = true;
+			if (!zaiAuth.authenticated) zaiOpen = true;
 		}
 	});
 
@@ -230,6 +239,8 @@
 		void checkAuth('opencode');
 		void checkAuth('amp');
 		void checkAuth('factory');
+		void checkAuth('openrouter');
+		void checkAuth('zai');
 
 		return () => {
 			stopAuthPolling('claude');
@@ -237,6 +248,8 @@
 			stopAuthPolling('opencode');
 			stopAuthPolling('amp');
 			stopAuthPolling('factory');
+			stopAuthPolling('openrouter');
+			stopAuthPolling('zai');
 		};
 	});
 </script>

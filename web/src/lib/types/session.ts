@@ -7,7 +7,7 @@ export type PinnedInsertPosition = 'top' | 'bottom';
 
 export interface ChatSession {
 	id: string;
-	provider: 'claude' | 'codex' | 'opencode' | 'amp' | 'factory';
+	provider: 'claude' | 'codex' | 'opencode' | 'amp' | 'factory' | 'openrouter' | 'zai';
 	model: string | null;
 	permissionMode?: PermissionMode;
 	thinkingMode?: ThinkingMode;
@@ -33,4 +33,3 @@ export interface ChatSession {
 	isActive: boolean;
 	isUnread: boolean;
 }
-

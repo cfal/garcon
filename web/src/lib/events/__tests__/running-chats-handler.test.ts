@@ -9,13 +9,15 @@ function makeRunningChatsMsg(sessions: ChatSessionsRunningMessage['sessions']): 
 
 describe('extractRunningChatIds', () => {
 	it('flattens provider-grouped sessions into a set of IDs', () => {
-		const msg = new ChatSessionsRunningMessage({
-			claude: [{ id: 'c1' }, { id: 'c2' }],
-			codex: [{ id: 'x1' }],
-			opencode: [],
-			amp: [],
-			factory: [],
-		});
+			const msg = new ChatSessionsRunningMessage({
+				claude: [{ id: 'c1' }, { id: 'c2' }],
+				codex: [{ id: 'x1' }],
+				opencode: [],
+				amp: [],
+				factory: [],
+				openrouter: [],
+				zai: [],
+			});
 
 		const ids = extractRunningChatIds(msg);
 		expect(ids).toEqual(new Set(['c1', 'c2', 'x1']));
@@ -37,8 +39,8 @@ describe('extractRunningChatIds', () => {
 		expect(ids).toEqual(new Set(['c1']));
 	});
 
-	it('handles empty sessions', () => {
-		const msg = new ChatSessionsRunningMessage({ claude: [], codex: [], opencode: [], amp: [], factory: [] });
+		it('handles empty sessions', () => {
+			const msg = new ChatSessionsRunningMessage({ claude: [], codex: [], opencode: [], amp: [], factory: [], openrouter: [], zai: [] });
 
 		const ids = extractRunningChatIds(msg);
 		expect(ids.size).toBe(0);
@@ -58,13 +60,15 @@ describe('handleRunningChats', () => {
 		const reconcileProcessing = vi.fn();
 		const ctx: RunningChatsContext = { reconcileProcessing };
 
-		const msg = makeRunningChatsMsg({
-			claude: [{ id: 'a' }],
-			codex: [{ id: 'b' }],
-			opencode: [],
-			amp: [],
-			factory: [],
-		});
+			const msg = makeRunningChatsMsg({
+				claude: [{ id: 'a' }],
+				codex: [{ id: 'b' }],
+				opencode: [],
+				amp: [],
+				factory: [],
+				openrouter: [],
+				zai: [],
+			});
 
 		handleRunningChats(msg, ctx);
 
@@ -77,8 +81,8 @@ describe('handleRunningChats', () => {
 		const reconcileProcessing = vi.fn();
 		const ctx: RunningChatsContext = { reconcileProcessing };
 
-		const msg = makeRunningChatsMsg({ claude: [], codex: [], opencode: [], amp: [], factory: [] });
-		handleRunningChats(msg, ctx);
+			const msg = makeRunningChatsMsg({ claude: [], codex: [], opencode: [], amp: [], factory: [], openrouter: [], zai: [] });
+			handleRunningChats(msg, ctx);
 
 		const receivedSet = reconcileProcessing.mock.calls[0][0] as Set<string>;
 		expect(receivedSet.size).toBe(0);

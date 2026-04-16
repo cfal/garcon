@@ -5,7 +5,13 @@ import {
 } from '../../common/generation-defaults.ts';
 
 function isProvider(value) {
-  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'amp' || value === 'factory';
+  return value === 'claude'
+    || value === 'codex'
+    || value === 'opencode'
+    || value === 'amp'
+    || value === 'factory'
+    || value === 'openrouter'
+    || value === 'zai';
 }
 
 function pickAutoProvider(authByProvider) {

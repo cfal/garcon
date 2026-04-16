@@ -2,13 +2,15 @@
 // These defaults are used when users have not explicitly configured
 // provider/model settings.
 
-export const GENERATION_PROVIDER_PRIORITY = ['claude', 'codex', 'opencode'] as const;
+export const GENERATION_PROVIDER_PRIORITY = ['claude', 'codex', 'opencode', 'openrouter', 'zai', 'amp', 'factory'] as const;
 
 export const GENERATION_MODEL_DEFAULTS = {
   claude: 'haiku',
   codex: 'gpt-5.1-codex-mini',
   amp: 'smart',
   factory: 'claude-opus-4-6',
+  openrouter: 'anthropic/claude-sonnet-4.6',
+  zai: 'glm-5.1',
 } as const;
 
 // Preference order for OpenCode model auto-selection.

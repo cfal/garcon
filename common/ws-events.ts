@@ -59,6 +59,8 @@ export class ChatSessionsRunningMessage {
     opencode: Array<{ id: string }>;
     amp: Array<{ id: string }>;
     factory: Array<{ id: string }>;
+    openrouter: Array<{ id: string }>;
+    zai: Array<{ id: string }>;
   }) { }
 }
 

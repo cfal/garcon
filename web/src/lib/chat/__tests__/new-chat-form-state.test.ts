@@ -55,11 +55,13 @@ const mockModelCatalog = {
 	getDefaultModel: vi.fn((provider: string) => {
 		if (provider === 'claude') return 'opus';
 		if (provider === 'codex') return 'gpt-5.4';
+		if (provider === 'zai') return 'glm-5.1';
 		return '';
 	}),
 	getModels: vi.fn((provider: string) => {
 		if (provider === 'claude') return [{ value: 'opus', label: 'Opus' }];
 		if (provider === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
+		if (provider === 'zai') return [{ value: 'glm-5.1', label: 'GLM-5.1' }];
 		return [];
 	}),
 	refreshIfStale: vi.fn().mockResolvedValue(undefined)
@@ -100,6 +102,19 @@ describe('NewChatFormState', () => {
 		expect(formState.thinkingMode).toBe('think-hard');
 		expect(formState.claudeThinkingMode).toBe('off');
 		expect(formState.projectPath).toBe('/workspace/project');
+	});
+
+	it('loads Z.ai startup defaults from server settings', async () => {
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
+			lastProvider: 'zai' as RemoteSettingsSnapshot['lastProvider'],
+			lastProjectPath: '/workspace/project',
+			lastModel: 'glm-5.1',
+		}));
+
+		await formState.loadSettingsAndModels();
+
+		expect(formState.provider).toBe('zai');
+		expect(formState.modelValue).toBe('glm-5.1');
 	});
 
 	it('normalizes invalid startup defaults from server settings', async () => {

@@ -2,7 +2,7 @@
 
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$shared/chat-modes';
 
-export type SessionProvider = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory' | 'openrouter';
+export type SessionProvider = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory' | 'openrouter' | 'zai';
 
 export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'preview';
 

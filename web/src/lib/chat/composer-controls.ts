@@ -121,6 +121,11 @@ export const PROVIDER_MENU_GROUPS: ProviderMenuGroup[] = [
 				value: 'openrouter',
 				label: 'OpenRouter',
 				description: 'Access many models via OpenRouter API.'
+			},
+			{
+				value: 'zai',
+				label: 'Z.AI',
+				description: 'Direct access to Z.AI OpenAI-compatible models.'
 			}
 		]
 	}

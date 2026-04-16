@@ -77,3 +77,10 @@ export const OPENROUTER_MODELS = {
   ] satisfies SharedModelOption[],
   DEFAULT: 'anthropic/claude-sonnet-4.6',
 };
+
+export const ZAI_MODELS = {
+  OPTIONS: [
+    { value: 'glm-5.1', label: 'GLM-5.1', supportsImages: false },
+  ] satisfies SharedModelOption[],
+  DEFAULT: 'glm-5.1',
+};

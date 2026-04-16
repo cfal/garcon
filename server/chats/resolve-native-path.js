@@ -43,5 +43,9 @@ export async function resolveMissingNativePath(session) {
     return createArtificialNativePath(session.provider, session.providerSessionId);
   }
 
+  if (session.provider === 'zai') {
+    return createArtificialNativePath(session.provider, session.providerSessionId);
+  }
+
   return null;
 }
