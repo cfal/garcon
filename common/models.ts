@@ -39,6 +39,7 @@ export const AMP_MODELS = {
 export const FACTORY_MODELS = {
   OPTIONS: [
     { value: 'claude-opus-4-5-20251101', label: 'Claude Opus 4.5', supportsImages: true },
+    { value: 'claude-opus-4-7', label: 'Claude Opus 4.7', supportsImages: true },
     { value: 'claude-opus-4-6', label: 'Claude Opus 4.6', supportsImages: true },
     { value: 'claude-opus-4-6-fast', label: 'Claude Opus 4.6 Fast Mode', supportsImages: true },
     { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', supportsImages: true },
@@ -58,11 +59,12 @@ export const FACTORY_MODELS = {
     { value: 'minimax-m2.5', label: 'Droid Core (MiniMax M2.5)', supportsImages: false },
     { value: 'gpt-5.1-codex-max', label: 'GPT-5.1-Codex-Max', supportsImages: true },
   ] satisfies SharedModelOption[],
-  DEFAULT: 'claude-opus-4-6',
+  DEFAULT: 'claude-opus-4-7',
 };
 
 export const OPENROUTER_MODELS = {
   OPTIONS: [
+    { value: 'anthropic/claude-opus-4.7', label: 'Claude Opus 4.7', supportsImages: true },
     { value: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6', supportsImages: true },
     { value: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', supportsImages: true },
     { value: 'openai/gpt-5.4', label: 'GPT-5.4', supportsImages: true },

@@ -46,7 +46,7 @@ describe('GET /api/v1/models', () => {
     expect(factory.supportsFork).toBe(false);
     expect(factory.supportsImages).toBe(false);
     expect(Array.isArray(factory.models)).toBe(true);
-    expect(factory.defaultModel).toBe('claude-opus-4-6');
+    expect(factory.defaultModel).toBe('claude-opus-4-7');
   });
 
   it('filters both top-level and catalog when provider param is given', async () => {

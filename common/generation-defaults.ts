@@ -8,7 +8,7 @@ export const GENERATION_MODEL_DEFAULTS = {
   claude: 'haiku',
   codex: 'gpt-5.1-codex-mini',
   amp: 'smart',
-  factory: 'claude-opus-4-6',
+  factory: 'claude-opus-4-7',
 } as const;
 
 // Preference order for OpenCode model auto-selection.

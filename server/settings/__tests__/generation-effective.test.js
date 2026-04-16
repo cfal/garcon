@@ -124,7 +124,7 @@ describe('resolveEffectiveGenerationConfig', () => {
     expect(result).toEqual({
       enabled: true,
       provider: 'factory',
-      model: 'claude-opus-4-6',
+      model: 'claude-opus-4-7',
       source: 'manual',
     });
   });
