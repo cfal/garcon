@@ -16,6 +16,7 @@ export interface ScrollControllerDeps {
 
 export class ConversationScrollController {
 	isPinnedToBottom = $state(true);
+	isScrollingToTop = $state(false);
 
 	constructor(private deps: ScrollControllerDeps) {}
 
@@ -32,6 +33,23 @@ export class ConversationScrollController {
 		node.scrollTop = node.scrollHeight;
 		this.deps.chatState.isUserScrolledUp = false;
 		this.isPinnedToBottom = true;
+	}
+
+	/** Loads all paginated messages and scrolls to the very top instantly. */
+	async scrollToTop(): Promise<void> {
+		const chatId = this.deps.sessions.selectedChatId;
+		if (!chatId) return;
+
+		this.isScrollingToTop = true;
+		try {
+			if (this.deps.chatState.hasMoreMessages) {
+				await this.deps.chatState.loadAllMessages(chatId, this.deps.ws);
+			}
+			const node = this.deps.getScrollContainer();
+			if (node) node.scrollTop = 0;
+		} finally {
+			this.isScrollingToTop = false;
+		}
 	}
 
 	handleScroll(): void {
@@ -92,7 +110,7 @@ export class ConversationScrollController {
 				const half = scrollContainer.clientHeight / 2;
 				scrollContainer.scrollBy({
 					top: event.key === 'd' ? half : -half,
-					behavior: 'smooth',
+					behavior: 'instant',
 				});
 			}
 		}
