@@ -28,7 +28,7 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(true);
 		expect(store.supportsImages('opencode')).toBe(false);
-		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
+		expect(store.supportsImages('factory', 'claude-opus-4-7')).toBe(true);
 		expect(store.supportsImages('factory', 'glm-5')).toBe(false);
 	});
 
@@ -119,7 +119,7 @@ describe('ModelCatalogStore', () => {
 							id: 'factory',
 							supportsFork: false,
 							supportsImages: false,
-							models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', supportsImages: true }],
+							models: [{ value: 'claude-opus-4-7', label: 'Claude Opus 4.6', supportsImages: true }],
 						},
 					],
 				},
@@ -133,7 +133,7 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('opencode')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(false);
-		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
+		expect(store.supportsImages('factory', 'claude-opus-4-7')).toBe(true);
 		// Remote had only opus; static sonnet+haiku are appended
 		const claudeModels = store.getModels('claude');
 		expect(claudeModels[0]).toMatchObject({ value: 'opus', label: 'Opus', supportsImages: true });
@@ -200,7 +200,7 @@ describe('ModelCatalogStore', () => {
 							supportsFork: false,
 							supportsImages: false,
 							models: [
-								{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', supportsImages: true },
+								{ value: 'claude-opus-4-7', label: 'Claude Opus 4.6', supportsImages: true },
 								{ value: 'glm-5', label: 'Droid Core (GLM-5)', supportsImages: false },
 							],
 						},
@@ -212,7 +212,7 @@ describe('ModelCatalogStore', () => {
 		const store = createModelCatalogStore();
 		await store.forceRefresh();
 
-		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
+		expect(store.supportsImages('factory', 'claude-opus-4-7')).toBe(true);
 		expect(store.supportsImages('factory', 'glm-5')).toBe(false);
 	});
 });
