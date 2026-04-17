@@ -107,7 +107,7 @@
 		<div class="relative" bind:this={dropdownEl}>
 			<button
 				onclick={onToggleBranchDropdown}
-				class="flex items-center hover:bg-accent rounded-lg transition-all duration-200 {isMobile ? 'gap-1.5 px-2 py-1' : 'gap-1.5 px-3 py-1.5'}"
+				class="flex items-center hover:bg-accent rounded-lg transition-colors duration-150 {isMobile ? 'gap-1.5 px-2 py-1' : 'gap-1.5 px-3 py-1.5'}"
 			>
 				<GitBranch class="text-muted-foreground w-4 h-4" />
 				<span class="text-sm font-medium max-w-[140px] truncate">{currentBranch}</span>
@@ -165,7 +165,7 @@
 			<!-- View commits toggle -->
 			<button
 				onclick={onViewCommits}
-				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200"
+				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-150"
 				title="View commit history"
 			>
 				<History class="w-4 h-4" />
@@ -245,7 +245,7 @@
 			<!-- Back to changes -->
 			<button
 				onclick={onViewChanges}
-				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200"
+				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-150"
 				title="View changes"
 			>
 				<ArrowLeft class="w-4 h-4" />
