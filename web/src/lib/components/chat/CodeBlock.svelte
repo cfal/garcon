@@ -96,23 +96,26 @@ does not ship ~100KB of syntax definitions for pages that render no code.
 
 	let { lang = '', text = '' }: Props = $props();
 
-	let highlighted = $state<string>('');
+	const escapedText = $derived(text ? escapeHtml(text) : '');
+	let asyncHighlighted = $state<string | null>(null);
+	const highlighted = $derived(asyncHighlighted ?? escapedText);
 	let highlightToken = 0;
 
 	// Highlights text asynchronously so highlight.js and its language
 	// definitions only load when a code block actually renders. While
-	// loading, shows escaped plain text so layout is stable.
+	// loading, keeps the escaped plain text visible so SSR and first paint
+	// never render an empty block.
 	$effect(() => {
 		const currentText = text;
 		const currentLang = lang;
 		const token = ++highlightToken;
 
 		if (!currentText) {
-			highlighted = '';
+			asyncHighlighted = null;
 			return;
 		}
 
-		highlighted = escapeHtml(currentText);
+		asyncHighlighted = null;
 
 		void (async () => {
 			const hljs = await loadHljs();
@@ -131,7 +134,7 @@ does not ship ~100KB of syntax definitions for pages that render no code.
 			}
 
 			if (token === highlightToken) {
-				highlighted = result;
+				asyncHighlighted = result;
 			}
 		})();
 	});
