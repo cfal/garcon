@@ -129,7 +129,7 @@
 
 	function getTabButtonClasses(tabId: AppTab): string {
 		return cn(
-			'relative px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium rounded-md transition-all duration-200',
+			'relative px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium rounded-md transition-colors duration-150',
 			tabId === activeTab
 				? 'bg-chat-tabs-active text-chat-tabs-active-foreground shadow-sm border border-chat-tabs-active-border'
 				: 'text-muted-foreground hover:text-foreground hover:bg-accent'
@@ -138,7 +138,7 @@
 
 	function getUtilityButtonClasses(): string {
 		return cn(
-			'relative inline-flex items-center justify-center h-6 sm:h-7 w-6 sm:w-7 px-0 py-0 rounded-md transition-all duration-200',
+			'relative inline-flex items-center justify-center h-6 sm:h-7 w-6 sm:w-7 px-0 py-0 rounded-md transition-colors duration-150',
 			'text-muted-foreground hover:text-foreground hover:bg-accent'
 		);
 	}

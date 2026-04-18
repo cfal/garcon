@@ -1,75 +1,87 @@
 <!--
 @component
 Renders a fenced code block with syntax highlighting via highlight.js.
-Registers languages once at module scope for efficiency.
+Highlight.js core and language packs load on demand so the initial bundle
+does not ship ~100KB of syntax definitions for pages that render no code.
 -->
 <script module lang="ts">
-	import hljs from 'highlight.js/lib/core';
-	import type { LanguageFn } from 'highlight.js';
-	import javascript from 'highlight.js/lib/languages/javascript';
-	import typescript from 'highlight.js/lib/languages/typescript';
-	import python from 'highlight.js/lib/languages/python';
-	import bash from 'highlight.js/lib/languages/bash';
-	import json from 'highlight.js/lib/languages/json';
-	import css from 'highlight.js/lib/languages/css';
-	import xml from 'highlight.js/lib/languages/xml';
-	import markdown from 'highlight.js/lib/languages/markdown';
-	import yaml from 'highlight.js/lib/languages/yaml';
-	import sql from 'highlight.js/lib/languages/sql';
-	import rust from 'highlight.js/lib/languages/rust';
-	import go from 'highlight.js/lib/languages/go';
-	import java from 'highlight.js/lib/languages/java';
-	import c from 'highlight.js/lib/languages/c';
-	import cpp from 'highlight.js/lib/languages/cpp';
-	import csharp from 'highlight.js/lib/languages/csharp';
-	import ruby from 'highlight.js/lib/languages/ruby';
-	import php from 'highlight.js/lib/languages/php';
-	import swift from 'highlight.js/lib/languages/swift';
-	import kotlin from 'highlight.js/lib/languages/kotlin';
-	import diff from 'highlight.js/lib/languages/diff';
-	import shell from 'highlight.js/lib/languages/shell';
-	import plaintext from 'highlight.js/lib/languages/plaintext';
+	import type { HLJSApi, LanguageFn } from 'highlight.js';
 
-	const languageMap: Record<string, LanguageFn> = {
-		javascript,
-		js: javascript,
-		typescript,
-		ts: typescript,
-		python,
-		py: python,
-		bash,
-		sh: bash,
-		json,
-		css,
-		html: xml,
-		xml,
-		markdown,
-		md: markdown,
-		yaml,
-		yml: yaml,
-		sql,
-		rust,
-		rs: rust,
-		go,
-		java,
-		c,
-		cpp,
-		csharp,
-		cs: csharp,
-		ruby,
-		rb: ruby,
-		php,
-		swift,
-		kotlin,
-		kt: kotlin,
-		diff,
-		shell,
-		plaintext,
-		text: plaintext
+	const commonAliases: Record<string, string> = {
+		js: 'javascript',
+		ts: 'typescript',
+		py: 'python',
+		sh: 'bash',
+		html: 'xml',
+		md: 'markdown',
+		yml: 'yaml',
+		rs: 'rust',
+		cs: 'csharp',
+		rb: 'ruby',
+		kt: 'kotlin',
+		text: 'plaintext',
 	};
 
-	for (const [name, lang] of Object.entries(languageMap)) {
-		hljs.registerLanguage(name, lang);
+	const languageLoaders: Record<string, () => Promise<{ default: LanguageFn }>> = {
+		javascript: () => import('highlight.js/lib/languages/javascript'),
+		typescript: () => import('highlight.js/lib/languages/typescript'),
+		python: () => import('highlight.js/lib/languages/python'),
+		bash: () => import('highlight.js/lib/languages/bash'),
+		json: () => import('highlight.js/lib/languages/json'),
+		css: () => import('highlight.js/lib/languages/css'),
+		xml: () => import('highlight.js/lib/languages/xml'),
+		markdown: () => import('highlight.js/lib/languages/markdown'),
+		yaml: () => import('highlight.js/lib/languages/yaml'),
+		sql: () => import('highlight.js/lib/languages/sql'),
+		rust: () => import('highlight.js/lib/languages/rust'),
+		go: () => import('highlight.js/lib/languages/go'),
+		java: () => import('highlight.js/lib/languages/java'),
+		c: () => import('highlight.js/lib/languages/c'),
+		cpp: () => import('highlight.js/lib/languages/cpp'),
+		csharp: () => import('highlight.js/lib/languages/csharp'),
+		ruby: () => import('highlight.js/lib/languages/ruby'),
+		php: () => import('highlight.js/lib/languages/php'),
+		swift: () => import('highlight.js/lib/languages/swift'),
+		kotlin: () => import('highlight.js/lib/languages/kotlin'),
+		diff: () => import('highlight.js/lib/languages/diff'),
+		shell: () => import('highlight.js/lib/languages/shell'),
+		plaintext: () => import('highlight.js/lib/languages/plaintext'),
+	};
+
+	let hljsPromise: Promise<HLJSApi> | null = null;
+	const loadedLanguages = new Set<string>();
+
+	function canonicalLangName(raw: string): string {
+		const key = raw.toLowerCase();
+		return commonAliases[key] ?? key;
+	}
+
+	async function loadHljs(): Promise<HLJSApi> {
+		if (!hljsPromise) {
+			hljsPromise = import('highlight.js/lib/core').then((m) => m.default);
+		}
+		return hljsPromise;
+	}
+
+	async function ensureLanguage(hljs: HLJSApi, name: string): Promise<boolean> {
+		if (loadedLanguages.has(name)) return true;
+		const loader = languageLoaders[name];
+		if (!loader) return false;
+		try {
+			const mod = await loader();
+			hljs.registerLanguage(name, mod.default);
+			loadedLanguages.add(name);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	function escapeHtml(text: string): string {
+		return text
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;');
 	}
 </script>
 
@@ -84,12 +96,47 @@ Registers languages once at module scope for efficiency.
 
 	let { lang = '', text = '' }: Props = $props();
 
-	const highlighted = $derived.by(() => {
-		if (!text) return '';
-		if (lang && hljs.getLanguage(lang)) {
-			return hljs.highlight(text, { language: lang }).value;
+	const escapedText = $derived(text ? escapeHtml(text) : '');
+	let asyncHighlighted = $state<string | null>(null);
+	const highlighted = $derived(asyncHighlighted ?? escapedText);
+	let highlightToken = 0;
+
+	// Highlights text asynchronously so highlight.js and its language
+	// definitions only load when a code block actually renders. While
+	// loading, keeps the escaped plain text visible so SSR and first paint
+	// never render an empty block.
+	$effect(() => {
+		const currentText = text;
+		const currentLang = lang;
+		const token = ++highlightToken;
+
+		if (!currentText) {
+			asyncHighlighted = null;
+			return;
 		}
-		return hljs.highlightAuto(text).value;
+
+		asyncHighlighted = null;
+
+		void (async () => {
+			const hljs = await loadHljs();
+			if (token !== highlightToken) return;
+
+			const normalized = currentLang ? canonicalLangName(currentLang) : '';
+			let result: string;
+			if (normalized && (await ensureLanguage(hljs, normalized)) && hljs.getLanguage(normalized)) {
+				result = hljs.highlight(currentText, { language: normalized }).value;
+			} else {
+				// Plaintext fallback avoids highlightAuto's multi-language probing cost.
+				await ensureLanguage(hljs, 'plaintext');
+				result = hljs.getLanguage('plaintext')
+					? hljs.highlight(currentText, { language: 'plaintext' }).value
+					: escapeHtml(currentText);
+			}
+
+			if (token === highlightToken) {
+				asyncHighlighted = result;
+			}
+		})();
 	});
 
 	let copied = $state(false);

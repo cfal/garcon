@@ -186,15 +186,21 @@
 		}
 	});
 
-	// Opens the settings dialog to the Agents tab on first authenticated load
-	// after registration. Uses a localStorage flag to avoid re-opening.
+	// Opens the settings dialog to the Agents tab on the first authenticated
+	// load right after a successful registration. Gated on a localStorage
+	// flag set during the registration flow so cold loads for existing users
+	// or auth-disabled sessions do not receive a blocking onboarding modal.
 	let settingsAutoOpened = $state(false);
 	$effect(() => {
 		if (auth.isLoading || !auth.isAuthenticated || settingsAutoOpened) return;
+		if (auth.authDisabled) {
+			settingsAutoOpened = true;
+			return;
+		}
 		settingsAutoOpened = true;
 		try {
-			if (!localStorage.getItem('has-seen-settings')) {
-				localStorage.setItem('has-seen-settings', '1');
+			if (localStorage.getItem('just-registered') === '1') {
+				localStorage.removeItem('just-registered');
 				appShell.openSettings('agents');
 			}
 		} catch {

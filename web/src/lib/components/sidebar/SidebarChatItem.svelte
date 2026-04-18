@@ -196,7 +196,7 @@
 	<div class="md:hidden">
 			<button
 					class={cn(
-						'w-full text-left py-[5px] pr-2 mx-0 my-0 rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg border-b border-border/30 active:scale-[0.98] transition-all duration-150 relative flex items-center',
+						'w-full text-left py-[5px] pr-2 mx-0 my-0 rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg border-b border-border/30 active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
 					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
 					!isMultiSelectMode && isSelected ? 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground' : '',
 					isMultiSelectMode && isMultiSelected ? 'bg-primary/8' : '',

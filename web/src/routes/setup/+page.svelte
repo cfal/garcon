@@ -53,6 +53,11 @@
 		if (!result.success) {
 			error = result.error || m.auth_setup_errors_registration_failed();
 		} else {
+			try {
+				localStorage.setItem('just-registered', '1');
+			} catch {
+				// localStorage unavailable; settings onboarding will be skipped
+			}
 			goto('/');
 		}
 		isSubmitting = false;
