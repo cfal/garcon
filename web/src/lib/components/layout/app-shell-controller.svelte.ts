@@ -55,11 +55,16 @@ export class AppShellController {
 		return this.#inFlightFetch;
 	}
 
+	/** Fires the server-side delete in the background. Callers are expected
+	 *  to have already applied the optimistic UI removal; on failure we
+	 *  refetch so the chat list reconverges with the server. */
 	async deleteChat(chatId: string): Promise<void> {
 		try {
 			await deleteChat(chatId);
 		} catch (err) {
 			console.error('[AppShellController] Delete failed:', err);
+			// Rehydrate so the chat that failed to delete reappears.
+			void this.quietRefresh();
 		}
 	}
 
