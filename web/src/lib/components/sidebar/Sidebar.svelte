@@ -63,6 +63,10 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		onChatSelect: (chatId: string) => void;
 		onNewChat: () => void;
 		onChatDelete?: (chatId: string) => void;
+		/** Applies the optimistic local removal (store + navigation) a
+		 *  ChatSessionDeletedWsMessage would trigger, without waiting for
+		 *  the server. Used by bulk delete so the list updates instantly. */
+		onLocallyDeleteChat?: (chatId: string) => void;
 		onQuietRefresh: () => Promise<void> | void;
 		onChatRenamed?: (chatId: string, newTitle: string) => void;
 		onShowSettings: () => void;
@@ -75,6 +79,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		onChatSelect,
 		onNewChat,
 		onChatDelete,
+		onLocallyDeleteChat,
 		onQuietRefresh,
 		onChatRenamed,
 		onShowSettings,
@@ -436,14 +441,22 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		const ids = bulkDeleteConfirmation.chatIds;
 		bulkDeleteConfirmation = null;
 		const isSelectedChatInBulk = selectedChatId && ids.includes(selectedChatId);
+		// Resolve the surviving neighbor before the optimistic removal runs.
+		const remainingSelection = isSelectedChatInBulk
+			? chats.find((c) => !ids.includes(c.id))?.id ?? null
+			: null;
 		isBulkOperating = true;
 		try {
-			await controller.bulkDelete(ids);
+			// Drop from the store immediately so the list updates without
+			// waiting for every DELETE response to come back.
+			if (onLocallyDeleteChat) {
+				for (const id of ids) onLocallyDeleteChat(id);
+			}
 			if (isSelectedChatInBulk) {
-				const remaining = chats.find((c) => !ids.includes(c.id));
-				if (remaining) onChatSelect(remaining.id);
+				if (remainingSelection) onChatSelect(remainingSelection);
 				else onNewChat();
 			}
+			await controller.bulkDelete(ids);
 		} catch (error) {
 			console.error('Failed to bulk delete:', error);
 		} finally {

@@ -134,7 +134,27 @@
 		appShell.openNewChatDialog();
 	}
 
+	// Applies the same store mutations the ChatSessionDeletedWsMessage handler
+	// would apply once the server broadcast arrives. Running it eagerly lets
+	// the sidebar and URL update without waiting for the HTTP round-trip.
+	function locallyDeleteChat(chatId: string) {
+		if (!sessions.hasChat(chatId)) return;
+		if (sessions.selectedChatId === chatId) {
+			const idx = sessions.order.indexOf(chatId);
+			const neighborId = sessions.order[idx - 1] ?? sessions.order[idx + 1] ?? null;
+			if (neighborId) {
+				sessions.setSelectedChatId(neighborId);
+				goto(`/chat/${neighborId}`);
+			} else {
+				sessions.setSelectedChatId(null);
+				goto('/');
+			}
+		}
+		sessions.removeChat(chatId);
+	}
+
 	function handleChatDelete(chatId: string) {
+		locallyDeleteChat(chatId);
 		return shellController.deleteChat(chatId);
 	}
 
@@ -172,6 +192,7 @@
 					onChatSelect={handleChatSelect}
 					onNewChat={handleNewChat}
 					onChatDelete={handleChatDelete}
+					onLocallyDeleteChat={locallyDeleteChat}
 					onQuietRefresh={quietRefresh}
 					onChatRenamed={handleChatRenamed}
 					onShowSettings={() => appShell.openSettings()}
@@ -214,6 +235,7 @@
 						}}
 							onNewChat={handleNewChat}
 							onChatDelete={handleChatDelete}
+							onLocallyDeleteChat={locallyDeleteChat}
 							onQuietRefresh={quietRefresh}
 							onChatRenamed={handleChatRenamed}
 							onShowSettings={() => appShell.openSettings()}

@@ -393,31 +393,29 @@ export default function createChatRoutes(
         return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
       }
 
-      if (session.nativePath && !isArtificialNativePath(session.nativePath)) {
-        try {
-          await fs.unlink(session.nativePath as string);
-        } catch (error: unknown) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-            console.warn(`sessions: could not delete native file ${session.nativePath}:`, (error as Error).message);
-          }
-        }
-      }
-
-      try {
-        await queue.deleteChatQueueFile(chatId);
-      } catch {
-        // Queue file may not exist.
-      }
-
+      // Remove from the in-memory registry first so the WS broadcast fires
+      // immediately; disk cleanup then happens in parallel. Clients see the
+      // chat disappear before the HTTP call resolves.
       registry.removeChat(chatId);
 
-      try {
-        await settings.removeFromAllOrderLists(chatId);
-      } catch { /* ignore */ }
+      const nativePath = session.nativePath && !isArtificialNativePath(session.nativePath)
+        ? (session.nativePath as string)
+        : null;
 
-      try {
-        await settings.removeSessionName(chatId);
-      } catch { /* ignore */ }
+      await Promise.all([
+        nativePath
+          ? fs.unlink(nativePath).catch((error: NodeJS.ErrnoException) => {
+              if (error.code !== 'ENOENT') {
+                console.warn(`sessions: could not delete native file ${nativePath}:`, error.message);
+              }
+            })
+          : Promise.resolve(),
+        queue.deleteChatQueueFile(chatId).catch(() => {
+          // Queue file may not exist.
+        }),
+        settings.removeFromAllOrderLists(chatId).catch(() => {}),
+        settings.removeSessionName(chatId).catch(() => {}),
+      ]);
 
       return Response.json({ success: true });
     } catch (error: unknown) {
