@@ -16,6 +16,9 @@
 		onRenameSelectedChatRequested() {
 			return () => {};
 		},
+		onDeleteSelectedChatRequested() {
+			return () => {};
+		},
 		onSidebarSearchRequested() {
 			return () => {};
 		},
