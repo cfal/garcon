@@ -7,6 +7,7 @@
 			openSidebarSearch: () => void;
 			requestNewChat: () => void;
 			requestRenameSelectedChat: () => void;
+			requestDeleteSelectedChat: () => void;
 			openSettings: () => void;
 		};
 		onToggleCommandMenu?: () => void;
@@ -23,6 +24,9 @@
 		},
 		get requestRenameSelectedChat() {
 			return appShell.requestRenameSelectedChat;
+		},
+		get requestDeleteSelectedChat() {
+			return appShell.requestDeleteSelectedChat;
 		},
 		get openSettings() {
 			return appShell.openSettings;

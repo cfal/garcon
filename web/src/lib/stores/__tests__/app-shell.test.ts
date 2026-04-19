@@ -115,6 +115,28 @@ describe('AppShellStore', () => {
 			store.requestRenameSelectedChat();
 			expect(cb).toHaveBeenCalledTimes(1);
 		});
+
+		it('requestDeleteSelectedChat fires callbacks', () => {
+			const store = new AppShellStore();
+			const cb = vi.fn();
+			store.onDeleteSelectedChatRequested(cb);
+
+			store.requestDeleteSelectedChat();
+			expect(cb).toHaveBeenCalledTimes(1);
+		});
+
+		it('requestDeleteSelectedChat unsubscribe removes callback', () => {
+			const store = new AppShellStore();
+			const cb = vi.fn();
+			const unsub = store.onDeleteSelectedChatRequested(cb);
+
+			store.requestDeleteSelectedChat();
+			expect(cb).toHaveBeenCalledTimes(1);
+
+			unsub();
+			store.requestDeleteSelectedChat();
+			expect(cb).toHaveBeenCalledTimes(1);
+		});
 	});
 
 	describe('settings tabs', () => {

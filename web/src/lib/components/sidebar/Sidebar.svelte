@@ -659,6 +659,13 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		startRenameChat(selected.id, selected.title || m.sidebar_chats_new_chat());
 	}));
 
+	onMount(() => appShell.onDeleteSelectedChatRequested(() => {
+		if (!selectedChatId) return;
+		const selected = chats.find((chat) => chat.id === selectedChatId);
+		if (!selected) return;
+		showDeleteConfirmation(selected.id, selected.title || m.sidebar_chats_new_chat(), selected.provider);
+	}));
+
 	onMount(() => appShell.onSidebarSearchRequested(() => {
 		searchState.toggleSearchDialog();
 	}));

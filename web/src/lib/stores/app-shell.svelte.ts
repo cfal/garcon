@@ -38,6 +38,7 @@ export class AppShellStore {
 	#recenterCallbacks = new Set<() => void>();
 	#composerFocusCallbacks = new Set<() => void>();
 	#renameSelectedCallbacks = new Set<() => void>();
+	#deleteSelectedCallbacks = new Set<() => void>();
 	#newChatDialogSeedCallbacks = new Set<() => void>();
 	#sidebarSearchCallbacks = new Set<() => void>();
 
@@ -94,6 +95,11 @@ export class AppShellStore {
 		return () => { this.#renameSelectedCallbacks.delete(cb); };
 	}
 
+	onDeleteSelectedChatRequested(cb: () => void): () => void {
+		this.#deleteSelectedCallbacks.add(cb);
+		return () => { this.#deleteSelectedCallbacks.delete(cb); };
+	}
+
 	onNewChatDialogSeed(cb: () => void): () => void {
 		this.#newChatDialogSeedCallbacks.add(cb);
 		return () => { this.#newChatDialogSeedCallbacks.delete(cb); };
@@ -107,6 +113,11 @@ export class AppShellStore {
 	/** Requests sidebar to open rename for the currently selected chat. */
 	requestRenameSelectedChat(): void {
 		for (const cb of this.#renameSelectedCallbacks) cb();
+	}
+
+	/** Requests sidebar to open delete confirmation for the currently selected chat. */
+	requestDeleteSelectedChat(): void {
+		for (const cb of this.#deleteSelectedCallbacks) cb();
 	}
 
 	/** Requests shell navigation to the new-chat screen. */
