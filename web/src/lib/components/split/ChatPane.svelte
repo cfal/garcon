@@ -38,6 +38,12 @@
 	const chatTitle = $derived(chatRecord?.title || 'Untitled');
 	const providerLabel = $derived(chatRecord?.provider || '');
 	const isProcessing = $derived(chatRecord?.isProcessing ?? false);
+	// Signals a finished, non-focused pane that has new content the user
+	// hasn't acknowledged -- lets the user see at a glance which pane
+	// needs attention across a 4-up split.
+	const needsAttention = $derived(
+		!isProcessing && !isFocused && (chatRecord?.isUnread ?? false),
+	);
 	const showDropZone = $derived(draggedChatId !== null && draggedChatId !== chatId);
 	let headerDropHover = $state(false);
 
@@ -197,9 +203,14 @@
 			</span>
 		{/if}
 		{#if isProcessing}
-			<span class="relative flex h-1.5 w-1.5 flex-shrink-0">
+			<span class="relative flex h-1.5 w-1.5 flex-shrink-0" aria-label="Chat is processing">
 				<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/50 opacity-75"></span>
 				<span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span>
+			</span>
+		{:else if needsAttention}
+			<span class="relative flex h-2 w-2 flex-shrink-0" aria-label="Chat finished, new activity">
+				<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indicator-attention/60 opacity-60"></span>
+				<span class="relative inline-flex rounded-full h-2 w-2 bg-indicator-attention shadow-sm shadow-indicator-attention/40"></span>
 			</span>
 		{/if}
 		<div class="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover/pane:opacity-100 transition-opacity duration-150"
