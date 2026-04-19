@@ -58,6 +58,7 @@
 	let {
 		session,
 		selectedChatId,
+		currentTime,
 		isPinned,
 		isArchived,
 		isReorderMode = false,
@@ -231,6 +232,8 @@
 						{isSelected}
 						{isPinned}
 						{isArchived}
+						{currentTime}
+						showTimestamp={true}
 						onTagClick={isMultiSelectMode ? undefined : onTagClick}
 						onManageTags={isMultiSelectMode ? undefined : onManageTags}
 					/>
@@ -282,6 +285,8 @@
 					{isSelected}
 					{isPinned}
 					{isArchived}
+					{currentTime}
+					showTimestamp={true}
 					onTagClick={isMultiSelectMode ? undefined : onTagClick}
 					onManageTags={isMultiSelectMode ? undefined : onManageTags}
 				/>
