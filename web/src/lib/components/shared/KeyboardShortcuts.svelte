@@ -53,6 +53,11 @@
 				appShell.requestRenameSelectedChat();
 				return;
 			}
+			if (e.ctrlKey && key === 'd') {
+				e.preventDefault();
+				appShell.requestDeleteSelectedChat();
+				return;
+			}
 			if (inEditable) return;
 
 			// Ctrl+, -- open settings
