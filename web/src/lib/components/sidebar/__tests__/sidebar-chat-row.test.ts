@@ -48,6 +48,8 @@ describe('shared sidebar chat row', () => {
 		expect(document.querySelectorAll('.border-sidebar-badge-pinned-border')).toHaveLength(1);
 		expect(screen.getAllByText('Shared row chat')).toHaveLength(2);
 		expect(screen.getAllByLabelText('Unread')).toHaveLength(2);
+		expect(screen.getAllByText('Jan 1')).toHaveLength(2);
+		expect(screen.getAllByText('12:00 AM')).toHaveLength(2);
 		expect(screen.getAllByTitle('/very/long/workspace/projects/feature-branch/app')).toHaveLength(2);
 		const sidebarPreview = screen.getAllByText('Latest preview text');
 		expect(sidebarPreview).toHaveLength(2);
@@ -79,6 +81,8 @@ describe('shared sidebar chat row', () => {
 		expect(option.querySelector('.border-sidebar-badge-pinned-border')).toBeNull();
 		expect(screen.getByText('Shared row chat')).toBeTruthy();
 		expect(screen.queryByLabelText('Unread')).toBeNull();
+		expect(screen.queryByText('Jan 1')).toBeNull();
+		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getByTitle('/very/long/workspace/projects/feature-branch/app')).toBeTruthy();
 		expect(screen.getByText('Latest preview text').className).toContain('mt-0.5');
 		expect(screen.getByText('Latest preview text').className).toContain('mb-1');

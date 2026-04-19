@@ -4,12 +4,15 @@
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { cn } from '$lib/utils/cn';
+	import { formatSidebarChatTimestamp } from './chat-timestamp.js';
 
 	interface SidebarChatSummaryProps {
 		session: ChatSessionRecord;
 		isSelected: boolean;
 		isPinned: boolean;
 		isArchived: boolean;
+		currentTime?: Date;
+		showTimestamp?: boolean;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 	}
@@ -17,6 +20,8 @@
 	let {
 		session,
 		isSelected,
+		currentTime = new Date(),
+		showTimestamp = false,
 		onTagClick,
 		onManageTags,
 	}: SidebarChatSummaryProps = $props();
@@ -29,6 +34,10 @@
 	let projectPath = $derived(session.projectPath || '');
 	let provider = $derived(session.provider || 'claude');
 	let isTagManagementEnabled = $derived(Boolean(onManageTags));
+	let activityTimestamp = $derived(session.lastActivityAt ?? session.createdAt);
+	let formattedTimestamp = $derived(
+		showTimestamp ? formatSidebarChatTimestamp(activityTimestamp, currentTime) : null
+	);
 
 	const PROVIDER_TAG_VARIANTS: Record<SessionProvider, string> = {
 		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
@@ -83,19 +92,37 @@
 
 <div class="relative min-w-0 w-full" data-slot="sidebar-chat-summary">
 	<div class="min-w-0 flex-1">
-		<div
-			class={cn(
-				'flex items-center gap-1.5 truncate text-[14px] font-medium',
-				isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
-			)}
-		>
-			{#if isUnread}
-				<span
-					class="h-1.5 w-1.5 shrink-0 rounded-full bg-indicator-unread"
-					aria-label={m.sidebar_chat_unread()}
-				></span>
+		<div class="flex min-w-0 items-start gap-2">
+			<div
+				class={cn(
+					'flex min-w-0 flex-1 items-center gap-1.5 truncate text-[14px] font-medium',
+					isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
+				)}
+			>
+				{#if isUnread}
+					<span
+						class="h-1.5 w-1.5 shrink-0 rounded-full bg-indicator-unread"
+						aria-label={m.sidebar_chat_unread()}
+					></span>
+				{/if}
+				<span class="truncate">{chatName}</span>
+			</div>
+
+			{#if formattedTimestamp}
+				<div
+					class={cn(
+						'shrink-0 text-right text-[10px] leading-[1.15] tabular-nums',
+						isSelected
+							? 'text-sidebar-chat-item-selected-foreground/75'
+							: 'text-muted-foreground',
+					)}
+					title={formattedTimestamp.tooltip}
+					aria-label={formattedTimestamp.tooltip}
+				>
+					<div>{formattedTimestamp.dateLabel}</div>
+					<div class="mt-0.5">{formattedTimestamp.timeLabel}</div>
+				</div>
 			{/if}
-			{chatName}
 		</div>
 
 		{#if projectPath}
