@@ -1,5 +1,4 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
 	import { tick } from 'svelte';
 	import { cn } from '$lib/utils/cn';
 	import { getChatSessions, getWs, getSplitLayout } from '$lib/context';
@@ -20,10 +19,18 @@
 		onClose: () => void;
 		onDelete: () => void;
 		onDrop: (zone: 'left' | 'right' | 'top' | 'bottom' | 'center') => void;
-		focusedContent?: Snippet;
 	}
 
-	let { paneId, chatId, isFocused, draggedChatId, onFocus, onClose, onDelete, onDrop, focusedContent }: ChatPaneProps = $props();
+	let {
+		paneId,
+		chatId,
+		isFocused,
+		draggedChatId,
+		onFocus,
+		onClose,
+		onDelete,
+		onDrop,
+	}: ChatPaneProps = $props();
 
 	const sessions = getChatSessions();
 	const ws = getWs();
@@ -76,7 +83,6 @@
 		e.preventDefault();
 		e.stopPropagation();
 		headerDropHover = false;
-		// Pane-to-pane drag: swap the two panes.
 		if (splitLayout.draggedPaneId) {
 			splitLayout.swapPanes(splitLayout.draggedPaneId, paneId);
 			splitLayout.endDrag();
@@ -126,9 +132,7 @@
 		}
 	}
 
-	// Scrolls to bottom after DOM updates whenever messages change or the
-	// scroll container mounts (e.g. when pane transitions from focused to
-	// unfocused and the read-only message list appears).
+	// Scrolls to bottom after DOM updates whenever messages change.
 	$effect(() => {
 		messages;
 		scrollContainer;
@@ -157,23 +161,24 @@
 <div
 	class={cn(
 		'h-full w-full flex flex-col relative overflow-hidden rounded-lg group/pane',
-		'border transition-all duration-200',
+		'border transition-colors duration-150',
 		isFocused
-			? 'border-primary/40 shadow-sm shadow-primary/10'
+			? 'border-primary/50 shadow-sm shadow-primary/10'
 			: 'border-border/40 hover:border-border/70',
 	)}
 	role="region"
 	aria-label="Chat pane: {chatTitle}"
+	data-pane-id={paneId}
 >
 	<!-- Pane Header: draggable for rearranging, drop target for swap/replace -->
 	<div
 		class={cn(
 			'flex items-center gap-1.5 px-2.5 py-1 flex-shrink-0 select-none cursor-grab',
-			'border-b transition-all duration-150',
+			'border-b transition-colors duration-150',
 			headerDropHover
 				? 'bg-accent/30 border-accent/50'
 				: isFocused
-					? 'bg-primary/5 border-primary/15'
+					? 'bg-primary/5 border-primary/20'
 					: 'bg-muted/20 border-border/30 hover:bg-muted/40',
 		)}
 		draggable={true}
@@ -189,7 +194,7 @@
 	>
 		<MessageSquare class={cn(
 			'w-3 h-3 flex-shrink-0 transition-colors duration-150',
-			isFocused ? 'text-primary/70' : 'text-muted-foreground/60',
+			isFocused ? 'text-primary/80' : 'text-muted-foreground/60',
 		)} />
 		<span class={cn(
 			'text-[11px] font-medium truncate flex-1 min-w-0 transition-colors duration-150',
@@ -233,21 +238,24 @@
 		</div>
 	</div>
 
-	<!-- Content area: full interactive workspace for focused pane, read-only for others -->
-	{#if focusedContent && isFocused}
-		<div class="flex-1 min-h-0 overflow-hidden">
-			{@render focusedContent()}
-		</div>
-	{:else}
-		<!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events -- click delegates focus to this pane -->
+	<!--
+		Body: always renders the read-only message list uniformly for every
+		pane. The interactive workspace for the focused chat is rendered as
+		an overlay by the parent, positioned over this element. Uniform
+		rendering means pane focus change is purely cosmetic (border color)
+		without remounting heavy chat components.
+	-->
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<div
+		class="flex-1 min-h-0 relative"
+		data-pane-body
+		onclick={onFocus}
+		onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onFocus(); }}
+		role="log"
+	>
 		<div
 			bind:this={scrollContainer}
-			class={cn(
-				'flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1.5 scrollbar-hide',
-				!isFocused && 'opacity-75',
-			)}
-			onclick={onFocus}
-			role="log"
+			class="absolute inset-0 overflow-y-auto px-3 py-2 space-y-1.5 scrollbar-hide"
 		>
 			{#if isLoading}
 				<div class="flex items-center justify-center h-full">
@@ -261,7 +269,7 @@
 					No messages yet
 				</div>
 			{:else}
-				{#each messages as msg, i}
+				{#each messages as msg}
 					{@const text = getMessageText(msg)}
 					{@const role = getMessageRole(msg)}
 					{#if text && role}
@@ -281,11 +289,11 @@
 				{/each}
 			{/if}
 		</div>
-	{/if}
+	</div>
 
 	<!-- Focus indicator: thin accent bar at top instead of bottom for cleaner look -->
 	{#if isFocused}
-		<div class="absolute top-0 left-2 right-2 h-0.5 bg-primary/50 rounded-b-full"></div>
+		<div class="absolute top-0 left-2 right-2 h-0.5 bg-primary/60 rounded-b-full pointer-events-none"></div>
 	{/if}
 
 	<!-- Drop zone overlay for drag-and-drop -->

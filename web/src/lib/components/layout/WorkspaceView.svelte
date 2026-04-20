@@ -253,6 +253,62 @@
 			}
 		});
 	});
+
+	// Focused-pane overlay tracking. The interactive ConversationWorkspace
+	// lives at a stable DOM location and is positioned over the focused
+	// pane's body via an absolute overlay. Focus changes only reposition
+	// the overlay rect; ConversationWorkspace is never remounted.
+	let splitRootEl: HTMLDivElement | undefined = $state();
+	let focusedOverlayRect = $state<{ top: number; left: number; width: number; height: number } | null>(null);
+
+	$effect(() => {
+		const focusedId = splitLayout.focusedPaneId;
+		const isEnabled = splitLayout.isEnabled;
+		// Also depend on the tree identity so mount/unmount of panes re-runs this.
+		const _rootIdentity = splitLayout.root;
+		const root = splitRootEl;
+
+		if (!isEnabled || !focusedId || !root) {
+			focusedOverlayRect = null;
+			return;
+		}
+
+		let paneEl: HTMLElement | null = null;
+		const update = () => {
+			if (!root) return;
+			paneEl = root.querySelector<HTMLElement>(
+				`[data-pane-id="${focusedId}"] [data-pane-body]`,
+			);
+			if (!paneEl) {
+				focusedOverlayRect = null;
+				return;
+			}
+			const rootRect = root.getBoundingClientRect();
+			const r = paneEl.getBoundingClientRect();
+			focusedOverlayRect = {
+				top: r.top - rootRect.top,
+				left: r.left - rootRect.left,
+				width: r.width,
+				height: r.height,
+			};
+		};
+
+		// Initial + poll on next frame so the just-rendered tree is present.
+		update();
+		const rafId = requestAnimationFrame(update);
+
+		const ro = new ResizeObserver(update);
+		ro.observe(root);
+		if (paneEl) ro.observe(paneEl);
+
+		const onWinResize = () => update();
+		window.addEventListener('resize', onWinResize);
+		return () => {
+			cancelAnimationFrame(rafId);
+			ro.disconnect();
+			window.removeEventListener('resize', onWinResize);
+		};
+	});
 </script>
 
 <div class="h-full flex flex-col relative">
@@ -437,20 +493,38 @@
 		<!-- Tab content: ConversationWorkspace stays mounted, other tabs lazy-loaded -->
 		<div class="flex-1 min-h-0 overflow-hidden">
 			{#if splitLayout.isEnabled && splitLayout.root && activeTab === 'chat'}
-				{#snippet focusedPaneContent()}
-					<ConversationWorkspace onRegisterSubmit={handleRegisterSubmit} />
-				{/snippet}
-				<SplitContainer
-					node={splitLayout.root}
-					focusedPaneId={splitLayout.focusedPaneId}
-					draggedChatId={splitLayout.draggedChatId}
-					onFocusPane={handleSplitFocusPane}
-					onClosePane={handleSplitClosePane}
-					onDeleteChat={handleSplitDeleteChat}
-					onSetRatio={handleSplitSetRatio}
-					onDropChat={handleSplitDropChat}
-					{focusedPaneContent}
-				/>
+				<!-- svelte-ignore a11y_no_static_element_interactions -- container tracks focused pane rect -->
+				<div class="h-full relative" bind:this={splitRootEl}>
+					<SplitContainer
+						node={splitLayout.root}
+						focusedPaneId={splitLayout.focusedPaneId}
+						draggedChatId={splitLayout.draggedChatId}
+						onFocusPane={handleSplitFocusPane}
+						onClosePane={handleSplitClosePane}
+						onDeleteChat={handleSplitDeleteChat}
+						onSetRatio={handleSplitSetRatio}
+						onDropChat={handleSplitDropChat}
+					/>
+					<!--
+						The interactive workspace is rendered once at a stable
+						location and positioned over the focused pane. Focus
+						changes only update the overlay's rect via CSS, so the
+						ConversationWorkspace is never remounted. All panes
+						render uniformly; switching focus triggers no side
+						effects beyond the chat switch inside the workspace.
+					-->
+					{#if focusedOverlayRect}
+						<div
+							class="absolute pointer-events-auto rounded-lg overflow-hidden bg-background border border-primary/40 shadow-sm shadow-primary/10"
+							style:top="{focusedOverlayRect.top}px"
+							style:left="{focusedOverlayRect.left}px"
+							style:width="{focusedOverlayRect.width}px"
+							style:height="{focusedOverlayRect.height}px"
+						>
+							<ConversationWorkspace onRegisterSubmit={handleRegisterSubmit} />
+						</div>
+					{/if}
+				</div>
 			{:else}
 				<!-- svelte-ignore a11y_no_static_element_interactions -- drop target for initiating split mode -->
 				<div
