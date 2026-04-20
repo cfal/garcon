@@ -69,6 +69,7 @@
 		--color-provider-zai-foreground: hsl(var(--provider-zai-foreground));
 		--color-provider-zai-border: hsl(var(--provider-zai-border));
 	--color-indicator-unread: hsl(var(--indicator-unread));
+	--color-indicator-attention: hsl(var(--indicator-attention));
 		--color-status-processing: hsl(var(--status-processing));
 		--color-status-processing-foreground: hsl(var(--status-processing-foreground));
 		--color-status-processing-border: hsl(var(--status-processing-border));
@@ -212,6 +213,7 @@
 		--provider-zai-foreground: 8 78% 28%;
 		--provider-zai-border: 8 52% 76%;
 	--indicator-unread: 214 90% 48%;
+	--indicator-attention: 0 78% 54%;
 		--status-processing: 214 90% 48%;
 		--status-processing-foreground: 214 85% 32%;
 		--status-processing-border: 214 70% 55%;
@@ -377,6 +379,7 @@
 		--provider-zai-foreground: 8 88% 86%;
 		--provider-zai-border: 8 28% 36%;
 	--indicator-unread: 214 95% 68%;
+	--indicator-attention: 0 82% 66%;
 		--status-processing: 214 95% 68%;
 		--status-processing-foreground: 214 95% 86%;
 		--status-processing-border: 214 74% 54%;
