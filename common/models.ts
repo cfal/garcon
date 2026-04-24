@@ -18,6 +18,7 @@ export const CLAUDE_MODELS = {
 
 export const CODEX_MODELS = {
   OPTIONS: [
+    { value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true },
     { value: 'gpt-5.4', label: 'GPT-5.4', supportsImages: true },
     { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsImages: true },
     { value: 'gpt-5.2-codex', label: 'GPT-5.2 Codex', supportsImages: true },
@@ -25,7 +26,7 @@ export const CODEX_MODELS = {
     { value: 'gpt-5.2', label: 'GPT-5.2', supportsImages: true },
     { value: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex Mini', supportsImages: true },
   ] satisfies SharedModelOption[],
-  DEFAULT: 'gpt-5.4',
+  DEFAULT: 'gpt-5.5',
 };
 
 export const AMP_MODELS = {
