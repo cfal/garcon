@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import SidebarChatItem from './SidebarChatItem.svelte';
+	import WorkspaceGroup from './WorkspaceGroup.svelte';
 	import Search from '@lucide/svelte/icons/search';
 	import GripVertical from '@lucide/svelte/icons/grip-vertical';
 	import { DragDropProvider, PointerSensor } from '@dnd-kit/svelte';
@@ -13,6 +14,7 @@
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList } from '$lib/api/chats.js';
+	import { groupChatsByWorkspace } from '$lib/utils/workspace-group.js';
 
 	interface SidebarChatListProps {
 		chats: ChatSessionRecord[];
@@ -183,6 +185,9 @@
 
 	let pinnedLocalOrder = $derived(pinnedDragOverride ?? pinnedAll.map((s) => s.id));
 	let normalLocalOrder = $derived(normalDragOverride ?? normalAll.map((s) => s.id));
+
+	// Workspace groups for normal (non-filtered) chats.
+	let normalGroups = $derived(groupChatsByWorkspace(normalAll));
 
 	function handleNormalDragStart() {
 		pinnedDragOverride = pinnedAll.map((s) => s.id);
@@ -485,45 +490,31 @@
 					{hasPinnedChats}
 				/>
 			{/each}
-		{:else if normalLocalOrder.length > 0}
-			<DragDropProvider
-				sensors={implicitDragSensors}
-				onDragStart={handleNormalDragStart}
-				onDragEnd={handleNormalNormalDragEnd}
-			>
-				{#each normalLocalOrder as chatId, idx (chatId)}
-					{@const chat = normalById.get(chatId)}
-					{#if chat}
-						{@const sortable = createSortable({ id: chat.id, index: idx, group: 'normal-normal' })}
-						{@const attach = sortable.attach as unknown as Action}
-						<div use:attach>
-							<SidebarChatItem
-								session={chat}
-								{selectedChatId}
-								{currentTime}
-								isPinned={false}
-								isArchived={false}
-								{isMultiSelectMode}
-								isMultiSelected={isMultiSelected?.(chat.id) ?? false}
-								{onChatSelect}
-								{onDeleteChat}
-								{onStartRenameChat}
-									{onTogglePinned}
-									{onToggleArchive}
-									{onShowDetails}
-									{onForkChat}
-									{onShareChat}
-									{onTagClick}
-									{onManageTags}
-									{onEnterReorderMode}
-								{onEnterMultiSelect}
-								{onMultiSelectToggle}
-								{hasPinnedChats}
-							/>
-						</div>
-					{/if}
-				{/each}
-			</DragDropProvider>
+			{:else if normalGroups.length > 0}
+					{#each normalGroups as group (group.name)}
+						<WorkspaceGroup
+							workspaceName={group.name}
+							chats={group.chats}
+							{selectedChatId}
+							{currentTime}
+							isMultiSelectMode={isMultiSelectMode}
+							isMultiSelected={isMultiSelected}
+							{hasPinnedChats}
+							{onChatSelect}
+							{onDeleteChat}
+							{onStartRenameChat}
+							{onTogglePinned}
+							{onToggleArchive}
+							{onShowDetails}
+							{onForkChat}
+							{onShareChat}
+							{onTagClick}
+							{onManageTags}
+							{onEnterReorderMode}
+							{onEnterMultiSelect}
+							{onMultiSelectToggle}
+								/>
+					{/each}
 		{/if}
 		{#each archived as gs (gs.id)}
 			<SidebarChatItem
