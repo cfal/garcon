@@ -19,6 +19,8 @@ describe('ModelCatalogStore', () => {
 		expect(store.getModels('factory').length).toBeGreaterThan(0);
 		expect(store.getModels('zai')).toEqual([{ value: 'glm-5.1', label: 'GLM-5.1', supportsImages: false }]);
 		expect(store.getDefaultModel('claude')).toBe('opus');
+		expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
+		expect(store.getModels('codex')[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
 	});
 
 	it('exposes default capabilities from common contract', () => {
@@ -173,8 +175,8 @@ describe('ModelCatalogStore', () => {
 
 		const codexModels = store.getModels('codex');
 		expect(codexModels[0]).toMatchObject({ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' });
-		// Static gpt-5.4 should be appended
-		expect(codexModels.find((m) => m.value === 'gpt-5.4')).toBeTruthy();
+		// Static GPT-5.5 should be appended
+		expect(codexModels.find((m) => m.value === 'gpt-5.5')).toBeTruthy();
 		expect(codexModels.length).toBeGreaterThan(1);
 	});
 

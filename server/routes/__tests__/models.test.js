@@ -38,6 +38,8 @@ describe('GET /api/v1/models', () => {
     const codex = body.catalog.providers.find((p) => p.id === 'codex');
     expect(codex.supportsFork).toBe(true);
     expect(codex.supportsImages).toBe(true);
+    expect(codex.defaultModel).toBe('gpt-5.5');
+    expect(codex.models[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
 
     const opencode = body.catalog.providers.find((p) => p.id === 'opencode');
     expect(opencode.supportsFork).toBe(false);
