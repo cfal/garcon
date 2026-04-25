@@ -21,10 +21,6 @@ export const CODEX_MODELS = {
     { value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true },
     { value: 'gpt-5.4', label: 'GPT-5.4', supportsImages: true },
     { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsImages: true },
-    { value: 'gpt-5.2-codex', label: 'GPT-5.2 Codex', supportsImages: true },
-    { value: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max', supportsImages: true },
-    { value: 'gpt-5.2', label: 'GPT-5.2', supportsImages: true },
-    { value: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex Mini', supportsImages: true },
   ] satisfies SharedModelOption[],
   DEFAULT: 'gpt-5.5',
 };
@@ -45,8 +41,6 @@ export const FACTORY_MODELS = {
     { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', supportsImages: true },
     { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', supportsImages: true },
     { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', supportsImages: true },
-    { value: 'gpt-5.2', label: 'GPT-5.2', supportsImages: true },
-    { value: 'gpt-5.2-codex', label: 'GPT-5.2-Codex', supportsImages: true },
     { value: 'gpt-5.4', label: 'GPT-5.4', supportsImages: true },
     { value: 'gpt-5.4-fast', label: 'GPT-5.4 Fast Mode', supportsImages: true },
     { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', supportsImages: true },
@@ -57,7 +51,6 @@ export const FACTORY_MODELS = {
     { value: 'glm-5', label: 'Droid Core (GLM-5)', supportsImages: false },
     { value: 'kimi-k2.5', label: 'Droid Core (Kimi K2.5)', supportsImages: true },
     { value: 'minimax-m2.5', label: 'Droid Core (MiniMax M2.5)', supportsImages: false },
-    { value: 'gpt-5.1-codex-max', label: 'GPT-5.1-Codex-Max', supportsImages: true },
   ] satisfies SharedModelOption[],
   DEFAULT: 'claude-opus-4-6',
 };

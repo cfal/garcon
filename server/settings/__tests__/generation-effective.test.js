@@ -37,7 +37,7 @@ describe('resolveEffectiveGenerationConfig', () => {
     expect(result).toEqual({
       enabled: true,
       provider: 'codex',
-      model: 'gpt-5.1-codex-mini',
+      model: 'gpt-5.5',
       source: 'auto',
     });
   });

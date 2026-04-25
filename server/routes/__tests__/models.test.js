@@ -40,6 +40,11 @@ describe('GET /api/v1/models', () => {
     expect(codex.supportsImages).toBe(true);
     expect(codex.defaultModel).toBe('gpt-5.5');
     expect(codex.models[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
+    const codexModelValues = codex.models.map((model) => model.value);
+    expect(codexModelValues).not.toContain('gpt-5.2');
+    expect(codexModelValues).not.toContain('gpt-5.2-codex');
+    expect(codexModelValues).not.toContain('gpt-5.1-codex-max');
+    expect(codexModelValues).not.toContain('gpt-5.1-codex-mini');
 
     const opencode = body.catalog.providers.find((p) => p.id === 'opencode');
     expect(opencode.supportsFork).toBe(false);
@@ -50,6 +55,10 @@ describe('GET /api/v1/models', () => {
     expect(factory.supportsImages).toBe(false);
     expect(Array.isArray(factory.models)).toBe(true);
     expect(factory.defaultModel).toBe('claude-opus-4-6');
+    const factoryModelValues = factory.models.map((model) => model.value);
+    expect(factoryModelValues).not.toContain('gpt-5.2');
+    expect(factoryModelValues).not.toContain('gpt-5.2-codex');
+    expect(factoryModelValues).not.toContain('gpt-5.1-codex-max');
 
     const zai = body.catalog.providers.find((p) => p.id === 'zai');
     expect(zai.supportsFork).toBe(false);
