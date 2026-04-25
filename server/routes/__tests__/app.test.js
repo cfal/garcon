@@ -221,10 +221,10 @@ describe('GET /api/app/settings', () => {
     expect(body.version).toBe(1);
     expect(body.uiEffective.chatTitle.enabled).toBe(true);
     expect(body.uiEffective.chatTitle.provider).toBe('codex');
-    expect(body.uiEffective.chatTitle.model).toBe('gpt-5.1-codex-mini');
+    expect(body.uiEffective.chatTitle.model).toBe('gpt-5.5');
     expect(body.uiEffective.commitMessage.enabled).toBe(true);
     expect(body.uiEffective.commitMessage.provider).toBe('codex');
-    expect(body.uiEffective.commitMessage.model).toBe('gpt-5.1-codex-mini');
+    expect(body.uiEffective.commitMessage.model).toBe('gpt-5.5');
   });
 
   it('preserves persisted commitMessage extra fields in uiEffective', async () => {
@@ -233,7 +233,7 @@ describe('GET /api/app/settings', () => {
       commitMessage: {
         enabled: true,
         provider: 'codex',
-        model: 'gpt-5.1-codex-mini',
+        model: 'gpt-5.5',
         customPrompt: 'Write a short message',
         useCommonDirPrefix: true,
       },
@@ -245,7 +245,7 @@ describe('GET /api/app/settings', () => {
     expect(body.version).toBe(3);
     expect(body.uiEffective.commitMessage.enabled).toBe(true);
     expect(body.uiEffective.commitMessage.provider).toBe('codex');
-    expect(body.uiEffective.commitMessage.model).toBe('gpt-5.1-codex-mini');
+    expect(body.uiEffective.commitMessage.model).toBe('gpt-5.5');
     expect(body.uiEffective.commitMessage.customPrompt).toBe('Write a short message');
     expect(body.uiEffective.commitMessage.useCommonDirPrefix).toBe(true);
   });

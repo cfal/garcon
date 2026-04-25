@@ -21,6 +21,15 @@ describe('ModelCatalogStore', () => {
 		expect(store.getDefaultModel('claude')).toBe('opus');
 		expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
 		expect(store.getModels('codex')[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
+		const codexModelValues = store.getModels('codex').map((model) => model.value);
+		expect(codexModelValues).not.toContain('gpt-5.2');
+		expect(codexModelValues).not.toContain('gpt-5.2-codex');
+		expect(codexModelValues).not.toContain('gpt-5.1-codex-max');
+		expect(codexModelValues).not.toContain('gpt-5.1-codex-mini');
+		const factoryModelValues = store.getModels('factory').map((model) => model.value);
+		expect(factoryModelValues).not.toContain('gpt-5.2');
+		expect(factoryModelValues).not.toContain('gpt-5.2-codex');
+		expect(factoryModelValues).not.toContain('gpt-5.1-codex-max');
 	});
 
 	it('exposes default capabilities from common contract', () => {

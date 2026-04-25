@@ -6,7 +6,7 @@ export const GENERATION_PROVIDER_PRIORITY = ['claude', 'codex', 'opencode', 'ope
 
 export const GENERATION_MODEL_DEFAULTS = {
   claude: 'haiku',
-  codex: 'gpt-5.1-codex-mini',
+  codex: 'gpt-5.5',
   amp: 'smart',
   factory: 'claude-opus-4-6',
   openrouter: 'anthropic/claude-sonnet-4.6',

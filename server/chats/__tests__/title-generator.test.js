@@ -114,7 +114,7 @@ describe('maybeGenerateChatTitle', () => {
     expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
     const [, opts] = runSingleQueryMock.mock.calls[0];
     expect(opts.provider).toBe('codex');
-    expect(opts.model).toBe('gpt-5.1-codex-mini');
+    expect(opts.model).toBe('gpt-5.5');
   });
 
   it('auto-enables and skips DeepSeek R1 when selecting OpenCode defaults', async () => {
