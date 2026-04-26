@@ -8,7 +8,7 @@
     "typecheck": "bunx tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@openai/codex-sdk": "^0.104.0",
+    "@openai/codex-sdk": "0.125.0",
     "@opencode-ai/sdk": "^1.2.10",
     "bun-pty": "^0.4.8",
     "jsonwebtoken": "^9.0.3",
