@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import {
   cacheHeaders,
 } from '../static.js';
+import routes from '../static.js';
 
 describe('cacheHeaders', () => {
   it('returns no-cache headers for html', () => {
@@ -18,5 +19,14 @@ describe('cacheHeaders', () => {
 
   it('returns empty headers for unknown extension', () => {
     expect(cacheHeaders('/api/health')).toEqual({});
+  });
+});
+
+describe('static app routes', () => {
+  it('serves the SPA shell for the bare chat route', () => {
+    expect(routes['/chat']).toBeDefined();
+    expect(routes['/chat']?.GET).toBeFunction();
+    expect(routes['/chat/']).toBeDefined();
+    expect(routes['/chat/']?.GET).toBeFunction();
   });
 });

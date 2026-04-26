@@ -13,6 +13,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { ChatRunningQueryRequest } from '$shared/ws-requests';
 	import { AppShellController } from './app-shell-controller.svelte';
+	import { selectedChatIdFromRoute } from './app-shell-route';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileViewerHost from '../files/FileViewerHost.svelte';
 
@@ -40,13 +41,8 @@
 	// single source of truth; this effect keeps it in sync with the URL.
 	$effect(() => {
 		const chatId = page.params.id as string | undefined;
-		if (!chatId) {
-			if (page.url.pathname === '/') {
-				sessions.setSelectedChatId(null);
-			}
-			return;
-		}
-		sessions.setSelectedChatId(chatId);
+		const selectedChatId = selectedChatIdFromRoute(page.url.pathname, chatId);
+		if (selectedChatId !== undefined) sessions.setSelectedChatId(selectedChatId);
 	});
 
 	$effect(() => {
