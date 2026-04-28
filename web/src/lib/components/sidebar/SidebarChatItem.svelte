@@ -132,6 +132,20 @@
 		menuOpen = true;
 	}
 
+	// Anchors the dropdown next to the mobile 3-dot button so it opens beside the trigger.
+	function handleMobileMenuClick(e: MouseEvent) {
+		e.stopPropagation();
+		if (!itemEl) return;
+		const target = e.currentTarget as HTMLElement;
+		const itemRect = itemEl.getBoundingClientRect();
+		const btnRect = target.getBoundingClientRect();
+		rightClickPos = {
+			x: btnRect.left - itemRect.left,
+			y: btnRect.bottom - itemRect.top,
+		};
+		menuOpen = true;
+	}
+
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
 	const splitLayout = getSplitLayout();
@@ -194,14 +208,18 @@
 	{/if}
 
 	<!-- Mobile layout -->
-	<div class="md:hidden">
+	<div
+		class={cn(
+			'md:hidden flex items-stretch border-b border-border/30 bg-sidebar-chat-item-bg',
+			!isMultiSelectMode && isSelected && 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
+			isMultiSelectMode && isMultiSelected && 'bg-primary/8',
+			!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
+		)}
+	>
 			<button
 					class={cn(
-						'w-full text-left py-[5px] pr-2 mx-0 my-0 rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg border-b border-border/30 active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
+						'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
 					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
-					!isMultiSelectMode && isSelected ? 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground' : '',
-					isMultiSelectMode && isMultiSelected ? 'bg-primary/8' : '',
-						isProcessing && !isMultiSelectMode ? 'border-l-[3px] border-l-status-processing' : '',
 				)}
 				onclick={handleItemClick}
 			>
@@ -239,6 +257,16 @@
 					/>
 				</div>
 		</button>
+		{#if !isMultiSelectMode}
+			<button
+				type="button"
+				class="shrink-0 flex items-center justify-center px-3 text-muted-foreground hover:text-foreground active:bg-accent border-l border-border/30 transition-colors"
+				onclick={handleMobileMenuClick}
+				aria-label={m.sidebar_chat_more_actions()}
+			>
+				<EllipsisVertical class="size-5" />
+			</button>
+		{/if}
 	</div>
 
 	<!-- Desktop layout with right-click support and drag-to-split -->
@@ -299,7 +327,7 @@
 	<div
 		class={cn(
 			"absolute z-20",
-			!isAtCursor && "sidebar-item-menu-anchor right-1 top-1 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
+			!isAtCursor && "sidebar-item-menu-anchor right-1 top-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
 			!isAtCursor && menuOpen && "!opacity-100"
 		)}
 		style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
