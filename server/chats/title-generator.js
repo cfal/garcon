@@ -78,7 +78,7 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
       cwd: projectPath,
       projectPath,
       permissionMode: 'default',
-      thinkingMode: 'think',
+      thinkingMode: 'none',
     });
 
     const title = normalizeTitle(titleRaw);
