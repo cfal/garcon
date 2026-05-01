@@ -1,13 +1,17 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import type { Snippet } from 'svelte';
 	import { cn } from '$lib/utils/cn';
-	import { getChatSessions, getWs, getSplitLayout } from '$lib/context';
+	import { getChatSessions, getSplitLayout, getWs } from '$lib/context';
 	import { LocalChatSnapshotCache } from '$lib/chat/chat-snapshot-cache';
 	import { parseChatMessages, type ChatMessage, UserMessage, AssistantMessage, ErrorMessage } from '$shared/chat-types';
 	import { ChatLogQueryRequest } from '$shared/ws-requests';
+	import * as m from '$lib/paraglide/messages.js';
 	import X from '@lucide/svelte/icons/x';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
+	import ImagePlus from '@lucide/svelte/icons/image-plus';
+	import SendHorizontal from '@lucide/svelte/icons/send-horizontal';
 	import DropZoneOverlay from './DropZoneOverlay.svelte';
 
 	interface ChatPaneProps {
@@ -19,6 +23,7 @@
 		onClose: () => void;
 		onDelete: () => void;
 		onDrop: (zone: 'left' | 'right' | 'top' | 'bottom' | 'center') => void;
+		focusedContent?: Snippet;
 	}
 
 	let {
@@ -30,16 +35,17 @@
 		onClose,
 		onDelete,
 		onDrop,
+		focusedContent,
 	}: ChatPaneProps = $props();
 
 	const sessions = getChatSessions();
-	const ws = getWs();
 	const splitLayout = getSplitLayout();
+	const ws = getWs();
 	const snapshotCache = new LocalChatSnapshotCache();
 
-	let messages = $state<ChatMessage[]>([]);
-	let isLoading = $state(true);
-	let scrollContainer: HTMLDivElement | undefined = $state();
+	let previewMessages = $state<ChatMessage[]>([]);
+	let isPreviewLoading = $state(false);
+	let previewScrollContainer: HTMLDivElement | undefined = $state();
 
 	const chatRecord = $derived(sessions.byId[chatId] ?? null);
 	const chatTitle = $derived(chatRecord?.title || 'Untitled');
@@ -91,24 +97,27 @@
 		}
 	}
 
-	// Loads messages when chatId changes (on mount and after swap/replace).
 	$effect(() => {
 		const id = chatId;
-		messages = [];
-		isLoading = true;
+		if (isFocused) return;
+
+		previewMessages = [];
+		isPreviewLoading = true;
 
 		const cached = snapshotCache.restore(id);
 		if (cached) {
-			messages = cached.messages;
-			isLoading = false;
+			previewMessages = cached.messages;
+			isPreviewLoading = false;
 		}
 
 		if (ws.isConnected) {
-			fetchMessagesForChat(id);
+			fetchPreviewMessages(id);
+		} else {
+			isPreviewLoading = false;
 		}
 	});
 
-	async function fetchMessagesForChat(targetChatId: string) {
+	async function fetchPreviewMessages(targetChatId: string) {
 		try {
 			const data = await ws.sendRequest<{
 				messages?: ChatMessage[];
@@ -116,29 +125,26 @@
 				total?: number;
 			}>(new ChatLogQueryRequest(null, targetChatId, 50, 0), 10_000);
 
-			// Guard against stale responses after rapid chatId changes.
-			if (targetChatId !== chatId) return;
+			if (targetChatId !== chatId || isFocused) return;
 
 			const parsed = parseChatMessages(data.messages);
-			if (parsed.length > 0) {
-				messages = parsed;
-			}
+			previewMessages = parsed;
+			snapshotCache.persist(targetChatId, parsed);
 		} catch {
-			// Uses cached messages if fetch fails.
+			// Leaves cached preview content in place when refresh fails.
 		} finally {
-			if (targetChatId === chatId) {
-				isLoading = false;
+			if (targetChatId === chatId && !isFocused) {
+				isPreviewLoading = false;
 			}
 		}
 	}
 
-	// Scrolls to bottom after DOM updates whenever messages change.
 	$effect(() => {
-		messages;
-		scrollContainer;
+		previewMessages;
+		previewScrollContainer;
 		tick().then(() => {
-			if (scrollContainer) {
-				scrollContainer.scrollTop = scrollContainer.scrollHeight;
+			if (previewScrollContainer) {
+				previewScrollContainer.scrollTop = previewScrollContainer.scrollHeight;
 			}
 		});
 	});
@@ -238,58 +244,77 @@
 		</div>
 	</div>
 
-	<!--
-		Body: always renders the read-only message list uniformly for every
-		pane. The interactive workspace for the focused chat is rendered as
-		an overlay by the parent, positioned over this element. Uniform
-		rendering means pane focus change is purely cosmetic (border color)
-		without remounting heavy chat components.
-	-->
-	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<div
-		class="flex-1 min-h-0 relative"
-		data-pane-body
-		onclick={onFocus}
-		onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onFocus(); }}
-		role="log"
-	>
-		<div
-			bind:this={scrollContainer}
-			class="absolute inset-0 overflow-y-auto px-3 py-2 space-y-1.5 scrollbar-hide"
-		>
-			{#if isLoading}
-				<div class="flex items-center justify-center h-full">
-					<div class="flex items-center gap-2 text-muted-foreground text-xs">
-						<div class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-						<span class="text-[11px]">Loading...</span>
-					</div>
-				</div>
-			{:else if messages.length === 0}
-				<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
-					No messages yet
-				</div>
-			{:else}
-				{#each messages as msg}
-					{@const text = getMessageText(msg)}
-					{@const role = getMessageRole(msg)}
-					{#if text && role}
-						<div
-							class={cn(
-								'text-[11px] leading-relaxed rounded-md px-2.5 py-1.5 max-w-full',
-								role === 'user'
-									? 'bg-primary/8 text-foreground ml-6'
-									: role === 'assistant'
-										? 'bg-muted/40 text-foreground mr-3'
-										: 'bg-destructive/10 text-destructive',
-							)}
-						>
-							<div class="whitespace-pre-wrap break-words line-clamp-[20]">{text}</div>
-						</div>
-					{/if}
-				{/each}
-			{/if}
+	<!-- Content area: full interactive workspace for focused pane, composer target for others -->
+	{#if focusedContent && isFocused}
+		<div class="flex-1 min-h-0 overflow-hidden" data-pane-body>
+			{@render focusedContent()}
 		</div>
-	</div>
+	{:else}
+		<div
+			data-pane-body
+			class={cn(
+				'flex-1 min-h-0 flex flex-col gap-2 p-2 text-left',
+				'bg-background/40 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+				'transition-colors',
+			)}
+			onclick={onFocus}
+			onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onFocus(); }}
+			role="button"
+			tabindex="0"
+			aria-label="Focus chat composer for {chatTitle}"
+		>
+			<div
+				bind:this={previewScrollContainer}
+				class="min-h-0 flex-1 overflow-y-auto space-y-1.5 scrollbar-hide"
+				role="log"
+				aria-label="Chat preview for {chatTitle}"
+			>
+				{#if isPreviewLoading && previewMessages.length === 0}
+					<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
+						Loading messages...
+					</div>
+				{:else if previewMessages.length === 0}
+					<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
+						No messages yet
+					</div>
+				{:else}
+					{#each previewMessages as msg}
+						{@const text = getMessageText(msg)}
+						{@const role = getMessageRole(msg)}
+						{#if text && role}
+							<div
+								class={cn(
+									'text-[11px] leading-relaxed rounded-md px-2.5 py-1.5 max-w-full',
+									role === 'user'
+										? 'bg-primary/8 text-foreground ml-6'
+										: role === 'assistant'
+											? 'bg-muted/40 text-foreground mr-3'
+											: 'bg-destructive/10 text-destructive',
+								)}
+							>
+								<div class="whitespace-pre-wrap break-words line-clamp-[20]">{text}</div>
+							</div>
+						{/if}
+					{/each}
+				{/if}
+			</div>
+			<div class="rounded-lg border border-border/70 bg-card/95 shadow-sm overflow-hidden">
+				<div class="min-h-[72px] px-3 py-2 text-sm text-muted-foreground">
+					{m.chat_composer_reply_placeholder()}
+				</div>
+				<div class="flex items-center justify-between border-t border-border/70 px-2 py-1.5">
+					<div class="flex items-center gap-1.5 text-muted-foreground/70">
+						<ImagePlus class="size-3.5" />
+						<span class="h-2.5 w-2.5 rounded-full border border-current"></span>
+						<span class="h-2.5 w-2.5 rounded-full border border-current"></span>
+					</div>
+					<span class="inline-flex size-7 items-center justify-center rounded-full border border-primary/30 bg-primary/90 text-primary-foreground">
+						<SendHorizontal class="size-3.5" />
+					</span>
+				</div>
+			</div>
+		</div>
+	{/if}
 
 	<!-- Focus indicator: thin accent bar at top instead of bottom for cleaner look -->
 	{#if isFocused}
