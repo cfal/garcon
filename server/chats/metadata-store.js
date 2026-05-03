@@ -2,17 +2,21 @@
 // from the registry via ProviderRegistry.getPreview(). Updated on live
 // append via history-cache.
 
+const DEFAULT_PREVIEW_TIMEOUT_MS = 5_000;
+
 export class MetadataIndex {
   #metadataByChatId = new Map();
   #registry;
   #providers;
   #initialized = false;
+  #previewTimeoutMs;
 
   // registry: ChatRegistry
   // providers: ProviderRegistry
-  constructor(registry, providers) {
+  constructor(registry, providers, options = {}) {
     this.#registry = registry;
     this.#providers = providers;
+    this.#previewTimeoutMs = options.previewTimeoutMs ?? DEFAULT_PREVIEW_TIMEOUT_MS;
   }
 
   async init() {
@@ -26,7 +30,7 @@ export class MetadataIndex {
 
     const entries = Object.entries(sessions);
     const results = await Promise.allSettled(
-      entries.map(([chatId, session]) => this.#buildMetadataFromPreview(chatId, session)),
+      entries.map(([chatId, session]) => this.#buildMetadataFromPreviewWithTimeout(chatId, session)),
     );
 
     for (let i = 0; i < results.length; i++) {
@@ -90,6 +94,14 @@ export class MetadataIndex {
     });
   }
 
+  async #buildMetadataFromPreviewWithTimeout(chatId, session) {
+    return withTimeout(
+      this.#buildMetadataFromPreview(chatId, session),
+      this.#previewTimeoutMs,
+      () => new Error(`Timed out building preview for chat ${chatId} after ${this.#previewTimeoutMs}ms`),
+    );
+  }
+
   async #buildMetadataFromPreview(chatId, session) {
     const preview = await this.#providers.getPreview(session);
     if (!preview) {
@@ -106,6 +118,17 @@ export class MetadataIndex {
       firstMessage: preview.firstMessage,
     };
   }
+}
+
+function withTimeout(promise, timeoutMs, createTimeoutError) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(createTimeoutError()), timeoutMs);
+  });
+  return Promise.race([
+    promise.finally(() => clearTimeout(timeoutId)),
+    timeout,
+  ]);
 }
 
 function extractPreviewText(msg) {

@@ -4,6 +4,7 @@
 
 import type { SessionProvider } from '$lib/types/app';
 import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { ApiProtocol } from '$shared/providers';
 import {
 	AMP_AGENT_MODES,
 	THINKING_MODES,
@@ -43,9 +44,19 @@ export const DEFAULT_MODE_STYLE = {
 	dot: 'bg-primary-foreground'
 };
 
+export interface ModelSelectionPayload {
+	model: string;
+	apiProviderId: string | null;
+	modelEndpointId: string | null;
+	modelProtocol: ApiProtocol | null;
+}
+
 export class ProviderState {
 	provider = $state<SessionProvider>('claude');
 	model = $state('opus');
+	apiProviderId = $state<string | null>(null);
+	modelEndpointId = $state<string | null>(null);
+	modelProtocol = $state<ApiProtocol | null>(null);
 	permissionMode = $state<PermissionMode>('default');
 	thinkingMode = $state<ThinkingMode>('none');
 	ampAgentMode = $state<AmpAgentMode>('smart');
@@ -98,6 +109,14 @@ export class ProviderState {
 	/** Sets the model and persists the choice. */
 	setModel(model: string): void {
 		this.model = model;
+	}
+
+	/** Sets the full model selection including API provider metadata. */
+	setModelSelection(selection: ModelSelectionPayload): void {
+		this.model = selection.model;
+		this.apiProviderId = selection.apiProviderId ?? null;
+		this.modelEndpointId = selection.modelEndpointId ?? null;
+		this.modelProtocol = selection.modelProtocol ?? null;
 	}
 }
 

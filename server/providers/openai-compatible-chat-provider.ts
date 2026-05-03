@@ -104,16 +104,30 @@ export function extractOpenAiCompatibleTextContent(content: ConversationMessage[
     .join('\n');
 }
 
+function parsePersistedConversationMessage(line: string): ConversationMessage | null {
+  if (!line.trim()) return null;
+  try {
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    const role = parsed.role;
+    const content = parsed.content;
+    if (
+      (role === 'user' || role === 'assistant' || role === 'system') &&
+      typeof content === 'string'
+    ) {
+      return { role, content };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export async function runOpenAiCompatibleSingleQuery(
   config: OpenAiCompatibleChatProviderConfig,
   prompt: string,
   options: Record<string, unknown> = {},
 ): Promise<string> {
   const apiKey = config.getApiKey();
-  if (!apiKey) {
-    throw new Error(`${config.apiKeyEnvVar} is not set`);
-  }
-
   const model = typeof options.model === 'string' && options.model
     ? options.model
     : config.defaultModel;
@@ -166,12 +180,40 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
     await fs.appendFile(this.#config.getSessionFilePath(sessionId), line);
   }
 
-  async #streamCompletion(session: ProviderSession): Promise<string> {
-    const apiKey = this.#config.getApiKey();
-    if (!apiKey) {
-      throw new Error(`${this.#config.apiKeyEnvVar} is not set`);
+  async #hydrateSession(sessionId: string, request: ResumeTurnRequest): Promise<ProviderSession | null> {
+    let raw: string;
+    try {
+      raw = await fs.readFile(this.#config.getSessionFilePath(sessionId), 'utf8');
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
     }
 
+    const messages = raw
+      .split('\n')
+      .map((line) => parsePersistedConversationMessage(line))
+      .filter((message): message is ConversationMessage => message !== null);
+
+    if (messages.length === 0) {
+      throw new Error(`Cannot hydrate ${this.#config.providerLabel} session without persisted messages: ${sessionId}`);
+    }
+
+    const session: ProviderSession = {
+      abortController: null,
+      aborted: false,
+      chatId: request.chatId,
+      id: sessionId,
+      isRunning: false,
+      messages,
+      model: request.model || this.#config.defaultModel,
+      startTime: Date.now(),
+    };
+    this.#sessions.set(sessionId, session);
+    return session;
+  }
+
+  async #streamCompletion(session: ProviderSession): Promise<string> {
+    const apiKey = this.#config.getApiKey();
     const abortController = new AbortController();
     session.abortController = abortController;
 
@@ -308,7 +350,8 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
-    const session = this.#sessions.get(request.providerSessionId);
+    const session = this.#sessions.get(request.providerSessionId)
+      ?? await this.#hydrateSession(request.providerSessionId, request);
     if (!session) {
       throw new Error(`Unknown ${this.#config.providerLabel} session: ${request.providerSessionId}`);
     }

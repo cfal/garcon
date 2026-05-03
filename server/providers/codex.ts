@@ -318,8 +318,8 @@ async function runCodexExec(args: string[], input: string, envOverrides?: Record
   }
   const proc = Bun.spawn(['codex', ...args], spawnOptions);
   const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout as ReadableStream).text(),
-    new Response(proc.stderr as ReadableStream).text(),
+    new Response(proc.stdout as unknown as ReadableStream).text(),
+    new Response(proc.stderr as unknown as ReadableStream).text(),
     proc.exited,
   ]);
   if (exitCode !== 0) {

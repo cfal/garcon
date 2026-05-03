@@ -25,6 +25,7 @@ import {
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
 import type { SessionProvider } from '$lib/types/app.js';
+import type { ApiProtocol } from '$shared/providers';
 import * as m from '$lib/paraglide/messages.js';
 import {
 	computeCommonDirPrefix as computeCommonDirPrefixSync,
@@ -95,10 +96,13 @@ export class GitWorkbenchStore {
 	isCreatingInitialCommit = $state(false);
 
 	// Commit message generation settings (persisted via app settings)
-	commitGenerationEnabled = $state(true);
-	commitProvider = $state<SessionProvider>('claude');
-	commitModel = $state('');
-	commitCustomPrompt = $state('');
+		commitGenerationEnabled = $state(true);
+		commitProvider = $state<SessionProvider>('claude');
+		commitModel = $state('');
+		commitApiProviderId = $state<string | null>(null);
+		commitModelEndpointId = $state<string | null>(null);
+		commitModelProtocol = $state<ApiProtocol | null>(null);
+		commitCustomPrompt = $state('');
 	commitUseCommonDirPrefix = $state(false);
 
 	// Pending discard confirmation (file path awaiting user confirmation)
@@ -870,10 +874,17 @@ export class GitWorkbenchStore {
 		this.isGeneratingMessage = true;
 		try {
 			// Hydrate provider/model from persisted settings before generating.
-			await this.hydrateCommitSettings();
-			const data = await generateCommitMessageApi(
-				projectPath, files, this.commitProvider, this.commitModel, this.commitCustomPrompt,
-			);
+				await this.hydrateCommitSettings();
+				const data = await generateCommitMessageApi(
+					projectPath,
+					files,
+					this.commitProvider,
+					this.commitModel,
+					this.commitCustomPrompt,
+					this.commitApiProviderId,
+					this.commitModelEndpointId,
+					this.commitModelProtocol,
+				);
 				if (data.message) {
 					let msg = data.message;
 					if (this.commitUseCommonDirPrefix) {
@@ -902,15 +913,20 @@ export class GitWorkbenchStore {
 			const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
 			const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;
 			const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
-			const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
-			this.commitGenerationEnabled = cm.enabled !== false;
-			const provider = cm.provider as string;
-				if (['claude', 'codex', 'opencode', 'amp', 'factory', 'openrouter', 'zai'].includes(provider)) {
+				const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
+				this.commitGenerationEnabled = cm.enabled !== false;
+				const provider = cm.provider as string;
+				if (typeof provider === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(provider)) {
 					this.commitProvider = provider as SessionProvider;
 				}
-			if (typeof cm.model === 'string' && cm.model) {
-				this.commitModel = cm.model;
-			}
+				if (typeof cm.model === 'string' && cm.model) {
+					this.commitModel = cm.model;
+				}
+				this.commitApiProviderId = typeof cm.apiProviderId === 'string' ? cm.apiProviderId : null;
+				this.commitModelEndpointId = typeof cm.modelEndpointId === 'string' ? cm.modelEndpointId : null;
+				this.commitModelProtocol = cm.modelProtocol === 'openai-chat-completions' || cm.modelProtocol === 'anthropic-messages'
+					? cm.modelProtocol
+					: null;
 			if (typeof cm.customPrompt === 'string') {
 				this.commitCustomPrompt = cm.customPrompt;
 			}

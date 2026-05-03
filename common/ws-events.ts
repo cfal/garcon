@@ -53,15 +53,7 @@ export class QueueDispatchingMessage {
 
 export class ChatSessionsRunningMessage {
   readonly type = 'chat-sessions-running' as const;
-  constructor(public sessions: {
-    claude: Array<{ id: string }>;
-    codex: Array<{ id: string }>;
-    opencode: Array<{ id: string }>;
-    amp: Array<{ id: string }>;
-    factory: Array<{ id: string }>;
-    openrouter: Array<{ id: string }>;
-    zai: Array<{ id: string }>;
-  }) { }
+  constructor(public sessions: Record<string, Array<{ id: string }>>) { }
 }
 
 export class WsFaultMessage {

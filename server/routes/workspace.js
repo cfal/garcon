@@ -1,6 +1,6 @@
 import { parseJsonBody } from '../lib/http-request.js';
 import { getProjectBasePath, getTelegramBotToken } from '../config.js';
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, OPENROUTER_MODELS, ZAI_MODELS } from '../../common/models.js';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
@@ -11,10 +11,10 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
   }
 
   function sanitizeRemoteUiSnapshot(value) {
-    // Removes browser-local sidebar layout state from the shared snapshot.
+    // Keeps browser-local sidebar layout state out of the shared snapshot.
     const ui = asPlainObject(value);
     if (!('searchBarPosition' in ui)) return ui;
-    const { searchBarPosition: _legacySearchBarPosition, ...rest } = ui;
+    const { searchBarPosition: _searchBarPosition, ...rest } = ui;
     return rest;
   }
 
@@ -22,27 +22,37 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
     ? await settings.getRemoteSettingsSnapshotSource()
     : null;
 
+  const getHarnessCatalog = async () => {
+    try {
+      return await providers?.getHarnessCatalog?.();
+    } catch {
+      return null;
+    }
+  };
+
   const [
-    authByProvider, opencodeModels, factoryModels, openrouterModels, zaiModels,
+    authByHarness, readinessByHarness, harnessCatalog, opencodeModels, factoryModels,
   ] = await Promise.all([
-    providers?.getAuthStatusMap?.() ?? Promise.resolve({
+    providers?.getHarnessAuthStatusMap?.() ?? Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
       amp: { authenticated: false },
       factory: { authenticated: false },
-      openrouter: { authenticated: false },
-      zai: { authenticated: false },
     }),
+    providers?.getHarnessReadinessMap?.() ?? Promise.resolve({}),
+    getHarnessCatalog(),
     providers?.getModels?.('opencode') ?? Promise.resolve([]),
     providers?.getModels?.('factory') ?? Promise.resolve([]),
-    providers?.getModels?.('openrouter') ?? Promise.resolve([]),
-    providers?.getModels?.('zai') ?? Promise.resolve([]),
   ]);
+  const catalogModels = Object.fromEntries(
+    (harnessCatalog?.harnesses ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
+  );
 
   const [
     version, ui, paths, pinnedChatIds, lastProvider, lastProjectPath, lastModel,
     lastPermissionMode, lastThinkingMode, lastClaudeThinkingMode, lastAmpAgentMode,
+    lastApiProviderId, lastModelEndpointId, lastModelProtocol,
   ] = settingsSource
     ? [
       settingsSource.version,
@@ -56,6 +66,9 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       settingsSource.lastThinkingMode,
       settingsSource.lastClaudeThinkingMode,
       settingsSource.lastAmpAgentMode,
+      settingsSource.lastApiProviderId ?? null,
+      settingsSource.lastModelEndpointId ?? null,
+      settingsSource.lastModelProtocol ?? null,
     ]
     : await Promise.all([
       settings.getRemoteSettingsVersion(),
@@ -69,28 +82,32 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       settings.getLastThinkingMode(),
       settings.getLastClaudeThinkingMode(),
       settings.getLastAmpAgentMode(),
+      settings.getLastApiProviderId?.() ?? Promise.resolve(null),
+      settings.getLastModelEndpointId?.() ?? Promise.resolve(null),
+      settings.getLastModelProtocol?.() ?? Promise.resolve(null),
     ]);
 
-  const modelsByProvider = {
+  const modelsByHarness = {
     claude: CLAUDE_MODELS.OPTIONS,
     codex: CODEX_MODELS.OPTIONS,
     opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
     amp: AMP_MODELS.OPTIONS,
     factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
-    openrouter: Array.isArray(openrouterModels) ? openrouterModels : OPENROUTER_MODELS.OPTIONS,
-    zai: Array.isArray(zaiModels) ? zaiModels : ZAI_MODELS.OPTIONS,
+    ...catalogModels,
   };
 
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.chatTitle),
-      authByProvider,
-      modelsByProvider,
+      authByHarness,
+      modelsByHarness,
+      readinessByHarness,
     }),
     commitMessage: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.commitMessage),
-      authByProvider,
-      modelsByProvider,
+      authByHarness,
+      modelsByHarness,
+      readinessByHarness,
     }),
   };
 
@@ -108,6 +125,9 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
     lastProvider,
     lastProjectPath,
     lastModel,
+    lastApiProviderId: lastApiProviderId ?? null,
+    lastModelEndpointId: lastModelEndpointId ?? null,
+    lastModelProtocol: lastModelProtocol ?? null,
     lastPermissionMode,
     lastThinkingMode,
     lastClaudeThinkingMode,
@@ -122,9 +142,8 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
   const FILTER_KEYS = ['textTokens', 'tags', 'providers', 'models'];
   const VALID_FILTER_STATUS = new Set(['active', 'unread']);
   function sanitizeRemoteUiPatch(raw) {
-    // Drops legacy browser-local fields before persisting shared settings.
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const { searchBarPosition: _legacySearchBarPosition, ...rest } = raw;
+    const { searchBarPosition: _searchBarPosition, ...rest } = raw;
     return Object.keys(rest).length > 0 ? rest : null;
   }
 	function sanitizeFilter(raw) {

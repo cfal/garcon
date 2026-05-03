@@ -1,46 +1,67 @@
 import { apiFetch } from '$lib/api/client.js';
 import type { SessionProvider } from '$lib/types/app';
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, OPENROUTER_MODELS, ZAI_MODELS } from '$shared/models';
-import { PROVIDERS, PROVIDER_CAPABILITIES, type ProviderId } from '$shared/providers';
+import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS } from '$shared/models';
+import {
+	isVisibleHarnessId,
+	type ApiProtocol,
+	type ApiProviderCatalogEntry,
+	type ApiProviderEndpointCatalogEntry,
+	type ApiProviderTemplateId,
+	type ModelDiscoveryKind,
+} from '$shared/providers';
 
 export interface ModelOption {
 	value: string;
 	label: string;
 	supportsImages?: boolean;
 	isLocal?: boolean;
+	apiProviderId?: string;
+	endpointId?: string;
+	rawModel?: string;
+	protocol?: ApiProtocol;
 }
 
-type ProviderModels = Partial<Record<SessionProvider, ModelOption[]>>;
-
-type ProviderCapabilitiesMap = Partial<Record<SessionProvider, {
+export interface HarnessMetadata {
+	id: string;
+	label: string;
+	description?: string;
 	supportsFork: boolean;
 	supportsImages: boolean;
-}>>;
+	acceptsApiProviderEndpoints: boolean;
+	supportedProtocols: ApiProtocol[];
+	defaultModel: string;
+}
+
+type HarnessModels = Record<string, ModelOption[]>;
+type HarnessMetadataMap = Record<string, HarnessMetadata>;
 
 interface ModelCatalogSnapshot {
-	providerModels: ProviderModels;
-	providerCapabilities: ProviderCapabilitiesMap;
+	harnessModels: HarnessModels;
+	harnessMetadata: HarnessMetadataMap;
+	apiProviderCatalog: ApiProviderCatalogEntry[];
 	lastFetchedAt: number | null;
 }
 
 const STORAGE_KEY = 'pref_model_catalog';
 const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000;
 
-const STATIC_FALLBACKS: ProviderModels = {
+const STATIC_FALLBACKS: HarnessModels = {
 	claude: CLAUDE_MODELS.OPTIONS,
 	codex: CODEX_MODELS.OPTIONS,
 	opencode: [],
 	amp: AMP_MODELS.OPTIONS,
 	factory: FACTORY_MODELS.OPTIONS,
-	openrouter: OPENROUTER_MODELS.OPTIONS,
-	zai: ZAI_MODELS.OPTIONS,
+	'direct-openai-compatible': [],
 };
 
-// Default capabilities derived from the shared common contract. Used when
-// the server response hasn't been parsed yet or lacks the catalog field.
-const DEFAULT_CAPABILITIES: ProviderCapabilitiesMap = Object.fromEntries(
-	PROVIDERS.map((id) => [id, { ...PROVIDER_CAPABILITIES[id] }])
-) as ProviderCapabilitiesMap;
+const STATIC_HARNESS_METADATA: HarnessMetadataMap = {
+	claude: { id: 'claude', label: 'Claude', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: CLAUDE_MODELS.DEFAULT },
+	codex: { id: 'codex', label: 'Codex', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-chat-completions'], defaultModel: CODEX_MODELS.DEFAULT },
+	opencode: { id: 'opencode', label: 'OpenCode', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '' },
+	amp: { id: 'amp', label: 'Amp', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: AMP_MODELS.DEFAULT },
+	factory: { id: 'factory', label: 'Factory', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: FACTORY_MODELS.DEFAULT },
+	'direct-openai-compatible': { id: 'direct-openai-compatible', label: 'Direct Chat', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-chat-completions'], defaultModel: '' },
+};
 
 function normalizeModelOption(value: unknown): ModelOption | null {
 	if (!value || typeof value !== 'object') return null;
@@ -51,26 +72,103 @@ function normalizeModelOption(value: unknown): ModelOption | null {
 		label: maybe.label,
 		supportsImages: typeof maybe.supportsImages === 'boolean' ? maybe.supportsImages : undefined,
 		isLocal: typeof maybe.isLocal === 'boolean' ? maybe.isLocal : undefined,
+		apiProviderId: typeof maybe.apiProviderId === 'string' ? maybe.apiProviderId : undefined,
+		endpointId: typeof maybe.endpointId === 'string' ? maybe.endpointId : undefined,
+		rawModel: typeof maybe.rawModel === 'string' ? maybe.rawModel : undefined,
+		protocol: maybe.protocol === 'openai-chat-completions' || maybe.protocol === 'anthropic-messages'
+			? maybe.protocol as ApiProtocol
+			: undefined,
 	};
 }
 
-function normalizeProviderModels(value: unknown): ProviderModels {
-	if (!value || typeof value !== 'object') return {};
-	const source = value as Record<string, unknown>;
-	const normalized: ProviderModels = {};
-	for (const provider of PROVIDERS) {
-		const rawOptions = source[provider];
-		if (!Array.isArray(rawOptions)) continue;
-		const options = rawOptions
-			.map((option) => normalizeModelOption(option))
-			.filter((option): option is ModelOption => option !== null);
-		normalized[provider] = options;
-	}
-	return normalized;
+function normalizeProtocols(value: unknown): ApiProtocol[] {
+	if (!Array.isArray(value)) return [];
+	return value.filter((p): p is ApiProtocol => p === 'openai-chat-completions' || p === 'anthropic-messages');
 }
 
-// Ensures static models for claude/codex are always present in the result,
-// even when a cached or server list is missing newly added entries.
+function normalizeTemplateId(value: unknown): ApiProviderTemplateId | undefined {
+	if (value === 'openrouter' || value === 'zai' || value === 'ollama' || value === 'custom') return value;
+	return undefined;
+}
+
+function normalizeModelDiscovery(value: unknown): ModelDiscoveryKind | undefined {
+	if (
+		value === 'none' ||
+		value === 'anthropic-models' ||
+		value === 'openai-models' ||
+		value === 'ollama-tags' ||
+		value === 'openrouter-models'
+	) {
+		return value;
+	}
+	return undefined;
+}
+
+function normalizeApiProviderEndpoint(value: unknown): ApiProviderEndpointCatalogEntry | null {
+	if (!value || typeof value !== 'object') return null;
+	const entry = value as Record<string, unknown>;
+	const protocol = entry.protocol === 'openai-chat-completions' || entry.protocol === 'anthropic-messages'
+		? entry.protocol
+		: null;
+	if (
+		typeof entry.id !== 'string' ||
+		!protocol ||
+		typeof entry.baseUrl !== 'string' ||
+		!Array.isArray(entry.exposeTo) ||
+		typeof entry.defaultModel !== 'string' ||
+		typeof entry.supportsImages !== 'boolean' ||
+		typeof entry.hasApiKey !== 'boolean'
+	) {
+		return null;
+	}
+	return {
+		id: entry.id,
+		protocol,
+		baseUrl: entry.baseUrl,
+		exposeTo: entry.exposeTo.filter((target): target is string => typeof target === 'string'),
+		defaultModel: entry.defaultModel,
+		models: Array.isArray(entry.models)
+			? entry.models.map((model) => normalizeModelOption(model)).filter((model): model is ModelOption => model !== null)
+			: [],
+		supportsImages: entry.supportsImages,
+		hasApiKey: entry.hasApiKey,
+		apiKeyLabel: typeof entry.apiKeyLabel === 'string' ? entry.apiKeyLabel : undefined,
+		modelDiscovery: normalizeModelDiscovery(entry.modelDiscovery),
+	};
+}
+
+function normalizeApiProviders(value: unknown): ApiProviderCatalogEntry[] {
+	if (!Array.isArray(value)) return [];
+	return value
+		.map((entry) => {
+			if (!entry || typeof entry !== 'object') return null;
+			const e = entry as Record<string, unknown>;
+			if (
+				typeof e.id !== 'string' ||
+				typeof e.label !== 'string' ||
+				typeof e.createdAt !== 'string' ||
+				typeof e.updatedAt !== 'string' ||
+				!Array.isArray(e.endpoints)
+			) {
+				return null;
+			}
+			const endpoints = e.endpoints
+				.map((endpoint) => normalizeApiProviderEndpoint(endpoint))
+				.filter((endpoint): endpoint is ApiProviderEndpointCatalogEntry => endpoint !== null);
+			if (endpoints.length === 0) return null;
+			const templateId = normalizeTemplateId(e.templateId);
+			return {
+				id: e.id,
+				label: e.label,
+				...(templateId ? { templateId } : {}),
+				createdAt: e.createdAt,
+				updatedAt: e.updatedAt,
+				endpoints,
+			} satisfies ApiProviderCatalogEntry;
+		})
+	.filter((e): e is ApiProviderCatalogEntry => e !== null);
+}
+
 function mergeStaticModels(remote: ModelOption[] | undefined, fallback: ModelOption[]): ModelOption[] {
 	if (!remote?.length) return fallback;
 	const seen = new Set(remote.map((m) => m.value));
@@ -78,113 +176,130 @@ function mergeStaticModels(remote: ModelOption[] | undefined, fallback: ModelOpt
 	return missing.length ? [...remote, ...missing] : remote;
 }
 
-function mergeWithFallbacks(models: ProviderModels): ProviderModels {
-	return {
+function mergeWithFallbacks(models: HarnessModels): HarnessModels {
+	const result: HarnessModels = {
 		claude: mergeStaticModels(models.claude, STATIC_FALLBACKS.claude!),
 		codex: mergeStaticModels(models.codex, STATIC_FALLBACKS.codex!),
-		amp: STATIC_FALLBACKS.amp!,
+		amp: models.amp?.length ? models.amp : STATIC_FALLBACKS.amp!,
 		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
-		openrouter: mergeStaticModels(models.openrouter, STATIC_FALLBACKS.openrouter!),
-		zai: mergeStaticModels(models.zai, STATIC_FALLBACKS.zai!),
-		opencode: models.opencode?.length ? models.opencode : STATIC_FALLBACKS.opencode
+		opencode: models.opencode?.length ? models.opencode : [],
+		'direct-openai-compatible': models['direct-openai-compatible']?.length ? models['direct-openai-compatible'] : [],
 	};
+	for (const [key, value] of Object.entries(models)) {
+		if (!(key in result) && value?.length && isVisibleHarnessId(key)) {
+			result[key] = value;
+		}
+	}
+	return result;
 }
 
-interface CatalogProviderEntry {
-	id: string;
-	supportsFork: boolean;
-	supportsImages: boolean;
-	models: unknown[];
+function filterVisibleHarnessMetadata(harnessMetadata: HarnessMetadataMap): HarnessMetadataMap {
+	return Object.fromEntries(
+		Object.entries(harnessMetadata).filter(([id]) => isVisibleHarnessId(id))
+	);
 }
 
-// Extracts capabilities and models from the catalog.providers array when
-// present in the API response, falling back to empty results otherwise.
 function parseCatalogResponse(data: unknown): {
-	providerModels: ProviderModels;
-	providerCapabilities: ProviderCapabilitiesMap;
+	harnessModels: HarnessModels;
+	harnessMetadata: HarnessMetadataMap;
+	apiProviderCatalog: ApiProviderCatalogEntry[];
 } | null {
 	if (!data || typeof data !== 'object') return null;
 	const root = data as Record<string, unknown>;
 	const catalog = root.catalog;
 	if (!catalog || typeof catalog !== 'object') return null;
 	const inner = catalog as Record<string, unknown>;
-	if (!Array.isArray(inner.providers)) return null;
+	if (!Array.isArray(inner.harnesses)) return null;
 
-	const providerModels: ProviderModels = {};
-	const providerCapabilities: ProviderCapabilitiesMap = {};
+	const harnessModels: HarnessModels = {};
+	const harnessMetadata: HarnessMetadataMap = {};
 
-	for (const entry of inner.providers as CatalogProviderEntry[]) {
-		if (!entry || typeof entry.id !== 'string') continue;
-		const id = entry.id as SessionProvider;
-		if (!(PROVIDERS as readonly string[]).includes(id)) continue;
+	for (const entry of inner.harnesses as Array<Record<string, unknown>>) {
+		if (typeof entry.id !== 'string') continue;
 
-		providerCapabilities[id] = {
+		const id = entry.id;
+		if (!isVisibleHarnessId(id)) continue;
+		harnessMetadata[id] = {
+			id,
+			label: typeof entry.label === 'string' ? entry.label : id,
+			description: typeof entry.description === 'string' ? entry.description : undefined,
 			supportsFork: Boolean(entry.supportsFork),
 			supportsImages: Boolean(entry.supportsImages),
+			acceptsApiProviderEndpoints: Boolean(entry.acceptsApiProviderEndpoints),
+			supportedProtocols: normalizeProtocols(entry.supportedProtocols),
+			defaultModel: typeof entry.defaultModel === 'string' ? entry.defaultModel : '',
 		};
 
 		if (Array.isArray(entry.models)) {
-			const models = entry.models
+			harnessModels[id] = entry.models
 				.map((m) => normalizeModelOption(m))
 				.filter((m): m is ModelOption => m !== null);
-			providerModels[id] = models;
 		}
 	}
 
-	return { providerModels, providerCapabilities };
+	return {
+		harnessModels,
+		harnessMetadata,
+		apiProviderCatalog: normalizeApiProviders(inner.apiProviders),
+	};
 }
 
 function readPersisted(): ModelCatalogSnapshot {
 	if (typeof window === 'undefined') {
-		return { providerModels: { ...STATIC_FALLBACKS }, providerCapabilities: { ...DEFAULT_CAPABILITIES }, lastFetchedAt: null };
+		return {
+			harnessModels: { ...STATIC_FALLBACKS },
+			harnessMetadata: { ...STATIC_HARNESS_METADATA },
+			apiProviderCatalog: [],
+			lastFetchedAt: null,
+		};
 	}
 
 	try {
 		const raw = localStorage.getItem(STORAGE_KEY);
 		if (!raw) {
-			return { providerModels: { ...STATIC_FALLBACKS }, providerCapabilities: { ...DEFAULT_CAPABILITIES }, lastFetchedAt: null };
+			return {
+				harnessModels: { ...STATIC_FALLBACKS },
+				harnessMetadata: { ...STATIC_HARNESS_METADATA },
+				apiProviderCatalog: [],
+				lastFetchedAt: null,
+			};
 		}
 		const parsed = JSON.parse(raw) as Record<string, unknown>;
-		const providerModels = mergeWithFallbacks(normalizeProviderModels(parsed.providerModels));
-		const providerCapabilities = normalizeCapabilities(parsed.providerCapabilities);
+		const harnessModels = mergeWithFallbacks(
+			typeof parsed.harnessModels === 'object' && parsed.harnessModels !== null
+				? parsed.harnessModels as HarnessModels
+				: {},
+		);
+		const harnessMetadata = filterVisibleHarnessMetadata(
+				typeof parsed.harnessMetadata === 'object' && parsed.harnessMetadata !== null
+					? { ...STATIC_HARNESS_METADATA, ...(parsed.harnessMetadata as HarnessMetadataMap) }
+					: { ...STATIC_HARNESS_METADATA }
+		);
+		const apiProviderCatalog = normalizeApiProviders(parsed.apiProviderCatalog);
 		const lastFetchedAt =
 			typeof parsed.lastFetchedAt === 'number' ? parsed.lastFetchedAt : null;
-		return { providerModels, providerCapabilities, lastFetchedAt };
+		return { harnessModels, harnessMetadata, apiProviderCatalog, lastFetchedAt };
 	} catch {
-		return { providerModels: { ...STATIC_FALLBACKS }, providerCapabilities: { ...DEFAULT_CAPABILITIES }, lastFetchedAt: null };
+		return {
+			harnessModels: { ...STATIC_FALLBACKS },
+			harnessMetadata: { ...STATIC_HARNESS_METADATA },
+			apiProviderCatalog: [],
+			lastFetchedAt: null,
+		};
 	}
-}
-
-function normalizeCapabilities(value: unknown): ProviderCapabilitiesMap {
-	if (!value || typeof value !== 'object') return { ...DEFAULT_CAPABILITIES };
-	const source = value as Record<string, unknown>;
-	const result: ProviderCapabilitiesMap = {};
-	for (const provider of PROVIDERS) {
-		const entry = source[provider];
-		if (entry && typeof entry === 'object') {
-			const e = entry as Record<string, unknown>;
-			result[provider] = {
-				supportsFork: typeof e.supportsFork === 'boolean' ? e.supportsFork : (DEFAULT_CAPABILITIES[provider]?.supportsFork ?? false),
-				supportsImages: typeof e.supportsImages === 'boolean' ? e.supportsImages : (DEFAULT_CAPABILITIES[provider]?.supportsImages ?? false),
-			};
-		} else {
-			result[provider] = DEFAULT_CAPABILITIES[provider] ? { ...DEFAULT_CAPABILITIES[provider]! } : { supportsFork: false, supportsImages: false };
-		}
-	}
-	return result;
 }
 
 function persist(snapshot: ModelCatalogSnapshot): void {
 	try {
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
 	} catch {
-		// localStorage may be unavailable.
 	}
 }
 
 export class ModelCatalogStore {
-	providerModels = $state<ProviderModels>({ ...STATIC_FALLBACKS });
-	providerCapabilities = $state<ProviderCapabilitiesMap>({ ...DEFAULT_CAPABILITIES });
+	harnessModels = $state<HarnessModels>({ ...STATIC_FALLBACKS });
+	harnessMetadata = $state<HarnessMetadataMap>({ ...STATIC_HARNESS_METADATA });
+	apiProviderCatalog = $state<ApiProviderCatalogEntry[]>([]);
 	lastFetchedAt = $state<number | null>(null);
 	isRefreshing = $state(false);
 	error = $state<string | null>(null);
@@ -194,47 +309,111 @@ export class ModelCatalogStore {
 		this.hydrateFromStorage();
 	}
 
-	getProviders(): SessionProvider[] {
-		return [...PROVIDERS] as SessionProvider[];
+	getHarnesses(): SessionProvider[] {
+		return Object.keys(this.harnessMetadata).filter(isVisibleHarnessId) as SessionProvider[];
 	}
 
-	getModels(provider: SessionProvider): ModelOption[] {
-		return this.providerModels[provider] ?? [];
+	getHarnessMetadataList(): HarnessMetadata[] {
+		return Object.values(this.harnessMetadata)
+			.filter((metadata) => isVisibleHarnessId(metadata.id));
 	}
 
-	getDefaultModel(provider: SessionProvider): string {
-		if (provider === 'claude') return CLAUDE_MODELS.DEFAULT;
-		if (provider === 'codex') return CODEX_MODELS.DEFAULT;
-		if (provider === 'amp') return AMP_MODELS.DEFAULT;
-		if (provider === 'factory') return FACTORY_MODELS.DEFAULT;
-		if (provider === 'openrouter') return OPENROUTER_MODELS.DEFAULT;
-		if (provider === 'zai') return ZAI_MODELS.DEFAULT;
-		return this.getModels('opencode')[0]?.value ?? '';
+	getHarness(id: string): HarnessMetadata | null {
+		if (!isVisibleHarnessId(id)) return null;
+		return this.harnessMetadata[id] ?? null;
 	}
 
-	supportsFork(provider: SessionProvider): boolean {
-		return this.providerCapabilities[provider]?.supportsFork ?? false;
+	getHarnessLabel(id: string): string {
+		return this.harnessMetadata[id]?.label ?? id;
 	}
 
-	isLocalModel(provider: SessionProvider, model: string): boolean {
-		const entry = this.getModels(provider).find((m) => m.value === model);
-		return entry?.isLocal === true;
+	getModels(harnessId: SessionProvider): ModelOption[] {
+		if (!isVisibleHarnessId(harnessId)) return [];
+		return this.harnessModels[harnessId] ?? [];
 	}
 
-	supportsImages(provider: SessionProvider, model?: string): boolean {
+	getDefaultModel(harnessId: SessionProvider): string {
+		return this.harnessMetadata[harnessId]?.defaultModel
+			|| this.getModels(harnessId)[0]?.value
+			|| '';
+	}
+
+	getModel(harnessId: SessionProvider, model: string): ModelOption | null {
+		return this.getModels(harnessId).find((entry) =>
+			entry.value === model || entry.rawModel === model
+		) ?? null;
+	}
+
+	getModelForSelection(
+		harnessId: SessionProvider,
+		model: string,
+		modelEndpointId?: string | null,
+	): ModelOption | null {
+		const models = this.getModels(harnessId);
+		if (modelEndpointId) {
+			const matchedEndpointModel = models.find((entry) =>
+				entry.endpointId === modelEndpointId && (entry.value === model || entry.rawModel === model)
+			);
+			if (matchedEndpointModel) return matchedEndpointModel;
+		}
+		return models.find((entry) => entry.value === model || entry.rawModel === model) ?? null;
+	}
+
+	supportsFork(harnessId: SessionProvider): boolean {
+		if (!isVisibleHarnessId(harnessId)) return false;
+		return this.harnessMetadata[harnessId]?.supportsFork ?? false;
+	}
+
+	supportsImages(harnessId: SessionProvider, model?: string, modelEndpointId?: string | null): boolean {
+		if (!isVisibleHarnessId(harnessId)) return false;
 		if (model) {
-			const selected = this.getModels(provider).find((entry) => entry.value === model);
+			const selected = this.getModelForSelection(harnessId, model, modelEndpointId);
 			if (selected && typeof selected.supportsImages === 'boolean') {
 				return selected.supportsImages;
 			}
 		}
-		return this.providerCapabilities[provider]?.supportsImages ?? false;
+		return this.harnessMetadata[harnessId]?.supportsImages ?? false;
+	}
+
+	isLocalModel(harnessId: SessionProvider, model: string, modelEndpointId?: string | null): boolean {
+		return this.getModelForSelection(harnessId, model, modelEndpointId)?.isLocal === true;
+	}
+
+	selectionFor(harnessId: SessionProvider, model: string, modelEndpointId?: string | null): {
+		model: string;
+		apiProviderId: string | null;
+		modelEndpointId: string | null;
+		modelProtocol: ApiProtocol | null;
+	} {
+		const selected = this.getModelForSelection(harnessId, model, modelEndpointId);
+		return {
+			model: selected?.rawModel ?? model,
+			apiProviderId: selected?.apiProviderId ?? null,
+			modelEndpointId: selected?.endpointId ?? null,
+			modelProtocol: selected?.protocol ?? null,
+		};
+	}
+
+	selectionValueFor(harnessId: SessionProvider, model: string, modelEndpointId?: string | null): string {
+		return this.getModelForSelection(harnessId, model, modelEndpointId)?.value ?? model;
+	}
+
+	findEndpoint(endpointId: string): {
+		apiProvider: ApiProviderCatalogEntry;
+		endpoint: ApiProviderCatalogEntry['endpoints'][number];
+	} | null {
+		for (const apiProvider of this.apiProviderCatalog) {
+			const endpoint = apiProvider.endpoints.find((entry) => entry.id === endpointId);
+			if (endpoint) return { apiProvider, endpoint };
+		}
+		return null;
 	}
 
 	hydrateFromStorage(): void {
 		const snapshot = readPersisted();
-		this.providerModels = snapshot.providerModels;
-		this.providerCapabilities = snapshot.providerCapabilities;
+		this.harnessModels = snapshot.harnessModels;
+		this.harnessMetadata = snapshot.harnessMetadata;
+		this.apiProviderCatalog = snapshot.apiProviderCatalog;
 		this.lastFetchedAt = snapshot.lastFetchedAt;
 		this.version += 1;
 	}
@@ -261,23 +440,22 @@ export class ModelCatalogStore {
 			}
 			const data = (await response.json()) as unknown;
 
-			let providerModels: ProviderModels;
-			let providerCapabilities: ProviderCapabilitiesMap;
-
 			const catalogResult = parseCatalogResponse(data);
-			if (catalogResult && Object.keys(catalogResult.providerModels).length > 0) {
-				providerModels = mergeWithFallbacks(catalogResult.providerModels);
-				providerCapabilities = catalogResult.providerCapabilities;
+			if (catalogResult && Object.keys(catalogResult.harnessModels).length > 0) {
+				this.harnessModels = mergeWithFallbacks(catalogResult.harnessModels);
+				this.harnessMetadata = filterVisibleHarnessMetadata({ ...STATIC_HARNESS_METADATA, ...catalogResult.harnessMetadata });
+				this.apiProviderCatalog = catalogResult.apiProviderCatalog;
 			} else {
-				providerModels = mergeWithFallbacks(normalizeProviderModels(data));
-				providerCapabilities = { ...DEFAULT_CAPABILITIES };
+				throw new Error('Model catalog response is invalid');
 			}
 
-			const lastFetchedAt = Date.now();
-			this.providerModels = providerModels;
-			this.providerCapabilities = providerCapabilities;
-			this.lastFetchedAt = lastFetchedAt;
-			persist({ providerModels, providerCapabilities, lastFetchedAt });
+			this.lastFetchedAt = Date.now();
+			persist({
+				harnessModels: this.harnessModels,
+				harnessMetadata: this.harnessMetadata,
+				apiProviderCatalog: this.apiProviderCatalog,
+				lastFetchedAt: this.lastFetchedAt,
+			});
 			this.version += 1;
 		} catch (error) {
 			this.error = error instanceof Error ? error.message : 'Unknown error';

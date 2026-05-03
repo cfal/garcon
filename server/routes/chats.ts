@@ -15,8 +15,9 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import { forkChatFileCopy } from '../chats/fork-chat.js';
-import { PROVIDERS as VALID_PROVIDERS, supportsFork as providerSupportsFork, supportsImages as providerSupportsImages } from '../../common/providers.ts';
+import { supportsFork as providerSupportsFork, supportsImages as providerSupportsImages } from '../../common/providers.ts';
 import { getProjectBasePath } from '../config.js';
+import { ModelSelectionError } from '../providers/api-provider-endpoint-resolver.js';
 
 type RouteHandler = (request: Request, url: URL) => Promise<Response> | Response;
 type RouteMap = Record<string, Record<string, RouteHandler>>;
@@ -57,30 +58,11 @@ interface HistoryCacheDep {
 }
 
 interface ProvidersDep {
-  isProviderSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
+  hasHarness(harnessId: string): boolean;
+  isHarnessSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
   startSession(chatId: string, command: string, opts: Record<string, unknown>): Promise<void>;
-  getModels(provider: import('../../common/providers.ts').ProviderId): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
+  modelSupportsImages(input: { provider: string; model: string; apiProviderId?: string | null; modelEndpointId?: string | null }): Promise<boolean>;
   runSingleQuery(prompt: string, opts?: Record<string, unknown>): Promise<string>;
-}
-
-async function modelSupportsImages(
-  provider: import('../../common/providers.ts').ProviderId,
-  model: string,
-  providers: ProvidersDep,
-): Promise<boolean> {
-  if (!model) return providerSupportsImages(provider);
-
-  try {
-    const models = await providers.getModels(provider);
-    const selected = models.find((entry) => entry.value === model);
-    if (selected && typeof selected.supportsImages === 'boolean') {
-      return selected.supportsImages;
-    }
-  } catch {
-    // Fall back to provider-level capability below.
-  }
-
-  return providerSupportsImages(provider);
 }
 
 function normalizeTagSlug(raw: string): string {
@@ -217,9 +199,12 @@ export default function createChatRoutes(
 
         entryMap.set(chatId, {
           id: chatId,
-          provider: session.provider,
-          model: session.model || null,
-          permissionMode: normalizePermissionMode(session.permissionMode),
+	          provider: session.provider,
+	          model: session.model || null,
+	          apiProviderId: session.apiProviderId ?? null,
+	          modelEndpointId: session.modelEndpointId ?? null,
+	          modelProtocol: session.modelProtocol ?? null,
+	          permissionMode: normalizePermissionMode(session.permissionMode),
           thinkingMode: normalizeThinkingMode(session.thinkingMode),
           claudeThinkingMode: normalizeClaudeThinkingMode(session.claudeThinkingMode),
           ampAgentMode: normalizeAmpAgentMode(session.ampAgentMode),
@@ -231,7 +216,7 @@ export default function createChatRoutes(
             lastMessage: extractFirstLine(meta?.lastMessage as string),
             firstMessage: extractFirstLine(meta?.firstMessage as string),
           },
-          isActive: providers.isProviderSessionRunning(session.provider as string, session.providerSessionId as string | null),
+          isActive: providers.isHarnessSessionRunning(session.provider as string, session.providerSessionId as string | null),
           isPinned,
           isArchived,
           isUnread,
@@ -270,9 +255,10 @@ export default function createChatRoutes(
     try {
       const body = await parseJsonBody(request);
       const chatId = String(body.chatId || '').trim();
-      const provider = typeof body.provider === 'string' && VALID_PROVIDERS.includes(body.provider)
-        ? body.provider
-        : 'claude';
+      const provider = typeof body.provider === 'string' ? body.provider.trim() : '';
+      const apiProviderId = typeof body.apiProviderId === 'string' ? body.apiProviderId : null;
+      const modelEndpointId = typeof body.modelEndpointId === 'string' ? body.modelEndpointId : null;
+      const modelProtocol = typeof body.modelProtocol === 'string' ? body.modelProtocol : null;
       const projectPath = String(body.projectPath || '').trim();
       const command = String(body.command || '').trim();
       const tags = Array.isArray(body.tags) ? body.tags : [provider];
@@ -283,8 +269,22 @@ export default function createChatRoutes(
       if (!chatId || !/^\d+$/.test(chatId)) {
         return Response.json({ success: false, error: 'Valid numeric chatId is required' }, { status: 400 });
       }
-      if (initialImages.length > 0 && !await modelSupportsImages(provider, model, providers)) {
-        return Response.json({ success: false, error: `Images unsupported for provider: ${provider}` }, { status: 422 });
+      if (!provider) {
+        return Response.json({ success: false, error: 'provider is required' }, { status: 400 });
+      }
+      if (!providers.hasHarness(provider)) {
+        return Response.json({ success: false, error: `Unsupported harness: ${provider}` }, { status: 400 });
+      }
+      if (initialImages.length > 0) {
+        let imageSupport = false;
+        try {
+          imageSupport = await providers.modelSupportsImages({ provider, model, apiProviderId, modelEndpointId });
+        } catch {}
+        const hasBackendSelection = Boolean(apiProviderId && modelEndpointId);
+        const supportsImages = hasBackendSelection ? imageSupport : providerSupportsImages(provider);
+        if (!supportsImages) {
+          return Response.json({ success: false, error: `Images unsupported for harness: ${provider}` }, { status: 422 });
+        }
       }
       if (!projectPath) {
         return Response.json({ success: false, error: 'projectPath is required' }, { status: 400 });
@@ -325,6 +325,9 @@ export default function createChatRoutes(
         tags,
         providerSessionId: null,
         model,
+        apiProviderId,
+        modelEndpointId,
+        modelProtocol,
         permissionMode,
         thinkingMode,
         claudeThinkingMode,
@@ -339,6 +342,9 @@ export default function createChatRoutes(
         provider,
         projectPath,
         model,
+        apiProviderId,
+        modelEndpointId,
+        modelProtocol,
         permissionMode,
         thinkingMode,
         claudeThinkingMode,
@@ -364,7 +370,8 @@ export default function createChatRoutes(
         } catch (cleanupError: unknown) {
           console.warn(`sessions: failed to remove ${chatId} from order lists after startup failure:`, (cleanupError as Error).message);
         }
-        return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+        const status = error instanceof ModelSelectionError ? 422 : 500;
+        return Response.json({ success: false, error: (error as Error).message }, { status });
       }
 
       void maybeGenerateChatTitle({ chatId, projectPath, firstPrompt: command, providers, settings });
@@ -648,8 +655,8 @@ export default function createChatRoutes(
         return Response.json({ success: false, error: 'Source session not found' }, { status: 404 });
       }
 
-      if (!providerSupportsFork(sourceSession.provider as import('../../common/providers.ts').ProviderId)) {
-        return Response.json({ success: false, error: `Fork unsupported for provider: ${sourceSession.provider}` }, { status: 422 });
+      if (!providerSupportsFork(sourceSession.provider)) {
+        return Response.json({ success: false, error: `Fork unsupported for harness: ${sourceSession.provider}` }, { status: 422 });
       }
 
       const existingTarget = registry.getChat(chatId);

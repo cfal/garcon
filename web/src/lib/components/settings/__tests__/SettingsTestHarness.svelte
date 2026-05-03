@@ -55,13 +55,17 @@
 	} as never);
 	setModelCatalog({
 		version: 0,
+		apiProviderCatalog: [],
 		getModels() {
 			return [{ value: 'opus', label: 'Opus' }];
 		},
-		getProviders() {
+		getHarnesses() {
 			return ['claude'];
 		},
 		refreshIfStale() {
+			return Promise.resolve();
+		},
+		forceRefresh() {
 			return Promise.resolve();
 		},
 	} as never);

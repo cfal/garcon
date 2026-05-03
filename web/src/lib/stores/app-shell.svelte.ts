@@ -1,13 +1,11 @@
-// Reactive app shell store using Svelte 5 runes. Controls settings
-// panel visibility, sidebar state, and callback registration for
-// imperative action dispatch.
+// Coordinates shell-level state and imperative action dispatch.
 
-export type SettingsTab = 'agents' | 'local' | 'remote';
+export type SettingsTab = 'api-providers' | 'local' | 'remote';
 
 function normalizeSettingsTab(value: string): SettingsTab {
 	if (value === 'local') return 'local';
 	if (value === 'remote') return 'remote';
-	return 'agents';
+	return 'api-providers';
 }
 
 export type RefreshChatsCallback = () => void;
@@ -18,7 +16,7 @@ export interface NewChatDialogSeed {
 
 export class AppShellStore {
 	showSettings = $state(false);
-	settingsInitialTab = $state<SettingsTab>('agents');
+	settingsInitialTab = $state<SettingsTab>('api-providers');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
 	/** Height of the virtual keyboard in px, tracked via visualViewport. */
@@ -42,7 +40,7 @@ export class AppShellStore {
 	#newChatDialogSeedCallbacks = new Set<() => void>();
 	#sidebarSearchCallbacks = new Set<() => void>();
 
-	openSettings(section: string = 'agents'): void {
+	openSettings(section: string = 'api-providers'): void {
 		this.showSettings = true;
 		this.settingsInitialTab = normalizeSettingsTab(section);
 	}

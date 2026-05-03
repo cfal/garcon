@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import AgentCard from '../AgentCard.svelte';
+import HarnessCard from '../HarnessCard.svelte';
 
 type AuthStatus = {
 	authenticated: boolean;
@@ -11,16 +11,16 @@ type AuthStatus = {
 };
 
 function renderCard(auth: AuthStatus, open = true) {
-	render(AgentCard, {
-		agentId: 'claude',
-		agentName: 'Claude',
+	render(HarnessCard, {
+		harnessId: 'claude',
+		harnessName: 'Claude',
 		auth,
 		open,
 		onLogin: vi.fn(),
 	});
 }
 
-describe('AgentCard', () => {
+describe('HarnessCard', () => {
 	it('renders a single Sign in button when unauthenticated and expanded', () => {
 		renderCard({ authenticated: false, canReauth: true, label: '', loading: false, error: null }, true);
 

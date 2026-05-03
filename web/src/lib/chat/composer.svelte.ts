@@ -10,6 +10,7 @@ import {
 } from '$shared/chat-modes';
 import { AgentRunRequest } from '$shared/ws-requests';
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { ApiProtocol } from '$shared/providers';
 
 const DRAFT_PREFIX = 'chat_draft_';
 
@@ -93,8 +94,11 @@ export class ComposerState {
 		ws: WsConnection,
 		chatId: string,
 		options: {
-			model: string;
-			permissionMode: PermissionMode;
+				model: string;
+				apiProviderId?: string | null;
+				modelEndpointId?: string | null;
+				modelProtocol?: ApiProtocol | null;
+				permissionMode: PermissionMode;
 			thinkingMode: ThinkingMode;
 			claudeThinkingMode: ClaudeThinkingMode;
 			ampAgentMode?: AmpAgentMode;
@@ -133,9 +137,12 @@ export class ComposerState {
 				normalizeThinkingMode(options.thinkingMode),
 				options.model,
 				normalizeClaudeThinkingMode(options.claudeThinkingMode),
-				options.ampAgentMode ? normalizeAmpAgentMode(options.ampAgentMode) : undefined,
-				imageData.length > 0 ? imageData : undefined
-			));
+					options.ampAgentMode ? normalizeAmpAgentMode(options.ampAgentMode) : undefined,
+					imageData.length > 0 ? imageData : undefined,
+					options.apiProviderId,
+					options.modelEndpointId,
+					options.modelProtocol,
+				));
 
 			if (!sent) {
 				// Revert on failure so user doesn't lose data

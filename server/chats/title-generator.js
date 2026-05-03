@@ -40,27 +40,41 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
   if (!firstPrompt?.trim()) return;
 
   const ui = await settings.getUiSettings();
-  const [authByProvider, opencodeModels, factoryModels] = await Promise.all([
-    providers?.getAuthStatusMap?.() ?? Promise.resolve({
+  const getHarnessCatalog = async () => {
+    try {
+      return await providers?.getHarnessCatalog?.();
+    } catch {
+      return null;
+    }
+  };
+  const [authByHarness, readinessByHarness, catalog, opencodeModels, factoryModels] = await Promise.all([
+    providers?.getHarnessAuthStatusMap?.() ?? Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
       amp: { authenticated: false },
       factory: { authenticated: false },
     }),
+    providers?.getHarnessReadinessMap?.() ?? Promise.resolve({}),
+    getHarnessCatalog(),
     providers?.getModels?.('opencode') ?? Promise.resolve([]),
     providers?.getModels?.('factory') ?? Promise.resolve([]),
   ]);
+  const catalogModels = Object.fromEntries(
+    (catalog?.harnesses ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
+  );
   const cfg = resolveEffectiveGenerationConfig({
     persisted: ui?.chatTitle,
-    authByProvider,
-    modelsByProvider: {
+    authByHarness,
+    modelsByHarness: {
       claude: CLAUDE_MODELS.OPTIONS,
       codex: CODEX_MODELS.OPTIONS,
       opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
       amp: AMP_MODELS.OPTIONS,
       factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
+      ...catalogModels,
     },
+    readinessByHarness,
   });
   if (!cfg.enabled) return;
 
@@ -79,6 +93,9 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
       projectPath,
       permissionMode: 'default',
       thinkingMode: 'none',
+      apiProviderId: cfg.apiProviderId,
+      modelEndpointId: cfg.modelEndpointId,
+      modelProtocol: cfg.modelProtocol,
     });
 
     const title = normalizeTitle(titleRaw);

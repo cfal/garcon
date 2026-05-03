@@ -42,19 +42,17 @@ const PERMISSION_DEDUP_TTL = 30_000;
 type WS = import('bun').ServerWebSocket<unknown>;
 
 interface ProviderRegistryDep {
-  getRunningSessions(): {
-    claude: Array<{ id: string; [key: string]: unknown }>;
-    codex: Array<{ id: string; [key: string]: unknown }>;
-    opencode: Array<{ id: string; [key: string]: unknown }>;
-    amp: Array<{ id: string; [key: string]: unknown }>;
-    factory: Array<{ id: string; [key: string]: unknown }>;
-  };
+  getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
   setPermissionMode(chatId: string, mode: PermissionMode): Promise<void>;
   setThinkingMode(chatId: string, mode: ThinkingMode): Promise<void>;
   setClaudeThinkingMode(chatId: string, mode: ClaudeThinkingMode): Promise<void>;
   setAmpAgentMode(chatId: string, mode: AmpAgentMode): Promise<void>;
-  setModel(chatId: string, model: string): Promise<void>;
+  setModel(chatId: string, model: string, metadata?: {
+    apiProviderId?: string | null;
+    modelEndpointId?: string | null;
+  }): Promise<void>;
+  hasHarness(harnessId: string): boolean;
 }
 
 interface QueueManagerDep {
@@ -139,14 +137,18 @@ export class ChatHandler {
     }
 
     try {
-      await this.#queue.submit(chatId, data.command, {
-        images: data.images,
+      const options: RunProviderTurnOptions = {
         permissionMode: data.permissionMode,
         thinkingMode: data.thinkingMode,
         claudeThinkingMode: data.claudeThinkingMode,
-        ampAgentMode: data.ampAgentMode,
         model: data.model,
-      });
+      };
+      if (data.images !== undefined) options.images = data.images;
+      if (data.ampAgentMode !== undefined) options.ampAgentMode = data.ampAgentMode;
+      if (data.apiProviderId !== undefined) options.apiProviderId = data.apiProviderId;
+      if (data.modelEndpointId !== undefined) options.modelEndpointId = data.modelEndpointId;
+      if (data.modelProtocol !== undefined) options.modelProtocol = data.modelProtocol;
+      await this.#queue.submit(chatId, data.command, options);
     } catch (error: unknown) {
       writer.send(new AgentRunFailedMessage(chatId, (error as Error).message));
     }
@@ -272,8 +274,20 @@ export class ChatHandler {
       } else if (data instanceof ModelSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (data.model) {
-          await this.#providers.setModel(chatId, data.model);
-          await this.#registry.updateChat(chatId, { model: data.model });
+          const metadata = data.apiProviderId !== undefined || data.modelEndpointId !== undefined
+            ? { apiProviderId: data.apiProviderId, modelEndpointId: data.modelEndpointId }
+            : undefined;
+          await this.#providers.setModel(chatId, data.model, metadata);
+          const patch: {
+            model: string;
+            apiProviderId?: string | null;
+            modelEndpointId?: string | null;
+            modelProtocol?: typeof data.modelProtocol;
+          } = { model: data.model };
+          if (data.apiProviderId !== undefined) patch.apiProviderId = data.apiProviderId;
+          if (data.modelEndpointId !== undefined) patch.modelEndpointId = data.modelEndpointId;
+          if (data.modelProtocol !== undefined) patch.modelProtocol = data.modelProtocol;
+          await this.#registry.updateChat(chatId, patch);
         }
       } else if (data instanceof ChatLogQueryRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
@@ -327,6 +341,9 @@ export class ChatHandler {
       claudeThinkingMode: entry.claudeThinkingMode,
       ampAgentMode: entry.ampAgentMode,
       model: entry.model,
+      apiProviderId: this.#registry.getChat(chatId)?.apiProviderId,
+      modelEndpointId: this.#registry.getChat(chatId)?.modelEndpointId,
+      modelProtocol: this.#registry.getChat(chatId)?.modelProtocol,
     };
   }
 

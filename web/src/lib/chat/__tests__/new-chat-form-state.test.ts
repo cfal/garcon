@@ -21,6 +21,9 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 		lastProvider: 'claude',
 		lastProjectPath: '',
 		lastModel: 'opus',
+		lastApiProviderId: null,
+		lastModelEndpointId: null,
+		lastModelProtocol: null,
 		lastPermissionMode: 'default',
 		lastThinkingMode: 'none',
 		lastClaudeThinkingMode: 'auto',
@@ -52,17 +55,54 @@ const mockAppShell = {
 	projectBasePath: '/',
 };
 const mockModelCatalog = {
+	harnessMetadata: {
+		claude: { label: 'Claude' },
+		codex: { label: 'Codex' },
+		'direct-openai-compatible': { label: 'Direct OpenAI Compatible' },
+	},
+	getHarnesses: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
 	getDefaultModel: vi.fn((provider: string) => {
 		if (provider === 'claude') return 'opus';
 		if (provider === 'codex') return 'gpt-5.4';
-		if (provider === 'zai') return 'glm-5.1';
+		if (provider === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
 		return '';
 	}),
 	getModels: vi.fn((provider: string) => {
 		if (provider === 'claude') return [{ value: 'opus', label: 'Opus' }];
 		if (provider === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
-		if (provider === 'zai') return [{ value: 'glm-5.1', label: 'GLM-5.1' }];
+		if (provider === 'direct-openai-compatible') {
+			return [{
+				value: 'zai_openai:glm-5.1',
+				label: 'Z.AI: GLM-5.1',
+				rawModel: 'glm-5.1',
+				apiProviderId: 'zai',
+				endpointId: 'zai_openai',
+				protocol: 'openai-chat-completions',
+			}];
+		}
 		return [];
+	}),
+	selectionFor: vi.fn((provider: string, model: string) => {
+		if (provider === 'direct-openai-compatible' && model === 'zai_openai:glm-5.1') {
+			return {
+				model: 'glm-5.1',
+				apiProviderId: 'zai',
+				modelEndpointId: 'zai_openai',
+				modelProtocol: 'openai-chat-completions',
+			};
+		}
+		return {
+			model,
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+		};
+	}),
+	selectionValueFor: vi.fn((provider: string, model: string, endpointId?: string | null) => {
+		if (provider === 'direct-openai-compatible' && model === 'glm-5.1' && endpointId === 'zai_openai') {
+			return 'zai_openai:glm-5.1';
+		}
+		return model;
 	}),
 	refreshIfStale: vi.fn().mockResolvedValue(undefined)
 };
@@ -104,7 +144,23 @@ describe('NewChatFormState', () => {
 		expect(formState.projectPath).toBe('/workspace/project');
 	});
 
-	it('loads Z.ai startup defaults from server settings', async () => {
+	it('loads API provider startup defaults from server settings', async () => {
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
+			lastProvider: 'direct-openai-compatible',
+			lastProjectPath: '/workspace/project',
+			lastModel: 'glm-5.1',
+			lastApiProviderId: 'zai',
+			lastModelEndpointId: 'zai_openai',
+			lastModelProtocol: 'openai-chat-completions',
+		}));
+
+		await formState.loadSettingsAndModels();
+
+		expect(formState.provider).toBe('direct-openai-compatible');
+		expect(formState.modelValue).toBe('zai_openai:glm-5.1');
+	});
+
+	it('falls back when startup defaults reference a non-harness API provider id', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
 			lastProvider: 'zai' as RemoteSettingsSnapshot['lastProvider'],
 			lastProjectPath: '/workspace/project',
@@ -113,8 +169,8 @@ describe('NewChatFormState', () => {
 
 		await formState.loadSettingsAndModels();
 
-		expect(formState.provider).toBe('zai');
-		expect(formState.modelValue).toBe('glm-5.1');
+		expect(formState.provider).toBe('claude');
+		expect(formState.modelValue).toBe('opus');
 	});
 
 	it('normalizes invalid startup defaults from server settings', async () => {

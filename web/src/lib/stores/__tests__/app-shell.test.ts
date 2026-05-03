@@ -140,11 +140,11 @@ describe('AppShellStore', () => {
 	});
 
 	describe('settings tabs', () => {
-		it('defaults unknown section requests to agents', () => {
+		it('defaults unknown section requests to API providers', () => {
 			const store = new AppShellStore();
 
 			store.openSettings('display');
-			expect(store.settingsInitialTab).toBe('agents');
+			expect(store.settingsInitialTab).toBe('api-providers');
 
 			store.openSettings('remote');
 			expect(store.settingsInitialTab).toBe('remote');
