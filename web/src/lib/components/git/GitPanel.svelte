@@ -251,6 +251,9 @@
 					wb.commitGenerationEnabled = s.enabled;
 					wb.commitProvider = s.provider;
 					wb.commitModel = s.model;
+					wb.commitApiProviderId = s.apiProviderId ?? null;
+					wb.commitModelEndpointId = s.modelEndpointId ?? null;
+					wb.commitModelProtocol = s.modelProtocol ?? null;
 					wb.commitCustomPrompt = s.customPrompt;
 					wb.commitUseCommonDirPrefix = s.useCommonDirPrefix;
 				}}

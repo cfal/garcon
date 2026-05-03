@@ -41,7 +41,7 @@
 		getModels() {
 			return [];
 		},
-		getProviders() {
+		getHarnesses() {
 			return ['claude', 'codex', 'opencode'];
 		}
 	} as never);

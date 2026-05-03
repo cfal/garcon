@@ -1,6 +1,5 @@
 // Resolves the native file path for a chat session when not yet persisted.
 // Shared by both the REST route and the WebSocket handler.
-// TODO: can we deprecate this?
 
 import { promises as fs } from 'fs';
 import { findCodexSessionFileBySessionId } from '../providers/codex.js';
@@ -39,11 +38,7 @@ export async function resolveMissingNativePath(session) {
     return createArtificialNativePath(session.provider, session.providerSessionId);
   }
 
-  if (session.provider === 'openrouter') {
-    return createArtificialNativePath(session.provider, session.providerSessionId);
-  }
-
-  if (session.provider === 'zai') {
+  if (session.provider === 'direct-openai-compatible') {
     return createArtificialNativePath(session.provider, session.providerSessionId);
   }
 

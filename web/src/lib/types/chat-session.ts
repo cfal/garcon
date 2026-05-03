@@ -3,12 +3,16 @@
 
 import type { SessionProvider } from '$lib/types/app';
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { ApiProtocol } from '$shared/providers';
 
 export type ChatStatus = 'draft' | 'running';
 
 export interface ChatStartupConfig {
 	provider: SessionProvider;
 	model: string;
+	apiProviderId?: string | null;
+	modelEndpointId?: string | null;
+	modelProtocol?: ApiProtocol | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
 	claudeThinkingMode: ClaudeThinkingMode;
@@ -24,6 +28,9 @@ export interface ChatSessionRecord {
 	title: string;
 	provider: SessionProvider;
 	model: string | null;
+	apiProviderId?: string | null;
+	modelEndpointId?: string | null;
+	modelProtocol?: ApiProtocol | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
 	claudeThinkingMode: ClaudeThinkingMode;

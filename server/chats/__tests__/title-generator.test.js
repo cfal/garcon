@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { maybeGenerateChatTitle } from '../title-generator.js';
 
 const runSingleQueryMock = mock(() => Promise.resolve('Test Chat Title'));
-const getAuthStatusMapMock = mock(() => Promise.resolve({
+const getHarnessAuthStatusMapMock = mock(() => Promise.resolve({
   claude: { authenticated: false },
   codex: { authenticated: false },
   opencode: { authenticated: false },
@@ -10,8 +10,9 @@ const getAuthStatusMapMock = mock(() => Promise.resolve({
 const getModelsMock = mock(() => Promise.resolve([]));
 const mockProviders = {
   runSingleQuery: runSingleQueryMock,
-  getAuthStatusMap: getAuthStatusMapMock,
+  getHarnessAuthStatusMap: getHarnessAuthStatusMapMock,
   getModels: getModelsMock,
+  getHarnessCatalog: mock(() => Promise.resolve({ harnesses: [], apiProviders: [] })),
 };
 
 const setSessionNameMock = mock(() => Promise.resolve(undefined));
@@ -27,7 +28,7 @@ const mockSettings = {
 
 const allMocks = [
   runSingleQueryMock, setSessionNameMock,
-  getChatNameMock, getUiSettingsMock, getAuthStatusMapMock, getModelsMock,
+  getChatNameMock, getUiSettingsMock, getHarnessAuthStatusMapMock, getModelsMock, mockProviders.getHarnessCatalog,
 ];
 
 describe('maybeGenerateChatTitle', () => {
@@ -36,7 +37,7 @@ describe('maybeGenerateChatTitle', () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({
       chatTitle: { enabled: true, provider: 'claude', model: 'opus' },
     }));
-    getAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
@@ -97,7 +98,7 @@ describe('maybeGenerateChatTitle', () => {
 
   it('auto-enables and defaults to codex when codex is authenticated', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
-    getAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: true },
       opencode: { authenticated: true },
@@ -120,7 +121,7 @@ describe('maybeGenerateChatTitle', () => {
 
   it('auto-enables and skips DeepSeek R1 when selecting OpenCode defaults', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
-    getAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: true },
@@ -142,6 +143,26 @@ describe('maybeGenerateChatTitle', () => {
     const [, opts] = runSingleQueryMock.mock.calls[0];
     expect(opts.provider).toBe('opencode');
     expect(opts.model).toBe('deepseek-v3');
+  });
+
+  it('does not auto-enable OpenCode title generation when no OpenCode models were discovered', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
+    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: false },
+      opencode: { authenticated: true },
+    }));
+    getModelsMock.mockImplementation(() => Promise.resolve([]));
+
+    await maybeGenerateChatTitle({
+      chatId: '303',
+      projectPath: '/proj',
+      firstPrompt: 'Hello',
+      providers: mockProviders,
+      settings: mockSettings,
+    });
+
+    expect(runSingleQueryMock).not.toHaveBeenCalled();
   });
 
   it('does nothing when firstPrompt is empty', async () => {
@@ -229,5 +250,33 @@ describe('maybeGenerateChatTitle', () => {
     const [, opts] = runSingleQueryMock.mock.calls[0];
     expect(opts.provider).toBe('opencode');
     expect(opts.model).toBe('anthropic/claude-sonnet-4-5');
+  });
+
+  it('passes API provider metadata to configured title generation harness', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({
+      chatTitle: {
+        enabled: true,
+        provider: 'direct-openai-compatible',
+        model: 'glm-5.1',
+        apiProviderId: 'zai',
+        modelEndpointId: 'zai_openai',
+        modelProtocol: 'openai-chat-completions',
+      },
+    }));
+
+    await maybeGenerateChatTitle({
+      chatId: '901',
+      projectPath: '/proj',
+      firstPrompt: 'Do something',
+      providers: mockProviders,
+      settings: mockSettings,
+    });
+
+    const [, opts] = runSingleQueryMock.mock.calls[0];
+    expect(opts.provider).toBe('direct-openai-compatible');
+    expect(opts.model).toBe('glm-5.1');
+    expect(opts.apiProviderId).toBe('zai');
+    expect(opts.modelEndpointId).toBe('zai_openai');
+    expect(opts.modelProtocol).toBe('openai-chat-completions');
   });
 });

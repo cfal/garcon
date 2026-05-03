@@ -112,23 +112,13 @@ export const PROVIDER_MENU_GROUPS: ProviderMenuGroup[] = [
 				label: 'Amp',
 				description: 'Amp agent with multi-tool workflows.'
 			},
-			{
-				value: 'factory',
-				label: 'Factory',
-				description: 'Factory Droid via the external droid CLI.'
-			},
-			{
-				value: 'openrouter',
-				label: 'OpenRouter',
-				description: 'Access many models via OpenRouter API.'
-			},
-			{
-				value: 'zai',
-				label: 'Z.AI',
-				description: 'Direct access to Z.AI OpenAI-compatible models.'
-			}
-		]
-	}
+				{
+					value: 'factory',
+					label: 'Factory',
+					description: 'Factory Droid via the external droid CLI.'
+				}
+			]
+		}
 ];
 
 // Flat list for backward compatibility and lookup
@@ -155,10 +145,10 @@ export function buildThinkingOptions(): ComposerModeOption<ThinkingMode>[] {
 	});
 }
 
-export function toModelMenuOptions(options: Array<{ value: string; label: string }>): ComposerMenuOption[] {
+export function toModelMenuOptions(options: Array<{ value: string; label: string; rawModel?: string }>): ComposerMenuOption[] {
 	return options.map((option) => ({
 		value: option.value,
 		label: option.label,
-		description: option.label === option.value ? option.value : option.value
+		description: option.rawModel ?? option.value
 	}));
 }

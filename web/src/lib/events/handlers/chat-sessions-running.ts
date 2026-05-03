@@ -10,17 +10,14 @@ export interface RunningChatsContext {
 /** Extracts the flat set of running chat IDs from a provider-grouped
  *  chat-sessions-running payload. Exported for testing. */
 export function extractRunningChatIds(msg: ChatSessionsRunningMessage): Set<string> {
+  const groupedSessions: unknown[] = msg.sessions && typeof msg.sessions === 'object'
+    ? Object.values(msg.sessions)
+    : [];
   return new Set(
-    [
-      ...((msg.sessions?.claude as Array<{ id?: string }> | undefined) || []),
-      ...((msg.sessions?.codex as Array<{ id?: string }> | undefined) || []),
-      ...((msg.sessions?.opencode as Array<{ id?: string }> | undefined) || []),
-      ...((msg.sessions?.amp as Array<{ id?: string }> | undefined) || []),
-      ...((msg.sessions?.factory as Array<{ id?: string }> | undefined) || []),
-      ...((msg.sessions?.openrouter as Array<{ id?: string }> | undefined) || []),
-      ...((msg.sessions?.zai as Array<{ id?: string }> | undefined) || []),
-    ]
-      .map((s) => s?.id)
+    groupedSessions
+      .filter((sessions): sessions is Array<{ id?: string }> => Array.isArray(sessions))
+      .flatMap((sessions) => sessions)
+      .map((session) => session?.id)
       .filter((id): id is string => Boolean(id)),
   );
 }

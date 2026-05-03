@@ -13,12 +13,16 @@ import {
 	type PermissionMode,
 	type ThinkingMode,
 } from '$shared/chat-modes';
+import type { ApiProtocol } from '$shared/providers';
 
 export interface StartChatParams {
 	chatId: string;
 	provider: SessionProvider;
 	projectPath: string;
 	model: string;
+	apiProviderId?: string | null;
+	modelEndpointId?: string | null;
+	modelProtocol?: ApiProtocol | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
 	claudeThinkingMode: ClaudeThinkingMode;

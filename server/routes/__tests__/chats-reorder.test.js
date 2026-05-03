@@ -55,7 +55,7 @@ const historyCache = {
 };
 const providers = {
   startSession: mock(() => undefined),
-  isProviderSessionRunning: mock(() => false),
+  isHarnessSessionRunning: mock(() => false),
 };
 
 const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);

@@ -11,9 +11,8 @@
 	import {
 		buildPermissionOptions,
 		buildThinkingOptions,
-		PROVIDER_MENU_OPTIONS,
-		PROVIDER_MENU_GROUPS,
-		toModelMenuOptions
+		toModelMenuOptions,
+		type ProviderMenuGroup,
 	} from '$lib/chat/composer-controls';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
@@ -44,6 +43,26 @@
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
 	const form = new NewChatFormState(appShell, modelCatalog, remoteSettings);
+
+	const providerGroups = $derived.by(() => {
+		const providers = modelCatalog.getHarnesses();
+		const coreIds = new Set(['claude', 'codex', 'opencode']);
+		const moreIds = new Set(['amp', 'factory', 'direct-openai-compatible']);
+		const core = providers.filter((p) => coreIds.has(p));
+		const more = providers.filter((p) => moreIds.has(p));
+		const custom = providers.filter((p) => !coreIds.has(p) && !moreIds.has(p));
+		const toOption = (p: string) => ({
+			value: p,
+			label: modelCatalog.harnessMetadata[p]?.label ?? p,
+			description: modelCatalog.harnessMetadata[p]?.description ?? '',
+		});
+		const groups: ProviderMenuGroup[] = [{ options: core.map(toOption) }];
+		if (more.length > 0 || custom.length > 0) {
+			groups.push({ label: 'More', options: [...more, ...custom].map(toOption) });
+		}
+		return groups;
+	});
+	const providerOptions = $derived(providerGroups.flatMap((g) => g.options));
 	let isMobile = $state(false);
 	let pendingTextareaFocus = $state(true);
 	let tagInputValue = $state('');
@@ -115,15 +134,9 @@
 	});
 
 	// Revalidates selected models whenever the shared model catalog updates.
-	$effect(() => {
-		void modelCatalog.version;
-		form.validateModelAgainstLive('claude');
-			form.validateModelAgainstLive('codex');
-			form.validateModelAgainstLive('opencode');
-			form.validateModelAgainstLive('amp');
-			form.validateModelAgainstLive('factory');
-			form.validateModelAgainstLive('openrouter');
-			form.validateModelAgainstLive('zai');
+		$effect(() => {
+			void modelCatalog.version;
+			form.validateAllModelsAgainstLive();
 		});
 
 	// Focus textarea when path validates successfully, but not while browsing.
@@ -446,8 +459,8 @@
 					onThinkingSelect={(mode) => {
 						form.thinkingMode = mode;
 					}}
-					providerOptions={PROVIDER_MENU_OPTIONS}
-					providerGroups={PROVIDER_MENU_GROUPS}
+					providerOptions={providerOptions}
+					providerGroups={providerGroups}
 					selectedProvider={form.provider}
 					onProviderSelect={(provider) => {
 						form.selectProvider(provider);

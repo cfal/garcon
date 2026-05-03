@@ -463,6 +463,10 @@ export class OpenCodeProvider extends AbsProvider {
     return instance.client;
   }
 
+  getClientIfInitialized(): any | null {
+    return this.#client?.client ?? null;
+  }
+
   async getModels(): Promise<Array<{ value: string; label: string }>> {
     if (!this.isAvailable()) return [];
     const client = await this.getClient();
@@ -473,10 +477,10 @@ export class OpenCodeProvider extends AbsProvider {
 
     const models: Array<{ value: string; label: string }> = [];
     for (const provider of allProviders) {
-      const pid = provider.id || provider.name;
-      if (!connected.has(pid)) continue;
-      const providerModelsObj = provider.models || {};
-      for (const [modelKey, model] of Object.entries(providerModelsObj)) {
+      const providerId = provider.id || provider.name;
+      if (!connected.has(providerId)) continue;
+      const harnessModelsObj = provider.models || {};
+      for (const [modelKey, model] of Object.entries(harnessModelsObj)) {
         const m = model as any;
         models.push({
           value: `${provider.id || provider.name}/${m.id || modelKey}`,

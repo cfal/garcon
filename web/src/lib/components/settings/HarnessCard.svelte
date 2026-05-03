@@ -1,5 +1,4 @@
-<!-- Collapsible card for a single agent in settings. Shows auth status and
-     either CLI instructions or a login action when expanded. -->
+<!-- Renders one harness auth/readiness card. -->
 <script lang="ts">
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -11,7 +10,7 @@
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { DeviceAuthInfo } from '$lib/api/providers.js';
+	import type { DeviceAuthInfo, HarnessReadiness } from '$lib/api/providers.js';
 
 	interface AuthStatus {
 		authenticated: boolean;
@@ -21,22 +20,24 @@
 		error: string | null;
 	}
 
-	type AgentId = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory' | 'openrouter' | 'zai';
+	type HarnessId = string;
 
 	let {
-		agentId,
-		agentName,
+		harnessId,
+		harnessName,
 		auth,
 		open = false,
 		onOpenChange,
 		onLogin = () => undefined,
 		cliOnly = false,
-		loginCommand = `${agentName.toLowerCase()} login`,
+		loginCommand = `${harnessName.toLowerCase()} login`,
 		deviceAuth = undefined,
-		pending = false
+		pending = false,
+		readiness = undefined,
+		noLogin = false
 	}: {
-		agentId: AgentId;
-		agentName: string;
+		harnessId: HarnessId;
+		harnessName: string;
 		auth: AuthStatus;
 		open?: boolean;
 		onOpenChange?: (open: boolean) => void;
@@ -45,6 +46,8 @@
 		loginCommand?: string;
 		deviceAuth?: DeviceAuthInfo;
 		pending?: boolean;
+		readiness?: HarnessReadiness;
+		noLogin?: boolean;
 	} = $props();
 
 	let codeCopied = $state(false);
@@ -56,31 +59,36 @@
 		setTimeout(() => { codeCopied = false; }, 2000);
 	}
 
-	const borderColorClass: Record<AgentId, string> = {
+	const borderColorClass: Record<HarnessId, string> = {
 		claude: 'border-l-provider-claude-border',
 		codex: 'border-l-provider-codex-border',
 		opencode: 'border-l-provider-opencode-border',
 		amp: 'border-l-provider-amp-border',
 		factory: 'border-l-provider-factory-border',
-		openrouter: 'border-l-provider-openrouter-border',
-		zai: 'border-l-provider-zai-border'
+		'direct-openai-compatible': 'border-l-border'
 	};
 
-	// Authenticated with no reauth option and no CLI-only content -- nothing to expand.
-	let expandable = $derived(!auth.loading && !(auth.authenticated && !auth.canReauth && !cliOnly));
+	let isReady = $derived(auth.authenticated || readiness?.ready === true);
+	let statusLabel = $derived(auth.authenticated
+		? (auth.label || m.settings_agents_auth_status_connected())
+		: readiness?.ready === true
+			? 'Ready'
+			: m.settings_agents_auth_status_disconnected()
+	);
+	let expandable = $derived(!auth.loading && !noLogin && !(auth.authenticated && !auth.canReauth && !cliOnly));
 </script>
 
 {#if expandable}
-<Collapsible.Root {open} {onOpenChange} class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass[agentId]}">
+<Collapsible.Root {open} {onOpenChange} class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass[harnessId]}">
 	<div class="flex items-center gap-3 px-4 py-3">
 		<Collapsible.Trigger class="flex flex-1 items-center gap-3 text-left cursor-pointer">
-			<span class="font-medium text-foreground">{agentName}</span>
+			<span class="font-medium text-foreground">{harnessName}</span>
 
 			{#if auth.loading}
 				<Badge variant="secondary" class="text-xs">{m.settings_agents_auth_status_checking()}</Badge>
-			{:else if auth.authenticated}
+			{:else if isReady}
 				<Badge class="text-xs bg-status-success text-status-success-foreground border-status-success-border">
-					{auth.label || m.settings_agents_auth_status_connected()}
+					{statusLabel}
 				</Badge>
 			{:else}
 				<Badge class="text-xs bg-status-neutral text-status-neutral-foreground border-status-neutral-border">
@@ -91,7 +99,7 @@
 			<ChevronDownIcon class="size-4 text-muted-foreground shrink-0 transition-transform duration-200 {open ? 'rotate-180' : ''}" />
 		</Collapsible.Trigger>
 
-		{#if !cliOnly && !auth.loading && !auth.authenticated && !open && auth.canReauth && !deviceAuth}
+		{#if !cliOnly && !noLogin && !auth.loading && !auth.authenticated && !open && auth.canReauth && !deviceAuth}
 			<Button variant="outline" size="sm" onclick={onLogin} disabled={pending}>
 				{#if pending}
 					<LoaderIcon class="size-3.5 mr-1.5 animate-spin" />
@@ -164,7 +172,7 @@
 						<div class="text-xs text-muted-foreground">
 							{auth.authenticated
 								? m.settings_agents_login_re_auth_description()
-								: m.settings_agents_login_description({ agent: agentName })}
+								: m.settings_agents_login_description({ agent: harnessName })}
 						</div>
 					</div>
 					<Button variant={auth.authenticated ? 'outline' : 'default'} size="sm" onclick={onLogin} disabled={pending}>
@@ -187,15 +195,15 @@
 	</Collapsible.Content>
 </Collapsible.Root>
 {:else}
-<div class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass[agentId]}">
+<div class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass[harnessId]}">
 	<div class="flex items-center gap-3 px-4 py-3">
-		<span class="font-medium text-foreground">{agentName}</span>
+		<span class="font-medium text-foreground">{harnessName}</span>
 
 		{#if auth.loading}
 			<Badge variant="secondary" class="text-xs">{m.settings_agents_auth_status_checking()}</Badge>
-		{:else if auth.authenticated}
+		{:else if isReady}
 			<Badge class="text-xs bg-status-success text-status-success-foreground border-status-success-border">
-				{auth.label || m.settings_agents_auth_status_connected()}
+				{statusLabel}
 			</Badge>
 		{/if}
 	</div>

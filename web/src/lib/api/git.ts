@@ -2,6 +2,7 @@
 // parameter (the project path on disk) to scope operations.
 
 import type { SessionProvider } from '$lib/types/app';
+import type { ApiProtocol } from '$shared/providers';
 import { apiGet, apiPost } from './client.js';
 
 // Workbench V2 types
@@ -193,9 +194,12 @@ export async function generateCommitMessage(
 	provider: SessionProvider = 'claude',
 	model = '',
 	customPrompt = '',
+	apiProviderId?: string | null,
+	modelEndpointId?: string | null,
+	modelProtocol?: ApiProtocol | null,
 ): Promise<{ message?: string; error?: string }> {
 	return apiPost('/api/v1/git/generate-commit-message',
-		{ project, files, provider, model, customPrompt },
+		{ project, files, provider, model, customPrompt, apiProviderId, modelEndpointId, modelProtocol },
 		{ timeoutMs: 120_000 },
 	);
 }

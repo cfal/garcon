@@ -39,27 +39,26 @@
 		showTimestamp ? formatSidebarChatTimestamp(activityTimestamp, currentTime) : null
 	);
 
-	const PROVIDER_TAG_VARIANTS: Record<SessionProvider, string> = {
+	const PROVIDER_TAG_VARIANTS: Record<string, string> = {
 		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
 		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
 		opencode: 'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
 		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
 		factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
-		openrouter: 'border-provider-openrouter-border bg-provider-openrouter-bg text-provider-openrouter-foreground',
-		zai: 'border-provider-zai-border bg-provider-zai-bg text-provider-zai-foreground',
+		'direct-openai-compatible': 'border-border bg-muted text-foreground',
 	};
 
 	let providerTagVariant = $derived(
 		PROVIDER_TAG_VARIANTS[provider] ?? PROVIDER_TAG_VARIANTS.claude
 	);
 	let providerTagLabel = $derived(
-		provider === 'codex' ? m.provider_codex()
-		: provider === 'opencode' ? m.provider_opencode()
-		: provider === 'amp' ? m.provider_amp()
+		provider === 'claude' ? m.provider_claude()
+			: provider === 'codex' ? m.provider_codex()
+			: provider === 'opencode' ? m.provider_opencode()
+			: provider === 'amp' ? m.provider_amp()
 		: provider === 'factory' ? m.provider_factory()
-		: provider === 'openrouter' ? m.provider_openrouter()
-		: provider === 'zai' ? m.provider_zai()
-		: m.provider_claude()
+		: provider === 'direct-openai-compatible' ? 'Direct'
+		: provider || m.provider_claude()
 	);
 	function prefixEllipsis(pathStr: string, maxLen = 40): string {
 		if (!pathStr || pathStr.length <= maxLen) return pathStr;

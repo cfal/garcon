@@ -14,7 +14,7 @@ import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
 
 const mockProviders = {
-  getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [], factory: [], openrouter: [], zai: [] })),
+  getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-openai-compatible': [] })),
   resolvePermission: mock(() => undefined),
   setPermissionMode: mock(() => Promise.resolve(undefined)),
   setThinkingMode: mock(() => Promise.resolve(undefined)),
@@ -349,7 +349,7 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('thinking-mode-set', () => {
-    it('persists thinking mode to registry and provider session', async () => {
+    it('persists thinking mode to registry and harness session', async () => {
       await chatHandler.message(ws, {
         type: 'thinking-mode-set',
         chatId: '123',
@@ -380,7 +380,7 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('claude-thinking-mode-set', () => {
-	it('persists Claude thinking mode to registry and provider session', async () => {
+	it('persists Claude thinking mode to registry and harness session', async () => {
 	  await chatHandler.message(ws, {
 	    type: 'claude-thinking-mode-set',
 	    chatId: '123',
@@ -402,14 +402,56 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('model-set', () => {
-    it('updates chat and calls setModel', async () => {
+    it('updates only the model when API provider metadata is omitted', async () => {
       await chatHandler.message(ws, {
         type: 'model-set',
         chatId: '123',
         model: 'opus',
       });
       expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { model: 'opus' });
-      expect(mockProviders.setModel).toHaveBeenCalledWith('123', 'opus');
+      expect(mockProviders.setModel).toHaveBeenCalledWith('123', 'opus', undefined);
+    });
+
+    it('updates API provider metadata when provided', async () => {
+      await chatHandler.message(ws, {
+        type: 'model-set',
+        chatId: '123',
+        model: 'zai_openai:glm-5.1',
+        apiProviderId: 'zai',
+        modelEndpointId: 'zai_openai',
+        modelProtocol: 'openai-chat-completions',
+      });
+      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+        model: 'zai_openai:glm-5.1',
+        apiProviderId: 'zai',
+        modelEndpointId: 'zai_openai',
+        modelProtocol: 'openai-chat-completions',
+      });
+      expect(mockProviders.setModel).toHaveBeenCalledWith('123', 'zai_openai:glm-5.1', {
+        apiProviderId: 'zai',
+        modelEndpointId: 'zai_openai',
+      });
+    });
+
+    it('clears API provider metadata when explicit nulls are provided', async () => {
+      await chatHandler.message(ws, {
+        type: 'model-set',
+        chatId: '123',
+        model: 'opus',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+      });
+      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+        model: 'opus',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+      });
+      expect(mockProviders.setModel).toHaveBeenCalledWith('123', 'opus', {
+        apiProviderId: null,
+        modelEndpointId: null,
+      });
     });
   });
 
@@ -422,7 +464,7 @@ describe('chat WebSocket handler', () => {
       expect(payload).toMatchObject({
         type: 'chat-sessions-running',
       });
-      expect(payload.sessions).toEqual({ claude: [], codex: [], opencode: [], amp: [], factory: [], openrouter: [], zai: [] });
+      expect(payload.sessions).toEqual({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-openai-compatible': [] });
     });
   });
 

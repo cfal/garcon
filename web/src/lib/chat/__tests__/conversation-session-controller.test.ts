@@ -59,9 +59,13 @@ function createDeps(chat = createRunningChat()) {
 				restoreDraft: vi.fn(),
 			},
 			providerState: {
-				setProvider: vi.fn(),
-				model: '',
-				permissionMode: 'default',
+					setProvider: vi.fn(),
+					setModelSelection: vi.fn(),
+					model: '',
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+					permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
 			},
@@ -78,9 +82,16 @@ function createDeps(chat = createRunningChat()) {
 				quietRefreshChats: vi.fn(),
 				openNewChatDialog: vi.fn(),
 			},
-		modelCatalog: {
-			isLocalModel: vi.fn(() => false),
-		},
+			modelCatalog: {
+				isLocalModel: vi.fn(() => false),
+				selectionFor: vi.fn((_provider, model) => ({
+					model,
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+				})),
+				selectionValueFor: vi.fn((_provider, model) => model),
+			},
 		readReceiptOutbox: {
 			enqueue: vi.fn(),
 		},

@@ -1,8 +1,9 @@
 import { createGitService } from '../git/git-service.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
 import { parseJsonBody, MalformedJsonError } from '../lib/http-request.js';
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, OPENROUTER_MODELS, ZAI_MODELS } from '../../common/models.js';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
+import { isHarnessId } from '../../common/providers.ts';
 
 const MALFORMED_BODY = () =>
   Response.json({ error: 'Request body is not valid JSON.' }, { status: 400 });
@@ -18,52 +19,64 @@ async function readJsonBody(request) {
   }
 }
 
-// Thin HTTP adapter for git operations. Each handler extracts request
-// parameters, delegates to the git service, and maps errors to HTTP
-// responses via git.toHttpError(). No business logic lives here.
-function isAllowedGenerationProvider(value) {
-  return value === 'claude'
-    || value === 'codex'
-    || value === 'opencode'
-    || value === 'amp'
-    || value === 'factory'
-    || value === 'openrouter'
-    || value === 'zai';
-}
-
 function hasOwn(source, key) {
   return Boolean(source) && Object.prototype.hasOwnProperty.call(source, key);
 }
 
+function optionalId(value) {
+  return typeof value === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(value) ? value : null;
+}
+
+function optionalProtocol(value) {
+  return value === 'openai-chat-completions' || value === 'anthropic-messages' ? value : null;
+}
+
+function isAllowedGenerationProvider(providers, value) {
+  if (!isHarnessId(value)) return false;
+  if (typeof providers?.hasHarness === 'function') {
+    return providers.hasHarness(value);
+  }
+  return true;
+}
+
+async function getHarnessCatalog(providers) {
+  try {
+    return await providers?.getHarnessCatalog?.();
+  } catch {
+    return null;
+  }
+}
+
 async function resolveCommitMessageConfig(settings, providers) {
   const ui = await settings?.getUiSettings?.() ?? {};
-  const authByProvider = await providers?.getAuthStatusMap?.() ?? {
+  const authByHarness = await providers?.getHarnessAuthStatusMap?.() ?? {
     claude: { authenticated: false },
     codex: { authenticated: false },
     opencode: { authenticated: false },
     amp: { authenticated: false },
     factory: { authenticated: false },
-    openrouter: { authenticated: false },
-    zai: { authenticated: false },
   };
-  const [opencodeModels, factoryModels, openrouterModels, zaiModels] = await Promise.all([
+  const [readinessByHarness, catalog, opencodeModels, factoryModels] = await Promise.all([
+    providers?.getHarnessReadinessMap?.() ?? {},
+    getHarnessCatalog(providers),
     providers?.getModels?.('opencode') ?? [],
     providers?.getModels?.('factory') ?? [],
-    providers?.getModels?.('openrouter') ?? [],
-    providers?.getModels?.('zai') ?? [],
   ]);
+  const catalogModels = Object.fromEntries(
+    (catalog?.harnesses ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
+  );
   return resolveEffectiveGenerationUiConfig({
     persisted: ui?.commitMessage,
-    authByProvider,
-    modelsByProvider: {
+    authByHarness,
+    modelsByHarness: {
       claude: CLAUDE_MODELS.OPTIONS,
       codex: CODEX_MODELS.OPTIONS,
       opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
       amp: AMP_MODELS.OPTIONS,
       factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
-      openrouter: Array.isArray(openrouterModels) ? openrouterModels : OPENROUTER_MODELS.OPTIONS,
-      zai: Array.isArray(zaiModels) ? zaiModels : ZAI_MODELS.OPTIONS,
+      ...catalogModels,
     },
+    readinessByHarness,
   });
 }
 
@@ -230,8 +243,8 @@ export default function createGitRoutes(providers, settings) {
       if (!project || !files || files.length === 0) {
         return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
       }
-      if (hasOwn(body, 'provider') && !isAllowedGenerationProvider(body.provider)) {
-        return Response.json({ error: 'Invalid provider. Expected one of: claude, codex, opencode, amp, factory, openrouter, zai.' }, { status: 400 });
+      if (hasOwn(body, 'provider') && !isAllowedGenerationProvider(providers, body.provider)) {
+        return Response.json({ error: 'Invalid provider.' }, { status: 400 });
       }
 
       const persistedConfig = await resolveCommitMessageConfig(settings, providers);
@@ -239,11 +252,29 @@ export default function createGitRoutes(providers, settings) {
       const model = hasOwn(body, 'model')
         ? (typeof body.model === 'string' ? body.model : '')
         : (typeof persistedConfig.model === 'string' ? persistedConfig.model : '');
+      const apiProviderId = hasOwn(body, 'apiProviderId')
+        ? optionalId(body.apiProviderId)
+        : (persistedConfig.apiProviderId ?? null);
+      const modelEndpointId = hasOwn(body, 'modelEndpointId')
+        ? optionalId(body.modelEndpointId)
+        : (persistedConfig.modelEndpointId ?? null);
+      const modelProtocol = hasOwn(body, 'modelProtocol')
+        ? optionalProtocol(body.modelProtocol)
+        : (persistedConfig.modelProtocol ?? null);
       const customPrompt = hasOwn(body, 'customPrompt')
         ? (typeof body.customPrompt === 'string' ? body.customPrompt : '')
         : (typeof persistedConfig.customPrompt === 'string' ? persistedConfig.customPrompt : '');
 
-      const result = await git.generateCommitMessageForFiles({ projectPath: project, files, provider, model, customPrompt });
+      const result = await git.generateCommitMessageForFiles({
+        projectPath: project,
+        files,
+        provider,
+        model,
+        apiProviderId,
+        modelEndpointId,
+        modelProtocol,
+        customPrompt,
+      });
       return Response.json(result);
     } catch (error) {
       return git.toHttpError(error);

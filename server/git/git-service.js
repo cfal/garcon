@@ -214,9 +214,10 @@ function classifyCommitMessageProviderError(error) {
 // Generates a conventional commit message using the given AI provider.
 // When customPrompt is non-empty, it is used as the template with
 // {{files}} and {{diff}} placeholders substituted in.
-async function generateCommitMessage(files, diffContext, provider, projectPath, runSingleQueryFn, model, customPrompt) {
+async function generateCommitMessage(files, diffContext, provider, projectPath, runSingleQueryFn, options = {}) {
   const filesList = files.map((f) => `- ${f}`).join('\n');
   const diffExcerpt = diffContext.substring(0, 4000);
+  const { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt } = options;
 
   let prompt;
   if (customPrompt && customPrompt.trim()) {
@@ -232,6 +233,9 @@ async function generateCommitMessage(files, diffContext, provider, projectPath, 
   try {
     const opts = { provider, cwd: projectPath };
     if (model) opts.model = model;
+    if (apiProviderId) opts.apiProviderId = apiProviderId;
+    if (modelEndpointId) opts.modelEndpointId = modelEndpointId;
+    if (modelProtocol) opts.modelProtocol = modelProtocol;
     const responseText = await runSingleQueryFn(prompt, opts);
     if (!responseText?.trim()) {
       throw new GitDomainError('COMMIT_MESSAGE_EMPTY_RESPONSE', 'Provider returned an empty commit message response.');
@@ -779,7 +783,16 @@ export function createGitService({ providers, classifyGitError }) {
     return { diff: stdout };
   }
 
-  async function generateCommitMessageForFiles({ projectPath, files, provider, model, customPrompt }) {
+  async function generateCommitMessageForFiles({
+    projectPath,
+    files,
+    provider,
+    model,
+    apiProviderId,
+    modelEndpointId,
+    modelProtocol,
+    customPrompt,
+  }) {
     if (!Array.isArray(files) || files.length === 0) {
       throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged files to generate a commit message.');
     }
@@ -802,7 +815,14 @@ export function createGitService({ providers, classifyGitError }) {
       throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged changes found for selected files.');
     }
 
-    const message = await generateCommitMessage(files, diffContext, provider, projectPath, (prompt, opts) => providers.runSingleQuery(prompt, opts), model, customPrompt);
+    const message = await generateCommitMessage(
+      files,
+      diffContext,
+      provider,
+      projectPath,
+      (prompt, opts) => providers.runSingleQuery(prompt, opts),
+      { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt },
+    );
     return { message };
   }
 

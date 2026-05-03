@@ -29,10 +29,13 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 	return {
 		id: session.id,
 		projectPath: session.projectPath,
-		title: session.title,
-		provider: session.provider,
-		model: session.model,
-		...normalizeModeFields(session),
+			title: session.title,
+			provider: session.provider,
+			model: session.model,
+			apiProviderId: session.apiProviderId ?? null,
+			modelEndpointId: session.modelEndpointId ?? null,
+			modelProtocol: session.modelProtocol ?? null,
+			...normalizeModeFields(session),
 		createdAt: session.activity?.createdAt ?? null,
 		lastActivityAt: session.activity?.lastActivityAt ?? null,
 		lastReadAt: session.activity?.lastReadAt ?? null,
@@ -60,9 +63,12 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.id === b.id &&
 		a.projectPath === b.projectPath &&
 		a.title === b.title &&
-		a.provider === b.provider &&
-		a.model === b.model &&
-		a.permissionMode === b.permissionMode &&
+			a.provider === b.provider &&
+			a.model === b.model &&
+			a.apiProviderId === b.apiProviderId &&
+			a.modelEndpointId === b.modelEndpointId &&
+			a.modelProtocol === b.modelProtocol &&
+			a.permissionMode === b.permissionMode &&
 		a.thinkingMode === b.thinkingMode &&
 		a.claudeThinkingMode === b.claudeThinkingMode &&
 		a.createdAt === b.createdAt &&
@@ -173,9 +179,12 @@ export class ChatSessionsStore {
 		const draft: ChatSessionRecord = {
 			id,
 			projectPath,
-			title: normalizedStartup.firstMessage.trim() || 'New Session',
-			provider: normalizedStartup.provider,
-			model: normalizedStartup.model,
+				title: normalizedStartup.firstMessage.trim() || 'New Session',
+				provider: normalizedStartup.provider,
+				model: normalizedStartup.model,
+				apiProviderId: normalizedStartup.apiProviderId ?? null,
+				modelEndpointId: normalizedStartup.modelEndpointId ?? null,
+				modelProtocol: normalizedStartup.modelProtocol ?? null,
 			...normalizeModeFields(normalizedStartup),
 			createdAt: null,
 			lastActivityAt: null,

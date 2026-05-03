@@ -90,4 +90,24 @@ describe('metadata-store', () => {
       expect(metadata.getChatMetadata('unknown-chat')).toBeNull();
     });
   });
+
+  describe('init', () => {
+    it('does not wait indefinitely for a stalled provider preview', async () => {
+      const stalledRegistry = {
+        listAllChats: () => ({
+          'stalled-chat': { provider: 'opencode', providerSessionId: 'opencode-session' },
+        }),
+        onChatRemoved: mock(() => {}),
+      };
+      const stalledProviders = {
+        getPreview: mock(() => new Promise(() => {})),
+      };
+      const index = new MetadataIndex(stalledRegistry, stalledProviders, { previewTimeoutMs: 5 });
+
+      await index.init();
+
+      expect(stalledProviders.getPreview).toHaveBeenCalledTimes(1);
+      expect(index.getChatMetadata('stalled-chat')).toBeNull();
+    });
+  });
 });

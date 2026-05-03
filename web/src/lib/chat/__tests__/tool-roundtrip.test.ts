@@ -209,9 +209,9 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('AmpHandoffToolUseMessage preserves goal', () => {
-		const msg = new AmpHandoffToolUseMessage(TS, 'id-amp-6', 'Continue the migration');
+		const msg = new AmpHandoffToolUseMessage(TS, 'id-amp-6', 'Continue the implementation');
 		const parsed = roundTrip(msg);
-		expect(parsed.goal).toBe('Continue the migration');
+		expect(parsed.goal).toBe('Continue the implementation');
 	});
 
 	it('AmpLookAtToolUseMessage preserves path and objective', () => {
@@ -235,11 +235,11 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('AmpTaskListToolUseMessage preserves task metadata', () => {
-		const msg = new AmpTaskListToolUseMessage(TS, 'id-amp-10', 'update', '42', 'Ship migration', 'done');
+		const msg = new AmpTaskListToolUseMessage(TS, 'id-amp-10', 'update', '42', 'Ship implementation', 'done');
 		const parsed = roundTrip(msg);
 		expect(parsed.action).toBe('update');
 		expect(parsed.taskId).toBe('42');
-		expect(parsed.title).toBe('Ship migration');
+		expect(parsed.title).toBe('Ship implementation');
 		expect(parsed.status).toBe('done');
 	});
 

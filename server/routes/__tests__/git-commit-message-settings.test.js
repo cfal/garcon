@@ -22,13 +22,14 @@ mock.module('../../git/git-service.js', () => ({
 import createGitRoutes from '../git.js';
 
 const providers = {
-  getAuthStatusMap: mock(() => Promise.resolve({
+  getHarnessAuthStatusMap: mock(() => Promise.resolve({
     claude: { authenticated: false },
     codex: { authenticated: false },
     opencode: { authenticated: false },
     amp: { authenticated: false },
   })),
   getModels: mock(() => Promise.resolve([])),
+  hasHarness: mock((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-openai-compatible'].includes(harnessId)),
 };
 
 const settings = {
@@ -51,8 +52,10 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
   beforeEach(() => {
     parseJsonBody.mockClear();
     generateCommitMessageForFiles.mockClear();
-    providers.getAuthStatusMap.mockClear();
+    providers.getHarnessAuthStatusMap.mockClear();
     providers.getModels.mockClear();
+    providers.hasHarness.mockClear();
+    providers.hasHarness.mockImplementation((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-openai-compatible'].includes(harnessId));
     settings.getUiSettings.mockClear();
   });
 
@@ -79,6 +82,9 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       files: ['src/a.ts'],
       provider: 'amp',
       model: 'smart',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
       customPrompt: 'Summarize {{files}}',
     });
   });
@@ -114,6 +120,45 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       files: ['src/a.ts'],
       provider: 'codex',
       model: 'gpt-5.4',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      customPrompt: '',
+    });
+  });
+
+  it('passes API provider endpoint metadata through to generation', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+      provider: 'direct-openai-compatible',
+      model: 'glm-5.1',
+      apiProviderId: 'zai',
+      modelEndpointId: 'zai_openai',
+      modelProtocol: 'openai-chat-completions',
+      customPrompt: '',
+    }));
+
+    const response = await handler(makeRequest({
+      project: '/proj',
+      files: ['src/a.ts'],
+      provider: 'direct-openai-compatible',
+      model: 'glm-5.1',
+      apiProviderId: 'zai',
+      modelEndpointId: 'zai_openai',
+      modelProtocol: 'openai-chat-completions',
+      customPrompt: '',
+    }));
+
+    expect(response.status).toBe(200);
+    expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+      projectPath: '/proj',
+      files: ['src/a.ts'],
+      provider: 'direct-openai-compatible',
+      model: 'glm-5.1',
+      apiProviderId: 'zai',
+      modelEndpointId: 'zai_openai',
+      modelProtocol: 'openai-chat-completions',
       customPrompt: '',
     });
   });

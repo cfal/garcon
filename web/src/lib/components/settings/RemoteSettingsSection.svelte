@@ -25,9 +25,15 @@
 	let titleModel = $derived(
 		remoteSettings.snapshot?.uiEffective?.chatTitle?.model ?? ''
 	);
+	let titleModelEndpointId = $derived(
+		remoteSettings.snapshot?.uiEffective?.chatTitle?.modelEndpointId ?? null
+	);
+	let titleModelSelectionValue = $derived(
+		modelCatalog.selectionValueFor(titleProvider, titleModel, titleModelEndpointId)
+	);
 
 	let availableTitleModels = $derived(modelCatalog.getModels(titleProvider));
-	let availableProviders = $derived(modelCatalog.getProviders());
+	let availableProviders = $derived(modelCatalog.getHarnesses());
 
 	// Telegram state derived from snapshot.
 	let telegramBotAvailable = $derived(
@@ -63,8 +69,7 @@
 		if (provider === 'opencode') return m.provider_opencode();
 		if (provider === 'amp') return m.provider_amp();
 		if (provider === 'factory') return m.provider_factory();
-		if (provider === 'openrouter') return m.provider_openrouter();
-		if (provider === 'zai') return m.provider_zai();
+		if (provider) return modelCatalog.getHarnessLabel(provider);
 		return m.provider_claude();
 	}
 
@@ -83,13 +88,23 @@
 
 	async function persistChatTitleSettings(overrides?: Record<string, unknown>) {
 		const base = remoteSettings.snapshot?.ui?.chatTitle ?? {};
+		const nextProvider = typeof overrides?.provider === 'string'
+			? overrides.provider as SessionProvider
+			: titleProvider;
+		const nextModelInput = typeof overrides?.model === 'string'
+			? overrides.model
+			: modelCatalog.selectionValueFor(nextProvider, titleModel, titleModelEndpointId);
+		const selection = modelCatalog.selectionFor(nextProvider, nextModelInput, titleModelEndpointId);
 		await save({
 			chatTitle: {
 				...base,
 				enabled: titleEnabled,
-				provider: titleProvider,
-				model: titleModel,
 				...overrides,
+				provider: nextProvider,
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
 			},
 		});
 	}
@@ -168,14 +183,15 @@
 					<div class="text-sm font-medium text-foreground">{m.settings_chat_title_provider()}</div>
 					<select
 						class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
-						value={titleProvider}
-						onchange={async (e) => {
-							const next = (e.currentTarget as HTMLSelectElement).value as SessionProvider;
-							const models = modelCatalog.getModels(next);
-							const resolvedModel = models.some((o) => o.value === titleModel)
-								? titleModel
-								: (models[0]?.value ?? '');
-							await persistChatTitleSettings({ provider: next, model: resolvedModel });
+							value={titleProvider}
+							onchange={async (e) => {
+								const next = (e.currentTarget as HTMLSelectElement).value as SessionProvider;
+								const models = modelCatalog.getModels(next);
+								const currentSelectionValue = modelCatalog.selectionValueFor(titleProvider, titleModel, titleModelEndpointId);
+								const resolvedModel = models.some((o) => o.value === currentSelectionValue)
+									? currentSelectionValue
+									: (models[0]?.value ?? '');
+								await persistChatTitleSettings({ provider: next, model: resolvedModel });
 						}}
 					>
 						{#each availableProviders as provider (provider)}
@@ -187,10 +203,10 @@
 				<div class="flex items-center justify-between py-2">
 					<div class="text-sm font-medium text-foreground">{m.settings_chat_title_model()}</div>
 					<select
-						class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
-						value={titleModel}
-						onchange={async (e) => {
-							await persistChatTitleSettings({ model: (e.currentTarget as HTMLSelectElement).value });
+							class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
+							value={titleModelSelectionValue}
+							onchange={async (e) => {
+								await persistChatTitleSettings({ model: (e.currentTarget as HTMLSelectElement).value });
 						}}
 					>
 						{#each availableTitleModels as opt (opt.value)}

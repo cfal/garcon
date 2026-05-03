@@ -185,11 +185,11 @@ describe('convertAmpToolUse', () => {
     const msg = convertAmpToolUse(TS, {
       id: 't13',
       name: 'handoff',
-      input: { goal: 'Continue the migration' },
+      input: { goal: 'Continue the implementation' },
     });
 
     expect(msg).toBeInstanceOf(AmpHandoffToolUseMessage);
-    expect(msg.goal).toBe('Continue the migration');
+    expect(msg.goal).toBe('Continue the implementation');
   });
 
   it('maps look_at to AmpLookAtToolUseMessage', () => {
@@ -231,13 +231,13 @@ describe('convertAmpToolUse', () => {
     const msg = convertAmpToolUse(TS, {
       id: 't17',
       name: 'task_list',
-      input: { action: 'update', taskID: '42', title: 'Ship migration', status: 'done' },
+      input: { action: 'update', taskID: '42', title: 'Ship implementation', status: 'done' },
     });
 
     expect(msg).toBeInstanceOf(AmpTaskListToolUseMessage);
     expect(msg.action).toBe('update');
     expect(msg.taskId).toBe('42');
-    expect(msg.title).toBe('Ship migration');
+    expect(msg.title).toBe('Ship implementation');
     expect(msg.status).toBe('done');
   });
 });

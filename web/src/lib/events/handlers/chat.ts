@@ -33,7 +33,7 @@ export interface ChatEventContext {
 	setCanAbort: (v: boolean) => void;
 	onChatProcessing?: (chatId?: string | null) => void;
 	onChatNotProcessing?: (chatId?: string | null) => void;
-	// Startup ownership callbacks (replaces legacy onReplaceTemporaryChat).
+	// Startup ownership callbacks.
 	startupCoordinator: StartupCoordinator;
 	onLocalStartupConfirmed?: (chatId: string) => void;
 	onExternalChatCreated?: (chatId: string) => void;

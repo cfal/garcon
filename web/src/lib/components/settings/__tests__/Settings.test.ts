@@ -11,8 +11,9 @@ vi.mock('$lib/api/settings.js', () => ({
 }));
 
 vi.mock('$lib/api/providers.js', () => ({
-	getAuthStatus: vi.fn(),
-	launchAuthLogin: vi.fn(),
+	getHarnessAuthStatus: vi.fn(),
+	getHarnessReadiness: vi.fn(),
+	launchHarnessAuthLogin: vi.fn(),
 }));
 
 const settingsApi = await import('$lib/api/settings.js');
@@ -22,11 +23,12 @@ describe('Settings', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(settingsApi.getRemoteSettings).mockReturnValue(new Promise(() => {}));
-		vi.mocked(providersApi.getAuthStatus).mockResolvedValue({
+		vi.mocked(providersApi.getHarnessAuthStatus).mockResolvedValue({
 			authenticated: false,
 			canReauth: true,
 			label: '',
 		});
+		vi.mocked(providersApi.getHarnessReadiness).mockResolvedValue({});
 	});
 
 	it('renders a single-page layout with local and remote sections', async () => {
@@ -44,6 +46,13 @@ describe('Settings', () => {
 		expect(await screen.findByRole('heading', { name: 'Local' })).toBeTruthy();
 		expect(await screen.findByRole('heading', { name: 'Remote' })).toBeTruthy();
 		expect(screen.queryByRole('heading', { name: 'Agents' })).toBeNull();
+		expect(screen.queryByRole('heading', { name: 'API Providers' })).toBeNull();
+		expect(screen.getByRole('heading', { name: 'Anthropic Providers' })).toBeTruthy();
+		expect(screen.getByText('Use Anthropic Messages-compatible endpoints with Claude Code.')).toBeTruthy();
+		expect(screen.getByRole('heading', { name: 'OpenAI Providers' })).toBeTruthy();
+		expect(screen.getByText('Use OpenAI-compatible endpoints with Codex and Direct Chat.')).toBeTruthy();
+		expect(screen.getByRole('heading', { name: 'Other Harnesses' })).toBeTruthy();
+		expect(screen.queryByText('Direct Chat')).toBeNull();
 		expect(screen.getByText('These settings are stored in your browser.')).toBeTruthy();
 		expect(screen.getByText('These settings are stored on the garcon server.')).toBeTruthy();
 	});

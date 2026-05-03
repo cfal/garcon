@@ -8,6 +8,7 @@ import {
   isThinkingMode,
 } from './chat-modes.js';
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from './chat-modes.js';
+import type { ApiProtocol } from './providers.js';
 
 // Narrows an unknown value to string | null for chatId fields.
 function strOrNull(v: unknown): string | null {
@@ -17,6 +18,28 @@ function strOrNull(v: unknown): string | null {
 // Narrows an unknown value to string | undefined for optional fields.
 function strOrUndef(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
+}
+
+// Narrows an unknown value to string | null | undefined, preserving omitted fields.
+function strOrNullish(v: unknown): string | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  return typeof v === 'string' ? v : null;
+}
+
+// Parses a protocol kind field, returning null for invalid/missing values.
+function parseProtocolOrNull(v: unknown): ApiProtocol | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  if (v === 'openai-chat-completions' || v === 'anthropic-messages') return v;
+  return null;
+}
+
+export interface ModelSelectionPayload {
+  model: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
 }
 
 function requireNonEmptyString(v: unknown, field: string): string {
@@ -79,6 +102,9 @@ export class AgentRunRequest {
     public claudeThinkingMode?: ClaudeThinkingMode,
     public ampAgentMode?: AmpAgentMode,
     public images?: AgentCommandImage[],
+    public apiProviderId?: string | null,
+    public modelEndpointId?: string | null,
+    public modelProtocol?: ApiProtocol | null,
   ) { }
 
   static fromJson(data: Record<string, unknown>): AgentRunRequest {
@@ -98,6 +124,9 @@ export class AgentRunRequest {
       data.claudeThinkingMode === undefined ? undefined : requireClaudeThinkingMode(data.claudeThinkingMode),
       data.ampAgentMode === undefined ? undefined : requireAmpAgentMode(data.ampAgentMode),
       images,
+      strOrNullish(data.apiProviderId),
+      strOrNullish(data.modelEndpointId),
+      parseProtocolOrNull(data.modelProtocol),
     );
   }
 }
@@ -198,10 +227,22 @@ export class AmpAgentModeSetRequest {
 
 export class ModelSetRequest {
   readonly type = 'model-set' as const;
-  constructor(public chatId: string | null, public model?: string) { }
+  constructor(
+    public chatId: string | null,
+    public model?: string,
+    public apiProviderId?: string | null,
+    public modelEndpointId?: string | null,
+    public modelProtocol?: ApiProtocol | null,
+  ) { }
 
   static fromJson(data: Record<string, unknown>): ModelSetRequest {
-    return new ModelSetRequest(strOrNull(data.chatId), strOrUndef(data.model));
+    return new ModelSetRequest(
+      strOrNull(data.chatId),
+      strOrUndef(data.model),
+      strOrNullish(data.apiProviderId),
+      strOrNullish(data.modelEndpointId),
+      parseProtocolOrNull(data.modelProtocol),
+    );
   }
 }
 
