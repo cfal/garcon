@@ -132,6 +132,21 @@ export interface HarnessCatalog {
   apiProviders: ApiProviderCatalogEntry[];
 }
 
+export interface ApiProviderModelDiscoveryRequest {
+  protocol: ApiProtocol;
+  baseUrl: string;
+  apiKey?: string;
+  apiProviderId?: string | null;
+  endpointId?: string | null;
+  modelDiscovery?: ModelDiscoveryKind;
+}
+
+export interface ApiProviderModelDiscoveryResponse {
+  success: boolean;
+  models?: HarnessModelOption[];
+  error?: string;
+}
+
 const ENDPOINT_MODEL_VALUE_SEPARATOR = ':';
 const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;
 const SETTINGS_OAUTH_HARNESSES = ['claude', 'codex'] as const;

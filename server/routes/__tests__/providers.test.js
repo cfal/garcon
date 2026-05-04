@@ -24,6 +24,7 @@ describe('harness auth login routes', () => {
     updateApiProvider: mock((id, input) => Promise.resolve({ id, ...input })),
     deleteApiProvider: mock(() => Promise.resolve(undefined)),
     testApiProvider: mock(() => Promise.resolve({ success: true })),
+    discoverApiProviderModels: mock(() => Promise.resolve({ success: true, models: [{ value: 'example', label: 'Example' }] })),
   };
   const routes = createProviderRoutes(providers);
 
@@ -121,6 +122,25 @@ describe('harness auth login routes', () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({ success: true });
     expect(providers.testApiProvider).toHaveBeenCalledWith(input);
+    expect(providers.createApiProvider).not.toHaveBeenCalled();
+  });
+
+  it('discovers API provider models without persisting them', async () => {
+    const input = {
+      protocol: 'openai-chat-completions',
+      baseUrl: 'https://api.example.test/v1',
+      apiKey: 'sk-test',
+      modelDiscovery: 'openai-models',
+    };
+    parseJsonBody.mockImplementationOnce(() => Promise.resolve(input));
+    const handler = routes['/api/v1/api-providers/models'].POST;
+
+    const response = await handler(new Request('http://localhost/api/v1/api-providers/models', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ success: true, models: [{ value: 'example', label: 'Example' }] });
+    expect(providers.discoverApiProviderModels).toHaveBeenCalledWith(input);
     expect(providers.createApiProvider).not.toHaveBeenCalled();
   });
 });

@@ -1,18 +1,19 @@
 import {
 	createApiProvider,
 	deleteApiProvider,
+	discoverApiProviderModels,
 	testApiProvider,
 	updateApiProvider,
 	type ApiProviderInput
 } from '$lib/api/providers.js';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
+import * as m from '$lib/paraglide/messages.js';
 import {
 	apiProviderTemplate,
 	type ApiProviderTemplateId
 } from '$shared/api-provider-templates';
 import {
 	harnessesForProtocol,
-	labelForProtocol,
 	type ApiProtocol,
 	type HarnessId,
 	type ModelDiscoveryKind
@@ -39,6 +40,7 @@ export class ApiProviderEndpointDialogState {
 	enabledTargets = $state<Record<string, boolean>>({});
 	isSaving = $state(false);
 	isTesting = $state(false);
+	isFetchingModels = $state(false);
 	error = $state<string | null>(null);
 	testMessage = $state<string | null>(null);
 	apiProviderId = $state<string | null>(null);
@@ -54,7 +56,10 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	get apiKeyPlaceholder(): string {
-		return apiProviderTemplate(this.protocol, this.templateId)?.apiKeyPlaceholder ?? 'API key or token';
+		if (this.templateId === 'openrouter') return m.settings_api_provider_dialog_api_key_placeholder_openrouter();
+		if (this.templateId === 'zai') return m.settings_api_provider_dialog_api_key_placeholder_zai();
+		if (this.templateId === 'ollama') return m.settings_api_provider_dialog_api_key_placeholder_ollama();
+		return m.settings_api_provider_dialog_api_key_placeholder();
 	}
 
 	get apiKeyRequired(): boolean {
@@ -63,20 +68,20 @@ export class ApiProviderEndpointDialogState {
 
 	get title(): string {
 		return this.protocol === 'anthropic-messages'
-			? 'Anthropic-compatible API provider'
-			: 'OpenAI-compatible API provider';
+			? m.settings_api_provider_dialog_title_anthropic()
+			: m.settings_api_provider_dialog_title_openai();
 	}
 
 	get description(): string {
 		return this.protocol === 'anthropic-messages'
-			? 'Adds an Anthropic Messages endpoint for Claude Code.'
-			: 'Adds an OpenAI-compatible endpoint for Codex and Direct Chat.';
+			? m.settings_api_provider_dialog_description_anthropic()
+			: m.settings_api_provider_dialog_description_openai();
 	}
 
 	get baseUrlPlaceholder(): string {
 		return this.protocol === 'anthropic-messages'
-			? 'https://api.example.com/anthropic'
-			: 'https://api.example.com/v1';
+			? m.settings_api_provider_dialog_base_url_placeholder_anthropic()
+			: m.settings_api_provider_dialog_base_url_placeholder_openai();
 	}
 
 	get targetOptions(): Array<{ harnessId: HarnessId; label: string; description: string }> {
@@ -93,14 +98,46 @@ export class ApiProviderEndpointDialogState {
 			.map((target) => target.harnessId);
 	}
 
+	get modelOptions(): ModelOption[] {
+		return parseModelsText(this.modelsText);
+	}
+
+	get hasModels(): boolean {
+		return this.modelOptions.length > 0;
+	}
+
+	get defaultModelIsValid(): boolean {
+		const selected = this.defaultModel.trim();
+		return Boolean(selected) && this.modelOptions.some((model) => model.value === selected);
+	}
+
+	get defaultModelLabel(): string {
+		return this.modelOptions.find((model) => model.value === this.defaultModel)?.label
+			?? m.settings_api_provider_dialog_default_model_placeholder();
+	}
+
+	get canFetchModels(): boolean {
+		return Boolean(
+			this.baseUrl.trim() &&
+				(!this.apiKeyRequired || Boolean(this.apiProviderId) || Boolean(this.apiKey.trim())) &&
+				!this.isFetchingModels
+		);
+	}
+
+	get canTest(): boolean {
+		return this.canSave && !this.isTesting;
+	}
+
 	get canSave(): boolean {
 		return Boolean(
 			this.label.trim() &&
 				this.baseUrl.trim() &&
-				this.defaultModel.trim() &&
+				this.hasModels &&
+				this.defaultModelIsValid &&
 				this.exposeTo.length > 0 &&
 				(!this.apiKeyRequired || Boolean(this.apiProviderId) || Boolean(this.apiKey.trim())) &&
-				!this.isSaving
+				!this.isSaving &&
+				!this.isFetchingModels
 		);
 	}
 
@@ -115,7 +152,7 @@ export class ApiProviderEndpointDialogState {
 
 		const found = this.options.modelCatalog.findEndpoint(endpointId);
 		if (!found) {
-			this.error = 'Endpoint no longer exists.';
+			this.error = m.settings_api_provider_dialog_endpoint_missing();
 			return;
 		}
 
@@ -140,7 +177,9 @@ export class ApiProviderEndpointDialogState {
 		const template = apiProviderTemplate(this.protocol, this.options.getTemplateId?.() ?? 'custom')
 			?? apiProviderTemplate(this.protocol, 'custom');
 		if (!template) {
-			this.error = `No provider template is available for ${labelForProtocol(this.protocol)} endpoints.`;
+			this.error = m.settings_api_provider_dialog_no_template({
+				protocol: localizedProtocolLabel(this.protocol)
+			});
 			return;
 		}
 		this.apiProviderId = null;
@@ -155,6 +194,11 @@ export class ApiProviderEndpointDialogState {
 		this.enabledTargets = Object.fromEntries(
 			this.targetOptions.map((target) => [target.harnessId, template.exposeTo.includes(target.harnessId)])
 		);
+	}
+
+	syncDefaultModelWithModels(): void {
+		if (this.defaultModelIsValid) return;
+		this.defaultModel = this.modelOptions[0]?.value ?? '';
 	}
 
 	isTargetEnabled(harnessId: HarnessId): boolean {
@@ -175,7 +219,7 @@ export class ApiProviderEndpointDialogState {
 				apiKey: this.apiKey || undefined,
 				exposeTo: this.exposeTo,
 				defaultModel: this.defaultModel.trim(),
-				models: parseModelsText(this.modelsText, this.defaultModel),
+				models: this.modelOptions,
 				supportsImages: this.supportsImages,
 				modelDiscovery: this.modelDiscovery
 			}
@@ -201,19 +245,59 @@ export class ApiProviderEndpointDialogState {
 		}
 	}
 
+	async fetchModels(): Promise<void> {
+		if (!this.canFetchModels) return;
+		this.isFetchingModels = true;
+		this.error = null;
+		this.testMessage = null;
+		try {
+			const discoveryKind = this.modelDiscovery === 'none'
+				? discoveryKindForProtocol(this.protocol)
+				: this.modelDiscovery;
+			const result = await discoverApiProviderModels({
+				protocol: this.protocol,
+				baseUrl: this.baseUrl.trim(),
+				apiKey: this.apiKey || undefined,
+				apiProviderId: this.apiProviderId,
+				endpointId: this.endpointId,
+				modelDiscovery: discoveryKind
+			});
+			if (!result.success) {
+				this.error = result.error || m.settings_api_provider_dialog_fetch_failed();
+				return;
+			}
+			if (!result.models?.length) {
+				this.error = m.settings_api_provider_dialog_no_models_returned();
+				return;
+			}
+			this.modelsText = result.models.map((model) => formatModelLine(model)).join('\n');
+			this.modelDiscovery = discoveryKind;
+			this.defaultModel = chooseDefaultModel(result.models, this.defaultModel);
+			this.testMessage = m.settings_api_provider_dialog_models_fetched({ count: result.models.length });
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : String(err);
+		} finally {
+			this.isFetchingModels = false;
+		}
+	}
+
 	async test(): Promise<void> {
+		if (!this.canTest) return;
 		this.isTesting = true;
 		this.error = null;
 		this.testMessage = null;
 		try {
 			const result = await testApiProvider(this.payload());
 			if (!result.success) {
-				this.error = result.error || 'Provider test failed.';
+				this.error = result.error || m.settings_api_provider_dialog_test_failed();
 				return;
 			}
-			this.testMessage = `${labelForProtocol(this.protocol)} endpoint accepted.`;
+			this.testMessage = m.settings_api_provider_dialog_endpoint_accepted({
+				protocol: localizedProtocolLabel(this.protocol)
+			});
 			if (result.models?.length && !this.modelsText.trim()) {
 				this.modelsText = result.models.map((model) => formatModelLine(model)).join('\n');
+				this.syncDefaultModelWithModels();
 			}
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : String(err);
@@ -225,14 +309,14 @@ export class ApiProviderEndpointDialogState {
 
 export async function deleteApiProviderEndpoint(modelCatalog: ModelCatalogStore, endpointId: string): Promise<void> {
 	const found = modelCatalog.findEndpoint(endpointId);
-	if (!found) throw new Error('Endpoint no longer exists.');
+	if (!found) throw new Error(m.settings_api_provider_dialog_endpoint_missing());
 	await deleteApiProvider(found.apiProvider.id);
 	await modelCatalog.forceRefresh();
 }
 
-function parseModelsText(text: string, defaultModel: string): Array<{ value: string; label: string }> {
+function parseModelsText(text: string): ModelOption[] {
 	if (!text.trim()) {
-		return [{ value: defaultModel, label: defaultModel }];
+		return [];
 	}
 	return text
 		.split('\n')
@@ -244,23 +328,40 @@ function parseModelsText(text: string, defaultModel: string): Array<{ value: str
 				return { value: line.slice(0, pipe).trim(), label: line.slice(pipe + 1).trim() };
 			}
 			return { value: line, label: line };
-		});
+		})
+		.filter((model) => Boolean(model.value && model.label));
 }
 
 function formatModelLine(model: ModelOption): string {
 	return model.value === model.label ? model.value : `${model.value}|${model.label}`;
 }
 
+function chooseDefaultModel(models: ModelOption[], current: string): string {
+	const selected = current.trim();
+	if (selected && models.some((model) => model.value === selected)) return selected;
+	return models[0]?.value ?? '';
+}
+
+function discoveryKindForProtocol(protocol: ApiProtocol): ModelDiscoveryKind {
+	return protocol === 'anthropic-messages' ? 'anthropic-models' : 'openai-models';
+}
+
+function localizedProtocolLabel(protocol: ApiProtocol): string {
+	return protocol === 'anthropic-messages'
+		? m.settings_api_provider_dialog_protocol_anthropic()
+		: m.settings_api_provider_dialog_protocol_openai();
+}
+
 function labelForHarnessTarget(harnessId: HarnessId): string {
-	if (harnessId === 'claude') return 'Use with Claude Code';
-	if (harnessId === 'codex') return 'Use with Codex';
-	if (harnessId === 'direct-openai-compatible') return 'Use with Direct Chat';
-	return `Use with ${harnessId}`;
+	if (harnessId === 'claude') return m.settings_api_provider_target_claude_label();
+	if (harnessId === 'codex') return m.settings_api_provider_target_codex_label();
+	if (harnessId === 'direct-openai-compatible') return m.settings_api_provider_target_direct_label();
+	return m.settings_api_provider_target_default_label({ harness: harnessId });
 }
 
 function descriptionForHarnessTarget(harnessId: HarnessId): string {
-	if (harnessId === 'claude') return 'Routes Claude Code through this Anthropic-compatible endpoint.';
-	if (harnessId === 'codex') return 'Routes Codex through this OpenAI-compatible endpoint.';
-	if (harnessId === 'direct-openai-compatible') return 'Makes models available in direct chat.';
-	return 'Makes models available to this harness.';
+	if (harnessId === 'claude') return m.settings_api_provider_target_claude_description();
+	if (harnessId === 'codex') return m.settings_api_provider_target_codex_description();
+	if (harnessId === 'direct-openai-compatible') return m.settings_api_provider_target_direct_description();
+	return m.settings_api_provider_target_default_description();
 }

@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 const claudeQuery = mock(async () => 'claude-response');
 const codexQuery = mock(async () => 'codex-response');
 const ampQuery = mock(async () => 'amp-response');
 const factoryQuery = mock(async () => 'factory-response');
+const originalFetch = globalThis.fetch;
 
 mock.module('../claude-cli.js', () => ({
   runSingleQuery: claudeQuery,
@@ -56,6 +57,10 @@ import {
   createOpenCodeAdapter,
 } from '../provider-adapters.js';
 
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
 function makeEndpointResolver(endpointOptions = {}) {
   return {
     getModelOptions: mock((harnessId) => endpointOptions[harnessId] ?? []),
@@ -75,6 +80,14 @@ function makeApiProviderStore(apiProviders = []) {
   return {
     list: () => apiProviders,
     redactedList: () => apiProviders,
+    getApiProvider: mock((apiProviderId) => apiProviders.find((apiProvider) => apiProvider.id === apiProviderId) ?? null),
+    getEndpoint: mock((endpointId) => {
+      for (const apiProvider of apiProviders) {
+        const endpoint = apiProvider.endpoints?.find((entry) => entry.id === endpointId);
+        if (endpoint) return { apiProvider, endpoint };
+      }
+      return null;
+    }),
     createApiProvider: mock((input) => Promise.resolve({
       id: 'custom_acme',
       label: input.label,
@@ -342,6 +355,90 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       },
     })).rejects.toThrow('OpenAI-compatible harnesses');
     expect(apiProviderStore.createApiProvider).not.toHaveBeenCalled();
+  });
+
+  it('discovers OpenAI-compatible models from the configured API base path', async () => {
+    globalThis.fetch = mock(async () => new Response(JSON.stringify({
+      data: [{ id: 'glm-5.1', name: 'GLM-5.1' }],
+    })));
+    const { registry } = makeRegistry();
+
+    const result = await registry.discoverApiProviderModels({
+      protocol: 'openai-chat-completions',
+      baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+      apiKey: 'sk-zai',
+      modelDiscovery: 'openai-models',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
+    });
+    const [url, options] = globalThis.fetch.mock.calls[0];
+    expect(url).toBe('https://api.z.ai/api/coding/paas/v4/models');
+    expect(options.headers).toEqual({ Authorization: 'Bearer sk-zai' });
+  });
+
+  it('discovers Anthropic-compatible models with Anthropic headers', async () => {
+    globalThis.fetch = mock(async () => new Response(JSON.stringify({
+      data: [{ id: 'claude-sonnet-4-20250514', display_name: 'Claude Sonnet 4' }],
+      has_more: false,
+      last_id: 'claude-sonnet-4-20250514',
+    })));
+    const { registry } = makeRegistry();
+
+    const result = await registry.discoverApiProviderModels({
+      protocol: 'anthropic-messages',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-ant',
+      modelDiscovery: 'anthropic-models',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      models: [{ value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' }],
+    });
+    const [url, options] = globalThis.fetch.mock.calls[0];
+    expect(url).toBe('https://api.anthropic.com/v1/models?limit=1000');
+    expect(options.headers).toEqual({
+      'x-api-key': 'sk-ant',
+      'anthropic-version': '2023-06-01',
+    });
+  });
+
+  it('uses the stored endpoint key when editing and no replacement key is provided', async () => {
+    globalThis.fetch = mock(async () => new Response(JSON.stringify({
+      data: [{ id: 'acme-code' }],
+    })));
+    const apiProviderStore = makeApiProviderStore([{
+      id: 'acme',
+      label: 'Acme',
+      templateId: 'custom',
+      createdAt: '2026-05-04T00:00:00.000Z',
+      updatedAt: '2026-05-04T00:00:00.000Z',
+      endpoints: [{
+        id: 'acme_openai',
+        protocol: 'openai-chat-completions',
+        baseUrl: 'https://api.acme.test/v1',
+        apiKey: 'sk-stored',
+        exposeTo: ['codex'],
+        defaultModel: 'acme-code',
+        models: [{ value: 'acme-code', label: 'Acme Code' }],
+        supportsImages: false,
+        modelDiscovery: 'openai-models',
+      }],
+    }]);
+    const { registry } = makeRegistry({ apiProviderStore });
+
+    await registry.discoverApiProviderModels({
+      protocol: 'openai-chat-completions',
+      baseUrl: 'https://api.acme.test/v1',
+      endpointId: 'acme_openai',
+      modelDiscovery: 'openai-models',
+    });
+
+    const [, options] = globalThis.fetch.mock.calls[0];
+    expect(options.headers).toEqual({ Authorization: 'Bearer sk-stored' });
   });
 });
 

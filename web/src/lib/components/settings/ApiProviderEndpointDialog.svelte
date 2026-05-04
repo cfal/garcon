@@ -4,8 +4,11 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Switch } from '$lib/components/ui/switch';
+	import * as Select from '$lib/components/ui/select';
 	import { untrack } from 'svelte';
 	import { getModelCatalog } from '$lib/context';
+	import * as m from '$lib/paraglide/messages.js';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import type { ApiProtocol } from '$shared/providers';
 	import type { ApiProviderTemplateId } from '$shared/api-provider-templates';
 	import { ApiProviderEndpointDialogState } from './api-provider-endpoint-dialog-state.svelte';
@@ -45,6 +48,12 @@
 	function handleOpenChange(next: boolean) {
 		onOpenChange(next);
 	}
+
+	function handleModelsInput(event: Event) {
+		const target = event.currentTarget as HTMLTextAreaElement;
+		dialog.modelsText = target.value;
+		dialog.syncDefaultModelWithModels();
+	}
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
@@ -56,17 +65,17 @@
 
 		<form class="space-y-4 p-6" onsubmit={(event) => { event.preventDefault(); void dialog.save(); }}>
 			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-label">Display name</label>
+				<label class="text-sm font-medium" for="api-provider-label">{m.settings_api_provider_dialog_display_name()}</label>
 				<Input id="api-provider-label" bind:value={dialog.label} />
 			</div>
 
 			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-base-url">Base URL</label>
+				<label class="text-sm font-medium" for="api-provider-base-url">{m.settings_api_provider_dialog_base_url()}</label>
 				<Input id="api-provider-base-url" bind:value={dialog.baseUrl} placeholder={dialog.baseUrlPlaceholder} />
 			</div>
 
 			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-api-key">API key or token</label>
+				<label class="text-sm font-medium" for="api-provider-api-key">{m.settings_api_provider_dialog_api_key()}</label>
 				<Input
 					id="api-provider-api-key"
 					type="password"
@@ -77,21 +86,65 @@
 			</div>
 
 			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-default-model">Default model</label>
-				<Input id="api-provider-default-model" bind:value={dialog.defaultModel} />
+				<label class="text-sm font-medium" for="api-provider-default-model">{m.settings_api_provider_dialog_default_model()}</label>
+				<Select.Root
+					type="single"
+					value={dialog.defaultModel}
+					onValueChange={(value) => {
+						if (value) dialog.defaultModel = value;
+					}}
+				>
+					<Select.Trigger
+						id="api-provider-default-model"
+						class="w-full"
+						disabled={!dialog.hasModels}
+						aria-label={m.settings_api_provider_dialog_default_model()}
+					>
+						{dialog.defaultModelLabel}
+					</Select.Trigger>
+					<Select.Content>
+						{#each dialog.modelOptions as model (model.value)}
+							<Select.Item value={model.value} label={model.label}>{model.label}</Select.Item>
+						{/each}
+					</Select.Content>
+				</Select.Root>
 			</div>
 
 			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-models">Models</label>
-				<Textarea id="api-provider-models" bind:value={dialog.modelsText} rows={6} />
+				<div class="flex items-center justify-between gap-3">
+					<label class="text-sm font-medium" for="api-provider-models">{m.settings_api_provider_dialog_models()}</label>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						onclick={() => dialog.fetchModels()}
+						disabled={!dialog.canFetchModels}
+					>
+						<RefreshCwIcon class="mr-1 size-3.5" />
+						{dialog.isFetchingModels
+							? m.settings_api_provider_dialog_fetching_models()
+							: m.settings_api_provider_dialog_fetch_models()}
+					</Button>
+				</div>
+				<Textarea
+					id="api-provider-models"
+					value={dialog.modelsText}
+					oninput={handleModelsInput}
+					rows={6}
+					placeholder={m.settings_api_provider_dialog_models_placeholder()}
+				/>
 			</div>
 
 			<div class="flex items-center justify-between rounded-lg border border-border p-3">
 				<div>
-					<div class="text-sm font-medium">Supports images</div>
-					<div class="text-xs text-muted-foreground">Allows image attachments when this model is selected.</div>
+					<div class="text-sm font-medium">{m.settings_api_provider_dialog_supports_images()}</div>
+					<div class="text-xs text-muted-foreground">{m.settings_api_provider_dialog_supports_images_description()}</div>
 				</div>
-				<Switch checked={dialog.supportsImages} onCheckedChange={(checked) => { dialog.supportsImages = Boolean(checked); }} />
+				<Switch
+					checked={dialog.supportsImages}
+					onCheckedChange={(checked) => { dialog.supportsImages = Boolean(checked); }}
+					aria-label={m.settings_api_provider_dialog_supports_images()}
+				/>
 			</div>
 
 			{#each dialog.targetOptions as target (target.harnessId)}
@@ -103,6 +156,7 @@
 					<Switch
 						checked={dialog.isTargetEnabled(target.harnessId)}
 						onCheckedChange={(checked) => dialog.setTarget(target.harnessId, Boolean(checked))}
+						aria-label={target.label}
 					/>
 				</div>
 			{/each}
@@ -120,12 +174,12 @@
 			{/if}
 
 			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={() => onOpenChange(false)}>Cancel</Button>
-				<Button type="button" variant="outline" onclick={() => dialog.test()} disabled={dialog.isTesting || !dialog.canSave}>
-					{dialog.isTesting ? 'Testing...' : 'Test'}
+				<Button type="button" variant="outline" onclick={() => onOpenChange(false)}>{m.settings_api_provider_dialog_cancel()}</Button>
+				<Button type="button" variant="outline" onclick={() => dialog.test()} disabled={!dialog.canTest}>
+					{dialog.isTesting ? m.settings_api_provider_dialog_testing() : m.settings_api_provider_dialog_test()}
 				</Button>
 				<Button type="submit" disabled={!dialog.canSave}>
-					{dialog.isSaving ? 'Saving...' : 'Save'}
+					{dialog.isSaving ? m.settings_api_provider_dialog_saving() : m.settings_api_provider_dialog_save()}
 				</Button>
 			</Dialog.Footer>
 		</form>

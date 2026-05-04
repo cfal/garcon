@@ -40,6 +40,8 @@ import {
   isVisibleHarnessId,
   labelForProtocol,
   type ApiProviderCatalogEntry,
+  type ApiProviderModelDiscoveryRequest,
+  type ApiProviderModelDiscoveryResponse,
   type ApiProviderTemplateId,
   type ApiProtocol,
   type HarnessCatalog,
@@ -142,6 +144,15 @@ export interface ApiProviderInput {
   };
 }
 
+interface ApiProviderModelDiscoveryFlatInput {
+  protocol: ApiProtocol;
+  baseUrl: string;
+  apiKey?: string;
+  apiProviderId?: string | null;
+  endpointId?: string | null;
+  modelDiscovery: ModelDiscoveryKind;
+}
+
 function requireObject(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== 'object') {
     throw new Error(`${field} must be an object`);
@@ -190,6 +201,14 @@ function normalizeApiProviderBaseUrl(value: unknown): string {
     throw new Error('endpoint.baseUrl must not include query or fragment components');
   }
   return normalized.replace(/\/+$/, '');
+}
+
+function normalizeOptionalLookupId(value: unknown, field: string): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${field} must be a string`);
+  }
+  return value.trim();
 }
 
 function normalizeProtocol(value: unknown): ApiProtocol {
@@ -302,8 +321,58 @@ function normalizeModelDiscovery(protocol: ApiProtocol, value: unknown): ModelDi
   return 'none';
 }
 
+function defaultModelDiscoveryForProtocol(protocol: ApiProtocol): ModelDiscoveryKind {
+  return protocol === 'anthropic-messages' ? 'anthropic-models' : 'openai-models';
+}
+
+function normalizeModelDiscoveryForFetch(protocol: ApiProtocol, value: unknown): ModelDiscoveryKind {
+  const normalized = normalizeModelDiscovery(protocol, value);
+  return normalized === 'none' ? defaultModelDiscoveryForProtocol(protocol) : normalized;
+}
+
+function flattenApiProviderModelDiscoveryInput(input: ApiProviderModelDiscoveryRequest): ApiProviderModelDiscoveryFlatInput {
+  const root = requireObject(input, 'API provider model discovery');
+  const protocol = normalizeProtocol(root.protocol);
+  return {
+    protocol,
+    baseUrl: normalizeApiProviderBaseUrl(root.baseUrl),
+    apiKey: typeof root.apiKey === 'string' && root.apiKey.length > 0 ? root.apiKey : undefined,
+    apiProviderId: normalizeOptionalLookupId(root.apiProviderId, 'apiProviderId'),
+    endpointId: normalizeOptionalLookupId(root.endpointId, 'endpointId'),
+    modelDiscovery: normalizeModelDiscoveryForFetch(protocol, root.modelDiscovery),
+  };
+}
+
 function bearerHeaders(apiKey: string | undefined): Record<string, string> {
   return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+}
+
+function anthropicHeaders(apiKey: string | undefined): Record<string, string> {
+  return {
+    ...(apiKey ? { 'x-api-key': apiKey } : {}),
+    'anthropic-version': '2023-06-01',
+  };
+}
+
+function appendPath(baseUrl: string, suffix: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/${suffix.replace(/^\/+/, '')}`;
+}
+
+function openAiModelListUrl(baseUrl: string): string {
+  const normalized = baseUrl.replace(/\/+$/, '');
+  const parsed = new URL(normalized);
+  const path = parsed.pathname.replace(/\/+$/, '');
+  if (!path || path === '/') {
+    return appendPath(normalized, '/v1/models');
+  }
+  return appendPath(normalized, '/models');
+}
+
+function anthropicModelListUrl(baseUrl: string): string {
+  const normalized = baseUrl.replace(/\/+$/, '');
+  return normalized.endsWith('/v1')
+    ? appendPath(normalized, '/models')
+    : appendPath(normalized, '/v1/models');
 }
 
 function ollamaDiscoveryBase(baseUrl: string): string {
@@ -311,7 +380,7 @@ function ollamaDiscoveryBase(baseUrl: string): string {
   return normalized.endsWith('/v1') ? normalized.slice(0, -3) : normalized;
 }
 
-async function testOllamaTags(input: CreateApiProviderInput): Promise<{ success: boolean; models?: HarnessModelOption[]; error?: string }> {
+async function testOllamaTags(input: ApiProviderModelDiscoveryFlatInput): Promise<ApiProviderModelDiscoveryResponse> {
   try {
     const response = await fetch(`${ollamaDiscoveryBase(input.baseUrl)}/api/tags`, {
       signal: AbortSignal.timeout(10_000),
@@ -323,16 +392,15 @@ async function testOllamaTags(input: CreateApiProviderInput): Promise<{ success:
     const models: HarnessModelOption[] = (body.models ?? [])
       .filter((model): model is { name: string } => typeof model.name === 'string' && model.name.length > 0)
       .map((model) => ({ value: model.name, label: `${model.name} (local)`, isLocal: true }));
-    return { success: true, models: models.length > 0 ? models : undefined };
+    return { success: true, models: models.length > 0 ? dedupeModels(models) : undefined };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
-async function testOpenAiModels(input: CreateApiProviderInput): Promise<{ success: boolean; models?: HarnessModelOption[]; error?: string }> {
+async function testOpenAiModels(input: ApiProviderModelDiscoveryFlatInput): Promise<ApiProviderModelDiscoveryResponse> {
   try {
-    const baseUrl = input.baseUrl.replace(/\/+$/, '');
-    const url = baseUrl.endsWith('/v1') ? `${baseUrl}/models` : `${baseUrl}/v1/models`;
+    const url = openAiModelListUrl(input.baseUrl);
     const response = await fetch(url, {
       headers: bearerHeaders(input.apiKey),
       signal: AbortSignal.timeout(10_000),
@@ -343,7 +411,42 @@ async function testOpenAiModels(input: CreateApiProviderInput): Promise<{ succes
     const models: HarnessModelOption[] = (body.data ?? [])
       .filter((model): model is { id: string; name?: string } => typeof model.id === 'string' && model.id.length > 0)
       .map((model) => ({ value: model.id, label: model.name || model.id }));
-    return { success: true, models: models.length > 0 ? models : undefined };
+    return { success: true, models: models.length > 0 ? dedupeModels(models) : undefined };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function testAnthropicModels(input: ApiProviderModelDiscoveryFlatInput): Promise<ApiProviderModelDiscoveryResponse> {
+  try {
+    const models: HarnessModelOption[] = [];
+    let afterId: string | null = null;
+
+    for (let page = 0; page < 5; page += 1) {
+      const url = new URL(anthropicModelListUrl(input.baseUrl));
+      url.searchParams.set('limit', '1000');
+      if (afterId) url.searchParams.set('after_id', afterId);
+
+      const response = await fetch(url.toString(), {
+        headers: anthropicHeaders(input.apiKey),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) return { success: false, error: `Model discovery failed with HTTP ${response.status}.` };
+
+      const body = await response.json() as {
+        data?: Array<{ id?: string; display_name?: string; name?: string }>;
+        has_more?: boolean;
+        last_id?: string | null;
+      };
+      for (const model of body.data ?? []) {
+        if (typeof model.id !== 'string' || model.id.length === 0) continue;
+        models.push({ value: model.id, label: model.display_name || model.name || model.id });
+      }
+      if (!body.has_more || !body.last_id || body.last_id === afterId) break;
+      afterId = body.last_id;
+    }
+
+    return { success: true, models: models.length > 0 ? dedupeModels(models) : undefined };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -882,13 +985,26 @@ export class ProviderRegistry {
     await this.#apiProviderStore.deleteApiProvider(id, (apiProviderId) => this.#registryHasChatsForApiProvider(apiProviderId));
   }
 
-  async testApiProvider(input: ApiProviderInput): Promise<{ success: boolean; models?: HarnessModelOption[]; error?: string }> {
+  async testApiProvider(input: ApiProviderInput): Promise<ApiProviderModelDiscoveryResponse> {
     const flat = flattenApiProviderInput(input);
     if (flat.modelDiscovery === 'ollama-tags') return testOllamaTags(flat);
+    if (flat.modelDiscovery === 'anthropic-models') return testAnthropicModels(flat);
     if (flat.modelDiscovery === 'openai-models' || flat.modelDiscovery === 'openrouter-models') {
       return testOpenAiModels(flat);
     }
     return { success: true };
+  }
+
+  async discoverApiProviderModels(input: ApiProviderModelDiscoveryRequest): Promise<ApiProviderModelDiscoveryResponse> {
+    const flat = flattenApiProviderModelDiscoveryInput(input);
+    const apiKey = flat.apiKey ?? this.#storedApiKeyForDiscovery(flat);
+    const discoveryInput = { ...flat, apiKey };
+    if (discoveryInput.modelDiscovery === 'ollama-tags') return testOllamaTags(discoveryInput);
+    if (discoveryInput.modelDiscovery === 'anthropic-models') return testAnthropicModels(discoveryInput);
+    if (discoveryInput.modelDiscovery === 'openai-models' || discoveryInput.modelDiscovery === 'openrouter-models') {
+      return testOpenAiModels(discoveryInput);
+    }
+    return { success: false, error: `Model discovery is not supported for ${discoveryInput.modelDiscovery}.` };
   }
 
   #registryHasChatsForApiProvider(apiProviderId: string): boolean {
@@ -896,6 +1012,19 @@ export class ProviderRegistry {
       if ((entry as any).apiProviderId === apiProviderId) return true;
     }
     return false;
+  }
+
+  #storedApiKeyForDiscovery(input: Pick<ApiProviderModelDiscoveryFlatInput, 'apiProviderId' | 'endpointId' | 'protocol'>): string | undefined {
+    if (input.endpointId) {
+      const resolved = this.#apiProviderStore.getEndpoint(input.endpointId);
+      if (resolved?.endpoint.protocol === input.protocol) return resolved.endpoint.apiKey || undefined;
+    }
+    if (input.apiProviderId) {
+      const apiProvider = this.#apiProviderStore.getApiProvider(input.apiProviderId);
+      const endpoint = apiProvider?.endpoints.find((entry) => entry.protocol === input.protocol);
+      return endpoint?.apiKey || undefined;
+    }
+    return undefined;
   }
 
 }

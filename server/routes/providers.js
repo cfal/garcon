@@ -105,6 +105,16 @@ export default function createProviderRoutes(providers) {
     }
   }
 
+  async function discoverApiProviderModels(request) {
+    try {
+      const body = await parseJsonBody(request);
+      const result = await providers.discoverApiProviderModels(body);
+      return Response.json(result);
+    } catch (error) {
+      return Response.json({ success: false, error: error.message }, { status: 400 });
+    }
+  }
+
   return {
     '/api/v1/harnesses': { GET: getHarnesses },
     '/api/v1/harnesses/auth': { GET: getHarnessAuth },
@@ -118,5 +128,6 @@ export default function createProviderRoutes(providers) {
       DELETE: deleteApiProvider,
     },
     '/api/v1/api-providers/test': { POST: testApiProvider },
+    '/api/v1/api-providers/models': { POST: discoverApiProviderModels },
   };
 }

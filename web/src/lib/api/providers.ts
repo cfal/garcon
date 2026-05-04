@@ -2,13 +2,16 @@
 // API providers own persisted compatible endpoint configuration.
 
 import { apiDelete, apiGet, apiPost, apiPut } from './client.js';
-import type { ModelOption } from '$lib/stores/model-catalog.svelte.js';
 import type {
 	ApiProtocol,
 	ApiProviderCatalogEntry,
+	ApiProviderModelDiscoveryRequest,
+	ApiProviderModelDiscoveryResponse,
 	ApiProviderTemplateId,
 	HarnessCatalog,
-	HarnessId
+	HarnessId,
+	HarnessModelOption,
+	ModelDiscoveryKind
 } from '$shared/providers';
 
 export type HarnessName = HarnessId;
@@ -48,9 +51,9 @@ export interface ApiProviderEndpointInput {
 	clearApiKey?: boolean;
 	exposeTo: string[];
 	defaultModel: string;
-	models: Array<{ value: string; label: string; supportsImages?: boolean; isLocal?: boolean }>;
+	models: Array<Pick<HarnessModelOption, 'value' | 'label' | 'supportsImages' | 'isLocal'>>;
 	supportsImages: boolean;
-	modelDiscovery?: 'none' | 'openai-models' | 'anthropic-models' | 'ollama-tags' | 'openrouter-models';
+	modelDiscovery?: ModelDiscoveryKind;
 }
 
 export interface ApiProviderInput {
@@ -94,6 +97,12 @@ export async function deleteApiProvider(id: string): Promise<{ success: boolean 
 	return apiDelete<{ success: boolean }>(`/api/v1/api-providers?id=${encodeURIComponent(id)}`);
 }
 
-export async function testApiProvider(input: ApiProviderInput): Promise<{ success: boolean; models?: ModelOption[]; error?: string }> {
+export async function testApiProvider(input: ApiProviderInput): Promise<ApiProviderModelDiscoveryResponse> {
 	return apiPost('/api/v1/api-providers/test', input);
+}
+
+export async function discoverApiProviderModels(
+	input: ApiProviderModelDiscoveryRequest
+): Promise<ApiProviderModelDiscoveryResponse> {
+	return apiPost('/api/v1/api-providers/models', input);
 }
