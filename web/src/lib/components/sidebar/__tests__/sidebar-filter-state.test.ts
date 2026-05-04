@@ -48,7 +48,8 @@ describe('SidebarFilterState', () => {
 			tags: ['ops'],
 			providers: [],
 			models: [],
-			status: 'unread',
+			project: null,
+status: 'unread',
 		});
 		expect(state.filteredChats.map((chat) => chat.id)).toEqual(['chat-1']);
 	});
@@ -73,7 +74,8 @@ describe('SidebarFilterState', () => {
 					tags: [],
 					providers: [],
 					models: [],
-					status: 'active',
+					project: null,
+status: 'active',
 				},
 				createdAt: '2026-03-27T00:00:00.000Z',
 			},
@@ -99,7 +101,8 @@ describe('SidebarFilterState', () => {
 			tags: [],
 			providers: [],
 			models: [],
-			status: 'unread',
+			project: null,
+status: 'unread',
 		});
 	});
 

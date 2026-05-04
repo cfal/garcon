@@ -1,7 +1,9 @@
 <script lang="ts">
+	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import SavedSearchPills from './SavedSearchPills.svelte';
 	import SidebarChatSummary from './SidebarChatSummary.svelte';
+	import CircleHelp from '@lucide/svelte/icons/circle-help';
 	import Search from '@lucide/svelte/icons/search';
 	import Save from '@lucide/svelte/icons/save';
 	import Settings from '@lucide/svelte/icons/settings';
@@ -44,6 +46,7 @@
 	}: SidebarSearchDialogProps = $props();
 
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let helpDialogOpen = $state(false);
 	let trimmedQuery = $derived(query.trim());
 	let canCreateSavedSearch = $derived(trimmedQuery.length > 0);
 
@@ -172,6 +175,17 @@
 							variant="ghost"
 							size="icon-sm"
 							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
+							onclick={() => helpDialogOpen = true}
+							title={m.sidebar_search_legend_help()}
+							aria-label={m.sidebar_search_legend_help()}
+						>
+							<CircleHelp class="h-4 w-4" />
+						</Button>
+
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
 							onclick={onCreateSavedSearch}
 							title={m.sidebar_saved_searches_add()}
 							aria-label={m.sidebar_saved_searches_add()}
@@ -240,4 +254,47 @@
 			</div>
 		</div>
 	</div>
-{/if}
+			<Dialog.Root open={helpDialogOpen} onOpenChange={(v) => helpDialogOpen = v}>
+				<Dialog.Content class="h-dvh w-full max-w-full rounded-none border-0 p-6 sm:h-auto sm:rounded-lg sm:border">
+					<Dialog.Header>
+						<Dialog.Title>{m.sidebar_search_legend_help()}</Dialog.Title>
+						<p class="text-sm text-muted-foreground">
+							{m.sidebar_search_legend_description()}
+						</p>
+					</Dialog.Header>
+					<div class="space-y-2 text-sm">
+						<div class="flex gap-3">
+							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">Any text</code>
+							<span class="text-muted-foreground">{m.sidebar_search_legend_free_text_description()}</span>
+						</div>
+						<div class="flex gap-3">
+							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">tag:X</code>
+							<span class="text-muted-foreground">{m.sidebar_search_legend_tag()}</span>
+						</div>
+						<div class="flex gap-3">
+							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">provider:X</code>
+							<span class="text-muted-foreground">{m.sidebar_search_legend_provider()}</span>
+						</div>
+						<div class="flex gap-3">
+							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">model:X</code>
+							<span class="text-muted-foreground">{m.sidebar_search_legend_model()}</span>
+						</div>
+						<div class="flex gap-3">
+							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">status:X</code>
+							<span class="text-muted-foreground">{m.sidebar_search_legend_status()}</span>
+						</div>
+						<div class="flex gap-3">
+							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">project:X</code>
+							<span class="text-muted-foreground">{m.sidebar_search_legend_project()}</span>
+						</div>
+						<div class="flex gap-3">
+							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">tag:X project:Y</code>
+							<span class="text-muted-foreground">{m.sidebar_search_legend_combine()}</span>
+						</div>
+					</div>
+					<Dialog.Footer>
+						<Button onclick={() => helpDialogOpen = false}>{m.editor_actions_close()}</Button>
+					</Dialog.Footer>
+				</Dialog.Content>
+			</Dialog.Root>
+	{/if}

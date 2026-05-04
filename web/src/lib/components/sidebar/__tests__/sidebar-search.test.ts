@@ -54,6 +54,7 @@ describe('parseChatSearch', () => {
 			providers: [],
 			models: [],
 			status: 'active',
+			project: null,
 		});
 	});
 
@@ -65,6 +66,7 @@ describe('parseChatSearch', () => {
 			providers: [],
 			models: [],
 			status: 'unread',
+			project: null,
 		});
 	});
 

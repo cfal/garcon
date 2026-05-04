@@ -136,7 +136,7 @@ export function matchesChatFilter(chat: ChatFilterTarget, spec: ChatFilterSpec):
 
 	// Project filter: projectPath must contain the value (case-insensitive)
 	if (spec.project !== null) {
-		if (!chat.projectPath.toLowerCase().includes(spec.project)) return false;
+		if (!chat.projectPath.toLowerCase().includes(spec.project.toLowerCase())) return false;
 	}
 
 	// Tag filter: chat must have ALL specified tags

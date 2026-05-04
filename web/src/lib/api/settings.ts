@@ -106,6 +106,7 @@ export interface ChatFolderFilter {
 	providers: string[];
 	models: string[];
 	status?: 'active' | 'unread';
+	project: string | null;
 }
 
 export interface ChatFolder {

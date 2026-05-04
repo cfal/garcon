@@ -31,7 +31,7 @@
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let isSaving = $state(false);
 	let saveError = $state<string | null>(null);
-	let editableFilter = $state<ChatFolderFilter>({ textTokens: [], tags: [], providers: [], models: [] });
+	let editableFilter = $state<ChatFolderFilter>({ textTokens: [], tags: [], providers: [], models: [], project: null });
 
 	$effect(() => {
 		if (saveFolderDialog) {
@@ -41,6 +41,7 @@
 				tags: [...saveFolderDialog.filter.tags],
 				providers: [...saveFolderDialog.filter.providers],
 				models: [...saveFolderDialog.filter.models],
+				project: saveFolderDialog.filter.project ?? null,
 				...(saveFolderDialog.filter.status ? { status: saveFolderDialog.filter.status } : {}),
 			};
 			saveError = null;
