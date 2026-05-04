@@ -1,19 +1,23 @@
 // Parses sidebar search queries into structured filter specs and matches
 // chats against them. Supports free-text search across title, projectPath,
 // firstMessage, lastMessage, and tags, plus structured prefix filters:
-// tag:X, provider:Y, model:Z, project:P.
+// tag:X, provider:Y, model:Z, project:P. The | character creates OR groups
+// within an operator, e.g. tag:a|b matches chats with tag "a" or "b".
+
+/** An OR group — values within one group match if ANY element matches. */
+type OrGroup = string[];
 
 export interface ChatFilterSpec {
 	textTokens: string[];
-	tags: string[];
-	providers: string[];
-	models: string[];
+	tags: OrGroup[];        // Each group is OR'd; groups are AND'd together
+	providers: string[];      // OR across all values
+	models: string[];         // OR across all values
 	status?: 'active' | 'unread';
-	project: string | null;
+	project: string[];      // OR across all values
 }
 
 export function emptyFilterSpec(): ChatFilterSpec {
-	return { textTokens: [], tags: [], providers: [], models: [], project: null };
+	return { textTokens: [], tags: [], providers: [], models: [], project: [] };
 }
 
 export function isEmptyFilter(spec: ChatFilterSpec): boolean {
@@ -23,19 +27,23 @@ export function isEmptyFilter(spec: ChatFilterSpec): boolean {
 		spec.providers.length === 0 &&
 		spec.models.length === 0 &&
 		spec.status === undefined &&
-		spec.project === null
+		spec.project.length === 0
 	);
 }
 
-/** Sentinel value set when multiple project: filters are parsed.
- *  No real path can contain this, so matches always fail. */
-const MULTI_PROJECT_SENTINEL = '\0MULTI\0';
+/** Splits a pipe-delimited value into non-empty, lowercased parts.
+ *  Returns null if all parts are empty after splitting. */
+function parsePipeValue(raw: string): string[] | null {
+	const parts = raw.split('|')
+		.map((s) => s.trim().toLowerCase())
+		.filter((s) => s.length > 0);
+	return parts.length > 0 ? parts : null;
+}
 
 /** Parses a raw search query into a structured filter spec.
  *  Prefix filters: tag:X, provider:Y, model:Z, project:P
- *  Everything else is a free-text token.
- *  Multiple project: filters are invalid and set project to a sentinel
- *  that matches no chats. */
+ *  The | character creates OR groups within a single operator value.
+ *  Everything else is a free-text token. */
 export function parseChatSearch(query: string): ChatFilterSpec {
 	const spec = emptyFilterSpec();
 	const raw = query.trim();
@@ -53,22 +61,24 @@ export function parseChatSearch(query: string): ChatFilterSpec {
 			}
 		} else if (lower.startsWith('tag:')) {
 			const value = token.slice(4).trim();
-			if (value) spec.tags.push(value.toLowerCase());
+			if (!value) continue;
+			const parts = parsePipeValue(value);
+			if (parts) spec.tags.push(parts);
 		} else if (lower.startsWith('provider:')) {
 			const value = token.slice(9).trim();
-			if (value) spec.providers.push(value.toLowerCase());
+			if (!value) continue;
+			const parts = parsePipeValue(value);
+			if (parts) spec.providers.push(...parts);
 		} else if (lower.startsWith('model:')) {
 			const value = token.slice(6).trim();
-			if (value) spec.models.push(value.toLowerCase());
+			if (!value) continue;
+			const parts = parsePipeValue(value);
+			if (parts) spec.models.push(...parts);
 		} else if (lower.startsWith('project:')) {
 			const value = token.slice(8).trim();
 			if (!value) continue;
-			if (spec.project !== null) {
-				// Multiple project: filters are invalid — mark as no-match
-				spec.project = MULTI_PROJECT_SENTINEL;
-			} else {
-				spec.project = value.toLowerCase();
-			}
+			const parts = parsePipeValue(value);
+			if (parts) spec.project.push(...parts);
 		} else {
 			spec.textTokens.push(lower);
 		}
@@ -126,24 +136,25 @@ export interface ChatFilterTarget {
 
 /** Checks whether a chat matches a filter spec.
  *  - All text tokens must appear somewhere in the text haystack (AND)
- *  - All tag: filters must be present on the chat (AND)
+ *  - Each tag OR group must have at least one match; groups are AND'd (AND)
  *  - Provider filters match any (OR)
  *  - Model filters match any (OR)
- *  - Project filter checks substring match against projectPath */
+ *  - Project filters match any value as substring (OR) */
 export function matchesChatFilter(chat: ChatFilterTarget, spec: ChatFilterSpec): boolean {
 	if (spec.status === 'active' && !chat.isProcessing) return false;
 	if (spec.status === 'unread' && !chat.isUnread) return false;
 
-	// Project filter: projectPath must contain the value (case-insensitive)
-	if (spec.project !== null) {
-		if (!chat.projectPath.toLowerCase().includes(spec.project.toLowerCase())) return false;
+	// Project filter: projectPath must contain at least one value (OR)
+	if (spec.project.length > 0) {
+		const chatPath = chat.projectPath.toLowerCase();
+		if (!spec.project.some((p) => chatPath.includes(p))) return false;
 	}
 
-	// Tag filter: chat must have ALL specified tags
+	// Tag filter: each OR group must have at least one match
 	if (spec.tags.length > 0) {
 		const chatTags = new Set(chat.tags.map((t) => t.toLowerCase()));
-		for (const tag of spec.tags) {
-			if (!chatTags.has(tag)) return false;
+		for (const group of spec.tags) {
+			if (!group.some((tag) => chatTags.has(tag))) return false;
 		}
 	}
 
@@ -185,10 +196,14 @@ function buildHaystack(chat: ChatFilterTarget): string {
 export function serializeChatFilter(spec: ChatFilterSpec): string {
 	const parts: string[] = [];
 	if (spec.status) parts.push(`status:${spec.status}`);
-	for (const tag of spec.tags) parts.push(`tag:${tag}`);
+	for (const group of spec.tags) {
+		parts.push(`tag:${group.join('|')}`);
+	}
 	for (const provider of spec.providers) parts.push(`provider:${provider}`);
 	for (const model of spec.models) parts.push(`model:${model}`);
-	if (spec.project !== null) parts.push(`project:${spec.project}`);
+	if (spec.project.length > 0) {
+		parts.push(`project:${spec.project.join('|')}`);
+	}
 	for (const text of spec.textTokens) {
 		parts.push(text.includes(' ') ? `"${text}"` : text);
 	}
@@ -204,12 +219,13 @@ export function addTagToQuery(query: string, tag: string): string {
 
 /** Removes a tag filter from the current search query. */
 export function removeTagFromQuery(query: string, tag: string): string {
-	const pattern = new RegExp(`\\btag:${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+	const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const pattern = new RegExp(`\\btag:${escaped}\\b`, 'gi');
 	return query.replace(pattern, '').replace(/\s{2,}/g, ' ').trim();
 }
 
 /** Checks if a query already contains a specific tag filter. */
 export function queryHasTag(query: string, tag: string): boolean {
 	const spec = parseChatSearch(query);
-	return spec.tags.includes(tag.toLowerCase());
+	return spec.tags.some((group) => group.includes(tag.toLowerCase()));
 }

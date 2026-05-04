@@ -102,11 +102,11 @@ export async function reorderSavedSearches(
 
 export interface ChatFolderFilter {
 	textTokens: string[];
-	tags: string[];
+	tags: string[][];
 	providers: string[];
 	models: string[];
 	status?: 'active' | 'unread';
-	project: string | null;
+	project: string[];
 }
 
 export interface ChatFolder {

@@ -27,11 +27,25 @@ function getSystemFolders(): FolderEntry[] {
 function mergeChatFilters(base: ChatFilterSpec | null, search: ChatFilterSpec): ChatFilterSpec {
 	const merged = emptyFilterSpec();
 	merged.textTokens = Array.from(new Set([...(base?.textTokens ?? []), ...search.textTokens]));
-	merged.tags = Array.from(new Set([...(base?.tags ?? []), ...search.tags]));
+	merged.tags = mergeTagGroups(base?.tags, search.tags);
 	merged.providers = Array.from(new Set([...(base?.providers ?? []), ...search.providers]));
 	merged.models = Array.from(new Set([...(base?.models ?? []), ...search.models]));
+	merged.project = Array.from(new Set([...(base?.project ?? []), ...search.project]));
 	merged.status = base?.status;
 	return merged;
+}
+
+function mergeTagGroups(a: string[][] | undefined, b: string[][]): string[][] {
+	const seen = new Set<string>();
+	const result: string[][] = [];
+	for (const group of [...(a ?? []), ...b]) {
+		const key = group.join(',');
+		if (!seen.has(key)) {
+			seen.add(key);
+			result.push(group);
+		}
+	}
+	return result;
 }
 
 export class SidebarFilterState {

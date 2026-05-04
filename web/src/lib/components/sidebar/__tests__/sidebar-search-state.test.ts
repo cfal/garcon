@@ -356,15 +356,16 @@ describe('SidebarSearchState', () => {
 			expect(searchState.filteredChats.map((c) => c.id)).toEqual(['c1']);
 		});
 
-		it('returns no results for multiple project: filters', () => {
+		it('combines multiple project: filters as OR', () => {
 			const chats = [
 				makeChat({ id: 'c1', projectPath: '/workspace/garcon' }),
 				makeChat({ id: 'c2', projectPath: '/workspace/other' }),
+				makeChat({ id: 'c3', projectPath: '/workspace/third' }),
 			];
 			const searchState = createState(chats);
 
-			searchState.applyQuery('project:a project:b');
-			expect(searchState.filteredChats).toEqual([]);
+			searchState.applyQuery('project:garcon project:other');
+			expect(searchState.filteredChats.map((c) => c.id)).toEqual(['c1', 'c2']);
 		});
 
 		it('combines project with tag filter', () => {

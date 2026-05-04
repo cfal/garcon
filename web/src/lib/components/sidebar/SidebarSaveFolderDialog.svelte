@@ -31,17 +31,17 @@
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let isSaving = $state(false);
 	let saveError = $state<string | null>(null);
-	let editableFilter = $state<ChatFolderFilter>({ textTokens: [], tags: [], providers: [], models: [], project: null });
+	let editableFilter = $state<ChatFolderFilter>({ textTokens: [], tags: [], providers: [], models: [], project: [] });
 
 	$effect(() => {
 		if (saveFolderDialog) {
 			folderName = saveFolderDialog.suggestedName;
 			editableFilter = {
 				textTokens: [...saveFolderDialog.filter.textTokens],
-				tags: [...saveFolderDialog.filter.tags],
+				tags: saveFolderDialog.filter.tags.map((g) => [...g]),
 				providers: [...saveFolderDialog.filter.providers],
 				models: [...saveFolderDialog.filter.models],
-				project: saveFolderDialog.filter.project ?? null,
+				project: [...saveFolderDialog.filter.project],
 				...(saveFolderDialog.filter.status ? { status: saveFolderDialog.filter.status } : {}),
 			};
 			saveError = null;
@@ -71,8 +71,8 @@
 		for (const token of editableFilter.textTokens) {
 			chips.push({ label: `"${token}"`, type: 'text', value: token });
 		}
-		for (const tag of editableFilter.tags) {
-			chips.push({ label: `tag:${tag}`, type: 'tag', value: tag });
+		for (const tagGroup of editableFilter.tags) {
+			chips.push({ label: `tag:${tagGroup.join('|')}`, type: 'tag', value: tagGroup.join('|') });
 		}
 		for (const provider of editableFilter.providers) {
 			chips.push({ label: `provider:${provider}`, type: 'provider', value: provider });
@@ -89,7 +89,7 @@
 		} else if (chip.type === 'text') {
 			editableFilter = { ...editableFilter, textTokens: editableFilter.textTokens.filter(t => t !== chip.value) };
 		} else if (chip.type === 'tag') {
-			editableFilter = { ...editableFilter, tags: editableFilter.tags.filter(t => t !== chip.value) };
+			editableFilter = { ...editableFilter, tags: editableFilter.tags.filter(g => g.join('|') !== chip.value) };
 		} else if (chip.type === 'provider') {
 			editableFilter = { ...editableFilter, providers: editableFilter.providers.filter(p => p !== chip.value) };
 		} else if (chip.type === 'model') {
