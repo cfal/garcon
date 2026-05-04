@@ -57,13 +57,13 @@
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
-	<Dialog.Content class="h-dvh w-full max-w-full rounded-none border-0 p-0 sm:h-auto sm:max-w-3xl sm:rounded-lg sm:border">
+		<Dialog.Content class="flex h-dvh w-full max-w-full flex-col rounded-none border-0 p-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:max-w-3xl sm:rounded-lg sm:border">
 		<Dialog.Header class="border-b border-border px-6 py-4">
 			<Dialog.Title>{dialog.title}</Dialog.Title>
 			<Dialog.Description>{dialog.description}</Dialog.Description>
 		</Dialog.Header>
 
-		<form class="space-y-4 p-6" onsubmit={(event) => { event.preventDefault(); void dialog.save(); }}>
+			<form class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6" onsubmit={(event) => { event.preventDefault(); void dialog.save(); }}>
 			<div class="grid gap-2">
 				<label class="text-sm font-medium" for="api-provider-label">{m.settings_api_provider_dialog_display_name()}</label>
 				<Input id="api-provider-label" bind:value={dialog.label} />
@@ -126,11 +126,12 @@
 							: m.settings_api_provider_dialog_fetch_models()}
 					</Button>
 				</div>
-				<Textarea
-					id="api-provider-models"
-					value={dialog.modelsText}
-					oninput={handleModelsInput}
-					rows={6}
+					<Textarea
+						id="api-provider-models"
+						class="h-40 max-h-60 resize-y overflow-y-auto [field-sizing:fixed]"
+						value={dialog.modelsText}
+						oninput={handleModelsInput}
+						rows={6}
 					placeholder={m.settings_api_provider_dialog_models_placeholder()}
 				/>
 			</div>
