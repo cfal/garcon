@@ -173,6 +173,16 @@ describe('GET /api/v1/git/file-review-data validation', () => {
     expect(response.status).toBe(400);
     expect(body.error).toContain('required');
   });
+
+  it('returns 400 for invalid mode', async () => {
+    const url = makeUrl('/api/v1/git/file-review-data', { project: '/proj', file: 'a.ts', mode: 'head' });
+    const request = new Request(url.toString());
+    const response = await handler(request, url);
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Invalid mode. Expected one of: working, staged.');
+  });
 });
 
 describe('POST /api/v1/git/stage-selection validation', () => {
@@ -187,6 +197,28 @@ describe('POST /api/v1/git/stage-selection validation', () => {
 
     expect(response.status).toBe(400);
   });
+
+  it('returns 400 for invalid mode', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({ project: '/proj', file: 'a.ts', mode: 'invalid', selection: { lineIndices: [0] } }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Invalid mode. Expected one of: stage, unstage.');
+  });
+
+  it('returns 400 for invalid lineIndices', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({ project: '/proj', file: 'a.ts', mode: 'stage', selection: { lineIndices: [0, -1] } }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('selection.lineIndices must be an array of non-negative integers.');
+  });
 });
 
 describe('POST /api/v1/git/stage-hunk validation', () => {
@@ -200,6 +232,28 @@ describe('POST /api/v1/git/stage-hunk validation', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
+  });
+
+  it('returns 400 for invalid mode', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({ project: '/proj', file: 'a.ts', mode: 'invalid', hunkIndex: 0 }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Invalid mode. Expected one of: stage, unstage.');
+  });
+
+  it('returns 400 for invalid hunkIndex', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({ project: '/proj', file: 'a.ts', mode: 'stage', hunkIndex: -1 }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('hunkIndex must be a non-negative integer.');
   });
 });
 
@@ -272,6 +326,9 @@ describe('route registration', () => {
     expect(routes['/api/v1/git/file-review-data']).toBeDefined();
     expect(routes['/api/v1/git/file-review-data'].GET).toBeFunction();
 
+    expect(routes['/api/v1/git/file-review-data/batch']).toBeDefined();
+    expect(routes['/api/v1/git/file-review-data/batch'].POST).toBeFunction();
+
     expect(routes['/api/v1/git/stage-selection']).toBeDefined();
     expect(routes['/api/v1/git/stage-selection'].POST).toBeFunction();
 
@@ -283,6 +340,9 @@ describe('route registration', () => {
 
     expect(routes['/api/v1/git/worktrees']).toBeDefined();
     expect(routes['/api/v1/git/worktrees'].GET).toBeFunction();
+
+    expect(routes['/api/v1/git/targets']).toBeDefined();
+    expect(routes['/api/v1/git/targets'].GET).toBeFunction();
 
     expect(routes['/api/v1/git/worktrees/create']).toBeDefined();
     expect(routes['/api/v1/git/worktrees/create'].POST).toBeFunction();

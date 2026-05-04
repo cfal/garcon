@@ -80,6 +80,18 @@ async function resolveCommitMessageConfig(settings, providers) {
   });
 }
 
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isNonNegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0;
+}
+
+function isValidLineIndices(value) {
+  return Array.isArray(value) && value.every(isNonNegativeInteger);
+}
+
 export default function createGitRoutes(providers, settings) {
   const git = createGitService({ providers, classifyGitError });
 
@@ -392,14 +404,14 @@ export default function createGitRoutes(providers, settings) {
   async function getFileReviewData(request, url) {
     const project = url.searchParams.get('project');
     const file = url.searchParams.get('file');
-    const mode = url.searchParams.get('mode') || 'head';
+    const mode = url.searchParams.get('mode') || 'working';
     const context = Number(url.searchParams.get('context') || 5);
 
     if (!project || !file) {
       return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
     }
-    if (mode !== 'head' && mode !== 'working' && mode !== 'staged') {
-      return Response.json({ error: 'Invalid mode. Expected one of: head, working, staged.' }, { status: 400 });
+    if (mode !== 'working' && mode !== 'staged') {
+      return Response.json({ error: 'Invalid mode. Expected one of: working, staged.' }, { status: 400 });
     }
 
     try {
@@ -424,6 +436,34 @@ export default function createGitRoutes(providers, settings) {
     }
   }
 
+  async function postFileReviewDataBatch(request, url) {
+    try {
+      const body = await readJsonBody(request);
+      if (body === null) return MALFORMED_BODY();
+      const { project, files, mode, context } = body;
+
+      if (!project || !Array.isArray(files) || files.length === 0) {
+        return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
+      }
+      if (!files.every(isNonEmptyString)) {
+        return Response.json({ error: 'files must be a non-empty array of file paths.' }, { status: 400 });
+      }
+      if (mode !== 'working' && mode !== 'staged') {
+        return Response.json({ error: 'Invalid mode. Expected one of: working, staged.' }, { status: 400 });
+      }
+
+      const result = await git.getFileReviewDataBatch({
+        projectPath: project,
+        files,
+        mode,
+        context: typeof context === 'number' ? context : 5,
+      });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
   async function postStageSelection(request, url) {
     try {
       const body = await readJsonBody(request);
@@ -435,6 +475,9 @@ export default function createGitRoutes(providers, settings) {
       }
       if (mode !== 'stage' && mode !== 'unstage') {
         return Response.json({ error: 'Invalid mode. Expected one of: stage, unstage.' }, { status: 400 });
+      }
+      if (!isValidLineIndices(selection.lineIndices)) {
+        return Response.json({ error: 'selection.lineIndices must be an array of non-negative integers.' }, { status: 400 });
       }
 
       const result = await git.stageSelection({
@@ -455,6 +498,12 @@ export default function createGitRoutes(providers, settings) {
 
       if (!project || !file || !mode || hunkIndex === undefined) {
         return Response.json({ error: 'Missing required parameters: project, file, mode, and hunkIndex.' }, { status: 400 });
+      }
+      if (mode !== 'stage' && mode !== 'unstage') {
+        return Response.json({ error: 'Invalid mode. Expected one of: stage, unstage.' }, { status: 400 });
+      }
+      if (!isNonNegativeInteger(hunkIndex)) {
+        return Response.json({ error: 'hunkIndex must be a non-negative integer.' }, { status: 400 });
       }
 
       const result = await git.stageHunk({
@@ -489,6 +538,20 @@ export default function createGitRoutes(providers, settings) {
 
     try {
       const result = await git.getWorktrees({ projectPath: project });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function getTargets(request, url) {
+    const project = url.searchParams.get('project');
+    if (!project) {
+      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
+    }
+
+    try {
+      const result = await git.getTargetCandidates({ projectPath: project });
       return Response.json(result);
     } catch (error) {
       return git.toHttpError(error);
@@ -608,11 +671,13 @@ export default function createGitRoutes(providers, settings) {
     '/api/v1/git/discard': { POST: postDiscard },
     '/api/v1/git/delete-untracked': { POST: postDeleteUntracked },
     '/api/v1/git/file-review-data': { GET: getFileReviewData },
+    '/api/v1/git/file-review-data/batch': { POST: postFileReviewDataBatch },
     '/api/v1/git/changes-tree': { GET: getChangesTree },
     '/api/v1/git/stage-selection': { POST: postStageSelection },
     '/api/v1/git/stage-hunk': { POST: postStageHunk },
     '/api/v1/git/repo-info': { GET: getRepoInfo },
     '/api/v1/git/worktrees': { GET: getWorktrees },
+    '/api/v1/git/targets': { GET: getTargets },
     '/api/v1/git/worktrees/create': { POST: postCreateWorktree },
     '/api/v1/git/worktrees/remove': { POST: postRemoveWorktree },
     '/api/v1/git/revert-last-commit': { POST: postRevertLastCommit },

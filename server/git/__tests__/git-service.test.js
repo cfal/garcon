@@ -38,6 +38,15 @@ async function runGitCommand(cwd, args) {
   });
 }
 
+async function initRepoWithCommit(projectPath) {
+  await runGitCommand(projectPath, ['init']);
+  await runGitCommand(projectPath, ['config', 'user.email', 'test@example.com']);
+  await runGitCommand(projectPath, ['config', 'user.name', 'Test User']);
+  await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\n', 'utf-8');
+  await runGitCommand(projectPath, ['add', 'a.txt']);
+  await runGitCommand(projectPath, ['commit', '-m', 'initial']);
+}
+
 describe('GitDomainError', () => {
   it('extends Error with name and code', () => {
     const err = new GitDomainError('INVALID_INPUT', 'bad input');
@@ -58,8 +67,8 @@ describe('createGitService', () => {
       'getCommits', 'getCommitDiff', 'generateCommitMessageForFiles',
       'getRemoteStatus', 'getRemotes', 'fetch', 'pull', 'push',
       'discard', 'deleteUntracked', 'getFileReviewData',
-      'getChangesTree', 'stageSelection', 'stageHunk',
-      'getWorktrees', 'createWorktree', 'removeWorktree',
+      'getFileReviewDataBatch', 'getChangesTree', 'stageSelection', 'stageHunk',
+      'getWorktrees', 'getTargetCandidates', 'createWorktree', 'removeWorktree',
       'commitIndex', 'stageFile', 'revertLastCommit', 'toHttpError',
     ];
     for (const method of expectedMethods) {
@@ -79,14 +88,14 @@ describe('getChangesTree', () => {
       await fs.writeFile(path.join(projectPath, 'newdir/subdir/file.txt'), 'hello\n', 'utf-8');
 
       const tree = await git.getChangesTree({ projectPath });
-      expect(tree.root).toEqual([
+      expect(tree.root).toMatchObject([
         {
           path: 'newdir',
           name: 'newdir',
           kind: 'directory',
           changeKind: 'untracked',
           staged: false,
-          hasUnstaged: false,
+          hasUnstaged: true,
           children: [
             {
               path: 'newdir/subdir',
@@ -94,23 +103,80 @@ describe('getChangesTree', () => {
               kind: 'directory',
               changeKind: 'untracked',
               staged: false,
-              hasUnstaged: false,
+              hasUnstaged: true,
               children: [
                 {
                   path: 'newdir/subdir/file.txt',
                   name: 'file.txt',
                   kind: 'file',
-                  changeKind: 'untracked',
-                  staged: false,
-                  hasUnstaged: false,
-                  additions: 0,
-                  deletions: 0,
+	                  changeKind: 'untracked',
+	                  staged: false,
+	                  hasUnstaged: true,
+	                  indexStatus: '?',
+	                  workTreeStatus: '?',
+	                  unstagedFacet: {
+	                    status: '?',
+	                    changeKind: 'untracked',
+	                    stats: { additions: 0, deletions: 0 },
+	                  },
+	                  additions: 0,
+	                  deletions: 0,
                 },
               ],
             },
           ],
         },
       ]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('reports separate staged and unstaged facets for the same file', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-mixed-'));
+    const git = createGitService({ providers: mockProviders, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\nstaged\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'a.txt']);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\nstaged\nunstaged\n', 'utf-8');
+
+      const tree = await git.getChangesTree({ projectPath });
+      const file = tree.root.find((node) => node.path === 'a.txt');
+
+      expect(file.indexStatus).toBe('M');
+      expect(file.workTreeStatus).toBe('M');
+      expect(file.staged).toBe(true);
+      expect(file.hasUnstaged).toBe(true);
+      expect(file.stagedFacet).toMatchObject({ status: 'M', changeKind: 'modified' });
+      expect(file.unstagedFacet).toMatchObject({ status: 'M', changeKind: 'modified' });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('getFileReviewData', () => {
+  it('keeps staged and working deletion review modes separate', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-review-'));
+    const git = createGitService({ providers: mockProviders, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\nstaged\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'a.txt']);
+      await fs.rm(path.join(projectPath, 'a.txt'));
+
+      const staged = await git.getFileReviewData({ projectPath, file: 'a.txt', mode: 'staged', context: 3 });
+      const working = await git.getFileReviewData({ projectPath, file: 'a.txt', mode: 'working', context: 3 });
+
+      expect(staged.contentBefore).toContain('one');
+      expect(staged.contentAfter).toContain('staged');
+      expect(staged.diffOps.some((op) => op.type === 'insert')).toBe(true);
+      expect(working.contentBefore).toContain('staged');
+      expect(working.contentAfter).toBeNull();
+      expect(working.diffOps.some((op) => op.type === 'delete')).toBe(true);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

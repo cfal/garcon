@@ -377,6 +377,119 @@ function parseNumstatBulk(numstatOutput) {
   return map;
 }
 
+const CHANGE_KIND_BY_STATUS = Object.freeze({
+  M: 'modified',
+  A: 'added',
+  D: 'deleted',
+  R: 'renamed',
+  C: 'renamed',
+  U: 'modified',
+  '?': 'untracked',
+});
+
+function changeKindForStatus(status) {
+  return CHANGE_KIND_BY_STATUS[status] || 'modified';
+}
+
+function hasIndexChange(status) {
+  return status !== ' ' && status !== '?' && status !== '!' && Boolean(status);
+}
+
+function hasWorkTreeChange(status) {
+  return status !== ' ' && status !== '!' && Boolean(status);
+}
+
+function parsePorcelainV1Z(output) {
+  const tokens = output.split('\0').filter(Boolean);
+  const entries = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const indexStatus = token[0] || ' ';
+    const workTreeStatus = token[1] || ' ';
+    const filePath = token.slice(3);
+
+    if (indexStatus === 'R' || indexStatus === 'C') {
+      entries.push({
+        path: filePath,
+        originalPath: tokens[++i] || '',
+        indexStatus,
+        workTreeStatus,
+      });
+      continue;
+    }
+
+    entries.push({ path: filePath, indexStatus, workTreeStatus });
+  }
+
+  return entries;
+}
+
+function buildFacet(status, stats, originalPath) {
+  if (!status || status === ' ' || status === '!') return undefined;
+  return {
+    status,
+    changeKind: changeKindForStatus(status),
+    stats: stats || { additions: 0, deletions: 0 },
+    ...(originalPath ? { originalPath } : {}),
+  };
+}
+
+function compatibleTreeFields(stagedFacet, unstagedFacet) {
+  const primaryFacet = unstagedFacet ?? stagedFacet;
+  const stats = unstagedFacet?.stats ?? stagedFacet?.stats ?? { additions: 0, deletions: 0 };
+  return {
+    staged: Boolean(stagedFacet),
+    hasUnstaged: Boolean(unstagedFacet),
+    changeKind: primaryFacet?.changeKind,
+    additions: stats.additions,
+    deletions: stats.deletions,
+  };
+}
+
+function buildChangeEntry(statusEntry, workingStats, cachedStats) {
+  const filePath = statusEntry.path.replace(/\/+$/g, '');
+  const stagedFacet = hasIndexChange(statusEntry.indexStatus)
+    ? buildFacet(statusEntry.indexStatus, cachedStats[filePath], statusEntry.originalPath)
+    : undefined;
+  const unstagedStatus = statusEntry.indexStatus === '?' ? '?' : statusEntry.workTreeStatus;
+  const unstagedFacet = hasWorkTreeChange(unstagedStatus)
+    ? buildFacet(unstagedStatus, workingStats[filePath], statusEntry.originalPath)
+    : undefined;
+
+  return {
+    path: filePath,
+    indexStatus: statusEntry.indexStatus,
+    workTreeStatus: statusEntry.workTreeStatus,
+    stagedFacet,
+    unstagedFacet,
+  };
+}
+
+function buildFullFileAddedPatch(contentAfter) {
+  const lines = contentAfter.split('\n');
+  return `@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join('\n')}`;
+}
+
+function buildFullFileDeletedPatch(contentBefore) {
+  const lines = (contentBefore || '').split('\n');
+  return `@@ -1,${lines.length} +0,0 @@\n${lines.map((line) => `-${line}`).join('\n')}`;
+}
+
+function maybeTruncateReviewContent(contentBefore, contentAfter) {
+  const MAX_CONTENT_SIZE = 500_000;
+  if (
+    (contentBefore && contentBefore.length > MAX_CONTENT_SIZE) ||
+    (contentAfter && contentAfter.length > MAX_CONTENT_SIZE)
+  ) {
+    return {
+      truncated: true,
+      truncatedReason: 'File exceeds 500KB display limit',
+    };
+  }
+  return { truncated: false, truncatedReason: undefined };
+}
+
 // Partial-staging implementation follows lazygit's patch-transform approach.
 // See https://github.com/jesseduffield/lazygit (pkg/commands/patch/).
 //
@@ -1002,26 +1115,77 @@ export function createGitService({ providers, classifyGitError }) {
     return { success: true, message: `Untracked file ${file} deleted successfully` };
   }
 
-  async function getFileReviewData({ projectPath, file, mode, context }) {
+  async function getSingleFileStatus(projectPath, file) {
+    const { stdout } = await runGit(projectPath, ['status', '--porcelain=v1', '-z', '--', file]);
+    const [entry] = parsePorcelainV1Z(stdout);
+    return entry || { path: file, indexStatus: ' ', workTreeStatus: ' ' };
+  }
+
+  async function readHeadBlob(projectPath, file) {
+    try {
+      const { stdout } = await runGit(projectPath, ['show', `HEAD:${file}`]);
+      return stdout;
+    } catch {
+      return '';
+    }
+  }
+
+  async function readIndexBlob(projectPath, file) {
+    try {
+      const { stdout } = await runGit(projectPath, ['show', `:${file}`]);
+      return stdout;
+    } catch {
+      return null;
+    }
+  }
+
+  async function getFileReviewData({ projectPath, file, mode = 'working', context }) {
     await assertGitRepository(projectPath);
 
-    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
-    const statusCode = statusOutput.substring(0, 2);
-    const isUntracked = statusCode === '??';
-    const isDeleted = statusCode.trim().startsWith('D') || statusCode.includes('D');
+    const effectiveMode = mode === 'staged' ? 'staged' : 'working';
+    const statusEntry = await getSingleFileStatus(projectPath, file);
+    const isUntracked = effectiveMode === 'working' &&
+      (statusEntry.indexStatus === '?' || statusEntry.workTreeStatus === '?');
+    const isDeleted = effectiveMode === 'staged'
+      ? statusEntry.indexStatus === 'D'
+      : statusEntry.workTreeStatus === 'D';
 
-    // Detect binary files
+    let filePath = null;
     if (!isDeleted) {
       try {
-        const filePath = resolvePathWithinProject(projectPath, file);
+        filePath = resolvePathWithinProject(projectPath, file);
+        const stats = await fs.stat(filePath);
+        if (stats.isDirectory()) {
+          return {
+            path: file,
+            mode: effectiveMode,
+            indexStatus: statusEntry.indexStatus,
+            workTreeStatus: statusEntry.workTreeStatus,
+            isBinary: false,
+            truncated: false,
+            contentBefore: null,
+            contentAfter: null,
+            diffOps: [],
+            hunks: [],
+            error: 'Directory diff is not supported. Provide a file path.',
+          };
+        }
         if (await isBinaryFile(filePath)) {
           return {
-            path: file, mode, isBinary: true, truncated: false,
-            contentBefore: null, contentAfter: null, diffOps: [], hunks: [],
+            path: file,
+            mode: effectiveMode,
+            indexStatus: statusEntry.indexStatus,
+            workTreeStatus: statusEntry.workTreeStatus,
+            isBinary: true,
+            truncated: false,
+            contentBefore: null,
+            contentAfter: null,
+            diffOps: [],
+            hunks: [],
           };
         }
       } catch {
-        // If we can't read the file, continue with text assumption
+        filePath = null;
       }
     }
 
@@ -1029,67 +1193,36 @@ export function createGitService({ providers, classifyGitError }) {
     let contentAfter = null;
     let diffText = '';
 
-    if (isUntracked) {
-      const filePath = resolvePathWithinProject(projectPath, file);
-      const stats = await fs.stat(filePath);
-      if (stats.isDirectory()) {
-        return {
-          path: file, mode, isBinary: false, truncated: false,
-          contentBefore: null, contentAfter: null, diffOps: [], hunks: [],
-          error: 'Directory diff is not supported. Provide a file path.',
-        };
-      }
-      contentAfter = await fs.readFile(filePath, 'utf-8');
-      contentBefore = null;
-      const lines = contentAfter.split('\n');
-      diffText = `@@ -0,0 +1,${lines.length} @@\n${lines.map(l => '+' + l).join('\n')}`;
-    } else if (isDeleted) {
-      try {
-        const { stdout } = await runGit(projectPath, ['show', `HEAD:${file}`]);
-        contentBefore = stdout;
-      } catch {
-        contentBefore = '';
-      }
-      contentAfter = null;
-      const lines = (contentBefore || '').split('\n');
-      diffText = `@@ -1,${lines.length} +0,0 @@\n${lines.map(l => '-' + l).join('\n')}`;
-    } else if (mode === 'staged') {
-      try {
-        const { stdout } = await runGit(projectPath, ['show', `HEAD:${file}`]);
-        contentBefore = stdout;
-      } catch {
-        contentBefore = '';
-      }
-      try {
-        const { stdout } = await runGit(projectPath, ['show', `:${file}`]);
-        contentAfter = stdout;
-      } catch {
-        contentAfter = contentBefore;
-      }
-
+    if (effectiveMode === 'staged') {
+      contentBefore = await readHeadBlob(projectPath, file);
+      contentAfter = isDeleted ? null : await readIndexBlob(projectPath, file);
+      if (contentAfter === null && !isDeleted) contentAfter = contentBefore;
       try {
         const { stdout } = await runGit(projectPath, ['diff', '--cached', `-U${context}`, '--', file]);
         diffText = stdout;
       } catch {
         diffText = '';
       }
-    } else {
-      // Working mode: index vs working tree -- unstaged changes only.
-      const filePath = resolvePathWithinProject(projectPath, file);
+    } else if (isUntracked) {
+      if (!filePath) filePath = resolvePathWithinProject(projectPath, file);
+      contentBefore = null;
       contentAfter = await fs.readFile(filePath, 'utf-8');
-
+      diffText = buildFullFileAddedPatch(contentAfter);
+    } else if (isDeleted) {
+      contentBefore = await readIndexBlob(projectPath, file);
+      if (contentBefore === null) contentBefore = await readHeadBlob(projectPath, file);
+      contentAfter = null;
       try {
-        const { stdout } = await runGit(projectPath, ['show', `:${file}`]);
-        contentBefore = stdout;
+        const { stdout } = await runGit(projectPath, ['diff', `-U${context}`, '--', file]);
+        diffText = stdout || buildFullFileDeletedPatch(contentBefore);
       } catch {
-        try {
-          const { stdout } = await runGit(projectPath, ['show', `HEAD:${file}`]);
-          contentBefore = stdout;
-        } catch {
-          contentBefore = '';
-        }
+        diffText = buildFullFileDeletedPatch(contentBefore);
       }
-
+    } else {
+      if (!filePath) filePath = resolvePathWithinProject(projectPath, file);
+      contentBefore = await readIndexBlob(projectPath, file);
+      if (contentBefore === null) contentBefore = await readHeadBlob(projectPath, file);
+      contentAfter = await fs.readFile(filePath, 'utf-8');
       try {
         const { stdout } = await runGit(projectPath, ['diff', `-U${context}`, '--', file]);
         diffText = stdout;
@@ -1098,24 +1231,19 @@ export function createGitService({ providers, classifyGitError }) {
       }
     }
 
-    const MAX_CONTENT_SIZE = 500_000;
-    let truncated = false;
-    let truncatedReason;
-    if ((contentBefore && contentBefore.length > MAX_CONTENT_SIZE) ||
-      (contentAfter && contentAfter.length > MAX_CONTENT_SIZE)) {
-      truncated = true;
-      truncatedReason = 'File exceeds 500KB display limit';
-    }
-
+    const truncatedResult = maybeTruncateReviewContent(contentBefore, contentAfter);
     const { diffOps, hunks } = parseUnifiedPatchToOps(diffText, context);
 
     return {
       path: file,
+      mode: effectiveMode,
+      indexStatus: statusEntry.indexStatus,
+      workTreeStatus: statusEntry.workTreeStatus,
       isBinary: false,
-      truncated,
-      truncatedReason,
-      contentBefore: truncated ? null : contentBefore,
-      contentAfter: truncated ? null : contentAfter,
+      truncated: truncatedResult.truncated,
+      truncatedReason: truncatedResult.truncatedReason,
+      contentBefore: truncatedResult.truncated ? null : contentBefore,
+      contentAfter: truncatedResult.truncated ? null : contentAfter,
       diffOps,
       hunks,
     };
@@ -1131,7 +1259,7 @@ export function createGitService({ providers, classifyGitError }) {
       hasCommits = false;
     }
 
-    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '-uall']);
+    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain=v1', '-z', '-uall']);
     if (!statusOutput.trim()) {
       return { root: [], hasCommits };
     }
@@ -1147,41 +1275,9 @@ export function createGitService({ providers, classifyGitError }) {
       cachedStats = parseNumstatBulk(stdout);
     } catch { /* no cached changes */ }
 
-    const entries = [];
-    for (const line of statusOutput.split('\n')) {
-      if (!line.trim()) continue;
-      const indexStatus = line[0];
-      const workTreeStatus = line[1];
-      const rawPath = line.substring(3).trim();
-      const isDirectory = rawPath.endsWith('/');
-      const filePath = rawPath.replace(/\/+$/g, '');
-      if (!filePath) continue;
-
-      let effectivePath = filePath;
-      if (filePath.includes(' -> ')) {
-        effectivePath = filePath.split(' -> ')[1].trim().replace(/\/+$/g, '');
-      }
-      if (!effectivePath) continue;
-
-      let changeKind = 'modified';
-      if (indexStatus === '?' || workTreeStatus === '?') changeKind = 'untracked';
-      else if (indexStatus === 'A' || workTreeStatus === 'A') changeKind = 'added';
-      else if (indexStatus === 'D' || workTreeStatus === 'D') changeKind = 'deleted';
-      else if (indexStatus === 'R' || workTreeStatus === 'R') changeKind = 'renamed';
-
-      const staged = indexStatus !== ' ' && indexStatus !== '?';
-      const hasUnstaged = workTreeStatus !== ' ' && workTreeStatus !== '?';
-
-      const stats = (staged && !hasUnstaged)
-        ? (cachedStats[effectivePath] || { additions: 0, deletions: 0 })
-        : (workingStats[effectivePath] || cachedStats[effectivePath] || { additions: 0, deletions: 0 });
-
-      entries.push({
-        path: effectivePath, changeKind, staged, hasUnstaged, isDirectory,
-        additions: stats.additions, deletions: stats.deletions,
-      });
-    }
-
+    const entries = parsePorcelainV1Z(statusOutput)
+      .map((entry) => buildChangeEntry(entry, workingStats, cachedStats))
+      .filter((entry) => entry.path);
     const rootMap = new Map();
 
     for (const entry of entries) {
@@ -1192,39 +1288,50 @@ export function createGitService({ providers, classifyGitError }) {
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
         const isLastSegment = i === segments.length - 1;
-        // Treat as directory if it's an intermediate segment, or if git
-        // reported it with a trailing slash (untracked directories).
-        const isDir = !isLastSegment || entry.isDirectory;
 
         if (!currentLevel.has(segment)) {
-          if (isDir) {
-            currentLevel.set(segment, {
-              path: segments.slice(0, i + 1).join('/'),
-              name: segment,
-              kind: 'directory',
-              changeKind: entry.changeKind,
-              staged: false,
-              hasUnstaged: false,
-              children: new Map(),
-            });
-          } else {
+          if (isLastSegment) {
+            const compatible = compatibleTreeFields(entry.stagedFacet, entry.unstagedFacet);
             currentLevel.set(segment, {
               path: entry.path,
               name: segment,
               kind: 'file',
-              changeKind: entry.changeKind,
-              staged: entry.staged,
-              hasUnstaged: entry.hasUnstaged,
-              additions: entry.additions,
-              deletions: entry.deletions,
+              indexStatus: entry.indexStatus,
+              workTreeStatus: entry.workTreeStatus,
+              stagedFacet: entry.stagedFacet,
+              unstagedFacet: entry.unstagedFacet,
+              ...compatible,
+            });
+          } else {
+            currentLevel.set(segment, {
+              path: segments.slice(0, i + 1).join('/'),
+              name: segment,
+              kind: 'directory',
+              indexStatus: ' ',
+              workTreeStatus: ' ',
+              staged: false,
+              hasUnstaged: false,
+              children: new Map(),
             });
           }
         }
 
         const node = currentLevel.get(segment);
-        if (isDir && node.kind === 'directory') {
-          if (entry.staged) node.staged = true;
-          if (entry.hasUnstaged) node.hasUnstaged = true;
+        if (!isLastSegment && node.kind === 'directory') {
+          if (entry.stagedFacet) {
+            node.staged = true;
+            node.stagedFacet = node.stagedFacet || entry.stagedFacet;
+            node.indexStatus = 'M';
+          }
+          if (entry.unstagedFacet) {
+            node.hasUnstaged = true;
+            node.unstagedFacet = node.unstagedFacet || entry.unstagedFacet;
+            node.workTreeStatus = 'M';
+          }
+          node.changeKind = node.unstagedFacet?.changeKind ?? node.stagedFacet?.changeKind;
+          const stats = node.unstagedFacet?.stats ?? node.stagedFacet?.stats ?? { additions: 0, deletions: 0 };
+          node.additions = (node.additions || 0) + stats.additions;
+          node.deletions = (node.deletions || 0) + stats.deletions;
           currentLevel = node.children;
         }
       }
@@ -1443,6 +1550,70 @@ export function createGitService({ providers, classifyGitError }) {
     return { worktrees };
   }
 
+  async function getTargetCandidates({ projectPath }) {
+    await assertGitRepository(projectPath);
+
+    const repoInfo = await getRepoInfo({ projectPath });
+    const { worktrees } = await getWorktrees({ projectPath });
+    const targets = [];
+    const seen = new Set();
+
+    function addTarget(target) {
+      if (!target.worktreePath || seen.has(target.worktreePath)) return;
+      seen.add(target.worktreePath);
+      targets.push(target);
+    }
+
+    addTarget({
+      projectPath,
+      repoRoot: repoInfo.repoRoot || projectPath,
+      worktreePath: repoInfo.currentWorktreePath || projectPath,
+      label: path.basename(projectPath) || projectPath,
+      branch: '',
+      source: 'chat-project',
+      isCurrent: true,
+      isMissing: false,
+    });
+
+    for (const wt of worktrees) {
+      addTarget({
+        projectPath: wt.path,
+        repoRoot: repoInfo.repoRoot || projectPath,
+        worktreePath: wt.path,
+        label: `${wt.name || path.basename(wt.path)}${wt.branch ? ` (${wt.branch})` : ''}`,
+        branch: wt.branch,
+        source: 'worktree',
+        isCurrent: wt.isCurrent,
+        isMissing: wt.isPathMissing,
+      });
+    }
+
+    return { targets };
+  }
+
+  async function mapWithConcurrency(items, limit, worker) {
+    const executing = new Set();
+    for (const item of items) {
+      const promise = Promise.resolve().then(() => worker(item));
+      executing.add(promise);
+      promise.finally(() => executing.delete(promise));
+      if (executing.size >= limit) await Promise.race(executing);
+    }
+    await Promise.all(executing);
+  }
+
+  async function getFileReviewDataBatch({ projectPath, files, mode, context }) {
+    const result = { files: {}, errors: {} };
+    await mapWithConcurrency(files, 4, async (file) => {
+      try {
+        result.files[file] = await getFileReviewData({ projectPath, file, mode, context });
+      } catch (error) {
+        result.errors[file] = error instanceof Error ? error.message : String(error);
+      }
+    });
+    return result;
+  }
+
   async function createWorktree({ projectPath, baseRef, worktreePath, branch, detach }) {
     await assertGitRepository(projectPath);
 
@@ -1567,11 +1738,13 @@ export function createGitService({ providers, classifyGitError }) {
     discard,
     deleteUntracked,
     getFileReviewData,
+    getFileReviewDataBatch,
     getChangesTree,
     stageSelection,
     stageHunk,
     getRepoInfo,
     getWorktrees,
+    getTargetCandidates,
     createWorktree,
     removeWorktree,
     commitIndex,

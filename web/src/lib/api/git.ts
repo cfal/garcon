@@ -8,11 +8,28 @@ import { apiGet, apiPost } from './client.js';
 // Workbench V2 types
 
 export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
+export type GitStatusCode = ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!';
+
+export interface GitChangeStats {
+	additions: number;
+	deletions: number;
+}
+
+export interface GitFileChangeFacet {
+	status: GitStatusCode;
+	changeKind: GitChangeKind;
+	stats: GitChangeStats;
+	originalPath?: string;
+}
 
 export interface GitTreeNode {
 	path: string;
 	name: string;
 	kind: 'file' | 'directory';
+	indexStatus?: GitStatusCode;
+	workTreeStatus?: GitStatusCode;
+	stagedFacet?: GitFileChangeFacet;
+	unstagedFacet?: GitFileChangeFacet;
 	changeKind?: GitChangeKind;
 	staged: boolean;
 	hasUnstaged: boolean;
@@ -40,9 +57,13 @@ export interface GitHunk {
 }
 
 export type GitDiffTab = 'unstaged' | 'staged';
+export type GitFileReviewMode = 'working' | 'staged';
 
 export interface GitFileReviewData {
 	path: string;
+	mode?: GitFileReviewMode;
+	indexStatus?: GitStatusCode;
+	workTreeStatus?: GitStatusCode;
 	isBinary: boolean;
 	truncated: boolean;
 	truncatedReason?: string;
@@ -71,6 +92,17 @@ export interface GitWorktreeItem {
 	isCurrent: boolean;
 	isMain: boolean;
 	isPathMissing: boolean;
+}
+
+export interface GitTargetCandidate {
+	projectPath: string;
+	repoRoot: string;
+	worktreePath: string;
+	label: string;
+	branch: string;
+	source: 'chat-project' | 'repo-root' | 'worktree';
+	isCurrent: boolean;
+	isMissing: boolean;
 }
 
 export interface GitStatus {
@@ -259,8 +291,25 @@ export async function getGitFileReviewData(
 	);
 }
 
+export async function getGitFileReviewDataBatch(
+	project: string,
+	files: string[],
+	tab: GitDiffTab,
+	context = 5,
+): Promise<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }> {
+	const mode = tab === 'staged' ? 'staged' : 'working';
+	return apiPost<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }>(
+		'/api/v1/git/file-review-data/batch',
+		{ project, files, mode, context },
+	);
+}
+
 export async function getGitChangesTree(project: string): Promise<{ root: GitTreeNode[]; hasCommits: boolean }> {
 	return apiGet<{ root: GitTreeNode[]; hasCommits: boolean }>(`/api/v1/git/changes-tree?${projectParam(project)}`);
+}
+
+export async function getGitTargetCandidates(project: string): Promise<{ targets: GitTargetCandidate[] }> {
+	return apiGet<{ targets: GitTargetCandidate[] }>(`/api/v1/git/targets?${projectParam(project)}`);
 }
 
 export async function gitStageSelection(

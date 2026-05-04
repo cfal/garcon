@@ -10,6 +10,7 @@ import {
 	type GitDiffTab,
 	getGitChangesTree,
 	getGitFileReviewData,
+	getGitFileReviewDataBatch,
 	gitStageSelection,
 	gitStageHunk,
 	gitStageFile,
@@ -35,6 +36,80 @@ import {
 export type DiffMode = 'unified' | 'split';
 export type { GitDiffTab } from '$lib/api/git.js';
 
+export interface GitWorkbenchTarget {
+	projectPath: string;
+	repoRoot: string;
+	worktreePath: string;
+	label: string;
+	source: 'chat-project' | 'repo-root' | 'worktree';
+}
+
+export type GitDiffActionMode = 'stage' | 'unstage';
+
+export interface GitDiffActionTarget {
+	filePath: string;
+	tab: GitDiffTab;
+	mode: GitDiffActionMode;
+	contextLines: number;
+}
+
+export interface GitLineSelectionKey {
+	filePath: string;
+	tab: GitDiffTab;
+	side: 'before' | 'after';
+	diffLineIndex: number;
+}
+
+export interface GitWorkbenchRefreshOptions {
+	reason: 'mount' | 'manual' | 'agent-event' | 'git-action' | 'branch-change' | 'worktree-change';
+	preserveDrafts?: boolean;
+	preserveSelection?: boolean;
+	preferSelectedFile?: boolean;
+}
+
+const DEFAULT_REFRESH_OPTIONS = {
+	preserveDrafts: true,
+	preserveSelection: true,
+	preferSelectedFile: true,
+};
+
+function targetKey(target: GitWorkbenchTarget | null): string {
+	return target ? target.worktreePath : '';
+}
+
+export function encodeLineSelectionKey(key: GitLineSelectionKey): string {
+	return [
+		encodeURIComponent(key.filePath),
+		key.tab,
+		key.side,
+		String(key.diffLineIndex),
+	].join('|');
+}
+
+export function decodeLineSelectionKey(raw: string): GitLineSelectionKey | null {
+	const [encodedFilePath, tab, side, rawIndex] = raw.split('|');
+	const diffLineIndex = Number(rawIndex);
+	if (!encodedFilePath) return null;
+	if (tab !== 'unstaged' && tab !== 'staged') return null;
+	if (side !== 'before' && side !== 'after') return null;
+	if (!Number.isInteger(diffLineIndex) || diffLineIndex < 0) return null;
+	return {
+		filePath: decodeURIComponent(encodedFilePath),
+		tab,
+		side,
+		diffLineIndex,
+	};
+}
+
+export function makeLineSelectionKey(
+	filePath: string,
+	tab: GitDiffTab,
+	side: 'before' | 'after',
+	diffLineIndex: number,
+): string {
+	return encodeLineSelectionKey({ filePath, tab, side, diffLineIndex });
+}
+
 /** Injectable dependencies for testing. Defaults load the real
  *  settings API when not overridden. */
 export interface GitWorkbenchDeps {
@@ -48,6 +123,12 @@ export interface GitWorkbenchDeps {
 }
 
 export class GitWorkbenchStore {
+	target = $state<GitWorkbenchTarget | null>(null);
+	private lastTargetKey = '';
+	private refreshGeneration = 0;
+	private scheduledRefresh: ReturnType<typeof setTimeout> | null = null;
+	private refreshPromise: Promise<void> | null = null;
+
 	// File tree
 	tree = $state<GitTreeNode[]>([]);
 	isLoadingTree = $state(false);
@@ -161,6 +242,35 @@ export class GitWorkbenchStore {
 		};
 		this.loadTreePaneWidth();
 		this.hydrateCommitSettings();
+	}
+
+	get projectPath(): string | null {
+		return this.target?.projectPath ?? null;
+	}
+
+	get hasTarget(): boolean {
+		return Boolean(this.target);
+	}
+
+	async setTarget(nextTarget: GitWorkbenchTarget | null): Promise<void> {
+		const nextKey = targetKey(nextTarget);
+		if (nextKey === this.lastTargetKey) {
+			this.target = nextTarget;
+			if (nextTarget && this.tree.length === 0) await this.refresh({ reason: 'mount' });
+			return;
+		}
+
+		this.target = nextTarget;
+		this.lastTargetKey = nextKey;
+		this.resetForTargetChange();
+
+		if (nextTarget) {
+			await this.refresh({
+				reason: 'mount',
+				preserveDrafts: false,
+				preserveSelection: false,
+			});
+		}
 	}
 
 	// Derived: currently selected file's review data
@@ -286,6 +396,31 @@ export class GitWorkbenchStore {
 		return result;
 	}
 
+	private hasFile(filePath: string): boolean {
+		return this.collectFilePaths(this.tree).includes(filePath);
+	}
+
+	private pruneReviewDataToCurrentTree(): void {
+		const paths = new Set(this.collectFilePaths(this.tree));
+		this.reviewDataByPath = Object.fromEntries(
+			Object.entries(this.reviewDataByPath).filter(([filePath]) => paths.has(filePath)),
+		);
+		for (const key of Array.from(this.reviewCache.keys())) {
+			const filePath = key.split('|').slice(2).join('|');
+			if (!paths.has(filePath)) this.reviewCache.delete(key);
+		}
+	}
+
+	private pruneLineSelectionToCurrentTree(): void {
+		const paths = new Set(this.collectFilePaths(this.tree));
+		this.selectedLineKeys = new Set(
+			Array.from(this.selectedLineKeys).filter((rawKey) => {
+				const parsed = decodeLineSelectionKey(rawKey);
+				return parsed ? paths.has(parsed.filePath) : false;
+			}),
+		);
+	}
+
 	private collectFilePathsByPredicate(nodes: GitTreeNode[], predicate: (n: GitTreeNode) => boolean): string[] {
 		const result: string[] = [];
 		for (const node of nodes) {
@@ -351,6 +486,10 @@ export class GitWorkbenchStore {
 		}, 6000);
 	}
 
+	reportError(msg: string): void {
+		this.surfaceError(msg);
+	}
+
 	private commitMessageGenerationErrorMessage(err: unknown): string {
 		if (!(err instanceof ApiError)) {
 			return `Generate message failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -410,6 +549,55 @@ export class GitWorkbenchStore {
 		}
 	}
 
+	scheduleRefresh(options: GitWorkbenchRefreshOptions, delayMs = 350): void {
+		if (this.scheduledRefresh) clearTimeout(this.scheduledRefresh);
+		this.scheduledRefresh = setTimeout(() => {
+			this.scheduledRefresh = null;
+			void this.refresh(options);
+		}, delayMs);
+	}
+
+	async refresh(options: GitWorkbenchRefreshOptions): Promise<void> {
+		if (this.refreshPromise) await this.refreshPromise;
+		this.refreshPromise = this.refreshNow(options);
+		try {
+			await this.refreshPromise;
+		} finally {
+			this.refreshPromise = null;
+		}
+	}
+
+	private async refreshNow(options: GitWorkbenchRefreshOptions): Promise<void> {
+		const target = this.target;
+		if (!target) return;
+		const effective = { ...DEFAULT_REFRESH_OPTIONS, ...options };
+		const generation = ++this.refreshGeneration;
+		const previousSelectedFile = this.selectedFile;
+
+		await this.loadTree(target.projectPath);
+		if (generation !== this.refreshGeneration) return;
+
+		this.pruneReviewDataToCurrentTree();
+		this.pruneLineSelectionToCurrentTree();
+
+		if (
+			effective.preserveSelection &&
+			effective.preferSelectedFile &&
+			previousSelectedFile &&
+			this.hasFile(previousSelectedFile)
+		) {
+			this.selectedFile = previousSelectedFile;
+			await this.loadFileReviewData(target.projectPath, previousSelectedFile);
+			return;
+		}
+
+		if (!effective.preserveSelection || !this.selectedFile || !this.hasFile(this.selectedFile)) {
+			const first = this.visibleFilePaths[0] ?? null;
+			this.selectedFile = first;
+			if (first) await this.loadFileReviewData(target.projectPath, first);
+		}
+	}
+
 	toggleDirCollapsed(dirPath: string): void {
 		const next = new Set(this.collapsedDirs);
 		if (next.has(dirPath)) next.delete(dirPath);
@@ -422,6 +610,7 @@ export class GitWorkbenchStore {
 	async openFile(projectPath: string, filePath: string): Promise<void> {
 		this.selectedFile = filePath;
 		this.selectedLineKeys = new Set();
+		await this.loadFileReviewData(projectPath, filePath);
 	}
 
 	// Queues a scroll request for the virtualized diff list.
@@ -439,6 +628,27 @@ export class GitWorkbenchStore {
 			if (filePath.startsWith(prefix)) return filePath;
 		}
 		return null;
+	}
+
+	preferredTabForFile(filePath: string): GitDiffTab | null {
+		const node = this.findTreeNode(filePath);
+		if (!node) return null;
+		if (this.activeTab === 'unstaged' && (node.hasUnstaged || node.changeKind === 'untracked')) return 'unstaged';
+		if (this.activeTab === 'staged' && node.staged) return 'staged';
+		if (node.hasUnstaged || node.changeKind === 'untracked') return 'unstaged';
+		if (node.staged) return 'staged';
+		return null;
+	}
+
+	async selectFile(projectPath: string, filePath: string): Promise<void> {
+		const nextTab = this.preferredTabForFile(filePath);
+		if (!nextTab) {
+			this.surfaceError(`File is not available in the current Git target: ${filePath}`);
+			return;
+		}
+		if (this.activeTab !== nextTab) this.setActiveTab(nextTab);
+		await this.openFile(projectPath, filePath);
+		this.requestDiffScrollToFile(filePath);
 	}
 
 	async loadFileReviewData(projectPath: string, filePath: string): Promise<void> {
@@ -489,42 +699,60 @@ export class GitWorkbenchStore {
 	}
 
 	private pumpFileQueue(): void {
-		const maxConcurrent = 6;
 		const gen = this.loadGeneration;
+		if (this.inFlightFiles.size > 0 || this.pendingLoadQueue.length === 0) return;
 
-		while (this.inFlightFiles.size < maxConcurrent && this.pendingLoadQueue.length > 0) {
-			const filePath = this.pendingLoadQueue.shift()!;
-			if (this.inFlightFiles.has(filePath)) continue;
-			this.inFlightFiles.add(filePath);
+		const tab = this.activeTab;
+		const contextLines = this.contextLines;
+		const projectPath = this.loadProjectPath;
+		const batch = this.pendingLoadQueue.splice(0, 8);
+		for (const filePath of batch) this.inFlightFiles.add(filePath);
 
-			const tab = this.activeTab;
-			const contextLines = this.contextLines;
-			const projectPath = this.loadProjectPath;
-
-			void getGitFileReviewData(projectPath, filePath, tab, contextLines)
-				.then((data) => {
-					if (gen !== this.loadGeneration) return;
+		void getGitFileReviewDataBatch(projectPath, batch, tab, contextLines)
+			.then((result) => {
+				if (gen !== this.loadGeneration) return;
+				const next = { ...this.reviewDataByPath };
+				for (const [filePath, data] of Object.entries(result.files)) {
 					this.cacheSet(filePath, data, tab);
-					this.reviewDataByPath = { ...this.reviewDataByPath, [filePath]: data };
-				})
-				.catch(() => {
-					if (gen !== this.loadGeneration) return;
-					this.reviewDataByPath = {
-						...this.reviewDataByPath,
-						[filePath]: {
-							path: filePath,
-							isBinary: false, truncated: false,
-							contentBefore: '', contentAfter: '',
-							diffOps: [], hunks: [],
-							error: 'Failed to load diff',
-						},
+					next[filePath] = data;
+				}
+				for (const [filePath, message] of Object.entries(result.errors)) {
+					next[filePath] = {
+						path: filePath,
+						mode: tab === 'staged' ? 'staged' : 'working',
+						isBinary: false,
+						truncated: false,
+						contentBefore: '',
+						contentAfter: '',
+						diffOps: [],
+						hunks: [],
+						error: message || 'Failed to load diff',
 					};
-				})
-				.finally(() => {
-					this.inFlightFiles.delete(filePath);
-					if (gen === this.loadGeneration) this.pumpFileQueue();
-				});
-		}
+				}
+				this.reviewDataByPath = next;
+			})
+			.catch(() => {
+				if (gen !== this.loadGeneration) return;
+				const next = { ...this.reviewDataByPath };
+				for (const filePath of batch) {
+					next[filePath] = {
+						path: filePath,
+						mode: tab === 'staged' ? 'staged' : 'working',
+						isBinary: false,
+						truncated: false,
+						contentBefore: '',
+						contentAfter: '',
+						diffOps: [],
+						hunks: [],
+						error: 'Failed to load diff',
+					};
+				}
+				this.reviewDataByPath = next;
+			})
+			.finally(() => {
+				for (const filePath of batch) this.inFlightFiles.delete(filePath);
+				if (gen === this.loadGeneration) this.pumpFileQueue();
+			});
 	}
 
 	// Invalidates all cached data. Used after commit/revert where every
@@ -542,9 +770,16 @@ export class GitWorkbenchStore {
 	// file. Other files remain cached and untouched.
 	private async refreshFileAfterStage(projectPath: string, file: string): Promise<void> {
 		this.cacheInvalidateFile(file);
-		await this.loadTree(projectPath);
-		// Reload just the affected file (bypasses cache since we invalidated it)
-		await this.loadFileReviewData(projectPath, file);
+		this.reviewDataByPath = Object.fromEntries(
+			Object.entries(this.reviewDataByPath).filter(([filePath]) => filePath !== file),
+		);
+		await this.refreshAfterGitAction(projectPath, { reason: 'git-action', preferSelectedFile: true });
+		if (this.hasFile(file)) await this.loadFileReviewData(projectPath, file);
+	}
+
+	private async refreshAfterGitAction(projectPath: string, options: GitWorkbenchRefreshOptions): Promise<void> {
+		if (this.target) await this.refresh(options);
+		else await this.loadTree(projectPath);
 	}
 
 	// Tab and diff settings
@@ -596,91 +831,34 @@ export class GitWorkbenchStore {
 	// Staging actions
 
 	async stageSelectedLines(projectPath: string): Promise<boolean> {
-		if (!this.selectedFile || this.selectedLineKeys.size === 0) return false;
-		const file = this.selectedFile;
-		const indices = Array.from(this.selectedLineKeys)
-			.map((k) => parseInt(k.split(':')[1], 10))
-			.filter((n) => !isNaN(n));
-		try {
-			const result = await gitStageSelection(
-				projectPath, file, 'stage', indices, this.contextLines,
-			);
-			if (result.success) {
-				this.selectedLineKeys = new Set();
-				await this.refreshFileAfterStage(projectPath, file);
-			}
-			return result.success ?? false;
-		} catch (err) {
-			this.surfaceError(`Stage failed: ${err instanceof Error ? err.message : String(err)}`);
-			return false;
-		}
+		return this.stageGroupedSelectedLines(projectPath, 'stage');
 	}
 
 	async unstageSelectedLines(projectPath: string): Promise<boolean> {
-		if (!this.selectedFile || this.selectedLineKeys.size === 0) return false;
-		const file = this.selectedFile;
-		const indices = Array.from(this.selectedLineKeys)
-			.map((k) => parseInt(k.split(':')[1], 10))
-			.filter((n) => !isNaN(n));
-		try {
-			const result = await gitStageSelection(
-				projectPath, file, 'unstage', indices, this.contextLines,
-			);
-			if (result.success) {
-				this.selectedLineKeys = new Set();
-				await this.refreshFileAfterStage(projectPath, file);
-			}
-			return result.success ?? false;
-		} catch (err) {
-			this.surfaceError(`Unstage failed: ${err instanceof Error ? err.message : String(err)}`);
-			return false;
-		}
+		return this.stageGroupedSelectedLines(projectPath, 'unstage');
 	}
 
 	// Stage/unstage a single diff line by its diffLineIndex.
-	async stageLine(projectPath: string, diffLineIndex: number): Promise<boolean> {
-		if (!this.selectedFile) return false;
-		const file = this.selectedFile;
-		try {
-			const result = await gitStageSelection(
-				projectPath, file, 'stage', [diffLineIndex], this.contextLines,
-			);
-			if (result.success) {
-				await this.refreshFileAfterStage(projectPath, file);
-			}
-			return result.success ?? false;
-		} catch (err) {
-			this.surfaceError(`Stage line failed: ${err instanceof Error ? err.message : String(err)}`);
-			return false;
-		}
+	async stageLine(projectPath: string, target: GitDiffActionTarget, diffLineIndex: number): Promise<boolean> {
+		return this.stageSelectionForTarget(projectPath, { ...target, mode: 'stage' }, [diffLineIndex]);
 	}
 
-	async unstageLine(projectPath: string, diffLineIndex: number): Promise<boolean> {
-		if (!this.selectedFile) return false;
-		const file = this.selectedFile;
-		try {
-			const result = await gitStageSelection(
-				projectPath, file, 'unstage', [diffLineIndex], this.contextLines,
-			);
-			if (result.success) {
-				await this.refreshFileAfterStage(projectPath, file);
-			}
-			return result.success ?? false;
-		} catch (err) {
-			this.surfaceError(`Unstage line failed: ${err instanceof Error ? err.message : String(err)}`);
-			return false;
-		}
+	async unstageLine(projectPath: string, target: GitDiffActionTarget, diffLineIndex: number): Promise<boolean> {
+		return this.stageSelectionForTarget(projectPath, { ...target, mode: 'unstage' }, [diffLineIndex]);
 	}
 
-	async stageHunk(projectPath: string, hunkIndex: number): Promise<boolean> {
-		if (!this.selectedFile) return false;
-		const file = this.selectedFile;
+	async stageHunk(projectPath: string, targetOrHunkIndex: GitDiffActionTarget | number, maybeHunkIndex?: number): Promise<boolean> {
+		const target = typeof targetOrHunkIndex === 'number'
+			? this.targetForSelectedFile('stage')
+			: { ...targetOrHunkIndex, mode: 'stage' as const };
+		const hunkIndex = typeof targetOrHunkIndex === 'number' ? targetOrHunkIndex : maybeHunkIndex;
+		if (!target || hunkIndex === undefined) return false;
 		try {
 			const result = await gitStageHunk(
-				projectPath, file, 'stage', hunkIndex, this.contextLines,
+				projectPath, target.filePath, 'stage', hunkIndex, target.contextLines,
 			);
 			if (result.success) {
-				await this.refreshFileAfterStage(projectPath, file);
+				await this.refreshFileAfterStage(projectPath, target.filePath);
 			}
 			return result.success ?? false;
 		} catch (err) {
@@ -689,21 +867,111 @@ export class GitWorkbenchStore {
 		}
 	}
 
-	async unstageHunk(projectPath: string, hunkIndex: number): Promise<boolean> {
-		if (!this.selectedFile) return false;
-		const file = this.selectedFile;
+	async unstageHunk(projectPath: string, targetOrHunkIndex: GitDiffActionTarget | number, maybeHunkIndex?: number): Promise<boolean> {
+		const target = typeof targetOrHunkIndex === 'number'
+			? this.targetForSelectedFile('unstage')
+			: { ...targetOrHunkIndex, mode: 'unstage' as const };
+		const hunkIndex = typeof targetOrHunkIndex === 'number' ? targetOrHunkIndex : maybeHunkIndex;
+		if (!target || hunkIndex === undefined) return false;
 		try {
 			const result = await gitStageHunk(
-				projectPath, file, 'unstage', hunkIndex, this.contextLines,
+				projectPath, target.filePath, 'unstage', hunkIndex, target.contextLines,
 			);
 			if (result.success) {
-				await this.refreshFileAfterStage(projectPath, file);
+				await this.refreshFileAfterStage(projectPath, target.filePath);
 			}
 			return result.success ?? false;
 		} catch (err) {
 			this.surfaceError(`Unstage hunk failed: ${err instanceof Error ? err.message : String(err)}`);
 			return false;
 		}
+	}
+
+	private async stageGroupedSelectedLines(projectPath: string, mode: GitDiffActionMode): Promise<boolean> {
+		const groups = this.groupSelectedLineIndicesByTarget(mode);
+		if (groups.length === 0) return false;
+		const results = [];
+		for (const group of groups) {
+			results.push(await this.stageSelectionForTarget(projectPath, group.target, group.lineIndices));
+		}
+		return results.every(Boolean);
+	}
+
+	private async stageSelectionForTarget(
+		projectPath: string,
+		target: GitDiffActionTarget,
+		lineIndices: number[],
+	): Promise<boolean> {
+		try {
+			const result = await gitStageSelection(
+				projectPath, target.filePath, target.mode, lineIndices, target.contextLines,
+			);
+			if (result.success) {
+				this.clearSelectionForFile(target.filePath, target.tab);
+				await this.refreshFileAfterStage(projectPath, target.filePath);
+			}
+			return result.success ?? false;
+		} catch (err) {
+			this.surfaceError(`${target.mode === 'stage' ? 'Stage' : 'Unstage'} failed: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
+		}
+	}
+
+	private targetForSelectedFile(mode: GitDiffActionMode): GitDiffActionTarget | null {
+		if (!this.selectedFile) return null;
+		return {
+			filePath: this.selectedFile,
+			tab: this.activeTab,
+			mode,
+			contextLines: this.contextLines,
+		};
+	}
+
+	private groupSelectedLineIndicesByTarget(mode: GitDiffActionMode): Array<{
+		target: GitDiffActionTarget;
+		lineIndices: number[];
+	}> {
+		const grouped = new Map<string, { target: GitDiffActionTarget; lineIndices: number[] }>();
+		for (const rawKey of this.selectedLineKeys) {
+			const parsed = decodeLineSelectionKey(rawKey) ?? this.decodeLegacySelectionKey(rawKey);
+			if (!parsed) continue;
+			const key = `${parsed.filePath}|${parsed.tab}|${mode}`;
+			const existing = grouped.get(key) ?? {
+				target: {
+					filePath: parsed.filePath,
+					tab: parsed.tab,
+					mode,
+					contextLines: this.contextLines,
+				},
+				lineIndices: [],
+			};
+			existing.lineIndices.push(parsed.diffLineIndex);
+			grouped.set(key, existing);
+		}
+		return Array.from(grouped.values());
+	}
+
+	private decodeLegacySelectionKey(rawKey: string): GitLineSelectionKey | null {
+		if (!this.selectedFile) return null;
+		const [side, rawIndex] = rawKey.split(':');
+		const diffLineIndex = Number(rawIndex);
+		if (side !== 'before' && side !== 'after') return null;
+		if (!Number.isInteger(diffLineIndex) || diffLineIndex < 0) return null;
+		return {
+			filePath: this.selectedFile,
+			tab: this.activeTab,
+			side,
+			diffLineIndex,
+		};
+	}
+
+	private clearSelectionForFile(filePath: string, tab: GitDiffTab): void {
+		this.selectedLineKeys = new Set(
+			Array.from(this.selectedLineKeys).filter((rawKey) => {
+				const parsed = decodeLineSelectionKey(rawKey) ?? this.decodeLegacySelectionKey(rawKey);
+				return !parsed || parsed.filePath !== filePath || parsed.tab !== tab;
+			}),
+		);
 	}
 
 	// File-level staging (for untracked files or bulk operations)
@@ -740,7 +1008,7 @@ export class GitWorkbenchStore {
 			const result = await gitStageFile(projectPath, dirPath, 'stage');
 			if (result.success) {
 				this.refreshAllData();
-				await this.loadTree(projectPath);
+				await this.refreshAfterGitAction(projectPath, { reason: 'git-action' });
 			}
 			return result.success ?? false;
 		} catch (err) {
@@ -754,7 +1022,7 @@ export class GitWorkbenchStore {
 			const result = await gitStageFile(projectPath, dirPath, 'unstage');
 			if (result.success) {
 				this.refreshAllData();
-				await this.loadTree(projectPath);
+				await this.refreshAfterGitAction(projectPath, { reason: 'git-action' });
 			}
 			return result.success ?? false;
 		} catch (err) {
@@ -780,16 +1048,16 @@ export class GitWorkbenchStore {
 		try {
 			const node = this.findTreeNode(filePath);
 			const isUntracked = node?.changeKind === 'untracked';
-			const result = isUntracked
-				? await gitDeleteUntracked(projectPath, filePath)
-				: await gitDiscard(projectPath, filePath);
-			if (result.success) {
-				this.refreshAllData();
-				await this.loadTree(projectPath);
-				if (this.selectedFile === filePath && !this.visibleFilePaths.includes(filePath)) {
-					const first = this.visibleFilePaths[0];
-					this.selectedFile = first ?? null;
-				}
+				const result = isUntracked
+					? await gitDeleteUntracked(projectPath, filePath)
+					: await gitDiscard(projectPath, filePath);
+				if (result.success) {
+					this.refreshAllData();
+					await this.refreshAfterGitAction(projectPath, { reason: 'git-action' });
+					if (this.selectedFile === filePath && !this.visibleFilePaths.includes(filePath)) {
+						const first = this.visibleFilePaths[0];
+						this.selectedFile = first ?? null;
+					}
 			}
 			return result.success ?? false;
 		} catch (err) {
@@ -820,11 +1088,11 @@ export class GitWorkbenchStore {
 		try {
 			const result = await gitCommitIndex(projectPath, this.commitMessage.trim());
 			if (result.success) {
-				this.commitMessage = '';
-				this.refreshAllData();
-				await this.loadTree(projectPath);
-				// After commit, the previously selected file may no longer
-				// have changes. Re-select if still present, otherwise pick
+					this.commitMessage = '';
+					this.refreshAllData();
+					await this.refreshAfterGitAction(projectPath, { reason: 'git-action', preserveSelection: false });
+					// After commit, the previously selected file may no longer
+					// have changes. Re-select if still present, otherwise pick
 				// the first remaining file or clear selection.
 				if (!this.selectedFile || !this.visibleFilePaths.includes(this.selectedFile)) {
 					const first = this.visibleFilePaths[0];
@@ -849,11 +1117,11 @@ export class GitWorkbenchStore {
 	async createInitialCommit(projectPath: string): Promise<boolean> {
 		this.isCreatingInitialCommit = true;
 		try {
-			const result = await gitInitialCommit(projectPath);
-			if (result.success) {
-				this.hasCommits = true;
-				await this.loadTree(projectPath);
-			} else {
+				const result = await gitInitialCommit(projectPath);
+				if (result.success) {
+					this.hasCommits = true;
+					await this.refreshAfterGitAction(projectPath, { reason: 'git-action', preserveSelection: false });
+				} else {
 				this.surfaceError(result.error ?? 'Initial commit failed');
 			}
 			return result.success ?? false;
@@ -1064,11 +1332,11 @@ export class GitWorkbenchStore {
 		strategy: 'revert' | 'reset-soft' = 'revert',
 	): Promise<boolean> {
 		try {
-			const result = await gitRevertLastCommit(projectPath, strategy);
-			if (result.success) {
-				this.refreshAllData();
-				await this.loadTree(projectPath);
-			}
+				const result = await gitRevertLastCommit(projectPath, strategy);
+				if (result.success) {
+					this.refreshAllData();
+					await this.refreshAfterGitAction(projectPath, { reason: 'git-action', preserveSelection: false });
+				}
 			return result.success ?? false;
 		} catch (err) {
 			this.surfaceError(`Revert failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1086,8 +1354,7 @@ export class GitWorkbenchStore {
 		return this.scrollPositions.get(filePath) ?? 0;
 	}
 
-	// Full reset when project changes
-	reset(): void {
+	private resetForTargetChange(): void {
 		this.tree = [];
 		this.selectedFile = null;
 		this.diffScrollRequest = null;
@@ -1109,5 +1376,12 @@ export class GitWorkbenchStore {
 		this.reviewCache.clear();
 		this.reviewModalOpen = false;
 		this.commentComposer = { open: false, filePath: '', side: 'after', line: 0, body: '', severity: 'note' };
+	}
+
+	// Full reset when project changes or the panel is disposed.
+	reset(): void {
+		this.target = null;
+		this.lastTargetKey = '';
+		this.resetForTargetChange();
 	}
 }

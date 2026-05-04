@@ -10,6 +10,7 @@ const mockDeps: GitWorkbenchDeps = {
 vi.mock('$lib/api/git.js', () => ({
 	getGitChangesTree: vi.fn(),
 	getGitFileReviewData: vi.fn(),
+	getGitFileReviewDataBatch: vi.fn(),
 	gitStageSelection: vi.fn(),
 	gitStageHunk: vi.fn(),
 	gitStageFile: vi.fn(),
@@ -93,14 +94,17 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('requestFilesLoaded fetches uncached files', async () => {
-			mockedApi.getGitFileReviewData.mockImplementation(async (_project, file) => ({
-				path: file as string,
-				isBinary: false,
-				truncated: false,
-				contentBefore: '',
-				contentAfter: '',
-				diffOps: [],
-				hunks: [],
+			mockedApi.getGitFileReviewDataBatch.mockImplementation(async (_project, files) => ({
+				files: Object.fromEntries((files as string[]).map((file) => [file, {
+					path: file,
+					isBinary: false,
+					truncated: false,
+					contentBefore: '',
+					contentAfter: '',
+					diffOps: [],
+					hunks: [],
+				}])),
+				errors: {},
 			}) as any);
 
 			wb.requestFilesLoaded('/project', ['a.ts', 'src/b.ts']);
@@ -111,16 +115,24 @@ describe('GitWorkbenchStore', () => {
 					expect.arrayContaining(['a.ts', 'src/b.ts']),
 				);
 			});
-			expect(mockedApi.getGitFileReviewData).toHaveBeenCalledTimes(2);
+			expect(mockedApi.getGitFileReviewDataBatch).toHaveBeenCalledTimes(1);
 		});
 
 		it('requestFilesLoaded deduplicates in-flight requests', async () => {
 			let callCount = 0;
-			mockedApi.getGitFileReviewData.mockImplementation(async (_project, file) => {
+			mockedApi.getGitFileReviewDataBatch.mockImplementation(async (_project, files) => {
 				callCount++;
 				return {
-					path: file as string, isBinary: false, truncated: false,
-					contentBefore: '', contentAfter: '', diffOps: [], hunks: [],
+					files: Object.fromEntries((files as string[]).map((file) => [file, {
+						path: file,
+						isBinary: false,
+						truncated: false,
+						contentBefore: '',
+						contentAfter: '',
+						diffOps: [],
+						hunks: [],
+					}])),
+					errors: {},
 				} as any;
 			});
 
@@ -649,6 +661,79 @@ describe('GitWorkbenchStore', () => {
 			expect(first?.filePath).toBe('src/a.ts');
 			expect(second?.filePath).toBe('src/a.ts');
 			expect(second?.token).toBeGreaterThan(first?.token ?? 0);
+		});
+
+		it('switches to staged tab when selecting a staged-only file', async () => {
+			wb.tree = [
+				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
+			] as any;
+			wb.setActiveTab('unstaged');
+			mockedApi.getGitFileReviewData.mockResolvedValue({
+				path: 'staged.ts',
+				isBinary: false,
+				truncated: false,
+				contentBefore: '',
+				contentAfter: '',
+				diffOps: [],
+				hunks: [],
+			} as any);
+
+			await wb.selectFile('/project', 'staged.ts');
+
+			expect(wb.activeTab).toBe('staged');
+			expect(wb.selectedFile).toBe('staged.ts');
+			expect(wb.diffScrollRequest?.filePath).toBe('staged.ts');
+		});
+	});
+
+	describe('target refresh lifecycle', () => {
+		it('preserves commit draft on same-target refresh', async () => {
+			mockedApi.getGitChangesTree.mockResolvedValue({
+				root: [{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true }],
+				hasCommits: true,
+			});
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+			wb.commitMessage = 'feat: keep draft';
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+
+			expect(wb.commitMessage).toBe('feat: keep draft');
+		});
+
+		it('clears commit draft when target changes', async () => {
+			mockedApi.getGitChangesTree.mockResolvedValue({ root: [], hasCommits: true });
+
+			await wb.setTarget({
+				projectPath: '/project-a',
+				repoRoot: '/repo',
+				worktreePath: '/project-a',
+				label: 'a',
+				source: 'worktree',
+			});
+			wb.commitMessage = 'feat: old target';
+
+			await wb.setTarget({
+				projectPath: '/project-b',
+				repoRoot: '/repo',
+				worktreePath: '/project-b',
+				label: 'b',
+				source: 'worktree',
+			});
+
+			expect(wb.commitMessage).toBe('');
 		});
 	});
 

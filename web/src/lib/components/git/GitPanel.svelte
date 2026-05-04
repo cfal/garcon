@@ -6,6 +6,8 @@
 	// it down so the toolbar can access commit/review state.
 
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
+	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
+	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 	import GitTopToolbar from './GitTopToolbar.svelte';
 	import GitWorkbench from './GitWorkbench.svelte';
@@ -16,8 +18,10 @@
 	import GitPushModal from './GitPushModal.svelte';
 	import CommitMessageSettingsModal from './CommitMessageSettingsModal.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
+	import GitWorktreePanel from './GitWorktreePanel.svelte';
 	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
-	import { GitWorkbenchStore } from '$lib/stores/git-workbench.svelte.js';
+	import { GitWorkbenchStore, type GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte.js';
+	import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js';
 	import { getLocalSettings, getFileViewer, getRemoteSettings } from '$lib/context';
 
 	interface GitPanelProps {
@@ -43,8 +47,24 @@
 			if (!snap) return null;
 			return { ui: snap.ui as Record<string, unknown>, uiEffective: snap.uiEffective as Record<string, unknown> };
 		},
-	});
-	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
+		});
+		let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
+		let targets = $state<GitTargetCandidate[]>([]);
+		let activeTarget = $state<GitWorkbenchTarget | null>(null);
+		let isLoadingTargets = $state(false);
+		let showWorktrees = $state(false);
+		let fallbackTarget = $derived<GitWorkbenchTarget | null>(
+			projectPath
+				? {
+					projectPath,
+					repoRoot: projectPath,
+					worktreePath: projectPath,
+					label: projectPath.split('/').pop() || projectPath,
+					source: 'chat-project',
+				}
+				: null,
+		);
+		let activeProjectPath = $derived(activeTarget?.projectPath ?? projectPath);
 
 	// Commit modal state
 	let showCommitModal = $state(false);
@@ -55,74 +75,137 @@
 	let revertStrategy = $state<'revert' | 'reset-soft'>('revert');
 
 	// Derived: whether push is available
-	let canPush = $derived(
-		!!store.remoteStatus?.hasRemote && (
-			!store.remoteStatus.hasUpstream ||
+		let canPush = $derived(
+			!!store.remoteStatus?.hasRemote && (
+				!store.remoteStatus.hasUpstream ||
 			store.remoteStatus.ahead > 0
 		)
 	);
 
-	// Reset and fetch when the project path changes.
-	$effect(() => {
-		store.resetForProject(projectPath);
-	});
+		function toWorkbenchTarget(candidate: GitTargetCandidate): GitWorkbenchTarget {
+			return {
+				projectPath: candidate.projectPath,
+				repoRoot: candidate.repoRoot,
+				worktreePath: candidate.worktreePath,
+				label: candidate.label,
+				source: candidate.source,
+			};
+		}
+
+		async function refreshTargets(baseProjectPath: string): Promise<void> {
+			isLoadingTargets = true;
+			try {
+				const result = await getGitTargetCandidates(baseProjectPath);
+				targets = result.targets;
+				const current = result.targets.find((candidate) => candidate.isCurrent && !candidate.isMissing)
+					?? result.targets.find((candidate) => !candidate.isMissing)
+					?? null;
+				if (!activeTarget || !result.targets.some((candidate) => candidate.worktreePath === activeTarget?.worktreePath && !candidate.isMissing)) {
+					activeTarget = current ? toWorkbenchTarget(current) : fallbackTarget;
+				}
+			} catch (err) {
+				wb.reportError(`Failed to load Git targets: ${err instanceof Error ? err.message : String(err)}`);
+				targets = fallbackTarget
+					? [{
+						projectPath: fallbackTarget.projectPath,
+						repoRoot: fallbackTarget.repoRoot,
+						worktreePath: fallbackTarget.worktreePath,
+						label: fallbackTarget.label,
+						branch: '',
+						source: fallbackTarget.source,
+						isCurrent: true,
+						isMissing: false,
+					}]
+					: [];
+				activeTarget = fallbackTarget;
+			} finally {
+				isLoadingTargets = false;
+			}
+		}
+
+		// Reset and fetch when the chat project changes.
+		$effect(() => {
+			if (!projectPath) {
+				targets = [];
+				activeTarget = null;
+				store.resetForProject(null);
+				return;
+			}
+			void refreshTargets(projectPath);
+		});
+
+		$effect(() => {
+			store.resetForProject(activeProjectPath);
+			void wb.setTarget(activeTarget ?? fallbackTarget);
+		});
 
 	// Fetch history when switching to the history tab.
 	$effect(() => {
-		if (projectPath && store.activeView === 'history') {
-			store.fetchRecentCommits(projectPath);
-		}
-	});
-
-	function handleRefresh(): void {
-		if (!projectPath) return;
-		store.refreshAll(projectPath);
-		wb.refreshAllData();
-		wb.loadTree(projectPath);
-	}
-
-	async function handleCommitFromModal(): Promise<void> {
-		if (!projectPath) return;
-		const ok = await wb.commitIndex(projectPath);
-		if (ok) showCommitModal = false;
-	}
-
-	function handleGenerateMessage(): void {
-		if (!projectPath) return;
-		wb.generateCommitMsg(projectPath);
-	}
-
-	async function handleRevert(): Promise<void> {
-		if (!projectPath) return;
-		await wb.revertLastCommit(projectPath, revertStrategy);
-		showRevertModal = false;
-	}
-
-	function handleOpenInEditor(relativePath: string, line: number): void {
-		if (!projectPath) return;
-		fileViewer.openCode({
-			chatId,
-			projectPath,
-			relativePath,
-			source: 'command',
-			line,
+			if (activeProjectPath && store.activeView === 'history') {
+				store.fetchRecentCommits(activeProjectPath);
+			}
 		});
-	}
+
+		function handleRefresh(): void {
+			if (!activeProjectPath) return;
+			store.refreshAll(activeProjectPath);
+			wb.refreshAllData();
+			wb.refresh({ reason: 'manual' });
+		}
+
+		async function handleCommitFromModal(): Promise<void> {
+			if (!activeProjectPath) return;
+			const ok = await wb.commitIndex(activeProjectPath);
+			if (ok) showCommitModal = false;
+			if (ok) store.refreshAll(activeProjectPath);
+		}
+
+		function handleGenerateMessage(): void {
+			if (!activeProjectPath) return;
+			wb.generateCommitMsg(activeProjectPath);
+		}
+
+		async function handleRevert(): Promise<void> {
+			if (!activeProjectPath) return;
+			await wb.revertLastCommit(activeProjectPath, revertStrategy);
+			store.refreshAll(activeProjectPath);
+			showRevertModal = false;
+		}
+
+		function handleOpenInEditor(relativePath: string, line: number): void {
+			if (!activeProjectPath) return;
+			fileViewer.openCode({
+				chatId,
+				projectPath: activeProjectPath,
+				relativePath,
+				source: 'command',
+				line,
+			});
+		}
+
+		function handleTargetSelect(worktreePath: string): void {
+			const candidate = targets.find((target) => target.worktreePath === worktreePath);
+			if (!candidate || candidate.isMissing) return;
+			activeTarget = toWorkbenchTarget(candidate);
+		}
 </script>
 
-{#if !projectPath}
+	{#if !activeProjectPath}
 	<div class="h-full flex items-center justify-center text-muted-foreground">
 		<p>{m.git_panel_select_project()}</p>
 	</div>
 {:else}
-	<div class="h-full flex flex-col bg-background">
-		<GitTopToolbar
+		<div class="relative h-full flex flex-col bg-background">
+			<GitTopToolbar
 			{isMobile}
 			activeView={store.activeView}
 			currentBranch={store.currentBranch}
 			branches={store.branches}
-			remoteStatus={store.remoteStatus}
-			showBranchDropdown={store.showBranchDropdown}
+				remoteStatus={store.remoteStatus}
+				targets={targets}
+				activeWorktreePath={activeTarget?.worktreePath ?? null}
+				isLoadingTargets={isLoadingTargets}
+				showBranchDropdown={store.showBranchDropdown}
 			isLoading={store.isLoading || wb.isLoadingTree}
 			isPushing={store.isPushing}
 			reviewCount={wb.reviewComments.length}
@@ -135,12 +218,21 @@
 			onToggleBranchDropdown={() => (store.showBranchDropdown = !store.showBranchDropdown)}
 			onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
 			onShowNewBranchModal={() => (store.showNewBranchModal = true)}
-			onSwitchBranch={(branch) => store.handleSwitchBranch(projectPath, branch)}
-			onViewCommits={() => (store.activeView = 'history')}
+				onSwitchBranch={async (branch) => {
+					if (!activeProjectPath) return;
+					const ok = await store.handleSwitchBranch(activeProjectPath, branch);
+					if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
+				}}
+				onSelectTarget={handleTargetSelect}
+				onOpenWorktrees={() => {
+					showWorktrees = true;
+					if (activeProjectPath) wb.loadWorktrees(activeProjectPath);
+				}}
+				onViewCommits={() => (store.activeView = 'history')}
 			onViewChanges={() => (store.activeView = 'changes')}
 			onOpenReview={() => (wb.reviewModalOpen = true)}
 			onCommit={() => { showCommitModal = true; }}
-			onPush={() => store.handleToolbarPush(projectPath)}
+				onPush={() => { if (activeProjectPath) store.handleToolbarPush(activeProjectPath); }}
 			onSetDiffMode={(m) => wb.setDiffMode(m)}
 			onSetContextLines={(n) => wb.setContextLines(n)}
 			onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
@@ -149,8 +241,26 @@
 				revertStrategy = 'revert';
 				showRevertModal = true;
 			}}
-			onRefresh={handleRefresh}
-		/>
+				onRefresh={handleRefresh}
+			/>
+
+			{#if store.lastError || wb.lastError}
+				<div class="flex items-center gap-2 border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground">
+					<AlertTriangle class="h-3.5 w-3.5 shrink-0" />
+					<span class="min-w-0 flex-1 truncate">{store.lastError ?? wb.lastError}</span>
+					<button
+						type="button"
+						class="rounded p-0.5 hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+						aria-label="Dismiss Git error"
+						onclick={() => {
+							store.dismissError();
+							wb.dismissError();
+						}}
+					>
+						<X class="h-3.5 w-3.5" />
+					</button>
+				</div>
+			{/if}
 
 		{#if store.gitStatus?.error}
 			<div class="flex-1 flex flex-col items-center justify-center text-muted-foreground px-6 py-12">
@@ -167,10 +277,10 @@
 			</div>
 		{:else}
 			{#if store.activeView === 'changes'}
-				<GitWorkbench
-					projectPath={projectPath}
-					{isMobile}
-					{wb}
+					<GitWorkbench
+						target={activeTarget ?? fallbackTarget}
+						{isMobile}
+						{wb}
 					{onSendToChat}
 					diffFontSize={gitDiffFontSize}
 					onOpenInEditor={handleOpenInEditor}
@@ -178,15 +288,15 @@
 			{/if}
 
 			{#if store.activeView === 'history' && !store.gitStatus?.error}
-				<GitHistoryView
+					<GitHistoryView
 					{isMobile}
 					isLoading={store.isLoading}
 					recentCommits={store.recentCommits}
 					expandedCommits={store.expandedCommits}
 					commitDiffs={store.commitDiffs}
 					wrapText={store.wrapText}
-					onToggleCommitExpanded={(hash) => store.toggleCommitExpanded(projectPath, hash)}
-				/>
+						onToggleCommitExpanded={(hash) => { if (activeProjectPath) store.toggleCommitExpanded(activeProjectPath, hash); }}
+					/>
 			{/if}
 		{/if}
 
@@ -196,7 +306,11 @@
 				newBranchName={store.newBranchName}
 				isCreatingBranch={store.isCreatingBranch}
 				onNameChange={(name) => (store.newBranchName = name)}
-				onCreateBranch={() => store.handleCreateBranch(projectPath)}
+					onCreateBranch={async () => {
+						if (!activeProjectPath) return;
+						const ok = await store.handleCreateBranch(activeProjectPath);
+						if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
+					}}
 				onClose={() => (store.showNewBranchModal = false)}
 			/>
 		{/if}
@@ -204,7 +318,7 @@
 		{#if store.confirmAction}
 			<GitConfirmModal
 				confirmAction={store.confirmAction}
-				onConfirm={() => store.confirmAndExecute(projectPath)}
+				onConfirm={() => { if (activeProjectPath) store.confirmAndExecute(activeProjectPath); }}
 				onCancel={() => (store.confirmAction = null)}
 			/>
 		{/if}
@@ -234,15 +348,49 @@
 			/>
 		{/if}
 
-		{#if store.showPushModal}
-			<GitPushModal
-				remotes={store.pushRemotes}
-				currentBranch={store.currentBranch}
-				isPushing={store.isPushing}
-				onPush={(remote, remoteBranch) => store.handlePush(projectPath, remote, remoteBranch)}
-				onClose={() => { store.showPushModal = false; }}
-			/>
-		{/if}
+			{#if store.showPushModal}
+				<GitPushModal
+					remotes={store.pushRemotes}
+					currentBranch={store.currentBranch}
+					isPushing={store.isPushing}
+					onPush={async (remote, remoteBranch) => {
+						if (!activeProjectPath) return;
+						const ok = await store.handlePush(activeProjectPath, remote, remoteBranch);
+						if (ok) await wb.refresh({ reason: 'git-action' });
+					}}
+					onClose={() => { store.showPushModal = false; }}
+				/>
+			{/if}
+
+			{#if showWorktrees}
+				<div class="absolute inset-x-3 top-12 z-50 max-w-md rounded border border-border bg-popover shadow-lg">
+					<GitWorktreePanel
+						worktrees={wb.worktrees}
+						isLoading={wb.isLoadingWorktrees}
+						onCreateWorktree={async (path, options) => {
+							if (!activeProjectPath) return false;
+							const ok = await wb.createWorktree(activeProjectPath, path, options);
+							if (ok && projectPath) await refreshTargets(projectPath);
+							return ok;
+						}}
+						onRemoveWorktree={async (path, force) => {
+							if (!activeProjectPath) return false;
+							const ok = await wb.removeWorktree(activeProjectPath, path, force);
+							if (ok && projectPath) await refreshTargets(projectPath);
+							return ok;
+						}}
+						onRefresh={() => { if (activeProjectPath) wb.loadWorktrees(activeProjectPath); }}
+					/>
+					<button
+						type="button"
+						class="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+						aria-label="Close worktrees"
+						onclick={() => { showWorktrees = false; }}
+					>
+						<X class="w-4 h-4" />
+					</button>
+				</div>
+			{/if}
 
 		{#if showCommitSettings}
 			<CommitMessageSettingsModal

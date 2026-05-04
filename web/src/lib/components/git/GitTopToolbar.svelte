@@ -13,8 +13,9 @@
 	import Upload from '@lucide/svelte/icons/upload';
 	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
-	import type { GitRemoteStatus } from '$lib/api/git';
+	import type { GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
 	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -24,6 +25,9 @@
 		currentBranch: string;
 		branches: string[];
 		remoteStatus: GitRemoteStatus | null;
+		targets?: GitTargetCandidate[];
+		activeWorktreePath?: string | null;
+		isLoadingTargets?: boolean;
 		showBranchDropdown: boolean;
 		isLoading: boolean;
 		isPushing: boolean;
@@ -38,6 +42,8 @@
 		onCloseBranchDropdown: () => void;
 		onShowNewBranchModal: () => void;
 		onSwitchBranch: (branch: string) => void;
+		onSelectTarget?: (worktreePath: string) => void;
+		onOpenWorktrees?: () => void;
 		onViewCommits: () => void;
 		onViewChanges: () => void;
 		onOpenReview: () => void;
@@ -57,6 +63,9 @@
 		currentBranch,
 		branches,
 		remoteStatus,
+		targets = [],
+		activeWorktreePath = null,
+		isLoadingTargets = false,
 		showBranchDropdown,
 		isLoading,
 		isPushing,
@@ -71,6 +80,8 @@
 		onCloseBranchDropdown,
 		onShowNewBranchModal,
 		onSwitchBranch,
+		onSelectTarget,
+		onOpenWorktrees,
 		onViewCommits,
 		onViewChanges,
 		onOpenReview,
@@ -155,9 +166,37 @@
 					</div>
 				</div>
 			{/if}
-		</div>
+			</div>
 
-	</div>
+			{#if targets.length > 0}
+				<label class="sr-only" for="git-target-select">Git target</label>
+				<select
+					id="git-target-select"
+					disabled={isLoadingTargets}
+					value={activeWorktreePath ?? ''}
+					onchange={(event) => onSelectTarget?.(event.currentTarget.value)}
+					class="h-7 max-w-52 rounded border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+					title="Git target"
+				>
+					{#each targets as target (target.worktreePath)}
+						<option value={target.worktreePath} disabled={target.isMissing}>
+							{target.label}
+						</option>
+					{/each}
+				</select>
+			{/if}
+
+			<button
+				type="button"
+				onclick={() => onOpenWorktrees?.()}
+				class="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+				title="Manage worktrees"
+				aria-label="Manage worktrees"
+			>
+				<FolderOpen class="w-4 h-4" />
+			</button>
+
+		</div>
 
 	<!-- Right: mode-specific actions -->
 	<div class="flex items-center {isMobile ? 'gap-1' : 'gap-1.5'}">
