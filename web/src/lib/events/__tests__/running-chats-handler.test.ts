@@ -10,14 +10,15 @@ function makeRunningChatsMsg(sessions: ChatSessionsRunningMessage['sessions']): 
 	describe('extractRunningChatIds', () => {
 		it('flattens provider-grouped sessions into a set of IDs', () => {
 			const msg = new ChatSessionsRunningMessage({
-				claude: [{ id: 'c1' }, { id: 'c2' }],
-				codex: [{ id: 'x1' }],
-				'direct-openai-compatible': [{ id: 'd1' }],
-				custom_provider: [{ id: 'custom-1' }],
-			});
+					claude: [{ id: 'c1' }, { id: 'c2' }],
+					codex: [{ id: 'x1' }],
+					'direct-anthropic-compatible': [{ id: 'a1' }],
+					'direct-openai-compatible': [{ id: 'd1' }],
+					custom_provider: [{ id: 'custom-1' }],
+				});
 
-			const ids = extractRunningChatIds(msg);
-			expect(ids).toEqual(new Set(['c1', 'c2', 'x1', 'd1', 'custom-1']));
+				const ids = extractRunningChatIds(msg);
+				expect(ids).toEqual(new Set(['c1', 'c2', 'x1', 'a1', 'd1', 'custom-1']));
 		});
 
 	it('filters out entries with missing IDs', () => {
@@ -58,17 +59,18 @@ describe('handleRunningChats', () => {
 		const ctx: RunningChatsContext = { reconcileProcessing };
 
 			const msg = makeRunningChatsMsg({
-				claude: [{ id: 'a' }],
-				codex: [{ id: 'b' }],
-				'direct-openai-compatible': [{ id: 'direct' }],
-			});
+					claude: [{ id: 'a' }],
+					codex: [{ id: 'b' }],
+					'direct-anthropic-compatible': [{ id: 'anthropic' }],
+					'direct-openai-compatible': [{ id: 'direct' }],
+				});
 
 		handleRunningChats(msg, ctx);
 
 		expect(reconcileProcessing).toHaveBeenCalledOnce();
 		const receivedSet = reconcileProcessing.mock.calls[0][0] as Set<string>;
-			expect(receivedSet).toEqual(new Set(['a', 'b', 'direct']));
-		});
+				expect(receivedSet).toEqual(new Set(['a', 'b', 'anthropic', 'direct']));
+			});
 
 	it('passes empty set when no running chats', () => {
 		const reconcileProcessing = vi.fn();

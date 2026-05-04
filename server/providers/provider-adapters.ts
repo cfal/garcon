@@ -10,8 +10,15 @@ import { runSingleQuery as runSingleQueryFactory } from './factory-cli.js';
 import type { ProviderAdapter } from './provider-adapter.js';
 import type { ClaudeStartSessionRequest, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from './types.js';
 import { OpenAiCompatibleChatProvider, type OpenAiCompatibleChatProviderConfig, runOpenAiCompatibleSingleQuery } from './openai-compatible-chat-provider.js';
-import type { ApiProviderStore, StoredApiProviderEndpoint } from './api-provider-store.js';
+import { AnthropicCompatibleChatProvider, type AnthropicCompatibleChatProviderConfig, runAnthropicCompatibleSingleQuery } from './anthropic-compatible-chat-provider.js';
+import type { ApiProviderStore, StoredApiProvider, StoredApiProviderEndpoint } from './api-provider-store.js';
 import { getWorkspaceDir } from '../config.js';
+import {
+  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+  type ApiProtocol,
+  type HarnessId,
+} from '../../common/providers.js';
 
 // Claude adapter wrapping the ClaudeProvider interface.
 
@@ -195,7 +202,7 @@ export function createFactoryAdapter(factory: ExternalCliProviderInstance): Prov
   };
 }
 
-// Direct OpenAI-compatible harness adapter for endpoint-backed API providers.
+// Direct compatible harness adapters for endpoint-backed API providers.
 
 type DirectEventCallbacks = {
   messages: Set<(chatId: string, messages: unknown[]) => void>;
@@ -205,11 +212,41 @@ type DirectEventCallbacks = {
   failed: Set<(chatId: string, errorMessage: string) => void>;
 };
 
-class DirectOpenAiCompatibleRouterAdapter implements ProviderAdapter {
-  readonly id = 'direct-openai-compatible';
-  readonly label = 'Direct OpenAI Compatible';
+type DirectCompatibleProvider = {
+  startSession(request: StartSessionRequest): Promise<StartedProviderSession>;
+  runTurn(request: ResumeTurnRequest): Promise<void>;
+  abort(providerSessionId: string): boolean;
+  isRunning(providerSessionId: string): boolean;
+  getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
+  getModels?(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
+  startPurgeTimer(): ReturnType<typeof setInterval>;
+  onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
+  onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
+  onSessionCreated(cb: (chatId: string) => void): void;
+  onFinished(cb: (chatId: string, exitCode: number) => void): void;
+  onFailed(cb: (chatId: string, errorMessage: string) => void): void;
+};
 
-  #providers = new Map<string, OpenAiCompatibleChatProvider>();
+interface DirectEndpointRouterConfig<TProvider extends DirectCompatibleProvider> {
+  harnessId: HarnessId;
+  label: string;
+  protocol: ApiProtocol;
+  noEndpointMessage: string;
+  apiProviderStore: ApiProviderStore;
+  createProvider(endpoint: StoredApiProviderEndpoint, apiProvider: StoredApiProvider): TProvider;
+  runSingleQuery(
+    prompt: string,
+    endpoint: StoredApiProviderEndpoint,
+    apiProvider: StoredApiProvider,
+    options: Record<string, unknown>,
+  ): Promise<string>;
+}
+
+class DirectEndpointRouterAdapter<TProvider extends DirectCompatibleProvider> implements ProviderAdapter {
+  readonly id: string;
+  readonly label: string;
+
+  #providers = new Map<string, TProvider>();
   #sessionEndpointIds = new Map<string, string>();
   #purgeTimers = new Map<string, ReturnType<typeof setInterval>>();
   #purgeTimersStarted = false;
@@ -221,11 +258,14 @@ class DirectOpenAiCompatibleRouterAdapter implements ProviderAdapter {
     failed: new Set(),
   };
 
-  constructor(private readonly apiProviderStore: ApiProviderStore) {}
+  constructor(private readonly config: DirectEndpointRouterConfig<TProvider>) {
+    this.id = config.harnessId;
+    this.label = config.label;
+  }
 
   async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
-    const { endpoint } = this.#resolveEndpoint(request.modelEndpointId);
-    const provider = this.#providerFor(endpoint);
+    const { apiProvider, endpoint } = this.#resolveEndpoint(request.modelEndpointId);
+    const provider = this.#providerFor(endpoint, apiProvider);
     const started = await provider.startSession(request);
     this.#sessionEndpointIds.set(started.providerSessionId, endpoint.id);
     return started;
@@ -234,12 +274,12 @@ class DirectOpenAiCompatibleRouterAdapter implements ProviderAdapter {
   async runTurn(request: ResumeTurnRequest): Promise<void> {
     let provider = this.#providerForSession(request.providerSessionId);
     if (!provider && request.modelEndpointId) {
-      const { endpoint } = this.#resolveEndpoint(request.modelEndpointId);
-      provider = this.#providerFor(endpoint);
+      const { apiProvider, endpoint } = this.#resolveEndpoint(request.modelEndpointId);
+      provider = this.#providerFor(endpoint, apiProvider);
       this.#sessionEndpointIds.set(request.providerSessionId, endpoint.id);
     }
     if (!provider) {
-      throw new Error(`Unknown direct OpenAI-compatible session: ${request.providerSessionId}`);
+      throw new Error(`Unknown ${this.label} session: ${request.providerSessionId}`);
     }
     await provider.runTurn(request);
   }
@@ -258,7 +298,7 @@ class DirectOpenAiCompatibleRouterAdapter implements ProviderAdapter {
 
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
     const models: Array<{ value: string; label: string; supportsImages?: boolean }> = [];
-    for (const apiProvider of this.apiProviderStore.list()) {
+    for (const apiProvider of this.config.apiProviderStore.list()) {
       for (const endpoint of apiProvider.endpoints) {
         if (!this.#isDirectEndpoint(endpoint)) continue;
         for (const model of endpoint.models) {
@@ -276,12 +316,7 @@ class DirectOpenAiCompatibleRouterAdapter implements ProviderAdapter {
   runSingleQuery(prompt: string, options: Record<string, unknown> = {}): Promise<string> {
     const endpointId = typeof options.modelEndpointId === 'string' ? options.modelEndpointId : undefined;
     const { apiProvider, endpoint } = this.#resolveEndpoint(endpointId);
-    const config = buildDirectOpenAiConfig({
-      providerId: this.id,
-      providerLabel: apiProvider.label,
-      endpoint,
-    });
-    return runOpenAiCompatibleSingleQuery(config, prompt, options);
+    return this.config.runSingleQuery(prompt, endpoint, apiProvider, options);
   }
 
   startPurgeTimer(): ReturnType<typeof setInterval> {
@@ -325,7 +360,7 @@ class DirectOpenAiCompatibleRouterAdapter implements ProviderAdapter {
     this.#callbacks.failed.add(cb);
   }
 
-  #providerForSession(providerSessionId: string): OpenAiCompatibleChatProvider | null {
+  #providerForSession(providerSessionId: string): TProvider | null {
     const endpointId = this.#sessionEndpointIds.get(providerSessionId);
     if (endpointId) {
       const provider = this.#providers.get(endpointId);
@@ -337,15 +372,11 @@ class DirectOpenAiCompatibleRouterAdapter implements ProviderAdapter {
     return null;
   }
 
-  #providerFor(endpoint: StoredApiProviderEndpoint): OpenAiCompatibleChatProvider {
+  #providerFor(endpoint: StoredApiProviderEndpoint, apiProvider: StoredApiProvider): TProvider {
     const existing = this.#providers.get(endpoint.id);
     if (existing) return existing;
 
-    const provider = new OpenAiCompatibleChatProvider(buildDirectOpenAiConfig({
-      providerId: this.id,
-      providerLabel: 'Direct OpenAI Compatible',
-      endpoint,
-    }));
+    const provider = this.config.createProvider(endpoint, apiProvider);
     this.#attachForwarders(provider);
     this.#providers.set(endpoint.id, provider);
 
@@ -355,7 +386,7 @@ class DirectOpenAiCompatibleRouterAdapter implements ProviderAdapter {
     return provider;
   }
 
-  #attachForwarders(provider: OpenAiCompatibleChatProvider): void {
+  #attachForwarders(provider: TProvider): void {
     provider.onMessages((chatId, messages) => {
       for (const cb of this.#callbacks.messages) cb(chatId, messages);
     });
@@ -373,30 +404,74 @@ class DirectOpenAiCompatibleRouterAdapter implements ProviderAdapter {
     });
   }
 
-  #resolveEndpoint(endpointId?: string | null): { apiProvider: { label: string }; endpoint: StoredApiProviderEndpoint } {
+  #resolveEndpoint(endpointId?: string | null): { apiProvider: StoredApiProvider; endpoint: StoredApiProviderEndpoint } {
     if (endpointId) {
-      const resolved = this.apiProviderStore.getEndpoint(endpointId);
+      const resolved = this.config.apiProviderStore.getEndpoint(endpointId);
       if (resolved && this.#isDirectEndpoint(resolved.endpoint)) {
         return resolved;
       }
     }
 
-    for (const apiProvider of this.apiProviderStore.list()) {
+    for (const apiProvider of this.config.apiProviderStore.list()) {
       const endpoint = apiProvider.endpoints.find((entry) => this.#isDirectEndpoint(entry));
       if (endpoint) return { apiProvider, endpoint };
     }
 
-    throw new Error('No OpenAI-compatible endpoint is configured for direct chat.');
+    throw new Error(this.config.noEndpointMessage);
   }
 
   #isDirectEndpoint(endpoint: StoredApiProviderEndpoint): boolean {
-    return endpoint.protocol === 'openai-chat-completions'
-      && endpoint.exposeTo.includes('direct-openai-compatible');
+    return endpoint.protocol === this.config.protocol
+      && endpoint.exposeTo.includes(this.config.harnessId);
   }
 }
 
 export function createDirectOpenAiCompatibleRouterAdapter(apiProviderStore: ApiProviderStore): ProviderAdapter {
-  return new DirectOpenAiCompatibleRouterAdapter(apiProviderStore);
+  return new DirectEndpointRouterAdapter({
+    harnessId: DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+    label: 'Direct Chat (OpenAI)',
+    protocol: 'openai-chat-completions',
+    noEndpointMessage: 'No OpenAI-compatible endpoint is configured for Direct Chat (OpenAI).',
+    apiProviderStore,
+    createProvider(endpoint) {
+      return new OpenAiCompatibleChatProvider(buildDirectOpenAiConfig({
+        providerId: DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+        providerLabel: 'Direct Chat (OpenAI)',
+        endpoint,
+      }));
+    },
+    runSingleQuery(prompt, endpoint, apiProvider, options) {
+      return runOpenAiCompatibleSingleQuery(buildDirectOpenAiConfig({
+        providerId: DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+        providerLabel: apiProvider.label,
+        endpoint,
+      }), prompt, options);
+    },
+  });
+}
+
+export function createDirectAnthropicCompatibleRouterAdapter(apiProviderStore: ApiProviderStore): ProviderAdapter {
+  return new DirectEndpointRouterAdapter({
+    harnessId: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+    label: 'Direct Chat (Anthropic)',
+    protocol: 'anthropic-messages',
+    noEndpointMessage: 'No Anthropic-compatible endpoint is configured for Direct Chat (Anthropic).',
+    apiProviderStore,
+    createProvider(endpoint) {
+      return new AnthropicCompatibleChatProvider(buildDirectAnthropicConfig({
+        providerId: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+        providerLabel: 'Direct Chat (Anthropic)',
+        endpoint,
+      }));
+    },
+    runSingleQuery(prompt, endpoint, apiProvider, options) {
+      return runAnthropicCompatibleSingleQuery(buildDirectAnthropicConfig({
+        providerId: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+        providerLabel: apiProvider.label,
+        endpoint,
+      }), prompt, options);
+    },
+  });
 }
 
 export function directOpenAiSessionDir(endpointId: string): string {
@@ -407,6 +482,14 @@ export function directOpenAiSessionFilePath(endpointId: string, sessionId: strin
   return `${directOpenAiSessionDir(endpointId)}/${sessionId}.jsonl`;
 }
 
+export function directAnthropicSessionDir(endpointId: string): string {
+  return `${getWorkspaceDir()}/anthropic-compatible-sessions/${endpointId}`;
+}
+
+export function directAnthropicSessionFilePath(endpointId: string, sessionId: string): string {
+  return `${directAnthropicSessionDir(endpointId)}/${sessionId}.jsonl`;
+}
+
 export function buildDirectOpenAiConfig(args: {
   providerId: string;
   providerLabel: string;
@@ -415,7 +498,6 @@ export function buildDirectOpenAiConfig(args: {
   return {
     providerId: args.providerId,
     providerLabel: args.providerLabel,
-    apiKeyEnvVar: `${args.providerId.toUpperCase()}_API_KEY`,
     defaultModel: args.endpoint.defaultModel,
     fallbackModels: args.endpoint.models,
     getApiKey: () => args.endpoint.apiKey,
@@ -427,6 +509,23 @@ export function buildDirectOpenAiConfig(args: {
       'Content-Type': 'application/json',
       ...(args.endpoint.headers ?? {}),
     }),
+  };
+}
+
+export function buildDirectAnthropicConfig(args: {
+  providerId: string;
+  providerLabel: string;
+  endpoint: StoredApiProviderEndpoint;
+}): AnthropicCompatibleChatProviderConfig {
+  return {
+    providerId: args.providerId,
+    providerLabel: args.providerLabel,
+    defaultModel: args.endpoint.defaultModel,
+    fallbackModels: args.endpoint.models,
+    getApiKey: () => args.endpoint.apiKey,
+    getBaseUrl: () => args.endpoint.baseUrl,
+    getSessionDir: () => directAnthropicSessionDir(args.endpoint.id),
+    getSessionFilePath: (sessionId) => directAnthropicSessionFilePath(args.endpoint.id, sessionId),
   };
 }
 

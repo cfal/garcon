@@ -14,7 +14,7 @@ import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
 
 const mockProviders = {
-  getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-openai-compatible': [] })),
+  getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [] })),
   resolvePermission: mock(() => undefined),
   setPermissionMode: mock(() => Promise.resolve(undefined)),
   setThinkingMode: mock(() => Promise.resolve(undefined)),
@@ -464,7 +464,7 @@ describe('chat WebSocket handler', () => {
       expect(payload).toMatchObject({
         type: 'chat-sessions-running',
       });
-      expect(payload.sessions).toEqual({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-openai-compatible': [] });
+      expect(payload.sessions).toEqual({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [] });
     });
   });
 

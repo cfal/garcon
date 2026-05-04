@@ -60,7 +60,7 @@ Return only the commit message now.`;
 	const modelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
 	let availableModels = $derived(modelCatalog.getModels(provider));
-	let availableProviders = $derived(modelCatalog.getHarnesses());
+	let availableProviders = $derived(modelCatalog.getSelectableHarnesses());
 	let loaded = $state(false);
 
 		onMount(async () => {

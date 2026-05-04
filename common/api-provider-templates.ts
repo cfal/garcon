@@ -9,6 +9,10 @@ import type {
   HarnessModelOption,
   ModelDiscoveryKind,
 } from './providers.js';
+import {
+  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+} from './providers.js';
 
 export type { ApiProviderTemplateId } from './providers.js';
 
@@ -38,7 +42,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: ZAI_MODELS.DEFAULT,
     models: ZAI_MODELS.OPTIONS,
     supportsImages: false,
-    exposeTo: ['claude'],
+    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'none',
   },
   {
@@ -51,7 +55,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: 'llama3',
     models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
     supportsImages: false,
-    exposeTo: ['claude'],
+    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'ollama-tags',
   },
   {
@@ -64,7 +68,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: OPENROUTER_MODELS.DEFAULT,
     models: OPENROUTER_MODELS.OPTIONS,
     supportsImages: true,
-    exposeTo: ['codex', 'direct-openai-compatible'],
+    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'openrouter-models',
     managedHeaders: 'openrouter',
   },
@@ -78,7 +82,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: ZAI_MODELS.DEFAULT,
     models: ZAI_MODELS.OPTIONS,
     supportsImages: false,
-    exposeTo: ['codex', 'direct-openai-compatible'],
+    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'none',
   },
   {
@@ -91,7 +95,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: 'llama3',
     models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
     supportsImages: false,
-    exposeTo: ['codex', 'direct-openai-compatible'],
+    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'ollama-tags',
   },
   {
@@ -104,7 +108,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: '',
     models: [],
     supportsImages: false,
-    exposeTo: ['claude'],
+    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'none',
   },
   {
@@ -117,7 +121,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: '',
     models: [],
     supportsImages: false,
-    exposeTo: ['codex', 'direct-openai-compatible'],
+    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'openai-models',
   },
 ] as const satisfies readonly ApiProviderTemplate[];

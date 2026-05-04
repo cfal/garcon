@@ -12,10 +12,13 @@
 			}
 			return [{ value: 'opus', label: 'Opus' }];
 		},
-			getHarnesses() {
-				return ['claude', 'codex'];
-			},
-			getHarnessLabel(provider: string) {
+				getHarnesses() {
+					return ['claude', 'codex'];
+				},
+				getSelectableHarnesses() {
+					return ['claude', 'codex'];
+				},
+				getHarnessLabel(provider: string) {
 				return provider === 'codex' ? 'Codex' : 'Claude';
 			},
 			selectionFor(_provider: string, model: string) {

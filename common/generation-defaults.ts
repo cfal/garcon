@@ -2,7 +2,20 @@
 // These defaults are used when users have not explicitly configured
 // harness/model settings.
 
-export const GENERATION_HARNESS_PRIORITY = ['claude', 'codex', 'direct-openai-compatible', 'opencode', 'amp', 'factory'] as const;
+import {
+  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+} from './providers.js';
+
+export const GENERATION_HARNESS_PRIORITY = [
+  'claude',
+  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+  'codex',
+  DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+  'opencode',
+  'amp',
+  'factory',
+] as const;
 
 export const GENERATION_MODEL_DEFAULTS = {
   claude: 'haiku',

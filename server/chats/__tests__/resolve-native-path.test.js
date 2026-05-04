@@ -10,4 +10,13 @@ describe('resolveMissingNativePath', () => {
 
     expect(path).toBe('!direct-openai-compatible:session-123');
   });
+
+  it('creates an artificial native path for direct Anthropic-compatible sessions', async () => {
+    const path = await resolveMissingNativePath({
+      provider: 'direct-anthropic-compatible',
+      providerSessionId: 'session-456',
+    });
+
+    expect(path).toBe('!direct-anthropic-compatible:session-456');
+  });
 });

@@ -2,9 +2,13 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import ColoredTag from '../shared/ColoredTag.svelte';
 	import type { SessionProvider } from '$lib/types/app';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import { cn } from '$lib/utils/cn';
-	import { formatSidebarChatTimestamp } from './chat-timestamp.js';
+		import type { ChatSessionRecord } from '$lib/types/chat-session';
+		import { cn } from '$lib/utils/cn';
+		import { formatSidebarChatTimestamp } from './chat-timestamp.js';
+		import {
+			DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+			DIRECT_OPENAI_COMPATIBLE_HARNESS_ID
+		} from '$shared/providers';
 
 	interface SidebarChatSummaryProps {
 		session: ChatSessionRecord;
@@ -43,9 +47,10 @@
 		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
 		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
 		opencode: 'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
-		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
-		factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
-		'direct-openai-compatible': 'border-border bg-muted text-foreground',
+			amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
+			factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
+			[DIRECT_OPENAI_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
+			[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
 	};
 
 	let providerTagVariant = $derived(
@@ -56,10 +61,11 @@
 			: provider === 'codex' ? m.provider_codex()
 			: provider === 'opencode' ? m.provider_opencode()
 			: provider === 'amp' ? m.provider_amp()
-		: provider === 'factory' ? m.provider_factory()
-		: provider === 'direct-openai-compatible' ? 'Direct'
-		: provider || m.provider_claude()
-	);
+			: provider === 'factory' ? m.provider_factory()
+			: provider === DIRECT_OPENAI_COMPATIBLE_HARNESS_ID ? 'Direct OpenAI'
+			: provider === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID ? 'Direct Anthropic'
+			: provider || m.provider_claude()
+		);
 	function prefixEllipsis(pathStr: string, maxLen = 40): string {
 		if (!pathStr || pathStr.length <= maxLen) return pathStr;
 		const segments = pathStr.split('/');

@@ -12,14 +12,18 @@ describe('ModelCatalogStore', () => {
 		vi.clearAllMocks();
 	});
 
-	it('uses static fallbacks before remote hydration', () => {
-		const store = createModelCatalogStore();
-		expect(store.getModels('claude').length).toBeGreaterThan(0);
-		expect(store.getModels('codex').length).toBeGreaterThan(0);
-		expect(store.getModels('factory').length).toBeGreaterThan(0);
-		expect(store.getModels('zai')).toEqual([]);
-		expect(store.getDefaultModel('claude')).toBe('opus');
-		expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
+		it('uses static fallbacks before remote hydration', () => {
+			const store = createModelCatalogStore();
+			expect(store.getModels('claude').length).toBeGreaterThan(0);
+			expect(store.getModels('codex').length).toBeGreaterThan(0);
+			expect(store.getModels('factory').length).toBeGreaterThan(0);
+			expect(store.getModels('direct-anthropic-compatible')).toEqual([]);
+			expect(store.getModels('direct-openai-compatible')).toEqual([]);
+			expect(store.getSelectableHarnesses()).not.toContain('direct-anthropic-compatible');
+			expect(store.getSelectableHarnesses()).not.toContain('direct-openai-compatible');
+			expect(store.getModels('zai')).toEqual([]);
+			expect(store.getDefaultModel('claude')).toBe('opus');
+			expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
 		expect(store.getModels('codex')[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
 		const codexModelValues = store.getModels('codex').map((model) => model.value);
 		expect(codexModelValues).not.toContain('gpt-5.2');
@@ -339,15 +343,15 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsImages('factory', 'glm-5')).toBe(false);
 	});
 
-	it('preserves API provider metadata and maps selection values to raw models', async () => {
+		it('preserves API provider metadata and maps selection values to raw models', async () => {
 		vi.mocked(clientApi.apiFetch).mockResolvedValue({
 			ok: true,
 			json: async () => ({
 				catalog: {
 					harnesses: [
-						{
-							id: 'direct-openai-compatible',
-							label: 'Direct OpenAI-compatible',
+							{
+								id: 'direct-openai-compatible',
+								label: 'Direct Chat (OpenAI)',
 							kind: 'harness',
 							supportsFork: false,
 							supportsImages: true,
@@ -405,6 +409,76 @@ describe('ModelCatalogStore', () => {
 		expect(store.selectionValueFor('direct-openai-compatible', 'glm-5.1', 'zai_openai'))
 			.toBe('zai_openai:glm-5.1');
 		expect(store.supportsImages('direct-openai-compatible', 'glm-5.1', 'zai_openai')).toBe(false);
-		expect(store.findEndpoint('zai_openai')?.endpoint.defaultModel).toBe('glm-5.1');
+			expect(store.findEndpoint('zai_openai')?.endpoint.defaultModel).toBe('glm-5.1');
+		});
+
+		it('maps Direct Anthropic endpoint selections to raw models', async () => {
+			vi.mocked(clientApi.apiFetch).mockResolvedValue({
+				ok: true,
+				json: async () => ({
+					catalog: {
+						harnesses: [
+							{
+								id: 'direct-anthropic-compatible',
+								label: 'Direct Chat (Anthropic)',
+								kind: 'harness',
+								supportsFork: false,
+								supportsImages: true,
+								acceptsApiProviderEndpoints: true,
+								supportedProtocols: ['anthropic-messages'],
+								defaultModel: 'acme_anthropic:acme-sonnet',
+								models: [
+									{
+										value: 'acme_anthropic:acme-sonnet',
+										label: 'Acme: Acme Sonnet',
+										rawModel: 'acme-sonnet',
+										apiProviderId: 'acme',
+										endpointId: 'acme_anthropic',
+										protocol: 'anthropic-messages',
+										supportsImages: true
+									}
+								]
+							}
+						],
+						apiProviders: [
+							{
+								id: 'acme',
+								label: 'Acme',
+								templateId: 'custom',
+								createdAt: '2026-01-01T00:00:00.000Z',
+								updatedAt: '2026-01-01T00:00:00.000Z',
+								endpoints: [
+									{
+										id: 'acme_anthropic',
+										protocol: 'anthropic-messages',
+										baseUrl: 'https://api.acme.test',
+										exposeTo: ['direct-anthropic-compatible'],
+										defaultModel: 'acme-sonnet',
+										models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
+										supportsImages: true,
+										hasApiKey: true,
+										modelDiscovery: 'anthropic-models'
+									}
+								]
+							}
+						]
+					}
+				})
+			} as unknown as Response);
+
+			const store = createModelCatalogStore();
+			await store.forceRefresh();
+
+			expect(store.getSelectableHarnesses()).toContain('direct-anthropic-compatible');
+			expect(store.selectionFor('direct-anthropic-compatible', 'acme_anthropic:acme-sonnet')).toEqual({
+				model: 'acme-sonnet',
+				apiProviderId: 'acme',
+				modelEndpointId: 'acme_anthropic',
+				modelProtocol: 'anthropic-messages'
+			});
+			expect(store.selectionValueFor('direct-anthropic-compatible', 'acme-sonnet', 'acme_anthropic'))
+				.toBe('acme_anthropic:acme-sonnet');
+			expect(store.supportsImages('direct-anthropic-compatible', 'acme-sonnet', 'acme_anthropic')).toBe(true);
+			expect(store.findEndpoint('acme_anthropic')?.endpoint.defaultModel).toBe('acme-sonnet');
+		});
 	});
-});

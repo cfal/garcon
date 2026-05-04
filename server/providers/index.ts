@@ -15,7 +15,7 @@ import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loader
 import { getCodexPreviewFromNativePath, loadCodexChatMessages } from './loaders/codex-history-loader.js';
 import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loaders/opencode-history-loader.js';
 import { getFactoryPreviewFromSessionId, loadFactoryChatMessagesBySessionId } from './loaders/factory-history-loader.js';
-import { getOpenAiCompatiblePreviewFromSessionId, loadOpenAiCompatibleChatMessages } from './loaders/openai-compatible-history-loader.js';
+import { getDirectCompatiblePreviewFromSessionId, loadDirectCompatibleChatMessages } from './loaders/direct-compatible-history-loader.js';
 
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
@@ -33,10 +33,14 @@ import type { ProviderAdapter } from './provider-adapter.js';
 import type { ApiProviderStore, CreateApiProviderInput, UpdateApiProviderInput } from './api-provider-store.js';
 import type { ApiProviderEndpointResolver, ResolvedModelSelection } from './api-provider-endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from './api-provider-endpoint-resolver.js';
-import { directOpenAiSessionFilePath } from './provider-adapters.js';
+import { directAnthropicSessionFilePath, directOpenAiSessionFilePath } from './provider-adapters.js';
 import {
   BUILTIN_HARNESS_CAPABILITIES,
+  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+  ENDPOINT_ONLY_HARNESSES,
   harnessesForProtocol,
+  isEndpointOnlyHarnessId,
   isVisibleHarnessId,
   labelForProtocol,
   type ApiProviderCatalogEntry,
@@ -65,7 +69,6 @@ const STATIC_HARNESS_MODELS: Record<string, { defaultModel: string; models: Harn
   amp: { defaultModel: AMP_MODELS.DEFAULT, models: AMP_MODELS.OPTIONS },
   factory: { defaultModel: FACTORY_MODELS.DEFAULT, models: FACTORY_MODELS.OPTIONS },
 };
-const DIRECT_OPENAI_COMPATIBLE_HARNESS_ID = 'direct-openai-compatible';
 
 function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | undefined): ProviderChatEntry & {
   projectPath: string;
@@ -109,7 +112,7 @@ function dedupeModels(models: HarnessModelOption[]): HarnessModelOption[] {
 
 async function nativeModelsForHarness(id: string, adapter: ProviderAdapter): Promise<HarnessModelOption[]> {
   let fetched: HarnessModelOption[] = [];
-  if (id !== DIRECT_OPENAI_COMPATIBLE_HARNESS_ID && adapter.getModels) {
+  if (!isEndpointOnlyHarnessId(id) && adapter.getModels) {
     try {
       fetched = await adapter.getModels();
     } catch (error) {
@@ -774,14 +777,24 @@ export class ProviderRegistry {
     if (session.provider === 'codex') {
       return getCodexPreviewFromNativePath(session.nativePath);
     }
-    if (session.provider === 'direct-openai-compatible') {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'direct-openai-compatible');
+    if (session.provider === DIRECT_OPENAI_COMPATIBLE_HARNESS_ID) {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_COMPATIBLE_HARNESS_ID);
       const endpointId = session.modelEndpointId;
       if (!endpointId) return null;
-      return getOpenAiCompatiblePreviewFromSessionId(
+      return getDirectCompatiblePreviewFromSessionId(
         sessionId,
         (id) => this.#loadDirectOpenAiMessages(endpointId, id),
         'OpenAI-compatible Session',
+      );
+    }
+    if (session.provider === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID);
+      const endpointId = session.modelEndpointId;
+      if (!endpointId) return null;
+      return getDirectCompatiblePreviewFromSessionId(
+        sessionId,
+        (id) => this.#loadDirectAnthropicMessages(endpointId, id),
+        'Anthropic-compatible Session',
       );
     }
 
@@ -807,21 +820,35 @@ export class ProviderRegistry {
     if (session.provider === 'codex') {
       return loadCodexChatMessages(session.nativePath);
     }
-    if (session.provider === 'direct-openai-compatible') {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'direct-openai-compatible');
+    if (session.provider === DIRECT_OPENAI_COMPATIBLE_HARNESS_ID) {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_COMPATIBLE_HARNESS_ID);
       const endpointId = session.modelEndpointId;
       if (!endpointId) return [];
       return this.#loadDirectOpenAiMessages(endpointId, sessionId);
+    }
+    if (session.provider === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID);
+      const endpointId = session.modelEndpointId;
+      if (!endpointId) return [];
+      return this.#loadDirectAnthropicMessages(endpointId, sessionId);
     }
 
     return [];
   }
 
   async #loadDirectOpenAiMessages(endpointId: string, sessionId: string | null | undefined): Promise<ChatMessage[]> {
-    return loadOpenAiCompatibleChatMessages(sessionId, {
+    return loadDirectCompatibleChatMessages(sessionId, {
       getSessionFilePath: (id) => directOpenAiSessionFilePath(endpointId, id),
       isValidSessionId: (id) => DIRECT_SESSION_ID_RE.test(id),
       sessionLabel: 'OpenAI-compatible Session',
+    });
+  }
+
+  async #loadDirectAnthropicMessages(endpointId: string, sessionId: string | null | undefined): Promise<ChatMessage[]> {
+    return loadDirectCompatibleChatMessages(sessionId, {
+      getSessionFilePath: (id) => directAnthropicSessionFilePath(endpointId, id),
+      isValidSessionId: (id) => DIRECT_SESSION_ID_RE.test(id),
+      sessionLabel: 'Anthropic-compatible Session',
     });
   }
 
@@ -846,7 +873,7 @@ export class ProviderRegistry {
   }
 
   async getHarnessAuthStatus(harnessId: string): Promise<unknown | null> {
-    if (harnessId === DIRECT_OPENAI_COMPATIBLE_HARNESS_ID) {
+    if (isEndpointOnlyHarnessId(harnessId)) {
       return {
         authenticated: false,
         canReauth: false,
@@ -864,7 +891,17 @@ export class ProviderRegistry {
     const results = await Promise.all(entries.map(([, fn]) => fn(this.#opencodeInstance)));
     return {
       ...Object.fromEntries(entries.map(([name], i) => [name, results[i]])),
-      [DIRECT_OPENAI_COMPATIBLE_HARNESS_ID]: await this.getHarnessAuthStatus(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID),
+      ...Object.fromEntries(
+        ENDPOINT_ONLY_HARNESSES.map((harnessId) => [
+          harnessId,
+          {
+            authenticated: false,
+            canReauth: false,
+            label: '',
+            source: 'none',
+          },
+        ]),
+      ),
     };
   }
 
@@ -944,7 +981,7 @@ export class ProviderRegistry {
       if (!isVisibleHarnessId(id)) continue;
       const endpointModels = this.#endpointResolver.getModelOptions(id as any);
       const nativeModels = await nativeModelsForHarness(id, adapter);
-      const models = id === DIRECT_OPENAI_COMPATIBLE_HARNESS_ID
+      const models = isEndpointOnlyHarnessId(id)
         ? dedupeModels(endpointModels)
         : dedupeModels([...nativeModels, ...endpointModels]);
       const builtinCaps = BUILTIN_HARNESS_CAPABILITIES[id as keyof typeof BUILTIN_HARNESS_CAPABILITIES];

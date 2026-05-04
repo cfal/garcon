@@ -59,10 +59,13 @@
 		getModels() {
 			return [{ value: 'opus', label: 'Opus' }];
 		},
-		getHarnesses() {
-			return ['claude'];
-		},
-		refreshIfStale() {
+			getHarnesses() {
+				return ['claude'];
+			},
+			getSelectableHarnesses() {
+				return ['claude'];
+			},
+			refreshIfStale() {
 			return Promise.resolve();
 		},
 		forceRefresh() {
