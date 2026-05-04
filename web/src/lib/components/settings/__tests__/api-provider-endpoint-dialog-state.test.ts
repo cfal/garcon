@@ -161,13 +161,13 @@ describe('ApiProviderEndpointDialogState', () => {
 	});
 
 	it('fetches OpenAI-compatible models and uses them as default model choices', async () => {
-		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
-			success: true,
-			models: [
-				{ value: 'acme-code', label: 'Acme Code' },
-				{ value: 'acme-fast', label: 'Acme Fast' }
-			]
-		});
+			vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
+				success: true,
+				models: [
+					{ value: 'acme-fast', label: 'Acme Fast' },
+					{ value: 'acme-code', label: 'Acme Code' }
+				]
+			});
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-chat-completions',
@@ -187,9 +187,9 @@ describe('ApiProviderEndpointDialogState', () => {
 			apiProviderId: null,
 			endpointId: null,
 			modelDiscovery: 'openai-models'
-		});
-		expect(dialog.modelsText).toBe('acme-code|Acme Code\nacme-fast|Acme Fast');
-		expect(dialog.defaultModel).toBe('acme-code');
+			});
+			expect(dialog.modelsText).toBe('acme-code|Acme Code\nacme-fast|Acme Fast');
+			expect(dialog.defaultModel).toBe('acme-code');
 		expect(dialog.modelOptions.map((model) => model.value)).toEqual(['acme-code', 'acme-fast']);
 	});
 

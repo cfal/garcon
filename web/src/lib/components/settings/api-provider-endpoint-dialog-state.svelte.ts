@@ -272,10 +272,11 @@ export class ApiProviderEndpointDialogState {
 				this.error = m.settings_api_provider_dialog_no_models_returned();
 				return;
 			}
-			this.modelsText = result.models.map((model) => formatModelLine(model)).join('\n');
-			this.modelDiscovery = discoveryKind;
-			this.defaultModel = chooseDefaultModel(result.models, this.defaultModel);
-			this.testMessage = m.settings_api_provider_dialog_models_fetched({ count: result.models.length });
+				const sortedModels = sortModelsForDisplay(result.models);
+				this.modelsText = sortedModels.map((model) => formatModelLine(model)).join('\n');
+				this.modelDiscovery = discoveryKind;
+				this.defaultModel = chooseDefaultModel(sortedModels, this.defaultModel);
+				this.testMessage = m.settings_api_provider_dialog_models_fetched({ count: result.models.length });
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : String(err);
 		} finally {
@@ -336,6 +337,15 @@ function parseModelsText(text: string): ModelOption[] {
 
 function formatModelLine(model: ModelOption): string {
 	return model.value === model.label ? model.value : `${model.value}|${model.label}`;
+}
+
+function sortModelsForDisplay(models: ModelOption[]): ModelOption[] {
+	return [...models].sort((left, right) =>
+		formatModelLine(left).localeCompare(formatModelLine(right), undefined, {
+			numeric: true,
+			sensitivity: 'base'
+		})
+	);
 }
 
 function chooseDefaultModel(models: ModelOption[], current: string): string {
