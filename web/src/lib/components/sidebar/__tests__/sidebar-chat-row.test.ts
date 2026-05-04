@@ -49,6 +49,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getAllByText('Shared row chat')).toHaveLength(2);
 		expect(screen.getAllByLabelText('Unread')).toHaveLength(2);
 		expect(screen.getAllByText('3h ago')).toHaveLength(2);
+		expect(screen.getAllByText('3h ago')[0]?.className).toContain('leading-[1.5]');
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getAllByTitle('/very/long/workspace/projects/feature-branch/app')).toHaveLength(2);
