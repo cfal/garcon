@@ -57,13 +57,19 @@
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
-		<Dialog.Content class="flex h-dvh w-full max-w-full flex-col rounded-none border-0 p-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:max-w-3xl sm:rounded-lg sm:border">
+	<Dialog.Content class="flex h-dvh w-full max-w-full flex-col rounded-none border-0 p-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:max-w-3xl sm:rounded-lg sm:border">
 		<Dialog.Header class="border-b border-border px-6 py-4">
 			<Dialog.Title>{dialog.title}</Dialog.Title>
 			<Dialog.Description>{dialog.description}</Dialog.Description>
 		</Dialog.Header>
 
-			<form class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6" onsubmit={(event) => { event.preventDefault(); void dialog.save(); }}>
+		<form
+			class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6"
+			onsubmit={(event) => {
+				event.preventDefault();
+				void dialog.save();
+			}}
+		>
 			<div class="grid gap-2">
 				<label class="text-sm font-medium" for="api-provider-label">{m.settings_api_provider_dialog_display_name()}</label>
 				<Input id="api-provider-label" bind:value={dialog.label} />
@@ -126,12 +132,12 @@
 							: m.settings_api_provider_dialog_fetch_models()}
 					</Button>
 				</div>
-					<Textarea
-						id="api-provider-models"
-						class="h-40 max-h-60 resize-y overflow-y-auto [field-sizing:fixed]"
-						value={dialog.modelsText}
-						oninput={handleModelsInput}
-						rows={6}
+				<Textarea
+					id="api-provider-models"
+					class="h-40 max-h-60 resize-y overflow-y-auto [field-sizing:fixed]"
+					value={dialog.modelsText}
+					oninput={handleModelsInput}
+					rows={6}
 					placeholder={m.settings_api_provider_dialog_models_placeholder()}
 				/>
 			</div>
@@ -148,19 +154,45 @@
 				/>
 			</div>
 
-			{#each dialog.targetOptions as target (target.harnessId)}
-				<div class="flex items-center justify-between rounded-lg border border-border p-3">
+			{#if dialog.usesOpenAiCapabilityToggles}
+				<label class="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
 					<div>
-						<div class="text-sm font-medium">{target.label}</div>
-						<div class="text-xs text-muted-foreground">{target.description}</div>
+						<div class="text-sm font-medium">{m.settings_api_provider_capability_chat_completions_label()}</div>
+						<div class="text-xs text-muted-foreground">{m.settings_api_provider_capability_chat_completions_description()}</div>
 					</div>
 					<Switch
-						checked={dialog.isTargetEnabled(target.harnessId)}
-						onCheckedChange={(checked) => dialog.setTarget(target.harnessId, Boolean(checked))}
-						aria-label={target.label}
+						checked={dialog.supportsChatCompletionsApi}
+						onCheckedChange={(checked) => dialog.setSupportsChatCompletionsApi(Boolean(checked))}
+						aria-label={m.settings_api_provider_capability_chat_completions_label()}
 					/>
-				</div>
-			{/each}
+				</label>
+
+				<label class="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
+					<div>
+						<div class="text-sm font-medium">{m.settings_api_provider_capability_responses_label()}</div>
+						<div class="text-xs text-muted-foreground">{m.settings_api_provider_capability_responses_description()}</div>
+					</div>
+					<Switch
+						checked={dialog.supportsResponsesApi}
+						onCheckedChange={(checked) => dialog.setSupportsResponsesApi(Boolean(checked))}
+						aria-label={m.settings_api_provider_capability_responses_label()}
+					/>
+				</label>
+			{:else}
+				{#each dialog.targetOptions as target (target.harnessId)}
+					<div class="flex items-center justify-between rounded-lg border border-border p-3">
+						<div>
+							<div class="text-sm font-medium">{target.label}</div>
+							<div class="text-xs text-muted-foreground">{target.description}</div>
+						</div>
+						<Switch
+							checked={dialog.isTargetEnabled(target.harnessId)}
+							onCheckedChange={(checked) => dialog.setTarget(target.harnessId, Boolean(checked))}
+							aria-label={target.label}
+						/>
+					</div>
+				{/each}
+			{/if}
 
 			{#if dialog.error}
 				<div class="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">

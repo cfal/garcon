@@ -236,6 +236,29 @@ describe('ProviderRegistry.runSingleQuery', () => {
 
   it('resolves API-provider model selections before one-shot execution', async () => {
     const endpointResolver = makeEndpointResolver();
+    const codexConfig = {
+      config: {
+        model_provider: 'garcon_acme_openai',
+        model_providers: {
+          garcon_acme_openai: {
+            name: 'Acme',
+            base_url: 'https://api.acme.test/v1',
+            wire_api: 'responses',
+            requires_openai_auth: false,
+            supports_websockets: false,
+          },
+        },
+      },
+    };
+    endpointResolver.resolveSelection.mockImplementation(({ model, apiProviderId = null, modelEndpointId = null }) => ({
+      model: modelEndpointId ? model.replace(`${modelEndpointId}:`, '') : model,
+      apiProviderId,
+      endpointId: modelEndpointId,
+      protocol: modelEndpointId ? 'openai-chat-completions' : null,
+      isLocal: false,
+      envOverrides: undefined,
+      codexConfig,
+    }));
     const { registry } = makeRegistry({ endpointResolver });
 
     await registry.runSingleQuery('hello', {
@@ -256,6 +279,7 @@ describe('ProviderRegistry.runSingleQuery', () => {
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
       modelProtocol: 'openai-chat-completions',
+      codexConfig,
     });
   });
 });

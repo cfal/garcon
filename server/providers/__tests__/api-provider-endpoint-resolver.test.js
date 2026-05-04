@@ -20,6 +20,10 @@ function makeResolver() {
           models: [{ value: 'acme-code', label: 'Acme Code', supportsImages: false }],
           supportsImages: false,
           modelDiscovery: 'openai-models',
+          headers: {
+            'HTTP-Referer': 'https://github.com/cfal/garcon',
+            'X-OpenRouter-Title': 'Garcon',
+          },
         },
         {
           id: 'acme_openai_blank',
@@ -126,7 +130,7 @@ describe('ApiProviderEndpointResolver', () => {
     });
   });
 
-  it('builds Claude and Codex env overrides for compatible endpoints', () => {
+  it('builds Claude env overrides and Codex Responses routing for compatible endpoints', () => {
     const resolver = makeResolver();
 
     expect(resolver.resolveSelection({
@@ -140,14 +144,34 @@ describe('ApiProviderEndpointResolver', () => {
       ANTHROPIC_API_KEY: '',
     });
 
-    expect(resolver.resolveSelection({
+    const codexSelection = resolver.resolveSelection({
       harnessId: 'codex',
       model: 'acme_openai:acme-code',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
-    }).envOverrides).toEqual({
-      OPENAI_BASE_URL: 'https://api.acme.test/v1',
-      OPENAI_API_KEY: 'secret',
+    });
+    expect(codexSelection.envOverrides).toBeUndefined();
+    expect(codexSelection.codexConfig).toEqual({
+      config: {
+        model_provider: 'garcon_acme_openai',
+        model_providers: {
+          garcon_acme_openai: {
+            name: 'Acme',
+            base_url: 'https://api.acme.test/v1',
+            wire_api: 'responses',
+            requires_openai_auth: false,
+            supports_websockets: false,
+            env_key: 'GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI',
+            http_headers: {
+              'HTTP-Referer': 'https://github.com/cfal/garcon',
+              'X-OpenRouter-Title': 'Garcon',
+            },
+          },
+        },
+      },
+      env: {
+        GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI: 'secret',
+      },
     });
   });
 
@@ -164,13 +188,26 @@ describe('ApiProviderEndpointResolver', () => {
       ANTHROPIC_API_KEY: '',
     });
 
-    expect(resolver.resolveSelection({
+    const codexSelection = resolver.resolveSelection({
       harnessId: 'codex',
       model: 'acme_openai_blank:llama3',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai_blank',
-    }).envOverrides).toEqual({
-      OPENAI_BASE_URL: 'http://localhost:11434/v1',
+    });
+    expect(codexSelection.envOverrides).toBeUndefined();
+    expect(codexSelection.codexConfig).toEqual({
+      config: {
+        model_provider: 'garcon_acme_openai_blank',
+        model_providers: {
+          garcon_acme_openai_blank: {
+            name: 'Acme',
+            base_url: 'http://localhost:11434/v1',
+            wire_api: 'responses',
+            requires_openai_auth: false,
+            supports_websockets: false,
+          },
+        },
+      },
     });
   });
 

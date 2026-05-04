@@ -29,7 +29,7 @@ describe('ApiProviderProtocolPanel', () => {
 		render(ApiProviderProtocolPanelTestHarness, {
 			protocol: 'openai-chat-completions',
 			title: 'OpenAI Providers',
-			description: 'Use OpenAI-compatible endpoints with Codex and Direct Chat.',
+			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat uses Chat Completions; Codex requires Responses API compatibility.',
 			addLabel: 'Add OpenAI-compatible provider'
 		});
 
@@ -47,11 +47,30 @@ describe('ApiProviderProtocolPanel', () => {
 		]);
 	});
 
+	it('opens OpenAI providers with API capability switches instead of harness exposure toggles', async () => {
+		render(ApiProviderProtocolPanelTestHarness, {
+			protocol: 'openai-chat-completions',
+			title: 'OpenAI Providers',
+			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat uses Chat Completions; Codex requires Responses API compatibility.',
+			addLabel: 'Add OpenAI-compatible provider'
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Add OpenAI-compatible provider' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Add custom provider..' }));
+
+		const chatCompletions = await screen.findByRole('switch', { name: 'Supports Chat Completions API' });
+		const responses = screen.getByRole('switch', { name: 'Supports Responses API' });
+		expect(chatCompletions.getAttribute('aria-checked')).toBe('true');
+		expect(responses.getAttribute('aria-checked')).toBe('false');
+		expect(screen.queryByText('Use with Codex')).toBeNull();
+		expect(screen.queryByText('Use with Direct Chat (OpenAI)')).toBeNull();
+	});
+
 	it('renders saved provider rows without built-in or disabled badges', () => {
 		render(ApiProviderProtocolPanelTestHarness, {
 			protocol: 'openai-chat-completions',
 			title: 'OpenAI Providers',
-			description: 'Use OpenAI-compatible endpoints with Codex and Direct Chat.',
+			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat uses Chat Completions; Codex requires Responses API compatibility.',
 			addLabel: 'Add OpenAI-compatible provider',
 			apiProviderCatalog: [
 				{

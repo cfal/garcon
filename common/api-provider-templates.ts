@@ -88,7 +88,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: '',
     models: [],
     supportsImages: false,
-    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    exposeTo: [DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'openai-models',
   },
   {
@@ -127,7 +127,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: GEMINI_MODELS.DEFAULT,
     models: GEMINI_MODELS.OPTIONS,
     supportsImages: true,
-    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    exposeTo: [DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'openai-models',
   },
   {
@@ -180,7 +180,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: TOGETHER_MODELS.DEFAULT,
     models: TOGETHER_MODELS.OPTIONS,
     supportsImages: false,
-    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    exposeTo: [DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'openai-models',
   },
   {
@@ -206,7 +206,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: ZAI_MODELS.DEFAULT,
     models: ZAI_MODELS.OPTIONS,
     supportsImages: false,
-    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    exposeTo: [DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'none',
   },
 ] as const satisfies readonly ApiProviderTemplate[];

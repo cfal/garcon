@@ -90,8 +90,25 @@ export class ApiProviderEndpointDialogState {
 			: m.settings_api_provider_dialog_base_url_placeholder_openai();
 	}
 
+	get usesOpenAiCapabilityToggles(): boolean {
+		return this.protocol === 'openai-chat-completions';
+	}
+
+	get supportsChatCompletionsApi(): boolean {
+		return this.isTargetEnabled(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID);
+	}
+
+	get supportsResponsesApi(): boolean {
+		return this.isTargetEnabled('codex');
+	}
+
+	get exposureTargetIds(): readonly HarnessId[] {
+		return harnessesForProtocol(this.protocol);
+	}
+
 	get targetOptions(): Array<{ harnessId: HarnessId; label: string; description: string }> {
-		return harnessesForProtocol(this.protocol).map((harnessId) => ({
+		if (this.usesOpenAiCapabilityToggles) return [];
+		return this.exposureTargetIds.map((harnessId) => ({
 			harnessId,
 			label: labelForHarnessTarget(harnessId),
 			description: descriptionForHarnessTarget(harnessId)
@@ -99,9 +116,7 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	get exposeTo(): HarnessId[] {
-		return this.targetOptions
-			.filter((target) => this.enabledTargets[target.harnessId] !== false)
-			.map((target) => target.harnessId);
+		return this.exposureTargetIds.filter((harnessId) => this.enabledTargets[harnessId] !== false);
 	}
 
 	get modelOptions(): ModelOption[] {
@@ -171,9 +186,9 @@ export class ApiProviderEndpointDialogState {
 		this.templateId = found.apiProvider.templateId ?? 'custom';
 		this.modelsText = found.endpoint.models.map((model) => formatModelLine(model)).join('\n');
 		this.enabledTargets = Object.fromEntries(
-			this.targetOptions.map((target) => [
-				target.harnessId,
-				found.endpoint.exposeTo.includes(target.harnessId)
+			this.exposureTargetIds.map((harnessId) => [
+				harnessId,
+				found.endpoint.exposeTo.includes(harnessId)
 			])
 		);
 		this.apiKey = '';
@@ -198,7 +213,7 @@ export class ApiProviderEndpointDialogState {
 		this.supportsImages = template.supportsImages;
 		this.modelDiscovery = template.modelDiscovery;
 		this.enabledTargets = Object.fromEntries(
-			this.targetOptions.map((target) => [target.harnessId, template.exposeTo.includes(target.harnessId)])
+			this.exposureTargetIds.map((harnessId) => [harnessId, template.exposeTo.includes(harnessId)])
 		);
 	}
 
@@ -213,6 +228,14 @@ export class ApiProviderEndpointDialogState {
 
 	setTarget(harnessId: HarnessId, enabled: boolean): void {
 		this.enabledTargets = { ...this.enabledTargets, [harnessId]: enabled };
+	}
+
+	setSupportsChatCompletionsApi(enabled: boolean): void {
+		this.setTarget(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID, enabled);
+	}
+
+	setSupportsResponsesApi(enabled: boolean): void {
+		this.setTarget('codex', enabled);
 	}
 
 	payload(): ApiProviderInput {
@@ -370,16 +393,12 @@ function localizedProtocolLabel(protocol: ApiProtocol): string {
 
 function labelForHarnessTarget(harnessId: HarnessId): string {
 	if (harnessId === 'claude') return m.settings_api_provider_target_claude_label();
-	if (harnessId === 'codex') return m.settings_api_provider_target_codex_label();
-	if (harnessId === DIRECT_OPENAI_COMPATIBLE_HARNESS_ID) return m.settings_api_provider_target_direct_openai_label();
 	if (harnessId === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) return m.settings_api_provider_target_direct_anthropic_label();
 	return m.settings_api_provider_target_default_label({ harness: harnessId });
 }
 
 function descriptionForHarnessTarget(harnessId: HarnessId): string {
 	if (harnessId === 'claude') return m.settings_api_provider_target_claude_description();
-	if (harnessId === 'codex') return m.settings_api_provider_target_codex_description();
-	if (harnessId === DIRECT_OPENAI_COMPATIBLE_HARNESS_ID) return m.settings_api_provider_target_direct_openai_description();
 	if (harnessId === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) return m.settings_api_provider_target_direct_anthropic_description();
 	return m.settings_api_provider_target_default_description();
 }

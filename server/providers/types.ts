@@ -18,6 +18,14 @@ import type { HarnessId, ApiProtocol } from '../../common/providers.js';
 export type { AgentCommandImage, AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode };
 export type ProviderName = HarnessId;
 
+export type CodexConfigValue = string | number | boolean | CodexConfigValue[] | { [key: string]: CodexConfigValue };
+export type CodexConfigObject = { [key: string]: CodexConfigValue };
+
+export interface CodexProviderConfig {
+  config: CodexConfigObject;
+  env?: Record<string, string>;
+}
+
 // Persisted chat execution state read from the registry.
 export interface PersistedChatExecutionConfig {
   projectPath?: string;
@@ -45,6 +53,7 @@ export interface StartSessionRequest extends ProviderExecutionConfig {
   command: string;
   images?: AgentCommandImage[];
   envOverrides?: Record<string, string>;
+  codexConfig?: CodexProviderConfig;
 }
 
 export interface StartedProviderSession {
@@ -63,6 +72,7 @@ export interface ResumeTurnRequest extends ProviderExecutionConfig {
   command: string;
   images?: AgentCommandImage[];
   envOverrides?: Record<string, string>;
+  codexConfig?: CodexProviderConfig;
 }
 
 // One-shot query with relaxed requirements (no session lifecycle).

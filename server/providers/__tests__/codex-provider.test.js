@@ -5,9 +5,14 @@ import { randomUUID } from 'crypto';
 
 const startThreadMock = mock();
 const resumeThreadMock = mock();
+const codexConstructorMock = mock();
 
 mock.module('@openai/codex-sdk', () => ({
   Codex: class {
+    constructor(options) {
+      codexConstructorMock(options);
+    }
+
     startThread(options) {
       return startThreadMock(options);
     }
@@ -34,6 +39,7 @@ describe('CodexProvider session startup', () => {
   beforeEach(() => {
     startThreadMock.mockReset();
     resumeThreadMock.mockReset();
+    codexConstructorMock.mockReset();
   });
 
   it('emits session-created once and resolves immediately when thread.id is available', async () => {
@@ -109,6 +115,61 @@ describe('CodexProvider session startup', () => {
         model: 'gpt-5.4',
         modelReasoningEffort: 'xhigh',
       }));
+    } finally {
+      await fs.rm(testRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('passes custom provider Responses config to the Codex SDK', async () => {
+    const provider = new CodexProvider();
+    const sessionId = `codex-session-${randomUUID()}`;
+    const testRoot = path.join(CODEX_SESSIONS_ROOT, `__test-${sessionId}`);
+    const nestedDir = path.join(testRoot, 'nested');
+    const nativePath = path.join(nestedDir, `rollout-123-${sessionId}.jsonl`);
+    const codexConfig = {
+      config: {
+        model_provider: 'garcon_acme_openai',
+        model_providers: {
+          garcon_acme_openai: {
+            name: 'Acme',
+            base_url: 'https://api.acme.test/v1',
+            wire_api: 'responses',
+            requires_openai_auth: false,
+            supports_websockets: false,
+            env_key: 'GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI',
+          },
+        },
+      },
+      env: {
+        GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI: 'secret',
+      },
+    };
+
+    startThreadMock.mockImplementation(() => ({
+      id: sessionId,
+      runStreamed: mock(() => Promise.resolve({
+        events: createEventStream([{ type: 'turn.completed' }]),
+      })),
+    }));
+    await fs.mkdir(nestedDir, { recursive: true });
+    await fs.writeFile(nativePath, '{}\n');
+
+    try {
+      await provider.startSession({
+        chatId: 'chat-provider',
+        command: 'hello',
+        projectPath: '/proj',
+        model: 'acme-code',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        codexConfig,
+      });
+
+      const options = codexConstructorMock.mock.calls[0][0];
+      expect(options.config).toEqual(codexConfig.config);
+      expect(options.env).toMatchObject(codexConfig.env);
+      expect(options.baseUrl).toBeUndefined();
+      expect(options.apiKey).toBeUndefined();
     } finally {
       await fs.rm(testRoot, { recursive: true, force: true });
     }

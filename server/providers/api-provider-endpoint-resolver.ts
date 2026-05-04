@@ -1,6 +1,6 @@
 // Resolves API-provider endpoint metadata for harnesses. Answers which
-// model options are exposed to each harness and builds env
-// overrides for compatible endpoint routing.
+// model options are exposed to each harness and builds routing
+// metadata for compatible endpoint execution.
 
 import type {
   HarnessId,
@@ -16,6 +16,7 @@ import type {
   StoredApiProvider,
   StoredApiProviderEndpoint,
 } from './api-provider-store.js';
+import type { CodexConfigObject, CodexProviderConfig } from './types.js';
 
 export interface ResolvedModelSelection {
   model: string;
@@ -24,6 +25,7 @@ export interface ResolvedModelSelection {
   protocol: ApiProtocol | null;
   isLocal: boolean;
   envOverrides?: Record<string, string>;
+  codexConfig?: CodexProviderConfig;
 }
 
 export type ModelSelectionErrorCode =
@@ -97,6 +99,7 @@ export class ApiProviderEndpointResolver {
 
     const matchedModel = this.#resolveModel(resolved.apiProvider, resolved.endpoint, input.model);
     const envOverrides = buildEnvOverrides(harnessId, resolved.endpoint);
+    const codexConfig = buildCodexProviderConfig(harnessId, resolved.apiProvider, resolved.endpoint);
     return {
       model: matchedModel.rawModel,
       apiProviderId: resolved.apiProvider.id,
@@ -104,6 +107,7 @@ export class ApiProviderEndpointResolver {
       protocol: resolved.endpoint.protocol,
       isLocal: matchedModel.isLocal,
       envOverrides,
+      ...(codexConfig ? { codexConfig } : {}),
     };
   }
 
@@ -183,14 +187,52 @@ function buildEnvOverrides(
     };
   }
 
-  if (harnessId === 'codex' && endpoint.protocol === 'openai-chat-completions') {
-    return {
-      OPENAI_BASE_URL: endpoint.baseUrl,
-      ...(endpoint.apiKey ? { OPENAI_API_KEY: endpoint.apiKey } : {}),
-    };
+  return undefined;
+}
+
+function buildCodexProviderConfig(
+  harnessId: HarnessId,
+  apiProvider: StoredApiProvider,
+  endpoint: StoredApiProviderEndpoint,
+): CodexProviderConfig | undefined {
+  if (harnessId !== 'codex' || endpoint.protocol !== 'openai-chat-completions') {
+    return undefined;
   }
 
-  return undefined;
+  const providerId = codexProviderIdForEndpoint(endpoint.id);
+  const envKey = endpoint.apiKey ? codexApiKeyEnvForEndpoint(endpoint.id) : null;
+  const providerConfig: CodexConfigObject = {
+    name: apiProvider.label || endpoint.id,
+    base_url: endpoint.baseUrl,
+    wire_api: 'responses',
+    requires_openai_auth: false,
+    supports_websockets: false,
+  };
+
+  if (envKey) {
+    providerConfig.env_key = envKey;
+  }
+  if (endpoint.headers && Object.keys(endpoint.headers).length > 0) {
+    providerConfig.http_headers = { ...endpoint.headers };
+  }
+
+  return {
+    config: {
+      model_provider: providerId,
+      model_providers: {
+        [providerId]: providerConfig,
+      },
+    },
+    ...(envKey ? { env: { [envKey]: endpoint.apiKey } } : {}),
+  };
+}
+
+function codexProviderIdForEndpoint(endpointId: string): string {
+  return `garcon_${endpointId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+}
+
+function codexApiKeyEnvForEndpoint(endpointId: string): string {
+  return `GARCON_CODEX_PROVIDER_API_KEY_${endpointId.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
 }
 
 export function assertSameApiProviderBoundary(previous: ResolvedModelSelection, next: ResolvedModelSelection): void {

@@ -555,6 +555,7 @@ export class ProviderRegistry {
       claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
       images: opts.images,
       envOverrides: selection.envOverrides,
+      ...(selection.codexConfig ? { codexConfig: selection.codexConfig } : {}),
       ...selectionRequestFields(selection),
     };
 
@@ -613,6 +614,7 @@ export class ProviderRegistry {
       claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
       images: opts.images,
       envOverrides: selection.envOverrides,
+      ...(selection.codexConfig ? { codexConfig: selection.codexConfig } : {}),
       ...selectionRequestFields(selection),
     });
   }
@@ -752,6 +754,7 @@ export class ProviderRegistry {
         });
         rest.model = selection.model;
         if (selection.envOverrides) rest.envOverrides = selection.envOverrides;
+        if (selection.codexConfig) rest.codexConfig = selection.codexConfig;
         Object.assign(rest, selectionRequestFields(selection));
       }
       return adapter.runSingleQuery(prompt, rest);

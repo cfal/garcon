@@ -22,28 +22,29 @@ describe('ApiProviderEndpointDialogState', () => {
 		vi.mocked(discoverApiProviderModels).mockReset();
 	});
 
-		it('shows Claude Code and Direct Chat for Anthropic-compatible endpoints', () => {
-			const dialog = new ApiProviderEndpointDialogState({
-				modelCatalog: makeModelCatalog() as never,
-				getProtocol: () => 'anthropic-messages',
+	it('shows Claude Code and Direct Chat for Anthropic-compatible endpoints', () => {
+		const dialog = new ApiProviderEndpointDialogState({
+			modelCatalog: makeModelCatalog() as never,
+			getProtocol: () => 'anthropic-messages',
 			getEndpointId: () => null,
 			getTemplateId: () => 'custom'
 		});
 
-			dialog.beginCreate();
+		dialog.beginCreate();
 
-			expect(dialog.targetOptions.map((target) => target.harnessId)).toEqual([
-				'claude',
-				'direct-anthropic-compatible'
-			]);
-			expect(dialog.targetOptions.map((target) => target.label)).toEqual([
-				'Use with Claude Code',
-				'Use with Direct Chat (Anthropic)'
-			]);
-			expect(dialog.exposeTo).toEqual(['claude', 'direct-anthropic-compatible']);
-		});
+		expect(dialog.usesOpenAiCapabilityToggles).toBe(false);
+		expect(dialog.targetOptions.map((target) => target.harnessId)).toEqual([
+			'claude',
+			'direct-anthropic-compatible'
+		]);
+		expect(dialog.targetOptions.map((target) => target.label)).toEqual([
+			'Use with Claude Code',
+			'Use with Direct Chat (Anthropic)'
+		]);
+		expect(dialog.exposeTo).toEqual(['claude', 'direct-anthropic-compatible']);
+	});
 
-	it('shows Codex and Direct Chat for OpenAI-compatible endpoints', () => {
+	it('maps OpenAI capability toggles to Direct Chat and Codex exposure', () => {
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-chat-completions',
@@ -52,18 +53,23 @@ describe('ApiProviderEndpointDialogState', () => {
 		});
 
 		dialog.beginCreate();
-		dialog.setTarget('codex', false);
 
-		expect(dialog.targetOptions.map((target) => target.harnessId)).toEqual([
-			'codex',
-			'direct-openai-compatible'
-		]);
-			expect(dialog.targetOptions.map((target) => target.label)).toEqual([
-				'Use with Codex',
-				'Use with Direct Chat (OpenAI)'
-			]);
-			expect(dialog.exposeTo).toEqual(['direct-openai-compatible']);
-		});
+		expect(dialog.usesOpenAiCapabilityToggles).toBe(true);
+		expect(dialog.targetOptions).toEqual([]);
+		expect(dialog.supportsChatCompletionsApi).toBe(true);
+		expect(dialog.supportsResponsesApi).toBe(false);
+		expect(dialog.exposeTo).toEqual(['direct-openai-compatible']);
+
+		dialog.setSupportsResponsesApi(true);
+
+		expect(dialog.supportsResponsesApi).toBe(true);
+		expect(dialog.exposeTo).toEqual(['codex', 'direct-openai-compatible']);
+
+		dialog.setSupportsChatCompletionsApi(false);
+
+		expect(dialog.supportsChatCompletionsApi).toBe(false);
+		expect(dialog.exposeTo).toEqual(['codex']);
+	});
 
 	it('loads edit state without exposing the stored API key', async () => {
 		const endpoint = {
@@ -96,8 +102,8 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.apiProviderId).toBe('zai');
 		expect(dialog.label).toBe('Z.AI');
 		expect(dialog.apiKey).toBe('');
-		expect(dialog.isTargetEnabled('codex')).toBe(true);
-		expect(dialog.isTargetEnabled('direct-openai-compatible')).toBe(false);
+		expect(dialog.supportsResponsesApi).toBe(true);
+		expect(dialog.supportsChatCompletionsApi).toBe(false);
 	});
 
 	it('prefills OpenRouter template values for OpenAI-compatible creation', () => {
@@ -114,8 +120,8 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.label).toBe('OpenRouter');
 		expect(dialog.baseUrl).toBe('https://openrouter.ai/api/v1');
 		expect(dialog.modelDiscovery).toBe('openrouter-models');
-		expect(dialog.isTargetEnabled('codex')).toBe(true);
-		expect(dialog.isTargetEnabled('direct-openai-compatible')).toBe(true);
+		expect(dialog.supportsResponsesApi).toBe(true);
+		expect(dialog.supportsChatCompletionsApi).toBe(true);
 		expect(dialog.apiKeyRequired).toBe(true);
 	});
 
@@ -143,6 +149,8 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(openAiDialog.baseUrl).toBe('https://dashscope-intl.aliyuncs.com/compatible-mode/v1');
 		expect(openAiDialog.defaultModel).toBe('qwen-plus');
 		expect(openAiDialog.modelDiscovery).toBe('openai-models');
+		expect(openAiDialog.supportsResponsesApi).toBe(true);
+		expect(openAiDialog.supportsChatCompletionsApi).toBe(true);
 	});
 
 	it('prefills Fireworks, Gemini, and Together provider templates', () => {
@@ -180,15 +188,21 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(fireworksOpenAiDialog.baseUrl).toBe('https://api.fireworks.ai/inference/v1');
 		expect(fireworksOpenAiDialog.defaultModel).toBe('accounts/fireworks/models/kimi-k2p5');
 		expect(fireworksOpenAiDialog.apiKeyPlaceholder).toBe('Fireworks.ai API key');
+		expect(fireworksOpenAiDialog.supportsResponsesApi).toBe(true);
+		expect(fireworksOpenAiDialog.supportsChatCompletionsApi).toBe(true);
 		expect(geminiDialog.label).toBe('Gemini');
 		expect(geminiDialog.baseUrl).toBe('https://generativelanguage.googleapis.com/v1beta/openai');
 		expect(geminiDialog.defaultModel).toBe('gemini-3-flash-preview');
 		expect(geminiDialog.supportsImages).toBe(true);
 		expect(geminiDialog.apiKeyPlaceholder).toBe('Gemini API key');
+		expect(geminiDialog.supportsResponsesApi).toBe(false);
+		expect(geminiDialog.supportsChatCompletionsApi).toBe(true);
 		expect(togetherDialog.label).toBe('Together.ai');
 		expect(togetherDialog.baseUrl).toBe('https://api.together.ai/v1');
 		expect(togetherDialog.defaultModel).toBe('openai/gpt-oss-20b');
 		expect(togetherDialog.apiKeyPlaceholder).toBe('Together.ai API key');
+		expect(togetherDialog.supportsResponsesApi).toBe(false);
+		expect(togetherDialog.supportsChatCompletionsApi).toBe(true);
 	});
 
 	it('prefills Ollama template with blank key support', () => {
@@ -206,9 +220,11 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.apiKey).toBe('');
 		expect(dialog.apiKeyRequired).toBe(false);
 		expect(dialog.modelDiscovery).toBe('ollama-tags');
+		expect(dialog.supportsResponsesApi).toBe(true);
+		expect(dialog.supportsChatCompletionsApi).toBe(true);
 	});
 
-	it('requires a parsed model and valid default model before saving', () => {
+	it('requires a parsed model, valid default model, and at least one API capability before saving', () => {
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-chat-completions',
@@ -220,6 +236,8 @@ describe('ApiProviderEndpointDialogState', () => {
 		dialog.label = 'Acme';
 		dialog.baseUrl = 'https://api.acme.test/v1';
 
+		expect(dialog.supportsResponsesApi).toBe(false);
+		expect(dialog.supportsChatCompletionsApi).toBe(true);
 		expect(dialog.canSave).toBe(false);
 
 		dialog.modelsText = 'acme-code|Acme Code';
@@ -228,18 +246,24 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.defaultModel).toBe('acme-code');
 		expect(dialog.canSave).toBe(true);
 
+		dialog.setSupportsChatCompletionsApi(false);
+		expect(dialog.canSave).toBe(false);
+
+		dialog.setSupportsResponsesApi(true);
+		expect(dialog.canSave).toBe(true);
+
 		dialog.defaultModel = 'missing-model';
 		expect(dialog.canSave).toBe(false);
 	});
 
 	it('fetches OpenAI-compatible models and uses them as default model choices', async () => {
-			vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
-				success: true,
-				models: [
-					{ value: 'acme-fast', label: 'Acme Fast' },
-					{ value: 'acme-code', label: 'Acme Code' }
-				]
-			});
+		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
+			success: true,
+			models: [
+				{ value: 'acme-fast', label: 'Acme Fast' },
+				{ value: 'acme-code', label: 'Acme Code' }
+			]
+		});
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-chat-completions',
@@ -259,16 +283,16 @@ describe('ApiProviderEndpointDialogState', () => {
 			apiProviderId: null,
 			endpointId: null,
 			modelDiscovery: 'openai-models'
-			});
-			expect(dialog.modelsText).toBe('acme-code|Acme Code\nacme-fast|Acme Fast');
-			expect(dialog.defaultModel).toBe('acme-code');
+		});
+		expect(dialog.modelsText).toBe('acme-code|Acme Code\nacme-fast|Acme Fast');
+		expect(dialog.defaultModel).toBe('acme-code');
 		expect(dialog.modelOptions.map((model) => model.value)).toEqual(['acme-code', 'acme-fast']);
 	});
 
-		it('uses Anthropic model discovery for custom Anthropic-compatible providers', async () => {
-			vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
-				success: true,
-				models: [{ value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' }]
+	it('uses Anthropic model discovery for custom Anthropic-compatible providers', async () => {
+		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
+			success: true,
+			models: [{ value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' }]
 		});
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
@@ -290,39 +314,39 @@ describe('ApiProviderEndpointDialogState', () => {
 			endpointId: null,
 			modelDiscovery: 'anthropic-models'
 		});
-			expect(dialog.modelDiscovery).toBe('anthropic-models');
-			expect(dialog.defaultModel).toBe('claude-sonnet-4-20250514');
+		expect(dialog.modelDiscovery).toBe('anthropic-models');
+		expect(dialog.defaultModel).toBe('claude-sonnet-4-20250514');
+	});
+
+	it('keeps Direct Anthropic exposure when fetching Anthropic models', async () => {
+		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
+			success: true,
+			models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }]
+		});
+		const dialog = new ApiProviderEndpointDialogState({
+			modelCatalog: makeModelCatalog() as never,
+			getProtocol: () => 'anthropic-messages',
+			getEndpointId: () => null,
+			getTemplateId: () => 'custom'
 		});
 
-		it('keeps Direct Anthropic exposure when fetching Anthropic models', async () => {
-			vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
-				success: true,
-				models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }]
-			});
-			const dialog = new ApiProviderEndpointDialogState({
-				modelCatalog: makeModelCatalog() as never,
-				getProtocol: () => 'anthropic-messages',
-				getEndpointId: () => null,
-				getTemplateId: () => 'custom'
-			});
+		dialog.beginCreate();
+		dialog.baseUrl = 'https://api.acme.test';
+		dialog.setTarget('claude', false);
 
-			dialog.beginCreate();
-			dialog.baseUrl = 'https://api.acme.test';
-			dialog.setTarget('claude', false);
+		await dialog.fetchModels();
 
-			await dialog.fetchModels();
-
-			expect(discoverApiProviderModels).toHaveBeenCalledWith({
-				protocol: 'anthropic-messages',
-				baseUrl: 'https://api.acme.test',
-				apiKey: undefined,
-				apiProviderId: null,
-				endpointId: null,
-				modelDiscovery: 'anthropic-models'
-			});
-			expect(dialog.exposeTo).toEqual(['direct-anthropic-compatible']);
-			expect(dialog.defaultModel).toBe('acme-sonnet');
+		expect(discoverApiProviderModels).toHaveBeenCalledWith({
+			protocol: 'anthropic-messages',
+			baseUrl: 'https://api.acme.test',
+			apiKey: undefined,
+			apiProviderId: null,
+			endpointId: null,
+			modelDiscovery: 'anthropic-models'
 		});
+		expect(dialog.exposeTo).toEqual(['direct-anthropic-compatible']);
+		expect(dialog.defaultModel).toBe('acme-sonnet');
+	});
 
 	it('allows model fetching on edit when the stored key is redacted from the dialog', async () => {
 		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({

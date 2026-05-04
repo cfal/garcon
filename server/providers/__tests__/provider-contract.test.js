@@ -99,4 +99,17 @@ describe('shared harness/API provider contract', () => {
       expect(template.exposeTo).not.toContain(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID);
     }
   });
+
+  it('prefills Codex only for OpenAI-compatible presets with Responses support', () => {
+    const openAiTemplates = templatesForProtocol('openai-chat-completions');
+    const exposeToCodex = openAiTemplates
+      .filter((template) => template.exposeTo.includes('codex'))
+      .map((template) => template.id);
+    const directOnly = openAiTemplates
+      .filter((template) => !template.exposeTo.includes('codex'))
+      .map((template) => template.id);
+
+    expect(exposeToCodex).toEqual(['alibaba-cloud', 'fireworks', 'ollama', 'openrouter']);
+    expect(directOnly).toEqual(['gemini', 'together', 'zai', 'custom']);
+  });
 });
