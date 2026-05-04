@@ -108,7 +108,11 @@
 	}
 
 	function templateMenuLabel(templateId: ApiProviderTemplateId): string {
+		if (templateId === 'alibaba-cloud') return m.settings_api_providers_add_alibaba_cloud();
+		if (templateId === 'fireworks') return m.settings_api_providers_add_fireworks();
+		if (templateId === 'gemini') return m.settings_api_providers_add_gemini();
 		if (templateId === 'openrouter') return m.settings_api_providers_add_openrouter();
+		if (templateId === 'together') return m.settings_api_providers_add_together();
 		if (templateId === 'zai') return m.settings_api_providers_add_zai();
 		if (templateId === 'ollama') return m.settings_api_providers_add_ollama();
 		return m.settings_api_providers_add_custom_provider();

@@ -4,19 +4,25 @@ import ApiProviderProtocolPanelTestHarness from './ApiProviderProtocolPanelTestH
 
 describe('ApiProviderProtocolPanel', () => {
 	it('shows protocol-specific Anthropic add-provider templates', async () => {
-			render(ApiProviderProtocolPanelTestHarness, {
-				protocol: 'anthropic-messages',
-				title: 'Anthropic Providers',
-				description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.',
-				addLabel: 'Add Anthropic-compatible provider'
-			});
+		render(ApiProviderProtocolPanelTestHarness, {
+			protocol: 'anthropic-messages',
+			title: 'Anthropic Providers',
+			description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.',
+			addLabel: 'Add Anthropic-compatible provider'
+		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Add Anthropic-compatible provider' }));
 
-		expect(await screen.findByRole('menuitem', { name: 'Add Z.AI' })).toBeTruthy();
-		expect(screen.getByRole('menuitem', { name: 'Add Ollama' })).toBeTruthy();
-		expect(screen.getByRole('menuitem', { name: 'Add custom provider..' })).toBeTruthy();
+		expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
+			'Add Alibaba Cloud',
+			'Add Fireworks.ai',
+			'Add Ollama',
+			'Add Z.AI',
+			'Add custom provider..'
+		]);
 		expect(screen.queryByRole('menuitem', { name: 'Add OpenRouter' })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: 'Add Together.ai' })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: 'Add Gemini' })).toBeNull();
 	});
 
 	it('shows protocol-specific OpenAI add-provider templates', async () => {
@@ -29,10 +35,16 @@ describe('ApiProviderProtocolPanel', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Add OpenAI-compatible provider' }));
 
-		expect(await screen.findByRole('menuitem', { name: 'Add OpenRouter' })).toBeTruthy();
-		expect(screen.getByRole('menuitem', { name: 'Add Z.AI' })).toBeTruthy();
-		expect(screen.getByRole('menuitem', { name: 'Add Ollama' })).toBeTruthy();
-		expect(screen.getByRole('menuitem', { name: 'Add custom provider..' })).toBeTruthy();
+		expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
+			'Add Alibaba Cloud',
+			'Add Fireworks.ai',
+			'Add Gemini',
+			'Add Ollama',
+			'Add OpenRouter',
+			'Add Together.ai',
+			'Add Z.AI',
+			'Add custom provider..'
+		]);
 	});
 
 	it('renders saved provider rows without built-in or disabled badges', () => {

@@ -28,11 +28,18 @@ export type ModelDiscoveryKind =
   | 'ollama-tags'
   | 'openrouter-models';
 
-export type ApiProviderTemplateId =
-  | 'openrouter'
-  | 'zai'
-  | 'ollama'
-  | 'custom';
+export const API_PROVIDER_TEMPLATE_IDS = [
+  'alibaba-cloud',
+  'fireworks',
+  'gemini',
+  'openrouter',
+  'together',
+  'zai',
+  'ollama',
+  'custom',
+] as const;
+
+export type ApiProviderTemplateId = (typeof API_PROVIDER_TEMPLATE_IDS)[number];
 
 export interface HarnessCapabilities {
   supportsFork: boolean;
@@ -201,6 +208,10 @@ export function isEndpointOnlyHarnessId(value: string): value is EndpointOnlyHar
 
 export function isApiProviderId(value: unknown): value is string {
   return typeof value === 'string' && SAFE_ID_RE.test(value);
+}
+
+export function isApiProviderTemplateId(value: unknown): value is ApiProviderTemplateId {
+  return typeof value === 'string' && (API_PROVIDER_TEMPLATE_IDS as readonly string[]).includes(value);
 }
 
 export function harnessesForProtocol(protocol: ApiProtocol): readonly BuiltinHarnessId[] {

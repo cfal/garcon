@@ -36,10 +36,12 @@ import { assertSameApiProviderBoundary } from './api-provider-endpoint-resolver.
 import { directAnthropicSessionFilePath, directOpenAiSessionFilePath } from './provider-adapters.js';
 import {
   BUILTIN_HARNESS_CAPABILITIES,
+  API_PROVIDER_TEMPLATE_IDS,
   DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
   DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
   ENDPOINT_ONLY_HARNESSES,
   harnessesForProtocol,
+  isApiProviderTemplateId,
   isEndpointOnlyHarnessId,
   isVisibleHarnessId,
   labelForProtocol,
@@ -187,8 +189,8 @@ function optionalBoolean(value: unknown, field: string): boolean | undefined {
 }
 
 function normalizeTemplateId(value: unknown): ApiProviderTemplateId {
-  if (value === 'openrouter' || value === 'zai' || value === 'ollama' || value === 'custom') return value;
-  throw new Error('templateId must be openrouter, zai, ollama, or custom');
+  if (isApiProviderTemplateId(value)) return value;
+  throw new Error(`templateId must be ${API_PROVIDER_TEMPLATE_IDS.join(', ')}`);
 }
 
 function normalizeApiProviderBaseUrl(value: unknown): string {

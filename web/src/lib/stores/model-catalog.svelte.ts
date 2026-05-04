@@ -4,6 +4,7 @@ import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS } from '$shared
 import {
 	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
 	DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+	isApiProviderTemplateId,
 	isEndpointOnlyHarnessId,
 	isVisibleHarnessId,
 	type ApiProtocol,
@@ -92,7 +93,7 @@ function normalizeProtocols(value: unknown): ApiProtocol[] {
 }
 
 function normalizeTemplateId(value: unknown): ApiProviderTemplateId | undefined {
-	if (value === 'openrouter' || value === 'zai' || value === 'ollama' || value === 'custom') return value;
+	if (isApiProviderTemplateId(value)) return value;
 	return undefined;
 }
 

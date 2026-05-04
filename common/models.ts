@@ -72,6 +72,40 @@ export const OPENROUTER_MODELS = {
   DEFAULT: 'anthropic/claude-sonnet-4.6',
 };
 
+export const ALIBABA_CLOUD_MODELS = {
+  OPTIONS: [
+    { value: 'qwen-plus', label: 'Qwen Plus', supportsImages: false },
+    { value: 'qwen3-coder-plus', label: 'Qwen3 Coder Plus', supportsImages: false },
+    { value: 'qwen3-max-preview', label: 'Qwen3 Max Preview', supportsImages: false },
+  ] satisfies SharedModelOption[],
+  DEFAULT: 'qwen-plus',
+};
+
+export const FIREWORKS_MODELS = {
+  OPTIONS: [
+    { value: 'accounts/fireworks/models/deepseek-v3p2', label: 'DeepSeek V3.2', supportsImages: false },
+    { value: 'accounts/fireworks/models/kimi-k2p5', label: 'Kimi K2.5', supportsImages: false },
+  ] satisfies SharedModelOption[],
+  DEFAULT: 'accounts/fireworks/models/kimi-k2p5',
+};
+
+export const GEMINI_MODELS = {
+  OPTIONS: [
+    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', supportsImages: true },
+    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', supportsImages: true },
+    { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview', supportsImages: true },
+    { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview', supportsImages: true },
+  ] satisfies SharedModelOption[],
+  DEFAULT: 'gemini-3-flash-preview',
+};
+
+export const TOGETHER_MODELS = {
+  OPTIONS: [
+    { value: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B', supportsImages: false },
+  ] satisfies SharedModelOption[],
+  DEFAULT: 'openai/gpt-oss-20b',
+};
+
 export const ZAI_MODELS = {
   OPTIONS: [
     { value: 'glm-5.1', label: 'GLM-5.1', supportsImages: false },

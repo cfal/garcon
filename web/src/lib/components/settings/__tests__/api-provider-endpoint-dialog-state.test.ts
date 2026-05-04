@@ -119,6 +119,78 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.apiKeyRequired).toBe(true);
 	});
 
+	it('prefills Alibaba Cloud Singapore URLs for both protocols', () => {
+		const anthropicDialog = new ApiProviderEndpointDialogState({
+			modelCatalog: makeModelCatalog() as never,
+			getProtocol: () => 'anthropic-messages',
+			getEndpointId: () => null,
+			getTemplateId: () => 'alibaba-cloud'
+		});
+		const openAiDialog = new ApiProviderEndpointDialogState({
+			modelCatalog: makeModelCatalog() as never,
+			getProtocol: () => 'openai-chat-completions',
+			getEndpointId: () => null,
+			getTemplateId: () => 'alibaba-cloud'
+		});
+
+		anthropicDialog.beginCreate();
+		openAiDialog.beginCreate();
+
+		expect(anthropicDialog.label).toBe('Alibaba Cloud');
+		expect(anthropicDialog.baseUrl).toBe('https://dashscope-intl.aliyuncs.com/apps/anthropic');
+		expect(anthropicDialog.defaultModel).toBe('qwen-plus');
+		expect(anthropicDialog.apiKeyPlaceholder).toBe('Alibaba Cloud API key');
+		expect(openAiDialog.baseUrl).toBe('https://dashscope-intl.aliyuncs.com/compatible-mode/v1');
+		expect(openAiDialog.defaultModel).toBe('qwen-plus');
+		expect(openAiDialog.modelDiscovery).toBe('openai-models');
+	});
+
+	it('prefills Fireworks, Gemini, and Together provider templates', () => {
+		const fireworksAnthropicDialog = new ApiProviderEndpointDialogState({
+			modelCatalog: makeModelCatalog() as never,
+			getProtocol: () => 'anthropic-messages',
+			getEndpointId: () => null,
+			getTemplateId: () => 'fireworks'
+		});
+		const fireworksOpenAiDialog = new ApiProviderEndpointDialogState({
+			modelCatalog: makeModelCatalog() as never,
+			getProtocol: () => 'openai-chat-completions',
+			getEndpointId: () => null,
+			getTemplateId: () => 'fireworks'
+		});
+		const geminiDialog = new ApiProviderEndpointDialogState({
+			modelCatalog: makeModelCatalog() as never,
+			getProtocol: () => 'openai-chat-completions',
+			getEndpointId: () => null,
+			getTemplateId: () => 'gemini'
+		});
+		const togetherDialog = new ApiProviderEndpointDialogState({
+			modelCatalog: makeModelCatalog() as never,
+			getProtocol: () => 'openai-chat-completions',
+			getEndpointId: () => null,
+			getTemplateId: () => 'together'
+		});
+
+		fireworksAnthropicDialog.beginCreate();
+		fireworksOpenAiDialog.beginCreate();
+		geminiDialog.beginCreate();
+		togetherDialog.beginCreate();
+
+		expect(fireworksAnthropicDialog.baseUrl).toBe('https://api.fireworks.ai/inference');
+		expect(fireworksOpenAiDialog.baseUrl).toBe('https://api.fireworks.ai/inference/v1');
+		expect(fireworksOpenAiDialog.defaultModel).toBe('accounts/fireworks/models/kimi-k2p5');
+		expect(fireworksOpenAiDialog.apiKeyPlaceholder).toBe('Fireworks.ai API key');
+		expect(geminiDialog.label).toBe('Gemini');
+		expect(geminiDialog.baseUrl).toBe('https://generativelanguage.googleapis.com/v1beta/openai');
+		expect(geminiDialog.defaultModel).toBe('gemini-3-flash-preview');
+		expect(geminiDialog.supportsImages).toBe(true);
+		expect(geminiDialog.apiKeyPlaceholder).toBe('Gemini API key');
+		expect(togetherDialog.label).toBe('Together.ai');
+		expect(togetherDialog.baseUrl).toBe('https://api.together.ai/v1');
+		expect(togetherDialog.defaultModel).toBe('openai/gpt-oss-20b');
+		expect(togetherDialog.apiKeyPlaceholder).toBe('Together.ai API key');
+	});
+
 	it('prefills Ollama template with blank key support', () => {
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,

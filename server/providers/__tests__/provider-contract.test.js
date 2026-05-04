@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  API_PROVIDER_TEMPLATE_IDS,
   DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
   DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
   harnessesForProtocol,
+  isApiProviderTemplateId,
   isEndpointOnlyHarnessId,
   isHarnessCompatibleWithProtocol,
   isOAuthHarnessId,
@@ -41,6 +43,10 @@ describe('shared harness/API provider contract', () => {
     expect(isVisibleHarnessId('zai')).toBe(false);
     expect(isVisibleHarnessId('openrouter')).toBe(false);
     expect(isVisibleHarnessId('ollama')).toBe(false);
+    expect(isVisibleHarnessId('alibaba-cloud')).toBe(false);
+    expect(isVisibleHarnessId('fireworks')).toBe(false);
+    expect(isVisibleHarnessId('gemini')).toBe(false);
+    expect(isVisibleHarnessId('together')).toBe(false);
   });
 
   it('keeps settings auth rows narrower than visible harnesses', () => {
@@ -62,15 +68,23 @@ describe('shared harness/API provider contract', () => {
   });
 
   it('returns protocol-specific add-provider templates', () => {
+    expect(API_PROVIDER_TEMPLATE_IDS.every(isApiProviderTemplateId)).toBe(true);
+    expect(isApiProviderTemplateId('missing-provider')).toBe(false);
     expect(templatesForProtocol('anthropic-messages').map((template) => template.id)).toEqual([
-      'zai',
+      'alibaba-cloud',
+      'fireworks',
       'ollama',
+      'zai',
       'custom',
     ]);
     expect(templatesForProtocol('openai-chat-completions').map((template) => template.id)).toEqual([
-      'openrouter',
-      'zai',
+      'alibaba-cloud',
+      'fireworks',
+      'gemini',
       'ollama',
+      'openrouter',
+      'together',
+      'zai',
       'custom',
     ]);
   });

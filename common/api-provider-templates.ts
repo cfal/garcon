@@ -1,7 +1,14 @@
 // Non-secret API provider templates used to prefill the settings dialog and
 // let the server apply provider-specific managed metadata.
 
-import { OPENROUTER_MODELS, ZAI_MODELS } from './models.js';
+import {
+  ALIBABA_CLOUD_MODELS,
+  FIREWORKS_MODELS,
+  GEMINI_MODELS,
+  OPENROUTER_MODELS,
+  TOGETHER_MODELS,
+  ZAI_MODELS,
+} from './models.js';
 import type {
   ApiProtocol,
   ApiProviderTemplateId,
@@ -33,70 +40,30 @@ export interface ApiProviderTemplate {
 
 export const API_PROVIDER_TEMPLATES = [
   {
-    id: 'zai',
+    id: 'alibaba-cloud',
     protocol: 'anthropic-messages',
-    label: 'Z.AI',
-    baseUrl: 'https://api.z.ai/api/anthropic',
-    apiKeyPlaceholder: 'Z.AI API key',
+    label: 'Alibaba Cloud',
+    baseUrl: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+    apiKeyPlaceholder: 'Alibaba Cloud API key',
     apiKeyRequired: true,
-    defaultModel: ZAI_MODELS.DEFAULT,
-    models: ZAI_MODELS.OPTIONS,
+    defaultModel: ALIBABA_CLOUD_MODELS.DEFAULT,
+    models: ALIBABA_CLOUD_MODELS.OPTIONS,
     supportsImages: false,
     exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
-    modelDiscovery: 'none',
+    modelDiscovery: 'anthropic-models',
   },
   {
-    id: 'ollama',
-    protocol: 'anthropic-messages',
-    label: 'Ollama',
-    baseUrl: 'http://localhost:11434',
-    apiKeyPlaceholder: 'Leave blank for local Ollama',
-    apiKeyRequired: false,
-    defaultModel: 'llama3',
-    models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
-    supportsImages: false,
-    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
-    modelDiscovery: 'ollama-tags',
-  },
-  {
-    id: 'openrouter',
+    id: 'alibaba-cloud',
     protocol: 'openai-chat-completions',
-    label: 'OpenRouter',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    apiKeyPlaceholder: 'OpenRouter API key',
+    label: 'Alibaba Cloud',
+    baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    apiKeyPlaceholder: 'Alibaba Cloud API key',
     apiKeyRequired: true,
-    defaultModel: OPENROUTER_MODELS.DEFAULT,
-    models: OPENROUTER_MODELS.OPTIONS,
-    supportsImages: true,
-    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
-    modelDiscovery: 'openrouter-models',
-    managedHeaders: 'openrouter',
-  },
-  {
-    id: 'zai',
-    protocol: 'openai-chat-completions',
-    label: 'Z.AI',
-    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
-    apiKeyPlaceholder: 'Z.AI API key',
-    apiKeyRequired: true,
-    defaultModel: ZAI_MODELS.DEFAULT,
-    models: ZAI_MODELS.OPTIONS,
+    defaultModel: ALIBABA_CLOUD_MODELS.DEFAULT,
+    models: ALIBABA_CLOUD_MODELS.OPTIONS,
     supportsImages: false,
     exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
-    modelDiscovery: 'none',
-  },
-  {
-    id: 'ollama',
-    protocol: 'openai-chat-completions',
-    label: 'Ollama',
-    baseUrl: 'http://localhost:11434/v1',
-    apiKeyPlaceholder: 'Leave blank for local Ollama',
-    apiKeyRequired: false,
-    defaultModel: 'llama3',
-    models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
-    supportsImages: false,
-    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
-    modelDiscovery: 'ollama-tags',
+    modelDiscovery: 'openai-models',
   },
   {
     id: 'custom',
@@ -124,10 +91,130 @@ export const API_PROVIDER_TEMPLATES = [
     exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'openai-models',
   },
+  {
+    id: 'fireworks',
+    protocol: 'anthropic-messages',
+    label: 'Fireworks.ai',
+    baseUrl: 'https://api.fireworks.ai/inference',
+    apiKeyPlaceholder: 'Fireworks.ai API key',
+    apiKeyRequired: true,
+    defaultModel: FIREWORKS_MODELS.DEFAULT,
+    models: FIREWORKS_MODELS.OPTIONS,
+    supportsImages: false,
+    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
+    modelDiscovery: 'anthropic-models',
+  },
+  {
+    id: 'fireworks',
+    protocol: 'openai-chat-completions',
+    label: 'Fireworks.ai',
+    baseUrl: 'https://api.fireworks.ai/inference/v1',
+    apiKeyPlaceholder: 'Fireworks.ai API key',
+    apiKeyRequired: true,
+    defaultModel: FIREWORKS_MODELS.DEFAULT,
+    models: FIREWORKS_MODELS.OPTIONS,
+    supportsImages: false,
+    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    modelDiscovery: 'openai-models',
+  },
+  {
+    id: 'gemini',
+    protocol: 'openai-chat-completions',
+    label: 'Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    apiKeyPlaceholder: 'Gemini API key',
+    apiKeyRequired: true,
+    defaultModel: GEMINI_MODELS.DEFAULT,
+    models: GEMINI_MODELS.OPTIONS,
+    supportsImages: true,
+    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    modelDiscovery: 'openai-models',
+  },
+  {
+    id: 'ollama',
+    protocol: 'anthropic-messages',
+    label: 'Ollama',
+    baseUrl: 'http://localhost:11434',
+    apiKeyPlaceholder: 'Leave blank for local Ollama',
+    apiKeyRequired: false,
+    defaultModel: 'llama3',
+    models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
+    supportsImages: false,
+    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
+    modelDiscovery: 'ollama-tags',
+  },
+  {
+    id: 'ollama',
+    protocol: 'openai-chat-completions',
+    label: 'Ollama',
+    baseUrl: 'http://localhost:11434/v1',
+    apiKeyPlaceholder: 'Leave blank for local Ollama',
+    apiKeyRequired: false,
+    defaultModel: 'llama3',
+    models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
+    supportsImages: false,
+    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    modelDiscovery: 'ollama-tags',
+  },
+  {
+    id: 'openrouter',
+    protocol: 'openai-chat-completions',
+    label: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    apiKeyPlaceholder: 'OpenRouter API key',
+    apiKeyRequired: true,
+    defaultModel: OPENROUTER_MODELS.DEFAULT,
+    models: OPENROUTER_MODELS.OPTIONS,
+    supportsImages: true,
+    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    modelDiscovery: 'openrouter-models',
+    managedHeaders: 'openrouter',
+  },
+  {
+    id: 'together',
+    protocol: 'openai-chat-completions',
+    label: 'Together.ai',
+    baseUrl: 'https://api.together.ai/v1',
+    apiKeyPlaceholder: 'Together.ai API key',
+    apiKeyRequired: true,
+    defaultModel: TOGETHER_MODELS.DEFAULT,
+    models: TOGETHER_MODELS.OPTIONS,
+    supportsImages: false,
+    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    modelDiscovery: 'openai-models',
+  },
+  {
+    id: 'zai',
+    protocol: 'anthropic-messages',
+    label: 'Z.AI',
+    baseUrl: 'https://api.z.ai/api/anthropic',
+    apiKeyPlaceholder: 'Z.AI API key',
+    apiKeyRequired: true,
+    defaultModel: ZAI_MODELS.DEFAULT,
+    models: ZAI_MODELS.OPTIONS,
+    supportsImages: false,
+    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
+    modelDiscovery: 'none',
+  },
+  {
+    id: 'zai',
+    protocol: 'openai-chat-completions',
+    label: 'Z.AI',
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+    apiKeyPlaceholder: 'Z.AI API key',
+    apiKeyRequired: true,
+    defaultModel: ZAI_MODELS.DEFAULT,
+    models: ZAI_MODELS.OPTIONS,
+    supportsImages: false,
+    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    modelDiscovery: 'none',
+  },
 ] as const satisfies readonly ApiProviderTemplate[];
 
 export function templatesForProtocol(protocol: ApiProtocol): readonly ApiProviderTemplate[] {
-  return API_PROVIDER_TEMPLATES.filter((template) => template.protocol === protocol);
+  return API_PROVIDER_TEMPLATES
+    .filter((template) => template.protocol === protocol)
+    .sort(compareTemplatesForMenu);
 }
 
 export function apiProviderTemplate(
@@ -137,4 +224,16 @@ export function apiProviderTemplate(
   return API_PROVIDER_TEMPLATES.find((template) =>
     template.protocol === protocol && template.id === templateId
   ) ?? null;
+}
+
+function compareTemplatesForMenu(left: ApiProviderTemplate, right: ApiProviderTemplate): number {
+  const leftIsCustom = left.id === 'custom';
+  const rightIsCustom = right.id === 'custom';
+  if (leftIsCustom || rightIsCustom) {
+    return leftIsCustom === rightIsCustom ? 0 : leftIsCustom ? 1 : -1;
+  }
+  return left.label.localeCompare(right.label, undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
 }

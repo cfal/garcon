@@ -10,6 +10,7 @@ import {
 } from '../../common/api-provider-templates.js';
 import {
   harnessesForProtocol,
+  isApiProviderTemplateId,
   labelForProtocol,
   type ApiProtocol,
   type ApiProviderTemplateId,
@@ -184,7 +185,7 @@ function normalizeProtocol(value: unknown): ApiProtocol | null {
 }
 
 function normalizeTemplateId(value: unknown): ApiProviderTemplateId | undefined {
-  if (value === 'openrouter' || value === 'zai' || value === 'ollama' || value === 'custom') return value;
+  if (isApiProviderTemplateId(value)) return value;
   return undefined;
 }
 
