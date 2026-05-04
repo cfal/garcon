@@ -28,6 +28,10 @@
 	import Tag from '@lucide/svelte/icons/tag';
 	import { getTagColorClasses } from '$lib/utils/tag-colors';
 	import { getChatSessions } from '$lib/context';
+	import {
+		DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+		DIRECT_OPENAI_COMPATIBLE_HARNESS_ID
+	} from '$shared/providers';
 
 	interface Props {
 		prefill?: string;
@@ -45,9 +49,14 @@
 	const form = new NewChatFormState(appShell, modelCatalog, remoteSettings);
 
 	const providerGroups = $derived.by(() => {
-		const providers = modelCatalog.getHarnesses();
+		const providers = modelCatalog.getSelectableHarnesses();
 		const coreIds = new Set(['claude', 'codex', 'opencode']);
-		const moreIds = new Set(['amp', 'factory', 'direct-openai-compatible']);
+		const moreIds = new Set([
+			'amp',
+			'factory',
+			DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+			DIRECT_OPENAI_COMPATIBLE_HARNESS_ID
+		]);
 		const core = providers.filter((p) => coreIds.has(p));
 		const more = providers.filter((p) => moreIds.has(p));
 		const custom = providers.filter((p) => !coreIds.has(p) && !moreIds.has(p));

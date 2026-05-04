@@ -2,6 +2,9 @@ import { apiFetch } from '$lib/api/client.js';
 import type { SessionProvider } from '$lib/types/app';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS } from '$shared/models';
 import {
+	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+	DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+	isEndpointOnlyHarnessId,
 	isVisibleHarnessId,
 	type ApiProtocol,
 	type ApiProviderCatalogEntry,
@@ -51,7 +54,8 @@ const STATIC_FALLBACKS: HarnessModels = {
 	opencode: [],
 	amp: AMP_MODELS.OPTIONS,
 	factory: FACTORY_MODELS.OPTIONS,
-	'direct-openai-compatible': [],
+	[DIRECT_OPENAI_COMPATIBLE_HARNESS_ID]: [],
+	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: [],
 };
 
 const STATIC_HARNESS_METADATA: HarnessMetadataMap = {
@@ -60,7 +64,8 @@ const STATIC_HARNESS_METADATA: HarnessMetadataMap = {
 	opencode: { id: 'opencode', label: 'OpenCode', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '' },
 	amp: { id: 'amp', label: 'Amp', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: AMP_MODELS.DEFAULT },
 	factory: { id: 'factory', label: 'Factory', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: FACTORY_MODELS.DEFAULT },
-	'direct-openai-compatible': { id: 'direct-openai-compatible', label: 'Direct Chat', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-chat-completions'], defaultModel: '' },
+	[DIRECT_OPENAI_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_COMPATIBLE_HARNESS_ID, label: 'Direct Chat (OpenAI)', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-chat-completions'], defaultModel: '' },
+	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: { id: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, label: 'Direct Chat (Anthropic)', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '' },
 };
 
 function normalizeModelOption(value: unknown): ModelOption | null {
@@ -180,11 +185,12 @@ function mergeWithFallbacks(models: HarnessModels): HarnessModels {
 	const result: HarnessModels = {
 		claude: mergeStaticModels(models.claude, STATIC_FALLBACKS.claude!),
 		codex: mergeStaticModels(models.codex, STATIC_FALLBACKS.codex!),
-		amp: models.amp?.length ? models.amp : STATIC_FALLBACKS.amp!,
-		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
-		opencode: models.opencode?.length ? models.opencode : [],
-		'direct-openai-compatible': models['direct-openai-compatible']?.length ? models['direct-openai-compatible'] : [],
-	};
+			amp: models.amp?.length ? models.amp : STATIC_FALLBACKS.amp!,
+			factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
+			opencode: models.opencode?.length ? models.opencode : [],
+			[DIRECT_OPENAI_COMPATIBLE_HARNESS_ID]: models[DIRECT_OPENAI_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_OPENAI_COMPATIBLE_HARNESS_ID] : [],
+			[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: models[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID] : [],
+		};
 	for (const [key, value] of Object.entries(models)) {
 		if (!(key in result) && value?.length && isVisibleHarnessId(key)) {
 			result[key] = value;
@@ -311,6 +317,13 @@ export class ModelCatalogStore {
 
 	getHarnesses(): SessionProvider[] {
 		return Object.keys(this.harnessMetadata).filter(isVisibleHarnessId) as SessionProvider[];
+	}
+
+	getSelectableHarnesses(): SessionProvider[] {
+		return this.getHarnesses().filter((harnessId) => {
+			if (!isEndpointOnlyHarnessId(harnessId)) return true;
+			return this.getModels(harnessId as SessionProvider).length > 0;
+		}) as SessionProvider[];
 	}
 
 	getHarnessMetadataList(): HarnessMetadata[] {

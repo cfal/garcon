@@ -4,12 +4,12 @@ import ApiProviderProtocolPanelTestHarness from './ApiProviderProtocolPanelTestH
 
 describe('ApiProviderProtocolPanel', () => {
 	it('shows protocol-specific Anthropic add-provider templates', async () => {
-		render(ApiProviderProtocolPanelTestHarness, {
-			protocol: 'anthropic-messages',
-			title: 'Anthropic Providers',
-			description: 'Use Anthropic Messages-compatible endpoints with Claude Code.',
-			addLabel: 'Add Anthropic-compatible provider'
-		});
+			render(ApiProviderProtocolPanelTestHarness, {
+				protocol: 'anthropic-messages',
+				title: 'Anthropic Providers',
+				description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.',
+				addLabel: 'Add Anthropic-compatible provider'
+			});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Add Anthropic-compatible provider' }));
 

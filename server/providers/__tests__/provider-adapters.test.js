@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { buildDirectOpenAiConfig } from '../provider-adapters.ts';
+import { buildDirectAnthropicConfig, buildDirectOpenAiConfig } from '../provider-adapters.ts';
 
 function endpoint(overrides = {}) {
   return {
@@ -48,5 +48,30 @@ describe('buildDirectOpenAiConfig', () => {
       'HTTP-Referer': 'https://github.com/cfal/garcon',
       'X-OpenRouter-Title': 'Garcon',
     });
+  });
+});
+
+describe('buildDirectAnthropicConfig', () => {
+  it('uses stored endpoint credentials and session paths', () => {
+    const config = buildDirectAnthropicConfig({
+      providerId: 'direct-anthropic-compatible',
+      providerLabel: 'Example',
+      endpoint: {
+        id: 'example_anthropic',
+        protocol: 'anthropic-messages',
+        baseUrl: 'https://api.example.test',
+        apiKey: 'sk-ant',
+        exposeTo: ['direct-anthropic-compatible'],
+        defaultModel: 'example-model',
+        models: [{ value: 'example-model', label: 'Example Model' }],
+        supportsImages: true,
+        modelDiscovery: 'anthropic-models',
+      },
+    });
+
+    expect(config.getApiKey()).toBe('sk-ant');
+    expect(config.getBaseUrl()).toBe('https://api.example.test');
+    expect(config.defaultModel).toBe('example-model');
+    expect(config.getSessionFilePath('session-1')).toContain('/anthropic-compatible-sessions/example_anthropic/session-1.jsonl');
   });
 });

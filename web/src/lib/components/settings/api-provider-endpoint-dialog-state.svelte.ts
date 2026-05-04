@@ -13,6 +13,8 @@ import {
 	type ApiProviderTemplateId
 } from '$shared/api-provider-templates';
 import {
+	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+	DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
 	harnessesForProtocol,
 	type ApiProtocol,
 	type HarnessId,
@@ -355,13 +357,15 @@ function localizedProtocolLabel(protocol: ApiProtocol): string {
 function labelForHarnessTarget(harnessId: HarnessId): string {
 	if (harnessId === 'claude') return m.settings_api_provider_target_claude_label();
 	if (harnessId === 'codex') return m.settings_api_provider_target_codex_label();
-	if (harnessId === 'direct-openai-compatible') return m.settings_api_provider_target_direct_label();
+	if (harnessId === DIRECT_OPENAI_COMPATIBLE_HARNESS_ID) return m.settings_api_provider_target_direct_openai_label();
+	if (harnessId === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) return m.settings_api_provider_target_direct_anthropic_label();
 	return m.settings_api_provider_target_default_label({ harness: harnessId });
 }
 
 function descriptionForHarnessTarget(harnessId: HarnessId): string {
 	if (harnessId === 'claude') return m.settings_api_provider_target_claude_description();
 	if (harnessId === 'codex') return m.settings_api_provider_target_codex_description();
-	if (harnessId === 'direct-openai-compatible') return m.settings_api_provider_target_direct_description();
+	if (harnessId === DIRECT_OPENAI_COMPATIBLE_HARNESS_ID) return m.settings_api_provider_target_direct_openai_description();
+	if (harnessId === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) return m.settings_api_provider_target_direct_anthropic_description();
 	return m.settings_api_provider_target_default_description();
 }

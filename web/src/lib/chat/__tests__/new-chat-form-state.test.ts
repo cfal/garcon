@@ -55,24 +55,42 @@ const mockAppShell = {
 	projectBasePath: '/',
 };
 const mockModelCatalog = {
-	harnessMetadata: {
-		claude: { label: 'Claude' },
-		codex: { label: 'Codex' },
-		'direct-openai-compatible': { label: 'Direct OpenAI Compatible' },
-	},
-	getHarnesses: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
-	getDefaultModel: vi.fn((provider: string) => {
-		if (provider === 'claude') return 'opus';
-		if (provider === 'codex') return 'gpt-5.4';
-		if (provider === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
-		return '';
-	}),
+		harnessMetadata: {
+			claude: { label: 'Claude' },
+			codex: { label: 'Codex' },
+			'direct-anthropic-compatible': { label: 'Direct Anthropic Compatible' },
+			'direct-openai-compatible': { label: 'Direct OpenAI Compatible' },
+		},
+		getHarnesses: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
+		getSelectableHarnesses: vi.fn(() => [
+			'claude',
+			'codex',
+			'direct-anthropic-compatible',
+			'direct-openai-compatible'
+		]),
+		getDefaultModel: vi.fn((provider: string) => {
+			if (provider === 'claude') return 'opus';
+			if (provider === 'codex') return 'gpt-5.4';
+			if (provider === 'direct-anthropic-compatible') return 'acme_anthropic:acme-sonnet';
+			if (provider === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
+			return '';
+		}),
 	getModels: vi.fn((provider: string) => {
 		if (provider === 'claude') return [{ value: 'opus', label: 'Opus' }];
-		if (provider === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
-		if (provider === 'direct-openai-compatible') {
-			return [{
-				value: 'zai_openai:glm-5.1',
+			if (provider === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
+			if (provider === 'direct-anthropic-compatible') {
+				return [{
+					value: 'acme_anthropic:acme-sonnet',
+					label: 'Acme: Acme Sonnet',
+					rawModel: 'acme-sonnet',
+					apiProviderId: 'acme',
+					endpointId: 'acme_anthropic',
+					protocol: 'anthropic-messages',
+				}];
+			}
+			if (provider === 'direct-openai-compatible') {
+				return [{
+					value: 'zai_openai:glm-5.1',
 				label: 'Z.AI: GLM-5.1',
 				rawModel: 'glm-5.1',
 				apiProviderId: 'zai',
@@ -81,11 +99,19 @@ const mockModelCatalog = {
 			}];
 		}
 		return [];
-	}),
-	selectionFor: vi.fn((provider: string, model: string) => {
-		if (provider === 'direct-openai-compatible' && model === 'zai_openai:glm-5.1') {
-			return {
-				model: 'glm-5.1',
+		}),
+		selectionFor: vi.fn((provider: string, model: string) => {
+			if (provider === 'direct-anthropic-compatible' && model === 'acme_anthropic:acme-sonnet') {
+				return {
+					model: 'acme-sonnet',
+					apiProviderId: 'acme',
+					modelEndpointId: 'acme_anthropic',
+					modelProtocol: 'anthropic-messages',
+				};
+			}
+			if (provider === 'direct-openai-compatible' && model === 'zai_openai:glm-5.1') {
+				return {
+					model: 'glm-5.1',
 				apiProviderId: 'zai',
 				modelEndpointId: 'zai_openai',
 				modelProtocol: 'openai-chat-completions',
@@ -97,11 +123,14 @@ const mockModelCatalog = {
 			modelEndpointId: null,
 			modelProtocol: null,
 		};
-	}),
-	selectionValueFor: vi.fn((provider: string, model: string, endpointId?: string | null) => {
-		if (provider === 'direct-openai-compatible' && model === 'glm-5.1' && endpointId === 'zai_openai') {
-			return 'zai_openai:glm-5.1';
-		}
+		}),
+		selectionValueFor: vi.fn((provider: string, model: string, endpointId?: string | null) => {
+			if (provider === 'direct-anthropic-compatible' && model === 'acme-sonnet' && endpointId === 'acme_anthropic') {
+				return 'acme_anthropic:acme-sonnet';
+			}
+			if (provider === 'direct-openai-compatible' && model === 'glm-5.1' && endpointId === 'zai_openai') {
+				return 'zai_openai:glm-5.1';
+			}
 		return model;
 	}),
 	refreshIfStale: vi.fn().mockResolvedValue(undefined)
@@ -113,6 +142,12 @@ describe('NewChatFormState', () => {
 
 	beforeEach(() => {
 		vi.useFakeTimers();
+		mockModelCatalog.getSelectableHarnesses.mockImplementation(() => [
+			'claude',
+			'codex',
+			'direct-anthropic-compatible',
+			'direct-openai-compatible'
+		]);
 		mockRemoteSettings = makeMockRemoteSettings();
 		formState = new NewChatFormState(mockAppShell as any, mockModelCatalog as any, mockRemoteSettings as any);
 	});
@@ -158,6 +193,39 @@ describe('NewChatFormState', () => {
 
 		expect(formState.provider).toBe('direct-openai-compatible');
 		expect(formState.modelValue).toBe('zai_openai:glm-5.1');
+	});
+
+	it('loads Direct Anthropic startup defaults from server settings', async () => {
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
+			lastProvider: 'direct-anthropic-compatible',
+			lastProjectPath: '/workspace/project',
+			lastModel: 'acme-sonnet',
+			lastApiProviderId: 'acme',
+			lastModelEndpointId: 'acme_anthropic',
+			lastModelProtocol: 'anthropic-messages',
+		}));
+
+		await formState.loadSettingsAndModels();
+
+		expect(formState.provider).toBe('direct-anthropic-compatible');
+		expect(formState.modelValue).toBe('acme_anthropic:acme-sonnet');
+	});
+
+	it('falls back when Direct Anthropic has no endpoint models', async () => {
+		mockModelCatalog.getSelectableHarnesses.mockReturnValue(['claude', 'codex']);
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
+			lastProvider: 'direct-anthropic-compatible',
+			lastProjectPath: '/workspace/project',
+			lastModel: 'acme-sonnet',
+			lastApiProviderId: 'acme',
+			lastModelEndpointId: 'acme_anthropic',
+			lastModelProtocol: 'anthropic-messages',
+		}));
+
+		await formState.loadSettingsAndModels();
+
+		expect(formState.provider).toBe('claude');
+		expect(formState.modelValue).toBe('opus');
 	});
 
 	it('falls back when startup defaults reference a non-harness API provider id', async () => {

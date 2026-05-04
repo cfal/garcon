@@ -48,6 +48,34 @@ describe('resolveEffectiveGenerationConfig', () => {
     });
   });
 
+  it('auto-selects Direct Anthropic endpoint models before Codex when ready', () => {
+    const result = resolveEffectiveGenerationConfig({
+      persisted: {},
+      authByHarness: {
+        claude: { authenticated: false },
+        codex: { authenticated: true },
+      },
+      readinessByHarness: {
+        'direct-anthropic-compatible': { ready: true },
+      },
+      modelsByHarness: {
+        'direct-anthropic-compatible': [
+          { value: 'acme_anthropic:acme-sonnet', label: 'Acme: Acme Sonnet' },
+        ],
+      },
+    });
+
+    expect(result).toEqual({
+      enabled: true,
+      provider: 'direct-anthropic-compatible',
+      model: 'acme_anthropic:acme-sonnet',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      source: 'auto',
+    });
+  });
+
   it('prefers OpenCode non-R1 defaults when OpenCode is selected', () => {
     const result = resolveEffectiveGenerationConfig({
       persisted: {},

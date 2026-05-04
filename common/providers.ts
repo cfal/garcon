@@ -1,13 +1,17 @@
 // Shared harness and API provider contracts. Harnesses execute chats; API
 // providers expose protocol-specific model endpoints that harnesses may use.
 
+export const DIRECT_OPENAI_COMPATIBLE_HARNESS_ID = 'direct-openai-compatible' as const;
+export const DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID = 'direct-anthropic-compatible' as const;
+
 export const BUILTIN_HARNESSES = [
   'claude',
   'codex',
   'opencode',
   'amp',
   'factory',
-  'direct-openai-compatible',
+  DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
 ] as const;
 
 export type BuiltinHarnessId = (typeof BUILTIN_HARNESSES)[number];
@@ -68,17 +72,23 @@ export const BUILTIN_HARNESS_CAPABILITIES: Record<BuiltinHarnessId, HarnessCapab
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
   },
-  'direct-openai-compatible': {
+  [DIRECT_OPENAI_COMPATIBLE_HARNESS_ID]: {
     supportsFork: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-chat-completions'],
   },
+  [DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: {
+    supportsFork: false,
+    supportsImages: true,
+    acceptsApiProviderEndpoints: true,
+    supportedProtocols: ['anthropic-messages'],
+  },
 };
 
 const HARNESS_IDS_BY_PROTOCOL: Record<ApiProtocol, readonly BuiltinHarnessId[]> = {
-  'anthropic-messages': ['claude'],
-  'openai-chat-completions': ['codex', 'direct-openai-compatible'],
+  'anthropic-messages': ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
+  'openai-chat-completions': ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
 };
 
 export interface HarnessModelOption {
@@ -151,9 +161,14 @@ const ENDPOINT_MODEL_VALUE_SEPARATOR = ':';
 const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;
 const SETTINGS_OAUTH_HARNESSES = ['claude', 'codex'] as const;
 const SETTINGS_OTHER_HARNESSES = ['opencode', 'amp', 'factory'] as const;
+export const ENDPOINT_ONLY_HARNESSES = [
+  DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+] as const;
 
 export type OAuthHarnessId = (typeof SETTINGS_OAUTH_HARNESSES)[number];
 export type OtherSettingsHarnessId = (typeof SETTINGS_OTHER_HARNESSES)[number];
+export type EndpointOnlyHarnessId = (typeof ENDPOINT_ONLY_HARNESSES)[number];
 
 export function endpointModelOptionValue(endpointId: string, rawModel: string): string {
   return `${endpointId}${ENDPOINT_MODEL_VALUE_SEPARATOR}${rawModel}`;
@@ -178,6 +193,10 @@ export function isOAuthHarnessId(value: string): value is OAuthHarnessId {
 
 export function isOtherSettingsHarnessId(value: string): value is OtherSettingsHarnessId {
   return (SETTINGS_OTHER_HARNESSES as readonly string[]).includes(value);
+}
+
+export function isEndpointOnlyHarnessId(value: string): value is EndpointOnlyHarnessId {
+  return (ENDPOINT_ONLY_HARNESSES as readonly string[]).includes(value);
 }
 
 export function isApiProviderId(value: unknown): value is string {

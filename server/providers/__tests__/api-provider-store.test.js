@@ -81,6 +81,26 @@ describe('ApiProviderStore', () => {
     expect(store.redactedList()[0].endpoints[0].hasApiKey).toBe(false);
   });
 
+  it('stores Direct Anthropic exposure for Anthropic-compatible providers', async () => {
+    const store = await tempStore();
+    await store.init();
+
+    const provider = await store.createApiProvider({
+      templateId: 'custom',
+      label: 'Acme Anthropic',
+      protocol: 'anthropic-messages',
+      baseUrl: 'https://api.acme.test',
+      apiKey: 'sk-acme',
+      exposeTo: ['claude', 'direct-anthropic-compatible'],
+      defaultModel: 'acme-sonnet',
+      models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
+      supportsImages: true,
+      modelDiscovery: 'anthropic-models',
+    });
+
+    expect(provider.endpoints[0].exposeTo).toEqual(['claude', 'direct-anthropic-compatible']);
+  });
+
   it('keeps existing API key when an edit sends a blank key', async () => {
     const store = await tempStore();
     await store.init();
@@ -143,7 +163,7 @@ describe('ApiProviderStore', () => {
       label: 'Example',
       protocol: 'openai-chat-completions',
       baseUrl: 'https://api.example.test/v1',
-      exposeTo: ['claude'],
+      exposeTo: ['direct-anthropic-compatible'],
       defaultModel: 'example-model',
       models: [],
       supportsImages: false,

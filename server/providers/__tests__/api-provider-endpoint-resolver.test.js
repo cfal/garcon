@@ -37,7 +37,7 @@ function makeResolver() {
           protocol: 'anthropic-messages',
           baseUrl: 'https://api.acme.test/anthropic',
           apiKey: 'secret',
-          exposeTo: ['claude'],
+          exposeTo: ['claude', 'direct-anthropic-compatible'],
           defaultModel: 'acme-claude',
           models: [{ value: 'acme-claude', label: 'Acme Claude', supportsImages: true }],
           supportsImages: true,
@@ -48,7 +48,7 @@ function makeResolver() {
           protocol: 'anthropic-messages',
           baseUrl: 'http://localhost:11434',
           apiKey: '',
-          exposeTo: ['claude'],
+          exposeTo: ['claude', 'direct-anthropic-compatible'],
           defaultModel: 'llama3',
           models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
           supportsImages: false,
@@ -94,6 +94,36 @@ describe('ApiProviderEndpointResolver', () => {
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
     })).toBe(false);
+  });
+
+  it('resolves Direct Anthropic endpoint-backed models without env overrides', () => {
+    const resolver = makeResolver();
+    const [option] = resolver.getModelOptions('direct-anthropic-compatible');
+
+    expect(option).toMatchObject({
+      value: 'acme_anthropic:acme-claude',
+      rawModel: 'acme-claude',
+      apiProviderId: 'acme',
+      endpointId: 'acme_anthropic',
+      protocol: 'anthropic-messages',
+      supportsImages: true,
+    });
+
+    const selection = resolver.resolveSelection({
+      harnessId: 'direct-anthropic-compatible',
+      model: 'acme_anthropic:acme-claude',
+      apiProviderId: 'acme',
+      modelEndpointId: 'acme_anthropic',
+    });
+
+    expect(selection).toEqual({
+      model: 'acme-claude',
+      apiProviderId: 'acme',
+      endpointId: 'acme_anthropic',
+      protocol: 'anthropic-messages',
+      isLocal: false,
+      envOverrides: undefined,
+    });
   });
 
   it('builds Claude and Codex env overrides for compatible endpoints', () => {
@@ -149,6 +179,13 @@ describe('ApiProviderEndpointResolver', () => {
 
     expect(() => resolver.resolveSelection({
       harnessId: 'claude',
+      model: 'acme_openai:acme-code',
+      apiProviderId: 'acme',
+      modelEndpointId: 'acme_openai',
+    })).toThrow(ModelSelectionError);
+
+    expect(() => resolver.resolveSelection({
+      harnessId: 'direct-anthropic-compatible',
       model: 'acme_openai:acme-code',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',

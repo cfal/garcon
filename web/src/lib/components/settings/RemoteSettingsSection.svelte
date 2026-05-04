@@ -33,7 +33,7 @@
 	);
 
 	let availableTitleModels = $derived(modelCatalog.getModels(titleProvider));
-	let availableProviders = $derived(modelCatalog.getHarnesses());
+	let availableProviders = $derived(modelCatalog.getSelectableHarnesses());
 
 	// Telegram state derived from snapshot.
 	let telegramBotAvailable = $derived(

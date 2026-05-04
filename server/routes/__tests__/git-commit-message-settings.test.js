@@ -27,9 +27,12 @@ const providers = {
     codex: { authenticated: false },
     opencode: { authenticated: false },
     amp: { authenticated: false },
+    factory: { authenticated: false },
+    'direct-anthropic-compatible': { authenticated: false },
+    'direct-openai-compatible': { authenticated: false },
   })),
   getModels: mock(() => Promise.resolve([])),
-  hasHarness: mock((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-openai-compatible'].includes(harnessId)),
+  hasHarness: mock((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible'].includes(harnessId)),
 };
 
 const settings = {
@@ -55,7 +58,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     providers.getHarnessAuthStatusMap.mockClear();
     providers.getModels.mockClear();
     providers.hasHarness.mockClear();
-    providers.hasHarness.mockImplementation((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-openai-compatible'].includes(harnessId));
+    providers.hasHarness.mockImplementation((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible'].includes(harnessId));
     settings.getUiSettings.mockClear();
   });
 
@@ -159,6 +162,42 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: 'zai',
       modelEndpointId: 'zai_openai',
       modelProtocol: 'openai-chat-completions',
+      customPrompt: '',
+    });
+  });
+
+  it('passes Direct Anthropic endpoint metadata through to generation', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+      provider: 'direct-anthropic-compatible',
+      model: 'acme-sonnet',
+      apiProviderId: 'acme',
+      modelEndpointId: 'acme_anthropic',
+      modelProtocol: 'anthropic-messages',
+      customPrompt: '',
+    }));
+
+    const response = await handler(makeRequest({
+      project: '/proj',
+      files: ['src/a.ts'],
+      provider: 'direct-anthropic-compatible',
+      model: 'acme-sonnet',
+      apiProviderId: 'acme',
+      modelEndpointId: 'acme_anthropic',
+      modelProtocol: 'anthropic-messages',
+      customPrompt: '',
+    }));
+
+    expect(response.status).toBe(200);
+    expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+      projectPath: '/proj',
+      files: ['src/a.ts'],
+      provider: 'direct-anthropic-compatible',
+      model: 'acme-sonnet',
+      apiProviderId: 'acme',
+      modelEndpointId: 'acme_anthropic',
+      modelProtocol: 'anthropic-messages',
       customPrompt: '',
     });
   });

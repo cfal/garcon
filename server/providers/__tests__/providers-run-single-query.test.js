@@ -43,9 +43,9 @@ mock.module('../loaders/factory-history-loader.js', () => ({
   loadFactoryChatMessagesBySessionId: mock(() => Promise.resolve([])),
 }));
 
-mock.module('../loaders/openai-compatible-history-loader.js', () => ({
-  getOpenAiCompatiblePreviewFromSessionId: mock(() => Promise.resolve(null)),
-  loadOpenAiCompatibleChatMessages: mock(() => Promise.resolve([])),
+mock.module('../loaders/direct-compatible-history-loader.js', () => ({
+  getDirectCompatiblePreviewFromSessionId: mock(() => Promise.resolve(null)),
+  loadDirectCompatibleChatMessages: mock(() => Promise.resolve([])),
 }));
 
 import { ProviderRegistry } from '../index.js';
@@ -270,6 +270,14 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       rawModel: 'acme-code',
       protocol: 'openai-chat-completions',
     };
+    const anthropicEndpointOption = {
+      value: 'acme_anthropic:acme-sonnet',
+      label: 'Acme: Acme Sonnet',
+      apiProviderId: 'acme',
+      endpointId: 'acme_anthropic',
+      rawModel: 'acme-sonnet',
+      protocol: 'anthropic-messages',
+    };
     const apiProvider = {
       id: 'acme',
       label: 'Acme',
@@ -279,28 +287,50 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       endpoints: [],
     };
     const { registry } = makeRegistry({
-      endpointResolver: makeEndpointResolver({ codex: [endpointOption], 'direct-openai-compatible': [endpointOption] }),
+      endpointResolver: makeEndpointResolver({
+        codex: [endpointOption],
+        'direct-openai-compatible': [endpointOption],
+        'direct-anthropic-compatible': [anthropicEndpointOption],
+      }),
       apiProviderStore: makeApiProviderStore([apiProvider]),
-      adapters: [{
-        id: 'direct-openai-compatible',
-        label: 'Direct',
-        startSession: mock(),
-        runTurn: mock(),
-        abort: mock(),
-        isRunning: mock(() => false),
-        getRunningSessions: mock(() => []),
-        getModels: mock(() => [{ value: 'raw', label: 'Raw' }]),
-        onMessages: mock(),
-        onProcessing: mock(),
-        onSessionCreated: mock(),
-        onFinished: mock(),
-        onFailed: mock(),
-      }],
+      adapters: [
+        {
+          id: 'direct-openai-compatible',
+          label: 'Direct Chat (OpenAI)',
+          startSession: mock(),
+          runTurn: mock(),
+          abort: mock(),
+          isRunning: mock(() => false),
+          getRunningSessions: mock(() => []),
+          getModels: mock(() => [{ value: 'raw-openai', label: 'Raw OpenAI' }]),
+          onMessages: mock(),
+          onProcessing: mock(),
+          onSessionCreated: mock(),
+          onFinished: mock(),
+          onFailed: mock(),
+        },
+        {
+          id: 'direct-anthropic-compatible',
+          label: 'Direct Chat (Anthropic)',
+          startSession: mock(),
+          runTurn: mock(),
+          abort: mock(),
+          isRunning: mock(() => false),
+          getRunningSessions: mock(() => []),
+          getModels: mock(() => [{ value: 'raw-anthropic', label: 'Raw Anthropic' }]),
+          onMessages: mock(),
+          onProcessing: mock(),
+          onSessionCreated: mock(),
+          onFinished: mock(),
+          onFailed: mock(),
+        },
+      ],
     });
 
     const catalog = await registry.getHarnessCatalog();
     expect(catalog.harnesses.find((entry) => entry.id === 'codex')?.models).toContainEqual(endpointOption);
     expect(catalog.harnesses.find((entry) => entry.id === 'direct-openai-compatible')?.models).toEqual([endpointOption]);
+    expect(catalog.harnesses.find((entry) => entry.id === 'direct-anthropic-compatible')?.models).toEqual([anthropicEndpointOption]);
     expect(catalog.apiProviders).toEqual([apiProvider]);
   });
 

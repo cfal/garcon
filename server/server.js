@@ -45,6 +45,7 @@ import {
   createAmpAdapter,
   createFactoryAdapter,
   createDirectOpenAiCompatibleRouterAdapter,
+  createDirectAnthropicCompatibleRouterAdapter,
 } from './providers/provider-adapters.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
@@ -111,6 +112,7 @@ export async function startServer() {
     const ampAdapter = createAmpAdapter(ampProvider);
     const factoryAdapter = createFactoryAdapter(factoryProvider);
     const directOpenAiAdapter = createDirectOpenAiCompatibleRouterAdapter(apiProviderStore);
+    const directAnthropicAdapter = createDirectAnthropicCompatibleRouterAdapter(apiProviderStore);
 
     const initialAdapters = [
       claudeAdapter,
@@ -119,6 +121,7 @@ export async function startServer() {
       ampAdapter,
       factoryAdapter,
       directOpenAiAdapter,
+      directAnthropicAdapter,
     ];
 
     // Tier 2: Harness registry wrapping adapters + registry + store + resolver

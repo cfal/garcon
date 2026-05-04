@@ -41,10 +41,13 @@
 		getModels() {
 			return [];
 		},
-		getHarnesses() {
-			return ['claude', 'codex', 'opencode'];
-		}
-	} as never);
+			getHarnesses() {
+				return ['claude', 'codex', 'opencode'];
+			},
+			getSelectableHarnesses() {
+				return ['claude', 'codex', 'opencode'];
+			}
+		} as never);
 
 	setSplitLayout({
 		isEnabled: false,

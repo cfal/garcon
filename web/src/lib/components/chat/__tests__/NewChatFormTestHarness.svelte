@@ -26,10 +26,13 @@
 				claude: { label: 'Claude' },
 				codex: { label: 'Codex' },
 			},
-			getHarnesses() {
-				return ['claude', 'codex'];
-			},
-			getDefaultModel(provider: string) {
+				getHarnesses() {
+					return ['claude', 'codex'];
+				},
+				getSelectableHarnesses() {
+					return ['claude', 'codex'];
+				},
+				getDefaultModel(provider: string) {
 				if (provider === 'claude') return 'opus';
 				if (provider === 'codex') return 'gpt-5.4';
 				return '';

@@ -5,6 +5,7 @@ import { promises as fs } from 'fs';
 import { findCodexSessionFileBySessionId } from '../providers/codex.js';
 import { createClaudeNativePath } from '../providers/claude-cli.js';
 import { createArtificialNativePath } from './artificial-native-path.js';
+import { isEndpointOnlyHarnessId } from '../../common/providers.ts';
 
 export async function resolveMissingNativePath(session) {
   if (!session || !session.providerSessionId) {
@@ -38,7 +39,7 @@ export async function resolveMissingNativePath(session) {
     return createArtificialNativePath(session.provider, session.providerSessionId);
   }
 
-  if (session.provider === 'direct-openai-compatible') {
+  if (isEndpointOnlyHarnessId(session.provider)) {
     return createArtificialNativePath(session.provider, session.providerSessionId);
   }
 

@@ -1,4 +1,4 @@
-// Shared loader for persisted OpenAI-compatible chat providers.
+// Loads persisted direct compatible chat history into shared chat messages.
 
 import { promises as fs } from 'fs';
 import { AssistantMessage, UserMessage, type ChatMessage } from '../../../common/chat-types.js';
@@ -15,7 +15,7 @@ interface LoaderConfig {
   sessionLabel: string;
 }
 
-export async function loadOpenAiCompatibleChatMessages(
+export async function loadDirectCompatibleChatMessages(
   sessionId: string | null | undefined,
   config: LoaderConfig,
 ): Promise<ChatMessage[]> {
@@ -41,14 +41,14 @@ export async function loadOpenAiCompatibleChatMessages(
         messages.push(new AssistantMessage(timestamp, content));
       }
     } catch {
-      // Skips malformed lines.
+      // Skips malformed persisted lines.
     }
   }
 
   return messages;
 }
 
-export async function getOpenAiCompatiblePreviewFromSessionId(
+export async function getDirectCompatiblePreviewFromSessionId(
   sessionId: string | null | undefined,
   loadMessages: (sessionId: string | null | undefined) => Promise<ChatMessage[]>,
   sessionLabel: string,
@@ -63,16 +63,16 @@ export async function getOpenAiCompatiblePreviewFromSessionId(
   const messages = await loadMessages(sessionId);
   if (messages.length === 0) return null;
 
-  const firstUser = messages.find((msg) => msg.type === 'user-message');
-  const lastMsg = [...messages].reverse().find(
-    (msg) => msg.type === 'assistant-message' || msg.type === 'user-message',
+  const firstUser = messages.find((message) => message.type === 'user-message');
+  const lastMessage = [...messages].reverse().find(
+    (message) => message.type === 'assistant-message' || message.type === 'user-message',
   );
-  const lastTimestamp = [...messages].reverse().find((msg) => msg.timestamp)?.timestamp ?? null;
+  const lastTimestamp = [...messages].reverse().find((message) => message.timestamp)?.timestamp ?? null;
 
   return {
     createdAt: messages[0]?.timestamp ?? null,
     firstMessage: firstUser?.type === 'user-message' ? firstUser.content : sessionLabel,
     lastActivity: lastTimestamp,
-    lastMessage: lastMsg && 'content' in lastMsg ? lastMsg.content : sessionLabel,
+    lastMessage: lastMessage && 'content' in lastMessage ? lastMessage.content : sessionLabel,
   };
 }

@@ -22,20 +22,26 @@ describe('ApiProviderEndpointDialogState', () => {
 		vi.mocked(discoverApiProviderModels).mockReset();
 	});
 
-	it('shows only Claude Code for Anthropic-compatible endpoints', () => {
-		const dialog = new ApiProviderEndpointDialogState({
-			modelCatalog: makeModelCatalog() as never,
-			getProtocol: () => 'anthropic-messages',
+		it('shows Claude Code and Direct Chat for Anthropic-compatible endpoints', () => {
+			const dialog = new ApiProviderEndpointDialogState({
+				modelCatalog: makeModelCatalog() as never,
+				getProtocol: () => 'anthropic-messages',
 			getEndpointId: () => null,
 			getTemplateId: () => 'custom'
 		});
 
-		dialog.beginCreate();
+			dialog.beginCreate();
 
-		expect(dialog.targetOptions.map((target) => target.harnessId)).toEqual(['claude']);
-		expect(dialog.targetOptions.map((target) => target.label)).toEqual(['Use with Claude Code']);
-		expect(dialog.exposeTo).toEqual(['claude']);
-	});
+			expect(dialog.targetOptions.map((target) => target.harnessId)).toEqual([
+				'claude',
+				'direct-anthropic-compatible'
+			]);
+			expect(dialog.targetOptions.map((target) => target.label)).toEqual([
+				'Use with Claude Code',
+				'Use with Direct Chat (Anthropic)'
+			]);
+			expect(dialog.exposeTo).toEqual(['claude', 'direct-anthropic-compatible']);
+		});
 
 	it('shows Codex and Direct Chat for OpenAI-compatible endpoints', () => {
 		const dialog = new ApiProviderEndpointDialogState({
@@ -52,12 +58,12 @@ describe('ApiProviderEndpointDialogState', () => {
 			'codex',
 			'direct-openai-compatible'
 		]);
-		expect(dialog.targetOptions.map((target) => target.label)).toEqual([
-			'Use with Codex',
-			'Use with Direct Chat'
-		]);
-		expect(dialog.exposeTo).toEqual(['direct-openai-compatible']);
-	});
+			expect(dialog.targetOptions.map((target) => target.label)).toEqual([
+				'Use with Codex',
+				'Use with Direct Chat (OpenAI)'
+			]);
+			expect(dialog.exposeTo).toEqual(['direct-openai-compatible']);
+		});
 
 	it('loads edit state without exposing the stored API key', async () => {
 		const endpoint = {
@@ -187,10 +193,10 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.modelOptions.map((model) => model.value)).toEqual(['acme-code', 'acme-fast']);
 	});
 
-	it('uses Anthropic model discovery for custom Anthropic-compatible providers', async () => {
-		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
-			success: true,
-			models: [{ value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' }]
+		it('uses Anthropic model discovery for custom Anthropic-compatible providers', async () => {
+			vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
+				success: true,
+				models: [{ value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' }]
 		});
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
@@ -212,9 +218,39 @@ describe('ApiProviderEndpointDialogState', () => {
 			endpointId: null,
 			modelDiscovery: 'anthropic-models'
 		});
-		expect(dialog.modelDiscovery).toBe('anthropic-models');
-		expect(dialog.defaultModel).toBe('claude-sonnet-4-20250514');
-	});
+			expect(dialog.modelDiscovery).toBe('anthropic-models');
+			expect(dialog.defaultModel).toBe('claude-sonnet-4-20250514');
+		});
+
+		it('keeps Direct Anthropic exposure when fetching Anthropic models', async () => {
+			vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
+				success: true,
+				models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }]
+			});
+			const dialog = new ApiProviderEndpointDialogState({
+				modelCatalog: makeModelCatalog() as never,
+				getProtocol: () => 'anthropic-messages',
+				getEndpointId: () => null,
+				getTemplateId: () => 'custom'
+			});
+
+			dialog.beginCreate();
+			dialog.baseUrl = 'https://api.acme.test';
+			dialog.setTarget('claude', false);
+
+			await dialog.fetchModels();
+
+			expect(discoverApiProviderModels).toHaveBeenCalledWith({
+				protocol: 'anthropic-messages',
+				baseUrl: 'https://api.acme.test',
+				apiKey: undefined,
+				apiProviderId: null,
+				endpointId: null,
+				modelDiscovery: 'anthropic-models'
+			});
+			expect(dialog.exposeTo).toEqual(['direct-anthropic-compatible']);
+			expect(dialog.defaultModel).toBe('acme-sonnet');
+		});
 
 	it('allows model fetching on edit when the stored key is redacted from the dialog', async () => {
 		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
