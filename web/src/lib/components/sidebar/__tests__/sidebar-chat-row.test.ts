@@ -49,11 +49,16 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getAllByText('Shared row chat')).toHaveLength(2);
 		expect(screen.getAllByLabelText('Unread')).toHaveLength(2);
 		expect(screen.getAllByText('3h ago')).toHaveLength(2);
-		expect(screen.getAllByText('3h ago')[0]?.className).toContain('leading-[1.5]');
-		expect(screen.getAllByText('3h ago')[0]?.className).toContain('md:group-hover:opacity-0');
+		expect(screen.getAllByText('3h ago')[0]?.className).toContain('font-normal');
+		expect(screen.getAllByText('3h ago')[0]?.className).not.toContain('md:group-hover:opacity-0');
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getAllByTitle('/very/long/workspace/projects/feature-branch/app')).toHaveLength(2);
+		const metadataProjectLabels = screen.getAllByText('\u2026/projects/feature-branch/app');
+		expect(metadataProjectLabels).toHaveLength(2);
+		expect(metadataProjectLabels[0]?.className).toContain('font-semibold');
+		expect(metadataProjectLabels[0]?.parentElement?.className).toContain('text-[12px]');
+		expect(metadataProjectLabels[0]?.parentElement?.className).toContain('gap-1');
 		const sidebarPreview = screen.getAllByText('Latest preview text');
 		expect(sidebarPreview).toHaveLength(2);
 		expect(sidebarPreview[0]?.className).toContain('mt-0.5');

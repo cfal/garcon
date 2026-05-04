@@ -100,46 +100,49 @@
 
 <div class="relative min-w-0 w-full" data-slot="sidebar-chat-summary">
 	<div class="min-w-0 flex-1">
-		<div class="flex min-w-0 items-start gap-2">
-			<div
-				class={cn(
-					'flex min-w-0 flex-1 items-center gap-1.5 truncate text-[14px] font-medium',
-					isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
-				)}
-			>
-				{#if isUnread}
-					<span
-						class="h-1.5 w-1.5 shrink-0 rounded-full bg-indicator-unread"
-						aria-label={m.sidebar_chat_unread()}
-					></span>
-				{/if}
-				<span class="truncate">{chatName}</span>
-			</div>
-
-			{#if formattedTimestamp}
-				<div
-					class={cn(
-						'shrink-0 whitespace-nowrap text-right text-[10px] leading-[1.5] tabular-nums transition-opacity duration-150 md:group-hover:opacity-0 md:group-focus-within:opacity-0',
-						isSelected
-							? 'text-sidebar-chat-item-selected-foreground/75'
-							: 'text-muted-foreground',
-					)}
-					title={formattedTimestamp.tooltip}
-				>
-					{formattedTimestamp.label}
-				</div>
+		<div
+			class={cn(
+				'flex min-w-0 items-center gap-1.5 truncate text-[14px] font-medium',
+				isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
+			)}
+		>
+			{#if isUnread}
+				<span
+					class="h-1.5 w-1.5 shrink-0 rounded-full bg-indicator-unread"
+					aria-label={m.sidebar_chat_unread()}
+				></span>
 			{/if}
+			<span class="truncate">{chatName}</span>
 		</div>
 
-		{#if projectPath}
+		{#if projectPath || formattedTimestamp}
 			<div
 				class={cn(
-					'truncate text-[11px]',
+					'mt-0.5 flex min-w-0 items-baseline gap-1 overflow-hidden text-[12px] leading-[1.3]',
 					isSelected ? 'text-sidebar-chat-item-selected-foreground/80' : 'text-muted-foreground',
 				)}
-				title={projectPath}
 			>
-				{prefixEllipsis(projectPath)}
+				{#if projectPath}
+					<span class="min-w-0 truncate font-semibold" title={projectPath}>
+						{prefixEllipsis(projectPath)}
+					</span>
+				{/if}
+				{#if projectPath && formattedTimestamp}
+					<span class="shrink-0 font-normal" aria-hidden="true">{'\u2022'}</span>
+				{/if}
+				{#if formattedTimestamp}
+					<span
+						class={cn(
+							'shrink-0 whitespace-nowrap font-normal tabular-nums',
+							isSelected
+								? 'text-sidebar-chat-item-selected-foreground/75'
+								: 'text-muted-foreground',
+						)}
+						title={formattedTimestamp.tooltip}
+					>
+						{formattedTimestamp.label}
+					</span>
+				{/if}
 			</div>
 		{/if}
 
