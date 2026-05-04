@@ -328,7 +328,6 @@
 		class={cn(
 			"absolute z-20",
 			!isAtCursor && "sidebar-item-menu-anchor right-1 top-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
-			!isAtCursor && menuOpen && "!opacity-100"
 		)}
 		style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
 	>
@@ -336,12 +335,12 @@
 				<DropdownMenuTrigger
 					class={isAtCursor
 						? "block w-px h-px opacity-0 pointer-events-none"
-						: "inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"}
+						: "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground"}
 					aria-label={m.sidebar_chat_more_actions()}
 					tabindex={isAtCursor ? -1 : 0}
 				>
 				{#if !isAtCursor}
-					<EllipsisVertical class="size-4" />
+					<EllipsisVertical class="h-3.5 w-3.5" />
 				{/if}
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align={isAtCursor ? "start" : "end"}>

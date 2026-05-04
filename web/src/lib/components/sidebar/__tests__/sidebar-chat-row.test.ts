@@ -50,6 +50,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getAllByLabelText('Unread')).toHaveLength(2);
 		expect(screen.getAllByText('3h ago')).toHaveLength(2);
 		expect(screen.getAllByText('3h ago')[0]?.className).toContain('leading-[1.5]');
+		expect(screen.getAllByText('3h ago')[0]?.className).toContain('md:group-hover:opacity-0');
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getAllByTitle('/very/long/workspace/projects/feature-branch/app')).toHaveLength(2);
@@ -61,6 +62,11 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getAllByText('ops')).toHaveLength(2);
 		expect(screen.getAllByText('prod')).toHaveLength(2);
 		expect(screen.getAllByRole('button', { name: '+1' })).toHaveLength(2);
+		const desktopMenuTrigger = document.querySelector<HTMLElement>(
+			'[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]'
+		);
+		expect(desktopMenuTrigger?.className).toContain('border-sidebar-border/70');
+		expect(desktopMenuTrigger?.className).toContain('bg-background');
 
 		await fireEvent.click(screen.getAllByRole('button', { name: 'ops' })[0]!);
 		expect(onTagClick).toHaveBeenCalledWith('ops');

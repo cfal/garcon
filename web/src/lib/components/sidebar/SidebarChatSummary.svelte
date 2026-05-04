@@ -119,7 +119,7 @@
 			{#if formattedTimestamp}
 				<div
 					class={cn(
-						'shrink-0 whitespace-nowrap text-right text-[10px] leading-[1.5] tabular-nums',
+						'shrink-0 whitespace-nowrap text-right text-[10px] leading-[1.5] tabular-nums transition-opacity duration-150 md:group-hover:opacity-0 md:group-focus-within:opacity-0',
 						isSelected
 							? 'text-sidebar-chat-item-selected-foreground/75'
 							: 'text-muted-foreground',
