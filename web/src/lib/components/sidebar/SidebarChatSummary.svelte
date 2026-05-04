@@ -119,16 +119,14 @@
 			{#if formattedTimestamp}
 				<div
 					class={cn(
-						'shrink-0 text-right text-[10px] leading-[1.15] tabular-nums',
+						'shrink-0 whitespace-nowrap text-right text-[10px] leading-none tabular-nums',
 						isSelected
 							? 'text-sidebar-chat-item-selected-foreground/75'
 							: 'text-muted-foreground',
 					)}
 					title={formattedTimestamp.tooltip}
-					aria-label={formattedTimestamp.tooltip}
 				>
-					<div>{formattedTimestamp.dateLabel}</div>
-					<div class="mt-0.5">{formattedTimestamp.timeLabel}</div>
+					{formattedTimestamp.label}
 				</div>
 			{/if}
 		</div>
