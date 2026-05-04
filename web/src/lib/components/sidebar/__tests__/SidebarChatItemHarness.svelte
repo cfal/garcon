@@ -6,6 +6,7 @@
 	interface SidebarChatItemHarnessProps {
 		session: ChatSessionRecord;
 		selectedChatId?: string | null;
+		currentTime?: Date;
 		isPinned?: boolean;
 		isArchived?: boolean;
 		onTagClick?: (tag: string) => void;
@@ -15,6 +16,7 @@
 	let {
 		session,
 		selectedChatId = null,
+		currentTime = new Date('2025-01-01T03:00:00.000Z'),
 		isPinned = false,
 		isArchived = false,
 		onTagClick,
@@ -43,7 +45,7 @@
 <SidebarChatItem
 	{session}
 	{selectedChatId}
-	currentTime={new Date('2025-01-01T00:00:00.000Z')}
+	{currentTime}
 	{isPinned}
 	{isArchived}
 	onChatSelect={() => {}}

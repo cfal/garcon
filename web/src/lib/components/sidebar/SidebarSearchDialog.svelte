@@ -16,6 +16,7 @@
 		query: string;
 		filteredChats: ChatSessionRecord[];
 		savedSearches: SavedChatSearch[];
+		currentTime: Date;
 		highlightedIndex: number;
 		onQueryChange: (query: string) => void;
 		onSelectChat: (chatId: string) => void;
@@ -31,6 +32,7 @@
 		query,
 		filteredChats,
 		savedSearches,
+		currentTime,
 		highlightedIndex,
 		onQueryChange,
 		onSelectChat,
@@ -227,6 +229,8 @@
 										isSelected={i === highlightedIndex}
 										isPinned={chat.isPinned}
 										isArchived={chat.isArchived}
+										{currentTime}
+										showTimestamp={true}
 									/>
 								</button>
 							{/each}

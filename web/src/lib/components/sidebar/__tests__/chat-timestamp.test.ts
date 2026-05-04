@@ -3,23 +3,87 @@ import { describe, expect, it } from 'vitest';
 import { formatSidebarChatTimestamp } from '../chat-timestamp.js';
 
 describe('formatSidebarChatTimestamp', () => {
-	it('uses a short month-day label for timestamps in the current year', () => {
+	it('uses compact relative hour labels', () => {
 		expect(
-			formatSidebarChatTimestamp('2026-04-18T07:30:00.000Z', new Date('2026-04-19T08:00:00.000Z'))
+			formatSidebarChatTimestamp(
+				'2026-04-19T05:00:00.000Z',
+				new Date('2026-04-19T08:30:00.000Z')
+			)
 		).toEqual({
-			dateLabel: 'Apr 18',
-			timeLabel: '7:30 AM',
-			tooltip: 'Apr 18, 2026, 7:30 AM',
+			label: '3h ago',
+			tooltip: 'Apr 19, 2026, 5:00 AM',
 		});
 	});
 
-	it('falls back to a compact numeric date for older years', () => {
+	it('uses compact relative minute labels', () => {
 		expect(
-			formatSidebarChatTimestamp('2025-12-31T23:45:00.000Z', new Date('2026-04-19T08:00:00.000Z'))
+			formatSidebarChatTimestamp(
+				'2026-04-19T08:18:00.000Z',
+				new Date('2026-04-19T08:30:00.000Z')
+			)
 		).toEqual({
-			dateLabel: '12/31/25',
-			timeLabel: '11:45 PM',
-			tooltip: 'Dec 31, 2025, 11:45 PM',
+			label: '12m ago',
+			tooltip: 'Apr 19, 2026, 8:18 AM',
+		});
+	});
+
+	it('uses now for timestamps less than one minute old', () => {
+		expect(
+			formatSidebarChatTimestamp(
+				'2026-04-19T08:29:30.000Z',
+				new Date('2026-04-19T08:30:00.000Z')
+			)
+		).toEqual({
+			label: 'now',
+			tooltip: 'Apr 19, 2026, 8:29 AM',
+		});
+	});
+
+	it('uses compact relative day labels', () => {
+		expect(
+			formatSidebarChatTimestamp(
+				'2026-04-17T08:30:00.000Z',
+				new Date('2026-04-19T08:30:00.000Z')
+			)
+		).toEqual({
+			label: '2d ago',
+			tooltip: 'Apr 17, 2026, 8:30 AM',
+		});
+	});
+
+	it('uses compact relative month labels for older chats', () => {
+		expect(
+			formatSidebarChatTimestamp(
+				'2026-02-18T08:30:00.000Z',
+				new Date('2026-04-19T08:30:00.000Z')
+			)
+		).toEqual({
+			label: '2mo ago',
+			tooltip: 'Feb 18, 2026, 8:30 AM',
+		});
+	});
+
+	it('uses compact relative year labels for old chats', () => {
+		expect(
+			formatSidebarChatTimestamp(
+				'2025-04-19T08:30:00.000Z',
+				new Date('2026-04-19T08:30:00.000Z')
+			)
+		).toEqual({
+			label: '1y ago',
+			tooltip: 'Apr 19, 2025, 8:30 AM',
+		});
+	});
+
+	it('preserves future direction when clock skew is large enough to matter', () => {
+		expect(
+			formatSidebarChatTimestamp(
+				'2026-04-19T08:35:00.000Z',
+				new Date('2026-04-19T08:30:00.000Z')
+			)
+		).toEqual({
+			label: 'in 5m',
+			tooltip: 'Apr 19, 2026, 8:35 AM',
 		});
 	});
 
