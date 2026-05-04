@@ -1,7 +1,7 @@
 // Parses sidebar search queries into structured filter specs and matches
 // chats against them. Supports free-text search across title, projectPath,
 // firstMessage, lastMessage, and tags, plus structured prefix filters:
-// tag:X, provider:Y, model:Z.
+// tag:X, provider:Y, model:Z, project:P.
 
 export interface ChatFilterSpec {
 	textTokens: string[];
@@ -9,10 +9,11 @@ export interface ChatFilterSpec {
 	providers: string[];
 	models: string[];
 	status?: 'active' | 'unread';
+	project: string | null;
 }
 
 export function emptyFilterSpec(): ChatFilterSpec {
-	return { textTokens: [], tags: [], providers: [], models: [] };
+	return { textTokens: [], tags: [], providers: [], models: [], project: null };
 }
 
 export function isEmptyFilter(spec: ChatFilterSpec): boolean {
@@ -21,13 +22,20 @@ export function isEmptyFilter(spec: ChatFilterSpec): boolean {
 		spec.tags.length === 0 &&
 		spec.providers.length === 0 &&
 		spec.models.length === 0 &&
-		spec.status === undefined
+		spec.status === undefined &&
+		spec.project === null
 	);
 }
 
+/** Sentinel value set when multiple project: filters are parsed.
+ *  No real path can contain this, so matches always fail. */
+const MULTI_PROJECT_SENTINEL = '\0MULTI\0';
+
 /** Parses a raw search query into a structured filter spec.
- *  Prefix filters: tag:X, provider:Y, model:Z
- *  Everything else is a free-text token. */
+ *  Prefix filters: tag:X, provider:Y, model:Z, project:P
+ *  Everything else is a free-text token.
+ *  Multiple project: filters are invalid and set project to a sentinel
+ *  that matches no chats. */
 export function parseChatSearch(query: string): ChatFilterSpec {
 	const spec = emptyFilterSpec();
 	const raw = query.trim();
@@ -52,6 +60,15 @@ export function parseChatSearch(query: string): ChatFilterSpec {
 		} else if (lower.startsWith('model:')) {
 			const value = token.slice(6).trim();
 			if (value) spec.models.push(value.toLowerCase());
+		} else if (lower.startsWith('project:')) {
+			const value = token.slice(8).trim();
+			if (!value) continue;
+			if (spec.project !== null) {
+				// Multiple project: filters are invalid — mark as no-match
+				spec.project = MULTI_PROJECT_SENTINEL;
+			} else {
+				spec.project = value.toLowerCase();
+			}
 		} else {
 			spec.textTokens.push(lower);
 		}
@@ -111,10 +128,16 @@ export interface ChatFilterTarget {
  *  - All text tokens must appear somewhere in the text haystack (AND)
  *  - All tag: filters must be present on the chat (AND)
  *  - Provider filters match any (OR)
- *  - Model filters match any (OR) */
+ *  - Model filters match any (OR)
+ *  - Project filter checks substring match against projectPath */
 export function matchesChatFilter(chat: ChatFilterTarget, spec: ChatFilterSpec): boolean {
 	if (spec.status === 'active' && !chat.isProcessing) return false;
 	if (spec.status === 'unread' && !chat.isUnread) return false;
+
+	// Project filter: projectPath must contain the value (case-insensitive)
+	if (spec.project !== null) {
+		if (!chat.projectPath.toLowerCase().includes(spec.project)) return false;
+	}
 
 	// Tag filter: chat must have ALL specified tags
 	if (spec.tags.length > 0) {
@@ -165,6 +188,7 @@ export function serializeChatFilter(spec: ChatFilterSpec): string {
 	for (const tag of spec.tags) parts.push(`tag:${tag}`);
 	for (const provider of spec.providers) parts.push(`provider:${provider}`);
 	for (const model of spec.models) parts.push(`model:${model}`);
+	if (spec.project !== null) parts.push(`project:${spec.project}`);
 	for (const text of spec.textTokens) {
 		parts.push(text.includes(' ') ? `"${text}"` : text);
 	}

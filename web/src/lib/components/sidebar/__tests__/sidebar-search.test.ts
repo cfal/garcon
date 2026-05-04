@@ -7,6 +7,7 @@ import {
 	removeTagFromQuery,
 	queryHasTag,
 	emptyFilterSpec,
+	matchesChatFilter,
 } from '../sidebar-search';
 
 describe('parseChatSearch', () => {
@@ -161,5 +162,100 @@ describe('queryHasTag', () => {
 
 	it('is case-insensitive', () => {
 		expect(queryHasTag('tag:Ops', 'ops')).toBe(true);
+	});
+});
+
+describe('parseChatSearch project filter', () => {
+	it('parses project:my-app', () => {
+		const spec = parseChatSearch('project:my-app');
+		expect(spec.project).toBe('my-app');
+		expect(spec.textTokens).toEqual([]);
+	});
+
+	it('parses project with mixed filters', () => {
+		const spec = parseChatSearch('tag:ops project:garcon hello');
+		expect(spec.project).toBe('garcon');
+		expect(spec.tags).toEqual(['ops']);
+		expect(spec.textTokens).toEqual(['hello']);
+	});
+
+	it('sets sentinel on multiple project: filters', () => {
+		const spec = parseChatSearch('project:a project:b');
+		expect(spec.project).toBeDefined();
+		expect(spec.project).not.toBeNull();
+		// Sentinel value — no real path can contain it
+		expect(spec.project).toContain('\0MULTI\0');
+	});
+
+	it('is case-insensitive for operator but preserves value casing (lowercased)', () => {
+		const spec = parseChatSearch('Project:MyApp');
+		expect(spec.project).toBe('myapp');
+	});
+
+	it('ignores empty project: value', () => {
+		const spec = parseChatSearch('project:');
+		expect(spec.project).toBeNull();
+	});
+});
+
+describe('serializeChatFilter project', () => {
+	it('serializes project filter', () => {
+		const spec = { ...emptyFilterSpec(), project: 'my-app' };
+		expect(serializeChatFilter(spec)).toBe('project:my-app');
+	});
+
+	it('round-trips project with other filters', () => {
+		const query = 'tag:ops project:garcon hello';
+		const spec = parseChatSearch(query);
+		const serialized = serializeChatFilter(spec);
+		const reparsed = parseChatSearch(serialized);
+		expect(reparsed).toEqual(spec);
+	});
+});
+
+describe('matchesChatFilter project', () => {
+	const chat = {
+		title: 'Test',
+		projectPath: '/workspace/garcon-monorepo',
+		provider: 'claude',
+		model: 'sonnet' as const,
+		tags: [],
+		isProcessing: false,
+		isUnread: false,
+	};
+
+	it('matches when projectPath contains the value', () => {
+		const spec = { ...emptyFilterSpec(), project: 'garcon' };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('matches the end of a path (suffix)', () => {
+		const spec = { ...emptyFilterSpec(), project: 'garcon-monorepo' };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('matches the beginning of a path (prefix)', () => {
+		const spec = { ...emptyFilterSpec(), project: '/workspace' };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('does not match when projectPath does not contain the value', () => {
+		const spec = { ...emptyFilterSpec(), project: 'other-project' };
+		expect(matchesChatFilter(chat, spec)).toBe(false);
+	});
+
+	it('does not match when multiple project: sent sentinel', () => {
+		const spec = { ...emptyFilterSpec(), project: '\0MULTI\0' };
+		expect(matchesChatFilter(chat, spec)).toBe(false);
+	});
+
+	it('is case-insensitive', () => {
+		const spec = { ...emptyFilterSpec(), project: 'GARCON' };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('matches when project is null (no filter)', () => {
+		const spec = { ...emptyFilterSpec(), project: null };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
 	});
 });

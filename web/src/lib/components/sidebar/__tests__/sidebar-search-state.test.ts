@@ -343,4 +343,40 @@ describe('SidebarSearchState', () => {
 			expect(searchState.filteredChats.map((c) => c.id)).toEqual(['c1']);
 		});
 	});
+
+	describe('project filter integration', () => {
+		it('filters by project: substring match', () => {
+			const chats = [
+				makeChat({ id: 'c1', projectPath: '/workspace/garcon' }),
+				makeChat({ id: 'c2', projectPath: '/workspace/other' }),
+			];
+			const searchState = createState(chats);
+
+			searchState.applyQuery('project:garcon');
+			expect(searchState.filteredChats.map((c) => c.id)).toEqual(['c1']);
+		});
+
+		it('returns no results for multiple project: filters', () => {
+			const chats = [
+				makeChat({ id: 'c1', projectPath: '/workspace/garcon' }),
+				makeChat({ id: 'c2', projectPath: '/workspace/other' }),
+			];
+			const searchState = createState(chats);
+
+			searchState.applyQuery('project:a project:b');
+			expect(searchState.filteredChats).toEqual([]);
+		});
+
+		it('combines project with tag filter', () => {
+			const chats = [
+				makeChat({ id: 'c1', projectPath: '/workspace/garcon', tags: ['ops'] }),
+				makeChat({ id: 'c2', projectPath: '/workspace/garcon', tags: ['dev'] }),
+				makeChat({ id: 'c3', projectPath: '/workspace/other', tags: ['ops'] }),
+			];
+			const searchState = createState(chats);
+
+			searchState.applyQuery('project:garcon tag:ops');
+			expect(searchState.filteredChats.map((c) => c.id)).toEqual(['c1']);
+		});
+	});
 });
