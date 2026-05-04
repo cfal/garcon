@@ -91,7 +91,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.queryByLabelText('Unread')).toBeNull();
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
-		expect(screen.queryByText('3h ago')).toBeNull();
+		expect(screen.getByText('3h ago')).toBeTruthy();
 		expect(screen.getByTitle('/very/long/workspace/projects/feature-branch/app')).toBeTruthy();
 		expect(screen.getByText('Latest preview text').className).toContain('mt-0.5');
 		expect(screen.getByText('Latest preview text').className).toContain('mb-1');

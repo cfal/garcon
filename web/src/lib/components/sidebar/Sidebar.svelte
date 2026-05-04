@@ -818,6 +818,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		query={searchState.draftQuery}
 		filteredChats={searchState.dialogFilteredChats}
 		savedSearches={searchState.searchDialogSavedSearches}
+		{currentTime}
 		highlightedIndex={searchState.highlightedResultIndex}
 		onQueryChange={(q) => searchState.updateDraftQuery(q)}
 		onSelectChat={handleSearchSelectChat}
