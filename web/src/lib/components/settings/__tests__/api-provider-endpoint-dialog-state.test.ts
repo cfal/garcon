@@ -22,7 +22,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		vi.mocked(discoverApiProviderModels).mockReset();
 	});
 
-	it('shows Claude Code and Direct Chat for Anthropic-compatible endpoints', () => {
+	it('always exposes Anthropic-compatible endpoints to Claude Code and Direct Chat', () => {
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'anthropic-messages',
@@ -33,15 +33,10 @@ describe('ApiProviderEndpointDialogState', () => {
 		dialog.beginCreate();
 
 		expect(dialog.usesOpenAiCapabilityToggles).toBe(false);
-		expect(dialog.targetOptions.map((target) => target.harnessId)).toEqual([
-			'claude',
-			'direct-anthropic-compatible'
-		]);
-		expect(dialog.targetOptions.map((target) => target.label)).toEqual([
-			'Use with Claude Code',
-			'Use with Direct Chat (Anthropic)'
-		]);
+		expect(dialog.supportsChatCompletionsApi).toBe(false);
+		expect(dialog.supportsResponsesApi).toBe(false);
 		expect(dialog.exposeTo).toEqual(['claude', 'direct-anthropic-compatible']);
+		expect(dialog.payload().endpoint.exposeTo).toEqual(['claude', 'direct-anthropic-compatible']);
 	});
 
 	it('maps OpenAI capability toggles to Direct Chat and Codex exposure', () => {
@@ -55,7 +50,6 @@ describe('ApiProviderEndpointDialogState', () => {
 		dialog.beginCreate();
 
 		expect(dialog.usesOpenAiCapabilityToggles).toBe(true);
-		expect(dialog.targetOptions).toEqual([]);
 		expect(dialog.supportsChatCompletionsApi).toBe(true);
 		expect(dialog.supportsResponsesApi).toBe(false);
 		expect(dialog.exposeTo).toEqual(['direct-openai-compatible']);
@@ -318,7 +312,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.defaultModel).toBe('claude-sonnet-4-20250514');
 	});
 
-	it('keeps Direct Anthropic exposure when fetching Anthropic models', async () => {
+	it('keeps fixed Anthropic exposure when fetching Anthropic models', async () => {
 		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
 			success: true,
 			models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }]
@@ -332,7 +326,6 @@ describe('ApiProviderEndpointDialogState', () => {
 
 		dialog.beginCreate();
 		dialog.baseUrl = 'https://api.acme.test';
-		dialog.setTarget('claude', false);
 
 		await dialog.fetchModels();
 
@@ -344,7 +337,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			endpointId: null,
 			modelDiscovery: 'anthropic-models'
 		});
-		expect(dialog.exposeTo).toEqual(['direct-anthropic-compatible']);
+		expect(dialog.exposeTo).toEqual(['claude', 'direct-anthropic-compatible']);
 		expect(dialog.defaultModel).toBe('acme-sonnet');
 	});
 

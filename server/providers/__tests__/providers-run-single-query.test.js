@@ -392,6 +392,38 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
     expect('apiKey' in created.endpoints[0]).toBe(false);
   });
 
+  it('canonicalizes Anthropic API provider exposure before storing it', async () => {
+    const apiProviderStore = makeApiProviderStore();
+    const { registry } = makeRegistry({ apiProviderStore });
+
+    await registry.createApiProvider({
+      templateId: 'custom',
+      label: 'Acme Anthropic',
+      endpoint: {
+        protocol: 'anthropic-messages',
+        baseUrl: 'https://api.acme.test',
+        apiKey: 'sk-test',
+        exposeTo: ['direct-anthropic-compatible'],
+        defaultModel: 'acme-sonnet',
+        models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
+        supportsImages: false,
+      },
+    });
+
+    expect(apiProviderStore.createApiProvider).toHaveBeenCalledWith({
+      templateId: 'custom',
+      label: 'Acme Anthropic',
+      protocol: 'anthropic-messages',
+      baseUrl: 'https://api.acme.test',
+      apiKey: 'sk-test',
+      exposeTo: ['claude', 'direct-anthropic-compatible'],
+      defaultModel: 'acme-sonnet',
+      models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
+      supportsImages: false,
+      modelDiscovery: 'none',
+    });
+  });
+
   it('rejects API provider payloads with incompatible exposure targets', async () => {
     const apiProviderStore = makeApiProviderStore();
     const { registry } = makeRegistry({ apiProviderStore });

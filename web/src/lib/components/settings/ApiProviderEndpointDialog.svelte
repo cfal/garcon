@@ -178,20 +178,6 @@
 						aria-label={m.settings_api_provider_capability_responses_label()}
 					/>
 				</label>
-			{:else}
-				{#each dialog.targetOptions as target (target.harnessId)}
-					<div class="flex items-center justify-between rounded-lg border border-border p-3">
-						<div>
-							<div class="text-sm font-medium">{target.label}</div>
-							<div class="text-xs text-muted-foreground">{target.description}</div>
-						</div>
-						<Switch
-							checked={dialog.isTargetEnabled(target.harnessId)}
-							onCheckedChange={(checked) => dialog.setTarget(target.harnessId, Boolean(checked))}
-							aria-label={target.label}
-						/>
-					</div>
-				{/each}
 			{/if}
 
 			{#if dialog.error}

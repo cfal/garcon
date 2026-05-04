@@ -225,10 +225,14 @@ function normalizeApiProviderTargets(protocol: ApiProtocol, value: unknown): str
   if (!Array.isArray(value)) {
     throw new Error('endpoint.exposeTo must be an array');
   }
-  const allowed = new Set(harnessesForProtocol(protocol));
+  const allowedTargets = harnessesForProtocol(protocol);
+  const allowed = new Set(allowedTargets);
   const invalid = value.filter((target) => typeof target !== 'string' || !allowed.has(target as any));
   if (invalid.length > 0) {
     throw new Error(`endpoint.exposeTo must only include ${labelForProtocol(protocol)} harnesses`);
+  }
+  if (protocol === 'anthropic-messages') {
+    return [...allowedTargets];
   }
   const targets = [...new Set(value)] as string[];
   if (targets.length === 0) {

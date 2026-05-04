@@ -13,7 +13,6 @@ import {
 	type ApiProviderTemplateId
 } from '$shared/api-provider-templates';
 import {
-	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
 	DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
 	harnessesForProtocol,
 	type ApiProtocol,
@@ -39,7 +38,7 @@ export class ApiProviderEndpointDialogState {
 	modelsText = $state('');
 	supportsImages = $state(false);
 	modelDiscovery = $state<ModelDiscoveryKind>('none');
-	enabledTargets = $state<Record<string, boolean>>({});
+	openAiEnabledTargets = $state<Record<string, boolean>>({});
 	isSaving = $state(false);
 	isTesting = $state(false);
 	isFetchingModels = $state(false);
@@ -95,28 +94,21 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	get supportsChatCompletionsApi(): boolean {
-		return this.isTargetEnabled(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID);
+		return this.protocol === 'openai-chat-completions'
+			&& this.isOpenAiTargetEnabled(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID);
 	}
 
 	get supportsResponsesApi(): boolean {
-		return this.isTargetEnabled('codex');
+		return this.protocol === 'openai-chat-completions' && this.isOpenAiTargetEnabled('codex');
 	}
 
 	get exposureTargetIds(): readonly HarnessId[] {
 		return harnessesForProtocol(this.protocol);
 	}
 
-	get targetOptions(): Array<{ harnessId: HarnessId; label: string; description: string }> {
-		if (this.usesOpenAiCapabilityToggles) return [];
-		return this.exposureTargetIds.map((harnessId) => ({
-			harnessId,
-			label: labelForHarnessTarget(harnessId),
-			description: descriptionForHarnessTarget(harnessId)
-		}));
-	}
-
 	get exposeTo(): HarnessId[] {
-		return this.exposureTargetIds.filter((harnessId) => this.enabledTargets[harnessId] !== false);
+		if (this.protocol === 'anthropic-messages') return [...this.exposureTargetIds];
+		return this.exposureTargetIds.filter((harnessId) => this.openAiEnabledTargets[harnessId] !== false);
 	}
 
 	get modelOptions(): ModelOption[] {
@@ -185,12 +177,7 @@ export class ApiProviderEndpointDialogState {
 		this.modelDiscovery = found.endpoint.modelDiscovery ?? 'none';
 		this.templateId = found.apiProvider.templateId ?? 'custom';
 		this.modelsText = found.endpoint.models.map((model) => formatModelLine(model)).join('\n');
-		this.enabledTargets = Object.fromEntries(
-			this.exposureTargetIds.map((harnessId) => [
-				harnessId,
-				found.endpoint.exposeTo.includes(harnessId)
-			])
-		);
+		this.openAiEnabledTargets = this.openAiTargetsFrom(found.endpoint.exposeTo);
 		this.apiKey = '';
 	}
 
@@ -212,9 +199,7 @@ export class ApiProviderEndpointDialogState {
 		this.modelsText = template.models.map((model) => formatModelLine(model)).join('\n');
 		this.supportsImages = template.supportsImages;
 		this.modelDiscovery = template.modelDiscovery;
-		this.enabledTargets = Object.fromEntries(
-			this.exposureTargetIds.map((harnessId) => [harnessId, template.exposeTo.includes(harnessId)])
-		);
+		this.openAiEnabledTargets = this.openAiTargetsFrom(template.exposeTo);
 	}
 
 	syncDefaultModelWithModels(): void {
@@ -222,20 +207,27 @@ export class ApiProviderEndpointDialogState {
 		this.defaultModel = this.modelOptions[0]?.value ?? '';
 	}
 
-	isTargetEnabled(harnessId: HarnessId): boolean {
-		return this.enabledTargets[harnessId] !== false;
-	}
-
-	setTarget(harnessId: HarnessId, enabled: boolean): void {
-		this.enabledTargets = { ...this.enabledTargets, [harnessId]: enabled };
-	}
-
 	setSupportsChatCompletionsApi(enabled: boolean): void {
-		this.setTarget(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID, enabled);
+		this.setOpenAiTarget(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID, enabled);
 	}
 
 	setSupportsResponsesApi(enabled: boolean): void {
-		this.setTarget('codex', enabled);
+		this.setOpenAiTarget('codex', enabled);
+	}
+
+	private isOpenAiTargetEnabled(harnessId: HarnessId): boolean {
+		return this.openAiEnabledTargets[harnessId] !== false;
+	}
+
+	private setOpenAiTarget(harnessId: HarnessId, enabled: boolean): void {
+		this.openAiEnabledTargets = { ...this.openAiEnabledTargets, [harnessId]: enabled };
+	}
+
+	private openAiTargetsFrom(exposeTo: readonly HarnessId[]): Record<string, boolean> {
+		if (this.protocol !== 'openai-chat-completions') return {};
+		return Object.fromEntries(
+			this.exposureTargetIds.map((harnessId) => [harnessId, exposeTo.includes(harnessId)])
+		);
 	}
 
 	payload(): ApiProviderInput {
@@ -389,16 +381,4 @@ function localizedProtocolLabel(protocol: ApiProtocol): string {
 	return protocol === 'anthropic-messages'
 		? m.settings_api_provider_dialog_protocol_anthropic()
 		: m.settings_api_provider_dialog_protocol_openai();
-}
-
-function labelForHarnessTarget(harnessId: HarnessId): string {
-	if (harnessId === 'claude') return m.settings_api_provider_target_claude_label();
-	if (harnessId === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) return m.settings_api_provider_target_direct_anthropic_label();
-	return m.settings_api_provider_target_default_label({ harness: harnessId });
-}
-
-function descriptionForHarnessTarget(harnessId: HarnessId): string {
-	if (harnessId === 'claude') return m.settings_api_provider_target_claude_description();
-	if (harnessId === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) return m.settings_api_provider_target_direct_anthropic_description();
-	return m.settings_api_provider_target_default_description();
 }

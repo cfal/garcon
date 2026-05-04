@@ -66,6 +66,22 @@ describe('ApiProviderProtocolPanel', () => {
 		expect(screen.queryByText('Use with Direct Chat (OpenAI)')).toBeNull();
 	});
 
+	it('opens Anthropic providers without per-harness exposure switches', async () => {
+		render(ApiProviderProtocolPanelTestHarness, {
+			protocol: 'anthropic-messages',
+			title: 'Anthropic Providers',
+			description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.',
+			addLabel: 'Add Anthropic-compatible provider'
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Add Anthropic-compatible provider' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Add custom provider..' }));
+
+		expect(await screen.findByText('Adds an Anthropic Messages endpoint for Claude Code and Direct Chat.')).toBeTruthy();
+		expect(screen.queryByText('Use with Claude Code')).toBeNull();
+		expect(screen.queryByText('Use with Direct Chat (Anthropic)')).toBeNull();
+	});
+
 	it('renders saved provider rows without built-in or disabled badges', () => {
 		render(ApiProviderProtocolPanelTestHarness, {
 			protocol: 'openai-chat-completions',

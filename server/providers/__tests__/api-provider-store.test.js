@@ -81,7 +81,7 @@ describe('ApiProviderStore', () => {
     expect(store.redactedList()[0].endpoints[0].hasApiKey).toBe(false);
   });
 
-  it('stores Direct Anthropic exposure for Anthropic-compatible providers', async () => {
+  it('canonicalizes Anthropic-compatible exposure to both Messages consumers', async () => {
     const store = await tempStore();
     await store.init();
 
@@ -91,7 +91,7 @@ describe('ApiProviderStore', () => {
       protocol: 'anthropic-messages',
       baseUrl: 'https://api.acme.test',
       apiKey: 'sk-acme',
-      exposeTo: ['claude', 'direct-anthropic-compatible'],
+      exposeTo: ['claude'],
       defaultModel: 'acme-sonnet',
       models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
       supportsImages: true,

@@ -139,10 +139,14 @@ function normalizeExposeTargets(protocol: ApiProtocol, targets: HarnessId[]): Ha
   if (!Array.isArray(targets)) {
     throw new Error('endpoint.exposeTo must be an array');
   }
-  const allowed = new Set(harnessesForProtocol(protocol));
+  const allowedTargets = harnessesForProtocol(protocol);
+  const allowed = new Set(allowedTargets);
   const invalid = targets.filter((target) => typeof target !== 'string' || !allowed.has(target as any));
   if (invalid.length > 0) {
     throw new Error(`endpoint.exposeTo must only include ${labelForProtocol(protocol)} harnesses`);
+  }
+  if (protocol === 'anthropic-messages') {
+    return [...allowedTargets];
   }
   const normalized = [...new Set(targets)] as HarnessId[];
   if (normalized.length === 0) {
