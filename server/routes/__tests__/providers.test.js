@@ -82,9 +82,9 @@ describe('harness auth login routes', () => {
       templateId: 'custom',
       label: 'Example',
       endpoint: {
-        protocol: 'openai-chat-completions',
+        protocol: 'openai-compatible',
         baseUrl: 'https://api.example.test/v1',
-        exposeTo: ['codex'],
+        capabilities: { chatCompletions: false, responses: true },
         defaultModel: 'example',
         models: [],
       },
@@ -107,7 +107,6 @@ describe('harness auth login routes', () => {
       endpoint: {
         protocol: 'anthropic-messages',
         baseUrl: 'https://api.example.test/anthropic',
-        exposeTo: ['claude'],
         defaultModel: 'example',
         models: [],
       },
@@ -127,7 +126,7 @@ describe('harness auth login routes', () => {
 
   it('discovers API provider models without persisting them', async () => {
     const input = {
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
       baseUrl: 'https://api.example.test/v1',
       apiKey: 'sk-test',
       modelDiscovery: 'openai-models',

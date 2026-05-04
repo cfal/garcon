@@ -45,6 +45,7 @@ import {
   createAmpAdapter,
   createFactoryAdapter,
   createDirectOpenAiCompatibleRouterAdapter,
+  createDirectOpenAiResponsesCompatibleRouterAdapter,
   createDirectAnthropicCompatibleRouterAdapter,
 } from './providers/provider-adapters.js';
 import { ChatHandler } from './ws/chat.js';
@@ -111,17 +112,19 @@ export async function startServer() {
     const opencodeAdapter = createOpenCodeAdapter(opencodeProvider);
     const ampAdapter = createAmpAdapter(ampProvider);
     const factoryAdapter = createFactoryAdapter(factoryProvider);
+    const directOpenAiResponsesAdapter = createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore);
     const directOpenAiAdapter = createDirectOpenAiCompatibleRouterAdapter(apiProviderStore);
     const directAnthropicAdapter = createDirectAnthropicCompatibleRouterAdapter(apiProviderStore);
 
     const initialAdapters = [
       claudeAdapter,
+      directAnthropicAdapter,
       codexAdapter,
+      directOpenAiResponsesAdapter,
+      directOpenAiAdapter,
       opencodeAdapter,
       ampAdapter,
       factoryAdapter,
-      directOpenAiAdapter,
-      directAnthropicAdapter,
     ];
 
     // Tier 2: Harness registry wrapping adapters + registry + store + resolver

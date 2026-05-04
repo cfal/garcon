@@ -28,7 +28,7 @@ function optionalId(value) {
 }
 
 function optionalProtocol(value) {
-  return value === 'openai-chat-completions' || value === 'anthropic-messages' ? value : null;
+  return value === 'openai-compatible' || value === 'anthropic-messages' ? value : null;
 }
 
 function isAllowedGenerationProvider(providers, value) {

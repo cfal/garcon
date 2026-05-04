@@ -95,7 +95,7 @@ const mockModelCatalog = {
 				rawModel: 'glm-5.1',
 				apiProviderId: 'zai',
 				endpointId: 'zai_openai',
-				protocol: 'openai-chat-completions',
+				protocol: 'openai-compatible',
 			}];
 		}
 		return [];
@@ -114,7 +114,7 @@ const mockModelCatalog = {
 					model: 'glm-5.1',
 				apiProviderId: 'zai',
 				modelEndpointId: 'zai_openai',
-				modelProtocol: 'openai-chat-completions',
+				modelProtocol: 'openai-compatible',
 			};
 		}
 		return {
@@ -186,7 +186,7 @@ describe('NewChatFormState', () => {
 			lastModel: 'glm-5.1',
 			lastApiProviderId: 'zai',
 			lastModelEndpointId: 'zai_openai',
-			lastModelProtocol: 'openai-chat-completions',
+			lastModelProtocol: 'openai-compatible',
 		}));
 
 		await formState.loadSettingsAndModels();

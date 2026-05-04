@@ -6,12 +6,13 @@ const providers = {
   getHarnessCatalog: mock(() => Promise.resolve({
     harnesses: [
       { id: 'claude', label: 'Claude', kind: 'harness', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: 'opus', models: [{ value: 'opus', label: 'Opus', supportsImages: true }] },
-      { id: 'codex', label: 'Codex', kind: 'harness', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-chat-completions'], defaultModel: 'gpt-5.5', models: [{ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true }] },
+      { id: 'codex', label: 'Codex', kind: 'harness', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: 'gpt-5.5', models: [{ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true }] },
       { id: 'opencode', label: 'OpenCode', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '', models: [] },
       { id: 'amp', label: 'Amp', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'default', models: [{ value: 'default', label: 'Default' }] },
       { id: 'factory', label: 'Factory', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'claude-opus-4-6', models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4-6' }] },
       { id: 'direct-anthropic-compatible', label: 'Direct Chat (Anthropic)', kind: 'harness', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '', models: [] },
-      { id: 'direct-openai-compatible', label: 'Direct Chat (OpenAI)', kind: 'harness', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-chat-completions'], defaultModel: '', models: [] },
+      { id: 'direct-openai-compatible', label: 'Direct Chat (OpenAI Chat Completions)', kind: 'harness', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
+      { id: 'direct-openai-responses-compatible', label: 'Direct Chat (OpenAI Responses)', kind: 'harness', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
     ],
     apiProviders: [],
   })),
@@ -36,7 +37,7 @@ describe('GET /api/v1/models', () => {
 
     expect(body.catalog).toBeDefined();
     expect(Array.isArray(body.catalog.harnesses)).toBe(true);
-    expect(body.catalog.harnesses.length).toBe(7);
+    expect(body.catalog.harnesses.length).toBe(8);
 
     const claude = body.catalog.harnesses.find((p) => p.id === 'claude');
     expect(claude.supportsFork).toBe(true);
@@ -70,10 +71,16 @@ describe('GET /api/v1/models', () => {
     expect(factoryModelValues).not.toContain('gpt-5.1-codex-max');
 
     const directOpenAi = body.catalog.harnesses.find((p) => p.id === 'direct-openai-compatible');
-    expect(directOpenAi.label).toBe('Direct Chat (OpenAI)');
+    expect(directOpenAi.label).toBe('Direct Chat (OpenAI Chat Completions)');
     expect(directOpenAi.supportsFork).toBe(false);
     expect(directOpenAi.supportsImages).toBe(true);
-    expect(directOpenAi.supportedProtocols).toEqual(['openai-chat-completions']);
+    expect(directOpenAi.supportedProtocols).toEqual(['openai-compatible']);
+
+    const directOpenAiResponses = body.catalog.harnesses.find((p) => p.id === 'direct-openai-responses-compatible');
+    expect(directOpenAiResponses.label).toBe('Direct Chat (OpenAI Responses)');
+    expect(directOpenAiResponses.supportsFork).toBe(false);
+    expect(directOpenAiResponses.supportsImages).toBe(true);
+    expect(directOpenAiResponses.supportedProtocols).toEqual(['openai-compatible']);
 
     const directAnthropic = body.catalog.harnesses.find((p) => p.id === 'direct-anthropic-compatible');
     expect(directAnthropic.label).toBe('Direct Chat (Anthropic)');

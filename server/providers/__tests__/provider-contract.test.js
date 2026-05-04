@@ -2,7 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import {
   API_PROVIDER_TEMPLATE_IDS,
   DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-  DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
+  endpointSupportsHarness,
+  harnessesForEndpoint,
   harnessesForProtocol,
   isApiProviderTemplateId,
   isEndpointOnlyHarnessId,
@@ -22,23 +25,49 @@ describe('shared harness/API provider contract', () => {
     expect(isHarnessCompatibleWithProtocol('claude', 'anthropic-messages')).toBe(true);
     expect(isHarnessCompatibleWithProtocol(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, 'anthropic-messages')).toBe(true);
     expect(isHarnessCompatibleWithProtocol('codex', 'anthropic-messages')).toBe(false);
-    expect(isHarnessCompatibleWithProtocol(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID, 'anthropic-messages')).toBe(false);
+    expect(isHarnessCompatibleWithProtocol(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, 'anthropic-messages')).toBe(false);
   });
 
-  it('maps OpenAI-compatible endpoints only to Codex and Direct Chat', () => {
-    expect(harnessesForProtocol('openai-chat-completions')).toEqual([
+  it('maps OpenAI-compatible endpoints to broad compatible consumers', () => {
+    expect(harnessesForProtocol('openai-compatible')).toEqual([
       'codex',
-      DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+      DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+      DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
     ]);
-    expect(isHarnessCompatibleWithProtocol('codex', 'openai-chat-completions')).toBe(true);
-    expect(isHarnessCompatibleWithProtocol(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID, 'openai-chat-completions')).toBe(true);
-    expect(isHarnessCompatibleWithProtocol('claude', 'openai-chat-completions')).toBe(false);
-    expect(isHarnessCompatibleWithProtocol(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, 'openai-chat-completions')).toBe(false);
+    expect(isHarnessCompatibleWithProtocol('codex', 'openai-compatible')).toBe(true);
+    expect(isHarnessCompatibleWithProtocol(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, 'openai-compatible')).toBe(true);
+    expect(isHarnessCompatibleWithProtocol(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, 'openai-compatible')).toBe(true);
+    expect(isHarnessCompatibleWithProtocol('claude', 'openai-compatible')).toBe(false);
+    expect(isHarnessCompatibleWithProtocol(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, 'openai-compatible')).toBe(false);
+  });
+
+  it('maps OpenAI-compatible endpoint capabilities to harnesses', () => {
+    expect(endpointSupportsHarness('codex', {
+      protocol: 'openai-compatible',
+      capabilities: { chatCompletions: true, responses: true },
+    })).toBe(true);
+    expect(endpointSupportsHarness(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, {
+      protocol: 'openai-compatible',
+      capabilities: { chatCompletions: true, responses: false },
+    })).toBe(true);
+    expect(endpointSupportsHarness(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, {
+      protocol: 'openai-compatible',
+      capabilities: { chatCompletions: true, responses: false },
+    })).toBe(false);
+    expect(endpointSupportsHarness(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, {
+      protocol: 'openai-compatible',
+      capabilities: { chatCompletions: false, responses: true },
+    })).toBe(true);
+    expect(harnessesForEndpoint({
+      protocol: 'openai-compatible',
+      capabilities: { chatCompletions: false, responses: true },
+    })).toEqual(['codex', DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]);
   });
 
   it('does not treat API provider ids as visible harness ids', () => {
     expect(isVisibleHarnessId('claude')).toBe(true);
-    expect(isVisibleHarnessId(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID)).toBe(true);
+    expect(isVisibleHarnessId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(true);
+    expect(isVisibleHarnessId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(true);
     expect(isVisibleHarnessId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(true);
     expect(isVisibleHarnessId('zai')).toBe(false);
     expect(isVisibleHarnessId('openrouter')).toBe(false);
@@ -52,17 +81,20 @@ describe('shared harness/API provider contract', () => {
   it('keeps settings auth rows narrower than visible harnesses', () => {
     expect(isOAuthHarnessId('claude')).toBe(true);
     expect(isOAuthHarnessId('codex')).toBe(true);
-    expect(isOAuthHarnessId(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID)).toBe(false);
+    expect(isOAuthHarnessId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(false);
+    expect(isOAuthHarnessId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(false);
     expect(isOAuthHarnessId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(false);
     expect(isOtherSettingsHarnessId('opencode')).toBe(true);
     expect(isOtherSettingsHarnessId('amp')).toBe(true);
     expect(isOtherSettingsHarnessId('factory')).toBe(true);
-    expect(isOtherSettingsHarnessId(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID)).toBe(false);
+    expect(isOtherSettingsHarnessId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(false);
+    expect(isOtherSettingsHarnessId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(false);
     expect(isOtherSettingsHarnessId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(false);
   });
 
   it('identifies endpoint-only direct harnesses', () => {
-    expect(isEndpointOnlyHarnessId(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID)).toBe(true);
+    expect(isEndpointOnlyHarnessId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(true);
+    expect(isEndpointOnlyHarnessId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(true);
     expect(isEndpointOnlyHarnessId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(true);
     expect(isEndpointOnlyHarnessId('claude')).toBe(false);
   });
@@ -77,7 +109,7 @@ describe('shared harness/API provider contract', () => {
       'zai',
       'custom',
     ]);
-    expect(templatesForProtocol('openai-chat-completions').map((template) => template.id)).toEqual([
+    expect(templatesForProtocol('openai-compatible').map((template) => template.id)).toEqual([
       'alibaba-cloud',
       'fireworks',
       'gemini',
@@ -89,27 +121,25 @@ describe('shared harness/API provider contract', () => {
     ]);
   });
 
-  it('prefills direct exposure targets from protocol-specific templates', () => {
+  it('prefills OpenAI endpoint capabilities from protocol-specific templates', () => {
     for (const template of templatesForProtocol('anthropic-messages')) {
-      expect(template.exposeTo).toContain(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID);
-      expect(template.exposeTo).not.toContain(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID);
+      expect(template.capabilities).toBeUndefined();
     }
-    for (const template of templatesForProtocol('openai-chat-completions')) {
-      expect(template.exposeTo).toContain(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID);
-      expect(template.exposeTo).not.toContain(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID);
+    for (const template of templatesForProtocol('openai-compatible')) {
+      expect(template.capabilities?.chatCompletions || template.capabilities?.responses).toBe(true);
     }
   });
 
-  it('prefills Codex only for OpenAI-compatible presets with Responses support', () => {
-    const openAiTemplates = templatesForProtocol('openai-chat-completions');
-    const exposeToCodex = openAiTemplates
-      .filter((template) => template.exposeTo.includes('codex'))
+  it('prefills Responses only for OpenAI-compatible presets with Responses support', () => {
+    const openAiTemplates = templatesForProtocol('openai-compatible');
+    const responsesCapable = openAiTemplates
+      .filter((template) => template.capabilities?.responses)
       .map((template) => template.id);
     const directOnly = openAiTemplates
-      .filter((template) => !template.exposeTo.includes('codex'))
+      .filter((template) => !template.capabilities?.responses)
       .map((template) => template.id);
 
-    expect(exposeToCodex).toEqual(['alibaba-cloud', 'fireworks', 'ollama', 'openrouter']);
+    expect(responsesCapable).toEqual(['alibaba-cloud', 'fireworks', 'ollama', 'openrouter']);
     expect(directOnly).toEqual(['gemini', 'together', 'zai', 'custom']);
   });
 });

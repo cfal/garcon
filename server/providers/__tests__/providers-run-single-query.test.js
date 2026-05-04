@@ -68,7 +68,7 @@ function makeEndpointResolver(endpointOptions = {}) {
       model: modelEndpointId ? model.replace(`${modelEndpointId}:`, '') : model,
       apiProviderId,
       endpointId: modelEndpointId,
-      protocol: modelEndpointId ? 'openai-chat-completions' : null,
+      protocol: modelEndpointId ? 'openai-compatible' : null,
       isLocal: false,
       envOverrides: undefined,
     })),
@@ -99,7 +99,7 @@ function makeApiProviderStore(apiProviders = []) {
         protocol: input.protocol,
         baseUrl: input.baseUrl,
         apiKey: input.apiKey ?? '',
-        exposeTo: input.exposeTo,
+        capabilities: input.capabilities,
         defaultModel: input.defaultModel,
         models: input.models,
         supportsImages: input.supportsImages ?? false,
@@ -254,7 +254,7 @@ describe('ProviderRegistry.runSingleQuery', () => {
       model: modelEndpointId ? model.replace(`${modelEndpointId}:`, '') : model,
       apiProviderId,
       endpointId: modelEndpointId,
-      protocol: modelEndpointId ? 'openai-chat-completions' : null,
+      protocol: modelEndpointId ? 'openai-compatible' : null,
       isLocal: false,
       envOverrides: undefined,
       codexConfig,
@@ -278,7 +278,7 @@ describe('ProviderRegistry.runSingleQuery', () => {
       model: 'acme-code',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
-      modelProtocol: 'openai-chat-completions',
+      modelProtocol: 'openai-compatible',
       codexConfig,
     });
   });
@@ -292,7 +292,7 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       apiProviderId: 'acme',
       endpointId: 'acme_openai',
       rawModel: 'acme-code',
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
     };
     const anthropicEndpointOption = {
       value: 'acme_anthropic:acme-sonnet',
@@ -314,19 +314,35 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       endpointResolver: makeEndpointResolver({
         codex: [endpointOption],
         'direct-openai-compatible': [endpointOption],
+        'direct-openai-responses-compatible': [endpointOption],
         'direct-anthropic-compatible': [anthropicEndpointOption],
       }),
       apiProviderStore: makeApiProviderStore([apiProvider]),
       adapters: [
         {
           id: 'direct-openai-compatible',
-          label: 'Direct Chat (OpenAI)',
+          label: 'Direct Chat (OpenAI Chat Completions)',
           startSession: mock(),
           runTurn: mock(),
           abort: mock(),
           isRunning: mock(() => false),
           getRunningSessions: mock(() => []),
           getModels: mock(() => [{ value: 'raw-openai', label: 'Raw OpenAI' }]),
+          onMessages: mock(),
+          onProcessing: mock(),
+          onSessionCreated: mock(),
+          onFinished: mock(),
+          onFailed: mock(),
+        },
+        {
+          id: 'direct-openai-responses-compatible',
+          label: 'Direct Chat (OpenAI Responses)',
+          startSession: mock(),
+          runTurn: mock(),
+          abort: mock(),
+          isRunning: mock(() => false),
+          getRunningSessions: mock(() => []),
+          getModels: mock(() => [{ value: 'raw-openai-response', label: 'Raw OpenAI Response' }]),
           onMessages: mock(),
           onProcessing: mock(),
           onSessionCreated: mock(),
@@ -354,6 +370,7 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
     const catalog = await registry.getHarnessCatalog();
     expect(catalog.harnesses.find((entry) => entry.id === 'codex')?.models).toContainEqual(endpointOption);
     expect(catalog.harnesses.find((entry) => entry.id === 'direct-openai-compatible')?.models).toEqual([endpointOption]);
+    expect(catalog.harnesses.find((entry) => entry.id === 'direct-openai-responses-compatible')?.models).toEqual([endpointOption]);
     expect(catalog.harnesses.find((entry) => entry.id === 'direct-anthropic-compatible')?.models).toEqual([anthropicEndpointOption]);
     expect(catalog.apiProviders).toEqual([apiProvider]);
   });
@@ -366,10 +383,10 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       templateId: 'custom',
       label: ' Acme ',
       endpoint: {
-        protocol: 'openai-chat-completions',
+        protocol: 'openai-compatible',
         baseUrl: 'api.acme.test/v1/',
         apiKey: 'sk-test',
-        exposeTo: ['codex'],
+        capabilities: { chatCompletions: false, responses: true },
         defaultModel: 'acme-code',
         models: [{ value: ' acme-code ', label: ' Acme Code ', supportsImages: false }],
         supportsImages: false,
@@ -379,10 +396,10 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
     expect(apiProviderStore.createApiProvider).toHaveBeenCalledWith({
       templateId: 'custom',
       label: 'Acme',
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
       baseUrl: 'https://api.acme.test/v1',
       apiKey: 'sk-test',
-      exposeTo: ['codex'],
+      capabilities: { chatCompletions: false, responses: true },
       defaultModel: 'acme-code',
       models: [{ value: 'acme-code', label: 'Acme Code', supportsImages: false }],
       supportsImages: false,
@@ -392,7 +409,7 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
     expect('apiKey' in created.endpoints[0]).toBe(false);
   });
 
-  it('canonicalizes Anthropic API provider exposure before storing it', async () => {
+  it('stores Anthropic API providers without OpenAI capabilities', async () => {
     const apiProviderStore = makeApiProviderStore();
     const { registry } = makeRegistry({ apiProviderStore });
 
@@ -403,7 +420,6 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
         protocol: 'anthropic-messages',
         baseUrl: 'https://api.acme.test',
         apiKey: 'sk-test',
-        exposeTo: ['direct-anthropic-compatible'],
         defaultModel: 'acme-sonnet',
         models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
         supportsImages: false,
@@ -416,7 +432,6 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       protocol: 'anthropic-messages',
       baseUrl: 'https://api.acme.test',
       apiKey: 'sk-test',
-      exposeTo: ['claude', 'direct-anthropic-compatible'],
       defaultModel: 'acme-sonnet',
       models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
       supportsImages: false,
@@ -424,7 +439,7 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
     });
   });
 
-  it('rejects API provider payloads with incompatible exposure targets', async () => {
+  it('rejects OpenAI-compatible API provider payloads with no supported API surface', async () => {
     const apiProviderStore = makeApiProviderStore();
     const { registry } = makeRegistry({ apiProviderStore });
 
@@ -432,14 +447,14 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       templateId: 'custom',
       label: 'Acme',
       endpoint: {
-        protocol: 'openai-chat-completions',
+        protocol: 'openai-compatible',
         baseUrl: 'https://api.acme.test/v1',
-        exposeTo: ['codex', 'claude'],
+        capabilities: { chatCompletions: false, responses: false },
         defaultModel: 'acme-code',
         models: [],
         supportsImages: false,
       },
-    })).rejects.toThrow('OpenAI-compatible harnesses');
+    })).rejects.toThrow('OpenAI-compatible endpoints must support Chat Completions or Responses.');
     expect(apiProviderStore.createApiProvider).not.toHaveBeenCalled();
   });
 
@@ -450,7 +465,7 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
     const { registry } = makeRegistry();
 
     const result = await registry.discoverApiProviderModels({
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
       baseUrl: 'https://api.z.ai/api/coding/paas/v4',
       apiKey: 'sk-zai',
       modelDiscovery: 'openai-models',
@@ -504,10 +519,10 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       updatedAt: '2026-05-04T00:00:00.000Z',
       endpoints: [{
         id: 'acme_openai',
-        protocol: 'openai-chat-completions',
+        protocol: 'openai-compatible',
         baseUrl: 'https://api.acme.test/v1',
         apiKey: 'sk-stored',
-        exposeTo: ['codex'],
+        capabilities: { chatCompletions: false, responses: true },
         defaultModel: 'acme-code',
         models: [{ value: 'acme-code', label: 'Acme Code' }],
         supportsImages: false,
@@ -517,7 +532,7 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
     const { registry } = makeRegistry({ apiProviderStore });
 
     await registry.discoverApiProviderModels({
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
       baseUrl: 'https://api.acme.test/v1',
       endpointId: 'acme_openai',
       modelDiscovery: 'openai-models',
@@ -580,7 +595,7 @@ describe('ProviderRegistry session option hydration', () => {
       nativePath: null,
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
-      modelProtocol: 'openai-chat-completions',
+      modelProtocol: 'openai-compatible',
     });
   });
 });

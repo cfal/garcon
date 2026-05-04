@@ -3,7 +3,8 @@ import type { SessionProvider } from '$lib/types/app';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS } from '$shared/models';
 import {
 	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-	DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+	DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
 	isApiProviderTemplateId,
 	isEndpointOnlyHarnessId,
 	isVisibleHarnessId,
@@ -12,6 +13,7 @@ import {
 	type ApiProviderEndpointCatalogEntry,
 	type ApiProviderTemplateId,
 	type ModelDiscoveryKind,
+	type OpenAiEndpointCapabilities,
 } from '$shared/providers';
 
 export interface ModelOption {
@@ -55,17 +57,19 @@ const STATIC_FALLBACKS: HarnessModels = {
 	opencode: [],
 	amp: AMP_MODELS.OPTIONS,
 	factory: FACTORY_MODELS.OPTIONS,
-	[DIRECT_OPENAI_COMPATIBLE_HARNESS_ID]: [],
+	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: [],
+	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: [],
 	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: [],
 };
 
 const STATIC_HARNESS_METADATA: HarnessMetadataMap = {
 	claude: { id: 'claude', label: 'Claude', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: CLAUDE_MODELS.DEFAULT },
-	codex: { id: 'codex', label: 'Codex', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-chat-completions'], defaultModel: CODEX_MODELS.DEFAULT },
+	codex: { id: 'codex', label: 'Codex', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: CODEX_MODELS.DEFAULT },
 	opencode: { id: 'opencode', label: 'OpenCode', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '' },
 	amp: { id: 'amp', label: 'Amp', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: AMP_MODELS.DEFAULT },
 	factory: { id: 'factory', label: 'Factory', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: FACTORY_MODELS.DEFAULT },
-	[DIRECT_OPENAI_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_COMPATIBLE_HARNESS_ID, label: 'Direct Chat (OpenAI)', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-chat-completions'], defaultModel: '' },
+	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, label: 'Direct Chat (OpenAI Chat Completions)', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '' },
+	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, label: 'Direct Chat (OpenAI Responses)', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '' },
 	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: { id: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, label: 'Direct Chat (Anthropic)', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '' },
 };
 
@@ -81,7 +85,7 @@ function normalizeModelOption(value: unknown): ModelOption | null {
 		apiProviderId: typeof maybe.apiProviderId === 'string' ? maybe.apiProviderId : undefined,
 		endpointId: typeof maybe.endpointId === 'string' ? maybe.endpointId : undefined,
 		rawModel: typeof maybe.rawModel === 'string' ? maybe.rawModel : undefined,
-		protocol: maybe.protocol === 'openai-chat-completions' || maybe.protocol === 'anthropic-messages'
+		protocol: maybe.protocol === 'openai-compatible' || maybe.protocol === 'anthropic-messages'
 			? maybe.protocol as ApiProtocol
 			: undefined,
 	};
@@ -89,7 +93,7 @@ function normalizeModelOption(value: unknown): ModelOption | null {
 
 function normalizeProtocols(value: unknown): ApiProtocol[] {
 	if (!Array.isArray(value)) return [];
-	return value.filter((p): p is ApiProtocol => p === 'openai-chat-completions' || p === 'anthropic-messages');
+	return value.filter((p): p is ApiProtocol => p === 'openai-compatible' || p === 'anthropic-messages');
 }
 
 function normalizeTemplateId(value: unknown): ApiProviderTemplateId | undefined {
@@ -110,17 +114,25 @@ function normalizeModelDiscovery(value: unknown): ModelDiscoveryKind | undefined
 	return undefined;
 }
 
+function normalizeOpenAiCapabilities(value: unknown): OpenAiEndpointCapabilities | undefined {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+	const raw = value as Record<string, unknown>;
+	return {
+		chatCompletions: raw.chatCompletions === true,
+		responses: raw.responses === true,
+	};
+}
+
 function normalizeApiProviderEndpoint(value: unknown): ApiProviderEndpointCatalogEntry | null {
 	if (!value || typeof value !== 'object') return null;
 	const entry = value as Record<string, unknown>;
-	const protocol = entry.protocol === 'openai-chat-completions' || entry.protocol === 'anthropic-messages'
+	const protocol = entry.protocol === 'openai-compatible' || entry.protocol === 'anthropic-messages'
 		? entry.protocol
 		: null;
 	if (
 		typeof entry.id !== 'string' ||
 		!protocol ||
 		typeof entry.baseUrl !== 'string' ||
-		!Array.isArray(entry.exposeTo) ||
 		typeof entry.defaultModel !== 'string' ||
 		typeof entry.supportsImages !== 'boolean' ||
 		typeof entry.hasApiKey !== 'boolean'
@@ -131,7 +143,7 @@ function normalizeApiProviderEndpoint(value: unknown): ApiProviderEndpointCatalo
 		id: entry.id,
 		protocol,
 		baseUrl: entry.baseUrl,
-		exposeTo: entry.exposeTo.filter((target): target is string => typeof target === 'string'),
+		capabilities: normalizeOpenAiCapabilities(entry.capabilities),
 		defaultModel: entry.defaultModel,
 		models: Array.isArray(entry.models)
 			? entry.models.map((model) => normalizeModelOption(model)).filter((model): model is ModelOption => model !== null)
@@ -186,12 +198,13 @@ function mergeWithFallbacks(models: HarnessModels): HarnessModels {
 	const result: HarnessModels = {
 		claude: mergeStaticModels(models.claude, STATIC_FALLBACKS.claude!),
 		codex: mergeStaticModels(models.codex, STATIC_FALLBACKS.codex!),
-			amp: models.amp?.length ? models.amp : STATIC_FALLBACKS.amp!,
-			factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
-			opencode: models.opencode?.length ? models.opencode : [],
-			[DIRECT_OPENAI_COMPATIBLE_HARNESS_ID]: models[DIRECT_OPENAI_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_OPENAI_COMPATIBLE_HARNESS_ID] : [],
-			[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: models[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID] : [],
-		};
+		amp: models.amp?.length ? models.amp : STATIC_FALLBACKS.amp!,
+		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
+		opencode: models.opencode?.length ? models.opencode : [],
+		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID] : [],
+		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID] : [],
+		[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: models[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID] : [],
+	};
 	for (const [key, value] of Object.entries(models)) {
 		if (!(key in result) && value?.length && isVisibleHarnessId(key)) {
 			result[key] = value;

@@ -31,7 +31,7 @@ function strOrNullish(v: unknown): string | null | undefined {
 function parseProtocolOrNull(v: unknown): ApiProtocol | null | undefined {
   if (v === undefined) return undefined;
   if (v === null) return null;
-  if (v === 'openai-chat-completions' || v === 'anthropic-messages') return v;
+  if (v === 'openai-compatible' || v === 'anthropic-messages') return v;
   return null;
 }
 

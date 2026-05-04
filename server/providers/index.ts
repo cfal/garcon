@@ -33,14 +33,14 @@ import type { ProviderAdapter } from './provider-adapter.js';
 import type { ApiProviderStore, CreateApiProviderInput, UpdateApiProviderInput } from './api-provider-store.js';
 import type { ApiProviderEndpointResolver, ResolvedModelSelection } from './api-provider-endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from './api-provider-endpoint-resolver.js';
-import { directAnthropicSessionFilePath, directOpenAiSessionFilePath } from './provider-adapters.js';
+import { directAnthropicSessionFilePath, directOpenAiResponsesSessionFilePath, directOpenAiSessionFilePath } from './provider-adapters.js';
 import {
   BUILTIN_HARNESS_CAPABILITIES,
   API_PROVIDER_TEMPLATE_IDS,
   DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-  DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
   ENDPOINT_ONLY_HARNESSES,
-  harnessesForProtocol,
   isApiProviderTemplateId,
   isEndpointOnlyHarnessId,
   isVisibleHarnessId,
@@ -54,6 +54,7 @@ import {
   type HarnessCatalogEntry,
   type HarnessModelOption,
   type ModelDiscoveryKind,
+  type OpenAiEndpointCapabilities,
 } from '../../common/providers.js';
 
 const AUTH_DISPATCHERS: Record<string, (opencode: any) => Promise<unknown>> = {
@@ -141,7 +142,7 @@ export interface ApiProviderInput {
     baseUrl: string;
     apiKey?: string;
     clearApiKey?: boolean;
-    exposeTo: string[];
+    capabilities?: OpenAiEndpointCapabilities;
     defaultModel: string;
     models: Array<{ value: string; label: string; supportsImages?: boolean; isLocal?: boolean }>;
     supportsImages: boolean;
@@ -217,28 +218,22 @@ function normalizeOptionalLookupId(value: unknown, field: string): string | null
 }
 
 function normalizeProtocol(value: unknown): ApiProtocol {
-  if (value === 'anthropic-messages' || value === 'openai-chat-completions') return value;
-  throw new Error('endpoint.protocol must be anthropic-messages or openai-chat-completions');
+  if (value === 'anthropic-messages' || value === 'openai-compatible') return value;
+  throw new Error('endpoint.protocol must be anthropic-messages or openai-compatible');
 }
 
-function normalizeApiProviderTargets(protocol: ApiProtocol, value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    throw new Error('endpoint.exposeTo must be an array');
+function normalizeApiProviderCapabilities(
+  protocol: ApiProtocol,
+  value: unknown,
+): OpenAiEndpointCapabilities | undefined {
+  if (protocol !== 'openai-compatible') return undefined;
+  const raw = value === undefined ? {} : requireObject(value, 'endpoint.capabilities');
+  const chatCompletions = optionalBoolean(raw.chatCompletions, 'endpoint.capabilities.chatCompletions') ?? true;
+  const responses = optionalBoolean(raw.responses, 'endpoint.capabilities.responses') ?? false;
+  if (!chatCompletions && !responses) {
+    throw new Error('OpenAI-compatible endpoints must support Chat Completions or Responses.');
   }
-  const allowedTargets = harnessesForProtocol(protocol);
-  const allowed = new Set(allowedTargets);
-  const invalid = value.filter((target) => typeof target !== 'string' || !allowed.has(target as any));
-  if (invalid.length > 0) {
-    throw new Error(`endpoint.exposeTo must only include ${labelForProtocol(protocol)} harnesses`);
-  }
-  if (protocol === 'anthropic-messages') {
-    return [...allowedTargets];
-  }
-  const targets = [...new Set(value)] as string[];
-  if (targets.length === 0) {
-    throw new Error(`endpoint.exposeTo must include at least one ${labelForProtocol(protocol)} harness`);
-  }
-  return targets;
+  return { chatCompletions, responses };
 }
 
 function normalizeApiProviderModels(value: unknown, defaultModel: string): HarnessModelOption[] {
@@ -276,7 +271,7 @@ function flattenApiProviderInput(input: ApiProviderInput): CreateApiProviderInpu
     protocol,
     baseUrl: normalizeApiProviderBaseUrl(endpoint.baseUrl),
     apiKey: typeof endpoint.apiKey === 'string' ? endpoint.apiKey : undefined,
-    exposeTo: normalizeApiProviderTargets(protocol, endpoint.exposeTo) as any[],
+    capabilities: normalizeApiProviderCapabilities(protocol, endpoint.capabilities),
     defaultModel,
     models: normalizeApiProviderModels(endpoint.models, defaultModel),
     supportsImages: optionalBoolean(endpoint.supportsImages, 'endpoint.supportsImages') ?? false,
@@ -300,9 +295,9 @@ function flattenApiProviderPatch(input: Partial<ApiProviderInput>): UpdateApiPro
     }
     const clearApiKey = optionalBoolean(inputEndpoint.clearApiKey, 'endpoint.clearApiKey');
     if (clearApiKey !== undefined) endpoint.clearApiKey = clearApiKey;
-    if (inputEndpoint.exposeTo !== undefined) {
-      if (!protocol) throw new Error('endpoint.protocol is required when endpoint.exposeTo is patched');
-      endpoint.exposeTo = normalizeApiProviderTargets(protocol, inputEndpoint.exposeTo) as any[];
+    if (inputEndpoint.capabilities !== undefined) {
+      if (!protocol) throw new Error('endpoint.protocol is required when endpoint.capabilities is patched');
+      endpoint.capabilities = normalizeApiProviderCapabilities(protocol, inputEndpoint.capabilities);
     }
     if (inputEndpoint.defaultModel !== undefined) endpoint.defaultModel = requireString(inputEndpoint.defaultModel, 'endpoint.defaultModel');
     if (inputEndpoint.models !== undefined) {
@@ -326,7 +321,7 @@ function normalizeModelDiscovery(protocol: ApiProtocol, value: unknown): ModelDi
   if (value === 'ollama-tags') return 'ollama-tags';
   if (value === 'openrouter-models') return 'openrouter-models';
   if (value === 'anthropic-models') return 'anthropic-models';
-  if (protocol === 'openai-chat-completions') return 'openai-models';
+  if (protocol === 'openai-compatible') return 'openai-models';
   return 'none';
 }
 
@@ -786,14 +781,24 @@ export class ProviderRegistry {
     if (session.provider === 'codex') {
       return getCodexPreviewFromNativePath(session.nativePath);
     }
-    if (session.provider === DIRECT_OPENAI_COMPATIBLE_HARNESS_ID) {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_COMPATIBLE_HARNESS_ID);
+    if (session.provider === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID) {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID);
       const endpointId = session.modelEndpointId;
       if (!endpointId) return null;
       return getDirectCompatiblePreviewFromSessionId(
         sessionId,
         (id) => this.#loadDirectOpenAiMessages(endpointId, id),
         'OpenAI-compatible Session',
+      );
+    }
+    if (session.provider === DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID) {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID);
+      const endpointId = session.modelEndpointId;
+      if (!endpointId) return null;
+      return getDirectCompatiblePreviewFromSessionId(
+        sessionId,
+        (id) => this.#loadDirectOpenAiResponsesMessages(endpointId, id),
+        'OpenAI Responses Session',
       );
     }
     if (session.provider === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) {
@@ -829,11 +834,17 @@ export class ProviderRegistry {
     if (session.provider === 'codex') {
       return loadCodexChatMessages(session.nativePath);
     }
-    if (session.provider === DIRECT_OPENAI_COMPATIBLE_HARNESS_ID) {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_COMPATIBLE_HARNESS_ID);
+    if (session.provider === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID) {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID);
       const endpointId = session.modelEndpointId;
       if (!endpointId) return [];
       return this.#loadDirectOpenAiMessages(endpointId, sessionId);
+    }
+    if (session.provider === DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID) {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID);
+      const endpointId = session.modelEndpointId;
+      if (!endpointId) return [];
+      return this.#loadDirectOpenAiResponsesMessages(endpointId, sessionId);
     }
     if (session.provider === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) {
       const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID);
@@ -850,6 +861,14 @@ export class ProviderRegistry {
       getSessionFilePath: (id) => directOpenAiSessionFilePath(endpointId, id),
       isValidSessionId: (id) => DIRECT_SESSION_ID_RE.test(id),
       sessionLabel: 'OpenAI-compatible Session',
+    });
+  }
+
+  async #loadDirectOpenAiResponsesMessages(endpointId: string, sessionId: string | null | undefined): Promise<ChatMessage[]> {
+    return loadDirectCompatibleChatMessages(sessionId, {
+      getSessionFilePath: (id) => directOpenAiResponsesSessionFilePath(endpointId, id),
+      isValidSessionId: (id) => DIRECT_SESSION_ID_RE.test(id),
+      sessionLabel: 'OpenAI Responses Session',
     });
   }
 

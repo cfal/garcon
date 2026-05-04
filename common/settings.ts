@@ -114,7 +114,7 @@ function safeOptionalId(value: unknown): string | null {
 }
 
 function safeOptionalProtocol(value: unknown): ApiProtocol | null {
-  if (value === 'openai-chat-completions' || value === 'anthropic-messages') return value;
+  if (value === 'openai-compatible' || value === 'anthropic-messages') return value;
   return null;
 }
 

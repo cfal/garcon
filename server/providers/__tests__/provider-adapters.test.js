@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'bun:test';
-import { buildDirectAnthropicConfig, buildDirectOpenAiConfig } from '../provider-adapters.ts';
+import {
+  buildDirectAnthropicConfig,
+  buildDirectOpenAiConfig,
+  buildDirectOpenAiResponsesConfig,
+  createDirectOpenAiCompatibleRouterAdapter,
+  createDirectOpenAiResponsesCompatibleRouterAdapter,
+} from '../provider-adapters.ts';
 
 function endpoint(overrides = {}) {
   return {
     id: 'example_openai',
-    protocol: 'openai-chat-completions',
+    protocol: 'openai-compatible',
     baseUrl: 'https://api.example.test/v1',
     apiKey: '',
-    exposeTo: ['direct-openai-compatible'],
+    capabilities: { chatCompletions: true, responses: false },
     defaultModel: 'example-model',
     models: [{ value: 'example-model', label: 'Example Model' }],
     supportsImages: false,
@@ -51,6 +57,57 @@ describe('buildDirectOpenAiConfig', () => {
   });
 });
 
+describe('buildDirectOpenAiResponsesConfig', () => {
+  it('uses separate Direct Responses session paths', () => {
+    const config = buildDirectOpenAiResponsesConfig({
+      providerId: 'direct-openai-responses-compatible',
+      providerLabel: 'Example',
+      endpoint: endpoint({
+        capabilities: { chatCompletions: false, responses: true },
+      }),
+    });
+
+    expect(config.getBaseUrl()).toBe('https://api.example.test/v1');
+    expect(config.defaultModel).toBe('example-model');
+    expect(config.getSessionFilePath('session-1')).toContain('/openai-compatible-responses-sessions/example_openai/session-1.jsonl');
+  });
+});
+
+describe('Direct OpenAI router adapters', () => {
+  it('routes models by Chat Completions and Responses capabilities', async () => {
+    const apiProviderStore = {
+      list: () => [{
+        id: 'acme',
+        label: 'Acme',
+        endpoints: [
+          endpoint({
+            id: 'chat_endpoint',
+            capabilities: { chatCompletions: true, responses: false },
+            defaultModel: 'chat-model',
+            models: [{ value: 'chat-model', label: 'Chat Model' }],
+          }),
+          endpoint({
+            id: 'responses_endpoint',
+            capabilities: { chatCompletions: false, responses: true },
+            defaultModel: 'responses-model',
+            models: [{ value: 'responses-model', label: 'Responses Model' }],
+          }),
+        ],
+      }],
+    };
+
+    const chatAdapter = createDirectOpenAiCompatibleRouterAdapter(apiProviderStore);
+    const responsesAdapter = createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore);
+
+    expect(await chatAdapter.getModels?.()).toEqual([
+      { value: 'chat-model', label: 'Acme: Chat Model', supportsImages: false },
+    ]);
+    expect(await responsesAdapter.getModels?.()).toEqual([
+      { value: 'responses-model', label: 'Acme: Responses Model', supportsImages: false },
+    ]);
+  });
+});
+
 describe('buildDirectAnthropicConfig', () => {
   it('uses stored endpoint credentials and session paths', () => {
     const config = buildDirectAnthropicConfig({
@@ -61,7 +118,6 @@ describe('buildDirectAnthropicConfig', () => {
         protocol: 'anthropic-messages',
         baseUrl: 'https://api.example.test',
         apiKey: 'sk-ant',
-        exposeTo: ['direct-anthropic-compatible'],
         defaultModel: 'example-model',
         models: [{ value: 'example-model', label: 'Example Model' }],
         supportsImages: true,

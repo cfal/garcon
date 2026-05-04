@@ -10,12 +10,19 @@ import { runSingleQuery as runSingleQueryFactory } from './factory-cli.js';
 import type { ProviderAdapter } from './provider-adapter.js';
 import type { ClaudeStartSessionRequest, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from './types.js';
 import { OpenAiCompatibleChatProvider, type OpenAiCompatibleChatProviderConfig, runOpenAiCompatibleSingleQuery } from './openai-compatible-chat-provider.js';
+import {
+  OpenAiCompatibleResponsesProvider,
+  type OpenAiCompatibleResponsesProviderConfig,
+  runOpenAiResponsesSingleQuery,
+} from './openai-compatible-responses-provider.js';
 import { AnthropicCompatibleChatProvider, type AnthropicCompatibleChatProviderConfig, runAnthropicCompatibleSingleQuery } from './anthropic-compatible-chat-provider.js';
 import type { ApiProviderStore, StoredApiProvider, StoredApiProviderEndpoint } from './api-provider-store.js';
 import { getWorkspaceDir } from '../config.js';
 import {
   DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-  DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
+  endpointSupportsHarness,
   type ApiProtocol,
   type HarnessId,
 } from '../../common/providers.js';
@@ -422,27 +429,51 @@ class DirectEndpointRouterAdapter<TProvider extends DirectCompatibleProvider> im
 
   #isDirectEndpoint(endpoint: StoredApiProviderEndpoint): boolean {
     return endpoint.protocol === this.config.protocol
-      && endpoint.exposeTo.includes(this.config.harnessId);
+      && endpointSupportsHarness(this.config.harnessId, endpoint);
   }
 }
 
 export function createDirectOpenAiCompatibleRouterAdapter(apiProviderStore: ApiProviderStore): ProviderAdapter {
   return new DirectEndpointRouterAdapter({
-    harnessId: DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
-    label: 'Direct Chat (OpenAI)',
-    protocol: 'openai-chat-completions',
-    noEndpointMessage: 'No OpenAI-compatible endpoint is configured for Direct Chat (OpenAI).',
+    harnessId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+    label: 'Direct Chat (OpenAI Chat Completions)',
+    protocol: 'openai-compatible',
+    noEndpointMessage: 'No OpenAI-compatible Chat Completions endpoint is configured for Direct Chat.',
     apiProviderStore,
     createProvider(endpoint) {
       return new OpenAiCompatibleChatProvider(buildDirectOpenAiConfig({
-        providerId: DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
-        providerLabel: 'Direct Chat (OpenAI)',
+        providerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+        providerLabel: 'Direct Chat (OpenAI Chat Completions)',
         endpoint,
       }));
     },
     runSingleQuery(prompt, endpoint, apiProvider, options) {
       return runOpenAiCompatibleSingleQuery(buildDirectOpenAiConfig({
-        providerId: DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+        providerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+        providerLabel: apiProvider.label,
+        endpoint,
+      }), prompt, options);
+    },
+  });
+}
+
+export function createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore: ApiProviderStore): ProviderAdapter {
+  return new DirectEndpointRouterAdapter({
+    harnessId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
+    label: 'Direct Chat (OpenAI Responses)',
+    protocol: 'openai-compatible',
+    noEndpointMessage: 'No OpenAI-compatible Responses endpoint is configured for Direct Chat.',
+    apiProviderStore,
+    createProvider(endpoint) {
+      return new OpenAiCompatibleResponsesProvider(buildDirectOpenAiResponsesConfig({
+        providerId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
+        providerLabel: 'Direct Chat (OpenAI Responses)',
+        endpoint,
+      }));
+    },
+    runSingleQuery(prompt, endpoint, apiProvider, options) {
+      return runOpenAiResponsesSingleQuery(buildDirectOpenAiResponsesConfig({
+        providerId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
         providerLabel: apiProvider.label,
         endpoint,
       }), prompt, options);
@@ -482,6 +513,14 @@ export function directOpenAiSessionFilePath(endpointId: string, sessionId: strin
   return `${directOpenAiSessionDir(endpointId)}/${sessionId}.jsonl`;
 }
 
+export function directOpenAiResponsesSessionDir(endpointId: string): string {
+  return `${getWorkspaceDir()}/openai-compatible-responses-sessions/${endpointId}`;
+}
+
+export function directOpenAiResponsesSessionFilePath(endpointId: string, sessionId: string): string {
+  return `${directOpenAiResponsesSessionDir(endpointId)}/${sessionId}.jsonl`;
+}
+
 export function directAnthropicSessionDir(endpointId: string): string {
   return `${getWorkspaceDir()}/anthropic-compatible-sessions/${endpointId}`;
 }
@@ -504,6 +543,28 @@ export function buildDirectOpenAiConfig(args: {
     getBaseUrl: () => args.endpoint.baseUrl,
     getSessionDir: () => directOpenAiSessionDir(args.endpoint.id),
     getSessionFilePath: (sessionId) => directOpenAiSessionFilePath(args.endpoint.id, sessionId),
+    buildHeaders: (apiKey) => ({
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      'Content-Type': 'application/json',
+      ...(args.endpoint.headers ?? {}),
+    }),
+  };
+}
+
+export function buildDirectOpenAiResponsesConfig(args: {
+  providerId: string;
+  providerLabel: string;
+  endpoint: StoredApiProviderEndpoint;
+}): OpenAiCompatibleResponsesProviderConfig {
+  return {
+    providerId: args.providerId,
+    providerLabel: args.providerLabel,
+    defaultModel: args.endpoint.defaultModel,
+    fallbackModels: args.endpoint.models,
+    getApiKey: () => args.endpoint.apiKey,
+    getBaseUrl: () => args.endpoint.baseUrl,
+    getSessionDir: () => directOpenAiResponsesSessionDir(args.endpoint.id),
+    getSessionFilePath: (sessionId) => directOpenAiResponsesSessionFilePath(args.endpoint.id, sessionId),
     buildHeaders: (apiKey) => ({
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       'Content-Type': 'application/json',

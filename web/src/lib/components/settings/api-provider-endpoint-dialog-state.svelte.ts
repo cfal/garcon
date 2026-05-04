@@ -13,11 +13,9 @@ import {
 	type ApiProviderTemplateId
 } from '$shared/api-provider-templates';
 import {
-	DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
-	harnessesForProtocol,
 	type ApiProtocol,
-	type HarnessId,
-	type ModelDiscoveryKind
+	type ModelDiscoveryKind,
+	type OpenAiEndpointCapabilities
 } from '$shared/providers';
 
 interface DialogOptions {
@@ -38,7 +36,10 @@ export class ApiProviderEndpointDialogState {
 	modelsText = $state('');
 	supportsImages = $state(false);
 	modelDiscovery = $state<ModelDiscoveryKind>('none');
-	openAiEnabledTargets = $state<Record<string, boolean>>({});
+	openAiCapabilities = $state<OpenAiEndpointCapabilities>({
+		chatCompletions: true,
+		responses: false
+	});
 	isSaving = $state(false);
 	isTesting = $state(false);
 	isFetchingModels = $state(false);
@@ -90,25 +91,21 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	get usesOpenAiCapabilityToggles(): boolean {
-		return this.protocol === 'openai-chat-completions';
+		return this.protocol === 'openai-compatible';
 	}
 
 	get supportsChatCompletionsApi(): boolean {
-		return this.protocol === 'openai-chat-completions'
-			&& this.isOpenAiTargetEnabled(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID);
+		return this.protocol === 'openai-compatible'
+			&& this.openAiCapabilities.chatCompletions;
 	}
 
 	get supportsResponsesApi(): boolean {
-		return this.protocol === 'openai-chat-completions' && this.isOpenAiTargetEnabled('codex');
+		return this.protocol === 'openai-compatible' && this.openAiCapabilities.responses;
 	}
 
-	get exposureTargetIds(): readonly HarnessId[] {
-		return harnessesForProtocol(this.protocol);
-	}
-
-	get exposeTo(): HarnessId[] {
-		if (this.protocol === 'anthropic-messages') return [...this.exposureTargetIds];
-		return this.exposureTargetIds.filter((harnessId) => this.openAiEnabledTargets[harnessId] !== false);
+	get hasRequiredApiCapability(): boolean {
+		if (this.protocol !== 'openai-compatible') return true;
+		return this.openAiCapabilities.chatCompletions || this.openAiCapabilities.responses;
 	}
 
 	get modelOptions(): ModelOption[] {
@@ -147,7 +144,7 @@ export class ApiProviderEndpointDialogState {
 				this.baseUrl.trim() &&
 				this.hasModels &&
 				this.defaultModelIsValid &&
-				this.exposeTo.length > 0 &&
+				this.hasRequiredApiCapability &&
 				(!this.apiKeyRequired || Boolean(this.apiProviderId) || Boolean(this.apiKey.trim())) &&
 				!this.isSaving &&
 				!this.isFetchingModels
@@ -177,7 +174,7 @@ export class ApiProviderEndpointDialogState {
 		this.modelDiscovery = found.endpoint.modelDiscovery ?? 'none';
 		this.templateId = found.apiProvider.templateId ?? 'custom';
 		this.modelsText = found.endpoint.models.map((model) => formatModelLine(model)).join('\n');
-		this.openAiEnabledTargets = this.openAiTargetsFrom(found.endpoint.exposeTo);
+		this.openAiCapabilities = this.openAiCapabilitiesFrom(found.endpoint.capabilities);
 		this.apiKey = '';
 	}
 
@@ -199,7 +196,7 @@ export class ApiProviderEndpointDialogState {
 		this.modelsText = template.models.map((model) => formatModelLine(model)).join('\n');
 		this.supportsImages = template.supportsImages;
 		this.modelDiscovery = template.modelDiscovery;
-		this.openAiEnabledTargets = this.openAiTargetsFrom(template.exposeTo);
+		this.openAiCapabilities = this.openAiCapabilitiesFrom(template.capabilities);
 	}
 
 	syncDefaultModelWithModels(): void {
@@ -208,26 +205,27 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	setSupportsChatCompletionsApi(enabled: boolean): void {
-		this.setOpenAiTarget(DIRECT_OPENAI_COMPATIBLE_HARNESS_ID, enabled);
+		this.openAiCapabilities = {
+			...this.openAiCapabilities,
+			chatCompletions: enabled
+		};
 	}
 
 	setSupportsResponsesApi(enabled: boolean): void {
-		this.setOpenAiTarget('codex', enabled);
+		this.openAiCapabilities = {
+			...this.openAiCapabilities,
+			responses: enabled
+		};
 	}
 
-	private isOpenAiTargetEnabled(harnessId: HarnessId): boolean {
-		return this.openAiEnabledTargets[harnessId] !== false;
-	}
-
-	private setOpenAiTarget(harnessId: HarnessId, enabled: boolean): void {
-		this.openAiEnabledTargets = { ...this.openAiEnabledTargets, [harnessId]: enabled };
-	}
-
-	private openAiTargetsFrom(exposeTo: readonly HarnessId[]): Record<string, boolean> {
-		if (this.protocol !== 'openai-chat-completions') return {};
-		return Object.fromEntries(
-			this.exposureTargetIds.map((harnessId) => [harnessId, exposeTo.includes(harnessId)])
-		);
+	private openAiCapabilitiesFrom(value: OpenAiEndpointCapabilities | undefined): OpenAiEndpointCapabilities {
+		if (this.protocol !== 'openai-compatible') {
+			return { chatCompletions: false, responses: false };
+		}
+		return {
+			chatCompletions: value?.chatCompletions ?? true,
+			responses: value?.responses ?? false
+		};
 	}
 
 	payload(): ApiProviderInput {
@@ -238,7 +236,9 @@ export class ApiProviderEndpointDialogState {
 				protocol: this.protocol,
 				baseUrl: this.baseUrl.trim(),
 				apiKey: this.apiKey || undefined,
-				exposeTo: this.exposeTo,
+				...(this.protocol === 'openai-compatible'
+					? { capabilities: this.openAiCapabilities }
+					: {}),
 				defaultModel: this.defaultModel.trim(),
 				models: this.modelOptions,
 				supportsImages: this.supportsImages,

@@ -9,14 +9,13 @@ import {
   type ApiProviderTemplate,
 } from '../../common/api-provider-templates.js';
 import {
-  harnessesForProtocol,
   isApiProviderTemplateId,
   labelForProtocol,
   type ApiProtocol,
   type ApiProviderTemplateId,
-  type HarnessId,
   type HarnessModelOption,
   type ModelDiscoveryKind,
+  type OpenAiEndpointCapabilities,
 } from '../../common/providers.js';
 import { getConfigDir } from '../config.js';
 
@@ -44,7 +43,7 @@ export interface StoredApiProviderEndpoint {
   baseUrl: string;
   apiKey: string;
   apiKeyLabel?: string;
-  exposeTo: HarnessId[];
+  capabilities?: OpenAiEndpointCapabilities;
   defaultModel: string;
   models: HarnessModelOption[];
   supportsImages: boolean;
@@ -58,7 +57,7 @@ export interface CreateApiProviderInput {
   protocol: ApiProtocol;
   baseUrl: string;
   apiKey?: string;
-  exposeTo: HarnessId[];
+  capabilities?: OpenAiEndpointCapabilities;
   defaultModel: string;
   models: HarnessModelOption[];
   supportsImages: boolean;
@@ -70,7 +69,7 @@ export interface UpdateApiProviderEndpointInput {
   baseUrl?: string;
   apiKey?: string;
   clearApiKey?: boolean;
-  exposeTo?: HarnessId[];
+  capabilities?: OpenAiEndpointCapabilities;
   defaultModel?: string;
   models?: HarnessModelOption[];
   supportsImages?: boolean;
@@ -135,26 +134,6 @@ function labelApiKey(apiKey: string | undefined): string {
   return `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`;
 }
 
-function normalizeExposeTargets(protocol: ApiProtocol, targets: HarnessId[]): HarnessId[] {
-  if (!Array.isArray(targets)) {
-    throw new Error('endpoint.exposeTo must be an array');
-  }
-  const allowedTargets = harnessesForProtocol(protocol);
-  const allowed = new Set(allowedTargets);
-  const invalid = targets.filter((target) => typeof target !== 'string' || !allowed.has(target as any));
-  if (invalid.length > 0) {
-    throw new Error(`endpoint.exposeTo must only include ${labelForProtocol(protocol)} harnesses`);
-  }
-  if (protocol === 'anthropic-messages') {
-    return [...allowedTargets];
-  }
-  const normalized = [...new Set(targets)] as HarnessId[];
-  if (normalized.length === 0) {
-    throw new Error(`endpoint.exposeTo must include at least one ${labelForProtocol(protocol)} harness`);
-  }
-  return normalized;
-}
-
 function normalizeManualModels(models: HarnessModelOption[], defaultModel: string): HarnessModelOption[] {
   const fallback = normalizeRequiredString(defaultModel, 'defaultModel');
   const normalized: HarnessModelOption[] = [];
@@ -170,7 +149,7 @@ function normalizeManualModels(models: HarnessModelOption[], defaultModel: strin
       if (typeof model.apiProviderId === 'string') normalizedModel.apiProviderId = model.apiProviderId;
       if (typeof model.endpointId === 'string') normalizedModel.endpointId = model.endpointId;
       if (typeof model.rawModel === 'string') normalizedModel.rawModel = model.rawModel;
-      if (model.protocol === 'openai-chat-completions' || model.protocol === 'anthropic-messages') {
+      if (model.protocol === 'openai-compatible' || model.protocol === 'anthropic-messages') {
         normalizedModel.protocol = model.protocol;
       }
       normalized.push(normalizedModel);
@@ -185,7 +164,7 @@ function normalizeManualModels(models: HarnessModelOption[], defaultModel: strin
 }
 
 function normalizeProtocol(value: unknown): ApiProtocol | null {
-  return value === 'anthropic-messages' || value === 'openai-chat-completions' ? value : null;
+  return value === 'anthropic-messages' || value === 'openai-compatible' ? value : null;
 }
 
 function normalizeTemplateId(value: unknown): ApiProviderTemplateId | undefined {
@@ -197,7 +176,25 @@ function normalizeModelDiscovery(protocol: ApiProtocol, value: unknown): ModelDi
   if (typeof value === 'string' && MODEL_DISCOVERY_KINDS.has(value as ModelDiscoveryKind)) {
     return value as ModelDiscoveryKind;
   }
-  return protocol === 'openai-chat-completions' ? 'openai-models' : 'none';
+  return protocol === 'openai-compatible' ? 'openai-models' : 'none';
+}
+
+function normalizeOpenAiCapabilities(
+  protocol: ApiProtocol,
+  value: unknown,
+): OpenAiEndpointCapabilities | undefined {
+  if (protocol !== 'openai-compatible') return undefined;
+  const raw = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const capabilities = {
+    chatCompletions: raw.chatCompletions !== false,
+    responses: raw.responses === true,
+  };
+  if (!capabilities.chatCompletions && !capabilities.responses) {
+    throw new Error('OpenAI-compatible endpoints must support Chat Completions or Responses.');
+  }
+  return capabilities;
 }
 
 function normalizeHeaders(value: unknown): Record<string, string> | undefined {
@@ -223,7 +220,7 @@ function normalizeStoredEndpoint(value: unknown): StoredApiProviderEndpoint | nu
     baseUrl: normalizeBaseUrl(raw.baseUrl),
     apiKey: typeof raw.apiKey === 'string' ? raw.apiKey : '',
     apiKeyLabel: typeof raw.apiKeyLabel === 'string' ? raw.apiKeyLabel : labelApiKey(typeof raw.apiKey === 'string' ? raw.apiKey : ''),
-    exposeTo: normalizeExposeTargets(protocol, Array.isArray(raw.exposeTo) ? raw.exposeTo as HarnessId[] : []),
+    capabilities: normalizeOpenAiCapabilities(protocol, raw.capabilities),
     defaultModel,
     models: normalizeManualModels(Array.isArray(raw.models) ? raw.models as HarnessModelOption[] : [], defaultModel),
     supportsImages: Boolean(raw.supportsImages),
@@ -343,7 +340,7 @@ export class ApiProviderStore {
   async createApiProvider(input: CreateApiProviderInput): Promise<StoredApiProvider> {
     const label = normalizeRequiredString(input.label, 'label');
     const baseUrl = normalizeBaseUrl(input.baseUrl);
-    const exposeTo = normalizeExposeTargets(input.protocol, input.exposeTo);
+    const capabilities = normalizeOpenAiCapabilities(input.protocol, input.capabilities);
     const defaultModel = normalizeRequiredString(input.defaultModel, 'defaultModel');
     const models = normalizeManualModels(input.models, defaultModel);
     const template = apiProviderTemplate(input.protocol, input.templateId);
@@ -368,7 +365,7 @@ export class ApiProviderStore {
           baseUrl,
           apiKey: input.apiKey ?? '',
           apiKeyLabel: labelApiKey(input.apiKey),
-          exposeTo,
+          capabilities,
           defaultModel,
           models,
           supportsImages: Boolean(input.supportsImages),
@@ -399,9 +396,9 @@ export class ApiProviderStore {
         const endpoint = apiProvider.endpoints.find((entry) => entry.id === endpointId);
         if (!endpoint) throw new Error(`Unknown endpoint: ${endpointId}`);
         endpoint.baseUrl = input.endpoint.baseUrl !== undefined ? normalizeBaseUrl(input.endpoint.baseUrl) : endpoint.baseUrl;
-        endpoint.exposeTo = input.endpoint.exposeTo !== undefined
-          ? normalizeExposeTargets(endpoint.protocol, input.endpoint.exposeTo)
-          : endpoint.exposeTo;
+        endpoint.capabilities = input.endpoint.capabilities !== undefined
+          ? normalizeOpenAiCapabilities(endpoint.protocol, input.endpoint.capabilities)
+          : endpoint.capabilities;
         endpoint.defaultModel = input.endpoint.defaultModel !== undefined
           ? normalizeRequiredString(input.endpoint.defaultModel, 'defaultModel')
           : endpoint.defaultModel;

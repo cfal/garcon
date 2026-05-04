@@ -12,13 +12,9 @@ import {
 import type {
   ApiProtocol,
   ApiProviderTemplateId,
-  HarnessId,
   HarnessModelOption,
   ModelDiscoveryKind,
-} from './providers.js';
-import {
-  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-  DIRECT_OPENAI_COMPATIBLE_HARNESS_ID,
+  OpenAiEndpointCapabilities,
 } from './providers.js';
 
 export type { ApiProviderTemplateId } from './providers.js';
@@ -33,7 +29,7 @@ export interface ApiProviderTemplate {
   defaultModel: string;
   models: readonly HarnessModelOption[];
   supportsImages: boolean;
-  exposeTo: readonly HarnessId[];
+  capabilities?: OpenAiEndpointCapabilities;
   modelDiscovery: ModelDiscoveryKind;
   managedHeaders?: 'openrouter';
 }
@@ -49,12 +45,11 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: ALIBABA_CLOUD_MODELS.DEFAULT,
     models: ALIBABA_CLOUD_MODELS.OPTIONS,
     supportsImages: false,
-    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'anthropic-models',
   },
   {
     id: 'alibaba-cloud',
-    protocol: 'openai-chat-completions',
+    protocol: 'openai-compatible',
     label: 'Alibaba Cloud',
     baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
     apiKeyPlaceholder: 'Alibaba Cloud API key',
@@ -62,7 +57,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: ALIBABA_CLOUD_MODELS.DEFAULT,
     models: ALIBABA_CLOUD_MODELS.OPTIONS,
     supportsImages: false,
-    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    capabilities: { chatCompletions: true, responses: true },
     modelDiscovery: 'openai-models',
   },
   {
@@ -75,12 +70,11 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: '',
     models: [],
     supportsImages: false,
-    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'none',
   },
   {
     id: 'custom',
-    protocol: 'openai-chat-completions',
+    protocol: 'openai-compatible',
     label: '',
     baseUrl: '',
     apiKeyPlaceholder: 'API key or token',
@@ -88,7 +82,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: '',
     models: [],
     supportsImages: false,
-    exposeTo: [DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    capabilities: { chatCompletions: true, responses: false },
     modelDiscovery: 'openai-models',
   },
   {
@@ -101,12 +95,11 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: FIREWORKS_MODELS.DEFAULT,
     models: FIREWORKS_MODELS.OPTIONS,
     supportsImages: false,
-    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'anthropic-models',
   },
   {
     id: 'fireworks',
-    protocol: 'openai-chat-completions',
+    protocol: 'openai-compatible',
     label: 'Fireworks.ai',
     baseUrl: 'https://api.fireworks.ai/inference/v1',
     apiKeyPlaceholder: 'Fireworks.ai API key',
@@ -114,12 +107,12 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: FIREWORKS_MODELS.DEFAULT,
     models: FIREWORKS_MODELS.OPTIONS,
     supportsImages: false,
-    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    capabilities: { chatCompletions: true, responses: true },
     modelDiscovery: 'openai-models',
   },
   {
     id: 'gemini',
-    protocol: 'openai-chat-completions',
+    protocol: 'openai-compatible',
     label: 'Gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     apiKeyPlaceholder: 'Gemini API key',
@@ -127,7 +120,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: GEMINI_MODELS.DEFAULT,
     models: GEMINI_MODELS.OPTIONS,
     supportsImages: true,
-    exposeTo: [DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    capabilities: { chatCompletions: true, responses: false },
     modelDiscovery: 'openai-models',
   },
   {
@@ -140,12 +133,11 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: 'llama3',
     models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
     supportsImages: false,
-    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'ollama-tags',
   },
   {
     id: 'ollama',
-    protocol: 'openai-chat-completions',
+    protocol: 'openai-compatible',
     label: 'Ollama',
     baseUrl: 'http://localhost:11434/v1',
     apiKeyPlaceholder: 'Leave blank for local Ollama',
@@ -153,12 +145,12 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: 'llama3',
     models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
     supportsImages: false,
-    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    capabilities: { chatCompletions: true, responses: true },
     modelDiscovery: 'ollama-tags',
   },
   {
     id: 'openrouter',
-    protocol: 'openai-chat-completions',
+    protocol: 'openai-compatible',
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     apiKeyPlaceholder: 'OpenRouter API key',
@@ -166,13 +158,13 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: OPENROUTER_MODELS.DEFAULT,
     models: OPENROUTER_MODELS.OPTIONS,
     supportsImages: true,
-    exposeTo: ['codex', DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    capabilities: { chatCompletions: true, responses: true },
     modelDiscovery: 'openrouter-models',
     managedHeaders: 'openrouter',
   },
   {
     id: 'together',
-    protocol: 'openai-chat-completions',
+    protocol: 'openai-compatible',
     label: 'Together.ai',
     baseUrl: 'https://api.together.ai/v1',
     apiKeyPlaceholder: 'Together.ai API key',
@@ -180,7 +172,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: TOGETHER_MODELS.DEFAULT,
     models: TOGETHER_MODELS.OPTIONS,
     supportsImages: false,
-    exposeTo: [DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    capabilities: { chatCompletions: true, responses: false },
     modelDiscovery: 'openai-models',
   },
   {
@@ -193,12 +185,11 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: ZAI_MODELS.DEFAULT,
     models: ZAI_MODELS.OPTIONS,
     supportsImages: false,
-    exposeTo: ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
     modelDiscovery: 'none',
   },
   {
     id: 'zai',
-    protocol: 'openai-chat-completions',
+    protocol: 'openai-compatible',
     label: 'Z.AI',
     baseUrl: 'https://api.z.ai/api/coding/paas/v4',
     apiKeyPlaceholder: 'Z.AI API key',
@@ -206,7 +197,7 @@ export const API_PROVIDER_TEMPLATES = [
     defaultModel: ZAI_MODELS.DEFAULT,
     models: ZAI_MODELS.OPTIONS,
     supportsImages: false,
-    exposeTo: [DIRECT_OPENAI_COMPATIBLE_HARNESS_ID],
+    capabilities: { chatCompletions: true, responses: false },
     modelDiscovery: 'none',
   },
 ] as const satisfies readonly ApiProviderTemplate[];

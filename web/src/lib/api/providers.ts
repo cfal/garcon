@@ -11,7 +11,8 @@ import type {
 	HarnessCatalog,
 	HarnessId,
 	HarnessModelOption,
-	ModelDiscoveryKind
+	ModelDiscoveryKind,
+	OpenAiEndpointCapabilities
 } from '$shared/providers';
 
 export type HarnessName = HarnessId;
@@ -49,7 +50,7 @@ export interface ApiProviderEndpointInput {
 	baseUrl: string;
 	apiKey?: string;
 	clearApiKey?: boolean;
-	exposeTo: string[];
+	capabilities?: OpenAiEndpointCapabilities;
 	defaultModel: string;
 	models: Array<Pick<HarnessModelOption, 'value' | 'label' | 'supportsImages' | 'isLocal'>>;
 	supportsImages: boolean;

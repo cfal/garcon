@@ -924,7 +924,7 @@ export class GitWorkbenchStore {
 				}
 				this.commitApiProviderId = typeof cm.apiProviderId === 'string' ? cm.apiProviderId : null;
 				this.commitModelEndpointId = typeof cm.modelEndpointId === 'string' ? cm.modelEndpointId : null;
-				this.commitModelProtocol = cm.modelProtocol === 'openai-chat-completions' || cm.modelProtocol === 'anthropic-messages'
+				this.commitModelProtocol = cm.modelProtocol === 'openai-compatible' || cm.modelProtocol === 'anthropic-messages'
 					? cm.modelProtocol
 					: null;
 			if (typeof cm.customPrompt === 'string') {

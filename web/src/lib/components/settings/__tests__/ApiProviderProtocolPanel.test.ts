@@ -27,9 +27,9 @@ describe('ApiProviderProtocolPanel', () => {
 
 	it('shows protocol-specific OpenAI add-provider templates', async () => {
 		render(ApiProviderProtocolPanelTestHarness, {
-			protocol: 'openai-chat-completions',
+			protocol: 'openai-compatible',
 			title: 'OpenAI Providers',
-			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat uses Chat Completions; Codex requires Responses API compatibility.',
+			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat can use Chat Completions or Responses; Codex requires Responses API compatibility.',
 			addLabel: 'Add OpenAI-compatible provider'
 		});
 
@@ -49,9 +49,9 @@ describe('ApiProviderProtocolPanel', () => {
 
 	it('opens OpenAI providers with API capability switches instead of harness exposure toggles', async () => {
 		render(ApiProviderProtocolPanelTestHarness, {
-			protocol: 'openai-chat-completions',
+			protocol: 'openai-compatible',
 			title: 'OpenAI Providers',
-			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat uses Chat Completions; Codex requires Responses API compatibility.',
+			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat can use Chat Completions or Responses; Codex requires Responses API compatibility.',
 			addLabel: 'Add OpenAI-compatible provider'
 		});
 
@@ -63,7 +63,8 @@ describe('ApiProviderProtocolPanel', () => {
 		expect(chatCompletions.getAttribute('aria-checked')).toBe('true');
 		expect(responses.getAttribute('aria-checked')).toBe('false');
 		expect(screen.queryByText('Use with Codex')).toBeNull();
-		expect(screen.queryByText('Use with Direct Chat (OpenAI)')).toBeNull();
+		expect(screen.queryByText('Use with Direct Chat (OpenAI Chat Completions)')).toBeNull();
+		expect(screen.queryByText('Use with Direct Chat (OpenAI Responses)')).toBeNull();
 	});
 
 	it('opens Anthropic providers without per-harness exposure switches', async () => {
@@ -84,9 +85,9 @@ describe('ApiProviderProtocolPanel', () => {
 
 	it('renders saved provider rows without built-in or disabled badges', () => {
 		render(ApiProviderProtocolPanelTestHarness, {
-			protocol: 'openai-chat-completions',
+			protocol: 'openai-compatible',
 			title: 'OpenAI Providers',
-			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat uses Chat Completions; Codex requires Responses API compatibility.',
+			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat can use Chat Completions or Responses; Codex requires Responses API compatibility.',
 			addLabel: 'Add OpenAI-compatible provider',
 			apiProviderCatalog: [
 				{
@@ -98,9 +99,9 @@ describe('ApiProviderProtocolPanel', () => {
 					endpoints: [
 						{
 							id: 'openrouter_openai',
-							protocol: 'openai-chat-completions',
+							protocol: 'openai-compatible',
 							baseUrl: 'https://openrouter.ai/api/v1',
-							exposeTo: ['codex', 'direct-openai-compatible'],
+							capabilities: { chatCompletions: true, responses: true },
 							defaultModel: 'openai/gpt-5.4',
 							models: [{ value: 'openai/gpt-5.4', label: 'GPT-5.4' }],
 							supportsImages: true,

@@ -146,7 +146,7 @@ function sanitize(parsed) {
     lastModel: typeof parsed.lastModel === 'string' ? parsed.lastModel : '',
     lastApiProviderId: typeof parsed.lastApiProviderId === 'string' ? parsed.lastApiProviderId : null,
     lastModelEndpointId: typeof parsed.lastModelEndpointId === 'string' ? parsed.lastModelEndpointId : null,
-    lastModelProtocol: (parsed.lastModelProtocol === 'openai-chat-completions' || parsed.lastModelProtocol === 'anthropic-messages')
+    lastModelProtocol: (parsed.lastModelProtocol === 'openai-compatible' || parsed.lastModelProtocol === 'anthropic-messages')
       ? parsed.lastModelProtocol
       : null,
     lastPermissionMode: normalizePermissionMode(parsed.lastPermissionMode),
@@ -541,7 +541,7 @@ export class SettingsStore extends EventEmitter {
         settings.lastModelEndpointId = typeof defaults.modelEndpointId === 'string' ? defaults.modelEndpointId : null;
       }
       if (defaults?.modelProtocol !== undefined) {
-        settings.lastModelProtocol = (defaults.modelProtocol === 'openai-chat-completions' || defaults.modelProtocol === 'anthropic-messages')
+        settings.lastModelProtocol = (defaults.modelProtocol === 'openai-compatible' || defaults.modelProtocol === 'anthropic-messages')
           ? defaults.modelProtocol
           : null;
       }

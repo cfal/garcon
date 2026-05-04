@@ -50,10 +50,11 @@ describe('Settings', () => {
 			expect(screen.getByRole('heading', { name: 'Anthropic Providers' })).toBeTruthy();
 			expect(screen.getByText('Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.')).toBeTruthy();
 			expect(screen.getByRole('heading', { name: 'OpenAI Providers' })).toBeTruthy();
-			expect(screen.getByText('Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat uses Chat Completions; Codex requires Responses API compatibility.')).toBeTruthy();
+			expect(screen.getByText('Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat can use Chat Completions or Responses; Codex requires Responses API compatibility.')).toBeTruthy();
 			expect(screen.getByRole('heading', { name: 'Other Harnesses' })).toBeTruthy();
 			expect(screen.queryByText('Direct Chat (Anthropic)')).toBeNull();
-			expect(screen.queryByText('Direct Chat (OpenAI)')).toBeNull();
+			expect(screen.queryByText('Direct Chat (OpenAI Chat Completions)')).toBeNull();
+			expect(screen.queryByText('Direct Chat (OpenAI Responses)')).toBeNull();
 			expect(screen.getByText('These settings are stored in your browser.')).toBeTruthy();
 		expect(screen.getByText('These settings are stored on the garcon server.')).toBeTruthy();
 	});

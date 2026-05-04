@@ -14,7 +14,7 @@ import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
 
 const mockProviders = {
-  getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [] })),
+  getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [], 'direct-openai-responses-compatible': [] })),
   resolvePermission: mock(() => undefined),
   setPermissionMode: mock(() => Promise.resolve(undefined)),
   setThinkingMode: mock(() => Promise.resolve(undefined)),
@@ -419,13 +419,13 @@ describe('chat WebSocket handler', () => {
         model: 'zai_openai:glm-5.1',
         apiProviderId: 'zai',
         modelEndpointId: 'zai_openai',
-        modelProtocol: 'openai-chat-completions',
+        modelProtocol: 'openai-compatible',
       });
       expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
         model: 'zai_openai:glm-5.1',
         apiProviderId: 'zai',
         modelEndpointId: 'zai_openai',
-        modelProtocol: 'openai-chat-completions',
+        modelProtocol: 'openai-compatible',
       });
       expect(mockProviders.setModel).toHaveBeenCalledWith('123', 'zai_openai:glm-5.1', {
         apiProviderId: 'zai',
@@ -464,7 +464,7 @@ describe('chat WebSocket handler', () => {
       expect(payload).toMatchObject({
         type: 'chat-sessions-running',
       });
-      expect(payload.sessions).toEqual({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [] });
+      expect(payload.sessions).toEqual({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [], 'direct-openai-responses-compatible': [] });
     });
   });
 

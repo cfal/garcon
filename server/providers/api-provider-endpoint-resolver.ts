@@ -9,7 +9,7 @@ import type {
 } from '../../common/providers.js';
 import {
   endpointModelOptionValue,
-  isHarnessCompatibleWithProtocol,
+  endpointSupportsHarness,
   rawModelFromEndpointOptionValue,
 } from '../../common/providers.js';
 import type {
@@ -50,8 +50,7 @@ export class ApiProviderEndpointResolver {
     const options: HarnessModelOption[] = [];
     for (const apiProvider of this.getApiProviders()) {
       for (const endpoint of apiProvider.endpoints) {
-        if (!endpoint.exposeTo.includes(harnessId)) continue;
-        if (!isHarnessCompatibleWithProtocol(harnessId, endpoint.protocol)) continue;
+        if (!endpointSupportsHarness(harnessId, endpoint)) continue;
         for (const model of endpoint.models) {
           const rawModel = model.rawModel || model.value;
           options.push({
@@ -142,16 +141,10 @@ export class ApiProviderEndpointResolver {
   }
 
   #assertEndpointCompatible(harnessId: HarnessId, endpoint: StoredApiProviderEndpoint): void {
-    if (!endpoint.exposeTo.includes(harnessId)) {
-      throw new ModelSelectionError(
-        `${endpoint.protocol} endpoint is not exposed to ${harnessId}.`,
-        'ENDPOINT_NOT_EXPOSED',
-      );
-    }
-    if (!isHarnessCompatibleWithProtocol(harnessId, endpoint.protocol)) {
+    if (!endpointSupportsHarness(harnessId, endpoint)) {
       throw new ModelSelectionError(
         `${endpoint.protocol} endpoint cannot be used with ${harnessId}.`,
-        'PROTOCOL_INCOMPATIBLE',
+        'ENDPOINT_NOT_EXPOSED',
       );
     }
   }
@@ -195,7 +188,10 @@ function buildCodexProviderConfig(
   apiProvider: StoredApiProvider,
   endpoint: StoredApiProviderEndpoint,
 ): CodexProviderConfig | undefined {
-  if (harnessId !== 'codex' || endpoint.protocol !== 'openai-chat-completions') {
+  if (harnessId !== 'codex' || endpoint.protocol !== 'openai-compatible') {
+    return undefined;
+  }
+  if (!endpoint.capabilities?.responses) {
     return undefined;
   }
 

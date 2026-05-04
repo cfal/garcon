@@ -183,7 +183,7 @@
 	/>
 
 	<ApiProviderProtocolPanel
-		protocol="openai-chat-completions"
+		protocol="openai-compatible"
 		title={m.settings_api_providers_openai_title()}
 		description={m.settings_api_providers_openai_description()}
 		addLabel={m.settings_api_providers_add_openai_provider()}

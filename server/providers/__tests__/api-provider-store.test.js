@@ -39,10 +39,10 @@ describe('ApiProviderStore', () => {
     const provider = await store.createApiProvider({
       templateId: 'openrouter',
       label: 'OpenRouter',
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
       baseUrl: 'https://openrouter.ai/api/v1',
       apiKey: 'sk-secret',
-      exposeTo: ['codex', 'direct-openai-compatible'],
+      capabilities: { chatCompletions: true, responses: true },
       defaultModel: 'openai/gpt-5.4',
       models: [{ value: 'openai/gpt-5.4', label: 'GPT-5.4' }],
       supportsImages: true,
@@ -50,6 +50,10 @@ describe('ApiProviderStore', () => {
     });
 
     expect(provider.templateId).toBe('openrouter');
+    expect(provider.endpoints[0].capabilities).toEqual({
+      chatCompletions: true,
+      responses: true,
+    });
     expect(provider.endpoints[0].headers).toEqual({
       'HTTP-Referer': 'https://github.com/cfal/garcon',
       'X-OpenRouter-Title': 'Garcon',
@@ -68,9 +72,9 @@ describe('ApiProviderStore', () => {
     const provider = await store.createApiProvider({
       templateId: 'ollama',
       label: 'Ollama',
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
       baseUrl: 'http://localhost:11434/v1',
-      exposeTo: ['direct-openai-compatible'],
+      capabilities: { chatCompletions: true, responses: false },
       defaultModel: 'llama3',
       models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
       supportsImages: false,
@@ -81,7 +85,7 @@ describe('ApiProviderStore', () => {
     expect(store.redactedList()[0].endpoints[0].hasApiKey).toBe(false);
   });
 
-  it('canonicalizes Anthropic-compatible exposure to both Messages consumers', async () => {
+  it('stores Anthropic-compatible endpoints without OpenAI capabilities', async () => {
     const store = await tempStore();
     await store.init();
 
@@ -91,14 +95,13 @@ describe('ApiProviderStore', () => {
       protocol: 'anthropic-messages',
       baseUrl: 'https://api.acme.test',
       apiKey: 'sk-acme',
-      exposeTo: ['claude'],
       defaultModel: 'acme-sonnet',
       models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
       supportsImages: true,
       modelDiscovery: 'anthropic-models',
     });
 
-    expect(provider.endpoints[0].exposeTo).toEqual(['claude', 'direct-anthropic-compatible']);
+    expect(provider.endpoints[0].capabilities).toBeUndefined();
   });
 
   it('keeps existing API key when an edit sends a blank key', async () => {
@@ -107,10 +110,10 @@ describe('ApiProviderStore', () => {
     const provider = await store.createApiProvider({
       templateId: 'custom',
       label: 'Example',
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
       baseUrl: 'https://api.example.test/v1',
       apiKey: 'sk-original',
-      exposeTo: ['codex'],
+      capabilities: { chatCompletions: true, responses: true },
       defaultModel: 'example',
       models: [{ value: 'example', label: 'Example' }],
       supportsImages: false,
@@ -133,10 +136,10 @@ describe('ApiProviderStore', () => {
     const provider = await store.createApiProvider({
       templateId: 'custom',
       label: 'Example',
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
       baseUrl: 'https://api.example.test/v1',
       apiKey: 'sk-original',
-      exposeTo: ['codex'],
+      capabilities: { chatCompletions: true, responses: true },
       defaultModel: 'example',
       models: [{ value: 'example', label: 'Example' }],
       supportsImages: false,
@@ -154,32 +157,20 @@ describe('ApiProviderStore', () => {
     expect(updated.endpoints[0].apiKeyLabel).toBe('');
   });
 
-  it('rejects API provider endpoints exposed to incompatible harnesses', async () => {
+  it('rejects OpenAI-compatible endpoints with no supported API surface', async () => {
     const store = await tempStore();
     await store.init();
 
     await expect(store.createApiProvider({
       templateId: 'custom',
       label: 'Example',
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
       baseUrl: 'https://api.example.test/v1',
-      exposeTo: ['direct-anthropic-compatible'],
+      capabilities: { chatCompletions: false, responses: false },
       defaultModel: 'example-model',
       models: [],
       supportsImages: false,
       modelDiscovery: 'openai-models',
-    })).rejects.toThrow('OpenAI-compatible harness');
-
-    await expect(store.createApiProvider({
-      templateId: 'custom',
-      label: 'Example',
-      protocol: 'anthropic-messages',
-      baseUrl: 'https://api.example.test/anthropic',
-      exposeTo: ['codex'],
-      defaultModel: 'example-model',
-      models: [],
-      supportsImages: false,
-      modelDiscovery: 'none',
-    })).rejects.toThrow('Anthropic-compatible harness');
+    })).rejects.toThrow('OpenAI-compatible endpoints must support Chat Completions or Responses.');
   });
 });

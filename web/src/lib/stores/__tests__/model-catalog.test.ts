@@ -19,8 +19,10 @@ describe('ModelCatalogStore', () => {
 			expect(store.getModels('factory').length).toBeGreaterThan(0);
 			expect(store.getModels('direct-anthropic-compatible')).toEqual([]);
 			expect(store.getModels('direct-openai-compatible')).toEqual([]);
+			expect(store.getModels('direct-openai-responses-compatible')).toEqual([]);
 			expect(store.getSelectableHarnesses()).not.toContain('direct-anthropic-compatible');
 			expect(store.getSelectableHarnesses()).not.toContain('direct-openai-compatible');
+			expect(store.getSelectableHarnesses()).not.toContain('direct-openai-responses-compatible');
 			expect(store.getModels('zai')).toEqual([]);
 			expect(store.getDefaultModel('claude')).toBe('opus');
 			expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
@@ -100,7 +102,7 @@ describe('ModelCatalogStore', () => {
 						supportsFork: true,
 						supportsImages: false,
 						acceptsApiProviderEndpoints: true,
-						supportedProtocols: ['openai-chat-completions'],
+						supportedProtocols: ['openai-compatible'],
 						defaultModel: 'gpt-5.5'
 					}
 				},
@@ -209,7 +211,7 @@ describe('ModelCatalogStore', () => {
 							supportsFork: true,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: true,
-							supportedProtocols: ['openai-chat-completions'],
+							supportedProtocols: ['openai-compatible'],
 							defaultModel: 'gpt-5.3-codex',
 							models: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsImages: false }]
 						},
@@ -237,7 +239,6 @@ describe('ModelCatalogStore', () => {
 									id: 'zai_anthropic',
 									protocol: 'anthropic-messages',
 									baseUrl: 'https://api.z.ai/api/anthropic',
-									exposeTo: ['claude'],
 									defaultModel: 'glm-5.1',
 									models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
 									supportsImages: false,
@@ -278,7 +279,7 @@ describe('ModelCatalogStore', () => {
 							supportsFork: true,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: true,
-							supportedProtocols: ['openai-chat-completions'],
+							supportedProtocols: ['openai-compatible'],
 							defaultModel: 'gpt-5.3-codex',
 							models: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' }]
 						}
@@ -351,12 +352,12 @@ describe('ModelCatalogStore', () => {
 					harnesses: [
 							{
 								id: 'direct-openai-compatible',
-								label: 'Direct Chat (OpenAI)',
+								label: 'Direct Chat (OpenAI Chat Completions)',
 							kind: 'harness',
 							supportsFork: false,
 							supportsImages: true,
 							acceptsApiProviderEndpoints: true,
-							supportedProtocols: ['openai-chat-completions'],
+							supportedProtocols: ['openai-compatible'],
 							defaultModel: 'zai_openai:glm-5.1',
 							models: [
 								{
@@ -365,7 +366,7 @@ describe('ModelCatalogStore', () => {
 									rawModel: 'glm-5.1',
 									apiProviderId: 'zai',
 									endpointId: 'zai_openai',
-									protocol: 'openai-chat-completions',
+									protocol: 'openai-compatible',
 									supportsImages: false
 								}
 							]
@@ -381,9 +382,9 @@ describe('ModelCatalogStore', () => {
 							endpoints: [
 								{
 									id: 'zai_openai',
-									protocol: 'openai-chat-completions',
+									protocol: 'openai-compatible',
 									baseUrl: 'https://api.z.ai/api/coding/paas/v4',
-									exposeTo: ['direct-openai-compatible'],
+									capabilities: { chatCompletions: true, responses: false },
 									defaultModel: 'glm-5.1',
 									models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
 									supportsImages: false,
@@ -404,12 +405,82 @@ describe('ModelCatalogStore', () => {
 			model: 'glm-5.1',
 			apiProviderId: 'zai',
 			modelEndpointId: 'zai_openai',
-			modelProtocol: 'openai-chat-completions'
+			modelProtocol: 'openai-compatible'
 		});
 		expect(store.selectionValueFor('direct-openai-compatible', 'glm-5.1', 'zai_openai'))
 			.toBe('zai_openai:glm-5.1');
 		expect(store.supportsImages('direct-openai-compatible', 'glm-5.1', 'zai_openai')).toBe(false);
 			expect(store.findEndpoint('zai_openai')?.endpoint.defaultModel).toBe('glm-5.1');
+		});
+
+		it('maps Direct Responses endpoint selections to raw models', async () => {
+			vi.mocked(clientApi.apiFetch).mockResolvedValue({
+				ok: true,
+				json: async () => ({
+					catalog: {
+						harnesses: [
+							{
+								id: 'direct-openai-responses-compatible',
+								label: 'Direct Chat (OpenAI Responses)',
+								kind: 'harness',
+								supportsFork: false,
+								supportsImages: true,
+								acceptsApiProviderEndpoints: true,
+								supportedProtocols: ['openai-compatible'],
+								defaultModel: 'acme_openai:acme-code',
+								models: [
+									{
+										value: 'acme_openai:acme-code',
+										label: 'Acme: Acme Code',
+										rawModel: 'acme-code',
+										apiProviderId: 'acme',
+										endpointId: 'acme_openai',
+										protocol: 'openai-compatible',
+										supportsImages: false
+									}
+								]
+							}
+						],
+						apiProviders: [
+							{
+								id: 'acme',
+								label: 'Acme',
+								templateId: 'custom',
+								createdAt: '2026-01-01T00:00:00.000Z',
+								updatedAt: '2026-01-01T00:00:00.000Z',
+								endpoints: [
+									{
+										id: 'acme_openai',
+										protocol: 'openai-compatible',
+										baseUrl: 'https://api.acme.test/v1',
+										capabilities: { chatCompletions: false, responses: true },
+										defaultModel: 'acme-code',
+										models: [{ value: 'acme-code', label: 'Acme Code' }],
+										supportsImages: false,
+										hasApiKey: true,
+										modelDiscovery: 'openai-models'
+									}
+								]
+							}
+						]
+					}
+				})
+			} as unknown as Response);
+
+			const store = createModelCatalogStore();
+			await store.forceRefresh();
+
+			expect(store.getSelectableHarnesses()).toContain('direct-openai-responses-compatible');
+			expect(store.selectionFor('direct-openai-responses-compatible', 'acme_openai:acme-code')).toEqual({
+				model: 'acme-code',
+				apiProviderId: 'acme',
+				modelEndpointId: 'acme_openai',
+				modelProtocol: 'openai-compatible'
+			});
+			expect(store.findEndpoint('acme_openai')?.endpoint.capabilities).toEqual({
+				chatCompletions: false,
+				responses: true
+			});
 		});
 
 		it('maps Direct Anthropic endpoint selections to raw models', async () => {
@@ -452,7 +523,6 @@ describe('ModelCatalogStore', () => {
 										id: 'acme_anthropic',
 										protocol: 'anthropic-messages',
 										baseUrl: 'https://api.acme.test',
-										exposeTo: ['direct-anthropic-compatible'],
 										defaultModel: 'acme-sonnet',
 										models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
 										supportsImages: true,

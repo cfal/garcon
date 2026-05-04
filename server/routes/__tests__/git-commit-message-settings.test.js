@@ -30,9 +30,10 @@ const providers = {
     factory: { authenticated: false },
     'direct-anthropic-compatible': { authenticated: false },
     'direct-openai-compatible': { authenticated: false },
+    'direct-openai-responses-compatible': { authenticated: false },
   })),
   getModels: mock(() => Promise.resolve([])),
-  hasHarness: mock((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible'].includes(harnessId)),
+  hasHarness: mock((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(harnessId)),
 };
 
 const settings = {
@@ -58,7 +59,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     providers.getHarnessAuthStatusMap.mockClear();
     providers.getModels.mockClear();
     providers.hasHarness.mockClear();
-    providers.hasHarness.mockImplementation((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible'].includes(harnessId));
+    providers.hasHarness.mockImplementation((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(harnessId));
     settings.getUiSettings.mockClear();
   });
 
@@ -138,7 +139,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       model: 'glm-5.1',
       apiProviderId: 'zai',
       modelEndpointId: 'zai_openai',
-      modelProtocol: 'openai-chat-completions',
+      modelProtocol: 'openai-compatible',
       customPrompt: '',
     }));
 
@@ -149,7 +150,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       model: 'glm-5.1',
       apiProviderId: 'zai',
       modelEndpointId: 'zai_openai',
-      modelProtocol: 'openai-chat-completions',
+      modelProtocol: 'openai-compatible',
       customPrompt: '',
     }));
 
@@ -161,7 +162,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       model: 'glm-5.1',
       apiProviderId: 'zai',
       modelEndpointId: 'zai_openai',
-      modelProtocol: 'openai-chat-completions',
+      modelProtocol: 'openai-compatible',
       customPrompt: '',
     });
   });

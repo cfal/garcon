@@ -260,7 +260,7 @@ describe('maybeGenerateChatTitle', () => {
         model: 'glm-5.1',
         apiProviderId: 'zai',
         modelEndpointId: 'zai_openai',
-        modelProtocol: 'openai-chat-completions',
+        modelProtocol: 'openai-compatible',
       },
     }));
 
@@ -277,6 +277,6 @@ describe('maybeGenerateChatTitle', () => {
     expect(opts.model).toBe('glm-5.1');
     expect(opts.apiProviderId).toBe('zai');
     expect(opts.modelEndpointId).toBe('zai_openai');
-    expect(opts.modelProtocol).toBe('openai-chat-completions');
+    expect(opts.modelProtocol).toBe('openai-compatible');
   });
 });

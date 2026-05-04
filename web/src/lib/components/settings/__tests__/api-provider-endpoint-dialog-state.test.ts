@@ -22,7 +22,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		vi.mocked(discoverApiProviderModels).mockReset();
 	});
 
-	it('always exposes Anthropic-compatible endpoints to Claude Code and Direct Chat', () => {
+	it('omits OpenAI capabilities for Anthropic-compatible endpoints', () => {
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'anthropic-messages',
@@ -35,14 +35,14 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.usesOpenAiCapabilityToggles).toBe(false);
 		expect(dialog.supportsChatCompletionsApi).toBe(false);
 		expect(dialog.supportsResponsesApi).toBe(false);
-		expect(dialog.exposeTo).toEqual(['claude', 'direct-anthropic-compatible']);
-		expect(dialog.payload().endpoint.exposeTo).toEqual(['claude', 'direct-anthropic-compatible']);
+		expect(dialog.hasRequiredApiCapability).toBe(true);
+		expect(dialog.payload().endpoint.capabilities).toBeUndefined();
 	});
 
-	it('maps OpenAI capability toggles to Direct Chat and Codex exposure', () => {
+	it('maps OpenAI capability toggles to endpoint capabilities', () => {
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
-			getProtocol: () => 'openai-chat-completions',
+			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
 			getTemplateId: () => 'custom'
 		});
@@ -52,17 +52,26 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.usesOpenAiCapabilityToggles).toBe(true);
 		expect(dialog.supportsChatCompletionsApi).toBe(true);
 		expect(dialog.supportsResponsesApi).toBe(false);
-		expect(dialog.exposeTo).toEqual(['direct-openai-compatible']);
+		expect(dialog.payload().endpoint.capabilities).toEqual({
+			chatCompletions: true,
+			responses: false
+		});
 
 		dialog.setSupportsResponsesApi(true);
 
 		expect(dialog.supportsResponsesApi).toBe(true);
-		expect(dialog.exposeTo).toEqual(['codex', 'direct-openai-compatible']);
+		expect(dialog.payload().endpoint.capabilities).toEqual({
+			chatCompletions: true,
+			responses: true
+		});
 
 		dialog.setSupportsChatCompletionsApi(false);
 
 		expect(dialog.supportsChatCompletionsApi).toBe(false);
-		expect(dialog.exposeTo).toEqual(['codex']);
+		expect(dialog.payload().endpoint.capabilities).toEqual({
+			chatCompletions: false,
+			responses: true
+		});
 	});
 
 	it('loads edit state without exposing the stored API key', async () => {
@@ -74,9 +83,9 @@ describe('ApiProviderEndpointDialogState', () => {
 			},
 			endpoint: {
 				id: 'zai_openai',
-				protocol: 'openai-chat-completions',
+				protocol: 'openai-compatible',
 				baseUrl: 'https://api.z.ai/api/coding/paas/v4',
-				exposeTo: ['codex'],
+				capabilities: { chatCompletions: false, responses: true },
 				defaultModel: 'glm-5.1',
 				models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
 				supportsImages: false,
@@ -86,7 +95,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		};
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog(endpoint) as never,
-			getProtocol: () => 'openai-chat-completions',
+			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => 'zai_openai',
 			getTemplateId: () => 'custom'
 		});
@@ -103,7 +112,7 @@ describe('ApiProviderEndpointDialogState', () => {
 	it('prefills OpenRouter template values for OpenAI-compatible creation', () => {
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
-			getProtocol: () => 'openai-chat-completions',
+			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
 			getTemplateId: () => 'openrouter'
 		});
@@ -128,7 +137,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		});
 		const openAiDialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
-			getProtocol: () => 'openai-chat-completions',
+			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
 			getTemplateId: () => 'alibaba-cloud'
 		});
@@ -156,19 +165,19 @@ describe('ApiProviderEndpointDialogState', () => {
 		});
 		const fireworksOpenAiDialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
-			getProtocol: () => 'openai-chat-completions',
+			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
 			getTemplateId: () => 'fireworks'
 		});
 		const geminiDialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
-			getProtocol: () => 'openai-chat-completions',
+			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
 			getTemplateId: () => 'gemini'
 		});
 		const togetherDialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
-			getProtocol: () => 'openai-chat-completions',
+			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
 			getTemplateId: () => 'together'
 		});
@@ -202,7 +211,7 @@ describe('ApiProviderEndpointDialogState', () => {
 	it('prefills Ollama template with blank key support', () => {
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
-			getProtocol: () => 'openai-chat-completions',
+			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
 			getTemplateId: () => 'ollama'
 		});
@@ -221,7 +230,7 @@ describe('ApiProviderEndpointDialogState', () => {
 	it('requires a parsed model, valid default model, and at least one API capability before saving', () => {
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
-			getProtocol: () => 'openai-chat-completions',
+			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
 			getTemplateId: () => 'custom'
 		});
@@ -260,7 +269,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		});
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
-			getProtocol: () => 'openai-chat-completions',
+			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
 			getTemplateId: () => 'custom'
 		});
@@ -271,7 +280,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		await dialog.fetchModels();
 
 		expect(discoverApiProviderModels).toHaveBeenCalledWith({
-			protocol: 'openai-chat-completions',
+			protocol: 'openai-compatible',
 			baseUrl: 'https://api.acme.test/v1',
 			apiKey: undefined,
 			apiProviderId: null,
@@ -312,7 +321,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.defaultModel).toBe('claude-sonnet-4-20250514');
 	});
 
-	it('keeps fixed Anthropic exposure when fetching Anthropic models', async () => {
+	it('keeps Anthropic payload free of OpenAI capabilities when fetching Anthropic models', async () => {
 		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
 			success: true,
 			models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }]
@@ -337,7 +346,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			endpointId: null,
 			modelDiscovery: 'anthropic-models'
 		});
-		expect(dialog.exposeTo).toEqual(['claude', 'direct-anthropic-compatible']);
+		expect(dialog.payload().endpoint.capabilities).toBeUndefined();
 		expect(dialog.defaultModel).toBe('acme-sonnet');
 	});
 
@@ -354,9 +363,9 @@ describe('ApiProviderEndpointDialogState', () => {
 			},
 			endpoint: {
 				id: 'zai_openai',
-				protocol: 'openai-chat-completions',
+				protocol: 'openai-compatible',
 				baseUrl: 'https://api.z.ai/api/coding/paas/v4',
-				exposeTo: ['codex'],
+				capabilities: { chatCompletions: false, responses: true },
 				defaultModel: 'glm-5.1',
 				models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
 				supportsImages: false,
@@ -366,7 +375,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		};
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog(endpoint) as never,
-			getProtocol: () => 'openai-chat-completions',
+			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => 'zai_openai',
 			getTemplateId: () => 'custom'
 		});
@@ -379,7 +388,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		await dialog.fetchModels();
 
 		expect(discoverApiProviderModels).toHaveBeenCalledWith({
-			protocol: 'openai-chat-completions',
+			protocol: 'openai-compatible',
 			baseUrl: 'https://api.z.ai/api/coding/paas/v4',
 			apiKey: undefined,
 			apiProviderId: 'zai',

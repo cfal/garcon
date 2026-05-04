@@ -30,7 +30,8 @@
 	import { getChatSessions } from '$lib/context';
 	import {
 		DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-		DIRECT_OPENAI_COMPATIBLE_HARNESS_ID
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID
 	} from '$shared/providers';
 
 	interface Props {
@@ -55,7 +56,8 @@
 			'amp',
 			'factory',
 			DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-			DIRECT_OPENAI_COMPATIBLE_HARNESS_ID
+			DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+			DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID
 		]);
 		const core = providers.filter((p) => coreIds.has(p));
 		const more = providers.filter((p) => moreIds.has(p));

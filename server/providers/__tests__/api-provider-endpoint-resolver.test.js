@@ -12,10 +12,10 @@ function makeResolver() {
       endpoints: [
         {
           id: 'acme_openai',
-          protocol: 'openai-chat-completions',
+          protocol: 'openai-compatible',
           baseUrl: 'https://api.acme.test/v1',
           apiKey: 'secret',
-          exposeTo: ['direct-openai-compatible', 'codex'],
+          capabilities: { chatCompletions: true, responses: true },
           defaultModel: 'acme-code',
           models: [{ value: 'acme-code', label: 'Acme Code', supportsImages: false }],
           supportsImages: false,
@@ -27,10 +27,10 @@ function makeResolver() {
         },
         {
           id: 'acme_openai_blank',
-          protocol: 'openai-chat-completions',
+          protocol: 'openai-compatible',
           baseUrl: 'http://localhost:11434/v1',
           apiKey: '',
-          exposeTo: ['codex'],
+          capabilities: { chatCompletions: false, responses: true },
           defaultModel: 'llama3',
           models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
           supportsImages: false,
@@ -41,7 +41,6 @@ function makeResolver() {
           protocol: 'anthropic-messages',
           baseUrl: 'https://api.acme.test/anthropic',
           apiKey: 'secret',
-          exposeTo: ['claude', 'direct-anthropic-compatible'],
           defaultModel: 'acme-claude',
           models: [{ value: 'acme-claude', label: 'Acme Claude', supportsImages: true }],
           supportsImages: true,
@@ -52,7 +51,6 @@ function makeResolver() {
           protocol: 'anthropic-messages',
           baseUrl: 'http://localhost:11434',
           apiKey: '',
-          exposeTo: ['claude', 'direct-anthropic-compatible'],
           defaultModel: 'llama3',
           models: [{ value: 'llama3', label: 'llama3 (local)', isLocal: true }],
           supportsImages: false,
@@ -73,7 +71,7 @@ describe('ApiProviderEndpointResolver', () => {
       rawModel: 'acme-code',
       apiProviderId: 'acme',
       endpointId: 'acme_openai',
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
       supportsImages: false,
     });
 
@@ -88,7 +86,7 @@ describe('ApiProviderEndpointResolver', () => {
       model: 'acme-code',
       apiProviderId: 'acme',
       endpointId: 'acme_openai',
-      protocol: 'openai-chat-completions',
+      protocol: 'openai-compatible',
       isLocal: false,
       envOverrides: undefined,
     });
@@ -98,6 +96,8 @@ describe('ApiProviderEndpointResolver', () => {
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
     })).toBe(false);
+    expect(resolver.getModelOptions('direct-openai-compatible')).toHaveLength(1);
+    expect(resolver.getModelOptions('direct-openai-responses-compatible')).toHaveLength(2);
   });
 
   it('resolves Direct Anthropic endpoint-backed models without env overrides', () => {

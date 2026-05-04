@@ -44,7 +44,7 @@ export function resolveEffectiveGenerationConfig({ persisted, authByHarness, mod
   const persistedModel = typeof cfg.model === 'string' && cfg.model.trim() ? cfg.model : '';
   const persistedApiProviderId = typeof cfg.apiProviderId === 'string' ? cfg.apiProviderId : null;
   const persistedEndpointId = typeof cfg.modelEndpointId === 'string' ? cfg.modelEndpointId : null;
-  const persistedProtocol = (cfg.modelProtocol === 'openai-chat-completions' || cfg.modelProtocol === 'anthropic-messages')
+  const persistedProtocol = (cfg.modelProtocol === 'openai-compatible' || cfg.modelProtocol === 'anthropic-messages')
     ? cfg.modelProtocol
     : null;
 
