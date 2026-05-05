@@ -61,6 +61,11 @@
 		if (showHarness && showSource) return 'w-[min(44rem,calc(100vw-1rem))]';
 		return 'w-[min(34rem,calc(100vw-1rem))]';
 	});
+	const contentHeightClass = $derived(
+		!showHarness && !showSource
+			? 'h-[18rem]'
+			: 'h-[26rem]'
+	);
 	const triggerBaseClass = $derived(
 		surfaceIsSettings
 			? 'inline-flex min-h-9 max-w-[18rem] items-center justify-between gap-2 rounded-md border border-border bg-muted px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
@@ -112,11 +117,16 @@
 		{align}
 		{side}
 		sideOffset={8}
-		class={cn(contentWidthClass, 'max-h-[min(32rem,calc(100vh-1rem))] overflow-hidden p-0', contentClass)}
+		class={cn(
+			contentWidthClass,
+			contentHeightClass,
+			'max-h-(--bits-popover-content-available-height) overflow-hidden p-0',
+			contentClass
+		)}
 	>
-		<div class="flex max-h-[min(32rem,calc(100vh-1rem))] min-h-[18rem] flex-col sm:flex-row">
+		<div class="flex h-full min-h-0 flex-col sm:flex-row">
 			{#if showHarness}
-				<section class="border-b border-border p-1 sm:w-40 sm:border-b-0 sm:border-r">
+				<section class="min-h-0 overflow-y-auto border-b border-border p-1 sm:w-40 sm:border-b-0 sm:border-r">
 					<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{m.model_selector_harness()}</div>
 					<div class="space-y-1">
 						{#each selector.harnessOptions as option (option.value)}
@@ -145,7 +155,7 @@
 			{/if}
 
 			{#if showSource}
-				<section class="border-b border-border p-1 sm:w-48 sm:border-b-0 sm:border-r">
+				<section class="min-h-0 overflow-y-auto border-b border-border p-1 sm:w-48 sm:border-b-0 sm:border-r">
 					<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{m.model_selector_provider()}</div>
 					<div class="space-y-1">
 						{#each selector.sources as source (source.key)}
