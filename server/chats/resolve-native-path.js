@@ -1,11 +1,11 @@
 // Resolves the native file path for a chat session when not yet persisted.
 // Shared by both the REST route and the WebSocket handler.
-// TODO: can we deprecate this?
 
 import { promises as fs } from 'fs';
 import { findCodexSessionFileBySessionId } from '../providers/codex.js';
 import { createClaudeNativePath } from '../providers/claude-cli.js';
 import { createArtificialNativePath } from './artificial-native-path.js';
+import { isEndpointOnlyHarnessId } from '../../common/providers.ts';
 
 export async function resolveMissingNativePath(session) {
   if (!session || !session.providerSessionId) {
@@ -39,11 +39,7 @@ export async function resolveMissingNativePath(session) {
     return createArtificialNativePath(session.provider, session.providerSessionId);
   }
 
-  if (session.provider === 'openrouter') {
-    return createArtificialNativePath(session.provider, session.providerSessionId);
-  }
-
-  if (session.provider === 'zai') {
+  if (isEndpointOnlyHarnessId(session.provider)) {
     return createArtificialNativePath(session.provider, session.providerSessionId);
   }
 

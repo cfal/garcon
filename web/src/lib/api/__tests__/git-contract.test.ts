@@ -14,7 +14,9 @@ import {
 	gitDiscard,
 	gitDeleteUntracked,
 	getGitFileReviewData,
+	getGitFileReviewDataBatch,
 	getGitChangesTree,
+	getGitTargetCandidates,
 	gitStageSelection,
 	gitStageHunk,
 	gitStageFile,
@@ -352,4 +354,32 @@ describe('git API contract', () => {
 		expect(url).toContain('mode=staged');
 		expect(url).toContain('context=3');
 	});
-});
+
+	it('getGitFileReviewDataBatch posts files with mapped review mode', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ files: {}, errors: {} }));
+
+		await getGitFileReviewDataBatch('/project', ['a.ts', 'b.ts'], 'unstaged', 5);
+
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/file-review-data/batch');
+		expect(opts.method).toBe('POST');
+		const body = JSON.parse(opts.body);
+		expect(body).toEqual({
+			project: '/project',
+			files: ['a.ts', 'b.ts'],
+			mode: 'working',
+			context: 5,
+		});
+	});
+
+	it('getGitTargetCandidates calls GET with encoded project', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ targets: [] }));
+
+		const result = await getGitTargetCandidates('/repo with space');
+
+		expect(result.targets).toEqual([]);
+		const [url] = fetchMock.mock.calls[0];
+		expect(url).toContain('/api/v1/git/targets');
+		expect(url).toContain('project=%2Frepo%20with%20space');
+	});
+	});

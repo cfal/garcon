@@ -7,6 +7,7 @@ import {
 	removeTagFromQuery,
 	queryHasTag,
 	emptyFilterSpec,
+	matchesChatFilter,
 } from '../sidebar-search';
 
 describe('parseChatSearch', () => {
@@ -17,13 +18,13 @@ describe('parseChatSearch', () => {
 
 	it('parses tag:ops to tags: ["ops"]', () => {
 		const spec = parseChatSearch('tag:ops');
-		expect(spec.tags).toEqual(['ops']);
+		expect(spec.tags).toEqual([['ops']]);
 		expect(spec.textTokens).toEqual([]);
 	});
 
 	it('parses multiple tags', () => {
 		const spec = parseChatSearch('tag:ops tag:bugs');
-		expect(spec.tags).toEqual(['ops', 'bugs']);
+		expect(spec.tags).toEqual([['ops'], ['bugs']]);
 	});
 
 	it('parses provider, model, and text tokens', () => {
@@ -40,7 +41,7 @@ describe('parseChatSearch', () => {
 
 	it('parses mixed tag, quoted text, and provider', () => {
 		const spec = parseChatSearch('tag:ops "some text" provider:claude');
-		expect(spec.tags).toEqual(['ops']);
+		expect(spec.tags).toEqual([['ops']]);
 		expect(spec.textTokens).toEqual(['some text']);
 		expect(spec.providers).toEqual(['claude']);
 	});
@@ -53,6 +54,7 @@ describe('parseChatSearch', () => {
 			providers: [],
 			models: [],
 			status: 'active',
+			project: [],
 		});
 	});
 
@@ -64,19 +66,48 @@ describe('parseChatSearch', () => {
 			providers: [],
 			models: [],
 			status: 'unread',
+			project: [],
 		});
 	});
 
 	it('parses mixed status and tag filters', () => {
 		const spec = parseChatSearch('status:unread tag:ops');
 		expect(spec.status).toBe('unread');
-		expect(spec.tags).toEqual(['ops']);
+		expect(spec.tags).toEqual([['ops']]);
 	});
 
 	it('ignores unknown status values', () => {
 		const spec = parseChatSearch('status:bogus hello');
 		expect(spec.status).toBeUndefined();
 		expect(spec.textTokens).toEqual(['hello']);
+	});
+
+	it('parses tag:a|b as an OR group', () => {
+		const spec = parseChatSearch('tag:a|b');
+		expect(spec.tags).toEqual([['a', 'b']]);
+		expect(spec.textTokens).toEqual([]);
+	});
+
+	it('parses mixed OR groups and separate tags', () => {
+		const spec = parseChatSearch('tag:a|b tag:c');
+		expect(spec.tags).toEqual([['a', 'b'], ['c']]);
+	});
+
+	it('parses provider:a|b as OR values', () => {
+		const spec = parseChatSearch('provider:claude|chatgpt');
+		expect(spec.providers).toEqual(['claude', 'chatgpt']);
+	});
+
+	it('parses model:a|b as OR values', () => {
+		const spec = parseChatSearch('model:sonnet|opus');
+		expect(spec.models).toEqual(['sonnet', 'opus']);
+	});
+
+	it('ignores empty parts in pipe values', () => {
+		const spec = parseChatSearch('tag:a||b');
+		expect(spec.tags).toEqual([['a', 'b']]);
+		const spec2 = parseChatSearch('tag:|a|');
+		expect(spec2.tags).toEqual([['a']]);
 	});
 });
 
@@ -106,6 +137,40 @@ describe('serializeChatFilter', () => {
 
 	it('round-trips status with tags', () => {
 		const query = 'status:unread tag:ops';
+		const spec = parseChatSearch(query);
+		const serialized = serializeChatFilter(spec);
+		const reparsed = parseChatSearch(serialized);
+		expect(reparsed).toEqual(spec);
+	});
+
+	it('serializes OR groups with pipe syntax', () => {
+		const spec = { ...emptyFilterSpec(), tags: [['a', 'b']] };
+		expect(serializeChatFilter(spec)).toContain('tag:a|b');
+	});
+
+	it('round-trips OR tag groups', () => {
+		const query = 'tag:ops|bugs tag:dev';
+		const spec = parseChatSearch(query);
+		const serialized = serializeChatFilter(spec);
+		const reparsed = parseChatSearch(serialized);
+		expect(reparsed).toEqual(spec);
+	});
+
+	it('round-trips pipe-separated providers', () => {
+		const query = 'provider:claude|chatgpt';
+		const spec = parseChatSearch(query);
+		const serialized = serializeChatFilter(spec);
+		const reparsed = parseChatSearch(serialized);
+		expect(reparsed).toEqual(spec);
+	});
+
+	it('serializes project with pipe syntax', () => {
+		const spec = { ...emptyFilterSpec(), project: ['my-app', 'garcon'] };
+		expect(serializeChatFilter(spec)).toContain('project:my-app|garcon');
+	});
+
+	it('round-trips project pipe OR', () => {
+		const query = 'project:a|b hello';
 		const spec = parseChatSearch(query);
 		const serialized = serializeChatFilter(spec);
 		const reparsed = parseChatSearch(serialized);
@@ -161,5 +226,143 @@ describe('queryHasTag', () => {
 
 	it('is case-insensitive', () => {
 		expect(queryHasTag('tag:Ops', 'ops')).toBe(true);
+	});
+
+	it('finds tag inside OR group', () => {
+		expect(queryHasTag('tag:ops|bugs', 'bugs')).toBe(true);
+	});
+});
+
+describe('parseChatSearch project filter', () => {
+	it('parses project:my-app', () => {
+		const spec = parseChatSearch('project:my-app');
+		expect(spec.project).toEqual(['my-app']);
+		expect(spec.textTokens).toEqual([]);
+	});
+
+	it('parses project with mixed filters', () => {
+		const spec = parseChatSearch('tag:ops project:garcon hello');
+		expect(spec.project).toEqual(['garcon']);
+		expect(spec.tags).toEqual([['ops']]);
+		expect(spec.textTokens).toEqual(['hello']);
+	});
+
+	it('parses multiple project: as OR (combined via | or space)', () => {
+		const spec = parseChatSearch('project:a|b');
+		expect(spec.project).toEqual(['a', 'b']);
+	});
+
+	it('is case-insensitive for operator but preserves value casing (lowercased)', () => {
+		const spec = parseChatSearch('Project:MyApp');
+		expect(spec.project).toEqual(['myapp']);
+	});
+
+	it('ignores empty project: value', () => {
+		const spec = parseChatSearch('project:');
+		expect(spec.project).toEqual([]);
+	});
+
+	it('parses project:a|b via pipe', () => {
+		const spec = parseChatSearch('project:a|b');
+		expect(spec.project).toEqual(['a', 'b']);
+	});
+});
+
+describe('serializeChatFilter project', () => {
+	it('serializes project filter', () => {
+		const spec = { ...emptyFilterSpec(), project: ['my-app'] };
+		expect(serializeChatFilter(spec)).toBe('project:my-app');
+	});
+
+	it('round-trips project with other filters', () => {
+		const query = 'tag:ops project:garcon hello';
+		const spec = parseChatSearch(query);
+		const serialized = serializeChatFilter(spec);
+		const reparsed = parseChatSearch(serialized);
+		expect(reparsed).toEqual(spec);
+	});
+});
+
+describe('matchesChatFilter project', () => {
+	const chat = {
+		title: 'Test',
+		projectPath: '/workspace/garcon-monorepo',
+		provider: 'claude',
+		model: 'sonnet' as const,
+		tags: [],
+		isProcessing: false,
+		isUnread: false,
+	};
+
+	it('matches when projectPath contains the value', () => {
+		const spec = { ...emptyFilterSpec(), project: ['garcon'] };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('matches the end of a path (suffix)', () => {
+		const spec = { ...emptyFilterSpec(), project: ['garcon-monorepo'] };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('matches the beginning of a path (prefix)', () => {
+		const spec = { ...emptyFilterSpec(), project: ['/workspace'] };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('does not match when projectPath does not contain the value', () => {
+		const spec = { ...emptyFilterSpec(), project: ['other-project'] };
+		expect(matchesChatFilter(chat, spec)).toBe(false);
+	});
+
+	it('is case-insensitive', () => {
+		const spec = { ...emptyFilterSpec(), project: ['garcon'] };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('matches when project is empty array (no filter)', () => {
+		const spec = { ...emptyFilterSpec(), project: [] };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('matches any value in project OR group', () => {
+		const spec = { ...emptyFilterSpec(), project: ['nope', 'garcon', 'other'] };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('does not match when no project values match', () => {
+		const spec = { ...emptyFilterSpec(), project: ['nope', 'other'] };
+		expect(matchesChatFilter(chat, spec)).toBe(false);
+	});
+});
+
+describe('matchesChatFilter OR groups', () => {
+	const chat = {
+		title: 'Test',
+		projectPath: '/workspace/test',
+		provider: 'claude',
+		model: 'sonnet' as const,
+		tags: ['ops', 'dev'] as string[],
+		isProcessing: false,
+		isUnread: false,
+	};
+
+	it('matches when OR group has any matching tag', () => {
+		const spec = { ...emptyFilterSpec(), tags: [['ops', 'bugs']] };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('does not match when OR group has no matching tag', () => {
+		const spec = { ...emptyFilterSpec(), tags: [['bugs', 'docs']] };
+		expect(matchesChatFilter(chat, spec)).toBe(false);
+	});
+
+	it('ANDs multiple OR tag groups', () => {
+		const spec = { ...emptyFilterSpec(), tags: [['ops', 'x'], ['dev']] };
+		expect(matchesChatFilter(chat, spec)).toBe(true);
+	});
+
+	it('fails AND when one OR group does not match', () => {
+		const spec = { ...emptyFilterSpec(), tags: [['ops'], ['bugs']] };
+		expect(matchesChatFilter(chat, spec)).toBe(false);
 	});
 });

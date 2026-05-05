@@ -45,11 +45,29 @@ describe('SidebarFilterState', () => {
 		expect(state.canSaveCurrentFilter).toBe(true);
 		expect(state.currentFilter).toEqual({
 			textTokens: [],
-			tags: ['ops'],
+			tags: [['ops']],
 			providers: [],
 			models: [],
+			project: [],
 			status: 'unread',
 		});
+		expect(state.filteredChats.map((chat) => chat.id)).toEqual(['chat-1']);
+	});
+
+	it('merges tag OR groups from search with folder filter', () => {
+		const chats = [
+			makeChat({ id: 'chat-1', isUnread: true, tags: ['ops', 'bug'] }),
+			makeChat({ id: 'chat-2', isUnread: true, tags: ['dev'] }),
+		];
+		const state = new SidebarFilterState({
+			get chats() { return chats; },
+		});
+
+		state.selectFolder('unread');
+		state.searchQuery = 'tag:ops|bug';
+
+		expect(state.canSaveCurrentFilter).toBe(true);
+		expect(state.currentFilter.tags).toEqual([['ops', 'bug']]);
 		expect(state.filteredChats.map((chat) => chat.id)).toEqual(['chat-1']);
 	});
 
@@ -73,6 +91,7 @@ describe('SidebarFilterState', () => {
 					tags: [],
 					providers: [],
 					models: [],
+					project: [],
 					status: 'active',
 				},
 				createdAt: '2026-03-27T00:00:00.000Z',
@@ -99,6 +118,7 @@ describe('SidebarFilterState', () => {
 			tags: [],
 			providers: [],
 			models: [],
+			project: [],
 			status: 'unread',
 		});
 	});

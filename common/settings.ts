@@ -14,15 +14,18 @@ import {
   isPermissionMode,
   isThinkingMode,
 } from './chat-modes';
-import type { ProviderId } from './providers';
-import { isProviderId } from './providers';
+import type { HarnessId, ApiProtocol } from './providers';
+import { isHarnessId } from './providers';
 
 export type PinnedInsertPosition = 'top' | 'bottom';
 
 export interface GenerationUiSettings {
   enabled?: boolean;
-  provider?: ProviderId;
+  provider?: HarnessId;
   model?: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
   customPrompt?: string;
   useCommonDirPrefix?: boolean;
 }
@@ -43,10 +46,16 @@ export interface RemoteUiSettings {
 
 export interface RemoteUiEffectiveSettings {
   chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'provider' | 'model'>> & {
+    apiProviderId?: string | null;
+    modelEndpointId?: string | null;
+    modelProtocol?: ApiProtocol | null;
     customPrompt?: string;
     useCommonDirPrefix?: boolean;
   };
   commitMessage?: Required<Pick<GenerationUiSettings, 'enabled' | 'provider' | 'model'>> & {
+    apiProviderId?: string | null;
+    modelEndpointId?: string | null;
+    modelProtocol?: ApiProtocol | null;
     customPrompt?: string;
     useCommonDirPrefix?: boolean;
   };
@@ -63,9 +72,12 @@ export interface RemoteSettingsSnapshot {
   uiEffective: RemoteUiEffectiveSettings;
   paths: RemotePathSettings;
   pinnedChatIds: string[];
-  lastProvider: ProviderId;
+  lastProvider: HarnessId;
   lastProjectPath: string;
   lastModel: string;
+  lastApiProviderId: string | null;
+  lastModelEndpointId: string | null;
+  lastModelProtocol: ApiProtocol | null;
   lastPermissionMode: PermissionMode;
   lastThinkingMode: ThinkingMode;
   lastClaudeThinkingMode: ClaudeThinkingMode;
@@ -95,14 +107,28 @@ function asStringArray(value: unknown): string[] | null {
   return value as string[];
 }
 
+function safeOptionalId(value: unknown): string | null {
+  return typeof value === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(value)
+    ? value
+    : null;
+}
+
+function safeOptionalProtocol(value: unknown): ApiProtocol | null {
+  if (value === 'openai-compatible' || value === 'anthropic-messages') return value;
+  return null;
+}
+
 function normalizeGenerationUiSettings(value: unknown): GenerationUiSettings | undefined {
   const raw = asRecord(value);
   if (!raw) return undefined;
 
   const normalized: GenerationUiSettings = {};
   if (typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
-  if (isProviderId(raw.provider)) normalized.provider = raw.provider;
+  if (isHarnessId(raw.provider)) normalized.provider = raw.provider;
   if (typeof raw.model === 'string') normalized.model = raw.model;
+  if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
+  if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
+  if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
   if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
   if (typeof raw.useCommonDirPrefix === 'boolean') {
     normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
@@ -116,7 +142,7 @@ function normalizeGenerationUiEffectiveSettings(
   const raw = asRecord(value);
   if (!raw) return undefined;
   if (typeof raw.enabled !== 'boolean') return undefined;
-  if (!isProviderId(raw.provider)) return undefined;
+  if (!isHarnessId(raw.provider)) return undefined;
   if (typeof raw.model !== 'string') return undefined;
 
   const normalized: NonNullable<RemoteUiEffectiveSettings['chatTitle']> = {
@@ -124,6 +150,9 @@ function normalizeGenerationUiEffectiveSettings(
     provider: raw.provider,
     model: raw.model,
   };
+  if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
+  if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
+  if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
   if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
   if (typeof raw.useCommonDirPrefix === 'boolean') {
     normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
@@ -207,10 +236,13 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
   const lastProjectPath = asString(raw.lastProjectPath);
   const lastModel = asString(raw.lastModel);
   const projectBasePath = asString(raw.projectBasePath);
+  const lastApiProviderId = safeOptionalId(raw.lastApiProviderId);
+  const lastModelEndpointId = safeOptionalId(raw.lastModelEndpointId);
+  const lastModelProtocol = safeOptionalProtocol(raw.lastModelProtocol);
 
   if (version === null) return null;
   if (!ui || !uiEffective || !paths || !pinnedChatIds) return null;
-  if (!isProviderId(raw.lastProvider)) return null;
+  if (!isHarnessId(raw.lastProvider)) return null;
   if (lastProjectPath === null || lastModel === null || projectBasePath === null) return null;
   if (!isPermissionMode(raw.lastPermissionMode)) return null;
   if (!isThinkingMode(raw.lastThinkingMode)) return null;
@@ -227,6 +259,9 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
     lastProvider: raw.lastProvider,
     lastProjectPath,
     lastModel,
+    lastApiProviderId,
+    lastModelEndpointId,
+    lastModelProtocol,
     lastPermissionMode: raw.lastPermissionMode,
     lastThinkingMode: raw.lastThinkingMode,
     lastClaudeThinkingMode: raw.lastClaudeThinkingMode,

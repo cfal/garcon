@@ -15,12 +15,13 @@
 	import GitReviewChangesModal from './GitReviewChangesModal.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
-	import { GitWorkbenchStore } from '$lib/stores/git-workbench.svelte.js';
+	import { GitWorkbenchStore, type GitWorkbenchTarget, type GitDiffActionTarget } from '$lib/stores/git-workbench.svelte.js';
 	import type { GitFileReviewData, ConfirmAction } from '$lib/api/git.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface GitWorkbenchProps {
-		projectPath: string | null;
+		projectPath?: string | null;
+		target?: GitWorkbenchTarget | null;
 		isMobile: boolean;
 		wb: GitWorkbenchStore;
 		diffFontSize: number;
@@ -28,7 +29,20 @@
 		onOpenInEditor?: (relativePath: string, line: number) => void;
 	}
 
-	let { projectPath, isMobile, wb, diffFontSize, onSendToChat, onOpenInEditor }: GitWorkbenchProps = $props();
+	let { projectPath = null, target = null, isMobile, wb, diffFontSize, onSendToChat, onOpenInEditor }: GitWorkbenchProps = $props();
+	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
+		projectPath
+			? {
+				projectPath,
+				repoRoot: projectPath,
+				worktreePath: projectPath,
+				label: projectPath.split('/').pop() || projectPath,
+				source: 'chat-project',
+			}
+			: null,
+	);
+	let activeTarget = $derived(target ?? fallbackTarget);
+	let activeProjectPath = $derived(activeTarget?.projectPath ?? null);
 
 	// Mobile pane navigation (files or diff only -- review is now a modal)
 	type MobilePane = 'files' | 'diff';
@@ -39,37 +53,27 @@
 		return paths.map((filePath) => ({ filePath, reviewData: wb.reviewDataByPath[filePath] ?? null }));
 	});
 
-	// Reload tree when project changes. Auto-select the first file.
-	// Diff loading is viewport-driven: the virtual list requests data
-	// for visible files via onRequestLoad.
 	$effect(() => {
-		wb.reset();
-		if (!projectPath) return;
-		const pp = projectPath;
-		untrack(() => void wb.loadTree(pp).then(() => {
-			const first = wb.visibleFilePaths[0];
-			if (first && !wb.selectedFile) wb.openFile(pp, first);
-		}));
+		const nextTarget = activeTarget;
+		untrack(() => void wb.setTarget(nextTarget));
 	});
 
 	function handleRequestLoad(filePaths: string[]): void {
-		if (!projectPath) return;
-		wb.requestFilesLoaded(projectPath, filePaths);
+		if (!activeProjectPath) return;
+		wb.requestFilesLoaded(activeProjectPath, filePaths);
 	}
 
 	function handleSelectFile(path: string): void {
-		if (!projectPath) return;
-		wb.openFile(projectPath, path);
-		wb.requestDiffScrollToFile(path);
+		if (!activeProjectPath) return;
+		void wb.selectFile(activeProjectPath, path);
 		if (isMobile) mobilePane = 'diff';
 	}
 
 	function handleSelectDirectory(path: string): void {
-		if (!projectPath) return;
+		if (!activeProjectPath) return;
 		const firstFile = wb.firstVisibleFileInDirectory(path);
 		if (!firstFile) return;
-		wb.openFile(projectPath, firstFile);
-		wb.requestDiffScrollToFile(firstFile);
+		void wb.selectFile(activeProjectPath, firstFile);
 		if (isMobile) mobilePane = 'diff';
 	}
 
@@ -94,8 +98,8 @@
 	}
 
 	function handleInitialCommit(): void {
-		if (!projectPath) return;
-		wb.createInitialCommit(projectPath);
+		if (!activeProjectPath) return;
+		wb.createInitialCommit(activeProjectPath);
 	}
 
 	// Pointer-based tree pane resize
@@ -117,23 +121,43 @@
 	}
 
 	function handleStageFile(filePath: string): void {
-		if (!projectPath) return;
-		wb.stageFile(projectPath, filePath);
+		if (!activeProjectPath) return;
+		wb.stageFile(activeProjectPath, filePath);
 	}
 
 	function handleUnstageFile(filePath: string): void {
-		if (!projectPath) return;
-		wb.unstageFile(projectPath, filePath);
+		if (!activeProjectPath) return;
+		wb.unstageFile(activeProjectPath, filePath);
 	}
 
 	function handleStageDir(dirPath: string): void {
-		if (!projectPath) return;
-		wb.stageDirectory(projectPath, dirPath);
+		if (!activeProjectPath) return;
+		wb.stageDirectory(activeProjectPath, dirPath);
 	}
 
 	function handleUnstageDir(dirPath: string): void {
-		if (!projectPath) return;
-		wb.unstageDirectory(projectPath, dirPath);
+		if (!activeProjectPath) return;
+		wb.unstageDirectory(activeProjectPath, dirPath);
+	}
+
+	function handleStageHunk(actionTarget: GitDiffActionTarget, hunkIndex: number): void {
+		if (!activeProjectPath) return;
+		wb.stageHunk(activeProjectPath, actionTarget, hunkIndex);
+	}
+
+	function handleUnstageHunk(actionTarget: GitDiffActionTarget, hunkIndex: number): void {
+		if (!activeProjectPath) return;
+		wb.unstageHunk(activeProjectPath, actionTarget, hunkIndex);
+	}
+
+	function handleStageLine(actionTarget: GitDiffActionTarget, diffLineIndex: number): void {
+		if (!activeProjectPath) return;
+		wb.stageLine(activeProjectPath, actionTarget, diffLineIndex);
+	}
+
+	function handleUnstageLine(actionTarget: GitDiffActionTarget, diffLineIndex: number): void {
+		if (!activeProjectPath) return;
+		wb.unstageLine(activeProjectPath, actionTarget, diffLineIndex);
 	}
 
 	function handleDiscardFile(filePath: string): void {
@@ -151,7 +175,7 @@
 	});
 </script>
 
-{#if !projectPath}
+	{#if !activeProjectPath}
 	<div class="h-full flex items-center justify-center text-muted-foreground">
 		<p class="text-sm">Select a project to view changes</p>
 	</div>
@@ -237,19 +261,20 @@
 						{/each}
 					</div>
 					<GitAllFilesVirtualList
-						items={allScopeReviewItems}
-						activeTab={wb.activeTab}
-						diffMode={wb.diffMode}
-						fontSize={diffFontSize}
+							items={allScopeReviewItems}
+							activeTab={wb.activeTab}
+							diffMode={wb.diffMode}
+							contextLines={wb.contextLines}
+							fontSize={diffFontSize}
 						selectedLineKeys={wb.selectedLineKeys}
 						overscan={3}
 						onRequestLoad={handleRequestLoad}
 						onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 						onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
-						onStageHunk={(i) => wb.stageHunk(projectPath, i)}
-						onUnstageHunk={(i) => wb.unstageHunk(projectPath, i)}
-						onStageLine={(i) => wb.stageLine(projectPath, i)}
-						onUnstageLine={(i) => wb.unstageLine(projectPath, i)}
+							onStageHunk={handleStageHunk}
+							onUnstageHunk={handleUnstageHunk}
+							onStageLine={handleStageLine}
+							onUnstageLine={handleUnstageLine}
 						onAddCommentForFile={handleAddCommentForFile}
 						commentsForFile={(fp) => wb.commentsForFile(fp)}
 						onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
@@ -265,14 +290,14 @@
 				<div class="flex gap-2 px-3 py-2 border-t border-border bg-background">
 					{#if wb.activeTab === 'unstaged'}
 						<button
-							onclick={() => wb.stageSelectedLines(projectPath)}
+								onclick={() => { if (activeProjectPath) wb.stageSelectedLines(activeProjectPath); }}
 							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-added/20 text-git-added"
 						>
 							Stage ({wb.selectedLineKeys.size})
 						</button>
 					{:else}
 						<button
-							onclick={() => wb.unstageSelectedLines(projectPath)}
+								onclick={() => { if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath); }}
 							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-deleted/20 text-git-deleted"
 						>
 							Unstage ({wb.selectedLineKeys.size})
@@ -332,19 +357,20 @@
 						{/each}
 					</div>
 					<GitAllFilesVirtualList
-						items={allScopeReviewItems}
-						activeTab={wb.activeTab}
-						diffMode={wb.diffMode}
-						fontSize={diffFontSize}
+							items={allScopeReviewItems}
+							activeTab={wb.activeTab}
+							diffMode={wb.diffMode}
+							contextLines={wb.contextLines}
+							fontSize={diffFontSize}
 						selectedLineKeys={wb.selectedLineKeys}
 						overscan={5}
 						onRequestLoad={handleRequestLoad}
 						onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 						onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
-						onStageHunk={(i) => wb.stageHunk(projectPath, i)}
-						onUnstageHunk={(i) => wb.unstageHunk(projectPath, i)}
-						onStageLine={(i) => wb.stageLine(projectPath, i)}
-						onUnstageLine={(i) => wb.unstageLine(projectPath, i)}
+							onStageHunk={handleStageHunk}
+							onUnstageHunk={handleUnstageHunk}
+							onStageLine={handleStageLine}
+							onUnstageLine={handleUnstageLine}
 						onAddCommentForFile={handleAddCommentForFile}
 						commentsForFile={(fp) => wb.commentsForFile(fp)}
 						composerState={wb.commentComposer}
@@ -361,7 +387,7 @@
 						<div class="flex items-center gap-2 px-3 py-2 border-t border-border bg-background shrink-0">
 							{#if wb.activeTab === 'unstaged'}
 								<button
-									onclick={() => wb.stageSelectedLines(projectPath)}
+										onclick={() => { if (activeProjectPath) wb.stageSelectedLines(activeProjectPath); }}
 									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors"
 								>
 									<Plus class="w-4 h-4" />
@@ -369,7 +395,7 @@
 								</button>
 							{:else}
 								<button
-									onclick={() => wb.unstageSelectedLines(projectPath)}
+										onclick={() => { if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath); }}
 									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors"
 								>
 									<Minus class="w-4 h-4" />
@@ -419,7 +445,7 @@
 	{#if discardConfirmAction}
 		<GitConfirmModal
 			confirmAction={discardConfirmAction}
-			onConfirm={() => { if (projectPath) wb.confirmDiscard(projectPath); }}
+				onConfirm={() => { if (activeProjectPath) wb.confirmDiscard(activeProjectPath); }}
 			onCancel={() => wb.cancelDiscard()}
 		/>
 	{/if}

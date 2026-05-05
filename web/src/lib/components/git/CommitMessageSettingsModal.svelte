@@ -9,16 +9,20 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { getModelCatalog, getRemoteSettings } from '$lib/context';
 	import type { SessionProvider } from '$lib/types/app';
+	import type { ApiProtocol } from '$shared/providers';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		onClose: () => void;
 		onSettingsChanged: (settings: {
-			enabled: boolean;
-			provider: SessionProvider;
-			model: string;
-			customPrompt: string;
-			useCommonDirPrefix: boolean;
+				enabled: boolean;
+				provider: SessionProvider;
+				model: string;
+				apiProviderId?: string | null;
+				modelEndpointId?: string | null;
+				modelProtocol?: ApiProtocol | null;
+				customPrompt: string;
+				useCommonDirPrefix: boolean;
 		}) => void;
 	}
 
@@ -56,43 +60,59 @@ Return only the commit message now.`;
 	const modelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
 	let availableModels = $derived(modelCatalog.getModels(provider));
-	let availableProviders = $derived(modelCatalog.getProviders());
+	let availableProviders = $derived(modelCatalog.getSelectableHarnesses());
 	let loaded = $state(false);
 
-	onMount(async () => {
-		try {
-			const snap = await remoteSettings.ensureLoaded();
-			const ui = (snap.ui ?? {}) as Record<string, unknown>;
+		onMount(async () => {
+			let persistedModel = '';
+			let persistedEndpointId: string | null = null;
+			try {
+				const snap = await remoteSettings.ensureLoaded();
+				const ui = (snap.ui ?? {}) as Record<string, unknown>;
 			const uiEffective = (snap.uiEffective ?? {}) as Record<string, unknown>;
 			const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;
-			const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
-			const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
-			enabled = cm.enabled !== false;
-			if (['claude', 'codex', 'opencode', 'amp', 'factory', 'openrouter', 'zai'].includes(cm.provider as string)) {
-				provider = cm.provider as SessionProvider;
-			}
-			if (typeof cm.model === 'string') model = cm.model;
-			if (typeof cm.customPrompt === 'string' && cm.customPrompt) customPrompt = cm.customPrompt;
-			else customPrompt = DEFAULT_PROMPT;
+				const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
+				const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
+				enabled = cm.enabled !== false;
+				if (typeof cm.provider === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(cm.provider)) {
+					provider = cm.provider as SessionProvider;
+				}
+				if (typeof cm.model === 'string') persistedModel = cm.model;
+				if (typeof cm.modelEndpointId === 'string') persistedEndpointId = cm.modelEndpointId;
+				if (typeof cm.customPrompt === 'string' && cm.customPrompt) customPrompt = cm.customPrompt;
+				else customPrompt = DEFAULT_PROMPT;
 			if (typeof cm.useCommonDirPrefix === 'boolean') useCommonDirPrefix = cm.useCommonDirPrefix;
 		} catch { /* use defaults */ }
 
-		await modelCatalog.refreshIfStale();
-		if (!model) {
-			const models = modelCatalog.getModels(provider);
-			if (models.length > 0) model = models[0].value;
+			await modelCatalog.refreshIfStale();
+			if (persistedModel) {
+				model = modelCatalog.selectionValueFor(provider, persistedModel, persistedEndpointId);
+			}
+			if (!model) {
+				const models = modelCatalog.getModels(provider);
+				if (models.length > 0) model = models[0].value;
 		}
 
 		loaded = true;
 	});
 
 	async function persist() {
-		// Store empty string when the prompt matches the default so the
-		// server uses its built-in prompt (avoids drift if the default changes).
-		const promptToStore = isDefaultPrompt ? '' : customPrompt;
-		const payload = { enabled, provider, model, customPrompt: promptToStore, useCommonDirPrefix };
-		await remoteSettings.update({ ui: { commitMessage: payload } });
-		onSettingsChanged({ enabled, provider, model, customPrompt: promptToStore, useCommonDirPrefix });
+			// Store empty string when the prompt matches the default so the
+			// server uses its built-in prompt (avoids drift if the default changes).
+			const promptToStore = isDefaultPrompt ? '' : customPrompt;
+			const selection = modelCatalog.selectionFor(provider, model);
+			const payload = {
+				enabled,
+				provider,
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+				customPrompt: promptToStore,
+				useCommonDirPrefix,
+			};
+			await remoteSettings.update({ ui: { commitMessage: payload } });
+			onSettingsChanged({ ...payload, customPrompt: promptToStore, useCommonDirPrefix });
 	}
 
 	async function handleEnabledChange(next: boolean) {
@@ -109,16 +129,15 @@ Return only the commit message now.`;
 		await persist();
 	}
 
-	function providerLabel(currentProvider: SessionProvider): string {
-		if (currentProvider === 'claude') return m.provider_claude();
+		function providerLabel(currentProvider: SessionProvider): string {
+			if (currentProvider === 'claude') return m.provider_claude();
 		if (currentProvider === 'codex') return m.provider_codex();
 		if (currentProvider === 'opencode') return m.provider_opencode();
 		if (currentProvider === 'amp') return m.provider_amp();
 		if (currentProvider === 'factory') return m.provider_factory();
-		if (currentProvider === 'openrouter') return m.provider_openrouter();
-		if (currentProvider === 'zai') return m.provider_zai();
-		return m.provider_claude();
-	}
+			if (currentProvider) return modelCatalog.getHarnessLabel(currentProvider);
+			return m.provider_claude();
+		}
 
 	async function handleModelChange(e: Event) {
 		model = (e.currentTarget as HTMLSelectElement).value;

@@ -12,14 +12,20 @@ describe('ModelCatalogStore', () => {
 		vi.clearAllMocks();
 	});
 
-	it('uses static fallbacks before remote hydration', () => {
-		const store = createModelCatalogStore();
-		expect(store.getModels('claude').length).toBeGreaterThan(0);
-		expect(store.getModels('codex').length).toBeGreaterThan(0);
-		expect(store.getModels('factory').length).toBeGreaterThan(0);
-		expect(store.getModels('zai')).toEqual([{ value: 'glm-5.1', label: 'GLM-5.1', supportsImages: false }]);
-		expect(store.getDefaultModel('claude')).toBe('opus');
-		expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
+		it('uses static fallbacks before remote hydration', () => {
+			const store = createModelCatalogStore();
+			expect(store.getModels('claude').length).toBeGreaterThan(0);
+			expect(store.getModels('codex').length).toBeGreaterThan(0);
+			expect(store.getModels('factory').length).toBeGreaterThan(0);
+			expect(store.getModels('direct-anthropic-compatible')).toEqual([]);
+			expect(store.getModels('direct-openai-compatible')).toEqual([]);
+			expect(store.getModels('direct-openai-responses-compatible')).toEqual([]);
+			expect(store.getSelectableHarnesses()).not.toContain('direct-anthropic-compatible');
+			expect(store.getSelectableHarnesses()).not.toContain('direct-openai-compatible');
+			expect(store.getSelectableHarnesses()).not.toContain('direct-openai-responses-compatible');
+			expect(store.getModels('zai')).toEqual([]);
+			expect(store.getDefaultModel('claude')).toBe('opus');
+			expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
 		expect(store.getModels('codex')[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
 		const codexModelValues = store.getModels('codex').map((model) => model.value);
 		expect(codexModelValues).not.toContain('gpt-5.2');
@@ -46,12 +52,23 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsImages('factory', 'glm-5')).toBe(false);
 	});
 
-	it('hydrates cached models from localStorage', () => {
+	it('hydrates cached harness models from localStorage', () => {
 		localStorage.setItem(
 			'pref_model_catalog',
 			JSON.stringify({
-				providerModels: {
+				harnessModels: {
 					opencode: [{ value: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' }]
+				},
+				harnessMetadata: {
+					opencode: {
+						id: 'opencode',
+						label: 'OpenCode',
+						supportsFork: false,
+						supportsImages: false,
+						acceptsApiProviderEndpoints: false,
+						supportedProtocols: [],
+						defaultModel: 'deepseek/deepseek-chat'
+					}
 				},
 				lastFetchedAt: Date.now()
 			})
@@ -64,16 +81,30 @@ describe('ModelCatalogStore', () => {
 		expect(store.isStale(60_000)).toBe(false);
 	});
 
-	it('hydrates cached capabilities from localStorage', () => {
+	it('hydrates cached harness capabilities from localStorage', () => {
 		localStorage.setItem(
 			'pref_model_catalog',
 			JSON.stringify({
-				providerModels: {},
-				providerCapabilities: {
-					claude: { supportsFork: true, supportsImages: true },
-					codex: { supportsFork: true, supportsImages: false },
-					opencode: { supportsFork: false, supportsImages: false },
-					factory: { supportsFork: false, supportsImages: false },
+				harnessModels: {},
+				harnessMetadata: {
+					claude: {
+						id: 'claude',
+						label: 'Claude',
+						supportsFork: true,
+						supportsImages: true,
+						acceptsApiProviderEndpoints: true,
+						supportedProtocols: ['anthropic-messages'],
+						defaultModel: 'opus'
+					},
+					codex: {
+						id: 'codex',
+						label: 'Codex',
+						supportsFork: true,
+						supportsImages: false,
+						acceptsApiProviderEndpoints: true,
+						supportedProtocols: ['openai-compatible'],
+						defaultModel: 'gpt-5.5'
+					}
 				},
 				lastFetchedAt: Date.now()
 			})
@@ -85,11 +116,65 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsImages('codex')).toBe(false);
 	});
 
-	it('refreshes when stale and persists merged results', async () => {
+	it('does not expose API provider ids as harnesses from cached metadata', () => {
+		localStorage.setItem(
+			'pref_model_catalog',
+			JSON.stringify({
+				harnessModels: {
+					zai: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
+					openrouter: [{ value: 'openai/gpt-5', label: 'GPT-5' }]
+				},
+				harnessMetadata: {
+					zai: {
+						id: 'zai',
+						label: 'Z.AI',
+						supportsFork: false,
+						supportsImages: false,
+						acceptsApiProviderEndpoints: false,
+						supportedProtocols: [],
+						defaultModel: 'glm-5.1'
+					},
+					openrouter: {
+						id: 'openrouter',
+						label: 'OpenRouter',
+						supportsFork: false,
+						supportsImages: true,
+						acceptsApiProviderEndpoints: false,
+						supportedProtocols: [],
+						defaultModel: 'openai/gpt-5'
+					}
+				},
+				lastFetchedAt: Date.now()
+			})
+		);
+
+		const store = createModelCatalogStore();
+		expect(store.getHarnesses()).not.toContain('zai');
+		expect(store.getHarnesses()).not.toContain('openrouter');
+		expect(store.getModels('zai')).toEqual([]);
+		expect(store.getModels('openrouter')).toEqual([]);
+	});
+
+	it('refreshes when stale and persists clean catalog results', async () => {
 		vi.mocked(clientApi.apiFetch).mockResolvedValue({
 			ok: true,
 			json: async () => ({
-				opencode: [{ value: 'moonshot/kimi-k2', label: 'Kimi K2' }]
+				catalog: {
+					harnesses: [
+						{
+							id: 'opencode',
+							label: 'OpenCode',
+							kind: 'harness',
+							supportsFork: false,
+							supportsImages: false,
+							acceptsApiProviderEndpoints: false,
+							supportedProtocols: [],
+							defaultModel: 'moonshot/kimi-k2',
+							models: [{ value: 'moonshot/kimi-k2', label: 'Kimi K2' }]
+						}
+					],
+					apiProviders: []
+				}
 			})
 		} as unknown as Response);
 
@@ -102,47 +187,68 @@ describe('ModelCatalogStore', () => {
 		expect(store.getModels('codex').length).toBeGreaterThan(0);
 	});
 
-	it('parses catalog.providers from API response', async () => {
+	it('parses catalog.harnesses and catalog.apiProviders from API response', async () => {
 		vi.mocked(clientApi.apiFetch).mockResolvedValue({
 			ok: true,
 			json: async () => ({
-				claude: [{ value: 'opus', label: 'Opus' }],
-				codex: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' }],
-				opencode: [],
 				catalog: {
-					providers: [
+					harnesses: [
 						{
 							id: 'claude',
+							label: 'Claude Code',
+							kind: 'harness',
 							supportsFork: true,
 							supportsImages: true,
-							models: [{ value: 'opus', label: 'Opus', supportsImages: true }],
+							acceptsApiProviderEndpoints: true,
+							supportedProtocols: ['anthropic-messages'],
+							defaultModel: 'opus',
+							models: [{ value: 'opus', label: 'Opus', supportsImages: true }]
 						},
 						{
 							id: 'codex',
+							label: 'Codex',
+							kind: 'harness',
 							supportsFork: true,
 							supportsImages: false,
-							models: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsImages: false }],
-						},
-						{
-							id: 'opencode',
-							supportsFork: false,
-							supportsImages: false,
-							models: [],
+							acceptsApiProviderEndpoints: true,
+							supportedProtocols: ['openai-compatible'],
+							defaultModel: 'gpt-5.3-codex',
+							models: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsImages: false }]
 						},
 						{
 							id: 'factory',
+							label: 'Factory',
+							kind: 'harness',
 							supportsFork: false,
 							supportsImages: false,
-							models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', supportsImages: true }],
-						},
+							acceptsApiProviderEndpoints: false,
+							supportedProtocols: [],
+							defaultModel: 'claude-opus-4-6',
+							models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', supportsImages: true }]
+						}
+					],
+					apiProviders: [
 						{
 							id: 'zai',
-							supportsFork: false,
-							supportsImages: false,
-							models: [{ value: 'glm-5.1', label: 'GLM-5.1', supportsImages: false }],
-						},
-					],
-				},
+							label: 'Z.AI',
+							templateId: 'zai',
+							createdAt: '2026-01-01T00:00:00.000Z',
+							updatedAt: '2026-01-01T00:00:00.000Z',
+							endpoints: [
+								{
+									id: 'zai_anthropic',
+									protocol: 'anthropic-messages',
+									baseUrl: 'https://api.z.ai/api/anthropic',
+									defaultModel: 'glm-5.1',
+									models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
+									supportsImages: false,
+									hasApiKey: true,
+									modelDiscovery: 'none'
+								}
+							]
+						}
+					]
+				}
 			})
 		} as unknown as Response);
 
@@ -153,29 +259,33 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('opencode')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(false);
-		expect(store.supportsImages('zai')).toBe(false);
 		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
-		expect(store.getDefaultModel('zai')).toBe('glm-5.1');
-		// Remote had only opus; static sonnet+haiku are appended
+		expect(store.findEndpoint('zai_anthropic')?.apiProvider.label).toBe('Z.AI');
 		const claudeModels = store.getModels('claude');
 		expect(claudeModels[0]).toMatchObject({ value: 'opus', label: 'Opus', supportsImages: true });
 		expect(claudeModels.find((m) => m.value === 'sonnet')).toBeTruthy();
 	});
 
-	it('merges missing static models into cached results', async () => {
+	it('merges missing static models into catalog results', async () => {
 		vi.mocked(clientApi.apiFetch).mockResolvedValue({
 			ok: true,
 			json: async () => ({
 				catalog: {
-					providers: [
+					harnesses: [
 						{
 							id: 'codex',
+							label: 'Codex',
+							kind: 'harness',
 							supportsFork: true,
 							supportsImages: false,
-							models: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' }],
-						},
+							acceptsApiProviderEndpoints: true,
+							supportedProtocols: ['openai-compatible'],
+							defaultModel: 'gpt-5.3-codex',
+							models: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' }]
+						}
 					],
-				},
+					apiProviders: []
+				}
 			})
 		} as unknown as Response);
 
@@ -184,31 +294,21 @@ describe('ModelCatalogStore', () => {
 
 		const codexModels = store.getModels('codex');
 		expect(codexModels[0]).toMatchObject({ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' });
-		// Static GPT-5.5 should be appended
 		expect(codexModels.find((m) => m.value === 'gpt-5.5')).toBeTruthy();
 		expect(codexModels.length).toBeGreaterThan(1);
 	});
 
-	it('falls back to legacy shape when catalog is absent', async () => {
+	it('records an error for invalid catalog responses', async () => {
 		vi.mocked(clientApi.apiFetch).mockResolvedValue({
 			ok: true,
-			json: async () => ({
-				claude: [{ value: 'opus', label: 'Opus' }],
-				codex: [],
-				opencode: [],
-			})
+			json: async () => ({ claude: [{ value: 'opus', label: 'Opus' }] })
 		} as unknown as Response);
 
 		const store = createModelCatalogStore();
 		await store.forceRefresh();
 
-		// Remote had only opus; static sonnet+haiku are merged in
-		const claudeModels = store.getModels('claude');
-		expect(claudeModels[0]).toMatchObject({ value: 'opus', label: 'Opus' });
-		expect(claudeModels.find((m) => m.value === 'sonnet')).toBeTruthy();
-		// Falls back to default capabilities from common contract
-		expect(store.supportsFork('claude')).toBe(true);
-		expect(store.supportsImages('claude')).toBe(true);
+		expect(store.error).toBe('Model catalog response is invalid');
+		expect(store.getModels('claude').find((m) => m.value === 'sonnet')).toBeTruthy();
 	});
 
 	it('prefers model-level image capability when present', async () => {
@@ -216,18 +316,24 @@ describe('ModelCatalogStore', () => {
 			ok: true,
 			json: async () => ({
 				catalog: {
-					providers: [
+					harnesses: [
 						{
 							id: 'factory',
+							label: 'Factory',
+							kind: 'harness',
 							supportsFork: false,
 							supportsImages: false,
+							acceptsApiProviderEndpoints: false,
+							supportedProtocols: [],
+							defaultModel: 'claude-opus-4-6',
 							models: [
 								{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', supportsImages: true },
-								{ value: 'glm-5', label: 'Droid Core (GLM-5)', supportsImages: false },
-							],
-						},
+								{ value: 'glm-5', label: 'Droid Core (GLM-5)', supportsImages: false }
+							]
+						}
 					],
-				},
+					apiProviders: []
+				}
 			})
 		} as unknown as Response);
 
@@ -237,4 +343,212 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
 		expect(store.supportsImages('factory', 'glm-5')).toBe(false);
 	});
-});
+
+		it('preserves API provider metadata and maps selection values to raw models', async () => {
+		vi.mocked(clientApi.apiFetch).mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				catalog: {
+					harnesses: [
+							{
+								id: 'direct-openai-compatible',
+								label: 'Direct Chat (OpenAI Chat Completions)',
+							kind: 'harness',
+							supportsFork: false,
+							supportsImages: true,
+							acceptsApiProviderEndpoints: true,
+							supportedProtocols: ['openai-compatible'],
+							defaultModel: 'zai_openai:glm-5.1',
+							models: [
+								{
+									value: 'zai_openai:glm-5.1',
+									label: 'Z.AI: GLM-5.1',
+									rawModel: 'glm-5.1',
+									apiProviderId: 'zai',
+									endpointId: 'zai_openai',
+									protocol: 'openai-compatible',
+									supportsImages: false
+								}
+							]
+						}
+					],
+					apiProviders: [
+						{
+							id: 'zai',
+							label: 'Z.AI',
+							templateId: 'zai',
+							createdAt: '2026-01-01T00:00:00.000Z',
+							updatedAt: '2026-01-01T00:00:00.000Z',
+							endpoints: [
+								{
+									id: 'zai_openai',
+									protocol: 'openai-compatible',
+									baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+									capabilities: { chatCompletions: true, responses: false },
+									defaultModel: 'glm-5.1',
+									models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
+									supportsImages: false,
+									hasApiKey: true,
+									modelDiscovery: 'none'
+								}
+							]
+						}
+					]
+				}
+			})
+		} as unknown as Response);
+
+		const store = createModelCatalogStore();
+		await store.forceRefresh();
+
+		expect(store.selectionFor('direct-openai-compatible', 'zai_openai:glm-5.1')).toEqual({
+			model: 'glm-5.1',
+			apiProviderId: 'zai',
+			modelEndpointId: 'zai_openai',
+			modelProtocol: 'openai-compatible'
+		});
+		expect(store.selectionValueFor('direct-openai-compatible', 'glm-5.1', 'zai_openai'))
+			.toBe('zai_openai:glm-5.1');
+		expect(store.supportsImages('direct-openai-compatible', 'glm-5.1', 'zai_openai')).toBe(false);
+			expect(store.findEndpoint('zai_openai')?.endpoint.defaultModel).toBe('glm-5.1');
+		});
+
+		it('maps Direct Responses endpoint selections to raw models', async () => {
+			vi.mocked(clientApi.apiFetch).mockResolvedValue({
+				ok: true,
+				json: async () => ({
+					catalog: {
+						harnesses: [
+							{
+								id: 'direct-openai-responses-compatible',
+								label: 'Direct Chat (OpenAI Responses)',
+								kind: 'harness',
+								supportsFork: false,
+								supportsImages: true,
+								acceptsApiProviderEndpoints: true,
+								supportedProtocols: ['openai-compatible'],
+								defaultModel: 'acme_openai:acme-code',
+								models: [
+									{
+										value: 'acme_openai:acme-code',
+										label: 'Acme: Acme Code',
+										rawModel: 'acme-code',
+										apiProviderId: 'acme',
+										endpointId: 'acme_openai',
+										protocol: 'openai-compatible',
+										supportsImages: false
+									}
+								]
+							}
+						],
+						apiProviders: [
+							{
+								id: 'acme',
+								label: 'Acme',
+								templateId: 'custom',
+								createdAt: '2026-01-01T00:00:00.000Z',
+								updatedAt: '2026-01-01T00:00:00.000Z',
+								endpoints: [
+									{
+										id: 'acme_openai',
+										protocol: 'openai-compatible',
+										baseUrl: 'https://api.acme.test/v1',
+										capabilities: { chatCompletions: false, responses: true },
+										defaultModel: 'acme-code',
+										models: [{ value: 'acme-code', label: 'Acme Code' }],
+										supportsImages: false,
+										hasApiKey: true,
+										modelDiscovery: 'openai-models'
+									}
+								]
+							}
+						]
+					}
+				})
+			} as unknown as Response);
+
+			const store = createModelCatalogStore();
+			await store.forceRefresh();
+
+			expect(store.getSelectableHarnesses()).toContain('direct-openai-responses-compatible');
+			expect(store.selectionFor('direct-openai-responses-compatible', 'acme_openai:acme-code')).toEqual({
+				model: 'acme-code',
+				apiProviderId: 'acme',
+				modelEndpointId: 'acme_openai',
+				modelProtocol: 'openai-compatible'
+			});
+			expect(store.findEndpoint('acme_openai')?.endpoint.capabilities).toEqual({
+				chatCompletions: false,
+				responses: true
+			});
+		});
+
+		it('maps Direct Anthropic endpoint selections to raw models', async () => {
+			vi.mocked(clientApi.apiFetch).mockResolvedValue({
+				ok: true,
+				json: async () => ({
+					catalog: {
+						harnesses: [
+							{
+								id: 'direct-anthropic-compatible',
+								label: 'Direct Chat (Anthropic)',
+								kind: 'harness',
+								supportsFork: false,
+								supportsImages: true,
+								acceptsApiProviderEndpoints: true,
+								supportedProtocols: ['anthropic-messages'],
+								defaultModel: 'acme_anthropic:acme-sonnet',
+								models: [
+									{
+										value: 'acme_anthropic:acme-sonnet',
+										label: 'Acme: Acme Sonnet',
+										rawModel: 'acme-sonnet',
+										apiProviderId: 'acme',
+										endpointId: 'acme_anthropic',
+										protocol: 'anthropic-messages',
+										supportsImages: true
+									}
+								]
+							}
+						],
+						apiProviders: [
+							{
+								id: 'acme',
+								label: 'Acme',
+								templateId: 'custom',
+								createdAt: '2026-01-01T00:00:00.000Z',
+								updatedAt: '2026-01-01T00:00:00.000Z',
+								endpoints: [
+									{
+										id: 'acme_anthropic',
+										protocol: 'anthropic-messages',
+										baseUrl: 'https://api.acme.test',
+										defaultModel: 'acme-sonnet',
+										models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
+										supportsImages: true,
+										hasApiKey: true,
+										modelDiscovery: 'anthropic-models'
+									}
+								]
+							}
+						]
+					}
+				})
+			} as unknown as Response);
+
+			const store = createModelCatalogStore();
+			await store.forceRefresh();
+
+			expect(store.getSelectableHarnesses()).toContain('direct-anthropic-compatible');
+			expect(store.selectionFor('direct-anthropic-compatible', 'acme_anthropic:acme-sonnet')).toEqual({
+				model: 'acme-sonnet',
+				apiProviderId: 'acme',
+				modelEndpointId: 'acme_anthropic',
+				modelProtocol: 'anthropic-messages'
+			});
+			expect(store.selectionValueFor('direct-anthropic-compatible', 'acme-sonnet', 'acme_anthropic'))
+				.toBe('acme_anthropic:acme-sonnet');
+			expect(store.supportsImages('direct-anthropic-compatible', 'acme-sonnet', 'acme_anthropic')).toBe(true);
+			expect(store.findEndpoint('acme_anthropic')?.endpoint.defaultModel).toBe('acme-sonnet');
+		});
+	});

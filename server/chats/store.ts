@@ -15,6 +15,7 @@ import {
   type PermissionMode,
   type ThinkingMode,
 } from '../../common/chat-modes.js';
+import type { ApiProtocol } from '../../common/providers.js';
 import type { ProviderName } from '../providers/types.js';
 import { isArtificialNativePath } from './artificial-native-path.js';
 
@@ -26,6 +27,9 @@ const ALLOWED_PATCH_FIELDS = [
   'providerSessionId',
   'nextForkOrdinal',
   'model',
+  'apiProviderId',
+  'modelEndpointId',
+  'modelProtocol',
   'lastReadAt',
   'permissionMode',
   'thinkingMode',
@@ -41,6 +45,9 @@ export interface ChatRegistryEntry {
   providerSessionId: string | null;
   nextForkOrdinal?: number;
   model: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
   lastReadAt?: string | null;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
@@ -62,6 +69,9 @@ export interface NewChatRegistryEntry {
   tags?: string[];
   providerSessionId?: string | null;
   nextForkOrdinal?: number;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
@@ -114,7 +124,11 @@ function normalizeRegistryModes(entry: {
 }
 
 function normalizeNextForkOrdinal(value: unknown): number | undefined {
-  const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : value;
+  const parsed = typeof value === 'string'
+    ? Number.parseInt(value, 10)
+    : typeof value === 'number'
+      ? value
+      : Number.NaN;
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
@@ -254,6 +268,9 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     tags = [],
     providerSessionId = null,
     nextForkOrdinal = 1,
+    apiProviderId = null,
+    modelEndpointId = null,
+    modelProtocol = null,
     permissionMode = 'default',
     thinkingMode = 'none',
     claudeThinkingMode = 'auto',
@@ -275,6 +292,9 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       providerSessionId,
       nextForkOrdinal: normalizeNextForkOrdinal(nextForkOrdinal) ?? 1,
       model,
+      apiProviderId,
+      modelEndpointId,
+      modelProtocol,
       ...normalizedModes,
     };
     this.#scheduleRegistrySave();

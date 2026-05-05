@@ -11,7 +11,11 @@
 	import Check from '@lucide/svelte/icons/check';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import type { GitFileReviewData, GitReviewCommentDraft, GitDiffTab } from '$lib/api/git.js';
-	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
+	import {
+		makeLineSelectionKey,
+		type DiffMode,
+		type GitDiffActionTarget,
+	} from '$lib/stores/git-workbench.svelte.js';
 
 	interface RenderedDiffRow {
 		kind: 'context' | 'add' | 'del' | 'hunk-header';
@@ -34,19 +38,21 @@
 	}
 
 	interface GitDiffViewerProps {
+		filePath: string;
 		reviewData: GitFileReviewData | null;
 		activeTab: GitDiffTab;
 		diffMode: DiffMode;
 		fontSize?: number;
+		contextLines?: number;
 		selectedLineKeys: Set<string>;
 		isLoading: boolean;
 		readOnly?: boolean;
 		onToggleLineSelection: (key: string) => void;
 		onSelectLineRange: (startKey: string, endKey: string, allKeys: string[]) => void;
-		onStageHunk: (hunkIndex: number) => void;
-		onUnstageHunk: (hunkIndex: number) => void;
-		onStageLine?: (diffLineIndex: number) => void;
-		onUnstageLine?: (diffLineIndex: number) => void;
+		onStageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
+		onUnstageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
+		onStageLine?: (target: GitDiffActionTarget, diffLineIndex: number) => void;
+		onUnstageLine?: (target: GitDiffActionTarget, diffLineIndex: number) => void;
 		onAddComment: (side: 'before' | 'after', line: number) => void;
 		comments?: GitReviewCommentDraft[];
 		composerState?: { open: boolean; filePath: string; side: 'before' | 'after'; line: number; body: string; severity: 'note' | 'warning' | 'blocker' } | null;
@@ -60,10 +66,12 @@
 	}
 
 	let {
+		filePath,
 		reviewData,
 		activeTab,
 		diffMode,
 		fontSize = 12,
+		contextLines = 5,
 		selectedLineKeys,
 		isLoading,
 		readOnly = false,
@@ -88,6 +96,12 @@
 	let lastClickedKey = $state<string | null>(null);
 	let pathCopied = $state(false);
 	let headerFontSize = $derived(Math.max(fontSize - 1, 10));
+	let actionTarget = $derived<GitDiffActionTarget>({
+		filePath,
+		tab: activeTab,
+		mode: activeTab === 'staged' ? 'unstage' : 'stage',
+		contextLines,
+	});
 
 	async function handleCopyPath() {
 		if (!reviewData) return;
@@ -219,11 +233,11 @@
 			? []
 			: rows
 				.filter((r) => r.kind === 'add' || r.kind === 'del')
-				.map((r) => `${r.kind === 'del' ? 'before' : 'after'}:${r.diffLineIndex}`),
+				.map((r) => makeLineSelectionKey(filePath, activeTab, r.kind === 'del' ? 'before' : 'after', r.diffLineIndex)),
 	);
 
 	function lineKey(row: RenderedDiffRow): string {
-		return `${row.kind === 'del' ? 'before' : 'after'}:${row.diffLineIndex}`;
+		return makeLineSelectionKey(filePath, activeTab, row.kind === 'del' ? 'before' : 'after', row.diffLineIndex);
 	}
 
 	function handleLineClick(e: MouseEvent | KeyboardEvent, row: RenderedDiffRow): void {
@@ -249,7 +263,7 @@
 	function handleSplitCellClick(e: MouseEvent | KeyboardEvent, side: 'before' | 'after', diffLineIndex: number, kind: string): void {
 		if (readOnly) return;
 		if (kind !== 'del' && kind !== 'add') return;
-		const key = `${side}:${diffLineIndex}`;
+			const key = makeLineSelectionKey(filePath, activeTab, side, diffLineIndex);
 
 		if (e.shiftKey && lastClickedKey) {
 			onSelectLineRange(lastClickedKey, key, allLineKeys);
@@ -275,7 +289,7 @@
 	function isSplitCellSelected(side: 'before' | 'after', diffLineIndex: number, kind: string): boolean {
 		if (readOnly) return false;
 		if (kind !== 'del' && kind !== 'add') return false;
-		return selectedLineKeys.has(`${side}:${diffLineIndex}`);
+		return selectedLineKeys.has(makeLineSelectionKey(filePath, activeTab, side, diffLineIndex));
 	}
 
 	// Column counts for colspan on inline comment/composer rows
@@ -430,6 +444,16 @@
 		ctxMenu = { ...ctxMenu, open: false };
 	}
 
+	function handleCtxMenuKeydown(e: KeyboardEvent): void {
+		if (e.key === 'Escape') closeCtxMenu();
+	}
+
+	$effect(() => {
+		if (!ctxMenu.open) return;
+		window.addEventListener('keydown', handleCtxMenuKeydown);
+		return () => window.removeEventListener('keydown', handleCtxMenuKeydown);
+	});
+
 	function handleUnifiedCtxMenu(e: MouseEvent, row: RenderedDiffRow): void {
 		if (row.kind === 'hunk-header') return;
 		const side: 'before' | 'after' = row.kind === 'del' ? 'before' : 'after';
@@ -502,7 +526,7 @@
 											{#if !readOnly}
 												{#if activeTab === 'unstaged'}
 													<button
-														onclick={() => onStageHunk(srow.hunkIndex!)}
+														onclick={() => onStageHunk(actionTarget, srow.hunkIndex!)}
 														class="px-1.5 py-0.5 text-[10px] rounded bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors"
 														title="Stage hunk"
 													>
@@ -510,7 +534,7 @@
 													</button>
 												{:else}
 													<button
-														onclick={() => onUnstageHunk(srow.hunkIndex!)}
+														onclick={() => onUnstageHunk(actionTarget, srow.hunkIndex!)}
 														class="px-1.5 py-0.5 text-[10px] rounded bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors"
 														title="Unstage hunk"
 													>
@@ -542,7 +566,7 @@
 												{#if srow.left?.kind === 'del'}
 													{#if activeTab === 'unstaged'}
 														<button
-															onclick={(e) => { e.stopPropagation(); onStageLine?.(srow.left!.diffLineIndex); }}
+															onclick={(e) => { e.stopPropagation(); onStageLine?.(actionTarget, srow.left!.diffLineIndex); }}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
 															title="Stage line"
 														>
@@ -550,7 +574,7 @@
 														</button>
 													{:else}
 														<button
-															onclick={(e) => { e.stopPropagation(); onUnstageLine?.(srow.left!.diffLineIndex); }}
+															onclick={(e) => { e.stopPropagation(); onUnstageLine?.(actionTarget, srow.left!.diffLineIndex); }}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
 															title="Unstage line"
 														>
@@ -598,7 +622,7 @@
 												{#if srow.right?.kind === 'add'}
 													{#if activeTab === 'unstaged'}
 														<button
-															onclick={(e) => { e.stopPropagation(); onStageLine?.(srow.right!.diffLineIndex); }}
+															onclick={(e) => { e.stopPropagation(); onStageLine?.(actionTarget, srow.right!.diffLineIndex); }}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
 															title="Stage line"
 														>
@@ -606,7 +630,7 @@
 														</button>
 													{:else}
 														<button
-															onclick={(e) => { e.stopPropagation(); onUnstageLine?.(srow.right!.diffLineIndex); }}
+															onclick={(e) => { e.stopPropagation(); onUnstageLine?.(actionTarget, srow.right!.diffLineIndex); }}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
 															title="Unstage line"
 														>
@@ -734,7 +758,7 @@
 											{#if !readOnly}
 												{#if activeTab === 'unstaged'}
 													<button
-														onclick={() => onStageHunk(row.hunkIndex!)}
+														onclick={() => onStageHunk(actionTarget, row.hunkIndex!)}
 														class="px-1.5 py-0.5 text-[10px] rounded bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors"
 														title="Stage hunk"
 													>
@@ -742,7 +766,7 @@
 													</button>
 												{:else}
 													<button
-														onclick={() => onUnstageHunk(row.hunkIndex!)}
+														onclick={() => onUnstageHunk(actionTarget, row.hunkIndex!)}
 														class="px-1.5 py-0.5 text-[10px] rounded bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors"
 														title="Unstage hunk"
 													>
@@ -769,7 +793,7 @@
 												{#if row.kind === 'add' || row.kind === 'del'}
 													{#if activeTab === 'unstaged'}
 														<button
-															onclick={(e) => { e.stopPropagation(); onStageLine(row.diffLineIndex); }}
+															onclick={(e) => { e.stopPropagation(); onStageLine(actionTarget, row.diffLineIndex); }}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
 															title="Stage line"
 														>
@@ -777,7 +801,7 @@
 														</button>
 													{:else}
 														<button
-															onclick={(e) => { e.stopPropagation(); onUnstageLine?.(row.diffLineIndex); }}
+															onclick={(e) => { e.stopPropagation(); onUnstageLine?.(actionTarget, row.diffLineIndex); }}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
 															title="Unstage line"
 														>
@@ -901,67 +925,80 @@
 		</div>
 	{/if}
 
-	<!-- Context menu for line-level actions (right-click / long-press) -->
-	{#if ctxMenu.open}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="fixed inset-0 z-50"
-			onclick={closeCtxMenu}
-			oncontextmenu={(e) => { e.preventDefault(); closeCtxMenu(); }}
-			onkeydown={(e) => { if (e.key === 'Escape') closeCtxMenu(); }}
-		>
-			<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+		<!-- Context menu for line-level actions (right-click / long-press) -->
+		{#if ctxMenu.open}
 			<div
-				class="fixed z-50 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[160px] text-xs"
-				style="left:{ctxMenu.x}px; top:{ctxMenu.y}px;"
-				onclick={(e) => e.stopPropagation()}
+				role="presentation"
+				class="fixed inset-0 z-50"
+				onclick={closeCtxMenu}
+				oncontextmenu={(e) => { e.preventDefault(); closeCtxMenu(); }}
+			>
+				<div
+					role="menu"
+					tabindex="-1"
+					class="fixed z-50 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[160px] text-xs"
+					style="left:{ctxMenu.x}px; top:{ctxMenu.y}px;"
+					onclick={(e) => e.stopPropagation()}
+					onkeydown={(e) => e.stopPropagation()}
 			>
 				{#if ctxMenu.line != null}
-					<button
-						onclick={() => { onAddComment(ctxMenu.side, ctxMenu.line!); closeCtxMenu(); }}
-						class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors"
-					>
+						<button
+							type="button"
+							role="menuitem"
+							onclick={() => { onAddComment(ctxMenu.side, ctxMenu.line!); closeCtxMenu(); }}
+							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors"
+						>
 						Add comment
 					</button>
 					{#if onOpenInEditor}
-						<button
-							onclick={() => { onOpenInEditor(ctxMenu.line!); closeCtxMenu(); }}
-							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors"
-						>
+							<button
+								type="button"
+								role="menuitem"
+								onclick={() => { onOpenInEditor(ctxMenu.line!); closeCtxMenu(); }}
+								class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors"
+							>
 							Open in Editor
 						</button>
 					{/if}
 				{/if}
 				{#if !readOnly && ctxMenu.hunkIndex >= 0}
 					{#if activeTab === 'unstaged'}
-						<button
-							onclick={() => { onStageHunk(ctxMenu.hunkIndex); closeCtxMenu(); }}
-							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added"
-						>
+							<button
+								type="button"
+								role="menuitem"
+								onclick={() => { onStageHunk(actionTarget, ctxMenu.hunkIndex); closeCtxMenu(); }}
+								class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added"
+							>
 							Stage hunk
 						</button>
 					{:else}
-						<button
-							onclick={() => { onUnstageHunk(ctxMenu.hunkIndex); closeCtxMenu(); }}
-							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted"
-						>
+							<button
+								type="button"
+								role="menuitem"
+								onclick={() => { onUnstageHunk(actionTarget, ctxMenu.hunkIndex); closeCtxMenu(); }}
+								class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted"
+							>
 							Unstage hunk
 						</button>
 					{/if}
 				{/if}
 				{#if !readOnly && onStageLine && (ctxMenu.rowKind === 'add' || ctxMenu.rowKind === 'del')}
 					{#if activeTab === 'unstaged'}
-						<button
-							onclick={() => { onStageLine!(ctxMenu.diffLineIndex); closeCtxMenu(); }}
-							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added"
-						>
+							<button
+								type="button"
+								role="menuitem"
+								onclick={() => { onStageLine!(actionTarget, ctxMenu.diffLineIndex); closeCtxMenu(); }}
+								class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added"
+							>
 							Stage line
 						</button>
 					{:else}
-						<button
-							onclick={() => { onUnstageLine?.(ctxMenu.diffLineIndex); closeCtxMenu(); }}
-							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted"
-						>
+							<button
+								type="button"
+								role="menuitem"
+								onclick={() => { onUnstageLine?.(actionTarget, ctxMenu.diffLineIndex); closeCtxMenu(); }}
+								class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted"
+							>
 							Unstage line
 						</button>
 					{/if}

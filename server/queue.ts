@@ -230,7 +230,7 @@ export class QueueManager extends EventEmitter {
     await this.#drain(chatId, options);
   }
 
-  // Aborts the running provider session and pauses the queue if entries remain.
+  // Aborts the running harness session and pauses the queue if entries remain.
   async abort(chatId: string): Promise<boolean> {
     const success = await this.#providers!.abortSession(chatId);
     if (success) {

@@ -5,6 +5,11 @@
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { cn } from '$lib/utils/cn';
 	import { formatSidebarChatTimestamp } from './chat-timestamp.js';
+	import {
+		DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID
+	} from '$shared/providers';
 
 	interface SidebarChatSummaryProps {
 		session: ChatSessionRecord;
@@ -39,28 +44,31 @@
 		showTimestamp ? formatSidebarChatTimestamp(activityTimestamp, currentTime) : null
 	);
 
-	const PROVIDER_TAG_VARIANTS: Record<SessionProvider, string> = {
+	const PROVIDER_TAG_VARIANTS: Record<string, string> = {
 		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
 		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
 		opencode: 'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
 		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
 		factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
-		openrouter: 'border-provider-openrouter-border bg-provider-openrouter-bg text-provider-openrouter-foreground',
-		zai: 'border-provider-zai-border bg-provider-zai-bg text-provider-zai-foreground',
+		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
+		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
+		[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
 	};
 
 	let providerTagVariant = $derived(
 		PROVIDER_TAG_VARIANTS[provider] ?? PROVIDER_TAG_VARIANTS.claude
 	);
 	let providerTagLabel = $derived(
-		provider === 'codex' ? m.provider_codex()
-		: provider === 'opencode' ? m.provider_opencode()
-		: provider === 'amp' ? m.provider_amp()
-		: provider === 'factory' ? m.provider_factory()
-		: provider === 'openrouter' ? m.provider_openrouter()
-		: provider === 'zai' ? m.provider_zai()
-		: m.provider_claude()
-	);
+		provider === 'claude' ? m.provider_claude()
+			: provider === 'codex' ? m.provider_codex()
+			: provider === 'opencode' ? m.provider_opencode()
+			: provider === 'amp' ? m.provider_amp()
+			: provider === 'factory' ? m.provider_factory()
+			: provider === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID ? 'Direct OpenAI Chat'
+			: provider === DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID ? 'Direct OpenAI Responses'
+			: provider === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID ? 'Direct Anthropic'
+			: provider || m.provider_claude()
+		);
 	function prefixEllipsis(pathStr: string, maxLen = 40): string {
 		if (!pathStr || pathStr.length <= maxLen) return pathStr;
 		const segments = pathStr.split('/');
@@ -92,48 +100,49 @@
 
 <div class="relative min-w-0 w-full" data-slot="sidebar-chat-summary">
 	<div class="min-w-0 flex-1">
-		<div class="flex min-w-0 items-start gap-2">
-			<div
-				class={cn(
-					'flex min-w-0 flex-1 items-center gap-1.5 truncate text-[14px] font-medium',
-					isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
-				)}
-			>
-				{#if isUnread}
-					<span
-						class="h-1.5 w-1.5 shrink-0 rounded-full bg-indicator-unread"
-						aria-label={m.sidebar_chat_unread()}
-					></span>
-				{/if}
-				<span class="truncate">{chatName}</span>
-			</div>
-
-			{#if formattedTimestamp}
-				<div
-					class={cn(
-						'shrink-0 text-right text-[10px] leading-[1.15] tabular-nums',
-						isSelected
-							? 'text-sidebar-chat-item-selected-foreground/75'
-							: 'text-muted-foreground',
-					)}
-					title={formattedTimestamp.tooltip}
-					aria-label={formattedTimestamp.tooltip}
-				>
-					<div>{formattedTimestamp.dateLabel}</div>
-					<div class="mt-0.5">{formattedTimestamp.timeLabel}</div>
-				</div>
+		<div
+			class={cn(
+				'flex min-w-0 items-center gap-1.5 truncate text-[14px] font-medium',
+				isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
+			)}
+		>
+			{#if isUnread}
+				<span
+					class="h-1.5 w-1.5 shrink-0 rounded-full bg-indicator-unread"
+					aria-label={m.sidebar_chat_unread()}
+				></span>
 			{/if}
+			<span class="truncate">{chatName}</span>
 		</div>
 
-		{#if projectPath}
+		{#if projectPath || formattedTimestamp}
 			<div
 				class={cn(
-					'truncate text-[11px]',
+					'mt-0.5 flex min-w-0 items-baseline gap-1 overflow-hidden text-[12px] leading-[1.3]',
 					isSelected ? 'text-sidebar-chat-item-selected-foreground/80' : 'text-muted-foreground',
 				)}
-				title={projectPath}
 			>
-				{prefixEllipsis(projectPath)}
+				{#if projectPath}
+					<span class="min-w-0 truncate font-semibold" title={projectPath}>
+						{prefixEllipsis(projectPath)}
+					</span>
+				{/if}
+				{#if projectPath && formattedTimestamp}
+					<span class="shrink-0 font-normal" aria-hidden="true">{'\u2022'}</span>
+				{/if}
+				{#if formattedTimestamp}
+					<span
+						class={cn(
+							'shrink-0 whitespace-nowrap font-normal tabular-nums',
+							isSelected
+								? 'text-sidebar-chat-item-selected-foreground/75'
+								: 'text-muted-foreground',
+						)}
+						title={formattedTimestamp.tooltip}
+					>
+						{formattedTimestamp.label}
+					</span>
+				{/if}
 			</div>
 		{/if}
 

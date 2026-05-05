@@ -1,14 +1,18 @@
 // Session and settings types used by app.ts and components.
 
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$shared/chat-modes';
+import type { ApiProtocol } from '$shared/providers';
 
 export type SidebarSearchBarPosition = 'top' | 'bottom';
 export type PinnedInsertPosition = 'top' | 'bottom';
 
 export interface ChatSession {
 	id: string;
-	provider: 'claude' | 'codex' | 'opencode' | 'amp' | 'factory' | 'openrouter' | 'zai';
+	provider: string;
 	model: string | null;
+	apiProviderId?: string | null;
+	modelEndpointId?: string | null;
+	modelProtocol?: ApiProtocol | null;
 	permissionMode?: PermissionMode;
 	thinkingMode?: ThinkingMode;
 	claudeThinkingMode?: ClaudeThinkingMode;

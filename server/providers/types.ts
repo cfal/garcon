@@ -13,10 +13,18 @@ import {
   type ThinkingMode,
 } from '../../common/chat-modes.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
-import type { ProviderId } from '../../common/providers.js';
+import type { HarnessId, ApiProtocol } from '../../common/providers.js';
 
 export type { AgentCommandImage, AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode };
-export type ProviderName = ProviderId;
+export type ProviderName = HarnessId;
+
+export type CodexConfigValue = string | number | boolean | CodexConfigValue[] | { [key: string]: CodexConfigValue };
+export type CodexConfigObject = { [key: string]: CodexConfigValue };
+
+export interface CodexProviderConfig {
+  config: CodexConfigObject;
+  env?: Record<string, string>;
+}
 
 // Persisted chat execution state read from the registry.
 export interface PersistedChatExecutionConfig {
@@ -35,13 +43,17 @@ export interface ProviderExecutionConfig extends PersistedChatExecutionConfig {
   model: string;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
 }
 
-// Request to start a new provider session.
+// Request to start a new harness session.
 export interface StartSessionRequest extends ProviderExecutionConfig {
   command: string;
   images?: AgentCommandImage[];
   envOverrides?: Record<string, string>;
+  codexConfig?: CodexProviderConfig;
 }
 
 export interface StartedProviderSession {
@@ -60,6 +72,7 @@ export interface ResumeTurnRequest extends ProviderExecutionConfig {
   command: string;
   images?: AgentCommandImage[];
   envOverrides?: Record<string, string>;
+  codexConfig?: CodexProviderConfig;
 }
 
 // One-shot query with relaxed requirements (no session lifecycle).
@@ -79,6 +92,9 @@ export interface ProviderChatEntry {
   projectPath: string;
   providerSessionId?: string | null;
   model?: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
@@ -139,6 +155,9 @@ export interface RunProviderTurnRequest {
   command: string;
   images?: AgentCommandImage[];
   model?: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;

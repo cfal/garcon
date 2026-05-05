@@ -3,12 +3,13 @@
 // chat-completions APIs such as OpenRouter and Z.AI.
 
 import crypto from 'crypto';
-import { promises as fs } from 'fs';
-import { AssistantMessage, type ChatMessage } from '../../common/chat-types.js';
+import { AssistantMessage } from '../../common/chat-types.js';
 import type { SharedModelOption } from '../../common/models.js';
 import { createArtificialNativePath } from '../chats/artificial-native-path.js';
 import { AbsProvider } from './base.js';
 import type { AgentCommandImage, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from './types.js';
+import { DirectSessionStore, type DirectConversationMessage } from './direct-compatible-session-store.js';
+import { readSseDataEvents } from './sse.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -22,7 +23,7 @@ interface OpenAiCompatibleContentPart {
 }
 
 interface ConversationMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant';
   content: string | OpenAiCompatibleContentPart[];
 }
 
@@ -47,7 +48,6 @@ interface ModelFetchContext {
 export interface OpenAiCompatibleChatProviderConfig {
   providerId: string;
   providerLabel: string;
-  apiKeyEnvVar: string;
   defaultModel: string;
   fallbackModels: SharedModelOption[];
   getApiKey: () => string;
@@ -104,16 +104,19 @@ export function extractOpenAiCompatibleTextContent(content: ConversationMessage[
     .join('\n');
 }
 
+function persistedToOpenAiMessage(message: DirectConversationMessage): ConversationMessage {
+  return {
+    role: message.role,
+    content: message.content,
+  };
+}
+
 export async function runOpenAiCompatibleSingleQuery(
   config: OpenAiCompatibleChatProviderConfig,
   prompt: string,
   options: Record<string, unknown> = {},
 ): Promise<string> {
   const apiKey = config.getApiKey();
-  if (!apiKey) {
-    throw new Error(`${config.apiKeyEnvVar} is not set`);
-  }
-
   const model = typeof options.model === 'string' && options.model
     ? options.model
     : config.defaultModel;
@@ -146,6 +149,7 @@ export async function runOpenAiCompatibleSingleQuery(
 
 export class OpenAiCompatibleChatProvider extends AbsProvider {
   readonly #config: OpenAiCompatibleChatProviderConfig;
+  readonly #sessionStore: DirectSessionStore;
   #sessions = new Map<string, ProviderSession>();
   #modelCache: SharedModelOption[] | null = null;
   #modelCacheTime = 0;
@@ -154,29 +158,46 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
   constructor(config: OpenAiCompatibleChatProviderConfig) {
     super();
     this.#config = config;
+    this.#sessionStore = new DirectSessionStore({
+      getSessionDir: config.getSessionDir,
+      getSessionFilePath: config.getSessionFilePath,
+    });
   }
 
-  async #ensureSessionDir(): Promise<void> {
-    await fs.mkdir(this.#config.getSessionDir(), { recursive: true });
+  async #persistMessage(sessionId: string, role: 'user' | 'assistant', content: string): Promise<void> {
+    try {
+      await this.#sessionStore.append(sessionId, role, content);
+    } catch (error: any) {
+      console.warn(`${this.#config.providerId}(${sessionId.slice(0, 8)}): persist failed:`, error?.message ?? String(error));
+    }
   }
 
-  async #persistMessage(sessionId: string, role: string, content: string): Promise<void> {
-    await this.#ensureSessionDir();
-    const line = JSON.stringify({ role, content, timestamp: new Date().toISOString() }) + '\n';
-    await fs.appendFile(this.#config.getSessionFilePath(sessionId), line);
+  async #hydrateSession(sessionId: string, request: ResumeTurnRequest): Promise<ProviderSession | null> {
+    const messages = await this.#sessionStore.read(sessionId);
+    if (!messages) {
+      throw new Error(`Cannot hydrate ${this.#config.providerLabel} session without persisted messages: ${sessionId}`);
+    }
+
+    const session: ProviderSession = {
+      abortController: null,
+      aborted: false,
+      chatId: request.chatId,
+      id: sessionId,
+      isRunning: false,
+      messages: messages.map(persistedToOpenAiMessage),
+      model: request.model || this.#config.defaultModel,
+      startTime: Date.now(),
+    };
+    this.#sessions.set(sessionId, session);
+    return session;
   }
 
   async #streamCompletion(session: ProviderSession): Promise<string> {
     const apiKey = this.#config.getApiKey();
-    if (!apiKey) {
-      throw new Error(`${this.#config.apiKeyEnvVar} is not set`);
-    }
-
     const abortController = new AbortController();
     session.abortController = abortController;
 
     const streamTimer = setTimeout(() => abortController.abort(), STREAM_TIMEOUT_MS);
-    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
     try {
       const response = await fetch(`${this.#config.getBaseUrl()}/chat/completions`, {
@@ -194,41 +215,30 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
         const errorText = await response.text();
         throw new Error(`${this.#config.providerLabel} API error ${response.status}: ${errorText}`);
       }
+      if (!response.body) {
+        throw new Error(`${this.#config.providerLabel} response did not include a stream body.`);
+      }
 
-      reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
       let accumulated = '';
       let lastStreamError = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      await readSseDataEvents(response.body, (data) => {
+        if (data === '[DONE]') return;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop()!;
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') continue;
-
-          try {
-            const parsed = JSON.parse(data) as {
-              choices?: Array<{ delta?: { content?: unknown } }>;
-              error?: { message?: string };
-            };
-            if (parsed.error?.message) {
-              lastStreamError = parsed.error.message;
-              continue;
-            }
-            accumulated = appendDeltaText(accumulated, parsed.choices?.[0]?.delta?.content);
-          } catch {
-            // Skips malformed chunks.
+        try {
+          const parsed = JSON.parse(data) as {
+            choices?: Array<{ delta?: { content?: unknown } }>;
+            error?: { message?: string };
+          };
+          if (parsed.error?.message) {
+            lastStreamError = parsed.error.message;
+            return;
           }
+          accumulated = appendDeltaText(accumulated, parsed.choices?.[0]?.delta?.content);
+        } catch {
+          // Skips malformed chunks.
         }
-      }
+      });
 
       if (!accumulated.trim() && lastStreamError) {
         throw new Error(`${this.#config.providerLabel} stream error: ${lastStreamError}`);
@@ -238,9 +248,6 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
     } finally {
       clearTimeout(streamTimer);
       session.abortController = null;
-      if (reader) {
-        reader.cancel().catch(() => {});
-      }
     }
   }
 
@@ -260,13 +267,11 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
 
       session.messages.push({ role: 'assistant', content: response });
 
+      await this.#persistMessage(session.id, 'assistant', response);
+
       const timestamp = new Date().toISOString();
       this.emitMessages(session.chatId, [new AssistantMessage(timestamp, response)]);
       this.emitFinished(session.chatId, 0);
-
-      void this.#persistMessage(session.id, 'assistant', response).catch((error) => {
-        console.warn(`${this.#config.providerId}(${session.id.slice(0, 8)}): persist failed:`, error.message);
-      });
     } catch (error: unknown) {
       if (session.aborted) return;
       this.emitFailed(session.chatId, error instanceof Error ? error.message : String(error));
@@ -295,9 +300,7 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
     this.#sessions.set(sessionId, session);
     this.emitSessionCreated(request.chatId);
 
-    void this.#persistMessage(sessionId, 'user', textContent).catch((error) => {
-      console.warn(`${this.#config.providerId}(${sessionId.slice(0, 8)}): persist failed:`, error.message);
-    });
+    await this.#persistMessage(sessionId, 'user', textContent);
 
     void this.#runTurnInternal(session);
 
@@ -308,7 +311,8 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
-    const session = this.#sessions.get(request.providerSessionId);
+    const session = this.#sessions.get(request.providerSessionId)
+      ?? await this.#hydrateSession(request.providerSessionId, request);
     if (!session) {
       throw new Error(`Unknown ${this.#config.providerLabel} session: ${request.providerSessionId}`);
     }
@@ -331,9 +335,7 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
     session.messages.push({ role: 'user', content: userContent });
     session.chatId = request.chatId;
 
-    void this.#persistMessage(session.id, 'user', textContent).catch((error) => {
-      console.warn(`${this.#config.providerId}(${session.id.slice(0, 8)}): persist failed:`, error.message);
-    });
+    await this.#persistMessage(session.id, 'user', textContent);
 
     await this.#runTurnInternal(session);
   }

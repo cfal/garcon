@@ -110,10 +110,10 @@ describe('tool display helpers', () => {
 
 	it('preserves plan content in display details', () => {
 		const details = getToolDisplayDetails(
-			new ExitPlanModeToolUseMessage('', 'tool-4', 'Implement the migration.'),
+			new ExitPlanModeToolUseMessage('', 'tool-4', 'Implement the change.'),
 		);
 		expect(details).toEqual({
-			plan: 'Implement the migration.',
+			plan: 'Implement the change.',
 		});
 	});
 });

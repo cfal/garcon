@@ -170,23 +170,26 @@
 				</span>
 				<span class="truncate text-foreground">{node.name}</span>
 			</button>
-			{#if node.staged && onUnstageDir}
-				<button
-					onclick={(e) => { e.stopPropagation(); onUnstageDir(node.path); }}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-					title="Unstage directory"
-				>
-					<Minus class="w-3 h-3 text-git-deleted" />
-				</button>
-			{:else if (node.hasUnstaged || node.changeKind === 'untracked') && onStageDir}
-				<button
-					onclick={(e) => { e.stopPropagation(); onStageDir(node.path); }}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-					title="Stage directory"
-				>
-					<Plus class="w-3 h-3 text-git-added" />
-				</button>
-			{/if}
+				{#if (node.hasUnstaged || node.changeKind === 'untracked') && onStageDir}
+					<button
+						type="button"
+						onclick={(e) => { e.stopPropagation(); onStageDir(node.path); }}
+						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+						title="Stage directory"
+					>
+						<Plus class="w-3 h-3 text-git-added" />
+					</button>
+				{/if}
+				{#if node.staged && onUnstageDir}
+					<button
+						type="button"
+						onclick={(e) => { e.stopPropagation(); onUnstageDir(node.path); }}
+						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+						title="Unstage directory"
+					>
+						<Minus class="w-3 h-3 text-git-deleted" />
+					</button>
+				{/if}
 		</div>
 
 		{#if !isCollapsed && node.children}
@@ -240,49 +243,36 @@
 					{changeKindBadge(node.changeKind)}
 				</span>
 			{/if}
-			{#if node.staged && onUnstageFile}
-				<button
-					onclick={(e) => { e.stopPropagation(); onUnstageFile(node.path); }}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-					title="Unstage file"
-				>
-					<Minus class="w-3 h-3 text-git-deleted" />
-				</button>
-			{:else if !node.staged && node.hasUnstaged && onStageFile}
-				{#if onDiscardFile}
+				{#if (node.hasUnstaged || node.changeKind === 'untracked') && onStageFile}
+					{#if onDiscardFile}
+						<button
+							type="button"
+							onclick={(e) => { e.stopPropagation(); onDiscardFile(node.path); }}
+							class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-status-error/20 transition-opacity shrink-0"
+							title={node.changeKind === 'untracked' ? 'Delete untracked file' : 'Discard changes'}
+						>
+							<Undo2 class="w-3 h-3 text-muted-foreground hover:text-status-error-foreground" />
+						</button>
+					{/if}
 					<button
-						onclick={(e) => { e.stopPropagation(); onDiscardFile(node.path); }}
-						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-status-error/20 transition-opacity shrink-0"
-						title="Discard changes"
+						type="button"
+						onclick={(e) => { e.stopPropagation(); onStageFile(node.path); }}
+						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+						title="Stage file"
 					>
-						<Undo2 class="w-3 h-3 text-muted-foreground hover:text-status-error-foreground" />
+						<Plus class="w-3 h-3 text-git-added" />
 					</button>
 				{/if}
-				<button
-					onclick={(e) => { e.stopPropagation(); onStageFile(node.path); }}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-					title="Stage file"
-				>
-					<Plus class="w-3 h-3 text-git-added" />
-				</button>
-			{:else if node.changeKind === 'untracked' && onStageFile}
-				{#if onDiscardFile}
+				{#if node.staged && onUnstageFile}
 					<button
-						onclick={(e) => { e.stopPropagation(); onDiscardFile(node.path); }}
-						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-status-error/20 transition-opacity shrink-0"
-						title="Delete untracked file"
+						type="button"
+						onclick={(e) => { e.stopPropagation(); onUnstageFile(node.path); }}
+						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+						title="Unstage file"
 					>
-						<Undo2 class="w-3 h-3 text-muted-foreground hover:text-status-error-foreground" />
+						<Minus class="w-3 h-3 text-git-deleted" />
 					</button>
 				{/if}
-				<button
-					onclick={(e) => { e.stopPropagation(); onStageFile(node.path); }}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-					title="Stage file"
-				>
-					<Plus class="w-3 h-3 text-git-added" />
-				</button>
-			{/if}
 			{#if node.staged}
 				<span class="ml-1 w-1.5 h-1.5 rounded-full bg-git-added shrink-0" title="Staged"></span>
 			{/if}

@@ -7,21 +7,20 @@ function makeRunningChatsMsg(sessions: ChatSessionsRunningMessage['sessions']): 
 	return new ChatSessionsRunningMessage(sessions);
 }
 
-describe('extractRunningChatIds', () => {
-	it('flattens provider-grouped sessions into a set of IDs', () => {
+	describe('extractRunningChatIds', () => {
+		it('flattens provider-grouped sessions into a set of IDs', () => {
 			const msg = new ChatSessionsRunningMessage({
-				claude: [{ id: 'c1' }, { id: 'c2' }],
-				codex: [{ id: 'x1' }],
-				opencode: [],
-				amp: [],
-				factory: [],
-				openrouter: [],
-				zai: [],
-			});
+					claude: [{ id: 'c1' }, { id: 'c2' }],
+					codex: [{ id: 'x1' }],
+					'direct-anthropic-compatible': [{ id: 'a1' }],
+					'direct-openai-compatible': [{ id: 'd1' }],
+					'direct-openai-responses-compatible': [{ id: 'r1' }],
+					custom_provider: [{ id: 'custom-1' }],
+				});
 
-		const ids = extractRunningChatIds(msg);
-		expect(ids).toEqual(new Set(['c1', 'c2', 'x1']));
-	});
+				const ids = extractRunningChatIds(msg);
+				expect(ids).toEqual(new Set(['c1', 'c2', 'x1', 'a1', 'd1', 'r1', 'custom-1']));
+		});
 
 	it('filters out entries with missing IDs', () => {
 		// Defensive: server contract guarantees id, but runtime data
@@ -40,10 +39,10 @@ describe('extractRunningChatIds', () => {
 	});
 
 		it('handles empty sessions', () => {
-			const msg = new ChatSessionsRunningMessage({ claude: [], codex: [], opencode: [], amp: [], factory: [], openrouter: [], zai: [] });
+			const msg = new ChatSessionsRunningMessage({});
 
-		const ids = extractRunningChatIds(msg);
-		expect(ids.size).toBe(0);
+			const ids = extractRunningChatIds(msg);
+			expect(ids.size).toBe(0);
 	});
 
 	it('handles missing sessions field', () => {
@@ -61,27 +60,25 @@ describe('handleRunningChats', () => {
 		const ctx: RunningChatsContext = { reconcileProcessing };
 
 			const msg = makeRunningChatsMsg({
-				claude: [{ id: 'a' }],
-				codex: [{ id: 'b' }],
-				opencode: [],
-				amp: [],
-				factory: [],
-				openrouter: [],
-				zai: [],
-			});
+					claude: [{ id: 'a' }],
+					codex: [{ id: 'b' }],
+					'direct-anthropic-compatible': [{ id: 'anthropic' }],
+					'direct-openai-compatible': [{ id: 'direct' }],
+					'direct-openai-responses-compatible': [{ id: 'responses' }],
+				});
 
 		handleRunningChats(msg, ctx);
 
 		expect(reconcileProcessing).toHaveBeenCalledOnce();
 		const receivedSet = reconcileProcessing.mock.calls[0][0] as Set<string>;
-		expect(receivedSet).toEqual(new Set(['a', 'b']));
-	});
+				expect(receivedSet).toEqual(new Set(['a', 'b', 'anthropic', 'direct', 'responses']));
+			});
 
 	it('passes empty set when no running chats', () => {
 		const reconcileProcessing = vi.fn();
 		const ctx: RunningChatsContext = { reconcileProcessing };
 
-			const msg = makeRunningChatsMsg({ claude: [], codex: [], opencode: [], amp: [], factory: [], openrouter: [], zai: [] });
+			const msg = makeRunningChatsMsg({});
 			handleRunningChats(msg, ctx);
 
 		const receivedSet = reconcileProcessing.mock.calls[0][0] as Set<string>;

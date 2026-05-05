@@ -5,7 +5,7 @@
 
 	import GitDiffViewer from './GitDiffViewer.svelte';
 	import type { GitFileReviewData, GitReviewCommentDraft, GitDiffTab } from '$lib/api/git.js';
-	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
+	import type { DiffMode, GitDiffActionTarget } from '$lib/stores/git-workbench.svelte.js';
 
 	interface VirtualListItem {
 		filePath: string;
@@ -16,16 +16,17 @@
 		items: VirtualListItem[];
 		activeTab: GitDiffTab;
 		diffMode: DiffMode;
+		contextLines: number;
 		fontSize?: number;
 		selectedLineKeys: Set<string>;
 		overscan?: number;
 		onRequestLoad: (filePaths: string[]) => void;
 		onToggleLineSelection: (key: string) => void;
 		onSelectLineRange: (startKey: string, endKey: string, allKeys: string[]) => void;
-		onStageHunk: (hunkIndex: number) => void;
-		onUnstageHunk: (hunkIndex: number) => void;
-		onStageLine?: (diffLineIndex: number) => void;
-		onUnstageLine?: (diffLineIndex: number) => void;
+		onStageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
+		onUnstageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
+		onStageLine?: (target: GitDiffActionTarget, diffLineIndex: number) => void;
+		onUnstageLine?: (target: GitDiffActionTarget, diffLineIndex: number) => void;
 		onAddCommentForFile: (filePath: string, side: 'before' | 'after', line: number) => void;
 		commentsForFile?: (filePath: string) => GitReviewCommentDraft[];
 		composerState?: { open: boolean; filePath: string; side: 'before' | 'after'; line: number; body: string; severity: 'note' | 'warning' | 'blocker' } | null;
@@ -43,6 +44,7 @@
 		items,
 		activeTab,
 		diffMode,
+		contextLines,
 		fontSize = 12,
 		selectedLineKeys,
 		overscan = 5,
@@ -229,21 +231,22 @@
 					style="position:absolute; top:{offsets[idx]}px; left:0; right:0;"
 				>
 					<div class="border-b border-border min-h-48">
-						<GitDiffViewer
-							reviewData={item.reviewData}
-							{activeTab}
-							{diffMode}
-							{fontSize}
-							{selectedLineKeys}
-							isLoading={!item.reviewData}
-							readOnly
-							{onToggleLineSelection}
-							{onSelectLineRange}
+							<GitDiffViewer
+								filePath={item.filePath}
+								reviewData={item.reviewData}
+								{activeTab}
+								{diffMode}
+								{contextLines}
+								{fontSize}
+								{selectedLineKeys}
+								isLoading={!item.reviewData}
+								{onToggleLineSelection}
+								{onSelectLineRange}
 							{onStageHunk}
 							{onUnstageHunk}
 							{onStageLine}
 							{onUnstageLine}
-							onAddComment={(side, line) => onAddCommentForFile(item.filePath, side, line)}
+							onAddComment={(side: 'before' | 'after', line: number) => onAddCommentForFile(item.filePath, side, line)}
 							comments={commentsForFile?.(item.filePath) ?? []}
 							{composerState}
 							{onComposerBodyChange}
@@ -252,7 +255,7 @@
 							{onComposerClose}
 							{onEditComment}
 							{onRemoveComment}
-							onOpenInEditor={(line) => onOpenInEditor?.(item.filePath, line)}
+							onOpenInEditor={(line: number) => onOpenInEditor?.(item.filePath, line)}
 						/>
 					</div>
 				</div>

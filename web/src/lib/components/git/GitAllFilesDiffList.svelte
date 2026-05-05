@@ -4,7 +4,7 @@
 
 	import GitDiffViewer from './GitDiffViewer.svelte';
 	import type { GitFileReviewData, GitDiffTab } from '$lib/api/git.js';
-	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
+	import type { DiffMode, GitDiffActionTarget } from '$lib/stores/git-workbench.svelte.js';
 
 	interface DiffListItem {
 		filePath: string;
@@ -19,10 +19,10 @@
 		itemMinHeightClass?: string;
 		onToggleLineSelection: (key: string) => void;
 		onSelectLineRange: (startKey: string, endKey: string, allKeys: string[]) => void;
-		onStageHunk: (hunkIndex: number) => void;
-		onUnstageHunk: (hunkIndex: number) => void;
-		onStageLine?: (diffLineIndex: number) => void;
-		onUnstageLine?: (diffLineIndex: number) => void;
+		onStageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
+		onUnstageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
+		onStageLine?: (target: GitDiffActionTarget, diffLineIndex: number) => void;
+		onUnstageLine?: (target: GitDiffActionTarget, diffLineIndex: number) => void;
 		onAddCommentForFile: (filePath: string, side: 'before' | 'after', line: number) => void;
 	}
 
@@ -50,10 +50,11 @@
 	{:else}
 		{#each items as item (item.filePath)}
 			<div class={itemMinHeightClass}>
-				<GitDiffViewer
-					reviewData={item.reviewData}
-					{activeTab}
-					diffMode={diffMode}
+					<GitDiffViewer
+						filePath={item.filePath}
+						reviewData={item.reviewData}
+						{activeTab}
+						diffMode={diffMode}
 					selectedLineKeys={selectedLineKeys}
 					isLoading={!item.reviewData}
 					readOnly
@@ -63,7 +64,7 @@
 					onUnstageHunk={onUnstageHunk}
 					{onStageLine}
 					{onUnstageLine}
-					onAddComment={(side, line) => onAddCommentForFile(item.filePath, side, line)}
+					onAddComment={(side: 'before' | 'after', line: number) => onAddCommentForFile(item.filePath, side, line)}
 				/>
 			</div>
 		{/each}

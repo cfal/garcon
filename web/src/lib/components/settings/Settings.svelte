@@ -1,10 +1,9 @@
-<!-- Settings dialog. Renders a single scrollable page with agents at
-     the top, followed by Local and Remote settings sections. -->
+<!-- Renders the settings dialog as one scrollable page. -->
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getAppShell, getRemoteSettings } from '$lib/context';
-	import AgentsSection from './AgentsSection.svelte';
+	import ApiProvidersSection from './ApiProvidersSection.svelte';
 	import LocalSettingsSection from './LocalSettingsSection.svelte';
 	import RemoteSettingsSection from './RemoteSettingsSection.svelte';
 
@@ -42,8 +41,8 @@
 
 		<div class="flex-1 min-h-0 overflow-y-auto px-6 py-6" bind:this={scrollContainer}>
 			<div class="space-y-8">
-				<div data-section="agents" class="space-y-3">
-					<AgentsSection />
+				<div data-section="api-providers" class="space-y-3">
+					<ApiProvidersSection />
 				</div>
 
 				<div data-section="local" class="space-y-3">

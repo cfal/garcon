@@ -28,13 +28,14 @@ import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { AmpAgentMode, PendingPermissionRequest, PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { AppTab, SessionProvider } from '$lib/types/app';
+import type { ApiProtocol } from '$shared/providers';
 
 export interface SessionControllerDeps {
 	sessions: {
 		selectedChatId: string | null;
 		selectedChat: ChatSessionRecord | null;
 		byId: Record<string, ChatSessionRecord>;
-		startupByChatId: Record<string, { provider: string; model: string; tags?: string[]; permissionMode: PermissionMode; thinkingMode: ThinkingMode; claudeThinkingMode?: string; ampAgentMode: AmpAgentMode; firstMessage: string; initialImages?: File[] }>;
+			startupByChatId: Record<string, { provider: string; model: string; apiProviderId?: string | null; modelEndpointId?: string | null; modelProtocol?: ApiProtocol | null; tags?: string[]; permissionMode: PermissionMode; thinkingMode: ThinkingMode; claudeThinkingMode?: string; ampAgentMode: AmpAgentMode; firstMessage: string; initialImages?: File[] }>;
 		isDraft: (chatId: string) => boolean;
 		patchDraftStartup: (chatId: string, patch: Record<string, unknown>) => void;
 		patchChat: (chatId: string, patch: Record<string, unknown>) => void;
@@ -49,7 +50,16 @@ export interface SessionControllerDeps {
 	lifecycle: ChatLifecycleStore;
 	startupCoordinator: StartupCoordinator;
 	ws: WsConnection;
-	modelCatalog: { isLocalModel: (provider: SessionProvider, model: string) => boolean };
+		modelCatalog: {
+			isLocalModel: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => boolean;
+			selectionFor: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => {
+				model: string;
+				apiProviderId: string | null;
+				modelEndpointId: string | null;
+				modelProtocol: ApiProtocol | null;
+			};
+			selectionValueFor: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => string;
+		};
 	appShell: { quietRefreshChats: () => void; openNewChatDialog: (opts: { prefill: string }) => void };
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
 	navigation: { setActiveTab: (tab: AppTab) => void };
@@ -121,7 +131,17 @@ export class ConversationSessionController {
 			deps.providerState.setProvider(selected.provider);
 		}
 		if (selected.model) {
-			deps.providerState.model = selected.model;
+			const modelValue = deps.modelCatalog.selectionValueFor(
+				selected.provider,
+				selected.model,
+				selected.modelEndpointId,
+			);
+			deps.providerState.setModelSelection({
+				model: modelValue,
+				apiProviderId: selected.apiProviderId ?? null,
+				modelEndpointId: selected.modelEndpointId ?? null,
+				modelProtocol: selected.modelProtocol ?? null,
+			});
 		}
 
 		if (selected.status === 'draft') {
@@ -129,7 +149,17 @@ export class ConversationSessionController {
 			const startup = deps.sessions.startupByChatId[chatId];
 			if (startup) {
 				deps.providerState.setProvider(startup.provider as Parameters<typeof deps.providerState.setProvider>[0]);
-				deps.providerState.model = startup.model;
+				const modelValue = deps.modelCatalog.selectionValueFor(
+					startup.provider,
+					startup.model,
+					startup.modelEndpointId,
+				);
+				deps.providerState.setModelSelection({
+					model: modelValue,
+					apiProviderId: startup.apiProviderId ?? null,
+					modelEndpointId: startup.modelEndpointId ?? null,
+					modelProtocol: startup.modelProtocol ?? null,
+				});
 				if (startup.permissionMode) {
 					deps.providerState.permissionMode = startup.permissionMode;
 				}
@@ -265,6 +295,9 @@ export class ConversationSessionController {
 			deps.startupCoordinator.beginLocalStartup(chatId);
 			const provider = startup?.provider ?? selected.provider;
 			const model = startup?.model ?? selected.model ?? deps.providerState.model;
+			const apiProviderId = startup?.apiProviderId ?? selected.apiProviderId ?? deps.providerState.apiProviderId;
+			const modelEndpointId = startup?.modelEndpointId ?? selected.modelEndpointId ?? deps.providerState.modelEndpointId;
+			const modelProtocol = startup?.modelProtocol ?? selected.modelProtocol ?? deps.providerState.modelProtocol;
 			const permissionMode = startup?.permissionMode ?? deps.providerState.permissionMode;
 			const thinkingMode = startup?.thinkingMode ?? deps.providerState.thinkingMode;
 			const ampAgentMode = startup?.ampAgentMode ?? deps.providerState.ampAgentMode;
@@ -276,6 +309,9 @@ export class ConversationSessionController {
 					provider: provider as typeof deps.providerState.provider,
 					projectPath: selected.projectPath,
 					model,
+					apiProviderId,
+					modelEndpointId,
+					modelProtocol,
 					permissionMode,
 					thinkingMode,
 					claudeThinkingMode: 'auto',
@@ -305,8 +341,16 @@ export class ConversationSessionController {
 				];
 			}
 		} else {
+			const selection = deps.modelCatalog.selectionFor(
+				deps.providerState.provider,
+				deps.providerState.model,
+				deps.providerState.modelEndpointId,
+			);
 			const sent = await deps.composerState.submitMessage(deps.ws, chatId, {
-				model: selected.model ?? deps.providerState.model,
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
 				permissionMode: deps.providerState.permissionMode,
 				thinkingMode: deps.providerState.thinkingMode,
 				claudeThinkingMode: 'auto',
@@ -360,20 +404,29 @@ export class ConversationSessionController {
 			if (!chatId || !path) return;
 
 			deps.lifecycle.activateLoading();
-			deps.lifecycle.setCanAbort(true);
-			deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
-
-			deps.ws.sendMessage(
-				new AgentRunRequest(
-					chatId,
-					buildApprovalMessage(),
-					mode,
-					deps.providerState.thinkingMode,
+				deps.lifecycle.setCanAbort(true);
+				deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
+				const selection = deps.modelCatalog.selectionFor(
+					deps.providerState.provider,
 					deps.providerState.model,
-					'auto',
-					deps.providerState.ampAgentMode,
-				),
-			);
+					deps.providerState.modelEndpointId,
+				);
+
+				deps.ws.sendMessage(
+					new AgentRunRequest(
+						chatId,
+						buildApprovalMessage(),
+						mode,
+						deps.providerState.thinkingMode,
+						selection.model,
+						'auto',
+						deps.providerState.ampAgentMode,
+						undefined,
+						selection.apiProviderId,
+						selection.modelEndpointId,
+						selection.modelProtocol,
+					),
+				);
 		};
 
 		switch (choice) {
@@ -423,10 +476,27 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId;
 		if (!chatId) return;
+		const provider = deps.providerState.provider;
+		const selection = deps.modelCatalog.selectionFor(provider, model);
 		if (deps.sessions.isDraft(chatId)) {
-			deps.providerState.setModel(model);
-			deps.sessions.patchDraftStartup(chatId, { model });
-			deps.sessions.patchChat(chatId, { model });
+			deps.providerState.setModelSelection({
+				model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			});
+			deps.sessions.patchDraftStartup(chatId, {
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			});
+			deps.sessions.patchChat(chatId, {
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			});
 			return;
 		}
 
@@ -434,25 +504,41 @@ export class ConversationSessionController {
 		// session. The CLI conversation history contains provider-specific
 		// artifacts (e.g. thinking-block signatures) that are invalid when
 		// replayed against a different backend.
-		const provider = deps.providerState.provider;
 		const currentModel = deps.sessions.selectedChat?.model ?? deps.providerState.model;
-		const wasLocal = deps.modelCatalog.isLocalModel(provider, currentModel);
-		const isLocal = deps.modelCatalog.isLocalModel(provider, model);
+		const currentEndpointId = deps.sessions.selectedChat?.modelEndpointId ?? deps.providerState.modelEndpointId;
+		const wasLocal = deps.modelCatalog.isLocalModel(provider, currentModel, currentEndpointId);
+		const isLocal = deps.modelCatalog.isLocalModel(provider, model, selection.modelEndpointId);
 		if (wasLocal !== isLocal) {
 			const target = isLocal ? 'local' : 'cloud';
 			deps.chatState.chatMessages = [
 				...deps.chatState.chatMessages,
 				new ErrorMessage(
 					new Date().toISOString(),
-					`Cannot switch to a ${target} model mid-session. Start a new chat to use ${model}.`,
+					`Cannot switch to a ${target} model mid-session. Start a new chat to use ${selection.model}.`,
 				),
 			];
 			return;
 		}
 
-		deps.providerState.setModel(model);
-		deps.ws.sendMessage(new ModelSetRequest(chatId, model));
-		deps.sessions.patchChat(chatId, { model });
+		deps.providerState.setModelSelection({
+			model,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+		});
+		deps.ws.sendMessage(new ModelSetRequest(
+			chatId,
+			selection.model,
+			selection.apiProviderId,
+			selection.modelEndpointId,
+			selection.modelProtocol,
+		));
+		deps.sessions.patchChat(chatId, {
+			model: selection.model,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+		});
 	}
 
 	handlePermissionModeChange(mode: PermissionMode): void {

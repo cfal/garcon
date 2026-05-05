@@ -1,21 +1,24 @@
 import {
-  GENERATION_PROVIDER_PRIORITY,
+  GENERATION_HARNESS_PRIORITY,
   GENERATION_MODEL_DEFAULTS,
   OPENCODE_PREFERRED_MODEL_PATTERNS,
 } from '../../common/generation-defaults.ts';
 
-function isProvider(value) {
-  return value === 'claude'
-    || value === 'codex'
-    || value === 'opencode'
-    || value === 'amp'
-    || value === 'factory'
-    || value === 'openrouter'
-    || value === 'zai';
+function isHarness(value) {
+  return typeof value === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(value);
 }
 
-function pickAutoProvider(authByProvider) {
-  return GENERATION_PROVIDER_PRIORITY.find((provider) => authByProvider?.[provider]?.authenticated) ?? null;
+function hasAutoModel(harnessId, modelsByHarness) {
+  if (GENERATION_MODEL_DEFAULTS[harnessId]) return true;
+  return Array.isArray(modelsByHarness?.[harnessId])
+    && modelsByHarness[harnessId].some((model) => typeof model?.value === 'string' && model.value.trim());
+}
+
+function pickAutoHarness(authByHarness, readinessByHarness, modelsByHarness) {
+  return GENERATION_HARNESS_PRIORITY.find((harnessId) =>
+    (authByHarness?.[harnessId]?.authenticated || readinessByHarness?.[harnessId]?.ready)
+      && hasAutoModel(harnessId, modelsByHarness)
+  ) ?? null;
 }
 
 function pickPreferredOpenCodeModel(models) {
@@ -29,34 +32,42 @@ function pickPreferredOpenCodeModel(models) {
   return preferred?.value || models[0]?.value || '';
 }
 
-function pickDefaultModel(provider, modelsByProvider) {
-  if (provider === 'opencode') return pickPreferredOpenCodeModel(modelsByProvider?.opencode || []);
-  return GENERATION_MODEL_DEFAULTS[provider] || '';
+function pickDefaultModel(harnessId, modelsByHarness) {
+  if (harnessId === 'opencode') return pickPreferredOpenCodeModel(modelsByHarness?.opencode || []);
+  return GENERATION_MODEL_DEFAULTS[harnessId] || modelsByHarness?.[harnessId]?.[0]?.value || '';
 }
 
-export function resolveEffectiveGenerationConfig({ persisted, authByProvider, modelsByProvider }) {
+export function resolveEffectiveGenerationConfig({ persisted, authByHarness, modelsByHarness, readinessByHarness }) {
   const cfg = persisted && typeof persisted === 'object' ? persisted : {};
   const persistedEnabled = typeof cfg.enabled === 'boolean' ? cfg.enabled : null;
-  const persistedProvider = isProvider(cfg.provider) ? cfg.provider : null;
+  const persistedHarness = isHarness(cfg.provider) ? cfg.provider : null;
   const persistedModel = typeof cfg.model === 'string' && cfg.model.trim() ? cfg.model : '';
+  const persistedApiProviderId = typeof cfg.apiProviderId === 'string' ? cfg.apiProviderId : null;
+  const persistedEndpointId = typeof cfg.modelEndpointId === 'string' ? cfg.modelEndpointId : null;
+  const persistedProtocol = (cfg.modelProtocol === 'openai-compatible' || cfg.modelProtocol === 'anthropic-messages')
+    ? cfg.modelProtocol
+    : null;
 
-  const autoProvider = pickAutoProvider(authByProvider);
-  const selectedProvider = persistedProvider || autoProvider || 'claude';
-  const selectedModel = persistedModel || pickDefaultModel(selectedProvider, modelsByProvider);
-  const selectedEnabled = persistedEnabled ?? Boolean(autoProvider);
+  const autoHarness = pickAutoHarness(authByHarness, readinessByHarness ?? {}, modelsByHarness);
+  const selectedHarness = persistedHarness || autoHarness || 'claude';
+  const selectedModel = persistedModel || pickDefaultModel(selectedHarness, modelsByHarness);
+  const selectedEnabled = persistedEnabled ?? Boolean(autoHarness);
 
   return {
     enabled: selectedEnabled,
-    provider: selectedProvider,
+    provider: selectedHarness,
     model: selectedModel,
-    source: persistedEnabled === null && !persistedProvider && !persistedModel ? 'auto' : 'manual',
+    apiProviderId: persistedApiProviderId,
+    modelEndpointId: persistedEndpointId,
+    modelProtocol: persistedProtocol,
+    source: persistedEnabled === null && !persistedHarness && !persistedModel ? 'auto' : 'manual',
   };
 }
 
-export function resolveEffectiveGenerationUiConfig({ persisted, authByProvider, modelsByProvider }) {
+export function resolveEffectiveGenerationUiConfig({ persisted, authByHarness, modelsByHarness, readinessByHarness }) {
   const config = persisted && typeof persisted === 'object' ? persisted : {};
   return {
     ...config,
-    ...resolveEffectiveGenerationConfig({ persisted: config, authByProvider, modelsByProvider }),
+    ...resolveEffectiveGenerationConfig({ persisted: config, authByHarness, modelsByHarness, readinessByHarness }),
   };
 }

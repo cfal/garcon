@@ -27,13 +27,7 @@ import * as m from '$lib/paraglide/messages.js';
 export class NewChatFormState {
 	// Provider and model
 	provider = $state<SessionProvider>('claude');
-	claudeModel = $state('');
-	codexModel = $state('');
-	opencodeModel = $state('');
-	ampModel = $state('');
-	factoryModel = $state('');
-	openrouterModel = $state('');
-	zaiModel = $state('');
+	selectedModelsByProvider = $state<Record<string, string>>({});
 
 	// Path
 	projectPath = $state('');
@@ -110,45 +104,14 @@ export class NewChatFormState {
 	}
 
 	get modelOptions(): ModelOption[] {
-		const opts: Record<SessionProvider, ModelOption[]> = {
-			claude: this.#modelCatalog.getModels('claude'),
-			codex: this.#modelCatalog.getModels('codex'),
-			opencode: this.#modelCatalog.getModels('opencode').length
-				? this.#modelCatalog.getModels('opencode')
-				: this.opencodeModel
-					? [{ value: this.opencodeModel, label: this.opencodeModel }]
-					: [],
-			amp: this.#modelCatalog.getModels('amp').length
-				? this.#modelCatalog.getModels('amp')
-				: this.ampModel
-					? [{ value: this.ampModel, label: this.ampModel }]
-					: [],
-			factory: this.#modelCatalog.getModels('factory').length
-				? this.#modelCatalog.getModels('factory')
-				: this.factoryModel
-					? [{ value: this.factoryModel, label: this.factoryModel }]
-					: [],
-			openrouter: this.#modelCatalog.getModels('openrouter'),
-			zai: this.#modelCatalog.getModels('zai').length
-				? this.#modelCatalog.getModels('zai')
-				: this.zaiModel
-					? [{ value: this.zaiModel, label: this.zaiModel }]
-					: []
-		};
-		return opts[this.provider];
+		const models = this.#modelCatalog.getModels(this.provider);
+		const selected = this.selectedModelsByProvider[this.provider];
+		if (models.length > 0) return models;
+		return selected ? [{ value: selected, label: selected }] : [];
 	}
 
 	get modelValue(): string {
-		const map: Record<SessionProvider, string> = {
-			claude: this.claudeModel,
-			codex: this.codexModel,
-			opencode: this.opencodeModel,
-			amp: this.ampModel,
-			factory: this.factoryModel,
-			openrouter: this.openrouterModel,
-			zai: this.zaiModel
-		};
-		return map[this.provider];
+		return this.selectedModelsByProvider[this.provider] ?? this.#modelCatalog.getDefaultModel(this.provider);
 	}
 
 	// Provider cycling
@@ -160,58 +123,48 @@ export class NewChatFormState {
 	// Model
 
 	handleModelChange(value: string): void {
-		const setterMap: Record<SessionProvider, (v: string) => void> = {
-			claude: (v) => { this.claudeModel = v; },
-			codex: (v) => { this.codexModel = v; },
-			opencode: (v) => { this.opencodeModel = v; },
-			amp: (v) => { this.ampModel = v; },
-			factory: (v) => { this.factoryModel = v; },
-			openrouter: (v) => { this.openrouterModel = v; },
-			zai: (v) => { this.zaiModel = v; }
+		this.selectedModelsByProvider = {
+			...this.selectedModelsByProvider,
+			[this.provider]: value,
 		};
-		setterMap[this.provider](value);
 	}
 
 	/** Validates the selected model against the live model list for a provider. */
 	validateModelAgainstLive(provider: SessionProvider): void {
 		const liveModels = this.#modelCatalog.getModels(provider);
 		if (!liveModels?.length) return;
-
-		if (provider === 'opencode' && !liveModels.some((m) => m.value === this.opencodeModel)) {
-			this.opencodeModel = liveModels[0].value;
-		}
-		if (provider === 'claude' && !liveModels.some((m) => m.value === this.claudeModel)) {
-			this.claudeModel = liveModels[0].value;
-		}
-		if (provider === 'codex' && !liveModels.some((m) => m.value === this.codexModel)) {
-			this.codexModel = liveModels[0].value;
-		}
-		if (provider === 'amp' && !liveModels.some((m) => m.value === this.ampModel)) {
-			this.ampModel = liveModels[0].value;
-		}
-		if (provider === 'factory' && !liveModels.some((m) => m.value === this.factoryModel)) {
-			this.factoryModel = liveModels[0].value;
-		}
-		if (provider === 'openrouter' && !liveModels.some((m) => m.value === this.openrouterModel)) {
-			this.openrouterModel = liveModels[0].value;
-		}
-		if (provider === 'zai' && !liveModels.some((m) => m.value === this.zaiModel)) {
-			this.zaiModel = liveModels[0].value;
+		const current = this.selectedModelsByProvider[provider];
+		if (!current || !liveModels.some((entry) => entry.value === current)) {
+			this.selectedModelsByProvider = {
+				...this.selectedModelsByProvider,
+				[provider]: liveModels[0].value,
+			};
 		}
 	}
 
-	applyResolvedModel(provider: SessionProvider, model: string): void {
+	validateAllModelsAgainstLive(): void {
+		for (const provider of this.#modelCatalog.getSelectableHarnesses()) {
+			this.validateModelAgainstLive(provider);
+		}
+	}
+
+	#resolveStartupProvider(provider: string): SessionProvider {
+		const providers = this.#modelCatalog.getSelectableHarnesses();
+		if (providers.includes(provider as SessionProvider)) return provider as SessionProvider;
+		if (providers.includes('claude')) return 'claude';
+		return providers[0] ?? 'claude';
+	}
+
+	applyResolvedModel(provider: SessionProvider, model: string, modelEndpointId?: string | null): void {
 		const liveModels = this.#modelCatalog.getModels(provider);
-		const resolvedModel = liveModels.some((entry) => entry.value === model)
-			? model
+		const selectionValue = this.#modelCatalog.selectionValueFor(provider, model, modelEndpointId);
+		const resolvedModel = liveModels.some((entry) => entry.value === selectionValue)
+			? selectionValue
 			: (liveModels[0]?.value ?? model);
-		if (provider === 'claude') this.claudeModel = resolvedModel;
-		if (provider === 'codex') this.codexModel = resolvedModel;
-		if (provider === 'opencode') this.opencodeModel = resolvedModel;
-		if (provider === 'amp') this.ampModel = resolvedModel;
-		if (provider === 'factory') this.factoryModel = resolvedModel;
-		if (provider === 'openrouter') this.openrouterModel = resolvedModel;
-		if (provider === 'zai') this.zaiModel = resolvedModel;
+		this.selectedModelsByProvider = {
+			...this.selectedModelsByProvider,
+			[provider]: resolvedModel,
+		};
 	}
 
 	// Images (delegated to ImageAttachmentState)
@@ -318,28 +271,28 @@ export class NewChatFormState {
 		if (this.#validationTimer) clearTimeout(this.#validationTimer);
 		const requestVersion = ++this.#validationRequestVersion;
 
-			this.#validationTimer = setTimeout(async () => {
-				try {
-					const data = await validateStart(path);
-					if (requestVersion !== this.#validationRequestVersion) return;
-					if (data.valid) {
-						this.validationStatus = 'valid';
-						this.validationError = null;
-						this.gitRepoStatus = data.isGitRepo ? 'git' : 'non-git';
-					} else {
-						this.validationStatus = 'invalid';
-						this.validationError = this.#validationErrorMessage(data.errorCode);
-						this.gitRepoStatus = 'non-git';
-					}
-				} catch (err) {
-					if (requestVersion !== this.#validationRequestVersion) return;
+		this.#validationTimer = setTimeout(async () => {
+			try {
+				const data = await validateStart(path);
+				if (requestVersion !== this.#validationRequestVersion) return;
+				if (data.valid) {
+					this.validationStatus = 'valid';
+					this.validationError = null;
+					this.gitRepoStatus = data.isGitRepo ? 'git' : 'non-git';
+				} else {
 					this.validationStatus = 'invalid';
-					this.validationError = m.chat_new_chat_errors_invalid_directory();
+					this.validationError = this.#validationErrorMessage(data.errorCode);
 					this.gitRepoStatus = 'non-git';
-					console.warn('[NewChatFormState] Path validation request failed', err);
 				}
-			}, 300);
-		}
+			} catch (err) {
+				if (requestVersion !== this.#validationRequestVersion) return;
+				this.validationStatus = 'invalid';
+				this.validationError = m.chat_new_chat_errors_invalid_directory();
+				this.gitRepoStatus = 'non-git';
+				console.warn('[NewChatFormState] Path validation request failed', err);
+			}
+		}, 300);
+	}
 
 	#validationErrorMessage(errorCode?: ValidateStartErrorCode): string {
 		if (errorCode === 'outside_base_dir') return m.chat_new_chat_errors_path_outside_base_dir();
@@ -354,11 +307,11 @@ export class NewChatFormState {
 			clearTimeout(this.#validationTimer);
 			this.#validationTimer = null;
 		}
-			this.#validationRequestVersion += 1;
-			this.validationStatus = 'idle';
-			this.validationError = null;
-			this.gitRepoStatus = 'unknown';
-		}
+		this.#validationRequestVersion += 1;
+		this.validationStatus = 'idle';
+		this.validationError = null;
+		this.gitRepoStatus = 'unknown';
+	}
 
 	// Pinned paths
 
@@ -427,11 +380,15 @@ export class NewChatFormState {
 			return null;
 		}
 		this.error = null;
+		const selection = this.#modelCatalog.selectionFor(this.provider, this.modelValue);
 
 		return {
 			provider: this.provider,
 			projectPath: this.trimmedPath,
-			model: this.modelValue,
+			model: selection.model,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
 			permissionMode: normalizePermissionMode(this.permissionMode),
 			thinkingMode: normalizeThinkingMode(this.thinkingMode),
 			claudeThinkingMode: normalizeClaudeThinkingMode(this.claudeThinkingMode),
@@ -449,10 +406,10 @@ export class NewChatFormState {
 		this.firstMessage = prefill;
 		this.attachedImages = [];
 		this.error = null;
-			this.showBrowser = false;
-			this.hasAutoOpened = false;
-			this.gitRepoStatus = 'unknown';
-			this.worktreeModalOpen = false;
+		this.showBrowser = false;
+		this.hasAutoOpened = false;
+		this.gitRepoStatus = 'unknown';
+		this.worktreeModalOpen = false;
 		this.worktreeItems = [];
 		this.worktreeError = null;
 		this.chatTags = [];
@@ -470,22 +427,12 @@ export class NewChatFormState {
 			]);
 
 			this.#applySettings(settingsData);
-			this.validateModelAgainstLive('claude');
-			this.validateModelAgainstLive('codex');
-			this.validateModelAgainstLive('opencode');
-			this.validateModelAgainstLive('amp');
-			this.validateModelAgainstLive('factory');
-			this.validateModelAgainstLive('openrouter');
-			this.validateModelAgainstLive('zai');
+			this.validateAllModelsAgainstLive();
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings and models', err);
-			this.applyResolvedModel('claude', this.#modelCatalog.getDefaultModel('claude'));
-			this.applyResolvedModel('codex', this.#modelCatalog.getDefaultModel('codex'));
-			this.applyResolvedModel('opencode', this.#modelCatalog.getDefaultModel('opencode'));
-			this.applyResolvedModel('amp', this.#modelCatalog.getDefaultModel('amp'));
-			this.applyResolvedModel('factory', this.#modelCatalog.getDefaultModel('factory'));
-			this.applyResolvedModel('openrouter', this.#modelCatalog.getDefaultModel('openrouter'));
-			this.applyResolvedModel('zai', this.#modelCatalog.getDefaultModel('zai'));
+			for (const provider of this.#modelCatalog.getSelectableHarnesses()) {
+				this.applyResolvedModel(provider, this.#modelCatalog.getDefaultModel(provider));
+			}
 			if (!this.projectPath) {
 				this.projectPath = this.projectBasePath;
 			}
@@ -509,17 +456,13 @@ export class NewChatFormState {
 			this.projectPath = this.projectBasePath;
 		}
 
-		this.provider = snap.lastProvider as SessionProvider;
+		this.provider = this.#resolveStartupProvider(snap.lastProvider);
 		if (snap.lastModel) {
-			this.applyResolvedModel(this.provider, snap.lastModel);
+			this.applyResolvedModel(this.provider, snap.lastModel, snap.lastModelEndpointId);
 		} else {
-			this.applyResolvedModel('claude', this.#modelCatalog.getDefaultModel('claude'));
-			this.applyResolvedModel('codex', this.#modelCatalog.getDefaultModel('codex'));
-			this.applyResolvedModel('opencode', this.#modelCatalog.getDefaultModel('opencode'));
-			this.applyResolvedModel('amp', this.#modelCatalog.getDefaultModel('amp'));
-			this.applyResolvedModel('factory', this.#modelCatalog.getDefaultModel('factory'));
-			this.applyResolvedModel('openrouter', this.#modelCatalog.getDefaultModel('openrouter'));
-			this.applyResolvedModel('zai', this.#modelCatalog.getDefaultModel('zai'));
+			for (const provider of this.#modelCatalog.getSelectableHarnesses()) {
+				this.applyResolvedModel(provider, this.#modelCatalog.getDefaultModel(provider));
+			}
 		}
 		this.permissionMode = normalizePermissionMode(snap.lastPermissionMode);
 		this.thinkingMode = normalizeThinkingMode(snap.lastThinkingMode);

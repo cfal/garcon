@@ -97,6 +97,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 	});
 
 	const selection = new ChatSelectionStore();
+	const MINUTE_MS = 60_000;
 
 	// Sidebar UI state.
 	let bulkDeleteConfirmation = $state<{ chatIds: string[]; chatTitles: string[] } | null>(null);
@@ -126,12 +127,35 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 	let dockOrderClass = $derived(isTopSearchDock ? 'order-1' : 'order-2');
 	let contentOrderClass = $derived(isTopSearchDock ? 'order-2' : 'order-1');
 
-	// Refresh timestamp every minute.
+	function millisecondsUntilNextMinute(nowMs = Date.now()): number {
+		const elapsedInMinute = nowMs % MINUTE_MS;
+		return elapsedInMinute === 0 ? MINUTE_MS : MINUTE_MS - elapsedInMinute;
+	}
+
+	// Refreshes relative timestamp labels on minute boundaries.
 	$effect(() => {
-		const timer = setInterval(() => {
+		let intervalId: ReturnType<typeof setInterval> | null = null;
+
+		const refreshCurrentTime = () => {
 			currentTime = new Date();
-		}, 60_000);
-		return () => clearInterval(timer);
+		};
+
+		const timeoutId = setTimeout(() => {
+			refreshCurrentTime();
+			intervalId = setInterval(refreshCurrentTime, MINUTE_MS);
+		}, millisecondsUntilNextMinute());
+
+		const handleVisibilityChange = () => {
+			if (document.visibilityState === 'visible') refreshCurrentTime();
+		};
+
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+
+		return () => {
+			clearTimeout(timeoutId);
+			if (intervalId) clearInterval(intervalId);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+		};
 	});
 
 	function handleChatClick(chatId: string) {
@@ -794,6 +818,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		query={searchState.draftQuery}
 		filteredChats={searchState.dialogFilteredChats}
 		savedSearches={searchState.searchDialogSavedSearches}
+		{currentTime}
 		highlightedIndex={searchState.highlightedResultIndex}
 		onQueryChange={(q) => searchState.updateDraftQuery(q)}
 		onSelectChat={handleSearchSelectChat}

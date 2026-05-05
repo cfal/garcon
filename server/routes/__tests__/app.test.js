@@ -40,7 +40,7 @@ function createMockCtx() {
       reorderSavedSearches: mock(() => Promise.resolve({ success: true })),
     },
     providers: {
-      getAuthStatusMap: mock(() => Promise.resolve({
+      getHarnessAuthStatusMap: mock(() => Promise.resolve({
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: false },
@@ -78,7 +78,7 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getAuthStatusMap.mockClear();
+    ctx.providers.getHarnessAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
   });
@@ -150,7 +150,7 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getAuthStatusMap.mockClear();
+    ctx.providers.getHarnessAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
   });
@@ -177,6 +177,9 @@ describe('GET /api/app/settings', () => {
     expect(body.lastProvider).toBe('codex');
     expect(body.lastProjectPath).toBe('/workspace/project');
     expect(body.lastModel).toBe('gpt-5.4');
+    expect(body.lastApiProviderId).toBeNull();
+    expect(body.lastModelEndpointId).toBeNull();
+    expect(body.lastModelProtocol).toBeNull();
     expect(body.lastPermissionMode).toBe('acceptEdits');
     expect(body.lastThinkingMode).toBe('think-hard');
     expect(body.lastClaudeThinkingMode).toBe('on');
@@ -205,7 +208,7 @@ describe('GET /api/app/settings', () => {
   it('auto-enables generation defaults from authenticated provider priority', async () => {
     ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(1));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
-    ctx.providers.getAuthStatusMap.mockImplementation(() => Promise.resolve({
+    ctx.providers.getHarnessAuthStatusMap.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: true },
       opencode: { authenticated: true },
@@ -268,7 +271,7 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getAuthStatusMap.mockClear();
+    ctx.providers.getHarnessAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
   });

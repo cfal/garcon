@@ -6,6 +6,7 @@
 	interface SidebarSearchDialogHarnessProps {
 		filteredChats: ChatSessionRecord[];
 		savedSearches?: SavedChatSearch[];
+		currentTime?: Date;
 		onSelectChat?: (chatId: string) => void;
 		onApplySavedSearch?: (search: SavedChatSearch) => void;
 		onCreateSavedSearch?: () => void;
@@ -16,6 +17,7 @@
 	let {
 		filteredChats,
 		savedSearches = [],
+		currentTime = new Date('2025-01-01T03:00:00.000Z'),
 		onSelectChat,
 		onApplySavedSearch,
 		onCreateSavedSearch,
@@ -48,6 +50,7 @@
 	{query}
 	{filteredChats}
 	{savedSearches}
+	{currentTime}
 	{highlightedIndex}
 	onQueryChange={handleQueryChange}
 	onSelectChat={(chatId) => onSelectChat?.(chatId)}

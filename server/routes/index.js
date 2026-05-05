@@ -17,7 +17,7 @@ export default function createAllRoutes(registry, settings, queue, pathCache, me
     ...createShareRoutes(shareStore, registry, settings, metadata, historyCache),
     ...createFilesRoutes(registry),
     ...createWorkspaceRoutes(settings, providers, telegramNotifier),
-    ...createModelsRoutes(providers, providers.ollamaBridge),
+    ...createModelsRoutes(providers),
     ...createGitRoutes(providers, settings),
   };
 }

@@ -1,33 +1,28 @@
-// Tests for ProviderRegistry.runSingleQuery routing.
-// claude-cli.js and codex.js standalone exports still need mock.module()
-// because runSingleQuery imports them at the module level.
-// opencode is injected via constructor as an instance with a
-// runSingleQuery method.
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
-import { describe, it, expect, mock, beforeEach } from 'bun:test';
-
-const claudeMock = mock(async () => 'claude-response');
-const codexMock = mock(async () => 'codex-response');
-const ampSingleQueryMock = mock(async () => 'amp-response');
+const claudeQuery = mock(async () => 'claude-response');
+const codexQuery = mock(async () => 'codex-response');
+const ampQuery = mock(async () => 'amp-response');
+const factoryQuery = mock(async () => 'factory-response');
+const originalFetch = globalThis.fetch;
 
 mock.module('../claude-cli.js', () => ({
-  runSingleQuery: claudeMock,
+  runSingleQuery: claudeQuery,
   createClaudeNativePath: mock(() => Promise.resolve('/tmp/claude-session.jsonl')),
-  ClaudeProvider: class { constructor() {} },
 }));
 
 mock.module('../codex.js', () => ({
-  runSingleQuery: codexMock,
-  CodexProvider: class { constructor() {} },
+  runSingleQuery: codexQuery,
 }));
 
 mock.module('../amp-cli.js', () => ({
-  runSingleQuery: ampSingleQueryMock,
-  exportThread: mock(() => Promise.resolve({ messages: [] })),
-  AmpProvider: class { constructor() {} },
+  runSingleQuery: ampQuery,
 }));
 
-// Mock the stateless loader imports that ProviderRegistry pulls in
+mock.module('../factory-cli.js', () => ({
+  runSingleQuery: factoryQuery,
+}));
+
 mock.module('../loaders/claude-history-loader.js', () => ({
   getClaudePreviewFromNativePath: mock(() => Promise.resolve(null)),
   loadClaudeChatMessages: mock(() => Promise.resolve([])),
@@ -43,144 +38,528 @@ mock.module('../loaders/opencode-history-loader.js', () => ({
   loadOpenCodeChatMessages: mock(() => Promise.resolve([])),
 }));
 
-mock.module('../loaders/amp-history-loader.js', () => ({
-  getAmpPreview: mock(() => Promise.resolve(null)),
-  loadAmpChatMessages: mock(() => Promise.resolve([])),
+mock.module('../loaders/factory-history-loader.js', () => ({
+  getFactoryPreviewFromSessionId: mock(() => Promise.resolve(null)),
+  loadFactoryChatMessagesBySessionId: mock(() => Promise.resolve([])),
 }));
 
-mock.module('../loaders/openrouter-history-loader.js', () => ({
-  getOpenRouterPreviewFromSessionId: mock(() => Promise.resolve(null)),
-  loadOpenRouterChatMessages: mock(() => Promise.resolve([])),
+mock.module('../loaders/direct-compatible-history-loader.js', () => ({
+  getDirectCompatiblePreviewFromSessionId: mock(() => Promise.resolve(null)),
+  loadDirectCompatibleChatMessages: mock(() => Promise.resolve([])),
 }));
 
-mock.module('../loaders/zai-history-loader.js', () => ({
-  getZaiPreviewFromSessionId: mock(() => Promise.resolve(null)),
-  loadZaiChatMessages: mock(() => Promise.resolve([])),
-}));
-
-mock.module('../openrouter.js', () => ({
-  runSingleQuery: mock(async () => 'openrouter-response'),
-  OpenRouterProvider: class { constructor() {} },
-}));
-
-mock.module('../zai.js', () => ({
-  runSingleQuery: mock(async () => 'zai-response'),
-  ZaiProvider: class { constructor() {} },
-}));
-
-const opencodeMock = mock(async () => 'opencode-response');
 import { ProviderRegistry } from '../index.js';
+import {
+  createAmpAdapter,
+  createClaudeAdapter,
+  createCodexAdapter,
+  createFactoryAdapter,
+  createOpenCodeAdapter,
+} from '../provider-adapters.js';
 
-describe('providers registry runSingleQuery', () => {
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
+function makeEndpointResolver(endpointOptions = {}) {
+  return {
+    getModelOptions: mock((harnessId) => endpointOptions[harnessId] ?? []),
+    resolveSelection: mock(({ model, apiProviderId = null, modelEndpointId = null }) => ({
+      model: modelEndpointId ? model.replace(`${modelEndpointId}:`, '') : model,
+      apiProviderId,
+      endpointId: modelEndpointId,
+      protocol: modelEndpointId ? 'openai-compatible' : null,
+      isLocal: false,
+      envOverrides: undefined,
+    })),
+    modelSupportsImages: mock(() => false),
+  };
+}
+
+function makeApiProviderStore(apiProviders = []) {
+  return {
+    list: () => apiProviders,
+    redactedList: () => apiProviders,
+    getApiProvider: mock((apiProviderId) => apiProviders.find((apiProvider) => apiProvider.id === apiProviderId) ?? null),
+    getEndpoint: mock((endpointId) => {
+      for (const apiProvider of apiProviders) {
+        const endpoint = apiProvider.endpoints?.find((entry) => entry.id === endpointId);
+        if (endpoint) return { apiProvider, endpoint };
+      }
+      return null;
+    }),
+    createApiProvider: mock((input) => Promise.resolve({
+      id: 'custom_acme',
+      label: input.label,
+      templateId: input.templateId,
+      createdAt: '2026-05-04T00:00:00.000Z',
+      updatedAt: '2026-05-04T00:00:00.000Z',
+      endpoints: [{
+        id: 'custom_acme_openai',
+        protocol: input.protocol,
+        baseUrl: input.baseUrl,
+        apiKey: input.apiKey ?? '',
+        capabilities: input.capabilities,
+        defaultModel: input.defaultModel,
+        models: input.models,
+        supportsImages: input.supportsImages ?? false,
+        modelDiscovery: input.modelDiscovery,
+      }],
+    })),
+    updateApiProvider: mock(),
+    deleteApiProvider: mock(),
+  };
+}
+
+function makeRegistry(args = {}) {
   const mockRegistry = {
     getChat: mock(() => null),
     getChatByProviderSessionId: mock(() => null),
+    listAllChats: mock(() => ({})),
+    updateChat: mock(() => undefined),
+    onChatRemoved: mock(() => undefined),
+    ...args.registry,
   };
-  const mockOpencode = { runSingleQuery: opencodeMock };
-  const registry = new ProviderRegistry(mockRegistry, {}, {}, mockOpencode, {}, {}, {}, {});
+  const opencode = {
+    startSession: mock(() => Promise.resolve('opencode-session')),
+    runTurn: mock(() => Promise.resolve()),
+    isRunning: mock(() => false),
+    abort: mock(() => false),
+    getRunningSessions: mock(() => []),
+    runSingleQuery: mock(async () => 'opencode-response'),
+    getModels: mock(() => []),
+    getClient: mock(() => null),
+    getClientIfInitialized: mock(() => null),
+    startPurgeTimer: mock(() => {}),
+    onMessages: mock(() => {}),
+    onProcessing: mock(() => {}),
+    onSessionCreated: mock(() => {}),
+    onFinished: mock(() => {}),
+    onFailed: mock(() => {}),
+  };
+  const claude = {
+    startClaudeCliSession: mock(() => Promise.resolve()),
+    runClaudeTurn: mock(() => Promise.resolve()),
+    isClaudeInternalSessionRunning: mock(() => false),
+    abortClaudeInternalSession: mock(() => false),
+    getRunningClaudeInternalSessions: mock(() => []),
+    startPurgeTimer: mock(() => {}),
+    onMessages: mock(() => {}),
+    onProcessing: mock(() => {}),
+    onSessionCreated: mock(() => {}),
+    onFinished: mock(() => {}),
+    onFailed: mock(() => {}),
+  };
+  const codex = {
+    startSession: mock(() => Promise.resolve({ providerSessionId: 'codex-session', nativePath: null })),
+    runTurn: mock(() => Promise.resolve()),
+    isRunning: mock(() => false),
+    abort: mock(() => false),
+    getRunningSessions: mock(() => []),
+    startPurgeTimer: mock(() => {}),
+    onMessages: mock(() => {}),
+    onProcessing: mock(() => {}),
+    onSessionCreated: mock(() => {}),
+    onFinished: mock(() => {}),
+    onFailed: mock(() => {}),
+  };
+  const amp = {
+    startSession: mock(() => Promise.resolve({ providerSessionId: 'amp-session', nativePath: 'amp:amp-session' })),
+    runTurn: mock(() => Promise.resolve()),
+    isRunning: mock(() => false),
+    abort: mock(() => false),
+    getRunningSessions: mock(() => []),
+    startPurgeTimer: mock(() => {}),
+    onMessages: mock(() => {}),
+    onProcessing: mock(() => {}),
+    onSessionCreated: mock(() => {}),
+    onFinished: mock(() => {}),
+    onFailed: mock(() => {}),
+  };
+  const factory = {
+    startSession: mock(() => Promise.resolve({ providerSessionId: 'factory-session', nativePath: 'factory:factory-session' })),
+    runTurn: mock(() => Promise.resolve()),
+    getRunningSessions: mock(() => []),
+    isRunning: mock(() => false),
+    abort: mock(() => false),
+    getModels: mock(() => []),
+    startPurgeTimer: mock(() => {}),
+    onMessages: mock(() => {}),
+    onProcessing: mock(() => {}),
+    onSessionCreated: mock(() => {}),
+    onFinished: mock(() => {}),
+    onFailed: mock(() => {}),
+  };
 
-  it('routes to claude by default', async () => {
-    const result = await registry.runSingleQuery('test prompt', {});
-    expect(result).toBe('claude-response');
+  return {
+    registry: new ProviderRegistry({
+      registry: mockRegistry,
+      adapters: [
+        createClaudeAdapter(claude),
+        createCodexAdapter(codex),
+        createOpenCodeAdapter(opencode),
+        createAmpAdapter(amp),
+        createFactoryAdapter(factory),
+        ...(args.adapters ?? []),
+      ],
+      endpointResolver: args.endpointResolver ?? makeEndpointResolver(),
+      apiProviderStore: args.apiProviderStore ?? makeApiProviderStore(),
+      opencodeInstance: opencode,
+    }),
+    mockRegistry,
+    claude,
+    codex,
+    opencode,
+    amp,
+    factory,
+  };
+}
+
+describe('ProviderRegistry.runSingleQuery', () => {
+  beforeEach(() => {
+    claudeQuery.mockClear();
+    codexQuery.mockClear();
+    ampQuery.mockClear();
+    factoryQuery.mockClear();
   });
 
-  it('routes to claude when provider is explicit', async () => {
-    const result = await registry.runSingleQuery('test prompt', { provider: 'claude' });
-    expect(result).toBe('claude-response');
+  it('routes one-shot prompts to native harness adapters', async () => {
+    const { registry, opencode } = makeRegistry();
+
+    expect(await registry.runSingleQuery('prompt', {})).toBe('claude-response');
+    expect(await registry.runSingleQuery('prompt', { provider: 'codex' })).toBe('codex-response');
+    expect(await registry.runSingleQuery('prompt', { provider: 'opencode' })).toBe('opencode-response');
+    expect(await registry.runSingleQuery('prompt', { provider: 'amp' })).toBe('amp-response');
+    expect(await registry.runSingleQuery('prompt', { provider: 'factory' })).toBe('factory-response');
+    expect(opencode.runSingleQuery).toHaveBeenCalled();
   });
 
-  it('routes to codex provider', async () => {
-    const result = await registry.runSingleQuery('test prompt', { provider: 'codex' });
-    expect(result).toBe('codex-response');
+  it('resolves API-provider model selections before one-shot execution', async () => {
+    const endpointResolver = makeEndpointResolver();
+    const codexConfig = {
+      config: {
+        model_provider: 'garcon_acme_openai',
+        model_providers: {
+          garcon_acme_openai: {
+            name: 'Acme',
+            base_url: 'https://api.acme.test/v1',
+            wire_api: 'responses',
+            requires_openai_auth: false,
+            supports_websockets: false,
+          },
+        },
+      },
+    };
+    endpointResolver.resolveSelection.mockImplementation(({ model, apiProviderId = null, modelEndpointId = null }) => ({
+      model: modelEndpointId ? model.replace(`${modelEndpointId}:`, '') : model,
+      apiProviderId,
+      endpointId: modelEndpointId,
+      protocol: modelEndpointId ? 'openai-compatible' : null,
+      isLocal: false,
+      envOverrides: undefined,
+      codexConfig,
+    }));
+    const { registry } = makeRegistry({ endpointResolver });
+
+    await registry.runSingleQuery('hello', {
+      provider: 'codex',
+      model: 'acme_openai:acme-code',
+      apiProviderId: 'acme',
+      modelEndpointId: 'acme_openai',
+    });
+
+    expect(endpointResolver.resolveSelection).toHaveBeenCalledWith({
+      harnessId: 'codex',
+      model: 'acme_openai:acme-code',
+      apiProviderId: 'acme',
+      modelEndpointId: 'acme_openai',
+    });
+    expect(codexQuery).toHaveBeenCalledWith('hello', {
+      model: 'acme-code',
+      apiProviderId: 'acme',
+      modelEndpointId: 'acme_openai',
+      modelProtocol: 'openai-compatible',
+      codexConfig,
+    });
+  });
+});
+
+describe('ProviderRegistry catalog and API provider mutations', () => {
+  it('returns harness and API provider catalog entries', async () => {
+    const endpointOption = {
+      value: 'acme_openai:acme-code',
+      label: 'Acme: Acme Code',
+      apiProviderId: 'acme',
+      endpointId: 'acme_openai',
+      rawModel: 'acme-code',
+      protocol: 'openai-compatible',
+    };
+    const anthropicEndpointOption = {
+      value: 'acme_anthropic:acme-sonnet',
+      label: 'Acme: Acme Sonnet',
+      apiProviderId: 'acme',
+      endpointId: 'acme_anthropic',
+      rawModel: 'acme-sonnet',
+      protocol: 'anthropic-messages',
+    };
+    const apiProvider = {
+      id: 'acme',
+      label: 'Acme',
+      templateId: 'custom',
+      createdAt: '2026-05-04T00:00:00.000Z',
+      updatedAt: '2026-05-04T00:00:00.000Z',
+      endpoints: [],
+    };
+    const { registry } = makeRegistry({
+      endpointResolver: makeEndpointResolver({
+        codex: [endpointOption],
+        'direct-openai-compatible': [endpointOption],
+        'direct-openai-responses-compatible': [endpointOption],
+        'direct-anthropic-compatible': [anthropicEndpointOption],
+      }),
+      apiProviderStore: makeApiProviderStore([apiProvider]),
+      adapters: [
+        {
+          id: 'direct-openai-compatible',
+          label: 'Direct Chat (OpenAI Chat Completions)',
+          startSession: mock(),
+          runTurn: mock(),
+          abort: mock(),
+          isRunning: mock(() => false),
+          getRunningSessions: mock(() => []),
+          getModels: mock(() => [{ value: 'raw-openai', label: 'Raw OpenAI' }]),
+          onMessages: mock(),
+          onProcessing: mock(),
+          onSessionCreated: mock(),
+          onFinished: mock(),
+          onFailed: mock(),
+        },
+        {
+          id: 'direct-openai-responses-compatible',
+          label: 'Direct Chat (OpenAI Responses)',
+          startSession: mock(),
+          runTurn: mock(),
+          abort: mock(),
+          isRunning: mock(() => false),
+          getRunningSessions: mock(() => []),
+          getModels: mock(() => [{ value: 'raw-openai-response', label: 'Raw OpenAI Response' }]),
+          onMessages: mock(),
+          onProcessing: mock(),
+          onSessionCreated: mock(),
+          onFinished: mock(),
+          onFailed: mock(),
+        },
+        {
+          id: 'direct-anthropic-compatible',
+          label: 'Direct Chat (Anthropic)',
+          startSession: mock(),
+          runTurn: mock(),
+          abort: mock(),
+          isRunning: mock(() => false),
+          getRunningSessions: mock(() => []),
+          getModels: mock(() => [{ value: 'raw-anthropic', label: 'Raw Anthropic' }]),
+          onMessages: mock(),
+          onProcessing: mock(),
+          onSessionCreated: mock(),
+          onFinished: mock(),
+          onFailed: mock(),
+        },
+      ],
+    });
+
+    const catalog = await registry.getHarnessCatalog();
+    expect(catalog.harnesses.find((entry) => entry.id === 'codex')?.models).toContainEqual(endpointOption);
+    expect(catalog.harnesses.find((entry) => entry.id === 'direct-openai-compatible')?.models).toEqual([endpointOption]);
+    expect(catalog.harnesses.find((entry) => entry.id === 'direct-openai-responses-compatible')?.models).toEqual([endpointOption]);
+    expect(catalog.harnesses.find((entry) => entry.id === 'direct-anthropic-compatible')?.models).toEqual([anthropicEndpointOption]);
+    expect(catalog.apiProviders).toEqual([apiProvider]);
   });
 
-  it('routes to opencode provider', async () => {
-    const result = await registry.runSingleQuery('test prompt', { provider: 'opencode' });
-    expect(result).toBe('opencode-response');
+  it('normalizes API provider payloads before storing them', async () => {
+    const apiProviderStore = makeApiProviderStore();
+    const { registry } = makeRegistry({ apiProviderStore });
+
+    const created = await registry.createApiProvider({
+      templateId: 'custom',
+      label: ' Acme ',
+      endpoint: {
+        protocol: 'openai-compatible',
+        baseUrl: 'api.acme.test/v1/',
+        apiKey: 'sk-test',
+        capabilities: { chatCompletions: false, responses: true },
+        defaultModel: 'acme-code',
+        models: [{ value: ' acme-code ', label: ' Acme Code ', supportsImages: false }],
+        supportsImages: false,
+      },
+    });
+
+    expect(apiProviderStore.createApiProvider).toHaveBeenCalledWith({
+      templateId: 'custom',
+      label: 'Acme',
+      protocol: 'openai-compatible',
+      baseUrl: 'https://api.acme.test/v1',
+      apiKey: 'sk-test',
+      capabilities: { chatCompletions: false, responses: true },
+      defaultModel: 'acme-code',
+      models: [{ value: 'acme-code', label: 'Acme Code', supportsImages: false }],
+      supportsImages: false,
+      modelDiscovery: 'openai-models',
+    });
+    expect(created.endpoints[0].hasApiKey).toBe(true);
+    expect('apiKey' in created.endpoints[0]).toBe(false);
   });
 
-  it('routes to amp provider', async () => {
-    const result = await registry.runSingleQuery('test prompt', { provider: 'amp' });
-    expect(result).toBe('amp-response');
+  it('stores Anthropic API providers without OpenAI capabilities', async () => {
+    const apiProviderStore = makeApiProviderStore();
+    const { registry } = makeRegistry({ apiProviderStore });
+
+    await registry.createApiProvider({
+      templateId: 'custom',
+      label: 'Acme Anthropic',
+      endpoint: {
+        protocol: 'anthropic-messages',
+        baseUrl: 'https://api.acme.test',
+        apiKey: 'sk-test',
+        defaultModel: 'acme-sonnet',
+        models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
+        supportsImages: false,
+      },
+    });
+
+    expect(apiProviderStore.createApiProvider).toHaveBeenCalledWith({
+      templateId: 'custom',
+      label: 'Acme Anthropic',
+      protocol: 'anthropic-messages',
+      baseUrl: 'https://api.acme.test',
+      apiKey: 'sk-test',
+      defaultModel: 'acme-sonnet',
+      models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
+      supportsImages: false,
+      modelDiscovery: 'none',
+    });
   });
 
-  it('routes to zai provider', async () => {
-    const result = await registry.runSingleQuery('test prompt', { provider: 'zai' });
-    expect(result).toBe('zai-response');
+  it('rejects OpenAI-compatible API provider payloads with no supported API surface', async () => {
+    const apiProviderStore = makeApiProviderStore();
+    const { registry } = makeRegistry({ apiProviderStore });
+
+    await expect(registry.createApiProvider({
+      templateId: 'custom',
+      label: 'Acme',
+      endpoint: {
+        protocol: 'openai-compatible',
+        baseUrl: 'https://api.acme.test/v1',
+        capabilities: { chatCompletions: false, responses: false },
+        defaultModel: 'acme-code',
+        models: [],
+        supportsImages: false,
+      },
+    })).rejects.toThrow('OpenAI-compatible endpoints must support Chat Completions or Responses.');
+    expect(apiProviderStore.createApiProvider).not.toHaveBeenCalled();
   });
 
-  it('passes options through to the provider', async () => {
-    claudeMock.mockClear();
-    await registry.runSingleQuery('hello', { provider: 'claude', model: 'opus', cwd: '/proj' });
-    expect(claudeMock).toHaveBeenCalledWith('hello', { model: 'opus', cwd: '/proj' });
+  it('discovers OpenAI-compatible models from the configured API base path', async () => {
+    globalThis.fetch = mock(async () => new Response(JSON.stringify({
+      data: [{ id: 'glm-5.1', name: 'GLM-5.1' }],
+    })));
+    const { registry } = makeRegistry();
+
+    const result = await registry.discoverApiProviderModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+      apiKey: 'sk-zai',
+      modelDiscovery: 'openai-models',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
+    });
+    const [url, options] = globalThis.fetch.mock.calls[0];
+    expect(url).toBe('https://api.z.ai/api/coding/paas/v4/models');
+    expect(options.headers).toEqual({ Authorization: 'Bearer sk-zai' });
+  });
+
+  it('discovers Anthropic-compatible models with Anthropic headers', async () => {
+    globalThis.fetch = mock(async () => new Response(JSON.stringify({
+      data: [{ id: 'claude-sonnet-4-20250514', display_name: 'Claude Sonnet 4' }],
+      has_more: false,
+      last_id: 'claude-sonnet-4-20250514',
+    })));
+    const { registry } = makeRegistry();
+
+    const result = await registry.discoverApiProviderModels({
+      protocol: 'anthropic-messages',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-ant',
+      modelDiscovery: 'anthropic-models',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      models: [{ value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' }],
+    });
+    const [url, options] = globalThis.fetch.mock.calls[0];
+    expect(url).toBe('https://api.anthropic.com/v1/models?limit=1000');
+    expect(options.headers).toEqual({
+      'x-api-key': 'sk-ant',
+      'anthropic-version': '2023-06-01',
+    });
+  });
+
+  it('uses the stored endpoint key when editing and no replacement key is provided', async () => {
+    globalThis.fetch = mock(async () => new Response(JSON.stringify({
+      data: [{ id: 'acme-code' }],
+    })));
+    const apiProviderStore = makeApiProviderStore([{
+      id: 'acme',
+      label: 'Acme',
+      templateId: 'custom',
+      createdAt: '2026-05-04T00:00:00.000Z',
+      updatedAt: '2026-05-04T00:00:00.000Z',
+      endpoints: [{
+        id: 'acme_openai',
+        protocol: 'openai-compatible',
+        baseUrl: 'https://api.acme.test/v1',
+        apiKey: 'sk-stored',
+        capabilities: { chatCompletions: false, responses: true },
+        defaultModel: 'acme-code',
+        models: [{ value: 'acme-code', label: 'Acme Code' }],
+        supportsImages: false,
+        modelDiscovery: 'openai-models',
+      }],
+    }]);
+    const { registry } = makeRegistry({ apiProviderStore });
+
+    await registry.discoverApiProviderModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://api.acme.test/v1',
+      endpointId: 'acme_openai',
+      modelDiscovery: 'openai-models',
+    });
+
+    const [, options] = globalThis.fetch.mock.calls[0];
+    expect(options.headers).toEqual({ Authorization: 'Bearer sk-stored' });
   });
 });
 
 describe('ProviderRegistry session option hydration', () => {
-  let mockRegistry;
-  let mockClaude;
-  let mockCodex;
-  let mockOpencode;
-  let mockAmp;
-  let mockZai;
-  let registry;
-
-  beforeEach(() => {
-    mockRegistry = {
-      getChat: mock(() => null),
-      getChatByProviderSessionId: mock(() => null),
-      updateChat: mock(() => undefined),
-    };
-    mockClaude = {
-      startClaudeCliSession: mock(() => Promise.resolve('claude-session')),
-      runClaudeTurn: mock(() => Promise.resolve(undefined)),
-    };
-    mockCodex = {
-      startSession: mock(() => Promise.resolve({
-        providerSessionId: 'codex-session',
-        nativePath: null,
-      })),
-      runTurn: mock(() => Promise.resolve(undefined)),
-    };
-    mockOpencode = {
-      startSession: mock(() => Promise.resolve('opencode-session')),
-      runTurn: mock(() => Promise.resolve(undefined)),
-    };
-    mockAmp = {
-      startSession: mock(() => Promise.resolve({ providerSessionId: 'amp-session', nativePath: 'amp:amp-session' })),
-      runTurn: mock((request) => Promise.resolve(undefined)),
-      exportThread: mock(() => Promise.resolve({ messages: [] })),
-    };
-    const mockFactory = {
-      startSession: mock(() => Promise.resolve({ providerSessionId: 'factory-session', nativePath: null })),
-      runTurn: mock(() => Promise.resolve(undefined)),
-      getRunningSessions: mock(() => []),
-    };
-    const mockOpenRouter = {
-      startSession: mock(() => Promise.resolve({ providerSessionId: 'openrouter-session', nativePath: null })),
-      runTurn: mock(() => Promise.resolve(undefined)),
-      getRunningSessions: mock(() => []),
-    };
-    mockZai = {
-      startSession: mock(() => Promise.resolve({ providerSessionId: 'zai-session', nativePath: '!zai:zai-session' })),
-      runTurn: mock(() => Promise.resolve(undefined)),
-      getRunningSessions: mock(() => []),
-    };
-    registry = new ProviderRegistry(mockRegistry, mockClaude, mockCodex, mockOpencode, mockAmp, mockFactory, mockOpenRouter, mockZai);
-  });
-
-  it('hydrates permission and thinking modes from the registry on new-session startup', async () => {
-    mockRegistry.getChat.mockReturnValue({
-      provider: 'opencode',
-      projectPath: '/proj',
-      model: 'openai/gpt-5',
-      permissionMode: 'bypassPermissions',
-      thinkingMode: 'think-hard',
+  it('hydrates execution modes from the registry on new-session startup', async () => {
+    const { registry, opencode } = makeRegistry({
+      registry: {
+        getChat: mock(() => ({
+          provider: 'opencode',
+          projectPath: '/proj',
+          model: 'openai/gpt-5',
+          permissionMode: 'bypassPermissions',
+          thinkingMode: 'think-hard',
+        })),
+      },
     });
 
     await registry.startSession('123', 'hello', {});
 
-    expect(mockOpencode.startSession).toHaveBeenCalledWith({
+    expect(opencode.startSession).toHaveBeenCalledWith({
       command: 'hello',
       projectPath: '/proj',
       model: 'openai/gpt-5',
@@ -192,158 +571,31 @@ describe('ProviderRegistry session option hydration', () => {
     });
   });
 
-  it('hydrates project path and execution modes from the registry on resumed turns', async () => {
-    mockRegistry.getChat.mockReturnValue({
-      provider: 'codex',
-      projectPath: '/proj',
-      providerSessionId: 'sess-1',
-      model: 'gpt-5.4',
-      permissionMode: 'bypassPermissions',
-      thinkingMode: 'think-hard',
-    });
-
-    await registry.runProviderTurn('123', 'continue', {});
-
-    expect(mockCodex.runTurn).toHaveBeenCalledWith({
-      command: 'continue',
-      providerSessionId: 'sess-1',
-      chatId: '123',
-      projectPath: '/proj',
-      model: 'gpt-5.4',
-      permissionMode: 'bypassPermissions',
-      thinkingMode: 'think-hard',
-      claudeThinkingMode: 'auto',
-      images: undefined,
-    });
-  });
-
-  it('hydrates project path from the registry for resumed Claude turns', async () => {
-    mockRegistry.getChat.mockReturnValue({
-      provider: 'claude',
-      projectPath: '/proj',
-      providerSessionId: 'sess-2',
-      model: 'opus',
-      permissionMode: 'default',
-      thinkingMode: 'none',
-    });
-
-    await registry.runProviderTurn('123', 'continue', {});
-
-    expect(mockClaude.runClaudeTurn).toHaveBeenCalledWith({
-      command: 'continue',
-      providerSessionId: 'sess-2',
-      chatId: '123',
-      projectPath: '/proj',
-      model: 'opus',
-      permissionMode: 'default',
-      thinkingMode: 'none',
-      claudeThinkingMode: 'auto',
-      images: undefined,
-    });
-  });
-
-  it('stores the derived native path when starting a Claude session', async () => {
-    mockRegistry.getChat.mockReturnValue({
-      provider: 'claude',
-      projectPath: '/proj',
-      model: 'opus',
-      permissionMode: 'default',
-      thinkingMode: 'none',
+  it('stores API provider selection metadata after session startup', async () => {
+    const endpointResolver = makeEndpointResolver();
+    const { registry, mockRegistry } = makeRegistry({
+      endpointResolver,
+      registry: {
+        getChat: mock(() => ({
+          provider: 'codex',
+          projectPath: '/proj',
+          model: 'acme_openai:acme-code',
+          apiProviderId: 'acme',
+          modelEndpointId: 'acme_openai',
+          permissionMode: 'default',
+          thinkingMode: 'none',
+        })),
+      },
     });
 
     await registry.startSession('123', 'hello', {});
 
     expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
-      providerSessionId: expect.any(String),
-      nativePath: '/tmp/claude-session.jsonl',
-    });
-  });
-
-  it('passes hydrated project path through resumed OpenCode turns', async () => {
-    mockRegistry.getChat.mockReturnValue({
-      provider: 'opencode',
-      projectPath: '/proj',
-      providerSessionId: 'sess-3',
-      model: 'openai/gpt-5',
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
-    });
-
-    await registry.runProviderTurn('123', 'continue', {});
-
-    expect(mockOpencode.runTurn).toHaveBeenCalledWith({
-      command: 'continue',
-      providerSessionId: 'sess-3',
-      chatId: '123',
-      projectPath: '/proj',
-      model: 'openai/gpt-5',
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
-      claudeThinkingMode: 'auto',
-      images: undefined,
-    });
-  });
-
-  it('preserves explicit runtime overrides over registry values', async () => {
-    mockRegistry.getChat.mockReturnValue({
-      provider: 'claude',
-      projectPath: '/proj',
-      providerSessionId: 'sess-2',
-      model: 'opus',
-      permissionMode: 'default',
-      thinkingMode: 'none',
-    });
-
-    await registry.runProviderTurn('123', 'continue', {
-      model: 'sonnet',
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'ultrathink',
-    });
-
-    expect(mockClaude.runClaudeTurn).toHaveBeenCalledWith({
-      command: 'continue',
-      providerSessionId: 'sess-2',
-      chatId: '123',
-      projectPath: '/proj',
-      model: 'sonnet',
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'ultrathink',
-      claudeThinkingMode: 'auto',
-      images: undefined,
-    });
-  });
-
-  it('stores the derived native path when starting an Amp session', async () => {
-    mockRegistry.getChat.mockReturnValue({
-      provider: 'amp',
-      projectPath: '/proj',
-      model: 'default',
-      permissionMode: 'default',
-      thinkingMode: 'none',
-    });
-
-    await registry.startSession('123', 'hello', {});
-
-    expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
-      providerSessionId: 'amp-session',
-      nativePath: 'amp:amp-session',
-    });
-  });
-
-  it('stores the derived native path when starting a Z.ai session', async () => {
-    mockRegistry.getChat.mockReturnValue({
-      provider: 'zai',
-      projectPath: '/proj',
-      model: 'glm-5.1',
-      permissionMode: 'default',
-      thinkingMode: 'none',
-    });
-
-    await registry.startSession('123', 'hello', {});
-
-    expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
-      providerSessionId: 'zai-session',
-      nativePath: '!zai:zai-session',
+      providerSessionId: 'codex-session',
+      nativePath: null,
+      apiProviderId: 'acme',
+      modelEndpointId: 'acme_openai',
+      modelProtocol: 'openai-compatible',
     });
   });
 });

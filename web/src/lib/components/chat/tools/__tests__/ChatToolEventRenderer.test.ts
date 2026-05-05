@@ -26,12 +26,12 @@ describe('ChatToolEventRenderer', () => {
 
 	it('opens tools with defaultOpen=true when autoExpandTools is disabled', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new ExitPlanModeToolUseMessage('', 'tool-2', 'Implement the migration.'),
+			toolMessage: new ExitPlanModeToolUseMessage('', 'tool-2', 'Implement the change.'),
 			mode: 'input',
 			autoExpandTools: false
 		});
 
-		expect(screen.getByText('Implement the migration.')).toBeTruthy();
+		expect(screen.getByText('Implement the change.')).toBeTruthy();
 	});
 
 	it('forces Edit open when autoExpandTools is enabled even with defaultOpen=false', () => {
@@ -109,7 +109,7 @@ describe('ChatToolEventRenderer', () => {
 
 	it('renders AmpTaskList using its typed task summary', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new AmpTaskListToolUseMessage('', 'tool-task-list-1', 'update', '42', 'Ship migration', 'done'),
+			toolMessage: new AmpTaskListToolUseMessage('', 'tool-task-list-1', 'update', '42', 'Ship implementation', 'done'),
 			mode: 'input'
 		});
 

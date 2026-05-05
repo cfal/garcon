@@ -35,10 +35,19 @@ import { CodexProvider } from './providers/codex.js';
 import { OpenCodeProvider } from './providers/opencode.js';
 import { AmpProvider } from './providers/amp-cli.js';
 import { FactoryProvider } from './providers/factory-cli.js';
-import { OpenRouterProvider } from './providers/openrouter.js';
-import { ZaiProvider } from './providers/zai.js';
 import { ProviderRegistry } from './providers/index.js';
-import { OllamaBridge } from './providers/ollama-bridge.js';
+import { ApiProviderStore } from './providers/api-provider-store.js';
+import { ApiProviderEndpointResolver } from './providers/api-provider-endpoint-resolver.js';
+import {
+  createClaudeAdapter,
+  createCodexAdapter,
+  createOpenCodeAdapter,
+  createAmpAdapter,
+  createFactoryAdapter,
+  createDirectOpenAiCompatibleRouterAdapter,
+  createDirectOpenAiResponsesCompatibleRouterAdapter,
+  createDirectAnthropicCompatibleRouterAdapter,
+} from './providers/provider-adapters.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
@@ -90,32 +99,42 @@ export async function startServer() {
     const opencodeProvider = new OpenCodeProvider();
     const ampProvider = new AmpProvider();
     const factoryProvider = new FactoryProvider();
-    const openrouterProvider = new OpenRouterProvider();
-    const zaiProvider = new ZaiProvider();
 
-    // Tier 1.5: Ollama bridge (local model support)
-    const ollamaBridge = new OllamaBridge();
-    const ollamaDetected = await ollamaBridge.detect();
-    if (ollamaDetected) {
-      const modelCount = ollamaBridge.getModels().length;
-      console.log(`ollama: detected at ${ollamaBridge.url} (${modelCount} model${modelCount !== 1 ? 's' : ''})`);
-      ollamaBridge.startRefreshTimer();
-    } else {
-      console.log('ollama: not detected (local models unavailable)');
-    }
+    // Tier 1.5: User-managed API provider store and resolver
+    const apiProviderStore = new ApiProviderStore();
+    await apiProviderStore.init();
 
-    // Tier 2: Provider registry wrapping providers + registry
-    const providerRegistry = new ProviderRegistry(
-      chatRegistry,
-      claudeProvider,
-      codexProvider,
-      opencodeProvider,
-      ampProvider,
-      factoryProvider,
-      openrouterProvider,
-      zaiProvider,
-      ollamaBridge,
-    );
+    const endpointResolver = new ApiProviderEndpointResolver(() => apiProviderStore.list());
+
+    // Build harness adapters from concrete harness instances.
+    const claudeAdapter = createClaudeAdapter(claudeProvider);
+    const codexAdapter = createCodexAdapter(codexProvider);
+    const opencodeAdapter = createOpenCodeAdapter(opencodeProvider);
+    const ampAdapter = createAmpAdapter(ampProvider);
+    const factoryAdapter = createFactoryAdapter(factoryProvider);
+    const directOpenAiResponsesAdapter = createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore);
+    const directOpenAiAdapter = createDirectOpenAiCompatibleRouterAdapter(apiProviderStore);
+    const directAnthropicAdapter = createDirectAnthropicCompatibleRouterAdapter(apiProviderStore);
+
+    const initialAdapters = [
+      claudeAdapter,
+      directAnthropicAdapter,
+      codexAdapter,
+      directOpenAiResponsesAdapter,
+      directOpenAiAdapter,
+      opencodeAdapter,
+      ampAdapter,
+      factoryAdapter,
+    ];
+
+    // Tier 2: Harness registry wrapping adapters + registry + store + resolver
+    const providerRegistry = new ProviderRegistry({
+      registry: chatRegistry,
+      adapters: initialAdapters,
+      endpointResolver,
+      apiProviderStore,
+      opencodeInstance: opencodeProvider,
+    });
 
     // Tier 3: Chat infrastructure (uses ProviderRegistry)
     const metadata = new MetadataIndex(chatRegistry, providerRegistry);

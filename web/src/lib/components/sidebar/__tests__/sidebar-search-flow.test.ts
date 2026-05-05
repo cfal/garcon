@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SidebarHarness from './SidebarHarness.svelte';
 
 import { getSavedSearches } from '$lib/api/settings';
@@ -46,6 +46,12 @@ describe('sidebar search dialog flow', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(getSavedSearches).mockResolvedValue({ savedSearches: [] });
+	});
+
+	afterEach(async () => {
+		cleanup();
+		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('restores the search dialog draft after cancelling add saved search', async () => {

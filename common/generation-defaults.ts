@@ -1,16 +1,29 @@
 // Shared default policy for title/commit generation auto-selection.
 // These defaults are used when users have not explicitly configured
-// provider/model settings.
+// harness/model settings.
 
-export const GENERATION_PROVIDER_PRIORITY = ['claude', 'codex', 'opencode', 'openrouter', 'zai', 'amp', 'factory'] as const;
+import {
+  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
+} from './providers.js';
+
+export const GENERATION_HARNESS_PRIORITY = [
+  'claude',
+  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+  'codex',
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+  'opencode',
+  'amp',
+  'factory',
+] as const;
 
 export const GENERATION_MODEL_DEFAULTS = {
   claude: 'haiku',
   codex: 'gpt-5.5',
   amp: 'smart',
   factory: 'claude-opus-4-6',
-  openrouter: 'anthropic/claude-sonnet-4.6',
-  zai: 'glm-5.1',
 } as const;
 
 // Preference order for OpenCode model auto-selection.

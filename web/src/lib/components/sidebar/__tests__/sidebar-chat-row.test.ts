@@ -48,9 +48,17 @@ describe('shared sidebar chat row', () => {
 		expect(document.querySelectorAll('.border-sidebar-badge-pinned-border')).toHaveLength(1);
 		expect(screen.getAllByText('Shared row chat')).toHaveLength(2);
 		expect(screen.getAllByLabelText('Unread')).toHaveLength(2);
-		expect(screen.getAllByText('Jan 1')).toHaveLength(2);
-		expect(screen.getAllByText('12:00 AM')).toHaveLength(2);
+		expect(screen.getAllByText('3h ago')).toHaveLength(2);
+		expect(screen.getAllByText('3h ago')[0]?.className).toContain('font-normal');
+		expect(screen.getAllByText('3h ago')[0]?.className).not.toContain('md:group-hover:opacity-0');
+		expect(screen.queryByText('Jan 1')).toBeNull();
+		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getAllByTitle('/very/long/workspace/projects/feature-branch/app')).toHaveLength(2);
+		const metadataProjectLabels = screen.getAllByText('\u2026/projects/feature-branch/app');
+		expect(metadataProjectLabels).toHaveLength(2);
+		expect(metadataProjectLabels[0]?.className).toContain('font-semibold');
+		expect(metadataProjectLabels[0]?.parentElement?.className).toContain('text-[12px]');
+		expect(metadataProjectLabels[0]?.parentElement?.className).toContain('gap-1');
 		const sidebarPreview = screen.getAllByText('Latest preview text');
 		expect(sidebarPreview).toHaveLength(2);
 		expect(sidebarPreview[0]?.className).toContain('mt-0.5');
@@ -59,6 +67,11 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getAllByText('ops')).toHaveLength(2);
 		expect(screen.getAllByText('prod')).toHaveLength(2);
 		expect(screen.getAllByRole('button', { name: '+1' })).toHaveLength(2);
+		const desktopMenuTrigger = document.querySelector<HTMLElement>(
+			'[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]'
+		);
+		expect(desktopMenuTrigger?.className).toContain('border-sidebar-border/70');
+		expect(desktopMenuTrigger?.className).toContain('bg-background');
 
 		await fireEvent.click(screen.getAllByRole('button', { name: 'ops' })[0]!);
 		expect(onTagClick).toHaveBeenCalledWith('ops');
@@ -83,6 +96,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.queryByLabelText('Unread')).toBeNull();
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
+		expect(screen.getByText('3h ago')).toBeTruthy();
 		expect(screen.getByTitle('/very/long/workspace/projects/feature-branch/app')).toBeTruthy();
 		expect(screen.getByText('Latest preview text').className).toContain('mt-0.5');
 		expect(screen.getByText('Latest preview text').className).toContain('mb-1');
@@ -91,5 +105,27 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('prod')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: '+1' })).toBeNull();
 		expect(screen.getByText('+1')).toBeTruthy();
+	});
+
+	it('updates relative timestamps when currentTime changes', async () => {
+		const session = createChat({
+			createdAt: '2025-01-01T00:00:00.000Z',
+			lastActivityAt: '2025-01-01T00:00:00.000Z',
+		});
+
+		const { rerender } = render(SidebarChatItemHarness, {
+			session,
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+		});
+
+		expect(screen.getAllByText('3h ago')).toHaveLength(2);
+
+		await rerender({
+			session,
+			currentTime: new Date('2025-01-01T04:00:00.000Z'),
+		});
+
+		expect(screen.getAllByText('4h ago')).toHaveLength(2);
+		expect(screen.queryByText('3h ago')).toBeNull();
 	});
 });

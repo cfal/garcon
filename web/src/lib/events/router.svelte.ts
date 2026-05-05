@@ -82,7 +82,7 @@ export interface EventRouterStores {
 	removeChat: (chatId: string) => void;
 	patchChatTitle: (chatId: string, title: string) => void;
 	navigateAwayFromChat: (chatId: string) => void;
-	// Startup ownership (replaces legacy replaceTemporaryChat).
+	// Startup ownership.
 	startupCoordinator: StartupCoordinator;
 	onLocalStartupConfirmed: (chatId: string) => void;
 	onExternalChatCreated: (chatId: string) => void;

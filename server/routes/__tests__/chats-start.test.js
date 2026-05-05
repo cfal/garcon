@@ -58,7 +58,9 @@ const historyCache = {
 const providers = {
   startSession: mock(() => Promise.resolve(undefined)),
   getModels: mock(() => Promise.resolve([])),
-  isProviderSessionRunning: mock(() => false),
+  isHarnessSessionRunning: mock(() => false),
+  hasHarness: mock(() => true),
+  modelSupportsImages: mock(() => Promise.resolve(false)),
 };
 
 const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
@@ -79,13 +81,16 @@ describe('POST /api/v1/chats/start', () => {
     historyCache.appendMessages.mockClear();
     providers.startSession.mockClear();
     providers.getModels.mockClear();
+    providers.hasHarness.mockClear();
+    providers.hasHarness.mockImplementation(() => true);
+    providers.modelSupportsImages.mockClear();
   });
 
   afterEach(async () => {
     await fs.rm(testBasePath, { recursive: true, force: true });
   });
 
-  it('persists top-level startup defaults before starting the provider session', async () => {
+  it('persists top-level startup defaults before starting the harness session', async () => {
     const projectPath = path.join(testBasePath, 'project-a');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
@@ -110,6 +115,9 @@ describe('POST /api/v1/chats/start', () => {
       provider: 'codex',
       projectPath,
       model: 'gpt-5.4',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
       permissionMode: 'acceptEdits',
       thinkingMode: 'think-hard',
       claudeThinkingMode: 'off',
@@ -147,6 +155,9 @@ describe('POST /api/v1/chats/start', () => {
       provider: 'claude',
       projectPath,
       model: 'opus',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'on',
@@ -177,7 +188,7 @@ describe('POST /api/v1/chats/start', () => {
     const body = await response.json();
 
     expect(response.status).toBe(422);
-    expect(body.error).toBe('Images unsupported for provider: factory');
+    expect(body.error).toBe('Images unsupported for harness: factory');
     expect(providers.startSession).not.toHaveBeenCalled();
   });
 
@@ -212,5 +223,47 @@ describe('POST /api/v1/chats/start', () => {
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',
     }));
+  });
+
+  it('rejects missing providers instead of defaulting to Claude', async () => {
+    const projectPath = path.join(testBasePath, 'project-e');
+    await fs.mkdir(projectPath, { recursive: true });
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      chatId: '791',
+      projectPath,
+      model: 'opus',
+      command: 'hello',
+      options: {},
+    }));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('provider is required');
+    expect(registry.addChat).not.toHaveBeenCalled();
+    expect(providers.startSession).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported providers instead of defaulting to Claude', async () => {
+    const projectPath = path.join(testBasePath, 'project-f');
+    await fs.mkdir(projectPath, { recursive: true });
+    providers.hasHarness.mockImplementation((harnessId) => harnessId !== 'unknown-provider');
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      chatId: '792',
+      provider: 'unknown-provider',
+      projectPath,
+      model: 'opus',
+      command: 'hello',
+      options: {},
+    }));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Unsupported harness: unknown-provider');
+    expect(registry.addChat).not.toHaveBeenCalled();
+    expect(providers.startSession).not.toHaveBeenCalled();
   });
 });

@@ -30,6 +30,9 @@ function createEmpty() {
     lastProvider: 'claude',
     lastProjectPath: '',
     lastModel: '',
+    lastApiProviderId: null,
+    lastModelEndpointId: null,
+    lastModelProtocol: null,
     lastPermissionMode: DEFAULT_PERMISSION_MODE,
     lastThinkingMode: DEFAULT_THINKING_MODE,
     lastClaudeThinkingMode: DEFAULT_CLAUDE_THINKING_MODE,
@@ -141,6 +144,11 @@ function sanitize(parsed) {
     lastProvider: typeof parsed.lastProvider === 'string' ? parsed.lastProvider : 'claude',
     lastProjectPath: typeof parsed.lastProjectPath === 'string' ? parsed.lastProjectPath : '',
     lastModel: typeof parsed.lastModel === 'string' ? parsed.lastModel : '',
+    lastApiProviderId: typeof parsed.lastApiProviderId === 'string' ? parsed.lastApiProviderId : null,
+    lastModelEndpointId: typeof parsed.lastModelEndpointId === 'string' ? parsed.lastModelEndpointId : null,
+    lastModelProtocol: (parsed.lastModelProtocol === 'openai-compatible' || parsed.lastModelProtocol === 'anthropic-messages')
+      ? parsed.lastModelProtocol
+      : null,
     lastPermissionMode: normalizePermissionMode(parsed.lastPermissionMode),
     lastThinkingMode: normalizeThinkingMode(parsed.lastThinkingMode),
     lastClaudeThinkingMode: normalizeClaudeThinkingMode(parsed.lastClaudeThinkingMode),
@@ -464,6 +472,9 @@ export class SettingsStore extends EventEmitter {
       lastProvider: settings.lastProvider || 'claude',
       lastProjectPath: settings.lastProjectPath || '',
       lastModel: settings.lastModel || '',
+      lastApiProviderId: settings.lastApiProviderId ?? null,
+      lastModelEndpointId: settings.lastModelEndpointId ?? null,
+      lastModelProtocol: settings.lastModelProtocol ?? null,
       lastPermissionMode: normalizePermissionMode(settings.lastPermissionMode),
       lastThinkingMode: normalizeThinkingMode(settings.lastThinkingMode),
       lastClaudeThinkingMode: normalizeClaudeThinkingMode(settings.lastClaudeThinkingMode),
@@ -496,6 +507,21 @@ export class SettingsStore extends EventEmitter {
     return settings.lastModel || '';
   }
 
+  async getLastApiProviderId() {
+    const settings = await this.loadSettings();
+    return settings.lastApiProviderId ?? null;
+  }
+
+  async getLastModelEndpointId() {
+    const settings = await this.loadSettings();
+    return settings.lastModelEndpointId ?? null;
+  }
+
+  async getLastModelProtocol() {
+    const settings = await this.loadSettings();
+    return settings.lastModelProtocol ?? null;
+  }
+
   async setLastChatDefaults(defaults) {
     return this.#withLock(async () => {
       const settings = await this.loadSettings();
@@ -508,6 +534,17 @@ export class SettingsStore extends EventEmitter {
       settings.lastModel = typeof defaults?.model === 'string'
         ? defaults.model
         : (settings.lastModel || '');
+      if (defaults?.apiProviderId !== undefined) {
+        settings.lastApiProviderId = typeof defaults.apiProviderId === 'string' ? defaults.apiProviderId : null;
+      }
+      if (defaults?.modelEndpointId !== undefined) {
+        settings.lastModelEndpointId = typeof defaults.modelEndpointId === 'string' ? defaults.modelEndpointId : null;
+      }
+      if (defaults?.modelProtocol !== undefined) {
+        settings.lastModelProtocol = (defaults.modelProtocol === 'openai-compatible' || defaults.modelProtocol === 'anthropic-messages')
+          ? defaults.modelProtocol
+          : null;
+      }
       settings.lastPermissionMode = normalizePermissionMode(
         defaults?.permissionMode,
         normalizePermissionMode(settings.lastPermissionMode),

@@ -10,7 +10,6 @@ import {
 	type ConfirmAction,
 	type GitRemoteEntry,
 	getGitStatus,
-	getGitDiff,
 	getBranches as fetchBranchesApi,
 	getRemoteStatus as fetchRemoteStatusApi,
 	getGitRemotes,
@@ -66,18 +65,19 @@ export class GitPanelStore {
 	isCommitAreaCollapsed = $state(false);
 	confirmAction = $state<ConfirmAction | null>(null);
 	isCreatingInitialCommit = $state(false);
+	lastError = $state<string | null>(null);
 
 	// Data fetching
 
-	private async fetchFileDiff(projectPath: string, file: string): Promise<void> {
-		try {
-			const data = await getGitDiff(projectPath, file);
-			if (!data.error && data.diff) {
-				this.gitDiffMap = { ...this.gitDiffMap, [file]: data.diff };
-			}
-		} catch (err) {
-			console.error('[Git] Error fetching file diff:', err);
-		}
+	surfaceError(message: string): void {
+		this.lastError = message;
+		setTimeout(() => {
+			if (this.lastError === message) this.lastError = null;
+		}, 6000);
+	}
+
+	dismissError(): void {
+		this.lastError = null;
 	}
 
 	async fetchGitStatus(projectPath: string): Promise<void> {
@@ -88,21 +88,14 @@ export class GitPanelStore {
 				this.gitStatus = { ...EMPTY_STATUS, error: data.error, details: data.details };
 				this.currentBranch = '';
 				this.selectedFiles = new Set();
-			} else {
-				this.gitStatus = data;
-				this.currentBranch = data.branch || 'main';
-				this.selectedFiles = new Set();
-				const allFiles = [
-					...(data.modified ?? []),
-					...(data.added ?? []),
-					...(data.deleted ?? []),
-					...(data.untracked ?? [])
-				];
-				for (const file of allFiles) this.fetchFileDiff(projectPath, file);
-			}
-		} catch (err) {
-			console.error('[Git] Error fetching status:', err);
-			this.gitStatus = {
+				} else {
+					this.gitStatus = data;
+					this.currentBranch = data.branch || 'main';
+					this.selectedFiles = new Set();
+				}
+			} catch (err) {
+				this.surfaceError(`Git status failed: ${err instanceof Error ? err.message : String(err)}`);
+				this.gitStatus = {
 				...EMPTY_STATUS,
 				error: 'Git operation failed',
 				details: String(err)
@@ -175,18 +168,22 @@ export class GitPanelStore {
 		projectPath: string,
 		action: () => Promise<{ success?: boolean; error?: string }>,
 		setLoading: (v: boolean) => void
-	): Promise<void> {
+	): Promise<boolean> {
 		setLoading(true);
 		try {
 			const data = await action();
 			if (data.success) {
-				this.fetchGitStatus(projectPath);
-				this.fetchRemoteStatus(projectPath);
-			} else {
-				console.error('[Git] Action failed:', data.error);
+				await Promise.all([
+					this.fetchGitStatus(projectPath),
+					this.fetchRemoteStatus(projectPath),
+				]);
+				return true;
 			}
+			this.surfaceError(data.error ?? 'Git action failed');
+			return false;
 		} catch (err) {
-			console.error('[Git] Action error:', err);
+			this.surfaceError(`Git action failed: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
 		} finally {
 			setLoading(false);
 		}
@@ -194,25 +191,25 @@ export class GitPanelStore {
 
 	// Git actions
 
-	handleFetch(projectPath: string): void {
-		this.postGitAction(
+	handleFetch(projectPath: string): Promise<boolean> {
+		return this.postGitAction(
 			projectPath,
 			() => gitFetch(projectPath),
 			(v) => (this.isFetching = v)
 		);
 	}
 
-	handlePull(projectPath: string): void {
-		this.postGitAction(
+	handlePull(projectPath: string): Promise<boolean> {
+		return this.postGitAction(
 			projectPath,
 			() => gitPull(projectPath),
 			(v) => (this.isPulling = v)
 		);
 	}
 
-	handlePush(projectPath: string, remote?: string, remoteBranch?: string): void {
+	handlePush(projectPath: string, remote?: string, remoteBranch?: string): Promise<boolean> {
 		this.showPushModal = false;
-		this.postGitAction(
+		return this.postGitAction(
 			projectPath,
 			() => gitPush(projectPath, remote, remoteBranch),
 			(v) => (this.isPushing = v)
@@ -234,23 +231,29 @@ export class GitPanelStore {
 		this.showPushModal = true;
 	}
 
-	async handleSwitchBranch(projectPath: string, branch: string): Promise<void> {
+	async handleSwitchBranch(projectPath: string, branch: string): Promise<boolean> {
 		try {
 			const data = await gitCheckout(projectPath, branch);
 			if (data.success) {
 				this.currentBranch = branch;
 				this.showBranchDropdown = false;
-				this.fetchGitStatus(projectPath);
-			} else {
-				console.error('[Git] Switch branch failed:', data.error);
+				await Promise.all([
+					this.fetchGitStatus(projectPath),
+					this.fetchBranches(projectPath),
+					this.fetchRemoteStatus(projectPath),
+				]);
+				return true;
 			}
+			this.surfaceError(data.error ?? 'Switch branch failed');
+			return false;
 		} catch (err) {
-			console.error('[Git] Error switching branch:', err);
+			this.surfaceError(`Switch branch failed: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
 		}
 	}
 
-	async handleCreateBranch(projectPath: string): Promise<void> {
-		if (!this.newBranchName.trim()) return;
+	async handleCreateBranch(projectPath: string): Promise<boolean> {
+		if (!this.newBranchName.trim()) return false;
 		this.isCreatingBranch = true;
 		try {
 			const data = await gitCreateBranch(projectPath, this.newBranchName.trim());
@@ -259,13 +262,18 @@ export class GitPanelStore {
 				this.showNewBranchModal = false;
 				this.showBranchDropdown = false;
 				this.newBranchName = '';
-				this.fetchBranches(projectPath);
-				this.fetchGitStatus(projectPath);
-			} else {
-				console.error('[Git] Create branch failed:', data.error);
+				await Promise.all([
+					this.fetchBranches(projectPath),
+					this.fetchGitStatus(projectPath),
+					this.fetchRemoteStatus(projectPath),
+				]);
+				return true;
 			}
+			this.surfaceError(data.error ?? 'Create branch failed');
+			return false;
 		} catch (err) {
-			console.error('[Git] Error creating branch:', err);
+			this.surfaceError(`Create branch failed: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
 		} finally {
 			this.isCreatingBranch = false;
 		}
