@@ -9,7 +9,7 @@
 	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
 	import * as m from '$lib/paraglide/messages.js';
-	import { ImagePlus } from '@lucide/svelte';
+	import { ImagePlus, X } from '@lucide/svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
@@ -323,10 +323,12 @@
 								</div>
 									<button
 										type="button"
+										aria-label={m.chat_composer_remove_image({ name: file.name })}
+										title={m.chat_composer_remove_image({ name: file.name })}
 										class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
 										onclick={() => composerState.removeImage(idx)}
 									>
-									x
+									<X class="w-3 h-3" aria-hidden="true" />
 								</button>
 							</div>
 						{/each}
@@ -350,7 +352,7 @@
 					ondragleave={handleDragLeave}
 					ondrop={handleDrop}
 					role="region"
-					aria-label="Message input area"
+					aria-label={m.chat_composer_message_input_area()}
 				>
 					<div class="relative z-10">
 						<textarea
@@ -370,7 +372,7 @@
 
 				<ComposerBottomBar
 					canAttachImages={canAttachImages}
-					attachImagesTooltip="Image attachments are unavailable for this provider."
+					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={handleImagePick}
 					permissionOptions={permissionOptions}
 					selectedPermission={providerState.permissionMode}

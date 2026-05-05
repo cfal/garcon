@@ -10,6 +10,7 @@
 	import type { ComposerModeOption } from '$lib/chat/composer-controls';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
 	import { ImagePlus, Plus, Send } from '@lucide/svelte';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		canAttachImages: boolean;
@@ -64,7 +65,7 @@
 				<DropdownMenuTrigger
 					disabled={!canAttachImages}
 					class="inline-flex size-9 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-					title={canAttachImages ? 'Add attachment' : attachImagesTooltip}
+					title={canAttachImages ? m.chat_composer_add_attachment() : attachImagesTooltip}
 				>
 					<Plus class="size-4" />
 				</DropdownMenuTrigger>
@@ -72,8 +73,8 @@
 					<DropdownMenuItem onclick={onAddImage} disabled={!canAttachImages} class="items-start">
 						<ImagePlus class="mt-0.5 size-4" />
 						<div class="min-w-0">
-							<div class="font-medium">Add image</div>
-							<div class="text-xs text-muted-foreground">Attach one or more image files.</div>
+							<div class="font-medium">{m.chat_composer_add_image()}</div>
+							<div class="text-xs text-muted-foreground">{m.chat_composer_attach_image_files()}</div>
 						</div>
 					</DropdownMenuItem>
 				</DropdownMenuContent>
@@ -82,7 +83,7 @@
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activePermission?.toneClass}"
-					title={activePermission?.label ?? 'Permission mode'}
+					title={activePermission?.label ?? m.chat_composer_permission_mode()}
 				>
 					{#if activePermission}
 						<ComposerModeIcon iconId={activePermission.iconId} class="size-4" />
@@ -104,7 +105,7 @@
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activeThinking?.toneClass}"
-					title={activeThinking?.label ?? 'Thinking effort'}
+					title={activeThinking?.label ?? m.chat_composer_thinking_effort()}
 				>
 					{#if activeThinking}
 						<ComposerModeIcon iconId={activeThinking.iconId} class="size-4" />

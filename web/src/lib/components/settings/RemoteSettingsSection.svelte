@@ -14,6 +14,7 @@
 
 	const remoteSettings = getRemoteSettings();
 	const modelCatalog = getModelCatalog();
+	const telegramBotTokenEnvVar = 'GARCON_TELEGRAM_BOT_TOKEN';
 
 	let saveError = $state<string | null>(null);
 
@@ -70,7 +71,7 @@
 		try {
 			await remoteSettings.update({ ui: patch });
 		} catch (error) {
-			saveError = error instanceof Error ? error.message : 'Failed to save setting';
+			saveError = error instanceof Error ? error.message : m.settings_save_failed();
 		}
 	}
 
@@ -134,10 +135,10 @@
 		try {
 			const res = await sendTelegramTest(telegramChatId.trim());
 			telegramTestResult = res.success
-				? { ok: true, message: 'Test message sent.' }
-				: { ok: false, message: res.error ?? 'Send failed.' };
+				? { ok: true, message: m.settings_telegram_test_sent() }
+				: { ok: false, message: res.error ?? m.settings_telegram_send_failed() };
 		} catch {
-			telegramTestResult = { ok: false, message: 'Request failed.' };
+			telegramTestResult = { ok: false, message: m.settings_telegram_request_failed() };
 		} finally {
 			telegramTestSending = false;
 		}
@@ -202,26 +203,26 @@
 		<!-- Telegram Notifications -->
 		<div class="bg-muted/50 border border-border rounded-lg px-4">
 			<div class="flex items-center justify-between py-2">
-				<div class="text-sm font-medium text-foreground">Telegram notifications</div>
+				<div class="text-sm font-medium text-foreground">{m.settings_telegram_notifications()}</div>
 				<Switch
 					checked={telegramEnabled}
 					disabled={!telegramBotAvailable}
 					onCheckedChange={async (next) => {
 						await persistTelegramSettings({ enabled: Boolean(next) });
 					}}
-					aria-label="Telegram notifications"
+					aria-label={m.settings_telegram_notifications()}
 				/>
 			</div>
 
 			{#if !telegramBotAvailable}
 				<p class="text-xs text-muted-foreground pb-2">
-					Set <code class="text-xs bg-muted px-1 py-0.5 rounded">GARCON_TELEGRAM_BOT_TOKEN</code> to enable.
+					{m.settings_telegram_enable_hint({ envVar: telegramBotTokenEnvVar })}
 				</p>
 			{/if}
 
 			{#if telegramBotAvailable && telegramEnabled}
 				<div class="flex items-center justify-between py-2 gap-3">
-					<div class="text-sm font-medium text-foreground shrink-0">Chat ID</div>
+					<div class="text-sm font-medium text-foreground shrink-0">{m.settings_telegram_chat_id()}</div>
 						<input
 							type="text"
 							class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground w-40"
@@ -254,7 +255,7 @@
 						onclick={handleTelegramTest}
 					>
 						<SendIcon class="size-3.5 mr-1.5" />
-						{telegramTestSending ? 'Sending...' : 'Send test'}
+						{telegramTestSending ? m.settings_telegram_sending() : m.settings_telegram_send_test()}
 					</Button>
 				</div>
 			{/if}

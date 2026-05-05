@@ -152,8 +152,9 @@ Return only the commit message now.`;
 >
 	<div class="bg-background border border-border rounded-lg shadow-xl w-[440px] max-h-[85vh] overflow-y-auto">
 		<div class="flex items-center justify-between px-4 py-3 border-b border-border">
-			<h2 class="text-sm font-medium text-foreground">Commit message generation</h2>
+			<h2 class="text-sm font-medium text-foreground">{m.git_commit_settings_title()}</h2>
 			<button
+				aria-label={m.share_dialog_close()}
 				onclick={onClose}
 				class="p-1 rounded hover:bg-muted transition-colors text-muted-foreground"
 			>
@@ -164,26 +165,26 @@ Return only the commit message now.`;
 			{#if loaded}
 				<div class="px-4 py-3 space-y-3">
 					<div class="flex items-center justify-between">
-						<div class="text-sm font-medium text-foreground">Directory prefix</div>
+						<div class="text-sm font-medium text-foreground">{m.git_commit_settings_directory_prefix()}</div>
 						<Switch
 							checked={useCommonDirPrefix}
 							onCheckedChange={(next) => { useCommonDirPrefix = next; persist(); }}
-							aria-label="Prefix commit message with common directory"
+							aria-label={m.git_commit_settings_directory_prefix_aria()}
 						/>
 					</div>
 
 					<div class="flex items-center justify-between">
-						<div class="text-sm font-medium text-foreground">Enabled</div>
+						<div class="text-sm font-medium text-foreground">{m.git_commit_settings_enabled()}</div>
 						<Switch
 							checked={enabled}
 							onCheckedChange={handleEnabledChange}
-						aria-label="Enable commit message generation"
+						aria-label={m.git_commit_settings_enabled_aria()}
 					/>
 				</div>
 
 					{#if enabled}
 						<div class="flex items-center justify-between">
-							<div class="text-sm font-medium text-foreground">{m.settings_chat_title_model()}</div>
+							<div class="text-sm font-medium text-foreground">{m.git_commit_settings_model()}</div>
 							<SettingsModelSelector
 								value={modelSelectorValue}
 								mode={modelSelectorMode}
@@ -194,12 +195,12 @@ Return only the commit message now.`;
 						</div>
 
 						<div class="space-y-1.5 pt-1">
-							<div class="text-sm font-medium text-foreground">Generation prompt</div>
+							<div class="text-sm font-medium text-foreground">{m.git_commit_settings_generation_prompt()}</div>
 							<textarea
 								value={customPrompt}
 								oninput={(e) => { customPrompt = e.currentTarget.value; }}
 								onblur={() => persist()}
-							placeholder={'Leave empty for default prompt. Use {{files}} and {{diff}} as placeholders.'}
+							placeholder={m.git_commit_settings_prompt_placeholder({ files: '{{files}}', diff: '{{diff}}' })}
 							class="w-full text-sm p-2.5 bg-muted/30 border border-border rounded-md resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent text-foreground placeholder:text-muted-foreground/60"
 								rows="8"
 							></textarea>
@@ -228,7 +229,7 @@ Return only the commit message now.`;
 			</div>
 		{:else}
 			<div class="px-4 py-6 flex items-center justify-center text-muted-foreground text-sm">
-				Loading...
+				{m.status_loading()}
 			</div>
 		{/if}
 	</div>

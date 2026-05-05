@@ -276,7 +276,7 @@
 								{:else if form.validationStatus === 'valid'}
 									<Check class="w-4 h-4 text-primary transition-opacity duration-200" />
 								{:else if form.validationStatus === 'invalid'}
-									<span title={form.validationError || 'Invalid path'}>
+									<span title={form.validationError || m.chat_new_chat_errors_invalid_directory()}>
 										<X class="w-4 h-4 text-destructive transition-opacity duration-200" />
 									</span>
 								{/if}
@@ -437,7 +437,7 @@
 
 				<ComposerBottomBar
 					canAttachImages={modelCatalog.supportsImages(form.provider, form.modelValue)}
-					attachImagesTooltip="Image attachments are unavailable for this provider."
+					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
 					permissionOptions={permissionOptions}
 					selectedPermission={form.permissionMode}
@@ -479,10 +479,12 @@
 								</div>
 								<button
 									type="button"
+									aria-label={m.chat_composer_remove_image({ name: file.name })}
+									title={m.chat_composer_remove_image({ name: file.name })}
 									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
 									onclick={() => form.removeImage(idx)}
 								>
-									x
+									<X class="w-3 h-3" aria-hidden="true" />
 								</button>
 							</div>
 						{/each}
