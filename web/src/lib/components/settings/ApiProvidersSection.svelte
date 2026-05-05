@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getModelCatalog } from '$lib/context';
+	import { nativeSourceLabelFor } from '$lib/i18n/harness-labels';
 	import {
 		getHarnessAuthStatus,
 		getHarnessReadiness,
@@ -174,7 +175,7 @@
 		title={m.settings_api_providers_anthropic_title()}
 		description={m.settings_api_providers_anthropic_description()}
 		addLabel={m.settings_api_providers_add_anthropic_provider()}
-		oauthHarness={{ id: 'claude', name: 'Claude OAuth' }}
+		oauthHarness={{ id: 'claude', name: nativeSourceLabelFor('claude') }}
 		auth={authFor('claude')}
 		readiness={readinessByHarness.claude}
 		deviceAuth={deviceAuthInfo.claude}
@@ -187,7 +188,7 @@
 		title={m.settings_api_providers_openai_title()}
 		description={m.settings_api_providers_openai_description()}
 		addLabel={m.settings_api_providers_add_openai_provider()}
-		oauthHarness={{ id: 'codex', name: 'OpenAI OAuth' }}
+		oauthHarness={{ id: 'codex', name: nativeSourceLabelFor('codex') }}
 		auth={authFor('codex')}
 		readiness={readinessByHarness.codex}
 		deviceAuth={deviceAuthInfo.codex}

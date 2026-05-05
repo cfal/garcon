@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
 import {
+	buildHarnessOptions,
 	buildModelRows,
 	buildModelSelectorChange,
 	buildModelSources,
@@ -68,7 +69,7 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 		getSelectableHarnesses: () => ['claude', 'codex'],
 		getHarness: (id: string) => ({
 			id,
-			label: id === 'codex' ? 'Codex' : 'Claude',
+			label: id === 'codex' ? 'Cached Codex' : 'Cached Claude',
 			description: '',
 			supportsFork: true,
 			supportsImages: true,
@@ -137,12 +138,62 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 	} as unknown as ModelCatalogStore;
 }
 
+function makeLargeEndpointCatalog(count: number): ModelCatalogStore {
+	const models = Array.from({ length: count }, (_, index): ModelOption => ({
+		value: `acme-openai:model-${index}`,
+		label: `Acme: Model ${index}`,
+		rawModel: `model-${index}`,
+		apiProviderId: 'acme',
+		endpointId: 'acme-openai',
+		protocol: 'openai-compatible',
+	}));
+
+	return {
+		getModels: () => models,
+		getHarnessLabel: () => 'Direct (Responses)',
+		findEndpoint: () => ({
+			apiProvider: {
+				id: 'acme',
+				label: 'Acme',
+				createdAt: '',
+				updatedAt: '',
+				endpoints: [
+					{
+						id: 'acme-openai',
+						protocol: 'openai-compatible',
+						baseUrl: 'https://openai.example',
+						defaultModel: 'model-0',
+						models: [],
+						supportsImages: true,
+						hasApiKey: true,
+					},
+				],
+			},
+			endpoint: {
+				id: 'acme-openai',
+				protocol: 'openai-compatible',
+				baseUrl: 'https://openai.example',
+				defaultModel: 'model-0',
+				models: [],
+				supportsImages: true,
+				hasApiKey: true,
+			},
+		}),
+	} as unknown as ModelCatalogStore;
+}
+
 describe('model selector options', () => {
 	it('labels native OAuth sources by product identity', () => {
 		const catalog = makeCatalog();
 
 		expect(nativeSourceLabel('claude', catalog)).toBe('Claude OAuth');
 		expect(nativeSourceLabel('codex', catalog)).toBe('OpenAI OAuth');
+	});
+
+	it('uses catalog display labels instead of raw cached metadata for harness options', () => {
+		const catalog = makeCatalog();
+
+		expect(buildHarnessOptions(catalog).map((option) => option.label)).toEqual(['Claude', 'Codex']);
 	});
 
 	it('groups native and endpoint-backed models into source options', () => {
@@ -157,6 +208,15 @@ describe('model selector options', () => {
 		const sources = buildModelSources(makeCatalog({ multiEndpointProvider: true }), 'claude');
 
 		expect(sources[1].label).toBe('Acme (Anthropic - https://anthropic.example)');
+	});
+
+	it('groups large endpoint catalogs without dropping model order', () => {
+		const sources = buildModelSources(makeLargeEndpointCatalog(2500), 'direct-openai-responses-compatible');
+
+		expect(sources).toHaveLength(1);
+		expect(sources[0].models).toHaveLength(2500);
+		expect(sources[0].models[0].value).toBe('acme-openai:model-0');
+		expect(sources[0].models[2499].value).toBe('acme-openai:model-2499');
 	});
 
 	it('removes endpoint provider prefixes only when a source is visible', () => {

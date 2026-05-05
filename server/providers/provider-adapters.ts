@@ -20,8 +20,11 @@ import type { ApiProviderStore, StoredApiProvider, StoredApiProviderEndpoint } f
 import { getWorkspaceDir } from '../config.js';
 import {
   DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL,
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL,
   DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL,
   endpointSupportsHarness,
   type ApiProtocol,
   type HarnessId,
@@ -436,14 +439,14 @@ class DirectEndpointRouterAdapter<TProvider extends DirectCompatibleProvider> im
 export function createDirectOpenAiCompatibleRouterAdapter(apiProviderStore: ApiProviderStore): ProviderAdapter {
   return new DirectEndpointRouterAdapter({
     harnessId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-    label: 'Direct Chat (OpenAI Chat Completions)',
+    label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL,
     protocol: 'openai-compatible',
-    noEndpointMessage: 'No OpenAI-compatible Chat Completions endpoint is configured for Direct Chat.',
+    noEndpointMessage: `No OpenAI-compatible Chat Completions endpoint is configured for ${DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL}.`,
     apiProviderStore,
     createProvider(endpoint) {
       return new OpenAiCompatibleChatProvider(buildDirectOpenAiConfig({
         providerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-        providerLabel: 'Direct Chat (OpenAI Chat Completions)',
+        providerLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL,
         endpoint,
       }));
     },
@@ -460,14 +463,14 @@ export function createDirectOpenAiCompatibleRouterAdapter(apiProviderStore: ApiP
 export function createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore: ApiProviderStore): ProviderAdapter {
   return new DirectEndpointRouterAdapter({
     harnessId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-    label: 'Direct Chat (OpenAI Responses)',
+    label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL,
     protocol: 'openai-compatible',
-    noEndpointMessage: 'No OpenAI-compatible Responses endpoint is configured for Direct Chat.',
+    noEndpointMessage: `No OpenAI-compatible Responses endpoint is configured for ${DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL}.`,
     apiProviderStore,
     createProvider(endpoint) {
       return new OpenAiCompatibleResponsesProvider(buildDirectOpenAiResponsesConfig({
         providerId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-        providerLabel: 'Direct Chat (OpenAI Responses)',
+        providerLabel: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL,
         endpoint,
       }));
     },
@@ -484,14 +487,14 @@ export function createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderSt
 export function createDirectAnthropicCompatibleRouterAdapter(apiProviderStore: ApiProviderStore): ProviderAdapter {
   return new DirectEndpointRouterAdapter({
     harnessId: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-    label: 'Direct Chat (Anthropic)',
+    label: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL,
     protocol: 'anthropic-messages',
-    noEndpointMessage: 'No Anthropic-compatible endpoint is configured for Direct Chat (Anthropic).',
+    noEndpointMessage: `No Anthropic-compatible endpoint is configured for ${DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL}.`,
     apiProviderStore,
     createProvider(endpoint) {
       return new AnthropicCompatibleChatProvider(buildDirectAnthropicConfig({
         providerId: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-        providerLabel: 'Direct Chat (Anthropic)',
+        providerLabel: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL,
         endpoint,
       }));
     },

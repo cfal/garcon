@@ -4,6 +4,9 @@
 export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID = 'direct-openai-compatible' as const;
 export const DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID = 'direct-openai-responses-compatible' as const;
 export const DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID = 'direct-anthropic-compatible' as const;
+export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL = 'Direct (Chat Completions)' as const;
+export const DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL = 'Direct (Responses)' as const;
+export const DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL = 'Direct (Anthropic)' as const;
 
 export const BUILTIN_HARNESSES = [
   'claude',

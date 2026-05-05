@@ -37,7 +37,7 @@ async function tempDir() {
 function makeProvider(dir, overrides = {}) {
   return new AnthropicCompatibleChatProvider({
     providerId: 'direct-anthropic-compatible',
-    providerLabel: 'Direct Chat (Anthropic)',
+    providerLabel: 'Direct (Anthropic)',
     defaultModel: 'acme-sonnet',
     fallbackModels: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
     getApiKey: () => 'sk-ant',
@@ -186,7 +186,7 @@ describe('AnthropicCompatibleChatProvider', () => {
 
     const result = await runAnthropicCompatibleSingleQuery({
       providerId: 'direct-anthropic-compatible',
-      providerLabel: 'Direct Chat (Anthropic)',
+      providerLabel: 'Direct (Anthropic)',
       defaultModel: 'acme-sonnet',
       fallbackModels: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
       getApiKey: () => 'sk-ant',

@@ -1,5 +1,6 @@
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
 import type { SessionProvider } from '$lib/types/app';
+import { getLocale } from '$lib/paraglide/runtime.js';
 import type {
 	FilteredModelRowsResult,
 	HarnessSelectorOption,
@@ -19,7 +20,7 @@ import {
 	filterModelRows,
 	findSelectedModelOption,
 	modelDisplayLabel,
-	selectedSourceKey,
+	modelSourceKeyFor,
 } from './model-selector-options';
 
 interface ModelSelectorStateOptions {
@@ -27,12 +28,6 @@ interface ModelSelectorStateOptions {
 	get value(): ModelSelectorValue;
 	get mode(): ModelSelectorMode;
 	onChange: (next: ModelSelectorChange) => void | Promise<void>;
-}
-
-interface SourcesCache {
-	catalogVersion: number;
-	harnessId: SessionProvider;
-	sources: ModelSourceOption[];
 }
 
 interface RowsCache {
@@ -62,7 +57,9 @@ export class ModelSelectorState {
 	rememberedModels = $state<Record<string, string>>({});
 
 	readonly #options: ModelSelectorStateOptions;
-	#sourcesCache: SourcesCache | null = null;
+	#sourcesCache = new Map<SessionProvider, ModelSourceOption[]>();
+	#sourcesCacheVersion: number | null = null;
+	#sourcesCacheLocale: string | null = null;
 	#rowsCache: RowsCache | null = null;
 	#filterCache: FilterCache | null = null;
 
@@ -95,23 +92,30 @@ export class ModelSelectorState {
 	}
 
 	get sources(): ModelSourceOption[] {
+		return this.sourcesFor(this.harnessId);
+	}
+
+	sourcesFor(harnessId: SessionProvider): ModelSourceOption[] {
 		const catalogVersion = this.modelCatalog.version;
-		const cached = this.#sourcesCache;
-		if (
-			cached &&
-			cached.catalogVersion === catalogVersion &&
-			cached.harnessId === this.harnessId
-		) {
-			return cached.sources;
+		const locale = getLocale();
+		if (this.#sourcesCacheVersion !== catalogVersion || this.#sourcesCacheLocale !== locale) {
+			this.#sourcesCache.clear();
+			this.#sourcesCacheVersion = catalogVersion;
+			this.#sourcesCacheLocale = locale;
 		}
 
-		const sources = buildModelSources(this.modelCatalog, this.harnessId);
-		this.#sourcesCache = {
-			catalogVersion,
-			harnessId: this.harnessId,
-			sources,
-		};
+		const cached = this.#sourcesCache.get(harnessId);
+		if (cached) return cached;
+
+		const sources = buildModelSources(this.modelCatalog, harnessId);
+		this.#sourcesCache.set(harnessId, sources);
 		return sources;
+	}
+
+	sourceKeyForValue(value: ModelSelectorValue): string | null {
+		const selectedModel = findSelectedModelOption(this.modelCatalog, value);
+		if (selectedModel) return modelSourceKeyFor(value.harnessId, selectedModel);
+		return this.sourcesFor(value.harnessId)[0]?.key ?? null;
 	}
 
 	get sourceKey(): string | null {
@@ -119,7 +123,7 @@ export class ModelSelectorState {
 		if (this.activeSourceKey && this.sources.some((source) => source.key === this.activeSourceKey)) {
 			return this.activeSourceKey;
 		}
-		return selectedSourceKey(this.modelCatalog, this.value);
+		return this.sourceKeyForValue(this.value);
 	}
 
 	get source(): ModelSourceOption | null {
@@ -220,7 +224,7 @@ export class ModelSelectorState {
 		this.open = open;
 		if (open) {
 			this.query = '';
-			this.activeSourceKey = selectedSourceKey(this.modelCatalog, this.value);
+			this.activeSourceKey = this.sourceKeyForValue(this.value);
 			this.resetActiveModelIndex();
 			return;
 		}
@@ -306,7 +310,7 @@ export class ModelSelectorState {
 
 	selectHarness(harnessId: SessionProvider): void {
 		if (harnessId === this.harnessId) return;
-		const sources = buildModelSources(this.modelCatalog, harnessId);
+		const sources = this.sourcesFor(harnessId);
 		const currentSourceKey = this.sourceKey;
 		const source = sources.find((entry) => entry.key === currentSourceKey) ?? sources[0] ?? null;
 		const modelValue = chooseModelForSource(
@@ -340,13 +344,12 @@ export class ModelSelectorState {
 	}
 
 	rememberSelection(harnessId: SessionProvider, modelValue: string): void {
-		const source = buildModelSources(this.modelCatalog, harnessId).find((entry) =>
-			entry.models.some((model) => model.value === modelValue)
-		);
-		if (!source) return;
+		const model = this.modelCatalog.getModelForSelection(harnessId, modelValue);
+		if (!model) return;
+		const sourceKey = modelSourceKeyFor(harnessId, model);
 		this.rememberedModels = {
 			...this.rememberedModels,
-			[this.memoryKey(harnessId, source.key)]: modelValue,
+			[this.memoryKey(harnessId, sourceKey)]: modelValue,
 		};
 	}
 

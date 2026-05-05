@@ -58,8 +58,8 @@ const mockModelCatalog = {
 		harnessMetadata: {
 			claude: { label: 'Claude' },
 			codex: { label: 'Codex' },
-			'direct-anthropic-compatible': { label: 'Direct Anthropic Compatible' },
-			'direct-openai-compatible': { label: 'Direct OpenAI Compatible' },
+			'direct-anthropic-compatible': { label: 'Direct (Anthropic)' },
+			'direct-openai-compatible': { label: 'Direct (Chat Completions)' },
 		},
 		getHarnesses: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
 		getSelectableHarnesses: vi.fn(() => [

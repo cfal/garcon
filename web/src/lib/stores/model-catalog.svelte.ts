@@ -1,10 +1,14 @@
 import { apiFetch } from '$lib/api/client.js';
+import { harnessLabelFor } from '$lib/i18n/harness-labels';
 import type { SessionProvider } from '$lib/types/app';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS } from '$shared/models';
 import {
 	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL,
 	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL,
 	DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
+	DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL,
 	isApiProviderTemplateId,
 	isEndpointOnlyHarnessId,
 	isVisibleHarnessId,
@@ -68,10 +72,23 @@ const STATIC_HARNESS_METADATA: HarnessMetadataMap = {
 	opencode: { id: 'opencode', label: 'OpenCode', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '' },
 	amp: { id: 'amp', label: 'Amp', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: AMP_MODELS.DEFAULT },
 	factory: { id: 'factory', label: 'Factory', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: FACTORY_MODELS.DEFAULT },
-	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, label: 'Direct Chat (OpenAI Chat Completions)', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '' },
-	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, label: 'Direct Chat (OpenAI Responses)', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '' },
-	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: { id: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, label: 'Direct Chat (Anthropic)', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '' },
+	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '' },
+	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '' },
+	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: { id: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, label: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '' },
 };
+
+function normalizeHarnessLabel(id: string, label: string): string {
+	if (id === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID) {
+		return DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL;
+	}
+	if (id === DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID) {
+		return DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL;
+	}
+	if (id === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) {
+		return DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL;
+	}
+	return label;
+}
 
 function normalizeModelOption(value: unknown): ModelOption | null {
 	if (!value || typeof value !== 'object') return null;
@@ -215,7 +232,12 @@ function mergeWithFallbacks(models: HarnessModels): HarnessModels {
 
 function filterVisibleHarnessMetadata(harnessMetadata: HarnessMetadataMap): HarnessMetadataMap {
 	return Object.fromEntries(
-		Object.entries(harnessMetadata).filter(([id]) => isVisibleHarnessId(id))
+		Object.entries(harnessMetadata)
+			.filter(([id]) => isVisibleHarnessId(id))
+			.map(([id, metadata]) => [
+				id,
+				{ ...metadata, label: normalizeHarnessLabel(id, metadata.label) }
+			])
 	);
 }
 
@@ -351,7 +373,7 @@ export class ModelCatalogStore {
 	}
 
 	getHarnessLabel(id: string): string {
-		return this.harnessMetadata[id]?.label ?? id;
+		return harnessLabelFor(id, this.harnessMetadata[id]?.label ?? id);
 	}
 
 	getModels(harnessId: SessionProvider): ModelOption[] {

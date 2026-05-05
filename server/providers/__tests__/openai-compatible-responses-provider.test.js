@@ -38,7 +38,7 @@ async function tempDir() {
 function providerConfig(dir) {
   return {
     providerId: 'direct-openai-responses-compatible',
-    providerLabel: 'Direct OpenAI Responses',
+    providerLabel: 'Direct (Responses)',
     defaultModel: 'fallback-model',
     fallbackModels: [{ value: 'fallback-model', label: 'Fallback' }],
     getApiKey: () => 'sk-test',

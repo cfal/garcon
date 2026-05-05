@@ -1,5 +1,6 @@
 import type { SessionProvider } from '$lib/types/app';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
+import { nativeSourceLabelFor } from '$lib/i18n/harness-labels';
 import type { ApiProtocol } from '$shared/providers';
 import type {
 	FilteredModelResult,
@@ -29,16 +30,14 @@ export function buildHarnessOptions(modelCatalog: ModelCatalogStore): HarnessSel
 		const metadata = modelCatalog.getHarness(harnessId);
 		return {
 			value: harnessId,
-			label: metadata?.label ?? modelCatalog.getHarnessLabel(harnessId),
+			label: modelCatalog.getHarnessLabel(harnessId),
 			description: metadata?.description ?? '',
 		};
 	});
 }
 
 export function nativeSourceLabel(harnessId: SessionProvider, modelCatalog: ModelCatalogStore): string {
-	if (harnessId === 'claude') return 'Claude OAuth';
-	if (harnessId === 'codex') return 'OpenAI OAuth';
-	return modelCatalog.getHarnessLabel(harnessId);
+	return nativeSourceLabelFor(harnessId, modelCatalog.getHarnessLabel(harnessId));
 }
 
 export function buildModelSources(
@@ -52,7 +51,12 @@ export function buildModelSources(
 	for (const model of models) {
 		if (model.endpointId) {
 			const key = endpointSourceKey(model.endpointId);
-			endpointModels.set(key, [...(endpointModels.get(key) ?? []), model]);
+			const groupedModels = endpointModels.get(key);
+			if (groupedModels) {
+				groupedModels.push(model);
+			} else {
+				endpointModels.set(key, [model]);
+			}
 		} else {
 			nativeModels.push(model);
 		}

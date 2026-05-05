@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import ColoredTag from '../shared/ColoredTag.svelte';
+	import { harnessLabelFor } from '$lib/i18n/harness-labels';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { cn } from '$lib/utils/cn';
@@ -59,15 +60,7 @@
 		PROVIDER_TAG_VARIANTS[provider] ?? PROVIDER_TAG_VARIANTS.claude
 	);
 	let providerTagLabel = $derived(
-		provider === 'claude' ? m.provider_claude()
-			: provider === 'codex' ? m.provider_codex()
-			: provider === 'opencode' ? m.provider_opencode()
-			: provider === 'amp' ? m.provider_amp()
-			: provider === 'factory' ? m.provider_factory()
-			: provider === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID ? 'Direct OpenAI Chat'
-			: provider === DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID ? 'Direct OpenAI Responses'
-			: provider === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID ? 'Direct Anthropic'
-			: provider || m.provider_claude()
+		harnessLabelFor(provider, provider || m.provider_claude())
 		);
 	function prefixEllipsis(pathStr: string, maxLen = 40): string {
 		if (!pathStr || pathStr.length <= maxLen) return pathStr;

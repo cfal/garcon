@@ -37,25 +37,33 @@ describe('Settings', () => {
 		const remoteSettings = new RemoteSettingsStore();
 		const refreshSpy = vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
 
-		render(SettingsTestHarness, { appShell, remoteSettings });
+		const rendered = render(SettingsTestHarness, { appShell, remoteSettings });
 
-		await waitFor(() => {
-			expect(refreshSpy).toHaveBeenCalled();
-		});
-		expect(screen.queryByRole('tablist')).toBeNull();
-		expect(await screen.findByRole('heading', { name: 'Local' })).toBeTruthy();
-		expect(await screen.findByRole('heading', { name: 'Remote' })).toBeTruthy();
-		expect(screen.queryByRole('heading', { name: 'Agents' })).toBeNull();
+		try {
+			await waitFor(() => {
+				expect(refreshSpy).toHaveBeenCalled();
+			});
+			expect(screen.queryByRole('tablist')).toBeNull();
+			expect(await screen.findByRole('heading', { name: 'Local' })).toBeTruthy();
+			expect(await screen.findByRole('heading', { name: 'Remote' })).toBeTruthy();
+			expect(screen.queryByRole('heading', { name: 'Agents' })).toBeNull();
 			expect(screen.queryByRole('heading', { name: 'API Providers' })).toBeNull();
 			expect(screen.getByRole('heading', { name: 'Anthropic Providers' })).toBeTruthy();
-			expect(screen.getByText('Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.')).toBeTruthy();
+			expect(screen.getByText('Use Anthropic Messages-compatible endpoints with Claude Code and Direct.')).toBeTruthy();
 			expect(screen.getByRole('heading', { name: 'OpenAI Providers' })).toBeTruthy();
-			expect(screen.getByText('Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat can use Chat Completions or Responses; Codex requires Responses API compatibility.')).toBeTruthy();
+			expect(screen.getByText('Use OpenAI-compatible endpoints with Direct and Codex. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.')).toBeTruthy();
 			expect(screen.getByRole('heading', { name: 'Other Harnesses' })).toBeTruthy();
-			expect(screen.queryByText('Direct Chat (Anthropic)')).toBeNull();
-			expect(screen.queryByText('Direct Chat (OpenAI Chat Completions)')).toBeNull();
-			expect(screen.queryByText('Direct Chat (OpenAI Responses)')).toBeNull();
+			expect(screen.queryByText('Direct (Anthropic)')).toBeNull();
+			expect(screen.queryByText('Direct (Chat Completions)')).toBeNull();
+			expect(screen.queryByText('Direct (Responses)')).toBeNull();
 			expect(screen.getByText('These settings are stored in your browser.')).toBeTruthy();
-		expect(screen.getByText('These settings are stored on the garcon server.')).toBeTruthy();
+			expect(screen.getByText('These settings are stored on the garcon server.')).toBeTruthy();
+		} finally {
+			vi.useFakeTimers();
+			appShell.closeSettings();
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
 	});
 });

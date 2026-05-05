@@ -52,7 +52,7 @@ describe('OpenAiCompatibleChatProvider', () => {
 
     const provider = new OpenAiCompatibleChatProvider({
       providerId: 'direct-openai-compatible',
-      providerLabel: 'Direct OpenAI Compatible',
+      providerLabel: 'Direct (Chat Completions)',
       defaultModel: 'fallback-model',
       fallbackModels: [{ value: 'fallback-model', label: 'Fallback' }],
       getApiKey: () => 'sk-test',

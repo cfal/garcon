@@ -321,7 +321,7 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       adapters: [
         {
           id: 'direct-openai-compatible',
-          label: 'Direct Chat (OpenAI Chat Completions)',
+          label: 'Direct (Chat Completions)',
           startSession: mock(),
           runTurn: mock(),
           abort: mock(),
@@ -336,7 +336,7 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
         },
         {
           id: 'direct-openai-responses-compatible',
-          label: 'Direct Chat (OpenAI Responses)',
+          label: 'Direct (Responses)',
           startSession: mock(),
           runTurn: mock(),
           abort: mock(),
@@ -351,7 +351,7 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
         },
         {
           id: 'direct-anthropic-compatible',
-          label: 'Direct Chat (Anthropic)',
+          label: 'Direct (Anthropic)',
           startSession: mock(),
           runTurn: mock(),
           abort: mock(),

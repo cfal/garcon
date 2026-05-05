@@ -1,4 +1,4 @@
-// Implements Direct Chat over OpenAI-compatible Responses APIs.
+// Implements Direct over OpenAI-compatible Responses APIs.
 // Keeps Responses request/stream parsing separate from chat completions.
 
 import crypto from 'crypto';

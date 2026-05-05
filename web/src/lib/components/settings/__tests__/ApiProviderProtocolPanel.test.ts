@@ -7,7 +7,7 @@ describe('ApiProviderProtocolPanel', () => {
 		render(ApiProviderProtocolPanelTestHarness, {
 			protocol: 'anthropic-messages',
 			title: 'Anthropic Providers',
-			description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.',
+			description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct.',
 			addLabel: 'Add Anthropic-compatible provider'
 		});
 
@@ -29,7 +29,7 @@ describe('ApiProviderProtocolPanel', () => {
 		render(ApiProviderProtocolPanelTestHarness, {
 			protocol: 'openai-compatible',
 			title: 'OpenAI Providers',
-			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat can use Chat Completions or Responses; Codex requires Responses API compatibility.',
+			description: 'Use OpenAI-compatible endpoints with Direct and Codex. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.',
 			addLabel: 'Add OpenAI-compatible provider'
 		});
 
@@ -51,7 +51,7 @@ describe('ApiProviderProtocolPanel', () => {
 		render(ApiProviderProtocolPanelTestHarness, {
 			protocol: 'openai-compatible',
 			title: 'OpenAI Providers',
-			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat can use Chat Completions or Responses; Codex requires Responses API compatibility.',
+			description: 'Use OpenAI-compatible endpoints with Direct and Codex. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.',
 			addLabel: 'Add OpenAI-compatible provider'
 		});
 
@@ -63,31 +63,31 @@ describe('ApiProviderProtocolPanel', () => {
 		expect(chatCompletions.getAttribute('aria-checked')).toBe('true');
 		expect(responses.getAttribute('aria-checked')).toBe('false');
 		expect(screen.queryByText('Use with Codex')).toBeNull();
-		expect(screen.queryByText('Use with Direct Chat (OpenAI Chat Completions)')).toBeNull();
-		expect(screen.queryByText('Use with Direct Chat (OpenAI Responses)')).toBeNull();
+		expect(screen.queryByText('Use with Direct (Chat Completions)')).toBeNull();
+		expect(screen.queryByText('Use with Direct (Responses)')).toBeNull();
 	});
 
 	it('opens Anthropic providers without per-harness exposure switches', async () => {
 		render(ApiProviderProtocolPanelTestHarness, {
 			protocol: 'anthropic-messages',
 			title: 'Anthropic Providers',
-			description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.',
+			description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct.',
 			addLabel: 'Add Anthropic-compatible provider'
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Add Anthropic-compatible provider' }));
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Add custom provider..' }));
 
-		expect(await screen.findByText('Adds an Anthropic Messages endpoint for Claude Code and Direct Chat.')).toBeTruthy();
+		expect(await screen.findByText('Adds an Anthropic Messages endpoint for Claude Code and Direct.')).toBeTruthy();
 		expect(screen.queryByText('Use with Claude Code')).toBeNull();
-		expect(screen.queryByText('Use with Direct Chat (Anthropic)')).toBeNull();
+		expect(screen.queryByText('Use with Direct (Anthropic)')).toBeNull();
 	});
 
 	it('renders saved provider rows without built-in or disabled badges', () => {
 		render(ApiProviderProtocolPanelTestHarness, {
 			protocol: 'openai-compatible',
 			title: 'OpenAI Providers',
-			description: 'Use OpenAI-compatible endpoints with Direct Chat and Codex. Direct Chat can use Chat Completions or Responses; Codex requires Responses API compatibility.',
+			description: 'Use OpenAI-compatible endpoints with Direct and Codex. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.',
 			addLabel: 'Add OpenAI-compatible provider',
 			apiProviderCatalog: [
 				{

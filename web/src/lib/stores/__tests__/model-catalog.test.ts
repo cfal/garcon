@@ -116,6 +116,50 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsImages('codex')).toBe(false);
 	});
 
+	it('normalizes cached direct harness labels from localStorage', () => {
+		localStorage.setItem(
+			'pref_model_catalog',
+			JSON.stringify({
+				harnessModels: {},
+				harnessMetadata: {
+					'direct-openai-compatible': {
+						id: 'direct-openai-compatible',
+						label: 'Direct Chat (OpenAI Chat Completions)',
+						supportsFork: false,
+						supportsImages: true,
+						acceptsApiProviderEndpoints: true,
+						supportedProtocols: ['openai-compatible'],
+						defaultModel: ''
+					},
+					'direct-openai-responses-compatible': {
+						id: 'direct-openai-responses-compatible',
+						label: 'Direct Chat (OpenAI Responses)',
+						supportsFork: false,
+						supportsImages: true,
+						acceptsApiProviderEndpoints: true,
+						supportedProtocols: ['openai-compatible'],
+						defaultModel: ''
+					},
+					'direct-anthropic-compatible': {
+						id: 'direct-anthropic-compatible',
+						label: 'Direct Chat (Anthropic)',
+						supportsFork: false,
+						supportsImages: true,
+						acceptsApiProviderEndpoints: true,
+						supportedProtocols: ['anthropic-messages'],
+						defaultModel: ''
+					}
+				},
+				lastFetchedAt: Date.now()
+			})
+		);
+
+		const store = createModelCatalogStore();
+		expect(store.getHarnessLabel('direct-openai-compatible')).toBe('Direct (Chat Completions)');
+		expect(store.getHarnessLabel('direct-openai-responses-compatible')).toBe('Direct (Responses)');
+		expect(store.getHarnessLabel('direct-anthropic-compatible')).toBe('Direct (Anthropic)');
+	});
+
 	it('does not expose API provider ids as harnesses from cached metadata', () => {
 		localStorage.setItem(
 			'pref_model_catalog',
@@ -352,7 +396,7 @@ describe('ModelCatalogStore', () => {
 					harnesses: [
 							{
 								id: 'direct-openai-compatible',
-								label: 'Direct Chat (OpenAI Chat Completions)',
+								label: 'Direct (Chat Completions)',
 							kind: 'harness',
 							supportsFork: false,
 							supportsImages: true,
@@ -421,7 +465,7 @@ describe('ModelCatalogStore', () => {
 						harnesses: [
 							{
 								id: 'direct-openai-responses-compatible',
-								label: 'Direct Chat (OpenAI Responses)',
+								label: 'Direct (Responses)',
 								kind: 'harness',
 								supportsFork: false,
 								supportsImages: true,
@@ -491,7 +535,7 @@ describe('ModelCatalogStore', () => {
 						harnesses: [
 							{
 								id: 'direct-anthropic-compatible',
-								label: 'Direct Chat (Anthropic)',
+								label: 'Direct (Anthropic)',
 								kind: 'harness',
 								supportsFork: false,
 								supportsImages: true,

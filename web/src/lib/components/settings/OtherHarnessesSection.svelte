@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { HarnessReadiness } from '$lib/api/providers';
 	import * as m from '$lib/paraglide/messages.js';
+	import { harnessLabelFor } from '$lib/i18n/harness-labels';
 	import HarnessCard from './HarnessCard.svelte';
 
 	interface AuthStatus {
@@ -13,14 +14,13 @@
 
 	type HarnessConfig = {
 		id: 'opencode' | 'amp' | 'factory';
-		name: string;
 		loginCommand: string;
 	};
 
 	const harnesses: HarnessConfig[] = [
-		{ id: 'opencode', name: 'OpenCode', loginCommand: 'opencode auth login' },
-		{ id: 'amp', name: 'Amp', loginCommand: 'amp login' },
-		{ id: 'factory', name: 'Factory', loginCommand: 'droid' }
+		{ id: 'opencode', loginCommand: 'opencode auth login' },
+		{ id: 'amp', loginCommand: 'amp login' },
+		{ id: 'factory', loginCommand: 'droid' }
 	];
 
 	let {
@@ -62,7 +62,7 @@
 		{#each harnesses as harness (harness.id)}
 			<HarnessCard
 				harnessId={harness.id}
-				harnessName={harness.name}
+				harnessName={harnessLabelFor(harness.id)}
 				auth={authByHarness[harness.id] ?? fallbackAuth}
 				open={isOpen(harness.id)}
 				onOpenChange={(open) => setOpen(harness.id, open)}
