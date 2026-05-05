@@ -58,8 +58,8 @@
 	const surfaceIsSettings = $derived(mode.surface === 'settings');
 	const contentWidthClass = $derived.by(() => {
 		if (!showHarness && !showSource) return 'w-[min(22rem,calc(100vw-1rem))]';
-		if (showHarness && showSource) return 'w-[min(44rem,calc(100vw-1rem))]';
-		return 'w-[min(34rem,calc(100vw-1rem))]';
+		if (showHarness && showSource) return 'w-[min(50rem,calc(100vw-1rem))]';
+		return 'w-[min(38rem,calc(100vw-1rem))]';
 	});
 	const contentHeightClass = $derived(
 		!showHarness && !showSource
@@ -126,7 +126,7 @@
 	>
 		<div class="flex h-full min-h-0 flex-col sm:flex-row">
 			{#if showHarness}
-				<section class="min-h-0 overflow-y-auto border-b border-border p-1 sm:w-40 sm:border-b-0 sm:border-r">
+				<section class="min-h-0 overflow-y-auto border-b border-border p-1 sm:w-56 sm:border-b-0 sm:border-r">
 					<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{m.model_selector_harness()}</div>
 					<div class="space-y-1">
 						{#each selector.harnessOptions as option (option.value)}
