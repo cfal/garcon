@@ -56,22 +56,57 @@
 	setModelCatalog({
 		version: 0,
 		apiProviderCatalog: [],
-		getModels() {
-			return [{ value: 'opus', label: 'Opus' }];
-		},
-			getHarnesses() {
-				return ['claude'];
+			getModels() {
+				return [{ value: 'opus', label: 'Opus' }];
 			},
-			getSelectableHarnesses() {
-				return ['claude'];
+			getHarness() {
+				return {
+					id: 'claude',
+					label: 'Claude',
+					description: '',
+					supportsFork: true,
+					supportsImages: true,
+					acceptsApiProviderEndpoints: true,
+					supportedProtocols: ['anthropic-messages'],
+					defaultModel: 'opus',
+				};
 			},
-			refreshIfStale() {
-			return Promise.resolve();
-		},
-		forceRefresh() {
-			return Promise.resolve();
-		},
-	} as never);
-</script>
+			getHarnessLabel() {
+				return 'Claude';
+			},
+				getHarnesses() {
+					return ['claude'];
+				},
+				getSelectableHarnesses() {
+					return ['claude'];
+				},
+				getDefaultModel() {
+				return 'opus';
+			},
+			getModelForSelection(_provider: string, model: string) {
+				return model === 'opus' ? { value: 'opus', label: 'Opus' } : null;
+			},
+			selectionFor(_provider: string, model: string) {
+				return {
+					model,
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+				};
+			},
+			selectionValueFor(_provider: string, model: string) {
+				return model;
+			},
+				refreshIfStale() {
+				return Promise.resolve();
+			},
+			forceRefresh() {
+				return Promise.resolve();
+			},
+			findEndpoint() {
+				return null;
+			},
+		} as never);
+	</script>
 
 <Settings />

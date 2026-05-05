@@ -187,7 +187,7 @@
 		title={m.settings_api_providers_openai_title()}
 		description={m.settings_api_providers_openai_description()}
 		addLabel={m.settings_api_providers_add_openai_provider()}
-		oauthHarness={{ id: 'codex', name: 'Codex OAuth' }}
+		oauthHarness={{ id: 'codex', name: 'OpenAI OAuth' }}
 		auth={authFor('codex')}
 		readiness={readinessByHarness.codex}
 		deviceAuth={deviceAuthInfo.codex}

@@ -1,4 +1,3 @@
-import type { SessionProvider } from '$lib/types/app';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import { THINKING_MODES } from '$lib/chat/chat-ui-constants';
 
@@ -79,52 +78,6 @@ const THINKING_ICON_METADATA: Record<ThinkingMode, Pick<ComposerModeOption<Think
 	}
 };
 
-export interface ProviderMenuGroup {
-	label?: string;
-	options: ComposerMenuOption<SessionProvider>[];
-}
-
-export const PROVIDER_MENU_GROUPS: ProviderMenuGroup[] = [
-	{
-		options: [
-			{
-				value: 'claude',
-				label: 'Claude',
-				description: 'General-purpose reasoning and tool workflows.'
-			},
-			{
-				value: 'codex',
-				label: 'Codex',
-				description: 'Code-heavy workflows and terminal-first tasks.'
-			},
-			{
-				value: 'opencode',
-				label: 'OpenCode',
-				description: 'Runs through OpenCode-compatible backends.'
-			},
-		]
-	},
-	{
-		label: 'More',
-		options: [
-			{
-				value: 'amp',
-				label: 'Amp',
-				description: 'Amp agent with multi-tool workflows.'
-			},
-				{
-					value: 'factory',
-					label: 'Factory',
-					description: 'Factory Droid via the external droid CLI.'
-				}
-			]
-		}
-];
-
-// Flat list for backward compatibility and lookup
-export const PROVIDER_MENU_OPTIONS: ComposerMenuOption<SessionProvider>[] =
-	PROVIDER_MENU_GROUPS.flatMap((g) => g.options);
-
 export function buildPermissionOptions(modes: PermissionMode[]): ComposerModeOption<PermissionMode>[] {
 	return modes.map((mode) => ({
 		value: mode,
@@ -143,12 +96,4 @@ export function buildThinkingOptions(): ComposerModeOption<ThinkingMode>[] {
 			toneClass: iconMeta.toneClass
 		};
 	});
-}
-
-export function toModelMenuOptions(options: Array<{ value: string; label: string; rawModel?: string }>): ComposerMenuOption[] {
-	return options.map((option) => ({
-		value: option.value,
-		label: option.label,
-		description: option.rawModel ?? option.value
-	}));
 }

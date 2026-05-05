@@ -9,6 +9,8 @@
 	import type { SessionProvider } from '$lib/types/app';
 	import type { PinnedInsertPosition } from '$lib/types/session.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import SettingsModelSelector from '$lib/components/model-selector/SettingsModelSelector.svelte';
+	import type { ModelSelectorChange, ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
 
 	const remoteSettings = getRemoteSettings();
 	const modelCatalog = getModelCatalog();
@@ -28,12 +30,12 @@
 	let titleModelEndpointId = $derived(
 		remoteSettings.snapshot?.uiEffective?.chatTitle?.modelEndpointId ?? null
 	);
-	let titleModelSelectionValue = $derived(
-		modelCatalog.selectionValueFor(titleProvider, titleModel, titleModelEndpointId)
-	);
-
-	let availableTitleModels = $derived(modelCatalog.getModels(titleProvider));
-	let availableProviders = $derived(modelCatalog.getSelectableHarnesses());
+	const titleSelectorMode: ModelSelectorMode = { harness: 'select', source: 'select', surface: 'settings' };
+	const titleSelectorValue = $derived({
+		harnessId: titleProvider,
+		model: titleModel,
+		modelEndpointId: titleModelEndpointId,
+	});
 
 	// Telegram state derived from snapshot.
 	let telegramBotAvailable = $derived(
@@ -62,16 +64,6 @@
 
 	let telegramTestSending = $state(false);
 	let telegramTestResult = $state<{ ok: boolean; message: string } | null>(null);
-
-	function providerLabel(provider: SessionProvider): string {
-		if (provider === 'claude') return m.provider_claude();
-		if (provider === 'codex') return m.provider_codex();
-		if (provider === 'opencode') return m.provider_opencode();
-		if (provider === 'amp') return m.provider_amp();
-		if (provider === 'factory') return m.provider_factory();
-		if (provider) return modelCatalog.getHarnessLabel(provider);
-		return m.provider_claude();
-	}
 
 	async function save(patch: Record<string, unknown>) {
 		saveError = null;
@@ -105,6 +97,21 @@
 				apiProviderId: selection.apiProviderId,
 				modelEndpointId: selection.modelEndpointId,
 				modelProtocol: selection.modelProtocol,
+			},
+		});
+	}
+
+	async function persistChatTitleSelection(next: ModelSelectorChange) {
+		const base = remoteSettings.snapshot?.ui?.chatTitle ?? {};
+		await save({
+			chatTitle: {
+				...base,
+				enabled: titleEnabled,
+				provider: next.harnessId,
+				model: next.model,
+				apiProviderId: next.apiProviderId,
+				modelEndpointId: next.modelEndpointId,
+				modelProtocol: next.modelProtocol,
 			},
 		});
 	}
@@ -178,43 +185,18 @@
 				/>
 			</div>
 
-			{#if titleEnabled}
-				<div class="flex items-center justify-between py-2">
-					<div class="text-sm font-medium text-foreground">{m.settings_chat_title_provider()}</div>
-					<select
-						class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
-							value={titleProvider}
-							onchange={async (e) => {
-								const next = (e.currentTarget as HTMLSelectElement).value as SessionProvider;
-								const models = modelCatalog.getModels(next);
-								const currentSelectionValue = modelCatalog.selectionValueFor(titleProvider, titleModel, titleModelEndpointId);
-								const resolvedModel = models.some((o) => o.value === currentSelectionValue)
-									? currentSelectionValue
-									: (models[0]?.value ?? '');
-								await persistChatTitleSettings({ provider: next, model: resolvedModel });
-						}}
-					>
-						{#each availableProviders as provider (provider)}
-							<option value={provider}>{providerLabel(provider)}</option>
-						{/each}
-					</select>
-				</div>
-
-				<div class="flex items-center justify-between py-2">
-					<div class="text-sm font-medium text-foreground">{m.settings_chat_title_model()}</div>
-					<select
-							class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
-							value={titleModelSelectionValue}
-							onchange={async (e) => {
-								await persistChatTitleSettings({ model: (e.currentTarget as HTMLSelectElement).value });
-						}}
-					>
-						{#each availableTitleModels as opt (opt.value)}
-							<option value={opt.value}>{opt.label}</option>
-						{/each}
-					</select>
-				</div>
-			{/if}
+				{#if titleEnabled}
+					<div class="flex items-center justify-between py-2">
+						<div class="text-sm font-medium text-foreground">{m.settings_chat_title_model()}</div>
+						<SettingsModelSelector
+							value={titleSelectorValue}
+							mode={titleSelectorMode}
+							onChange={persistChatTitleSelection}
+							align="end"
+							side="bottom"
+						/>
+					</div>
+				{/if}
 		</div>
 
 		<!-- Telegram Notifications -->
