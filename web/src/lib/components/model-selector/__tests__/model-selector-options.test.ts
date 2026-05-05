@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
 import {
+	buildModelRows,
 	buildModelSelectorChange,
 	buildModelSources,
 	filterModelOptions,
+	filterModelRows,
 	modelDisplayLabel,
 	nativeSourceLabel,
 	selectedSourceKey,
@@ -165,6 +167,21 @@ describe('model selector options', () => {
 		expect(modelDisplayLabel(model, model.value, null)).toBe('Acme: Sonnet');
 	});
 
+	it('builds model rows with one visible label', () => {
+		const rows = buildModelRows([{ value: 'same-model', label: 'same-model' }], null);
+
+		expect(rows[0].label).toBe('same-model');
+		expect(rows[0].searchText).toContain('same-model');
+	});
+
+	it('builds model rows with source prefixes stripped only when source is visible', () => {
+		const source = buildModelSources(makeCatalog(), 'claude')[1];
+		const model = claudeModels[1];
+
+		expect(buildModelRows([model], source)[0].label).toBe('Sonnet');
+		expect(buildModelRows([model], null)[0].label).toBe('Acme: Sonnet');
+	});
+
 	it('resolves the selected source from raw model and endpoint metadata', () => {
 		const sourceKey = selectedSourceKey(makeCatalog(), {
 			harnessId: 'claude',
@@ -197,5 +214,30 @@ describe('model selector options', () => {
 		const result = filterModelOptions(models, 'model');
 
 		expect(result.items).toHaveLength(150);
+	});
+
+	it('filters prepared model rows without capping matches', () => {
+		const rows = buildModelRows(
+			Array.from({ length: 150 }, (_, index) => ({
+				value: `model-${index}`,
+				label: `Model ${index}`,
+			})),
+			null,
+		);
+
+		const result = filterModelRows(rows, 'model');
+
+		expect(result.items).toHaveLength(150);
+	});
+
+	it('filters prepared model rows by raw model', () => {
+		const rows = buildModelRows([
+			{ value: 'display-a', label: 'Display A', rawModel: 'vendor/raw-a' },
+			{ value: 'display-b', label: 'Display B', rawModel: 'vendor/raw-b' },
+		], null);
+
+		const result = filterModelRows(rows, 'raw-b');
+
+		expect(result.items.map((row) => row.value)).toEqual(['display-b']);
 	});
 });

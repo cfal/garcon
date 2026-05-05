@@ -3,8 +3,10 @@ import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.s
 import type { ApiProtocol } from '$shared/providers';
 import type {
 	FilteredModelResult,
+	FilteredModelRowsResult,
 	HarnessSelectorOption,
 	ModelSelectorChange,
+	ModelSelectorRow,
 	ModelSelectorValue,
 	ModelSourceOption,
 } from './model-selector-types';
@@ -145,6 +147,41 @@ export function filterModelOptions(
 	};
 }
 
+export function buildModelRows(
+	models: ModelOption[],
+	source: ModelSourceOption | null = null,
+): ModelSelectorRow[] {
+	return models.map((model) => {
+		const label = modelDisplayLabel(model, model.value, source);
+		return {
+			value: model.value,
+			label,
+			searchText: buildModelSearchText(model, label),
+			model,
+		};
+	});
+}
+
+export function filterModelRows(
+	rows: ModelSelectorRow[],
+	query: string,
+): FilteredModelRowsResult {
+	const trimmed = query.trim();
+	if (!trimmed) {
+		return { items: rows };
+	}
+
+	const tokens = tokenize(trimmed);
+	const scored = rows
+		.map((row, index) => ({ row, index, score: scoreModelRow(row, tokens) }))
+		.filter((entry) => entry.score > 0)
+		.sort((left, right) => right.score - left.score || left.index - right.index);
+
+	return {
+		items: scored.map((entry) => entry.row),
+	};
+}
+
 export function chooseModelForSource(
 	source: ModelSourceOption | null,
 	currentModelValue: string,
@@ -252,6 +289,43 @@ function scoreModel(model: ModelOption, tokens: string[], source: ModelSourceOpt
 			displayLabel.startsWith(token) ||
 			value.startsWith(token) ||
 			raw.startsWith(token)
+		) {
+			score += 8;
+		}
+		else if (joined.includes(token)) score += 4;
+		else if (compact.includes(compactToken)) score += 2;
+		else return 0;
+	}
+
+	return score;
+}
+
+function buildModelSearchText(model: ModelOption, label: string): string {
+	return [
+		model.label,
+		label,
+		model.value,
+		model.rawModel ?? '',
+	].join(' ').toLowerCase();
+}
+
+function scoreModelRow(row: ModelSelectorRow, tokens: string[]): number {
+	const label = row.label.toLowerCase();
+	const value = row.value.toLowerCase();
+	const raw = (row.model.rawModel ?? '').toLowerCase();
+	const sourceLabel = row.model.label.toLowerCase();
+	const joined = row.searchText;
+	const compact = compactSearchText(joined);
+	let score = 0;
+
+	for (const token of tokens) {
+		const compactToken = compactSearchText(token);
+		if (label === token || value === token || raw === token || sourceLabel === token) score += 12;
+		else if (
+			label.startsWith(token) ||
+			value.startsWith(token) ||
+			raw.startsWith(token) ||
+			sourceLabel.startsWith(token)
 		) {
 			score += 8;
 		}

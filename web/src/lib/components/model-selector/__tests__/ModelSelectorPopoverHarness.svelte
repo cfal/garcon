@@ -12,17 +12,27 @@
 		value: ModelSelectorValue;
 		mode: ModelSelectorMode;
 		onChange: (next: ModelSelectorChange) => void;
+		modelCount?: number;
+		includeDuplicateModel?: boolean;
 	}
 
-	let { value, mode, onChange }: Props = $props();
+	let {
+		value,
+		mode,
+		onChange,
+		modelCount = 120,
+		includeDuplicateModel = true,
+	}: Props = $props();
 
-	const models = [
-		...Array.from({ length: 120 }, (_, index): ModelOption => ({
+	let models = $derived.by<ModelOption[]>(() => {
+		const generated = Array.from({ length: modelCount }, (_, index): ModelOption => ({
 			value: `model-${index}`,
 			label: `Model ${index}`,
-		})),
-		{ value: 'same-model', label: 'same-model' },
-	];
+		}));
+		return includeDuplicateModel
+			? [...generated, { value: 'same-model', label: 'same-model' }]
+			: generated;
+	});
 
 	setModelCatalog({
 		getSelectableHarnesses: () => ['claude'],

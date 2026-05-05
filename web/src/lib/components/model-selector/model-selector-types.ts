@@ -48,3 +48,14 @@ export interface ModelSourceOption {
 export interface FilteredModelResult {
 	items: ModelOption[];
 }
+
+export interface ModelSelectorRow {
+	value: string;
+	label: string;
+	searchText: string;
+	model: ModelOption;
+}
+
+export interface FilteredModelRowsResult {
+	items: ModelSelectorRow[];
+}
