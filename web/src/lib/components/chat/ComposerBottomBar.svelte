@@ -4,14 +4,12 @@
 		DropdownMenuContent,
 		DropdownMenuItem,
 		DropdownMenuTrigger,
-		DropdownMenuSeparator,
-		DropdownMenuLabel,
 	} from '$lib/components/ui/dropdown-menu';
-	import type { SessionProvider } from '$lib/types/app';
+	import type { Snippet } from 'svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
-	import type { ComposerMenuOption, ComposerModeOption, ProviderMenuGroup } from '$lib/chat/composer-controls';
+	import type { ComposerModeOption } from '$lib/chat/composer-controls';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
-	import { ChevronDown, ImagePlus, Plus, Send } from '@lucide/svelte';
+	import { ImagePlus, Plus, Send } from '@lucide/svelte';
 
 	interface Props {
 		canAttachImages: boolean;
@@ -20,19 +18,13 @@
 		permissionOptions: ComposerModeOption<PermissionMode>[];
 		selectedPermission: PermissionMode;
 		onPermissionSelect: (mode: PermissionMode) => void;
-		thinkingOptions: ComposerModeOption<ThinkingMode>[];
-		selectedThinking: ThinkingMode;
-		onThinkingSelect: (mode: ThinkingMode) => void;
-		providerOptions?: ComposerMenuOption<SessionProvider>[];
-		providerGroups?: ProviderMenuGroup[];
-		selectedProvider?: SessionProvider;
-		onProviderSelect?: (provider: SessionProvider) => void;
-		modelOptions: ComposerMenuOption[];
-		selectedModel: string;
-		onModelSelect: (model: string) => void;
-		canSend: boolean;
-		onSend: () => void;
-		sendTitle: string;
+			thinkingOptions: ComposerModeOption<ThinkingMode>[];
+			selectedThinking: ThinkingMode;
+			onThinkingSelect: (mode: ThinkingMode) => void;
+			modelSelector?: Snippet;
+			canSend: boolean;
+			onSend: () => void;
+			sendTitle: string;
 		sendButtonClass: string;
 		selectorsSide?: 'left' | 'right';
 		mobileRightGroupFullRow?: boolean;
@@ -45,19 +37,13 @@
 		permissionOptions,
 		selectedPermission,
 		onPermissionSelect,
-		thinkingOptions,
-		selectedThinking,
-		onThinkingSelect,
-		providerOptions,
-		providerGroups,
-		selectedProvider,
-		onProviderSelect,
-		modelOptions,
-		selectedModel,
-		onModelSelect,
-		canSend,
-		onSend,
-		sendTitle,
+			thinkingOptions,
+			selectedThinking,
+			onThinkingSelect,
+			modelSelector,
+			canSend,
+			onSend,
+			sendTitle,
 		sendButtonClass,
 		selectorsSide = 'right',
 		mobileRightGroupFullRow = false,
@@ -66,79 +52,10 @@
 	const activePermission = $derived(
 		permissionOptions.find((option) => option.value === selectedPermission) ?? permissionOptions[0]
 	);
-	const activeThinking = $derived(
-		thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0]
-	);
-	const activeProvider = $derived(
-		providerOptions?.find((option) => option.value === selectedProvider) ?? providerOptions?.[0]
-	);
-	const activeModel = $derived(
-		modelOptions.find((option) => option.value === selectedModel) ?? modelOptions[0]
-	);
-</script>
-
-{#snippet providerAndModelSelectors(align: 'start' | 'end')}
-	<div class="flex min-w-0 items-center gap-2">
-		{#if providerOptions && activeProvider && onProviderSelect}
-			<DropdownMenu>
-				<DropdownMenuTrigger
-					class="inline-flex h-9 max-w-[7rem] items-center gap-1.5 rounded-lg px-2.5 text-sm text-foreground transition-colors hover:bg-muted min-w-0 sm:max-w-[10rem]"
-					title={activeProvider.label}
-				>
-					<span class="truncate max-w-[4.5rem] sm:max-w-[7rem]">{activeProvider.label}</span>
-					<ChevronDown class="size-3.5 text-muted-foreground" />
-				</DropdownMenuTrigger>
-				<DropdownMenuContent align={align}>
-					{#if providerGroups}
-						{#each providerGroups as group, groupIdx (groupIdx)}
-							{#if groupIdx > 0}
-								<DropdownMenuSeparator />
-								{#if group.label}
-									<DropdownMenuLabel class="text-xs text-muted-foreground font-normal">{group.label}</DropdownMenuLabel>
-								{/if}
-							{/if}
-							{#each group.options as option (option.value)}
-								<DropdownMenuItem onclick={() => onProviderSelect(option.value)} class="items-start">
-									<div class="min-w-0">
-										<div class="font-medium">{option.label}</div>
-									</div>
-								</DropdownMenuItem>
-							{/each}
-						{/each}
-					{:else}
-						{#each providerOptions as option (option.value)}
-							<DropdownMenuItem onclick={() => onProviderSelect(option.value)} class="items-start">
-								<div class="min-w-0">
-									<div class="font-medium">{option.label}</div>
-								</div>
-							</DropdownMenuItem>
-						{/each}
-					{/if}
-				</DropdownMenuContent>
-			</DropdownMenu>
-		{/if}
-
-		<DropdownMenu>
-			<DropdownMenuTrigger
-				class="inline-flex h-9 max-w-[9rem] items-center gap-1.5 rounded-lg px-2.5 text-sm text-foreground transition-colors hover:bg-muted min-w-0 sm:max-w-[14rem]"
-				title={activeModel?.label ?? 'Model'}
-			>
-				<span class="truncate max-w-[6.5rem] sm:max-w-[10rem]">{activeModel?.label ?? ''}</span>
-				<ChevronDown class="size-3.5 text-muted-foreground" />
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align={align}>
-				{#each modelOptions as option (option.value)}
-					<DropdownMenuItem onclick={() => onModelSelect(option.value)} class="items-start">
-						<div class="min-w-0">
-							<div class="font-medium">{option.label}</div>
-							<div class="text-xs text-muted-foreground">{option.description}</div>
-						</div>
-					</DropdownMenuItem>
-				{/each}
-			</DropdownMenuContent>
-		</DropdownMenu>
-	</div>
-{/snippet}
+		const activeThinking = $derived(
+			thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0]
+		);
+	</script>
 
 <div class="mt-1 pt-1.5 px-2 pb-[env(safe-area-inset-bottom)]">
 	<div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -206,18 +123,18 @@
 				</DropdownMenuContent>
 			</DropdownMenu>
 
-				{#if selectorsSide === 'left'}
-				{@render providerAndModelSelectors('start')}
-			{/if}
-		</div>
+				{#if selectorsSide === 'left' && modelSelector}
+					{@render modelSelector()}
+				{/if}
+			</div>
 
 		<div
 			class="flex min-w-0 items-center justify-between gap-2 sm:ml-auto sm:basis-auto sm:justify-end"
 			class:basis-full={mobileRightGroupFullRow}
 		>
-			{#if selectorsSide === 'right'}
-				{@render providerAndModelSelectors('end')}
-			{/if}
+				{#if selectorsSide === 'right' && modelSelector}
+					{@render modelSelector()}
+				{/if}
 
 			<button
 				type="button"

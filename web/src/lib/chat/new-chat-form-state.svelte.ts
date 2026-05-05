@@ -17,7 +17,7 @@ import {
 	normalizeThinkingMode,
 } from '$shared/chat-modes';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
-import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
+import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
 import { canSubmitNewChat, type PathValidationStatus } from '$lib/components/chat/new-chat-submit.js';
@@ -101,13 +101,6 @@ export class NewChatFormState {
 
 	get placeholder(): string {
 		return m.chat_new_chat_placeholder();
-	}
-
-	get modelOptions(): ModelOption[] {
-		const models = this.#modelCatalog.getModels(this.provider);
-		const selected = this.selectedModelsByProvider[this.provider];
-		if (models.length > 0) return models;
-		return selected ? [{ value: selected, label: selected }] : [];
 	}
 
 	get modelValue(): string {

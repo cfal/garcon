@@ -8,12 +8,10 @@
 		NewChatFormState,
 	} from '$lib/chat/new-chat-form-state.svelte.js';
 	import { shouldSubmitOnEnter } from '$lib/chat/composer-shortcuts';
-	import {
-		buildPermissionOptions,
-		buildThinkingOptions,
-		toModelMenuOptions,
-		type ProviderMenuGroup,
-	} from '$lib/chat/composer-controls';
+		import {
+			buildPermissionOptions,
+			buildThinkingOptions,
+		} from '$lib/chat/composer-controls';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import { getLocalSettings, getAppShell, getModelCatalog, getRemoteSettings } from '$lib/context';
@@ -26,13 +24,10 @@
 	import Pin from '@lucide/svelte/icons/pin';
 	import PinOff from '@lucide/svelte/icons/pin-off';
 	import Tag from '@lucide/svelte/icons/tag';
-	import { getTagColorClasses } from '$lib/utils/tag-colors';
-	import { getChatSessions } from '$lib/context';
-	import {
-		DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-		DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID
-	} from '$shared/providers';
+		import { getTagColorClasses } from '$lib/utils/tag-colors';
+		import { getChatSessions } from '$lib/context';
+		import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
+		import type { ModelSelectorChange, ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
 
 	interface Props {
 		prefill?: string;
@@ -45,36 +40,11 @@
 	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
-	const remoteSettings = getRemoteSettings();
-	const sessions = getChatSessions();
-	const form = new NewChatFormState(appShell, modelCatalog, remoteSettings);
-
-	const providerGroups = $derived.by(() => {
-		const providers = modelCatalog.getSelectableHarnesses();
-		const coreIds = new Set(['claude', 'codex', 'opencode']);
-		const moreIds = new Set([
-			'amp',
-			'factory',
-			DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-			DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-			DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID
-		]);
-		const core = providers.filter((p) => coreIds.has(p));
-		const more = providers.filter((p) => moreIds.has(p));
-		const custom = providers.filter((p) => !coreIds.has(p) && !moreIds.has(p));
-		const toOption = (p: string) => ({
-			value: p,
-			label: modelCatalog.harnessMetadata[p]?.label ?? p,
-			description: modelCatalog.harnessMetadata[p]?.description ?? '',
-		});
-		const groups: ProviderMenuGroup[] = [{ options: core.map(toOption) }];
-		if (more.length > 0 || custom.length > 0) {
-			groups.push({ label: 'More', options: [...more, ...custom].map(toOption) });
-		}
-		return groups;
-	});
-	const providerOptions = $derived(providerGroups.flatMap((g) => g.options));
-	let isMobile = $state(false);
+		const remoteSettings = getRemoteSettings();
+		const sessions = getChatSessions();
+		const form = new NewChatFormState(appShell, modelCatalog, remoteSettings);
+	
+		let isMobile = $state(false);
 	let pendingTextareaFocus = $state(true);
 	let tagInputValue = $state('');
 	let tagInputRef = $state<HTMLInputElement | null>(null);
@@ -241,13 +211,22 @@
 		}
 	}
 
-	const permissionOptions = $derived(
-		buildPermissionOptions(form.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES)
-	);
-	const thinkingOptions = $derived(buildThinkingOptions());
-	const modelOptions = $derived(toModelMenuOptions(form.modelOptions));
-	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
-</script>
+		const permissionOptions = $derived(
+			buildPermissionOptions(form.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES)
+		);
+		const thinkingOptions = $derived(buildThinkingOptions());
+		const modelSelectorMode: ModelSelectorMode = { harness: 'select', source: 'select', surface: 'composer' };
+		const modelSelectorValue = $derived({
+			harnessId: form.provider,
+			model: form.modelValue,
+		});
+		const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
+
+		function handleModelSelectorChange(next: ModelSelectorChange): void {
+			form.selectProvider(next.harnessId);
+			form.handleModelChange(next.modelValue);
+		}
+	</script>
 
 <div class="p-4 sm:p-8">
 	<div class="relative">
@@ -465,29 +444,28 @@
 					onPermissionSelect={(mode) => {
 						form.permissionMode = mode;
 					}}
-					thinkingOptions={thinkingOptions}
-					selectedThinking={form.thinkingMode}
-					onThinkingSelect={(mode) => {
-						form.thinkingMode = mode;
-					}}
-					providerOptions={providerOptions}
-					providerGroups={providerGroups}
-					selectedProvider={form.provider}
-					onProviderSelect={(provider) => {
-						form.selectProvider(provider);
-					}}
-					modelOptions={modelOptions}
-					selectedModel={form.modelValue}
-					onModelSelect={(model) => {
-						form.handleModelChange(model);
-					}}
-					canSend={form.canSubmit}
-					onSend={handleSubmit}
-					sendTitle={m.chat_new_chat_start_session()}
-					sendButtonClass={sendButtonClass}
-					mobileRightGroupFullRow={true}
-				/>
-			</div>
+						thinkingOptions={thinkingOptions}
+						selectedThinking={form.thinkingMode}
+						onThinkingSelect={(mode) => {
+							form.thinkingMode = mode;
+						}}
+						canSend={form.canSubmit}
+						onSend={handleSubmit}
+						sendTitle={m.chat_new_chat_start_session()}
+						sendButtonClass={sendButtonClass}
+						mobileRightGroupFullRow={true}
+					>
+						{#snippet modelSelector()}
+							<ComposerModelSelector
+								value={modelSelectorValue}
+								mode={modelSelectorMode}
+								onChange={handleModelSelectorChange}
+								align="end"
+								side="bottom"
+							/>
+						{/snippet}
+					</ComposerBottomBar>
+				</div>
 
 			{#if form.attachedImages.length > 0}
 				<div class="p-2 bg-muted/40 rounded-lg">

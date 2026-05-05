@@ -11,6 +11,8 @@
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ApiProtocol } from '$shared/providers';
 	import * as m from '$lib/paraglide/messages.js';
+	import SettingsModelSelector from '$lib/components/model-selector/SettingsModelSelector.svelte';
+	import type { ModelSelectorChange, ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
 
 	interface Props {
 		onClose: () => void;
@@ -57,11 +59,14 @@ Return only the commit message now.`;
 	let customPrompt = $state('');
 	let useCommonDirPrefix = $state(false);
 	let isDefaultPrompt = $derived(!customPrompt || customPrompt === DEFAULT_PROMPT);
-	const modelCatalog = getModelCatalog();
-	const remoteSettings = getRemoteSettings();
-	let availableModels = $derived(modelCatalog.getModels(provider));
-	let availableProviders = $derived(modelCatalog.getSelectableHarnesses());
-	let loaded = $state(false);
+		const modelCatalog = getModelCatalog();
+		const remoteSettings = getRemoteSettings();
+		const modelSelectorMode: ModelSelectorMode = { harness: 'select', source: 'select', surface: 'settings' };
+		const modelSelectorValue = $derived({
+			harnessId: provider,
+			model,
+		});
+		let loaded = $state(false);
 
 		onMount(async () => {
 			let persistedModel = '';
@@ -120,29 +125,11 @@ Return only the commit message now.`;
 		await persist();
 	}
 
-	async function handleProviderChange(e: Event) {
-		provider = (e.currentTarget as HTMLSelectElement).value as SessionProvider;
-		const models = modelCatalog.getModels(provider);
-		if (!models.some((opt) => opt.value === model)) {
-			model = models[0]?.value ?? '';
+		async function handleModelSelectorChange(next: ModelSelectorChange) {
+			provider = next.harnessId;
+			model = next.modelValue;
+			await persist();
 		}
-		await persist();
-	}
-
-		function providerLabel(currentProvider: SessionProvider): string {
-			if (currentProvider === 'claude') return m.provider_claude();
-		if (currentProvider === 'codex') return m.provider_codex();
-		if (currentProvider === 'opencode') return m.provider_opencode();
-		if (currentProvider === 'amp') return m.provider_amp();
-		if (currentProvider === 'factory') return m.provider_factory();
-			if (currentProvider) return modelCatalog.getHarnessLabel(currentProvider);
-			return m.provider_claude();
-		}
-
-	async function handleModelChange(e: Event) {
-		model = (e.currentTarget as HTMLSelectElement).value;
-		await persist();
-	}
 
 	function handleBackdropClick(e: MouseEvent) {
 		if (e.target === e.currentTarget) onClose();
@@ -194,32 +181,17 @@ Return only the commit message now.`;
 					/>
 				</div>
 
-				{#if enabled}
-					<div class="flex items-center justify-between">
-						<div class="text-sm font-medium text-foreground">{m.settings_chat_title_provider()}</div>
-						<select
-							class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
-							value={provider}
-							onchange={handleProviderChange}
-						>
-							{#each availableProviders as availableProvider (availableProvider)}
-								<option value={availableProvider}>{providerLabel(availableProvider)}</option>
-							{/each}
-						</select>
-					</div>
-
-					<div class="flex items-center justify-between">
-						<div class="text-sm font-medium text-foreground">{m.settings_chat_title_model()}</div>
-						<select
-							class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground max-w-[180px] truncate"
-							value={model}
-							onchange={handleModelChange}
-						>
-							{#each availableModels as opt (opt.value)}
-								<option value={opt.value}>{opt.label}</option>
-							{/each}
-						</select>
-					</div>
+					{#if enabled}
+						<div class="flex items-center justify-between">
+							<div class="text-sm font-medium text-foreground">{m.settings_chat_title_model()}</div>
+							<SettingsModelSelector
+								value={modelSelectorValue}
+								mode={modelSelectorMode}
+								onChange={handleModelSelectorChange}
+								align="end"
+								side="bottom"
+							/>
+						</div>
 
 						<div class="space-y-1.5 pt-1">
 							<div class="text-sm font-medium text-foreground">Generation prompt</div>

@@ -6,11 +6,13 @@
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
-	import { buildPermissionOptions, buildThinkingOptions, toModelMenuOptions } from '$lib/chat/composer-controls';
+	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ImagePlus } from '@lucide/svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
+	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
+	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
 
 	interface Props {
 		onsubmit: () => void;
@@ -188,13 +190,18 @@
 		buildPermissionOptions(
 			providerState.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES
 		)
-	);
-	const thinkingOptions = $derived(buildThinkingOptions());
-	const modelOptions = $derived(
-		toModelMenuOptions(modelCatalog.getModels(providerState.provider))
-	);
-	const canAttachImages = $derived(modelCatalog.supportsImages(providerState.provider, providerState.model));
-	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
+		);
+		const thinkingOptions = $derived(buildThinkingOptions());
+		const canAttachImages = $derived(modelCatalog.supportsImages(providerState.provider, providerState.model));
+		const modelSelectorMode: ModelSelectorMode = { harness: 'fixed', source: 'hidden', surface: 'composer' };
+		const modelSelectorValue = $derived({
+			harnessId: providerState.provider,
+			model: providerState.model,
+			apiProviderId: providerState.apiProviderId,
+			modelEndpointId: providerState.modelEndpointId,
+			modelProtocol: providerState.modelProtocol,
+		});
+		const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 
 	// Composer resize via drag handle. Persists height to localStorage and
 	// mutates the DOM directly during drag to avoid render latency.
@@ -373,20 +380,25 @@
 					}}
 					thinkingOptions={thinkingOptions}
 					selectedThinking={providerState.thinkingMode}
-					onThinkingSelect={(mode) => {
-						providerState.thinkingMode = mode;
-						onThinkingModeChange?.(mode);
-					}}
-					modelOptions={modelOptions}
-					selectedModel={providerState.model}
-				onModelSelect={(model) => {
-					onModelChange?.(model);
-				}}
-					canSend={canSubmit}
-					onSend={handleFormSubmit}
-					sendTitle={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
-					sendButtonClass={sendButtonClass}
-				/>
-			</form>
+						onThinkingSelect={(mode) => {
+							providerState.thinkingMode = mode;
+							onThinkingModeChange?.(mode);
+						}}
+						canSend={canSubmit}
+						onSend={handleFormSubmit}
+						sendTitle={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
+						sendButtonClass={sendButtonClass}
+					>
+						{#snippet modelSelector()}
+							<ComposerModelSelector
+								value={modelSelectorValue}
+								mode={modelSelectorMode}
+								onChange={(next) => onModelChange?.(next.modelValue)}
+								align="end"
+								side="top"
+							/>
+						{/snippet}
+					</ComposerBottomBar>
+				</form>
 		</div>
 	</div>
