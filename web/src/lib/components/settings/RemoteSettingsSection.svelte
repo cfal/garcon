@@ -8,34 +8,53 @@
 	import { sendTelegramTest } from '$lib/api/settings.js';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { PinnedInsertPosition } from '$lib/types/session.js';
+	import type { ApiProtocol } from '$shared/providers';
 	import * as m from '$lib/paraglide/messages.js';
 	import SettingsModelSelector from '$lib/components/model-selector/SettingsModelSelector.svelte';
-	import type { ModelSelectorChange, ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
+	import type {
+		ModelSelectorChange,
+		ModelSelectorMode,
+		ModelSelectorValue,
+	} from '$lib/components/model-selector/model-selector-types';
 
 	const remoteSettings = getRemoteSettings();
 	const modelCatalog = getModelCatalog();
 	const telegramBotTokenEnvVar = 'GARCON_TELEGRAM_BOT_TOKEN';
 
 	let saveError = $state<string | null>(null);
+	let titleSelectionOverride = $state<ModelSelectorValue | null>(null);
+	let titleSelectionSaveToken = 0;
 
 	// Chat title generation local editing state (hydrated from snapshot).
 	let titleEnabled = $derived(
 		remoteSettings.snapshot?.uiEffective?.chatTitle?.enabled !== false
 	);
 	let titleProvider = $derived<SessionProvider>(
-		(remoteSettings.snapshot?.uiEffective?.chatTitle?.provider as SessionProvider) ?? 'claude'
+		titleSelectionOverride?.harnessId
+			?? (remoteSettings.snapshot?.uiEffective?.chatTitle?.provider as SessionProvider)
+			?? 'claude'
 	);
 	let titleModel = $derived(
-		remoteSettings.snapshot?.uiEffective?.chatTitle?.model ?? ''
+		titleSelectionOverride?.model
+			?? remoteSettings.snapshot?.uiEffective?.chatTitle?.model
+			?? ''
 	);
 	let titleModelEndpointId = $derived(
-		remoteSettings.snapshot?.uiEffective?.chatTitle?.modelEndpointId ?? null
+		titleSelectionOverride?.modelEndpointId
+			?? remoteSettings.snapshot?.uiEffective?.chatTitle?.modelEndpointId
+			?? null
+	);
+	let titleModelProtocol = $derived<ApiProtocol | null>(
+		titleSelectionOverride?.modelProtocol
+			?? remoteSettings.snapshot?.uiEffective?.chatTitle?.modelProtocol
+			?? null
 	);
 	const titleSelectorMode: ModelSelectorMode = { harness: 'select', source: 'select', surface: 'settings' };
 	const titleSelectorValue = $derived({
 		harnessId: titleProvider,
 		model: titleModel,
 		modelEndpointId: titleModelEndpointId,
+		modelProtocol: titleModelProtocol,
 	});
 
 	// Telegram state derived from snapshot.
@@ -66,12 +85,14 @@
 	let telegramTestSending = $state(false);
 	let telegramTestResult = $state<{ ok: boolean; message: string } | null>(null);
 
-	async function save(patch: Record<string, unknown>) {
+	async function save(patch: Record<string, unknown>): Promise<boolean> {
 		saveError = null;
 		try {
 			await remoteSettings.update({ ui: patch });
+			return true;
 		} catch (error) {
 			saveError = error instanceof Error ? error.message : m.settings_save_failed();
+			return false;
 		}
 	}
 
@@ -104,7 +125,17 @@
 
 	async function persistChatTitleSelection(next: ModelSelectorChange) {
 		const base = remoteSettings.snapshot?.ui?.chatTitle ?? {};
-		await save({
+		const previousOverride = titleSelectionOverride;
+		const token = ++titleSelectionSaveToken;
+		titleSelectionOverride = {
+			harnessId: next.harnessId,
+			model: next.modelValue,
+			apiProviderId: next.apiProviderId,
+			modelEndpointId: next.modelEndpointId,
+			modelProtocol: next.modelProtocol,
+		};
+
+		const saved = await save({
 			chatTitle: {
 				...base,
 				enabled: titleEnabled,
@@ -115,6 +146,8 @@
 				modelProtocol: next.modelProtocol,
 			},
 		});
+		if (token !== titleSelectionSaveToken) return;
+		titleSelectionOverride = saved ? null : previousOverride;
 	}
 
 	async function persistTelegramSettings(overrides?: { enabled?: boolean }) {

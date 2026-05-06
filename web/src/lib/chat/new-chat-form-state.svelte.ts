@@ -411,18 +411,14 @@ export class NewChatFormState {
 
 	// Initialization
 
-	/** Loads server settings and refreshes models when the cache is stale. */
+	/** Loads server settings without blocking the form on live model discovery. */
 	async loadSettingsAndModels(): Promise<void> {
 		try {
-			const [settingsData] = await Promise.all([
-				this.#remoteSettings.ensureLoaded(),
-				this.#modelCatalog.refreshIfStale()
-			]);
-
+			const settingsData = await this.#remoteSettings.ensureLoaded();
 			this.#applySettings(settingsData);
 			this.validateAllModelsAgainstLive();
 		} catch (err) {
-			console.warn('[NewChatFormState] Failed to load settings and models', err);
+			console.warn('[NewChatFormState] Failed to load settings', err);
 			for (const provider of this.#modelCatalog.getSelectableHarnesses()) {
 				this.applyResolvedModel(provider, this.#modelCatalog.getDefaultModel(provider));
 			}
@@ -431,6 +427,16 @@ export class NewChatFormState {
 			}
 		} finally {
 			this.settingsLoaded = true;
+			void this.#refreshModelsInBackground();
+		}
+	}
+
+	async #refreshModelsInBackground(): Promise<void> {
+		try {
+			await this.#modelCatalog.refreshIfStale();
+			this.validateAllModelsAgainstLive();
+		} catch (err) {
+			console.warn('[NewChatFormState] Failed to refresh models', err);
 		}
 	}
 

@@ -39,12 +39,6 @@ interface RowsCache {
 	rows: ModelSelectorRow[];
 }
 
-interface FilterCache {
-	rows: ModelSelectorRow[];
-	query: string;
-	result: FilteredModelRowsResult;
-}
-
 let nextModelSelectorInstanceId = 0;
 
 export class ModelSelectorState {
@@ -55,13 +49,17 @@ export class ModelSelectorState {
 	activeSourceKey = $state<string | null>(null);
 	activeModelIndex = $state(0);
 	rememberedModels = $state<Record<string, string>>({});
+	draftHarnessId = $state<SessionProvider | null>(null);
+	draftModelValue = $state<string | null>(null);
 
 	readonly #options: ModelSelectorStateOptions;
 	#sourcesCache = new Map<SessionProvider, ModelSourceOption[]>();
 	#sourcesCacheVersion: number | null = null;
 	#sourcesCacheLocale: string | null = null;
-	#rowsCache: RowsCache | null = null;
-	#filterCache: FilterCache | null = null;
+	#rowsCache = new Map<string, RowsCache>();
+	#rowsCacheVersion: number | null = null;
+	#rowsCacheLocale: string | null = null;
+	#filterCache = new WeakMap<ModelSelectorRow[], Map<string, FilteredModelRowsResult>>();
 
 	constructor(options: ModelSelectorStateOptions) {
 		this.#options = options;
@@ -84,6 +82,7 @@ export class ModelSelectorState {
 	}
 
 	get harnessId(): SessionProvider {
+		if (this.open && this.draftHarnessId) return this.draftHarnessId;
 		return this.value.harnessId;
 	}
 
@@ -96,7 +95,7 @@ export class ModelSelectorState {
 	}
 
 	sourcesFor(harnessId: SessionProvider): ModelSourceOption[] {
-		const catalogVersion = this.modelCatalog.version;
+		const catalogVersion = this.modelCatalog.version ?? 0;
 		const locale = getLocale();
 		if (this.#sourcesCacheVersion !== catalogVersion || this.#sourcesCacheLocale !== locale) {
 			this.#sourcesCache.clear();
@@ -112,10 +111,14 @@ export class ModelSelectorState {
 		return sources;
 	}
 
-	sourceKeyForValue(value: ModelSelectorValue): string | null {
-		const selectedModel = findSelectedModelOption(this.modelCatalog, value);
-		if (selectedModel) return modelSourceKeyFor(value.harnessId, selectedModel);
-		return this.sourcesFor(value.harnessId)[0]?.key ?? null;
+	#sourceKeyForModel(
+		harnessId: SessionProvider,
+		modelValue: string,
+		modelEndpointId?: string | null,
+	): string | null {
+		const selectedModel = this.modelCatalog.getModelForSelection(harnessId, modelValue, modelEndpointId);
+		if (selectedModel) return modelSourceKeyFor(harnessId, selectedModel);
+		return this.sourcesFor(harnessId)[0]?.key ?? null;
 	}
 
 	get sourceKey(): string | null {
@@ -123,7 +126,11 @@ export class ModelSelectorState {
 		if (this.activeSourceKey && this.sources.some((source) => source.key === this.activeSourceKey)) {
 			return this.activeSourceKey;
 		}
-		return this.sourceKeyForValue(this.value);
+		return this.#sourceKeyForModel(
+			this.harnessId,
+			this.currentModelValue,
+			this.open ? null : this.value.modelEndpointId,
+		);
 	}
 
 	get source(): ModelSourceOption | null {
@@ -138,10 +145,14 @@ export class ModelSelectorState {
 	}
 
 	get currentModelValue(): string {
+		if (this.open && this.draftModelValue !== null) return this.draftModelValue;
 		return currentModelValue(this.modelCatalog, this.value);
 	}
 
 	get selectedModel(): ModelOption | null {
+		if (this.open) {
+			return this.modelCatalog.getModelForSelection(this.harnessId, this.currentModelValue);
+		}
 		return findSelectedModelOption(this.modelCatalog, this.value);
 	}
 
@@ -150,11 +161,19 @@ export class ModelSelectorState {
 	}
 
 	get modelRows(): ModelSelectorRow[] {
-		const catalogVersion = this.modelCatalog.version;
+		const catalogVersion = this.modelCatalog.version ?? 0;
+		const locale = getLocale();
+		if (this.#rowsCacheVersion !== catalogVersion || this.#rowsCacheLocale !== locale) {
+			this.#rowsCache.clear();
+			this.#rowsCacheVersion = catalogVersion;
+			this.#rowsCacheLocale = locale;
+		}
+
 		const models = this.availableModels;
 		const source = this.modelLabelSource;
 		const sourceKey = this.sourceKey;
-		const cached = this.#rowsCache;
+		const cacheKey = this.#rowsCacheKey(this.harnessId, sourceKey, source);
+		const cached = this.#rowsCache.get(cacheKey);
 
 		if (
 			cached &&
@@ -168,27 +187,30 @@ export class ModelSelectorState {
 		}
 
 		const rows = buildModelRows(models, source);
-		this.#rowsCache = {
+		this.#rowsCache.set(cacheKey, {
 			catalogVersion,
 			harnessId: this.harnessId,
 			sourceKey,
 			models,
 			source,
 			rows,
-		};
+		});
 		return rows;
 	}
 
 	get filteredModelRows(): FilteredModelRowsResult {
 		const rows = this.modelRows;
 		const query = this.query;
-		const cached = this.#filterCache;
-		if (cached && cached.rows === rows && cached.query === query) {
-			return cached.result;
+		const cachedByQuery = this.#filterCache.get(rows);
+		const cached = cachedByQuery?.get(query);
+		if (cached) {
+			return cached;
 		}
 
 		const result = filterModelRows(rows, query);
-		this.#filterCache = { rows, query, result };
+		const nextByQuery = cachedByQuery ?? new Map<string, FilteredModelRowsResult>();
+		nextByQuery.set(query, result);
+		this.#filterCache.set(rows, nextByQuery);
 		return result;
 	}
 
@@ -221,15 +243,18 @@ export class ModelSelectorState {
 	}
 
 	setOpen(open: boolean): void {
-		this.open = open;
 		if (open) {
+			this.open = true;
 			this.query = '';
-			this.activeSourceKey = this.sourceKeyForValue(this.value);
+			this.#startDraftFromValue();
 			this.resetActiveModelIndex();
 			return;
 		}
+		this.#commitDraftSelection();
+		this.open = false;
 		this.query = '';
 		this.activeModelIndex = 0;
+		this.#clearDraft();
 	}
 
 	setQuery(query: string): void {
@@ -319,9 +344,8 @@ export class ModelSelectorState {
 			source ? this.rememberedModels[this.memoryKey(harnessId, source.key)] : undefined,
 		);
 		this.query = '';
-		this.activeSourceKey = source?.key ?? null;
-		this.emit(harnessId, modelValue);
-		this.activeModelIndex = 0;
+		this.#setDraftSelection(harnessId, modelValue, source?.key ?? null);
+		this.resetActiveModelIndex();
 	}
 
 	selectSource(sourceKey: string): void {
@@ -333,14 +357,14 @@ export class ModelSelectorState {
 			source ? this.rememberedModels[this.memoryKey(this.harnessId, source.key)] : undefined,
 		);
 		this.query = '';
-		this.activeSourceKey = source?.key ?? null;
-		this.emit(this.harnessId, modelValue);
-		this.activeModelIndex = 0;
+		this.#setDraftSelection(this.harnessId, modelValue, source?.key ?? null);
+		this.resetActiveModelIndex();
 	}
 
 	selectModel(modelValue: string): void {
-		this.emit(this.harnessId, modelValue);
-		this.setOpen(false);
+		this.#setDraftSelection(this.harnessId, modelValue, this.sourceKey);
+		this.rememberSelection(this.harnessId, modelValue);
+		this.resetActiveModelIndex();
 	}
 
 	rememberSelection(harnessId: SessionProvider, modelValue: string): void {
@@ -362,5 +386,48 @@ export class ModelSelectorState {
 		if (!next) return;
 		this.rememberSelection(harnessId, next.modelValue);
 		void this.#options.onChange(next);
+	}
+
+	#commitDraftSelection(): void {
+		if (!this.draftHarnessId || this.draftModelValue === null || !this.draftModelValue) return;
+		const committedModelValue = currentModelValue(this.modelCatalog, this.value);
+		if (this.draftHarnessId === this.value.harnessId && this.draftModelValue === committedModelValue) {
+			return;
+		}
+		this.emit(this.draftHarnessId, this.draftModelValue);
+	}
+
+	#startDraftFromValue(): void {
+		const harnessId = this.value.harnessId;
+		const modelValue = currentModelValue(this.modelCatalog, this.value);
+		this.#setDraftSelection(
+			harnessId,
+			modelValue,
+			this.#sourceKeyForModel(harnessId, modelValue, this.value.modelEndpointId),
+		);
+	}
+
+	#setDraftSelection(
+		harnessId: SessionProvider,
+		modelValue: string,
+		sourceKey: string | null,
+	): void {
+		this.draftHarnessId = harnessId;
+		this.draftModelValue = modelValue;
+		this.activeSourceKey = sourceKey;
+	}
+
+	#clearDraft(): void {
+		this.draftHarnessId = null;
+		this.draftModelValue = null;
+		this.activeSourceKey = null;
+	}
+
+	#rowsCacheKey(
+		harnessId: SessionProvider,
+		sourceKey: string | null,
+		source: ModelSourceOption | null,
+	): string {
+		return `${harnessId}:${source ? 'source' : 'flat'}:${sourceKey ?? 'all'}`;
 	}
 }

@@ -17,14 +17,14 @@
 	interface Props {
 		onClose: () => void;
 		onSettingsChanged: (settings: {
-				enabled: boolean;
-				provider: SessionProvider;
-				model: string;
-				apiProviderId?: string | null;
-				modelEndpointId?: string | null;
-				modelProtocol?: ApiProtocol | null;
-				customPrompt: string;
-				useCommonDirPrefix: boolean;
+			enabled: boolean;
+			provider: SessionProvider;
+			model: string;
+			apiProviderId?: string | null;
+			modelEndpointId?: string | null;
+			modelProtocol?: ApiProtocol | null;
+			customPrompt: string;
+			useCommonDirPrefix: boolean;
 		}) => void;
 	}
 
@@ -59,65 +59,76 @@ Return only the commit message now.`;
 	let customPrompt = $state('');
 	let useCommonDirPrefix = $state(false);
 	let isDefaultPrompt = $derived(!customPrompt || customPrompt === DEFAULT_PROMPT);
-		const modelCatalog = getModelCatalog();
-		const remoteSettings = getRemoteSettings();
-		const modelSelectorMode: ModelSelectorMode = { harness: 'select', source: 'select', surface: 'settings' };
-		const modelSelectorValue = $derived({
-			harnessId: provider,
-			model,
-		});
-		let loaded = $state(false);
+	const modelCatalog = getModelCatalog();
+	const remoteSettings = getRemoteSettings();
+	const modelSelectorMode: ModelSelectorMode = { harness: 'select', source: 'select', surface: 'settings' };
+	const modelSelectorValue = $derived({
+		harnessId: provider,
+		model,
+	});
+	let loaded = $state(false);
 
-		onMount(async () => {
-			let persistedModel = '';
-			let persistedEndpointId: string | null = null;
-			try {
-				const snap = await remoteSettings.ensureLoaded();
-				const ui = (snap.ui ?? {}) as Record<string, unknown>;
+	function applyModelDefault(persistedModel: string, persistedEndpointId: string | null): void {
+		if (persistedModel) {
+			model = modelCatalog.selectionValueFor(provider, persistedModel, persistedEndpointId);
+		}
+		if (!model) {
+			const models = modelCatalog.getModels(provider);
+			if (models.length > 0) model = models[0].value;
+		}
+	}
+
+	onMount(async () => {
+		let persistedModel = '';
+		let persistedEndpointId: string | null = null;
+		try {
+			const snap = await remoteSettings.ensureLoaded();
+			const ui = (snap.ui ?? {}) as Record<string, unknown>;
 			const uiEffective = (snap.uiEffective ?? {}) as Record<string, unknown>;
 			const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;
-				const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
-				const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
-				enabled = cm.enabled !== false;
-				if (typeof cm.provider === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(cm.provider)) {
-					provider = cm.provider as SessionProvider;
-				}
-				if (typeof cm.model === 'string') persistedModel = cm.model;
-				if (typeof cm.modelEndpointId === 'string') persistedEndpointId = cm.modelEndpointId;
-				if (typeof cm.customPrompt === 'string' && cm.customPrompt) customPrompt = cm.customPrompt;
-				else customPrompt = DEFAULT_PROMPT;
+			const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
+			const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
+			enabled = cm.enabled !== false;
+			if (typeof cm.provider === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(cm.provider)) {
+				provider = cm.provider as SessionProvider;
+			}
+			if (typeof cm.model === 'string') persistedModel = cm.model;
+			if (typeof cm.modelEndpointId === 'string') persistedEndpointId = cm.modelEndpointId;
+			if (typeof cm.customPrompt === 'string' && cm.customPrompt) customPrompt = cm.customPrompt;
+			else customPrompt = DEFAULT_PROMPT;
 			if (typeof cm.useCommonDirPrefix === 'boolean') useCommonDirPrefix = cm.useCommonDirPrefix;
 		} catch { /* use defaults */ }
 
-			await modelCatalog.refreshIfStale();
-			if (persistedModel) {
-				model = modelCatalog.selectionValueFor(provider, persistedModel, persistedEndpointId);
-			}
-			if (!model) {
-				const models = modelCatalog.getModels(provider);
-				if (models.length > 0) model = models[0].value;
-		}
+		applyModelDefault(persistedModel, persistedEndpointId);
 
 		loaded = true;
+		const providerAtLoad = provider;
+		const modelAtLoad = model;
+		void modelCatalog.refreshIfStale().then(() => {
+			if (provider !== providerAtLoad || model !== modelAtLoad) return;
+			applyModelDefault(persistedModel, persistedEndpointId);
+		}).catch((err) => {
+			console.warn('[CommitMessageSettingsModal] Failed to refresh models', err);
+		});
 	});
 
 	async function persist() {
-			// Store empty string when the prompt matches the default so the
-			// server uses its built-in prompt (avoids drift if the default changes).
-			const promptToStore = isDefaultPrompt ? '' : customPrompt;
-			const selection = modelCatalog.selectionFor(provider, model);
-			const payload = {
-				enabled,
-				provider,
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-				customPrompt: promptToStore,
-				useCommonDirPrefix,
-			};
-			await remoteSettings.update({ ui: { commitMessage: payload } });
-			onSettingsChanged({ ...payload, customPrompt: promptToStore, useCommonDirPrefix });
+		// Store empty string when the prompt matches the default so the
+		// server uses its built-in prompt and avoids drift if the default changes.
+		const promptToStore = isDefaultPrompt ? '' : customPrompt;
+		const selection = modelCatalog.selectionFor(provider, model);
+		const payload = {
+			enabled,
+			provider,
+			model: selection.model,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+			customPrompt: promptToStore,
+			useCommonDirPrefix,
+		};
+		await remoteSettings.update({ ui: { commitMessage: payload } });
+		onSettingsChanged({ ...payload, customPrompt: promptToStore, useCommonDirPrefix });
 	}
 
 	async function handleEnabledChange(next: boolean) {
@@ -125,11 +136,11 @@ Return only the commit message now.`;
 		await persist();
 	}
 
-		async function handleModelSelectorChange(next: ModelSelectorChange) {
-			provider = next.harnessId;
-			model = next.modelValue;
-			await persist();
-		}
+	async function handleModelSelectorChange(next: ModelSelectorChange) {
+		provider = next.harnessId;
+		model = next.modelValue;
+		await persist();
+	}
 
 	function handleBackdropClick(e: MouseEvent) {
 		if (e.target === e.currentTarget) onClose();
@@ -162,69 +173,69 @@ Return only the commit message now.`;
 			</button>
 		</div>
 
-			{#if loaded}
-				<div class="px-4 py-3 space-y-3">
-					<div class="flex items-center justify-between">
-						<div class="text-sm font-medium text-foreground">{m.git_commit_settings_directory_prefix()}</div>
-						<Switch
-							checked={useCommonDirPrefix}
-							onCheckedChange={(next) => { useCommonDirPrefix = next; persist(); }}
-							aria-label={m.git_commit_settings_directory_prefix_aria()}
-						/>
-					</div>
+		{#if loaded}
+			<div class="px-4 py-3 space-y-3">
+				<div class="flex items-center justify-between">
+					<div class="text-sm font-medium text-foreground">{m.git_commit_settings_directory_prefix()}</div>
+					<Switch
+						checked={useCommonDirPrefix}
+						onCheckedChange={(next) => { useCommonDirPrefix = next; persist(); }}
+						aria-label={m.git_commit_settings_directory_prefix_aria()}
+					/>
+				</div>
 
-					<div class="flex items-center justify-between">
-						<div class="text-sm font-medium text-foreground">{m.git_commit_settings_enabled()}</div>
-						<Switch
-							checked={enabled}
-							onCheckedChange={handleEnabledChange}
+				<div class="flex items-center justify-between">
+					<div class="text-sm font-medium text-foreground">{m.git_commit_settings_enabled()}</div>
+					<Switch
+						checked={enabled}
+						onCheckedChange={handleEnabledChange}
 						aria-label={m.git_commit_settings_enabled_aria()}
 					/>
 				</div>
 
-					{#if enabled}
-						<div class="flex items-center justify-between">
-							<div class="text-sm font-medium text-foreground">{m.git_commit_settings_model()}</div>
-							<SettingsModelSelector
-								value={modelSelectorValue}
-								mode={modelSelectorMode}
-								onChange={handleModelSelectorChange}
-								align="end"
-								side="bottom"
-							/>
-						</div>
+				{#if enabled}
+					<div class="flex items-center justify-between">
+						<div class="text-sm font-medium text-foreground">{m.git_commit_settings_model()}</div>
+						<SettingsModelSelector
+							value={modelSelectorValue}
+							mode={modelSelectorMode}
+							onChange={handleModelSelectorChange}
+							align="end"
+							side="bottom"
+						/>
+					</div>
 
-						<div class="space-y-1.5 pt-1">
-							<div class="text-sm font-medium text-foreground">{m.git_commit_settings_generation_prompt()}</div>
-							<textarea
-								value={customPrompt}
-								oninput={(e) => { customPrompt = e.currentTarget.value; }}
-								onblur={() => persist()}
+					<div class="space-y-1.5 pt-1">
+						<div class="text-sm font-medium text-foreground">{m.git_commit_settings_generation_prompt()}</div>
+						<textarea
+							value={customPrompt}
+							oninput={(e) => { customPrompt = e.currentTarget.value; }}
+							onblur={() => persist()}
 							placeholder={m.git_commit_settings_prompt_placeholder({ files: '{{files}}', diff: '{{diff}}' })}
 							class="w-full text-sm p-2.5 bg-muted/30 border border-border rounded-md resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent text-foreground placeholder:text-muted-foreground/60"
-								rows="8"
-							></textarea>
-							<div class="rounded-md border border-border bg-muted/20 px-3 py-2">
-								<div class="text-xs font-medium text-foreground">
-									{m.git_commit_settings_prompt_legend_title()}
-								</div>
-								<div class="mt-1 space-y-1 text-xs text-muted-foreground">
-									<div><code class="font-mono text-foreground">{'{{files}}'}</code> {m.git_commit_settings_prompt_legend_files()}</div>
-									<div><code class="font-mono text-foreground">{'{{diff}}'}</code> {m.git_commit_settings_prompt_legend_diff()}</div>
-								</div>
+							rows="8"
+						></textarea>
+						<div class="rounded-md border border-border bg-muted/20 px-3 py-2">
+							<div class="text-xs font-medium text-foreground">
+								{m.git_commit_settings_prompt_legend_title()}
 							</div>
-							{#if !isDefaultPrompt}
-								<div class="flex justify-end">
-									<Button
-										variant="outline"
-										size="sm"
-										onclick={() => { customPrompt = DEFAULT_PROMPT; persist(); }}
-									>
-										{m.git_commit_settings_restore_default_prompt()}
-									</Button>
-								</div>
-							{/if}
+							<div class="mt-1 space-y-1 text-xs text-muted-foreground">
+								<div><code class="font-mono text-foreground">{'{{files}}'}</code> {m.git_commit_settings_prompt_legend_files()}</div>
+								<div><code class="font-mono text-foreground">{'{{diff}}'}</code> {m.git_commit_settings_prompt_legend_diff()}</div>
+							</div>
 						</div>
+						{#if !isDefaultPrompt}
+							<div class="flex justify-end">
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => { customPrompt = DEFAULT_PROMPT; persist(); }}
+								>
+									{m.git_commit_settings_restore_default_prompt()}
+								</Button>
+							</div>
+						{/if}
+					</div>
 				{/if}
 			</div>
 		{:else}

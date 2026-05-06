@@ -117,7 +117,6 @@
 
 	onMount(() => {
 		auth.checkAuthStatus();
-		void modelCatalog.refreshIfStale();
 	});
 
 	function handlePageHide() {
@@ -133,6 +132,15 @@
 	$effect(() => {
 		if (!auth.isAuthenticated) return;
 		void remoteSettings.ensureLoadedInBackground();
+	});
+
+	// Refreshes the model catalog only after auth is known, since the models
+	// endpoint is protected when auth is enabled.
+	$effect(() => {
+		if (!auth.isAuthenticated) return;
+		untrack(() => {
+			void modelCatalog.refreshIfStale();
+		});
 	});
 
 	// Keeps root-global remote values synchronized after both HTTP refreshes

@@ -181,7 +181,7 @@
 				</section>
 			{/if}
 
-			<section class="flex min-w-0 flex-1 flex-col">
+			<section class="flex min-h-0 min-w-0 flex-1 flex-col">
 				<div class="flex items-center gap-2 border-b border-border px-3">
 					<Search class="size-4 shrink-0 text-muted-foreground" />
 					<input

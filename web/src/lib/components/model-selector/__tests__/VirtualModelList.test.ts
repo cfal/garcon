@@ -35,6 +35,28 @@ describe('VirtualModelList', () => {
 		expect(screen.getAllByRole('option').length).toBeLessThan(40);
 	});
 
+	it('allows vertical touch panning on the scroll viewport and rows', () => {
+		render(VirtualModelList, {
+			props: {
+				rows: makeRows(50),
+				selectedValue: 'model-0',
+				activeIndex: 0,
+				listId: 'models',
+				ariaLabel: 'Models',
+				onActiveIndexChange: vi.fn(),
+				onSelect: vi.fn(),
+			},
+		});
+
+		const listbox = screen.getByRole('listbox', { name: 'Models' });
+		const firstOption = screen.getByRole('option', { name: /Model 0/ });
+
+		expect(listbox.className).toContain('touch-pan-y');
+		expect(listbox.className).toContain('overflow-y-auto');
+		expect(listbox.className).toContain('overscroll-contain');
+		expect(firstOption.className).toContain('touch-pan-y');
+	});
+
 	it('selects visible rows by click', async () => {
 		const onSelect = vi.fn();
 		render(VirtualModelList, {
