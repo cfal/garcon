@@ -204,6 +204,90 @@ describe('WorkspaceView header visibility', () => {
 		expect(setSelectedChatId).toHaveBeenCalledWith('chat-1');
 	});
 
+	it('focuses an existing split pane instead of duplicating a sidebar chat', async () => {
+		const addChatToZone = vi.fn();
+		const endDrag = vi.fn();
+		const focusPane = vi.fn();
+		const setSelectedChatId = vi.fn();
+		const root = {
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+		};
+		const splitLayout = {
+			isEnabled: true,
+			root,
+			focusedPaneId: 'pane-left',
+			draggedChatId: 'chat-2',
+			draggedPaneId: null,
+			paneCount: 2,
+			panes: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+			focusedChatId: 'chat-2',
+			addChatToZone,
+			endDrag,
+			focusPane,
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable: vi.fn(),
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+
+		const { container } = render(WorkspaceViewTestHarness, {
+			activeTab: 'chat',
+			showChatHeader: true,
+			isMobile: false,
+			splitLayout,
+			chatSessions: {
+				selectedChat: {
+					id: 'chat-1',
+					title: 'Header Test Chat',
+					projectPath: '/tmp/header-test',
+				},
+				byId: {},
+				orderedChats: [],
+				setSelectedChatId,
+			},
+		});
+
+		const rightPane = container.querySelector<HTMLElement>('[data-pane-id="pane-right"]');
+		const layer = container.querySelector<HTMLElement>('[data-split-drag-layer]');
+		expect(rightPane).toBeTruthy();
+		expect(layer).toBeTruthy();
+
+		Object.defineProperty(rightPane!, 'getBoundingClientRect', {
+			value: () => ({
+				left: 100,
+				top: 0,
+				right: 200,
+				bottom: 100,
+				width: 100,
+				height: 100,
+				x: 100,
+				y: 0,
+				toJSON: () => ({}),
+			}),
+		});
+
+		dispatchDragEvent(layer!, 'dragover', { clientX: 195, clientY: 50 });
+		dispatchDragEvent(layer!, 'drop', { clientX: 195, clientY: 50 });
+
+		expect(addChatToZone).not.toHaveBeenCalled();
+		expect(focusPane).toHaveBeenCalledWith('pane-right');
+		expect(endDrag).toHaveBeenCalledOnce();
+		expect(setSelectedChatId).toHaveBeenCalledWith('chat-2');
+	});
+
 	it('blocks edge drops when split view already has four panes', async () => {
 		const addChatToZone = vi.fn();
 		const endDrag = vi.fn();

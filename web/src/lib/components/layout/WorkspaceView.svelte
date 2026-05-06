@@ -199,6 +199,13 @@
 			syncFocusedChatToSessions();
 			return;
 		}
+		const existingPane = splitLayout.panes.find((p) => p.chatId === draggedChat);
+		if (existingPane) {
+			splitLayout.focusPane(existingPane.id);
+			splitLayout.endDrag();
+			syncFocusedChatToSessions();
+			return;
+		}
 		splitLayout.addChatToZone(paneId, draggedChat, zone);
 		splitLayout.endDrag();
 		syncFocusedChatToSessions();
