@@ -186,21 +186,6 @@ export function filterModelRows(
 	};
 }
 
-export function chooseModelForSource(
-	source: ModelSourceOption | null,
-	currentModelValue: string,
-	rememberedModelValue?: string,
-): string {
-	if (!source) return '';
-	if (currentModelValue && source.models.some((model) => model.value === currentModelValue)) {
-		return currentModelValue;
-	}
-	if (rememberedModelValue && source.models.some((model) => model.value === rememberedModelValue)) {
-		return rememberedModelValue;
-	}
-	return source.models[0]?.value ?? '';
-}
-
 export function buildModelSelectorChange(
 	modelCatalog: ModelCatalogStore,
 	harnessId: SessionProvider,

@@ -126,6 +126,7 @@ describe('ModelSelectorPopover', () => {
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(within(listbox).getByText('Codex Model 0')).toBeTruthy();
 		expect(within(listbox).queryByText('Model 0')).toBeNull();
+		expect(listbox.querySelector('.lucide-check')).toBeNull();
 
 		await fireEvent.click(within(listbox).getByText('Codex Model 0'));
 
@@ -159,7 +160,7 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.queryByRole('button', { name: /Codex .* Codex Model 0/ })).toBeNull();
 	});
 
-	it('commits the fallback model when a draft harness change closes', async () => {
+	it('does not commit harness navigation without a model selection', async () => {
 		const onChange = vi.fn();
 
 		render(ModelSelectorPopoverHarness, {
@@ -173,12 +174,8 @@ describe('ModelSelectorPopover', () => {
 
 		await closePopoverByOutsideClick();
 
-		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-			harnessId: 'codex',
-			modelValue: 'codex-model-0',
-			model: 'codex-model-0',
-		}));
+		expect(onChange).not.toHaveBeenCalled();
+		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
 	});
 
 	it('keeps provider source and model changes draft-only until the popup closes', async () => {
@@ -198,6 +195,7 @@ describe('ModelSelectorPopover', () => {
 
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(within(listbox).getByText('Endpoint Model')).toBeTruthy();
+		expect(listbox.querySelector('.lucide-check')).toBeNull();
 
 		await fireEvent.click(within(listbox).getByText('Endpoint Model'));
 
@@ -214,6 +212,29 @@ describe('ModelSelectorPopover', () => {
 			modelEndpointId: 'acme-claude',
 			modelProtocol: 'anthropic-messages',
 		});
+	});
+
+	it('does not commit provider navigation without a model selection', async () => {
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHarness, {
+			value: { harnessId: 'claude', model: 'model-0' },
+			mode: { harness: 'fixed', source: 'select', surface: 'settings' },
+			includeEndpointModel: true,
+			onChange,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Acme' }));
+
+		const listbox = await screen.findByRole('listbox', { name: 'Model' });
+		expect(within(listbox).getByText('Endpoint Model')).toBeTruthy();
+		expect(listbox.querySelector('.lucide-check')).toBeNull();
+
+		await closePopoverByOutsideClick();
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
 	});
 
 	it('reserves the trigger subtitle row when the committed subtitle is empty', () => {
@@ -334,6 +355,31 @@ describe('ModelSelectorPopover', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 		});
+	});
+
+	it('keeps compact Done disabled until a model is selected after navigation', async () => {
+		installMatchMedia(true);
+
+		render(ModelSelectorPopoverHarness, {
+			value: { harnessId: 'claude', model: 'model-0' },
+			mode: { harness: 'select', source: 'select', surface: 'composer' },
+			onChange: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
+
+		const listbox = await screen.findByRole('listbox', { name: 'Model' });
+		const done = screen.getByRole('button', { name: 'Done' });
+
+		expect(within(listbox).getByText('Codex Model 0')).toBeTruthy();
+		expect(listbox.querySelector('.lucide-check')).toBeNull();
+		expect(done.hasAttribute('disabled')).toBe(true);
+
+		await fireEvent.click(within(listbox).getByText('Codex Model 0'));
+
+		expect(done.hasAttribute('disabled')).toBe(false);
 	});
 
 	it('discards compact draft selection from Cancel or outside close', async () => {

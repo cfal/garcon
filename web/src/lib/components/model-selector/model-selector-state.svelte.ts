@@ -15,7 +15,6 @@ import {
 	buildModelRows,
 	buildModelSelectorChange,
 	buildModelSources,
-	chooseModelForSource,
 	currentModelValue,
 	filterModelRows,
 	modelDisplayLabel,
@@ -58,7 +57,6 @@ export class ModelSelectorState {
 	query = $state('');
 	activeSourceKey = $state<string | null>(null);
 	activeModelIndex = $state(0);
-	rememberedModels = $state<Record<string, string>>({});
 	draftHarnessId = $state<SessionProvider | null>(null);
 	draftModelValue = $state<string | null>(null);
 
@@ -249,7 +247,9 @@ export class ModelSelectorState {
 		const harnessId = this.open && this.draftHarnessId ? this.draftHarnessId : this.value.harnessId;
 		const modelValue = this.open && this.draftModelValue !== null
 			? this.draftModelValue
-			: currentModelValue(this.modelCatalog, this.value);
+			: this.open
+				? ''
+				: currentModelValue(this.modelCatalog, this.value);
 		return this.#selectionView({
 			harnessId,
 			modelValue,
@@ -370,11 +370,7 @@ export class ModelSelectorState {
 		const sources = this.sourcesFor(harnessId);
 		const currentSourceKey = this.sourceKey;
 		const source = sources.find((entry) => entry.key === currentSourceKey) ?? sources[0] ?? null;
-		const modelValue = chooseModelForSource(
-			source,
-			this.currentModelValue,
-			source ? this.rememberedModels[this.memoryKey(harnessId, source.key)] : undefined,
-		);
+		const modelValue = this.#committedModelValueFor(harnessId, source?.key ?? null);
 		this.query = '';
 		this.#setDraftSelection(harnessId, modelValue, source?.key ?? null);
 		this.resetActiveModelIndex();
@@ -383,11 +379,7 @@ export class ModelSelectorState {
 	selectSource(sourceKey: string): void {
 		if (sourceKey === this.sourceKey) return;
 		const source = this.sources.find((entry) => entry.key === sourceKey) ?? null;
-		const modelValue = chooseModelForSource(
-			source,
-			this.currentModelValue,
-			source ? this.rememberedModels[this.memoryKey(this.harnessId, source.key)] : undefined,
-		);
+		const modelValue = this.#committedModelValueFor(this.harnessId, source?.key ?? null);
 		this.query = '';
 		this.#setDraftSelection(this.harnessId, modelValue, source?.key ?? null);
 		this.resetActiveModelIndex();
@@ -395,28 +387,12 @@ export class ModelSelectorState {
 
 	selectModel(modelValue: string): void {
 		this.#setDraftSelection(this.harnessId, modelValue, this.sourceKey);
-		this.rememberSelection(this.harnessId, modelValue);
 		this.resetActiveModelIndex();
-	}
-
-	rememberSelection(harnessId: SessionProvider, modelValue: string): void {
-		const model = this.modelCatalog.getModelForSelection(harnessId, modelValue);
-		if (!model) return;
-		const sourceKey = modelSourceKeyFor(harnessId, model);
-		this.rememberedModels = {
-			...this.rememberedModels,
-			[this.memoryKey(harnessId, sourceKey)]: modelValue,
-		};
-	}
-
-	memoryKey(harnessId: SessionProvider, sourceKey: string): string {
-		return `${harnessId}:${sourceKey}`;
 	}
 
 	emit(harnessId: SessionProvider, modelValue: string): void {
 		const next = buildModelSelectorChange(this.modelCatalog, harnessId, modelValue);
 		if (!next) return;
-		this.rememberSelection(harnessId, next.modelValue);
 		void this.#options.onChange(next);
 	}
 
@@ -441,12 +417,27 @@ export class ModelSelectorState {
 
 	#setDraftSelection(
 		harnessId: SessionProvider,
-		modelValue: string,
+		modelValue: string | null,
 		sourceKey: string | null,
 	): void {
 		this.draftHarnessId = harnessId;
 		this.draftModelValue = modelValue;
 		this.activeSourceKey = sourceKey;
+	}
+
+	#committedModelValueFor(harnessId: SessionProvider, sourceKey: string | null): string | null {
+		if (harnessId !== this.value.harnessId) return null;
+		const modelValue = currentModelValue(this.modelCatalog, this.value);
+		if (!modelValue) return null;
+		const selectedModel = this.modelCatalog.getModelForSelection(
+			harnessId,
+			modelValue,
+			this.value.modelEndpointId,
+		);
+		if (!selectedModel) return null;
+		if (this.mode.source === 'hidden') return modelValue;
+		if (!sourceKey) return null;
+		return modelSourceKeyFor(harnessId, selectedModel) === sourceKey ? modelValue : null;
 	}
 
 	#clearDraft(): void {
