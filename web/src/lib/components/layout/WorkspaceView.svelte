@@ -25,6 +25,7 @@
 		zone: SplitDropZone;
 		rect: DOMRect;
 		blockedReason?: 'max-panes';
+		focusReason?: 'already-open';
 	};
 
 	// Lazy-loaded tab panels to keep the main chunk lean. Each panel
@@ -274,12 +275,20 @@
 		zone: SplitDropZone,
 		rect: DOMRect,
 	): ActiveSplitDropTarget {
+		const draggedChat = splitLayout.draggedChatId;
+		const isExistingSidebarChat =
+			!!draggedChat &&
+			!splitLayout.draggedPaneId &&
+			splitLayout.panes.some((p) => p.chatId === draggedChat);
 		return {
 			paneId,
 			zone,
 			rect,
+			focusReason: isExistingSidebarChat ? 'already-open' : undefined,
 			blockedReason:
-				splitLayout.paneCount >= 4 && isSplitEdgeZone(zone) ? 'max-panes' : undefined,
+				!isExistingSidebarChat && splitLayout.paneCount >= 4 && isSplitEdgeZone(zone)
+					? 'max-panes'
+					: undefined,
 		};
 	}
 
@@ -366,9 +375,12 @@
 	function getActiveSplitPreviewTone(zone: SplitDropZone): string {
 		if (
 			activeSplitDropTarget?.zone === zone &&
-			activeSplitDropTarget.blockedReason === 'max-panes'
+			(activeSplitDropTarget.blockedReason === 'max-panes' ||
+				activeSplitDropTarget.focusReason === 'already-open')
 		) {
-			return 'bg-destructive/10 border-destructive/40';
+			return activeSplitDropTarget.blockedReason === 'max-panes'
+				? 'bg-destructive/10 border-destructive/40'
+				: 'bg-accent/15 border-accent/40';
 		}
 		return zone === 'center'
 			? 'bg-accent/15 border-accent/40'
@@ -382,6 +394,12 @@
 		) {
 			return '4 panes max';
 		}
+		if (
+			activeSplitDropTarget?.zone === zone &&
+			activeSplitDropTarget.focusReason === 'already-open'
+		) {
+			return 'Already open';
+		}
 		return fallback;
 	}
 
@@ -391,6 +409,12 @@
 			activeSplitDropTarget.blockedReason === 'max-panes'
 		) {
 			return 'bg-destructive/10 text-destructive';
+		}
+		if (
+			activeSplitDropTarget?.zone === zone &&
+			activeSplitDropTarget.focusReason === 'already-open'
+		) {
+			return 'bg-accent/15 text-accent-foreground';
 		}
 		return zone === 'center'
 			? 'bg-accent/15 text-accent-foreground'

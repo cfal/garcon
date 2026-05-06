@@ -280,6 +280,9 @@ describe('WorkspaceView header visibility', () => {
 		});
 
 		dispatchDragEvent(layer!, 'dragover', { clientX: 195, clientY: 50 });
+		await tick();
+		expect(screen.getByText('Already open')).toBeTruthy();
+
 		dispatchDragEvent(layer!, 'drop', { clientX: 195, clientY: 50 });
 
 		expect(addChatToZone).not.toHaveBeenCalled();
