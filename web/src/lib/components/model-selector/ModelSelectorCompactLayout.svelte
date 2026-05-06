@@ -39,7 +39,7 @@
 	const previousPane = $derived.by<CompactPane | null>(() => {
 		if (pane === 'source') return showHarness ? 'harness' : null;
 		if (pane === 'model') {
-			if (showSource && selector.sources.length > 0) return 'source';
+			if (shouldShowSourcePaneFor(selector.harnessId)) return 'source';
 			return showHarness ? 'harness' : null;
 		}
 		return null;
@@ -78,12 +78,16 @@
 	function firstPane(): CompactPane {
 		if (selector.currentModelValue) return 'model';
 		if (showHarness) return 'harness';
-		if (showSource && selector.sources.length > 0) return 'source';
+		if (shouldShowSourcePaneFor(selector.harnessId)) return 'source';
 		return 'model';
 	}
 
+	function shouldShowSourcePaneFor(harnessId: SessionProvider): boolean {
+		return showSource && selector.sourcesFor(harnessId).length > 1;
+	}
+
 	function paneAfterHarness(harnessId: SessionProvider): CompactPane {
-		if (showSource && selector.sourcesFor(harnessId).length > 0) return 'source';
+		if (shouldShowSourcePaneFor(harnessId)) return 'source';
 		return 'model';
 	}
 

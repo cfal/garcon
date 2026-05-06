@@ -40,9 +40,7 @@ async function closePopoverByOutsideClick(): Promise<void> {
 
 async function chooseCodexModelInCompactLayout(): Promise<void> {
 	await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-	await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 	await fireEvent.click(await screen.findByRole('button', { name: 'Codex' }));
-	await fireEvent.click(screen.getByRole('button', { name: 'OpenAI OAuth' }));
 	await fireEvent.click(await screen.findByText('Codex Model 0'));
 }
 
@@ -240,6 +238,7 @@ describe('ModelSelectorPopover', () => {
 		render(ModelSelectorPopoverHarness, {
 			value: { harnessId: 'claude', model: 'model-0' },
 			mode: { harness: 'select', source: 'select', surface: 'composer' },
+			includeEndpointModel: true,
 			onChange: vi.fn(),
 		});
 
@@ -263,6 +262,32 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.getByText('Harness')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
 		expect(screen.getByRole('button', { name: 'Codex' })).toBeTruthy();
+	});
+
+	it('skips the compact provider pane when the selected harness has one provider', async () => {
+		installMatchMedia(true);
+
+		render(ModelSelectorPopoverHarness, {
+			value: { harnessId: 'claude', model: 'model-0' },
+			mode: { harness: 'select', source: 'select', surface: 'composer' },
+			onChange: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+
+		expect(await screen.findByRole('listbox', { name: 'Model' })).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+		expect(screen.getByText('Harness')).toBeTruthy();
+		expect(screen.queryByText('Claude Providers')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
+
+		const listbox = await screen.findByRole('listbox', { name: 'Model' });
+		expect(within(listbox).getByText('Codex Model 0')).toBeTruthy();
+		expect(screen.queryByText('Codex Providers')).toBeNull();
 	});
 
 	it('starts compact selection at harness when no model is selected', async () => {
