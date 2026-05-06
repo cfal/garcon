@@ -1,6 +1,6 @@
 <script lang="ts">
 	import WorkspaceView from '../WorkspaceView.svelte';
-	import { setChatSessions, setModelCatalog, setLocalSettings, setSplitLayout, setAppShell } from '$lib/context';
+	import { setChatSessions, setModelCatalog, setLocalSettings, setSplitLayout, setAppShell, setWs } from '$lib/context';
 	import type { AppTab } from '$lib/types/app';
 
 	interface WorkspaceViewTestHarnessProps {
@@ -9,6 +9,8 @@
 		alwaysFullscreenOnGitPanel?: boolean;
 		isMobile?: boolean;
 		isDesktopFullscreen?: boolean;
+		chatSessions?: unknown;
+		splitLayout?: unknown;
 	}
 
 	let {
@@ -16,16 +18,31 @@
 		showChatHeader,
 		alwaysFullscreenOnGitPanel = true,
 		isMobile = false,
-		isDesktopFullscreen = false
+		isDesktopFullscreen = false,
+		chatSessions,
+		splitLayout,
 	}: WorkspaceViewTestHarnessProps = $props();
 
-	setChatSessions({
-		selectedChat: {
-			id: 'chat-1',
-			title: 'Header Test Chat',
-			projectPath: '/tmp/header-test'
-		}
-	} as never);
+	function getChatSessionsContext(): unknown {
+		return chatSessions ?? {
+			selectedChat: {
+				id: 'chat-1',
+				title: 'Header Test Chat',
+				projectPath: '/tmp/header-test',
+			},
+			byId: {
+				'chat-1': {
+					id: 'chat-1',
+					title: 'Header Test Chat',
+					projectPath: '/tmp/header-test',
+				},
+			},
+			orderedChats: [],
+			setSelectedChatId() {},
+		};
+	}
+
+	setChatSessions(getChatSessionsContext() as never);
 
 	setLocalSettings({
 		get showChatHeader() {
@@ -49,17 +66,26 @@
 			}
 		} as never);
 
-	setSplitLayout({
-		isEnabled: false,
-		root: null,
-		focusedPaneId: null,
-		draggedChatId: null,
-		panes: [],
-		focusedChatId: null,
-	} as never);
+	function getSplitLayoutContext(): unknown {
+		return splitLayout ?? {
+			isEnabled: false,
+			root: null,
+			focusedPaneId: null,
+			draggedChatId: null,
+			draggedPaneId: null,
+			panes: [],
+			focusedChatId: null,
+		};
+	}
+
+	setSplitLayout(getSplitLayoutContext() as never);
 
 	setAppShell({
 		quietRefreshChats() {},
+	} as never);
+
+	setWs({
+		isConnected: false,
 	} as never);
 
 	function handleTabChange(_tab: AppTab): void {
