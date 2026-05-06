@@ -1003,17 +1003,15 @@ export class ProviderRegistry {
 
   async getHarnessCatalog(): Promise<HarnessCatalog> {
     const apiProviders = this.#apiProviderStore.redactedList();
-    const harnesses: HarnessCatalogEntry[] = [];
-
-    for (const [id, adapter] of this.#adapters.entries()) {
-      if (!isVisibleHarnessId(id)) continue;
+    const harnesses = (await Promise.all(Array.from(this.#adapters.entries()).map(async ([id, adapter]) => {
+      if (!isVisibleHarnessId(id)) return null;
       const endpointModels = this.#endpointResolver.getModelOptions(id as any);
       const nativeModels = await nativeModelsForHarness(id, adapter);
       const models = isEndpointOnlyHarnessId(id)
         ? dedupeModels(endpointModels)
         : dedupeModels([...nativeModels, ...endpointModels]);
       const builtinCaps = BUILTIN_HARNESS_CAPABILITIES[id as keyof typeof BUILTIN_HARNESS_CAPABILITIES];
-      harnesses.push({
+      return {
         id: id as any,
         label: adapter.label,
         kind: 'harness',
@@ -1023,8 +1021,8 @@ export class ProviderRegistry {
         supportedProtocols: builtinCaps?.supportedProtocols ?? [],
         defaultModel: defaultModelForHarness(id, nativeModels, endpointModels),
         models,
-      });
-    }
+      };
+    }))).filter((entry): entry is HarnessCatalogEntry => Boolean(entry));
 
     return {
       harnesses,

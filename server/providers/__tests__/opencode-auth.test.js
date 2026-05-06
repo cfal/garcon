@@ -34,4 +34,21 @@ describe('getOpenCodeAuthStatus', () => {
       source: 'none',
     });
   });
+
+  it('reports temporary unavailability during the OpenCode cooldown window', async () => {
+    const status = await getOpenCodeAuthStatus({
+      isAvailable: () => true,
+      isTemporarilyUnavailable: () => true,
+      getUnavailableReason: () => 'OpenCode startup timed out after 5000ms',
+      getUnavailableRetryAfterMs: () => 42_000,
+    });
+
+    expect(status).toEqual({
+      authenticated: false,
+      canReauth: false,
+      label: 'Unavailable',
+      source: 'cli',
+      detail: 'OpenCode startup timed out after 5000ms Retrying in 42s.',
+    });
+  });
 });
