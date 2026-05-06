@@ -6,7 +6,7 @@ const providers = {
   getHarnessCatalog: mock(() => Promise.resolve({
     harnesses: [
       { id: 'claude', label: 'Claude', kind: 'harness', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: 'opus', models: [{ value: 'opus', label: 'Opus', supportsImages: true }] },
-      { id: 'codex', label: 'Codex', kind: 'harness', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: 'gpt-5.5', models: [{ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true }] },
+      { id: 'codex', label: 'Codex', kind: 'harness', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: 'gpt-5.5', models: [{ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true }, { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', supportsImages: false }] },
       { id: 'opencode', label: 'OpenCode', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '', models: [] },
       { id: 'amp', label: 'Amp', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'default', models: [{ value: 'default', label: 'Default' }] },
       { id: 'factory', label: 'Factory', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'claude-opus-4-6', models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4-6' }] },
@@ -51,6 +51,8 @@ describe('GET /api/v1/models', () => {
     expect(codex.defaultModel).toBe('gpt-5.5');
     expect(codex.models[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
     const codexModelValues = codex.models.map((model) => model.value);
+    expect(codexModelValues).toContain('gpt-5.3-codex-spark');
+    expect(codex.models.find((model) => model.value === 'gpt-5.3-codex-spark')).toMatchObject({ supportsImages: false });
     expect(codexModelValues).not.toContain('gpt-5.2');
     expect(codexModelValues).not.toContain('gpt-5.2-codex');
     expect(codexModelValues).not.toContain('gpt-5.1-codex-max');
