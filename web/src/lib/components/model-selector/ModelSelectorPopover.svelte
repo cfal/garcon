@@ -71,6 +71,9 @@
 			? 'inline-flex min-h-9 max-w-[18rem] items-center justify-between gap-2 rounded-md border border-border bg-muted px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
 			: 'inline-flex h-9 max-w-[11rem] items-center gap-1.5 rounded-lg px-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-[15rem]'
 	);
+	const showTriggerSecondaryLine = $derived(
+		surfaceIsSettings || mode.harness === 'select' || Boolean(selector.triggerSecondary)
+	);
 	const modelListId = $derived(`model-selector-model-list-${selector.instanceId}`);
 	const hasFilteredModels = $derived(selector.filteredModelRows.items.length > 0);
 
@@ -107,8 +110,14 @@
 	>
 		<span class="flex min-w-0 flex-1 flex-col leading-tight">
 			<span class="truncate font-medium">{selector.triggerPrimary || m.model_selector_unavailable()}</span>
-			{#if selector.triggerSecondary}
-				<span class="truncate text-xs text-muted-foreground">{selector.triggerSecondary}</span>
+			{#if showTriggerSecondaryLine}
+				<span
+					data-slot="model-selector-trigger-secondary"
+					aria-hidden={!selector.triggerSecondary}
+					class="min-h-4 truncate text-xs text-muted-foreground"
+				>
+					{selector.triggerSecondary}
+				</span>
 			{/if}
 		</span>
 		<ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />

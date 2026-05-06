@@ -73,7 +73,7 @@
 		}),
 		getHarnessLabel: (harnessId: string) => harnessId === 'codex' ? 'Codex' : 'Claude',
 		getModels: (harnessId: string) => modelsFor(harnessId),
-		getDefaultModel: (harnessId: string) => harnessId === 'codex' ? 'codex-model-0' : 'model-0',
+		getDefaultModel: (harnessId: string) => modelsFor(harnessId)[0]?.value ?? '',
 		getModelForSelection: (harnessId: string, model: string, endpointId?: string | null) =>
 			modelsFor(harnessId).find((entry) =>
 				(endpointId ? entry.endpointId === endpointId : true) &&

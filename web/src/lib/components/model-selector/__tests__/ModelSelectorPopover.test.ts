@@ -98,6 +98,24 @@ describe('ModelSelectorPopover', () => {
 		}));
 	});
 
+	it('keeps the trigger display on the committed selection while editing a draft', async () => {
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHarness, {
+			value: { harnessId: 'claude', model: 'model-0' },
+			mode: { harness: 'select', source: 'hidden', surface: 'composer' },
+			onChange,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(await screen.findByRole('button', { name: /Codex/ }));
+		await fireEvent.click(await screen.findByText('Codex Model 0'));
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: /Codex .* Codex Model 0/ })).toBeNull();
+	});
+
 	it('commits the fallback model when a draft harness change closes', async () => {
 		const onChange = vi.fn();
 
@@ -153,6 +171,22 @@ describe('ModelSelectorPopover', () => {
 			modelEndpointId: 'acme-claude',
 			modelProtocol: 'anthropic-messages',
 		});
+	});
+
+	it('reserves the trigger subtitle row when the committed subtitle is empty', () => {
+		render(ModelSelectorPopoverHarness, {
+			value: { harnessId: 'claude', model: '' },
+			mode: { harness: 'fixed', source: 'hidden', surface: 'settings' },
+			modelCount: 0,
+			includeDuplicateModel: false,
+			onChange: vi.fn(),
+		});
+
+		const subtitle = document.querySelector('[data-slot="model-selector-trigger-secondary"]');
+
+		expect(subtitle).toBeTruthy();
+		expect(subtitle?.textContent).toBe('');
+		expect(subtitle?.getAttribute('aria-hidden')).toBe('true');
 	});
 
 	it('renders matching model rows as a single visible label', async () => {

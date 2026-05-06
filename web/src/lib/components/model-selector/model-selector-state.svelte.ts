@@ -18,7 +18,6 @@ import {
 	chooseModelForSource,
 	currentModelValue,
 	filterModelRows,
-	findSelectedModelOption,
 	modelDisplayLabel,
 	modelSourceKeyFor,
 } from './model-selector-options';
@@ -37,6 +36,17 @@ interface RowsCache {
 	models: ModelOption[];
 	source: ModelSourceOption | null;
 	rows: ModelSelectorRow[];
+}
+
+interface SelectionView {
+	harnessId: SessionProvider;
+	harnessLabel: string;
+	modelValue: string;
+	sourceKey: string | null;
+	source: ModelSourceOption | null;
+	selectedModel: ModelOption | null;
+	modelLabelSource: ModelSourceOption | null;
+	modelLabel: string;
 }
 
 let nextModelSelectorInstanceId = 0;
@@ -82,12 +92,11 @@ export class ModelSelectorState {
 	}
 
 	get harnessId(): SessionProvider {
-		if (this.open && this.draftHarnessId) return this.draftHarnessId;
-		return this.value.harnessId;
+		return this.draftSelection.harnessId;
 	}
 
 	get harnessLabel(): string {
-		return this.modelCatalog.getHarnessLabel(this.harnessId);
+		return this.draftSelection.harnessLabel;
 	}
 
 	get sources(): ModelSourceOption[] {
@@ -122,21 +131,11 @@ export class ModelSelectorState {
 	}
 
 	get sourceKey(): string | null {
-		if (this.mode.source === 'hidden') return null;
-		if (this.activeSourceKey && this.sources.some((source) => source.key === this.activeSourceKey)) {
-			return this.activeSourceKey;
-		}
-		return this.#sourceKeyForModel(
-			this.harnessId,
-			this.currentModelValue,
-			this.open ? null : this.value.modelEndpointId,
-		);
+		return this.draftSelection.sourceKey;
 	}
 
 	get source(): ModelSourceOption | null {
-		const key = this.sourceKey;
-		if (!key) return null;
-		return this.sources.find((source) => source.key === key) ?? null;
+		return this.draftSelection.source;
 	}
 
 	get availableModels(): ModelOption[] {
@@ -145,19 +144,15 @@ export class ModelSelectorState {
 	}
 
 	get currentModelValue(): string {
-		if (this.open && this.draftModelValue !== null) return this.draftModelValue;
-		return currentModelValue(this.modelCatalog, this.value);
+		return this.draftSelection.modelValue;
 	}
 
 	get selectedModel(): ModelOption | null {
-		if (this.open) {
-			return this.modelCatalog.getModelForSelection(this.harnessId, this.currentModelValue);
-		}
-		return findSelectedModelOption(this.modelCatalog, this.value);
+		return this.draftSelection.selectedModel;
 	}
 
 	get selectedModelLabel(): string {
-		return modelDisplayLabel(this.selectedModel, this.currentModelValue, this.modelLabelSource);
+		return this.draftSelection.modelLabel;
 	}
 
 	get modelRows(): ModelSelectorRow[] {
@@ -219,27 +214,57 @@ export class ModelSelectorState {
 	}
 
 	get modelLabelSource(): ModelSourceOption | null {
-		return this.mode.source === 'select' ? this.source : null;
+		return this.draftSelection.modelLabelSource;
 	}
 
 	get triggerPrimary(): string {
-		if (this.mode.surface === 'settings') return this.harnessLabel;
-		if (this.mode.harness === 'select') return this.harnessLabel;
-		return this.selectedModelLabel;
+		const committed = this.committedSelection;
+		if (this.mode.surface === 'settings') return committed.harnessLabel;
+		if (this.mode.harness === 'select') return committed.harnessLabel;
+		return committed.modelLabel;
 	}
 
 	get triggerSecondary(): string {
+		const committed = this.committedSelection;
 		if (this.mode.surface === 'settings') {
-			const sourceLabel = this.mode.source === 'select' && this.source ? `${this.source.label} / ` : '';
-			return `${sourceLabel}${this.selectedModelLabel}`;
+			if (this.mode.source === 'select' && committed.source) {
+				return [committed.source.label, committed.modelLabel].filter(Boolean).join(' / ');
+			}
+			return committed.modelLabel;
 		}
-		if (this.mode.harness === 'select') return this.selectedModelLabel;
+		if (this.mode.harness === 'select') return committed.modelLabel;
 		return '';
 	}
 
 	get triggerTitle(): string {
-		const sourceLabel = this.mode.source === 'select' && this.source ? ` / ${this.source.label}` : '';
-		return `${this.harnessLabel}${sourceLabel} / ${this.selectedModelLabel}`;
+		const committed = this.committedSelection;
+		return [
+			committed.harnessLabel,
+			this.mode.source === 'select' ? committed.source?.label : '',
+			committed.modelLabel,
+		].filter(Boolean).join(' / ');
+	}
+
+	get draftSelection(): SelectionView {
+		const harnessId = this.open && this.draftHarnessId ? this.draftHarnessId : this.value.harnessId;
+		const modelValue = this.open && this.draftModelValue !== null
+			? this.draftModelValue
+			: currentModelValue(this.modelCatalog, this.value);
+		return this.#selectionView({
+			harnessId,
+			modelValue,
+			modelEndpointId: this.open ? null : this.value.modelEndpointId,
+			sourceKey: this.activeSourceKey,
+		});
+	}
+
+	get committedSelection(): SelectionView {
+		return this.#selectionView({
+			harnessId: this.value.harnessId,
+			modelValue: currentModelValue(this.modelCatalog, this.value),
+			modelEndpointId: this.value.modelEndpointId,
+			sourceKey: null,
+		});
 	}
 
 	setOpen(open: boolean): void {
@@ -421,6 +446,40 @@ export class ModelSelectorState {
 		this.draftHarnessId = null;
 		this.draftModelValue = null;
 		this.activeSourceKey = null;
+	}
+
+	#selectionView(input: {
+		harnessId: SessionProvider;
+		modelValue: string;
+		modelEndpointId?: string | null;
+		sourceKey?: string | null;
+	}): SelectionView {
+		const harnessLabel = this.modelCatalog.getHarnessLabel(input.harnessId);
+		const sources = this.sourcesFor(input.harnessId);
+		let sourceKey: string | null = null;
+		if (this.mode.source !== 'hidden') {
+			sourceKey = input.sourceKey && sources.some((source) => source.key === input.sourceKey)
+				? input.sourceKey
+				: this.#sourceKeyForModel(input.harnessId, input.modelValue, input.modelEndpointId);
+		}
+		const source = sourceKey ? sources.find((entry) => entry.key === sourceKey) ?? null : null;
+		const selectedModel = this.modelCatalog.getModelForSelection(
+			input.harnessId,
+			input.modelValue,
+			input.modelEndpointId,
+		);
+		const modelLabelSource = this.mode.source === 'select' ? source : null;
+		const modelLabel = modelDisplayLabel(selectedModel, input.modelValue, modelLabelSource);
+		return {
+			harnessId: input.harnessId,
+			harnessLabel,
+			modelValue: input.modelValue,
+			sourceKey,
+			source,
+			selectedModel,
+			modelLabelSource,
+			modelLabel,
+		};
 	}
 
 	#rowsCacheKey(
