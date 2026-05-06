@@ -29,6 +29,7 @@ describe('ModelCatalogStore', () => {
 			expect(store.getModels('codex')[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
 			const codexModelValues = store.getModels('codex').map((model) => model.value);
 			expect(codexModelValues).toContain('gpt-5.3-codex-spark');
+			expect(store.supportsImages('codex', 'gpt-5.3-codex-spark')).toBe(false);
 			expect(codexModelValues).not.toContain('gpt-5.2');
 			expect(codexModelValues).not.toContain('gpt-5.2-codex');
 			expect(codexModelValues).not.toContain('gpt-5.1-codex-max');

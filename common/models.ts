@@ -21,7 +21,7 @@ export const CODEX_MODELS = {
     { value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true },
     { value: 'gpt-5.4', label: 'GPT-5.4', supportsImages: true },
     { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsImages: true },
-    { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', supportsImages: true },
+    { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', supportsImages: false },
   ] satisfies SharedModelOption[],
   DEFAULT: 'gpt-5.5',
 };
