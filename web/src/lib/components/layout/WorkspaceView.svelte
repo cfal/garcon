@@ -19,6 +19,13 @@
 	import { cn } from '$lib/utils/cn';
 	import { CHAT_TOOLBAR_TABS } from './chat-toolbar-tabs';
 
+	type SplitDropZone = 'left' | 'right' | 'top' | 'bottom' | 'center';
+	type ActiveSplitDropTarget = {
+		paneId: string;
+		zone: SplitDropZone;
+		rect: DOMRect;
+	};
+
 	// Lazy-loaded tab panels to keep the main chunk lean. Each panel
 	// pulls in heavy dependencies (CodeMirror, xterm, git logic).
 	const lazyFilesPanel = () => import('$lib/components/files/FilesPanel.svelte');
@@ -181,7 +188,7 @@
 		splitLayout.setRatioByPath(path, ratio);
 	}
 
-	function handleSplitDropChat(paneId: string, zone: 'left' | 'right' | 'top' | 'bottom' | 'center') {
+	function handleSplitDropChat(paneId: string, zone: SplitDropZone) {
 		const draggedChat = splitLayout.draggedChatId;
 		if (!draggedChat) return;
 		// Pane-to-pane drag: always swap regardless of zone to prevent duplication.
@@ -205,6 +212,10 @@
 	// Handles dropping a chat on the main workspace when split mode is off.
 	// Auto-enables split with the current chat, then splits in the dropped chat.
 	let workspaceDragOver = $state(false);
+	let activeSplitDropTarget = $state<ActiveSplitDropTarget | null>(null);
+	const showActiveSplitDropLayer = $derived(
+		splitLayout.isEnabled && activeTab === 'chat' && splitLayout.draggedChatId !== null,
+	);
 
 	function handleWorkspaceDragOver(e: DragEvent) {
 		if (splitLayout.isEnabled) return;
@@ -231,6 +242,104 @@
 			splitLayout.focusPane(initialPane.id);
 		}
 		splitLayout.endDrag();
+	}
+
+	function resolveDropZone(rect: DOMRect, clientX: number, clientY: number): SplitDropZone {
+		const x = clientX - rect.left;
+		const y = clientY - rect.top;
+		const edgeX = rect.width * 0.25;
+		const edgeY = rect.height * 0.25;
+
+		if (y < edgeY) return 'top';
+		if (y > rect.height - edgeY) return 'bottom';
+		if (x < edgeX) return 'left';
+		if (x > rect.width - edgeX) return 'right';
+		return 'center';
+	}
+
+	function resolveActiveSplitDropTarget(e: DragEvent): ActiveSplitDropTarget | null {
+		if (!splitRootEl) return null;
+
+		let fallback: { paneId: string; rect: DOMRect; distance: number } | null = null;
+		for (const pane of splitLayout.panes) {
+			const paneEl = splitRootEl.querySelector<HTMLElement>(`[data-pane-id="${pane.id}"]`);
+			if (!paneEl) continue;
+
+			const rect = paneEl.getBoundingClientRect();
+			const containsPointer =
+				e.clientX >= rect.left &&
+				e.clientX <= rect.right &&
+				e.clientY >= rect.top &&
+				e.clientY <= rect.bottom;
+			if (containsPointer) {
+				return { paneId: pane.id, zone: resolveDropZone(rect, e.clientX, e.clientY), rect };
+			}
+
+			const centerX = rect.left + rect.width / 2;
+			const centerY = rect.top + rect.height / 2;
+			const distance = Math.hypot(e.clientX - centerX, e.clientY - centerY);
+			if (!fallback || distance < fallback.distance) {
+				fallback = { paneId: pane.id, rect, distance };
+			}
+		}
+
+		if (!fallback) return null;
+		return {
+			paneId: fallback.paneId,
+			zone: resolveDropZone(fallback.rect, e.clientX, e.clientY),
+			rect: fallback.rect,
+		};
+	}
+
+	function handleActiveSplitDragOver(e: DragEvent) {
+		if (!showActiveSplitDropLayer) return;
+		const target = resolveActiveSplitDropTarget(e);
+		if (!target) return;
+
+		e.preventDefault();
+		e.stopPropagation();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		activeSplitDropTarget = target;
+	}
+
+	function handleActiveSplitDrop(e: DragEvent) {
+		if (!showActiveSplitDropLayer) return;
+		e.preventDefault();
+		e.stopPropagation();
+
+		const target = activeSplitDropTarget ?? resolveActiveSplitDropTarget(e);
+		activeSplitDropTarget = null;
+		if (!target) {
+			splitLayout.endDrag();
+			return;
+		}
+
+		handleSplitDropChat(target.paneId, target.zone);
+	}
+
+	function handleActiveSplitDragLeave(e: DragEvent) {
+		const related = e.relatedTarget as HTMLElement | null;
+		if (!related || !(e.currentTarget as HTMLElement).contains(related)) {
+			activeSplitDropTarget = null;
+		}
+	}
+
+	function getActiveSplitPreviewClass(zone: SplitDropZone): string {
+		if (!activeSplitDropTarget || activeSplitDropTarget.zone !== zone) return 'opacity-0';
+		return 'opacity-100';
+	}
+
+	function getActiveSplitTargetStyle(): string {
+		if (!splitRootEl || !activeSplitDropTarget) return '';
+
+		const rootRect = splitRootEl.getBoundingClientRect();
+		const rect = activeSplitDropTarget.rect;
+		return [
+			`top:${rect.top - rootRect.top}px`,
+			`left:${rect.left - rootRect.left}px`,
+			`width:${rect.width}px`,
+			`height:${rect.height}px`,
+		].join(';');
 	}
 
 	// Keeps sessions.selectedChatId in sync with the split layout's focused pane.
@@ -522,6 +631,55 @@
 							style:height="{focusedOverlayRect.height}px"
 						>
 							<ConversationWorkspace onRegisterSubmit={handleRegisterSubmit} />
+						</div>
+					{/if}
+					{#if showActiveSplitDropLayer}
+						<!-- svelte-ignore a11y_no_static_element_interactions -- drag target only exists during native drag-and-drop -->
+						<div
+							class="absolute inset-0 z-40 pointer-events-auto"
+							data-split-drag-layer
+							ondragover={handleActiveSplitDragOver}
+							ondragleave={handleActiveSplitDragLeave}
+							ondrop={handleActiveSplitDrop}
+							role="region"
+							aria-label="Split view drop target"
+						>
+							<div class={cn(
+								'absolute inset-0 pointer-events-none transition-colors duration-150',
+								activeSplitDropTarget ? 'bg-background/45 backdrop-blur-[1px]' : 'bg-background/20',
+							)}></div>
+							{#if activeSplitDropTarget}
+								<div
+									class="absolute pointer-events-none transition-all duration-150"
+									style={getActiveSplitTargetStyle()}
+								>
+									<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-opacity duration-150', getActiveSplitPreviewClass('top'), 'inset-x-3 top-3 bottom-[52%]')}>
+										<div class="flex h-full items-center justify-center">
+											<span class="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary shadow-sm">Top</span>
+										</div>
+									</div>
+									<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-opacity duration-150', getActiveSplitPreviewClass('bottom'), 'inset-x-3 top-[52%] bottom-3')}>
+										<div class="flex h-full items-center justify-center">
+											<span class="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary shadow-sm">Bottom</span>
+										</div>
+									</div>
+									<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-opacity duration-150', getActiveSplitPreviewClass('left'), 'inset-y-3 left-3 right-[52%]')}>
+										<div class="flex h-full items-center justify-center">
+											<span class="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary shadow-sm">Left</span>
+										</div>
+									</div>
+									<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-opacity duration-150', getActiveSplitPreviewClass('right'), 'inset-y-3 left-[52%] right-3')}>
+										<div class="flex h-full items-center justify-center">
+											<span class="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary shadow-sm">Right</span>
+										</div>
+									</div>
+									<div class={cn('absolute bg-accent/15 border border-accent/40 rounded-lg transition-opacity duration-150', getActiveSplitPreviewClass('center'), 'inset-3')}>
+										<div class="flex h-full items-center justify-center">
+											<span class="rounded-md bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent-foreground shadow-sm">Replace</span>
+										</div>
+									</div>
+								</div>
+							{/if}
 						</div>
 					{/if}
 				</div>

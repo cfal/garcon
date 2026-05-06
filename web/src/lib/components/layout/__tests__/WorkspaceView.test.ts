@@ -1,12 +1,29 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 import ConversationWorkspaceStub from './ConversationWorkspaceStub.svelte';
+import SplitContainerStub from './SplitContainerStub.svelte';
 
 vi.mock('$lib/components/chat/ConversationWorkspace.svelte', () => ({
 	default: ConversationWorkspaceStub
 }));
 
+vi.mock('$lib/components/split/SplitContainer.svelte', () => ({
+	default: SplitContainerStub
+}));
+
 import WorkspaceViewTestHarness from './WorkspaceViewTestHarness.svelte';
+
+function dispatchDragEvent(
+	target: HTMLElement,
+	type: 'dragover' | 'drop',
+	position: { clientX: number; clientY: number },
+): void {
+	const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent;
+	Object.defineProperty(event, 'clientX', { value: position.clientX });
+	Object.defineProperty(event, 'clientY', { value: position.clientY });
+	Object.defineProperty(event, 'dataTransfer', { value: { dropEffect: 'move' } });
+	target.dispatchEvent(event);
+}
 
 describe('WorkspaceView header visibility', () => {
 	it('hides the top header on desktop when Show header is disabled on the chat tab', () => {
@@ -103,5 +120,86 @@ describe('WorkspaceView header visibility', () => {
 		expect(container.querySelector('.bg-chat-header')).toBeTruthy();
 		expect(container.querySelector('.bg-chat-tabs-rail')).toBeTruthy();
 		expect(container.querySelector('.bg-chat-tabs-active')).toBeTruthy();
+	});
+
+	it('accepts sidebar chat drops while split mode is already active', async () => {
+		const addChatToZone = vi.fn();
+		const endDrag = vi.fn();
+		const setSelectedChatId = vi.fn();
+		const root = {
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+		};
+		const splitLayout = {
+			isEnabled: true,
+			root,
+			focusedPaneId: 'pane-left',
+			draggedChatId: 'chat-3',
+			draggedPaneId: null,
+			panes: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+			focusedChatId: 'chat-1',
+			addChatToZone,
+			endDrag,
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable: vi.fn(),
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+
+		const { container } = render(WorkspaceViewTestHarness, {
+			activeTab: 'chat',
+			showChatHeader: true,
+			isMobile: false,
+			splitLayout,
+			chatSessions: {
+				selectedChat: {
+					id: 'chat-1',
+					title: 'Header Test Chat',
+					projectPath: '/tmp/header-test',
+				},
+				byId: {},
+				orderedChats: [],
+				setSelectedChatId,
+			},
+		});
+
+		const rightPane = container.querySelector<HTMLElement>('[data-pane-id="pane-right"]');
+		const layer = container.querySelector<HTMLElement>('[data-split-drag-layer]');
+		expect(rightPane).toBeTruthy();
+		expect(layer).toBeTruthy();
+
+		Object.defineProperty(rightPane!, 'getBoundingClientRect', {
+			value: () => ({
+				left: 100,
+				top: 0,
+				right: 200,
+				bottom: 100,
+				width: 100,
+				height: 100,
+				x: 100,
+				y: 0,
+				toJSON: () => ({}),
+			}),
+		});
+
+		dispatchDragEvent(layer!, 'dragover', { clientX: 195, clientY: 50 });
+		dispatchDragEvent(layer!, 'drop', { clientX: 195, clientY: 50 });
+
+		expect(addChatToZone).toHaveBeenCalledWith('pane-right', 'chat-3', 'right');
+		expect(endDrag).toHaveBeenCalledOnce();
+		expect(setSelectedChatId).toHaveBeenCalledWith('chat-1');
 	});
 });
