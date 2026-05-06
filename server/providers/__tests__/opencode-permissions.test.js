@@ -198,31 +198,25 @@ describe('OpenCodeProvider resolvePermission guards', () => {
   let client;
 
   beforeEach(async () => {
-    // Stub SDK at module level before importing provider.
-    // Since bun:test mock.module is hoisted, we re-import to get fresh state.
-    mock.module('@opencode-ai/sdk/v2', () => ({
-      createOpencode: mock(() =>
-        Promise.resolve({
-          client: {
-            permission: { reply: mock(() => Promise.resolve({ data: true })) },
-            event: { subscribe: mock(() => Promise.resolve({ stream: [] })) },
-            session: {
-              create: mock(() => Promise.resolve({ data: { id: 'sess-1' } })),
-              promptAsync: mock(() => Promise.resolve()),
-              abort: mock(() => Promise.resolve()),
-            },
-            provider: {
-              list: mock(() => Promise.resolve({ data: { all: [], connected: [] } })),
-            },
-          },
-          server: { url: 'http://localhost:0', close: () => {} },
-        }),
-      ),
-    }));
-
-    // Dynamic import to pick up the mock.
     const { OpenCodeProvider } = await import('../opencode.js');
-    provider = new OpenCodeProvider();
+    client = {
+      permission: { reply: mock(() => Promise.resolve({ data: true })) },
+      event: { subscribe: mock(() => Promise.resolve({ stream: [] })) },
+      session: {
+        create: mock(() => Promise.resolve({ data: { id: 'sess-1' } })),
+        promptAsync: mock(() => Promise.resolve()),
+        abort: mock(() => Promise.resolve()),
+      },
+      provider: {
+        list: mock(() => Promise.resolve({ data: { all: [], connected: [] } })),
+      },
+    };
+    provider = new OpenCodeProvider({
+      createInstance: mock(() => Promise.resolve({
+        client,
+        server: { close: () => {} },
+      })),
+    });
     client = await provider.getClient();
     client.session.create.mockClear();
     client.permission.reply.mockClear();
@@ -235,7 +229,7 @@ describe('OpenCodeProvider resolvePermission guards', () => {
       permissionMode: 'bypassPermissions',
     });
 
-    expect(client.session.create).toHaveBeenCalledWith({
+    expect(client.session.create.mock.calls[0][0]).toEqual({
       permission: OPENCODE_PERMISSION_KEYS.map((permission) => ({
         permission,
         pattern: '*',

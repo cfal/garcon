@@ -2,6 +2,7 @@
 // through typed events wired in the composition root.
 
 import crypto from 'crypto';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { normalizeToolResultContent } from './normalize-util.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '../../common/chat-types.js';
 import { convertOpencodePermissionTool } from './converters/opencode-permission-tool.js';
@@ -9,6 +10,12 @@ import { convertOpenCodeToolUse } from './converters/opencode-tool-use.js';
 import { AbsProvider } from './base.js';
 import type { PermissionMode } from '../../common/chat-modes.js';
 import type { StartSessionRequest, ResumeTurnRequest } from './types.js';
+
+const DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS = 5_000;
+const DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
+const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS = 60_000;
+const DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS = 5 * 60_000;
 
 // Source of OpenCode permission keys:
 // - https://github.com/anomalyco/opencode/blob/f5eade1d2b95562c7fb58e3041e662a8b2b611b6/packages/web/src/content/docs/permissions.mdx
@@ -151,34 +158,251 @@ interface PendingPermission {
   chatId: string;
 }
 
+interface OpenCodeProviderOptions {
+  startupTimeoutMs?: number;
+  modelDiscoveryTimeoutMs?: number;
+  requestTimeoutMs?: number;
+  unavailableRetryMs?: number;
+  modelCacheTtlMs?: number;
+  now?: () => number;
+  createInstance?: (input: {
+    port: number;
+    signal: AbortSignal;
+  }) => Promise<OpenCodeInstance>;
+}
+
+interface NormalizedOpenCodeProviderOptions {
+  startupTimeoutMs: number;
+  modelDiscoveryTimeoutMs: number;
+  requestTimeoutMs: number;
+  unavailableRetryMs: number;
+  modelCacheTtlMs: number;
+  now: () => number;
+  createInstance: (input: {
+    port: number;
+    signal: AbortSignal;
+  }) => Promise<OpenCodeInstance>;
+}
+
+interface OpenCodeInstance {
+  client: any;
+  server?: {
+    close?: () => void;
+  };
+  close?: () => void;
+}
+
+interface OpenCodeModelOption {
+  value: string;
+  label: string;
+}
+
+interface OpenCodeModelCache {
+  models: OpenCodeModelOption[];
+  fetchedAt: number;
+}
+
+class OpenCodeTimeoutError extends Error {
+  constructor(label: string, timeoutMs: number) {
+    super(`${label} timed out after ${timeoutMs}ms`);
+    this.name = 'OpenCodeTimeoutError';
+  }
+}
+
+function normalizeOptions(options: OpenCodeProviderOptions): NormalizedOpenCodeProviderOptions {
+  return {
+    startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS,
+    modelDiscoveryTimeoutMs: options.modelDiscoveryTimeoutMs ?? DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS,
+    requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS,
+    unavailableRetryMs: options.unavailableRetryMs ?? DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS,
+    modelCacheTtlMs: options.modelCacheTtlMs ?? DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS,
+    now: options.now ?? (() => Date.now()),
+    createInstance: options.createInstance ?? createOpenCodeInstance,
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || 'unknown error');
+}
+
+function configuredProvidersFromResult(result: any): any[] {
+  const providers = result?.data?.providers;
+  return Array.isArray(providers) ? providers : [];
+}
+
+function connectedProvidersFromListResult(result: any): any[] {
+  const data = result?.data;
+  const allProviders: any[] = Array.isArray(data?.all) ? data.all : [];
+  const connected = new Set<string>(Array.isArray(data?.connected) ? data.connected : []);
+  return allProviders.filter((provider) => connected.has(provider.id || provider.name));
+}
+
+function modelsFromProviders(providers: any[]): OpenCodeModelOption[] {
+  const models: OpenCodeModelOption[] = [];
+  for (const provider of providers) {
+    const providerId = provider.id || provider.name;
+    const providerName = provider.name || providerId;
+    const harnessModelsObj = provider.models || {};
+    for (const [modelKey, model] of Object.entries(harnessModelsObj)) {
+      const m = model as any;
+      const modelId = m.id || modelKey;
+      models.push({
+        value: `${providerId}/${modelId}`,
+        label: `${providerName}: ${m.name || modelId}`,
+      });
+    }
+  }
+  return models;
+}
+
+async function withAbortableTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  const controller = new AbortController();
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      operation(controller.signal),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          const error = new OpenCodeTimeoutError(label, timeoutMs);
+          controller.abort(error);
+          reject(error);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+}
+
+function stopOpenCodeProcess(proc: ChildProcess): void {
+  if (proc.exitCode !== null || proc.signalCode !== null) return;
+
+  proc.kill();
+  proc.stdout?.destroy();
+  proc.stderr?.destroy();
+
+  const killTimer = setTimeout(() => {
+    if (proc.exitCode === null && proc.signalCode === null) {
+      proc.kill('SIGKILL');
+    }
+  }, 500);
+  killTimer.unref?.();
+  proc.once('exit', () => clearTimeout(killTimer));
+}
+
+async function createOpenCodeInstance(input: {
+  port: number;
+  signal: AbortSignal;
+}): Promise<OpenCodeInstance> {
+  const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
+  const proc = spawn('opencode', ['serve', '--hostname=127.0.0.1', `--port=${input.port}`], {
+    env: {
+      ...process.env,
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({}),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  const url = await new Promise<string>((resolve, reject) => {
+    let output = '';
+    let resolved = false;
+
+    const cleanup = () => {
+      input.signal.removeEventListener('abort', abort);
+      proc.off('exit', onExit);
+      proc.off('error', onError);
+      proc.stdout.off('data', onStdout);
+      proc.stderr.off('data', onStderr);
+    };
+
+    const fail = (error: unknown) => {
+      if (resolved) return;
+      cleanup();
+      stopOpenCodeProcess(proc);
+      reject(error);
+    };
+
+    const abort = () => {
+      fail(input.signal.reason ?? new Error('OpenCode startup aborted'));
+    };
+
+    const onStdout = (chunk: Buffer) => {
+      if (resolved) return;
+      output += chunk.toString();
+      const lines = output.split('\n');
+      for (const line of lines) {
+        if (!line.startsWith('opencode server listening')) continue;
+        const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
+        if (!match) {
+          fail(new Error(`Failed to parse OpenCode server URL from output: ${line}`));
+          return;
+        }
+        resolved = true;
+        cleanup();
+        resolve(match[1]);
+        return;
+      }
+    };
+
+    const onStderr = (chunk: Buffer) => {
+      output += chunk.toString();
+    };
+
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      const detail = output.trim() ? `\nServer output: ${output.trim()}` : '';
+      fail(new Error(`OpenCode server exited before startup with code ${code ?? signal}${detail}`));
+    };
+
+    const onError = (error: Error) => {
+      fail(error);
+    };
+
+    input.signal.addEventListener('abort', abort, { once: true });
+    proc.stdout.on('data', onStdout);
+    proc.stderr.on('data', onStderr);
+    proc.on('exit', onExit);
+    proc.on('error', onError);
+
+    if (input.signal.aborted) abort();
+  });
+
+  const close = () => stopOpenCodeProcess(proc);
+  return {
+    client: createOpencodeClient({ baseUrl: url }),
+    server: { close },
+  };
+}
+
 export class OpenCodeProvider extends AbsProvider {
-  #client: any = null;
-  #initPromise: Promise<any> | null = null;
+  #instance: OpenCodeInstance | null = null;
+  #initPromise: Promise<OpenCodeInstance> | null = null;
   #sseListenerStarted = false;
   #sessions = new Map<string, OpenCodeSession>();
   #pendingTurnWaiters = new Map<string, PendingTurnWaiter>();
   #pendingPermissions = new Map<string, PendingPermission>();
   #messageRoles = new Map<string, Map<string, string>>();
   #assistantPartTypes = new Map<string, Map<string, string>>();
+  #modelCache: OpenCodeModelCache | null = null;
+  #modelsPromise: Promise<OpenCodeModelOption[]> | null = null;
+  #unavailableUntil = 0;
+  #unavailableReason = '';
 
   #available: boolean | null = null;
+  readonly #options: NormalizedOpenCodeProviderOptions;
 
-  constructor() {
+  constructor(options: OpenCodeProviderOptions = {}) {
     super();
+    this.#options = normalizeOptions(options);
   }
 
   // Shuts down the spawned opencode server process (if any).
   // Called during garcon graceful shutdown to prevent orphaned processes.
   shutdown(): void {
-    if (this.#client && typeof this.#client.close === 'function') {
-      try {
-        this.#client.close();
-      } catch {
-        // Best-effort cleanup.
-      }
-      this.#client = null;
-      this.#initPromise = null;
-    }
+    this.#closeInstance();
   }
 
   // Returns true if the opencode binary is on $PATH, without spawning a server.
@@ -194,6 +418,79 @@ export class OpenCodeProvider extends AbsProvider {
       this.#available = false;
     }
     return this.#available;
+  }
+
+  isTemporarilyUnavailable(): boolean {
+    return this.#unavailableRemainingMs() > 0;
+  }
+
+  getUnavailableReason(): string {
+    return this.isTemporarilyUnavailable() ? this.#unavailableReason : '';
+  }
+
+  getUnavailableRetryAfterMs(): number {
+    return this.#unavailableRemainingMs();
+  }
+
+  #now(): number {
+    return this.#options.now();
+  }
+
+  #unavailableRemainingMs(): number {
+    return Math.max(0, this.#unavailableUntil - this.#now());
+  }
+
+  #temporaryUnavailableError(): Error {
+    const reason = this.getUnavailableReason();
+    const retrySeconds = Math.ceil(this.#unavailableRemainingMs() / 1000);
+    const suffix = retrySeconds > 0 ? ` Retry in ${retrySeconds}s.` : '';
+    return new Error(`OpenCode is temporarily unavailable${reason ? `: ${reason}` : ''}.${suffix}`);
+  }
+
+  #assertCanUseOpenCode(): void {
+    if (!this.isAvailable()) throw new Error('opencode is not installed');
+    if (this.isTemporarilyUnavailable()) throw this.#temporaryUnavailableError();
+  }
+
+  #markAvailable(): void {
+    this.#unavailableUntil = 0;
+    this.#unavailableReason = '';
+  }
+
+  #markTemporarilyUnavailable(reason: string): boolean {
+    const now = this.#now();
+    const wasAvailable = this.#unavailableRemainingMs() === 0;
+    const reasonChanged = this.#unavailableReason !== reason;
+    this.#unavailableReason = reason;
+    this.#unavailableUntil = now + this.#options.unavailableRetryMs;
+    this.#closeInstanceIfIdle();
+    return wasAvailable || reasonChanged;
+  }
+
+  #hasRunningSessions(): boolean {
+    return Array.from(this.#sessions.values()).some((session) => session.status === 'running');
+  }
+
+  #closeInstanceIfIdle(): void {
+    if (!this.#hasRunningSessions()) this.#closeInstance();
+  }
+
+  #closeInstance(): void {
+    const instance = this.#instance;
+    if (instance) {
+      try {
+        if (typeof instance.server?.close === 'function') {
+          instance.server.close();
+        } else if (typeof instance.close === 'function') {
+          instance.close();
+        }
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+    this.#instance = null;
+    this.#initPromise = null;
+    this.#sseListenerStarted = false;
   }
 
   #createTurnWaiter(providerSessionId: string): PendingTurnWaiter {
@@ -225,33 +522,45 @@ export class OpenCodeProvider extends AbsProvider {
     waiter.reject(error instanceof Error ? error : new Error(String(error || 'OpenCode turn failed')));
   }
 
-  async #ensureOpenCodeServer(): Promise<any> {
-    if (this.#client) return this.#client;
+  async #ensureOpenCodeServer(): Promise<OpenCodeInstance> {
+    if (this.#instance) return this.#instance;
     if (this.#initPromise) return this.#initPromise;
+    this.#assertCanUseOpenCode();
 
-    this.#initPromise = (async () => {
+    let startup: Promise<OpenCodeInstance> | null = null;
+    startup = (async () => {
       try {
         if (typeof Bun !== 'undefined' && typeof Bun.which === 'function'
             && process.env.NODE_ENV !== 'test' && !Bun.which('opencode')) {
           throw new Error('opencode executable not found in $PATH');
         }
 
-        const { createOpencode } = await import('@opencode-ai/sdk/v2');
         const port = 10000 + Math.floor(Math.random() * 50000);
-        const result = await createOpencode({ timeout: 30000, port });
+        const result: OpenCodeInstance = await withAbortableTimeout(
+          (signal) => this.#options.createInstance({ port, signal }),
+          this.#options.startupTimeoutMs,
+          'OpenCode startup',
+        );
 
         if (!result?.client?.permission?.reply) {
           throw new Error('OpenCode v2 client missing permission.reply; aborting startup');
         }
 
-        this.#client = result;
+        this.#instance = result;
+        this.#markAvailable();
         return result;
       } catch (err) {
-        this.#initPromise = null;
+        const reason = errorMessage(err);
+        if (this.#markTemporarilyUnavailable(reason)) {
+          console.warn('opencode: marked unavailable after startup failure:', reason);
+        }
         throw err;
+      } finally {
+        if (this.#initPromise === startup) this.#initPromise = null;
       }
     })();
 
+    this.#initPromise = startup;
     return this.#initPromise;
   }
 
@@ -386,7 +695,10 @@ export class OpenCodeProvider extends AbsProvider {
     const runListener = async () => {
       try {
         const client = await this.getClient();
-        const result = await client.event.subscribe();
+        const result: any = await this.#runRequest<any>(
+          'OpenCode event subscribe',
+          (signal) => client.event.subscribe(undefined, { signal }),
+        );
 
         for await (const event of result.stream) {
           const sessionId = extractSessionId(event);
@@ -448,9 +760,12 @@ export class OpenCodeProvider extends AbsProvider {
         for (const sessionId of this.#pendingTurnWaiters.keys()) {
           this.#rejectTurnWaiter(sessionId, err);
         }
-        console.error('opencode: SSE listener error, reconnecting in 3s:', err.message);
+        const retryMs = this.isTemporarilyUnavailable()
+          ? Math.max(3000, Math.min(this.getUnavailableRetryAfterMs(), 30_000))
+          : 3000;
+        console.error(`opencode: SSE listener error, reconnecting in ${Math.round(retryMs / 1000)}s:`, err.message);
         this.#sseListenerStarted = false;
-        setTimeout(() => this.#startGlobalSSEListener(), 3000);
+        setTimeout(() => this.#startGlobalSSEListener(), retryMs);
       }
     };
 
@@ -458,38 +773,85 @@ export class OpenCodeProvider extends AbsProvider {
   }
 
   async getClient(): Promise<any> {
-    if (!this.isAvailable()) throw new Error('opencode is not installed');
+    this.#assertCanUseOpenCode();
     const instance = await this.#ensureOpenCodeServer();
     return instance.client;
   }
 
   getClientIfInitialized(): any | null {
-    return this.#client?.client ?? null;
+    return this.#instance?.client ?? null;
   }
 
-  async getModels(): Promise<Array<{ value: string; label: string }>> {
+  async getModels(): Promise<OpenCodeModelOption[]> {
     if (!this.isAvailable()) return [];
-    const client = await this.getClient();
-    const result = await client.provider.list();
-    const data = result.data;
-    const allProviders: any[] = Array.isArray(data.all) ? data.all : [];
-    const connected = new Set<string>(Array.isArray(data.connected) ? data.connected : []);
+    if (this.isTemporarilyUnavailable()) return this.#cachedModels();
+    if (this.#isModelCacheFresh()) return this.#cachedModels();
+    if (this.#modelsPromise) return this.#modelsPromise;
 
-    const models: Array<{ value: string; label: string }> = [];
-    for (const provider of allProviders) {
-      const providerId = provider.id || provider.name;
-      if (!connected.has(providerId)) continue;
-      const harnessModelsObj = provider.models || {};
-      for (const [modelKey, model] of Object.entries(harnessModelsObj)) {
-        const m = model as any;
-        models.push({
-          value: `${provider.id || provider.name}/${m.id || modelKey}`,
-          label: `${provider.name}: ${m.name || m.id || modelKey}`,
-        });
+    this.#modelsPromise = this.#loadModels().finally(() => {
+      this.#modelsPromise = null;
+    });
+    return this.#modelsPromise;
+  }
+
+  #cachedModels(): OpenCodeModelOption[] {
+    return this.#modelCache?.models ?? [];
+  }
+
+  #isModelCacheFresh(): boolean {
+    if (!this.#modelCache) return false;
+    return this.#now() - this.#modelCache.fetchedAt < this.#options.modelCacheTtlMs;
+  }
+
+  async #loadModels(): Promise<OpenCodeModelOption[]> {
+    try {
+      const client = await this.getClient();
+      const models = await this.#discoverModels(client);
+      this.#modelCache = {
+        models,
+        fetchedAt: this.#now(),
+      };
+      this.#markAvailable();
+      return models;
+    } catch (err) {
+      const reason = errorMessage(err);
+      if (this.#markTemporarilyUnavailable(reason)) {
+        console.warn('opencode: model discovery unavailable:', reason);
       }
+      return this.#cachedModels();
+    }
+  }
+
+  async #discoverModels(client: any): Promise<OpenCodeModelOption[]> {
+    if (typeof client.config?.providers === 'function') {
+      const result = await withAbortableTimeout(
+        (signal) => client.config.providers(undefined, { signal }),
+        this.#options.modelDiscoveryTimeoutMs,
+        'OpenCode model discovery',
+      );
+      return modelsFromProviders(configuredProvidersFromResult(result));
     }
 
-    return models;
+    const result = await withAbortableTimeout(
+      (signal) => client.provider.list(undefined, { signal }),
+      this.#options.modelDiscoveryTimeoutMs,
+      'OpenCode provider list',
+    );
+    return modelsFromProviders(connectedProvidersFromListResult(result));
+  }
+
+  async #runRequest<T>(label: string, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    try {
+      return await withAbortableTimeout(operation, this.#options.requestTimeoutMs, label);
+    } catch (err) {
+      if (err instanceof OpenCodeTimeoutError) {
+        const reason = errorMessage(err);
+        if (this.#markTemporarilyUnavailable(reason)) {
+          console.warn('opencode: request timed out:', reason);
+        }
+      }
+      throw err;
+    }
   }
 
   async startSession({
@@ -505,14 +867,16 @@ export class OpenCodeProvider extends AbsProvider {
     void projectPath;
     void thinkingMode;
 
-    if (!this.isAvailable()) throw new Error('opencode is not installed');
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();
 
     const client = await this.getClient();
-    const sessionResult = await client.session.create({
-      permission: mapPermissionMode(permissionMode),
-    });
+    const sessionResult: any = await this.#runRequest<any>(
+      'OpenCode session create',
+      (signal) => client.session.create({
+        permission: mapPermissionMode(permissionMode),
+      }, { signal }),
+    );
     const providerSessionId: string = sessionResult.data.id;
 
     this.#sessions.set(providerSessionId, {
@@ -527,10 +891,13 @@ export class OpenCodeProvider extends AbsProvider {
 
     const promptBody = buildPromptBody(command, model);
 
-    client.session.promptAsync({
-      sessionID: providerSessionId,
-      ...promptBody,
-    }).catch((err: Error) => {
+    this.#runRequest(
+      'OpenCode prompt submit',
+      (signal) => client.session.promptAsync({
+        sessionID: providerSessionId,
+        ...promptBody,
+      }, { signal }),
+    ).catch((err: Error) => {
       console.error(`opencode: prompt failed for session ${providerSessionId}:`, err.message);
       const sess = this.#sessions.get(providerSessionId);
       if (sess) sess.status = 'completed';
@@ -556,7 +923,6 @@ export class OpenCodeProvider extends AbsProvider {
     void projectPath;
     void thinkingMode;
 
-    if (!this.isAvailable()) throw new Error('opencode is not installed');
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();
 
@@ -579,10 +945,13 @@ export class OpenCodeProvider extends AbsProvider {
     const waiter = this.#createTurnWaiter(providerSessionId);
 
     try {
-      await client.session.promptAsync({
-        sessionID: providerSessionId,
-        ...promptBody,
-      });
+      await this.#runRequest(
+        'OpenCode prompt submit',
+        (signal) => client.session.promptAsync({
+          sessionID: providerSessionId,
+          ...promptBody,
+        }, { signal }),
+      );
     } catch (err: any) {
       console.error(`opencode: query failed for session ${providerSessionId}:`, err.message);
       const sess = this.#sessions.get(providerSessionId);
@@ -604,9 +973,14 @@ export class OpenCodeProvider extends AbsProvider {
     this.#rejectTurnWaiter(providerSessionId, new Error('OpenCode session aborted'));
     this.#cancelPendingPermissionsForSession(providerSessionId, 'aborted');
     this.getClient().then((client: any) => {
-      client.session.abort({ sessionID: providerSessionId }).catch((err: Error) => {
+      this.#runRequest(
+        'OpenCode session abort',
+        (signal) => client.session.abort({ sessionID: providerSessionId }, { signal }),
+      ).catch((err: Error) => {
         console.warn(`opencode: failed to abort session ${providerSessionId}:`, err.message);
       });
+    }).catch((err: Error) => {
+      console.warn(`opencode: failed to get client for abort ${providerSessionId}:`, err.message);
     });
     return true;
   }
@@ -640,11 +1014,14 @@ export class OpenCodeProvider extends AbsProvider {
     const reply = mapPermissionDecision(decision);
 
     const client = await this.getClient();
-    await client.permission.reply({
-      requestID: pending.originalRequestId,
-      reply,
-      message: allow ? undefined : 'User denied tool use',
-    });
+    await this.#runRequest(
+      'OpenCode permission reply',
+      (signal) => client.permission.reply({
+        requestID: pending.originalRequestId,
+        reply,
+        message: allow ? undefined : 'User denied tool use',
+      }, { signal }),
+    );
   }
 
   async runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
@@ -653,9 +1030,12 @@ export class OpenCodeProvider extends AbsProvider {
     void projectPath;
     const client = await this.getClient();
 
-    const createResult = await client.session.create({
-      permission: mapPermissionMode(permissionMode),
-    });
+    const createResult: any = await this.#runRequest<any>(
+      'OpenCode session create',
+      (signal) => client.session.create({
+        permission: mapPermissionMode(permissionMode),
+      }, { signal }),
+    );
 
     if (createResult.error || !createResult.data?.id) {
       throw new Error(createResult.error?.message || 'Failed to create OpenCode session');
@@ -673,10 +1053,13 @@ export class OpenCodeProvider extends AbsProvider {
         body.model = parsedModel;
       }
 
-      const promptResult = await client.session.prompt({
-        sessionID: sessionId,
-        ...body,
-      });
+      const promptResult: any = await this.#runRequest<any>(
+        'OpenCode prompt',
+        (signal) => client.session.prompt({
+          sessionID: sessionId,
+          ...body,
+        }, { signal }),
+      );
 
       if (promptResult.error) {
         throw new Error(promptResult.error.message || 'OpenCode one-shot prompt failed');
@@ -684,9 +1067,12 @@ export class OpenCodeProvider extends AbsProvider {
 
       return extractTextParts(promptResult.data?.parts);
     } finally {
-      await client.session.delete({
-        sessionID: sessionId,
-      }).catch(() => {});
+      await this.#runRequest(
+        'OpenCode session delete',
+        (signal) => client.session.delete({
+          sessionID: sessionId,
+        }, { signal }),
+      ).catch(() => {});
     }
   }
 

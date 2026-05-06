@@ -102,7 +102,7 @@
 	role="listbox"
 	id={listId}
 	aria-label={ariaLabel}
-	class="min-h-0 flex-1 overflow-y-auto p-1"
+	class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
 	onscroll={handleScroll}
 >
 	<div style={`height:${totalHeight}px;`} class="relative">
@@ -116,7 +116,7 @@
 				data-model-index={index}
 				style={`height:${rowHeight}px; transform:translateY(${index * rowHeight}px);`}
 				class={cn(
-					'absolute left-0 right-0 flex w-full items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+					'absolute left-0 right-0 top-0 flex w-full touch-pan-y items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
 					index === activeIndex
 						? 'bg-accent text-accent-foreground'
 						: 'text-foreground hover:bg-accent/50 hover:text-accent-foreground'
