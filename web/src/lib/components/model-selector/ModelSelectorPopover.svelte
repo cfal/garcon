@@ -1,13 +1,13 @@
 <script lang="ts">
-	import Check from '@lucide/svelte/icons/check';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
-	import Search from '@lucide/svelte/icons/search';
+	import { onMount } from 'svelte';
 	import * as Popover from '$lib/components/ui/popover';
 	import { getModelCatalog } from '$lib/context';
 	import { cn } from '$lib/utils/cn.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ModelSelectorState } from './model-selector-state.svelte';
-	import VirtualModelList from './VirtualModelList.svelte';
+	import ModelSelectorColumnsLayout from './ModelSelectorColumnsLayout.svelte';
+	import ModelSelectorCompactLayout from './ModelSelectorCompactLayout.svelte';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
@@ -44,71 +44,65 @@
 		onChange: (next) => onChange(next),
 	});
 
-	let inputRef = $state<HTMLInputElement | null>(null);
-	let activeOptionId = $state<string | undefined>(undefined);
-	let visiblePageSize = $state(6);
-
-	$effect(() => {
-		if (!selector.open) return;
-		requestAnimationFrame(() => inputRef?.focus());
-	});
+	let isCompactLayout = $state(false);
 
 	const showHarness = $derived(mode.harness === 'select');
 	const showSource = $derived(mode.source === 'select');
 	const surfaceIsSettings = $derived(mode.surface === 'settings');
 	const contentWidthClass = $derived.by(() => {
+		if (isCompactLayout) return 'w-[min(24rem,calc(100vw-1rem))]';
 		if (!showHarness && !showSource) return 'w-[min(22rem,calc(100vw-1rem))]';
 		if (showHarness && showSource) return 'w-[min(50rem,calc(100vw-1rem))]';
 		return 'w-[min(38rem,calc(100vw-1rem))]';
 	});
-	const contentHeightClass = $derived(
-		!showHarness && !showSource
+	const contentHeightClass = $derived.by(() => {
+		if (isCompactLayout) return 'h-[min(32rem,calc(100vh-1rem))]';
+		return !showHarness && !showSource
 			? 'h-[18rem]'
-			: 'h-[26rem]'
-	);
+			: 'h-[26rem]';
+	});
 	const triggerBaseClass = $derived(
 		surfaceIsSettings
-			? 'inline-flex min-h-9 max-w-[18rem] items-center justify-between gap-2 rounded-md border border-border bg-muted px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
-			: 'inline-flex h-9 max-w-[11rem] items-center gap-1.5 rounded-lg px-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-[15rem]'
+			? 'inline-flex min-h-9 min-w-0 max-w-[18rem] items-center justify-between gap-2 overflow-hidden rounded-md border border-border bg-muted px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
+			: 'inline-flex h-9 min-w-0 max-w-[11rem] items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-[15rem]'
 	);
 	const showTriggerSecondaryLine = $derived(
 		surfaceIsSettings || mode.harness === 'select' || Boolean(selector.triggerSecondary)
 	);
 	const modelListId = $derived(`model-selector-model-list-${selector.instanceId}`);
-	const hasFilteredModels = $derived(selector.filteredModelRows.items.length > 0);
 
-	function handleQueryInput(event: Event): void {
-		selector.setQuery((event.currentTarget as HTMLInputElement).value);
-	}
-
-	function handleModelInputKeydown(event: KeyboardEvent): void {
-		if (!selector.handleModelKeydown(event, visiblePageSize)) return;
-		event.preventDefault();
-		event.stopPropagation();
-	}
-
-	function handleModelListMetrics(metrics: {
-		activeOptionId: string | undefined;
-		visiblePageSize: number;
-	}): void {
-		activeOptionId = metrics.activeOptionId;
-		visiblePageSize = metrics.visiblePageSize;
-	}
-
-	$effect(() => {
-		if (hasFilteredModels) return;
-		activeOptionId = undefined;
+	onMount(() => {
+		if (typeof window.matchMedia !== 'function') return;
+		const mediaQuery = window.matchMedia('(max-width: 639px)');
+		const updateLayout = () => {
+			isCompactLayout = mediaQuery.matches;
+		};
+		updateLayout();
+		mediaQuery.addEventListener('change', updateLayout);
+		return () => mediaQuery.removeEventListener('change', updateLayout);
 	});
+
+	function handleOpenChange(open: boolean): void {
+		if (open) {
+			selector.openDraft();
+			return;
+		}
+		if (isCompactLayout) {
+			selector.discardAndClose();
+			return;
+		}
+		selector.commitAndClose();
+	}
 </script>
 
-<Popover.Root open={selector.open} onOpenChange={(open) => selector.setOpen(open)}>
+<Popover.Root open={selector.open} onOpenChange={handleOpenChange}>
 	<Popover.Trigger
 		{disabled}
 		title={selector.triggerTitle}
 		aria-label={selector.triggerTitle || m.model_selector_unavailable()}
 		class={cn(triggerBaseClass, triggerClass)}
 	>
-		<span class="flex min-w-0 flex-1 flex-col leading-tight">
+		<span class="flex min-w-0 flex-1 flex-col overflow-hidden leading-tight">
 			<span class="truncate font-medium">{selector.triggerPrimary || m.model_selector_unavailable()}</span>
 			{#if showTriggerSecondaryLine}
 				<span
@@ -133,98 +127,22 @@
 			contentClass
 		)}
 	>
-		<div class="flex h-full min-h-0 flex-col sm:flex-row">
-			{#if showHarness}
-				<section class="min-h-0 overflow-y-auto border-b border-border p-1 sm:w-56 sm:border-b-0 sm:border-r">
-					<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{m.model_selector_harness()}</div>
-					<div class="space-y-1">
-						{#each selector.harnessOptions as option (option.value)}
-							<button
-								type="button"
-								class={cn(
-									'flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-									option.value === selector.harnessId && 'bg-accent text-accent-foreground'
-								)}
-								aria-pressed={option.value === selector.harnessId}
-								onclick={() => selector.selectHarness(option.value)}
-							>
-								<span class="min-w-0 flex-1">
-									<span class="block truncate font-medium">{option.label}</span>
-									{#if option.description}
-										<span class="block truncate text-xs text-muted-foreground">{option.description}</span>
-									{/if}
-								</span>
-								{#if option.value === selector.harnessId}
-									<Check class="mt-0.5 size-4 shrink-0" />
-								{/if}
-							</button>
-						{/each}
-					</div>
-				</section>
-			{/if}
-
-			{#if showSource}
-				<section class="min-h-0 overflow-y-auto border-b border-border p-1 sm:w-48 sm:border-b-0 sm:border-r">
-					<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{m.model_selector_provider()}</div>
-					<div class="space-y-1">
-						{#each selector.sources as source (source.key)}
-							<button
-								type="button"
-								title={source.description ? `${source.label} - ${source.description}` : source.label}
-								class={cn(
-									'flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-									source.key === selector.sourceKey && 'bg-accent text-accent-foreground'
-								)}
-								aria-pressed={source.key === selector.sourceKey}
-								onclick={() => selector.selectSource(source.key)}
-							>
-								<span class="min-w-0 flex-1">
-									<span class="block truncate font-medium">{source.label}</span>
-								</span>
-								{#if source.key === selector.sourceKey}
-									<Check class="mt-0.5 size-4 shrink-0" />
-								{/if}
-							</button>
-						{/each}
-					</div>
-				</section>
-			{/if}
-
-			<section class="flex min-h-0 min-w-0 flex-1 flex-col">
-				<div class="flex items-center gap-2 border-b border-border px-3">
-					<Search class="size-4 shrink-0 text-muted-foreground" />
-					<input
-						bind:this={inputRef}
-						type="text"
-						value={selector.query}
-						placeholder={m.model_selector_filter_placeholder()}
-						aria-label={m.model_selector_filter_placeholder()}
-						aria-controls={modelListId}
-						aria-activedescendant={activeOptionId}
-						class="flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-						oninput={handleQueryInput}
-						onkeydown={handleModelInputKeydown}
-					/>
-				</div>
-				{#if !hasFilteredModels}
-					<div class="px-3 py-8 text-center text-sm text-muted-foreground">
-						{selector.availableModels.length === 0
-							? m.model_selector_no_models()
-							: m.model_selector_no_results()}
-					</div>
-				{:else}
-					<VirtualModelList
-						listId={modelListId}
-						ariaLabel={m.model_selector_model()}
-						rows={selector.filteredModelRows.items}
-						selectedValue={selector.currentModelValue}
-						activeIndex={selector.activeModelIndex}
-						onActiveIndexChange={(index) => selector.setActiveModelIndex(index)}
-						onSelect={(modelValue) => selector.selectModel(modelValue)}
-						onMetricsChange={handleModelListMetrics}
-					/>
-				{/if}
-			</section>
-		</div>
+		{#if isCompactLayout}
+			<ModelSelectorCompactLayout
+				{selector}
+				{showHarness}
+				{showSource}
+				{modelListId}
+				onCancel={() => selector.discardAndClose()}
+				onDone={() => selector.commitAndClose()}
+			/>
+		{:else}
+			<ModelSelectorColumnsLayout
+				{selector}
+				{showHarness}
+				{showSource}
+				{modelListId}
+			/>
+		{/if}
 	</Popover.Content>
 </Popover.Root>

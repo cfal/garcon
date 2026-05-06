@@ -267,15 +267,26 @@ export class ModelSelectorState {
 		});
 	}
 
-	setOpen(open: boolean): void {
-		if (open) {
-			this.open = true;
-			this.query = '';
-			this.#startDraftFromValue();
-			this.resetActiveModelIndex();
-			return;
-		}
+	openDraft(): void {
+		if (this.open) return;
+		this.open = true;
+		this.query = '';
+		this.#startDraftFromValue();
+		this.resetActiveModelIndex();
+	}
+
+	commitAndClose(): void {
+		if (!this.open) return;
 		this.#commitDraftSelection();
+		this.#finishClose();
+	}
+
+	discardAndClose(): void {
+		if (!this.open) return;
+		this.#finishClose();
+	}
+
+	#finishClose(): void {
 		this.open = false;
 		this.query = '';
 		this.activeModelIndex = 0;
@@ -319,10 +330,6 @@ export class ModelSelectorState {
 
 	handleModelKeydown(event: KeyboardEvent, visiblePageSize: number): boolean {
 		const rows = this.filteredModelRows.items;
-		if (event.key === 'Escape') {
-			this.setOpen(false);
-			return true;
-		}
 		if (rows.length === 0) return false;
 
 		if (event.key === 'ArrowDown') {
