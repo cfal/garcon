@@ -24,6 +24,7 @@
 		paneId: string;
 		zone: SplitDropZone;
 		rect: DOMRect;
+		blockedReason?: 'max-panes';
 	};
 
 	// Lazy-loaded tab panels to keep the main chunk lean. Each panel
@@ -257,6 +258,24 @@
 		return 'center';
 	}
 
+	function isSplitEdgeZone(zone: SplitDropZone): boolean {
+		return zone !== 'center';
+	}
+
+	function toActiveSplitDropTarget(
+		paneId: string,
+		zone: SplitDropZone,
+		rect: DOMRect,
+	): ActiveSplitDropTarget {
+		return {
+			paneId,
+			zone,
+			rect,
+			blockedReason:
+				splitLayout.paneCount >= 4 && isSplitEdgeZone(zone) ? 'max-panes' : undefined,
+		};
+	}
+
 	function resolveActiveSplitDropTarget(e: DragEvent): ActiveSplitDropTarget | null {
 		if (!splitRootEl) return null;
 
@@ -272,7 +291,11 @@
 				e.clientY >= rect.top &&
 				e.clientY <= rect.bottom;
 			if (containsPointer) {
-				return { paneId: pane.id, zone: resolveDropZone(rect, e.clientX, e.clientY), rect };
+				return toActiveSplitDropTarget(
+					pane.id,
+					resolveDropZone(rect, e.clientX, e.clientY),
+					rect,
+				);
 			}
 
 			const centerX = rect.left + rect.width / 2;
@@ -284,11 +307,11 @@
 		}
 
 		if (!fallback) return null;
-		return {
-			paneId: fallback.paneId,
-			zone: resolveDropZone(fallback.rect, e.clientX, e.clientY),
-			rect: fallback.rect,
-		};
+		return toActiveSplitDropTarget(
+			fallback.paneId,
+			resolveDropZone(fallback.rect, e.clientX, e.clientY),
+			fallback.rect,
+		);
 	}
 
 	function handleActiveSplitDragOver(e: DragEvent) {
@@ -298,7 +321,7 @@
 
 		e.preventDefault();
 		e.stopPropagation();
-		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		if (e.dataTransfer) e.dataTransfer.dropEffect = target.blockedReason ? 'none' : 'move';
 		activeSplitDropTarget = target;
 	}
 
@@ -310,6 +333,10 @@
 		const target = activeSplitDropTarget ?? resolveActiveSplitDropTarget(e);
 		activeSplitDropTarget = null;
 		if (!target) {
+			splitLayout.endDrag();
+			return;
+		}
+		if (target.blockedReason) {
 			splitLayout.endDrag();
 			return;
 		}
@@ -327,6 +354,40 @@
 	function getActiveSplitPreviewClass(zone: SplitDropZone): string {
 		if (!activeSplitDropTarget || activeSplitDropTarget.zone !== zone) return 'opacity-0';
 		return 'opacity-100';
+	}
+
+	function getActiveSplitPreviewTone(zone: SplitDropZone): string {
+		if (
+			activeSplitDropTarget?.zone === zone &&
+			activeSplitDropTarget.blockedReason === 'max-panes'
+		) {
+			return 'bg-destructive/10 border-destructive/40';
+		}
+		return zone === 'center'
+			? 'bg-accent/15 border-accent/40'
+			: 'bg-primary/12 border-primary/30';
+	}
+
+	function getActiveSplitPreviewLabel(zone: SplitDropZone, fallback: string): string {
+		if (
+			activeSplitDropTarget?.zone === zone &&
+			activeSplitDropTarget.blockedReason === 'max-panes'
+		) {
+			return '4 panes max';
+		}
+		return fallback;
+	}
+
+	function getActiveSplitPreviewLabelClass(zone: SplitDropZone): string {
+		if (
+			activeSplitDropTarget?.zone === zone &&
+			activeSplitDropTarget.blockedReason === 'max-panes'
+		) {
+			return 'bg-destructive/10 text-destructive';
+		}
+		return zone === 'center'
+			? 'bg-accent/15 text-accent-foreground'
+			: 'bg-primary/10 text-primary';
 	}
 
 	function getActiveSplitTargetStyle(): string {
@@ -653,29 +714,29 @@
 									class="absolute pointer-events-none transition-all duration-150"
 									style={getActiveSplitTargetStyle()}
 								>
-									<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-opacity duration-150', getActiveSplitPreviewClass('top'), 'inset-x-3 top-3 bottom-[52%]')}>
+									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('top'), getActiveSplitPreviewClass('top'), 'inset-x-3 top-3 bottom-[52%]')}>
 										<div class="flex h-full items-center justify-center">
-											<span class="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary shadow-sm">Top</span>
+											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('top'))}>{getActiveSplitPreviewLabel('top', 'Top')}</span>
 										</div>
 									</div>
-									<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-opacity duration-150', getActiveSplitPreviewClass('bottom'), 'inset-x-3 top-[52%] bottom-3')}>
+									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('bottom'), getActiveSplitPreviewClass('bottom'), 'inset-x-3 top-[52%] bottom-3')}>
 										<div class="flex h-full items-center justify-center">
-											<span class="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary shadow-sm">Bottom</span>
+											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('bottom'))}>{getActiveSplitPreviewLabel('bottom', 'Bottom')}</span>
 										</div>
 									</div>
-									<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-opacity duration-150', getActiveSplitPreviewClass('left'), 'inset-y-3 left-3 right-[52%]')}>
+									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('left'), getActiveSplitPreviewClass('left'), 'inset-y-3 left-3 right-[52%]')}>
 										<div class="flex h-full items-center justify-center">
-											<span class="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary shadow-sm">Left</span>
+											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('left'))}>{getActiveSplitPreviewLabel('left', 'Left')}</span>
 										</div>
 									</div>
-									<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-opacity duration-150', getActiveSplitPreviewClass('right'), 'inset-y-3 left-[52%] right-3')}>
+									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('right'), getActiveSplitPreviewClass('right'), 'inset-y-3 left-[52%] right-3')}>
 										<div class="flex h-full items-center justify-center">
-											<span class="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary shadow-sm">Right</span>
+											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('right'))}>{getActiveSplitPreviewLabel('right', 'Right')}</span>
 										</div>
 									</div>
-									<div class={cn('absolute bg-accent/15 border border-accent/40 rounded-lg transition-opacity duration-150', getActiveSplitPreviewClass('center'), 'inset-3')}>
+									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('center'), getActiveSplitPreviewClass('center'), 'inset-3')}>
 										<div class="flex h-full items-center justify-center">
-											<span class="rounded-md bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent-foreground shadow-sm">Replace</span>
+											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('center'))}>Replace</span>
 										</div>
 									</div>
 								</div>

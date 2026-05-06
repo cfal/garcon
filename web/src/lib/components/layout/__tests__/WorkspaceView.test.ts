@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import ConversationWorkspaceStub from './ConversationWorkspaceStub.svelte';
 import SplitContainerStub from './SplitContainerStub.svelte';
 
@@ -201,5 +202,96 @@ describe('WorkspaceView header visibility', () => {
 		expect(addChatToZone).toHaveBeenCalledWith('pane-right', 'chat-3', 'right');
 		expect(endDrag).toHaveBeenCalledOnce();
 		expect(setSelectedChatId).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('blocks edge drops when split view already has four panes', async () => {
+		const addChatToZone = vi.fn();
+		const endDrag = vi.fn();
+		const root = {
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{
+					type: 'split',
+					direction: 'vertical',
+					ratio: 0.5,
+					children: [
+						{ type: 'pane', id: 'pane-1', chatId: 'chat-1' },
+						{ type: 'pane', id: 'pane-2', chatId: 'chat-2' },
+					],
+				},
+				{
+					type: 'split',
+					direction: 'vertical',
+					ratio: 0.5,
+					children: [
+						{ type: 'pane', id: 'pane-3', chatId: 'chat-3' },
+						{ type: 'pane', id: 'pane-4', chatId: 'chat-4' },
+					],
+				},
+			],
+		};
+		const splitLayout = {
+			isEnabled: true,
+			root,
+			focusedPaneId: 'pane-1',
+			draggedChatId: 'chat-5',
+			draggedPaneId: null,
+			paneCount: 4,
+			panes: [
+				{ type: 'pane', id: 'pane-1', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-2', chatId: 'chat-2' },
+				{ type: 'pane', id: 'pane-3', chatId: 'chat-3' },
+				{ type: 'pane', id: 'pane-4', chatId: 'chat-4' },
+			],
+			focusedChatId: 'chat-1',
+			addChatToZone,
+			endDrag,
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable: vi.fn(),
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+
+		const { container } = render(WorkspaceViewTestHarness, {
+			activeTab: 'chat',
+			showChatHeader: true,
+			isMobile: false,
+			splitLayout,
+		});
+
+		const pane = container.querySelector<HTMLElement>('[data-pane-id="pane-4"]');
+		const layer = container.querySelector<HTMLElement>('[data-split-drag-layer]');
+		expect(pane).toBeTruthy();
+		expect(layer).toBeTruthy();
+
+		Object.defineProperty(pane!, 'getBoundingClientRect', {
+			value: () => ({
+				left: 100,
+				top: 100,
+				right: 200,
+				bottom: 200,
+				width: 100,
+				height: 100,
+				x: 100,
+				y: 100,
+				toJSON: () => ({}),
+			}),
+		});
+
+		dispatchDragEvent(layer!, 'dragover', { clientX: 195, clientY: 150 });
+		await tick();
+		expect(screen.getByText('4 panes max')).toBeTruthy();
+
+		dispatchDragEvent(layer!, 'drop', { clientX: 195, clientY: 150 });
+
+		expect(addChatToZone).not.toHaveBeenCalled();
+		expect(endDrag).toHaveBeenCalledOnce();
 	});
 });
