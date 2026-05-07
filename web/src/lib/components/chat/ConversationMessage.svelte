@@ -177,7 +177,7 @@
 
 {#if !shouldHideThinking}
 	<div
-		class="chat-message {cssType} {isGrouped ? 'grouped' : ''} {message instanceof UserMessage ? 'flex justify-start px-3 sm:px-0 min-w-0' : 'px-3 sm:px-0'}"
+		class="chat-message {cssType} {isGrouped ? 'grouped' : ''} {message instanceof UserMessage ? 'flex justify-start min-w-0' : ''}"
 	>
 			{#if asUser}
 				<div class="flex items-end w-full sm:w-auto sm:max-w-[85%] min-w-0">
