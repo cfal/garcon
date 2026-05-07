@@ -269,11 +269,12 @@
 	});
 </script>
 
-<div class="flex-shrink-0">
-		<div data-composer class="relative bg-card border-t border-border pb-1 sm:pb-2">
-		{#if !appShell.isMobile}
-			<!-- Invisible resize grab zone above the composer (desktop only) -->
-			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
+<div class="flex-shrink-0 bg-background px-3 pb-2 pt-2 sm:px-5 sm:pb-4 lg:px-6">
+	<div class="mx-auto w-full max-w-5xl">
+		<div data-composer class="relative overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+			{#if !appShell.isMobile}
+				<!-- Invisible resize grab zone above the composer (desktop only) -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
 			<div
 				onpointerdown={handleResizeStart}
 				class="absolute left-0 right-0 -top-1 h-3 cursor-row-resize z-10 touch-none"
@@ -304,8 +305,8 @@
 					</div>
 				{/if}
 
-				{#if composerState.images.length > 0}
-					<div class="mb-2 p-2 bg-muted/40 rounded-lg">
+					{#if composerState.images.length > 0}
+						<div class="mx-2 mt-2 p-2 bg-muted/40 rounded-lg">
 						<div class="flex flex-wrap gap-2">
 							{#each composerState.images as file, idx (file.name + idx)}
 								<div class="relative group">
@@ -364,10 +365,10 @@
 							onfocus={() => appShell.requestSidebarRecenterToSelected()}
 							placeholder={m.chat_composer_reply_placeholder()}
 							disabled={isDisabled}
-								class="block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
-								style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}
-							></textarea>
-					</div>
+							class="block w-full px-4 py-2.5 sm:px-5 sm:py-4 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none min-h-[48px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
+							style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}
+						></textarea>
+				</div>
 				</div>
 
 				<ComposerBottomBar
@@ -402,5 +403,6 @@
 						{/snippet}
 					</ComposerBottomBar>
 				</form>
+			</div>
 		</div>
 	</div>
