@@ -58,7 +58,7 @@
 		);
 	</script>
 
-<div class="mt-1 pt-1.5 px-2 pb-[env(safe-area-inset-bottom)]">
+<div class="mt-1 px-2 py-1.5">
 	<div class="flex min-w-0 flex-wrap items-center gap-2">
 		<div class="flex min-w-0 grow flex-wrap items-center gap-2">
 			<DropdownMenu>
