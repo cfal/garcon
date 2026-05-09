@@ -16,6 +16,7 @@
 	import { selectedChatIdFromRoute } from './app-shell-route';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileViewerHost from '../files/FileViewerHost.svelte';
+	import { computeMobileViewportMetrics } from './mobile-viewport';
 
 	const navigation = getNavigation();
 	const chatRuntime = getChatRuntime();
@@ -30,6 +31,9 @@
 
 	let isMobile = $state(false);
 	let isWorkspaceFullscreen = $state(false);
+	let mobileAppHeight = $state<number | null>(null);
+	let mobileViewportBaselineHeight = $state<number | null>(null);
+	let mobileKeyboardVisible = $state(false);
 	const isAutoFullscreenOnGitTab = $derived(
 		!isMobile &&
 		navigation.activeTab === 'git' &&
@@ -65,25 +69,45 @@
 	$effect(() => {
 		if (typeof window === 'undefined' || !window.visualViewport) return;
 		const vv = window.visualViewport;
+		let frameId: number | null = null;
 
-		function onViewportResize() {
-			// Accounts for both keyboard and iOS URL-bar offset so the
-			// layout height matches the actual visible area.
-			const visibleH = vv.height - vv.offsetTop;
-			const keyboardH = Math.max(0, window.innerHeight - vv.height);
-			appShell.keyboardHeight = keyboardH;
+		function applyViewportMetrics() {
+			frameId = null;
+			const metrics = computeMobileViewportMetrics({
+				visualViewportHeight: vv.height,
+				visualViewportOffsetTop: vv.offsetTop,
+				windowInnerHeight: window.innerHeight,
+				baselineAppHeight: mobileViewportBaselineHeight,
+				previousAppHeight: mobileAppHeight,
+			});
+			mobileAppHeight = metrics.appHeight;
+			mobileKeyboardVisible = metrics.keyboardVisible;
+			if (!metrics.keyboardVisible) {
+				mobileViewportBaselineHeight = metrics.appHeight;
+			}
+			appShell.keyboardHeight = metrics.keyboardHeight;
 			document.documentElement.style.setProperty(
 				'--app-height',
-				`${visibleH}px`,
+				`${metrics.appHeight}px`,
+			);
+			document.documentElement.style.setProperty(
+				'--app-viewport-offset-top',
+				`${metrics.viewportOffsetTop}px`,
 			);
 		}
 
-		onViewportResize();
-		vv.addEventListener('resize', onViewportResize);
-		vv.addEventListener('scroll', onViewportResize);
+		function scheduleViewportMetrics() {
+			if (frameId !== null) return;
+			frameId = requestAnimationFrame(applyViewportMetrics);
+		}
+
+		scheduleViewportMetrics();
+		vv.addEventListener('resize', scheduleViewportMetrics);
+		vv.addEventListener('scroll', scheduleViewportMetrics);
 		return () => {
-			vv.removeEventListener('resize', onViewportResize);
-			vv.removeEventListener('scroll', onViewportResize);
+			if (frameId !== null) cancelAnimationFrame(frameId);
+			vv.removeEventListener('resize', scheduleViewportMetrics);
+			vv.removeEventListener('scroll', scheduleViewportMetrics);
 		};
 	});
 
@@ -248,11 +272,13 @@
 			/>
 		</div>
 
-		<BottomTabBar
-			activeTab={navigation.activeTab}
-			onTabChange={handleTabChange}
-			onMenuClick={toggleMobileSidebar}
-		/>
+		{#if !mobileKeyboardVisible}
+			<BottomTabBar
+				activeTab={navigation.activeTab}
+				onTabChange={handleTabChange}
+				onMenuClick={toggleMobileSidebar}
+			/>
+		{/if}
 	</div>
 {/if}
 

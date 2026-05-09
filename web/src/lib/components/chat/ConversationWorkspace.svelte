@@ -242,6 +242,13 @@
 		return scroll.observeQueueResize();
 	});
 
+	// Keeps bottom-pinned chats pinned when the message viewport height changes.
+	$effect(() => {
+		const _scroller = scrollContainer;
+		const _selected = sessions.selectedChatId;
+		return scroll.observeScrollContainerResize();
+	});
+
 	function handleGlobalKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape' && !event.repeat && lifecycle.isLoading && lifecycle.canAbort) {
 			event.preventDefault();

@@ -97,4 +97,50 @@ describe('ConversationScrollController', () => {
 		expect(scroller.scrollTop).toBe(180);
 		cleanup?.();
 	});
+
+	it('keeps the viewport pinned to bottom when the scroll container height changes', () => {
+		const scrollToBottom = vi.spyOn(ConversationScrollController.prototype, 'scrollToBottom');
+		const scroller = { scrollTop: 120, scrollHeight: 800, clientHeight: 520 } as HTMLDivElement;
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: { isUserScrolledUp: false } as never,
+			sessions: { selectedChatId: 'chat-1' },
+			ws: {} as never,
+		});
+
+		controller.isPinnedToBottom = true;
+		const cleanup = controller.observeScrollContainerResize();
+		expect(cleanup).toBeTypeOf('function');
+
+		ResizeObserverStub.instances[0]?.emit(360);
+
+		expect(scrollToBottom).toHaveBeenCalledTimes(1);
+		cleanup?.();
+		scrollToBottom.mockRestore();
+	});
+
+	it('does not repin the viewport on scroll container resize when the user scrolled up', () => {
+		const scrollToBottom = vi.spyOn(ConversationScrollController.prototype, 'scrollToBottom');
+		const scroller = { scrollTop: 120, scrollHeight: 800, clientHeight: 520 } as HTMLDivElement;
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: { isUserScrolledUp: true } as never,
+			sessions: { selectedChatId: 'chat-1' },
+			ws: {} as never,
+		});
+
+		controller.isPinnedToBottom = false;
+		const cleanup = controller.observeScrollContainerResize();
+
+		ResizeObserverStub.instances[0]?.emit(360);
+
+		expect(scrollToBottom).not.toHaveBeenCalled();
+		expect(scroller.scrollTop).toBe(120);
+		cleanup?.();
+		scrollToBottom.mockRestore();
+	});
 });

@@ -305,10 +305,12 @@
 	--mobile-nav-total: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
 
 	--app-height: 100dvh;
+	--app-viewport-offset-top: 0px;
 }
 
 .mobile-shell {
 	height: var(--app-height, 100dvh);
+	transform: translateY(var(--app-viewport-offset-top, 0px));
 }
 
 .dark {

@@ -1,6 +1,6 @@
 // Scroll viewport controller for the chat conversation pane. Manages
 // near-bottom detection, pinned-to-bottom state, infinite scroll
-// loading, and queue controls resize reconciliation.
+// loading, and layout resize reconciliation.
 
 import { reconcileScrollAfterHeightDelta } from '$lib/chat/scroll-anchor';
 import type { ChatState } from '$lib/chat/state.svelte';
@@ -94,6 +94,26 @@ export class ConversationScrollController {
 			previousHeight = nextHeight;
 		});
 		observer.observe(host);
+		return () => observer.disconnect();
+	}
+
+	// Keeps pinned conversations at the bottom when the viewport height
+	// changes, for example when the mobile keyboard opens or closes.
+	observeScrollContainerResize(): (() => void) | undefined {
+		const scroller = this.deps.getScrollContainer();
+		if (!scroller || typeof ResizeObserver === 'undefined') return undefined;
+
+		let previousHeight = scroller.clientHeight;
+		const observer = new ResizeObserver((entries) => {
+			const nextHeight = entries[0]?.contentRect.height ?? scroller.clientHeight;
+			if (nextHeight <= 0 || nextHeight === previousHeight) return;
+			const pinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
+			if (pinned) {
+				requestAnimationFrame(() => this.scrollToBottom());
+			}
+			previousHeight = nextHeight;
+		});
+		observer.observe(scroller);
 		return () => observer.disconnect();
 	}
 
