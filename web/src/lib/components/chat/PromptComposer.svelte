@@ -411,7 +411,6 @@
 				onSend={handleFormSubmit}
 				sendTitle={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
 				sendButtonClass={sendButtonClass}
-				roundedLayout={localSettings.roundedChatLayout}
 			>
 				{#snippet modelSelector()}
 					<ComposerModelSelector

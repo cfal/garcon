@@ -19,17 +19,16 @@
 		permissionOptions: ComposerModeOption<PermissionMode>[];
 		selectedPermission: PermissionMode;
 		onPermissionSelect: (mode: PermissionMode) => void;
-			thinkingOptions: ComposerModeOption<ThinkingMode>[];
-			selectedThinking: ThinkingMode;
-			onThinkingSelect: (mode: ThinkingMode) => void;
-			modelSelector?: Snippet;
-			canSend: boolean;
-			onSend: () => void;
-			sendTitle: string;
+		thinkingOptions: ComposerModeOption<ThinkingMode>[];
+		selectedThinking: ThinkingMode;
+		onThinkingSelect: (mode: ThinkingMode) => void;
+		modelSelector?: Snippet;
+		canSend: boolean;
+		onSend: () => void;
+		sendTitle: string;
 		sendButtonClass: string;
 		selectorsSide?: 'left' | 'right';
 		mobileRightGroupFullRow?: boolean;
-		roundedLayout?: boolean;
 	}
 
 	let {
@@ -39,31 +38,27 @@
 		permissionOptions,
 		selectedPermission,
 		onPermissionSelect,
-			thinkingOptions,
-			selectedThinking,
-			onThinkingSelect,
-			modelSelector,
-			canSend,
-			onSend,
-			sendTitle,
+		thinkingOptions,
+		selectedThinking,
+		onThinkingSelect,
+		modelSelector,
+		canSend,
+		onSend,
+		sendTitle,
 		sendButtonClass,
 		selectorsSide = 'right',
 		mobileRightGroupFullRow = false,
-		roundedLayout = false,
 	}: Props = $props();
 
 	const activePermission = $derived(
 		permissionOptions.find((option) => option.value === selectedPermission) ?? permissionOptions[0]
 	);
-		const activeThinking = $derived(
-			thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0]
-		);
-		const bottomBarClass = $derived(
-			roundedLayout ? 'mt-1 px-2 py-1.5' : 'mt-1 pt-1.5 px-2 pb-[env(safe-area-inset-bottom)]'
-		);
-	</script>
+	const activeThinking = $derived(
+		thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0]
+	);
+</script>
 
-<div class={bottomBarClass}>
+<div class="mt-1 px-2 py-1.5">
 	<div class="flex min-w-0 flex-wrap items-center gap-2">
 		<div class="flex min-w-0 grow flex-wrap items-center gap-2">
 			<DropdownMenu>
