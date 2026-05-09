@@ -288,15 +288,6 @@
 
 {#snippet composerSurface()}
 	<div data-composer class={composerSurfaceClass}>
-		{#if !appShell.isMobile}
-			<!-- Invisible resize grab zone above the composer (desktop only) -->
-			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
-			<div
-				onpointerdown={handleResizeStart}
-				class="absolute left-0 right-0 -top-1 h-3 cursor-row-resize z-10 touch-none"
-			></div>
-		{/if}
-
 		<FileMentionMenu
 			projectPath={sessions.selectedChat?.projectPath || ''}
 			isVisible={ui.showFileMenu}
@@ -422,12 +413,26 @@
 	</div>
 {/snippet}
 
+{#snippet composerFrame()}
+	<div class="relative">
+		{#if !appShell.isMobile}
+			<!-- Keeps the grab zone outside the clipped rounded surface. -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
+			<div
+				onpointerdown={handleResizeStart}
+				class="absolute left-0 right-0 -top-1 h-3 cursor-row-resize z-20 touch-none"
+			></div>
+		{/if}
+		{@render composerSurface()}
+	</div>
+{/snippet}
+
 <div class={composerShellClass}>
 	{#if localSettings.chatHorizontalMargins}
 		<div class="mx-auto w-full max-w-5xl">
-			{@render composerSurface()}
+			{@render composerFrame()}
 		</div>
 	{:else}
-		{@render composerSurface()}
+		{@render composerFrame()}
 	{/if}
 </div>
