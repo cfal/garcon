@@ -37,6 +37,11 @@ describe('WorkspaceView header visibility', () => {
 
 		expect(screen.queryByRole('heading', { name: 'Header Test Chat' })).toBeNull();
 		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeTruthy();
+		const toolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
+		expect(toolbar).toBeTruthy();
+		expect(toolbar?.className).toContain('right-6');
+		expect(toolbar?.className).toContain('md:right-8');
+		expect(screen.getByTestId('conversation-workspace-stub').dataset.reserveTopFloatingToolbar).toBe('true');
 		expect(screen.getByTitle('Fullscreen')).toBeTruthy();
 	});
 
@@ -74,6 +79,7 @@ describe('WorkspaceView header visibility', () => {
 
 		expect(screen.getByRole('heading', { name: 'Header Test Chat' })).toBeTruthy();
 		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeNull();
+		expect(screen.getByTestId('conversation-workspace-stub').dataset.reserveTopFloatingToolbar).toBe('false');
 		expect(screen.getByTitle('Fullscreen')).toBeTruthy();
 	});
 

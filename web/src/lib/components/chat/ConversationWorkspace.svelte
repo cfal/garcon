@@ -23,13 +23,15 @@
 	import type { PendingPermissionRequest, QueueState, PermissionMode, PendingViewChat } from '$lib/types/chat';
 	import { ArrowDown, ArrowUp, Loader2 } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
+	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ConversationWorkspaceProps {
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
+		reserveTopFloatingToolbar?: boolean;
 	}
 
-	let { onRegisterSubmit }: ConversationWorkspaceProps = $props();
+	let { onRegisterSubmit, reserveTopFloatingToolbar = false }: ConversationWorkspaceProps = $props();
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
@@ -61,6 +63,10 @@
 		if (!chatId) return null;
 		return queueByChatId[chatId] ?? null;
 	});
+	const scrollToTopButtonClass = $derived(cn(
+		'absolute right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg',
+		reserveTopFloatingToolbar ? 'top-16' : 'top-3',
+	));
 
 	let scrollContainer: HTMLDivElement | undefined = $state();
 	let queueControlsContainer: HTMLDivElement | undefined = $state();
@@ -303,13 +309,13 @@
 			/>
 
 			{#if chatState.isUserScrolledUp && chatState.chatMessages.length > 0}
-				<Button
-					variant="outline"
-					size="icon"
-					class="absolute top-3 right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg"
-					onclick={() => scroll.scrollToTop()}
-					disabled={scroll.isScrollingToTop}
-					title="Scroll to initial prompt"
+					<Button
+						variant="outline"
+						size="icon"
+						class={scrollToTopButtonClass}
+						onclick={() => scroll.scrollToTop()}
+						disabled={scroll.isScrollingToTop}
+						title="Scroll to initial prompt"
 				>
 					{#if scroll.isScrollingToTop}
 						<Loader2 class="w-5 h-5 animate-spin" />

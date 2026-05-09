@@ -619,7 +619,10 @@
 		{/if}
 
 		{#if showFloatingDesktopTabs}
-			<div class="absolute right-2 top-2 z-20 hidden sm:block">
+			<div
+				data-floating-workspace-toolbar
+				class="absolute right-6 top-3 z-20 hidden sm:block md:right-8"
+			>
 				<div class="flex items-center gap-1.5">
 					<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-0.5 border border-chat-tabs-rail-border shadow-sm">
 						{#each tabs as tab (tab.id)}
@@ -722,7 +725,10 @@
 							style:width="{focusedOverlayRect.width}px"
 							style:height="{focusedOverlayRect.height}px"
 						>
-							<ConversationWorkspace onRegisterSubmit={handleRegisterSubmit} />
+							<ConversationWorkspace
+								onRegisterSubmit={handleRegisterSubmit}
+								reserveTopFloatingToolbar={showFloatingDesktopTabs}
+							/>
 						</div>
 					{/if}
 					{#if showActiveSplitDropLayer}
@@ -784,7 +790,10 @@
 					ondragleave={handleWorkspaceDragLeave}
 					ondrop={handleWorkspaceDrop}
 				>
-					<ConversationWorkspace onRegisterSubmit={handleRegisterSubmit} />
+					<ConversationWorkspace
+						onRegisterSubmit={handleRegisterSubmit}
+						reserveTopFloatingToolbar={showFloatingDesktopTabs}
+					/>
 					{#if workspaceDragOver}
 						<div class="absolute inset-0 z-30 flex items-center justify-center bg-primary/5 border-2 border-dashed border-primary/30 rounded-lg pointer-events-none">
 							<span class="text-sm font-medium text-primary bg-primary/10 px-3 py-1.5 rounded-md">Drop to split view</span>
