@@ -116,6 +116,11 @@
 				ls.showChatHeader,
 				() => ls.toggle('showChatHeader')
 			)}
+			{@render settingRow(
+				m.settings_chat_rounded_layout(),
+				ls.roundedChatLayout,
+				() => ls.toggle('roundedChatLayout')
+			)}
 		</div>
 	</div>
 </div>

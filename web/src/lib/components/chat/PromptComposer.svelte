@@ -8,6 +8,7 @@
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
+	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ImagePlus, X } from '@lucide/svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
@@ -190,18 +191,38 @@
 		buildPermissionOptions(
 			providerState.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES
 		)
-		);
-		const thinkingOptions = $derived(buildThinkingOptions());
-		const canAttachImages = $derived(modelCatalog.supportsImages(providerState.provider, providerState.model));
-		const modelSelectorMode: ModelSelectorMode = { harness: 'fixed', source: 'hidden', surface: 'composer' };
-		const modelSelectorValue = $derived({
-			harnessId: providerState.provider,
-			model: providerState.model,
-			apiProviderId: providerState.apiProviderId,
-			modelEndpointId: providerState.modelEndpointId,
-			modelProtocol: providerState.modelProtocol,
-		});
-		const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
+	);
+	const thinkingOptions = $derived(buildThinkingOptions());
+	const canAttachImages = $derived(modelCatalog.supportsImages(providerState.provider, providerState.model));
+	const modelSelectorMode: ModelSelectorMode = { harness: 'fixed', source: 'hidden', surface: 'composer' };
+	const modelSelectorValue = $derived({
+		harnessId: providerState.provider,
+		model: providerState.model,
+		apiProviderId: providerState.apiProviderId,
+		modelEndpointId: providerState.modelEndpointId,
+		modelProtocol: providerState.modelProtocol,
+	});
+	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
+	const composerShellClass = $derived(cn(
+		'flex-shrink-0',
+		localSettings.roundedChatLayout && 'bg-background px-3 pb-2 pt-2 sm:px-5 sm:pb-4 lg:px-6'
+	));
+	const composerSurfaceClass = $derived(cn(
+		'relative bg-card',
+		localSettings.roundedChatLayout
+			? 'overflow-hidden rounded-2xl border border-border shadow-sm'
+			: 'border-t border-border pb-1 sm:pb-2'
+	));
+	const imageListClass = $derived(cn(
+		'p-2 bg-muted/40 rounded-lg',
+		localSettings.roundedChatLayout ? 'mx-2 mt-2' : 'mb-2'
+	));
+	const textareaClass = $derived(cn(
+		'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200',
+		localSettings.roundedChatLayout
+			? 'px-4 py-2.5 sm:px-5 sm:py-4 min-h-[48px]'
+			: 'px-4 py-1.5 sm:py-3 min-h-[44px]'
+	));
 
 	// Composer resize via drag handle. Persists height to localStorage and
 	// mutates the DOM directly during drag to avoid render latency.
@@ -269,12 +290,11 @@
 	});
 </script>
 
-<div class="flex-shrink-0 bg-background px-3 pb-2 pt-2 sm:px-5 sm:pb-4 lg:px-6">
-	<div class="mx-auto w-full max-w-5xl">
-		<div data-composer class="relative overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-			{#if !appShell.isMobile}
-				<!-- Invisible resize grab zone above the composer (desktop only) -->
-				<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
+{#snippet composerSurface()}
+	<div data-composer class={composerSurfaceClass}>
+		{#if !appShell.isMobile}
+			<!-- Invisible resize grab zone above the composer (desktop only) -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
 			<div
 				onpointerdown={handleResizeStart}
 				class="absolute left-0 right-0 -top-1 h-3 cursor-row-resize z-10 touch-none"
@@ -289,28 +309,28 @@
 			onClose={() => (ui.showFileMenu = false)}
 		/>
 
-			<form
-				onsubmit={(e) => {
-					e.preventDefault();
-					handleFormSubmit();
-				}}
-				class="relative"
-			>
-				{#if composerState.isDragActive}
-					<div class="absolute inset-0 bg-primary/20 border-2 border-dashed border-primary flex items-center justify-center z-50 rounded-lg">
-						<div class="bg-card rounded-lg p-4 shadow-md">
-							<ImagePlus class="w-8 h-8 text-primary mx-auto mb-2" />
-							<p class="text-sm font-medium text-foreground">{m.chat_composer_drop_images()}</p>
-						</div>
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				handleFormSubmit();
+			}}
+			class="relative"
+		>
+			{#if composerState.isDragActive}
+				<div class="absolute inset-0 bg-primary/20 border-2 border-dashed border-primary flex items-center justify-center z-50 rounded-lg">
+					<div class="bg-card rounded-lg p-4 shadow-md">
+						<ImagePlus class="w-8 h-8 text-primary mx-auto mb-2" />
+						<p class="text-sm font-medium text-foreground">{m.chat_composer_drop_images()}</p>
 					</div>
-				{/if}
+				</div>
+			{/if}
 
-					{#if composerState.images.length > 0}
-						<div class="mx-2 mt-2 p-2 bg-muted/40 rounded-lg">
-						<div class="flex flex-wrap gap-2">
-							{#each composerState.images as file, idx (file.name + idx)}
-								<div class="relative group">
-									<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
+			{#if composerState.images.length > 0}
+				<div class={imageListClass}>
+					<div class="flex flex-wrap gap-2">
+						{#each composerState.images as file, idx (file.name + idx)}
+							<div class="relative group">
+								<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
 									{#if file.type.startsWith('image/')}
 										{@const url = imageAttachments.urlFor(file, idx)}
 										{#if url}
@@ -322,13 +342,13 @@
 										{/if}
 									{/if}
 								</div>
-									<button
-										type="button"
-										aria-label={m.chat_composer_remove_image({ name: file.name })}
-										title={m.chat_composer_remove_image({ name: file.name })}
-										class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-										onclick={() => composerState.removeImage(idx)}
-									>
+								<button
+									type="button"
+									aria-label={m.chat_composer_remove_image({ name: file.name })}
+									title={m.chat_composer_remove_image({ name: file.name })}
+									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+									onclick={() => composerState.removeImage(idx)}
+								>
 									<X class="w-3 h-3" aria-hidden="true" />
 								</button>
 							</div>
@@ -346,63 +366,73 @@
 				onchange={handleFileChange}
 			/>
 
-				<!-- svelte-ignore a11y_no_static_element_interactions -- drag-and-drop region with role=region and aria-label -->
-				<div
-					class="relative bg-transparent focus-within:ring-0 transition-all duration-200 overflow-hidden"
-					ondragover={handleDragOver}
-					ondragleave={handleDragLeave}
-					ondrop={handleDrop}
-					role="region"
-					aria-label={m.chat_composer_message_input_area()}
-				>
-					<div class="relative z-10">
-						<textarea
-							bind:this={textarea}
-							bind:value={composerState.inputText}
-							onkeydown={handleKeyDown}
-							oninput={handleInput}
-							onpaste={handlePaste}
-							onfocus={() => appShell.requestSidebarRecenterToSelected()}
-							placeholder={m.chat_composer_reply_placeholder()}
-							disabled={isDisabled}
-							class="block w-full px-4 py-2.5 sm:px-5 sm:py-4 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none min-h-[48px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
-							style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}
-						></textarea>
+			<!-- svelte-ignore a11y_no_static_element_interactions -- drag-and-drop region with role=region and aria-label -->
+			<div
+				class="relative bg-transparent focus-within:ring-0 transition-all duration-200 overflow-hidden"
+				ondragover={handleDragOver}
+				ondragleave={handleDragLeave}
+				ondrop={handleDrop}
+				role="region"
+				aria-label={m.chat_composer_message_input_area()}
+			>
+				<div class="relative z-10">
+					<textarea
+						bind:this={textarea}
+						bind:value={composerState.inputText}
+						onkeydown={handleKeyDown}
+						oninput={handleInput}
+						onpaste={handlePaste}
+						onfocus={() => appShell.requestSidebarRecenterToSelected()}
+						placeholder={m.chat_composer_reply_placeholder()}
+						disabled={isDisabled}
+						class={textareaClass}
+						style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}
+					></textarea>
 				</div>
-				</div>
-
-				<ComposerBottomBar
-					canAttachImages={canAttachImages}
-					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
-					onAddImage={handleImagePick}
-					permissionOptions={permissionOptions}
-					selectedPermission={providerState.permissionMode}
-					onPermissionSelect={(mode) => {
-						providerState.permissionMode = mode;
-						onPermissionModeChange?.(mode);
-					}}
-					thinkingOptions={thinkingOptions}
-					selectedThinking={providerState.thinkingMode}
-						onThinkingSelect={(mode) => {
-							providerState.thinkingMode = mode;
-							onThinkingModeChange?.(mode);
-						}}
-						canSend={canSubmit}
-						onSend={handleFormSubmit}
-						sendTitle={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
-						sendButtonClass={sendButtonClass}
-					>
-						{#snippet modelSelector()}
-							<ComposerModelSelector
-								value={modelSelectorValue}
-								mode={modelSelectorMode}
-								onChange={(next) => onModelChange?.(next.modelValue)}
-								align="end"
-								side="top"
-							/>
-						{/snippet}
-					</ComposerBottomBar>
-				</form>
 			</div>
-		</div>
+
+			<ComposerBottomBar
+				canAttachImages={canAttachImages}
+				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
+				onAddImage={handleImagePick}
+				permissionOptions={permissionOptions}
+				selectedPermission={providerState.permissionMode}
+				onPermissionSelect={(mode) => {
+					providerState.permissionMode = mode;
+					onPermissionModeChange?.(mode);
+				}}
+				thinkingOptions={thinkingOptions}
+				selectedThinking={providerState.thinkingMode}
+				onThinkingSelect={(mode) => {
+					providerState.thinkingMode = mode;
+					onThinkingModeChange?.(mode);
+				}}
+				canSend={canSubmit}
+				onSend={handleFormSubmit}
+				sendTitle={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
+				sendButtonClass={sendButtonClass}
+				roundedLayout={localSettings.roundedChatLayout}
+			>
+				{#snippet modelSelector()}
+					<ComposerModelSelector
+						value={modelSelectorValue}
+						mode={modelSelectorMode}
+						onChange={(next) => onModelChange?.(next.modelValue)}
+						align="end"
+						side="top"
+					/>
+				{/snippet}
+			</ComposerBottomBar>
+		</form>
 	</div>
+{/snippet}
+
+<div class={composerShellClass}>
+	{#if localSettings.roundedChatLayout}
+		<div class="mx-auto w-full max-w-5xl">
+			{@render composerSurface()}
+		</div>
+	{:else}
+		{@render composerSurface()}
+	{/if}
+</div>

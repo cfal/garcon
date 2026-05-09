@@ -14,6 +14,14 @@ describe('LocalSettingsStore', () => {
 		store.destroy();
 	});
 
+	it('defaults rounded chat layout to disabled', () => {
+		const store = createLocalSettingsStore();
+
+		expect(store.roundedChatLayout).toBe(false);
+
+		store.destroy();
+	});
+
 	it('persists sidebar controls position', () => {
 		const store = createLocalSettingsStore();
 
@@ -21,6 +29,18 @@ describe('LocalSettingsStore', () => {
 
 		expect(JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}')).toMatchObject({
 			searchBarPosition: 'top',
+		});
+
+		store.destroy();
+	});
+
+	it('persists rounded chat layout', () => {
+		const store = createLocalSettingsStore();
+
+		store.set('roundedChatLayout', true);
+
+		expect(JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}')).toMatchObject({
+			roundedChatLayout: true,
 		});
 
 		store.destroy();
@@ -40,6 +60,25 @@ describe('LocalSettingsStore', () => {
 		}));
 
 		expect(secondStore.searchBarPosition).toBe('top');
+
+		firstStore.destroy();
+		secondStore.destroy();
+	});
+
+	it('syncs rounded chat layout across storage events', () => {
+		const firstStore = createLocalSettingsStore();
+		const secondStore = createLocalSettingsStore();
+
+		localStorage.setItem('pref_local_settings', JSON.stringify({
+			...firstStore.snapshot(),
+			roundedChatLayout: true,
+		}));
+		window.dispatchEvent(new StorageEvent('storage', {
+			key: 'pref_local_settings',
+			newValue: localStorage.getItem('pref_local_settings'),
+		}));
+
+		expect(secondStore.roundedChatLayout).toBe(true);
 
 		firstStore.destroy();
 		secondStore.destroy();

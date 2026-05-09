@@ -29,6 +29,7 @@
 		sendButtonClass: string;
 		selectorsSide?: 'left' | 'right';
 		mobileRightGroupFullRow?: boolean;
+		roundedLayout?: boolean;
 	}
 
 	let {
@@ -48,6 +49,7 @@
 		sendButtonClass,
 		selectorsSide = 'right',
 		mobileRightGroupFullRow = false,
+		roundedLayout = false,
 	}: Props = $props();
 
 	const activePermission = $derived(
@@ -56,9 +58,12 @@
 		const activeThinking = $derived(
 			thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0]
 		);
+		const bottomBarClass = $derived(
+			roundedLayout ? 'mt-1 px-2 py-1.5' : 'mt-1 pt-1.5 px-2 pb-[env(safe-area-inset-bottom)]'
+		);
 	</script>
 
-<div class="mt-1 px-2 py-1.5">
+<div class={bottomBarClass}>
 	<div class="flex min-w-0 flex-wrap items-center gap-2">
 		<div class="flex min-w-0 grow flex-wrap items-center gap-2">
 			<DropdownMenu>

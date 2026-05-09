@@ -5,6 +5,8 @@
 
 	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import { getLocalSettings } from '$lib/context';
+	import { cn } from '$lib/utils/cn';
 
 	interface Props {
 		isLoading: boolean;
@@ -23,6 +25,8 @@
 		onAbort,
 		spinnerSelectionKey = null
 	}: Props = $props();
+
+	const localSettings = getLocalSettings();
 
 	const SPINNER_SETS = [
 		['\u25D0', '\u25D3', '\u25D1', '\u25D2'],
@@ -88,32 +92,39 @@
 
 	const statusText = $derived(provider === 'codex' ? m.chat_loading_thinking() : (status?.text || m.chat_loading_thinking()));
 	const canInterrupt = $derived(status?.can_interrupt !== false);
+	const statusOuterClass = $derived(cn(
+		'absolute bottom-0 left-0 right-0 z-10 border-t',
+		showBg ? 'bg-card border-border' : 'border-transparent'
+	));
+	const statusGutterClass = $derived(localSettings.roundedChatLayout ? 'px-3 sm:px-5 lg:px-6' : '');
+	const statusContentClass = $derived(cn(
+		'flex items-center justify-between py-2 leading-none',
+		localSettings.roundedChatLayout ? 'mx-auto w-full max-w-5xl px-4 sm:px-5' : 'px-3 sm:px-4'
+	));
 </script>
 
 {#if isLoading}
-	<div
-		class="absolute bottom-0 left-0 right-0 z-10 border-t {showBg
-			? 'bg-card border-border'
-			: 'border-transparent'}"
-	>
-		<div class="flex items-center justify-between px-3 sm:px-4 py-2 leading-none">
+	<div class={statusOuterClass}>
+		<div class={statusGutterClass}>
+			<div class={statusContentClass}>
 				<div class="flex items-center gap-1.5 min-w-0">
 					<span
 						class="text-xs sm:text-sm transition-all duration-500 flex-shrink-0 text-status-processing {animationPhase % 2 === 0 ? 'scale-110' : ''}"
 					>
 						{activeSpinners[animationPhase]}
 					</span>
-				<span class="font-medium text-xs sm:text-sm truncate">{statusText}...</span>
-			</div>
+					<span class="font-medium text-xs sm:text-sm truncate">{statusText}...</span>
+				</div>
 
 				{#if canInterrupt && onAbort}
 					<button
 						onclick={onAbort}
 						class="ml-2 mr-1 text-xs sm:text-sm border border-stop-button-border bg-stop-button-bg text-stop-button-foreground hover:bg-stop-button-bg/90 px-3 py-1 sm:px-3.5 sm:py-1 rounded-md transition-colors flex items-center flex-shrink-0 font-medium"
 					>
-					<span>{m.chat_loading_stop()}</span>
-				</button>
-			{/if}
+						<span>{m.chat_loading_stop()}</span>
+					</button>
+				{/if}
+			</div>
 		</div>
 	</div>
 {/if}

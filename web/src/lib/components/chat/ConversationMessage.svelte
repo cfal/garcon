@@ -28,6 +28,7 @@
 	} from '$lib/components/ui/context-menu';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { cn } from '$lib/utils/cn';
 
 	interface PermissionTerminal {
 		state: 'resolved' | 'cancelled';
@@ -110,6 +111,13 @@
 		}
 
 	const formattedContent = $derived(getFormattedContent());
+	const messageClass = $derived(cn(
+		'chat-message',
+		cssType,
+		isGrouped && 'grouped',
+		!localSettings.roundedChatLayout && 'px-3 sm:px-0',
+		message instanceof UserMessage && 'flex justify-start min-w-0'
+	));
 
 	function getMessageMenuText(): string {
 		if (asAssistant) return String(asAssistant.content || '');
@@ -177,7 +185,7 @@
 
 {#if !shouldHideThinking}
 	<div
-		class="chat-message {cssType} {isGrouped ? 'grouped' : ''} {message instanceof UserMessage ? 'flex justify-start min-w-0' : ''}"
+		class={messageClass}
 	>
 			{#if asUser}
 				<div class="flex items-end w-full sm:w-auto sm:max-w-[85%] min-w-0">

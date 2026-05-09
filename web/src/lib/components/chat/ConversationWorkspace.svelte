@@ -214,9 +214,10 @@
 		};
 	});
 
-	// Scrolls to bottom on new messages unless user scrolled up.
+	// Scrolls to bottom on new messages and loading status changes unless user scrolled up.
 	$effect(() => {
 		const _count = chatState.chatMessages.length;
+		const _isLoading = lifecycle.isLoading;
 		if (!chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
 			requestAnimationFrame(() => scroll.scrollToBottom());
 		}
@@ -291,6 +292,7 @@
 					const chatId = sessions.selectedChatId;
 					if (chatId) controller.loadChat(chatId);
 				}}
+				reserveLoadingStatusSpace={lifecycle.isLoading}
 			/>
 
 			{#if chatState.isUserScrolledUp && chatState.chatMessages.length > 0}
