@@ -298,7 +298,7 @@
 							<ContextMenu>
 								<ContextMenuTrigger class="message-context-menu-trigger relative block">
 									<div class="group/message">
-										<div class="text-sm text-foreground">
+										<div class="px-px text-sm text-foreground">
 											<Markdown source={formattedContent} variant="assistant" {projectBasePath} onLinkNavigate={handleLinkNavigate} />
 										</div>
 										<div class="message-menu-actions mt-1 flex justify-end opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100">
