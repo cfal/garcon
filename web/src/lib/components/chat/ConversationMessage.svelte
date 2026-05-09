@@ -115,7 +115,6 @@
 		'chat-message',
 		cssType,
 		isGrouped && 'grouped',
-		!localSettings.roundedChatLayout && 'px-3 sm:px-0',
 		message instanceof UserMessage && 'flex justify-start min-w-0'
 	));
 

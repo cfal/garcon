@@ -102,12 +102,17 @@
 	const feedViewportClass = $derived(
 		cn(
 			'h-full overflow-y-auto overflow-x-hidden scrollbar-hide relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
-			localSettings.roundedChatLayout
-				? cn(
-					'px-3 pt-3 sm:px-5 sm:pt-4 lg:px-6',
-					reserveLoadingStatusSpace ? 'pb-14 sm:pb-16' : 'pb-6 sm:pb-8'
-				)
-				: 'px-0 pt-3 pb-10 sm:pt-4 sm:px-4 sm:pb-12 space-y-2 sm:space-y-3'
+			'pt-3 sm:pt-4',
+			reserveLoadingStatusSpace ? 'pb-14 sm:pb-16' : 'pb-10 sm:pb-12',
+			localSettings.chatHorizontalMargins ? 'px-3 sm:px-5 lg:px-6' : 'px-0'
+		)
+	);
+	const feedContentClass = $derived(
+		cn(
+			'flex w-full flex-col gap-2 sm:gap-3',
+			localSettings.chatHorizontalMargins
+				? 'mx-auto max-w-5xl px-4 sm:px-5'
+				: 'px-3 sm:px-4'
 		)
 	);
 </script>
@@ -255,11 +260,7 @@
 	aria-label="Chat messages"
 	class={feedViewportClass}
 >
-	{#if localSettings.roundedChatLayout}
-		<div class="mx-auto flex w-full max-w-5xl flex-col gap-2 px-4 sm:gap-3 sm:px-5">
-			{@render feedContent()}
-		</div>
-	{:else}
+	<div class={feedContentClass}>
 		{@render feedContent()}
-	{/if}
+	</div>
 </div>

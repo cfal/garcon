@@ -96,10 +96,10 @@
 		'absolute bottom-0 left-0 right-0 z-10 border-t',
 		showBg ? 'bg-card border-border' : 'border-transparent'
 	));
-	const statusGutterClass = $derived(localSettings.roundedChatLayout ? 'px-3 sm:px-5 lg:px-6' : '');
+	const statusGutterClass = $derived(localSettings.chatHorizontalMargins ? 'px-3 sm:px-5 lg:px-6' : '');
 	const statusContentClass = $derived(cn(
 		'flex items-center justify-between py-2 leading-none',
-		localSettings.roundedChatLayout ? 'mx-auto w-full max-w-5xl px-4 sm:px-5' : 'px-3 sm:px-4'
+		localSettings.chatHorizontalMargins ? 'mx-auto w-full max-w-5xl px-4 sm:px-5' : 'px-3 sm:px-4'
 	));
 </script>
 

@@ -53,7 +53,7 @@ describe('Settings', () => {
 			expect(screen.getByRole('heading', { name: 'OpenAI Providers' })).toBeTruthy();
 			expect(screen.getByText('Use OpenAI-compatible endpoints with Direct and Codex. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.')).toBeTruthy();
 				expect(screen.getByRole('heading', { name: 'Other Harnesses' })).toBeTruthy();
-				expect(screen.getByText('Rounded chat layout')).toBeTruthy();
+				expect(screen.getByText('Chat horizontal margins')).toBeTruthy();
 				expect(screen.queryByText('Direct (Anthropic)')).toBeNull();
 			expect(screen.queryByText('Direct (Chat Completions)')).toBeNull();
 			expect(screen.queryByText('Direct (Responses)')).toBeNull();
