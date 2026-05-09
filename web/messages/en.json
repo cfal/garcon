@@ -396,7 +396,7 @@
   "settings_chat_auto_expand_tools": "Always expand tool calls",
   "settings_chat_auto_scroll_to_bottom": "Auto-scroll",
   "settings_chat_send_by_shift_enter": "Send by Shift+Enter",
-  "settings_chat_horizontal_margins": "Chat horizontal margins",
+  "settings_chat_horizontal_margins": "Add chat gutters",
   "settings_chat_show_thinking": "Show thinking",
   "settings_accessibility_colorblind_mode": "Colorblind-friendly colors",
   "settings_display_show_fullscreen_button": "Always full screen on Git panel",
