@@ -12,7 +12,6 @@ export interface LocalSettingsSnapshot {
 	showThinking: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
-	showChatHeader: boolean;
 	roundedChatLayout: boolean;
 	alwaysFullscreenOnGitPanel: boolean;
 	sidebarVisible: boolean;
@@ -33,7 +32,6 @@ type BooleanLocalSettingKey =
 	| 'showThinking'
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
-	| 'showChatHeader'
 	| 'roundedChatLayout'
 	| 'alwaysFullscreenOnGitPanel'
 	| 'sidebarVisible'
@@ -48,7 +46,6 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	showThinking: true,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
-	showChatHeader: false,
 	roundedChatLayout: false,
 	alwaysFullscreenOnGitPanel: true,
 	sidebarVisible: true,
@@ -95,7 +92,6 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
-		showChatHeader: parseBoolean(parsed.showChatHeader, DEFAULTS.showChatHeader),
 		roundedChatLayout: parseBoolean(parsed.roundedChatLayout, DEFAULTS.roundedChatLayout),
 		alwaysFullscreenOnGitPanel: parseBoolean(parsed.alwaysFullscreenOnGitPanel, DEFAULTS.alwaysFullscreenOnGitPanel),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
@@ -143,7 +139,6 @@ export class LocalSettingsStore {
 	showThinking = $state(DEFAULTS.showThinking);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
-	showChatHeader = $state(DEFAULTS.showChatHeader);
 	roundedChatLayout = $state(DEFAULTS.roundedChatLayout);
 	alwaysFullscreenOnGitPanel = $state(DEFAULTS.alwaysFullscreenOnGitPanel);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
@@ -195,7 +190,6 @@ export class LocalSettingsStore {
 			showThinking: this.showThinking,
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
-			showChatHeader: this.showChatHeader,
 			roundedChatLayout: this.roundedChatLayout,
 			alwaysFullscreenOnGitPanel: this.alwaysFullscreenOnGitPanel,
 			sidebarVisible: this.sidebarVisible,
@@ -218,7 +212,6 @@ export class LocalSettingsStore {
 		this.showThinking = snap.showThinking;
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;
-		this.showChatHeader = snap.showChatHeader;
 		this.roundedChatLayout = snap.roundedChatLayout;
 		this.alwaysFullscreenOnGitPanel = snap.alwaysFullscreenOnGitPanel;
 		this.sidebarVisible = snap.sidebarVisible;

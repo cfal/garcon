@@ -48,7 +48,6 @@
 		showThinking: true,
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
-		showChatHeader: false,
 		roundedChatLayout: false,
 		searchBarPosition: 'top',
 		set() {},

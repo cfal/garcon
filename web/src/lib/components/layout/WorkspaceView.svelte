@@ -58,10 +58,10 @@
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
 	const isMobileLayout = $derived(!!onMenuClick);
-	const hideHeaderForChatTab = $derived(!localSettings.showChatHeader && activeTab === 'chat');
-	const showTopHeader = $derived(!hideHeaderForChatTab);
+	const isChatTab = $derived(activeTab === 'chat');
+	const showTopHeader = $derived(!isChatTab);
 	const showInlineDesktopTabs = $derived(showTopHeader);
-	const showFloatingDesktopTabs = $derived(hideHeaderForChatTab && !isMobileLayout);
+	const showFloatingDesktopTabs = $derived(isChatTab && !isMobileLayout);
 	const hideFullscreenButtonOnGitTab = $derived(activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel);
 	const canToggleDesktopFullscreen = $derived(
 		!isMobileLayout &&

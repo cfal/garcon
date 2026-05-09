@@ -5,7 +5,6 @@
 
 	interface WorkspaceViewTestHarnessProps {
 		activeTab: AppTab;
-		showChatHeader: boolean;
 		alwaysFullscreenOnGitPanel?: boolean;
 		isMobile?: boolean;
 		isDesktopFullscreen?: boolean;
@@ -15,7 +14,6 @@
 
 	let {
 		activeTab,
-		showChatHeader,
 		alwaysFullscreenOnGitPanel = true,
 		isMobile = false,
 		isDesktopFullscreen = false,
@@ -45,9 +43,6 @@
 	setChatSessions(getChatSessionsContext() as never);
 
 	setLocalSettings({
-		get showChatHeader() {
-			return showChatHeader;
-		},
 		get alwaysFullscreenOnGitPanel() {
 			return alwaysFullscreenOnGitPanel;
 		},

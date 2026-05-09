@@ -52,9 +52,9 @@ describe('Settings', () => {
 			expect(screen.getByText('Use Anthropic Messages-compatible endpoints with Claude Code and Direct.')).toBeTruthy();
 			expect(screen.getByRole('heading', { name: 'OpenAI Providers' })).toBeTruthy();
 			expect(screen.getByText('Use OpenAI-compatible endpoints with Direct and Codex. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.')).toBeTruthy();
-			expect(screen.getByRole('heading', { name: 'Other Harnesses' })).toBeTruthy();
-			expect(screen.getByText('Rounded chat layout')).toBeTruthy();
-			expect(screen.queryByText('Direct (Anthropic)')).toBeNull();
+				expect(screen.getByRole('heading', { name: 'Other Harnesses' })).toBeTruthy();
+				expect(screen.getByText('Rounded chat layout')).toBeTruthy();
+				expect(screen.queryByText('Direct (Anthropic)')).toBeNull();
 			expect(screen.queryByText('Direct (Chat Completions)')).toBeNull();
 			expect(screen.queryByText('Direct (Responses)')).toBeNull();
 			expect(screen.getByText('These settings are stored in your browser.')).toBeTruthy();

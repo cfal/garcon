@@ -396,7 +396,6 @@
   "settings_chat_auto_expand_tools": "Always expand tool calls",
   "settings_chat_auto_scroll_to_bottom": "Auto-scroll",
   "settings_chat_send_by_shift_enter": "Send by Shift+Enter",
-  "settings_chat_always_show_chat_header": "Always show chat header",
   "settings_chat_rounded_layout": "Rounded chat layout",
   "settings_chat_show_thinking": "Show thinking",
   "settings_accessibility_colorblind_mode": "Colorblind-friendly colors",

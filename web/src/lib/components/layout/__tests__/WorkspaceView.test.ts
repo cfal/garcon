@@ -27,10 +27,9 @@ function dispatchDragEvent(
 }
 
 describe('WorkspaceView header visibility', () => {
-	it('hides the top header on desktop when Show header is disabled on the chat tab', () => {
+	it('hides the top header on desktop for the chat tab', () => {
 		const { container } = render(WorkspaceViewTestHarness, {
 			activeTab: 'chat',
-			showChatHeader: false,
 			alwaysFullscreenOnGitPanel: true,
 			isMobile: false
 		});
@@ -45,10 +44,9 @@ describe('WorkspaceView header visibility', () => {
 		expect(screen.getByTitle('Fullscreen')).toBeTruthy();
 	});
 
-	it('keeps the top header visible on desktop when Show header is disabled on non-chat tabs', () => {
+	it('keeps the top header visible on desktop for non-chat tabs', () => {
 		const { container } = render(WorkspaceViewTestHarness, {
 			activeTab: 'preview',
-			showChatHeader: false,
 			isMobile: false
 		});
 
@@ -56,10 +54,9 @@ describe('WorkspaceView header visibility', () => {
 		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeNull();
 	});
 
-	it('hides the top header on mobile chat tab when Show header is disabled', () => {
+	it('hides the top header on mobile chat tab', () => {
 		const { container } = render(WorkspaceViewTestHarness, {
 			activeTab: 'chat',
-			showChatHeader: false,
 			isMobile: true
 		});
 
@@ -69,24 +66,9 @@ describe('WorkspaceView header visibility', () => {
 		expect(screen.queryByTitle('Fullscreen')).toBeNull();
 	});
 
-	it('shows the top header when Show header is enabled', () => {
-		const { container } = render(WorkspaceViewTestHarness, {
-			activeTab: 'chat',
-			showChatHeader: true,
-			alwaysFullscreenOnGitPanel: true,
-			isMobile: false
-		});
-
-		expect(screen.getByRole('heading', { name: 'Header Test Chat' })).toBeTruthy();
-		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeNull();
-		expect(screen.getByTestId('conversation-workspace-stub').dataset.reserveTopFloatingToolbar).toBe('false');
-		expect(screen.getByTitle('Fullscreen')).toBeTruthy();
-	});
-
 	it('shows exit fullscreen title when desktop fullscreen is active', () => {
 		render(WorkspaceViewTestHarness, {
 			activeTab: 'chat',
-			showChatHeader: true,
 			alwaysFullscreenOnGitPanel: true,
 			isMobile: false,
 			isDesktopFullscreen: true
@@ -98,7 +80,6 @@ describe('WorkspaceView header visibility', () => {
 	it('hides fullscreen control on git tab when always-fullscreen-on-git is enabled', () => {
 		render(WorkspaceViewTestHarness, {
 			activeTab: 'git',
-			showChatHeader: true,
 			alwaysFullscreenOnGitPanel: true,
 			isMobile: false
 		});
@@ -109,7 +90,6 @@ describe('WorkspaceView header visibility', () => {
 	it('shows fullscreen control on git tab when always-fullscreen-on-git is disabled', () => {
 		render(WorkspaceViewTestHarness, {
 			activeTab: 'git',
-			showChatHeader: true,
 			alwaysFullscreenOnGitPanel: false,
 			isMobile: false
 		});
@@ -119,8 +99,7 @@ describe('WorkspaceView header visibility', () => {
 
 	it('uses semantic token classes for header and active tabs', () => {
 		const { container } = render(WorkspaceViewTestHarness, {
-			activeTab: 'chat',
-			showChatHeader: true,
+			activeTab: 'files',
 			isMobile: false
 		});
 
@@ -168,7 +147,6 @@ describe('WorkspaceView header visibility', () => {
 
 		const { container } = render(WorkspaceViewTestHarness, {
 			activeTab: 'chat',
-			showChatHeader: true,
 			isMobile: false,
 			splitLayout,
 			chatSessions: {
@@ -251,7 +229,6 @@ describe('WorkspaceView header visibility', () => {
 
 		const { container } = render(WorkspaceViewTestHarness, {
 			activeTab: 'chat',
-			showChatHeader: true,
 			isMobile: false,
 			splitLayout,
 			chatSessions: {
@@ -354,7 +331,6 @@ describe('WorkspaceView header visibility', () => {
 
 		const { container } = render(WorkspaceViewTestHarness, {
 			activeTab: 'chat',
-			showChatHeader: true,
 			isMobile: false,
 			splitLayout,
 		});

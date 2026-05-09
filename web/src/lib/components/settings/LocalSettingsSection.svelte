@@ -112,11 +112,6 @@
 				() => ls.toggle('sendByShiftEnter')
 			)}
 			{@render settingRow(
-				m.settings_chat_always_show_chat_header(),
-				ls.showChatHeader,
-				() => ls.toggle('showChatHeader')
-			)}
-			{@render settingRow(
 				m.settings_chat_rounded_layout(),
 				ls.roundedChatLayout,
 				() => ls.toggle('roundedChatLayout')
