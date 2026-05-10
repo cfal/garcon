@@ -1,6 +1,7 @@
 # Garcon
 
-Garcon is a coding workspace for Claude Code, Codex, OpenCode, and Amp.
+Garcon is a local coding workspace for agentic CLI and API backends: Claude Code,
+Codex, OpenCode, Amp, Factory Droid, and OpenAI/Anthropic-compatible endpoints.
 
 <table>
   <tr>
@@ -27,36 +28,39 @@ Garcon is a coding workspace for Claude Code, Codex, OpenCode, and Amp.
   </tr>
   <tr>
     <td align="center"><em>Main workspace</em></td>
-    <td align="center"><em>Built-in Git workbench</em></td>
+    <td align="center"><em>Git workbench</em></td>
     <td align="center"><em>Mobile layout</em></td>
-    <td align="center"><em>Main workspace (dark theme)</em></td>
+    <td align="center"><em>Dark theme</em></td>
   </tr>
 </table>
 
-## Capabilities
+## What It Does
 
-- Multi-provider chat sessions (`claude`, `codex`, `opencode`) with per-chat model selection
-- Unified coding workspace tabs: chat, files, terminal, and git
-- Full Git workbench: status, diff, staging/hunks, branches, history, commit/push/pull/fetch, worktrees, revert
-- Persistent chat history with pin/archive/reorder/read-state/fork operations
-- Per-chat message queueing (enqueue, pause, resume, clear) with recovery after restart
-- File workspace: tree/list/browse, text editing, binary/image viewing, and image upload for prompts
-- Built-in terminal tab (PTY over WebSocket) with reconnectable sessions
-- Configurable project access boundary for filesystem safety
+- Runs persistent coding chats across Claude, Codex, OpenCode, Amp, Factory, and direct API-compatible providers.
+- Supports Anthropic Messages, OpenAI Chat Completions, OpenAI Responses, Ollama, OpenRouter, Gemini, Fireworks, Together, Alibaba Cloud, Z.AI, and custom endpoints through Settings.
+- Provides per-chat model, permission, thinking, image, tag, queue, read-state, pin, archive, reorder, fork, and share controls.
+- Keeps a unified workspace with chat, file browser/editor, terminal, and Git tabs.
+- Supports split chat panes with drag-and-drop, resizable layouts, and up to four visible chats.
+- Offers saved searches, structured sidebar filters, quick search pills, tags, and unread/active filters.
+- Includes a Git workbench for status, staged/unstaged review, split diffs, line/hunk/file staging, commits, branches, remotes, push/pull/fetch, worktrees, and revert/reset flows.
 
 ## Architecture
 
-- `web/`: SvelteKit frontend (chat, files, shell, git panels)
-- `server/`: Bun server + WebSocket orchestration + provider adapters
-- `common/`: shared WS contracts and chat/event types
+- `web/`: SvelteKit/Svelte 5 frontend.
+- `server/`: Bun HTTP/WebSocket server, provider adapters, queueing, Git, auth, and notifications.
+- `common/`: shared chat, WebSocket, provider, model, settings, and API contracts.
 
 ## Requirements
 
 - [Bun](https://bun.sh/)
-- At least one agent backend:
-  - Claude CLI (`claude`) and local Claude auth
-  - Codex auth (`~/.codex/auth.json`) or `OPENAI_API_KEY`
-  - OpenCode provider keys/config (through OpenCode SDK)
+- `git`
+- At least one backend:
+  - Claude CLI/auth, `ANTHROPIC_API_KEY`, or an Anthropic-compatible endpoint
+  - Codex auth, `OPENAI_API_KEY`, or an OpenAI-compatible endpoint
+  - OpenCode config
+  - Amp CLI/login
+  - Factory Droid CLI/login or `FACTORY_API_KEY`
+  - Local Ollama or another configured API provider
 
 ## Quick Start
 
@@ -67,47 +71,74 @@ bun run install
 bun run start
 ```
 
-Default URL: `http://127.0.0.1:8080` (override with `GARCON_PORT` or `--port`)
+Default URL: `http://127.0.0.1:8080`.
 
-On first launch, create the single local account at `/setup`, then configure providers in Settings.
-If you start the server with auth disabled, onboarding/login is skipped and you enter the app directly.
+On first launch, create the local account at `/setup`, then configure providers in
+Settings. To skip local auth:
 
-## Run and Configuration
+```bash
+bun run start --disable-auth
+# or
+GARCON_DISABLE_AUTH=true bun run start
+```
 
-### CLI
+## Run And Configure
 
 ```bash
 bun run start --port 8080 --bind-address 127.0.0.1 --project-base-dir /path/to/repos
 ```
 
-Disable auth at startup (requires server restart to change):
+Useful options and environment variables:
+
+- `GARCON_PORT` / `--port`: listen port. Use `0` for a random port.
+- `GARCON_BIND_ADDRESS` / `--bind-address`: server bind address.
+- `GARCON_CONFIG_DIR` / `--config-dir`: base config directory. Defaults to `~/.garcon`.
+- `GARCON_WORKSPACE` / `--workspace`: named workspace under the config dir.
+- `GARCON_WORKSPACE_DIR` / `--workspace-dir`: explicit workspace directory.
+- `GARCON_PROJECT_BASE_DIR` / `--project-base-dir`: filesystem access boundary.
+- `GARCON_TERMINAL_SHELL`: shell used by PTY sessions.
+- `GARCON_TELEGRAM_BOT_TOKEN`: enables Telegram notifications.
+- `CLAUDE_BINARY`, `AMP_BINARY`, `FACTORY_BINARY`: override CLI binary paths.
+
+Run `bun run help` for the full option list.
+
+## Providers And Models
+
+Configure providers from Settings. Garcon can use native harnesses, direct
+Anthropic/OpenAI-compatible endpoints, and endpoint-backed models inside
+compatible harnesses. API provider definitions are stored server-side; API keys
+are redacted from client catalog responses.
+
+Local Ollama models are supported through API provider templates and model
+discovery.
+
+## Build
+
+Build the SvelteKit frontend:
 
 ```bash
-bun run start -- --disable-auth
-# or GARCON_DISABLE_AUTH=true bun run start
+bun run build
 ```
 
-Run `bun run help` to see all flags and supported environment variables.
-
-### Build Executable
-
-Build a standalone Bun executable (server + embedded static frontend assets):
+Build a standalone Bun executable:
 
 ```bash
 bun run build-exe
 ```
 
-This command runs checks/tests, builds `web/build`, compiles `dist/garcon`, and runs a smoke test against the executable.
+`build-exe` runs checks/tests, builds `web/build`, compiles target-specific
+executables under `dist/`, and runs an executable smoke test.
 
-At server startup, static assets are served from embedded assets when `Bun.embeddedFiles` is non-empty.
-Otherwise the server reads from `web/build`.
+## Docker
 
-### Docker
+Docker Hub images are published periodically but may lag behind the latest
+commits. For the freshest image, build locally:
 
-Docker Hub images are published periodically but may lag behind the latest commits.
-For the most up-to-date version, build the image locally with `docker compose build` (see the Docker Compose section below).
+```bash
+GARCON_PROJECT_DIR=~/repos docker compose up -d --build
+```
 
-Test with Docker Hub image:
+Run a published image:
 
 ```bash
 docker run -d \
@@ -131,16 +162,18 @@ docker run -d \
   garconide/garcon:latest
 ```
 
-Run with Docker Compose (builds local image):
+Set `GARCON_PROJECT_DIR` for Compose or mount `/projects` for `docker run`.
+Config and workspace data are persisted in `garcon-data`.
+
+## Development
 
 ```bash
-GARCON_PROJECT_DIR=~/repos docker compose up -d
+bun run check
+bun run test
 ```
 
-Custom port:
+For startup validation after code changes:
 
 ```bash
-GARCON_PROJECT_DIR=~/repos GARCON_PORT=3000 docker compose up -d
+timeout 45s bun run start --port 0
 ```
-
-Set `GARCON_PROJECT_DIR` (compose) or the `/projects` bind mount (`docker run`) to the directory containing your repos. Pass any API keys (e.g. `OPENAI_API_KEY`) as needed. Config is persisted in `garcon-data`.
