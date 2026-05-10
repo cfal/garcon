@@ -86,7 +86,7 @@ describe('shouldSubmitOnEnter', () => {
 		).toBe(false);
 	});
 
-	it('never submits on mobile (Enter inserts newline)', () => {
+	it('uses the setting as the only Enter/Shift+Enter mode switch', () => {
 		expect(
 			shouldSubmitOnEnter({
 				sendByShiftEnter: false,
@@ -94,12 +94,8 @@ describe('shouldSubmitOnEnter', () => {
 				ctrlKey: false,
 				metaKey: false,
 				isComposing: false,
-				isMobile: true,
 			})
-		).toBe(false);
-	});
-
-	it('never submits on mobile even with Shift+Enter', () => {
+		).toBe(true);
 		expect(
 			shouldSubmitOnEnter({
 				sendByShiftEnter: true,
@@ -107,9 +103,8 @@ describe('shouldSubmitOnEnter', () => {
 				ctrlKey: false,
 				metaKey: false,
 				isComposing: false,
-				isMobile: true,
 			})
-		).toBe(false);
+		).toBe(true);
 	});
 });
 

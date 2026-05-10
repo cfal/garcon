@@ -2,9 +2,24 @@
 	import NewChatForm from '../NewChatForm.svelte';
 	import { setAppShell, setModelCatalog, setLocalSettings, setRemoteSettings, setChatSessions } from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import type { NewChatConfig } from '$lib/types/app';
+
+	interface Props {
+		sendByShiftEnter?: boolean;
+		isMobile?: boolean;
+		onStartChat?: (config: NewChatConfig) => void;
+	}
+
+	let {
+		sendByShiftEnter = false,
+		isMobile = false,
+		onStartChat = () => {},
+	}: Props = $props();
 
 	setLocalSettings({
-		sendByShiftEnter: false
+		get sendByShiftEnter() {
+			return sendByShiftEnter;
+		}
 	} as never);
 
 	setRemoteSettings(createRemoteSettingsStore());
@@ -15,6 +30,9 @@
 
 	setAppShell({
 		projectBasePath: '/workspace',
+		get isMobile() {
+			return isMobile;
+		},
 		onNewChatDialogSeed() {
 			return () => {};
 		}
@@ -86,4 +104,4 @@
 			} as never);
 	</script>
 
-<NewChatForm onStartChat={() => {}} />
+	<NewChatForm {onStartChat} />

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import NewChatFormTestHarness from './NewChatFormTestHarness.svelte';
+import * as chatsApi from '$lib/api/chats';
 import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
@@ -17,6 +18,22 @@ vi.mock('$lib/api/settings', () => ({
 	getRemoteSettings: vi.fn(),
 	updateRemoteSettings: vi.fn(),
 }));
+
+function installMatchMedia(matches: boolean): void {
+	Object.defineProperty(window, 'matchMedia', {
+		configurable: true,
+		value: vi.fn().mockImplementation((query: string) => ({
+			matches,
+			media: query,
+			onchange: null,
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn(),
+			addListener: vi.fn(),
+			removeListener: vi.fn(),
+			dispatchEvent: vi.fn(),
+		})),
+	});
+}
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -49,7 +66,46 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 	};
 }
 
+async function renderReadyNewChatForm(options: {
+	sendByShiftEnter?: boolean;
+	isMobile?: boolean;
+} = {}) {
+	const onStartChat = vi.fn();
+	vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+		lastProjectPath: '/workspace/project',
+	}));
+	vi.mocked(chatsApi.validateStart).mockResolvedValue({
+		valid: true,
+		isGitRepo: false
+	});
+
+	render(NewChatFormTestHarness, {
+		props: {
+			...options,
+			onStartChat,
+		}
+	});
+
+	const messageInput = await screen.findByPlaceholderText('How can I help you today?') as HTMLTextAreaElement;
+	await waitFor(() => {
+		expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+	});
+	await fireEvent.input(messageInput, { target: { value: 'Start this session' } });
+
+	const sendButton = screen.getByTitle('Start session') as HTMLButtonElement;
+	await waitFor(() => {
+		expect(sendButton.disabled).toBe(false);
+	});
+
+	return { messageInput, onStartChat };
+}
+
 describe('NewChatForm', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		installMatchMedia(false);
+	});
+
 	it('shows a centered spinner and hides the composer until settings load', async () => {
 		const pending = deferred<Awaited<ReturnType<typeof settingsApi.getRemoteSettings>>>();
 		vi.mocked(settingsApi.getRemoteSettings).mockReturnValueOnce(pending.promise);
@@ -109,4 +165,45 @@ describe('NewChatForm', () => {
 		expect(worktreeDialog.textContent).toContain('New worktree');
 	});
 
+	it('starts on Enter when send by Shift+Enter is disabled', async () => {
+		const { messageInput, onStartChat } = await renderReadyNewChatForm({
+			sendByShiftEnter: false,
+		});
+
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		expect(onStartChat).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps Enter as a newline when send by Shift+Enter is enabled', async () => {
+		const { messageInput, onStartChat } = await renderReadyNewChatForm({
+			sendByShiftEnter: true,
+		});
+
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		expect(onStartChat).not.toHaveBeenCalled();
+	});
+
+	it('starts on Shift+Enter when send by Shift+Enter is enabled', async () => {
+		const { messageInput, onStartChat } = await renderReadyNewChatForm({
+			sendByShiftEnter: true,
+		});
+
+		await fireEvent.keyDown(messageInput, { key: 'Enter', shiftKey: true });
+
+		expect(onStartChat).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not let the mobile viewport override the Enter setting', async () => {
+		installMatchMedia(true);
+		const { messageInput, onStartChat } = await renderReadyNewChatForm({
+			sendByShiftEnter: false,
+			isMobile: true,
+		});
+
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		expect(onStartChat).toHaveBeenCalledTimes(1);
+	});
 });
