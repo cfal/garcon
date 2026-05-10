@@ -2,6 +2,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import LoadingStatus from './LoadingStatus.svelte';
 	import { getComposerState, getChatLifecycle, getLocalSettings, getChatSessions, getAppShell, getModelCatalog, getProviderState } from '$lib/context';
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
@@ -20,9 +21,10 @@
 		onModelChange?: (model: string) => void;
 		onPermissionModeChange?: (mode: PermissionMode) => void;
 		onThinkingModeChange?: (mode: ThinkingMode) => void;
+		onAbort?: (() => void) | null;
 	}
 
-	let { onsubmit, onModelChange, onPermissionModeChange, onThinkingModeChange }: Props = $props();
+	let { onsubmit, onModelChange, onPermissionModeChange, onThinkingModeChange, onAbort = null }: Props = $props();
 
 	const composerState = getComposerState();
 	const lifecycle = getChatLifecycle();
@@ -210,7 +212,7 @@
 			: 'px-2 pb-2 sm:px-3'
 	));
 	const composerSurfaceClass = $derived(cn(
-		'relative bg-card overflow-hidden rounded-2xl border border-border shadow-sm'
+		'relative z-20 bg-card overflow-hidden rounded-2xl border border-border shadow-sm'
 	));
 	const imageListClass = $derived(cn(
 		'p-2 bg-muted/40 rounded-lg mx-2 mt-2'
@@ -415,12 +417,19 @@
 
 {#snippet composerFrame()}
 	<div class="relative">
+		<LoadingStatus
+			isLoading={lifecycle.isLoading}
+			status={lifecycle.loadingStatus}
+			provider={providerState.provider}
+			spinnerSelectionKey={sessions.selectedChatId}
+			{onAbort}
+		/>
 		{#if !appShell.isMobile}
 			<!-- Keeps the grab zone outside the clipped rounded surface. -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
 			<div
 				onpointerdown={handleResizeStart}
-				class="absolute left-0 right-0 -top-1 h-3 cursor-row-resize z-20 touch-none"
+				class="absolute left-0 right-0 -top-1 z-40 h-3 cursor-row-resize touch-none"
 			></div>
 		{/if}
 		{@render composerSurface()}

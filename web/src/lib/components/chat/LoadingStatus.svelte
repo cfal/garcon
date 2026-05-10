@@ -1,18 +1,15 @@
 <script lang="ts">
-	// Thinking status overlay at the bottom of the messages pane.
-	// Shows animated spinner, status text, elapsed time, and a stop
-	// button when the agent can be interrupted.
+	// Renders the composer-anchored status tray shown while an agent is running.
 
 	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getLocalSettings } from '$lib/context';
 	import { cn } from '$lib/utils/cn';
+	import { Square } from '@lucide/svelte';
 
 	interface Props {
 		isLoading: boolean;
 		status: { text?: string; can_interrupt?: boolean } | null;
 		provider: string;
-		isScrolledToBottom: boolean;
 		onAbort: (() => void) | null;
 		spinnerSelectionKey?: string | null;
 	}
@@ -21,26 +18,20 @@
 		isLoading,
 		status,
 		provider,
-		isScrolledToBottom,
 		onAbort,
 		spinnerSelectionKey = null
 	}: Props = $props();
-
-	const localSettings = getLocalSettings();
 
 	const SPINNER_SETS = [
 		['\u25D0', '\u25D3', '\u25D1', '\u25D2'],
 		['\u280B', '\u2819', '\u2839', '\u2838', '\u283C', '\u2834', '\u2826', '\u2827', '\u2807', '\u280F'],
 		['\u2736', '\u2737', '\u2738', '\u2739']
 	] as const;
-	const BG_DEBOUNCE_MS = 250;
 
 	let animationPhase = $state(0);
 	let activeSpinners = $state<string[]>([...SPINNER_SETS[0]]);
-	let showBg = $state(false);
 
 	let animTimer: ReturnType<typeof setInterval> | null = null;
-	let bgTimer: ReturnType<typeof setTimeout> | null = null;
 	let hasSpinnerSelection = false;
 	let lastSpinnerSelectionKey: string | null = null;
 
@@ -48,7 +39,7 @@
 		return [...SPINNER_SETS[Math.floor(Math.random() * SPINNER_SETS.length)]];
 	}
 
-	// Spinner animation.
+	// Animates the spinner while the tray is visible.
 	$effect(() => {
 		if (animTimer) { clearInterval(animTimer); animTimer = null; }
 		if (!isLoading) return;
@@ -74,57 +65,44 @@
 		}
 	});
 
-	// Debounced background when scrolled up.
-	$effect(() => {
-		if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
-		if (isScrolledToBottom) {
-			showBg = false;
-		} else {
-			bgTimer = setTimeout(() => { showBg = true; }, BG_DEBOUNCE_MS);
-		}
-		return () => { if (bgTimer) clearTimeout(bgTimer); };
-	});
-
 	onDestroy(() => {
 		if (animTimer) clearInterval(animTimer);
-		if (bgTimer) clearTimeout(bgTimer);
 	});
 
 	const statusText = $derived(provider === 'codex' ? m.chat_loading_thinking() : (status?.text || m.chat_loading_thinking()));
 	const canInterrupt = $derived(status?.can_interrupt !== false);
-	const statusOuterClass = $derived(cn(
-		'absolute bottom-0 left-0 right-0 z-10 border-t',
-		showBg ? 'bg-card border-border' : 'border-transparent'
-	));
-	const statusGutterClass = $derived(localSettings.chatHorizontalMargins ? 'px-3 sm:px-5 lg:px-6' : '');
-	const statusContentClass = $derived(cn(
-		'flex items-center justify-between py-2 leading-none',
-		localSettings.chatHorizontalMargins ? 'mx-auto w-full max-w-5xl px-4 sm:px-5' : 'px-[21px] sm:px-[25px]'
-	));
+	const statusTrayClass = cn(
+		'absolute bottom-full left-2 right-2 z-10 sm:left-3 sm:right-3'
+	);
+	const statusPanelClass = cn(
+		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-chat-thinking px-3 py-2 shadow-sm sm:px-4'
+	);
 </script>
 
 {#if isLoading}
-	<div class={statusOuterClass}>
-		<div class={statusGutterClass}>
-			<div class={statusContentClass}>
-				<div class="flex items-center gap-1.5 min-w-0">
-					<span
-						class="text-xs sm:text-sm transition-all duration-500 flex-shrink-0 text-status-processing {animationPhase % 2 === 0 ? 'scale-110' : ''}"
-					>
-						{activeSpinners[animationPhase]}
-					</span>
-					<span class="font-medium text-xs sm:text-sm truncate">{statusText}...</span>
-				</div>
-
-				{#if canInterrupt && onAbort}
-					<button
-						onclick={onAbort}
-						class="ml-2 mr-1 text-xs sm:text-sm border border-stop-button-border bg-stop-button-bg text-stop-button-foreground hover:bg-stop-button-bg/90 px-3 py-1 sm:px-3.5 sm:py-1 rounded-md transition-colors flex items-center flex-shrink-0 font-medium"
-					>
-						<span>{m.chat_loading_stop()}</span>
-					</button>
-				{/if}
+	<div class={statusTrayClass}>
+		<div class={statusPanelClass} role="status" aria-live="polite">
+			<div class="flex min-w-0 items-center gap-1.5">
+				<span
+					class="flex-shrink-0 text-xs text-status-processing transition-all duration-500 sm:text-sm {animationPhase % 2 === 0 ? 'scale-110' : ''}"
+				>
+					{activeSpinners[animationPhase]}
+				</span>
+				<span class="truncate text-xs font-medium text-foreground sm:text-sm">{statusText}...</span>
 			</div>
+
+			{#if canInterrupt && onAbort}
+				<button
+					type="button"
+					onclick={onAbort}
+					aria-label={m.chat_loading_stop()}
+					title={m.chat_loading_stop()}
+					class="inline-flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				>
+					<Square class="size-3" aria-hidden="true" />
+					<span class="hidden sm:inline">{m.chat_loading_stop()}</span>
+				</button>
+			{/if}
 		</div>
 	</div>
 {/if}

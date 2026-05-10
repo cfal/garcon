@@ -103,7 +103,7 @@
 		cn(
 			'h-full overflow-y-auto overflow-x-hidden scrollbar-hide relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
 			'pt-3 sm:pt-4',
-			reserveLoadingStatusSpace ? 'pb-14 sm:pb-16' : 'pb-3 sm:pb-4',
+			reserveLoadingStatusSpace ? 'pb-12' : 'pb-3 sm:pb-4',
 			localSettings.chatHorizontalMargins ? 'px-3 sm:px-5 lg:px-6' : 'px-0'
 		)
 	);
