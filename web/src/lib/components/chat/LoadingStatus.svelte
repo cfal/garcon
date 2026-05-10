@@ -75,7 +75,7 @@
 		'absolute bottom-full left-2 right-2 z-10 sm:left-3 sm:right-3'
 	);
 	const statusPanelClass = cn(
-		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-chat-thinking px-3 py-2 shadow-sm sm:px-4'
+		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-chat-thinking px-3 py-2 shadow-md sm:px-4'
 	);
 </script>
 
