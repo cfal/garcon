@@ -11,6 +11,7 @@
 		status: { text?: string; can_interrupt?: boolean } | null;
 		provider: string;
 		onAbort: (() => void) | null;
+		chatHorizontalMargins: boolean;
 		spinnerSelectionKey?: string | null;
 	}
 
@@ -19,6 +20,7 @@
 		status,
 		provider,
 		onAbort,
+		chatHorizontalMargins,
 		spinnerSelectionKey = null
 	}: Props = $props();
 
@@ -71,8 +73,12 @@
 
 	const statusText = $derived(provider === 'codex' ? m.chat_loading_thinking() : (status?.text || m.chat_loading_thinking()));
 	const canInterrupt = $derived(status?.can_interrupt !== false);
-	const statusTrayClass = cn(
-		'absolute bottom-full left-2 right-2 z-10 sm:left-3 sm:right-3'
+	const mobileTrayInsetClass = $derived(chatHorizontalMargins ? 'left-4 right-4' : 'left-[13px] right-[13px]');
+	const statusTrayClass = $derived(
+		cn(
+			'absolute bottom-full z-10 sm:left-3 sm:right-3',
+			mobileTrayInsetClass
+		)
 	);
 	const statusPanelClass = cn(
 		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-chat-thinking px-3 py-2 sm:px-4'
@@ -84,11 +90,11 @@
 		<div class={statusPanelClass} role="status" aria-live="polite">
 			<div class="flex min-w-0 items-center gap-1.5">
 				<span
-					class="flex-shrink-0 text-xs text-status-processing transition-all duration-500 sm:text-sm {animationPhase % 2 === 0 ? 'scale-110' : ''}"
+					class="flex-shrink-0 text-sm text-status-processing transition-all duration-500 {animationPhase % 2 === 0 ? 'scale-110' : ''}"
 				>
 					{activeSpinners[animationPhase]}
 				</span>
-				<span class="truncate text-xs font-medium text-foreground sm:text-sm">{statusText}...</span>
+				<span class="truncate text-sm font-medium text-foreground">{statusText}...</span>
 			</div>
 
 			{#if canInterrupt && onAbort}

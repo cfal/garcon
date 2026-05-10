@@ -422,6 +422,7 @@
 			status={lifecycle.loadingStatus}
 			provider={providerState.provider}
 			spinnerSelectionKey={sessions.selectedChatId}
+			chatHorizontalMargins={localSettings.chatHorizontalMargins}
 			{onAbort}
 		/>
 		{#if !appShell.isMobile}
