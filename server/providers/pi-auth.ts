@@ -1,9 +1,4 @@
-import { getPiBinary } from '../config.js';
-import { parsePiListModelsOutput } from './pi-models.js';
-
-export function hasPiModelRows(output: string): boolean {
-  return parsePiListModelsOutput(output).length > 0;
-}
+import { getPiAvailableModels } from './pi-models.js';
 
 export async function getPiAuthStatus(): Promise<{
   authenticated: boolean;
@@ -11,31 +6,17 @@ export async function getPiAuthStatus(): Promise<{
   label: string;
 }> {
   try {
-    const proc = Bun.spawn([getPiBinary(), '--list-models'], {
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout as ReadableStream).text(),
-      new Response(proc.stderr as ReadableStream).text(),
-      proc.exited,
-    ]);
-
-    if (exitCode !== 0) {
-      return {
-        authenticated: false,
-        canReauth: false,
-        label: (stderr || stdout).trim(),
-      };
-    }
-
+    const models = await getPiAvailableModels();
     return {
-      authenticated: hasPiModelRows(stdout),
+      authenticated: models.length > 0,
       canReauth: false,
       label: '',
     };
-  } catch {
-    return { authenticated: false, canReauth: false, label: '' };
+  } catch (error) {
+    return {
+      authenticated: false,
+      canReauth: false,
+      label: error instanceof Error ? error.message : '',
+    };
   }
 }

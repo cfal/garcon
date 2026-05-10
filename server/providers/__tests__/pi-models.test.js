@@ -1,52 +1,46 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 
 import { PI_MODELS } from '../../../common/models.js';
-import { clearPiModelCacheForTests, getPiModels, parsePiListModelsOutput } from '../pi-models.js';
 
-const originalSpawn = Bun.spawn;
+const createAgentSessionServicesMock = mock(async () => ({
+  modelRegistry: { getAvailable: () => [] },
+}));
+const authStorageCreateMock = mock(() => ({}));
+const getAgentDirMock = mock(() => '/tmp/pi-agent');
 
-function textStream(text) {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    start(controller) {
-      if (text) controller.enqueue(encoder.encode(text));
-      controller.close();
-    },
-  });
-}
+mock.module('@earendil-works/pi-coding-agent', () => ({
+  AuthStorage: { create: authStorageCreateMock },
+  createAgentSessionServices: createAgentSessionServicesMock,
+  getAgentDir: getAgentDirMock,
+}));
+
+import { clearPiModelCacheForTests, getPiAvailableModels, getPiModels } from '../pi-models.js';
 
 afterEach(() => {
-  Bun.spawn = originalSpawn;
+  createAgentSessionServicesMock.mockReset();
+  createAgentSessionServicesMock.mockImplementation(async () => ({
+    modelRegistry: { getAvailable: () => [] },
+  }));
+  authStorageCreateMock.mockReset();
+  authStorageCreateMock.mockImplementation(() => ({}));
+  getAgentDirMock.mockReset();
+  getAgentDirMock.mockImplementation(() => '/tmp/pi-agent');
   clearPiModelCacheForTests();
 });
 
 describe('Pi model discovery', () => {
-  it('parses pi --list-models table rows', () => {
-    const models = parsePiListModelsOutput(`
-provider   model                  context   max-out   thinking   images
-anthropic  claude-opus-4-6        200K      32K       yes        yes
-openai     gpt-5.4                400K      128K      yes        no
-`);
-
-    expect(models).toEqual([
-      { value: 'anthropic/claude-opus-4-6', label: 'anthropic/claude-opus-4-6', supportsImages: true },
-      { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4', supportsImages: false },
-    ]);
-  });
-
-  it('ignores non-table output', () => {
-    expect(parsePiListModelsOutput('No models are configured. Run pi and configure a provider.')).toEqual([]);
-  });
-
-  it('prepends the default fallback to dynamically discovered models', async () => {
-    Bun.spawn = mock(() => ({
-      stdout: textStream(`
-provider   model            context   max-out   thinking   images
-openai     gpt-5.4          400K      128K      yes        yes
-`),
-      stderr: textStream(''),
-      exited: Promise.resolve(0),
-    }));
+  it('prepends the default fallback to dynamically discovered SDK models', async () => {
+    createAgentSessionServicesMock.mockResolvedValueOnce({
+      modelRegistry: {
+        getAvailable: () => [
+          {
+            provider: 'openai',
+            id: 'gpt-5.4',
+            input: ['text', 'image'],
+          },
+        ],
+      },
+    });
 
     await expect(getPiModels()).resolves.toEqual([
       ...PI_MODELS.OPTIONS,
@@ -54,12 +48,47 @@ openai     gpt-5.4          400K      128K      yes        yes
     ]);
   });
 
-  it('falls back to Pi Default when model discovery fails', async () => {
-    Bun.spawn = mock(() => ({
-      stdout: textStream(''),
-      stderr: textStream('not logged in'),
-      exited: Promise.resolve(1),
-    }));
+  it('returns SDK-discovered models without the static default option', async () => {
+    createAgentSessionServicesMock.mockResolvedValueOnce({
+      modelRegistry: {
+        getAvailable: () => [
+          {
+            provider: 'openai',
+            id: 'gpt-5.4',
+            input: ['text'],
+          },
+        ],
+      },
+    });
+
+    await expect(getPiAvailableModels()).resolves.toEqual([
+      { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4', supportsImages: false },
+    ]);
+  });
+
+  it('filters malformed SDK model records', async () => {
+    createAgentSessionServicesMock.mockResolvedValueOnce({
+      modelRegistry: {
+        getAvailable: () => [
+          null,
+          { provider: 'openai' },
+          { id: 'gpt-5.4' },
+          {
+            provider: 'openai',
+            id: 'gpt-5.4',
+            input: ['text', 'image'],
+          },
+        ],
+      },
+    });
+
+    await expect(getPiAvailableModels()).resolves.toEqual([
+      { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4', supportsImages: true },
+    ]);
+  });
+
+  it('falls back to Pi Default when SDK model discovery fails', async () => {
+    createAgentSessionServicesMock.mockRejectedValueOnce(new Error('model registry failed'));
 
     await expect(getPiModels()).resolves.toEqual(PI_MODELS.OPTIONS);
   });
