@@ -13,10 +13,12 @@
 	import { createMessageIdAllocator } from '$lib/chat/message-id';
 	import { Loader2, TriangleAlert, RefreshCw } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
+	import { Scrollbar } from '$lib/components/ui/scroll-area';
 	import { cn } from '$lib/utils/cn';
+	import { ScrollArea as ScrollAreaPrimitive } from 'bits-ui';
 
 	interface Props {
-		scrollContainer?: HTMLDivElement;
+		scrollContainer?: HTMLDivElement | null;
 		onscroll?: () => void;
 		onPermissionDecision?: (permissionRequestId: string, decision: { allow: boolean; message?: string }) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
@@ -26,7 +28,7 @@
 	}
 
 	let {
-		scrollContainer = $bindable(),
+		scrollContainer = $bindable(null),
 		onscroll,
 		onPermissionDecision,
 		onExitPlanMode,
@@ -99,9 +101,10 @@
 		),
 	);
 
+	const feedScrollAreaClass = 'h-full overflow-hidden relative';
 	const feedViewportClass = $derived(
 		cn(
-			'h-full overflow-y-auto overflow-x-hidden scrollbar-hide relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
+			'h-full overflow-y-auto overflow-x-hidden relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
 			'pt-3 sm:pt-4',
 			reserveLoadingStatusSpace ? 'pb-14' : 'pb-3 sm:pb-4',
 			localSettings.chatHorizontalMargins ? 'md:px-5 lg:px-6' : 'md:px-0'
@@ -250,17 +253,21 @@
 	{/if}
 {/snippet}
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D -->
-<div
-	bind:this={scrollContainer}
-	onscroll={onscroll}
-	onfocusin={handleMessagePaneFocusIntent}
-	tabindex={-1}
-	role="log"
-	aria-label="Chat messages"
-	class={feedViewportClass}
->
-	<div class={feedContentClass}>
-		{@render feedContent()}
-	</div>
-</div>
+<ScrollAreaPrimitive.Root type="auto" class={feedScrollAreaClass}>
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D -->
+	<ScrollAreaPrimitive.Viewport
+		bind:ref={scrollContainer}
+		onscroll={onscroll}
+		onfocusin={handleMessagePaneFocusIntent}
+		tabindex={-1}
+		role="log"
+		aria-label="Chat messages"
+		class={feedViewportClass}
+	>
+		<div class={feedContentClass}>
+			{@render feedContent()}
+		</div>
+	</ScrollAreaPrimitive.Viewport>
+	<Scrollbar orientation="vertical" class="w-1.5" />
+	<ScrollAreaPrimitive.Corner />
+</ScrollAreaPrimitive.Root>

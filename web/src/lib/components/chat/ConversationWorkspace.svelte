@@ -67,7 +67,7 @@
 		reserveTopFloatingToolbar ? 'top-16' : 'top-3',
 	));
 
-	let scrollContainer: HTMLDivElement | undefined = $state();
+	let scrollContainer: HTMLDivElement | null = $state(null);
 	let queueControlsContainer: HTMLDivElement | undefined = $state();
 
 	// WS drain and event router.
