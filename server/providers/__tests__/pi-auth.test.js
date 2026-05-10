@@ -16,7 +16,7 @@ afterEach(() => {
 describe('Pi auth status', () => {
   it('is authenticated when SDK model discovery returns available models', async () => {
     getPiAvailableModelsMock.mockResolvedValueOnce([
-      { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4', supportsImages: true },
+      { value: 'openai/gpt-5.4', label: 'openai: gpt-5.4', supportsImages: true },
     ]);
 
     await expect(getPiAuthStatus()).resolves.toEqual({

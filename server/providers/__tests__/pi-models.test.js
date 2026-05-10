@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 
-import { PI_MODELS } from '../../../common/models.js';
-
 const createAgentSessionServicesMock = mock(async () => ({
   modelRegistry: { getAvailable: () => [] },
 }));
@@ -29,7 +27,7 @@ afterEach(() => {
 });
 
 describe('Pi model discovery', () => {
-  it('prepends the default fallback to dynamically discovered SDK models', async () => {
+  it('returns dynamically discovered SDK models with concise labels', async () => {
     createAgentSessionServicesMock.mockResolvedValueOnce({
       modelRegistry: {
         getAvailable: () => [
@@ -38,13 +36,22 @@ describe('Pi model discovery', () => {
             id: 'gpt-5.4',
             input: ['text', 'image'],
           },
+          {
+            provider: 'fireworks',
+            id: 'accounts/fireworks/models/deepseek-v3p1',
+            input: ['text'],
+          },
         ],
       },
     });
 
     await expect(getPiModels()).resolves.toEqual([
-      ...PI_MODELS.OPTIONS,
-      { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4', supportsImages: true },
+      { value: 'openai/gpt-5.4', label: 'openai: gpt-5.4', supportsImages: true },
+      {
+        value: 'fireworks/accounts/fireworks/models/deepseek-v3p1',
+        label: 'fireworks: deepseek-v3p1',
+        supportsImages: false,
+      },
     ]);
   });
 
@@ -62,7 +69,7 @@ describe('Pi model discovery', () => {
     });
 
     await expect(getPiAvailableModels()).resolves.toEqual([
-      { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4', supportsImages: false },
+      { value: 'openai/gpt-5.4', label: 'openai: gpt-5.4', supportsImages: false },
     ]);
   });
 
@@ -83,13 +90,13 @@ describe('Pi model discovery', () => {
     });
 
     await expect(getPiAvailableModels()).resolves.toEqual([
-      { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4', supportsImages: true },
+      { value: 'openai/gpt-5.4', label: 'openai: gpt-5.4', supportsImages: true },
     ]);
   });
 
-  it('falls back to Pi Default when SDK model discovery fails', async () => {
+  it('returns no models when SDK model discovery fails', async () => {
     createAgentSessionServicesMock.mockRejectedValueOnce(new Error('model registry failed'));
 
-    await expect(getPiModels()).resolves.toEqual(PI_MODELS.OPTIONS);
+    await expect(getPiModels()).resolves.toEqual([]);
   });
 });

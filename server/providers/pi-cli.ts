@@ -142,6 +142,14 @@ function buildPrompt(command: string, permissionMode: PermissionMode, hasImages:
   return `${PI_PLAN_PREFIX}\n\n${basePrompt}`;
 }
 
+function requireExplicitPiModel(model: unknown): string {
+  const normalized = typeof model === 'string' ? model.trim() : '';
+  if (!normalized || normalized === 'default') {
+    throw new Error('Pi requires an explicit model selection.');
+  }
+  return normalized;
+}
+
 async function resolveSessionArgument(request: ResumeTurnRequest): Promise<string> {
   if (request.nativePath && !isArtificialNativePath(request.nativePath)) {
     try {
@@ -162,12 +170,11 @@ async function buildPiRun(
   const args = ['--mode', 'json'];
   const configuredSessionDir = resolvePiConfiguredSessionDir(request.projectPath);
   const thinking = mapThinkingMode(request.thinkingMode);
+  const model = requireExplicitPiModel(request.model);
   const { cleanup, fileArgs } = await writeImagesToTempFiles(request.images);
   const prompt = buildPrompt(request.command, request.permissionMode, fileArgs.length > 0);
 
-  if (request.model && request.model !== 'default') {
-    args.push('--model', request.model);
-  }
+  args.push('--model', model);
   if (thinking) {
     args.push('--thinking', thinking);
   }
@@ -216,14 +223,14 @@ async function runPiCommand(
 }
 
 export async function runSingleQuery(prompt: string, options: Record<string, unknown> = {}): Promise<string> {
-  const model = typeof options.model === 'string' ? options.model : 'default';
+  const model = requireExplicitPiModel(options.model);
   const cwd = typeof options.cwd === 'string'
     ? options.cwd
     : typeof options.projectPath === 'string'
       ? options.projectPath
       : process.cwd();
   const args = ['--mode', 'text', '--no-session', '--no-tools'];
-  if (model && model !== 'default') args.push('--model', model);
+  args.push('--model', model);
   return (await runPiCommand(args, { cwd, input: prompt })).trim();
 }
 

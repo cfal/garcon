@@ -67,7 +67,7 @@ function baseStartRequest(overrides = {}) {
     command: 'hello',
     chatId: 'chat-1',
     projectPath: path.join(tempRoot, 'project'),
-    model: 'default',
+    model: 'github-copilot/gpt-5.4',
     permissionMode: 'default',
     thinkingMode: 'none',
     ...overrides,
@@ -135,6 +135,7 @@ describe('PiProvider lifecycle', () => {
     expect(created).toHaveBeenCalledWith('chat-1');
     expect(proc.stdin.writes.join('')).toBe('hello');
     expect(spawnMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['--mode', 'json', '--session-dir']));
+    expect(spawnMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['--model', 'github-copilot/gpt-5.4']));
 
     proc.pushJson({ type: 'agent_end' });
     proc.close(0);
@@ -234,6 +235,14 @@ describe('PiProvider lifecycle', () => {
     proc.close(7);
 
     await expect(startedPromise).rejects.toThrow('Pi process exited before session header (code 7)');
+  });
+
+  it('rejects Pi default because Pi runs require an explicit model', async () => {
+    const provider = new PiProvider();
+
+    await expect(provider.startSession(baseStartRequest({ model: 'default' })))
+      .rejects.toThrow('Pi requires an explicit model selection.');
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('aborts a running Pi process', async () => {

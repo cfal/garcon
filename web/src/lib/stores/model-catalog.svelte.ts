@@ -213,13 +213,21 @@ function mergeStaticModels(remote: ModelOption[] | undefined, fallback: ModelOpt
 	return missing.length ? [...remote, ...missing] : remote;
 }
 
+function removeLegacyPiDefaultModels(models: ModelOption[] | undefined): ModelOption[] | undefined {
+	return models?.filter((model) => model.value !== 'default');
+}
+
+function normalizeHarnessDefaultModel(id: string, defaultModel: string): string {
+	return id === 'pi' && defaultModel === 'default' ? '' : defaultModel;
+}
+
 function mergeWithFallbacks(models: HarnessModels): HarnessModels {
 	const result: HarnessModels = {
 		claude: mergeStaticModels(models.claude, STATIC_FALLBACKS.claude!),
 		codex: mergeStaticModels(models.codex, STATIC_FALLBACKS.codex!),
 		amp: models.amp?.length ? models.amp : STATIC_FALLBACKS.amp!,
 		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
-		pi: mergeStaticModels(models.pi, STATIC_FALLBACKS.pi!),
+		pi: mergeStaticModels(removeLegacyPiDefaultModels(models.pi), STATIC_FALLBACKS.pi!),
 		opencode: models.opencode?.length ? models.opencode : [],
 		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID] : [],
 		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID] : [],
@@ -239,7 +247,11 @@ function filterVisibleHarnessMetadata(harnessMetadata: HarnessMetadataMap): Harn
 			.filter(([id]) => isVisibleHarnessId(id))
 			.map(([id, metadata]) => [
 				id,
-				{ ...metadata, label: normalizeHarnessLabel(id, metadata.label) }
+				{
+					...metadata,
+					label: normalizeHarnessLabel(id, metadata.label),
+					defaultModel: normalizeHarnessDefaultModel(id, metadata.defaultModel),
+				}
 			])
 	);
 }

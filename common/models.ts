@@ -57,10 +57,8 @@ export const FACTORY_MODELS = {
 };
 
 export const PI_MODELS = {
-  OPTIONS: [
-    { value: 'default', label: 'Pi Default', supportsImages: false },
-  ] satisfies SharedModelOption[],
-  DEFAULT: 'default',
+  OPTIONS: [] satisfies SharedModelOption[],
+  DEFAULT: '',
 };
 
 export const OPENROUTER_MODELS = {

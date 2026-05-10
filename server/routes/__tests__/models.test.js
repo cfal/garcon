@@ -10,7 +10,7 @@ const providers = {
       { id: 'opencode', label: 'OpenCode', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '', models: [] },
       { id: 'amp', label: 'Amp', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'default', models: [{ value: 'default', label: 'Default' }] },
       { id: 'factory', label: 'Factory', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'claude-opus-4-6', models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4-6' }] },
-      { id: 'pi', label: 'Pi', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'default', models: [{ value: 'default', label: 'Pi Default', supportsImages: false }] },
+      { id: 'pi', label: 'Pi', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'github-copilot/gpt-5.4', models: [{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }] },
       { id: 'direct-anthropic-compatible', label: 'Direct (Anthropic)', kind: 'harness', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '', models: [] },
       { id: 'direct-openai-compatible', label: 'Direct (Chat Completions)', kind: 'harness', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
       { id: 'direct-openai-responses-compatible', label: 'Direct (Responses)', kind: 'harness', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
@@ -79,8 +79,8 @@ describe('GET /api/v1/models', () => {
     expect(pi.supportsImages).toBe(false);
     expect(pi.acceptsApiProviderEndpoints).toBe(false);
     expect(pi.supportedProtocols).toEqual([]);
-    expect(pi.defaultModel).toBe('default');
-    expect(pi.models).toContainEqual({ value: 'default', label: 'Pi Default', supportsImages: false });
+    expect(pi.defaultModel).toBe('github-copilot/gpt-5.4');
+    expect(pi.models).toContainEqual({ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true });
 
     const directOpenAi = body.catalog.harnesses.find((p) => p.id === 'direct-openai-compatible');
     expect(directOpenAi.label).toBe('Direct (Chat Completions)');
