@@ -207,7 +207,7 @@
 		'flex-shrink-0 bg-background pt-2',
 		localSettings.chatHorizontalMargins
 			? 'px-3 pb-2 sm:px-5 sm:pb-4 lg:px-6'
-			: 'px-3 pb-2 sm:px-4'
+			: 'px-2 pb-2 sm:px-3'
 	));
 	const composerSurfaceClass = $derived(cn(
 		'relative bg-card overflow-hidden rounded-2xl border border-border shadow-sm'
