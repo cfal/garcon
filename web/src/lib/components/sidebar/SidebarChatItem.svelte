@@ -188,11 +188,11 @@
 	}));
 </script>
 
-<div class="chat-item-root group relative" bind:this={itemEl}>
+{#snippet stateBadge()}
 	{#if !isMultiSelectMode && (isPinned || isArchived)}
 		<div
 			class={cn(
-				'pointer-events-none absolute bottom-[5px] right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full border',
+					'pointer-events-none absolute bottom-0 right-0 z-10 flex h-5 w-5 items-center justify-center rounded-full border',
 				isPinned
 					? 'border-sidebar-badge-pinned-border bg-sidebar-badge-pinned-bg'
 					: 'border-sidebar-badge-archived-border bg-sidebar-badge-archived-bg',
@@ -206,7 +206,9 @@
 			{/if}
 		</div>
 	{/if}
+{/snippet}
 
+<div class="chat-item-root group relative" bind:this={itemEl}>
 	<!-- Mobile layout -->
 	<div
 		class={cn(
@@ -216,74 +218,11 @@
 			!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
 		)}
 	>
-			<button
-					class={cn(
-						'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
-					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
-				)}
-				onclick={handleItemClick}
-			>
-				{#if isMultiSelectMode}
-					<div class="flex items-center justify-center w-7 shrink-0" aria-hidden="true">
-						<div
-							role="checkbox"
-							aria-checked={isMultiSelected}
-							aria-label="Select {chatName}"
-							class={cn(
-								'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
-								isMultiSelected
-									? 'bg-primary border-primary'
-									: 'border-muted-foreground/40 bg-background',
-							)}
-						>
-							{#if isMultiSelected}
-								<svg class="size-3 text-primary-foreground" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<polyline points="2.5 6 5 8.5 9.5 3.5" />
-								</svg>
-							{/if}
-						</div>
-					</div>
-				{/if}
-				<div class="flex-1 min-w-0">
-					<SidebarChatSummary
-						{session}
-						{isSelected}
-						{isPinned}
-						{isArchived}
-						{currentTime}
-						showTimestamp={true}
-						onTagClick={isMultiSelectMode ? undefined : onTagClick}
-						onManageTags={isMultiSelectMode ? undefined : onManageTags}
-					/>
-				</div>
-		</button>
-		{#if !isMultiSelectMode}
-			<button
-				type="button"
-				class="shrink-0 flex items-center justify-center px-3 text-muted-foreground hover:text-foreground active:bg-accent border-l border-border/30 transition-colors"
-				onclick={handleMobileMenuClick}
-				aria-label={m.sidebar_chat_more_actions()}
-			>
-				<EllipsisVertical class="size-5" />
-			</button>
-		{/if}
-	</div>
-
-	<!-- Desktop layout with right-click support and drag-to-split -->
-	<div class="hidden md:block">
-			<Button
-				variant="ghost"
-				draggable={!isMultiSelectMode}
-				ondragstart={isMultiSelectMode ? undefined : handleDragStart}
-				ondragend={isMultiSelectMode ? undefined : handleDragEnd}
-				oncontextmenu={handleRightClick}
-					class={cn(
-						'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30',
-					isMultiSelectMode ? 'py-[5px] pl-1 border-l-0' : 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
-					!isMultiSelectMode && isSelected && 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
-					!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
-					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
-				)}
+		<button
+			class={cn(
+				'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
+				isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
+			)}
 			onclick={handleItemClick}
 		>
 			{#if isMultiSelectMode}
@@ -307,7 +246,7 @@
 					</div>
 				</div>
 			{/if}
-			<div class="flex-1 min-w-0">
+			<div class="relative flex-1 min-w-0">
 				<SidebarChatSummary
 					{session}
 					{isSelected}
@@ -318,6 +257,71 @@
 					onTagClick={isMultiSelectMode ? undefined : onTagClick}
 					onManageTags={isMultiSelectMode ? undefined : onManageTags}
 				/>
+				{@render stateBadge()}
+			</div>
+		</button>
+		{#if !isMultiSelectMode}
+			<button
+				type="button"
+				class="shrink-0 flex items-center justify-center px-3 text-muted-foreground hover:text-foreground active:bg-accent border-l border-border/30 transition-colors"
+				onclick={handleMobileMenuClick}
+				aria-label={m.sidebar_chat_more_actions()}
+			>
+				<EllipsisVertical class="size-5" />
+			</button>
+		{/if}
+	</div>
+
+	<!-- Desktop layout with right-click support and drag-to-split -->
+	<div class="hidden md:block">
+		<Button
+			variant="ghost"
+			draggable={!isMultiSelectMode}
+			ondragstart={isMultiSelectMode ? undefined : handleDragStart}
+			ondragend={isMultiSelectMode ? undefined : handleDragEnd}
+			oncontextmenu={handleRightClick}
+			class={cn(
+				'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30',
+				isMultiSelectMode ? 'py-[5px] pl-1 border-l-0' : 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
+				!isMultiSelectMode && isSelected && 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
+				!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
+				isMultiSelectMode && isMultiSelected && 'bg-primary/8',
+			)}
+			onclick={handleItemClick}
+		>
+			{#if isMultiSelectMode}
+				<div class="flex items-center justify-center w-7 shrink-0" aria-hidden="true">
+					<div
+						role="checkbox"
+						aria-checked={isMultiSelected}
+						aria-label="Select {chatName}"
+						class={cn(
+							'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
+							isMultiSelected
+								? 'bg-primary border-primary'
+								: 'border-muted-foreground/40 bg-background',
+						)}
+					>
+						{#if isMultiSelected}
+							<svg class="size-3 text-primary-foreground" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<polyline points="2.5 6 5 8.5 9.5 3.5" />
+							</svg>
+						{/if}
+					</div>
+				</div>
+			{/if}
+			<div class="relative flex-1 min-w-0">
+				<SidebarChatSummary
+					{session}
+					{isSelected}
+					{isPinned}
+					{isArchived}
+					{currentTime}
+					showTimestamp={true}
+					onTagClick={isMultiSelectMode ? undefined : onTagClick}
+					onManageTags={isMultiSelectMode ? undefined : onManageTags}
+				/>
+				{@render stateBadge()}
 			</div>
 		</Button>
 	</div>

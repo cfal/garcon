@@ -45,7 +45,8 @@ describe('shared sidebar chat row', () => {
 		});
 
 		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(2);
-		expect(document.querySelectorAll('.border-sidebar-badge-pinned-border')).toHaveLength(1);
+		const pinnedBadges = document.querySelectorAll('.border-sidebar-badge-pinned-border');
+		expect(pinnedBadges).toHaveLength(2);
 		expect(screen.getAllByText('Shared row chat')).toHaveLength(2);
 		expect(screen.getAllByLabelText('Unread')).toHaveLength(2);
 		expect(screen.getAllByText('3h ago')).toHaveLength(2);
@@ -72,6 +73,13 @@ describe('shared sidebar chat row', () => {
 		);
 		expect(desktopMenuTrigger?.className).toContain('border-sidebar-border/70');
 		expect(desktopMenuTrigger?.className).toContain('bg-background');
+		for (const badge of pinnedBadges) {
+			expect(badge.className).toContain('bottom-0');
+			expect(badge.className).toContain('right-0');
+			expect(badge.closest('button')).not.toBe(desktopMenuTrigger);
+			expect(badge.parentElement?.className).toContain('relative flex-1 min-w-0');
+			expect(badge.parentElement?.className).not.toContain('pr-');
+		}
 
 		await fireEvent.click(screen.getAllByRole('button', { name: 'ops' })[0]!);
 		expect(onTagClick).toHaveBeenCalledWith('ops');
