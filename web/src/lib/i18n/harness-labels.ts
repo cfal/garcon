@@ -11,6 +11,7 @@ export function harnessLabelFor(harnessId: string, fallback?: string): string {
 	if (harnessId === 'opencode') return m.provider_opencode();
 	if (harnessId === 'amp') return m.provider_amp();
 	if (harnessId === 'factory') return m.provider_factory();
+	if (harnessId === 'pi') return m.provider_pi();
 	if (harnessId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID) {
 		return m.provider_direct_openai_chat_completions();
 	}

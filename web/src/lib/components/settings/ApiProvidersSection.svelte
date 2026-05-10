@@ -21,13 +21,13 @@
 		error: string | null;
 	}
 
-	type HarnessId = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory';
+	type HarnessId = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory' | 'pi';
 	type BrowserLoginHarnessId = 'claude' | 'codex';
 
 	const AUTH_POLL_INTERVAL_MS = 1500;
 	const AUTH_POLL_TIMEOUT_MS = 5 * 60_000;
 	const DEFAULT_AUTH: AuthStatus = { authenticated: false, canReauth: true, label: '', loading: true, error: null };
-	const harnessIds: HarnessId[] = ['claude', 'codex', 'opencode', 'amp', 'factory'];
+	const harnessIds: HarnessId[] = ['claude', 'codex', 'opencode', 'amp', 'factory', 'pi'];
 
 	const modelCatalog = getModelCatalog();
 	const authPollTimers: Partial<Record<HarnessId, ReturnType<typeof setTimeout>>> = {};

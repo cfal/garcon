@@ -1,0 +1,76 @@
+import path from 'path';
+import { promises as fs } from 'fs';
+import {
+  getAgentDir,
+  SessionManager,
+  SettingsManager,
+  type SessionHeader,
+} from '@earendil-works/pi-coding-agent';
+
+const PI_SESSION_DIR_ENV = 'PI_CODING_AGENT_SESSION_DIR';
+
+function expandTilde(value: string): string {
+  if (value === '~') return process.env.HOME || value;
+  if (value.startsWith('~/')) return path.join(process.env.HOME || '', value.slice(2));
+  return value;
+}
+
+export function resolvePiConfiguredSessionDir(projectPath: string): string | undefined {
+  const envSessionDir = process.env[PI_SESSION_DIR_ENV];
+  if (envSessionDir?.trim()) return expandTilde(envSessionDir.trim());
+
+  try {
+    const settings = SettingsManager.create(projectPath, getAgentDir());
+    return settings.getSessionDir();
+  } catch {
+    return undefined;
+  }
+}
+
+function encodePiCwd(cwd: string): string {
+  return `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
+}
+
+function fileTimestamp(timestamp: string): string {
+  return timestamp.replace(/[:.]/g, '-');
+}
+
+export function piDefaultSessionDir(projectPath: string): string {
+  return path.join(getAgentDir(), 'sessions', encodePiCwd(projectPath));
+}
+
+export function piSessionPathFromHeader(header: SessionHeader, sessionDir?: string): string {
+  const fileName = `${fileTimestamp(header.timestamp)}_${header.id}.jsonl`;
+  return path.join(sessionDir ?? piDefaultSessionDir(header.cwd), fileName);
+}
+
+export async function findPiSessionFileBySessionId(
+  sessionId: string,
+  projectPath: string,
+): Promise<string | null> {
+  if (!sessionId || !projectPath) return null;
+  const configuredSessionDir = resolvePiConfiguredSessionDir(projectPath);
+
+  try {
+    const localSessions = await SessionManager.list(projectPath, configuredSessionDir);
+    const localMatch = localSessions.find((session) => session.id === sessionId);
+    if (localMatch) {
+      await fs.access(localMatch.path);
+      return localMatch.path;
+    }
+  } catch {
+    return null;
+  }
+
+  if (configuredSessionDir) return null;
+
+  try {
+    const allSessions = await SessionManager.listAll();
+    const globalMatch = allSessions.find((session) => session.id === sessionId);
+    if (!globalMatch) return null;
+    await fs.access(globalMatch.path);
+    return globalMatch.path;
+  } catch {
+    return null;
+  }
+}

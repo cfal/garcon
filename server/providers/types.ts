@@ -73,6 +73,7 @@ export interface ResumeTurnRequest extends ProviderExecutionConfig {
   images?: AgentCommandImage[];
   envOverrides?: Record<string, string>;
   codexConfig?: CodexProviderConfig;
+  nativePath?: string | null;
 }
 
 // One-shot query with relaxed requirements (no session lifecycle).

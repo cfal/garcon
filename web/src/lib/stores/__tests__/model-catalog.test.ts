@@ -17,15 +17,18 @@ describe('ModelCatalogStore', () => {
 			expect(store.getModels('claude').length).toBeGreaterThan(0);
 			expect(store.getModels('codex').length).toBeGreaterThan(0);
 			expect(store.getModels('factory').length).toBeGreaterThan(0);
+			expect(store.getModels('pi')).toEqual([]);
 			expect(store.getModels('direct-anthropic-compatible')).toEqual([]);
 			expect(store.getModels('direct-openai-compatible')).toEqual([]);
 			expect(store.getModels('direct-openai-responses-compatible')).toEqual([]);
+			expect(store.getSelectableHarnesses()).toContain('pi');
 			expect(store.getSelectableHarnesses()).not.toContain('direct-anthropic-compatible');
 			expect(store.getSelectableHarnesses()).not.toContain('direct-openai-compatible');
 			expect(store.getSelectableHarnesses()).not.toContain('direct-openai-responses-compatible');
 			expect(store.getModels('zai')).toEqual([]);
 			expect(store.getDefaultModel('claude')).toBe('opus');
 			expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
+			expect(store.getDefaultModel('pi')).toBe('');
 			expect(store.getModels('codex')[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
 			const codexModelValues = store.getModels('codex').map((model) => model.value);
 			expect(codexModelValues).toContain('gpt-5.3-codex-spark');
@@ -45,10 +48,12 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('claude')).toBe(true);
 		expect(store.supportsFork('codex')).toBe(true);
 		expect(store.supportsFork('opencode')).toBe(false);
+		expect(store.supportsFork('pi')).toBe(false);
 		expect(store.supportsFork('zai')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(true);
 		expect(store.supportsImages('opencode')).toBe(false);
+		expect(store.supportsImages('pi')).toBe(false);
 		expect(store.supportsImages('zai')).toBe(false);
 		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
 		expect(store.supportsImages('factory', 'glm-5')).toBe(false);
@@ -81,6 +86,38 @@ describe('ModelCatalogStore', () => {
 			{ value: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' }
 		]);
 		expect(store.isStale(60_000)).toBe(false);
+	});
+
+	it('removes stale cached Pi default entries', () => {
+		localStorage.setItem(
+			'pref_model_catalog',
+			JSON.stringify({
+				harnessModels: {
+					pi: [
+						{ value: 'default', label: 'Pi Default' },
+						{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }
+					]
+				},
+				harnessMetadata: {
+					pi: {
+						id: 'pi',
+						label: 'Pi',
+						supportsFork: false,
+						supportsImages: false,
+						acceptsApiProviderEndpoints: false,
+						supportedProtocols: [],
+						defaultModel: 'default'
+					}
+				},
+				lastFetchedAt: Date.now()
+			})
+		);
+
+		const store = createModelCatalogStore();
+		expect(store.getModels('pi')).toEqual([
+			{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }
+		]);
+		expect(store.getDefaultModel('pi')).toBe('github-copilot/gpt-5.4');
 	});
 
 	it('hydrates cached harness capabilities from localStorage', () => {

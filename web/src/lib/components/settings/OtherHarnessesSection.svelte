@@ -13,14 +13,15 @@
 	}
 
 	type HarnessConfig = {
-		id: 'opencode' | 'amp' | 'factory';
+		id: 'opencode' | 'amp' | 'factory' | 'pi';
 		loginCommand: string;
 	};
 
 	const harnesses: HarnessConfig[] = [
-		{ id: 'opencode', loginCommand: 'opencode auth login' },
 		{ id: 'amp', loginCommand: 'amp login' },
-		{ id: 'factory', loginCommand: 'droid' }
+		{ id: 'factory', loginCommand: 'droid' },
+		{ id: 'opencode', loginCommand: 'opencode auth login' },
+		{ id: 'pi', loginCommand: 'pi' }
 	];
 
 	let {

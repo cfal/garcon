@@ -7,6 +7,7 @@ import { getCodexAuthStatus } from './codex-auth.js';
 import { getOpenCodeAuthStatus } from './opencode-auth.js';
 import { getAmpAuthStatus } from './amp-auth.js';
 import { getFactoryAuthStatus } from './factory-auth.js';
+import { getPiAuthStatus } from './pi-auth.js';
 import { getArtificialProviderSessionId } from '../chats/artificial-native-path.js';
 import { getMaxSessions } from '../config.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -15,12 +16,13 @@ import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loader
 import { getCodexPreviewFromNativePath, loadCodexChatMessages } from './loaders/codex-history-loader.js';
 import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loaders/opencode-history-loader.js';
 import { getFactoryPreviewFromSessionId, loadFactoryChatMessagesBySessionId } from './loaders/factory-history-loader.js';
+import { getPiPreviewFromSessionId, getPiPreviewFromSessionPath, loadPiChatMessages, loadPiChatMessagesBySessionId } from './loaders/pi-history-loader.js';
 import { getDirectCompatiblePreviewFromSessionId, loadDirectCompatibleChatMessages } from './loaders/direct-compatible-history-loader.js';
 
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { ChatMessage } from '../../common/chat-types.js';
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, PI_MODELS } from '../../common/models.js';
 import { apiProviderTemplate } from '../../common/api-provider-templates.js';
 import type {
   ProviderChatEntry,
@@ -63,6 +65,7 @@ const AUTH_DISPATCHERS: Record<string, (opencode: any) => Promise<unknown>> = {
   opencode: (oc) => getOpenCodeAuthStatus(oc),
   amp: () => getAmpAuthStatus(),
   factory: () => getFactoryAuthStatus(),
+  pi: () => getPiAuthStatus(),
 };
 
 const DIRECT_SESSION_ID_RE = /^[a-z0-9-]{8,64}$/i;
@@ -71,6 +74,7 @@ const STATIC_HARNESS_MODELS: Record<string, { defaultModel: string; models: Harn
   codex: { defaultModel: CODEX_MODELS.DEFAULT, models: CODEX_MODELS.OPTIONS },
   amp: { defaultModel: AMP_MODELS.DEFAULT, models: AMP_MODELS.OPTIONS },
   factory: { defaultModel: FACTORY_MODELS.DEFAULT, models: FACTORY_MODELS.OPTIONS },
+  pi: { defaultModel: PI_MODELS.DEFAULT, models: PI_MODELS.OPTIONS },
 };
 
 function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | undefined): ProviderChatEntry & {
@@ -613,6 +617,7 @@ export class ProviderRegistry {
       claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
       images: opts.images,
       envOverrides: selection.envOverrides,
+      nativePath: rawEntry.nativePath,
       ...(selection.codexConfig ? { codexConfig: selection.codexConfig } : {}),
       ...selectionRequestFields(selection),
     });
@@ -769,6 +774,12 @@ export class ProviderRegistry {
       const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'factory');
       return getFactoryPreviewFromSessionId(sessionId || '');
     }
+    if (session.provider === 'pi') {
+      if (session.nativePath && !session.nativePath.startsWith('!')) {
+        return getPiPreviewFromSessionPath(session.nativePath);
+      }
+      return getPiPreviewFromSessionId(session.providerSessionId || '', session.projectPath);
+    }
     if (session.provider === 'opencode') {
       const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');
       const client = this.#opencodeInstance?.getClientIfInitialized?.();
@@ -822,6 +833,12 @@ export class ProviderRegistry {
     if (session.provider === 'factory') {
       const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'factory');
       return loadFactoryChatMessagesBySessionId(sessionId || '');
+    }
+    if (session.provider === 'pi') {
+      if (session.nativePath && !session.nativePath.startsWith('!')) {
+        return loadPiChatMessages(session.nativePath);
+      }
+      return loadPiChatMessagesBySessionId(session.providerSessionId || '', session.projectPath);
     }
     if (session.provider === 'opencode') {
       const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');

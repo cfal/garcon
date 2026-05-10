@@ -4,6 +4,7 @@ const claudeQuery = mock(async () => 'claude-response');
 const codexQuery = mock(async () => 'codex-response');
 const ampQuery = mock(async () => 'amp-response');
 const factoryQuery = mock(async () => 'factory-response');
+const piQuery = mock(async () => 'pi-response');
 const originalFetch = globalThis.fetch;
 
 mock.module('../claude-cli.js', () => ({
@@ -21,6 +22,10 @@ mock.module('../amp-cli.js', () => ({
 
 mock.module('../factory-cli.js', () => ({
   runSingleQuery: factoryQuery,
+}));
+
+mock.module('../pi-cli.js', () => ({
+  runSingleQuery: piQuery,
 }));
 
 mock.module('../loaders/claude-history-loader.js', () => ({
@@ -55,6 +60,7 @@ import {
   createCodexAdapter,
   createFactoryAdapter,
   createOpenCodeAdapter,
+  createPiAdapter,
 } from '../provider-adapters.js';
 
 afterEach(() => {
@@ -190,6 +196,20 @@ function makeRegistry(args = {}) {
     onFinished: mock(() => {}),
     onFailed: mock(() => {}),
   };
+  const pi = {
+    startSession: mock(() => Promise.resolve({ providerSessionId: 'pi-session', nativePath: '/tmp/pi-session.jsonl' })),
+    runTurn: mock(() => Promise.resolve()),
+    getRunningSessions: mock(() => []),
+    isRunning: mock(() => false),
+    abort: mock(() => false),
+    getModels: mock(() => [{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }]),
+    startPurgeTimer: mock(() => {}),
+    onMessages: mock(() => {}),
+    onProcessing: mock(() => {}),
+    onSessionCreated: mock(() => {}),
+    onFinished: mock(() => {}),
+    onFailed: mock(() => {}),
+  };
 
   return {
     registry: new ProviderRegistry({
@@ -200,6 +220,7 @@ function makeRegistry(args = {}) {
         createOpenCodeAdapter(opencode),
         createAmpAdapter(amp),
         createFactoryAdapter(factory),
+        createPiAdapter(pi),
         ...(args.adapters ?? []),
       ],
       endpointResolver: args.endpointResolver ?? makeEndpointResolver(),
@@ -212,6 +233,7 @@ function makeRegistry(args = {}) {
     opencode,
     amp,
     factory,
+    pi,
   };
 }
 
@@ -221,6 +243,7 @@ describe('ProviderRegistry.runSingleQuery', () => {
     codexQuery.mockClear();
     ampQuery.mockClear();
     factoryQuery.mockClear();
+    piQuery.mockClear();
   });
 
   it('routes one-shot prompts to native harness adapters', async () => {
@@ -231,6 +254,7 @@ describe('ProviderRegistry.runSingleQuery', () => {
     expect(await registry.runSingleQuery('prompt', { provider: 'opencode' })).toBe('opencode-response');
     expect(await registry.runSingleQuery('prompt', { provider: 'amp' })).toBe('amp-response');
     expect(await registry.runSingleQuery('prompt', { provider: 'factory' })).toBe('factory-response');
+    expect(await registry.runSingleQuery('prompt', { provider: 'pi' })).toBe('pi-response');
     expect(opencode.runSingleQuery).toHaveBeenCalled();
   });
 

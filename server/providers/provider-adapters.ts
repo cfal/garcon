@@ -7,6 +7,7 @@ import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude } from '
 import { runSingleQuery as runSingleQueryCodex } from './codex.js';
 import { runSingleQuery as runSingleQueryAmp } from './amp-cli.js';
 import { runSingleQuery as runSingleQueryFactory } from './factory-cli.js';
+import { runSingleQuery as runSingleQueryPi } from './pi-cli.js';
 import type { ProviderAdapter } from './provider-adapter.js';
 import type { ClaudeStartSessionRequest, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from './types.js';
 import { OpenAiCompatibleChatProvider, type OpenAiCompatibleChatProviderConfig, runOpenAiCompatibleSingleQuery } from './openai-compatible-chat-provider.js';
@@ -209,6 +210,42 @@ export function createFactoryAdapter(factory: ExternalCliProviderInstance): Prov
     onSessionCreated(cb) { factory.onSessionCreated(cb); },
     onFinished(cb) { factory.onFinished(cb); },
     onFailed(cb) { factory.onFailed(cb); },
+  };
+}
+
+// Pi adapter
+
+export function createPiAdapter(pi: ExternalCliProviderInstance): ProviderAdapter {
+  return {
+    id: 'pi',
+    label: 'Pi',
+    async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
+      return pi.startSession(request);
+    },
+    async runTurn(request: ResumeTurnRequest): Promise<void> {
+      await pi.runTurn(request);
+    },
+    abort(id: string): boolean {
+      return pi.abort(id);
+    },
+    isRunning(id: string): boolean {
+      return pi.isRunning(id);
+    },
+    getRunningSessions() {
+      return pi.getRunningSessions();
+    },
+    async getModels() {
+      return pi.getModels?.() ?? [];
+    },
+    runSingleQuery: runSingleQueryPi,
+    startPurgeTimer() {
+      return pi.startPurgeTimer();
+    },
+    onMessages(cb) { pi.onMessages(cb); },
+    onProcessing(cb) { pi.onProcessing(cb); },
+    onSessionCreated(cb) { pi.onSessionCreated(cb); },
+    onFinished(cb) { pi.onFinished(cb); },
+    onFailed(cb) { pi.onFailed(cb); },
   };
 }
 

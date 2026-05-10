@@ -51,6 +51,7 @@
 		opencode: 'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
 		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
 		factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
+		pi: 'border-provider-pi-border bg-provider-pi-bg text-provider-pi-foreground',
 		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
 		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
 		[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',

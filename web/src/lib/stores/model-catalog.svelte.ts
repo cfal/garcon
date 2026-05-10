@@ -1,7 +1,7 @@
 import { apiFetch } from '$lib/api/client.js';
 import { harnessLabelFor } from '$lib/i18n/harness-labels';
 import type { SessionProvider } from '$lib/types/app';
-import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS } from '$shared/models';
+import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS, PI_MODELS } from '$shared/models';
 import {
 	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
 	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL,
@@ -61,6 +61,7 @@ const STATIC_FALLBACKS: HarnessModels = {
 	opencode: [],
 	amp: AMP_MODELS.OPTIONS,
 	factory: FACTORY_MODELS.OPTIONS,
+	pi: PI_MODELS.OPTIONS,
 	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: [],
 	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: [],
 	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: [],
@@ -72,6 +73,7 @@ const STATIC_HARNESS_METADATA: HarnessMetadataMap = {
 	opencode: { id: 'opencode', label: 'OpenCode', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '' },
 	amp: { id: 'amp', label: 'Amp', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: AMP_MODELS.DEFAULT },
 	factory: { id: 'factory', label: 'Factory', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: FACTORY_MODELS.DEFAULT },
+	pi: { id: 'pi', label: 'Pi', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: PI_MODELS.DEFAULT },
 	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '' },
 	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '' },
 	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: { id: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, label: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '' },
@@ -211,12 +213,21 @@ function mergeStaticModels(remote: ModelOption[] | undefined, fallback: ModelOpt
 	return missing.length ? [...remote, ...missing] : remote;
 }
 
+function removeLegacyPiDefaultModels(models: ModelOption[] | undefined): ModelOption[] | undefined {
+	return models?.filter((model) => model.value !== 'default');
+}
+
+function normalizeHarnessDefaultModel(id: string, defaultModel: string): string {
+	return id === 'pi' && defaultModel === 'default' ? '' : defaultModel;
+}
+
 function mergeWithFallbacks(models: HarnessModels): HarnessModels {
 	const result: HarnessModels = {
 		claude: mergeStaticModels(models.claude, STATIC_FALLBACKS.claude!),
 		codex: mergeStaticModels(models.codex, STATIC_FALLBACKS.codex!),
 		amp: models.amp?.length ? models.amp : STATIC_FALLBACKS.amp!,
 		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
+		pi: mergeStaticModels(removeLegacyPiDefaultModels(models.pi), STATIC_FALLBACKS.pi!),
 		opencode: models.opencode?.length ? models.opencode : [],
 		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID] : [],
 		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID] : [],
@@ -236,7 +247,11 @@ function filterVisibleHarnessMetadata(harnessMetadata: HarnessMetadataMap): Harn
 			.filter(([id]) => isVisibleHarnessId(id))
 			.map(([id, metadata]) => [
 				id,
-				{ ...metadata, label: normalizeHarnessLabel(id, metadata.label) }
+				{
+					...metadata,
+					label: normalizeHarnessLabel(id, metadata.label),
+					defaultModel: normalizeHarnessDefaultModel(id, metadata.defaultModel),
+				}
 			])
 	);
 }
