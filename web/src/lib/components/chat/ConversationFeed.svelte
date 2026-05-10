@@ -104,15 +104,15 @@
 			'h-full overflow-y-auto overflow-x-hidden scrollbar-hide relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
 			'pt-3 sm:pt-4',
 			reserveLoadingStatusSpace ? 'pb-14' : 'pb-3 sm:pb-4',
-			localSettings.chatHorizontalMargins ? 'px-3 sm:px-5 lg:px-6' : 'px-0'
+			localSettings.chatHorizontalMargins ? 'md:px-5 lg:px-6' : 'md:px-0'
 		)
 	);
 	const feedContentClass = $derived(
 		cn(
-			'flex w-full flex-col gap-2 sm:gap-3',
+			'flex w-full flex-col gap-2 px-[21px] sm:gap-3',
 			localSettings.chatHorizontalMargins
-				? 'mx-auto max-w-5xl px-4 sm:px-5'
-				: 'px-[21px] sm:px-[25px]'
+				? 'md:mx-auto md:max-w-5xl md:px-5'
+				: 'md:px-[25px]'
 		)
 	);
 </script>

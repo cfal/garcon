@@ -206,10 +206,10 @@
 	});
 	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 	const composerShellClass = $derived(cn(
-		'flex-shrink-0 bg-background',
+		'flex-shrink-0 bg-background px-2 pb-2',
 		localSettings.chatHorizontalMargins
-			? 'px-3 pb-2 sm:px-5 sm:pb-4 lg:px-6'
-			: 'px-2 pb-2 sm:px-3'
+			? 'md:px-5 md:pb-4 lg:px-6'
+			: 'md:px-3'
 	));
 	const composerSurfaceClass = $derived(cn(
 		'relative z-20 bg-card overflow-hidden rounded-2xl border border-border shadow-sm'
@@ -422,7 +422,6 @@
 			status={lifecycle.loadingStatus}
 			provider={providerState.provider}
 			spinnerSelectionKey={sessions.selectedChatId}
-			chatHorizontalMargins={localSettings.chatHorizontalMargins}
 			{onAbort}
 		/>
 		{#if !appShell.isMobile}

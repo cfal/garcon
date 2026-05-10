@@ -11,7 +11,6 @@
 		status: { text?: string; can_interrupt?: boolean } | null;
 		provider: string;
 		onAbort: (() => void) | null;
-		chatHorizontalMargins: boolean;
 		spinnerSelectionKey?: string | null;
 	}
 
@@ -20,7 +19,6 @@
 		status,
 		provider,
 		onAbort,
-		chatHorizontalMargins,
 		spinnerSelectionKey = null
 	}: Props = $props();
 
@@ -73,12 +71,8 @@
 
 	const statusText = $derived(provider === 'codex' ? m.chat_loading_thinking() : (status?.text || m.chat_loading_thinking()));
 	const canInterrupt = $derived(status?.can_interrupt !== false);
-	const mobileTrayInsetClass = $derived(chatHorizontalMargins ? 'left-4 right-4' : 'left-[13px] right-[13px]');
-	const statusTrayClass = $derived(
-		cn(
-			'absolute bottom-full z-10 sm:left-3 sm:right-3',
-			mobileTrayInsetClass
-		)
+	const statusTrayClass = cn(
+		'absolute bottom-full left-[13px] right-[13px] z-10 md:left-3 md:right-3'
 	);
 	const statusPanelClass = cn(
 		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-chat-thinking px-3 py-2 sm:px-4'
