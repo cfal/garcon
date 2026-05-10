@@ -1,7 +1,7 @@
 # Garcon
 
 Garcon is a local coding workspace for agentic CLI and API backends: Claude Code,
-Codex, OpenCode, Amp, Factory Droid, and OpenAI/Anthropic-compatible endpoints.
+Codex, OpenCode, Amp, Factory Droid, Pi, and OpenAI/Anthropic-compatible endpoints.
 
 <table>
   <tr>
@@ -36,7 +36,7 @@ Codex, OpenCode, Amp, Factory Droid, and OpenAI/Anthropic-compatible endpoints.
 
 ## What It Does
 
-- Runs persistent coding chats across Claude, Codex, OpenCode, Amp, Factory, and direct API-compatible providers.
+- Runs persistent coding chats across Claude, Codex, OpenCode, Amp, Factory, Pi, and direct API-compatible providers.
 - Supports Anthropic Messages, OpenAI Chat Completions, OpenAI Responses, Ollama, OpenRouter, Gemini, Fireworks, Together, Alibaba Cloud, Z.AI, and custom endpoints through Settings.
 - Provides per-chat model, permission, thinking, image, tag, queue, read-state, pin, archive, reorder, fork, and share controls.
 - Keeps a unified workspace with chat, file browser/editor, terminal, and Git tabs.
@@ -60,6 +60,7 @@ Codex, OpenCode, Amp, Factory Droid, and OpenAI/Anthropic-compatible endpoints.
   - OpenCode config
   - Amp CLI/login
   - Factory Droid CLI/login or `FACTORY_API_KEY`
+  - Pi CLI/config
   - Local Ollama or another configured API provider
 
 ## Quick Start
@@ -99,6 +100,8 @@ Useful options and environment variables:
 - `GARCON_TERMINAL_SHELL`: shell used by PTY sessions.
 - `GARCON_TELEGRAM_BOT_TOKEN`: enables Telegram notifications.
 - `CLAUDE_BINARY`, `AMP_BINARY`, `FACTORY_BINARY`: override CLI binary paths.
+- `GARCON_PI_BINARY` / `PI_BINARY`: override the Pi CLI binary path.
+- `PI_CODING_AGENT_SESSION_DIR`: optional Pi session directory override.
 
 Run `bun run help` for the full option list.
 
@@ -111,6 +114,10 @@ are redacted from client catalog responses.
 
 Local Ollama models are supported through API provider templates and model
 discovery.
+
+Pi is a native-only harness. Garcon runs Pi through `pi --mode json`, discovers
+available Pi models from Pi's SDK/config, requires an explicit Pi model, and
+resumes chats from native Pi session files.
 
 ## Build
 
@@ -159,11 +166,13 @@ docker run -d \
   -v "$HOME/.opencode/opencode-state":/home/garcon/.local/state/opencode \
   -v "$HOME/.opencode/opencode-cache":/home/garcon/.local/cache/opencode \
   -v "$HOME/.amp":/home/garcon/.amp \
+  -v "$HOME/.pi":/home/garcon/.pi \
   garconide/garcon:latest
 ```
 
 Set `GARCON_PROJECT_DIR` for Compose or mount `/projects` for `docker run`.
-Config and workspace data are persisted in `garcon-data`.
+Config and workspace data are persisted in `garcon-data`. Mount the auth/config
+directory for each native CLI harness you use.
 
 ## Development
 
