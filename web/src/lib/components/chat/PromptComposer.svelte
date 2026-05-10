@@ -208,8 +208,12 @@
 	const composerShellClass = $derived(cn(
 		'flex-shrink-0 bg-background px-2 pb-2',
 		localSettings.chatHorizontalMargins
-			? 'md:px-5 md:pb-4 lg:px-6'
-			: 'md:px-3'
+			? 'lg:px-6 lg:pb-4'
+			: 'lg:px-3'
+	));
+	const composerFrameWrapperClass = $derived(cn(
+		'w-full',
+		localSettings.chatHorizontalMargins && 'lg:mx-auto lg:max-w-5xl'
 	));
 	const composerSurfaceClass = $derived(cn(
 		'relative z-20 bg-card overflow-hidden rounded-2xl border border-border shadow-sm'
@@ -437,11 +441,7 @@
 {/snippet}
 
 <div class={composerShellClass}>
-	{#if localSettings.chatHorizontalMargins}
-		<div class="mx-auto w-full max-w-5xl">
-			{@render composerFrame()}
-		</div>
-	{:else}
+	<div class={composerFrameWrapperClass}>
 		{@render composerFrame()}
-	{/if}
+	</div>
 </div>
