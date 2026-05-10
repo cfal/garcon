@@ -204,7 +204,7 @@
 	});
 	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 	const composerShellClass = $derived(cn(
-		'flex-shrink-0 bg-background pt-2',
+		'flex-shrink-0 bg-background',
 		localSettings.chatHorizontalMargins
 			? 'px-3 pb-2 sm:px-5 sm:pb-4 lg:px-6'
 			: 'px-2 pb-2 sm:px-3'
