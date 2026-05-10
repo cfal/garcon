@@ -112,7 +112,7 @@
 			'flex w-full flex-col gap-2 sm:gap-3',
 			localSettings.chatHorizontalMargins
 				? 'mx-auto max-w-5xl px-4 sm:px-5'
-				: 'px-3 sm:px-4'
+				: 'px-[21px] sm:px-[25px]'
 		)
 	);
 </script>

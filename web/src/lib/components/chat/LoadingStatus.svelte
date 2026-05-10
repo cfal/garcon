@@ -99,7 +99,7 @@
 	const statusGutterClass = $derived(localSettings.chatHorizontalMargins ? 'px-3 sm:px-5 lg:px-6' : '');
 	const statusContentClass = $derived(cn(
 		'flex items-center justify-between py-2 leading-none',
-		localSettings.chatHorizontalMargins ? 'mx-auto w-full max-w-5xl px-4 sm:px-5' : 'px-3 sm:px-4'
+		localSettings.chatHorizontalMargins ? 'mx-auto w-full max-w-5xl px-4 sm:px-5' : 'px-[21px] sm:px-[25px]'
 	));
 </script>
 
