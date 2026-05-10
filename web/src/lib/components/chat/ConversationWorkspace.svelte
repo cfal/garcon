@@ -7,7 +7,6 @@
 	import { onDestroy, untrack } from 'svelte';
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
-	import LoadingStatus from './LoadingStatus.svelte';
 	import QueueControls from './QueueControls.svelte';
 	import { ChatState } from '$lib/chat/state.svelte';
 	import { ComposerState } from '$lib/chat/composer.svelte';
@@ -68,7 +67,7 @@
 		reserveTopFloatingToolbar ? 'top-16' : 'top-3',
 	));
 
-	let scrollContainer: HTMLDivElement | undefined = $state();
+	let scrollContainer: HTMLDivElement | null = $state(null);
 	let queueControlsContainer: HTMLDivElement | undefined = $state();
 
 	// WS drain and event router.
@@ -333,15 +332,6 @@
 					<ArrowDown class="w-5 h-5" />
 				</Button>
 			{/if}
-
-			<LoadingStatus
-				isLoading={lifecycle.isLoading}
-				status={lifecycle.loadingStatus}
-				provider={providerState.provider}
-				spinnerSelectionKey={sessions.selectedChatId}
-				isScrolledToBottom={!chatState.isUserScrolledUp}
-				onAbort={() => controller.handleAbort()}
-			/>
 		</div>
 
 			<div bind:this={queueControlsContainer}>
@@ -358,6 +348,7 @@
 				onModelChange={(m) => controller.handleModelChange(m)}
 				onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
 				onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
+				onAbort={() => controller.handleAbort()}
 				/>
 		</div>
 		{/if}

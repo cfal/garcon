@@ -13,10 +13,12 @@
 	import { createMessageIdAllocator } from '$lib/chat/message-id';
 	import { Loader2, TriangleAlert, RefreshCw } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
+	import { Scrollbar } from '$lib/components/ui/scroll-area';
 	import { cn } from '$lib/utils/cn';
+	import { ScrollArea as ScrollAreaPrimitive } from 'bits-ui';
 
 	interface Props {
-		scrollContainer?: HTMLDivElement;
+		scrollContainer?: HTMLDivElement | null;
 		onscroll?: () => void;
 		onPermissionDecision?: (permissionRequestId: string, decision: { allow: boolean; message?: string }) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
@@ -26,7 +28,7 @@
 	}
 
 	let {
-		scrollContainer = $bindable(),
+		scrollContainer = $bindable(null),
 		onscroll,
 		onPermissionDecision,
 		onExitPlanMode,
@@ -99,15 +101,21 @@
 		),
 	);
 
+	const feedScrollAreaClass = 'h-full overflow-hidden relative';
 	const feedViewportClass = $derived(
 		cn(
-			'h-full overflow-y-auto overflow-x-hidden scrollbar-hide relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
-			localSettings.roundedChatLayout
-				? cn(
-					'px-3 pt-3 sm:px-5 sm:pt-4 lg:px-6',
-					reserveLoadingStatusSpace ? 'pb-14 sm:pb-16' : 'pb-6 sm:pb-8'
-				)
-				: 'px-0 pt-3 pb-10 sm:pt-4 sm:px-4 sm:pb-12 space-y-2 sm:space-y-3'
+			'h-full overflow-y-auto overflow-x-hidden relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
+			'pt-3 sm:pt-4',
+			reserveLoadingStatusSpace ? 'pb-14' : 'pb-3 sm:pb-4',
+			localSettings.chatHorizontalMargins ? 'lg:px-6' : 'lg:px-0'
+		)
+	);
+	const feedContentClass = $derived(
+		cn(
+			'flex w-full flex-col gap-2 px-[21px] sm:gap-3',
+			localSettings.chatHorizontalMargins
+				? 'lg:mx-auto lg:max-w-5xl lg:px-5'
+				: 'lg:px-[25px]'
 		)
 	);
 </script>
@@ -245,21 +253,21 @@
 	{/if}
 {/snippet}
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D -->
-<div
-	bind:this={scrollContainer}
-	onscroll={onscroll}
-	onfocusin={handleMessagePaneFocusIntent}
-	tabindex={-1}
-	role="log"
-	aria-label="Chat messages"
-	class={feedViewportClass}
->
-	{#if localSettings.roundedChatLayout}
-		<div class="mx-auto flex w-full max-w-5xl flex-col gap-2 px-4 sm:gap-3 sm:px-5">
+<ScrollAreaPrimitive.Root type="auto" class={feedScrollAreaClass}>
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D -->
+	<ScrollAreaPrimitive.Viewport
+		bind:ref={scrollContainer}
+		onscroll={onscroll}
+		onfocusin={handleMessagePaneFocusIntent}
+		tabindex={-1}
+		role="log"
+		aria-label="Chat messages"
+		class={feedViewportClass}
+	>
+		<div class={feedContentClass}>
 			{@render feedContent()}
 		</div>
-	{:else}
-		{@render feedContent()}
-	{/if}
-</div>
+	</ScrollAreaPrimitive.Viewport>
+	<Scrollbar orientation="vertical" class="w-1.5" />
+	<ScrollAreaPrimitive.Corner />
+</ScrollAreaPrimitive.Root>

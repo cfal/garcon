@@ -14,10 +14,10 @@ describe('LocalSettingsStore', () => {
 		store.destroy();
 	});
 
-	it('defaults rounded chat layout to disabled', () => {
+	it('defaults chat horizontal margins to disabled', () => {
 		const store = createLocalSettingsStore();
 
-		expect(store.roundedChatLayout).toBe(false);
+		expect(store.chatHorizontalMargins).toBe(false);
 
 		store.destroy();
 	});
@@ -34,13 +34,13 @@ describe('LocalSettingsStore', () => {
 		store.destroy();
 	});
 
-	it('persists rounded chat layout', () => {
+	it('persists chat horizontal margins', () => {
 		const store = createLocalSettingsStore();
 
-		store.set('roundedChatLayout', true);
+		store.set('chatHorizontalMargins', true);
 
 		expect(JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}')).toMatchObject({
-			roundedChatLayout: true,
+			chatHorizontalMargins: true,
 		});
 
 		store.destroy();
@@ -65,20 +65,20 @@ describe('LocalSettingsStore', () => {
 		secondStore.destroy();
 	});
 
-	it('syncs rounded chat layout across storage events', () => {
+	it('syncs chat horizontal margins across storage events', () => {
 		const firstStore = createLocalSettingsStore();
 		const secondStore = createLocalSettingsStore();
 
 		localStorage.setItem('pref_local_settings', JSON.stringify({
 			...firstStore.snapshot(),
-			roundedChatLayout: true,
+			chatHorizontalMargins: true,
 		}));
 		window.dispatchEvent(new StorageEvent('storage', {
 			key: 'pref_local_settings',
 			newValue: localStorage.getItem('pref_local_settings'),
 		}));
 
-		expect(secondStore.roundedChatLayout).toBe(true);
+		expect(secondStore.chatHorizontalMargins).toBe(true);
 
 		firstStore.destroy();
 		secondStore.destroy();

@@ -7,7 +7,7 @@ import type { ChatState } from '$lib/chat/state.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 
 export interface ScrollControllerDeps {
-	getScrollContainer: () => HTMLDivElement | undefined;
+	getScrollContainer: () => HTMLDivElement | null;
 	getQueueContainer: () => HTMLDivElement | undefined;
 	chatState: ChatState;
 	sessions: { selectedChatId: string | null };

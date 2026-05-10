@@ -2,6 +2,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import LoadingStatus from './LoadingStatus.svelte';
 	import { getComposerState, getChatLifecycle, getLocalSettings, getChatSessions, getAppShell, getModelCatalog, getProviderState } from '$lib/context';
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
@@ -20,9 +21,10 @@
 		onModelChange?: (model: string) => void;
 		onPermissionModeChange?: (mode: PermissionMode) => void;
 		onThinkingModeChange?: (mode: ThinkingMode) => void;
+		onAbort?: (() => void) | null;
 	}
 
-	let { onsubmit, onModelChange, onPermissionModeChange, onThinkingModeChange }: Props = $props();
+	let { onsubmit, onModelChange, onPermissionModeChange, onThinkingModeChange, onAbort = null }: Props = $props();
 
 	const composerState = getComposerState();
 	const lifecycle = getChatLifecycle();
@@ -204,24 +206,24 @@
 	});
 	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 	const composerShellClass = $derived(cn(
-		'flex-shrink-0',
-		localSettings.roundedChatLayout && 'bg-background px-3 pb-2 pt-2 sm:px-5 sm:pb-4 lg:px-6'
+		'flex-shrink-0 bg-background px-2 pb-2',
+		localSettings.chatHorizontalMargins
+			? 'lg:px-6 lg:pb-4'
+			: 'lg:px-3'
+	));
+	const composerFrameWrapperClass = $derived(cn(
+		'w-full',
+		localSettings.chatHorizontalMargins && 'lg:mx-auto lg:max-w-5xl'
 	));
 	const composerSurfaceClass = $derived(cn(
-		'relative bg-card',
-		localSettings.roundedChatLayout
-			? 'overflow-hidden rounded-2xl border border-border shadow-sm'
-			: 'border-t border-border pb-1 sm:pb-2'
+		'relative z-20 bg-card overflow-hidden rounded-2xl border border-border shadow-sm'
 	));
 	const imageListClass = $derived(cn(
-		'p-2 bg-muted/40 rounded-lg',
-		localSettings.roundedChatLayout ? 'mx-2 mt-2' : 'mb-2'
+		'p-2 bg-muted/40 rounded-lg mx-2 mt-2'
 	));
 	const textareaClass = $derived(cn(
 		'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200',
-		localSettings.roundedChatLayout
-			? 'px-4 py-2.5 sm:px-5 sm:py-4 min-h-[48px]'
-			: 'px-4 py-1.5 sm:py-3 min-h-[44px]'
+		'px-4 py-2.5 sm:px-5 sm:py-4 min-h-[48px]'
 	));
 
 	// Composer resize via drag handle. Persists height to localStorage and
@@ -292,15 +294,6 @@
 
 {#snippet composerSurface()}
 	<div data-composer class={composerSurfaceClass}>
-		{#if !appShell.isMobile}
-			<!-- Invisible resize grab zone above the composer (desktop only) -->
-			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
-			<div
-				onpointerdown={handleResizeStart}
-				class="absolute left-0 right-0 -top-1 h-3 cursor-row-resize z-10 touch-none"
-			></div>
-		{/if}
-
 		<FileMentionMenu
 			projectPath={sessions.selectedChat?.projectPath || ''}
 			isVisible={ui.showFileMenu}
@@ -426,12 +419,29 @@
 	</div>
 {/snippet}
 
-<div class={composerShellClass}>
-	{#if localSettings.roundedChatLayout}
-		<div class="mx-auto w-full max-w-5xl">
-			{@render composerSurface()}
-		</div>
-	{:else}
+{#snippet composerFrame()}
+	<div class="relative">
+		<LoadingStatus
+			isLoading={lifecycle.isLoading}
+			status={lifecycle.loadingStatus}
+			provider={providerState.provider}
+			spinnerSelectionKey={sessions.selectedChatId}
+			{onAbort}
+		/>
+		{#if !appShell.isMobile}
+			<!-- Keeps the grab zone outside the clipped rounded surface. -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
+			<div
+				onpointerdown={handleResizeStart}
+				class="absolute left-0 right-0 -top-1 z-40 h-3 cursor-row-resize touch-none"
+			></div>
+		{/if}
 		{@render composerSurface()}
-	{/if}
+	</div>
+{/snippet}
+
+<div class={composerShellClass}>
+	<div class={composerFrameWrapperClass}>
+		{@render composerFrame()}
+	</div>
 </div>

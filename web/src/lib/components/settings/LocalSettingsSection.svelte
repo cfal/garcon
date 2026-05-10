@@ -112,9 +112,9 @@
 				() => ls.toggle('sendByShiftEnter')
 			)}
 			{@render settingRow(
-				m.settings_chat_rounded_layout(),
-				ls.roundedChatLayout,
-				() => ls.toggle('roundedChatLayout')
+				m.settings_chat_horizontal_margins(),
+				ls.chatHorizontalMargins,
+				() => ls.toggle('chatHorizontalMargins')
 			)}
 		</div>
 	</div>

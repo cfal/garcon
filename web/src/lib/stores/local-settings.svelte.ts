@@ -12,7 +12,7 @@ export interface LocalSettingsSnapshot {
 	showThinking: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
-	roundedChatLayout: boolean;
+	chatHorizontalMargins: boolean;
 	alwaysFullscreenOnGitPanel: boolean;
 	sidebarVisible: boolean;
 	sidebarWidth: number;
@@ -32,7 +32,7 @@ type BooleanLocalSettingKey =
 	| 'showThinking'
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
-	| 'roundedChatLayout'
+	| 'chatHorizontalMargins'
 	| 'alwaysFullscreenOnGitPanel'
 	| 'sidebarVisible'
 	| 'codeEditorWordWrap'
@@ -46,7 +46,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	showThinking: true,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
-	roundedChatLayout: false,
+	chatHorizontalMargins: false,
 	alwaysFullscreenOnGitPanel: true,
 	sidebarVisible: true,
 	sidebarWidth: 320,
@@ -92,7 +92,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
-		roundedChatLayout: parseBoolean(parsed.roundedChatLayout, DEFAULTS.roundedChatLayout),
+		chatHorizontalMargins: parseBoolean(parsed.chatHorizontalMargins, DEFAULTS.chatHorizontalMargins),
 		alwaysFullscreenOnGitPanel: parseBoolean(parsed.alwaysFullscreenOnGitPanel, DEFAULTS.alwaysFullscreenOnGitPanel),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
@@ -139,7 +139,7 @@ export class LocalSettingsStore {
 	showThinking = $state(DEFAULTS.showThinking);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
-	roundedChatLayout = $state(DEFAULTS.roundedChatLayout);
+	chatHorizontalMargins = $state(DEFAULTS.chatHorizontalMargins);
 	alwaysFullscreenOnGitPanel = $state(DEFAULTS.alwaysFullscreenOnGitPanel);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
@@ -190,7 +190,7 @@ export class LocalSettingsStore {
 			showThinking: this.showThinking,
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
-			roundedChatLayout: this.roundedChatLayout,
+			chatHorizontalMargins: this.chatHorizontalMargins,
 			alwaysFullscreenOnGitPanel: this.alwaysFullscreenOnGitPanel,
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
@@ -212,7 +212,7 @@ export class LocalSettingsStore {
 		this.showThinking = snap.showThinking;
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;
-		this.roundedChatLayout = snap.roundedChatLayout;
+		this.chatHorizontalMargins = snap.chatHorizontalMargins;
 		this.alwaysFullscreenOnGitPanel = snap.alwaysFullscreenOnGitPanel;
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;

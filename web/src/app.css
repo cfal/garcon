@@ -23,6 +23,7 @@
 	--color-ring: hsl(var(--ring));
 	--color-chat-header: hsl(var(--chat-header-bg));
 	--color-chat-header-border: hsl(var(--chat-header-border));
+	--color-chat-thinking: hsl(var(--chat-thinking-bg));
 	--color-chat-tabs-rail: hsl(var(--chat-tabs-rail-bg));
 	--color-chat-tabs-rail-border: hsl(var(--chat-tabs-rail-border));
 	--color-chat-tabs-active: hsl(var(--chat-tabs-active-bg));
@@ -167,6 +168,7 @@
 	--radius: 0.5rem;
 	--chat-header-bg: 0 0% 97%;
 	--chat-header-border: 0 0% 88%;
+	--chat-thinking-bg: 0 0% 93%;
 	--chat-tabs-rail-bg: 0 0% 94%;
 	--chat-tabs-rail-border: 0 0% 86%;
 	--chat-tabs-active-bg: 0 0% 18%;
@@ -335,6 +337,7 @@
 	--ring: 0 0% 60%;
 	--chat-header-bg: 0 0% 12%;
 	--chat-header-border: 0 0% 24%;
+	--chat-thinking-bg: 0 0% 5%;
 	--chat-tabs-rail-bg: 0 0% 16%;
 	--chat-tabs-rail-border: 0 0% 24%;
 	--chat-tabs-active-bg: 0 0% 84%;
