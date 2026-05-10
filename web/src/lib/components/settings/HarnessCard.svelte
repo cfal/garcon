@@ -65,6 +65,7 @@
 		opencode: 'border-l-provider-opencode-border',
 		amp: 'border-l-provider-amp-border',
 		factory: 'border-l-provider-factory-border',
+		pi: 'border-l-provider-pi-border',
 		'direct-openai-compatible': 'border-l-border',
 		'direct-openai-responses-compatible': 'border-l-border',
 		'direct-anthropic-compatible': 'border-l-border'

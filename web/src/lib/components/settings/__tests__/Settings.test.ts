@@ -53,6 +53,13 @@ describe('Settings', () => {
       expect(screen.getByRole('heading', { name: 'OpenAI Providers' })).toBeTruthy();
       expect(screen.getByText('Use OpenAI-compatible endpoints with Codex and Direct Chat. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.')).toBeTruthy();
       expect(screen.getByRole('heading', { name: 'Other Harnesses' })).toBeTruthy();
+      expect(screen.getByText('These harnesses manage providers and authentication internally.')).toBeTruthy();
+      const otherHarnessNames = ['Amp', 'Factory', 'OpenCode', 'Pi'].map((name) => screen.getByText(name));
+      expect(otherHarnessNames[0].compareDocumentPosition(otherHarnessNames[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(otherHarnessNames[1].compareDocumentPosition(otherHarnessNames[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(otherHarnessNames[2].compareDocumentPosition(otherHarnessNames[3]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getByText('Pi')).toBeTruthy();
+      expect(screen.getByText('pi')).toBeTruthy();
       expect(screen.getByText('Limit chat width')).toBeTruthy();
       expect(screen.queryByText('Direct (Anthropic)')).toBeNull();
       expect(screen.queryByText('Direct (Chat Completions)')).toBeNull();

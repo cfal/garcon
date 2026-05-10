@@ -14,6 +14,7 @@ export const BUILTIN_HARNESSES = [
   'opencode',
   'amp',
   'factory',
+  'pi',
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
   DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
   DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
@@ -84,6 +85,12 @@ export const BUILTIN_HARNESS_CAPABILITIES: Record<BuiltinHarnessId, HarnessCapab
     supportedProtocols: [],
   },
   factory: {
+    supportsFork: false,
+    supportsImages: false,
+    acceptsApiProviderEndpoints: false,
+    supportedProtocols: [],
+  },
+  pi: {
     supportsFork: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
@@ -187,7 +194,7 @@ export interface ApiProviderModelDiscoveryResponse {
 const ENDPOINT_MODEL_VALUE_SEPARATOR = ':';
 const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;
 const SETTINGS_OAUTH_HARNESSES = ['claude', 'codex'] as const;
-const SETTINGS_OTHER_HARNESSES = ['opencode', 'amp', 'factory'] as const;
+const SETTINGS_OTHER_HARNESSES = ['amp', 'factory', 'opencode', 'pi'] as const;
 export const ENDPOINT_ONLY_HARNESSES = [
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
   DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,

@@ -35,6 +35,7 @@ import { CodexProvider } from './providers/codex.js';
 import { OpenCodeProvider } from './providers/opencode.js';
 import { AmpProvider } from './providers/amp-cli.js';
 import { FactoryProvider } from './providers/factory-cli.js';
+import { PiProvider } from './providers/pi-cli.js';
 import { ProviderRegistry } from './providers/index.js';
 import { ApiProviderStore } from './providers/api-provider-store.js';
 import { ApiProviderEndpointResolver } from './providers/api-provider-endpoint-resolver.js';
@@ -44,6 +45,7 @@ import {
   createOpenCodeAdapter,
   createAmpAdapter,
   createFactoryAdapter,
+  createPiAdapter,
   createDirectOpenAiCompatibleRouterAdapter,
   createDirectOpenAiResponsesCompatibleRouterAdapter,
   createDirectAnthropicCompatibleRouterAdapter,
@@ -99,6 +101,7 @@ export async function startServer() {
     const opencodeProvider = new OpenCodeProvider();
     const ampProvider = new AmpProvider();
     const factoryProvider = new FactoryProvider();
+    const piProvider = new PiProvider();
 
     // Tier 1.5: User-managed API provider store and resolver
     const apiProviderStore = new ApiProviderStore();
@@ -112,6 +115,7 @@ export async function startServer() {
     const opencodeAdapter = createOpenCodeAdapter(opencodeProvider);
     const ampAdapter = createAmpAdapter(ampProvider);
     const factoryAdapter = createFactoryAdapter(factoryProvider);
+    const piAdapter = createPiAdapter(piProvider);
     const directOpenAiResponsesAdapter = createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore);
     const directOpenAiAdapter = createDirectOpenAiCompatibleRouterAdapter(apiProviderStore);
     const directAnthropicAdapter = createDirectAnthropicCompatibleRouterAdapter(apiProviderStore);
@@ -125,6 +129,7 @@ export async function startServer() {
       opencodeAdapter,
       ampAdapter,
       factoryAdapter,
+      piAdapter,
     ];
 
     // Tier 2: Harness registry wrapping adapters + registry + store + resolver

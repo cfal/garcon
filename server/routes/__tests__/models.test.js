@@ -10,6 +10,7 @@ const providers = {
       { id: 'opencode', label: 'OpenCode', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '', models: [] },
       { id: 'amp', label: 'Amp', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'default', models: [{ value: 'default', label: 'Default' }] },
       { id: 'factory', label: 'Factory', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'claude-opus-4-6', models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4-6' }] },
+      { id: 'pi', label: 'Pi', kind: 'harness', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'default', models: [{ value: 'default', label: 'Pi Default', supportsImages: false }] },
       { id: 'direct-anthropic-compatible', label: 'Direct (Anthropic)', kind: 'harness', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '', models: [] },
       { id: 'direct-openai-compatible', label: 'Direct (Chat Completions)', kind: 'harness', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
       { id: 'direct-openai-responses-compatible', label: 'Direct (Responses)', kind: 'harness', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
@@ -37,7 +38,7 @@ describe('GET /api/v1/models', () => {
 
     expect(body.catalog).toBeDefined();
     expect(Array.isArray(body.catalog.harnesses)).toBe(true);
-    expect(body.catalog.harnesses.length).toBe(8);
+    expect(body.catalog.harnesses.length).toBe(9);
 
     const claude = body.catalog.harnesses.find((p) => p.id === 'claude');
     expect(claude.supportsFork).toBe(true);
@@ -71,6 +72,15 @@ describe('GET /api/v1/models', () => {
     expect(factoryModelValues).not.toContain('gpt-5.2');
     expect(factoryModelValues).not.toContain('gpt-5.2-codex');
     expect(factoryModelValues).not.toContain('gpt-5.1-codex-max');
+
+    const pi = body.catalog.harnesses.find((p) => p.id === 'pi');
+    expect(pi.label).toBe('Pi');
+    expect(pi.supportsFork).toBe(false);
+    expect(pi.supportsImages).toBe(false);
+    expect(pi.acceptsApiProviderEndpoints).toBe(false);
+    expect(pi.supportedProtocols).toEqual([]);
+    expect(pi.defaultModel).toBe('default');
+    expect(pi.models).toContainEqual({ value: 'default', label: 'Pi Default', supportsImages: false });
 
     const directOpenAi = body.catalog.harnesses.find((p) => p.id === 'direct-openai-compatible');
     expect(directOpenAi.label).toBe('Direct (Chat Completions)');

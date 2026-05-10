@@ -56,6 +56,13 @@ export const FACTORY_MODELS = {
   DEFAULT: 'claude-opus-4-6',
 };
 
+export const PI_MODELS = {
+  OPTIONS: [
+    { value: 'default', label: 'Pi Default', supportsImages: false },
+  ] satisfies SharedModelOption[],
+  DEFAULT: 'default',
+};
+
 export const OPENROUTER_MODELS = {
   OPTIONS: [
     { value: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6', supportsImages: true },

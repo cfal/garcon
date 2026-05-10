@@ -17,6 +17,9 @@ describe('ModelCatalogStore', () => {
 			expect(store.getModels('claude').length).toBeGreaterThan(0);
 			expect(store.getModels('codex').length).toBeGreaterThan(0);
 			expect(store.getModels('factory').length).toBeGreaterThan(0);
+			expect(store.getModels('pi')).toEqual([
+				{ value: 'default', label: 'Pi Default', supportsImages: false }
+			]);
 			expect(store.getModels('direct-anthropic-compatible')).toEqual([]);
 			expect(store.getModels('direct-openai-compatible')).toEqual([]);
 			expect(store.getModels('direct-openai-responses-compatible')).toEqual([]);
@@ -26,6 +29,7 @@ describe('ModelCatalogStore', () => {
 			expect(store.getModels('zai')).toEqual([]);
 			expect(store.getDefaultModel('claude')).toBe('opus');
 			expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
+			expect(store.getDefaultModel('pi')).toBe('default');
 			expect(store.getModels('codex')[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
 			const codexModelValues = store.getModels('codex').map((model) => model.value);
 			expect(codexModelValues).toContain('gpt-5.3-codex-spark');
@@ -45,10 +49,12 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('claude')).toBe(true);
 		expect(store.supportsFork('codex')).toBe(true);
 		expect(store.supportsFork('opencode')).toBe(false);
+		expect(store.supportsFork('pi')).toBe(false);
 		expect(store.supportsFork('zai')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(true);
 		expect(store.supportsImages('opencode')).toBe(false);
+		expect(store.supportsImages('pi')).toBe(false);
 		expect(store.supportsImages('zai')).toBe(false);
 		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
 		expect(store.supportsImages('factory', 'glm-5')).toBe(false);

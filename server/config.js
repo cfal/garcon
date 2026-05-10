@@ -4,6 +4,16 @@
 
 import path from 'path';
 import os from 'os';
+import { existsSync } from 'fs';
+import { fileURLToPath } from 'url';
+
+const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+function localServerBinary(name) {
+  const suffix = process.platform === 'win32' ? '.cmd' : '';
+  const candidate = path.join(SERVER_DIR, 'node_modules', '.bin', `${name}${suffix}`);
+  return existsSync(candidate) ? candidate : null;
+}
 
 // Garcon config directory
 export function getConfigDir() {
@@ -118,6 +128,14 @@ export function getAmpBinary() {
 // Factory Droid CLI binary path
 export function getFactoryBinary() {
   return process.env.FACTORY_BINARY || 'droid';
+}
+
+// Pi CLI binary path
+export function getPiBinary() {
+  return process.env.GARCON_PI_BINARY
+    || process.env.PI_BINARY
+    || localServerBinary('pi')
+    || 'pi';
 }
 
 // JWT token expiry (secret is managed by auth/store.js).
