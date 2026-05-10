@@ -245,6 +245,25 @@ describe('PiProvider lifecycle', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
+  it('does not pass Garcon embedded Pi package metadata to the Pi CLI', async () => {
+    process.env.PI_PACKAGE_DIR = path.join(tempRoot, 'garcon-pi-package');
+    process.env.GARCON_EMBEDDED_PI_PACKAGE_DIR = process.env.PI_PACKAGE_DIR;
+    const provider = new PiProvider();
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const startedPromise = provider.startSession(baseStartRequest());
+    proc.pushJson(sessionHeader('pi-session-env'));
+    await startedPromise;
+
+    const spawnOptions = spawnMock.mock.calls[0][1];
+    expect(spawnOptions.env.PI_PACKAGE_DIR).toBeUndefined();
+    expect(spawnOptions.env.GARCON_EMBEDDED_PI_PACKAGE_DIR).toBeUndefined();
+
+    proc.pushJson({ type: 'agent_end' });
+    proc.close(0);
+  });
+
   it('aborts a running Pi process', async () => {
     const provider = new PiProvider();
     const processing = mock();

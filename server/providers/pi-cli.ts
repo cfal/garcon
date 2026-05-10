@@ -68,6 +68,7 @@ interface BuildPiPromptResult {
 type PiCliEvent = Record<string, unknown> & { type?: string };
 
 const PI_READ_ONLY_TOOLS = ['read', 'grep', 'find', 'ls'] as const;
+const GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV = 'GARCON_EMBEDDED_PI_PACKAGE_DIR';
 const PI_PLAN_PREFIX = [
   'You are operating in Garcon plan mode.',
   'Do not modify files, run mutating commands, or carry out implementation.',
@@ -150,6 +151,17 @@ function requireExplicitPiModel(model: unknown): string {
   return normalized;
 }
 
+function buildPiCliEnv(envOverrides?: Record<string, string>): Record<string, string | undefined> {
+  const env = { ...process.env, ...envOverrides };
+  const embeddedPackageDir = env[GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV];
+  if (embeddedPackageDir && env.PI_PACKAGE_DIR === embeddedPackageDir) {
+    // Keeps Garcon's executable-only SDK metadata override out of the external Pi CLI.
+    delete env.PI_PACKAGE_DIR;
+  }
+  delete env[GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV];
+  return env;
+}
+
 async function resolveSessionArgument(request: ResumeTurnRequest): Promise<string> {
   if (request.nativePath && !isArtificialNativePath(request.nativePath)) {
     try {
@@ -198,6 +210,7 @@ async function runPiCommand(
 ): Promise<string> {
   const proc = Bun.spawn([getPiBinary(), ...args], {
     cwd: cwd || process.cwd(),
+    env: buildPiCliEnv(),
     stdin: input == null ? 'ignore' : 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -474,13 +487,11 @@ export class PiProvider extends AbsProvider {
   ): ReturnType<typeof Bun.spawn> {
     const spawnOptions: Parameters<typeof Bun.spawn>[1] = {
       cwd: request.projectPath,
+      env: buildPiCliEnv(request.envOverrides),
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
     };
-    if (request.envOverrides) {
-      spawnOptions.env = { ...process.env, ...request.envOverrides };
-    }
 
     const proc = Bun.spawn([getPiBinary(), ...run.args], spawnOptions);
     const stdin = proc.stdin as unknown as { end(): void; write(chunk: string): void };

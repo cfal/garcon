@@ -9,6 +9,14 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const distDir = path.resolve(repoRoot, 'web', 'build');
 const executableDir = path.resolve(repoRoot, 'dist');
+const piPackageJsonPath = path.resolve(
+  repoRoot,
+  'server',
+  'node_modules',
+  '@earendil-works',
+  'pi-coding-agent',
+  'package.json',
+);
 
 const executableTargets = {
   'linux-x64': {
@@ -74,11 +82,60 @@ async function collectEmbeddedAssetInputs() {
   return files;
 }
 
+async function assertPiPackageMetadataExists() {
+  const stat = await fs.stat(piPackageJsonPath).catch(() => null);
+  if (!stat?.isFile()) {
+    throw new Error(`Missing Pi package metadata: ${piPackageJsonPath}. Run "bun install --cwd server" first.`);
+  }
+}
+
+/**
+ * Generates a bootstrap entrypoint instead of a static server import.
+ * Pi's SDK reads package metadata at module evaluation in Bun compiled-binary mode.
+ */
+function createVirtualMainEntrypoint(virtualAssetsEntrypoint, serverMainPath) {
+  return [
+    `import '${virtualAssetsEntrypoint}';`,
+    "import { mkdir, writeFile } from 'node:fs/promises';",
+    "import { tmpdir } from 'node:os';",
+    "import { join } from 'node:path';",
+    '',
+    "const PI_PACKAGE_JSON_SUFFIX = 'server/node_modules/@earendil-works/pi-coding-agent/package.json';",
+    "const GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV = 'GARCON_EMBEDDED_PI_PACKAGE_DIR';",
+    '',
+    'function normalizeEmbeddedFileName(name) {',
+    "  return name.replaceAll('\\\\', '/');",
+    '}',
+    '',
+    'async function prepareEmbeddedPiPackageDir() {',
+    '  if (process.env.PI_PACKAGE_DIR) return;',
+    '  const packageJsonBlob = Bun.embeddedFiles.find((blob) => {',
+    "    return blob instanceof Blob && normalizeEmbeddedFileName(blob.name).endsWith(PI_PACKAGE_JSON_SUFFIX);",
+    '  });',
+    '  if (!(packageJsonBlob instanceof Blob)) {',
+    "    throw new Error('Garcon executable is missing embedded Pi package metadata.');",
+    '  }',
+    '',
+    "  // Presents Pi's package metadata before SDK imports run in Bun compiled-binary mode.",
+    "  const packageDir = join(tmpdir(), 'garcon-pi-coding-agent', String(process.pid));",
+    '  await mkdir(packageDir, { recursive: true });',
+    "  await writeFile(join(packageDir, 'package.json'), await packageJsonBlob.text());",
+    '  process.env.PI_PACKAGE_DIR = packageDir;',
+    '  process.env[GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV] = packageDir;',
+    '}',
+    '',
+    'await prepareEmbeddedPiPackageDir();',
+    `await import('${serverMainPath}');`,
+    '',
+  ].join('\n');
+}
+
 async function buildExecutable(targetId, embeddedFiles) {
   const virtualAssetsEntrypoint = '__garcon_embed_static_assets__.js';
   const virtualMainEntrypoint = '__garcon_build_exe_main__.js';
   const serverMainPath = toPosixPath(path.join(repoRoot, 'server', 'main.js'));
-  const assetsImports = embeddedFiles.map((filePath) => {
+  const filesToEmbed = [...embeddedFiles, piPackageJsonPath];
+  const assetsImports = filesToEmbed.map((filePath) => {
     return `import '${toPosixPath(filePath)}' with { type: 'file' };`;
   });
   const target = executableTargets[targetId];
@@ -98,7 +155,7 @@ async function buildExecutable(targetId, embeddedFiles) {
       },
       files: {
         [virtualAssetsEntrypoint]: assetsImports.join('\n'),
-        [virtualMainEntrypoint]: `import '${virtualAssetsEntrypoint}';\nimport '${serverMainPath}';`,
+        [virtualMainEntrypoint]: createVirtualMainEntrypoint(virtualAssetsEntrypoint, serverMainPath),
       },
     });
   } catch (error) {
@@ -111,11 +168,12 @@ async function buildExecutable(targetId, embeddedFiles) {
     throw new Error('Executable build failed.');
   }
 
-  console.log(`Compiled ${target.outputName} with ${embeddedFiles.length} embedded static assets.`);
+  console.log(`Compiled ${target.outputName} with ${embeddedFiles.length} embedded static assets and Pi metadata.`);
 }
 
 async function run() {
   const targetIds = parseRequestedTargets(Bun.argv.slice(2));
+  await assertPiPackageMetadataExists();
   const embeddedFiles = await collectEmbeddedAssetInputs();
   for (const targetId of targetIds) {
     await buildExecutable(targetId, embeddedFiles);
