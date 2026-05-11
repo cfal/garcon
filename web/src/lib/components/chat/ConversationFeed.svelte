@@ -11,6 +11,7 @@
 	import { getChatState, getProviderState, getLocalSettings, getAppShell } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createMessageIdAllocator } from '$lib/chat/message-id';
+	import { CHAT_MAX_WIDTH_FEED_CONTENT_CLASS, CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS } from '$lib/chat/chat-max-width';
 	import { Loader2, TriangleAlert, RefreshCw } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Scrollbar } from '$lib/components/ui/scroll-area';
@@ -107,15 +108,13 @@
 			'h-full overflow-y-auto overflow-x-hidden relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
 			'pt-3 sm:pt-4',
 			reserveLoadingStatusSpace ? 'pb-14' : 'pb-3 sm:pb-4',
-			localSettings.chatHorizontalMargins ? 'lg:px-6' : 'lg:px-0'
+			CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS[localSettings.chatMaxWidth]
 		)
 	);
 	const feedContentClass = $derived(
 		cn(
 			'flex w-full flex-col gap-2 px-[21px] sm:gap-3',
-			localSettings.chatHorizontalMargins
-				? 'lg:mx-auto lg:max-w-5xl lg:px-5'
-				: 'lg:px-[25px]'
+			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth]
 		)
 	);
 </script>

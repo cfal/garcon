@@ -48,7 +48,7 @@
 		showThinking: true,
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
-		chatHorizontalMargins: false,
+		chatMaxWidth: 'none',
 		searchBarPosition: 'top',
 		set() {},
 		toggle() {},

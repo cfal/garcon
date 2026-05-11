@@ -8,6 +8,7 @@
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
+	import { CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS, CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS } from '$lib/chat/chat-max-width';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -207,13 +208,11 @@
 	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 	const composerShellClass = $derived(cn(
 		'flex-shrink-0 bg-background px-2 pb-2',
-		localSettings.chatHorizontalMargins
-			? 'lg:px-6 lg:pb-4'
-			: 'lg:px-3'
+		CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS[localSettings.chatMaxWidth]
 	));
 	const composerFrameWrapperClass = $derived(cn(
 		'w-full',
-		localSettings.chatHorizontalMargins && 'lg:mx-auto lg:max-w-5xl'
+		CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS[localSettings.chatMaxWidth]
 	));
 	const composerSurfaceClass = $derived(cn(
 		'relative z-20 bg-card overflow-hidden rounded-2xl border border-border shadow-sm'

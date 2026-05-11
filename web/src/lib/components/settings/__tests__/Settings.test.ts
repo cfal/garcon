@@ -60,7 +60,7 @@ describe('Settings', () => {
       expect(otherHarnessNames[2].compareDocumentPosition(otherHarnessNames[3]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(screen.getByText('Pi')).toBeTruthy();
       expect(screen.getByText('pi')).toBeTruthy();
-      expect(screen.getByText('Limit chat width')).toBeTruthy();
+      expect(screen.getByText('Max chat width')).toBeTruthy();
       expect(screen.queryByText('Direct (Anthropic)')).toBeNull();
       expect(screen.queryByText('Direct (Chat Completions)')).toBeNull();
       expect(screen.queryByText('Direct (Responses)')).toBeNull();

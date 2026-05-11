@@ -1,16 +1,23 @@
 <!-- Browser-stored settings. All values render immediately from localStorage. -->
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
+	import * as Select from '$lib/components/ui/select';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
-	import type { ThemeMode } from '$lib/stores/local-settings.svelte.js';
+	import { isChatMaxWidth, type ChatMaxWidth, type ThemeMode } from '$lib/stores/local-settings.svelte.js';
 	import { getLocalSettings } from '$lib/context';
 	import type { SidebarSearchBarPosition } from '$lib/types/session.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const ls = getLocalSettings();
+	const chatMaxWidthOptions: Array<{ value: ChatMaxWidth; label: () => string }> = [
+		{ value: 'none', label: m.settings_chat_max_width_none },
+		{ value: 'large', label: m.settings_chat_max_width_large },
+		{ value: 'medium', label: m.settings_chat_max_width_medium },
+		{ value: 'small', label: m.settings_chat_max_width_small },
+	];
 
 	function setTheme(mode: ThemeMode) {
 		ls.set('theme', mode);
@@ -18,6 +25,16 @@
 
 	function setSearchBarPosition(position: SidebarSearchBarPosition) {
 		ls.set('searchBarPosition', position);
+	}
+
+	function setChatMaxWidth(value: string) {
+		if (isChatMaxWidth(value)) {
+			ls.set('chatMaxWidth', value);
+		}
+	}
+
+	function chatMaxWidthLabel(value: ChatMaxWidth): string {
+		return chatMaxWidthOptions.find((option) => option.value === value)?.label() ?? m.settings_chat_max_width_none();
 	}
 </script>
 
@@ -111,11 +128,31 @@
 				ls.sendByShiftEnter,
 				() => ls.toggle('sendByShiftEnter')
 			)}
-			{@render settingRow(
-				m.settings_chat_horizontal_margins(),
-				ls.chatHorizontalMargins,
-				() => ls.toggle('chatHorizontalMargins')
-			)}
+			<div class="flex items-center justify-between gap-4 py-2">
+				<div class="text-sm font-medium text-foreground">{m.settings_chat_max_width()}</div>
+				<Select.Root
+					type="single"
+					value={ls.chatMaxWidth}
+					onValueChange={(value) => {
+						if (value) setChatMaxWidth(value);
+					}}
+				>
+					<Select.Trigger
+						size="sm"
+						class="w-32"
+						aria-label={m.settings_chat_max_width()}
+					>
+						{chatMaxWidthLabel(ls.chatMaxWidth)}
+					</Select.Trigger>
+					<Select.Content>
+						{#each chatMaxWidthOptions as option (option.value)}
+							<Select.Item value={option.value} label={option.label()}>
+								{option.label()}
+							</Select.Item>
+						{/each}
+					</Select.Content>
+				</Select.Root>
+			</div>
 		</div>
 	</div>
 </div>

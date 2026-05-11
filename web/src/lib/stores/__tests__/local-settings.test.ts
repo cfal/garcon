@@ -14,10 +14,10 @@ describe('LocalSettingsStore', () => {
 		store.destroy();
 	});
 
-	it('defaults chat horizontal margins to disabled', () => {
+	it('defaults max chat width to none', () => {
 		const store = createLocalSettingsStore();
 
-		expect(store.chatHorizontalMargins).toBe(false);
+		expect(store.chatMaxWidth).toBe('none');
 
 		store.destroy();
 	});
@@ -34,13 +34,13 @@ describe('LocalSettingsStore', () => {
 		store.destroy();
 	});
 
-	it('persists chat horizontal margins', () => {
+	it('persists max chat width', () => {
 		const store = createLocalSettingsStore();
 
-		store.set('chatHorizontalMargins', true);
+		store.set('chatMaxWidth', 'medium');
 
 		expect(JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}')).toMatchObject({
-			chatHorizontalMargins: true,
+			chatMaxWidth: 'medium',
 		});
 
 		store.destroy();
@@ -65,20 +65,20 @@ describe('LocalSettingsStore', () => {
 		secondStore.destroy();
 	});
 
-	it('syncs chat horizontal margins across storage events', () => {
+	it('syncs max chat width across storage events', () => {
 		const firstStore = createLocalSettingsStore();
 		const secondStore = createLocalSettingsStore();
 
 		localStorage.setItem('pref_local_settings', JSON.stringify({
 			...firstStore.snapshot(),
-			chatHorizontalMargins: true,
+			chatMaxWidth: 'small',
 		}));
 		window.dispatchEvent(new StorageEvent('storage', {
 			key: 'pref_local_settings',
 			newValue: localStorage.getItem('pref_local_settings'),
 		}));
 
-		expect(secondStore.chatHorizontalMargins).toBe(true);
+		expect(secondStore.chatMaxWidth).toBe('small');
 
 		firstStore.destroy();
 		secondStore.destroy();

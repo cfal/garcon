@@ -4,6 +4,8 @@
 import type { SidebarSearchBarPosition } from '$lib/types/session.js';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
+export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
+export type ChatMaxWidth = typeof CHAT_MAX_WIDTH_VALUES[number];
 
 export interface LocalSettingsSnapshot {
 	theme: ThemeMode;
@@ -12,7 +14,7 @@ export interface LocalSettingsSnapshot {
 	showThinking: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
-	chatHorizontalMargins: boolean;
+	chatMaxWidth: ChatMaxWidth;
 	alwaysFullscreenOnGitPanel: boolean;
 	sidebarVisible: boolean;
 	sidebarWidth: number;
@@ -32,7 +34,6 @@ type BooleanLocalSettingKey =
 	| 'showThinking'
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
-	| 'chatHorizontalMargins'
 	| 'alwaysFullscreenOnGitPanel'
 	| 'sidebarVisible'
 	| 'codeEditorWordWrap'
@@ -46,7 +47,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	showThinking: true,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
-	chatHorizontalMargins: false,
+	chatMaxWidth: 'none',
 	alwaysFullscreenOnGitPanel: true,
 	sidebarVisible: true,
 	sidebarWidth: 320,
@@ -75,6 +76,14 @@ function parseTheme(value: unknown): ThemeMode {
 	return DEFAULTS.theme;
 }
 
+export function isChatMaxWidth(value: unknown): value is ChatMaxWidth {
+	return typeof value === 'string' && CHAT_MAX_WIDTH_VALUES.includes(value as ChatMaxWidth);
+}
+
+function parseChatMaxWidth(value: unknown): ChatMaxWidth {
+	return isChatMaxWidth(value) ? value : DEFAULTS.chatMaxWidth;
+}
+
 function parseSidebarWidth(value: unknown): number {
 	if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
 	return DEFAULTS.sidebarWidth;
@@ -92,7 +101,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
-		chatHorizontalMargins: parseBoolean(parsed.chatHorizontalMargins, DEFAULTS.chatHorizontalMargins),
+		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
 		alwaysFullscreenOnGitPanel: parseBoolean(parsed.alwaysFullscreenOnGitPanel, DEFAULTS.alwaysFullscreenOnGitPanel),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
@@ -139,7 +148,7 @@ export class LocalSettingsStore {
 	showThinking = $state(DEFAULTS.showThinking);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
-	chatHorizontalMargins = $state(DEFAULTS.chatHorizontalMargins);
+	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
 	alwaysFullscreenOnGitPanel = $state(DEFAULTS.alwaysFullscreenOnGitPanel);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
@@ -190,7 +199,7 @@ export class LocalSettingsStore {
 			showThinking: this.showThinking,
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
-			chatHorizontalMargins: this.chatHorizontalMargins,
+			chatMaxWidth: this.chatMaxWidth,
 			alwaysFullscreenOnGitPanel: this.alwaysFullscreenOnGitPanel,
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
@@ -212,7 +221,7 @@ export class LocalSettingsStore {
 		this.showThinking = snap.showThinking;
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;
-		this.chatHorizontalMargins = snap.chatHorizontalMargins;
+		this.chatMaxWidth = snap.chatMaxWidth;
 		this.alwaysFullscreenOnGitPanel = snap.alwaysFullscreenOnGitPanel;
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
