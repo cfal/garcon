@@ -67,6 +67,14 @@ export interface GitWorkbenchRefreshOptions {
 	preferSelectedFile?: boolean;
 }
 
+interface GitWorkbenchLoadGuard {
+	generation: number;
+	targetKey: string;
+	projectPath: string;
+	tab: GitDiffTab;
+	contextLines: number;
+}
+
 const DEFAULT_REFRESH_OPTIONS = {
 	preserveDrafts: true,
 	preserveSelection: true,
@@ -207,21 +215,46 @@ export class GitWorkbenchStore {
 	private pendingLoadQueue: string[] = [];
 	private loadGeneration = 0;
 	private loadProjectPath = '';
+	private fileLoadRequestId = 0;
 
-	// Diff cache keyed by contextLines|filePath. Staging invalidates
+	// Diff cache keyed by tab, context lines, and file path. Staging invalidates
 	// only the affected file rather than the entire cache.
 	private reviewCache = new Map<string, GitFileReviewData>();
 
-	private cacheKey(filePath: string, tab?: GitDiffTab): string {
-		return `${tab ?? this.activeTab}|${this.contextLines}|${filePath}`;
+	private cacheKey(filePath: string, tab = this.activeTab, contextLines = this.contextLines): string {
+		return `${tab}|${contextLines}|${filePath}`;
 	}
 
-	private cacheGet(filePath: string, tab?: GitDiffTab): GitFileReviewData | null {
-		return this.reviewCache.get(this.cacheKey(filePath, tab)) ?? null;
+	private cacheGet(filePath: string, tab = this.activeTab, contextLines = this.contextLines): GitFileReviewData | null {
+		return this.reviewCache.get(this.cacheKey(filePath, tab, contextLines)) ?? null;
 	}
 
-	private cacheSet(filePath: string, data: GitFileReviewData, tab?: GitDiffTab): void {
-		this.reviewCache.set(this.cacheKey(filePath, tab), data);
+	private cacheSet(filePath: string, data: GitFileReviewData, tab = this.activeTab, contextLines = this.contextLines): void {
+		this.reviewCache.set(this.cacheKey(filePath, tab, contextLines), data);
+	}
+
+	private createLoadGuard(projectPath: string, generation = this.loadGeneration): GitWorkbenchLoadGuard {
+		return {
+			generation,
+			targetKey: targetKey(this.target),
+			projectPath,
+			tab: this.activeTab,
+			contextLines: this.contextLines,
+		};
+	}
+
+	private isCurrentLoadGuard(guard: GitWorkbenchLoadGuard): boolean {
+		if (guard.generation !== this.loadGeneration) return false;
+		if (guard.targetKey !== targetKey(this.target)) return false;
+		return !this.target || this.target.projectPath === guard.projectPath;
+	}
+
+	private isCurrentFileLoadGuard(guard: GitWorkbenchLoadGuard): boolean {
+		return (
+			this.isCurrentLoadGuard(guard) &&
+			this.activeTab === guard.tab &&
+			this.contextLines === guard.contextLines
+		);
 	}
 
 	// Removes all cache entries for a specific file (across tabs and context sizes).
@@ -535,17 +568,22 @@ export class GitWorkbenchStore {
 
 	// Tree operations
 
-	async loadTree(projectPath: string): Promise<void> {
+	async loadTree(projectPath: string): Promise<boolean> {
+		const guard = this.createLoadGuard(projectPath, ++this.loadGeneration);
 		this.isLoadingTree = true;
 		try {
 			const data = await getGitChangesTree(projectPath);
+			if (!this.isCurrentLoadGuard(guard)) return false;
 			this.tree = data.root;
 			this.hasCommits = data.hasCommits;
+			return true;
 		} catch (err) {
+			if (!this.isCurrentLoadGuard(guard)) return false;
 			this.surfaceError(`Failed to load changes: ${err instanceof Error ? err.message : String(err)}`);
 			this.tree = [];
+			return true;
 		} finally {
-			this.isLoadingTree = false;
+			if (this.isCurrentLoadGuard(guard)) this.isLoadingTree = false;
 		}
 	}
 
@@ -574,8 +612,8 @@ export class GitWorkbenchStore {
 		const generation = ++this.refreshGeneration;
 		const previousSelectedFile = this.selectedFile;
 
-		await this.loadTree(target.projectPath);
-		if (generation !== this.refreshGeneration) return;
+		const loadedTree = await this.loadTree(target.projectPath);
+		if (!loadedTree || generation !== this.refreshGeneration || targetKey(this.target) !== targetKey(target)) return;
 
 		this.pruneReviewDataToCurrentTree();
 		this.pruneLineSelectionToCurrentTree();
@@ -652,21 +690,28 @@ export class GitWorkbenchStore {
 	}
 
 	async loadFileReviewData(projectPath: string, filePath: string): Promise<void> {
-		const tab = this.activeTab;
-		const cached = this.cacheGet(filePath, tab);
+		const guard = this.createLoadGuard(projectPath);
+		const tab = guard.tab;
+		const contextLines = guard.contextLines;
+		const cached = this.cacheGet(filePath, tab, contextLines);
 		if (cached) {
 			this.reviewDataByPath = { ...this.reviewDataByPath, [filePath]: cached };
 			return;
 		}
+		const requestId = ++this.fileLoadRequestId;
 		this.isLoadingFile = true;
 		try {
-			const data = await getGitFileReviewData(projectPath, filePath, tab, this.contextLines);
-			this.cacheSet(filePath, data, tab);
+			const data = await getGitFileReviewData(projectPath, filePath, tab, contextLines);
+			if (!this.isCurrentFileLoadGuard(guard)) return;
+			this.cacheSet(filePath, data, tab, contextLines);
 			this.reviewDataByPath = { ...this.reviewDataByPath, [filePath]: data };
 		} catch (err) {
+			if (!this.isCurrentFileLoadGuard(guard)) return;
 			this.surfaceError(`Failed to load diff: ${err instanceof Error ? err.message : String(err)}`);
 		} finally {
-			this.isLoadingFile = false;
+			if (requestId === this.fileLoadRequestId && this.isCurrentFileLoadGuard(guard)) {
+				this.isLoadingFile = false;
+			}
 		}
 	}
 
@@ -713,7 +758,7 @@ export class GitWorkbenchStore {
 				if (gen !== this.loadGeneration) return;
 				const next = { ...this.reviewDataByPath };
 				for (const [filePath, data] of Object.entries(result.files)) {
-					this.cacheSet(filePath, data, tab);
+					this.cacheSet(filePath, data, tab, contextLines);
 					next[filePath] = data;
 				}
 				for (const [filePath, message] of Object.entries(result.errors)) {
@@ -762,6 +807,7 @@ export class GitWorkbenchStore {
 		this.reviewCache.clear();
 		this.reviewDataByPath = {};
 		this.pendingLoadQueue = [];
+		this.isLoadingFile = false;
 		this.loadGeneration++;
 	}
 
@@ -790,6 +836,7 @@ export class GitWorkbenchStore {
 		this.selectedLineKeys = new Set();
 		this.reviewDataByPath = {};
 		this.pendingLoadQueue = [];
+		this.isLoadingFile = false;
 		this.loadGeneration++;
 	}
 
@@ -801,6 +848,7 @@ export class GitWorkbenchStore {
 		this.contextLines = lines;
 		this.reviewDataByPath = {};
 		this.pendingLoadQueue = [];
+		this.isLoadingFile = false;
 		this.loadGeneration++;
 	}
 
@@ -1356,9 +1404,11 @@ export class GitWorkbenchStore {
 
 	private resetForTargetChange(): void {
 		this.tree = [];
+		this.isLoadingTree = false;
 		this.selectedFile = null;
 		this.diffScrollRequest = null;
 		this.reviewDataByPath = {};
+		this.isLoadingFile = false;
 		this.selectedLineKeys = new Set();
 		this.collapsedDirs = new Set();
 		this.activeTab = 'unstaged';

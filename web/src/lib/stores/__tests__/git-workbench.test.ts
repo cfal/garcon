@@ -32,6 +32,16 @@ vi.stubGlobal('localStorage', {
 const gitApi = await import('$lib/api/git.js');
 const mockedApi = vi.mocked(gitApi);
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
+}
+
 describe('GitWorkbenchStore', () => {
 	let wb: GitWorkbenchStore;
 
@@ -74,6 +84,42 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.tree).toEqual([]);
 			expect(wb.lastError).toContain('network error');
 		});
+
+		it('ignores stale tree results after target changes', async () => {
+			const staleTreeLoad = deferred<Awaited<ReturnType<typeof gitApi.getGitChangesTree>>>();
+			const staleTree = [
+				{ path: 'old.ts', name: 'old.ts', kind: 'file' as const, staged: false, hasUnstaged: true },
+			];
+			const currentTree = [
+				{ path: 'new.ts', name: 'new.ts', kind: 'file' as const, staged: false, hasUnstaged: true },
+			];
+			mockedApi.getGitChangesTree
+				.mockReturnValueOnce(staleTreeLoad.promise)
+				.mockResolvedValueOnce({ root: currentTree, hasCommits: false });
+
+			const staleTarget = wb.setTarget({
+				projectPath: '/project-a',
+				repoRoot: '/repo',
+				worktreePath: '/project-a',
+				label: 'a',
+				source: 'worktree',
+			});
+			const currentTarget = wb.setTarget({
+				projectPath: '/project-b',
+				repoRoot: '/repo',
+				worktreePath: '/project-b',
+				label: 'b',
+				source: 'worktree',
+			});
+
+			staleTreeLoad.resolve({ root: staleTree, hasCommits: true });
+			await Promise.all([staleTarget, currentTarget]);
+
+			expect(wb.target?.projectPath).toBe('/project-b');
+			expect(wb.tree).toEqual(currentTree);
+			expect(wb.hasCommits).toBe(false);
+			expect(wb.isLoadingTree).toBe(false);
+		});
 	});
 
 	describe('file review data', () => {
@@ -91,6 +137,39 @@ describe('GitWorkbenchStore', () => {
 				'/project', 'a.ts', 'unstaged', 5,
 			);
 			expect(wb.reviewDataByPath['a.ts']).toEqual(reviewData);
+		});
+
+		it('ignores stale file review data after tab changes', async () => {
+			const staleReviewLoad = deferred<Awaited<ReturnType<typeof gitApi.getGitFileReviewData>>>();
+			const staleReviewData = {
+				path: 'a.ts', isBinary: false,
+				truncated: false, contentBefore: 'old', contentAfter: '',
+				diffOps: [], hunks: [],
+			};
+			const currentReviewData = {
+				path: 'a.ts', isBinary: false,
+				truncated: false, contentBefore: 'new', contentAfter: '',
+				diffOps: [], hunks: [],
+			};
+			mockedApi.getGitFileReviewData
+				.mockReturnValueOnce(staleReviewLoad.promise)
+				.mockResolvedValueOnce(currentReviewData);
+
+			const staleLoad = wb.loadFileReviewData('/project', 'a.ts');
+			wb.setActiveTab('staged');
+			const currentLoad = wb.loadFileReviewData('/project', 'a.ts');
+
+			staleReviewLoad.resolve(staleReviewData);
+			await Promise.all([staleLoad, currentLoad]);
+
+			expect(mockedApi.getGitFileReviewData).toHaveBeenNthCalledWith(
+				1, '/project', 'a.ts', 'unstaged', 5,
+			);
+			expect(mockedApi.getGitFileReviewData).toHaveBeenNthCalledWith(
+				2, '/project', 'a.ts', 'staged', 5,
+			);
+			expect(wb.reviewDataByPath['a.ts']).toEqual(currentReviewData);
+			expect(wb.isLoadingFile).toBe(false);
 		});
 
 		it('requestFilesLoaded fetches uncached files', async () => {
