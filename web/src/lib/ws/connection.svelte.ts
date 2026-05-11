@@ -51,6 +51,7 @@ function generateRequestId() {
 
 export class WsConnection {
   #ws: WebSocket | null = $state(null);
+  #activeSocket: WebSocket | null = null;
   #messageLog: WsMessage[] = $state([]);
   messageVersion: number = $state(0);
   isConnected: boolean = $state(false);
@@ -95,8 +96,10 @@ export class WsConnection {
     try {
       const wsUrl = buildWebSocketUrl(token);
       const websocket = new WebSocket(wsUrl);
+      this.#activeSocket = websocket;
 
       websocket.onopen = () => {
+        if (!this.#isCurrentSocket(websocket)) return;
         this.isConnected = true;
         this.#ws = websocket;
         this.#reconnectAttempts = 0;
@@ -104,6 +107,7 @@ export class WsConnection {
       };
 
       websocket.onmessage = (event: MessageEvent) => {
+        if (!this.#isCurrentSocket(websocket)) return;
         try {
           const data = JSON.parse(event.data as string) as Record<string, unknown>;
 
@@ -133,12 +137,15 @@ export class WsConnection {
       };
 
       websocket.onclose = () => {
+        if (!this.#isCurrentSocket(websocket)) return;
         this.isConnected = false;
         this.#ws = null;
+        this.#activeSocket = null;
         this.#scheduleReconnect();
       };
 
       websocket.onerror = (error) => {
+        if (!this.#isCurrentSocket(websocket)) return;
         console.error('WebSocket error:', error);
       };
     } catch (error) {
@@ -251,15 +258,21 @@ export class WsConnection {
 
   #closeExisting(): void {
     this.#clearReconnectTimeout();
-    if (this.#ws) {
-      this.#ws.onopen = null;
-      this.#ws.onmessage = null;
-      this.#ws.onclose = null;
-      this.#ws.onerror = null;
-      this.#ws.close();
+    const socket = this.#activeSocket ?? this.#ws;
+    if (socket) {
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onclose = null;
+      socket.onerror = null;
+      if (socket.readyState !== WebSocket.CLOSED) socket.close();
+      this.#activeSocket = null;
       this.#ws = null;
       this.isConnected = false;
     }
+  }
+
+  #isCurrentSocket(socket: WebSocket): boolean {
+    return this.#activeSocket === socket;
   }
 
   #resolveAllWaiters(): void {
