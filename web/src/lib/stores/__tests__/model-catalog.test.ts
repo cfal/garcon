@@ -6,6 +6,40 @@ vi.mock('$lib/api/client', () => ({
 	apiFetch: vi.fn()
 }));
 
+const STORAGE_KEY = 'pref_model_catalog';
+const PI_MODEL = { value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true };
+
+function mockResponse(body: unknown, status = 200): Response {
+	return {
+		ok: status >= 200 && status < 300,
+		status,
+		json: async () => body
+	} as unknown as Response;
+}
+
+function catalogBody(harnesses: unknown[], apiProviders: unknown[] = []): unknown {
+	return {
+		catalog: {
+			harnesses,
+			apiProviders
+		}
+	};
+}
+
+function piHarness(models: unknown[], defaultModel = ''): unknown {
+	return {
+		id: 'pi',
+		label: 'Pi',
+		kind: 'harness',
+		supportsFork: false,
+		supportsImages: false,
+		acceptsApiProviderEndpoints: false,
+		supportedProtocols: [],
+		defaultModel,
+		models
+	};
+}
+
 describe('ModelCatalogStore', () => {
 	beforeEach(() => {
 		localStorage.clear();
@@ -392,6 +426,102 @@ describe('ModelCatalogStore', () => {
 
 		expect(store.error).toBe('Model catalog response is invalid');
 		expect(store.getModels('claude').find((m) => m.value === 'sonnet')).toBeTruthy();
+	});
+
+	it('validates explicit empty Pi results before persisting the catalog', async () => {
+		vi.mocked(clientApi.apiFetch)
+			.mockResolvedValueOnce(mockResponse(catalogBody([piHarness([])])))
+			.mockResolvedValueOnce(mockResponse(catalogBody([piHarness([PI_MODEL], PI_MODEL.value)])));
+
+		const store = createModelCatalogStore();
+		await store.forceRefresh();
+
+		expect(clientApi.apiFetch).toHaveBeenNthCalledWith(1, '/api/v1/models');
+		expect(clientApi.apiFetch).toHaveBeenNthCalledWith(2, '/api/v1/models?harness=pi');
+		expect(store.error).toBeNull();
+		expect(store.getModels('pi')).toEqual([PI_MODEL]);
+		expect(store.lastFetchedAt).toEqual(expect.any(Number));
+		expect(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').harnessModels.pi).toEqual([PI_MODEL]);
+	});
+
+	it('does not persist empty Pi results when strict Pi discovery is unavailable', async () => {
+		vi.mocked(clientApi.apiFetch)
+			.mockResolvedValueOnce(mockResponse(catalogBody([piHarness([])])))
+			.mockResolvedValueOnce(mockResponse({
+				error: 'Pi model discovery unavailable',
+				reason: 'auth storage: auth.json is locked'
+			}, 503));
+
+		const store = createModelCatalogStore();
+		await store.forceRefresh();
+
+		expect(store.error).toBe('auth storage: auth.json is locked');
+		expect(store.getModels('pi')).toEqual([]);
+		expect(store.lastFetchedAt).toBeNull();
+		expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+	});
+
+	it('uses stale Pi models from a strict 503 body without marking them fresh', async () => {
+		vi.mocked(clientApi.apiFetch)
+			.mockResolvedValueOnce(mockResponse(catalogBody([piHarness([])])))
+			.mockResolvedValueOnce(mockResponse({
+				error: 'Pi model discovery unavailable',
+				reason: 'auth storage: auth.json is locked',
+				catalog: {
+					harnesses: [piHarness([PI_MODEL], PI_MODEL.value)],
+					apiProviders: []
+				}
+			}, 503));
+
+		const store = createModelCatalogStore();
+		await store.forceRefresh();
+
+		const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+		expect(store.error).toBe('auth storage: auth.json is locked');
+		expect(store.getModels('pi')).toEqual([PI_MODEL]);
+		expect(store.lastFetchedAt).toBeNull();
+		expect(persisted.harnessModels.pi).toEqual([PI_MODEL]);
+		expect(persisted.lastFetchedAt).toBeNull();
+	});
+
+	it('preserves cached Pi models on strict discovery failures without storing an empty refresh', async () => {
+		localStorage.setItem(
+			STORAGE_KEY,
+			JSON.stringify({
+				harnessModels: {
+					pi: [PI_MODEL]
+				},
+				harnessMetadata: {
+					pi: {
+						id: 'pi',
+						label: 'Pi',
+						supportsFork: false,
+						supportsImages: false,
+						acceptsApiProviderEndpoints: false,
+						supportedProtocols: [],
+						defaultModel: PI_MODEL.value
+					}
+				},
+				apiProviderCatalog: [],
+				lastFetchedAt: Date.now()
+			})
+		);
+		vi.mocked(clientApi.apiFetch)
+			.mockResolvedValueOnce(mockResponse(catalogBody([piHarness([])])))
+			.mockResolvedValueOnce(mockResponse({
+				error: 'Pi model discovery unavailable',
+				reason: 'auth storage: auth.json is locked'
+			}, 503));
+
+		const store = createModelCatalogStore();
+		await store.forceRefresh();
+
+		const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+		expect(store.error).toBe('auth storage: auth.json is locked');
+		expect(store.getModels('pi')).toEqual([PI_MODEL]);
+		expect(store.lastFetchedAt).toBeNull();
+		expect(persisted.harnessModels.pi).toEqual([PI_MODEL]);
+		expect(persisted.lastFetchedAt).toBeNull();
 	});
 
 	it('prefers model-level image capability when present', async () => {
