@@ -1,4 +1,4 @@
-import { getPiAvailableModels } from './pi-models.js';
+import { getPiModels } from './pi-models.js';
 
 export async function getPiAuthStatus(): Promise<{
   authenticated: boolean;
@@ -6,7 +6,7 @@ export async function getPiAuthStatus(): Promise<{
   label: string;
 }> {
   try {
-    const models = await getPiAvailableModels();
+    const models = await getPiModels();
     return {
       authenticated: models.length > 0,
       canReauth: false,

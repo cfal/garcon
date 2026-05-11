@@ -241,6 +241,19 @@ function mergeWithFallbacks(models: HarnessModels): HarnessModels {
 	return result;
 }
 
+function hasExplicitEmptyPiModels(models: HarnessModels): boolean {
+	return Array.isArray(models.pi) && models.pi.length === 0;
+}
+
+function piUnavailableError(data: unknown, status: number): string {
+	if (data && typeof data === 'object') {
+		const root = data as Record<string, unknown>;
+		if (typeof root.reason === 'string' && root.reason) return root.reason;
+		if (typeof root.error === 'string' && root.error) return root.error;
+	}
+	return `Pi model discovery failed: ${status}`;
+}
+
 function filterVisibleHarnessMetadata(harnessMetadata: HarnessMetadataMap): HarnessMetadataMap {
 	return Object.fromEntries(
 		Object.entries(harnessMetadata)
@@ -351,6 +364,10 @@ function persist(snapshot: ModelCatalogSnapshot): void {
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
 	} catch {
 	}
+}
+
+function hasNonEmptyPiModels(snapshot: ModelCatalogSnapshot): boolean {
+	return Boolean(snapshot.harnessModels.pi?.length);
 }
 
 export class ModelCatalogStore {
@@ -473,6 +490,37 @@ export class ModelCatalogStore {
 		return null;
 	}
 
+	async #resolveStrictPiModels(
+		models: HarnessModels,
+		metadata: HarnessMetadataMap
+	): Promise<{ models: HarnessModels; metadata: HarnessMetadataMap; persistable: boolean }> {
+		const response = await apiFetch('/api/v1/models?harness=pi');
+		const data = (await response.json().catch(() => ({}))) as unknown;
+		const catalogResult = parseCatalogResponse(data);
+		if (response.ok) {
+			if (!catalogResult?.harnessModels.pi) {
+				throw new Error('Pi model catalog response is invalid');
+			}
+			return {
+				models: { ...models, pi: catalogResult.harnessModels.pi },
+				metadata: filterVisibleHarnessMetadata({ ...metadata, ...catalogResult.harnessMetadata }),
+				persistable: true,
+			};
+		}
+
+		const previousPiModels = this.harnessModels.pi ?? [];
+		const stalePiModels = catalogResult?.harnessModels.pi ?? [];
+		const nextPiModels = stalePiModels.length > 0 ? stalePiModels : previousPiModels;
+		this.error = piUnavailableError(data, response.status);
+		return {
+			models: { ...models, pi: nextPiModels },
+			metadata: catalogResult
+				? filterVisibleHarnessMetadata({ ...metadata, ...catalogResult.harnessMetadata })
+				: metadata,
+			persistable: false,
+		};
+	}
+
 	hydrateFromStorage(): void {
 		const snapshot = readPersisted();
 		this.harnessModels = snapshot.harnessModels;
@@ -505,21 +553,33 @@ export class ModelCatalogStore {
 			const data = (await response.json()) as unknown;
 
 			const catalogResult = parseCatalogResponse(data);
+			let persistable = true;
 			if (catalogResult && Object.keys(catalogResult.harnessModels).length > 0) {
-				this.harnessModels = mergeWithFallbacks(catalogResult.harnessModels);
-				this.harnessMetadata = filterVisibleHarnessMetadata({ ...STATIC_HARNESS_METADATA, ...catalogResult.harnessMetadata });
+				let nextModels = mergeWithFallbacks(catalogResult.harnessModels);
+				let nextMetadata = filterVisibleHarnessMetadata({ ...STATIC_HARNESS_METADATA, ...catalogResult.harnessMetadata });
+				if (hasExplicitEmptyPiModels(catalogResult.harnessModels)) {
+					const strictPi = await this.#resolveStrictPiModels(nextModels, nextMetadata);
+					nextModels = strictPi.models;
+					nextMetadata = strictPi.metadata;
+					persistable = strictPi.persistable;
+				}
+				this.harnessModels = nextModels;
+				this.harnessMetadata = nextMetadata;
 				this.apiProviderCatalog = catalogResult.apiProviderCatalog;
 			} else {
 				throw new Error('Model catalog response is invalid');
 			}
 
-			this.lastFetchedAt = Date.now();
-			persist({
+			this.lastFetchedAt = persistable ? Date.now() : null;
+			const snapshot = {
 				harnessModels: this.harnessModels,
 				harnessMetadata: this.harnessMetadata,
 				apiProviderCatalog: this.apiProviderCatalog,
 				lastFetchedAt: this.lastFetchedAt,
-			});
+			};
+			if (persistable || hasNonEmptyPiModels(snapshot)) {
+				persist(snapshot);
+			}
 			this.version += 1;
 		} catch (error) {
 			this.error = error instanceof Error ? error.message : 'Unknown error';

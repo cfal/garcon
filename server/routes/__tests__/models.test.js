@@ -1,4 +1,14 @@
 import { describe, it, expect, mock } from 'bun:test';
+
+const getPiModelsStrictMock = mock(() => Promise.resolve([
+  { value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true },
+]));
+
+mock.module('../../providers/pi-models.js', () => ({
+  getPiModelsStrict: getPiModelsStrictMock,
+  isPiModelDiscoveryUnavailableError: (error) => error?.code === 'PI_MODEL_DISCOVERY_UNAVAILABLE',
+}));
+
 import createModelsRoutes from '../models.js';
 
 const providers = {
@@ -110,5 +120,59 @@ describe('GET /api/v1/models', () => {
 
     expect(body.catalog.harnesses.length).toBe(1);
     expect(body.catalog.harnesses[0].id).toBe('claude');
+  });
+
+  it('uses strict Pi discovery for the Pi harness filter', async () => {
+    getPiModelsStrictMock.mockResolvedValueOnce([
+      { value: 'openrouter/openai/gpt-5.4', label: 'openrouter: gpt-5.4', supportsImages: true },
+    ]);
+    const url = new URL('http://localhost/api/v1/models?harness=pi');
+    const response = await handler(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(getPiModelsStrictMock).toHaveBeenCalled();
+    expect(body.catalog.harnesses).toHaveLength(1);
+    expect(body.catalog.harnesses[0].id).toBe('pi');
+    expect(body.catalog.harnesses[0].models).toEqual([
+      { value: 'openrouter/openai/gpt-5.4', label: 'openrouter: gpt-5.4', supportsImages: true },
+    ]);
+  });
+
+  it('returns a Pi-specific 503 when strict Pi discovery has no stale models', async () => {
+    const error = Object.assign(new Error('auth storage: auth.json is locked'), {
+      code: 'PI_MODEL_DISCOVERY_UNAVAILABLE',
+      staleModels: [],
+    });
+    getPiModelsStrictMock.mockRejectedValueOnce(error);
+    const url = new URL('http://localhost/api/v1/models?harness=pi');
+    const response = await handler(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      error: 'Pi model discovery unavailable',
+      reason: 'auth storage: auth.json is locked',
+    });
+  });
+
+  it('returns stale Pi models in the 503 body when available', async () => {
+    const staleModels = [
+      { value: 'openrouter/openai/gpt-5.4', label: 'openrouter: gpt-5.4', supportsImages: true },
+    ];
+    const error = Object.assign(new Error('auth storage: auth.json is locked'), {
+      code: 'PI_MODEL_DISCOVERY_UNAVAILABLE',
+      staleModels,
+    });
+    getPiModelsStrictMock.mockRejectedValueOnce(error);
+    const url = new URL('http://localhost/api/v1/models?harness=pi');
+    const response = await handler(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.error).toBe('Pi model discovery unavailable');
+    expect(body.catalog.harnesses).toHaveLength(1);
+    expect(body.catalog.harnesses[0].id).toBe('pi');
+    expect(body.catalog.harnesses[0].models).toEqual(staleModels);
   });
 });
