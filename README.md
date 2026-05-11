@@ -1,8 +1,12 @@
-# Garcon
+<h1 align="center">Garcon</h1>
 
-Garcon is a unified local coding workspace for multiple AI coding agents - install it as a PWA on your phone for on-the-go coding, or use it from your desktop.
+<p align="center"><strong>Garcon is a unified coding workspace for AI coding agents - use it from your phone or computer, with seamless access to your local machine.</strong></p>
 
-Works with Claude Code, Codex, OpenCode, Amp, Factory Droid, Pi, and any OpenAI/Anthropic-compatible endpoint.
+<p align="center">Works with Claude Code, Codex, OpenCode, Amp, Factory Droid, Pi, and any OpenAI/Anthropic-compatible endpoint.</p>
+
+<p align="center">
+  <img src="screenshots/main-screen-top.png" alt="Garcon IDE" width="100%" />
+</p>
 
 <table>
   <tr>
