@@ -52,7 +52,6 @@
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
 		chatMaxWidth: 'none',
-		searchBarPosition: 'top',
 		set() {},
 		toggle() {},
 	} as never);

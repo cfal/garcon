@@ -3,7 +3,6 @@
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$shared/chat-modes';
 import type { ApiProtocol } from '$shared/providers';
 
-export type SidebarSearchBarPosition = 'top' | 'bottom';
 export type PinnedInsertPosition = 'top' | 'bottom';
 
 export interface ChatSession {

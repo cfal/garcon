@@ -11,7 +11,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
   }
 
   function sanitizeRemoteUiSnapshot(value) {
-    // Keeps browser-local sidebar layout state out of the shared snapshot.
+    // Drops obsolete sidebar placement state from stale remote settings.
     const ui = asPlainObject(value);
     if (!('searchBarPosition' in ui)) return ui;
     const { searchBarPosition: _searchBarPosition, ...rest } = ui;

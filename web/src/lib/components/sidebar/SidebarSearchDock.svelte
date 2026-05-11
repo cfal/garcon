@@ -4,7 +4,6 @@
 	import type { SavedChatSearch } from '$lib/api/settings';
 
 	interface SidebarSearchDockProps {
-		dockPlacement: 'top' | 'bottom';
 		isLoading: boolean;
 		isReorderMode: boolean;
 		visibleUnreadCount: number;
@@ -23,7 +22,6 @@
 	}
 
 	let {
-		dockPlacement,
 		isLoading,
 		isReorderMode,
 		visibleUnreadCount,
@@ -41,60 +39,30 @@
 		onShowSettings,
 	}: SidebarSearchDockProps = $props();
 
-	let isTopDock = $derived(dockPlacement === 'top');
 	let hasSearchContext = $derived(sidebarPillSearches.length > 0 || activeQuery.trim().length > 0);
 </script>
 
 <div data-slot="sidebar-search-dock">
-	{#if isTopDock}
-		<SidebarControlsRow
-			{dockPlacement}
-			{isLoading}
-			{isReorderMode}
-			{visibleUnreadCount}
-			{isMarkingAllRead}
-			{sidebarMenuSearches}
-			hasAdjacentSearchContext={hasSearchContext}
-			{onOpenSearchDialog}
-			onCreateChat={onCreateChat}
-			{onMarkAllRead}
-			{onApplySidebarMenuSearch}
-			{primaryLabel}
-			{onShowSettings}
-		/>
-		<SidebarSearchContext
-			{dockPlacement}
-			hasAdjacentControlsRow={true}
-			{sidebarPillSearches}
-			{activeQuery}
-			{onOpenSearchDialog}
-			onApplyPillSearch={onApplyPillSearch}
-			onClearActiveQuery={onClearActiveQuery}
-		/>
-	{:else}
-		<SidebarSearchContext
-			{dockPlacement}
-			hasAdjacentControlsRow={true}
-			{sidebarPillSearches}
-			{activeQuery}
-			{onOpenSearchDialog}
-			onApplyPillSearch={onApplyPillSearch}
-			onClearActiveQuery={onClearActiveQuery}
-		/>
-		<SidebarControlsRow
-			{dockPlacement}
-			{isLoading}
-			{isReorderMode}
-			{visibleUnreadCount}
-			{isMarkingAllRead}
-			{sidebarMenuSearches}
-			hasAdjacentSearchContext={hasSearchContext}
-			{onOpenSearchDialog}
-			onCreateChat={onCreateChat}
-			{onMarkAllRead}
-			{onApplySidebarMenuSearch}
-			{primaryLabel}
-			{onShowSettings}
-		/>
-	{/if}
+	<SidebarControlsRow
+		{isLoading}
+		{isReorderMode}
+		{visibleUnreadCount}
+		{isMarkingAllRead}
+		{sidebarMenuSearches}
+		hasAdjacentSearchContext={hasSearchContext}
+		{onOpenSearchDialog}
+		onCreateChat={onCreateChat}
+		{onMarkAllRead}
+		{onApplySidebarMenuSearch}
+		{primaryLabel}
+		{onShowSettings}
+	/>
+	<SidebarSearchContext
+		hasAdjacentControlsRow={true}
+		{sidebarPillSearches}
+		{activeQuery}
+		{onOpenSearchDialog}
+		onApplyPillSearch={onApplyPillSearch}
+		onClearActiveQuery={onClearActiveQuery}
+	/>
 </div>

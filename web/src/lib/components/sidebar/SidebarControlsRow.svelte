@@ -16,7 +16,6 @@
 	import type { SavedChatSearch } from '$lib/api/settings';
 
 	interface SidebarControlsRowProps {
-		dockPlacement?: 'top' | 'bottom';
 		isLoading: boolean;
 		isReorderMode: boolean;
 		visibleUnreadCount?: number;
@@ -32,7 +31,6 @@
 	}
 
 	let {
-		dockPlacement = 'bottom',
 		isLoading,
 		isReorderMode,
 		visibleUnreadCount = 0,
@@ -51,7 +49,6 @@
 	let showMarkAllRead = $derived(visibleUnreadCount > 0 && !isReorderMode);
 	let showQuickSearchSeparator = $derived(sidebarMenuSearches.length > 0);
 	let isMarkAllReadDisabled = $derived(isLoading || isMarkingAllRead);
-	let isTopDock = $derived(dockPlacement === 'top');
 	let showDockDivider = $derived(!hasAdjacentSearchContext);
 	let primaryButtonRef = $state<HTMLButtonElement | null>(null);
 	let primaryButtonWidth = $state(0);
@@ -75,7 +72,7 @@
 
 <div
 	data-slot="sidebar-controls-row"
-	class={`flex-shrink-0 ${showDockDivider ? (isTopDock ? 'border-b' : 'border-t') : ''} border-border/60 bg-card px-2 py-2`}
+	class={`flex-shrink-0 ${showDockDivider ? 'border-b' : ''} border-border/60 bg-card px-2 py-2`}
 >
 	{#if !isReorderMode}
 		<div class="flex items-center gap-1.5">

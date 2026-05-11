@@ -404,7 +404,6 @@
   "settings_chat_show_thinking": "Show thinking",
   "settings_accessibility_colorblind_mode": "Colorblind-friendly colors",
   "settings_display_show_fullscreen_button": "Always full screen on Git panel",
-  "settings_display_sidebar_controls_position": "Sidebar controls position",
   "settings_save_failed": "Failed to save setting",
   "settings_telegram_chat_id": "Chat ID",
   "settings_telegram_enable_hint": "Set {envVar} to enable.",

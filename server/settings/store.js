@@ -52,8 +52,7 @@ function normalizeUiSettings(ui) {
     normalized.pinnedInsertPosition = normalized.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
   }
   if ('searchBarPosition' in normalized) {
-    // Stores sidebar controls position in browser-local settings instead of
-    // the shared remote settings snapshot.
+    // Drops obsolete sidebar placement state from stale remote settings.
     delete normalized.searchBarPosition;
   }
   return normalized;

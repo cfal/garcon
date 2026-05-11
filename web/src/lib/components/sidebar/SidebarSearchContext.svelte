@@ -7,7 +7,6 @@
 	interface SidebarSearchContextProps {
 		sidebarPillSearches: SavedChatSearch[];
 		activeQuery: string;
-		dockPlacement?: 'top' | 'bottom';
 		hasAdjacentControlsRow?: boolean;
 		onOpenSearchDialog: () => void;
 		onApplyPillSearch: (search: SavedChatSearch) => void;
@@ -17,7 +16,6 @@
 	let {
 		sidebarPillSearches,
 		activeQuery,
-		dockPlacement = 'top',
 		hasAdjacentControlsRow = false,
 		onOpenSearchDialog,
 		onApplyPillSearch,
@@ -25,11 +23,9 @@
 	}: SidebarSearchContextProps = $props();
 
 	let hasActiveQuery = $derived(activeQuery.trim().length > 0);
-	let isTopDock = $derived(dockPlacement === 'top');
-	let containerBorderClass = $derived(isTopDock ? 'border-b' : 'border-t');
 	let containerPaddingClass = $derived.by(() => {
 		if (!hasAdjacentControlsRow) return 'px-2 py-2';
-		return isTopDock ? 'px-2 pb-2' : 'px-2 pt-2';
+		return 'px-2 pb-2';
 	});
 </script>
 
@@ -69,14 +65,9 @@
 {#if sidebarPillSearches.length > 0 || hasActiveQuery}
 	<div
 		data-slot="sidebar-search-context"
-		class={`flex-shrink-0 ${containerBorderClass} border-border/60 bg-card space-y-2 ${containerPaddingClass}`}
+		class={`flex-shrink-0 border-b border-border/60 bg-card space-y-2 ${containerPaddingClass}`}
 	>
-		{#if isTopDock}
-			{@render savedSearchPills()}
-			{@render activeSearchBanner()}
-		{:else}
-			{@render activeSearchBanner()}
-			{@render savedSearchPills()}
-		{/if}
+		{@render savedSearchPills()}
+		{@render activeSearchBanner()}
 	</div>
 {/if}

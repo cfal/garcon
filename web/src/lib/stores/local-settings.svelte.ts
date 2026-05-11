@@ -1,8 +1,6 @@
 // Reactive local settings store using Svelte 5 runes. Persists
 // browser-only preferences to localStorage.
 
-import type { SidebarSearchBarPosition } from '$lib/types/session.js';
-
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
 export type ChatMaxWidth = typeof CHAT_MAX_WIDTH_VALUES[number];
@@ -18,7 +16,6 @@ export interface LocalSettingsSnapshot {
 	alwaysFullscreenOnGitPanel: boolean;
 	sidebarVisible: boolean;
 	sidebarWidth: number;
-	searchBarPosition: SidebarSearchBarPosition;
 	codeEditorTheme: string;
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
@@ -51,7 +48,6 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	alwaysFullscreenOnGitPanel: true,
 	sidebarVisible: true,
 	sidebarWidth: 320,
-	searchBarPosition: 'top',
 	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
@@ -89,10 +85,6 @@ function parseSidebarWidth(value: unknown): number {
 	return DEFAULTS.sidebarWidth;
 }
 
-function parseSearchBarPosition(value: unknown): SidebarSearchBarPosition {
-	return value === 'bottom' ? 'bottom' : 'top';
-}
-
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	return {
 		theme: parseTheme(parsed.theme),
@@ -105,7 +97,6 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		alwaysFullscreenOnGitPanel: parseBoolean(parsed.alwaysFullscreenOnGitPanel, DEFAULTS.alwaysFullscreenOnGitPanel),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
-		searchBarPosition: parseSearchBarPosition(parsed.searchBarPosition),
 		codeEditorTheme: parseString(parsed.codeEditorTheme, DEFAULTS.codeEditorTheme),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
 		codeEditorLineNumbers: parseBoolean(parsed.codeEditorLineNumbers, DEFAULTS.codeEditorLineNumbers),
@@ -152,7 +143,6 @@ export class LocalSettingsStore {
 	alwaysFullscreenOnGitPanel = $state(DEFAULTS.alwaysFullscreenOnGitPanel);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
-	searchBarPosition = $state<SidebarSearchBarPosition>(DEFAULTS.searchBarPosition);
 	codeEditorTheme = $state(DEFAULTS.codeEditorTheme);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
@@ -203,7 +193,6 @@ export class LocalSettingsStore {
 			alwaysFullscreenOnGitPanel: this.alwaysFullscreenOnGitPanel,
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
-			searchBarPosition: this.searchBarPosition,
 			codeEditorTheme: this.codeEditorTheme,
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
@@ -225,7 +214,6 @@ export class LocalSettingsStore {
 		this.alwaysFullscreenOnGitPanel = snap.alwaysFullscreenOnGitPanel;
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
-		this.searchBarPosition = snap.searchBarPosition;
 		this.codeEditorTheme = snap.codeEditorTheme;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;
 		this.codeEditorLineNumbers = snap.codeEditorLineNumbers;

@@ -7,7 +7,6 @@
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import { isChatMaxWidth, type ChatMaxWidth, type ThemeMode } from '$lib/stores/local-settings.svelte.js';
 	import { getLocalSettings } from '$lib/context';
-	import type { SidebarSearchBarPosition } from '$lib/types/session.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const ls = getLocalSettings();
@@ -22,16 +21,11 @@
 		ls.set('theme', mode);
 	}
 
-	function setSearchBarPosition(position: SidebarSearchBarPosition) {
-		ls.set('searchBarPosition', position);
-	}
-
 	function setChatMaxWidth(value: string) {
 		if (isChatMaxWidth(value)) {
 			ls.set('chatMaxWidth', value);
 		}
 	}
-
 </script>
 
 {#snippet settingRow(label: string, checked: boolean, onToggle: () => void)}
@@ -79,19 +73,17 @@
 		</div>
 
 		<div class="px-4">
-			<div class="flex items-center justify-between py-2">
-				<div class="text-sm font-medium text-foreground">
-					{m.settings_display_sidebar_controls_position()}
-				</div>
+			<div class="flex items-center justify-between gap-4 py-2">
+				<div class="text-sm font-medium text-foreground">{m.settings_chat_max_width()}</div>
 				<select
 					class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
-					aria-label={m.settings_display_sidebar_controls_position()}
-					value={ls.searchBarPosition}
-					onchange={(event) =>
-						setSearchBarPosition((event.currentTarget as HTMLSelectElement).value as SidebarSearchBarPosition)}
+					aria-label={m.settings_chat_max_width()}
+					value={ls.chatMaxWidth}
+					onchange={(event) => setChatMaxWidth((event.currentTarget as HTMLSelectElement).value)}
 				>
-					<option value="top">{m.sidebar_chats_pinned_insert_top()}</option>
-					<option value="bottom">{m.sidebar_chats_pinned_insert_bottom()}</option>
+					{#each chatMaxWidthOptions as option (option.value)}
+						<option value={option.value}>{option.label()}</option>
+					{/each}
 				</select>
 			</div>
 			{@render settingRow(
@@ -124,19 +116,6 @@
 				ls.sendByShiftEnter,
 				() => ls.toggle('sendByShiftEnter')
 			)}
-			<div class="flex items-center justify-between gap-4 py-2">
-				<div class="text-sm font-medium text-foreground">{m.settings_chat_max_width()}</div>
-				<select
-					class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
-					aria-label={m.settings_chat_max_width()}
-					value={ls.chatMaxWidth}
-					onchange={(event) => setChatMaxWidth((event.currentTarget as HTMLSelectElement).value)}
-				>
-					{#each chatMaxWidthOptions as option (option.value)}
-						<option value={option.value}>{option.label()}</option>
-					{/each}
-				</select>
-			</div>
 		</div>
 	</div>
 </div>

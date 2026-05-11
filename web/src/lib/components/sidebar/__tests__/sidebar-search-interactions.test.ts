@@ -316,8 +316,7 @@ describe('sidebar search interactions', () => {
 	});
 
 	it('suppresses the dock divider when search context sits directly against the controls row', () => {
-		const { rerender } = render(SidebarControlsRow, {
-			dockPlacement: 'top',
+		render(SidebarControlsRow, {
 			isLoading: false,
 			isReorderMode: false,
 			visibleUnreadCount: 0,
@@ -332,22 +331,6 @@ describe('sidebar search interactions', () => {
 		const controlsRow = document.querySelector('[data-slot="sidebar-controls-row"]');
 		expect(controlsRow?.className ?? '').not.toMatch(/\bborder-b\b/);
 		expect(controlsRow?.className ?? '').toContain('px-2');
-
-		rerender({
-			dockPlacement: 'bottom',
-			isLoading: false,
-			isReorderMode: false,
-			visibleUnreadCount: 0,
-			hasAdjacentSearchContext: true,
-			sidebarMenuSearches: [],
-			onOpenSearchDialog: vi.fn(),
-			onCreateChat: vi.fn(),
-			onApplySidebarMenuSearch: vi.fn(),
-			onShowSettings: vi.fn(),
-		});
-
-		const bottomControlsRow = document.querySelector('[data-slot="sidebar-controls-row"]');
-		expect(bottomControlsRow?.className ?? '').not.toMatch(/\bborder-t\b/);
 	});
 
 	it('omits the separator when no sidebar menu searches are shown', async () => {
@@ -399,11 +382,10 @@ describe('sidebar search interactions', () => {
 		expect(onOpenSearchDialog).toHaveBeenCalledTimes(1);
 	});
 
-	it('tightens the dock seam for both top and bottom placements', () => {
-		const { rerender } = render(SidebarSearchContext, {
+	it('tightens the top dock seam when search context sits below the controls row', () => {
+		render(SidebarSearchContext, {
 			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
-			activeQuery: '',
-			dockPlacement: 'top',
+			activeQuery: 'tag:ops',
 			hasAdjacentControlsRow: true,
 			onOpenSearchDialog: vi.fn(),
 			onApplyPillSearch: vi.fn(),
@@ -419,29 +401,7 @@ describe('sidebar search interactions', () => {
 		const topChildSlots = Array.from(topContext?.children ?? []).map((element) =>
 			element.getAttribute('data-slot')
 		);
-		expect(topChildSlots).toEqual(['sidebar-search-pills']);
-
-		rerender({
-			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
-			activeQuery: 'tag:ops',
-			dockPlacement: 'bottom',
-			hasAdjacentControlsRow: true,
-			onOpenSearchDialog: vi.fn(),
-			onApplyPillSearch: vi.fn(),
-			onClearActiveQuery: vi.fn(),
-		});
-
-		const bottomContext = document.querySelector('[data-slot="sidebar-search-context"]');
-		expect(bottomContext?.className).toContain('border-t');
-		expect(bottomContext?.className).toContain('px-2');
-		expect(bottomContext?.className).toContain('pt-2');
-		expect(bottomContext?.className).not.toContain('pb-2');
-		expect(bottomContext?.className).not.toContain('py-2');
-
-		const childSlots = Array.from(bottomContext?.children ?? []).map((element) =>
-			element.getAttribute('data-slot')
-		);
-		expect(childSlots).toEqual(['active-search-banner', 'sidebar-search-pills']);
+		expect(topChildSlots).toEqual(['sidebar-search-pills', 'active-search-banner']);
 	});
 
 	it('omits sidebar search context when there are no pills and no active query', () => {
@@ -457,9 +417,8 @@ describe('sidebar search interactions', () => {
 		expect(document.querySelector('[data-slot="active-search-banner"]')).toBeNull();
 	});
 
-	it('mirrors the dock order when the search section is placed at the bottom', () => {
-		const { rerender } = render(SidebarSearchDock, {
-			dockPlacement: 'top',
+	it('renders the controls row above the search context', () => {
+		render(SidebarSearchDock, {
 			isLoading: false,
 			isReorderMode: false,
 			visibleUnreadCount: 0,
@@ -480,29 +439,6 @@ describe('sidebar search interactions', () => {
 			element.getAttribute('data-slot')
 		);
 		expect(topChildSlots).toEqual(['sidebar-controls-row', 'sidebar-search-context']);
-
-		rerender({
-			dockPlacement: 'bottom',
-			isLoading: false,
-			isReorderMode: false,
-			visibleUnreadCount: 0,
-			sidebarMenuSearches: [],
-			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
-			activeQuery: 'tag:ops',
-			onOpenSearchDialog: vi.fn(),
-			onCreateChat: vi.fn(),
-			onMarkAllRead: vi.fn(),
-			onApplySidebarMenuSearch: vi.fn(),
-			onApplyPillSearch: vi.fn(),
-			onClearActiveQuery: vi.fn(),
-			onShowSettings: vi.fn(),
-		});
-
-		const bottomDock = document.querySelector('[data-slot="sidebar-search-dock"]');
-		const bottomChildSlots = Array.from(bottomDock?.children ?? []).map((element) =>
-			element.getAttribute('data-slot')
-		);
-		expect(bottomChildSlots).toEqual(['sidebar-search-context', 'sidebar-controls-row']);
 	});
 
 	it('supports button-based reordering for saved searches', async () => {

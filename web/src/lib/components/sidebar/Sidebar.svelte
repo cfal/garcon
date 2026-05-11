@@ -9,7 +9,7 @@
 	import SavedSearchManagerDialog from './SavedSearchManagerDialog.svelte';
 	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
-	import { getAppShell, getLocalSettings, getReadReceiptOutbox } from '$lib/context';
+	import { getAppShell, getReadReceiptOutbox } from '$lib/context';
 	import type { SessionProvider } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { reorderChats } from '$lib/api/chats.js';
@@ -85,7 +85,6 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		onShowSettings,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
-	const localSettings = getLocalSettings();
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const controller = new SidebarController({
 		get onQuietRefresh() { return onQuietRefresh; },
@@ -109,7 +108,6 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 	let shareChatDialog = $state<{ chatId: string; chatTitle: string } | null>(null);
 	let currentTime = $state(new Date());
 	let isMarkingAllRead = $state(false);
-	let searchBarPosition = $derived(localSettings.searchBarPosition);
 
 	// Saved search management state.
 	let editorState = $state<SavedSearchEditorState | null>(null);
@@ -123,9 +121,6 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
 			.map((chat) => chat.id)
 	);
-	let isTopSearchDock = $derived(searchBarPosition === 'top');
-	let dockOrderClass = $derived(isTopSearchDock ? 'order-1' : 'order-2');
-	let contentOrderClass = $derived(isTopSearchDock ? 'order-2' : 'order-1');
 
 	function millisecondsUntilNextMinute(nowMs = Date.now()): number {
 		const elapsedInMinute = nowMs % MINUTE_MS;
@@ -697,9 +692,8 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 
 <!-- svelte-ignore a11y_no_static_element_interactions -- keydown on container for Escape handling -->
 <div class="h-full flex flex-col bg-card md:select-none relative" onkeydown={handleSidebarKeydown}>
-	<div class={`${dockOrderClass} flex-shrink-0`}>
+	<div class="order-1 flex-shrink-0">
 		<SidebarSearchDock
-			dockPlacement={searchBarPosition}
 			{isLoading}
 			{isReorderMode}
 			visibleUnreadCount={visibleUnreadChatIds.length}
@@ -718,7 +712,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		/>
 	</div>
 
-	<div class={`${contentOrderClass} flex min-h-0 flex-1`}>
+	<div class="order-2 flex min-h-0 flex-1">
 		<SidebarContent
 			{chats}
 			filteredChats={searchState.filteredChats}

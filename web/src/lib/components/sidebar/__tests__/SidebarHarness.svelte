@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Sidebar from '../Sidebar.svelte';
-	import { setAppShell, setLocalSettings, setModelCatalog, setReadReceiptOutbox, setSplitLayout } from '$lib/context';
+	import { setAppShell, setModelCatalog, setReadReceiptOutbox, setSplitLayout } from '$lib/context';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarHarnessProps {
@@ -26,11 +26,7 @@
 		requestComposerFocus() {},
 	} as never);
 
-	setLocalSettings({
-		searchBarPosition: 'top',
-	} as never);
-
-	setReadReceiptOutbox({
+setReadReceiptOutbox({
 		markChatsReadNow() {
 			return Promise.resolve();
 		},
