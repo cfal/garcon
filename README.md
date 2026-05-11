@@ -6,8 +6,8 @@ Codex, OpenCode, Amp, Factory Droid, Pi, and OpenAI/Anthropic-compatible endpoin
 <table>
   <tr>
     <td align="center">
-      <a href="screenshots/main-screen.png">
-        <img src="screenshots/main-screen.png" alt="Garcon main workspace" width="200" />
+      <a href="screenshots/main-screen-dark.png">
+        <img src="screenshots/main-screen-dark.png" alt="Garcon main workspace with dark theme" width="200" />
       </a>
     </td>
     <td align="center">
@@ -21,8 +21,8 @@ Codex, OpenCode, Amp, Factory Droid, Pi, and OpenAI/Anthropic-compatible endpoin
       </a>
     </td>
     <td align="center">
-      <a href="screenshots/main-screen-dark.png">
-        <img src="screenshots/main-screen-dark.png" alt="Garcon main workspace in dark theme" width="200" />
+      <a href="screenshots/main-screen-light.png">
+        <img src="screenshots/main-screen-light.png" alt="Garcon main workspace with light theme" width="200" />
       </a>
     </td>
   </tr>
@@ -30,7 +30,7 @@ Codex, OpenCode, Amp, Factory Droid, Pi, and OpenAI/Anthropic-compatible endpoin
     <td align="center"><em>Main workspace</em></td>
     <td align="center"><em>Git workbench</em></td>
     <td align="center"><em>Mobile layout</em></td>
-    <td align="center"><em>Dark theme</em></td>
+    <td align="center"><em>Settings screen</em></td>
   </tr>
 </table>
 
