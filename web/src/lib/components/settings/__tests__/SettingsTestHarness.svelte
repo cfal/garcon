@@ -16,8 +16,11 @@
 		get showSettings() {
 			return appShell.showSettings;
 		},
-		get settingsInitialTab() {
-			return appShell.settingsInitialTab;
+		get settingsTab() {
+			return appShell.settingsTab;
+		},
+		setSettingsTab(tab: string) {
+			appShell.setSettingsTab(tab);
 		},
 		closeSettings() {
 			appShell.closeSettings();

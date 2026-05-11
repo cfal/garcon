@@ -1,11 +1,13 @@
 // Coordinates shell-level state and imperative action dispatch.
 
-export type SettingsTab = 'api-providers' | 'local' | 'remote';
+export type SettingsTab = 'providers' | 'other-harnesses' | 'local' | 'remote';
 
 function normalizeSettingsTab(value: string): SettingsTab {
+	if (value === 'providers') return 'providers';
+	if (value === 'other-harnesses') return 'other-harnesses';
 	if (value === 'local') return 'local';
 	if (value === 'remote') return 'remote';
-	return 'api-providers';
+	return 'providers';
 }
 
 export type RefreshChatsCallback = () => void;
@@ -16,7 +18,7 @@ export interface NewChatDialogSeed {
 
 export class AppShellStore {
 	showSettings = $state(false);
-	settingsInitialTab = $state<SettingsTab>('api-providers');
+	settingsTab = $state<SettingsTab>('providers');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
 	/** Height of the virtual keyboard in px, tracked via visualViewport. */
@@ -40,13 +42,17 @@ export class AppShellStore {
 	#newChatDialogSeedCallbacks = new Set<() => void>();
 	#sidebarSearchCallbacks = new Set<() => void>();
 
-	openSettings(section: string = 'api-providers'): void {
+	openSettings(section: string = 'providers'): void {
 		this.showSettings = true;
-		this.settingsInitialTab = normalizeSettingsTab(section);
+		this.settingsTab = normalizeSettingsTab(section);
 	}
 
 	closeSettings(): void {
 		this.showSettings = false;
+	}
+
+	setSettingsTab(tab: string): void {
+		this.settingsTab = normalizeSettingsTab(tab);
 	}
 
 	setSidebarOpen(open: boolean): void {

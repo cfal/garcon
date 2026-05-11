@@ -140,14 +140,17 @@ describe('AppShellStore', () => {
 	});
 
 	describe('settings tabs', () => {
-		it('defaults unknown section requests to API providers', () => {
+		it('defaults unknown section requests to providers', () => {
 			const store = new AppShellStore();
 
 			store.openSettings('display');
-			expect(store.settingsInitialTab).toBe('api-providers');
+			expect(store.settingsTab).toBe('providers');
 
 			store.openSettings('remote');
-			expect(store.settingsInitialTab).toBe('remote');
+			expect(store.settingsTab).toBe('remote');
+
+			store.setSettingsTab('other-harnesses');
+			expect(store.settingsTab).toBe('other-harnesses');
 		});
 	});
 });

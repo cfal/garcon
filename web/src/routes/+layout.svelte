@@ -194,7 +194,7 @@
 		}
 	});
 
-	// Opens the settings dialog to the Agents tab on the first authenticated
+	// Opens the settings dialog to the Providers tab on the first authenticated
 	// load right after a successful registration. Gated on a localStorage
 	// flag set during the registration flow so cold loads for existing users
 	// or auth-disabled sessions do not receive a blocking onboarding modal.
@@ -209,7 +209,7 @@
 		try {
 			if (localStorage.getItem('just-registered') === '1') {
 				localStorage.removeItem('just-registered');
-				appShell.openSettings('agents');
+				appShell.openSettings('providers');
 			}
 		} catch {
 			// localStorage unavailable
