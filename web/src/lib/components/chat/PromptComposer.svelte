@@ -110,7 +110,6 @@
 				ctrlKey: event.ctrlKey,
 				metaKey: event.metaKey,
 				isComposing: event.isComposing,
-				isMobile: appShell.isMobile,
 			})
 		) return;
 
