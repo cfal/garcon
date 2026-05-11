@@ -1,7 +1,6 @@
 <!-- Browser-stored settings. All values render immediately from localStorage. -->
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
-	import * as Select from '$lib/components/ui/select';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import SunIcon from '@lucide/svelte/icons/sun';
@@ -33,9 +32,6 @@
 		}
 	}
 
-	function chatMaxWidthLabel(value: ChatMaxWidth): string {
-		return chatMaxWidthOptions.find((option) => option.value === value)?.label() ?? m.settings_chat_max_width_none();
-	}
 </script>
 
 {#snippet settingRow(label: string, checked: boolean, onToggle: () => void)}
@@ -130,28 +126,16 @@
 			)}
 			<div class="flex items-center justify-between gap-4 py-2">
 				<div class="text-sm font-medium text-foreground">{m.settings_chat_max_width()}</div>
-				<Select.Root
-					type="single"
+				<select
+					class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
+					aria-label={m.settings_chat_max_width()}
 					value={ls.chatMaxWidth}
-					onValueChange={(value) => {
-						if (value) setChatMaxWidth(value);
-					}}
+					onchange={(event) => setChatMaxWidth((event.currentTarget as HTMLSelectElement).value)}
 				>
-					<Select.Trigger
-						size="sm"
-						class="w-32"
-						aria-label={m.settings_chat_max_width()}
-					>
-						{chatMaxWidthLabel(ls.chatMaxWidth)}
-					</Select.Trigger>
-					<Select.Content>
-						{#each chatMaxWidthOptions as option (option.value)}
-							<Select.Item value={option.value} label={option.label()}>
-								{option.label()}
-							</Select.Item>
-						{/each}
-					</Select.Content>
-				</Select.Root>
+					{#each chatMaxWidthOptions as option (option.value)}
+						<option value={option.value}>{option.label()}</option>
+					{/each}
+				</select>
 			</div>
 		</div>
 	</div>
