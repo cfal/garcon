@@ -20,8 +20,10 @@
 	let allFiles = $state<FileEntry[]>([]);
 	let selectedIndex = $state(0);
 	let listElement: HTMLUListElement | undefined = $state();
+	let isLoading = $state(false);
+	let loadFailed = $state(false);
 
-	let fetchedForProject = $state('');
+	let fetchedForProject = '';
 
 	// Defers fetch until the menu becomes visible for the first time.
 	// Re-fetches when projectPath changes.
@@ -29,6 +31,8 @@
 		if (!projectPath || !isVisible) return;
 		if (fetchedForProject === projectPath) return;
 		fetchedForProject = projectPath;
+		isLoading = true;
+		loadFailed = false;
 
 		const controller = new AbortController();
 
@@ -41,21 +45,53 @@
 			.catch((err) => {
 				if (!controller.signal.aborted) {
 					console.error('Failed to fetch file list:', err);
+					fetchedForProject = '';
+					loadFailed = true;
+				}
+			})
+			.finally(() => {
+				if (!controller.signal.aborted) {
+					isLoading = false;
 				}
 			});
 
 		return () => controller.abort();
 	});
 
+	function normalizeSlashes(value: string): string {
+		return value.replace(/\\/g, '/');
+	}
+
+	function mentionPathFor(file: FileEntry): string {
+		if (file.relativePath) return normalizeSlashes(file.relativePath);
+		const normalizedProject = normalizeSlashes(projectPath).replace(/\/+$/, '');
+		const normalizedPath = normalizeSlashes(file.path);
+		if (normalizedProject && normalizedPath.startsWith(`${normalizedProject}/`)) {
+			return normalizedPath.slice(normalizedProject.length + 1);
+		}
+		return normalizedPath;
+	}
+
+	const selectableFiles = $derived.by(() => allFiles
+		.filter((file) => file.type === undefined || file.type === 'file')
+		.map((file) => {
+			const mentionPath = mentionPathFor(file);
+			return {
+				...file,
+				mentionPath,
+				searchText: `${mentionPath} ${file.name}`.toLowerCase(),
+			};
+		}));
+
 	// Filters files by query (case-insensitive), capped at 10 results.
 	let filteredFiles = $derived.by(() => {
-		if (!query) return allFiles.slice(0, 10);
+		if (!query) return selectableFiles.slice(0, 10);
 
 		const lowerQuery = query.toLowerCase();
-		const matched: FileEntry[] = [];
+		const matched: typeof selectableFiles = [];
 
-		for (const file of allFiles) {
-			if (file.path.toLowerCase().includes(lowerQuery) || file.name.toLowerCase().includes(lowerQuery)) {
+		for (const file of selectableFiles) {
+			if (file.searchText.includes(lowerQuery)) {
 				matched.push(file);
 				if (matched.length >= 10) break;
 			}
@@ -101,7 +137,7 @@
 
 		if (event.key === 'Enter' || event.key === 'Tab') {
 			event.preventDefault();
-			onSelect(filteredFiles[selectedIndex].path);
+			onSelect(filteredFiles[selectedIndex].mentionPath);
 			return true;
 		}
 
@@ -126,7 +162,15 @@
 			class="max-h-[200px] overflow-y-auto py-1"
 			role="listbox"
 		>
-			{#if filteredFiles.length === 0}
+			{#if isLoading}
+				<li class="px-3 py-2 text-sm text-muted-foreground">
+					{m.filetree_loading()}
+				</li>
+			{:else if loadFailed}
+				<li class="px-3 py-2 text-sm text-muted-foreground">
+					{m.filetree_check_project_path()}
+				</li>
+			{:else if filteredFiles.length === 0}
 				<li class="px-3 py-2 text-sm text-muted-foreground">
 					{m.chat_file_mention_no_matching()}
 				</li>
@@ -138,10 +182,10 @@
 							class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-foreground transition-colors
 								{i === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50'}"
 							onmouseenter={() => { selectedIndex = i; }}
-							onclick={() => onSelect(file.path)}
+							onclick={() => onSelect(file.mentionPath)}
 						>
 							<File class="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-							<span class="truncate">{file.path}</span>
+							<span class="truncate">{file.mentionPath}</span>
 						</button>
 					</li>
 				{/each}

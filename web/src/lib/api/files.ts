@@ -45,6 +45,8 @@ export interface FileTreeNode {
 export interface FileEntry {
 	name: string;
 	path: string;
+	relativePath?: string;
+	type?: 'file' | 'directory';
 }
 
 export interface ReadTextResponse {

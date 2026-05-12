@@ -4,6 +4,7 @@
 import { normalizeToolResultContent } from '../normalize-util.js';
 import { UserMessage, AssistantMessage, ThinkingMessage, WebSearchToolUseMessage, ToolResultMessage } from '../../../common/chat-types.js';
 import { convertCodexFunctionCall, convertCodexCustomToolCall } from '../converters/codex-tool-use.js';
+import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
 
 // Extracts plaintext from Codex content arrays or raw strings.
 export function extractTextContent(content) {
@@ -84,7 +85,7 @@ function normalizeEventMsg(payload, ts) {
       const text = payload.message;
       if (text?.trim()) {
         result.isCanonicalUser = true;
-        result.canonical.push(new UserMessage(ts, text));
+        result.canonical.push(new UserMessage(ts, stripResolvedFileMentionContext(text)));
       }
       return result;
     }
@@ -147,7 +148,7 @@ function normalizeResponseItem(payload, ts) {
       if (payload.role === 'user') {
         const textContent = extractTextContent(payload.content);
         if (textContent?.trim()) {
-          result.fallbackUser.push(new UserMessage(ts, textContent));
+          result.fallbackUser.push(new UserMessage(ts, stripResolvedFileMentionContext(textContent)));
         }
         return result;
       }

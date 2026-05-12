@@ -10,6 +10,7 @@ import {
 } from '../../../common/chat-types.js';
 import { convertFactoryToolUse } from '../converters/factory-tool-use.js';
 import { normalizeToolResultContent } from '../normalize-util.js';
+import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
 
 const FACTORY_HOME = path.join(os.homedir(), '.factory');
 const FACTORY_SESSION_DISCOVERY_INDEX = path.join(FACTORY_HOME, 'cache', 'session-discovery-index.json');
@@ -218,7 +219,7 @@ export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEvent[]):
 
       const text = getTextParts(content).join('\n');
       if (text) {
-        messages.push(new UserMessage(timestamp, text));
+        messages.push(new UserMessage(timestamp, stripResolvedFileMentionContext(text)));
       }
       continue;
     }

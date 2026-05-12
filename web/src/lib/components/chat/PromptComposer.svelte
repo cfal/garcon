@@ -10,6 +10,7 @@
 	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
 	import { CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS, CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS } from '$lib/chat/chat-max-width';
 	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
+	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/file-mentions';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ImagePlus, X } from '@lucide/svelte';
@@ -37,6 +38,7 @@
 
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
+	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 
 	// Auto-focus textarea when the composer mounts (new chat or chat switch).
 	onMount(() => {
@@ -84,24 +86,36 @@
 		textarea.style.height = `${Math.min(textarea.scrollHeight, cap)}px`;
 	}
 
-	/** Detects "@" trigger prefixes relative to caret position. */
 	function updateFileTrigger(value: string, caret: number) {
-		const prefix = value.slice(0, caret);
-		const fileMatch = prefix.match(/(?:^|\s)@([^\s]*)$/);
-		ui.showFileMenu = Boolean(fileMatch);
-		ui.fileQuery = fileMatch?.[1] ?? '';
+		ui.setFileMentionTrigger(findFileMentionTrigger(value, caret));
 	}
 
-	function insertFileMention(path: string) {
-		composerState.inputText = composerState.inputText.replace(/(?:^|\s)@([^\s]*)$/, ` @${path} `);
-		ui.showFileMenu = false;
+	async function insertFileMention(path: string) {
+		const trigger = ui.fileMentionTrigger
+			?? findFileMentionTrigger(composerState.inputText, textarea?.selectionStart ?? composerState.inputText.length);
+		if (!trigger) {
+			ui.closeFileMenu();
+			return;
+		}
+		const replacement = applyFileMention(composerState.inputText, trigger, path);
+		composerState.inputText = replacement.text;
+		ui.closeFileMenu();
+		await tick();
 		textarea?.focus();
+		textarea?.setSelectionRange(replacement.caret, replacement.caret);
+		autoResize();
 	}
 
 	// Handles Enter/Shift+Enter submission depending on preference.
 	// Defers to the file menu while it is open.
 	function handleKeyDown(event: KeyboardEvent) {
-		if (ui.showFileMenu) return;
+		if (ui.showFileMenu) {
+			if (fileMentionMenu?.handleKeyDown(event)) return;
+			if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) {
+				event.preventDefault();
+				return;
+			}
+		}
 		if (event.key !== 'Enter') return;
 		if (
 			!shouldSubmitOnEnter({
@@ -294,11 +308,12 @@
 {#snippet composerSurface()}
 	<div data-composer class={composerSurfaceClass}>
 		<FileMentionMenu
+			bind:this={fileMentionMenu}
 			projectPath={sessions.selectedChat?.projectPath || ''}
 			isVisible={ui.showFileMenu}
 			query={ui.fileQuery}
 			onSelect={insertFileMention}
-			onClose={() => (ui.showFileMenu = false)}
+			onClose={() => ui.closeFileMenu()}
 		/>
 
 		<form

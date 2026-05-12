@@ -9,6 +9,7 @@ import { getAmpAuthStatus } from './amp-auth.js';
 import { getFactoryAuthStatus } from './factory-auth.js';
 import { getPiAuthStatus } from './pi-auth.js';
 import { getArtificialProviderSessionId } from '../chats/artificial-native-path.js';
+import { resolveFileMentionsInCommand } from '../chats/file-mentions.ts';
 import { getMaxSessions } from '../config.js';
 import type { IChatRegistry } from '../chats/store.js';
 
@@ -548,9 +549,10 @@ export class ProviderRegistry {
       modelEndpointId: entry.modelEndpointId,
     });
 
+    const resolvedCommand = await resolveFileMentionsInCommand(command, entry.projectPath);
     const request: StartSessionRequest = {
       chatId,
-      command,
+      command: resolvedCommand,
       projectPath: entry.projectPath,
       model: selection.model,
       permissionMode: entry.permissionMode,
@@ -606,10 +608,11 @@ export class ProviderRegistry {
     assertSameApiProviderBoundary(previousSelection, selection);
 
     const adapter = this.#adapterFor(provider);
+    const resolvedCommand = await resolveFileMentionsInCommand(command, entry.projectPath);
     await adapter.runTurn({
       chatId,
       providerSessionId,
-      command,
+      command: resolvedCommand,
       projectPath: entry.projectPath,
       model: selection.model,
       permissionMode: opts.permissionMode ?? entry.permissionMode,

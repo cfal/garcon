@@ -8,6 +8,7 @@ import {
 } from '../../../common/chat-types.js';
 import { convertAmpToolUse } from '../converters/amp-tool-use.js';
 import { normalizeToolResultContent } from '../normalize-util.js';
+import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
 
 export interface AmpContentPart {
   type: string;
@@ -131,7 +132,7 @@ export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[
 
       const text = getUserText(content);
       if (text) {
-        messages.push(new UserMessage(timestamp, text));
+        messages.push(new UserMessage(timestamp, stripResolvedFileMentionContext(text)));
       }
       continue;
     }

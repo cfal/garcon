@@ -7,6 +7,7 @@
 
 import { UserMessage, AssistantMessage, ThinkingMessage, ToolResultMessage } from '../../../common/chat-types.js';
 import { convertOpenCodeToolUse } from '../converters/opencode-tool-use.js';
+import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
 
 const PREVIEW_TAIL_MESSAGE_LIMIT = 20;
 
@@ -92,7 +93,7 @@ export async function loadOpenCodeChatMessages(sessionId, getClient) {
       if (info.role === 'user') {
         const text = extractTextFromParts(msg.parts || []);
         if (text?.trim()) {
-          messages.push(new UserMessage(ts, text));
+          messages.push(new UserMessage(ts, stripResolvedFileMentionContext(text)));
         }
         continue;
       }

@@ -17,7 +17,7 @@ function isWithinBasePath(targetPath) {
   return resolved === PROJECT_BASE_PATH || resolved.startsWith(projectBasePathPrefix);
 }
 
-async function listAllFiles(dirPath, maxDepth = 10, currentDepth = 0) {
+async function listAllFiles(dirPath, maxDepth = 10, currentDepth = 0, rootPath = dirPath) {
   const skipNames = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
   let entries;
   try {
@@ -30,10 +30,16 @@ async function listAllFiles(dirPath, maxDepth = 10, currentDepth = 0) {
     if (skipNames.has(entry.name)) continue;
     const itemPath = path.join(dirPath, entry.name);
     const isDir = entry.isDirectory();
-    results.push({ name: entry.name, path: itemPath, type: isDir ? 'directory' : 'file' });
     if (isDir && currentDepth < maxDepth) {
-      const children = await listAllFiles(itemPath, maxDepth, currentDepth + 1);
+      const children = await listAllFiles(itemPath, maxDepth, currentDepth + 1, rootPath);
       results.push(...children);
+    } else if (entry.isFile()) {
+      results.push({
+        name: entry.name,
+        path: itemPath,
+        relativePath: path.relative(rootPath, itemPath).split(path.sep).join('/'),
+        type: 'file',
+      });
     }
   }
   return results;

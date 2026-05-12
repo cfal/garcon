@@ -7,6 +7,7 @@ import { readJsonlTailLines } from './common.ts';
 import { normalizeToolResultContent } from '../normalize-util.js';
 import { UserMessage, AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage } from '../../../common/chat-types.js';
 import { convertClaudeToolUse } from '../converters/claude-tool-use.js';
+import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
 
 const HEAD_READ_BYTES = 32 * 1024;
 
@@ -125,7 +126,7 @@ export async function loadClaudeChatMessages(nativePath) {
         // Extract text and check if it's a system message
         const text = getMessageText(content);
         if (text && !isSystemUserMessage(text)) {
-          messages.push(new UserMessage(ts, decodeHtmlEntities(text)));
+          messages.push(new UserMessage(ts, stripResolvedFileMentionContext(decodeHtmlEntities(text))));
         }
         continue;
       }

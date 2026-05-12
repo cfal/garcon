@@ -8,6 +8,7 @@ import {
 } from '../../../common/chat-types.js';
 import { normalizeToolResultContent } from '../normalize-util.js';
 import { convertPiToolUse } from './pi-tool-use.js';
+import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
 
 interface PiTextContent {
   type: 'text';
@@ -137,7 +138,7 @@ export function convertPiMessage(
     const text = textFromContent(message.content);
     const images = imagesFromContent(message.content);
     if (!text && !images?.length) return [];
-    return [new UserMessage(timestamp, text, images)];
+    return [new UserMessage(timestamp, stripResolvedFileMentionContext(text), images)];
   }
 
   if (message.role === 'assistant') {

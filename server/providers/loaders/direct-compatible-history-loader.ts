@@ -2,6 +2,7 @@
 
 import { promises as fs } from 'fs';
 import { AssistantMessage, UserMessage, type ChatMessage } from '../../../common/chat-types.js';
+import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
 
 interface StoredMessage {
   content?: string;
@@ -36,7 +37,7 @@ export async function loadDirectCompatibleChatMessages(
       const timestamp = entry.timestamp || new Date().toISOString();
       const content = entry.content || '';
       if (entry.role === 'user' && content) {
-        messages.push(new UserMessage(timestamp, content));
+        messages.push(new UserMessage(timestamp, stripResolvedFileMentionContext(content)));
       } else if (entry.role === 'assistant' && content) {
         messages.push(new AssistantMessage(timestamp, content));
       }
