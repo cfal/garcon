@@ -131,6 +131,46 @@ export class AgentRunRequest {
   }
 }
 
+export class ForkRunRequest {
+  readonly type = 'fork-run' as const;
+  constructor(
+    public sourceChatId: string,
+    public chatId: string,
+    public command: string,
+    public permissionMode?: PermissionMode,
+    public thinkingMode?: ThinkingMode,
+    public model?: string,
+    public claudeThinkingMode?: ClaudeThinkingMode,
+    public ampAgentMode?: AmpAgentMode,
+    public images?: AgentCommandImage[],
+    public apiProviderId?: string | null,
+    public modelEndpointId?: string | null,
+    public modelProtocol?: ApiProtocol | null,
+  ) { }
+
+  static fromJson(data: Record<string, unknown>): ForkRunRequest {
+    const sourceChatId = requireNonEmptyString(data.sourceChatId, 'sourceChatId');
+    const chatId = requireNonEmptyString(data.chatId, 'chatId');
+    const command = requireNonEmptyString(data.command, 'command');
+    const images = parseAgentRunImages(data.images);
+
+    return new ForkRunRequest(
+      sourceChatId,
+      chatId,
+      command,
+      data.permissionMode === undefined ? undefined : requirePermissionMode(data.permissionMode),
+      data.thinkingMode === undefined ? undefined : requireThinkingMode(data.thinkingMode),
+      strOrUndef(data.model),
+      data.claudeThinkingMode === undefined ? undefined : requireClaudeThinkingMode(data.claudeThinkingMode),
+      data.ampAgentMode === undefined ? undefined : requireAmpAgentMode(data.ampAgentMode),
+      images,
+      strOrNullish(data.apiProviderId),
+      strOrNullish(data.modelEndpointId),
+      parseProtocolOrNull(data.modelProtocol),
+    );
+  }
+}
+
 export class AgentStopRequest {
   readonly type = 'agent-stop' as const;
   constructor(public chatId: string | null, public provider?: string) { }
@@ -314,6 +354,7 @@ export class QueueQueryRequest {
 
 export type ClientWsMessage =
   | AgentRunRequest
+  | ForkRunRequest
   | AgentStopRequest
   | ChatRunningQueryRequest
   | ChatLogQueryRequest
@@ -334,6 +375,8 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
   switch (data.type) {
     case 'agent-run':
       return AgentRunRequest.fromJson(data);
+    case 'fork-run':
+      return ForkRunRequest.fromJson(data);
     case 'agent-stop':
       return AgentStopRequest.fromJson(data);
     case 'chats-running-query':

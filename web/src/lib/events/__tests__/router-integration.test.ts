@@ -20,6 +20,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		pushLoadingStatus: vi.fn(),
 		popLoadingStatus: vi.fn(),
 		setIsSystemChatChange: vi.fn(),
+		setSelectedChatId: vi.fn(),
 		pendingPermissionRequests: () => [],
 		setPendingPermissionRequests: vi.fn(),
 		pendingViewChat: () => null,
@@ -72,6 +73,18 @@ describe('event router integration', () => {
 			{ type: 'chat-list-refresh-requested', reason: 'archive-toggled', chatId: 'chat-b' },
 		], stores);
 
+		expect(stores.refreshChats).toHaveBeenCalledTimes(1);
+	});
+
+	it('routes fork-created events to the fork chat', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages([
+			{ type: 'chat-fork-created', sourceChatId: 'chat-a', chatId: 'chat-b' },
+		], stores);
+
+		expect(stores.setCurrentChatId).toHaveBeenCalledWith('chat-b');
+		expect(stores.setSelectedChatId).toHaveBeenCalledWith('chat-b');
+		expect(stores.navigateToChat).toHaveBeenCalledWith('chat-b');
 		expect(stores.refreshChats).toHaveBeenCalledTimes(1);
 	});
 

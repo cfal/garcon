@@ -5,6 +5,7 @@
 	// the controller modules.
 
 	import { onDestroy, untrack } from 'svelte';
+	import { goto } from '$app/navigation';
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueueControls from './QueueControls.svelte';
@@ -123,7 +124,13 @@
 		modelCatalog,
 		appShell,
 		readReceiptOutbox,
-		navigation,
+		navigation: {
+			setActiveTab: (tab) => navigation.setActiveTab(tab),
+			navigateToChat: (chatId) => {
+				sessions.setSelectedChatId(chatId);
+				goto(`/chat/${chatId}`);
+			},
+		},
 		getPendingPermissionRequests: () => pendingPermissionRequests,
 		setPendingPermissionRequests: (v) => { pendingPermissionRequests = v; },
 		getPreviousPermissionMode: () => previousPermissionMode,

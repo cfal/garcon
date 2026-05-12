@@ -69,6 +69,7 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 		selectedChat: () => selectedChatForRouter(deps),
 		currentChatId: () => deps.lifecycle.currentChatId,
 		setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),
+		setSelectedChatId: (id) => deps.sessions.setSelectedChatId(id),
 		chatMessages: () => deps.chatState.chatMessages,
 		setChatMessages: (updater) => {
 			if (typeof updater === 'function') {

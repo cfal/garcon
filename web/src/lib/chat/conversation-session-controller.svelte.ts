@@ -3,8 +3,8 @@
 // No direct DOM access -- all viewport operations are delegated via
 // callback functions supplied through the deps interface.
 
-import { startChat } from '$lib/api/chats.js';
-import { UserMessage, ErrorMessage, type ChatImage } from '$shared/chat-types';
+import { forkChat, startChat } from '$lib/api/chats.js';
+import { UserMessage, AssistantMessage, ErrorMessage, type ChatImage } from '$shared/chat-types';
 import {
 	AgentStopRequest,
 	PermissionDecisionRequest,
@@ -18,7 +18,10 @@ import {
 	QueueEnqueueRequest,
 	AgentRunRequest,
 	QueueQueryRequest,
+	ForkRunRequest,
 } from '$shared/ws-requests';
+import { createClientChatId } from '$lib/chat/client-id';
+import { parseForkCommand } from '$lib/chat/fork-command';
 import type { ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { ProviderState } from '$lib/chat/provider-state.svelte';
@@ -60,9 +63,12 @@ export interface SessionControllerDeps {
 			};
 			selectionValueFor: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => string;
 		};
-	appShell: { quietRefreshChats: () => void; openNewChatDialog: (opts: { prefill: string }) => void };
+	appShell: {
+		quietRefreshChats: () => Promise<void> | void;
+		openNewChatDialog: (opts: { prefill: string }) => void;
+	};
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
-	navigation: { setActiveTab: (tab: AppTab) => void };
+	navigation: { setActiveTab: (tab: AppTab) => void; navigateToChat?: (chatId: string) => void };
 	// Mutable binding accessors for per-chat UI state.
 	getPendingPermissionRequests: () => PendingPermissionRequest[];
 	setPendingPermissionRequests: (v: PendingPermissionRequest[]) => void;
@@ -234,7 +240,12 @@ export class ConversationSessionController {
 
 	// Submits a message for a specific chat. Accepts explicit chatId to
 	// prevent selection-dependent races during draft startup.
-	async submitForChat(chatId: string, messageOverride?: string, imageOverride?: File[]): Promise<void> {
+	async submitForChat(
+		chatId: string,
+		messageOverride?: string,
+		imageOverride?: File[],
+		options: { allowForkCommand?: boolean } = {},
+	): Promise<void> {
 		const { deps } = this;
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return;
@@ -244,6 +255,20 @@ export class ConversationSessionController {
 		const text = messageOverride ?? deps.composerState.inputText.trim();
 		const submissionImages = imageOverride ?? deps.composerState.images;
 		if (!text && submissionImages.length === 0) return;
+
+		if (options.allowForkCommand !== false) {
+			const forkCommand = parseForkCommand(text);
+			if (forkCommand) {
+				await this.#submitForkCommand(
+					chatId,
+					selected,
+					forkCommand.message,
+					[...submissionImages],
+					messageOverride === undefined && imageOverride === undefined,
+				);
+				return;
+			}
+		}
 
 		let imagePayload: ChatImage[] = [];
 		if (submissionImages.length > 0) {
@@ -364,6 +389,125 @@ export class ConversationSessionController {
 					new ErrorMessage(new Date().toISOString(), 'Failed to send message: Not connected to server'),
 				];
 			}
+		}
+	}
+
+	async #submitForkCommand(
+		sourceChatId: string,
+		sourceChat: ChatSessionRecord,
+		message: string,
+		images: File[],
+		clearComposer: boolean,
+	): Promise<void> {
+		const { deps } = this;
+		if (sourceChat.status !== 'running') {
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(new Date().toISOString(), 'Cannot fork a draft chat. Select an existing chat first.'),
+			];
+			return;
+		}
+
+		const previousText = deps.composerState.inputText;
+		const previousImages = [...deps.composerState.images];
+		deps.chatState.chatMessages = [
+			...deps.chatState.chatMessages,
+			new AssistantMessage(new Date().toISOString(), 'Forking chat..'),
+		];
+		deps.chatState.isUserScrolledUp = false;
+		if (clearComposer) {
+			deps.composerState.clearAfterSubmit(sourceChatId);
+		}
+
+		if (!message.trim()) {
+			await this.#submitForkOnlyCommand(sourceChatId, previousText, previousImages, clearComposer);
+			return;
+		}
+
+		let imagePayload: ChatImage[] = [];
+		if (images.length > 0) {
+			try {
+				imagePayload = await Promise.all(images.map(fileToChatImage));
+			} catch (error) {
+				if (clearComposer) {
+					deps.composerState.inputText = previousText;
+					deps.composerState.images = previousImages;
+					deps.composerState.saveDraft(sourceChatId);
+				}
+				deps.chatState.chatMessages = [
+					...deps.chatState.chatMessages,
+					new ErrorMessage(
+						new Date().toISOString(),
+						`Failed to prepare images: ${error instanceof Error ? error.message : String(error)}`,
+					),
+				];
+				return;
+			}
+		}
+
+		const forkChatId = createClientChatId();
+		const model = sourceChat.model ?? deps.providerState.model;
+		const selection = deps.modelCatalog.selectionFor(
+			sourceChat.provider,
+			model,
+			sourceChat.modelEndpointId,
+		);
+		const sent = deps.ws.sendMessage(new ForkRunRequest(
+			sourceChatId,
+			forkChatId,
+			message.trim(),
+			sourceChat.permissionMode,
+			sourceChat.thinkingMode,
+			selection.model,
+			sourceChat.claudeThinkingMode,
+			sourceChat.ampAgentMode,
+			imagePayload.length > 0 ? imagePayload : undefined,
+			selection.apiProviderId,
+			selection.modelEndpointId,
+			selection.modelProtocol,
+		));
+
+		if (!sent) {
+			if (clearComposer) {
+				deps.composerState.inputText = previousText;
+				deps.composerState.images = previousImages;
+				deps.composerState.saveDraft(sourceChatId);
+			}
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(new Date().toISOString(), 'Failed to fork chat: Not connected to server'),
+			];
+		}
+	}
+
+	async #submitForkOnlyCommand(
+		sourceChatId: string,
+		previousText: string,
+		previousImages: File[],
+		restoreComposer: boolean,
+	): Promise<void> {
+		const { deps } = this;
+		const forkChatId = createClientChatId();
+
+		try {
+			const result = await forkChat({ sourceChatId, chatId: forkChatId });
+			await deps.appShell.quietRefreshChats();
+			deps.lifecycle.setCurrentChatId(result.chatId);
+			deps.sessions.setSelectedChatId(result.chatId);
+			deps.navigation.navigateToChat?.(result.chatId);
+		} catch (error) {
+			if (restoreComposer) {
+				deps.composerState.inputText = previousText;
+				deps.composerState.images = previousImages;
+				deps.composerState.saveDraft(sourceChatId);
+			}
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(
+					new Date().toISOString(),
+					`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			];
 		}
 	}
 

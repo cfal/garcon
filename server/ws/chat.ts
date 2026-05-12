@@ -6,13 +6,14 @@ import { sendWebSocketJson } from './utils.js';
 import {
   QueueStateUpdatedMessage,
   AgentRunFailedMessage, ChatLogResponseMessage,
-  ChatSessionsRunningMessage, WsFaultMessage,
+  ChatSessionsRunningMessage, WsFaultMessage, ChatForkCreatedMessage,
   ClientRequestErrorMessage,
 } from '../../common/ws-events.ts';
 import type { ClientRequestErrorCode } from '../../common/ws-events.ts';
 import {
   parseClientWsMessage,
   AgentRunRequest,
+  ForkRunRequest,
   AgentStopRequest,
   PermissionDecisionRequest,
   ClaudeThinkingModeSetRequest,
@@ -32,9 +33,10 @@ import {
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { QueueState } from '../../common/queue-state.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
-import type { IChatRegistry } from '../chats/store.js';
+import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { RunProviderTurnOptions } from '../providers/types.js';
 import { requireChatExecutionConfig } from '../providers/types.js';
+import { supportsFork as providerSupportsFork } from '../../common/providers.ts';
 
 const PERMISSION_DEDUP_TTL = 30_000;
 
@@ -53,6 +55,7 @@ interface ProviderRegistryDep {
     modelEndpointId?: string | null;
   }): Promise<void>;
   hasHarness(harnessId: string): boolean;
+  isHarnessSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
 }
 
 interface QueueManagerDep {
@@ -65,6 +68,30 @@ interface QueueManagerDep {
   clearChatQueue(chatId: string): Promise<unknown>;
   pauseChatQueue(chatId: string): Promise<unknown>;
   resumeChatQueue(chatId: string): Promise<unknown>;
+}
+
+interface ForkSettingsDep {
+  getChatName(chatId: string): string | null;
+  ensureInNormal(chatId: string): Promise<void>;
+  setSessionName(chatId: string, title: string): Promise<void>;
+}
+
+interface ForkMetadataDep {
+  getChatMetadata(chatId: string): Record<string, unknown> | null;
+  addNewChatMetadata(chatId: string, command: string): void;
+}
+
+interface ForkDeps {
+  settings: ForkSettingsDep;
+  metadata: ForkMetadataDep;
+  forkChatFileCopy(args: {
+    sourceSession: ChatRegistryEntry;
+    sourceChatId: string;
+    targetChatId: string;
+    registry: IChatRegistry;
+    settings: ForkSettingsDep;
+    metadata: ForkMetadataDep;
+  }): Promise<{ sourceChatId: string; chatId: string; provider?: string }>;
 }
 
 interface HistoryCacheDep {
@@ -102,6 +129,7 @@ export class ChatHandler {
   #queue: QueueManagerDep;
   #historyCache: HistoryCacheDep;
   #registry: IChatRegistry;
+  #forkDeps: ForkDeps | null;
   #recentPermissionDecisions = new Map<string, number>();
 
   constructor(
@@ -109,11 +137,13 @@ export class ChatHandler {
     queue: QueueManagerDep,
     historyCache: HistoryCacheDep,
     registry: IChatRegistry,
+    forkDeps?: ForkDeps | null,
   ) {
     this.#providers = providers;
     this.#queue = queue;
     this.#historyCache = historyCache;
     this.#registry = registry;
+    this.#forkDeps = forkDeps ?? null;
   }
 
   createHandler(): {
@@ -150,6 +180,76 @@ export class ChatHandler {
       if (data.modelProtocol !== undefined) options.modelProtocol = data.modelProtocol;
       await this.#queue.submit(chatId, data.command, options);
     } catch (error: unknown) {
+      writer.send(new AgentRunFailedMessage(chatId, (error as Error).message));
+    }
+  }
+
+  #runOptionsFromForkRequest(data: ForkRunRequest): RunProviderTurnOptions {
+    const options: RunProviderTurnOptions = {};
+    if (data.permissionMode !== undefined) options.permissionMode = data.permissionMode;
+    if (data.thinkingMode !== undefined) options.thinkingMode = data.thinkingMode;
+    if (data.claudeThinkingMode !== undefined) options.claudeThinkingMode = data.claudeThinkingMode;
+    if (data.ampAgentMode !== undefined) options.ampAgentMode = data.ampAgentMode;
+    if (data.model !== undefined) options.model = data.model;
+    if (data.images !== undefined) options.images = data.images;
+    if (data.apiProviderId !== undefined) options.apiProviderId = data.apiProviderId;
+    if (data.modelEndpointId !== undefined) options.modelEndpointId = data.modelEndpointId;
+    if (data.modelProtocol !== undefined) options.modelProtocol = data.modelProtocol;
+    return options;
+  }
+
+  async #handleForkRun(data: ForkRunRequest, writer: WebSocketWriter): Promise<void> {
+    const sourceChatId = data.sourceChatId;
+    const targetChatId = data.chatId;
+
+    if (!/^\d+$/.test(String(sourceChatId))) {
+      writer.send(new WsFaultMessage('Invalid sourceChatId format'));
+      return;
+    }
+    if (!/^\d+$/.test(String(targetChatId))) {
+      writer.send(new AgentRunFailedMessage(sourceChatId, 'Invalid fork target session ID format'));
+      return;
+    }
+    if (sourceChatId === targetChatId) {
+      writer.send(new AgentRunFailedMessage(sourceChatId, 'sourceChatId and chatId must differ'));
+      return;
+    }
+    if (!this.#forkDeps) {
+      writer.send(new AgentRunFailedMessage(sourceChatId, 'Forking is not configured on this server'));
+      return;
+    }
+
+    const sourceSession = this.#registry.getChat(sourceChatId);
+    if (!sourceSession) {
+      writer.send(new AgentRunFailedMessage(sourceChatId, 'Source session not found'));
+      return;
+    }
+    if (!providerSupportsFork(sourceSession.provider)) {
+      writer.send(new AgentRunFailedMessage(sourceChatId, `Fork unsupported for harness: ${sourceSession.provider}`));
+      return;
+    }
+    if (this.#providers.isHarnessSessionRunning(sourceSession.provider, sourceSession.providerSessionId)) {
+      writer.send(new AgentRunFailedMessage(sourceChatId, 'Cannot fork a chat while it is processing'));
+      return;
+    }
+    if (this.#registry.getChat(targetChatId)) {
+      writer.send(new AgentRunFailedMessage(sourceChatId, `Session already exists: ${targetChatId}`));
+      return;
+    }
+
+    try {
+      const result = await this.#forkDeps.forkChatFileCopy({
+        sourceSession,
+        sourceChatId,
+        targetChatId,
+        registry: this.#registry,
+        settings: this.#forkDeps.settings,
+        metadata: this.#forkDeps.metadata,
+      });
+      writer.send(new ChatForkCreatedMessage(result.sourceChatId, result.chatId));
+      await this.#queue.submit(result.chatId, data.command, this.#runOptionsFromForkRequest(data));
+    } catch (error: unknown) {
+      const chatId = this.#registry.getChat(targetChatId) ? targetChatId : sourceChatId;
       writer.send(new AgentRunFailedMessage(chatId, (error as Error).message));
     }
   }
@@ -242,6 +342,8 @@ export class ChatHandler {
       if (data instanceof AgentRunRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         await this.#handleAgentCommand(data, chatId, writer);
+      } else if (data instanceof ForkRunRequest) {
+        await this.#handleForkRun(data, writer);
       } else if (data instanceof AgentStopRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         await this.#handleAbortSession(data, chatId);

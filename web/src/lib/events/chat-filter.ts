@@ -17,6 +17,7 @@ export type ChatFilterResult =
 const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 	'chat-sessions-running',
 	'chat-session-created',
+	'chat-fork-created',
 	'chat-session-deleted',
 	'chat-processing-updated',
 	'queue-state-updated',

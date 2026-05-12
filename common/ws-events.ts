@@ -31,6 +31,11 @@ export class ChatSessionCreatedMessage {
   constructor(public chatId: string) { }
 }
 
+export class ChatForkCreatedMessage {
+  readonly type = 'chat-fork-created' as const;
+  constructor(public sourceChatId: string, public chatId: string) { }
+}
+
 export class ChatSessionStoppedMessage {
   readonly type = 'chat-session-stopped' as const;
   constructor(public chatId: string, public success: boolean) { }
@@ -144,6 +149,7 @@ export type ServerWsMessage =
   | AgentRunFinishedMessage
   | AgentRunFailedMessage
   | ChatSessionCreatedMessage
+  | ChatForkCreatedMessage
   | ChatSessionStoppedMessage
   | ChatProcessingUpdatedMessage
   | QueueStateUpdatedMessage
@@ -165,6 +171,7 @@ export type EventKey =
   | 'agent-run-finished'
   | 'agent-run-failed'
   | 'chat-session-created'
+  | 'chat-fork-created'
   | 'chat-session-stopped'
   | 'chat-processing-updated'
   | 'queue-state-updated'
@@ -229,6 +236,12 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
       const chatId = requiredStr(data.chatId);
       if (!chatId) return null;
       return new ChatSessionCreatedMessage(chatId);
+    }
+    case 'chat-fork-created': {
+      const sourceChatId = requiredStr(data.sourceChatId);
+      const chatId = requiredStr(data.chatId);
+      if (!sourceChatId || !chatId) return null;
+      return new ChatForkCreatedMessage(sourceChatId, chatId);
     }
     case 'chat-session-stopped': {
       const chatId = requiredStr(data.chatId);

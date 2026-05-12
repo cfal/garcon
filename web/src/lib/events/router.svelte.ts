@@ -10,6 +10,7 @@ import {
 	AgentRunFinishedMessage,
 	AgentRunFailedMessage,
 	ChatSessionCreatedMessage,
+	ChatForkCreatedMessage,
 	ChatSessionStoppedMessage,
 	ChatProcessingUpdatedMessage,
 	QueueStateUpdatedMessage,
@@ -64,6 +65,7 @@ export interface EventRouterStores {
 	pushLoadingStatus: (entry: import('$lib/stores/chat-lifecycle.svelte').LoadingStatusEntry) => void;
 	popLoadingStatus: (id: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
+	setSelectedChatId: (chatId: string | null) => void;
 	pendingPermissionRequests: () => PendingPermissionRequest[];
 	setPendingPermissionRequests: (
 		updater: PendingPermissionRequest[] | ((prev: PendingPermissionRequest[]) => PendingPermissionRequest[]),
@@ -300,6 +302,14 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 
 		'chat-session-created': (msg) => {
 			if (msg instanceof ChatSessionCreatedMessage) handleChatCreated(msg, chatEventCtx);
+		},
+		'chat-fork-created': (msg) => {
+			if (!(msg instanceof ChatForkCreatedMessage)) return;
+			stores.setIsSystemChatChange(true);
+			stores.setCurrentChatId(msg.chatId);
+			stores.setSelectedChatId(msg.chatId);
+			stores.refreshChats();
+			stores.navigateToChat?.(msg.chatId);
 		},
 		'chat-session-stopped': (msg) => {
 			if (msg instanceof ChatSessionStoppedMessage) handleChatAborted(msg, chatEventCtx);

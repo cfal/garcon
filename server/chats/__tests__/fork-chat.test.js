@@ -141,6 +141,9 @@ describe('forkChatFileCopy', () => {
       '100': {
         provider: 'claude',
         model: 'sonnet',
+        apiProviderId: 'anthropic-custom',
+        modelEndpointId: 'endpoint-1',
+        modelProtocol: 'anthropic-messages',
         projectPath: '/proj',
         nativePath: sourceNativePath,
         tags: ['ops'],
@@ -185,6 +188,11 @@ describe('forkChatFileCopy', () => {
     expect(settings.getChatName('103')).toBe('Bug hunt (1)');
     expect(registry.getChat('100')?.nextForkOrdinal).toBe(2);
     expect(registry.getChat('103')?.nextForkOrdinal).toBe(1);
+    expect(registry.getChat('103')).toMatchObject({
+      apiProviderId: 'anthropic-custom',
+      modelEndpointId: 'endpoint-1',
+      modelProtocol: 'anthropic-messages',
+    });
     expect(metadata.addNewChatMetadata).toHaveBeenCalledWith('103', 'Fallback bug hunt prompt');
     expect(settings.ensureInNormal).toHaveBeenCalledWith('103');
   });

@@ -10,7 +10,7 @@ function normalizeSettingsTab(value: string): SettingsTab {
 	return 'providers';
 }
 
-export type RefreshChatsCallback = () => void;
+export type RefreshChatsCallback = () => Promise<void> | void;
 
 export interface NewChatDialogSeed {
 	prefill?: string;
@@ -67,14 +67,14 @@ export class AppShellStore {
 		this.quietRefreshChatsCallback = cb;
 	}
 
-	refreshChats(): void {
-		if (this.refreshChatsCallback) this.refreshChatsCallback();
+	refreshChats(): Promise<void> | void {
+		return this.refreshChatsCallback?.();
 	}
 
 	/** Refreshes the chat list without showing the loading indicator. */
-	quietRefreshChats(): void {
+	quietRefreshChats(): Promise<void> | void {
 		const cb = this.quietRefreshChatsCallback ?? this.refreshChatsCallback;
-		if (cb) cb();
+		return cb?.();
 	}
 
 	// Callback registration: returns an unsubscribe function.

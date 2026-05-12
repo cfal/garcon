@@ -5,6 +5,7 @@ import {
 	AgentRunFinishedMessage,
 	AgentRunFailedMessage,
 	ChatSessionCreatedMessage,
+	ChatForkCreatedMessage,
 	ChatSessionStoppedMessage,
 	ChatProcessingUpdatedMessage,
 	QueueStateUpdatedMessage,
@@ -17,6 +18,7 @@ import {
 	ClientRequestErrorMessage,
 	WsFaultMessage,
 } from '$shared/ws-events';
+import { ForkRunRequest, parseClientWsMessage } from '$shared/ws-requests';
 
 describe('parseServerWsMessage', () => {
 	it('parses agent-run-output', () => {
@@ -44,6 +46,17 @@ describe('parseServerWsMessage', () => {
 	it('parses chat-session-created', () => {
 		const msg = parseServerWsMessage({ type: 'chat-session-created', chatId: 'c-1' });
 		expect(msg).toBeInstanceOf(ChatSessionCreatedMessage);
+	});
+
+	it('parses chat-fork-created', () => {
+		const msg = parseServerWsMessage({
+			type: 'chat-fork-created',
+			sourceChatId: 'c-1',
+			chatId: 'c-2',
+		});
+		expect(msg).toBeInstanceOf(ChatForkCreatedMessage);
+		expect((msg as ChatForkCreatedMessage).sourceChatId).toBe('c-1');
+		expect((msg as ChatForkCreatedMessage).chatId).toBe('c-2');
 	});
 
 	it('parses chat-session-stopped', () => {
@@ -203,6 +216,11 @@ describe('parseServerWsMessage', () => {
 		expect(msg).toBeNull();
 	});
 
+	it('returns null for chat-fork-created when sourceChatId is missing', () => {
+		const msg = parseServerWsMessage({ type: 'chat-fork-created', chatId: 'c-2' });
+		expect(msg).toBeNull();
+	});
+
 	it('returns null for chat-log-response when clientRequestId is missing', () => {
 		const msg = parseServerWsMessage({
 			type: 'chat-log-response',
@@ -244,5 +262,33 @@ describe('parseServerWsMessage', () => {
 			chatId: 'c-1',
 		});
 		expect(msg).toBeNull();
+	});
+});
+
+describe('parseClientWsMessage', () => {
+	it('parses fork-run', () => {
+		const msg = parseClientWsMessage({
+			type: 'fork-run',
+			sourceChatId: 'c-1',
+			chatId: 'c-2',
+			command: 'continue in the fork',
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			model: 'sonnet',
+		});
+
+		expect(msg).toBeInstanceOf(ForkRunRequest);
+		expect((msg as ForkRunRequest).sourceChatId).toBe('c-1');
+		expect((msg as ForkRunRequest).chatId).toBe('c-2');
+		expect((msg as ForkRunRequest).command).toBe('continue in the fork');
+	});
+
+	it('rejects fork-run without a command', () => {
+		expect(() => parseClientWsMessage({
+			type: 'fork-run',
+			sourceChatId: 'c-1',
+			chatId: 'c-2',
+			command: '   ',
+		})).toThrow('command');
 	});
 });

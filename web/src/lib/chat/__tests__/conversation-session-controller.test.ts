@@ -1,6 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { forkChat } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
+
+vi.mock('$lib/api/chats.js', () => ({
+	forkChat: vi.fn(),
+	startChat: vi.fn(),
+}));
+
+const mockForkChat = vi.mocked(forkChat);
 
 function createRunningChat(overrides: Partial<Record<string, unknown>> = {}) {
 	return {
@@ -44,6 +52,7 @@ function createDeps(chat = createRunningChat()) {
 			},
 			chatState: {
 				chatMessages: [],
+				isUserScrolledUp: false,
 				clearMessages: vi.fn(),
 				resetForNewChat: vi.fn(),
 				restoreMessages: vi.fn(() => false),
@@ -55,7 +64,10 @@ function createDeps(chat = createRunningChat()) {
 			},
 			composerState: {
 				inputText: '',
+				images: [],
 				clearImages: vi.fn(),
+				clearAfterSubmit: vi.fn(),
+				saveDraft: vi.fn(),
 				restoreDraft: vi.fn(),
 			},
 			providerState: {
@@ -97,6 +109,7 @@ function createDeps(chat = createRunningChat()) {
 		},
 		navigation: {
 				setActiveTab: vi.fn(),
+				navigateToChat: vi.fn(),
 			},
 			getPendingPermissionRequests: vi.fn(() => []),
 			setPendingPermissionRequests: vi.fn(),
@@ -111,6 +124,10 @@ function createDeps(chat = createRunningChat()) {
 }
 
 describe('ConversationSessionController', () => {
+	beforeEach(() => {
+		mockForkChat.mockReset();
+	});
+
 	it('marks an unread chat read immediately when selected', () => {
 		const { deps } = createDeps();
 		const controller = new ConversationSessionController(deps as never);
@@ -149,6 +166,66 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
+	});
+
+	it('submits /fork with a message as a fork-run request after appending the status message', async () => {
+		const chat = createRunningChat({ id: '123' });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = '/fork continue from here';
+		deps.ws.sendMessage = vi.fn(() => true);
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('123');
+
+		expect(deps.chatState.chatMessages).toHaveLength(1);
+		expect(deps.chatState.chatMessages[0]).toMatchObject({
+			type: 'assistant-message',
+			content: 'Forking chat..',
+		});
+		expect(deps.chatState.isUserScrolledUp).toBe(false);
+		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('123');
+
+		const request = deps.ws.sendMessage.mock.calls[0][0];
+		expect(request).toMatchObject({
+			type: 'fork-run',
+			sourceChatId: '123',
+			command: 'continue from here',
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			model: 'sonnet',
+		});
+		expect(request.chatId).toMatch(/^\d+$/);
+	});
+
+	it('submits bare /fork through the fork API without sending fork-run', async () => {
+		const chat = createRunningChat({ id: '123' });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = '/fork';
+		deps.ws.sendMessage = vi.fn(() => true);
+		mockForkChat.mockResolvedValue({
+			success: true,
+			sourceChatId: '123',
+			chatId: '456',
+			provider: 'claude',
+		});
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('123');
+
+		expect(deps.ws.sendMessage).not.toHaveBeenCalled();
+		expect(mockForkChat).toHaveBeenCalledWith({
+			sourceChatId: '123',
+			chatId: expect.stringMatching(/^\d+$/),
+		});
+		expect(deps.chatState.chatMessages).toHaveLength(1);
+		expect(deps.chatState.chatMessages[0]).toMatchObject({
+			type: 'assistant-message',
+			content: 'Forking chat..',
+		});
+		expect(deps.appShell.quietRefreshChats).toHaveBeenCalled();
+		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('456');
+		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
+		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('456');
 	});
 
 });

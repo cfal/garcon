@@ -20,6 +20,7 @@ import { wrapRoutes } from './lib/http-route.js';
 import { verifyAuthToken } from './auth/token.js';
 import { init as initAuthStore } from './auth/store.js';
 import { resolveMissingNativePath } from './chats/resolve-native-path.js';
+import { forkChatFileCopy } from './chats/fork-chat.js';
 
 // Classes
 import { ChatRegistry } from './chats/store.js';
@@ -180,7 +181,11 @@ export async function startServer() {
       providerRegistry, telegramNotifier, shareStore,
     );
 
-    const chatHandler = new ChatHandler(providerRegistry, queue, historyCache, chatRegistry);
+    const chatHandler = new ChatHandler(providerRegistry, queue, historyCache, chatRegistry, {
+      settings,
+      metadata,
+      forkChatFileCopy,
+    });
     const wsHandlers = {
       '/shell': shellManager.createHandler(),
       '/ws': chatHandler.createHandler(),

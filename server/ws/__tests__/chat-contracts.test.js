@@ -20,6 +20,7 @@ const mockProviders = {
   setThinkingMode: mock(() => Promise.resolve(undefined)),
   setClaudeThinkingMode: mock(() => Promise.resolve(undefined)),
   setModel: mock(() => Promise.resolve(undefined)),
+  isHarnessSessionRunning: mock(() => false),
 };
 
 const mockRegistry = {
@@ -51,22 +52,34 @@ const mockHistoryCache = {
   })),
 };
 
+const mockForkDeps = {
+  settings: {},
+  metadata: {},
+  forkChatFileCopy: mock(() => Promise.resolve({
+    sourceChatId: '123',
+    chatId: '456',
+    provider: 'claude',
+  })),
+};
+
 const injectedMocks = [
   mockProviders.getRunningSessions, mockProviders.resolvePermission,
   mockProviders.setPermissionMode, mockProviders.setThinkingMode,
   mockProviders.setClaudeThinkingMode, mockProviders.setModel,
+  mockProviders.isHarnessSessionRunning,
   mockRegistry.getChat, mockRegistry.updateChat,
   mockQueue.submit, mockQueue.abort, mockQueue.triggerDrain,
   mockQueue.readChatQueue, mockQueue.enqueueChat, mockQueue.dequeueChat,
   mockQueue.clearChatQueue, mockQueue.pauseChatQueue, mockQueue.resumeChatQueue,
   mockHistoryCache.appendMessages, mockHistoryCache.ensureLoaded,
   mockHistoryCache.getPaginatedMessages,
+  mockForkDeps.forkChatFileCopy,
 ];
 
 const moduleMocks = [sendWebSocketJson];
 
 const chatHandlerInstance = new ChatHandler(
-  mockProviders, mockQueue, mockHistoryCache, mockRegistry,
+  mockProviders, mockQueue, mockHistoryCache, mockRegistry, mockForkDeps,
 );
 const chatHandler = chatHandlerInstance.createHandler();
 
@@ -88,6 +101,12 @@ describe('chat WebSocket handler', () => {
   beforeEach(() => {
     injectedMocks.forEach(m => m.mockClear());
     moduleMocks.forEach(m => m.mockClear());
+    mockProviders.isHarnessSessionRunning.mockImplementation(() => false);
+    mockForkDeps.forkChatFileCopy.mockImplementation(() => Promise.resolve({
+      sourceChatId: '123',
+      chatId: '456',
+      provider: 'claude',
+    }));
     ws = createMockWs();
   });
 
@@ -212,6 +231,129 @@ describe('chat WebSocket handler', () => {
       expect(mockQueue.submit).not.toHaveBeenCalled();
       expect(payload).toMatchObject({ type: 'ws-fault' });
       expect(payload.error).toContain('command or images required');
+    });
+  });
+
+  describe('fork-run', () => {
+    it('forks the source chat, notifies the client, and submits the fork turn', async () => {
+      const sourceSession = {
+        provider: 'claude',
+        providerSessionId: 'source-session',
+        projectPath: '/repo',
+        model: 'opus',
+      };
+      mockRegistry.getChat.mockImplementation((chatId) => {
+        if (chatId === '123') return sourceSession;
+        return null;
+      });
+
+      await chatHandler.message(ws, {
+        type: 'fork-run',
+        sourceChatId: '123',
+        chatId: '456',
+        command: 'continue in fork',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: 'opus',
+      });
+
+      expect(mockForkDeps.forkChatFileCopy).toHaveBeenCalledWith({
+        sourceSession,
+        sourceChatId: '123',
+        targetChatId: '456',
+        registry: mockRegistry,
+        settings: mockForkDeps.settings,
+        metadata: mockForkDeps.metadata,
+      });
+      expect(sendWebSocketJson.mock.calls[0][1]).toMatchObject({
+        type: 'chat-fork-created',
+        sourceChatId: '123',
+        chatId: '456',
+      });
+      expect(mockQueue.submit).toHaveBeenCalledWith('456', 'continue in fork', {
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: 'opus',
+      });
+    });
+
+    it('rejects unsupported source providers', async () => {
+      mockRegistry.getChat.mockImplementation((chatId) => {
+        if (chatId === '123') return { provider: 'opencode', providerSessionId: 'source-session' };
+        return null;
+      });
+
+      await chatHandler.message(ws, {
+        type: 'fork-run',
+        sourceChatId: '123',
+        chatId: '456',
+        command: 'continue in fork',
+      });
+
+      expect(mockForkDeps.forkChatFileCopy).not.toHaveBeenCalled();
+      expect(mockQueue.submit).not.toHaveBeenCalled();
+      const payload = lastSentPayload();
+      expect(payload).toMatchObject({
+        type: 'agent-run-failed',
+        chatId: '123',
+      });
+      expect(payload.error).toContain('unsupported');
+    });
+
+    it('rejects a source chat that is currently processing', async () => {
+      mockRegistry.getChat.mockImplementation((chatId) => {
+        if (chatId === '123') return { provider: 'claude', providerSessionId: 'source-session' };
+        return null;
+      });
+      mockProviders.isHarnessSessionRunning.mockImplementation(() => true);
+
+      await chatHandler.message(ws, {
+        type: 'fork-run',
+        sourceChatId: '123',
+        chatId: '456',
+        command: 'continue in fork',
+      });
+
+      expect(mockForkDeps.forkChatFileCopy).not.toHaveBeenCalled();
+      expect(mockQueue.submit).not.toHaveBeenCalled();
+      const payload = lastSentPayload();
+      expect(payload).toMatchObject({
+        type: 'agent-run-failed',
+        chatId: '123',
+      });
+      expect(payload.error).toContain('processing');
+    });
+
+    it('reports target turn failures against the forked chat after creation', async () => {
+      let targetCreated = false;
+      mockRegistry.getChat.mockImplementation((chatId) => {
+        if (chatId === '123') return { provider: 'claude', providerSessionId: 'source-session' };
+        if (chatId === '456' && targetCreated) return { provider: 'claude', providerSessionId: 'fork-session' };
+        return null;
+      });
+      mockForkDeps.forkChatFileCopy.mockImplementationOnce(async () => {
+        targetCreated = true;
+        return {
+          sourceChatId: '123',
+          chatId: '456',
+          provider: 'claude',
+        };
+      });
+      mockQueue.submit.mockRejectedValueOnce(new Error('fork turn failed'));
+
+      await chatHandler.message(ws, {
+        type: 'fork-run',
+        sourceChatId: '123',
+        chatId: '456',
+        command: 'continue in fork',
+      });
+
+      const payload = lastSentPayload();
+      expect(payload).toMatchObject({
+        type: 'agent-run-failed',
+        chatId: '456',
+        error: 'fork turn failed',
+      });
     });
   });
 
