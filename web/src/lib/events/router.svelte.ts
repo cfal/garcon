@@ -138,6 +138,23 @@ function applyServerMessages(
 	stores.setChatMessages(updated);
 }
 
+function markPendingUserMessageDelivery(
+	clientRequestId: string | undefined,
+	stores: EventRouterStores,
+	deliveryStatus: 'accepted' | 'failed',
+) {
+	if (!clientRequestId) return;
+	stores.setChatMessages((previous) => previous.map((message) => {
+		if (!(message instanceof UserMessage)) return message;
+		if (message.metadata?.clientRequestId !== clientRequestId) return message;
+		if (message.metadata.deliveryStatus !== 'submitting') return message;
+		return new UserMessage(message.timestamp, message.content, message.images, {
+			...message.metadata,
+			deliveryStatus,
+		});
+	}));
+}
+
 // Creates helper functions used by multiple handler contexts.
 function createHelpers(stores: EventRouterStores) {
 	const activateLoadingFor = (chatId?: string | null) => {
@@ -284,21 +301,25 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 	};
 
 	return {
-		'agent-run-output': (msg) => {
-			if (!(msg instanceof AgentRunOutputMessage)) return;
-			activateLoadingFor(msg.chatId);
-			stores.setCanAbort(true);
-			onChatProcessing(msg.chatId);
-			applyServerMessages(msg, stores);
-			handlePlanModeMessages(msg, planModeCtx);
-			handlePermissionLifecycleFromBatch(msg, permLifecycleCtx);
+			'agent-run-output': (msg) => {
+				if (!(msg instanceof AgentRunOutputMessage)) return;
+				activateLoadingFor(msg.chatId);
+				stores.setCanAbort(true);
+				onChatProcessing(msg.chatId);
+				markPendingUserMessageDelivery(msg.clientRequestId, stores, 'accepted');
+				applyServerMessages(msg, stores);
+				handlePlanModeMessages(msg, planModeCtx);
+				handlePermissionLifecycleFromBatch(msg, permLifecycleCtx);
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) handleAgentComplete(msg, lifecycleCtx);
-		},
-		'agent-run-failed': (msg) => {
-			if (msg instanceof AgentRunFailedMessage) handleAgentError(msg, lifecycleCtx);
-		},
+			},
+			'agent-run-failed': (msg) => {
+				if (msg instanceof AgentRunFailedMessage) {
+					markPendingUserMessageDelivery(msg.clientRequestId, stores, 'failed');
+					handleAgentError(msg, lifecycleCtx);
+				}
+			},
 
 		'chat-session-created': (msg) => {
 			if (msg instanceof ChatSessionCreatedMessage) handleChatCreated(msg, chatEventCtx);

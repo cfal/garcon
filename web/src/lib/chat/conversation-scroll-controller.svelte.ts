@@ -2,17 +2,15 @@
 // near-bottom detection, pinned-to-bottom state, infinite scroll
 // loading, and layout resize reconciliation.
 
-import { reconcileScrollAfterHeightDelta } from '$lib/chat/scroll-anchor';
-import type { ChatState } from '$lib/chat/state.svelte';
-import type { WsConnection } from '$lib/ws/connection.svelte';
+	import { reconcileScrollAfterHeightDelta } from '$lib/chat/scroll-anchor';
+	import type { ChatState } from '$lib/chat/state.svelte';
 
 export interface ScrollControllerDeps {
 	getScrollContainer: () => HTMLDivElement | null;
-	getQueueContainer: () => HTMLDivElement | undefined;
-	chatState: ChatState;
-	sessions: { selectedChatId: string | null };
-	ws: WsConnection;
-}
+		getQueueContainer: () => HTMLDivElement | undefined;
+		chatState: ChatState;
+		sessions: { selectedChatId: string | null };
+	}
 
 export class ConversationScrollController {
 	isPinnedToBottom = $state(true);
@@ -42,9 +40,9 @@ export class ConversationScrollController {
 
 		this.isScrollingToTop = true;
 		try {
-			if (this.deps.chatState.hasMoreMessages) {
-				await this.deps.chatState.loadAllMessages(chatId, this.deps.ws);
-			}
+				if (this.deps.chatState.hasMoreMessages) {
+					await this.deps.chatState.loadAllMessages(chatId);
+				}
 			const node = this.deps.getScrollContainer();
 			if (node) node.scrollTop = 0;
 		} finally {
@@ -64,7 +62,7 @@ export class ConversationScrollController {
 			if (chatId) {
 				const prevHeight = node.scrollHeight;
 				const prevTop = node.scrollTop;
-				this.deps.chatState.loadMoreMessages(chatId, this.deps.ws).then((loaded) => {
+					this.deps.chatState.loadMoreMessages(chatId).then((loaded) => {
 					const container = this.deps.getScrollContainer();
 					if (loaded && container) {
 						const newHeight = container.scrollHeight;

@@ -13,17 +13,32 @@ import { normalizeRemoteSettingsSnapshot } from './settings';
 
 export class AgentRunOutputMessage {
   readonly type = 'agent-run-output' as const;
-  constructor(public chatId: string, public messages: ChatMessage[]) { }
+  constructor(
+    public chatId: string,
+    public messages: ChatMessage[],
+    public turnId?: string,
+    public clientRequestId?: string,
+  ) { }
 }
 
 export class AgentRunFinishedMessage {
   readonly type = 'agent-run-finished' as const;
-  constructor(public chatId: string, public exitCode?: number) { }
+  constructor(
+    public chatId: string,
+    public exitCode?: number,
+    public turnId?: string,
+    public clientRequestId?: string,
+  ) { }
 }
 
 export class AgentRunFailedMessage {
   readonly type = 'agent-run-failed' as const;
-  constructor(public chatId: string, public error: string) { }
+  constructor(
+    public chatId: string,
+    public error: string,
+    public turnId?: string,
+    public clientRequestId?: string,
+  ) { }
 }
 
 export class ChatSessionCreatedMessage {
@@ -219,18 +234,33 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
     case 'agent-run-output': {
       const chatId = requiredStr(data.chatId);
       if (!chatId) return null;
-      return new AgentRunOutputMessage(chatId, parseChatMessages(data.messages));
+      return new AgentRunOutputMessage(
+        chatId,
+        parseChatMessages(data.messages),
+        typeof data.turnId === 'string' ? data.turnId : undefined,
+        typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
+      );
     }
     case 'agent-run-finished': {
       const chatId = requiredStr(data.chatId);
       if (!chatId) return null;
-      return new AgentRunFinishedMessage(chatId, data.exitCode as number | undefined);
+      return new AgentRunFinishedMessage(
+        chatId,
+        data.exitCode as number | undefined,
+        typeof data.turnId === 'string' ? data.turnId : undefined,
+        typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
+      );
     }
     case 'agent-run-failed': {
       const chatId = requiredStr(data.chatId);
       const error = requiredStr(data.error);
       if (!chatId || !error) return null;
-      return new AgentRunFailedMessage(chatId, error);
+      return new AgentRunFailedMessage(
+        chatId,
+        error,
+        typeof data.turnId === 'string' ? data.turnId : undefined,
+        typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
+      );
     }
     case 'chat-session-created': {
       const chatId = requiredStr(data.chatId);

@@ -2,10 +2,10 @@
 	import { tick } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import { cn } from '$lib/utils/cn';
-	import { getChatSessions, getSplitLayout, getWs } from '$lib/context';
+	import { getChatSessions, getSplitLayout } from '$lib/context';
 	import { LocalChatSnapshotCache } from '$lib/chat/chat-snapshot-cache';
 	import { parseChatMessages, type ChatMessage, UserMessage, AssistantMessage, ErrorMessage } from '$shared/chat-types';
-	import { ChatLogQueryRequest } from '$shared/ws-requests';
+	import { getChatMessages } from '$lib/api/chats.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import X from '@lucide/svelte/icons/x';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -40,7 +40,6 @@
 
 	const sessions = getChatSessions();
 	const splitLayout = getSplitLayout();
-	const ws = getWs();
 	const snapshotCache = new LocalChatSnapshotCache();
 
 	let previewMessages = $state<ChatMessage[]>([]);
@@ -110,20 +109,12 @@
 			isPreviewLoading = false;
 		}
 
-		if (ws.isConnected) {
-			fetchPreviewMessages(id);
-		} else {
-			isPreviewLoading = false;
-		}
+		fetchPreviewMessages(id);
 	});
 
 	async function fetchPreviewMessages(targetChatId: string) {
 		try {
-			const data = await ws.sendRequest<{
-				messages?: ChatMessage[];
-				hasMore?: boolean;
-				total?: number;
-			}>(new ChatLogQueryRequest(null, targetChatId, 50, 0), 10_000);
+			const data = await getChatMessages({ chatId: targetChatId, limit: 50, offset: 0 });
 
 			if (targetChatId !== chatId || isFocused) return;
 

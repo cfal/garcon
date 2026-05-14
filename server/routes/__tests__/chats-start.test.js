@@ -109,8 +109,9 @@ describe('POST /api/v1/chats/start', () => {
     const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.success).toBe(true);
+	    expect(response.status).toBe(202);
+	    expect(body.success).toBe(true);
+	    expect(body.commandType).toBe('chat-start');
     expect(settings.setLastChatDefaults).toHaveBeenCalledWith({
       provider: 'codex',
       projectPath,
@@ -123,10 +124,12 @@ describe('POST /api/v1/chats/start', () => {
       claudeThinkingMode: 'off',
       ampAgentMode: 'smart',
     });
-    expect(providers.startSession).toHaveBeenCalledWith('123', 'hello', {
-      images: [],
-      projectPath,
-    });
+	    expect(providers.startSession).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
+	      images: [],
+	      projectPath,
+	      clientRequestId: expect.any(String),
+	      turnId: expect.any(String),
+	    }));
   });
 
   it('keeps the attempted defaults even when provider startup fails', async () => {
@@ -211,8 +214,9 @@ describe('POST /api/v1/chats/start', () => {
     const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.success).toBe(true);
+	    expect(response.status).toBe(202);
+	    expect(body.success).toBe(true);
+	    expect(body.commandType).toBe('chat-start');
     expect(registry.addChat).toHaveBeenCalledWith(expect.objectContaining({
       permissionMode: 'default',
       thinkingMode: 'none',

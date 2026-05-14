@@ -1,14 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { forkChat } from '$lib/api/chats.js';
+import { forkChat, forkRunChat, getChatQueue } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 
 vi.mock('$lib/api/chats.js', () => ({
+	dequeueChatMessage: vi.fn(),
+	enqueueChatMessage: vi.fn(),
 	forkChat: vi.fn(),
+	forkRunChat: vi.fn(),
+	getChatQueue: vi.fn(),
+	pauseChatQueue: vi.fn(),
+	resumeChatQueue: vi.fn(),
+	runChat: vi.fn(),
+	sendPermissionDecision: vi.fn(),
 	startChat: vi.fn(),
+	stopChat: vi.fn(),
+	updateChatModel: vi.fn(),
+	updateExecutionSettings: vi.fn(),
 }));
 
 const mockForkChat = vi.mocked(forkChat);
+const mockForkRunChat = vi.mocked(forkRunChat);
+const mockGetChatQueue = vi.mocked(getChatQueue);
 
 function createRunningChat(overrides: Partial<Record<string, unknown>> = {}) {
 	return {
@@ -81,10 +94,13 @@ function createDeps(chat = createRunningChat()) {
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
 			},
-			lifecycle: {
-				clearLoading: vi.fn(),
-				setCurrentChatId: vi.fn(),
-			},
+				lifecycle: {
+					activateLoading: vi.fn(),
+					clearLoading: vi.fn(),
+					setCanAbort: vi.fn(),
+					setCurrentChatId: vi.fn(),
+					setLoadingStatus: vi.fn(),
+				},
 			startupCoordinator: {},
 			ws: {
 				sendMessage: vi.fn(),
@@ -115,10 +131,11 @@ function createDeps(chat = createRunningChat()) {
 			setPendingPermissionRequests: vi.fn(),
 			getPreviousPermissionMode: vi.fn(() => null),
 			setPreviousPermissionMode: vi.fn(),
-			setNeedsServerLoad: vi.fn(),
-			setIsViewportPinnedToBottom: vi.fn(),
-			scrollToBottom: vi.fn(),
-		},
+				setNeedsServerLoad: vi.fn(),
+				setIsViewportPinnedToBottom: vi.fn(),
+				setMessageQueue: vi.fn(),
+				scrollToBottom: vi.fn(),
+			},
 		waitForConnection,
 	};
 }
@@ -126,6 +143,13 @@ function createDeps(chat = createRunningChat()) {
 describe('ConversationSessionController', () => {
 	beforeEach(() => {
 		mockForkChat.mockReset();
+		mockForkRunChat.mockReset();
+		mockGetChatQueue.mockReset();
+		mockGetChatQueue.mockResolvedValue({
+			success: true,
+			chatId: 'chat-1',
+			queue: { entries: [], paused: false },
+		});
 	});
 
 	it('marks an unread chat read immediately when selected', () => {
@@ -173,6 +197,15 @@ describe('ConversationSessionController', () => {
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = '/fork continue from here';
 		deps.ws.sendMessage = vi.fn(() => true);
+		mockForkRunChat.mockResolvedValue({
+			success: true,
+			commandType: 'fork-run',
+			clientRequestId: 'req-1',
+			chatId: '456',
+			status: 'accepted',
+			acceptedAt: '2026-03-27T08:00:00.000Z',
+			sourceChatId: '123',
+		});
 		const controller = new ConversationSessionController(deps as never);
 
 		await controller.submitForChat('123');
@@ -185,16 +218,17 @@ describe('ConversationSessionController', () => {
 		expect(deps.chatState.isUserScrolledUp).toBe(false);
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('123');
 
-		const request = deps.ws.sendMessage.mock.calls[0][0];
-		expect(request).toMatchObject({
-			type: 'fork-run',
+		expect(deps.ws.sendMessage).not.toHaveBeenCalled();
+		expect(mockForkRunChat).toHaveBeenCalledWith(expect.objectContaining({
 			sourceChatId: '123',
 			command: 'continue from here',
 			permissionMode: 'default',
 			thinkingMode: 'none',
 			model: 'sonnet',
-		});
-		expect(request.chatId).toMatch(/^\d+$/);
+			chatId: expect.stringMatching(/^\d+$/),
+			clientRequestId: expect.any(String),
+			clientMessageId: expect.any(String),
+		}));
 	});
 
 	it('submits bare /fork through the fork API without sending fork-run', async () => {

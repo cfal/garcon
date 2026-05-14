@@ -8,6 +8,8 @@ export interface QueueEntry {
 export interface QueueState {
   entries: QueueEntry[];
   paused: boolean;
+  version?: number;
+  updatedAt?: string;
 }
 
 function normalizeQueueEntry(value: unknown): QueueEntry | null {
@@ -37,5 +39,7 @@ export function normalizeQueueState(value: unknown): QueueState {
     : [];
 
   const paused = entries.length > 0 && raw.paused === true;
-  return { entries, paused };
+  const version = typeof raw.version === 'number' && Number.isFinite(raw.version) ? raw.version : undefined;
+  const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : undefined;
+  return { entries, paused, version, updatedAt };
 }

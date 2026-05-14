@@ -1,6 +1,6 @@
-<script lang="ts">
-	import ChatPane from '../ChatPane.svelte';
-	import { setChatSessions, setSplitLayout, setWs } from '$lib/context';
+	<script lang="ts">
+		import ChatPane from '../ChatPane.svelte';
+		import { setChatSessions, setSplitLayout } from '$lib/context';
 
 	interface Props {
 		isFocused?: boolean;
@@ -20,25 +20,7 @@
 		},
 	} as never);
 
-	setWs({
-		isConnected: true,
-		sendRequest: () => Promise.resolve({
-			messages: [
-				{
-					type: 'user-message',
-					timestamp: '2026-05-01T00:00:00.000Z',
-					content: 'Unfocused user question',
-				},
-				{
-					type: 'assistant-message',
-					timestamp: '2026-05-01T00:00:01.000Z',
-					content: 'Unfocused assistant answer',
-				},
-			],
-		}),
-	} as never);
-
-	setSplitLayout({
+		setSplitLayout({
 		draggedPaneId: null,
 		startPaneDrag() {},
 		endDrag() {},

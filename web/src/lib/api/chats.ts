@@ -14,8 +14,28 @@ import {
 	type ThinkingMode,
 } from '$shared/chat-modes';
 import type { ApiProtocol } from '$shared/providers';
+import type { ChatMessage } from '$shared/chat-types';
+import type {
+	AgentRunCommandRequest,
+	AgentStopCommandRequest,
+	AgentStopResponse,
+	CommandAcceptedResponse,
+	ExecutionSettingsPatchRequest,
+	ExecutionSettingsPatchResponse,
+	ForkRunCommandRequest,
+	ModelPatchRequest,
+	ModelPatchResponse,
+	PermissionDecisionCommandRequest,
+	QueueEnqueueCommandRequest,
+	QueueEnqueueResponse,
+	QueueMutationResponse,
+	RunningChatsResponse,
+} from '$shared/chat-command-contracts';
+import type { QueueState } from '$shared/queue-state';
 
 export interface StartChatParams {
+	clientRequestId?: string;
+	clientMessageId?: string;
 	chatId: string;
 	provider: SessionProvider;
 	projectPath: string;
@@ -51,8 +71,13 @@ export async function listChats(): Promise<ListChatsResponse> {
 }
 
 export interface StartChatResponse {
-	success: boolean;
+	success: true;
+	commandType: string;
+	clientRequestId: string;
 	chatId?: string;
+	turnId?: string;
+	status: 'accepted' | 'duplicate' | 'already-applied';
+	acceptedAt: string;
 }
 
 /** Starts a new chat session. */
@@ -75,6 +100,73 @@ export async function startChat(params: StartChatParams): Promise<StartChatRespo
 		options,
 		tags,
 	});
+}
+
+export async function runChat(params: AgentRunCommandRequest): Promise<CommandAcceptedResponse> {
+	return apiPost<CommandAcceptedResponse>('/api/v1/chats/run', params);
+}
+
+export async function forkRunChat(params: ForkRunCommandRequest): Promise<CommandAcceptedResponse & { sourceChatId?: string }> {
+	return apiPost<CommandAcceptedResponse & { sourceChatId?: string }>('/api/v1/chats/fork-run', params);
+}
+
+export async function stopChat(params: AgentStopCommandRequest): Promise<AgentStopResponse> {
+	return apiPost<AgentStopResponse>('/api/v1/chats/stop', params);
+}
+
+export async function sendPermissionDecision(params: PermissionDecisionCommandRequest): Promise<CommandAcceptedResponse> {
+	return apiPost<CommandAcceptedResponse>('/api/v1/chats/permissions/decision', params);
+}
+
+export async function enqueueChatMessage(params: QueueEnqueueCommandRequest): Promise<QueueEnqueueResponse> {
+	return apiPost<QueueEnqueueResponse>('/api/v1/chats/queue/enqueue', params);
+}
+
+export async function getChatQueue(chatId: string): Promise<{ success: true; chatId: string; queue: QueueState }> {
+	return apiGet<{ success: true; chatId: string; queue: QueueState }>(`/api/v1/chats/queue?chatId=${encodeURIComponent(chatId)}`);
+}
+
+export async function dequeueChatMessage(chatId: string, entryId: string): Promise<QueueMutationResponse> {
+	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/dequeue', { chatId, entryId });
+}
+
+export async function clearChatQueue(chatId: string): Promise<QueueMutationResponse> {
+	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/clear', { chatId });
+}
+
+export async function pauseChatQueue(chatId: string): Promise<QueueMutationResponse> {
+	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/pause', { chatId });
+}
+
+export async function resumeChatQueue(chatId: string): Promise<QueueMutationResponse> {
+	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', { chatId });
+}
+
+export async function updateExecutionSettings(params: ExecutionSettingsPatchRequest): Promise<ExecutionSettingsPatchResponse> {
+	return apiPatch<ExecutionSettingsPatchResponse>('/api/v1/chats/execution-settings', params);
+}
+
+export async function updateChatModel(params: ModelPatchRequest): Promise<ModelPatchResponse> {
+	return apiPatch<ModelPatchResponse>('/api/v1/chats/model', params);
+}
+
+export async function getRunningChats(): Promise<RunningChatsResponse> {
+	return apiGet<RunningChatsResponse>('/api/v1/chats/running');
+}
+
+export async function getChatMessages(params: { chatId: string; limit?: number; offset?: number }): Promise<{
+	messages: ChatMessage[];
+	total: number;
+	hasMore: boolean;
+	offset: number;
+	limit: number;
+}> {
+	const query = new URLSearchParams({
+		chatId: params.chatId,
+		limit: String(params.limit ?? 20),
+		offset: String(params.offset ?? 0),
+	});
+	return apiGet(`/api/v1/chats/messages?${query.toString()}`);
 }
 
 export interface DeleteChatResponse {

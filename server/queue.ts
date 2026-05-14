@@ -12,11 +12,24 @@ import { UserMessage } from '../common/chat-types.ts';
 import type { RunProviderTurnOptions } from './providers/types.js';
 
 function emptyQueue(): QueueState {
-  return { entries: [], paused: false };
+  return { entries: [], paused: false, version: 0 };
 }
 
 function normalizeForPersist(queue: unknown): QueueState {
   return normalizeQueueState(queue);
+}
+
+function bumpQueue(queue: QueueState): QueueState {
+  return {
+    ...queue,
+    version: (queue.version ?? 0) + 1,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function optionsForQueuedTurn(options: RunProviderTurnOptions): RunProviderTurnOptions {
+  const { clientRequestId: _clientRequestId, clientMessageId: _clientMessageId, turnId: _turnId, ...rest } = options;
+  return rest;
 }
 
 interface ProvidersDep {
@@ -33,6 +46,7 @@ type QueueUpdatedCallback = (chatId: string, state: QueueState) => void;
 type DispatchingCallback = (chatId: string, entryId: string, content: string) => void;
 type SessionStoppedCallback = (chatId: string, success: boolean) => void;
 type ChatIdleCallback = (chatId: string) => void;
+type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunProviderTurnOptions) => void;
 
 export class QueueManager extends EventEmitter {
   #busy = new Map<string, boolean>();
@@ -50,10 +64,11 @@ export class QueueManager extends EventEmitter {
     this.#historyCache = historyCache || null;
   }
 
-  onQueueUpdated(cb: QueueUpdatedCallback): void { this.on('queue-updated', cb); }
-  onDispatching(cb: DispatchingCallback): void { this.on('dispatching', cb); }
-  onSessionStopped(cb: SessionStoppedCallback): void { this.on('session-stopped', cb); }
-  onChatIdle(cb: ChatIdleCallback): void { this.on('chat-idle', cb); }
+	  onQueueUpdated(cb: QueueUpdatedCallback): void { this.on('queue-updated', cb); }
+	  onDispatching(cb: DispatchingCallback): void { this.on('dispatching', cb); }
+	  onSessionStopped(cb: SessionStoppedCallback): void { this.on('session-stopped', cb); }
+	  onChatIdle(cb: ChatIdleCallback): void { this.on('chat-idle', cb); }
+	  onTurnFailed(cb: TurnFailedCallback): void { this.on('turn-failed', cb); }
 
   // Emits chat-idle if the chat has no queued items and the provider is not
   // running. Called after a provider turn finishes to cover the initial-session
@@ -108,8 +123,9 @@ export class QueueManager extends EventEmitter {
       const existing = queue.entries.find(e => e.status === 'queued');
       if (existing) {
         existing.content += '\n' + content;
-        await this.#writeChatQueue(chatId, queue);
-        const result = normalizeForPersist(queue);
+        const bumped = bumpQueue(queue);
+        await this.#writeChatQueue(chatId, bumped);
+        const result = normalizeForPersist(bumped);
         this.emit('queue-updated', chatId, result);
         return { entry: existing, queue: result };
       }
@@ -120,8 +136,9 @@ export class QueueManager extends EventEmitter {
         createdAt: new Date().toISOString(),
       };
       queue.entries.push(entry);
-      await this.#writeChatQueue(chatId, queue);
-      const result = normalizeForPersist(queue);
+      const bumped = bumpQueue(queue);
+      await this.#writeChatQueue(chatId, bumped);
+      const result = normalizeForPersist(bumped);
       this.emit('queue-updated', chatId, result);
       return { entry, queue: result };
     });
@@ -131,8 +148,9 @@ export class QueueManager extends EventEmitter {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       queue.entries = queue.entries.filter(e => e.id !== entryId);
-      await this.#writeChatQueue(chatId, queue);
-      const result = normalizeForPersist(queue);
+      const bumped = bumpQueue(queue);
+      await this.#writeChatQueue(chatId, bumped);
+      const result = normalizeForPersist(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -143,8 +161,9 @@ export class QueueManager extends EventEmitter {
       const queue = await this.readChatQueue(chatId);
       queue.entries = [];
       queue.paused = false;
-      await this.#writeChatQueue(chatId, queue);
-      const result = normalizeForPersist(queue);
+      const bumped = bumpQueue(queue);
+      await this.#writeChatQueue(chatId, bumped);
+      const result = normalizeForPersist(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -154,8 +173,9 @@ export class QueueManager extends EventEmitter {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       queue.paused = queue.entries.length > 0;
-      await this.#writeChatQueue(chatId, queue);
-      const result = normalizeForPersist(queue);
+      const bumped = bumpQueue(queue);
+      await this.#writeChatQueue(chatId, bumped);
+      const result = normalizeForPersist(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -165,8 +185,9 @@ export class QueueManager extends EventEmitter {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       queue.paused = false;
-      await this.#writeChatQueue(chatId, queue);
-      const result = normalizeForPersist(queue);
+      const bumped = bumpQueue(queue);
+      await this.#writeChatQueue(chatId, bumped);
+      const result = normalizeForPersist(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -177,16 +198,18 @@ export class QueueManager extends EventEmitter {
       const queue = await this.readChatQueue(chatId);
       if (queue.paused && queue.entries.length === 0) {
         queue.paused = false;
-        await this.#writeChatQueue(chatId, queue);
-        this.emit('queue-updated', chatId, normalizeForPersist(queue));
+        const bumped = bumpQueue(queue);
+        await this.#writeChatQueue(chatId, bumped);
+        this.emit('queue-updated', chatId, normalizeForPersist(bumped));
         return null;
       }
       if (queue.paused) return null;
       const next = queue.entries.find(e => e.status === 'queued');
       if (!next) return null;
       next.status = 'sending';
-      await this.#writeChatQueue(chatId, queue);
-      const result = normalizeForPersist(queue);
+      const bumped = bumpQueue(queue);
+      await this.#writeChatQueue(chatId, bumped);
+      const result = normalizeForPersist(bumped);
       this.emit('queue-updated', chatId, result);
       return { entry: next, queue: result };
     });
@@ -196,8 +219,9 @@ export class QueueManager extends EventEmitter {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = await this.readChatQueue(chatId);
       queue.entries = queue.entries.filter(e => e.id !== entryId);
-      await this.#writeChatQueue(chatId, queue);
-      const result = normalizeForPersist(queue);
+      const bumped = bumpQueue(queue);
+      await this.#writeChatQueue(chatId, bumped);
+      const result = normalizeForPersist(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -209,8 +233,9 @@ export class QueueManager extends EventEmitter {
       const entry = queue.entries.find(e => e.id === entryId);
       if (entry) entry.status = 'queued';
       queue.paused = true;
-      await this.#writeChatQueue(chatId, queue);
-      const result = normalizeForPersist(queue);
+      const bumped = bumpQueue(queue);
+      await this.#writeChatQueue(chatId, bumped);
+      const result = normalizeForPersist(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -219,16 +244,31 @@ export class QueueManager extends EventEmitter {
   // Submits a command to a chat session. Appends the user message to
   // history, runs the provider turn, then drains any queued entries.
   async submit(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
-    if (command && this.#historyCache) {
-      const userMsg = new UserMessage(new Date().toISOString(), String(command));
-      this.#historyCache.appendMessages(chatId, [userMsg]).catch((err: Error) => {
-        console.warn(`queue: failed to append user message for ${chatId}:`, err.message);
-      });
-    }
-
-    await this.#providers!.runProviderTurn(chatId, command, options);
-    await this.#drain(chatId, options);
+    await this.appendUserMessage(chatId, command, options);
+    await this.runAcceptedTurn(chatId, command, options);
   }
+
+  async appendUserMessage(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
+    if (command && this.#historyCache) {
+      const userMsg = new UserMessage(new Date().toISOString(), String(command), options.images, {
+        messageId: options.clientMessageId,
+        clientRequestId: options.clientRequestId,
+        turnId: options.turnId,
+      });
+      await this.#historyCache.appendMessages(chatId, [userMsg]);
+    }
+  }
+
+	  async runAcceptedTurn(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
+	    try {
+	      await this.#providers!.runProviderTurn(chatId, command, options);
+	    } catch (error: unknown) {
+	      const message = error instanceof Error ? error.message : String(error);
+	      this.emit('turn-failed', chatId, message, options);
+	      throw error;
+	    }
+	    await this.#drain(chatId, options);
+	  }
 
   // Aborts the running harness session and pauses the queue if entries remain.
   async abort(chatId: string): Promise<boolean> {
@@ -275,7 +315,7 @@ export class QueueManager extends EventEmitter {
         }
 
         try {
-          await this.#providers!.runProviderTurn(chatId, entry.content, options);
+	          await this.#providers!.runProviderTurn(chatId, entry.content, optionsForQueuedTurn(options));
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
           console.error('queue: error processing queued message:', (error as Error).message);

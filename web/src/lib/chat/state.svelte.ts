@@ -1,14 +1,12 @@
 // Per-chat message state: message arrays, pagination, scroll management,
 // and message persistence via LocalChatSnapshotCache.
 
-import { parseChatMessages, type ChatMessage } from '$shared/chat-types';
-import { ChatLogQueryRequest } from '$shared/ws-requests';
-import type { WsConnection } from '$lib/ws/connection.svelte';
-import { LocalChatSnapshotCache } from './chat-snapshot-cache';
+	import { parseChatMessages, type ChatMessage } from '$shared/chat-types';
+	import { LocalChatSnapshotCache } from './chat-snapshot-cache';
+	import { getChatMessages } from '$lib/api/chats.js';
 
 const MESSAGES_PER_PAGE = 20;
 const INITIAL_VISIBLE_MESSAGES = 100;
-const CHAT_LOG_TIMEOUT_MS = 45_000;
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 
@@ -42,10 +40,8 @@ export class ChatState {
 	// the loading state from a newer load.
 	#loadGeneration = 0;
 
-	/** Loads messages for a chat from the server via WebSocket.
-	 *  Throws on transport failure so callers can distinguish
-	 *  "no connection" from "empty chat". */
-	async loadMessages(chatId: string, ws: WsConnection): Promise<ChatMessage[]> {
+		/** Loads messages for a chat through the REST history endpoint. */
+		async loadMessages(chatId: string): Promise<ChatMessage[]> {
 		if (!chatId) return [];
 
 		const generation = ++this.#loadGeneration;
@@ -55,11 +51,7 @@ export class ChatState {
 		this.#messagesOffset = 0;
 
 		try {
-			const data = await ws.sendRequest<{
-				messages?: ChatMessage[];
-				hasMore?: boolean;
-				total?: number;
-			}>(new ChatLogQueryRequest(null, chatId, MESSAGES_PER_PAGE, 0), CHAT_LOG_TIMEOUT_MS);
+			const data = await getChatMessages({ chatId, limit: MESSAGES_PER_PAGE, offset: 0 });
 
 			const messages = parseChatMessages(data.messages);
 
@@ -86,7 +78,7 @@ export class ChatState {
 	}
 
 	/** Loads older messages and prepends them to the current array. */
-	async loadMoreMessages(chatId: string, ws: WsConnection): Promise<boolean> {
+		async loadMoreMessages(chatId: string): Promise<boolean> {
 		if (this.#isLoadingMore || this.isLoadingMoreMessages) return false;
 		if (!this.hasMoreMessages || !chatId) return false;
 
@@ -94,11 +86,7 @@ export class ChatState {
 		this.isLoadingMoreMessages = true;
 
 		try {
-			const data = await ws.sendRequest<{
-				messages?: ChatMessage[];
-				hasMore?: boolean;
-				total?: number;
-			}>(new ChatLogQueryRequest(null, chatId, MESSAGES_PER_PAGE, this.#messagesOffset));
+			const data = await getChatMessages({ chatId, limit: MESSAGES_PER_PAGE, offset: this.#messagesOffset });
 
 			const messages = parseChatMessages(data.messages);
 			if (messages.length === 0) return false;
@@ -149,9 +137,9 @@ export class ChatState {
 	}
 
 	/** Loads all remaining paginated messages so the full history is available. */
-	async loadAllMessages(chatId: string, ws: WsConnection): Promise<void> {
-		while (this.hasMoreMessages) {
-			const loaded = await this.loadMoreMessages(chatId, ws);
+		async loadAllMessages(chatId: string): Promise<void> {
+			while (this.hasMoreMessages) {
+				const loaded = await this.loadMoreMessages(chatId);
 			if (!loaded) break;
 		}
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.chatMessages.length);

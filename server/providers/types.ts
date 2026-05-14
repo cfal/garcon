@@ -166,4 +166,8 @@ export interface RunProviderTurnRequest {
 }
 
 // Runtime-supplied turn fields forwarded through the queue and WS layers.
-export type RunProviderTurnOptions = Omit<RunProviderTurnRequest, 'chatId' | 'command'>;
+export type RunProviderTurnOptions = Omit<RunProviderTurnRequest, 'chatId' | 'command'> & {
+  clientRequestId?: string;
+  clientMessageId?: string;
+  turnId?: string;
+};

@@ -139,6 +139,11 @@ function defaultModelForHarness(id: string, nativeModels: HarnessModelOption[], 
   return nativeModels[0]?.value ?? endpointModels[0]?.value ?? fallbackDefault ?? '';
 }
 
+interface TurnEventMetadata {
+  clientRequestId?: string;
+  turnId?: string;
+}
+
 export interface ApiProviderInput {
   templateId: ApiProviderTemplateId;
   label: string;
@@ -481,6 +486,7 @@ export class ProviderRegistry {
   #apiProviderStore: ApiProviderStore;
   #opencodeInstance: any;
   #authDispatchers = new Map<string, (opencode: any) => Promise<unknown>>();
+  #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
 
   constructor(args: {
     registry: IChatRegistry;
@@ -522,6 +528,17 @@ export class ProviderRegistry {
     return adapter;
   }
 
+  #setTurnMetadata(chatId: string, opts: { clientRequestId?: string; turnId?: string }): void {
+    if (opts.clientRequestId || opts.turnId) {
+      this.#turnMetadataByChatId.set(chatId, {
+        clientRequestId: opts.clientRequestId,
+        turnId: opts.turnId,
+      });
+      return;
+    }
+    this.#turnMetadataByChatId.delete(chatId);
+  }
+
   async startSession(chatId: string, command: string, opts: {
     images?: AgentCommandImage[];
     model?: string;
@@ -530,6 +547,8 @@ export class ProviderRegistry {
     claudeThinkingMode?: ClaudeThinkingMode;
     ampAgentMode?: AmpAgentMode;
     projectPath?: string;
+    clientRequestId?: string;
+    turnId?: string;
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
 
@@ -565,7 +584,14 @@ export class ProviderRegistry {
     };
 
     const adapter = this.#adapterFor(entry.provider);
-    const started = await adapter.startSession(request);
+    this.#setTurnMetadata(chatId, opts);
+    let started: StartedProviderSession;
+    try {
+      started = await adapter.startSession(request);
+    } catch (error) {
+      this.#turnMetadataByChatId.delete(chatId);
+      throw error;
+    }
     this.#registry.updateChat(chatId, {
       providerSessionId: started.providerSessionId,
       nativePath: started.nativePath,
@@ -609,21 +635,29 @@ export class ProviderRegistry {
 
     const adapter = this.#adapterFor(provider);
     const resolvedCommand = await resolveFileMentionsInCommand(command, entry.projectPath);
-    await adapter.runTurn({
-      chatId,
-      providerSessionId,
-      command: resolvedCommand,
-      projectPath: entry.projectPath,
-      model: selection.model,
-      permissionMode: opts.permissionMode ?? entry.permissionMode,
-      thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
-      claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
-      images: opts.images,
-      envOverrides: selection.envOverrides,
-      nativePath: rawEntry.nativePath,
-      ...(selection.codexConfig ? { codexConfig: selection.codexConfig } : {}),
-      ...selectionRequestFields(selection),
-    });
+    this.#setTurnMetadata(chatId, opts);
+    let startedTurn = false;
+    try {
+      startedTurn = true;
+      await adapter.runTurn({
+        chatId,
+        providerSessionId,
+        command: resolvedCommand,
+        projectPath: entry.projectPath,
+        model: selection.model,
+        permissionMode: opts.permissionMode ?? entry.permissionMode,
+        thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
+        claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
+        images: opts.images,
+        envOverrides: selection.envOverrides,
+        nativePath: rawEntry.nativePath,
+        ...(selection.codexConfig ? { codexConfig: selection.codexConfig } : {}),
+        ...selectionRequestFields(selection),
+      });
+    } catch (error) {
+      if (startedTurn) this.#turnMetadataByChatId.delete(chatId);
+      throw error;
+    }
   }
 
   async abortSession(chatId: string): Promise<boolean> {
@@ -991,9 +1025,11 @@ export class ProviderRegistry {
     }
   }
 
-  onMessages(cb: (chatId: string, messages: unknown[]) => void): void {
+  onMessages(cb: (chatId: string, messages: unknown[], metadata?: TurnEventMetadata) => void): void {
     for (const adapter of this.#adapters.values()) {
-      adapter.onMessages(cb);
+      adapter.onMessages((chatId, messages) => {
+        cb(chatId, messages, this.#turnMetadataByChatId.get(chatId));
+      });
     }
   }
 
@@ -1009,15 +1045,23 @@ export class ProviderRegistry {
     }
   }
 
-  onFinished(cb: (chatId: string, exitCode: number) => void): void {
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void {
     for (const adapter of this.#adapters.values()) {
-      adapter.onFinished(cb);
+      adapter.onFinished((chatId, exitCode) => {
+        const metadata = this.#turnMetadataByChatId.get(chatId);
+        cb(chatId, exitCode, metadata);
+        this.#turnMetadataByChatId.delete(chatId);
+      });
     }
   }
 
-  onFailed(cb: (chatId: string, errorMessage: string) => void): void {
+  onFailed(cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void): void {
     for (const adapter of this.#adapters.values()) {
-      adapter.onFailed(cb);
+      adapter.onFailed((chatId, errorMessage) => {
+        const metadata = this.#turnMetadataByChatId.get(chatId);
+        cb(chatId, errorMessage, metadata);
+        this.#turnMetadataByChatId.delete(chatId);
+      });
     }
   }
 

@@ -9,7 +9,7 @@
 	} from '$shared/chat-types';
 	import type { ChatMessage, ToolResultMessage, ToolUseChatMessage } from '$shared/chat-types';
 	import type { SessionProvider } from '$lib/types/app';
-	import { ChevronRight } from '@lucide/svelte';
+	import { Check, ChevronRight, CircleAlert, LoaderCircle } from '@lucide/svelte';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Copy from '@lucide/svelte/icons/copy';
 	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
@@ -99,6 +99,16 @@
 	const asToolUse = $derived(isToolUseMessage(message) ? message : null);
 	const asError = $derived(message instanceof ErrorMessage ? message : null);
 	const asPermissionRequest = $derived(message instanceof PermissionRequestMessage ? message : null);
+	const userDeliveryStatus = $derived(asUser?.metadata?.deliveryStatus ?? null);
+	const userDeliveryTitle = $derived(
+		userDeliveryStatus === 'submitting'
+			? 'Sending'
+			: userDeliveryStatus === 'accepted'
+				? 'Sent'
+				: userDeliveryStatus === 'failed'
+					? 'Failed to send'
+					: '',
+	);
 
 	const showNonAssistantHeader = $derived(!isGrouped && message instanceof ErrorMessage);
 
@@ -205,10 +215,28 @@
 										{/each}
 									</div>
 								{/if}
-								<div class="mt-1 flex items-center justify-between gap-2">
-									<div class="text-xs text-user-bubble-timestamp text-left">
-										{formattedTime}
-									</div>
+									<div class="mt-1 flex items-center justify-between gap-2">
+										<div class="flex items-center gap-1 text-xs text-user-bubble-timestamp text-left">
+											<span>{formattedTime}</span>
+											{#if userDeliveryStatus}
+												<span
+													class={cn(
+														'inline-flex size-3.5 items-center justify-center',
+														userDeliveryStatus === 'failed' && 'text-status-error-foreground'
+													)}
+													title={userDeliveryTitle}
+													aria-label={userDeliveryTitle}
+												>
+													{#if userDeliveryStatus === 'submitting'}
+														<LoaderCircle class="size-3 animate-spin" />
+													{:else if userDeliveryStatus === 'accepted'}
+														<Check class="size-3" />
+													{:else}
+														<CircleAlert class="size-3" />
+													{/if}
+												</span>
+											{/if}
+										</div>
 									<div class="message-menu-actions flex justify-end opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100">
 										<button
 											type="button"

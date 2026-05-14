@@ -12,7 +12,7 @@
 	import { ChatState } from '$lib/chat/state.svelte';
 	import { ComposerState } from '$lib/chat/composer.svelte';
 	import { ProviderState } from '$lib/chat/provider-state.svelte';
-	import { QueueQueryRequest } from '$shared/ws-requests';
+	import { getChatQueue } from '$lib/api/chats.js';
 	import { StartupCoordinator } from '$lib/chat/startup-coordinator.js';
 	import { createDrainCursor } from '$lib/ws/drain';
 	import { mountConversationRouter } from '$lib/chat/conversation-router-adapter.svelte';
@@ -58,11 +58,14 @@
 	let pendingViewChat = $state<PendingViewChat | null>(null);
 	let previousPermissionMode = $state<PermissionMode | null>(null);
 	let needsServerLoad = $state(false);
-	const activeQueue = $derived.by(() => {
-		const chatId = sessions.selectedChatId;
-		if (!chatId) return null;
-		return queueByChatId[chatId] ?? null;
-	});
+		const activeQueue = $derived.by(() => {
+			const chatId = sessions.selectedChatId;
+			if (!chatId) return null;
+			return queueByChatId[chatId] ?? null;
+		});
+		function setMessageQueue(chatId: string, q: QueueState | null): void {
+			queueByChatId = { ...queueByChatId, [chatId]: q };
+		}
 	const scrollToTopButtonClass = $derived(cn(
 		'absolute right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg',
 		reserveTopFloatingToolbar ? 'top-16' : 'top-3',
@@ -96,9 +99,7 @@
 		},
 		getPendingViewChat: () => pendingViewChat,
 		setPendingViewChat: (v) => { pendingViewChat = v; },
-		setMessageQueue: (chatId, q) => {
-			queueByChatId = { ...queueByChatId, [chatId]: q };
-		},
+			setMessageQueue,
 		getPreviousPermissionMode: () => previousPermissionMode,
 		setPreviousPermissionMode: (mode) => { previousPermissionMode = mode; },
 	});
@@ -106,11 +107,10 @@
 	// Scroll controller.
 	const scroll = new ConversationScrollController({
 		getScrollContainer: () => scrollContainer,
-		getQueueContainer: () => queueControlsContainer,
-		chatState,
-		sessions,
-		ws,
-	});
+			getQueueContainer: () => queueControlsContainer,
+			chatState,
+			sessions,
+		});
 
 	// Session controller.
 	const controller = new ConversationSessionController({
@@ -118,10 +118,9 @@
 		chatState,
 		composerState,
 		providerState,
-		lifecycle,
-		startupCoordinator,
-		ws,
-		modelCatalog,
+			lifecycle,
+			startupCoordinator,
+			modelCatalog,
 		appShell,
 		readReceiptOutbox,
 		navigation: {
@@ -135,10 +134,11 @@
 		setPendingPermissionRequests: (v) => { pendingPermissionRequests = v; },
 		getPreviousPermissionMode: () => previousPermissionMode,
 		setPreviousPermissionMode: (v) => { previousPermissionMode = v; },
-		setNeedsServerLoad: (v) => { needsServerLoad = v; },
-		setIsViewportPinnedToBottom: (v) => { scroll.isPinnedToBottom = v; },
-		scrollToBottom: () => scroll.scrollToBottom(),
-	});
+			setNeedsServerLoad: (v) => { needsServerLoad = v; },
+			setIsViewportPinnedToBottom: (v) => { scroll.isPinnedToBottom = v; },
+			setMessageQueue,
+			scrollToBottom: () => scroll.scrollToBottom(),
+		});
 
 	// Expose the submit function to sibling components (runs once on mount).
 	$effect(() => {
@@ -167,7 +167,11 @@
 			const chatId = sessions.selectedChatId;
 
 			if (selected && selected.status === 'running') {
-				ws.sendMessage(new QueueQueryRequest(selected.id));
+				void getChatQueue(selected.id).then((result) => {
+					setMessageQueue(selected.id, result.queue);
+				}).catch(() => {
+					// Queue state will converge through later broadcasts.
+				});
 			}
 
 			if (!hasConnectedBefore) {

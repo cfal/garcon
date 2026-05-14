@@ -1,18 +1,7 @@
 // Composer state: input text, image attachments, draft persistence,
 // and message submission. Manages the input area lifecycle for a single chat.
 
-import type { WsConnection } from '$lib/ws/connection.svelte';
-import {
-	normalizeAmpAgentMode,
-	normalizeClaudeThinkingMode,
-	normalizePermissionMode,
-	normalizeThinkingMode,
-} from '$shared/chat-modes';
-import { AgentRunRequest } from '$shared/ws-requests';
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
-import type { ApiProtocol } from '$shared/providers';
-
-const DRAFT_PREFIX = 'chat_draft_';
+	const DRAFT_PREFIX = 'chat_draft_';
 
 export class ComposerState {
 	inputText = $state('');
@@ -86,81 +75,6 @@ export class ComposerState {
 		this.clearDraft(chatId);
 	}
 
-	/**
-	 * Submits the current message via WebSocket. Sends as an agent-run
-	 * with the current text and optional image attachments.
-	 */
-	async submitMessage(
-		ws: WsConnection,
-		chatId: string,
-		options: {
-				model: string;
-				apiProviderId?: string | null;
-				modelEndpointId?: string | null;
-				modelProtocol?: ApiProtocol | null;
-				permissionMode: PermissionMode;
-			thinkingMode: ThinkingMode;
-			claudeThinkingMode: ClaudeThinkingMode;
-			ampAgentMode?: AmpAgentMode;
-		}
-	): Promise<boolean> {
-		const text = this.inputText.trim();
-		if (!text && this.images.length === 0) return false;
-
-		this.isSubmitting = true;
-
-		// Clear immediately for synchronous DOM update,
-		// preventing Safari IME composition race conditions.
-		const previousText = this.inputText;
-		const previousImages = [...this.images];
-		this.clearAfterSubmit(chatId);
-
-		try {
-			// Convert images to base64 data URLs for transmission.
-			const imageData = await Promise.all(
-				previousImages.map(async (file) => {
-					const buffer = await file.arrayBuffer();
-					const base64 = btoa(
-						new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-					);
-					return {
-						data: `data:${file.type};base64,${base64}`,
-						name: file.name
-					};
-				})
-			);
-
-			const sent = ws.sendMessage(new AgentRunRequest(
-				chatId,
-				text,
-				normalizePermissionMode(options.permissionMode),
-				normalizeThinkingMode(options.thinkingMode),
-				options.model,
-				normalizeClaudeThinkingMode(options.claudeThinkingMode),
-					options.ampAgentMode ? normalizeAmpAgentMode(options.ampAgentMode) : undefined,
-					imageData.length > 0 ? imageData : undefined,
-					options.apiProviderId,
-					options.modelEndpointId,
-					options.modelProtocol,
-				));
-
-			if (!sent) {
-				// Revert on failure so user doesn't lose data
-				this.inputText = previousText;
-				this.images = previousImages;
-				this.saveDraft(chatId);
-			}
-			return sent;
-		} catch (error) {
-			console.error('Failed to submit message:', error);
-			this.inputText = previousText;
-			this.images = previousImages;
-			this.saveDraft(chatId);
-			return false;
-		} finally {
-			this.isSubmitting = false;
-		}
-	}
 }
 
 export function createComposerState(): ComposerState {

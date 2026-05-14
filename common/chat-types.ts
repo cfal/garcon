@@ -7,6 +7,15 @@ export interface ChatImage {
   name: string;
 }
 
+export type UserMessageDeliveryStatus = 'submitting' | 'accepted' | 'failed';
+
+export interface ChatMessageMetadata {
+  messageId?: string;
+  clientRequestId?: string;
+  turnId?: string;
+  deliveryStatus?: UserMessageDeliveryStatus;
+}
+
 // Canonical shape for a single todo/plan item. All provider-specific
 // formats are normalized to this at the converter boundary.
 export type TodoStatus = 'pending' | 'in_progress' | 'completed';
@@ -38,7 +47,12 @@ function asTodoItems(raw: unknown): TodoItem[] | undefined {
 
 export class UserMessage {
   readonly type = 'user-message' as const;
-  constructor(public timestamp: string, public content: string, public images?: ChatImage[]) {}
+  constructor(
+    public timestamp: string,
+    public content: string,
+    public images?: ChatImage[],
+    public metadata?: ChatMessageMetadata,
+  ) {}
 }
 
 export class AssistantMessage {
@@ -483,6 +497,22 @@ function asRecord(v: unknown): Record<string, unknown> {
   return {};
 }
 
+function parseChatMessageMetadata(v: unknown): ChatMessageMetadata | undefined {
+  const raw = asRecord(v);
+  const metadata: ChatMessageMetadata = {};
+  if (typeof raw.messageId === 'string') metadata.messageId = raw.messageId;
+  if (typeof raw.clientRequestId === 'string') metadata.clientRequestId = raw.clientRequestId;
+  if (typeof raw.turnId === 'string') metadata.turnId = raw.turnId;
+  if (
+    raw.deliveryStatus === 'submitting' ||
+    raw.deliveryStatus === 'accepted' ||
+    raw.deliveryStatus === 'failed'
+  ) {
+    metadata.deliveryStatus = raw.deliveryStatus;
+  }
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
 function asStringArray(v: unknown): string[] | undefined {
   if (!Array.isArray(v)) return undefined;
   const items = v.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
@@ -498,8 +528,13 @@ function asOptionalChanges(v: unknown): Array<{ path?: string; kind?: string }> 
 // Returns null for unrecognized message types.
 export function parseChatMessage(data: Record<string, unknown>): ChatMessage | null {
   switch (data.type) {
-    case 'user-message':
-      return new UserMessage(str(data.timestamp), str(data.content), data.images as ChatImage[] | undefined);
+	    case 'user-message':
+	      return new UserMessage(
+	        str(data.timestamp),
+	        str(data.content),
+	        data.images as ChatImage[] | undefined,
+	        parseChatMessageMetadata(data.metadata),
+	      );
     case 'assistant-message':
       return new AssistantMessage(str(data.timestamp), str(data.content));
     case 'thinking':

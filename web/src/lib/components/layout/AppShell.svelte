@@ -11,7 +11,7 @@
 	const lazySettings = () => import('../settings/Settings.svelte');
 	import { getNavigation, getChatRuntime, getChatSessions, getAppShell, getWs, getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import { ChatRunningQueryRequest } from '$shared/ws-requests';
+	import { getRunningChats } from '$lib/api/chats.js';
 	import { AppShellController } from './app-shell-controller.svelte';
 	import { selectedChatIdFromRoute } from './app-shell-route';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
@@ -123,7 +123,14 @@
 	 *  Ensures reconcileProcessing runs against a populated byId map. */
 	async function fetchChatsAndReconcile() {
 		await quietRefresh();
-		ws.sendMessage(new ChatRunningQueryRequest());
+		const running = await getRunningChats();
+		const activeChatIds = new Set<string>();
+		for (const sessionsForProvider of Object.values(running.sessions)) {
+			for (const session of sessionsForProvider) {
+				if (session.id) activeChatIds.add(session.id);
+			}
+		}
+		sessions.reconcileProcessing(activeChatIds);
 	}
 
 	appShell.registerRefreshChats(fetchChats);
@@ -133,7 +140,9 @@
 	// (initial page load and reconnect).
 	$effect(() => {
 		if (!ws.isConnected) return;
-		fetchChatsAndReconcile();
+		fetchChatsAndReconcile().catch((error) => {
+			console.warn('app-shell: failed to reconcile running chats:', error instanceof Error ? error.message : String(error));
+		});
 	});
 
 	onMount(() => {

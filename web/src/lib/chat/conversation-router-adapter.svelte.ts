@@ -78,7 +78,7 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				deps.chatState.chatMessages = updater;
 			}
 		},
-		loadMessages: (chatId) => deps.chatState.loadMessages(chatId, deps.ws),
+		loadMessages: (chatId) => deps.chatState.loadMessages(chatId),
 		setIsLoading: (v) => deps.lifecycle.setIsLoading(v),
 		setCanAbort: (v) => deps.lifecycle.setCanAbort(v),
 		setLoadingStatus: (s) => deps.lifecycle.setLoadingStatus(s),

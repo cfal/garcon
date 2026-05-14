@@ -2,6 +2,27 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import ChatPaneTestHarness from './ChatPaneTestHarness.svelte';
 
+vi.mock('$lib/api/chats.js', () => ({
+	getChatMessages: vi.fn(() => Promise.resolve({
+		messages: [
+			{
+				type: 'user-message',
+				timestamp: '2026-05-01T00:00:00.000Z',
+				content: 'Unfocused user question',
+			},
+			{
+				type: 'assistant-message',
+				timestamp: '2026-05-01T00:00:01.000Z',
+				content: 'Unfocused assistant answer',
+			},
+		],
+		total: 2,
+		hasMore: false,
+		offset: 0,
+		limit: 50,
+	})),
+}));
+
 describe('ChatPane', () => {
 	it('shows chat history and a composer target when unfocused', async () => {
 		const onFocus = vi.fn();

@@ -285,8 +285,8 @@ export async function startServer() {
     // Wire provider events to broadcast via ProviderRegistry fan-out.
     // HistoryCache's init() already self-wired appendMessages via
     // providers.onMessages(), so only broadcast wiring is needed here.
-    providerRegistry.onMessages((chatId, messages) => {
-      broadcast(new AgentRunOutputMessage(chatId, messages));
+    providerRegistry.onMessages((chatId, messages, metadata) => {
+      broadcast(new AgentRunOutputMessage(chatId, messages, metadata?.turnId, metadata?.clientRequestId));
     });
     providerRegistry.onProcessing((chatId, isProcessing) => {
       broadcast(new ChatProcessingUpdatedMessage(chatId, isProcessing));
@@ -294,8 +294,8 @@ export async function startServer() {
     providerRegistry.onSessionCreated((chatId) => {
       broadcast(new ChatSessionCreatedMessage(chatId));
     });
-    providerRegistry.onFinished((chatId, exitCode) => {
-      broadcast(new AgentRunFinishedMessage(chatId, exitCode));
+    providerRegistry.onFinished((chatId, exitCode, metadata) => {
+      broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId));
       // Defer idle check to next microtask so the provider has time to
       // clear its isRunning flag (emitFinished fires before the flag flip).
       queueMicrotask(() => {
@@ -304,8 +304,8 @@ export async function startServer() {
         });
       });
     });
-    providerRegistry.onFailed((chatId, errorMessage) => {
-      broadcast(new AgentRunFailedMessage(chatId, errorMessage));
+    providerRegistry.onFailed((chatId, errorMessage, metadata) => {
+      broadcast(new AgentRunFailedMessage(chatId, errorMessage, metadata?.turnId, metadata?.clientRequestId));
       queueMicrotask(() => {
         queue.checkChatIdle(chatId).catch((err) => {
           console.warn('queue: checkChatIdle error:', err.message);
@@ -348,6 +348,9 @@ export async function startServer() {
     });
     queue.onSessionStopped((chatId, success) => {
       broadcast(new ChatSessionStoppedMessage(chatId, success));
+    });
+    queue.onTurnFailed((chatId, errorMessage, options = {}) => {
+      broadcast(new AgentRunFailedMessage(chatId, errorMessage, options.turnId, options.clientRequestId));
     });
 
     // Graceful shutdown: flush pending writes and clean up timers.

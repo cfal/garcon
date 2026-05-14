@@ -3,32 +3,31 @@
 // No direct DOM access -- all viewport operations are delegated via
 // callback functions supplied through the deps interface.
 
-import { forkChat, startChat } from '$lib/api/chats.js';
-import { UserMessage, AssistantMessage, ErrorMessage, type ChatImage } from '$shared/chat-types';
 import {
-	AgentStopRequest,
-	PermissionDecisionRequest,
-	QueueResumeRequest,
-	QueuePauseRequest,
-	QueueDropRequest,
-	ModelSetRequest,
-	AmpAgentModeSetRequest,
-	PermissionModeSetRequest,
-	ThinkingModeSetRequest,
-	QueueEnqueueRequest,
-	AgentRunRequest,
-	QueueQueryRequest,
-	ForkRunRequest,
-} from '$shared/ws-requests';
+	dequeueChatMessage,
+	enqueueChatMessage,
+	forkChat,
+	forkRunChat,
+	getChatQueue,
+	pauseChatQueue,
+	resumeChatQueue,
+	runChat,
+	sendPermissionDecision,
+	startChat,
+	stopChat,
+	updateChatModel,
+	updateExecutionSettings,
+} from '$lib/api/chats.js';
+import { UserMessage, AssistantMessage, ErrorMessage, type ChatImage } from '$shared/chat-types';
 import { createClientChatId } from '$lib/chat/client-id';
+import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
 import type { ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { ProviderState } from '$lib/chat/provider-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
-import type { WsConnection } from '$lib/ws/connection.svelte';
-import type { AmpAgentMode, PendingPermissionRequest, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AmpAgentMode, PendingPermissionRequest, PermissionMode, QueueState, ThinkingMode } from '$lib/types/chat';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { AppTab, SessionProvider } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/providers';
@@ -50,10 +49,9 @@ export interface SessionControllerDeps {
 	chatState: ChatState;
 	composerState: ComposerState;
 	providerState: ProviderState;
-	lifecycle: ChatLifecycleStore;
-	startupCoordinator: StartupCoordinator;
-	ws: WsConnection;
-		modelCatalog: {
+		lifecycle: ChatLifecycleStore;
+		startupCoordinator: StartupCoordinator;
+			modelCatalog: {
 			isLocalModel: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => boolean;
 			selectionFor: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => {
 				model: string;
@@ -76,6 +74,7 @@ export interface SessionControllerDeps {
 	setPreviousPermissionMode: (v: PermissionMode | null) => void;
 	setNeedsServerLoad: (v: boolean) => void;
 	setIsViewportPinnedToBottom: (v: boolean) => void;
+	setMessageQueue: (chatId: string, queue: QueueState | null) => void;
 	scrollToBottom: () => void;
 }
 
@@ -87,10 +86,39 @@ async function fileToChatImage(file: File): Promise<ChatImage> {
 	return { data: `data:${file.type};base64,${base64}`, name: file.name };
 }
 
+function pendingUserMessage(
+	content: string,
+	images: ChatImage[],
+	clientRequestId: string,
+	clientMessageId: string,
+): UserMessage {
+	return new UserMessage(new Date().toISOString(), content, images.length > 0 ? images : undefined, {
+		messageId: clientMessageId,
+		clientRequestId,
+		deliveryStatus: 'submitting',
+	});
+}
+
+function withMessageDelivery(message: UserMessage, deliveryStatus: 'accepted' | 'failed'): UserMessage {
+	return new UserMessage(message.timestamp, message.content, message.images, {
+		...message.metadata,
+		deliveryStatus,
+	});
+}
+
 export class ConversationSessionController {
 	#lastChatId: string | null = null;
 
 	constructor(private deps: SessionControllerDeps) {}
+
+	#markUserMessageDelivery(clientMessageId: string, deliveryStatus: 'accepted' | 'failed'): void {
+		const { deps } = this;
+		deps.chatState.chatMessages = deps.chatState.chatMessages.map((message) => {
+			if (!(message instanceof UserMessage)) return message;
+			if (message.metadata?.messageId !== clientMessageId) return message;
+			return withMessageDelivery(message, deliveryStatus);
+		});
+	}
 
 	// Deduplicates chat-switch calls so the component effect can be stateless.
 	handleChatSwitchIfChanged(chatId: string | null): void {
@@ -190,7 +218,13 @@ export class ConversationSessionController {
 
 		deps.lifecycle.setCurrentChatId(chatId);
 		deps.composerState.restoreDraft(chatId);
-		deps.ws.sendMessage(new QueueQueryRequest(chatId));
+			getChatQueue(chatId).then((result) => {
+				if (deps.sessions.selectedChatId === chatId) {
+					deps.setMessageQueue(chatId, result.queue);
+				}
+			}).catch(() => {
+				// Queue state will refresh through later broadcasts or reconnect reconciliation.
+		});
 
 		if (selected.lastActivityAt && (!selected.lastReadAt || selected.lastReadAt < selected.lastActivityAt)) {
 			deps.readReceiptOutbox.enqueue(chatId, selected.lastActivityAt);
@@ -218,8 +252,7 @@ export class ConversationSessionController {
 		}
 
 		try {
-			await deps.ws.waitForConnection();
-			const messages = await deps.chatState.loadMessages(chatId, deps.ws);
+			const messages = await deps.chatState.loadMessages(chatId);
 			if (deps.sessions.selectedChatId !== chatId) return;
 
 			deps.chatState.setMessages(messages);
@@ -252,9 +285,12 @@ export class ConversationSessionController {
 		const isDraft = selected.status === 'draft';
 		const startup = deps.sessions.startupByChatId[chatId];
 
-		const text = messageOverride ?? deps.composerState.inputText.trim();
-		const submissionImages = imageOverride ?? deps.composerState.images;
-		if (!text && submissionImages.length === 0) return;
+			const text = messageOverride ?? deps.composerState.inputText.trim();
+			const submissionImages = imageOverride ?? deps.composerState.images;
+			if (!text && submissionImages.length === 0) return;
+			const restoreComposerOnFailure = messageOverride === undefined && imageOverride === undefined;
+			const previousText = deps.composerState.inputText;
+			const previousImages = [...deps.composerState.images];
 
 		if (options.allowForkCommand !== false) {
 			const forkCommand = parseForkCommand(text);
@@ -270,9 +306,17 @@ export class ConversationSessionController {
 			}
 		}
 
-		let imagePayload: ChatImage[] = [];
-		if (submissionImages.length > 0) {
-			try {
+			if (selected.status === 'running' && selected.isProcessing && submissionImages.length > 0) {
+				deps.chatState.chatMessages = [
+					...deps.chatState.chatMessages,
+					new ErrorMessage(new Date().toISOString(), 'Messages with images cannot be queued while a turn is already running.'),
+				];
+				return;
+			}
+
+			let imagePayload: ChatImage[] = [];
+			if (submissionImages.length > 0) {
+				try {
 				imagePayload = await Promise.all(submissionImages.map(fileToChatImage));
 			} catch (error) {
 				console.error('[SessionController] Failed to prepare image payload:', error);
@@ -285,39 +329,45 @@ export class ConversationSessionController {
 				];
 				return;
 			}
-		}
-
-		if (selected.status === 'running' && selected.isProcessing) {
-			const sent = deps.ws.sendMessage(
-				new QueueEnqueueRequest(chatId, text, deps.providerState.provider, selected.projectPath, selected.projectPath),
-			);
-			if (sent) {
-				deps.composerState.clearAfterSubmit(chatId);
-			} else {
-				deps.chatState.chatMessages = [
-					...deps.chatState.chatMessages,
-					new ErrorMessage(new Date().toISOString(), 'Failed to queue message: Not connected to server'),
-				];
 			}
-			return;
-		}
 
-		if (deps.lifecycle.isLoading && selected.status === 'draft') return;
+			if (selected.status === 'running' && selected.isProcessing) {
+				try {
+					const result = await enqueueChatMessage({
+						clientRequestId: createClientCommandId(),
+						chatId,
+						content: text,
+					});
+					deps.setMessageQueue(chatId, result.queue);
+					deps.composerState.clearAfterSubmit(chatId);
+				} catch (err) {
+					deps.chatState.chatMessages = [
+						...deps.chatState.chatMessages,
+						new ErrorMessage(
+							new Date().toISOString(),
+							`Failed to queue message: ${err instanceof Error ? err.message : String(err)}`,
+						),
+					];
+				}
+				return;
+			}
 
-		deps.chatState.chatMessages = [
-			...deps.chatState.chatMessages,
-			new UserMessage(new Date().toISOString(), text, imagePayload),
-		];
-		deps.chatState.isUserScrolledUp = false;
+			if (deps.lifecycle.isLoading && selected.status === 'draft') return;
 
-		deps.lifecycle.activateLoading();
-		deps.lifecycle.setCanAbort(true);
-		deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
-		deps.lifecycle.setCurrentChatId(chatId);
-		deps.sessions.setChatProcessing(chatId, true);
+			const clientRequestId = createClientCommandId();
+			const clientMessageId = createClientCommandId();
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				pendingUserMessage(text, imagePayload, clientRequestId, clientMessageId),
+			];
+			deps.chatState.isUserScrolledUp = false;
+			if (restoreComposerOnFailure) {
+				deps.composerState.clearAfterSubmit(chatId);
+			}
+			deps.composerState.isSubmitting = true;
 
-		if (isDraft) {
-			deps.startupCoordinator.beginLocalStartup(chatId);
+			if (isDraft) {
+				deps.startupCoordinator.beginLocalStartup(chatId);
 			const provider = startup?.provider ?? selected.provider;
 			const model = startup?.model ?? selected.model ?? deps.providerState.model;
 			const apiProviderId = startup?.apiProviderId ?? selected.apiProviderId ?? deps.providerState.apiProviderId;
@@ -327,11 +377,12 @@ export class ConversationSessionController {
 			const thinkingMode = startup?.thinkingMode ?? deps.providerState.thinkingMode;
 			const ampAgentMode = startup?.ampAgentMode ?? deps.providerState.ampAgentMode;
 
-			deps.composerState.clearAfterSubmit(chatId);
-			try {
-				await startChat({
-					chatId,
-					provider: provider as typeof deps.providerState.provider,
+				try {
+					await startChat({
+						clientRequestId,
+						clientMessageId,
+						chatId,
+						provider: provider as typeof deps.providerState.provider,
 					projectPath: selected.projectPath,
 					model,
 					apiProviderId,
@@ -347,50 +398,87 @@ export class ConversationSessionController {
 						cwd: selected.projectPath,
 						projectPath: selected.projectPath,
 						sessionId: chatId,
-						images: imagePayload,
-					},
-				});
-				deps.sessions.promoteDraft(chatId);
-				deps.appShell.quietRefreshChats();
-			} catch (err) {
-				console.error('[SessionController] Failed to start chat:', err);
-				deps.startupCoordinator.completeStartup(chatId);
-				deps.lifecycle.clearLoading();
-				deps.sessions.setChatProcessing(chatId, false);
-				deps.chatState.chatMessages = [
-					...deps.chatState.chatMessages,
+							images: imagePayload,
+						},
+					});
+					this.#markUserMessageDelivery(clientMessageId, 'accepted');
+					deps.lifecycle.activateLoading();
+					deps.lifecycle.setCanAbort(true);
+					deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
+					deps.lifecycle.setCurrentChatId(chatId);
+					deps.sessions.setChatProcessing(chatId, true);
+					deps.sessions.promoteDraft(chatId);
+					deps.appShell.quietRefreshChats();
+				} catch (err) {
+					console.error('[SessionController] Failed to start chat:', err);
+					this.#markUserMessageDelivery(clientMessageId, 'failed');
+					deps.startupCoordinator.completeStartup(chatId);
+					deps.lifecycle.clearLoading();
+					deps.sessions.setChatProcessing(chatId, false);
+					if (restoreComposerOnFailure) {
+						deps.composerState.inputText = previousText;
+						deps.composerState.images = previousImages;
+						deps.composerState.saveDraft(chatId);
+					}
+					deps.chatState.chatMessages = [
+						...deps.chatState.chatMessages,
 					new ErrorMessage(
 						new Date().toISOString(),
 						`Failed to start chat: ${err instanceof Error ? err.message : String(err)}`,
 					),
-				];
-			}
-		} else {
-			const selection = deps.modelCatalog.selectionFor(
+					];
+				} finally {
+					deps.composerState.isSubmitting = false;
+				}
+			} else {
+				const selection = deps.modelCatalog.selectionFor(
 				deps.providerState.provider,
-				deps.providerState.model,
-				deps.providerState.modelEndpointId,
-			);
-			const sent = await deps.composerState.submitMessage(deps.ws, chatId, {
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-				permissionMode: deps.providerState.permissionMode,
-				thinkingMode: deps.providerState.thinkingMode,
-				claudeThinkingMode: 'auto',
-				ampAgentMode: deps.providerState.ampAgentMode,
-			});
-			if (!sent) {
-				deps.lifecycle.clearLoading();
-				deps.sessions.setChatProcessing(chatId, false);
-				deps.chatState.chatMessages = [
-					...deps.chatState.chatMessages,
-					new ErrorMessage(new Date().toISOString(), 'Failed to send message: Not connected to server'),
-				];
+					deps.providerState.model,
+					deps.providerState.modelEndpointId,
+				);
+				try {
+					await runChat({
+						clientRequestId,
+						clientMessageId,
+						chatId,
+						command: text,
+						images: imagePayload.length > 0 ? imagePayload : undefined,
+						permissionMode: deps.providerState.permissionMode,
+						thinkingMode: deps.providerState.thinkingMode,
+						claudeThinkingMode: 'auto',
+						ampAgentMode: deps.providerState.ampAgentMode,
+						model: selection.model,
+						apiProviderId: selection.apiProviderId,
+						modelEndpointId: selection.modelEndpointId,
+						modelProtocol: selection.modelProtocol,
+					});
+					this.#markUserMessageDelivery(clientMessageId, 'accepted');
+					deps.lifecycle.activateLoading();
+					deps.lifecycle.setCanAbort(true);
+					deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
+					deps.lifecycle.setCurrentChatId(chatId);
+					deps.sessions.setChatProcessing(chatId, true);
+				} catch (err) {
+					this.#markUserMessageDelivery(clientMessageId, 'failed');
+					deps.lifecycle.clearLoading();
+					deps.sessions.setChatProcessing(chatId, false);
+					if (restoreComposerOnFailure) {
+						deps.composerState.inputText = previousText;
+						deps.composerState.images = previousImages;
+						deps.composerState.saveDraft(chatId);
+					}
+					deps.chatState.chatMessages = [
+						...deps.chatState.chatMessages,
+						new ErrorMessage(
+							new Date().toISOString(),
+							`Failed to send message: ${err instanceof Error ? err.message : String(err)}`,
+						),
+					];
+				} finally {
+					deps.composerState.isSubmitting = false;
+				}
 			}
 		}
-	}
 
 	async #submitForkCommand(
 		sourceChatId: string,
@@ -452,33 +540,46 @@ export class ConversationSessionController {
 			model,
 			sourceChat.modelEndpointId,
 		);
-		const sent = deps.ws.sendMessage(new ForkRunRequest(
-			sourceChatId,
-			forkChatId,
-			message.trim(),
-			sourceChat.permissionMode,
-			sourceChat.thinkingMode,
-			selection.model,
-			sourceChat.claudeThinkingMode,
-			sourceChat.ampAgentMode,
-			imagePayload.length > 0 ? imagePayload : undefined,
-			selection.apiProviderId,
-			selection.modelEndpointId,
-			selection.modelProtocol,
-		));
-
-		if (!sent) {
-			if (clearComposer) {
-				deps.composerState.inputText = previousText;
-				deps.composerState.images = previousImages;
+			try {
+				await forkRunChat({
+					clientRequestId: createClientCommandId(),
+					clientMessageId: createClientCommandId(),
+					sourceChatId,
+					chatId: forkChatId,
+					command: message.trim(),
+					permissionMode: sourceChat.permissionMode,
+					thinkingMode: sourceChat.thinkingMode,
+					claudeThinkingMode: sourceChat.claudeThinkingMode,
+					ampAgentMode: sourceChat.ampAgentMode,
+					images: imagePayload.length > 0 ? imagePayload : undefined,
+					model: selection.model,
+					apiProviderId: selection.apiProviderId,
+					modelEndpointId: selection.modelEndpointId,
+					modelProtocol: selection.modelProtocol,
+				});
+				await deps.appShell.quietRefreshChats();
+				deps.lifecycle.setCurrentChatId(forkChatId);
+				deps.lifecycle.activateLoading();
+				deps.lifecycle.setCanAbort(true);
+				deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
+				deps.sessions.setSelectedChatId(forkChatId);
+				deps.sessions.setChatProcessing(forkChatId, true);
+				deps.navigation.navigateToChat?.(forkChatId);
+			} catch (error) {
+				if (clearComposer) {
+					deps.composerState.inputText = previousText;
+					deps.composerState.images = previousImages;
 				deps.composerState.saveDraft(sourceChatId);
+				}
+				deps.chatState.chatMessages = [
+					...deps.chatState.chatMessages,
+					new ErrorMessage(
+						new Date().toISOString(),
+						`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
+					),
+				];
 			}
-			deps.chatState.chatMessages = [
-				...deps.chatState.chatMessages,
-				new ErrorMessage(new Date().toISOString(), 'Failed to fork chat: Not connected to server'),
-			];
 		}
-	}
 
 	async #submitForkOnlyCommand(
 		sourceChatId: string,
@@ -515,19 +616,47 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
 		if (!chatId) return;
-		deps.ws.sendMessage(new AgentStopRequest(chatId, deps.providerState.provider));
-		deps.lifecycle.clearLoading();
+		deps.lifecycle.setLoadingStatus({ text: 'Stopping', tokens: 0, can_interrupt: false });
+		void stopChat({
+			clientRequestId: createClientCommandId(),
+			chatId,
+			provider: deps.providerState.provider,
+		}).then(() => {
+			deps.lifecycle.clearLoading();
+		}).catch((error) => {
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(
+					new Date().toISOString(),
+					`Failed to stop chat: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			];
+		});
 	}
 
 	handlePermissionDecision(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		deps.ws.sendMessage(
-			new PermissionDecisionRequest(chatId, permissionRequestId, decision.allow, Boolean(decision.alwaysAllow)),
-		);
-		deps.setPendingPermissionRequests(
-			deps.getPendingPermissionRequests().filter((r) => r.permissionRequestId !== permissionRequestId),
-		);
+		if (!chatId) return;
+		void sendPermissionDecision({
+			clientRequestId: createClientCommandId(),
+			chatId,
+			permissionRequestId,
+			allow: decision.allow,
+			alwaysAllow: Boolean(decision.alwaysAllow),
+		}).then(() => {
+			deps.setPendingPermissionRequests(
+				deps.getPendingPermissionRequests().filter((r) => r.permissionRequestId !== permissionRequestId),
+			);
+		}).catch((error) => {
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(
+					new Date().toISOString(),
+					`Failed to send permission decision: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			];
+		});
 	}
 
 	handleExitPlanMode(permissionRequestId: string, choice: string, plan: string): void {
@@ -546,31 +675,39 @@ export class ConversationSessionController {
 			deps.setPreviousPermissionMode(null);
 			deps.providerState.permissionMode = mode;
 			if (!chatId || !path) return;
+			const selection = deps.modelCatalog.selectionFor(
+				deps.providerState.provider,
+				deps.providerState.model,
+				deps.providerState.modelEndpointId,
+			);
 
-			deps.lifecycle.activateLoading();
+			void runChat({
+				clientRequestId: createClientCommandId(),
+				clientMessageId: createClientCommandId(),
+				chatId,
+				command: buildApprovalMessage(),
+				permissionMode: mode,
+				thinkingMode: deps.providerState.thinkingMode,
+				claudeThinkingMode: 'auto',
+				ampAgentMode: deps.providerState.ampAgentMode,
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			}).then(() => {
+				deps.lifecycle.activateLoading();
 				deps.lifecycle.setCanAbort(true);
 				deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
-				const selection = deps.modelCatalog.selectionFor(
-					deps.providerState.provider,
-					deps.providerState.model,
-					deps.providerState.modelEndpointId,
-				);
-
-				deps.ws.sendMessage(
-					new AgentRunRequest(
-						chatId,
-						buildApprovalMessage(),
-						mode,
-						deps.providerState.thinkingMode,
-						selection.model,
-						'auto',
-						deps.providerState.ampAgentMode,
-						undefined,
-						selection.apiProviderId,
-						selection.modelEndpointId,
-						selection.modelProtocol,
+				deps.sessions.setChatProcessing(chatId, true);
+			}).catch((error) => {
+				deps.chatState.chatMessages = [
+					...deps.chatState.chatMessages,
+					new ErrorMessage(
+						new Date().toISOString(),
+						`Failed to resume plan: ${error instanceof Error ? error.message : String(error)}`,
 					),
-				);
+				];
+			});
 		};
 
 		switch (choice) {
@@ -589,31 +726,78 @@ export class ConversationSessionController {
 			case 'approve-edits':
 				resumeWithApproval('acceptEdits');
 				break;
-			case 'deny': {
-				if (chatId) {
-					deps.ws.sendMessage(new PermissionDecisionRequest(chatId, permissionRequestId, false, false));
+				case 'deny': {
+					if (chatId) {
+						void sendPermissionDecision({
+							clientRequestId: createClientCommandId(),
+							chatId,
+							permissionRequestId,
+							allow: false,
+							alwaysAllow: false,
+						}).catch((error) => {
+							deps.chatState.chatMessages = [
+								...deps.chatState.chatMessages,
+								new ErrorMessage(
+									new Date().toISOString(),
+									`Failed to deny permission: ${error instanceof Error ? error.message : String(error)}`,
+								),
+							];
+						});
+					}
+					break;
 				}
-				break;
-			}
 		}
 	}
 
 	handleQueueResume(): void {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		deps.ws.sendMessage(new QueueResumeRequest(chatId));
+		if (!chatId) return;
+		void resumeChatQueue(chatId).then((result) => {
+			deps.setMessageQueue(chatId, result.queue);
+		}).catch((error) => {
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(
+					new Date().toISOString(),
+					`Failed to resume queue: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			];
+		});
 	}
 
 	handleQueuePause(): void {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		deps.ws.sendMessage(new QueuePauseRequest(chatId));
+		if (!chatId) return;
+		void pauseChatQueue(chatId).then((result) => {
+			deps.setMessageQueue(chatId, result.queue);
+		}).catch((error) => {
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(
+					new Date().toISOString(),
+					`Failed to pause queue: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			];
+		});
 	}
 
 	handleDequeue(entryId: string): void {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		deps.ws.sendMessage(new QueueDropRequest(chatId, entryId));
+		if (!chatId) return;
+		void dequeueChatMessage(chatId, entryId).then((result) => {
+			deps.setMessageQueue(chatId, result.queue);
+		}).catch((error) => {
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(
+					new Date().toISOString(),
+					`Failed to remove queued message: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			];
+		});
 	}
 
 	handleModelChange(model: string): void {
@@ -648,10 +832,10 @@ export class ConversationSessionController {
 		// session. The CLI conversation history contains provider-specific
 		// artifacts (e.g. thinking-block signatures) that are invalid when
 		// replayed against a different backend.
-		const currentModel = deps.sessions.selectedChat?.model ?? deps.providerState.model;
-		const currentEndpointId = deps.sessions.selectedChat?.modelEndpointId ?? deps.providerState.modelEndpointId;
-		const wasLocal = deps.modelCatalog.isLocalModel(provider, currentModel, currentEndpointId);
-		const isLocal = deps.modelCatalog.isLocalModel(provider, model, selection.modelEndpointId);
+			const currentModel = deps.sessions.selectedChat?.model ?? deps.providerState.model;
+			const currentEndpointId = deps.sessions.selectedChat?.modelEndpointId ?? deps.providerState.modelEndpointId;
+			const wasLocal = deps.modelCatalog.isLocalModel(provider, currentModel, currentEndpointId);
+			const isLocal = deps.modelCatalog.isLocalModel(provider, model, selection.modelEndpointId);
 		if (wasLocal !== isLocal) {
 			const target = isLocal ? 'local' : 'cloud';
 			deps.chatState.chatMessages = [
@@ -661,25 +845,49 @@ export class ConversationSessionController {
 					`Cannot switch to a ${target} model mid-session. Start a new chat to use ${selection.model}.`,
 				),
 			];
-			return;
-		}
+				return;
+			}
 
-		deps.providerState.setModelSelection({
-			model,
-			apiProviderId: selection.apiProviderId,
-			modelEndpointId: selection.modelEndpointId,
-			modelProtocol: selection.modelProtocol,
-		});
-		deps.ws.sendMessage(new ModelSetRequest(
-			chatId,
-			selection.model,
-			selection.apiProviderId,
-			selection.modelEndpointId,
-			selection.modelProtocol,
-		));
-		deps.sessions.patchChat(chatId, {
-			model: selection.model,
-			apiProviderId: selection.apiProviderId,
+			const previousModel = deps.sessions.selectedChat?.model ?? deps.providerState.model;
+			const previousApiProviderId = deps.sessions.selectedChat?.apiProviderId ?? deps.providerState.apiProviderId;
+			const previousEndpointId = deps.sessions.selectedChat?.modelEndpointId ?? deps.providerState.modelEndpointId;
+			const previousProtocol = deps.sessions.selectedChat?.modelProtocol ?? deps.providerState.modelProtocol;
+			deps.providerState.setModelSelection({
+				model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			});
+			void updateChatModel({
+				chatId,
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			}).catch((error) => {
+				deps.providerState.setModelSelection({
+					model: deps.modelCatalog.selectionValueFor(provider, previousModel, previousEndpointId),
+					apiProviderId: previousApiProviderId ?? null,
+					modelEndpointId: previousEndpointId ?? null,
+					modelProtocol: previousProtocol ?? null,
+				});
+				deps.sessions.patchChat(chatId, {
+					model: previousModel,
+					apiProviderId: previousApiProviderId ?? null,
+					modelEndpointId: previousEndpointId ?? null,
+					modelProtocol: previousProtocol ?? null,
+				});
+				deps.chatState.chatMessages = [
+					...deps.chatState.chatMessages,
+					new ErrorMessage(
+						new Date().toISOString(),
+						`Failed to update model: ${error instanceof Error ? error.message : String(error)}`,
+					),
+				];
+			});
+			deps.sessions.patchChat(chatId, {
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,
 			modelProtocol: selection.modelProtocol,
 		});
@@ -694,8 +902,19 @@ export class ConversationSessionController {
 			deps.sessions.patchChat(chatId, { permissionMode: mode });
 			return;
 		}
-		deps.ws.sendMessage(new PermissionModeSetRequest(chatId, mode));
+		const previous = deps.sessions.selectedChat?.permissionMode ?? 'default';
 		deps.sessions.patchChat(chatId, { permissionMode: mode });
+		void updateExecutionSettings({ chatId, permissionMode: mode }).catch((error) => {
+			deps.providerState.permissionMode = previous;
+			deps.sessions.patchChat(chatId, { permissionMode: previous });
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(
+					new Date().toISOString(),
+					`Failed to update permission mode: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			];
+		});
 	}
 
 	handleThinkingModeChange(mode: ThinkingMode): void {
@@ -707,8 +926,19 @@ export class ConversationSessionController {
 			deps.sessions.patchChat(chatId, { thinkingMode: mode });
 			return;
 		}
-		deps.ws.sendMessage(new ThinkingModeSetRequest(chatId, mode));
+		const previous = deps.sessions.selectedChat?.thinkingMode ?? 'none';
 		deps.sessions.patchChat(chatId, { thinkingMode: mode });
+		void updateExecutionSettings({ chatId, thinkingMode: mode }).catch((error) => {
+			deps.providerState.thinkingMode = previous;
+			deps.sessions.patchChat(chatId, { thinkingMode: previous });
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(
+					new Date().toISOString(),
+					`Failed to update thinking mode: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			];
+		});
 	}
 
 	handleAmpAgentModeChange(mode: AmpAgentMode): void {
@@ -720,7 +950,18 @@ export class ConversationSessionController {
 			deps.sessions.patchChat(chatId, { ampAgentMode: mode });
 			return;
 		}
-		deps.ws.sendMessage(new AmpAgentModeSetRequest(chatId, mode));
+		const previous = deps.sessions.selectedChat?.ampAgentMode ?? 'smart';
 		deps.sessions.patchChat(chatId, { ampAgentMode: mode });
+		void updateExecutionSettings({ chatId, ampAgentMode: mode }).catch((error) => {
+			deps.providerState.ampAgentMode = previous;
+			deps.sessions.patchChat(chatId, { ampAgentMode: previous });
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(
+					new Date().toISOString(),
+					`Failed to update agent mode: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			];
+		});
 	}
 }
