@@ -47,6 +47,19 @@ describe('queue invariants', () => {
     expect(result.entries).toEqual([]);
     expect(result.paused).toBe(false);
   });
+
+  it('bumps version and updatedAt across queue mutations', async () => {
+    const first = await queue.enqueueChat('123', 'hello');
+    const paused = await queue.pauseChatQueue('123');
+    const resumed = await queue.resumeChatQueue('123');
+
+    expect(first.queue.version).toBe(1);
+    expect(typeof first.queue.updatedAt).toBe('string');
+    expect(paused.version).toBe(2);
+    expect(typeof paused.updatedAt).toBe('string');
+    expect(resumed.version).toBe(3);
+    expect(typeof resumed.updatedAt).toBe('string');
+  });
 });
 
 describe('queue-updated event', () => {
@@ -132,6 +145,26 @@ describe('orchestration', () => {
       ]);
     });
 
+    it('appends user message metadata for accepted REST turns', async () => {
+      await orchQueue.appendUserMessage('c1', 'hello', {
+        clientRequestId: 'req-1',
+        clientMessageId: 'msg-1',
+        turnId: 'turn-1',
+      });
+
+      expect(mockHistoryCache.appendMessages).toHaveBeenCalledWith('c1', [
+        expect.objectContaining({
+          type: 'user-message',
+          content: 'hello',
+          metadata: {
+            messageId: 'msg-1',
+            clientRequestId: 'req-1',
+            turnId: 'turn-1',
+          },
+        }),
+      ]);
+    });
+
     it('does not append when command is empty', async () => {
       await orchQueue.submit('c1', '', {});
       expect(mockHistoryCache.appendMessages).not.toHaveBeenCalled();
@@ -151,6 +184,28 @@ describe('orchestration', () => {
       mockProviders.runProviderTurn.mockRejectedValue(new Error('provider fail'));
 
       await expect(orchQueue.submit('c1', 'hello', {})).rejects.toThrow('provider fail');
+    });
+
+    it('emits turn-failed with command identity when provider execution fails', async () => {
+      mockProviders.runProviderTurn.mockRejectedValue(new Error('provider fail'));
+      const failures = [];
+      orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
+
+      await expect(orchQueue.runAcceptedTurn('c1', 'hello', {
+        clientRequestId: 'req-1',
+        clientMessageId: 'msg-1',
+        turnId: 'turn-1',
+      })).rejects.toThrow('provider fail');
+
+      expect(failures).toEqual([{
+        chatId: 'c1',
+        error: 'provider fail',
+        options: {
+          clientRequestId: 'req-1',
+          clientMessageId: 'msg-1',
+          turnId: 'turn-1',
+        },
+      }]);
     });
   });
 
@@ -234,6 +289,21 @@ describe('orchestration', () => {
       expect(mockHistoryCache.appendMessages).toHaveBeenCalledWith('c1', [
         expect.objectContaining({ type: 'user-message', content: 'queued text' }),
       ]);
+    });
+
+    it('does not reuse original command identity for drained queued turns', async () => {
+      await orchQueue.enqueueChat('c1', 'queued text');
+
+      await orchQueue.triggerDrain('c1', {
+        clientRequestId: 'req-active',
+        clientMessageId: 'msg-active',
+        turnId: 'turn-active',
+        permissionMode: 'default',
+      });
+
+      expect(mockProviders.runProviderTurn).toHaveBeenCalledWith('c1', 'queued text', {
+        permissionMode: 'default',
+      });
     });
   });
 

@@ -26,21 +26,41 @@ describe('parseServerWsMessage', () => {
 			type: 'agent-run-output',
 			chatId: 'c-1',
 			messages: [{ type: 'assistant-message', timestamp: '2025-01-01T00:00:00Z', content: 'hi' }],
+			turnId: 'turn-1',
+			clientRequestId: 'req-1',
 		});
 		expect(msg).toBeInstanceOf(AgentRunOutputMessage);
 		expect((msg as AgentRunOutputMessage).chatId).toBe('c-1');
+		expect((msg as AgentRunOutputMessage).turnId).toBe('turn-1');
+		expect((msg as AgentRunOutputMessage).clientRequestId).toBe('req-1');
 	});
 
 	it('parses agent-run-finished with exitCode', () => {
-		const msg = parseServerWsMessage({ type: 'agent-run-finished', chatId: 'c-1', exitCode: 0 });
+		const msg = parseServerWsMessage({
+			type: 'agent-run-finished',
+			chatId: 'c-1',
+			exitCode: 0,
+			turnId: 'turn-1',
+			clientRequestId: 'req-1',
+		});
 		expect(msg).toBeInstanceOf(AgentRunFinishedMessage);
 		expect((msg as AgentRunFinishedMessage).exitCode).toBe(0);
+		expect((msg as AgentRunFinishedMessage).turnId).toBe('turn-1');
+		expect((msg as AgentRunFinishedMessage).clientRequestId).toBe('req-1');
 	});
 
 	it('parses agent-run-failed', () => {
-		const msg = parseServerWsMessage({ type: 'agent-run-failed', chatId: 'c-1', error: 'timeout' });
+		const msg = parseServerWsMessage({
+			type: 'agent-run-failed',
+			chatId: 'c-1',
+			error: 'timeout',
+			turnId: 'turn-1',
+			clientRequestId: 'req-1',
+		});
 		expect(msg).toBeInstanceOf(AgentRunFailedMessage);
 		expect((msg as AgentRunFailedMessage).error).toBe('timeout');
+		expect((msg as AgentRunFailedMessage).turnId).toBe('turn-1');
+		expect((msg as AgentRunFailedMessage).clientRequestId).toBe('req-1');
 	});
 
 	it('parses chat-session-created', () => {

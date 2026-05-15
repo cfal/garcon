@@ -18,7 +18,7 @@ import {
 	updateChatModel,
 	updateExecutionSettings,
 } from '$lib/api/chats.js';
-import { UserMessage, AssistantMessage, ErrorMessage, type ChatImage } from '$shared/chat-types';
+import { UserMessage, AssistantMessage, ErrorMessage, type ChatImage, type ChatMessage } from '$shared/chat-types';
 import { createClientChatId } from '$lib/chat/client-id';
 import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
@@ -37,7 +37,7 @@ export interface SessionControllerDeps {
 		selectedChatId: string | null;
 		selectedChat: ChatSessionRecord | null;
 		byId: Record<string, ChatSessionRecord>;
-			startupByChatId: Record<string, { provider: string; model: string; apiProviderId?: string | null; modelEndpointId?: string | null; modelProtocol?: ApiProtocol | null; tags?: string[]; permissionMode: PermissionMode; thinkingMode: ThinkingMode; claudeThinkingMode?: string; ampAgentMode: AmpAgentMode; firstMessage: string; initialImages?: File[] }>;
+		startupByChatId: Record<string, { provider: string; model: string; apiProviderId?: string | null; modelEndpointId?: string | null; modelProtocol?: ApiProtocol | null; tags?: string[]; permissionMode: PermissionMode; thinkingMode: ThinkingMode; claudeThinkingMode?: string; ampAgentMode: AmpAgentMode; firstMessage: string; initialImages?: File[] }>;
 		isDraft: (chatId: string) => boolean;
 		patchDraftStartup: (chatId: string, patch: Record<string, unknown>) => void;
 		patchChat: (chatId: string, patch: Record<string, unknown>) => void;
@@ -49,18 +49,18 @@ export interface SessionControllerDeps {
 	chatState: ChatState;
 	composerState: ComposerState;
 	providerState: ProviderState;
-		lifecycle: ChatLifecycleStore;
-		startupCoordinator: StartupCoordinator;
-			modelCatalog: {
-			isLocalModel: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => boolean;
-			selectionFor: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => {
-				model: string;
-				apiProviderId: string | null;
-				modelEndpointId: string | null;
-				modelProtocol: ApiProtocol | null;
-			};
-			selectionValueFor: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => string;
+	lifecycle: ChatLifecycleStore;
+	startupCoordinator: StartupCoordinator;
+	modelCatalog: {
+		isLocalModel: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => boolean;
+		selectionFor: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => {
+			model: string;
+			apiProviderId: string | null;
+			modelEndpointId: string | null;
+			modelProtocol: ApiProtocol | null;
 		};
+		selectionValueFor: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => string;
+	};
 	appShell: {
 		quietRefreshChats: () => Promise<void> | void;
 		openNewChatDialog: (opts: { prefill: string }) => void;
@@ -104,6 +104,31 @@ function withMessageDelivery(message: UserMessage, deliveryStatus: 'accepted' | 
 		...message.metadata,
 		deliveryStatus,
 	});
+}
+
+function commandMessageKey(message: ChatMessage): string | null {
+	if (message.type !== 'user-message') return null;
+	const metadata = message.metadata;
+	if (metadata?.messageId) return `message:${metadata.messageId}`;
+	if (metadata?.clientRequestId) return `request:${metadata.clientRequestId}`;
+	if (metadata?.turnId) return `turn:${metadata.turnId}`;
+	return null;
+}
+
+function mergeLoadedMessagesWithLocalCommandMessages(
+	loadedMessages: ChatMessage[],
+	currentMessages: ChatMessage[],
+): ChatMessage[] {
+	const loadedKeys = new Set(
+		loadedMessages
+			.map(commandMessageKey)
+			.filter((key): key is string => Boolean(key)),
+	);
+	const localOnlyCommandMessages = currentMessages.filter((message) => {
+		const key = commandMessageKey(message);
+		return key !== null && !loadedKeys.has(key);
+	});
+	return [...loadedMessages, ...localOnlyCommandMessages];
 }
 
 export class ConversationSessionController {
@@ -255,7 +280,9 @@ export class ConversationSessionController {
 			const messages = await deps.chatState.loadMessages(chatId);
 			if (deps.sessions.selectedChatId !== chatId) return;
 
-			deps.chatState.setMessages(messages);
+			deps.chatState.setMessages(
+				mergeLoadedMessagesWithLocalCommandMessages(messages, deps.chatState.chatMessages),
+			);
 			deps.chatState.snapshotCache.markValidated(chatId);
 			deps.setNeedsServerLoad(false);
 			requestAnimationFrame(() => deps.scrollToBottom());

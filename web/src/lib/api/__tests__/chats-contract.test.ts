@@ -10,6 +10,20 @@ import {
 	reorderChatsQuick,
 	forkChat,
 	validateStart,
+	runChat,
+	forkRunChat,
+	stopChat,
+	sendPermissionDecision,
+	enqueueChatMessage,
+	getChatQueue,
+	dequeueChatMessage,
+	clearChatQueue,
+	pauseChatQueue,
+	resumeChatQueue,
+	updateExecutionSettings,
+	updateChatModel,
+	getRunningChats,
+	getChatMessages,
 } from '../chats';
 
 vi.stubGlobal('localStorage', {
@@ -124,6 +138,159 @@ describe('chats API contract', () => {
 		expect(body.permissionMode).toBe('default');
 		expect(body.thinkingMode).toBe('none');
 		expect(body.claudeThinkingMode).toBe('auto');
+	});
+
+	it('runChat sends POST /api/v1/chats/run with command identity', async () => {
+		const payload = {
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-1',
+			chatId: 'c-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+		};
+		fetchMock.mockResolvedValue(jsonResponse(payload, 202));
+
+		const result = await runChat({
+			clientRequestId: 'req-1',
+			clientMessageId: 'msg-1',
+			chatId: 'c-1',
+			command: 'hello',
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			claudeThinkingMode: 'auto',
+			ampAgentMode: 'smart',
+			model: 'opus',
+		});
+
+		expect(result).toEqual(payload);
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/chats/run');
+		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toMatchObject({
+			clientRequestId: 'req-1',
+			clientMessageId: 'msg-1',
+			chatId: 'c-1',
+			command: 'hello',
+		});
+	});
+
+	it('forkRunChat sends POST /api/v1/chats/fork-run', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, commandType: 'fork-run', clientRequestId: 'req-1', status: 'accepted', acceptedAt: 't' }, 202));
+
+		await forkRunChat({
+			clientRequestId: 'req-1',
+			clientMessageId: 'msg-1',
+			sourceChatId: 'c-1',
+			chatId: 'c-2',
+			command: 'continue',
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			claudeThinkingMode: 'auto',
+			ampAgentMode: 'smart',
+			model: 'opus',
+		});
+
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/chats/fork-run');
+		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toMatchObject({
+			clientRequestId: 'req-1',
+			clientMessageId: 'msg-1',
+			sourceChatId: 'c-1',
+			chatId: 'c-2',
+			command: 'continue',
+		});
+	});
+
+	it('stopChat and permission decision send command identity payloads', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, commandType: 'agent-stop', clientRequestId: 'req-stop', status: 'accepted', acceptedAt: 't', stopped: true }));
+
+		await stopChat({ clientRequestId: 'req-stop', chatId: 'c-1', provider: 'claude' });
+
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/stop');
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			clientRequestId: 'req-stop',
+			chatId: 'c-1',
+			provider: 'claude',
+		});
+
+		fetchMock.mockResolvedValueOnce(jsonResponse({ success: true, commandType: 'permission-decision', clientRequestId: 'req-perm', status: 'accepted', acceptedAt: 't' }));
+
+		await sendPermissionDecision({
+			clientRequestId: 'req-perm',
+			chatId: 'c-1',
+			permissionRequestId: 'perm-1',
+			allow: true,
+			alwaysAllow: false,
+		});
+
+		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/permissions/decision');
+		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+			clientRequestId: 'req-perm',
+			chatId: 'c-1',
+			permissionRequestId: 'perm-1',
+			allow: true,
+			alwaysAllow: false,
+		});
+	});
+
+	it('queue helpers use REST endpoints and encode identifiers', async () => {
+		fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ success: true, chatId: 'c/1', queue: { entries: [], paused: false } })));
+
+		await getChatQueue('c/1');
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/queue?chatId=c%2F1');
+		expect(fetchMock.mock.calls[0][1].method ?? 'GET').toBe('GET');
+
+		await enqueueChatMessage({ clientRequestId: 'req-queue', chatId: 'c/1', content: 'queued' });
+		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/queue/enqueue');
+		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+			clientRequestId: 'req-queue',
+			chatId: 'c/1',
+			content: 'queued',
+		});
+
+		await dequeueChatMessage('c/1', 'entry/1');
+		await clearChatQueue('c/1');
+		await pauseChatQueue('c/1');
+		await resumeChatQueue('c/1');
+
+		expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/chats/queue/dequeue');
+		expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ chatId: 'c/1', entryId: 'entry/1' });
+		expect(fetchMock.mock.calls[3][0]).toBe('/api/v1/chats/queue/clear');
+		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/queue/pause');
+		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/queue/resume');
+	});
+
+	it('settings, model, running, and history helpers use REST endpoints', async () => {
+		fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ success: true })));
+
+		await updateExecutionSettings({ chatId: 'c-1', permissionMode: 'acceptEdits' });
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/execution-settings');
+		expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			chatId: 'c-1',
+			permissionMode: 'acceptEdits',
+		});
+
+		await updateChatModel({
+			chatId: 'c-1',
+			model: 'endpoint:model',
+			apiProviderId: 'provider',
+			modelEndpointId: 'endpoint',
+			modelProtocol: 'openai-compatible',
+		});
+		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/model');
+		expect(fetchMock.mock.calls[1][1].method).toBe('PATCH');
+
+		await getRunningChats();
+		expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/chats/running');
+		expect(fetchMock.mock.calls[2][1].method ?? 'GET').toBe('GET');
+
+		await getChatMessages({ chatId: 'c/1', limit: 50, offset: 20 });
+		expect(fetchMock.mock.calls[3][0]).toBe('/api/v1/chats/messages?chatId=c%2F1&limit=50&offset=20');
+		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
 	});
 
 	it('deleteChat encodes chatId in query string', async () => {

@@ -29,6 +29,7 @@ import {
 	AmpTaskListToolUseMessage,
 	UnknownToolUseMessage,
 	PermissionRequestMessage,
+	UserMessage,
 	parseChatMessage,
 } from '$shared/chat-types';
 
@@ -252,6 +253,40 @@ describe('tool-use serialization round-trip', () => {
 });
 
 describe('wire format parsing', () => {
+	it('preserves user-message metadata for command reconciliation', () => {
+		const msg = new UserMessage(TS, 'hello', undefined, {
+			messageId: 'msg-1',
+			clientRequestId: 'req-1',
+			turnId: 'turn-1',
+			deliveryStatus: 'submitting',
+		});
+		const parsed = roundTrip(msg);
+
+		expect(parsed.metadata).toEqual({
+			messageId: 'msg-1',
+			clientRequestId: 'req-1',
+			turnId: 'turn-1',
+			deliveryStatus: 'submitting',
+		});
+	});
+
+	it('drops invalid user-message metadata fields at parse boundary', () => {
+		const parsed = parseChatMessage({
+			type: 'user-message',
+			timestamp: TS,
+			content: 'hello',
+			metadata: {
+				messageId: 123,
+				clientRequestId: 'req-1',
+				turnId: null,
+				deliveryStatus: 'sent',
+			},
+		}) as UserMessage;
+
+		expect(parsed).toBeInstanceOf(UserMessage);
+		expect(parsed.metadata).toEqual({ clientRequestId: 'req-1' });
+	});
+
 	it('parses bash-tool-use from wire data', () => {
 		const data = { type: 'bash-tool-use', timestamp: TS, toolId: 'id-legacy', command: 'echo hello' };
 		const parsed = parseChatMessage(data);

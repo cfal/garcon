@@ -4,6 +4,7 @@ import RouterIntegrationHarness from './RouterIntegrationHarness.svelte';
 import type { EventRouterStores } from '../router.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
+import { UserMessage, type ChatMessage } from '$shared/chat-types';
 
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
 	return {
@@ -105,5 +106,59 @@ describe('event router integration', () => {
 
 		expect(stores.setIsLoading).not.toHaveBeenCalled();
 		expect(stores.setCanAbort).not.toHaveBeenCalled();
+	});
+
+	it('marks pending user messages accepted when correlated output arrives before REST response', () => {
+			let messages: ChatMessage[] = [
+			new UserMessage('2026-05-14T00:00:00.000Z', 'hello', undefined, {
+				messageId: 'msg-1',
+				clientRequestId: 'req-1',
+				deliveryStatus: 'submitting',
+			}),
+		];
+		const stores = createStores({
+			chatMessages: () => messages,
+			setChatMessages: (updater) => {
+				messages = typeof updater === 'function' ? updater(messages) : updater;
+			},
+		});
+
+		renderRouterWithRawMessages([
+			{
+				type: 'agent-run-output',
+				chatId: 'chat-a',
+				clientRequestId: 'req-1',
+				messages: [{ type: 'assistant-message', timestamp: '2026-05-14T00:00:01.000Z', content: 'hi' }],
+			},
+		], stores);
+
+		expect((messages[0] as UserMessage).metadata?.deliveryStatus).toBe('accepted');
+	});
+
+	it('marks pending user messages failed on correlated execution failure', () => {
+			let messages: ChatMessage[] = [
+			new UserMessage('2026-05-14T00:00:00.000Z', 'hello', undefined, {
+				messageId: 'msg-1',
+				clientRequestId: 'req-1',
+				deliveryStatus: 'submitting',
+			}),
+		];
+		const stores = createStores({
+			chatMessages: () => messages,
+			setChatMessages: (updater) => {
+				messages = typeof updater === 'function' ? updater(messages) : updater;
+			},
+		});
+
+		renderRouterWithRawMessages([
+			{
+				type: 'agent-run-failed',
+				chatId: 'chat-a',
+				clientRequestId: 'req-1',
+				error: 'provider failed',
+			},
+		], stores);
+
+		expect((messages[0] as UserMessage).metadata?.deliveryStatus).toBe('failed');
 	});
 });

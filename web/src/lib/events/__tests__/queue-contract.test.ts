@@ -33,4 +33,22 @@ describe('queue-state WS contract', () => {
 		expect(parsed.queue.entries).toHaveLength(1);
 		expect(parsed.queue.entries[0].id).toBe('ok');
 	});
+
+	it('preserves queue version and updatedAt fields', () => {
+		const parsed = parseServerWsMessage({
+			type: 'queue-state-updated',
+			chatId: '123',
+			queue: {
+				paused: false,
+				entries: [],
+				version: 7,
+				updatedAt: '2026-05-14T00:00:00.000Z',
+			},
+		});
+
+		expect(parsed instanceof QueueStateUpdatedMessage).toBe(true);
+		if (!(parsed instanceof QueueStateUpdatedMessage)) return;
+		expect(parsed.queue.version).toBe(7);
+		expect(parsed.queue.updatedAt).toBe('2026-05-14T00:00:00.000Z');
+	});
 });
