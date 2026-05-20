@@ -4,7 +4,7 @@
 
 import crypto from 'crypto';
 import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude } from './claude-cli.js';
-import { runSingleQuery as runSingleQueryCodex } from './codex.js';
+import { runSingleQuery as runSingleQueryCodex } from './codex-app-server/run-single-query.js';
 import { runSingleQuery as runSingleQueryAmp } from './amp-cli.js';
 import { runSingleQuery as runSingleQueryFactory } from './factory-cli.js';
 import { runSingleQuery as runSingleQueryPi } from './pi-cli.js';
@@ -59,6 +59,9 @@ export function createClaudeAdapter(claude: ClaudeProviderInstance): ProviderAda
       return claude.getRunningClaudeInternalSessions();
     },
     runSingleQuery: runSingleQueryClaude,
+    resolvePermission(permissionRequestId, decision) {
+      claude.resolveInternalToolApproval(permissionRequestId, decision);
+    },
     startPurgeTimer() {
       return claude.startPurgeTimer();
     },
@@ -92,8 +95,15 @@ export function createCodexAdapter(codex: CodexProviderInstance): ProviderAdapte
       return codex.getRunningSessions();
     },
     runSingleQuery: runSingleQueryCodex,
+    loadMessages: codex.loadMessages ? (session) => codex.loadMessages!(session) : undefined,
+    getPreview: codex.getPreview ? (session) => codex.getPreview!(session) : undefined,
+    forkSession: codex.forkSession ? (request) => codex.forkSession!(request) : undefined,
+    resolvePermission: codex.resolvePermission ? (permissionRequestId, decision) => codex.resolvePermission!(permissionRequestId, decision) : undefined,
     startPurgeTimer() {
       return codex.startPurgeTimer();
+    },
+    shutdown() {
+      codex.shutdown?.();
     },
     onMessages(cb) { codex.onMessages(cb); },
     onProcessing(cb) { codex.onProcessing(cb); },
@@ -656,7 +666,12 @@ export interface CodexProviderInstance {
   isRunning(providerSessionId: string): boolean;
   abort(providerSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }>;
+  loadMessages?(session: unknown): Promise<unknown[]>;
+  getPreview?(session: unknown): Promise<unknown>;
+  forkSession?(request: { sourceSession: unknown; sourceChatId: string; targetChatId: string }): Promise<StartedProviderSession | null>;
+  resolvePermission?(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void>;
   startPurgeTimer(): ReturnType<typeof setInterval>;
+  shutdown?(): void;
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;

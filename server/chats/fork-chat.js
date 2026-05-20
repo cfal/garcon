@@ -60,15 +60,11 @@ export async function forkChatFileCopy({
   registry,
   settings,
   metadata,
+  forkProviderSession,
 }) {
   const sourceProvider = sourceSession.provider;
   if (!supportsFork(sourceProvider)) {
     throw new Error(`Provider does not support fork: ${sourceProvider}`);
-  }
-
-  let sourceNativePath = sourceSession.nativePath || null;
-  if (!sourceNativePath) {
-    throw new Error(`Source native path unavailable for chat ${sourceChatId}`);
   }
 
   const sourceProviderSessionId = sourceSession.providerSessionId;
@@ -80,18 +76,34 @@ export async function forkChatFileCopy({
   const nextForkOrdinal = normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1;
   const forkTitle = `${sourceTitle} (${nextForkOrdinal})`;
 
-  const newProviderSessionId = crypto.randomUUID();
-  const destinationNativePath = buildForkDestination(sourceNativePath, newProviderSessionId);
+  const nativeFork = forkProviderSession
+    ? await forkProviderSession({ sourceSession, sourceChatId, targetChatId })
+    : null;
 
-  const raw = await fs.readFile(sourceNativePath, 'utf8');
-  const rewritten = raw
-    .split('\n')
-    .map((line) => replaceUuidBounded(line, sourceProviderSessionId, newProviderSessionId))
-    .join('\n');
+  let newProviderSessionId = nativeFork?.providerSessionId || null;
+  let destinationNativePath = nativeFork?.nativePath || null;
+  let ownsDestinationFile = false;
 
-  assertJsonlValid(rewritten, destinationNativePath);
+  if (!newProviderSessionId || !destinationNativePath) {
+    const sourceNativePath = sourceSession.nativePath || null;
+    if (!sourceNativePath) {
+      throw new Error(`Source native path unavailable for chat ${sourceChatId}`);
+    }
 
-  await fs.writeFile(destinationNativePath, rewritten, 'utf8');
+    newProviderSessionId = crypto.randomUUID();
+    destinationNativePath = buildForkDestination(sourceNativePath, newProviderSessionId);
+
+    const raw = await fs.readFile(sourceNativePath, 'utf8');
+    const rewritten = raw
+      .split('\n')
+      .map((line) => replaceUuidBounded(line, sourceProviderSessionId, newProviderSessionId))
+      .join('\n');
+
+    assertJsonlValid(rewritten, destinationNativePath);
+
+    await fs.writeFile(destinationNativePath, rewritten, 'utf8');
+    ownsDestinationFile = true;
+  }
 
   const created = registry.addChat({
     id: targetChatId,
@@ -111,7 +123,7 @@ export async function forkChatFileCopy({
   });
 
   if (!created) {
-    await fs.unlink(destinationNativePath).catch(() => {});
+    if (ownsDestinationFile) await fs.unlink(destinationNativePath).catch(() => {});
     throw new Error(`Chat ID collision: ${targetChatId}`);
   }
 

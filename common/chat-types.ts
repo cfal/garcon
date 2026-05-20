@@ -358,6 +358,41 @@ export class AmpTaskListToolUseMessage {
   ) {}
 }
 
+export class ExternalToolUseMessage {
+  readonly type = 'external-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public name: string,
+    public input: Record<string, unknown>,
+    public namespace?: string | null,
+  ) {}
+}
+
+export class McpToolUseMessage {
+  readonly type = 'mcp-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public server: string,
+    public tool: string,
+    public input: Record<string, unknown>,
+  ) {}
+}
+
+export class RequestPermissionsToolUseMessage {
+  readonly type = 'request-permissions-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public permissions: Record<string, unknown>,
+    public reason?: string,
+  ) {}
+}
+
 export class UnknownToolUseMessage {
   readonly type = 'unknown-tool-use' as const;
 
@@ -423,6 +458,9 @@ export type ToolUseChatMessage =
   | AmpFindThreadToolUseMessage
   | AmpReadThreadToolUseMessage
   | AmpTaskListToolUseMessage
+  | ExternalToolUseMessage
+  | McpToolUseMessage
+  | RequestPermissionsToolUseMessage
   | UnknownToolUseMessage;
 
 export type ChatMessage =
@@ -467,6 +505,9 @@ export function isToolUseMessage(message: ChatMessage): message is ToolUseChatMe
     case 'amp-find-thread-tool-use':
     case 'amp-read-thread-tool-use':
     case 'amp-task-list-tool-use':
+    case 'external-tool-use':
+    case 'mcp-tool-use':
+    case 'request-permissions-tool-use':
     case 'unknown-tool-use':
       return true;
     default:
@@ -705,6 +746,26 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
         asOptionalString(data.taskId),
         asOptionalString(data.title),
         asOptionalString(data.status));
+
+    case 'external-tool-use':
+      return new ExternalToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        str(data.name),
+        asRecord(data.input),
+        data.namespace === null ? null : asOptionalString(data.namespace));
+
+    case 'mcp-tool-use':
+      return new McpToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        str(data.server),
+        str(data.tool),
+        asRecord(data.input));
+
+    case 'request-permissions-tool-use':
+      return new RequestPermissionsToolUseMessage(
+        str(data.timestamp), str(data.toolId),
+        asRecord(data.permissions),
+        asOptionalString(data.reason));
 
     case 'unknown-tool-use':
       return new UnknownToolUseMessage(

@@ -90,6 +90,7 @@ interface ProvidersDep {
   isHarnessSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   startSession(chatId: string, command: string, opts: Record<string, unknown>): Promise<void>;
+  forkProviderSession?(args: { sourceSession: unknown; sourceChatId: string; targetChatId: string }): Promise<{ providerSessionId: string; nativePath: string | null } | null>;
   modelSupportsImages(input: { provider: string; model: string; apiProviderId?: string | null; modelEndpointId?: string | null }): Promise<boolean>;
   runSingleQuery(prompt: string, opts?: Record<string, unknown>): Promise<string>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
@@ -798,6 +799,7 @@ export default function createChatRoutes(
         registry,
         settings,
         metadata,
+        forkProviderSession: providers.forkProviderSession?.bind(providers),
       });
 
       return Response.json({ success: true, ...result });
@@ -922,6 +924,7 @@ export default function createChatRoutes(
           registry,
           settings,
           metadata,
+          forkProviderSession: providers.forkProviderSession?.bind(providers),
         });
       }
 

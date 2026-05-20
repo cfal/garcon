@@ -10,7 +10,7 @@ import {
   OPENCODE_PERMISSION_KEYS,
 } from '../opencode.js';
 import { convertOpencodePermissionTool } from '../converters/opencode-permission-tool.js';
-import { EnterPlanModeToolUseMessage, UnknownToolUseMessage } from '../../../common/chat-types.js';
+import { EnterPlanModeToolUseMessage, RequestPermissionsToolUseMessage, UnknownToolUseMessage } from '../../../common/chat-types.js';
 
 describe('mapPermissionDecision', () => {
   it('returns "once" for allow=true, alwaysAllow=false', () => {
@@ -135,7 +135,7 @@ describe('extractPermissionRequest', () => {
 });
 
 describe('convertOpencodePermissionTool', () => {
-  it('canonicalizes bash permission names before emitting to the client', () => {
+  it('maps ambient permission names to request-permissions tool use', () => {
     const msg = convertOpencodePermissionTool('2026-01-01T00:00:00.000Z', 'perm-1', {
       permission: 'bash',
       patterns: ['*.sh'],
@@ -144,9 +144,10 @@ describe('convertOpencodePermissionTool', () => {
       tool: { name: 'bash' },
     });
 
-    expect(msg).toBeInstanceOf(UnknownToolUseMessage);
-    expect(msg.rawName).toBe('Bash');
-    expect(msg.input.patterns).toEqual(['*.sh']);
+    expect(msg).toBeInstanceOf(RequestPermissionsToolUseMessage);
+    expect(msg.reason).toBe('Bash');
+    expect(msg.permissions.patterns).toEqual(['*.sh']);
+    expect(msg.permissions.tool).toEqual({ name: 'bash' });
   });
 
   it('maps plan_enter to EnterPlanMode', () => {
@@ -155,6 +156,13 @@ describe('convertOpencodePermissionTool', () => {
     });
 
     expect(msg).toBeInstanceOf(EnterPlanModeToolUseMessage);
+  });
+
+  it('uses UnknownToolUseMessage only when permission identity is missing', () => {
+    const msg = convertOpencodePermissionTool('2026-01-01T00:00:00.000Z', 'perm-3', {});
+
+    expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+    expect(msg.rawName).toBe('Unknown');
   });
 });
 

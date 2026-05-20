@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -273,6 +273,35 @@ describe('ChatRegistry', () => {
       expect(registry.getChat('c1')).toBeNull();
     });
 
+    it('preserves unresolved chats when nativePath reconciliation throws', async () => {
+      registry.addChat({
+        id: 'c1',
+        provider: 'codex',
+        model: 'gpt',
+        projectPath: '/p',
+        providerSessionId: 'ps1',
+        nativePath: null,
+      });
+      registry.addChat({
+        id: 'c2',
+        provider: 'codex',
+        model: 'gpt',
+        projectPath: '/p',
+        providerSessionId: 'ps2',
+        nativePath: null,
+      });
+      const resolver = mock(async () => {
+        throw new Error('app-server unavailable');
+      });
+
+      const changed = await registry.reconcileSessions(resolver);
+
+      expect(changed).toBe(false);
+      expect(registry.getChat('c1')?.providerSessionId).toBe('ps1');
+      expect(registry.getChat('c2')?.providerSessionId).toBe('ps2');
+      expect(resolver).toHaveBeenCalledTimes(1);
+    });
+
     it('returns false when registry is already consistent', async () => {
       const existingNativePath = path.join(tmpDir, 'existing.jsonl');
       await fs.writeFile(existingNativePath, '', 'utf8');
@@ -306,6 +335,22 @@ describe('ChatRegistry', () => {
 
       expect(changed).toBe(true);
       expect(registry.getChat('c1')?.nativePath).toBe('/resolved/path.jsonl');
+    });
+
+    it('preserves Codex chats with stale nativePath when repair cannot resolve a replacement', async () => {
+      registry.addChat({
+        id: 'c1',
+        provider: 'codex',
+        model: 'gpt',
+        projectPath: '/p',
+        providerSessionId: 'thread-1',
+        nativePath: '/tmp/missing-codex.jsonl',
+      });
+
+      const changed = await registry.reconcileSessions(async () => null);
+
+      expect(changed).toBe(false);
+      expect(registry.getChat('c1')?.nativePath).toBe('/tmp/missing-codex.jsonl');
     });
 
     it('keeps Amp pseudo native paths without filesystem checks', async () => {

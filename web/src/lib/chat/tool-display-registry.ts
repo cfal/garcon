@@ -66,6 +66,9 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'amp-find-thread-tool-use': 'Threads',
 	'amp-read-thread-tool-use': 'Thread',
 	'amp-task-list-tool-use': 'Tasks',
+	'external-tool-use': 'Tool',
+	'mcp-tool-use': 'MCP',
+	'request-permissions-tool-use': 'Permissions',
 };
 
 function fallbackDisplayName(type: string): string {
@@ -693,6 +696,69 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
+		'external-tool-use': {
+			input: {
+				mode: 'collapsible',
+				label: 'Tool',
+				title: 'Parameters',
+				defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (input) => ({
+				content: JSON.stringify(input, null, 2),
+				format: 'code',
+			}),
+		},
+		result: {
+			mode: 'collapsible',
+			defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (result) => ({
+				content: extractContentString(result?.content),
+				format: 'plain',
+			}),
+		},
+	},
+
+		'mcp-tool-use': {
+			input: {
+				mode: 'collapsible',
+			label: 'MCP',
+			title: 'Parameters',
+			defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (input) => ({
+				content: JSON.stringify(input, null, 2),
+				format: 'code',
+			}),
+		},
+		result: {
+			mode: 'collapsible',
+			defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (result) => ({
+				content: extractContentString(result?.content),
+				format: 'plain',
+			}),
+		},
+	},
+
+		'request-permissions-tool-use': {
+			input: {
+				mode: 'collapsible',
+			label: 'Permissions',
+			title: 'Requested permissions',
+			defaultOpen: true,
+			contentKind: 'text',
+			getContentProps: (input) => ({
+				content: JSON.stringify(input, null, 2),
+				format: 'code',
+			}),
+		},
+		result: {
+			hidden: true,
+		},
+	},
+
 	'unknown-tool-use': {
 		input: {
 			mode: 'collapsible',
@@ -741,6 +807,12 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 export function getToolDisplayLabel(toolMessage: ToolUseChatMessage): string {
 	if (toolMessage.type === 'unknown-tool-use') {
 		return toolMessage.rawName || 'Tool';
+	}
+	if (toolMessage.type === 'external-tool-use') {
+		return toolMessage.namespace ? `${toolMessage.namespace}.${toolMessage.name}` : toolMessage.name;
+	}
+	if (toolMessage.type === 'mcp-tool-use') {
+		return `${toolMessage.server}.${toolMessage.tool}`;
 	}
 	return DISPLAY_NAME_BY_TYPE[toolMessage.type] || fallbackDisplayName(toolMessage.type);
 }

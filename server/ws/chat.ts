@@ -91,7 +91,17 @@ interface ForkDeps {
     registry: IChatRegistry;
     settings: ForkSettingsDep;
     metadata: ForkMetadataDep;
+    forkProviderSession?: (args: {
+      sourceSession: ChatRegistryEntry;
+      sourceChatId: string;
+      targetChatId: string;
+    }) => Promise<{ providerSessionId: string; nativePath: string | null } | null>;
   }): Promise<{ sourceChatId: string; chatId: string; provider?: string }>;
+  forkProviderSession?(args: {
+    sourceSession: ChatRegistryEntry;
+    sourceChatId: string;
+    targetChatId: string;
+  }): Promise<{ providerSessionId: string; nativePath: string | null } | null>;
 }
 
 interface HistoryCacheDep {
@@ -245,6 +255,7 @@ export class ChatHandler {
         registry: this.#registry,
         settings: this.#forkDeps.settings,
         metadata: this.#forkDeps.metadata,
+        forkProviderSession: this.#forkDeps.forkProviderSession,
       });
       writer.send(new ChatForkCreatedMessage(result.sourceChatId, result.chatId));
       await this.#queue.submit(result.chatId, data.command, this.#runOptionsFromForkRequest(data));

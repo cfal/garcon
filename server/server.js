@@ -32,7 +32,7 @@ import { ShellManager } from './ws/shell.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { HistoryCache } from './chats/history-cache.js';
 import { ClaudeProvider } from './providers/claude-cli.js';
-import { CodexProvider } from './providers/codex.js';
+import { CodexAppServerProvider } from './providers/codex-app-server/provider.js';
 import { OpenCodeProvider } from './providers/opencode.js';
 import { AmpProvider } from './providers/amp-cli.js';
 import { FactoryProvider } from './providers/factory-cli.js';
@@ -88,17 +88,19 @@ export async function startServer() {
     const settings = new SettingsStore(workspaceDir);
     const pathCache = new PathCache();
     const shellManager = new ShellManager();
+    const codexProvider = new CodexAppServerProvider();
 
     await initAuthStore();
     await chatRegistry.init();
-    await chatRegistry.reconcileSessions(resolveMissingNativePath);
+    await chatRegistry.reconcileSessions((session) => resolveMissingNativePath(session, {
+      resolveCodexNativePath: codexProvider.resolveNativePath.bind(codexProvider),
+    }));
     await settings.init();
 
     await settings.reconcileWithRegistry(chatRegistry);
 
     // Tier 1: Standalone providers (EventEmitter-based, no deps)
     const claudeProvider = new ClaudeProvider();
-    const codexProvider = new CodexProvider();
     const opencodeProvider = new OpenCodeProvider();
     const ampProvider = new AmpProvider();
     const factoryProvider = new FactoryProvider();
@@ -185,6 +187,7 @@ export async function startServer() {
       settings,
       metadata,
       forkChatFileCopy,
+      forkProviderSession: providerRegistry.forkProviderSession.bind(providerRegistry),
     });
     const wsHandlers = {
       '/shell': shellManager.createHandler(),

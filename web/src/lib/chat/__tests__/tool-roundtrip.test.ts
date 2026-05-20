@@ -23,13 +23,16 @@ import {
 	AmpSkillToolUseMessage,
 	AmpMermaidToolUseMessage,
 	AmpHandoffToolUseMessage,
-	AmpLookAtToolUseMessage,
-	AmpFindThreadToolUseMessage,
-	AmpReadThreadToolUseMessage,
-	AmpTaskListToolUseMessage,
-	UnknownToolUseMessage,
-	PermissionRequestMessage,
-	UserMessage,
+		AmpLookAtToolUseMessage,
+		AmpFindThreadToolUseMessage,
+		AmpReadThreadToolUseMessage,
+		AmpTaskListToolUseMessage,
+		ExternalToolUseMessage,
+		McpToolUseMessage,
+		RequestPermissionsToolUseMessage,
+		UnknownToolUseMessage,
+		PermissionRequestMessage,
+		UserMessage,
 	parseChatMessage,
 } from '$shared/chat-types';
 
@@ -242,6 +245,29 @@ describe('tool-use serialization round-trip', () => {
 		expect(parsed.taskId).toBe('42');
 		expect(parsed.title).toBe('Ship implementation');
 		expect(parsed.status).toBe('done');
+	});
+
+	it('ExternalToolUseMessage preserves tool metadata', () => {
+		const msg = new ExternalToolUseMessage(TS, 'id-external-1', 'search', { q: 'threads' }, 'app');
+		const parsed = roundTrip(msg);
+		expect(parsed.name).toBe('search');
+		expect(parsed.namespace).toBe('app');
+		expect(parsed.input).toEqual({ q: 'threads' });
+	});
+
+	it('McpToolUseMessage preserves server and tool metadata', () => {
+		const msg = new McpToolUseMessage(TS, 'id-mcp-1', 'github', 'list_prs', { state: 'open' });
+		const parsed = roundTrip(msg);
+		expect(parsed.server).toBe('github');
+		expect(parsed.tool).toBe('list_prs');
+		expect(parsed.input).toEqual({ state: 'open' });
+	});
+
+	it('RequestPermissionsToolUseMessage preserves requested permissions', () => {
+		const msg = new RequestPermissionsToolUseMessage(TS, 'id-permissions-1', { network: { enabled: true } }, 'Need API access');
+		const parsed = roundTrip(msg);
+		expect(parsed.permissions).toEqual({ network: { enabled: true } });
+		expect(parsed.reason).toBe('Need API access');
 	});
 
 	it('UnknownToolUseMessage preserves rawName and input without metadata', () => {

@@ -1,10 +1,11 @@
 // Converts OpenCode permission.asked event payloads into canonical
 // ToolUseMessage subclasses. Unlike tool-use events, permission events
-// carry minimal structured input, so most map to UnknownToolUseMessage
-// with a canonical tool name and the provider metadata preserved.
+// carry minimal structured input, so generic permission requests preserve
+// the provider permission context instead of pretending a concrete tool ran.
 
 import {
   EnterPlanModeToolUseMessage,
+  RequestPermissionsToolUseMessage,
   TodoReadToolUseMessage,
   UnknownToolUseMessage,
 } from '../../../common/chat-types.js';
@@ -75,8 +76,7 @@ function canonicalNameForPermission(rawName) {
 /**
  * Converts an OpenCode permission event into a canonical ToolUseChatMessage.
  * OpenCode permission events carry a permission key and metadata rather than
- * full tool input, so most map to UnknownToolUseMessage with the permission
- * context preserved in the input record.
+ * full tool input, so ambient approvals map to RequestPermissionsToolUseMessage.
  */
 export function convertOpencodePermissionTool(ts, toolId, permission) {
   const providerPermission = permission && typeof permission === 'object' ? permission : {};
@@ -89,6 +89,13 @@ export function convertOpencodePermissionTool(ts, toolId, permission) {
       ? providerTool.name
       : 'Unknown';
   const canonicalName = canonicalNameForPermission(rawName);
+  const permissionContext = {
+    permission: providerPermission.permission ?? null,
+    patterns: Array.isArray(providerPermission.patterns) ? providerPermission.patterns : [],
+    metadata: providerPermission.metadata ?? {},
+    always: Array.isArray(providerPermission.always) ? providerPermission.always : [],
+    tool: providerPermission.tool ?? null,
+  };
 
   switch (canonicalName) {
     case 'TodoRead':
@@ -96,12 +103,9 @@ export function convertOpencodePermissionTool(ts, toolId, permission) {
     case 'EnterPlanMode':
       return new EnterPlanModeToolUseMessage(ts, toolId);
     default:
-      return new UnknownToolUseMessage(ts, toolId, canonicalName, {
-        permission: providerPermission.permission ?? null,
-        patterns: Array.isArray(providerPermission.patterns) ? providerPermission.patterns : [],
-        metadata: providerPermission.metadata ?? {},
-        always: Array.isArray(providerPermission.always) ? providerPermission.always : [],
-        tool: providerPermission.tool ?? null,
-      });
+      if (canonicalName === 'Unknown' && !providerPermission.permission && !providerTool?.name) {
+        return new UnknownToolUseMessage(ts, toolId, canonicalName, permissionContext);
+      }
+      return new RequestPermissionsToolUseMessage(ts, toolId, permissionContext, canonicalName);
   }
 }

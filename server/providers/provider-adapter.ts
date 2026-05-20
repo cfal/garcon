@@ -2,7 +2,13 @@
 // provider adapters so the registry can route operations without
 // per-provider branching.
 
-import type { ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from './types.js';
+import type { ProviderChatEntry, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from './types.js';
+
+export interface ProviderForkSessionRequest {
+  sourceSession: ProviderChatEntry;
+  sourceChatId: string;
+  targetChatId: string;
+}
 
 export interface ProviderAdapter {
   id: string;
@@ -16,6 +22,8 @@ export interface ProviderAdapter {
   runSingleQuery?(prompt: string, options?: Record<string, unknown>): Promise<string>;
   loadMessages?(session: unknown): Promise<unknown[]>;
   getPreview?(session: unknown): Promise<unknown>;
+  forkSession?(request: ProviderForkSessionRequest): Promise<StartedProviderSession | null>;
+  resolvePermission?(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> | void;
   startPurgeTimer?(): ReturnType<typeof setInterval>;
   shutdown?(): void;
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;

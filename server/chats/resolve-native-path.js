@@ -2,13 +2,12 @@
 // Shared by both the REST route and the WebSocket handler.
 
 import { promises as fs } from 'fs';
-import { findCodexSessionFileBySessionId } from '../providers/codex.js';
 import { createClaudeNativePath } from '../providers/claude-cli.js';
 import { findPiSessionFileBySessionId } from '../providers/pi-session-paths.js';
 import { createArtificialNativePath } from './artificial-native-path.js';
 import { isEndpointOnlyHarnessId } from '../../common/providers.ts';
 
-export async function resolveMissingNativePath(session) {
+export async function resolveMissingNativePath(session, options = {}) {
   if (!session || !session.providerSessionId) {
     return null;
   }
@@ -25,7 +24,9 @@ export async function resolveMissingNativePath(session) {
   }
 
   if (session.provider === 'codex') {
-    return findCodexSessionFileBySessionId(session.providerSessionId);
+    return options.resolveCodexNativePath
+      ? options.resolveCodexNativePath(session)
+      : null;
   }
 
   if (session.provider === 'opencode') {

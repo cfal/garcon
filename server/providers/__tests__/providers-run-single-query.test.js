@@ -12,7 +12,7 @@ mock.module('../claude-cli.js', () => ({
   createClaudeNativePath: mock(() => Promise.resolve('/tmp/claude-session.jsonl')),
 }));
 
-mock.module('../codex.js', () => ({
+mock.module('../codex-app-server/run-single-query.js', () => ({
   runSingleQuery: codexQuery,
 }));
 

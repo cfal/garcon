@@ -717,21 +717,25 @@ export class ProviderRegistry {
       return;
     }
 
-    if (chat.provider === 'claude') {
-      const adapter = this.#adapters.get('claude') as any;
-      adapter?.resolveInternalToolApproval?.(permissionRequestId, decision);
-      return;
-    }
-
-    if (chat.provider === 'opencode') {
-      const adapter = this.#adapters.get('opencode') as any;
-      adapter?.resolvePermission?.(permissionRequestId, decision).catch((err: Error) => {
-        console.warn('providers: opencode permission reply failed:', err.message);
+    const adapter = this.#adapters.get(chat.provider);
+    if (adapter?.resolvePermission) {
+      Promise.resolve(adapter.resolvePermission(permissionRequestId, decision)).catch((err: Error) => {
+        console.warn(`providers: ${chat.provider} permission reply failed:`, err.message);
       });
       return;
     }
 
     console.warn('providers: no permission handler for provider:', chat.provider);
+  }
+
+  async forkProviderSession(args: {
+    sourceSession: ProviderChatEntry;
+    sourceChatId: string;
+    targetChatId: string;
+  }): Promise<StartedProviderSession | null> {
+    const adapter = this.#adapters.get(args.sourceSession.provider);
+    if (!adapter?.forkSession) return null;
+    return adapter.forkSession(args);
   }
 
   async setPermissionMode(chatId: string, mode: PermissionMode): Promise<void> {
@@ -805,6 +809,8 @@ export class ProviderRegistry {
 
   async getPreview(session: ProviderChatEntry | null): Promise<unknown> {
     if (!session?.provider) return null;
+    const adapter = this.#adapters.get(session.provider);
+    if (adapter?.getPreview) return adapter.getPreview(session);
 
     if (session.provider === 'amp') return null;
     if (session.provider === 'factory') {
@@ -865,6 +871,8 @@ export class ProviderRegistry {
 
   async loadMessages(session: ProviderChatEntry | null): Promise<unknown[]> {
     if (!session?.provider) return [];
+    const adapter = this.#adapters.get(session.provider);
+    if (adapter?.loadMessages) return adapter.loadMessages(session);
 
     if (session.provider === 'amp') return [];
     if (session.provider === 'factory') {

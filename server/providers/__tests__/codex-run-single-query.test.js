@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { promises as fs } from 'fs';
-import os from 'os';
-import path from 'path';
-import { resolveCodexCliCommand, runSingleQuery } from '../codex.js';
+import { resolveCodexCliCommand, runSingleQuery } from '../codex-app-server/run-single-query.js';
 
 const originalSpawn = Bun.spawn;
 let spawnMock;
@@ -62,18 +59,7 @@ describe('Codex runSingleQuery', () => {
     expect(options.env.GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI).toBe('secret');
   });
 
-  it('falls back to PATH codex when the local package bin is unavailable', async () => {
-    expect(await resolveCodexCliCommand('/tmp/garcon-missing-codex-bin')).toBe('codex');
-  });
-
-  it('uses the local package bin when it is available', async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-codex-bin-'));
-    const localBin = path.join(tmpDir, process.platform === 'win32' ? 'codex.cmd' : 'codex');
-    try {
-      await fs.writeFile(localBin, '', 'utf8');
-      expect(await resolveCodexCliCommand(localBin)).toBe(localBin);
-    } finally {
-      await fs.rm(tmpDir, { recursive: true, force: true });
-    }
+  it('resolves codex from PATH', async () => {
+    expect(await resolveCodexCliCommand()).toBe('codex');
   });
 });

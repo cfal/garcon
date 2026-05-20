@@ -223,11 +223,18 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         }
       }
 
-      const resolvedPath = await resolveNativePath(session).catch((error: Error) => {
-        console.warn(`sessions: failed to reconcile nativePath for ${chatId}:`, error.message);
-        return null;
-      });
+      let resolvedPath: string | null;
+      try {
+        resolvedPath = await resolveNativePath(session);
+      } catch (error) {
+        console.warn(`sessions: nativePath reconciliation aborted at ${chatId}:`, (error as Error).message);
+        break;
+      }
       if (!resolvedPath) {
+        if (session.provider === 'codex' && session.nativePath) {
+          console.warn(`sessions: preserving Codex chat ${chatId} with unresolved nativePath`);
+          continue;
+        }
         console.warn(`sessions: discarding chat ${chatId} with unresolved nativePath`);
         delete sessions[chatId];
         dirty = true;

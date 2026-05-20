@@ -230,4 +230,46 @@ describe('forkChatFileCopy', () => {
     expect(registry.getChat('200')?.nextForkOrdinal).toBe(3);
     expect(registry.getChat('201')?.nextForkOrdinal).toBe(1);
   });
+
+  it('uses provider-native fork results when available', async () => {
+    const sourceNativePath = await createSourceNativeFile('33333333-3333-3333-3333-333333333333');
+    const nativeForkPath = path.join(tmpDir, 'native-codex-fork.jsonl');
+    await fs.writeFile(nativeForkPath, '{"type":"session"}\n', 'utf8');
+    const registry = createRegistry({
+      '300': {
+        provider: 'codex',
+        model: 'gpt-5.4-codex',
+        projectPath: '/proj',
+        nativePath: sourceNativePath,
+        tags: ['codex'],
+        providerSessionId: '33333333-3333-3333-3333-333333333333',
+      },
+    });
+    const settings = createSettings({ '300': 'Codex work' });
+    const metadata = createMetadata({ '300': { firstMessage: 'Codex prompt' } });
+    const forkProviderSession = mock(async () => ({
+      providerSessionId: 'codex-fork-thread',
+      nativePath: nativeForkPath,
+    }));
+
+    const result = await forkChatFileCopy({
+      sourceSession: registry.getChat('300'),
+      sourceChatId: '300',
+      targetChatId: '301',
+      registry,
+      settings,
+      metadata,
+      forkProviderSession,
+    });
+
+    expect(forkProviderSession).toHaveBeenCalledTimes(1);
+    expect(result.providerSessionId).toBe('codex-fork-thread');
+    expect(result.nativePath).toBe(nativeForkPath);
+    expect(registry.getChat('301')).toMatchObject({
+      provider: 'codex',
+      providerSessionId: 'codex-fork-thread',
+      nativePath: nativeForkPath,
+      tags: ['codex'],
+    });
+  });
 });
