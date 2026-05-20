@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { runSingleQuery } from '../codex.js';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+import { resolveCodexCliCommand, runSingleQuery } from '../codex.js';
 
 const originalSpawn = Bun.spawn;
 let spawnMock;
@@ -23,6 +26,8 @@ describe('Codex runSingleQuery', () => {
   });
 
   it('passes custom provider config and API key env to codex exec', async () => {
+    const expectedCodexCommand = await resolveCodexCliCommand();
+
     await runSingleQuery('hello', {
       model: 'acme-code',
       codexConfig: {
@@ -46,7 +51,7 @@ describe('Codex runSingleQuery', () => {
     });
 
     const [command, options] = spawnMock.mock.calls[0];
-    expect(command[0]).toBe('codex');
+    expect(command[0]).toBe(expectedCodexCommand);
     expect(command).toContain('--config');
     expect(command).toContain('model_provider="garcon_acme_openai"');
     expect(command).toContain('model_providers.garcon_acme_openai.base_url="https://api.acme.test/v1"');
@@ -55,5 +60,20 @@ describe('Codex runSingleQuery', () => {
     expect(command).toContain('model_providers.garcon_acme_openai.supports_websockets=false');
     expect(command).toContain('model_providers.garcon_acme_openai.env_key="GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI"');
     expect(options.env.GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI).toBe('secret');
+  });
+
+  it('falls back to PATH codex when the local package bin is unavailable', async () => {
+    expect(await resolveCodexCliCommand('/tmp/garcon-missing-codex-bin')).toBe('codex');
+  });
+
+  it('uses the local package bin when it is available', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-codex-bin-'));
+    const localBin = path.join(tmpDir, process.platform === 'win32' ? 'codex.cmd' : 'codex');
+    try {
+      await fs.writeFile(localBin, '', 'utf8');
+      expect(await resolveCodexCliCommand(localBin)).toBe(localBin);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 });

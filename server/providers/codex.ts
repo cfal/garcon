@@ -5,6 +5,7 @@ import { Codex } from '@openai/codex-sdk';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { normalizeToolResultContent, normalizeTodoItems } from './normalize-util.js';
 import { AssistantMessage, ThinkingMessage, BashToolUseMessage, EditToolUseMessage, WebSearchToolUseMessage, TodoWriteToolUseMessage, ToolResultMessage, ErrorMessage } from '../../common/chat-types.js';
 import { AbsProvider } from './base.js';
@@ -194,6 +195,14 @@ const CODEX_SANDBOX: Record<string, { sandboxMode: string; approvalPolicy: strin
   bypassPermissions: { sandboxMode: 'danger-full-access', approvalPolicy: 'never' },
 };
 export const CODEX_SESSIONS_ROOT = path.join(os.homedir(), '.codex', 'sessions');
+const CODEX_PROVIDER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const CODEX_LOCAL_BIN_PATH = path.resolve(
+  CODEX_PROVIDER_DIR,
+  '..',
+  'node_modules',
+  '.bin',
+  process.platform === 'win32' ? 'codex.cmd' : 'codex',
+);
 const DEFAULT_WAIT_TIMEOUT_MS = 10_000;
 const DEFAULT_POLL_INTERVAL_MS = 250;
 
@@ -415,7 +424,8 @@ async function runCodexExec(
   if (env) {
     spawnOptions.env = env;
   }
-  const proc = Bun.spawn(['codex', ...args], spawnOptions);
+  const codexCommand = await resolveCodexCliCommand();
+  const proc = Bun.spawn([codexCommand, ...args], spawnOptions);
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout as unknown as ReadableStream).text(),
     new Response(proc.stderr as unknown as ReadableStream).text(),
@@ -426,6 +436,16 @@ async function runCodexExec(
     throw new Error(`Codex exec failed with code ${exitCode}: ${details}`);
   }
   return { stdout, stderr };
+}
+
+// Prefers the package-pinned CLI before falling back to PATH.
+export async function resolveCodexCliCommand(localBinPath = CODEX_LOCAL_BIN_PATH): Promise<string> {
+  try {
+    await fs.access(localBinPath);
+    return localBinPath;
+  } catch {
+    return 'codex';
+  }
 }
 
 export async function runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
