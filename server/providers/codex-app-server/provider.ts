@@ -5,7 +5,12 @@ import { loadCodexChatMessages, getCodexPreviewFromNativePath } from '../loaders
 import type { ProviderChatEntry, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../types.js';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions } from './client.js';
-import { convertCodexAppServerLiveItem, convertCodexAppServerThread, getCodexThreadPreview } from './converter.js';
+import {
+  convertCodexAppServerLiveItem,
+  convertCodexAppServerThread,
+  convertCodexAppServerTurnMissingItems,
+  getCodexThreadPreview,
+} from './converter.js';
 import { waitForMaterializedThread } from './durability.js';
 import type {
   ErrorNotification,
@@ -26,7 +31,7 @@ import {
   writeImagesToTempFiles,
 } from './request-builders.js';
 
-type RunningStatus = 'running' | 'completed' | 'failed' | 'aborted';
+type RunningStatus = 'running' | 'completing' | 'completed' | 'failed' | 'aborted';
 
 interface RunningCodexSession {
   chatId: string;
@@ -34,6 +39,7 @@ interface RunningCodexSession {
   nativePath: string | null;
   client: CodexAppServerClient;
   activeTurnId: string | null;
+  completedItemIds: Set<string>;
   status: RunningStatus;
   startedAt: string;
 }
@@ -41,6 +47,7 @@ interface RunningCodexSession {
 export interface CodexAppServerProviderOptions {
   createClient?: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   materializationTimeoutMs?: number;
+  terminalBackfillTimeoutMs?: number;
 }
 
 export class CodexAppServerProvider extends AbsProvider {
@@ -51,11 +58,13 @@ export class CodexAppServerProvider extends AbsProvider {
   #threadListCaches = new Map<boolean, Promise<Map<string, CodexThread>>>();
   #createClient: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   #materializationTimeoutMs: number;
+  #terminalBackfillTimeoutMs: number;
 
   constructor(options: CodexAppServerProviderOptions = {}) {
     super();
     this.#createClient = options.createClient ?? ((clientOptions) => new CodexAppServerClient(clientOptions));
     this.#materializationTimeoutMs = options.materializationTimeoutMs ?? 10_000;
+    this.#terminalBackfillTimeoutMs = options.terminalBackfillTimeoutMs ?? 2_000;
   }
 
   async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
@@ -171,12 +180,13 @@ export class CodexAppServerProvider extends AbsProvider {
   }
 
   isRunning(providerSessionId: string): boolean {
-    return this.#sessions.get(providerSessionId)?.status === 'running';
+    const status = this.#sessions.get(providerSessionId)?.status;
+    return status === 'running' || status === 'completing';
   }
 
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }> {
     return Array.from(this.#sessions.values())
-      .filter((session) => session.status === 'running')
+      .filter((session) => session.status === 'running' || session.status === 'completing')
       .map((session) => ({ id: session.threadId, status: session.status, startedAt: session.startedAt }));
   }
 
@@ -214,9 +224,15 @@ export class CodexAppServerProvider extends AbsProvider {
 
   async forkSession(args: { sourceSession: ProviderChatEntry }): Promise<StartedProviderSession | null> {
     const sourceSession = args.sourceSession;
-    if (!sourceSession.providerSessionId && !sourceSession.nativePath) return null;
+    const sourceThreadId = sourceSession.providerSessionId;
+    if (!sourceThreadId) return null;
 
-    const forked = await this.#withUtilityClient((client) => client.forkThread(buildThreadForkParams(sourceSession)));
+    const forked = await this.#withUtilityClient((client) => client.forkThread(buildThreadForkParams({
+      providerSessionId: sourceThreadId,
+      nativePath: sourceSession.nativePath,
+      model: sourceSession.model,
+      projectPath: sourceSession.projectPath,
+    })));
     const nativePath = await waitForMaterializedThread(forked.thread, {
       timeoutMs: this.#materializationTimeoutMs,
     });
@@ -378,6 +394,7 @@ export class CodexAppServerProvider extends AbsProvider {
       nativePath: args.nativePath,
       client: args.client,
       activeTurnId: null,
+      completedItemIds: new Set(),
       status: 'running',
       startedAt: new Date().toISOString(),
     };
@@ -420,10 +437,19 @@ export class CodexAppServerProvider extends AbsProvider {
   #handleItemCompleted(params: ItemCompletedNotification): void {
     const session = this.#sessions.get(params.threadId);
     if (!session) return;
+    session.completedItemIds.add(params.item.id);
     this.emitMessages(session.chatId, convertCodexAppServerLiveItem(params.item));
   }
 
   #handleTurnCompleted(params: TurnCompletedNotification): void {
+    void this.#completeTurn(params).catch((error) => {
+      const session = this.#sessions.get(params.threadId);
+      if (!session) return;
+      this.#finishSession(session, { failedMessage: humanizeCodexAppServerError(error) });
+    });
+  }
+
+  async #completeTurn(params: TurnCompletedNotification): Promise<void> {
     const session = this.#sessions.get(params.threadId);
     if (!session) return;
     if (params.turn.status === 'failed') {
@@ -432,7 +458,45 @@ export class CodexAppServerProvider extends AbsProvider {
       });
       return;
     }
-    this.#finishSession(session, { aborted: params.turn.status === 'interrupted' || session.status === 'aborted' });
+    const aborted = params.turn.status === 'interrupted' || session.status === 'aborted';
+    session.status = 'completing';
+    this.#threadListCaches.clear();
+    const turnId = params.turn.id ?? session.activeTurnId;
+    if (!aborted && turnId) {
+      await this.#backfillCompletedTurn(session, turnId).catch((error) => {
+        console.warn('codex: terminal thread/read backfill failed:', (error as Error).message);
+      });
+    }
+    this.#finishSession(session, { aborted });
+  }
+
+  async #backfillCompletedTurn(session: RunningCodexSession, turnId: string): Promise<void> {
+    const response = await this.#readThreadForTerminalBackfill(session);
+    const turn = response.thread.turns?.find((candidate) => candidate.id === turnId);
+    if (!turn) return;
+
+    const messages = convertCodexAppServerTurnMissingItems(turn, session.completedItemIds, {
+      includeUserMessages: false,
+    });
+    for (const item of turn.items ?? []) session.completedItemIds.add(item.id);
+    if (messages.length) this.emitMessages(session.chatId, messages);
+  }
+
+  async #readThreadForTerminalBackfill(session: RunningCodexSession): Promise<ThreadReadResponse> {
+    try {
+      return await withTimeout(
+        session.client.readThread(session.threadId, true),
+        this.#terminalBackfillTimeoutMs,
+        `active thread/read timed out for ${session.threadId}`,
+      );
+    } catch (error) {
+      console.warn('codex: active app-server terminal backfill failed, retrying utility app-server:', (error as Error).message);
+      return withTimeout(
+        this.#readThread(session.threadId, true),
+        this.#terminalBackfillTimeoutMs,
+        `utility thread/read timed out for ${session.threadId}`,
+      );
+    }
   }
 
   #handleErrorNotification(client: CodexAppServerClient, params: ErrorNotification): void {
@@ -552,4 +616,14 @@ function isUtilityOverload(error: unknown): boolean {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
 }

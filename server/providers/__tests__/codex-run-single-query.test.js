@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { resolveCodexCli } from '../codex-app-server/cli.js';
 import { resolveCodexCliCommand, runSingleQuery } from '../codex-app-server/run-single-query.js';
 
 const originalSpawn = Bun.spawn;
+const originalCodexCli = process.env.GARCON_CODEX_CLI;
 let spawnMock;
 
 function textStream(text) {
@@ -10,6 +12,7 @@ function textStream(text) {
 
 describe('Codex runSingleQuery', () => {
   beforeEach(() => {
+    delete process.env.GARCON_CODEX_CLI;
     spawnMock = mock(() => ({
       stdout: textStream('codex output'),
       stderr: textStream(''),
@@ -20,6 +23,11 @@ describe('Codex runSingleQuery', () => {
 
   afterEach(() => {
     Bun.spawn = originalSpawn;
+    if (originalCodexCli === undefined) {
+      delete process.env.GARCON_CODEX_CLI;
+    } else {
+      process.env.GARCON_CODEX_CLI = originalCodexCli;
+    }
   });
 
   it('passes custom provider config and API key env to codex exec', async () => {
@@ -59,7 +67,29 @@ describe('Codex runSingleQuery', () => {
     expect(options.env.GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI).toBe('secret');
   });
 
-  it('resolves codex from PATH', async () => {
-    expect(await resolveCodexCliCommand()).toBe('codex');
+  it('honors an explicit codex CLI override', async () => {
+    process.env.GARCON_CODEX_CLI = '/custom/codex';
+
+    expect(await resolveCodexCliCommand()).toBe('/custom/codex');
+  });
+
+  it('prefers the bundled codex CLI before PATH fallback', async () => {
+    await expect(resolveCodexCli({
+      env: {},
+      bundledCommand: '/repo/server/node_modules/.bin/codex',
+      isExecutable: async () => true,
+    })).resolves.toEqual({
+      command: '/repo/server/node_modules/.bin/codex',
+      source: 'bundled',
+    });
+
+    await expect(resolveCodexCli({
+      env: {},
+      bundledCommand: '/repo/server/node_modules/.bin/codex',
+      isExecutable: async () => false,
+    })).resolves.toEqual({
+      command: 'codex',
+      source: 'path',
+    });
   });
 });

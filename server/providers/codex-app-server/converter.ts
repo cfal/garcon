@@ -24,7 +24,7 @@ import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from '../normalize-util.js';
 import type { CodexThread, CodexThreadItem, CodexTurn, CodexUserInput } from './protocol.js';
 
-interface ConvertCodexAppServerItemOptions {
+export interface ConvertCodexAppServerItemOptions {
   includeUserMessages?: boolean;
 }
 
@@ -41,6 +41,20 @@ export function convertCodexAppServerThread(thread: CodexThread): ChatMessage[] 
 
 export function convertCodexAppServerLiveItem(item: CodexThreadItem, timestamp = new Date().toISOString()): ChatMessage[] {
   return convertCodexAppServerItem(item, timestamp, { includeUserMessages: false });
+}
+
+export function convertCodexAppServerTurnMissingItems(
+  turn: CodexTurn,
+  alreadyEmittedItemIds: ReadonlySet<string>,
+  options: ConvertCodexAppServerItemOptions = {},
+): ChatMessage[] {
+  const timestamp = timestampFromTurn(turn);
+  const messages: ChatMessage[] = [];
+  for (const item of turn.items ?? []) {
+    if (alreadyEmittedItemIds.has(item.id)) continue;
+    messages.push(...convertCodexAppServerItem(item, timestamp, options));
+  }
+  return messages;
 }
 
 export function convertCodexAppServerItem(

@@ -68,8 +68,6 @@ function appendCommonThreadParams(
 export function buildThreadStartParams(request: StartSessionRequest): Record<string, unknown> {
   return appendCommonThreadParams({
     ephemeral: false,
-    experimentalRawEvents: false,
-    persistExtendedHistory: true,
   }, request);
 }
 
@@ -79,26 +77,22 @@ export function buildThreadResumeParams(request: {
 } & Pick<StartSessionRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>): Record<string, unknown> {
   return appendCommonThreadParams({
     threadId: request.providerSessionId,
-    path: request.nativePath ?? null,
     excludeTurns: true,
-    persistExtendedHistory: true,
   }, request);
 }
 
 export function buildThreadForkParams(sourceSession: {
-  providerSessionId?: string | null;
+  providerSessionId: string;
   nativePath?: string | null;
   model?: string | null;
   projectPath: string;
 }): Record<string, unknown> {
   const params: Record<string, unknown> = {
-    threadId: sourceSession.providerSessionId ?? '',
-    path: sourceSession.nativePath ?? null,
+    threadId: sourceSession.providerSessionId,
     cwd: sourceSession.projectPath,
     model: sourceSession.model ?? null,
     ephemeral: false,
     excludeTurns: true,
-    persistExtendedHistory: true,
   };
   return params;
 }
