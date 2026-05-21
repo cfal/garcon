@@ -84,6 +84,12 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 	);
 }
 
+function preserveLocalPreview(prev: ChatSessionRecord | undefined, next: ChatSessionRecord): void {
+	if (prev?.lastMessage && !next.lastMessage) {
+		next.lastMessage = prev.lastMessage;
+	}
+}
+
 export class ChatSessionsStore {
 	byId = $state<Record<string, ChatSessionRecord>>({});
 	order = $state<string[]>([]);
@@ -129,12 +135,13 @@ export class ChatSessionsStore {
 			}
 		}
 
-		for (const session of sessions) {
-			const next = toRecord(session);
-			const prev = this.byId[next.id];
-			if (prev && sameRecord(prev, next)) {
-				nextById[next.id] = prev;
-			} else {
+			for (const session of sessions) {
+				const next = toRecord(session);
+				const prev = this.byId[next.id];
+				preserveLocalPreview(prev, next);
+				if (prev && sameRecord(prev, next)) {
+					nextById[next.id] = prev;
+				} else {
 				// Preserve WS-authoritative isProcessing flag; the REST
 				// isActive snapshot can lag behind real-time WS events.
 				if (prev?.isProcessing && !next.isProcessing) {

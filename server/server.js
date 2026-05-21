@@ -1,6 +1,7 @@
 // Composition root. Instantiates all services and wires them together.
 // This is the single place where dependencies are resolved.
 
+import path from 'path';
 import {
   getPort,
   getBindAddress,
@@ -145,7 +146,9 @@ export async function startServer() {
     });
 
     // Tier 3: Chat infrastructure (uses ProviderRegistry)
-    const metadata = new MetadataIndex(chatRegistry, providerRegistry);
+    const metadata = new MetadataIndex(chatRegistry, providerRegistry, {
+      metadataPath: path.join(workspaceDir, 'chat-metadata.json'),
+    });
     await metadata.init();
 
     const historyCache = new HistoryCache(chatRegistry, metadata, providerRegistry);
@@ -373,6 +376,7 @@ export async function startServer() {
         }
         providerRegistry.shutdown();
         historyCache.destroy();
+        await metadata.flush();
         await chatRegistry.flush();
       } catch (err) {
         console.warn('server: shutdown cleanup error:', err.message);

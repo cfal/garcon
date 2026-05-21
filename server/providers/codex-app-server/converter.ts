@@ -106,7 +106,9 @@ export function getCodexThreadPreview(thread: CodexThread): { firstMessage: stri
 
   return {
     firstMessage: firstUser?.content || thread.preview || 'Unknown Codex Session',
-    lastMessage: lastMessage instanceof UserMessage || lastMessage instanceof AssistantMessage ? lastMessage.content : '',
+    lastMessage: lastMessage instanceof UserMessage || lastMessage instanceof AssistantMessage
+      ? lastMessage.content
+      : firstUser?.content || thread.preview || 'Unknown Codex Session',
     lastActivity: timestampFromNumber(thread.updatedAt) ?? new Date().toISOString(),
     createdAt: timestampFromNumber(thread.createdAt),
   };

@@ -292,6 +292,9 @@ export default function createChatRoutes(
         const lastReadAt = (session.lastReadAt as string) || null;
         const lastActivityAt = (meta?.lastActivity as string) || null;
         const isUnread = Boolean(lastActivityAt && (!lastReadAt || lastActivityAt > lastReadAt));
+        const title = extractFirstLine((overrideTitle || meta?.firstMessage || 'New Session') as string);
+        const firstPreview = extractFirstLine((meta?.firstMessage || title) as string);
+        const lastPreview = extractFirstLine((meta?.lastMessage || meta?.firstMessage || title) as string);
 
         entryMap.set(chatId, {
           id: chatId,
@@ -304,13 +307,13 @@ export default function createChatRoutes(
           thinkingMode: normalizeThinkingMode(session.thinkingMode),
           claudeThinkingMode: normalizeClaudeThinkingMode(session.claudeThinkingMode),
           ampAgentMode: normalizeAmpAgentMode(session.ampAgentMode),
-          title: extractFirstLine((overrideTitle || meta?.firstMessage || 'New Session') as string),
+          title,
           projectPath: session.projectPath,
           tags: session.tags || [],
           activity: { createdAt: (meta?.createdAt as string) || inferredCreatedAt, lastActivityAt, lastReadAt },
           preview: {
-            lastMessage: extractFirstLine(meta?.lastMessage as string),
-            firstMessage: extractFirstLine(meta?.firstMessage as string),
+            lastMessage: lastPreview,
+            firstMessage: firstPreview,
           },
           isActive: providers.isHarnessSessionRunning(session.provider as string, session.providerSessionId as string | null),
           isPinned,

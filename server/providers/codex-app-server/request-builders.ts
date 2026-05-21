@@ -86,6 +86,7 @@ export function buildThreadForkParams(sourceSession: {
   nativePath?: string | null;
   model?: string | null;
   projectPath: string;
+  codexConfig?: CodexProviderConfig;
 }): Record<string, unknown> {
   const params: Record<string, unknown> = {
     threadId: sourceSession.providerSessionId,
@@ -94,6 +95,7 @@ export function buildThreadForkParams(sourceSession: {
     ephemeral: false,
     excludeTurns: true,
   };
+  if (sourceSession.codexConfig?.config) params.config = sourceSession.codexConfig.config;
   return params;
 }
 

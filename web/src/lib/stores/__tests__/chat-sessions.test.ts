@@ -193,6 +193,22 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.lastMessage).toBe('Hello world');
 	});
 
+	it('upsertFromServer does not erase a non-empty preview with a blank payload', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([
+			makeServerSession({ id: 'a', preview: { lastMessage: 'Persisted preview' } }),
+		]);
+		const ref = store.byId['a'];
+
+		store.upsertFromServer([
+			makeServerSession({ id: 'a', preview: { lastMessage: '' } }),
+		]);
+
+		expect(store.byId['a']).toBe(ref);
+		expect(store.byId['a']?.lastMessage).toBe('Persisted preview');
+	});
+
 	it('patchChat updates arbitrary fields', () => {
 		const store = new ChatSessionsStore();
 

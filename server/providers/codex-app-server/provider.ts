@@ -4,7 +4,7 @@ import { AbsProvider } from '../base.js';
 import { loadCodexChatMessages, getCodexPreviewFromNativePath } from '../loaders/codex-history-loader.js';
 import type { ProviderChatEntry, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../types.js';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
-import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions } from './client.js';
+import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
 import {
   convertCodexAppServerLiveItem,
   convertCodexAppServerThread,
@@ -12,6 +12,7 @@ import {
   getCodexThreadPreview,
 } from './converter.js';
 import { waitForMaterializedThread } from './durability.js';
+import { CodexTurnMessageDeduper } from './message-deduper.js';
 import type {
   ErrorNotification,
   ItemCompletedNotification,
@@ -39,9 +40,15 @@ interface RunningCodexSession {
   nativePath: string | null;
   client: CodexAppServerClient;
   activeTurnId: string | null;
-  completedItemIds: Set<string>;
+  messageDeduper: CodexTurnMessageDeduper;
   status: RunningStatus;
   startedAt: string;
+}
+
+interface CodexForkSessionRequest {
+  sourceSession: ProviderChatEntry;
+  envOverrides?: Record<string, string>;
+  codexConfig?: StartSessionRequest['codexConfig'];
 }
 
 export interface CodexAppServerProviderOptions {
@@ -222,22 +229,26 @@ export class CodexAppServerProvider extends AbsProvider {
     }
   }
 
-  async forkSession(args: { sourceSession: ProviderChatEntry }): Promise<StartedProviderSession | null> {
+  async forkSession(args: CodexForkSessionRequest): Promise<StartedProviderSession | null> {
     const sourceSession = args.sourceSession;
     const sourceThreadId = sourceSession.providerSessionId;
     if (!sourceThreadId) return null;
 
-    const forked = await this.#withUtilityClient((client) => client.forkThread(buildThreadForkParams({
-      providerSessionId: sourceThreadId,
-      nativePath: sourceSession.nativePath,
-      model: sourceSession.model,
-      projectPath: sourceSession.projectPath,
-    })));
-    const nativePath = await waitForMaterializedThread(forked.thread, {
-      timeoutMs: this.#materializationTimeoutMs,
+    return this.#withOperationClient(args, async (client) => {
+      const forked = await client.forkThread(buildThreadForkParams({
+        providerSessionId: sourceThreadId,
+        nativePath: sourceSession.nativePath,
+        model: sourceSession.model,
+        projectPath: sourceSession.projectPath,
+        codexConfig: args.codexConfig,
+      }));
+      await this.#unsubscribeBestEffort(client, forked.thread.id);
+      const nativePath = await waitForMaterializedThread(forked.thread, {
+        timeoutMs: this.#materializationTimeoutMs,
+      });
+      this.#threadListCaches.clear();
+      return { providerSessionId: forked.thread.id, nativePath };
     });
-    this.#threadListCaches.clear();
-    return { providerSessionId: forked.thread.id, nativePath };
   }
 
   async resolveNativePath(session: ProviderChatEntry): Promise<string | null> {
@@ -292,6 +303,18 @@ export class CodexAppServerProvider extends AbsProvider {
     const client = this.#createClient({ env: buildCodexEnv(request.envOverrides, request.codexConfig) });
     this.#wireClient(client);
     return client;
+  }
+
+  async #withOperationClient<T>(
+    request: Pick<StartSessionRequest, 'envOverrides' | 'codexConfig'>,
+    operation: (client: CodexAppServerClient) => Promise<T>,
+  ): Promise<T> {
+    const client = this.#newClient(request);
+    try {
+      return await operation(client);
+    } finally {
+      client.shutdown();
+    }
   }
 
   async #utility(): Promise<CodexAppServerClient> {
@@ -356,6 +379,7 @@ export class CodexAppServerProvider extends AbsProvider {
       pageCount += 1;
     } while (cursor && pageCount < 20);
 
+    void this.#sampleUtilityLoadedThreads();
     return threads;
   }
 
@@ -382,6 +406,29 @@ export class CodexAppServerProvider extends AbsProvider {
     }
   }
 
+  async #sampleUtilityLoadedThreads(): Promise<void> {
+    const client = this.#utilityClient;
+    if (!client) return;
+    try {
+      const response = await client.loadedThreads();
+      const metric: CodexAppServerMetric = {
+        name: 'codex.app_server.loaded_threads',
+        loadedThreadCount: response.data.length,
+      };
+      this.emit('metric', metric);
+    } catch (error) {
+      console.warn('codex: failed to sample loaded app-server threads:', (error as Error).message);
+    }
+  }
+
+  async #unsubscribeBestEffort(client: CodexAppServerClient, threadId: string): Promise<void> {
+    try {
+      await client.unsubscribeThread(threadId);
+    } catch (error) {
+      console.warn(`codex: failed to unsubscribe app-server thread ${threadId}:`, (error as Error).message);
+    }
+  }
+
   #activateSession(args: {
     chatId: string;
     threadId: string;
@@ -394,7 +441,7 @@ export class CodexAppServerProvider extends AbsProvider {
       nativePath: args.nativePath,
       client: args.client,
       activeTurnId: null,
-      completedItemIds: new Set(),
+      messageDeduper: new CodexTurnMessageDeduper(),
       status: 'running',
       startedAt: new Date().toISOString(),
     };
@@ -407,6 +454,7 @@ export class CodexAppServerProvider extends AbsProvider {
     client.on('serverRequest', (request: JsonRpcServerRequest) => this.#handleServerRequest(client, request));
     client.on('stderr', (line: string) => console.warn('codex app-server:', line));
     client.on('warning', (message: string) => console.warn(message));
+    client.on('metric', (metric: unknown) => this.emit('metric', metric));
     client.on('exit', (code: number) => this.#handleClientExit(client, code));
   }
 
@@ -437,8 +485,9 @@ export class CodexAppServerProvider extends AbsProvider {
   #handleItemCompleted(params: ItemCompletedNotification): void {
     const session = this.#sessions.get(params.threadId);
     if (!session) return;
-    session.completedItemIds.add(params.item.id);
-    this.emitMessages(session.chatId, convertCodexAppServerLiveItem(params.item));
+    const messages = convertCodexAppServerLiveItem(params.item);
+    session.messageDeduper.recordItem(params.item, messages);
+    if (messages.length) this.emitMessages(session.chatId, messages);
   }
 
   #handleTurnCompleted(params: TurnCompletedNotification): void {
@@ -475,11 +524,15 @@ export class CodexAppServerProvider extends AbsProvider {
     const turn = response.thread.turns?.find((candidate) => candidate.id === turnId);
     if (!turn) return;
 
-    const messages = convertCodexAppServerTurnMissingItems(turn, session.completedItemIds, {
-      includeUserMessages: false,
-    });
-    for (const item of turn.items ?? []) session.completedItemIds.add(item.id);
-    if (messages.length) this.emitMessages(session.chatId, messages);
+    for (const item of turn.items ?? []) {
+      const messages = convertCodexAppServerTurnMissingItems({ ...turn, items: [item] }, new Set(), {
+        includeUserMessages: false,
+      });
+      if (session.messageDeduper.shouldEmitItem(item, messages)) {
+        this.emitMessages(session.chatId, messages);
+      }
+      session.messageDeduper.recordItem(item, messages);
+    }
   }
 
   async #readThreadForTerminalBackfill(session: RunningCodexSession): Promise<ThreadReadResponse> {

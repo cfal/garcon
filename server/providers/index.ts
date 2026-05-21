@@ -735,7 +735,23 @@ export class ProviderRegistry {
   }): Promise<StartedProviderSession | null> {
     const adapter = this.#adapters.get(args.sourceSession.provider);
     if (!adapter?.forkSession) return null;
-    return adapter.forkSession(args);
+    const source = requireChatEntry(args.sourceChatId, args.sourceSession);
+    const selection = this.#endpointResolver.resolveSelection({
+      harnessId: source.provider,
+      model: source.model,
+      apiProviderId: source.apiProviderId,
+      modelEndpointId: source.modelEndpointId,
+    });
+    return adapter.forkSession({
+      ...args,
+      sourceSession: {
+        ...source,
+        model: selection.model,
+        ...selectionRequestFields(selection),
+      },
+      envOverrides: selection.envOverrides,
+      ...(selection.codexConfig ? { codexConfig: selection.codexConfig } : {}),
+    });
   }
 
   async setPermissionMode(chatId: string, mode: PermissionMode): Promise<void> {

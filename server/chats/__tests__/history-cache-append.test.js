@@ -106,4 +106,89 @@ describe('appendMessages', () => {
     expect(cache._cacheByChatId.get(chatId2).messages).toHaveLength(1);
     expect(cache._cacheByChatId.get(chatId2).messages[0].content).toBe('Chat 2');
   });
+
+  it('appends to an uncached chat without loading provider history', async () => {
+    cache._cacheByChatId.delete(chatId);
+
+    await cache.appendMessages(chatId, [
+      { type: 'assistant-message', timestamp: ts, content: 'Background update' },
+    ]);
+
+    const entry = cache._cacheByChatId.get(chatId);
+    expect(mockProviders.loadMessages).toHaveBeenCalledTimes(0);
+    expect(entry.completeness).toBe('tail');
+    expect(entry.messages.map((message) => message.content)).toEqual(['Background update']);
+  });
+
+  it('loads provider history once and merges a live tail without duplicate assistant text', async () => {
+    const selectedChatId = 'selected-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { provider: 'codex', providerSessionId: 'thread-1' } : null
+    ));
+    mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'user-message', timestamp: ts, content: 'Prompt' },
+      { type: 'assistant-message', timestamp: ts, content: 'Already present' },
+    ]));
+
+    await cache.appendMessages(selectedChatId, [
+      { type: 'assistant-message', timestamp: ts, content: 'Already present' },
+      { type: 'assistant-message', timestamp: ts, content: 'Live tail' },
+    ]);
+    const messages = await cache.ensureLoaded(selectedChatId);
+
+    expect(mockProviders.loadMessages).toHaveBeenCalledTimes(1);
+    expect(cache._cacheByChatId.get(selectedChatId).completeness).toBe('full');
+    expect(messages.map((message) => message.content)).toEqual([
+      'Prompt',
+      'Already present',
+      'Live tail',
+    ]);
+  });
+
+  it('deduplicates tool-use messages by toolId when merging history and tail', async () => {
+    const selectedChatId = 'tool-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { provider: 'codex', providerSessionId: 'thread-1' } : null
+    ));
+    mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'bash-tool-use', timestamp: ts, toolId: 'tool-1', command: 'ls' },
+    ]));
+
+    await cache.appendMessages(selectedChatId, [
+      { type: 'bash-tool-use', timestamp: ts, toolId: 'tool-1', command: 'ls' },
+      { type: 'bash-tool-use', timestamp: ts, toolId: 'tool-2', command: 'pwd' },
+    ]);
+    const messages = await cache.ensureLoaded(selectedChatId);
+
+    expect(messages.map((message) => message.toolId)).toEqual(['tool-1', 'tool-2']);
+  });
+
+  it('keeps live messages appended while a full load is in flight', async () => {
+    const selectedChatId = 'in-flight-chat';
+    let releaseLoad;
+    let loadStarted;
+    const started = new Promise((resolve) => {
+      loadStarted = resolve;
+    });
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { provider: 'codex', providerSessionId: 'thread-1' } : null
+    ));
+    mockProviders.loadMessages.mockImplementation(async () => {
+      loadStarted();
+      await new Promise((resolve) => {
+        releaseLoad = resolve;
+      });
+      return [{ type: 'assistant-message', timestamp: ts, content: 'Loaded history' }];
+    });
+
+    const pending = cache.ensureLoaded(selectedChatId);
+    await started;
+    await cache.appendMessages(selectedChatId, [
+      { type: 'assistant-message', timestamp: ts, content: 'Arrived live' },
+    ]);
+    releaseLoad();
+    const messages = await pending;
+
+    expect(messages.map((message) => message.content)).toEqual(['Loaded history', 'Arrived live']);
+  });
 });

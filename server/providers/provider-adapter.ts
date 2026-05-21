@@ -8,6 +8,8 @@ export interface ProviderForkSessionRequest {
   sourceSession: ProviderChatEntry;
   sourceChatId: string;
   targetChatId: string;
+  envOverrides?: StartSessionRequest['envOverrides'];
+  codexConfig?: StartSessionRequest['codexConfig'];
 }
 
 export interface ProviderAdapter {

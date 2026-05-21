@@ -668,7 +668,13 @@ export interface CodexProviderInstance {
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }>;
   loadMessages?(session: unknown): Promise<unknown[]>;
   getPreview?(session: unknown): Promise<unknown>;
-  forkSession?(request: { sourceSession: unknown; sourceChatId: string; targetChatId: string }): Promise<StartedProviderSession | null>;
+  forkSession?(request: {
+    sourceSession: unknown;
+    sourceChatId: string;
+    targetChatId: string;
+    envOverrides?: StartSessionRequest['envOverrides'];
+    codexConfig?: StartSessionRequest['codexConfig'];
+  }): Promise<StartedProviderSession | null>;
   resolvePermission?(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void>;
   startPurgeTimer(): ReturnType<typeof setInterval>;
   shutdown?(): void;

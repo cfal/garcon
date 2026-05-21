@@ -1,6 +1,5 @@
-// Bounded in-memory cache of ChatMessage[] arrays by chatId. Once loaded,
-// the cache is authoritative -- messages are never re-read from JSONL
-// while the cache entry exists. Live provider events append directly.
+// Bounded in-memory cache of ChatMessage[] arrays by chatId. Entries may be
+// full history loads or live tails captured before the user opens a chat.
 
 const CACHE_LIMIT = 100;
 const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
@@ -67,17 +66,24 @@ export class HistoryCache {
 
   async ensureLoaded(chatId) {
     const key = String(chatId);
-    const existing = this.getMessages(key);
-    if (existing) return existing;
+    const existing = this.#cacheByChatId.get(key);
+    if (existing?.completeness === 'full') {
+      existing.lastAccessAt = Date.now();
+      return existing.messages;
+    }
 
     const pending = this.#inFlightLoads.get(key);
     if (pending) return pending;
 
     const loadPromise = (async () => {
-      const messages = await this.#loadFromProvider(key);
+      const loaded = await this.#loadFromProvider(key);
+      const current = this.#cacheByChatId.get(key);
+      const liveTail = current?.completeness === 'tail' ? current.messages : [];
+      const messages = trimTail(mergeChatMessages(loaded, liveTail), MAX_MESSAGES_PER_ENTRY);
       this.#cacheByChatId.set(key, {
         chatId: key,
         messages,
+        completeness: 'full',
         lastAccessAt: Date.now(),
       });
       return messages;
@@ -97,22 +103,11 @@ export class HistoryCache {
     let entry = this.#cacheByChatId.get(key);
 
     if (!entry) {
-      await this.ensureLoaded(key);
-      entry = this.#cacheByChatId.get(key);
-      if (!entry) {
-        entry = { chatId: key, messages: [], lastAccessAt: Date.now() };
-        this.#cacheByChatId.set(key, entry);
-      }
+      entry = { chatId: key, messages: [], completeness: 'tail', lastAccessAt: Date.now() };
+      this.#cacheByChatId.set(key, entry);
     }
 
-    for (const m of appendedMessages) {
-      entry.messages.push(m);
-    }
-
-    if (entry.messages.length > MAX_MESSAGES_PER_ENTRY) {
-      entry.messages = entry.messages.slice(-MAX_MESSAGES_PER_ENTRY);
-    }
-
+    entry.messages = trimTail(mergeChatMessages(entry.messages, appendedMessages), MAX_MESSAGES_PER_ENTRY);
     entry.lastAccessAt = Date.now();
 
     try {
@@ -182,3 +177,35 @@ export class HistoryCache {
 }
 
 export { CACHE_LIMIT as _CACHE_LIMIT, STALE_NON_ACTIVE_MS as _STALE_NON_ACTIVE_MS, MAX_MESSAGES_PER_ENTRY as _MAX_MESSAGES_PER_ENTRY };
+
+function trimTail(messages, maxMessages) {
+  return messages.length > maxMessages ? messages.slice(-maxMessages) : messages;
+}
+
+function mergeChatMessages(base, incoming) {
+  const seen = new Set(base.map(chatMessageIdentity));
+  const merged = [...base];
+  for (const message of incoming ?? []) {
+    const key = chatMessageIdentity(message);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(message);
+  }
+  return merged;
+}
+
+function chatMessageIdentity(message) {
+  if (!message || typeof message !== 'object') return 'unknown';
+  if (typeof message.toolId === 'string' && message.toolId) {
+    return `${message.type}:tool:${message.toolId}`;
+  }
+  if (message.type === 'user-message') {
+    const metadata = message.metadata && typeof message.metadata === 'object' ? message.metadata : {};
+    const requestId = metadata.clientRequestId || metadata.messageId;
+    if (typeof requestId === 'string' && requestId) return `${message.type}:client:${requestId}`;
+  }
+  if (typeof message.content === 'string') {
+    return `${message.type}:text:${message.content.trim()}`;
+  }
+  return `${message.type}:json:${JSON.stringify(message)}`;
+}

@@ -5,7 +5,8 @@ import os from 'os';
 import path from 'path';
 import { PermissionRequestMessage, PermissionResolvedMessage } from '../../../common/chat-types.js';
 import { buildApprovalResponse, createPendingApproval } from '../codex-app-server/approvals.ts';
-import { convertCodexAppServerLiveItem, convertCodexAppServerThread } from '../codex-app-server/converter.ts';
+import { CodexAppServerClient } from '../codex-app-server/client.ts';
+import { convertCodexAppServerLiveItem, convertCodexAppServerThread, getCodexThreadPreview } from '../codex-app-server/converter.ts';
 import { waitForMaterializedThread } from '../codex-app-server/durability.ts';
 import { CodexAppServerProvider } from '../codex-app-server/provider.ts';
 import {
@@ -73,6 +74,8 @@ class FakeClient extends EventEmitter {
     this.forkThread = mock(script.forkThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
     this.readThread = mock(script.readThread ?? (async () => ({ thread: makeThread() })));
     this.listThreads = mock(script.listThreads ?? (async () => ({ data: [], nextCursor: null, backwardsCursor: null })));
+    this.loadedThreads = mock(script.loadedThreads ?? (async () => ({ data: [] })));
+    this.unsubscribeThread = mock(script.unsubscribeThread ?? (async () => ({ status: 'notSubscribed' })));
     this.startTurn = mock(script.startTurn ?? (async () => ({ turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } })));
     this.interruptTurn = mock(script.interruptTurn ?? (async () => ({})));
     this.connect = mock(script.connect ?? (async () => ({ userAgent: 'codex', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' })));
@@ -81,6 +84,107 @@ class FakeClient extends EventEmitter {
     this.shutdown = mock();
   }
 }
+
+function createRpcClientFixture(responder) {
+  const encoder = new TextEncoder();
+  let controller;
+  let resolveExit;
+  const writes = [];
+  const stdout = new ReadableStream({
+    start(ctrl) {
+      controller = ctrl;
+    },
+  });
+  const exited = new Promise((resolve) => {
+    resolveExit = resolve;
+  });
+  const proc = {
+    stdin: {
+      write(data) {
+        const line = String(data).trim();
+        const message = JSON.parse(line);
+        writes.push(message);
+        if (typeof message.id !== 'number') return;
+
+        const response = responder(message);
+        if (response?.error) {
+          controller.enqueue(encoder.encode(`${JSON.stringify({ id: message.id, error: response.error })}\n`));
+          return;
+        }
+        controller.enqueue(encoder.encode(`${JSON.stringify({ id: message.id, result: response })}\n`));
+      },
+    },
+    stdout,
+    stderr: null,
+    exited,
+    kill: mock(() => {
+      try {
+        controller.close();
+      } catch {
+        // The stream may already be closed by the test.
+      }
+      resolveExit(0);
+    }),
+  };
+  const spawn = mock(() => proc);
+  const client = new CodexAppServerClient({
+    spawn,
+    resolveCli: async () => ({ command: '/tmp/codex', source: 'bundled' }),
+  });
+  return { client, writes, spawn, proc };
+}
+
+const initializeResponse = {
+  userAgent: 'codex',
+  codexHome: '/tmp/codex-home',
+  platformFamily: 'unix',
+  platformOs: 'linux',
+};
+
+describe('CodexAppServerClient lifecycle RPCs', () => {
+  it('sends loaded-list and unsubscribe requests with metrics', async () => {
+    const { client, writes, spawn } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      if (message.method === 'thread/loaded/list') return { data: ['thread-1'] };
+      if (message.method === 'thread/unsubscribe') return { status: 'notSubscribed' };
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+    const metrics = [];
+    client.on('metric', (metric) => metrics.push(metric));
+
+    await expect(client.loadedThreads()).resolves.toEqual({ data: ['thread-1'] });
+    await expect(client.unsubscribeThread('thread-1')).resolves.toEqual({ status: 'notSubscribed' });
+    client.shutdown();
+
+    expect(spawn).toHaveBeenCalledWith('/tmp/codex', ['app-server', '--listen', 'stdio://'], expect.any(Object));
+    expect(writes).toContainEqual(expect.objectContaining({ method: 'thread/loaded/list', params: {} }));
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/unsubscribe',
+      params: { threadId: 'thread-1' },
+    }));
+    expect(metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'codex.app_server.startup', commandSource: 'bundled' }),
+      expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/loaded/list', success: true }),
+      expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/unsubscribe', success: true }),
+    ]));
+  });
+
+  it('emits a failed request metric when the app-server rejects a request', async () => {
+    const { client } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      return { error: { code: -32001, message: 'Server overloaded' } };
+    });
+    const metrics = [];
+    client.on('metric', (metric) => metrics.push(metric));
+
+    await expect(client.loadedThreads()).rejects.toThrow('Server overloaded');
+    client.shutdown();
+
+    expect(metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/loaded/list', success: false }),
+    ]));
+  });
+});
 
 describe('Codex app-server request builders', () => {
   it('builds durable thread/start params with sandbox and config', () => {
@@ -132,6 +236,20 @@ describe('Codex app-server request builders', () => {
       model: 'gpt-5.4-codex',
       ephemeral: false,
       excludeTurns: true,
+    });
+  });
+
+  it('includes Codex config in thread/fork params', () => {
+    const params = buildThreadForkParams({
+      providerSessionId: 'thread-1',
+      model: 'gpt-5.4-codex',
+      projectPath: '/repo',
+      codexConfig: { config: { model_provider: 'custom-openai' } },
+    });
+
+    expect(params).toMatchObject({
+      threadId: 'thread-1',
+      config: { model_provider: 'custom-openai' },
     });
   });
 
@@ -243,6 +361,13 @@ describe('Codex app-server converter', () => {
       'mcp-tool-use',
       'tool-result',
     ]);
+  });
+
+  it('uses thread preview as lastMessage when thread summaries omit turns', () => {
+    const preview = getCodexThreadPreview(makeThread({ preview: 'Listed preview', turns: [] }));
+
+    expect(preview.firstMessage).toBe('Listed preview');
+    expect(preview.lastMessage).toBe('Listed preview');
   });
 });
 
@@ -428,6 +553,54 @@ describe('CodexAppServerProvider', () => {
     expect(preview.firstMessage).toBe('Listed preview');
     expect(fake.listThreads).toHaveBeenCalledWith(expect.objectContaining({ useStateDbOnly: true }));
     expect(fake.readThread).toHaveBeenCalledTimes(0);
+    await tick();
+    expect(fake.loadedThreads).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses an operation-scoped client with effective env and config for forks', async () => {
+    const nativePath = path.join(tmpDir, 'forked-thread.jsonl');
+    const operationClient = new FakeClient({
+      forkThread: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { thread: makeThread({ id: 'forked-thread', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+      },
+      unsubscribeThread: async () => ({ status: 'unsubscribed' }),
+    });
+    const clientOptions = [];
+    const provider = new CodexAppServerProvider({
+      createClient: (options) => {
+        clientOptions.push(options);
+        return operationClient;
+      },
+      materializationTimeoutMs: 20,
+    });
+
+    const forked = await provider.forkSession({
+      sourceSession: {
+        provider: 'codex',
+        providerSessionId: 'thread-1',
+        nativePath: null,
+        model: 'gpt-5.4-codex',
+        projectPath: '/repo',
+      },
+      envOverrides: { OPENAI_API_KEY: 'endpoint-key' },
+      codexConfig: {
+        env: { CODEX_HOME: '/tmp/codex-home' },
+        config: { model_provider: 'custom-openai' },
+      },
+    });
+
+    expect(forked).toEqual({ providerSessionId: 'forked-thread', nativePath });
+    expect(clientOptions[0].env).toMatchObject({
+      OPENAI_API_KEY: 'endpoint-key',
+      CODEX_HOME: '/tmp/codex-home',
+    });
+    expect(operationClient.forkThread).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+      config: { model_provider: 'custom-openai' },
+    }));
+    expect(operationClient.unsubscribeThread).toHaveBeenCalledWith('forked-thread');
+    expect(operationClient.shutdown).toHaveBeenCalledTimes(1);
   });
 
   it('clears thread/list preview caches when a session finishes', async () => {
@@ -548,6 +721,7 @@ describe('CodexAppServerProvider', () => {
   it('does not duplicate live items during completed-turn backfill', async () => {
     const nativePath = path.join(tmpDir, 'dedupe-backfill-thread.jsonl');
     const liveItem = { type: 'agentMessage', id: 'a1', text: 'Already emitted', phase: null, memoryCitation: null };
+    const backfillItem = { type: 'agentMessage', id: 'a2', text: 'Already emitted', phase: null, memoryCitation: null };
     const fake = new FakeClient({
       startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
       startTurn: async () => {
@@ -557,7 +731,7 @@ describe('CodexAppServerProvider', () => {
       readThread: async () => ({
         thread: makeThread({
           id: 'thread-1',
-          turns: [makeTurn({ id: 'turn-1', items: [liveItem] })],
+          turns: [makeTurn({ id: 'turn-1', items: [backfillItem] })],
         }),
       }),
     });
@@ -578,6 +752,44 @@ describe('CodexAppServerProvider', () => {
     await finished;
 
     expect(emitted.map((message) => message.content)).toEqual(['Already emitted']);
+  });
+
+  it('keeps a repeated backfill assistant item from rendering around missing reasoning', async () => {
+    const nativePath = path.join(tmpDir, 'reasoning-dedupe-backfill-thread.jsonl');
+    const liveAssistant = { type: 'agentMessage', id: 'a-live', text: 'Final answer', phase: null, memoryCitation: null };
+    const backfillReasoning = { type: 'reasoning', id: 'r-backfill', summary: ['Worked through details'], content: [] };
+    const repeatedAssistant = { type: 'agentMessage', id: 'a-backfill', text: 'Final answer', phase: null, memoryCitation: null };
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+      readThread: async () => ({
+        thread: makeThread({
+          id: 'thread-1',
+          turns: [makeTurn({ id: 'turn-1', items: [backfillReasoning, repeatedAssistant] })],
+        }),
+      }),
+    });
+    const provider = new CodexAppServerProvider({ createClient: () => fake, terminalBackfillTimeoutMs: 20 });
+    const emitted = [];
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    await provider.startSession(makeRequest());
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: { threadId: 'thread-1', turnId: 'turn-1', item: liveAssistant },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    await finished;
+
+    expect(emitted.map((message) => message.type)).toEqual(['assistant-message', 'thinking']);
+    expect(emitted.filter((message) => message.content === 'Final answer')).toHaveLength(1);
   });
 
   it('serializes utility app-server reads', async () => {

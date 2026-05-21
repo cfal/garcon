@@ -141,6 +141,13 @@ export interface ThreadListResponse {
   nextCursor: string | null;
   backwardsCursor: string | null;
 }
+export interface ThreadLoadedListResponse {
+  data: string[];
+}
+export type ThreadUnsubscribeStatus = 'notLoaded' | 'notSubscribed' | 'unsubscribed';
+export interface ThreadUnsubscribeResponse {
+  status: ThreadUnsubscribeStatus;
+}
 export interface TurnStartResponse { turn: CodexTurn }
 
 export interface TurnStartedNotification {

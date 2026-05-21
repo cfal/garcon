@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { resolveCodexCliCommand } from './cli.js';
+import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
 import type {
   InitializeResponse,
   JsonRpcFailure,
@@ -8,9 +8,11 @@ import type {
   JsonRpcSuccess,
   ThreadListResponse,
   ThreadForkResponse,
+  ThreadLoadedListResponse,
   ThreadReadResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
+  ThreadUnsubscribeResponse,
   TurnStartResponse,
 } from './protocol.js';
 
@@ -51,7 +53,17 @@ export class CodexAppServerRpcError extends Error {
 export interface CodexAppServerClientOptions {
   env?: Record<string, string>;
   spawn?: SpawnCodexAppServer;
+  resolveCli?: () => Promise<ResolvedCodexCli>;
   resolveCommand?: () => Promise<string>;
+}
+
+export interface CodexAppServerMetric {
+  name: 'codex.app_server.startup' | 'codex.app_server.request' | 'codex.app_server.loaded_threads';
+  durationMs?: number;
+  method?: string;
+  success?: boolean;
+  loadedThreadCount?: number;
+  commandSource?: ResolvedCodexCli['source'];
 }
 
 function defaultSpawnCodexAppServer(
@@ -81,13 +93,17 @@ export class CodexAppServerClient extends EventEmitter {
   #pending = new Map<number, PendingRequest<unknown>>();
   #ready: Promise<InitializeResponse> | null = null;
   #spawn: SpawnCodexAppServer;
-  #resolveCommand: () => Promise<string>;
+  #resolveCli: () => Promise<ResolvedCodexCli>;
   #env: Record<string, string>;
 
   constructor(options: CodexAppServerClientOptions = {}) {
     super();
+    const resolveCommand = options.resolveCommand;
     this.#spawn = options.spawn ?? defaultSpawnCodexAppServer;
-    this.#resolveCommand = options.resolveCommand ?? resolveCodexCliCommand;
+    this.#resolveCli = options.resolveCli
+      ?? (resolveCommand
+        ? async () => ({ command: await resolveCommand(), source: 'path' })
+        : resolveCodexCli);
     this.#env = mergedEnv(options.env);
   }
 
@@ -102,7 +118,25 @@ export class CodexAppServerClient extends EventEmitter {
 
   async request<T>(method: string, params?: unknown): Promise<T> {
     await this.connect();
-    return this.#sendRequest<T>(method, params);
+    const startedAt = performance.now();
+    try {
+      const result = await this.#sendRequest<T>(method, params);
+      this.#emitMetric({
+        name: 'codex.app_server.request',
+        method,
+        durationMs: Math.round(performance.now() - startedAt),
+        success: true,
+      });
+      return result;
+    } catch (error) {
+      this.#emitMetric({
+        name: 'codex.app_server.request',
+        method,
+        durationMs: Math.round(performance.now() - startedAt),
+        success: false,
+      });
+      throw error;
+    }
   }
 
   notify(method: string, params?: unknown): void {
@@ -137,6 +171,14 @@ export class CodexAppServerClient extends EventEmitter {
     return this.request<ThreadListResponse>('thread/list', params);
   }
 
+  loadedThreads(): Promise<ThreadLoadedListResponse> {
+    return this.request<ThreadLoadedListResponse>('thread/loaded/list', {});
+  }
+
+  unsubscribeThread(threadId: string): Promise<ThreadUnsubscribeResponse> {
+    return this.request<ThreadUnsubscribeResponse>('thread/unsubscribe', { threadId });
+  }
+
   startTurn(params: Record<string, unknown>): Promise<TurnStartResponse> {
     return this.request<TurnStartResponse>('turn/start', params);
   }
@@ -146,8 +188,9 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   async #start(): Promise<InitializeResponse> {
-    const command = await this.#resolveCommand();
-    this.#proc = this.#spawn(command, ['app-server', '--listen', 'stdio://'], { env: this.#env });
+    const startedAt = performance.now();
+    const resolved = await this.#resolveCli();
+    this.#proc = this.#spawn(resolved.command, ['app-server', '--listen', 'stdio://'], { env: this.#env });
 
     void this.#readStdout(this.#proc.stdout ?? null);
     void this.#readStderr(this.#proc.stderr ?? null);
@@ -164,8 +207,17 @@ export class CodexAppServerClient extends EventEmitter {
         requestAttestation: false,
       },
     });
+    this.#emitMetric({
+      name: 'codex.app_server.startup',
+      durationMs: Math.round(performance.now() - startedAt),
+      commandSource: resolved.source,
+    });
     this.notify('initialized');
     return initialized;
+  }
+
+  #emitMetric(metric: CodexAppServerMetric): void {
+    this.emit('metric', metric);
   }
 
   #sendRequest<T>(method: string, params?: unknown): Promise<T> {

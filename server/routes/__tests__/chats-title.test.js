@@ -103,6 +103,7 @@ describe('GET /api/chats title resolution', () => {
     const body = await response.json();
 
     expect(body.sessions[0].title).toBe('Hello world');
+    expect(body.sessions[0].preview.lastMessage).toBe('Hello world');
   });
 
   it('falls back to "New Session" when no override or metadata', async () => {
@@ -117,6 +118,7 @@ describe('GET /api/chats title resolution', () => {
     const body = await response.json();
 
     expect(body.sessions[0].title).toBe('New Session');
+    expect(body.sessions[0].preview.lastMessage).toBe('New Session');
   });
 });
 
