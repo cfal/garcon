@@ -53,6 +53,7 @@ export interface HarnessCapabilities {
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: ApiProtocol[];
+  authLoginSupported: boolean;
 }
 
 export interface OpenAiEndpointCapabilities {
@@ -66,60 +67,70 @@ export const BUILTIN_HARNESS_CAPABILITIES: Record<BuiltinHarnessId, HarnessCapab
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['anthropic-messages'],
+    authLoginSupported: true,
   },
   codex: {
     supportsFork: true,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
+    authLoginSupported: true,
   },
   cursor: {
     supportsFork: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
+    authLoginSupported: false,
   },
   opencode: {
     supportsFork: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
+    authLoginSupported: false,
   },
   amp: {
     supportsFork: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
+    authLoginSupported: false,
   },
   factory: {
     supportsFork: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
+    authLoginSupported: false,
   },
   pi: {
     supportsFork: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
+    authLoginSupported: false,
   },
   [DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: {
     supportsFork: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
+    authLoginSupported: false,
   },
   [DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: {
     supportsFork: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
+    authLoginSupported: false,
   },
   [DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: {
     supportsFork: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['anthropic-messages'],
+    authLoginSupported: false,
   },
 };
 
@@ -152,6 +163,7 @@ export interface HarnessCatalogEntry {
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: ApiProtocol[];
+  authLoginSupported: boolean;
   defaultModel: string;
   models: HarnessModelOption[];
 }

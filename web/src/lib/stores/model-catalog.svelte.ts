@@ -39,6 +39,7 @@ export interface HarnessMetadata {
 	supportsImages: boolean;
 	acceptsApiProviderEndpoints: boolean;
 	supportedProtocols: ApiProtocol[];
+	authLoginSupported: boolean;
 	defaultModel: string;
 }
 
@@ -69,16 +70,16 @@ const STATIC_FALLBACKS: HarnessModels = {
 };
 
 const STATIC_HARNESS_METADATA: HarnessMetadataMap = {
-	claude: { id: 'claude', label: 'Claude', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: CLAUDE_MODELS.DEFAULT },
-	codex: { id: 'codex', label: 'Codex', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: CODEX_MODELS.DEFAULT },
-	cursor: { id: 'cursor', label: 'Cursor', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '' },
-	opencode: { id: 'opencode', label: 'OpenCode', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '' },
-	amp: { id: 'amp', label: 'Amp', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: AMP_MODELS.DEFAULT },
-	factory: { id: 'factory', label: 'Factory', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: FACTORY_MODELS.DEFAULT },
-	pi: { id: 'pi', label: 'Pi', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: PI_MODELS.DEFAULT },
-	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '' },
-	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '' },
-	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: { id: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, label: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '' },
+	claude: { id: 'claude', label: 'Claude', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], authLoginSupported: true, defaultModel: CLAUDE_MODELS.DEFAULT },
+	codex: { id: 'codex', label: 'Codex', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], authLoginSupported: true, defaultModel: CODEX_MODELS.DEFAULT },
+	cursor: { id: 'cursor', label: 'Cursor', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: '' },
+	opencode: { id: 'opencode', label: 'OpenCode', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: '' },
+	amp: { id: 'amp', label: 'Amp', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: AMP_MODELS.DEFAULT },
+	factory: { id: 'factory', label: 'Factory', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: FACTORY_MODELS.DEFAULT },
+	pi: { id: 'pi', label: 'Pi', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: PI_MODELS.DEFAULT },
+	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], authLoginSupported: false, defaultModel: '' },
+	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], authLoginSupported: false, defaultModel: '' },
+	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: { id: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, label: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], authLoginSupported: false, defaultModel: '' },
 };
 
 function normalizeHarnessLabel(id: string, label: string): string {
@@ -292,16 +293,17 @@ function parseCatalogResponse(data: unknown): {
 
 		const id = entry.id;
 		if (!isVisibleHarnessId(id)) continue;
-		harnessMetadata[id] = {
-			id,
-			label: typeof entry.label === 'string' ? entry.label : id,
-			description: typeof entry.description === 'string' ? entry.description : undefined,
-			supportsFork: Boolean(entry.supportsFork),
-			supportsImages: Boolean(entry.supportsImages),
-			acceptsApiProviderEndpoints: Boolean(entry.acceptsApiProviderEndpoints),
-			supportedProtocols: normalizeProtocols(entry.supportedProtocols),
-			defaultModel: typeof entry.defaultModel === 'string' ? entry.defaultModel : '',
-		};
+			harnessMetadata[id] = {
+				id,
+				label: typeof entry.label === 'string' ? entry.label : id,
+				description: typeof entry.description === 'string' ? entry.description : undefined,
+				supportsFork: Boolean(entry.supportsFork),
+				supportsImages: Boolean(entry.supportsImages),
+				acceptsApiProviderEndpoints: Boolean(entry.acceptsApiProviderEndpoints),
+				supportedProtocols: normalizeProtocols(entry.supportedProtocols),
+				authLoginSupported: Boolean(entry.authLoginSupported),
+				defaultModel: typeof entry.defaultModel === 'string' ? entry.defaultModel : '',
+			};
 
 		if (Array.isArray(entry.models)) {
 			harnessModels[id] = entry.models

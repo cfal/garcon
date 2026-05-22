@@ -16,7 +16,6 @@ import type {
 } from '$shared/providers';
 
 export type HarnessName = HarnessId;
-export type BrowserLoginHarnessName = 'claude' | 'codex';
 
 export interface HarnessAuthStatus {
 	authenticated: boolean;
@@ -78,8 +77,8 @@ export async function getHarnessCatalog(): Promise<HarnessCatalog> {
 	return apiGet<HarnessCatalog>('/api/v1/harnesses');
 }
 
-export async function launchHarnessAuthLogin(harness: BrowserLoginHarnessName): Promise<HarnessAuthLoginResult> {
-	return apiPost<HarnessAuthLoginResult>(`/api/v1/harnesses/${harness}/auth/login`);
+export async function launchHarnessAuthLogin(harness: HarnessName): Promise<HarnessAuthLoginResult> {
+	return apiPost<HarnessAuthLoginResult>('/api/v1/harnesses/auth/login', { harnessId: harness });
 }
 
 export async function getApiProviders(): Promise<{ apiProviders: ApiProviderCatalogEntry[] }> {

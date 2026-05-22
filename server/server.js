@@ -37,11 +37,16 @@ import { ClaudeProvider } from './providers/claude-cli.js';
 import { CodexAppServerProvider } from './providers/codex-app-server/provider.js';
 import { OpenCodeProvider } from './providers/opencode.js';
 import { AmpProvider } from './providers/amp-cli.js';
-import { CursorProvider } from './providers/cursor-cli.js';
 import { CursorRequestIdentityStore } from './providers/cursor-request-identities.js';
 import { FactoryProvider } from './providers/factory-cli.js';
 import { PiProvider } from './providers/pi-cli.js';
 import { ProviderRegistry } from './providers/index.js';
+import { getClaudeAuthStatus } from './providers/claude-auth.js';
+import { getCodexAuthStatus } from './providers/codex-auth.js';
+import { getOpenCodeAuthStatus } from './providers/opencode-auth.js';
+import { getAmpAuthStatus } from './providers/amp-auth.js';
+import { getFactoryAuthStatus } from './providers/factory-auth.js';
+import { getPiAuthStatus } from './providers/pi-auth.js';
 import { ApiProviderStore } from './providers/api-provider-store.js';
 import { ApiProviderEndpointResolver } from './providers/api-provider-endpoint-resolver.js';
 import {
@@ -49,13 +54,15 @@ import {
   createCodexAdapter,
   createOpenCodeAdapter,
   createAmpAdapter,
-  createCursorAdapter,
   createFactoryAdapter,
   createPiAdapter,
   createDirectOpenAiCompatibleRouterAdapter,
   createDirectOpenAiResponsesCompatibleRouterAdapter,
   createDirectAnthropicCompatibleRouterAdapter,
 } from './providers/provider-adapters.js';
+import { adapterToHarnessPlugin, createHarnessCapabilities } from './providers/harness-plugin-bridge.js';
+import { launchProviderAuthLogin } from './providers/auth-login.js';
+import { createCursorHarnessPlugin } from './providers/harnesses/cursor/cursor-harness.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
@@ -106,13 +113,13 @@ export async function startServer() {
 
     await settings.reconcileWithRegistry(chatRegistry);
 
-    // Tier 1: Standalone providers (EventEmitter-based, no deps)
-    const claudeProvider = new ClaudeProvider();
-    const opencodeProvider = new OpenCodeProvider();
-    const ampProvider = new AmpProvider();
-    const cursorProvider = new CursorProvider(new CursorRequestIdentityStore(workspaceDir));
-    const factoryProvider = new FactoryProvider();
-    const piProvider = new PiProvider();
+	    // Tier 1: Standalone providers (EventEmitter-based, no deps)
+	    const claudeProvider = new ClaudeProvider();
+	    const opencodeProvider = new OpenCodeProvider();
+	    const ampProvider = new AmpProvider();
+	    const cursorRequestIdentities = new CursorRequestIdentityStore(workspaceDir);
+	    const factoryProvider = new FactoryProvider();
+	    const piProvider = new PiProvider();
 
     // Tier 1.5: User-managed API provider store and resolver
     const apiProviderStore = new ApiProviderStore();
@@ -125,34 +132,129 @@ export async function startServer() {
     const codexAdapter = createCodexAdapter(codexProvider);
     const opencodeAdapter = createOpenCodeAdapter(opencodeProvider);
     const ampAdapter = createAmpAdapter(ampProvider);
-    const cursorAdapter = createCursorAdapter(cursorProvider);
-    const factoryAdapter = createFactoryAdapter(factoryProvider);
-    const piAdapter = createPiAdapter(piProvider);
-    const directOpenAiResponsesAdapter = createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore);
-    const directOpenAiAdapter = createDirectOpenAiCompatibleRouterAdapter(apiProviderStore);
-    const directAnthropicAdapter = createDirectAnthropicCompatibleRouterAdapter(apiProviderStore);
+	    const factoryAdapter = createFactoryAdapter(factoryProvider);
+	    const piAdapter = createPiAdapter(piProvider);
+	    const directOpenAiResponsesAdapter = createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore);
+	    const directOpenAiAdapter = createDirectOpenAiCompatibleRouterAdapter(apiProviderStore);
+	    const directAnthropicAdapter = createDirectAnthropicCompatibleRouterAdapter(apiProviderStore);
 
-    const initialAdapters = [
-      claudeAdapter,
-      directAnthropicAdapter,
-      codexAdapter,
-      directOpenAiResponsesAdapter,
-      directOpenAiAdapter,
-      opencodeAdapter,
-      ampAdapter,
-      cursorAdapter,
-      factoryAdapter,
-      piAdapter,
-    ];
+	    const noAuthStatus = {
+	      authenticated: false,
+	      canReauth: false,
+	      label: '',
+	      source: 'none',
+	    };
+	    const withAdapterModels = (adapter, input) => createHarnessCapabilities({
+	      ...input,
+	      ...(adapter.getModels ? { getModels: () => adapter.getModels() } : {}),
+	    });
+	    const harnesses = [
+	      adapterToHarnessPlugin(claudeAdapter, {
+	        auth: {
+	          getAuthStatus: () => getClaudeAuthStatus(),
+	          launchLogin: () => launchProviderAuthLogin('claude'),
+	        },
+	        capabilities: withAdapterModels(claudeAdapter, {
+	          supportsFork: true,
+	          supportsImages: true,
+	          acceptsApiProviderEndpoints: true,
+	          supportedProtocols: ['anthropic-messages'],
+	          authLoginSupported: true,
+	        }),
+	      }),
+	      adapterToHarnessPlugin(codexAdapter, {
+	        auth: {
+	          getAuthStatus: () => getCodexAuthStatus(),
+	          launchLogin: () => launchProviderAuthLogin('codex'),
+	        },
+	        capabilities: withAdapterModels(codexAdapter, {
+	          supportsFork: true,
+	          supportsImages: true,
+	          acceptsApiProviderEndpoints: true,
+	          supportedProtocols: ['openai-compatible'],
+	          authLoginSupported: true,
+	        }),
+	      }),
+	      adapterToHarnessPlugin(directOpenAiResponsesAdapter, {
+	        auth: { getAuthStatus: async () => noAuthStatus },
+	        capabilities: withAdapterModels(directOpenAiResponsesAdapter, {
+	          supportsFork: false,
+	          supportsImages: true,
+	          acceptsApiProviderEndpoints: true,
+	          supportedProtocols: ['openai-compatible'],
+	          authLoginSupported: false,
+	        }),
+	      }),
+	      adapterToHarnessPlugin(directOpenAiAdapter, {
+	        auth: { getAuthStatus: async () => noAuthStatus },
+	        capabilities: withAdapterModels(directOpenAiAdapter, {
+	          supportsFork: false,
+	          supportsImages: true,
+	          acceptsApiProviderEndpoints: true,
+	          supportedProtocols: ['openai-compatible'],
+	          authLoginSupported: false,
+	        }),
+	      }),
+	      adapterToHarnessPlugin(directAnthropicAdapter, {
+	        auth: { getAuthStatus: async () => noAuthStatus },
+	        capabilities: withAdapterModels(directAnthropicAdapter, {
+	          supportsFork: false,
+	          supportsImages: true,
+	          acceptsApiProviderEndpoints: true,
+	          supportedProtocols: ['anthropic-messages'],
+	          authLoginSupported: false,
+	        }),
+	      }),
+	      adapterToHarnessPlugin(opencodeAdapter, {
+	        auth: { getAuthStatus: () => getOpenCodeAuthStatus(opencodeProvider) },
+	        capabilities: withAdapterModels(opencodeAdapter, {
+	          supportsFork: false,
+	          supportsImages: false,
+	          acceptsApiProviderEndpoints: false,
+	          supportedProtocols: [],
+	          authLoginSupported: false,
+	        }),
+	      }),
+	      adapterToHarnessPlugin(ampAdapter, {
+	        auth: { getAuthStatus: () => getAmpAuthStatus() },
+	        capabilities: withAdapterModels(ampAdapter, {
+	          supportsFork: false,
+	          supportsImages: false,
+	          acceptsApiProviderEndpoints: false,
+	          supportedProtocols: [],
+	          authLoginSupported: false,
+	        }),
+	      }),
+	      createCursorHarnessPlugin({ requestIdentities: cursorRequestIdentities }),
+	      adapterToHarnessPlugin(factoryAdapter, {
+	        auth: { getAuthStatus: () => getFactoryAuthStatus() },
+	        capabilities: withAdapterModels(factoryAdapter, {
+	          supportsFork: false,
+	          supportsImages: false,
+	          acceptsApiProviderEndpoints: false,
+	          supportedProtocols: [],
+	          authLoginSupported: false,
+	        }),
+	      }),
+	      adapterToHarnessPlugin(piAdapter, {
+	        auth: { getAuthStatus: () => getPiAuthStatus() },
+	        capabilities: withAdapterModels(piAdapter, {
+	          supportsFork: false,
+	          supportsImages: false,
+	          acceptsApiProviderEndpoints: false,
+	          supportedProtocols: [],
+	          authLoginSupported: false,
+	        }),
+	      }),
+	    ];
 
-    // Tier 2: Harness registry wrapping adapters + registry + store + resolver
-    const providerRegistry = new ProviderRegistry({
-      registry: chatRegistry,
-      adapters: initialAdapters,
-      endpointResolver,
-      apiProviderStore,
-      opencodeInstance: opencodeProvider,
-    });
+	    // Tier 2: Harness registry wrapping plugin runtime + registry + store + resolver
+	    const providerRegistry = new ProviderRegistry({
+	      registry: chatRegistry,
+	      harnesses,
+	      endpointResolver,
+	      apiProviderStore,
+	    });
 
     // Tier 3: Chat infrastructure (uses ProviderRegistry)
     const metadata = new MetadataIndex(chatRegistry, providerRegistry, {

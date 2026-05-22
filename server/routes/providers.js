@@ -1,10 +1,7 @@
 // Harness and API provider routes. Harness routes expose native auth and
 // readiness; API provider routes manage persisted compatible endpoints.
 
-import { launchProviderAuthLogin } from '../providers/auth-login.js';
 import { parseJsonBody } from '../lib/http-request.js';
-
-const UI_LOGIN_HARNESSES = new Set(['claude', 'codex']);
 
 export default function createProviderRoutes(providers) {
   async function getHarnesses() {
@@ -39,12 +36,14 @@ export default function createProviderRoutes(providers) {
     }
   }
 
-  async function postHarnessAuthLogin(harnessId) {
-    if (!UI_LOGIN_HARNESSES.has(harnessId)) {
-      return Response.json({ error: `Auth login is not supported for harness: ${harnessId}` }, { status: 400 });
-    }
+  async function postHarnessAuthLogin(request) {
     try {
-      return Response.json(await launchProviderAuthLogin(harnessId));
+      const body = await parseJsonBody(request);
+      const harnessId = typeof body?.harnessId === 'string' ? body.harnessId : '';
+      if (!harnessId) {
+        return Response.json({ error: 'harnessId is required' }, { status: 400 });
+      }
+      return Response.json(await providers.launchHarnessAuthLogin(harnessId));
     } catch (error) {
       return Response.json({ error: error.message }, { status: 500 });
     }
@@ -119,8 +118,7 @@ export default function createProviderRoutes(providers) {
     '/api/v1/harnesses': { GET: getHarnesses },
     '/api/v1/harnesses/auth': { GET: getHarnessAuth },
     '/api/v1/harnesses/readiness': { GET: getHarnessReadiness },
-    '/api/v1/harnesses/claude/auth/login': { POST: () => postHarnessAuthLogin('claude') },
-    '/api/v1/harnesses/codex/auth/login': { POST: () => postHarnessAuthLogin('codex') },
+    '/api/v1/harnesses/auth/login': { POST: postHarnessAuthLogin },
     '/api/v1/api-providers': {
       GET: getApiProviders,
       POST: postApiProvider,

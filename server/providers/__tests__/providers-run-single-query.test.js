@@ -68,6 +68,7 @@ import {
   createOpenCodeAdapter,
   createPiAdapter,
 } from '../provider-adapters.js';
+import { adapterToHarnessPlugin, createHarnessCapabilities } from '../harness-plugin-bridge.js';
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -121,6 +122,23 @@ function makeApiProviderStore(apiProviders = []) {
     updateApiProvider: mock(),
     deleteApiProvider: mock(),
   };
+}
+
+function pluginFromAdapter(adapter, capabilities) {
+  return adapterToHarnessPlugin(adapter, {
+    auth: {
+      getAuthStatus: async () => ({
+        authenticated: false,
+        canReauth: false,
+        label: '',
+        source: 'none',
+      }),
+    },
+    capabilities: createHarnessCapabilities({
+      ...capabilities,
+      ...(adapter.getModels ? { getModels: () => adapter.getModels() } : {}),
+    }),
+  });
 }
 
 function makeRegistry(args = {}) {
@@ -234,19 +252,60 @@ function makeRegistry(args = {}) {
   return {
     registry: new ProviderRegistry({
       registry: mockRegistry,
-      adapters: [
-        createClaudeAdapter(claude),
-        createCodexAdapter(codex),
-        createOpenCodeAdapter(opencode),
-        createAmpAdapter(amp),
-        createCursorAdapter(cursor),
-        createFactoryAdapter(factory),
-        createPiAdapter(pi),
-        ...(args.adapters ?? []),
+      harnesses: [
+        pluginFromAdapter(createClaudeAdapter(claude), {
+          supportsFork: true,
+          supportsImages: true,
+          acceptsApiProviderEndpoints: true,
+          supportedProtocols: ['anthropic-messages'],
+          authLoginSupported: true,
+        }),
+        pluginFromAdapter(createCodexAdapter(codex), {
+          supportsFork: true,
+          supportsImages: true,
+          acceptsApiProviderEndpoints: true,
+          supportedProtocols: ['openai-compatible'],
+          authLoginSupported: true,
+        }),
+        pluginFromAdapter(createOpenCodeAdapter(opencode), {
+          supportsFork: false,
+          supportsImages: false,
+          acceptsApiProviderEndpoints: false,
+          supportedProtocols: [],
+          authLoginSupported: false,
+        }),
+        pluginFromAdapter(createAmpAdapter(amp), {
+          supportsFork: false,
+          supportsImages: false,
+          acceptsApiProviderEndpoints: false,
+          supportedProtocols: [],
+          authLoginSupported: false,
+        }),
+        pluginFromAdapter(createCursorAdapter(cursor), {
+          supportsFork: false,
+          supportsImages: false,
+          acceptsApiProviderEndpoints: false,
+          supportedProtocols: [],
+          authLoginSupported: false,
+        }),
+        pluginFromAdapter(createFactoryAdapter(factory), {
+          supportsFork: false,
+          supportsImages: false,
+          acceptsApiProviderEndpoints: false,
+          supportedProtocols: [],
+          authLoginSupported: false,
+        }),
+        pluginFromAdapter(createPiAdapter(pi), {
+          supportsFork: false,
+          supportsImages: false,
+          acceptsApiProviderEndpoints: false,
+          supportedProtocols: [],
+          authLoginSupported: false,
+        }),
+        ...(args.harnesses ?? []),
       ],
       endpointResolver: args.endpointResolver ?? makeEndpointResolver(),
       apiProviderStore: args.apiProviderStore ?? makeApiProviderStore(),
-      opencodeInstance: opencode,
     }),
     mockRegistry,
     claude,
@@ -366,8 +425,8 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
         'direct-anthropic-compatible': [anthropicEndpointOption],
       }),
       apiProviderStore: makeApiProviderStore([apiProvider]),
-      adapters: [
-        {
+      harnesses: [
+        pluginFromAdapter({
           id: 'direct-openai-compatible',
           label: 'Direct (Chat Completions)',
           startSession: mock(),
@@ -381,8 +440,14 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
           onSessionCreated: mock(),
           onFinished: mock(),
           onFailed: mock(),
-        },
-        {
+        }, {
+          supportsFork: false,
+          supportsImages: true,
+          acceptsApiProviderEndpoints: true,
+          supportedProtocols: ['openai-compatible'],
+          authLoginSupported: false,
+        }),
+        pluginFromAdapter({
           id: 'direct-openai-responses-compatible',
           label: 'Direct (Responses)',
           startSession: mock(),
@@ -396,8 +461,14 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
           onSessionCreated: mock(),
           onFinished: mock(),
           onFailed: mock(),
-        },
-        {
+        }, {
+          supportsFork: false,
+          supportsImages: true,
+          acceptsApiProviderEndpoints: true,
+          supportedProtocols: ['openai-compatible'],
+          authLoginSupported: false,
+        }),
+        pluginFromAdapter({
           id: 'direct-anthropic-compatible',
           label: 'Direct (Anthropic)',
           startSession: mock(),
@@ -411,7 +482,13 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
           onSessionCreated: mock(),
           onFinished: mock(),
           onFailed: mock(),
-        },
+        }, {
+          supportsFork: false,
+          supportsImages: true,
+          acceptsApiProviderEndpoints: true,
+          supportedProtocols: ['anthropic-messages'],
+          authLoginSupported: false,
+        }),
       ],
     });
 

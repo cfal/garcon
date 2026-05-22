@@ -15,8 +15,7 @@ export interface AuthStatus {
 	error: string | null;
 }
 
-export type SettingsHarnessId = 'claude' | 'codex' | 'opencode' | 'amp' | 'cursor' | 'factory' | 'pi';
-export type BrowserLoginHarnessId = 'claude' | 'codex';
+export type SettingsHarnessId = string;
 
 const AUTH_POLL_INTERVAL_MS = 1500;
 const AUTH_POLL_TIMEOUT_MS = 5 * 60_000;
@@ -27,7 +26,6 @@ const DEFAULT_AUTH: AuthStatus = {
 	loading: true,
 	error: null
 };
-const HARNESS_IDS: SettingsHarnessId[] = ['claude', 'codex', 'opencode', 'amp', 'cursor', 'factory', 'pi'];
 
 export class SettingsAuthState {
 	readonly #modelCatalog: ModelCatalogStore;
@@ -47,7 +45,7 @@ export class SettingsAuthState {
 
 	initialize(): () => void {
 		void this.#modelCatalog.forceRefresh();
-		for (const harnessId of HARNESS_IDS) {
+		for (const harnessId of this.#harnessIds()) {
 			void this.#checkAuth(harnessId);
 		}
 		void this.#checkReadiness();
@@ -58,7 +56,7 @@ export class SettingsAuthState {
 	}
 
 	destroy(): void {
-		for (const harnessId of HARNESS_IDS) {
+		for (const harnessId of this.#harnessIds()) {
 			this.#stopAuthPolling(harnessId);
 		}
 	}
@@ -79,7 +77,8 @@ export class SettingsAuthState {
 		return this.loginPending[harnessId] ?? false;
 	}
 
-	async handleLogin(harnessId: BrowserLoginHarnessId): Promise<void> {
+	async handleLogin(harnessId: SettingsHarnessId): Promise<void> {
+		if (!this.supportsAuthLogin(harnessId)) return;
 		this.#setAuth(harnessId, { ...this.authFor(harnessId), error: null });
 		this.loginPending = { ...this.loginPending, [harnessId]: true };
 
@@ -187,5 +186,23 @@ export class SettingsAuthState {
 	#clearDeviceAuth(harnessId: SettingsHarnessId): void {
 		this.deviceAuthInfo = { ...this.deviceAuthInfo, [harnessId]: undefined };
 		this.loginPending = { ...this.loginPending, [harnessId]: false };
+	}
+
+	supportsAuthLogin(harnessId: SettingsHarnessId): boolean {
+		return this.#modelCatalog.getHarness(harnessId)?.authLoginSupported === true;
+	}
+
+	#harnessIds(): SettingsHarnessId[] {
+		const catalog = this.#modelCatalog as unknown as {
+			getHarnessMetadataList?: () => Array<{ id: string }>;
+			getHarnesses?: () => string[];
+		};
+		if (typeof catalog.getHarnessMetadataList === 'function') {
+			return catalog.getHarnessMetadataList().map((metadata) => metadata.id);
+		}
+		if (typeof catalog.getHarnesses === 'function') {
+			return catalog.getHarnesses();
+		}
+		return [];
 	}
 }

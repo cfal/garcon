@@ -1,0 +1,37 @@
+import { getCursorBinary } from '../../../config.js';
+import type { AcpRuntimePolicy } from '../../acp/runtime.js';
+import type { PermissionMode, ResumeTurnRequest, StartSessionRequest } from '../../types.js';
+
+function mappedMode(permissionMode: PermissionMode): string {
+  return permissionMode === 'plan' ? 'plan' : 'agent';
+}
+
+function mappedModel(model: string): string | undefined {
+  if (!model || model === 'default') return 'default[]';
+  if (model === 'auto') return 'default[]';
+  return model;
+}
+
+function promptForRequest(request: StartSessionRequest | ResumeTurnRequest): Array<{ type: string; text: string }> {
+  if (request.images?.length) {
+    throw new Error('Cursor ACP does not currently support image attachments in Garcon.');
+  }
+  return [{ type: 'text', text: request.command.trim() }];
+}
+
+function buildEnv(request: StartSessionRequest | ResumeTurnRequest): Record<string, string | undefined> {
+  return { ...process.env, ...request.envOverrides };
+}
+
+export function createCursorAcpPolicy(): AcpRuntimePolicy {
+  return {
+    harnessId: 'cursor',
+    command: getCursorBinary(),
+    args: ['acp'],
+    authenticateMethodId: 'cursor_login',
+    buildPrompt: promptForRequest,
+    buildEnv,
+    mapPermissionMode: mappedMode,
+    mapModel: mappedModel,
+  };
+}

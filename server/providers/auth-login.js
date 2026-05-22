@@ -1,6 +1,6 @@
 import os from 'os';
 import { spawn as ptySpawn } from 'bun-pty';
-import { getClaudeBinary } from '../config.js';
+import { getClaudeBinary, getCursorBinary } from '../config.js';
 
 const CLAUDE_LOGIN_WRAPPER = `
 delete process.env.CLAUDECODE;
@@ -24,6 +24,7 @@ function getClaudeLoginCommand() {
 function getLoginCommand(provider) {
   if (provider === 'claude') return getClaudeLoginCommand();
   if (provider === 'codex') return ['codex', 'login', '--device-auth'];
+  if (provider === 'cursor') return [getCursorBinary(), 'login'];
   return null;
 }
 

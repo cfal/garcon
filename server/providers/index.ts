@@ -2,29 +2,12 @@
 // keyed by harness ID. Also provides preview/message loading, harness auth,
 // readiness, and API provider mutations.
 
-import { getClaudeAuthStatus } from './claude-auth.js';
-import { getCodexAuthStatus } from './codex-auth.js';
-import { getOpenCodeAuthStatus } from './opencode-auth.js';
-import { getAmpAuthStatus } from './amp-auth.js';
-import { getCursorAuthStatus } from './cursor-auth.js';
-import { getFactoryAuthStatus } from './factory-auth.js';
-import { getPiAuthStatus } from './pi-auth.js';
-import { getArtificialProviderSessionId } from '../chats/artificial-native-path.js';
 import { resolveFileMentionsInCommand } from '../chats/file-mentions.ts';
 import { getMaxSessions } from '../config.js';
 import type { IChatRegistry } from '../chats/store.js';
 
-import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loaders/claude-history-loader.js';
-import { getCodexPreviewFromNativePath, loadCodexChatMessages } from './loaders/codex-history-loader.js';
-import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loaders/opencode-history-loader.js';
-import { getFactoryPreviewFromSessionId, loadFactoryChatMessagesBySessionId } from './loaders/factory-history-loader.js';
-import { getCursorPreviewFromSessionId, loadCursorChatMessagesBySessionId } from './loaders/cursor-history-loader.js';
-import { getPiPreviewFromSessionId, getPiPreviewFromSessionPath, loadPiChatMessages, loadPiChatMessagesBySessionId } from './loaders/pi-history-loader.js';
-import { getDirectCompatiblePreviewFromSessionId, loadDirectCompatibleChatMessages } from './loaders/direct-compatible-history-loader.js';
-
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
-import type { ChatMessage } from '../../common/chat-types.js';
 import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, PI_MODELS } from '../../common/models.js';
 import { apiProviderTemplate } from '../../common/api-provider-templates.js';
 import type {
@@ -35,18 +18,12 @@ import type {
   RunProviderTurnOptions,
 } from './types.js';
 import { requireChatExecutionConfig } from './types.js';
-import type { ProviderAdapter } from './provider-adapter.js';
 import type { ApiProviderStore, CreateApiProviderInput, UpdateApiProviderInput } from './api-provider-store.js';
 import type { ApiProviderEndpointResolver, ResolvedModelSelection } from './api-provider-endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from './api-provider-endpoint-resolver.js';
-import { directAnthropicSessionFilePath, directOpenAiResponsesSessionFilePath, directOpenAiSessionFilePath } from './provider-adapters.js';
+import type { HarnessPlugin } from './harness-plugin.js';
 import {
-  BUILTIN_HARNESS_CAPABILITIES,
   API_PROVIDER_TEMPLATE_IDS,
-  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-  ENDPOINT_ONLY_HARNESSES,
   isApiProviderTemplateId,
   isEndpointOnlyHarnessId,
   isVisibleHarnessId,
@@ -62,18 +39,6 @@ import {
   type ModelDiscoveryKind,
   type OpenAiEndpointCapabilities,
 } from '../../common/providers.js';
-
-const AUTH_DISPATCHERS: Record<string, (opencode: any) => Promise<unknown>> = {
-  claude: () => getClaudeAuthStatus(),
-  codex: () => getCodexAuthStatus(),
-  cursor: () => getCursorAuthStatus(),
-  opencode: (oc) => getOpenCodeAuthStatus(oc),
-  amp: () => getAmpAuthStatus(),
-  factory: () => getFactoryAuthStatus(),
-  pi: () => getPiAuthStatus(),
-};
-
-const DIRECT_SESSION_ID_RE = /^[a-z0-9-]{8,64}$/i;
 const STATIC_HARNESS_MODELS: Record<string, { defaultModel: string; models: HarnessModelOption[] }> = {
   claude: { defaultModel: CLAUDE_MODELS.DEFAULT, models: CLAUDE_MODELS.OPTIONS },
   codex: { defaultModel: CODEX_MODELS.DEFAULT, models: CODEX_MODELS.OPTIONS },
@@ -122,11 +87,12 @@ function dedupeModels(models: HarnessModelOption[]): HarnessModelOption[] {
   return result;
 }
 
-async function nativeModelsForHarness(id: string, adapter: ProviderAdapter): Promise<HarnessModelOption[]> {
+async function nativeModelsForHarness(id: string, harness: HarnessPlugin): Promise<HarnessModelOption[]> {
   let fetched: HarnessModelOption[] = [];
-  if (!isEndpointOnlyHarnessId(id) && adapter.getModels) {
+  const getModels = harness.capabilities.getModels;
+  if (!isEndpointOnlyHarnessId(id) && getModels) {
     try {
-      fetched = await adapter.getModels();
+      fetched = await getModels();
     } catch (error) {
       console.warn(`providers: failed to fetch ${id} models:`, error instanceof Error ? error.message : String(error));
     }
@@ -494,51 +460,34 @@ function selectionRequestFields(selection: ResolvedModelSelection): {
 
 export class ProviderRegistry {
   #registry: IChatRegistry;
-  #adapters = new Map<string, ProviderAdapter>();
+  #harnesses = new Map<string, HarnessPlugin>();
   #endpointResolver: ApiProviderEndpointResolver;
   #apiProviderStore: ApiProviderStore;
-  #opencodeInstance: any;
-  #authDispatchers = new Map<string, (opencode: any) => Promise<unknown>>();
   #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
 
   constructor(args: {
     registry: IChatRegistry;
-    adapters: ProviderAdapter[];
+    harnesses: HarnessPlugin[];
     endpointResolver: ApiProviderEndpointResolver;
     apiProviderStore: ApiProviderStore;
-    opencodeInstance?: any;
   }) {
     this.#registry = args.registry;
     this.#endpointResolver = args.endpointResolver;
     this.#apiProviderStore = args.apiProviderStore;
-    this.#opencodeInstance = args.opencodeInstance;
 
-    for (const adapter of args.adapters) {
-      this.#adapters.set(adapter.id, adapter);
-    }
-
-    for (const [key, fn] of Object.entries(AUTH_DISPATCHERS)) {
-      this.#authDispatchers.set(key, fn);
-    }
-
-    if (typeof args.registry.onChatRemoved === 'function') {
-      args.registry.onChatRemoved((chatId: string) => {
-        const oc = this.#adapters.get('opencode');
-        if (oc && 'evictChat' in oc) {
-          (oc as any).evictChat(chatId);
-        }
-      });
+    for (const harness of args.harnesses) {
+      this.#harnesses.set(harness.id, harness);
     }
   }
 
   hasHarness(harnessId: string): boolean {
-    return this.#adapters.has(harnessId);
+    return this.#harnesses.has(harnessId);
   }
 
-  #adapterFor(harnessId: string): ProviderAdapter {
-    const adapter = this.#adapters.get(harnessId);
-    if (!adapter) throw new Error(`Unsupported harness: ${harnessId}`);
-    return adapter;
+  #harnessFor(harnessId: string): HarnessPlugin {
+    const harness = this.#harnesses.get(harnessId);
+    if (!harness) throw new Error(`Unsupported harness: ${harnessId}`);
+    return harness;
   }
 
   #setTurnMetadata(chatId: string, opts: { clientRequestId?: string; turnId?: string }): void {
@@ -598,11 +547,11 @@ export class ProviderRegistry {
       ...selectionRequestFields(selection),
     };
 
-    const adapter = this.#adapterFor(entry.provider);
+    const harness = this.#harnessFor(entry.provider);
     this.#setTurnMetadata(chatId, opts);
     let started: StartedProviderSession;
     try {
-      started = await adapter.startSession(request);
+      started = await harness.runtime.startSession(request);
     } catch (error) {
       this.#turnMetadataByChatId.delete(chatId);
       throw error;
@@ -648,13 +597,13 @@ export class ProviderRegistry {
 
     assertSameApiProviderBoundary(previousSelection, selection);
 
-    const adapter = this.#adapterFor(provider);
+    const harness = this.#harnessFor(provider);
     const resolvedCommand = await resolveFileMentionsInCommand(command, entry.projectPath);
     this.#setTurnMetadata(chatId, opts);
     let startedTurn = false;
     try {
       startedTurn = true;
-      await adapter.runTurn({
+      await harness.runtime.runTurn({
         chatId,
         providerSessionId,
         command: resolvedCommand,
@@ -681,9 +630,9 @@ export class ProviderRegistry {
     const entry = this.#registry.getChat(chatId);
     const providerSessionId = entry?.providerSessionId;
     if (!providerSessionId) return false;
-    const adapter = this.#adapters.get(entry.provider);
-    if (!adapter) return false;
-    return adapter.abort(providerSessionId);
+    const harness = this.#harnesses.get(entry.provider);
+    if (!harness) return false;
+    return harness.runtime.abort(providerSessionId);
   }
 
   isChatRunning(chatId: string): boolean {
@@ -694,9 +643,9 @@ export class ProviderRegistry {
 
   isHarnessSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean {
     if (!providerSessionId) return false;
-    const adapter = this.#adapters.get(provider);
-    if (!adapter) return false;
-    return adapter.isRunning(providerSessionId);
+    const harness = this.#harnesses.get(provider);
+    if (!harness) return false;
+    return harness.runtime.isRunning(providerSessionId);
   }
 
   getRunningSessions(): Record<string, Array<{ id: string;[key: string]: unknown }>> {
@@ -711,16 +660,16 @@ export class ProviderRegistry {
         .filter((e): e is NonNullable<typeof e> => Boolean(e));
 
     const result: Record<string, Array<{ id: string;[key: string]: unknown }>> = {};
-    for (const [provider, adapter] of this.#adapters.entries()) {
-      result[provider] = mapToChatId(adapter.getRunningSessions());
+    for (const [provider, harness] of this.#harnesses.entries()) {
+      result[provider] = mapToChatId(harness.runtime.getRunningSessions());
     }
     return result;
   }
 
   getRunningSessionCount(): number {
     let total = 0;
-    for (const adapter of this.#adapters.values()) {
-      total += adapter.getRunningSessions().length;
+    for (const harness of this.#harnesses.values()) {
+      total += harness.runtime.getRunningSessions().length;
     }
     return total;
   }
@@ -734,9 +683,9 @@ export class ProviderRegistry {
       return;
     }
 
-    const adapter = this.#adapters.get(chat.provider);
-    if (adapter?.resolvePermission) {
-      Promise.resolve(adapter.resolvePermission(permissionRequestId, decision)).catch((err: Error) => {
+    const harness = this.#harnesses.get(chat.provider);
+    if (harness?.runtime.resolvePermission) {
+      Promise.resolve(harness.runtime.resolvePermission(permissionRequestId, decision)).catch((err: Error) => {
         console.warn(`providers: ${chat.provider} permission reply failed:`, err.message);
       });
       return;
@@ -750,8 +699,8 @@ export class ProviderRegistry {
     sourceChatId: string;
     targetChatId: string;
   }): Promise<StartedProviderSession | null> {
-    const adapter = this.#adapters.get(args.sourceSession.provider);
-    if (!adapter?.forkSession) return null;
+    const harness = this.#harnesses.get(args.sourceSession.provider);
+    if (!harness?.forkSession) return null;
     const source = requireChatEntry(args.sourceChatId, args.sourceSession);
     const selection = this.#endpointResolver.resolveSelection({
       harnessId: source.provider,
@@ -759,7 +708,7 @@ export class ProviderRegistry {
       apiProviderId: source.apiProviderId,
       modelEndpointId: source.modelEndpointId,
     });
-    return adapter.forkSession({
+    return harness.forkSession({
       ...args,
       sourceSession: {
         ...source,
@@ -775,24 +724,24 @@ export class ProviderRegistry {
     const entry = this.#registry.getChat(chatId);
     const providerSessionId = entry?.providerSessionId;
     if (!providerSessionId || entry.provider !== 'claude') return;
-    const adapter = this.#adapters.get('claude') as any;
-    adapter?.setInternalPermissionMode?.(providerSessionId, mode);
+    const runtime = this.#harnesses.get('claude')?.runtime as any;
+    runtime?.setInternalPermissionMode?.(providerSessionId, mode);
   }
 
   async setThinkingMode(chatId: string, mode: ThinkingMode): Promise<void> {
     const entry = this.#registry.getChat(chatId);
     const providerSessionId = entry?.providerSessionId;
     if (!providerSessionId || entry.provider !== 'claude') return;
-    const adapter = this.#adapters.get('claude') as any;
-    adapter?.setInternalThinkingMode?.(providerSessionId, mode);
+    const runtime = this.#harnesses.get('claude')?.runtime as any;
+    runtime?.setInternalThinkingMode?.(providerSessionId, mode);
   }
 
   async setClaudeThinkingMode(chatId: string, mode: ClaudeThinkingMode): Promise<void> {
     const entry = this.#registry.getChat(chatId);
     const providerSessionId = entry?.providerSessionId;
     if (!providerSessionId || entry.provider !== 'claude') return;
-    const adapter = this.#adapters.get('claude') as any;
-    adapter?.setInternalClaudeThinkingMode?.(providerSessionId, mode);
+    const runtime = this.#harnesses.get('claude')?.runtime as any;
+    runtime?.setInternalClaudeThinkingMode?.(providerSessionId, mode);
   }
 
   async setAmpAgentMode(_chatId: string, _mode: AmpAgentMode): Promise<void> { }
@@ -820,8 +769,8 @@ export class ProviderRegistry {
 
   async runSingleQuery(prompt: string, options: { provider?: string;[key: string]: unknown } = {}): Promise<string> {
     const { provider = 'claude', ...rest } = options;
-    const adapter = this.#adapters.get(provider);
-    if (adapter?.runSingleQuery) {
+    const harness = this.#harnesses.get(provider);
+    if (harness?.runSingleQuery) {
       const model = typeof rest.model === 'string' ? rest.model : '';
       if (model) {
         const selection = this.#endpointResolver.resolveSelection({
@@ -835,157 +784,28 @@ export class ProviderRegistry {
         if (selection.codexConfig) rest.codexConfig = selection.codexConfig;
         Object.assign(rest, selectionRequestFields(selection));
       }
-      return adapter.runSingleQuery(prompt, rest);
+      return harness.runSingleQuery(prompt, rest);
     }
     throw new Error(`Single query unsupported for provider: ${provider}`);
   }
 
   async getPreview(session: ProviderChatEntry | null): Promise<unknown> {
     if (!session?.provider) return null;
-    const adapter = this.#adapters.get(session.provider);
-    if (adapter?.getPreview) return adapter.getPreview(session);
-
-    if (session.provider === 'amp') return null;
-    if (session.provider === 'factory') {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'factory');
-      return getFactoryPreviewFromSessionId(sessionId || '');
-    }
-    if (session.provider === 'cursor') {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'cursor');
-      return getCursorPreviewFromSessionId(sessionId || '', session.projectPath);
-    }
-    if (session.provider === 'pi') {
-      if (session.nativePath && !session.nativePath.startsWith('!')) {
-        return getPiPreviewFromSessionPath(session.nativePath);
-      }
-      return getPiPreviewFromSessionId(session.providerSessionId || '', session.projectPath);
-    }
-    if (session.provider === 'opencode') {
-      const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');
-      const client = this.#opencodeInstance?.getClientIfInitialized?.();
-      if (!client) return null;
-      return getOpenCodePreviewFromSessionId(sessionId, () => Promise.resolve(client));
-    }
-    if (session.provider === 'claude') {
-      return getClaudePreviewFromNativePath(session.nativePath);
-    }
-    if (session.provider === 'codex') {
-      return getCodexPreviewFromNativePath(session.nativePath);
-    }
-    if (session.provider === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID) {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID);
-      const endpointId = session.modelEndpointId;
-      if (!endpointId) return null;
-      return getDirectCompatiblePreviewFromSessionId(
-        sessionId,
-        (id) => this.#loadDirectOpenAiMessages(endpointId, id),
-        'OpenAI-compatible Session',
-      );
-    }
-    if (session.provider === DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID) {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID);
-      const endpointId = session.modelEndpointId;
-      if (!endpointId) return null;
-      return getDirectCompatiblePreviewFromSessionId(
-        sessionId,
-        (id) => this.#loadDirectOpenAiResponsesMessages(endpointId, id),
-        'OpenAI Responses Session',
-      );
-    }
-    if (session.provider === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID);
-      const endpointId = session.modelEndpointId;
-      if (!endpointId) return null;
-      return getDirectCompatiblePreviewFromSessionId(
-        sessionId,
-        (id) => this.#loadDirectAnthropicMessages(endpointId, id),
-        'Anthropic-compatible Session',
-      );
-    }
-
-    return null;
+    const harness = this.#harnesses.get(session.provider);
+    if (!harness?.transcript.getPreview) return null;
+    return harness.transcript.getPreview(session);
   }
 
   async loadMessages(session: ProviderChatEntry | null, chatId?: string): Promise<unknown[]> {
     if (!session?.provider) return [];
-    const adapter = this.#adapters.get(session.provider);
-    if (adapter?.loadMessages) return adapter.loadMessages(session, { chatId });
-
-    if (session.provider === 'amp') return [];
-    if (session.provider === 'factory') {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'factory');
-      return loadFactoryChatMessagesBySessionId(sessionId || '');
-    }
-    if (session.provider === 'cursor') {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'cursor');
-      return loadCursorChatMessagesBySessionId(sessionId || '', session.projectPath);
-    }
-    if (session.provider === 'pi') {
-      if (session.nativePath && !session.nativePath.startsWith('!')) {
-        return loadPiChatMessages(session.nativePath);
-      }
-      return loadPiChatMessagesBySessionId(session.providerSessionId || '', session.projectPath);
-    }
-    if (session.provider === 'opencode') {
-      const sessionId = session.providerSessionId || session.nativePath?.replace('opencode:', '');
-      const getClient = () => this.#opencodeInstance?.getClient?.() ?? Promise.resolve(null);
-      return loadOpenCodeChatMessages(sessionId, getClient);
-    }
-    if (session.provider === 'claude') {
-      return loadClaudeChatMessages(session.nativePath);
-    }
-    if (session.provider === 'codex') {
-      return loadCodexChatMessages(session.nativePath);
-    }
-    if (session.provider === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID) {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID);
-      const endpointId = session.modelEndpointId;
-      if (!endpointId) return [];
-      return this.#loadDirectOpenAiMessages(endpointId, sessionId);
-    }
-    if (session.provider === DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID) {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID);
-      const endpointId = session.modelEndpointId;
-      if (!endpointId) return [];
-      return this.#loadDirectOpenAiResponsesMessages(endpointId, sessionId);
-    }
-    if (session.provider === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) {
-      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID);
-      const endpointId = session.modelEndpointId;
-      if (!endpointId) return [];
-      return this.#loadDirectAnthropicMessages(endpointId, sessionId);
-    }
-
-    return [];
-  }
-
-  async #loadDirectOpenAiMessages(endpointId: string, sessionId: string | null | undefined): Promise<ChatMessage[]> {
-    return loadDirectCompatibleChatMessages(sessionId, {
-      getSessionFilePath: (id) => directOpenAiSessionFilePath(endpointId, id),
-      isValidSessionId: (id) => DIRECT_SESSION_ID_RE.test(id),
-      sessionLabel: 'OpenAI-compatible Session',
-    });
-  }
-
-  async #loadDirectOpenAiResponsesMessages(endpointId: string, sessionId: string | null | undefined): Promise<ChatMessage[]> {
-    return loadDirectCompatibleChatMessages(sessionId, {
-      getSessionFilePath: (id) => directOpenAiResponsesSessionFilePath(endpointId, id),
-      isValidSessionId: (id) => DIRECT_SESSION_ID_RE.test(id),
-      sessionLabel: 'OpenAI Responses Session',
-    });
-  }
-
-  async #loadDirectAnthropicMessages(endpointId: string, sessionId: string | null | undefined): Promise<ChatMessage[]> {
-    return loadDirectCompatibleChatMessages(sessionId, {
-      getSessionFilePath: (id) => directAnthropicSessionFilePath(endpointId, id),
-      isValidSessionId: (id) => DIRECT_SESSION_ID_RE.test(id),
-      sessionLabel: 'Anthropic-compatible Session',
-    });
+    const harness = this.#harnesses.get(session.provider);
+    if (!harness) return [];
+    return harness.transcript.loadMessages(session, { chatId });
   }
 
   async getModels(provider: string): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
-    const adapter = this.#adapters.get(provider);
-    if (adapter?.getModels) return adapter.getModels();
+    const getModels = this.#harnesses.get(provider)?.capabilities.getModels;
+    if (getModels) return getModels();
     return [];
   }
 
@@ -1003,37 +823,30 @@ export class ProviderRegistry {
     });
   }
 
-  async getHarnessAuthStatus(harnessId: string): Promise<unknown | null> {
-    if (isEndpointOnlyHarnessId(harnessId)) {
-      return {
-        authenticated: false,
-        canReauth: false,
-        label: '',
-        source: 'none',
-      };
+  async launchHarnessAuthLogin(harnessId: string): Promise<{
+    launched: boolean;
+    alreadyRunning: boolean;
+    deviceAuth?: { url: string; code: string };
+  }> {
+    const harness = this.#harnesses.get(harnessId);
+    if (!harness) throw new Error(`Unsupported harness: ${harnessId}`);
+    if (!harness.capabilities.authLoginSupported || !harness.auth.launchLogin) {
+      throw new Error(`Auth login is not supported for harness: ${harnessId}`);
     }
-    const dispatcher = this.#authDispatchers.get(harnessId);
-    if (!dispatcher) return null;
-    return dispatcher(this.#opencodeInstance);
+    return harness.auth.launchLogin();
+  }
+
+  async getHarnessAuthStatus(harnessId: string): Promise<unknown | null> {
+    const harness = this.#harnesses.get(harnessId);
+    if (!harness) return null;
+    return harness.auth.getAuthStatus();
   }
 
   async getHarnessAuthStatusMap(): Promise<Record<string, unknown>> {
-    const entries = Array.from(this.#authDispatchers.entries());
-    const results = await Promise.all(entries.map(([, fn]) => fn(this.#opencodeInstance)));
-    return {
-      ...Object.fromEntries(entries.map(([name], i) => [name, results[i]])),
-      ...Object.fromEntries(
-        ENDPOINT_ONLY_HARNESSES.map((harnessId) => [
-          harnessId,
-          {
-            authenticated: false,
-            canReauth: false,
-            label: '',
-            source: 'none',
-          },
-        ]),
-      ),
-    };
+    const authEntries = await Promise.all(
+      Array.from(this.#harnesses.values()).map(async (harness) => [harness.id, await harness.auth.getAuthStatus()] as const),
+    );
+    return Object.fromEntries(authEntries);
   }
 
   async getHarnessReadinessMap(): Promise<Record<string, {
@@ -1044,7 +857,7 @@ export class ProviderRegistry {
   }>> {
     const auth = await this.getHarnessAuthStatusMap();
     const result: Record<string, { ready: boolean; nativeReady: boolean; endpointReady: boolean; reason: string }> = {};
-    for (const [harnessId] of this.#adapters.entries()) {
+    for (const [harnessId] of this.#harnesses.entries()) {
       if (!isVisibleHarnessId(harnessId)) continue;
       const endpointReady = this.#endpointResolver.getModelOptions(harnessId as any).length > 0;
       const nativeReady = Boolean((auth[harnessId] as any)?.authenticated);
@@ -1063,40 +876,40 @@ export class ProviderRegistry {
   }
 
   startPurgeTimers(): void {
-    for (const adapter of this.#adapters.values()) {
-      adapter.startPurgeTimer?.();
+    for (const harness of this.#harnesses.values()) {
+      harness.runtime.startPurgeTimer?.();
     }
   }
 
   shutdown(): void {
-    for (const adapter of this.#adapters.values()) {
-      adapter.shutdown?.();
+    for (const harness of this.#harnesses.values()) {
+      harness.runtime.shutdown?.();
     }
   }
 
   onMessages(cb: (chatId: string, messages: unknown[], metadata?: TurnEventMetadata) => void): void {
-    for (const adapter of this.#adapters.values()) {
-      adapter.onMessages((chatId, messages, eventMetadata) => {
+    for (const harness of this.#harnesses.values()) {
+      harness.runtime.onMessages((chatId, messages, eventMetadata) => {
         cb(chatId, messages, mergeTurnEventMetadata(this.#turnMetadataByChatId.get(chatId), eventMetadata));
       });
     }
   }
 
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void {
-    for (const adapter of this.#adapters.values()) {
-      adapter.onProcessing(cb);
+    for (const harness of this.#harnesses.values()) {
+      harness.runtime.onProcessing(cb);
     }
   }
 
   onSessionCreated(cb: (chatId: string) => void): void {
-    for (const adapter of this.#adapters.values()) {
-      adapter.onSessionCreated(cb);
+    for (const harness of this.#harnesses.values()) {
+      harness.runtime.onSessionCreated(cb);
     }
   }
 
   onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void {
-    for (const adapter of this.#adapters.values()) {
-      adapter.onFinished((chatId, exitCode, eventMetadata) => {
+    for (const harness of this.#harnesses.values()) {
+      harness.runtime.onFinished((chatId, exitCode, eventMetadata) => {
         const metadata = mergeTurnEventMetadata(this.#turnMetadataByChatId.get(chatId), eventMetadata);
         cb(chatId, exitCode, metadata);
         this.#turnMetadataByChatId.delete(chatId);
@@ -1105,8 +918,8 @@ export class ProviderRegistry {
   }
 
   onFailed(cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void): void {
-    for (const adapter of this.#adapters.values()) {
-      adapter.onFailed((chatId, errorMessage) => {
+    for (const harness of this.#harnesses.values()) {
+      harness.runtime.onFailed((chatId, errorMessage) => {
         const metadata = this.#turnMetadataByChatId.get(chatId);
         cb(chatId, errorMessage, metadata);
         this.#turnMetadataByChatId.delete(chatId);
@@ -1116,22 +929,22 @@ export class ProviderRegistry {
 
   async getHarnessCatalog(): Promise<HarnessCatalog> {
     const apiProviders = this.#apiProviderStore.redactedList();
-    const harnesses = (await Promise.all(Array.from(this.#adapters.entries()).map(async ([id, adapter]) => {
+    const harnesses = (await Promise.all(Array.from(this.#harnesses.entries()).map(async ([id, harness]) => {
       if (!isVisibleHarnessId(id)) return null;
       const endpointModels = this.#endpointResolver.getModelOptions(id as any);
-      const nativeModels = await nativeModelsForHarness(id, adapter);
+      const nativeModels = await nativeModelsForHarness(id, harness);
       const models = isEndpointOnlyHarnessId(id)
         ? dedupeModels(endpointModels)
         : dedupeModels([...nativeModels, ...endpointModels]);
-      const builtinCaps = BUILTIN_HARNESS_CAPABILITIES[id as keyof typeof BUILTIN_HARNESS_CAPABILITIES];
       return {
         id: id as any,
-        label: adapter.label,
+        label: harness.label,
         kind: 'harness',
-        supportsFork: builtinCaps?.supportsFork ?? false,
-        supportsImages: builtinCaps?.supportsImages ?? false,
-        acceptsApiProviderEndpoints: builtinCaps?.acceptsApiProviderEndpoints ?? false,
-        supportedProtocols: builtinCaps?.supportedProtocols ?? [],
+        supportsFork: harness.capabilities.supportsFork,
+        supportsImages: harness.capabilities.supportsImages,
+        acceptsApiProviderEndpoints: harness.capabilities.acceptsApiProviderEndpoints,
+        supportedProtocols: harness.capabilities.supportedProtocols,
+        authLoginSupported: harness.capabilities.authLoginSupported,
         defaultModel: defaultModelForHarness(id, nativeModels, endpointModels),
         models,
       };

@@ -11,6 +11,106 @@
 	}
 
 	let { appShell, remoteSettings }: SettingsTestHarnessProps = $props();
+	const harnessIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];
+	const harnessLabels: Record<string, string> = {
+		claude: 'Claude',
+		codex: 'Codex',
+		amp: 'Amp',
+		cursor: 'Cursor',
+		factory: 'Factory',
+		opencode: 'OpenCode',
+		pi: 'Pi',
+	};
+	type MockHarnessMetadata = {
+		id: string;
+		label: string;
+		description: string;
+		supportsFork: boolean;
+		supportsImages: boolean;
+		acceptsApiProviderEndpoints: boolean;
+		supportedProtocols: string[];
+		authLoginSupported: boolean;
+		defaultModel: string;
+	};
+	const harnessMetadataById: Record<string, MockHarnessMetadata> = {
+		claude: {
+			id: 'claude',
+			label: 'Claude',
+			description: '',
+			supportsFork: true,
+			supportsImages: true,
+			acceptsApiProviderEndpoints: true,
+			supportedProtocols: ['anthropic-messages'],
+			authLoginSupported: true,
+			defaultModel: 'opus',
+		},
+		codex: {
+			id: 'codex',
+			label: 'Codex',
+			description: '',
+			supportsFork: true,
+			supportsImages: true,
+			acceptsApiProviderEndpoints: true,
+			supportedProtocols: ['openai-compatible'],
+			authLoginSupported: true,
+			defaultModel: 'opus',
+		},
+		amp: {
+			id: 'amp',
+			label: 'Amp',
+			description: '',
+			supportsFork: false,
+			supportsImages: false,
+			acceptsApiProviderEndpoints: false,
+			supportedProtocols: [],
+			authLoginSupported: false,
+			defaultModel: 'opus',
+		},
+		cursor: {
+			id: 'cursor',
+			label: 'Cursor',
+			description: '',
+			supportsFork: false,
+			supportsImages: false,
+			acceptsApiProviderEndpoints: false,
+			supportedProtocols: [],
+			authLoginSupported: false,
+			defaultModel: 'opus',
+		},
+		factory: {
+			id: 'factory',
+			label: 'Factory',
+			description: '',
+			supportsFork: false,
+			supportsImages: false,
+			acceptsApiProviderEndpoints: false,
+			supportedProtocols: [],
+			authLoginSupported: false,
+			defaultModel: 'opus',
+		},
+		opencode: {
+			id: 'opencode',
+			label: 'OpenCode',
+			description: '',
+			supportsFork: false,
+			supportsImages: false,
+			acceptsApiProviderEndpoints: false,
+			supportedProtocols: [],
+			authLoginSupported: false,
+			defaultModel: 'opus',
+		},
+		pi: {
+			id: 'pi',
+			label: 'Pi',
+			description: '',
+			supportsFork: false,
+			supportsImages: false,
+			acceptsApiProviderEndpoints: false,
+			supportedProtocols: [],
+			authLoginSupported: false,
+			defaultModel: 'opus',
+		},
+	};
 
 	setAppShell({
 		get showSettings() {
@@ -56,33 +156,29 @@
 		toggle() {},
 	} as never);
 	setModelCatalog({
-		version: 0,
-		apiProviderCatalog: [],
+			version: 0,
+			apiProviderCatalog: [],
 			getModels() {
 				return [{ value: 'opus', label: 'Opus' }];
 			},
-			getHarness() {
-				return {
-					id: 'claude',
-					label: 'Claude',
-					description: '',
-					supportsFork: true,
-					supportsImages: true,
-					acceptsApiProviderEndpoints: true,
-					supportedProtocols: ['anthropic-messages'],
-					defaultModel: 'opus',
-				};
+			getHarness(harnessId: string) {
+				return harnessMetadataById[harnessId] ?? null;
 			},
-			getHarnessLabel() {
-				return 'Claude';
+			getHarnessLabel(harnessId: string) {
+				return harnessLabels[harnessId] ?? harnessId;
 			},
-				getHarnesses() {
-					return ['claude'];
-				},
-				getSelectableHarnesses() {
-					return ['claude'];
-				},
-				getDefaultModel() {
+			getHarnesses() {
+				return harnessIds;
+			},
+			getSelectableHarnesses() {
+				return harnessIds;
+			},
+			getHarnessMetadataList() {
+				return harnessIds
+					.map((harnessId) => harnessMetadataById[harnessId] ?? null)
+					.filter((metadata): metadata is MockHarnessMetadata => metadata !== null);
+			},
+			getDefaultModel() {
 				return 'opus';
 			},
 			getModelForSelection(_provider: string, model: string) {
@@ -99,7 +195,7 @@
 			selectionValueFor(_provider: string, model: string) {
 				return model;
 			},
-				refreshIfStale() {
+			refreshIfStale() {
 				return Promise.resolve();
 			},
 			forceRefresh() {
@@ -109,6 +205,6 @@
 				return null;
 			},
 		} as never);
-	</script>
+		</script>
 
 <Settings />

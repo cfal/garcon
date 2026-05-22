@@ -1,11 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
-const launchProviderAuthLogin = mock(() => Promise.resolve({ launched: true, alreadyRunning: false }));
 const parseJsonBody = mock(() => Promise.resolve({}));
-
-mock.module('../../providers/auth-login.js', () => ({
-  launchProviderAuthLogin,
-}));
 
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody,
@@ -19,6 +14,7 @@ describe('harness auth login routes', () => {
     getHarnessAuthStatusMap: mock(() => Promise.resolve({})),
     getHarnessReadinessMap: mock(() => Promise.resolve({})),
     getHarnessCatalog: mock(() => Promise.resolve({ harnesses: [], apiProviders: [] })),
+    launchHarnessAuthLogin: mock(() => Promise.resolve({ launched: true, alreadyRunning: false })),
     getApiProviderCatalog: mock(() => []),
     createApiProvider: mock((input) => Promise.resolve({ id: 'custom_one', ...input })),
     updateApiProvider: mock((id, input) => Promise.resolve({ id, ...input })),
@@ -29,7 +25,6 @@ describe('harness auth login routes', () => {
   const routes = createProviderRoutes(providers);
 
   beforeEach(() => {
-    launchProviderAuthLogin.mockClear();
     parseJsonBody.mockClear();
     for (const fn of Object.values(providers)) {
       if (typeof fn?.mockClear === 'function') fn.mockClear();
@@ -37,27 +32,41 @@ describe('harness auth login routes', () => {
   });
 
   it('launches Claude login via the harness auth route', async () => {
-    const handler = routes['/api/v1/harnesses/claude/auth/login'].POST;
+    parseJsonBody.mockResolvedValueOnce({ harnessId: 'claude' });
+    const handler = routes['/api/v1/harnesses/auth/login'].POST;
 
-    const response = await handler(new Request('http://localhost/api/v1/harnesses/claude/auth/login', { method: 'POST' }));
+    const response = await handler(new Request('http://localhost/api/v1/harnesses/auth/login', { method: 'POST' }));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ launched: true, alreadyRunning: false });
-    expect(launchProviderAuthLogin).toHaveBeenCalledWith('claude');
+    expect(providers.launchHarnessAuthLogin).toHaveBeenCalledWith('claude');
   });
 
   it('returns an error response when auth launch fails', async () => {
-    const handler = routes['/api/v1/harnesses/codex/auth/login'].POST;
-    launchProviderAuthLogin.mockImplementationOnce(() => {
+    parseJsonBody.mockResolvedValueOnce({ harnessId: 'codex' });
+    const handler = routes['/api/v1/harnesses/auth/login'].POST;
+    providers.launchHarnessAuthLogin.mockImplementationOnce(() => {
       throw new Error('spawn failed');
     });
 
-    const response = await handler(new Request('http://localhost/api/v1/harnesses/codex/auth/login', { method: 'POST' }));
+    const response = await handler(new Request('http://localhost/api/v1/harnesses/auth/login', { method: 'POST' }));
     const body = await response.json();
 
     expect(response.status).toBe(500);
     expect(body.error).toBe('spawn failed');
+  });
+
+  it('validates missing harnessId for auth launch', async () => {
+    parseJsonBody.mockResolvedValueOnce({});
+    const handler = routes['/api/v1/harnesses/auth/login'].POST;
+
+    const response = await handler(new Request('http://localhost/api/v1/harnesses/auth/login', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('harnessId is required');
+    expect(providers.launchHarnessAuthLogin).not.toHaveBeenCalled();
   });
 
   it('returns the clean harness/API provider catalog', async () => {
