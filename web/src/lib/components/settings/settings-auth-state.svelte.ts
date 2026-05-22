@@ -15,7 +15,7 @@ export interface AuthStatus {
 	error: string | null;
 }
 
-export type SettingsHarnessId = 'claude' | 'codex' | 'opencode' | 'amp' | 'factory' | 'pi';
+export type SettingsHarnessId = 'claude' | 'codex' | 'opencode' | 'amp' | 'cursor' | 'factory' | 'pi';
 export type BrowserLoginHarnessId = 'claude' | 'codex';
 
 const AUTH_POLL_INTERVAL_MS = 1500;
@@ -27,7 +27,7 @@ const DEFAULT_AUTH: AuthStatus = {
 	loading: true,
 	error: null
 };
-const HARNESS_IDS: SettingsHarnessId[] = ['claude', 'codex', 'opencode', 'amp', 'factory', 'pi'];
+const HARNESS_IDS: SettingsHarnessId[] = ['claude', 'codex', 'opencode', 'amp', 'cursor', 'factory', 'pi'];
 
 export class SettingsAuthState {
 	readonly #modelCatalog: ModelCatalogStore;

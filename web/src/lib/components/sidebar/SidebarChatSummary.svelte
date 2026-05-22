@@ -48,6 +48,7 @@
 	const PROVIDER_TAG_VARIANTS: Record<string, string> = {
 		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
 		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
+		cursor: 'border-provider-cursor-border bg-provider-cursor-bg text-provider-cursor-foreground',
 		opencode: 'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
 		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
 		factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',

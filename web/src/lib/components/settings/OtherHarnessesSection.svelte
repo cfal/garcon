@@ -5,12 +5,13 @@
 	import type { SettingsAuthState } from './settings-auth-state.svelte.js';
 
 	type HarnessConfig = {
-		id: 'opencode' | 'amp' | 'factory' | 'pi';
+		id: 'opencode' | 'amp' | 'cursor' | 'factory' | 'pi';
 		loginCommand: string;
 	};
 
 	const harnesses: HarnessConfig[] = [
 		{ id: 'amp', loginCommand: 'amp login' },
+		{ id: 'cursor', loginCommand: 'cursor-agent login' },
 		{ id: 'factory', loginCommand: 'droid' },
 		{ id: 'opencode', loginCommand: 'opencode auth login' },
 		{ id: 'pi', loginCommand: 'pi' }

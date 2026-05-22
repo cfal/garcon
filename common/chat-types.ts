@@ -132,6 +132,7 @@ export class ApplyPatchToolUseMessage {
     public filePath?: string,
     public oldString?: string,
     public newString?: string,
+    public patch?: string,
   ) {}
 }
 
@@ -625,7 +626,8 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
         str(data.timestamp), str(data.toolId),
         asOptionalString(data.filePath),
         asOptionalString(data.oldString),
-        asOptionalString(data.newString));
+        asOptionalString(data.newString),
+        asOptionalString(data.patch));
 
     case 'grep-tool-use':
       return new GrepToolUseMessage(

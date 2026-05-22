@@ -62,6 +62,7 @@
 	const borderColorClass: Record<HarnessId, string> = {
 		claude: 'border-l-provider-claude-border',
 		codex: 'border-l-provider-codex-border',
+		cursor: 'border-l-provider-cursor-border',
 		opencode: 'border-l-provider-opencode-border',
 		amp: 'border-l-provider-amp-border',
 		factory: 'border-l-provider-factory-border',

@@ -97,11 +97,12 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('ApplyPatchToolUseMessage preserves diff fields', () => {
-		const msg = new ApplyPatchToolUseMessage(TS, 'id-6', '/tmp/p.ts', 'before', 'after');
+		const msg = new ApplyPatchToolUseMessage(TS, 'id-6', '/tmp/p.ts', 'before', 'after', 'patch text');
 		const parsed = roundTrip(msg);
 		expect(parsed.filePath).toBe('/tmp/p.ts');
 		expect(parsed.oldString).toBe('before');
 		expect(parsed.newString).toBe('after');
+		expect(parsed.patch).toBe('patch text');
 	});
 
 	it('GrepToolUseMessage preserves pattern and path', () => {

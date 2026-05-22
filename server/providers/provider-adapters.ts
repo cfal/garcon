@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude } from './claude-cli.js';
 import { runSingleQuery as runSingleQueryCodex } from './codex-app-server/run-single-query.js';
 import { runSingleQuery as runSingleQueryAmp } from './amp-cli.js';
+import { runSingleQuery as runSingleQueryCursor } from './cursor-cli.js';
 import { runSingleQuery as runSingleQueryFactory } from './factory-cli.js';
 import { runSingleQuery as runSingleQueryPi } from './pi-cli.js';
 import type { ProviderAdapter } from './provider-adapter.js';
@@ -184,6 +185,42 @@ export function createAmpAdapter(amp: ExternalCliProviderInstance): ProviderAdap
     onSessionCreated(cb) { amp.onSessionCreated(cb); },
     onFinished(cb) { amp.onFinished(cb); },
     onFailed(cb) { amp.onFailed(cb); },
+  };
+}
+
+// Cursor adapter
+
+export function createCursorAdapter(cursor: ExternalCliProviderInstance): ProviderAdapter {
+  return {
+    id: 'cursor',
+    label: 'Cursor',
+    async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
+      return cursor.startSession(request);
+    },
+    async runTurn(request: ResumeTurnRequest): Promise<void> {
+      await cursor.runTurn(request);
+    },
+    abort(id: string): boolean {
+      return cursor.abort(id);
+    },
+    isRunning(id: string): boolean {
+      return cursor.isRunning(id);
+    },
+    getRunningSessions() {
+      return cursor.getRunningSessions();
+    },
+    async getModels() {
+      return cursor.getModels?.() ?? [];
+    },
+    runSingleQuery: runSingleQueryCursor,
+    startPurgeTimer() {
+      return cursor.startPurgeTimer();
+    },
+    onMessages(cb) { cursor.onMessages(cb); },
+    onProcessing(cb) { cursor.onProcessing(cb); },
+    onSessionCreated(cb) { cursor.onSessionCreated(cb); },
+    onFinished(cb) { cursor.onFinished(cb); },
+    onFailed(cb) { cursor.onFailed(cb); },
   };
 }
 

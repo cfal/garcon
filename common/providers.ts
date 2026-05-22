@@ -11,6 +11,7 @@ export const DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL = 'Direct (Anthropic)' as
 export const BUILTIN_HARNESSES = [
   'claude',
   'codex',
+  'cursor',
   'opencode',
   'amp',
   'factory',
@@ -71,6 +72,12 @@ export const BUILTIN_HARNESS_CAPABILITIES: Record<BuiltinHarnessId, HarnessCapab
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
+  },
+  cursor: {
+    supportsFork: false,
+    supportsImages: false,
+    acceptsApiProviderEndpoints: false,
+    supportedProtocols: [],
   },
   opencode: {
     supportsFork: false,
@@ -194,7 +201,7 @@ export interface ApiProviderModelDiscoveryResponse {
 const ENDPOINT_MODEL_VALUE_SEPARATOR = ':';
 const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;
 const SETTINGS_OAUTH_HARNESSES = ['claude', 'codex'] as const;
-const SETTINGS_OTHER_HARNESSES = ['amp', 'factory', 'opencode', 'pi'] as const;
+const SETTINGS_OTHER_HARNESSES = ['amp', 'cursor', 'factory', 'opencode', 'pi'] as const;
 export const ENDPOINT_ONLY_HARNESSES = [
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
   DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,

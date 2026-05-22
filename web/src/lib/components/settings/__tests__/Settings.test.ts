@@ -71,10 +71,11 @@ describe('Settings', () => {
       expect(appShell.settingsTab).toBe('other-harnesses');
       expect(screen.queryByRole('heading', { name: 'Other Harnesses' })).toBeNull();
       expect(screen.getByText('These harnesses manage providers and authentication internally.')).toBeTruthy();
-      const otherHarnessNames = ['Amp', 'Factory', 'OpenCode', 'Pi'].map((name) => screen.getByText(name));
-      expect(otherHarnessNames[0].compareDocumentPosition(otherHarnessNames[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(otherHarnessNames[1].compareDocumentPosition(otherHarnessNames[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(otherHarnessNames[2].compareDocumentPosition(otherHarnessNames[3]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	      const otherHarnessNames = ['Amp', 'Cursor', 'Factory', 'OpenCode', 'Pi'].map((name) => screen.getByText(name));
+	      expect(otherHarnessNames[0].compareDocumentPosition(otherHarnessNames[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	      expect(otherHarnessNames[1].compareDocumentPosition(otherHarnessNames[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	      expect(otherHarnessNames[2].compareDocumentPosition(otherHarnessNames[3]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	      expect(otherHarnessNames[3].compareDocumentPosition(otherHarnessNames[4]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(screen.getByText('Pi')).toBeTruthy();
       expect(screen.getByText('pi')).toBeTruthy();
 

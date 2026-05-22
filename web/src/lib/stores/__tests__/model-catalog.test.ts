@@ -48,9 +48,10 @@ describe('ModelCatalogStore', () => {
 
 		it('uses static fallbacks before remote hydration', () => {
 			const store = createModelCatalogStore();
-			expect(store.getModels('claude').length).toBeGreaterThan(0);
-			expect(store.getModels('codex').length).toBeGreaterThan(0);
-			expect(store.getModels('factory').length).toBeGreaterThan(0);
+				expect(store.getModels('claude').length).toBeGreaterThan(0);
+				expect(store.getModels('codex').length).toBeGreaterThan(0);
+				expect(store.getModels('cursor').length).toBeGreaterThan(0);
+				expect(store.getModels('factory').length).toBeGreaterThan(0);
 			expect(store.getModels('pi')).toEqual([]);
 			expect(store.getModels('direct-anthropic-compatible')).toEqual([]);
 			expect(store.getModels('direct-openai-compatible')).toEqual([]);
@@ -60,9 +61,10 @@ describe('ModelCatalogStore', () => {
 			expect(store.getSelectableHarnesses()).not.toContain('direct-openai-compatible');
 			expect(store.getSelectableHarnesses()).not.toContain('direct-openai-responses-compatible');
 			expect(store.getModels('zai')).toEqual([]);
-			expect(store.getDefaultModel('claude')).toBe('opus');
-			expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
-			expect(store.getDefaultModel('pi')).toBe('');
+				expect(store.getDefaultModel('claude')).toBe('opus');
+				expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
+				expect(store.getDefaultModel('cursor')).toBe('gpt-5.3-codex');
+				expect(store.getDefaultModel('pi')).toBe('');
 			expect(store.getModels('codex')[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
 			const codexModelValues = store.getModels('codex').map((model) => model.value);
 			expect(codexModelValues).toContain('gpt-5.3-codex-spark');
@@ -80,14 +82,16 @@ describe('ModelCatalogStore', () => {
 	it('exposes default capabilities from common contract', () => {
 		const store = createModelCatalogStore();
 		expect(store.supportsFork('claude')).toBe(true);
-		expect(store.supportsFork('codex')).toBe(true);
-		expect(store.supportsFork('opencode')).toBe(false);
-		expect(store.supportsFork('pi')).toBe(false);
+			expect(store.supportsFork('codex')).toBe(true);
+			expect(store.supportsFork('opencode')).toBe(false);
+			expect(store.supportsFork('cursor')).toBe(false);
+			expect(store.supportsFork('pi')).toBe(false);
 		expect(store.supportsFork('zai')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
-		expect(store.supportsImages('codex')).toBe(true);
-		expect(store.supportsImages('opencode')).toBe(false);
-		expect(store.supportsImages('pi')).toBe(false);
+			expect(store.supportsImages('codex')).toBe(true);
+			expect(store.supportsImages('opencode')).toBe(false);
+			expect(store.supportsImages('cursor')).toBe(false);
+			expect(store.supportsImages('pi')).toBe(false);
 		expect(store.supportsImages('zai')).toBe(false);
 		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
 		expect(store.supportsImages('factory', 'glm-5')).toBe(false);

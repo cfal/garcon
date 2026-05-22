@@ -1,7 +1,7 @@
 import { apiFetch } from '$lib/api/client.js';
 import { harnessLabelFor } from '$lib/i18n/harness-labels';
 import type { SessionProvider } from '$lib/types/app';
-import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS, PI_MODELS } from '$shared/models';
+import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, CURSOR_MODELS, FACTORY_MODELS, PI_MODELS } from '$shared/models';
 import {
 	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
 	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL,
@@ -58,6 +58,7 @@ const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000;
 const STATIC_FALLBACKS: HarnessModels = {
 	claude: CLAUDE_MODELS.OPTIONS,
 	codex: CODEX_MODELS.OPTIONS,
+	cursor: CURSOR_MODELS.OPTIONS,
 	opencode: [],
 	amp: AMP_MODELS.OPTIONS,
 	factory: FACTORY_MODELS.OPTIONS,
@@ -70,6 +71,7 @@ const STATIC_FALLBACKS: HarnessModels = {
 const STATIC_HARNESS_METADATA: HarnessMetadataMap = {
 	claude: { id: 'claude', label: 'Claude', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: CLAUDE_MODELS.DEFAULT },
 	codex: { id: 'codex', label: 'Codex', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: CODEX_MODELS.DEFAULT },
+	cursor: { id: 'cursor', label: 'Cursor', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: CURSOR_MODELS.DEFAULT },
 	opencode: { id: 'opencode', label: 'OpenCode', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '' },
 	amp: { id: 'amp', label: 'Amp', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: AMP_MODELS.DEFAULT },
 	factory: { id: 'factory', label: 'Factory', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: FACTORY_MODELS.DEFAULT },
@@ -225,6 +227,7 @@ function mergeWithFallbacks(models: HarnessModels): HarnessModels {
 	const result: HarnessModels = {
 		claude: mergeStaticModels(models.claude, STATIC_FALLBACKS.claude!),
 		codex: mergeStaticModels(models.codex, STATIC_FALLBACKS.codex!),
+		cursor: mergeStaticModels(models.cursor, STATIC_FALLBACKS.cursor!),
 		amp: models.amp?.length ? models.amp : STATIC_FALLBACKS.amp!,
 		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
 		pi: mergeStaticModels(removeLegacyPiDefaultModels(models.pi), STATIC_FALLBACKS.pi!),

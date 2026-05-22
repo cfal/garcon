@@ -8,6 +8,7 @@ import {
 export function harnessLabelFor(harnessId: string, fallback?: string): string {
 	if (harnessId === 'claude') return m.provider_claude();
 	if (harnessId === 'codex') return m.provider_codex();
+	if (harnessId === 'cursor') return m.provider_cursor();
 	if (harnessId === 'opencode') return m.provider_opencode();
 	if (harnessId === 'amp') return m.provider_amp();
 	if (harnessId === 'factory') return m.provider_factory();

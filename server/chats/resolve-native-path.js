@@ -37,6 +37,10 @@ export async function resolveMissingNativePath(session, options = {}) {
     return createArtificialNativePath(session.provider, session.providerSessionId);
   }
 
+  if (session.provider === 'cursor') {
+    return createArtificialNativePath(session.provider, session.providerSessionId);
+  }
+
   if (session.provider === 'factory') {
     return createArtificialNativePath(session.provider, session.providerSessionId);
   }

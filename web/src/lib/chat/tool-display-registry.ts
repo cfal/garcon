@@ -270,7 +270,20 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			defaultOpen: false,
 			contentKind: 'diff',
 			actionButton: 'none',
-			getContentProps: (input) => diffProps(input, 'Patch', 'gray'),
+			getContentProps: (input) => {
+				const patch = typeof input.patch === 'string' ? input.patch : '';
+				if (patch && !input.oldString && !input.newString) {
+					return {
+						oldContent: '',
+						newContent: patch,
+						filePath: input.filePath,
+						showHeader: false,
+						badge: 'Patch',
+						badgeColor: 'gray'
+					};
+				}
+				return diffProps(input, 'Patch', 'gray');
+			},
 		},
 		result: {
 			hideOnSuccess: true,

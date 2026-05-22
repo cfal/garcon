@@ -36,6 +36,7 @@ import { ClaudeProvider } from './providers/claude-cli.js';
 import { CodexAppServerProvider } from './providers/codex-app-server/provider.js';
 import { OpenCodeProvider } from './providers/opencode.js';
 import { AmpProvider } from './providers/amp-cli.js';
+import { CursorProvider } from './providers/cursor-cli.js';
 import { FactoryProvider } from './providers/factory-cli.js';
 import { PiProvider } from './providers/pi-cli.js';
 import { ProviderRegistry } from './providers/index.js';
@@ -46,6 +47,7 @@ import {
   createCodexAdapter,
   createOpenCodeAdapter,
   createAmpAdapter,
+  createCursorAdapter,
   createFactoryAdapter,
   createPiAdapter,
   createDirectOpenAiCompatibleRouterAdapter,
@@ -104,6 +106,7 @@ export async function startServer() {
     const claudeProvider = new ClaudeProvider();
     const opencodeProvider = new OpenCodeProvider();
     const ampProvider = new AmpProvider();
+    const cursorProvider = new CursorProvider();
     const factoryProvider = new FactoryProvider();
     const piProvider = new PiProvider();
 
@@ -118,6 +121,7 @@ export async function startServer() {
     const codexAdapter = createCodexAdapter(codexProvider);
     const opencodeAdapter = createOpenCodeAdapter(opencodeProvider);
     const ampAdapter = createAmpAdapter(ampProvider);
+    const cursorAdapter = createCursorAdapter(cursorProvider);
     const factoryAdapter = createFactoryAdapter(factoryProvider);
     const piAdapter = createPiAdapter(piProvider);
     const directOpenAiResponsesAdapter = createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore);
@@ -132,6 +136,7 @@ export async function startServer() {
       directOpenAiAdapter,
       opencodeAdapter,
       ampAdapter,
+      cursorAdapter,
       factoryAdapter,
       piAdapter,
     ];

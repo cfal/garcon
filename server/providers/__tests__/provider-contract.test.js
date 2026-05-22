@@ -69,6 +69,7 @@ describe('shared harness/API provider contract', () => {
     expect(isVisibleHarnessId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(true);
     expect(isVisibleHarnessId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(true);
     expect(isVisibleHarnessId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(true);
+    expect(isVisibleHarnessId('cursor')).toBe(true);
     expect(isVisibleHarnessId('pi')).toBe(true);
     expect(isVisibleHarnessId('zai')).toBe(false);
     expect(isVisibleHarnessId('openrouter')).toBe(false);
@@ -87,6 +88,7 @@ describe('shared harness/API provider contract', () => {
     expect(isOAuthHarnessId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(false);
     expect(isOtherSettingsHarnessId('opencode')).toBe(true);
     expect(isOtherSettingsHarnessId('amp')).toBe(true);
+    expect(isOtherSettingsHarnessId('cursor')).toBe(true);
     expect(isOtherSettingsHarnessId('factory')).toBe(true);
     expect(isOtherSettingsHarnessId('pi')).toBe(true);
     expect(isOtherSettingsHarnessId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(false);

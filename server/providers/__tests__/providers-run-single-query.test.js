@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 const claudeQuery = mock(async () => 'claude-response');
 const codexQuery = mock(async () => 'codex-response');
 const ampQuery = mock(async () => 'amp-response');
+const cursorQuery = mock(async () => 'cursor-response');
 const factoryQuery = mock(async () => 'factory-response');
 const piQuery = mock(async () => 'pi-response');
 const originalFetch = globalThis.fetch;
@@ -18,6 +19,10 @@ mock.module('../codex-app-server/run-single-query.js', () => ({
 
 mock.module('../amp-cli.js', () => ({
   runSingleQuery: ampQuery,
+}));
+
+mock.module('../cursor-cli.js', () => ({
+  runSingleQuery: cursorQuery,
 }));
 
 mock.module('../factory-cli.js', () => ({
@@ -58,6 +63,7 @@ import {
   createAmpAdapter,
   createClaudeAdapter,
   createCodexAdapter,
+  createCursorAdapter,
   createFactoryAdapter,
   createOpenCodeAdapter,
   createPiAdapter,
@@ -182,6 +188,20 @@ function makeRegistry(args = {}) {
     onFinished: mock(() => {}),
     onFailed: mock(() => {}),
   };
+  const cursor = {
+    startSession: mock(() => Promise.resolve({ providerSessionId: 'cursor-session', nativePath: '!cursor:cursor-session' })),
+    runTurn: mock(() => Promise.resolve()),
+    isRunning: mock(() => false),
+    abort: mock(() => false),
+    getRunningSessions: mock(() => []),
+    getModels: mock(() => []),
+    startPurgeTimer: mock(() => {}),
+    onMessages: mock(() => {}),
+    onProcessing: mock(() => {}),
+    onSessionCreated: mock(() => {}),
+    onFinished: mock(() => {}),
+    onFailed: mock(() => {}),
+  };
   const factory = {
     startSession: mock(() => Promise.resolve({ providerSessionId: 'factory-session', nativePath: 'factory:factory-session' })),
     runTurn: mock(() => Promise.resolve()),
@@ -219,6 +239,7 @@ function makeRegistry(args = {}) {
         createCodexAdapter(codex),
         createOpenCodeAdapter(opencode),
         createAmpAdapter(amp),
+        createCursorAdapter(cursor),
         createFactoryAdapter(factory),
         createPiAdapter(pi),
         ...(args.adapters ?? []),
@@ -232,6 +253,7 @@ function makeRegistry(args = {}) {
     codex,
     opencode,
     amp,
+    cursor,
     factory,
     pi,
   };
@@ -242,6 +264,7 @@ describe('ProviderRegistry.runSingleQuery', () => {
     claudeQuery.mockClear();
     codexQuery.mockClear();
     ampQuery.mockClear();
+    cursorQuery.mockClear();
     factoryQuery.mockClear();
     piQuery.mockClear();
   });
@@ -253,6 +276,7 @@ describe('ProviderRegistry.runSingleQuery', () => {
     expect(await registry.runSingleQuery('prompt', { provider: 'codex' })).toBe('codex-response');
     expect(await registry.runSingleQuery('prompt', { provider: 'opencode' })).toBe('opencode-response');
     expect(await registry.runSingleQuery('prompt', { provider: 'amp' })).toBe('amp-response');
+    expect(await registry.runSingleQuery('prompt', { provider: 'cursor' })).toBe('cursor-response');
     expect(await registry.runSingleQuery('prompt', { provider: 'factory' })).toBe('factory-response');
     expect(await registry.runSingleQuery('prompt', { provider: 'pi' })).toBe('pi-response');
     expect(opencode.runSingleQuery).toHaveBeenCalled();

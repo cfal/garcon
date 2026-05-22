@@ -138,6 +138,15 @@ export function getPiBinary() {
     || 'pi';
 }
 
+// Cursor Agent CLI binary path
+export function getCursorBinary() {
+  return process.env.GARCON_CURSOR_BINARY
+    || process.env.CURSOR_BINARY
+    || localServerBinary('cursor-agent')
+    || localServerBinary('agent')
+    || 'cursor-agent';
+}
+
 // JWT token expiry (secret is managed by auth/store.js).
 export function getJwtTokenExpiry() {
   return process.env.GARCON_JWT_TOKEN_EXPIRY || '30d';

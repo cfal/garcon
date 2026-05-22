@@ -34,6 +34,31 @@ export const AMP_MODELS = {
   DEFAULT: 'smart',
 };
 
+export const CURSOR_MODELS = {
+  OPTIONS: [
+    { value: 'opus-4.6-thinking', label: 'Claude 4.6 Opus (Thinking)', supportsImages: false },
+    { value: 'gpt-5.3-codex', label: 'GPT-5.3', supportsImages: false },
+    { value: 'gpt-5.2-high', label: 'GPT-5.2 High', supportsImages: false },
+    { value: 'gemini-3-pro', label: 'Gemini 3 Pro', supportsImages: false },
+    { value: 'opus-4.5-thinking', label: 'Claude 4.5 Opus (Thinking)', supportsImages: false },
+    { value: 'gpt-5.2', label: 'GPT-5.2', supportsImages: false },
+    { value: 'gpt-5.1', label: 'GPT-5.1', supportsImages: false },
+    { value: 'gpt-5.1-high', label: 'GPT-5.1 High', supportsImages: false },
+    { value: 'composer-1', label: 'Composer 1', supportsImages: false },
+    { value: 'auto', label: 'Auto', supportsImages: false },
+    { value: 'sonnet-4.5', label: 'Claude 4.5 Sonnet', supportsImages: false },
+    { value: 'sonnet-4.5-thinking', label: 'Claude 4.5 Sonnet (Thinking)', supportsImages: false },
+    { value: 'opus-4.5', label: 'Claude 4.5 Opus', supportsImages: false },
+    { value: 'gpt-5.1-codex', label: 'GPT-5.1 Codex', supportsImages: false },
+    { value: 'gpt-5.1-codex-high', label: 'GPT-5.1 Codex High', supportsImages: false },
+    { value: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max', supportsImages: false },
+    { value: 'gpt-5.1-codex-max-high', label: 'GPT-5.1 Codex Max High', supportsImages: false },
+    { value: 'opus-4.1', label: 'Claude 4.1 Opus', supportsImages: false },
+    { value: 'grok', label: 'Grok', supportsImages: false },
+  ] satisfies SharedModelOption[],
+  DEFAULT: 'gpt-5.3-codex',
+};
+
 export const FACTORY_MODELS = {
   OPTIONS: [
     { value: 'claude-opus-4-5-20251101', label: 'Claude Opus 4.5', supportsImages: true },

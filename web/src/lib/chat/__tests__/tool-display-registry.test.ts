@@ -6,14 +6,15 @@ import {
 	getToolDisplayLabel,
 } from '../tool-display-registry';
 import {
-		AmpFinderToolUseMessage,
-		AmpOracleToolUseMessage,
-		BashToolUseMessage,
-		ExternalToolUseMessage,
-		ExitPlanModeToolUseMessage,
-		ListToolUseMessage,
-		McpToolUseMessage,
-	} from '$shared/chat-types';
+	ApplyPatchToolUseMessage,
+	AmpFinderToolUseMessage,
+	AmpOracleToolUseMessage,
+	BashToolUseMessage,
+	ExternalToolUseMessage,
+	ExitPlanModeToolUseMessage,
+	ListToolUseMessage,
+	McpToolUseMessage,
+} from '$shared/chat-types';
 
 describe('TOOL_DISPLAY_REGISTRY', () => {
 	it('contains a default entry', () => {
@@ -124,6 +125,18 @@ describe('tool display helpers', () => {
 		);
 		expect(details).toEqual({
 			plan: 'Implement the change.',
+		});
+	});
+
+	it('shows patch-only ApplyPatch messages as diffs', () => {
+		const message = new ApplyPatchToolUseMessage('', 'tool-5', undefined, undefined, undefined, '*** Begin Patch');
+		const props = TOOL_DISPLAY_REGISTRY['apply-patch-tool-use'].input.getContentProps?.(
+			message as unknown as Record<string, unknown>,
+		);
+		expect(props).toMatchObject({
+			oldContent: '',
+			newContent: '*** Begin Patch',
+			badge: 'Patch',
 		});
 	});
 });

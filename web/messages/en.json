@@ -295,6 +295,7 @@
   "provider_claude": "Claude",
   "provider_claude_oauth": "Claude OAuth",
   "provider_codex": "Codex",
+  "provider_cursor": "Cursor",
   "provider_direct_anthropic": "Direct (Anthropic)",
   "provider_direct_openai_chat_completions": "Direct (Chat Completions)",
   "provider_direct_openai_responses": "Direct (Responses)",

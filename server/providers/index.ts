@@ -6,6 +6,7 @@ import { getClaudeAuthStatus } from './claude-auth.js';
 import { getCodexAuthStatus } from './codex-auth.js';
 import { getOpenCodeAuthStatus } from './opencode-auth.js';
 import { getAmpAuthStatus } from './amp-auth.js';
+import { getCursorAuthStatus } from './cursor-auth.js';
 import { getFactoryAuthStatus } from './factory-auth.js';
 import { getPiAuthStatus } from './pi-auth.js';
 import { getArtificialProviderSessionId } from '../chats/artificial-native-path.js';
@@ -17,13 +18,14 @@ import { getClaudePreviewFromNativePath, loadClaudeChatMessages } from './loader
 import { getCodexPreviewFromNativePath, loadCodexChatMessages } from './loaders/codex-history-loader.js';
 import { getOpenCodePreviewFromSessionId, loadOpenCodeChatMessages } from './loaders/opencode-history-loader.js';
 import { getFactoryPreviewFromSessionId, loadFactoryChatMessagesBySessionId } from './loaders/factory-history-loader.js';
+import { getCursorPreviewFromSessionId, loadCursorChatMessagesBySessionId } from './loaders/cursor-history-loader.js';
 import { getPiPreviewFromSessionId, getPiPreviewFromSessionPath, loadPiChatMessages, loadPiChatMessagesBySessionId } from './loaders/pi-history-loader.js';
 import { getDirectCompatiblePreviewFromSessionId, loadDirectCompatibleChatMessages } from './loaders/direct-compatible-history-loader.js';
 
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { ChatMessage } from '../../common/chat-types.js';
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, PI_MODELS } from '../../common/models.js';
+import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS, FACTORY_MODELS, PI_MODELS } from '../../common/models.js';
 import { apiProviderTemplate } from '../../common/api-provider-templates.js';
 import type {
   ProviderChatEntry,
@@ -63,6 +65,7 @@ import {
 const AUTH_DISPATCHERS: Record<string, (opencode: any) => Promise<unknown>> = {
   claude: () => getClaudeAuthStatus(),
   codex: () => getCodexAuthStatus(),
+  cursor: () => getCursorAuthStatus(),
   opencode: (oc) => getOpenCodeAuthStatus(oc),
   amp: () => getAmpAuthStatus(),
   factory: () => getFactoryAuthStatus(),
@@ -73,6 +76,7 @@ const DIRECT_SESSION_ID_RE = /^[a-z0-9-]{8,64}$/i;
 const STATIC_HARNESS_MODELS: Record<string, { defaultModel: string; models: HarnessModelOption[] }> = {
   claude: { defaultModel: CLAUDE_MODELS.DEFAULT, models: CLAUDE_MODELS.OPTIONS },
   codex: { defaultModel: CODEX_MODELS.DEFAULT, models: CODEX_MODELS.OPTIONS },
+  cursor: { defaultModel: CURSOR_MODELS.DEFAULT, models: CURSOR_MODELS.OPTIONS },
   amp: { defaultModel: AMP_MODELS.DEFAULT, models: AMP_MODELS.OPTIONS },
   factory: { defaultModel: FACTORY_MODELS.DEFAULT, models: FACTORY_MODELS.OPTIONS },
   pi: { defaultModel: PI_MODELS.DEFAULT, models: PI_MODELS.OPTIONS },
@@ -833,6 +837,10 @@ export class ProviderRegistry {
       const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'factory');
       return getFactoryPreviewFromSessionId(sessionId || '');
     }
+    if (session.provider === 'cursor') {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'cursor');
+      return getCursorPreviewFromSessionId(sessionId || '', session.projectPath);
+    }
     if (session.provider === 'pi') {
       if (session.nativePath && !session.nativePath.startsWith('!')) {
         return getPiPreviewFromSessionPath(session.nativePath);
@@ -894,6 +902,10 @@ export class ProviderRegistry {
     if (session.provider === 'factory') {
       const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'factory');
       return loadFactoryChatMessagesBySessionId(sessionId || '');
+    }
+    if (session.provider === 'cursor') {
+      const sessionId = session.providerSessionId || getArtificialProviderSessionId(session.nativePath, 'cursor');
+      return loadCursorChatMessagesBySessionId(sessionId || '', session.projectPath);
     }
     if (session.provider === 'pi') {
       if (session.nativePath && !session.nativePath.startsWith('!')) {
