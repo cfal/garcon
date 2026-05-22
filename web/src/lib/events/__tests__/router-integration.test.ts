@@ -4,7 +4,7 @@ import RouterIntegrationHarness from './RouterIntegrationHarness.svelte';
 import type { EventRouterStores } from '../router.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
-import { UserMessage, type ChatMessage } from '$shared/chat-types';
+import type { PendingUserInput } from '$shared/pending-user-input';
 
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
 	return {
@@ -14,6 +14,11 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		setCurrentChatId: vi.fn(),
 		chatMessages: () => [],
 		setChatMessages: vi.fn(),
+		pendingUserInputs: () => [],
+		setPendingUserInputs: vi.fn(),
+		upsertPendingUserInput: vi.fn(),
+		clearPendingUserInput: vi.fn(),
+		updatePendingUserInputDeliveryStatus: vi.fn(),
 		loadMessages: vi.fn().mockResolvedValue([]),
 		setIsLoading: vi.fn(),
 		setCanAbort: vi.fn(),
@@ -109,17 +114,22 @@ describe('event router integration', () => {
 	});
 
 	it('marks pending user messages accepted when correlated output arrives before REST response', () => {
-			let messages: ChatMessage[] = [
-			new UserMessage('2026-05-14T00:00:00.000Z', 'hello', undefined, {
-				messageId: 'msg-1',
-				clientRequestId: 'req-1',
-				deliveryStatus: 'submitting',
-			}),
-		];
+		let pendingUserInputs: PendingUserInput[] = [{
+			chatId: 'chat-a',
+			clientRequestId: 'req-1',
+			clientMessageId: 'msg-1',
+			content: 'hello',
+			createdAt: '2026-05-14T00:00:00.000Z',
+			deliveryStatus: 'submitting',
+		}];
 		const stores = createStores({
-			chatMessages: () => messages,
-			setChatMessages: (updater) => {
-				messages = typeof updater === 'function' ? updater(messages) : updater;
+			pendingUserInputs: () => pendingUserInputs,
+			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) => {
+				pendingUserInputs = pendingUserInputs.map((input) =>
+					input.clientRequestId === clientRequestId
+						? { ...input, deliveryStatus }
+						: input,
+				);
 			},
 		});
 
@@ -133,22 +143,26 @@ describe('event router integration', () => {
 			},
 		], stores);
 
-		expect((messages[0] as UserMessage).metadata?.deliveryStatus).toBe('accepted');
-		expect((messages[0] as UserMessage).metadata?.providerRequestId).toBe('cursor-req-1');
+		expect(pendingUserInputs[0]?.deliveryStatus).toBe('accepted');
 	});
 
 	it('marks pending user messages failed on correlated execution failure', () => {
-			let messages: ChatMessage[] = [
-			new UserMessage('2026-05-14T00:00:00.000Z', 'hello', undefined, {
-				messageId: 'msg-1',
-				clientRequestId: 'req-1',
-				deliveryStatus: 'submitting',
-			}),
-		];
+		let pendingUserInputs: PendingUserInput[] = [{
+			chatId: 'chat-a',
+			clientRequestId: 'req-1',
+			clientMessageId: 'msg-1',
+			content: 'hello',
+			createdAt: '2026-05-14T00:00:00.000Z',
+			deliveryStatus: 'submitting',
+		}];
 		const stores = createStores({
-			chatMessages: () => messages,
-			setChatMessages: (updater) => {
-				messages = typeof updater === 'function' ? updater(messages) : updater;
+			pendingUserInputs: () => pendingUserInputs,
+			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) => {
+				pendingUserInputs = pendingUserInputs.map((input) =>
+					input.clientRequestId === clientRequestId
+						? { ...input, deliveryStatus }
+						: input,
+				);
 			},
 		});
 
@@ -161,6 +175,6 @@ describe('event router integration', () => {
 			},
 		], stores);
 
-		expect((messages[0] as UserMessage).metadata?.deliveryStatus).toBe('failed');
+		expect(pendingUserInputs[0]?.deliveryStatus).toBe('failed');
 	});
 });

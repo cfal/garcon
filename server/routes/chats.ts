@@ -8,7 +8,6 @@ import { parseJsonBody } from '../lib/http-request.js';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { isArtificialNativePath } from '../chats/artificial-native-path.js';
-import { UserMessage } from '../../common/chat-types.ts';
 import {
   normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
@@ -57,7 +56,8 @@ interface SettingsDep {
 interface QueueDep {
   deleteChatQueueFile(chatId: string): Promise<void>;
   submit(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
-  appendUserMessage(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
+  registerPendingUserInput(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
+  appendUserMessage?(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
   runAcceptedTurn(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
   abort(chatId: string): Promise<boolean>;
   triggerDrain(chatId: string, options: RunProviderTurnOptions): Promise<void>;
@@ -99,6 +99,19 @@ interface ProvidersDep {
   setClaudeThinkingMode(chatId: string, mode: import('../../common/chat-modes.js').ClaudeThinkingMode): Promise<void>;
   setAmpAgentMode(chatId: string, mode: import('../../common/chat-modes.js').AmpAgentMode): Promise<void>;
   setModel(chatId: string, model: string, metadata?: { apiProviderId?: string | null; modelEndpointId?: string | null }): Promise<void>;
+}
+
+interface PendingInputsDep {
+  register(chatId: string, content: string, options?: {
+    clientRequestId?: string;
+    clientMessageId?: string;
+    turnId?: string;
+    images?: RunProviderTurnOptions['images'];
+    deliveryStatus?: 'submitting' | 'accepted' | 'failed';
+  }): Promise<unknown>;
+  reconcile(chatId: string): Promise<void>;
+  listForChat(chatId: string): unknown[];
+  clearChat(chatId: string, reason?: 'persisted' | 'chat-removed'): void;
 }
 
 function normalizeTagSlug(raw: string): string {
@@ -220,6 +233,19 @@ function queueDrainOptions(chatId: string, registry: IChatRegistry): RunProvider
   };
 }
 
+async function registerPendingQueueInput(
+  queue: QueueDep,
+  chatId: string,
+  command: string,
+  options: RunProviderTurnOptions,
+): Promise<void> {
+  if (typeof queue.registerPendingUserInput === 'function') {
+    await queue.registerPendingUserInput(chatId, command, options);
+    return;
+  }
+  await queue.appendUserMessage?.(chatId, command, options);
+}
+
 export default function createChatRoutes(
   registry: IChatRegistry,
   settings: SettingsDep,
@@ -228,6 +254,12 @@ export default function createChatRoutes(
   metadata: MetadataDep,
   historyCache: HistoryCacheDep,
   providers: ProvidersDep,
+  pendingInputs: PendingInputsDep = {
+    register: () => Promise.resolve(undefined),
+    reconcile: () => Promise.resolve(undefined),
+    listForChat: () => [],
+    clearChat: () => undefined,
+  },
 ): RouteMap {
   const commandLedger = new CommandLedger(getWorkspaceDir());
 
@@ -481,13 +513,13 @@ export default function createChatRoutes(
       });
       await settings.ensureInNormal(chatId);
 
-      await historyCache.appendMessages(chatId, [
-        new UserMessage(new Date().toISOString(), command, initialImages.length > 0 ? initialImages as any : undefined, {
-          messageId: clientMessageId,
-          clientRequestId,
-          turnId,
-        }),
-      ]);
+      await pendingInputs.register(chatId, command, {
+        clientRequestId,
+        clientMessageId,
+        turnId,
+        images: initialImages.length > 0 ? initialImages as any : undefined,
+        deliveryStatus: 'accepted',
+      });
 
       try {
         await commandLedger.update(ledger.record.key, { status: 'scheduled', turnId });
@@ -499,6 +531,7 @@ export default function createChatRoutes(
         });
       } catch (error: unknown) {
         await commandLedger.update(ledger.record.key, { status: 'failed', error: (error as Error).message });
+        pendingInputs.clearChat(chatId, 'chat-removed');
         registry.removeChat(chatId);
         try {
           await settings.removeFromAllOrderLists(chatId);
@@ -575,7 +608,12 @@ export default function createChatRoutes(
       const offset = parseInt(url.searchParams.get('offset') || '0', 10);
 
       await historyCache.ensureLoaded(chatId);
-      return Response.json(historyCache.getPaginatedMessages(chatId, limit, offset));
+      await pendingInputs.reconcile(chatId);
+      const page = historyCache.getPaginatedMessages(chatId, limit, offset) as Record<string, unknown>;
+      return Response.json({
+        ...page,
+        pendingUserInputs: pendingInputs.listForChat(chatId),
+      });
     } catch (error: unknown) {
       console.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
@@ -855,7 +893,7 @@ export default function createChatRoutes(
       options.clientRequestId = clientRequestId;
       options.clientMessageId = clientMessageId;
       options.turnId = ledger.record.turnId ?? turnId;
-      await queue.appendUserMessage(chatId, command, options);
+      await registerPendingQueueInput(queue, chatId, command, options);
       const scheduled = await commandLedger.update(ledger.record.key, {
         status: 'scheduled',
         turnId: options.turnId,
@@ -935,7 +973,7 @@ export default function createChatRoutes(
       options.clientRequestId = clientRequestId;
       options.clientMessageId = clientMessageId;
       options.turnId = ledger.record.turnId ?? turnId;
-      await queue.appendUserMessage(chatId, command, options);
+      await registerPendingQueueInput(queue, chatId, command, options);
       const scheduled = await commandLedger.update(ledger.record.key, { status: 'scheduled', turnId: options.turnId });
       void queue.runAcceptedTurn(chatId, command, options)
         .then(() => commandLedger.update(ledger.record.key, { status: 'finished' }))

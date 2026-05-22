@@ -32,6 +32,7 @@ import { PathCache } from './chats/path-cache.js';
 import { ShellManager } from './ws/shell.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { HistoryCache } from './chats/history-cache.js';
+import { PendingUserInputService } from './chats/pending-user-input-service.js';
 import { ClaudeProvider } from './providers/claude-cli.js';
 import { CodexAppServerProvider } from './providers/codex-app-server/provider.js';
 import { OpenCodeProvider } from './providers/opencode.js';
@@ -71,6 +72,8 @@ import {
   ChatSessionStoppedMessage,
   QueueStateUpdatedMessage,
   QueueDispatchingMessage,
+  PendingUserInputUpdatedMessage,
+  PendingUserInputClearedMessage,
   SettingsChangedMessage,
   WsFaultMessage,
 } from '../common/ws-events.ts';
@@ -159,11 +162,12 @@ export async function startServer() {
 
     const historyCache = new HistoryCache(chatRegistry, metadata, providerRegistry);
     historyCache.init();
+    const pendingInputs = new PendingUserInputService(historyCache);
 
     const shareStore = new ShareStore(workspaceDir);
     await shareStore.init();
 
-    const queue = new QueueManager(workspaceDir, providerRegistry, historyCache);
+    const queue = new QueueManager(workspaceDir, providerRegistry, pendingInputs);
 
     // Telegram notifications (wires itself to provider + queue events).
     const telegramNotifier = new TelegramNotifier(getTelegramBotToken());
@@ -189,10 +193,10 @@ export async function startServer() {
     // Build route and WS handler tables
     const routes = createAllRoutes(
       chatRegistry, settings, queue, pathCache, metadata, historyCache,
-      providerRegistry, telegramNotifier, shareStore,
+      providerRegistry, pendingInputs, telegramNotifier, shareStore,
     );
 
-    const chatHandler = new ChatHandler(providerRegistry, queue, historyCache, chatRegistry, {
+    const chatHandler = new ChatHandler(providerRegistry, queue, historyCache, chatRegistry, pendingInputs, {
       settings,
       metadata,
       forkChatFileCopy,
@@ -299,6 +303,9 @@ export async function startServer() {
     // providers.onMessages(), so only broadcast wiring is needed here.
     providerRegistry.onMessages((chatId, messages, metadata) => {
       broadcast(new AgentRunOutputMessage(chatId, messages, metadata?.turnId, metadata?.clientRequestId, metadata?.providerRequestId));
+      pendingInputs.reconcile(chatId).catch((err) => {
+        console.warn('pending-inputs: reconcile after messages failed:', err.message);
+      });
     });
     providerRegistry.onProcessing((chatId, isProcessing) => {
       broadcast(new ChatProcessingUpdatedMessage(chatId, isProcessing));
@@ -308,6 +315,9 @@ export async function startServer() {
     });
     providerRegistry.onFinished((chatId, exitCode, metadata) => {
       broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId, metadata?.providerRequestId));
+      pendingInputs.reconcile(chatId).catch((err) => {
+        console.warn('pending-inputs: reconcile after finish failed:', err.message);
+      });
       // Defer idle check to next microtask so the provider has time to
       // clear its isRunning flag (emitFinished fires before the flag flip).
       queueMicrotask(() => {
@@ -318,6 +328,9 @@ export async function startServer() {
     });
     providerRegistry.onFailed((chatId, errorMessage, metadata) => {
       broadcast(new AgentRunFailedMessage(chatId, errorMessage, metadata?.turnId, metadata?.clientRequestId, metadata?.providerRequestId));
+      pendingInputs.reconcile(chatId).catch((err) => {
+        console.warn('pending-inputs: reconcile after failure failed:', err.message);
+      });
       queueMicrotask(() => {
         queue.checkChatIdle(chatId).catch((err) => {
           console.warn('queue: checkChatIdle error:', err.message);
@@ -342,6 +355,7 @@ export async function startServer() {
       }
     });
     chatRegistry.onChatRemoved((chatId) => {
+      pendingInputs.clearChat(chatId, 'chat-removed');
       broadcast(new ChatSessionDeletedWsMessage(chatId));
       shareStore.revokeShareByChatId(chatId).catch((err) => {
         console.warn('share-store: failed to revoke share on chat removal:', err.message);
@@ -357,6 +371,12 @@ export async function startServer() {
     });
     queue.onDispatching((chatId, entryId, content) => {
       broadcast(new QueueDispatchingMessage(chatId, entryId, content));
+    });
+    pendingInputs.store.onUpdated((input) => {
+      broadcast(new PendingUserInputUpdatedMessage(input));
+    });
+    pendingInputs.store.onCleared((chatId, clientRequestId, reason) => {
+      broadcast(new PendingUserInputClearedMessage(chatId, clientRequestId, reason));
     });
     queue.onSessionStopped((chatId, success) => {
       broadcast(new ChatSessionStoppedMessage(chatId, success));

@@ -78,6 +78,12 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				deps.chatState.chatMessages = updater;
 			}
 		},
+		pendingUserInputs: () => deps.chatState.pendingUserInputs,
+		setPendingUserInputs: (inputs) => deps.chatState.setPendingUserInputs(inputs),
+		upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
+		clearPendingUserInput: (clientRequestId) => deps.chatState.clearPendingUserInput(clientRequestId),
+		updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
+			deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
 		loadMessages: (chatId) => deps.chatState.loadMessages(chatId),
 		setIsLoading: (v) => deps.lifecycle.setIsLoading(v),
 		setCanAbort: (v) => deps.lifecycle.setCanAbort(v),

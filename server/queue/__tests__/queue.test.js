@@ -117,7 +117,7 @@ describe('queue-updated event', () => {
 
 describe('orchestration', () => {
   let mockProviders;
-  let mockHistoryCache;
+  let mockPendingInputs;
   let orchQueue;
 
   beforeEach(async () => {
@@ -126,48 +126,53 @@ describe('orchestration', () => {
       abortSession: mock(() => Promise.resolve(true)),
       isChatRunning: mock(() => false),
     };
-    mockHistoryCache = {
-      appendMessages: mock(() => Promise.resolve()),
+    mockPendingInputs = {
+      register: mock(() => Promise.resolve()),
+      updateDeliveryStatus: mock(() => undefined),
     };
-    orchQueue = new QueueManager(workspaceDir, mockProviders, mockHistoryCache);
+    orchQueue = new QueueManager(workspaceDir, mockProviders, mockPendingInputs);
   });
 
   describe('submit', () => {
     it('runs provider turn with the given command', async () => {
       await orchQueue.submit('c1', 'hello', { permissionMode: 'default' });
-      expect(mockProviders.runProviderTurn).toHaveBeenCalledWith('c1', 'hello', { permissionMode: 'default' });
+      expect(mockProviders.runProviderTurn).toHaveBeenCalledWith('c1', 'hello', expect.objectContaining({
+        permissionMode: 'default',
+        clientRequestId: expect.any(String),
+        clientMessageId: expect.any(String),
+        turnId: expect.any(String),
+      }));
     });
 
-    it('appends user message to history cache', async () => {
+    it('registers pending input for submitted turns', async () => {
       await orchQueue.submit('c1', 'hello', {});
-      expect(mockHistoryCache.appendMessages).toHaveBeenCalledWith('c1', [
-        expect.objectContaining({ type: 'user-message', content: 'hello' }),
-      ]);
+      expect(mockPendingInputs.register).toHaveBeenCalledWith('c1', 'hello', expect.objectContaining({
+        clientRequestId: expect.any(String),
+        clientMessageId: expect.any(String),
+        turnId: expect.any(String),
+        deliveryStatus: 'accepted',
+      }));
     });
 
-    it('appends user message metadata for accepted REST turns', async () => {
+    it('registers provided metadata for accepted REST turns', async () => {
       await orchQueue.appendUserMessage('c1', 'hello', {
         clientRequestId: 'req-1',
         clientMessageId: 'msg-1',
         turnId: 'turn-1',
       });
 
-      expect(mockHistoryCache.appendMessages).toHaveBeenCalledWith('c1', [
-        expect.objectContaining({
-          type: 'user-message',
-          content: 'hello',
-          metadata: {
-            messageId: 'msg-1',
-            clientRequestId: 'req-1',
-            turnId: 'turn-1',
-          },
-        }),
-      ]);
+      expect(mockPendingInputs.register).toHaveBeenCalledWith('c1', 'hello', {
+        clientRequestId: 'req-1',
+        clientMessageId: 'msg-1',
+        turnId: 'turn-1',
+        images: undefined,
+        deliveryStatus: 'accepted',
+      });
     });
 
-    it('does not append when command is empty', async () => {
+    it('does not register pending input when command is empty', async () => {
       await orchQueue.submit('c1', '', {});
-      expect(mockHistoryCache.appendMessages).not.toHaveBeenCalled();
+      expect(mockPendingInputs.register).not.toHaveBeenCalled();
     });
 
     it('drains queued entries after provider turn', async () => {
@@ -250,7 +255,11 @@ describe('orchestration', () => {
 
       await orchQueue.triggerDrain('c1', {});
 
-      expect(mockProviders.runProviderTurn).toHaveBeenCalledWith('c1', 'queued msg', {});
+      expect(mockProviders.runProviderTurn).toHaveBeenCalledWith('c1', 'queued msg', expect.objectContaining({
+        clientRequestId: expect.any(String),
+        clientMessageId: expect.any(String),
+        turnId: expect.any(String),
+      }));
       expect(events).toHaveLength(1);
       expect(events[0].content).toBe('queued msg');
     });
@@ -281,14 +290,17 @@ describe('orchestration', () => {
       expect(result.entries[0].status).toBe('queued');
     });
 
-    it('appends queued messages to history cache', async () => {
+    it('registers queued messages as pending input before dispatch', async () => {
       await orchQueue.enqueueChat('c1', 'queued text');
 
       await orchQueue.triggerDrain('c1', {});
 
-      expect(mockHistoryCache.appendMessages).toHaveBeenCalledWith('c1', [
-        expect.objectContaining({ type: 'user-message', content: 'queued text' }),
-      ]);
+      expect(mockPendingInputs.register).toHaveBeenCalledWith('c1', 'queued text', expect.objectContaining({
+        clientRequestId: expect.any(String),
+        clientMessageId: expect.any(String),
+        turnId: expect.any(String),
+        deliveryStatus: 'accepted',
+      }));
     });
 
     it('does not reuse original command identity for drained queued turns', async () => {
@@ -301,9 +313,14 @@ describe('orchestration', () => {
         permissionMode: 'default',
       });
 
-      expect(mockProviders.runProviderTurn).toHaveBeenCalledWith('c1', 'queued text', {
-        permissionMode: 'default',
-      });
+      const queuedTurnOptions = mockProviders.runProviderTurn.mock.calls[0]?.[2];
+      expect(queuedTurnOptions.permissionMode).toBe('default');
+      expect(queuedTurnOptions.clientRequestId).toEqual(expect.any(String));
+      expect(queuedTurnOptions.clientMessageId).toEqual(expect.any(String));
+      expect(queuedTurnOptions.turnId).toEqual(expect.any(String));
+      expect(queuedTurnOptions.clientRequestId).not.toBe('req-active');
+      expect(queuedTurnOptions.clientMessageId).not.toBe('msg-active');
+      expect(queuedTurnOptions.turnId).not.toBe('turn-active');
     });
   });
 

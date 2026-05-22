@@ -5,21 +5,20 @@ import { handleQueueSending, handleQueueUpdated, type QueueContext } from '../ha
 function makeQueueContext(overrides: Partial<QueueContext> = {}): {
 	ctx: QueueContext;
 	setMessageQueue: ReturnType<typeof vi.fn>;
-	setChatMessages: ReturnType<typeof vi.fn>;
+	activateLoadingFor: ReturnType<typeof vi.fn>;
 } {
 	const setMessageQueue = vi.fn();
-	const setChatMessages = vi.fn();
+	const activateLoadingFor = vi.fn();
 	const ctx: QueueContext = {
 		currentChatId: 'chat-a',
 		selectedChatId: 'chat-a',
-		setChatMessages,
 		setMessageQueue,
-		activateLoadingFor: vi.fn(),
+		activateLoadingFor,
 		setCanAbort: vi.fn(),
 		onChatProcessing: vi.fn(),
 		...overrides,
 	};
-	return { ctx, setMessageQueue, setChatMessages };
+	return { ctx, setMessageQueue, activateLoadingFor };
 }
 
 describe('queue handler', () => {
@@ -35,16 +34,16 @@ describe('queue handler', () => {
 		expect(setMessageQueue).toHaveBeenCalledWith('chat-b', queueState);
 	});
 
-	it('appends queued message only for current or selected chat', () => {
-		const { ctx, setChatMessages } = makeQueueContext({
+	it('activates loading only for current or selected chat', () => {
+		const { ctx, activateLoadingFor } = makeQueueContext({
 			currentChatId: 'chat-a',
 			selectedChatId: 'chat-a',
 		});
 
 		handleQueueSending(new QueueDispatchingMessage('chat-b', 'q1', 'queued text'), ctx);
-		expect(setChatMessages).not.toHaveBeenCalled();
+		expect(activateLoadingFor).not.toHaveBeenCalled();
 
 		handleQueueSending(new QueueDispatchingMessage('chat-a', 'q2', 'queued text'), ctx);
-		expect(setChatMessages).toHaveBeenCalledTimes(1);
+		expect(activateLoadingFor).toHaveBeenCalledTimes(1);
 	});
 });

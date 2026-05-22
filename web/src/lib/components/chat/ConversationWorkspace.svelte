@@ -232,7 +232,7 @@
 
 	// Scrolls to bottom on new messages and loading status changes unless user scrolled up.
 	$effect(() => {
-		const _count = chatState.chatMessages.length;
+		const _count = chatState.displayMessageCount;
 		const _isLoading = lifecycle.isLoading;
 		if (!chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
 			requestAnimationFrame(() => scroll.scrollToBottom());
@@ -245,7 +245,7 @@
 	// calls from loadChat fire against an undefined container.
 	$effect(() => {
 		const _container = scrollContainer;
-		if (_container && chatState.chatMessages.length > 0) {
+		if (_container && chatState.displayMessageCount > 0) {
 			requestAnimationFrame(() => scroll.scrollToBottom());
 		}
 	});
@@ -318,7 +318,7 @@
 				reserveLoadingStatusSpace={lifecycle.isLoading}
 			/>
 
-			{#if chatState.isUserScrolledUp && chatState.chatMessages.length > 0}
+			{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}
 					<Button
 						variant="outline"
 						size="icon"

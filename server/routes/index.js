@@ -8,12 +8,12 @@ import createChatRoutes from './chats.js';
 import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 
-export default function createAllRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers, telegramNotifier, shareStore) {
+export default function createAllRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers, pendingInputs, telegramNotifier, shareStore) {
   return {
     ...staticRoutes,
     ...authRoutes,
     ...createProviderRoutes(providers),
-    ...createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers),
+    ...createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers, pendingInputs),
     ...createShareRoutes(shareStore, registry, settings, metadata, historyCache),
     ...createFilesRoutes(registry),
     ...createWorkspaceRoutes(settings, providers, telegramNotifier),

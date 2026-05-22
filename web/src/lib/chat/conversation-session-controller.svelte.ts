@@ -18,8 +18,8 @@ import {
 	updateChatModel,
 	updateExecutionSettings,
 } from '$lib/api/chats.js';
-import { UserMessage, AssistantMessage, ErrorMessage, type ChatImage, type ChatMessage } from '$shared/chat-types';
-import { mergeChatMessagesByIdentity } from '$shared/chat-message-identity';
+import { AssistantMessage, ErrorMessage, type ChatImage } from '$shared/chat-types';
+import type { PendingUserInput } from '$shared/pending-user-input';
 import { createClientChatId } from '$lib/chat/client-id';
 import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
@@ -87,32 +87,22 @@ async function fileToChatImage(file: File): Promise<ChatImage> {
 	return { data: `data:${file.type};base64,${base64}`, name: file.name };
 }
 
-function pendingUserMessage(
+function pendingUserInput(
+	chatId: string,
 	content: string,
 	images: ChatImage[],
 	clientRequestId: string,
 	clientMessageId: string,
-): UserMessage {
-	return new UserMessage(new Date().toISOString(), content, images.length > 0 ? images : undefined, {
-		messageId: clientMessageId,
+): PendingUserInput {
+	return {
+		chatId,
 		clientRequestId,
+		clientMessageId,
+		content,
+		createdAt: new Date().toISOString(),
 		deliveryStatus: 'submitting',
-	});
-}
-
-function withMessageDelivery(message: UserMessage, deliveryStatus: 'accepted' | 'failed'): UserMessage {
-	return new UserMessage(message.timestamp, message.content, message.images, {
-		...message.metadata,
-		deliveryStatus,
-	});
-}
-
-function mergeLoadedMessagesWithLocalUserMessages(
-	loadedMessages: ChatMessage[],
-	currentMessages: ChatMessage[],
-): ChatMessage[] {
-	const localUserMessages = currentMessages.filter((message) => message.type === 'user-message');
-	return mergeChatMessagesByIdentity(loadedMessages, localUserMessages, { includeContentToken: true });
+		...(images.length > 0 ? { images } : {}),
+	};
 }
 
 export class ConversationSessionController {
@@ -120,13 +110,8 @@ export class ConversationSessionController {
 
 	constructor(private deps: SessionControllerDeps) {}
 
-	#markUserMessageDelivery(clientMessageId: string, deliveryStatus: 'accepted' | 'failed'): void {
-		const { deps } = this;
-		deps.chatState.chatMessages = deps.chatState.chatMessages.map((message) => {
-			if (!(message instanceof UserMessage)) return message;
-			if (message.metadata?.messageId !== clientMessageId) return message;
-			return withMessageDelivery(message, deliveryStatus);
-		});
+	#markPendingUserInputDelivery(clientRequestId: string, deliveryStatus: 'accepted' | 'failed'): void {
+		this.deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus);
 	}
 
 	// Deduplicates chat-switch calls so the component effect can be stateless.
@@ -264,9 +249,7 @@ export class ConversationSessionController {
 			const messages = await deps.chatState.loadMessages(chatId);
 			if (deps.sessions.selectedChatId !== chatId) return;
 
-			deps.chatState.setMessages(
-				mergeLoadedMessagesWithLocalUserMessages(messages, deps.chatState.chatMessages),
-			);
+			deps.chatState.setMessages(messages);
 			deps.chatState.snapshotCache.markValidated(chatId);
 			deps.setNeedsServerLoad(false);
 			requestAnimationFrame(() => deps.scrollToBottom());
@@ -367,10 +350,9 @@ export class ConversationSessionController {
 
 			const clientRequestId = createClientCommandId();
 			const clientMessageId = createClientCommandId();
-			deps.chatState.chatMessages = [
-				...deps.chatState.chatMessages,
-				pendingUserMessage(text, imagePayload, clientRequestId, clientMessageId),
-			];
+			deps.chatState.upsertPendingUserInput(
+				pendingUserInput(chatId, text, imagePayload, clientRequestId, clientMessageId),
+			);
 			deps.chatState.isUserScrolledUp = false;
 			if (restoreComposerOnFailure) {
 				deps.composerState.clearAfterSubmit(chatId);
@@ -412,7 +394,7 @@ export class ConversationSessionController {
 							images: imagePayload,
 						},
 					});
-					this.#markUserMessageDelivery(clientMessageId, 'accepted');
+					this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
 					deps.lifecycle.activateLoading();
 					deps.lifecycle.setCanAbort(true);
 					deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
@@ -422,7 +404,7 @@ export class ConversationSessionController {
 					deps.appShell.quietRefreshChats();
 				} catch (err) {
 					console.error('[SessionController] Failed to start chat:', err);
-					this.#markUserMessageDelivery(clientMessageId, 'failed');
+					this.#markPendingUserInputDelivery(clientRequestId, 'failed');
 					deps.startupCoordinator.completeStartup(chatId);
 					deps.lifecycle.clearLoading();
 					deps.sessions.setChatProcessing(chatId, false);
@@ -463,14 +445,14 @@ export class ConversationSessionController {
 						modelEndpointId: selection.modelEndpointId,
 						modelProtocol: selection.modelProtocol,
 					});
-					this.#markUserMessageDelivery(clientMessageId, 'accepted');
+					this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
 					deps.lifecycle.activateLoading();
 					deps.lifecycle.setCanAbort(true);
 					deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
 					deps.lifecycle.setCurrentChatId(chatId);
 					deps.sessions.setChatProcessing(chatId, true);
 				} catch (err) {
-					this.#markUserMessageDelivery(clientMessageId, 'failed');
+					this.#markPendingUserInputDelivery(clientRequestId, 'failed');
 					deps.lifecycle.clearLoading();
 					deps.sessions.setChatProcessing(chatId, false);
 					if (restoreComposerOnFailure) {

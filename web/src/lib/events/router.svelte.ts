@@ -15,6 +15,8 @@ import {
 	ChatProcessingUpdatedMessage,
 	QueueStateUpdatedMessage,
 	QueueDispatchingMessage,
+	PendingUserInputUpdatedMessage,
+	PendingUserInputClearedMessage,
 	ChatSessionsRunningMessage,
 	WsFaultMessage,
 	ChatTitleUpdatedMessage,
@@ -23,6 +25,7 @@ import {
 	ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
+import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PendingPermissionRequest, PendingViewChat, PermissionMode, QueueState } from '$lib/types/chat';
 import type { ChatEntry, SessionProvider } from '$lib/types/app';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
@@ -58,6 +61,14 @@ export interface EventRouterStores {
 	setCurrentChatId: (id: string | null) => void;
 	chatMessages: () => ChatMessage[];
 	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
+	pendingUserInputs: () => PendingUserInput[];
+	setPendingUserInputs: (inputs: PendingUserInput[]) => void;
+	upsertPendingUserInput: (input: PendingUserInput) => void;
+	clearPendingUserInput: (clientRequestId: string) => void;
+	updatePendingUserInputDeliveryStatus: (
+		clientRequestId: string,
+		deliveryStatus: 'submitting' | 'accepted' | 'failed',
+	) => void;
 	loadMessages: (chatId: string, loadMore?: boolean, provider?: string) => Promise<ChatMessage[]>;
 	setIsLoading: (v: boolean) => void;
 	setCanAbort: (v: boolean) => void;
@@ -138,27 +149,13 @@ function applyServerMessages(
 	stores.setChatMessages(updated);
 }
 
-function markPendingUserMessageDelivery(
+function markPendingUserInputDelivery(
 	clientRequestId: string | undefined,
 	stores: EventRouterStores,
 	deliveryStatus: 'accepted' | 'failed',
-	providerRequestId?: string,
 ) {
 	if (!clientRequestId) return;
-	stores.setChatMessages((previous) => previous.map((message) => {
-		if (!(message instanceof UserMessage)) return message;
-		const metadata = message.metadata;
-		if (metadata?.clientRequestId !== clientRequestId) return message;
-		const nextDeliveryStatus = metadata.deliveryStatus === 'submitting'
-			? deliveryStatus
-			: metadata.deliveryStatus;
-		if (nextDeliveryStatus === metadata.deliveryStatus && !providerRequestId) return message;
-		return new UserMessage(message.timestamp, message.content, message.images, {
-			...metadata,
-			...(providerRequestId ? { providerRequestId } : {}),
-			deliveryStatus: nextDeliveryStatus,
-		});
-	}));
+	stores.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus);
 }
 
 // Creates helper functions used by multiple handler contexts.
@@ -274,7 +271,6 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 	const queueCtx: QueueContext = {
 		currentChatId,
 		selectedChatId: selectedChat?.id || null,
-		setChatMessages: stores.setChatMessages,
 		setMessageQueue: stores.setMessageQueue,
 		activateLoadingFor,
 		setCanAbort: stores.setCanAbort,
@@ -312,20 +308,20 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 				activateLoadingFor(msg.chatId);
 				stores.setCanAbort(true);
 				onChatProcessing(msg.chatId);
-				markPendingUserMessageDelivery(msg.clientRequestId, stores, 'accepted', msg.providerRequestId);
+				markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
 				applyServerMessages(msg, stores);
 				handlePlanModeMessages(msg, planModeCtx);
 				handlePermissionLifecycleFromBatch(msg, permLifecycleCtx);
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
-				markPendingUserMessageDelivery(msg.clientRequestId, stores, 'accepted', msg.providerRequestId);
+				markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
 				handleAgentComplete(msg, lifecycleCtx);
 			}
 			},
 			'agent-run-failed': (msg) => {
 				if (msg instanceof AgentRunFailedMessage) {
-					markPendingUserMessageDelivery(msg.clientRequestId, stores, 'failed', msg.providerRequestId);
+					markPendingUserInputDelivery(msg.clientRequestId, stores, 'failed');
 					handleAgentError(msg, lifecycleCtx);
 				}
 			},
@@ -362,6 +358,24 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 					new Date().toISOString(),
 				);
 			}
+		},
+		'pending-user-input-updated': (msg) => {
+			if (!(msg instanceof PendingUserInputUpdatedMessage)) return;
+			stores.upsertPendingUserInput(msg.input);
+		},
+		'pending-user-input-cleared': (msg) => {
+			if (!(msg instanceof PendingUserInputClearedMessage)) return;
+			if (msg.reason !== 'persisted') {
+				stores.clearPendingUserInput(msg.clientRequestId);
+				return;
+			}
+			void stores.loadMessages(msg.chatId).then((messages) => {
+				if (stores.currentChatId() && stores.currentChatId() !== msg.chatId) return;
+				stores.setChatMessages(messages);
+				stores.clearPendingUserInput(msg.clientRequestId);
+			}).catch(() => {
+				// The local pending overlay remains visible until the next successful reload.
+			});
 		},
 		'chat-sessions-running': (msg) => {
 			if (msg instanceof ChatSessionsRunningMessage) handleRunningChats(msg, runningCtx);

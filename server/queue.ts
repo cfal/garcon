@@ -8,7 +8,6 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
-import { UserMessage } from '../common/chat-types.ts';
 import type { RunProviderTurnOptions } from './providers/types.js';
 
 function emptyQueue(): QueueState {
@@ -28,8 +27,12 @@ function bumpQueue(queue: QueueState): QueueState {
 }
 
 function optionsForQueuedTurn(options: RunProviderTurnOptions): RunProviderTurnOptions {
-  const { clientRequestId: _clientRequestId, clientMessageId: _clientMessageId, turnId: _turnId, ...rest } = options;
-  return rest;
+  return {
+    ...options,
+    clientRequestId: crypto.randomUUID(),
+    clientMessageId: crypto.randomUUID(),
+    turnId: crypto.randomUUID(),
+  };
 }
 
 interface ProvidersDep {
@@ -38,8 +41,15 @@ interface ProvidersDep {
   isChatRunning(chatId: string): boolean;
 }
 
-interface HistoryCacheDep {
-  appendMessages(chatId: string, messages: unknown[]): Promise<void>;
+interface PendingInputsDep {
+  register(chatId: string, content: string, options?: {
+    clientRequestId?: string;
+    clientMessageId?: string;
+    turnId?: string;
+    images?: RunProviderTurnOptions['images'];
+    deliveryStatus?: 'submitting' | 'accepted' | 'failed';
+  }): Promise<unknown>;
+  updateDeliveryStatus(chatId: string, clientRequestId: string, deliveryStatus: 'submitting' | 'accepted' | 'failed'): unknown;
 }
 
 type QueueUpdatedCallback = (chatId: string, state: QueueState) => void;
@@ -53,15 +63,15 @@ export class QueueManager extends EventEmitter {
   #draining = new Set<string>();
   #workspaceDir: string;
   #providers: ProvidersDep | null;
-  #historyCache: HistoryCacheDep | null;
+  #pendingInputs: PendingInputsDep | null;
 
-  // providers and historyCache are optional for backward compat in tests
+  // providers and pendingInputs are optional for backward compat in tests
   // that only exercise state management methods.
-  constructor(workspaceDir: string, providers?: ProvidersDep | null, historyCache?: HistoryCacheDep | null) {
+  constructor(workspaceDir: string, providers?: ProvidersDep | null, pendingInputs?: PendingInputsDep | null) {
     super();
     this.#workspaceDir = workspaceDir;
     this.#providers = providers || null;
-    this.#historyCache = historyCache || null;
+    this.#pendingInputs = pendingInputs || null;
   }
 
 	  onQueueUpdated(cb: QueueUpdatedCallback): void { this.on('queue-updated', cb); }
@@ -244,19 +254,24 @@ export class QueueManager extends EventEmitter {
   // Submits a command to a chat session. Appends the user message to
   // history, runs the provider turn, then drains any queued entries.
   async submit(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
-    await this.appendUserMessage(chatId, command, options);
-    await this.runAcceptedTurn(chatId, command, options);
+    const turnOptions = ensureTurnIdentifiers(options);
+    await this.registerPendingUserInput(chatId, command, turnOptions);
+    await this.runAcceptedTurn(chatId, command, turnOptions);
+  }
+
+  async registerPendingUserInput(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
+    if (!command || !this.#pendingInputs) return;
+    await this.#pendingInputs.register(chatId, command, {
+      clientRequestId: options.clientRequestId,
+      clientMessageId: options.clientMessageId,
+      turnId: options.turnId,
+      images: options.images,
+      deliveryStatus: 'accepted',
+    });
   }
 
   async appendUserMessage(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
-    if (command && this.#historyCache) {
-      const userMsg = new UserMessage(new Date().toISOString(), String(command), options.images, {
-        messageId: options.clientMessageId,
-        clientRequestId: options.clientRequestId,
-        turnId: options.turnId,
-      });
-      await this.#historyCache.appendMessages(chatId, [userMsg]);
-    }
+    await this.registerPendingUserInput(chatId, command, options);
   }
 
 	  async runAcceptedTurn(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
@@ -291,7 +306,7 @@ export class QueueManager extends EventEmitter {
     await this.#drain(chatId, options);
   }
 
-  // Pops queued entries one at a time, appends to history, and runs provider turns.
+  // Pops queued entries one at a time, registers a pending overlay, and runs provider turns.
   async #drain(chatId: string, options: RunProviderTurnOptions): Promise<void> {
     this.#draining.add(chatId);
     try {
@@ -305,17 +320,12 @@ export class QueueManager extends EventEmitter {
         }
 
         const { entry } = result;
+        const queuedTurnOptions = optionsForQueuedTurn(options);
+        await this.registerPendingUserInput(chatId, entry.content, queuedTurnOptions);
         this.emit('dispatching', chatId, entry.id, entry.content);
 
-        if (this.#historyCache) {
-          const userMsg = new UserMessage(new Date().toISOString(), String(entry.content));
-          this.#historyCache.appendMessages(chatId, [userMsg]).catch((err: Error) => {
-            console.warn(`queue: failed to append queued message for ${chatId}:`, err.message);
-          });
-        }
-
         try {
-	          await this.#providers!.runProviderTurn(chatId, entry.content, optionsForQueuedTurn(options));
+	          await this.#providers!.runProviderTurn(chatId, entry.content, queuedTurnOptions);
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
           console.error('queue: error processing queued message:', (error as Error).message);
@@ -368,4 +378,13 @@ export class QueueManager extends EventEmitter {
       }
     }
   }
+}
+
+function ensureTurnIdentifiers(options: RunProviderTurnOptions): RunProviderTurnOptions {
+  return {
+    ...options,
+    clientRequestId: options.clientRequestId ?? crypto.randomUUID(),
+    clientMessageId: options.clientMessageId ?? crypto.randomUUID(),
+    turnId: options.turnId ?? crypto.randomUUID(),
+  };
 }

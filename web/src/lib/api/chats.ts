@@ -15,6 +15,7 @@ import {
 } from '$shared/chat-modes';
 import type { ApiProtocol } from '$shared/providers';
 import type { ChatMessage } from '$shared/chat-types';
+import type { PendingUserInput } from '$shared/pending-user-input';
 import type {
 	AgentRunCommandRequest,
 	AgentStopCommandRequest,
@@ -156,6 +157,7 @@ export async function getRunningChats(): Promise<RunningChatsResponse> {
 
 export async function getChatMessages(params: { chatId: string; limit?: number; offset?: number }): Promise<{
 	messages: ChatMessage[];
+	pendingUserInputs: PendingUserInput[];
 	total: number;
 	hasMore: boolean;
 	offset: number;

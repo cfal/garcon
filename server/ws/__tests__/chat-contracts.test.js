@@ -52,6 +52,11 @@ const mockHistoryCache = {
   })),
 };
 
+const mockPendingInputs = {
+  reconcile: mock(() => Promise.resolve(undefined)),
+  listForChat: mock(() => []),
+};
+
 const mockForkDeps = {
   settings: {},
   metadata: {},
@@ -73,13 +78,14 @@ const injectedMocks = [
   mockQueue.clearChatQueue, mockQueue.pauseChatQueue, mockQueue.resumeChatQueue,
   mockHistoryCache.appendMessages, mockHistoryCache.ensureLoaded,
   mockHistoryCache.getPaginatedMessages,
+  mockPendingInputs.reconcile, mockPendingInputs.listForChat,
   mockForkDeps.forkChatFileCopy,
 ];
 
 const moduleMocks = [sendWebSocketJson];
 
 const chatHandlerInstance = new ChatHandler(
-  mockProviders, mockQueue, mockHistoryCache, mockRegistry, mockForkDeps,
+  mockProviders, mockQueue, mockHistoryCache, mockRegistry, mockPendingInputs, mockForkDeps,
 );
 const chatHandler = chatHandlerInstance.createHandler();
 
@@ -107,6 +113,7 @@ describe('chat WebSocket handler', () => {
       chatId: '456',
       provider: 'claude',
     }));
+    mockPendingInputs.listForChat.mockReturnValue([]);
     ws = createMockWs();
   });
 
@@ -264,6 +271,7 @@ describe('chat WebSocket handler', () => {
         registry: mockRegistry,
         settings: mockForkDeps.settings,
         metadata: mockForkDeps.metadata,
+        forkProviderSession: undefined,
       });
       expect(sendWebSocketJson.mock.calls[0][1]).toMatchObject({
         type: 'chat-fork-created',
@@ -639,12 +647,14 @@ describe('chat WebSocket handler', () => {
         clientRequestId: 'req-msg-2',
       });
       expect(mockHistoryCache.ensureLoaded).toHaveBeenCalledWith('123');
+      expect(mockPendingInputs.reconcile).toHaveBeenCalledWith('123');
       expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 20, 0);
       const payload = lastSentPayload();
       expect(payload).toMatchObject({
         type: 'chat-log-response',
         clientRequestId: 'req-msg-2',
         chatId: '123',
+        pendingUserInputs: [],
       });
       expect(payload.messages.length).toBe(1);
     });
@@ -672,6 +682,7 @@ describe('chat WebSocket handler', () => {
         limit: 50,
         offset: 10,
       });
+      expect(mockPendingInputs.reconcile).toHaveBeenCalledWith('123');
       expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 50, 10);
     });
 

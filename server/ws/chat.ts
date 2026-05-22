@@ -115,6 +115,11 @@ interface HistoryCacheDep {
   };
 }
 
+interface PendingInputsDep {
+  reconcile(chatId: string): Promise<void>;
+  listForChat(chatId: string): unknown[];
+}
+
 class WebSocketWriter {
   #ws: WS;
   constructor(ws: WS) {
@@ -138,6 +143,7 @@ export class ChatHandler {
   #providers: ProviderRegistryDep;
   #queue: QueueManagerDep;
   #historyCache: HistoryCacheDep;
+  #pendingInputs: PendingInputsDep;
   #registry: IChatRegistry;
   #forkDeps: ForkDeps | null;
   #recentPermissionDecisions = new Map<string, number>();
@@ -147,11 +153,16 @@ export class ChatHandler {
     queue: QueueManagerDep,
     historyCache: HistoryCacheDep,
     registry: IChatRegistry,
+    pendingInputs: PendingInputsDep = {
+      reconcile: () => Promise.resolve(),
+      listForChat: () => [],
+    },
     forkDeps?: ForkDeps | null,
   ) {
     this.#providers = providers;
     this.#queue = queue;
     this.#historyCache = historyCache;
+    this.#pendingInputs = pendingInputs;
     this.#registry = registry;
     this.#forkDeps = forkDeps ?? null;
   }
@@ -317,10 +328,11 @@ export class ChatHandler {
       const offset = parseInt(String(data.offset || '0'), 10);
 
       await this.#historyCache.ensureLoaded(chatId);
+      await this.#pendingInputs.reconcile(chatId);
       const result = this.#historyCache.getPaginatedMessages(chatId, limit, offset);
 
       writer.send(new ChatLogResponseMessage(
-        clientRequestId, chatId, result.messages, result.total,
+        clientRequestId, chatId, result.messages, this.#pendingInputs.listForChat(chatId), result.total,
         result.hasMore, result.offset, result.limit,
       ));
     } catch (error: unknown) {
