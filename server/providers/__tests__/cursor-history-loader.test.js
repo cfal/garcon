@@ -1,11 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { Database } from 'bun:sqlite';
 
 import {
-  cursorProjectHash,
   cursorStoreDbPath,
   getCursorPreviewFromSessionId,
   loadCursorChatMessagesBySessionId,
@@ -23,11 +22,22 @@ describe('Cursor history loader', () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
-  it('builds project-scoped store paths and rejects unsafe session ids', () => {
-    expect(cursorProjectHash('/tmp/project')).toHaveLength(32);
-    expect(cursorStoreDbPath('session-1', '/tmp/project', tempRoot))
-      .toBe(path.join(tempRoot, 'chats', cursorProjectHash('/tmp/project'), 'session-1', 'store.db'));
-    expect(() => cursorStoreDbPath('../session', '/tmp/project', tempRoot)).toThrow('Invalid Cursor session id');
+  it('builds ACP session store paths and rejects unsafe session ids', () => {
+    expect(cursorStoreDbPath('session-1', tempRoot))
+      .toBe(path.join(tempRoot, 'acp-sessions', 'session-1', 'store.db'));
+    expect(() => cursorStoreDbPath('../session', tempRoot)).toThrow('Invalid Cursor session id');
+  });
+
+  it('returns an empty transcript without warning when the ACP store is missing', async () => {
+    const originalWarn = console.warn;
+    console.warn = mock(() => {});
+    try {
+      await expect(loadCursorChatMessagesBySessionId('missing-session', '/tmp/project', tempRoot))
+        .resolves.toEqual([]);
+      expect(console.warn).not.toHaveBeenCalled();
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 
   it('normalizes Cursor blobs into canonical chat messages', () => {
@@ -252,7 +262,7 @@ describe('Cursor history loader', () => {
   it('loads Cursor store.db blobs and builds previews', async () => {
     const sessionId = 'session-db';
     const projectPath = '/tmp/project';
-    const storeDbPath = cursorStoreDbPath(sessionId, projectPath, tempRoot);
+    const storeDbPath = cursorStoreDbPath(sessionId, tempRoot);
     await fs.mkdir(path.dirname(storeDbPath), { recursive: true });
 
     const db = new Database(storeDbPath);

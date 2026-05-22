@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { Database } from 'bun:sqlite';
@@ -44,10 +44,6 @@ function cursorHomePath(): string {
   return path.join(os.homedir(), '.cursor');
 }
 
-export function cursorProjectHash(projectPath: string): string {
-  return crypto.createHash('md5').update(projectPath || process.cwd()).digest('hex');
-}
-
 function sanitizeCursorSessionId(sessionId: string): string {
   const normalized = sessionId.trim();
   if (!normalized) throw new Error('Cursor session id is required.');
@@ -62,15 +58,15 @@ function sanitizeCursorSessionId(sessionId: string): string {
   return normalized;
 }
 
-export function cursorStoreDbPath(sessionId: string, projectPath: string, cursorHome = cursorHomePath()): string {
+export function cursorStoreDbPath(sessionId: string, cursorHome = cursorHomePath()): string {
   const safeSessionId = sanitizeCursorSessionId(sessionId);
-  const baseChatsPath = path.join(cursorHome, 'chats', cursorProjectHash(projectPath));
-  const storeDbPath = path.join(baseChatsPath, safeSessionId, 'store.db');
-  const resolvedBase = path.resolve(baseChatsPath);
+  const baseSessionsPath = path.join(cursorHome, 'acp-sessions');
+  const storeDbPath = path.join(baseSessionsPath, safeSessionId, 'store.db');
+  const resolvedBase = path.resolve(baseSessionsPath);
   const resolvedStore = path.resolve(storeDbPath);
   const relative = path.relative(resolvedBase, resolvedStore);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`Invalid Cursor session path for "${sessionId}".`);
+    throw new Error(`Invalid Cursor ACP session path for "${sessionId}".`);
   }
   return resolvedStore;
 }
@@ -402,12 +398,13 @@ export function normalizeCursorBlobs(blobs: CursorMessageBlob[]): ChatMessage[] 
 
 export async function loadCursorChatMessagesBySessionId(
   sessionId: string,
-  projectPath: string,
+  _projectPath: string,
   cursorHome?: string,
 ): Promise<ChatMessage[]> {
   if (!sessionId) return [];
   try {
-    const storeDbPath = cursorStoreDbPath(sessionId, projectPath, cursorHome);
+    const storeDbPath = cursorStoreDbPath(sessionId, cursorHome);
+    if (!fs.existsSync(storeDbPath)) return [];
     return normalizeCursorBlobs(readCursorBlobs(storeDbPath));
   } catch (error) {
     console.warn('cursor: failed to load history:', error instanceof Error ? error.message : String(error));
