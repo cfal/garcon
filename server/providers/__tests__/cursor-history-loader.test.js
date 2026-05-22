@@ -39,6 +39,7 @@ describe('Cursor history loader', () => {
         content: {
           role: 'user',
           timestamp: '2026-05-22T01:00:00.000Z',
+          providerOptions: { cursor: { requestId: 'cursor-req-1' } },
           content: [
             { type: 'text', text: '<user_query>Hello Cursor</user_query>' },
             { type: 'user_info', text: '<user_info>internal</user_info>' },
@@ -85,6 +86,7 @@ describe('Cursor history loader', () => {
       'tool-result',
     ]);
     expect(messages[0].content).toBe('Hello Cursor');
+    expect(messages[0].metadata?.providerRequestId).toBe('cursor-req-1');
     expect(messages[2].patch).toBe('*** Begin Patch');
     expect(messages[4].content).toEqual({ ok: true });
   });

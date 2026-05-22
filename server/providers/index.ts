@@ -29,6 +29,7 @@ import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, PI_MODELS } fr
 import { apiProviderTemplate } from '../../common/api-provider-templates.js';
 import type {
   ProviderChatEntry,
+  ProviderEventMetadata,
   StartSessionRequest,
   StartedProviderSession,
   RunProviderTurnOptions,
@@ -144,7 +145,16 @@ function defaultModelForHarness(id: string, nativeModels: HarnessModelOption[], 
 
 interface TurnEventMetadata {
   clientRequestId?: string;
+  providerRequestId?: string;
   turnId?: string;
+}
+
+function mergeTurnEventMetadata(
+  base: TurnEventMetadata | undefined,
+  event: ProviderEventMetadata | undefined,
+): TurnEventMetadata | undefined {
+  const metadata = { ...(base ?? {}), ...(event ?? {}) };
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
 
 export interface ApiProviderInput {
@@ -580,6 +590,8 @@ export class ProviderRegistry {
       permissionMode: entry.permissionMode,
       thinkingMode: entry.thinkingMode,
       claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
+      clientRequestId: opts.clientRequestId,
+      turnId: opts.turnId,
       images: opts.images,
       envOverrides: selection.envOverrides,
       ...(selection.codexConfig ? { codexConfig: selection.codexConfig } : {}),
@@ -651,6 +663,8 @@ export class ProviderRegistry {
         permissionMode: opts.permissionMode ?? entry.permissionMode,
         thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
         claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
+        clientRequestId: opts.clientRequestId,
+        turnId: opts.turnId,
         images: opts.images,
         envOverrides: selection.envOverrides,
         nativePath: rawEntry.nativePath,
@@ -892,10 +906,10 @@ export class ProviderRegistry {
     return null;
   }
 
-  async loadMessages(session: ProviderChatEntry | null): Promise<unknown[]> {
+  async loadMessages(session: ProviderChatEntry | null, chatId?: string): Promise<unknown[]> {
     if (!session?.provider) return [];
     const adapter = this.#adapters.get(session.provider);
-    if (adapter?.loadMessages) return adapter.loadMessages(session);
+    if (adapter?.loadMessages) return adapter.loadMessages(session, { chatId });
 
     if (session.provider === 'amp') return [];
     if (session.provider === 'factory') {
@@ -1062,8 +1076,8 @@ export class ProviderRegistry {
 
   onMessages(cb: (chatId: string, messages: unknown[], metadata?: TurnEventMetadata) => void): void {
     for (const adapter of this.#adapters.values()) {
-      adapter.onMessages((chatId, messages) => {
-        cb(chatId, messages, this.#turnMetadataByChatId.get(chatId));
+      adapter.onMessages((chatId, messages, eventMetadata) => {
+        cb(chatId, messages, mergeTurnEventMetadata(this.#turnMetadataByChatId.get(chatId), eventMetadata));
       });
     }
   }
@@ -1082,8 +1096,8 @@ export class ProviderRegistry {
 
   onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void {
     for (const adapter of this.#adapters.values()) {
-      adapter.onFinished((chatId, exitCode) => {
-        const metadata = this.#turnMetadataByChatId.get(chatId);
+      adapter.onFinished((chatId, exitCode, eventMetadata) => {
+        const metadata = mergeTurnEventMetadata(this.#turnMetadataByChatId.get(chatId), eventMetadata);
         cb(chatId, exitCode, metadata);
         this.#turnMetadataByChatId.delete(chatId);
       });

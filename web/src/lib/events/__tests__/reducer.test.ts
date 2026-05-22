@@ -64,6 +64,38 @@ describe('applyChatMessages', () => {
 		expect(result).not.toBe(current);
 	});
 
+	it('deduplicates user messages by shared request identity', () => {
+		const current: ChatMessage[] = [
+			new UserMessage('2026-01-01T00:00:00Z', 'Question', undefined, {
+				clientRequestId: 'req-1',
+				deliveryStatus: 'accepted',
+			}),
+		];
+		const result = applyChatMessages(current, [
+			new UserMessage('2026-01-01T00:00:01Z', 'Question', undefined, {
+				clientRequestId: 'req-1',
+				providerRequestId: 'cursor-req-1',
+			}),
+		]);
+
+		expect(result).toHaveLength(1);
+		expect(result[0]).toBe(current[0]);
+	});
+
+	it('keeps repeated user messages with the same text when identities differ', () => {
+		const result = applyChatMessages([
+			new UserMessage('2026-01-01T00:00:00Z', 'Again', undefined, {
+				clientRequestId: 'req-1',
+			}),
+		], [
+			new UserMessage('2026-01-01T00:00:01Z', 'Again', undefined, {
+				clientRequestId: 'req-2',
+			}),
+		]);
+
+		expect(result).toHaveLength(2);
+	});
+
 	it('handles thinking messages', () => {
 		const result = applyChatMessages([], [
 			new ThinkingMessage('2026-01-01T00:00:00Z', 'Reasoning...'),

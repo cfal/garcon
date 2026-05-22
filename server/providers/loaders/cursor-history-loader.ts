@@ -298,6 +298,21 @@ function textFromPart(part: unknown, role: 'assistant' | 'user'): string {
   return text ? unwrapUserQueryText(text, role) : '';
 }
 
+function providerRequestIdFromContent(content: Record<string, unknown>, nestedMessage: Record<string, unknown>): string | undefined {
+  const cursorOptions = asObject(asObject(content.providerOptions).cursor);
+  const nestedCursorOptions = asObject(asObject(nestedMessage.providerOptions).cursor);
+  return asString(
+    cursorOptions.requestId
+    ?? cursorOptions.request_id
+    ?? nestedCursorOptions.requestId
+    ?? nestedCursorOptions.request_id
+    ?? content.requestId
+    ?? content.request_id
+    ?? nestedMessage.requestId
+    ?? nestedMessage.request_id,
+  );
+}
+
 function normalizeCursorContent(content: Record<string, unknown>, blob: CursorMessageBlob, timestamp: string): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const nestedMessage = asObject(content.message);
@@ -330,6 +345,8 @@ function normalizeCursorContent(content: Record<string, unknown>, blob: CursorMe
 
   const role = roleValue === 'user' ? 'user' : 'assistant';
   const rawContent = content.content ?? nestedMessage.content;
+  const providerRequestId = role === 'user' ? providerRequestIdFromContent(content, nestedMessage) : undefined;
+  const userMetadata = providerRequestId ? { providerRequestId } : undefined;
 
   if (Array.isArray(rawContent)) {
     for (let partIndex = 0; partIndex < rawContent.length; partIndex += 1) {
@@ -353,7 +370,7 @@ function normalizeCursorContent(content: Record<string, unknown>, blob: CursorMe
       const text = textFromPart(part, role);
       if (!text.trim()) continue;
       messages.push(role === 'user'
-        ? new UserMessage(timestamp, stripResolvedFileMentionContext(text))
+        ? new UserMessage(timestamp, stripResolvedFileMentionContext(text), undefined, userMetadata)
         : new AssistantMessage(timestamp, text));
     }
     return messages;
@@ -363,7 +380,7 @@ function normalizeCursorContent(content: Record<string, unknown>, blob: CursorMe
     const text = unwrapUserQueryText(rawContent, role);
     if (text.trim()) {
       messages.push(role === 'user'
-        ? new UserMessage(timestamp, stripResolvedFileMentionContext(text))
+        ? new UserMessage(timestamp, stripResolvedFileMentionContext(text), undefined, userMetadata)
         : new AssistantMessage(timestamp, text));
     }
   }

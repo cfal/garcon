@@ -208,6 +208,33 @@ describe('ConversationSessionController', () => {
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
 	});
 
+	it('merges loaded Cursor user echoes with local pending messages by request identity', async () => {
+		const { deps } = createDeps();
+		deps.chatState.chatMessages = [
+			new UserMessage('2026-05-14T00:00:00.000Z', 'hello', undefined, {
+				messageId: 'msg-1',
+				clientRequestId: 'req-1',
+				deliveryStatus: 'accepted',
+			}),
+		];
+		deps.chatState.loadMessages = vi.fn().mockResolvedValue([
+			new UserMessage('2026-05-14T00:00:01.000Z', 'hello', undefined, {
+				clientRequestId: 'req-1',
+				providerRequestId: 'cursor-req-1',
+			}),
+			new AssistantMessage('2026-05-14T00:00:02.000Z', 'hi'),
+		]);
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.loadChat('chat-1');
+
+		expect(deps.chatState.setMessages).toHaveBeenCalledTimes(1);
+		const merged = vi.mocked(deps.chatState.setMessages).mock.calls[0][0] as ChatMessage[];
+		expect(merged.filter((message) => message.type === 'user-message')).toHaveLength(1);
+		expect((merged[0] as UserMessage).metadata?.providerRequestId).toBe('cursor-req-1');
+		expect(merged.map((message) => message.type)).toEqual(['user-message', 'assistant-message']);
+	});
+
 	it('submits /fork with a message as a fork-run request after appending the status message', async () => {
 		const chat = createRunningChat({ id: '123' });
 		const { deps } = createDeps(chat);

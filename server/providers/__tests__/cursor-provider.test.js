@@ -119,7 +119,9 @@ describe('CursorProvider lifecycle', () => {
   it('continues a session, deduplicates tool calls, and emits tool results', async () => {
     const provider = new CursorProvider();
     const messages = mock();
+    const finished = mock();
     provider.onMessages(messages);
+    provider.onFinished(finished);
 
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
@@ -132,6 +134,8 @@ describe('CursorProvider lifecycle', () => {
       model: 'gpt-5.3-codex',
       permissionMode: 'acceptEdits',
       thinkingMode: 'none',
+      clientRequestId: 'req-2',
+      turnId: 'turn-2',
     });
 
     expect(spawnMock.mock.calls[0][0].slice(1)).toEqual([
@@ -147,6 +151,11 @@ describe('CursorProvider lifecycle', () => {
       'continue',
     ]);
 
+    proc.pushJson({
+      type: 'user',
+      session_id: 'cursor-session-2',
+      message: { role: 'user', content: 'continue' },
+    });
     proc.pushJson({
       type: 'assistant',
       message: {
@@ -166,7 +175,12 @@ describe('CursorProvider lifecycle', () => {
       input: { command: 'pwd' },
       result: { stdout: '/proj' },
     });
-    proc.pushJson({ type: 'result', subtype: 'success', session_id: 'cursor-session-2' });
+    proc.pushJson({
+      type: 'result',
+      subtype: 'success',
+      session_id: 'cursor-session-2',
+      request_id: 'cursor-req-2',
+    });
     proc.close(0);
 
     await turnPromise;
@@ -178,6 +192,7 @@ describe('CursorProvider lifecycle', () => {
       'assistant-message',
       'tool-result',
     ]);
+    expect(finished).toHaveBeenCalledWith('chat-2', 0, { providerRequestId: 'cursor-req-2' });
     expect(emitted.filter((message) => message.type === 'bash-tool-use')).toHaveLength(1);
     expect(emitted.find((message) => message.type === 'tool-result')?.content).toEqual({ stdout: '/proj' });
   });

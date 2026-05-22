@@ -142,15 +142,21 @@ function markPendingUserMessageDelivery(
 	clientRequestId: string | undefined,
 	stores: EventRouterStores,
 	deliveryStatus: 'accepted' | 'failed',
+	providerRequestId?: string,
 ) {
 	if (!clientRequestId) return;
 	stores.setChatMessages((previous) => previous.map((message) => {
 		if (!(message instanceof UserMessage)) return message;
-		if (message.metadata?.clientRequestId !== clientRequestId) return message;
-		if (message.metadata.deliveryStatus !== 'submitting') return message;
+		const metadata = message.metadata;
+		if (metadata?.clientRequestId !== clientRequestId) return message;
+		const nextDeliveryStatus = metadata.deliveryStatus === 'submitting'
+			? deliveryStatus
+			: metadata.deliveryStatus;
+		if (nextDeliveryStatus === metadata.deliveryStatus && !providerRequestId) return message;
 		return new UserMessage(message.timestamp, message.content, message.images, {
-			...message.metadata,
-			deliveryStatus,
+			...metadata,
+			...(providerRequestId ? { providerRequestId } : {}),
+			deliveryStatus: nextDeliveryStatus,
 		});
 	}));
 }
@@ -306,17 +312,20 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 				activateLoadingFor(msg.chatId);
 				stores.setCanAbort(true);
 				onChatProcessing(msg.chatId);
-				markPendingUserMessageDelivery(msg.clientRequestId, stores, 'accepted');
+				markPendingUserMessageDelivery(msg.clientRequestId, stores, 'accepted', msg.providerRequestId);
 				applyServerMessages(msg, stores);
 				handlePlanModeMessages(msg, planModeCtx);
 				handlePermissionLifecycleFromBatch(msg, permLifecycleCtx);
 		},
 		'agent-run-finished': (msg) => {
-			if (msg instanceof AgentRunFinishedMessage) handleAgentComplete(msg, lifecycleCtx);
+			if (msg instanceof AgentRunFinishedMessage) {
+				markPendingUserMessageDelivery(msg.clientRequestId, stores, 'accepted', msg.providerRequestId);
+				handleAgentComplete(msg, lifecycleCtx);
+			}
 			},
 			'agent-run-failed': (msg) => {
 				if (msg instanceof AgentRunFailedMessage) {
-					markPendingUserMessageDelivery(msg.clientRequestId, stores, 'failed');
+					markPendingUserMessageDelivery(msg.clientRequestId, stores, 'failed', msg.providerRequestId);
 					handleAgentError(msg, lifecycleCtx);
 				}
 			},

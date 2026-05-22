@@ -10,7 +10,13 @@ import { runSingleQuery as runSingleQueryCursor } from './cursor-cli.js';
 import { runSingleQuery as runSingleQueryFactory } from './factory-cli.js';
 import { runSingleQuery as runSingleQueryPi } from './pi-cli.js';
 import type { ProviderAdapter } from './provider-adapter.js';
-import type { ClaudeStartSessionRequest, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from './types.js';
+import type {
+  ClaudeStartSessionRequest,
+  ProviderEventMetadata,
+  ResumeTurnRequest,
+  StartSessionRequest,
+  StartedProviderSession,
+} from './types.js';
 import { OpenAiCompatibleChatProvider, type OpenAiCompatibleChatProviderConfig, runOpenAiCompatibleSingleQuery } from './openai-compatible-chat-provider.js';
 import {
   OpenAiCompatibleResponsesProvider,
@@ -213,6 +219,7 @@ export function createCursorAdapter(cursor: ExternalCliProviderInstance): Provid
       return cursor.getModels?.() ?? [];
     },
     runSingleQuery: runSingleQueryCursor,
+    loadMessages: cursor.loadMessages ? (session, context) => cursor.loadMessages!(session, context) : undefined,
     startPurgeTimer() {
       return cursor.startPurgeTimer();
     },
@@ -299,10 +306,10 @@ export function createPiAdapter(pi: ExternalCliProviderInstance): ProviderAdapte
 // Direct compatible harness adapters for endpoint-backed API providers.
 
 type DirectEventCallbacks = {
-  messages: Set<(chatId: string, messages: unknown[]) => void>;
+  messages: Set<(chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void>;
   processing: Set<(chatId: string, isProcessing: boolean) => void>;
   sessionCreated: Set<(chatId: string) => void>;
-  finished: Set<(chatId: string, exitCode: number) => void>;
+  finished: Set<(chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void>;
   failed: Set<(chatId: string, errorMessage: string) => void>;
 };
 
@@ -314,10 +321,10 @@ type DirectCompatibleProvider = {
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   getModels?(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
   startPurgeTimer(): ReturnType<typeof setInterval>;
-  onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
+  onMessages(cb: (chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
-  onFinished(cb: (chatId: string, exitCode: number) => void): void;
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void): void;
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
 };
 
@@ -434,7 +441,7 @@ class DirectEndpointRouterAdapter<TProvider extends DirectCompatibleProvider> im
     this.#purgeTimers.clear();
   }
 
-  onMessages(cb: (chatId: string, messages: unknown[]) => void): void {
+  onMessages(cb: (chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void): void {
     this.#callbacks.messages.add(cb);
   }
 
@@ -446,7 +453,7 @@ class DirectEndpointRouterAdapter<TProvider extends DirectCompatibleProvider> im
     this.#callbacks.sessionCreated.add(cb);
   }
 
-  onFinished(cb: (chatId: string, exitCode: number) => void): void {
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void): void {
     this.#callbacks.finished.add(cb);
   }
 
@@ -481,8 +488,8 @@ class DirectEndpointRouterAdapter<TProvider extends DirectCompatibleProvider> im
   }
 
   #attachForwarders(provider: TProvider): void {
-    provider.onMessages((chatId, messages) => {
-      for (const cb of this.#callbacks.messages) cb(chatId, messages);
+    provider.onMessages((chatId, messages, metadata) => {
+      for (const cb of this.#callbacks.messages) cb(chatId, messages, metadata);
     });
     provider.onProcessing((chatId, isProcessing) => {
       for (const cb of this.#callbacks.processing) cb(chatId, isProcessing);
@@ -490,8 +497,8 @@ class DirectEndpointRouterAdapter<TProvider extends DirectCompatibleProvider> im
     provider.onSessionCreated((chatId) => {
       for (const cb of this.#callbacks.sessionCreated) cb(chatId);
     });
-    provider.onFinished((chatId, exitCode) => {
-      for (const cb of this.#callbacks.finished) cb(chatId, exitCode);
+    provider.onFinished((chatId, exitCode, metadata) => {
+      for (const cb of this.#callbacks.finished) cb(chatId, exitCode, metadata);
     });
     provider.onFailed((chatId, errorMessage) => {
       for (const cb of this.#callbacks.failed) cb(chatId, errorMessage);
@@ -690,10 +697,10 @@ export interface ClaudeProviderInstance {
   setInternalThinkingMode(providerSessionId: string, mode: import('../../common/chat-modes.js').ThinkingMode): void;
   setInternalClaudeThinkingMode(providerSessionId: string, mode: import('../../common/chat-modes.js').ClaudeThinkingMode): void;
   startPurgeTimer(): ReturnType<typeof setInterval>;
-  onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
+  onMessages(cb: (chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
-  onFinished(cb: (chatId: string, exitCode: number) => void): void;
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void): void;
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
 }
 
@@ -715,10 +722,10 @@ export interface CodexProviderInstance {
   resolvePermission?(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void>;
   startPurgeTimer(): ReturnType<typeof setInterval>;
   shutdown?(): void;
-  onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
+  onMessages(cb: (chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
-  onFinished(cb: (chatId: string, exitCode: number) => void): void;
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void): void;
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
 }
 
@@ -736,10 +743,10 @@ export interface OpenCodeProviderInstance {
   evictChat(chatId: string): void;
   shutdown?(): void;
   startPurgeTimer(): ReturnType<typeof setInterval>;
-  onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
+  onMessages(cb: (chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
-  onFinished(cb: (chatId: string, exitCode: number) => void): void;
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void): void;
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
 }
 
@@ -750,10 +757,11 @@ export interface ExternalCliProviderInstance {
   abort(providerSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }>;
   getModels?(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
+  loadMessages?(session: unknown, context?: { chatId?: string }): Promise<unknown[]>;
   startPurgeTimer(): ReturnType<typeof setInterval>;
-  onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
+  onMessages(cb: (chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
-  onFinished(cb: (chatId: string, exitCode: number) => void): void;
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void): void;
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
 }

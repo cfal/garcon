@@ -1,6 +1,8 @@
 // Bounded in-memory cache of ChatMessage[] arrays by chatId. Entries may be
 // full history loads or live tails captured before the user opens a chat.
 
+import { mergeChatMessagesByIdentity } from '../../common/chat-message-identity.js';
+
 const CACHE_LIMIT = 100;
 const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 5 * 60 * 1000;
@@ -80,7 +82,7 @@ export class HistoryCache {
       const current = this.#cacheByChatId.get(key);
       const liveTail = current?.completeness === 'tail' ? current.messages : [];
       const messages = trimTail(
-        mergeChatMessages(loaded, liveTail, { dedupeUserProviderEchoes: true }),
+        mergeChatMessages(loaded, liveTail, { includeContentToken: true }),
         MAX_MESSAGES_PER_ENTRY,
       );
       this.#cacheByChatId.set(key, {
@@ -172,7 +174,7 @@ export class HistoryCache {
   async #loadFromProvider(chatId) {
     const session = this.#registry.getChat(chatId);
     if (!session) return [];
-    return this.#providers.loadMessages(session);
+    return this.#providers.loadMessages(session, chatId);
   }
 
   // Exposed for tests that need to inspect/populate cache directly.
@@ -186,57 +188,5 @@ function trimTail(messages, maxMessages) {
 }
 
 function mergeChatMessages(base, incoming, options = {}) {
-  const seen = new Set();
-  const providerUserEchoTexts = new Set();
-  const merged = [...base];
-  for (const message of base) {
-    rememberMessageIdentity(message, seen, providerUserEchoTexts);
-  }
-  for (const message of incoming ?? []) {
-    const key = chatMessageIdentity(message);
-    if (seen.has(key)) continue;
-    if (options.dedupeUserProviderEchoes && hasClientUserIdentity(message)) {
-      const text = userTextFingerprint(message);
-      if (text && providerUserEchoTexts.has(text)) continue;
-    }
-    rememberMessageIdentity(message, seen, providerUserEchoTexts);
-    merged.push(message);
-  }
-  return merged;
-}
-
-function rememberMessageIdentity(message, seen, providerUserEchoTexts) {
-  seen.add(chatMessageIdentity(message));
-  if (message?.type === 'user-message' && !hasClientUserIdentity(message)) {
-    const text = userTextFingerprint(message);
-    if (text) providerUserEchoTexts.add(text);
-  }
-}
-
-function chatMessageIdentity(message) {
-  if (!message || typeof message !== 'object') return 'unknown';
-  if (typeof message.toolId === 'string' && message.toolId) {
-    return `${message.type}:tool:${message.toolId}`;
-  }
-  if (message.type === 'user-message' && hasClientUserIdentity(message)) {
-    return `${message.type}:client:${userClientIdentity(message)}`;
-  }
-  if (typeof message.content === 'string') {
-    return `${message.type}:text:${message.content.trim()}`;
-  }
-  return `${message.type}:json:${JSON.stringify(message)}`;
-}
-
-function hasClientUserIdentity(message) {
-  return userClientIdentity(message) !== null;
-}
-
-function userClientIdentity(message) {
-  const metadata = message?.metadata && typeof message.metadata === 'object' ? message.metadata : {};
-  const requestId = metadata.clientRequestId || metadata.messageId;
-  return typeof requestId === 'string' && requestId ? requestId : null;
-}
-
-function userTextFingerprint(message) {
-  return typeof message?.content === 'string' ? message.content.trim() : null;
+  return mergeChatMessagesByIdentity(base, incoming ?? [], options);
 }

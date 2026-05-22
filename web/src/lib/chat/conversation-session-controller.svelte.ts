@@ -19,6 +19,7 @@ import {
 	updateExecutionSettings,
 } from '$lib/api/chats.js';
 import { UserMessage, AssistantMessage, ErrorMessage, type ChatImage, type ChatMessage } from '$shared/chat-types';
+import { mergeChatMessagesByIdentity } from '$shared/chat-message-identity';
 import { createClientChatId } from '$lib/chat/client-id';
 import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
@@ -106,29 +107,12 @@ function withMessageDelivery(message: UserMessage, deliveryStatus: 'accepted' | 
 	});
 }
 
-function commandMessageKey(message: ChatMessage): string | null {
-	if (message.type !== 'user-message') return null;
-	const metadata = message.metadata;
-	if (metadata?.messageId) return `message:${metadata.messageId}`;
-	if (metadata?.clientRequestId) return `request:${metadata.clientRequestId}`;
-	if (metadata?.turnId) return `turn:${metadata.turnId}`;
-	return null;
-}
-
-function mergeLoadedMessagesWithLocalCommandMessages(
+function mergeLoadedMessagesWithLocalUserMessages(
 	loadedMessages: ChatMessage[],
 	currentMessages: ChatMessage[],
 ): ChatMessage[] {
-	const loadedKeys = new Set(
-		loadedMessages
-			.map(commandMessageKey)
-			.filter((key): key is string => Boolean(key)),
-	);
-	const localOnlyCommandMessages = currentMessages.filter((message) => {
-		const key = commandMessageKey(message);
-		return key !== null && !loadedKeys.has(key);
-	});
-	return [...loadedMessages, ...localOnlyCommandMessages];
+	const localUserMessages = currentMessages.filter((message) => message.type === 'user-message');
+	return mergeChatMessagesByIdentity(loadedMessages, localUserMessages, { includeContentToken: true });
 }
 
 export class ConversationSessionController {
@@ -281,7 +265,7 @@ export class ConversationSessionController {
 			if (deps.sessions.selectedChatId !== chatId) return;
 
 			deps.chatState.setMessages(
-				mergeLoadedMessagesWithLocalCommandMessages(messages, deps.chatState.chatMessages),
+				mergeLoadedMessagesWithLocalUserMessages(messages, deps.chatState.chatMessages),
 			);
 			deps.chatState.snapshotCache.markValidated(chatId);
 			deps.setNeedsServerLoad(false);

@@ -145,13 +145,21 @@ describe('appendMessages', () => {
     ]);
   });
 
-  it('deduplicates provider-history user echoes against live client messages', async () => {
+  it('deduplicates provider-history user echoes through shared request identity', async () => {
     const selectedChatId = 'cursor-chat';
     mockRegistry.getChat.mockImplementation((id) => (
       id === selectedChatId ? { provider: 'cursor', providerSessionId: 'cursor-session-1' } : null
     ));
     mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
-      { type: 'user-message', timestamp: ts, content: 'Prompt' },
+      {
+        type: 'user-message',
+        timestamp: ts,
+        content: 'Prompt',
+        metadata: {
+          providerRequestId: 'cursor-req-1',
+          clientRequestId: 'req-1',
+        },
+      },
       { type: 'assistant-message', timestamp: ts, content: 'Reply' },
     ]));
 
@@ -175,6 +183,32 @@ describe('appendMessages', () => {
       'Reply',
       'Live tail',
     ]);
+  });
+
+  it('does not deduplicate user messages by matching text alone', async () => {
+    const selectedChatId = 'cursor-chat-text';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { provider: 'cursor', providerSessionId: 'cursor-session-1' } : null
+    ));
+    mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'user-message', timestamp: ts, content: 'Prompt' },
+      { type: 'assistant-message', timestamp: ts, content: 'Reply' },
+    ]));
+
+    await cache.appendMessages(selectedChatId, [
+      {
+        type: 'user-message',
+        timestamp: '2026-01-01T00:00:01Z',
+        content: 'Prompt',
+        metadata: {
+          clientRequestId: 'req-1',
+          messageId: 'msg-1',
+        },
+      },
+    ]);
+    const messages = await cache.ensureLoaded(selectedChatId);
+
+    expect(messages.filter((message) => message.type === 'user-message')).toHaveLength(2);
   });
 
   it('keeps repeated client user messages when they have distinct client identities', async () => {

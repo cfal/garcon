@@ -46,6 +46,12 @@ export interface ProviderExecutionConfig extends PersistedChatExecutionConfig {
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
+  clientRequestId?: string;
+  turnId?: string;
+}
+
+export interface ProviderEventMetadata {
+  providerRequestId?: string;
 }
 
 // Request to start a new harness session.

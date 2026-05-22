@@ -12,6 +12,7 @@ export type UserMessageDeliveryStatus = 'submitting' | 'accepted' | 'failed';
 export interface ChatMessageMetadata {
   messageId?: string;
   clientRequestId?: string;
+  providerRequestId?: string;
   turnId?: string;
   deliveryStatus?: UserMessageDeliveryStatus;
 }
@@ -544,6 +545,7 @@ function parseChatMessageMetadata(v: unknown): ChatMessageMetadata | undefined {
   const metadata: ChatMessageMetadata = {};
   if (typeof raw.messageId === 'string') metadata.messageId = raw.messageId;
   if (typeof raw.clientRequestId === 'string') metadata.clientRequestId = raw.clientRequestId;
+  if (typeof raw.providerRequestId === 'string') metadata.providerRequestId = raw.providerRequestId;
   if (typeof raw.turnId === 'string') metadata.turnId = raw.turnId;
   if (
     raw.deliveryStatus === 'submitting' ||

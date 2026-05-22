@@ -8,13 +8,16 @@ import {
   type ChatMessage,
 } from '../../common/chat-types.js';
 import { getCursorBinary } from '../config.js';
-import { createArtificialNativePath } from '../chats/artificial-native-path.js';
+import { createArtificialNativePath, getArtificialProviderSessionId } from '../chats/artificial-native-path.js';
 import { AbsProvider } from './base.js';
 import { normalizeCursorToolResultContent } from './converters/cursor-tool-result.js';
 import { convertCursorToolUse } from './converters/cursor-tool-use.js';
 import { getCursorModels } from './cursor-models.js';
+import { CursorRequestIdentityStore } from './cursor-request-identities.js';
+import { loadCursorChatMessagesBySessionId } from './loaders/cursor-history-loader.js';
 import type {
   PermissionMode,
+  ProviderChatEntry,
   ResumeTurnRequest,
   StartSessionRequest,
   StartedProviderSession,
@@ -24,11 +27,13 @@ interface CursorSession {
   aborted: boolean;
   assistantSeen: boolean;
   chatId: string;
+  clientRequestId?: string;
   emittedToolIds: Set<string>;
   finalized: boolean;
   id: string;
   isRunning: boolean;
   process: ReturnType<typeof Bun.spawn> | null;
+  providerRequestId?: string;
   resultSeen: boolean;
   sessionCreatedEmitted: boolean;
   startTime: number;
@@ -39,6 +44,8 @@ interface CursorSession {
     resolved: boolean;
   } | null;
   turnResolve: (() => void) | null;
+  turnId?: string;
+  userEchoSeen: boolean;
 }
 
 type CursorCliEvent = Record<string, unknown> & {
@@ -73,16 +80,20 @@ function createSession(chatId: string, startedSession: CursorSession['startedSes
     aborted: false,
     assistantSeen: false,
     chatId,
+    clientRequestId: undefined,
     emittedToolIds: new Set(),
     finalized: false,
     id: `pending-${crypto.randomUUID()}`,
     isRunning: true,
     process: null,
+    providerRequestId: undefined,
     resultSeen: false,
     sessionCreatedEmitted: false,
     startTime: Date.now(),
     startedSession,
     turnResolve: null,
+    turnId: undefined,
+    userEchoSeen: false,
   };
 }
 
@@ -98,6 +109,10 @@ function asString(value: unknown): string | undefined {
 
 function getSessionId(event: Record<string, unknown>): string | undefined {
   return asString(event.session_id ?? event.sessionId ?? event.chat_id ?? event.chatId);
+}
+
+function getRequestId(event: Record<string, unknown>): string | undefined {
+  return asString(event.request_id ?? event.requestId);
 }
 
 function getToolCallId(event: Record<string, unknown>): string {
@@ -313,6 +328,12 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
 
 export class CursorProvider extends AbsProvider {
   #runningSessions = new Map<string, CursorSession>();
+  #requestIdentities: CursorRequestIdentityStore;
+
+  constructor(requestIdentities = new CursorRequestIdentityStore()) {
+    super();
+    this.#requestIdentities = requestIdentities;
+  }
 
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
     return getCursorModels();
@@ -331,6 +352,10 @@ export class CursorProvider extends AbsProvider {
       this.emitSessionCreated(session.chatId);
     }
 
+    this.#requestIdentities.rememberProviderSession(this.#identityInput(session, {
+      providerSessionId: sessionId,
+    }));
+
     const tracker = session.startedSession;
     if (tracker && !tracker.resolved) {
       tracker.resolved = true;
@@ -341,12 +366,51 @@ export class CursorProvider extends AbsProvider {
     }
   }
 
+  #identityInput(
+    session: CursorSession,
+    patch: {
+      providerSessionId?: string;
+      providerRequestId?: string;
+      userEchoSeen?: boolean;
+    } = {},
+  ) {
+    const providerSessionId = patch.providerSessionId
+      ?? (session.id.startsWith('pending-') ? undefined : session.id);
+    return {
+      chatId: session.chatId,
+      providerSessionId,
+      clientRequestId: session.clientRequestId,
+      turnId: session.turnId,
+      providerRequestId: patch.providerRequestId ?? session.providerRequestId,
+      userEchoSeen: patch.userEchoSeen,
+    };
+  }
+
+  #rememberTurnIdentity(session: CursorSession, request: StartSessionRequest | ResumeTurnRequest): void {
+    session.clientRequestId = request.clientRequestId;
+    session.turnId = request.turnId;
+    session.providerRequestId = undefined;
+    session.userEchoSeen = false;
+    this.#requestIdentities.rememberTurn(this.#identityInput(session));
+  }
+
   #routeEvent(session: CursorSession, event: CursorCliEvent): void {
     const timestamp = new Date().toISOString();
 
     if (event.type === 'system' && event.subtype === 'init') {
       const sessionId = getSessionId(event);
       if (sessionId) this.#activateSession(session, sessionId);
+      return;
+    }
+
+    if (event.type === 'user') {
+      session.userEchoSeen = true;
+      const sessionId = getSessionId(event);
+      if (sessionId && session.id !== sessionId) this.#activateSession(session, sessionId);
+      this.#requestIdentities.markUserEcho(this.#identityInput(session, {
+        providerSessionId: sessionId,
+        userEchoSeen: true,
+      }));
       return;
     }
 
@@ -390,9 +454,22 @@ export class CursorProvider extends AbsProvider {
       if (resultText && !session.assistantSeen) {
         this.emitMessages(session.chatId, [new AssistantMessage(timestamp, resultText)]);
       }
+      const sessionId = getSessionId(event);
+      if (sessionId && session.id !== sessionId) this.#activateSession(session, sessionId);
+      const providerRequestId = getRequestId(event);
+      if (providerRequestId) {
+        session.providerRequestId = providerRequestId;
+        this.#requestIdentities.markProviderRequestId(this.#identityInput(session, {
+          providerRequestId,
+        }));
+      }
       session.resultSeen = true;
       const exitCode = cursorExitCodeForResult(event);
-      this.emitFinished(session.chatId, exitCode);
+      this.emitFinished(
+        session.chatId,
+        exitCode,
+        providerRequestId ? { providerRequestId } : undefined,
+      );
       this.#finalizeTurn(session, exitCode);
       return;
     }
@@ -529,14 +606,18 @@ export class CursorProvider extends AbsProvider {
     session.aborted = false;
     session.assistantSeen = false;
     session.chatId = chatId;
+    session.clientRequestId = undefined;
     session.emittedToolIds = new Set();
     session.finalized = false;
     session.isRunning = true;
     session.process = null;
+    session.providerRequestId = undefined;
     session.resultSeen = false;
     session.startTime = Date.now();
     session.startedSession = null;
     session.turnResolve = null;
+    session.turnId = undefined;
+    session.userEchoSeen = false;
   }
 
   async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
@@ -544,6 +625,7 @@ export class CursorProvider extends AbsProvider {
     const startedSession = createStartTracker();
     const session = createSession(request.chatId, startedSession);
     this.#runningSessions.set(session.id, session);
+    this.#rememberTurnIdentity(session, request);
     this.emitProcessing(request.chatId, true);
 
     try {
@@ -575,6 +657,7 @@ export class CursorProvider extends AbsProvider {
     session.id = request.providerSessionId;
     session.sessionCreatedEmitted = true;
     this.#runningSessions.set(session.id, session);
+    this.#rememberTurnIdentity(session, request);
 
     this.emitProcessing(request.chatId, true);
 
@@ -612,6 +695,17 @@ export class CursorProvider extends AbsProvider {
         startedAt: new Date(session.startTime).toISOString(),
         status: 'running',
       }));
+  }
+
+  async loadMessages(session: ProviderChatEntry, context: { chatId?: string } = {}): Promise<ChatMessage[]> {
+    const providerSessionId = session.providerSessionId
+      || getArtificialProviderSessionId(session.nativePath, 'cursor')
+      || '';
+    const messages = await loadCursorChatMessagesBySessionId(providerSessionId, session.projectPath);
+    return this.#requestIdentities.applyToMessages(messages, {
+      chatId: context.chatId,
+      providerSessionId,
+    });
   }
 
   startPurgeTimer(): ReturnType<typeof setInterval> {

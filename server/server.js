@@ -37,6 +37,7 @@ import { CodexAppServerProvider } from './providers/codex-app-server/provider.js
 import { OpenCodeProvider } from './providers/opencode.js';
 import { AmpProvider } from './providers/amp-cli.js';
 import { CursorProvider } from './providers/cursor-cli.js';
+import { CursorRequestIdentityStore } from './providers/cursor-request-identities.js';
 import { FactoryProvider } from './providers/factory-cli.js';
 import { PiProvider } from './providers/pi-cli.js';
 import { ProviderRegistry } from './providers/index.js';
@@ -106,7 +107,7 @@ export async function startServer() {
     const claudeProvider = new ClaudeProvider();
     const opencodeProvider = new OpenCodeProvider();
     const ampProvider = new AmpProvider();
-    const cursorProvider = new CursorProvider();
+    const cursorProvider = new CursorProvider(new CursorRequestIdentityStore(workspaceDir));
     const factoryProvider = new FactoryProvider();
     const piProvider = new PiProvider();
 
@@ -297,7 +298,7 @@ export async function startServer() {
     // HistoryCache's init() already self-wired appendMessages via
     // providers.onMessages(), so only broadcast wiring is needed here.
     providerRegistry.onMessages((chatId, messages, metadata) => {
-      broadcast(new AgentRunOutputMessage(chatId, messages, metadata?.turnId, metadata?.clientRequestId));
+      broadcast(new AgentRunOutputMessage(chatId, messages, metadata?.turnId, metadata?.clientRequestId, metadata?.providerRequestId));
     });
     providerRegistry.onProcessing((chatId, isProcessing) => {
       broadcast(new ChatProcessingUpdatedMessage(chatId, isProcessing));
@@ -306,7 +307,7 @@ export async function startServer() {
       broadcast(new ChatSessionCreatedMessage(chatId));
     });
     providerRegistry.onFinished((chatId, exitCode, metadata) => {
-      broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId));
+      broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId, metadata?.providerRequestId));
       // Defer idle check to next microtask so the provider has time to
       // clear its isRunning flag (emitFinished fires before the flag flip).
       queueMicrotask(() => {
@@ -316,7 +317,7 @@ export async function startServer() {
       });
     });
     providerRegistry.onFailed((chatId, errorMessage, metadata) => {
-      broadcast(new AgentRunFailedMessage(chatId, errorMessage, metadata?.turnId, metadata?.clientRequestId));
+      broadcast(new AgentRunFailedMessage(chatId, errorMessage, metadata?.turnId, metadata?.clientRequestId, metadata?.providerRequestId));
       queueMicrotask(() => {
         queue.checkChatIdle(chatId).catch((err) => {
           console.warn('queue: checkChatIdle error:', err.message);

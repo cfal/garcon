@@ -128,11 +128,13 @@ describe('event router integration', () => {
 				type: 'agent-run-output',
 				chatId: 'chat-a',
 				clientRequestId: 'req-1',
+				providerRequestId: 'cursor-req-1',
 				messages: [{ type: 'assistant-message', timestamp: '2026-05-14T00:00:01.000Z', content: 'hi' }],
 			},
 		], stores);
 
 		expect((messages[0] as UserMessage).metadata?.deliveryStatus).toBe('accepted');
+		expect((messages[0] as UserMessage).metadata?.providerRequestId).toBe('cursor-req-1');
 	});
 
 	it('marks pending user messages failed on correlated execution failure', () => {

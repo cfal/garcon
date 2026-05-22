@@ -9,7 +9,7 @@ describe('factory model discovery', () => {
     expect(catalog.options.length).toBeGreaterThan(0);
     expect(catalog.options.find((entry) => entry.value === catalog.defaultModel)).toBeTruthy();
     expect(typeof catalog.metadata[catalog.defaultModel]?.supportsImages).toBe('boolean');
-  });
+  }, 10_000);
 
   it('includes reasoning efforts when the droid CLI is available', async () => {
     const catalog = await getFactoryModelCatalog(true);
@@ -19,5 +19,5 @@ describe('factory model discovery', () => {
     if (gpt54?.reasoningEfforts) {
       expect(gpt54.reasoningEfforts.includes('xhigh')).toBe(true);
     }
-  });
+  }, 10_000);
 });
