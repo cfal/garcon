@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -28,16 +28,9 @@ describe('Cursor history loader', () => {
     expect(() => cursorStoreDbPath('../session', tempRoot)).toThrow('Invalid Cursor session id');
   });
 
-  it('returns an empty transcript without warning when the ACP store is missing', async () => {
-    const originalWarn = console.warn;
-    console.warn = mock(() => {});
-    try {
-      await expect(loadCursorChatMessagesBySessionId('missing-session', '/tmp/project', tempRoot))
-        .resolves.toEqual([]);
-      expect(console.warn).not.toHaveBeenCalled();
-    } finally {
-      console.warn = originalWarn;
-    }
+  it('raises a clear error when the ACP store is missing', async () => {
+    await expect(loadCursorChatMessagesBySessionId('missing-session', '/tmp/project', tempRoot))
+      .rejects.toThrow('Cursor ACP transcript database not found');
   });
 
   it('normalizes Cursor blobs into canonical chat messages', () => {

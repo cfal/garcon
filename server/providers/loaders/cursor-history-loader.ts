@@ -402,14 +402,11 @@ export async function loadCursorChatMessagesBySessionId(
   cursorHome?: string,
 ): Promise<ChatMessage[]> {
   if (!sessionId) return [];
-  try {
-    const storeDbPath = cursorStoreDbPath(sessionId, cursorHome);
-    if (!fs.existsSync(storeDbPath)) return [];
-    return normalizeCursorBlobs(readCursorBlobs(storeDbPath));
-  } catch (error) {
-    console.warn('cursor: failed to load history:', error instanceof Error ? error.message : String(error));
-    return [];
+  const storeDbPath = cursorStoreDbPath(sessionId, cursorHome);
+  if (!fs.existsSync(storeDbPath)) {
+    throw new Error(`Cursor ACP transcript database not found: ${storeDbPath}`);
   }
+  return normalizeCursorBlobs(readCursorBlobs(storeDbPath));
 }
 
 function previewText(message: ChatMessage): string {
