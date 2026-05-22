@@ -40,33 +40,33 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
   if (!firstPrompt?.trim()) return;
 
   const ui = await settings.getUiSettings();
-  const getHarnessCatalog = async () => {
+  const getAgentCatalog = async () => {
     try {
-      return await providers?.getHarnessCatalog?.();
+      return await providers?.getAgentCatalog?.();
     } catch {
       return null;
     }
   };
-  const [authByHarness, readinessByHarness, catalog, opencodeModels, factoryModels] = await Promise.all([
-    providers?.getHarnessAuthStatusMap?.() ?? Promise.resolve({
+  const [authByAgent, readinessByAgent, catalog, opencodeModels, factoryModels] = await Promise.all([
+    providers?.getAgentAuthStatusMap?.() ?? Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
       amp: { authenticated: false },
       factory: { authenticated: false },
     }),
-    providers?.getHarnessReadinessMap?.() ?? Promise.resolve({}),
-    getHarnessCatalog(),
+    providers?.getAgentReadinessMap?.() ?? Promise.resolve({}),
+    getAgentCatalog(),
     providers?.getModels?.('opencode') ?? Promise.resolve([]),
     providers?.getModels?.('factory') ?? Promise.resolve([]),
   ]);
   const catalogModels = Object.fromEntries(
-    (catalog?.harnesses ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
+    (catalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
   );
   const cfg = resolveEffectiveGenerationConfig({
     persisted: ui?.chatTitle,
-    authByHarness,
-    modelsByHarness: {
+    authByAgent,
+    modelsByAgent: {
       claude: CLAUDE_MODELS.OPTIONS,
       codex: CODEX_MODELS.OPTIONS,
       opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
@@ -74,7 +74,7 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
       factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
       ...catalogModels,
     },
-    readinessByHarness,
+    readinessByAgent,
   });
   if (!cfg.enabled) return;
 

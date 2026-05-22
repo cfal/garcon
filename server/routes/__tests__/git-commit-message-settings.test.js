@@ -22,7 +22,7 @@ mock.module('../../git/git-service.js', () => ({
 import createGitRoutes from '../git.js';
 
 const providers = {
-  getHarnessAuthStatusMap: mock(() => Promise.resolve({
+  getAgentAuthStatusMap: mock(() => Promise.resolve({
     claude: { authenticated: false },
     codex: { authenticated: false },
     opencode: { authenticated: false },
@@ -33,7 +33,7 @@ const providers = {
     'direct-openai-responses-compatible': { authenticated: false },
   })),
   getModels: mock(() => Promise.resolve([])),
-  hasHarness: mock((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(harnessId)),
+  hasAgent: mock((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId)),
 };
 
 const settings = {
@@ -56,10 +56,10 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
   beforeEach(() => {
     parseJsonBody.mockClear();
     generateCommitMessageForFiles.mockClear();
-    providers.getHarnessAuthStatusMap.mockClear();
+    providers.getAgentAuthStatusMap.mockClear();
     providers.getModels.mockClear();
-    providers.hasHarness.mockClear();
-    providers.hasHarness.mockImplementation((harnessId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(harnessId));
+    providers.hasAgent.mockClear();
+    providers.hasAgent.mockImplementation((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId));
     settings.getUiSettings.mockClear();
   });
 

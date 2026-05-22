@@ -1,10 +1,10 @@
 // Coordinates shell-level state and imperative action dispatch.
 
-export type SettingsTab = 'providers' | 'other-harnesses' | 'local' | 'remote';
+export type SettingsTab = 'providers' | 'other-agents' | 'local' | 'remote';
 
 function normalizeSettingsTab(value: string): SettingsTab {
 	if (value === 'providers') return 'providers';
-	if (value === 'other-harnesses') return 'other-harnesses';
+	if (value === 'other-agents') return 'other-agents';
 	if (value === 'local') return 'local';
 	if (value === 'remote') return 'remote';
 	return 'providers';

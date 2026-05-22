@@ -136,13 +136,13 @@ export class NewChatFormState {
 	}
 
 	validateAllModelsAgainstLive(): void {
-		for (const provider of this.#modelCatalog.getSelectableHarnesses()) {
+		for (const provider of this.#modelCatalog.getSelectableAgents()) {
 			this.validateModelAgainstLive(provider);
 		}
 	}
 
 	#resolveStartupProvider(provider: string): SessionProvider {
-		const providers = this.#modelCatalog.getSelectableHarnesses();
+		const providers = this.#modelCatalog.getSelectableAgents();
 		if (providers.includes(provider as SessionProvider)) return provider as SessionProvider;
 		if (providers.includes('claude')) return 'claude';
 		return providers[0] ?? 'claude';
@@ -419,7 +419,7 @@ export class NewChatFormState {
 			this.validateAllModelsAgainstLive();
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings', err);
-			for (const provider of this.#modelCatalog.getSelectableHarnesses()) {
+			for (const provider of this.#modelCatalog.getSelectableAgents()) {
 				this.applyResolvedModel(provider, this.#modelCatalog.getDefaultModel(provider));
 			}
 			if (!this.projectPath) {
@@ -459,7 +459,7 @@ export class NewChatFormState {
 		if (snap.lastModel) {
 			this.applyResolvedModel(this.provider, snap.lastModel, snap.lastModelEndpointId);
 		} else {
-			for (const provider of this.#modelCatalog.getSelectableHarnesses()) {
+			for (const provider of this.#modelCatalog.getSelectableAgents()) {
 				this.applyResolvedModel(provider, this.#modelCatalog.getDefaultModel(provider));
 			}
 		}

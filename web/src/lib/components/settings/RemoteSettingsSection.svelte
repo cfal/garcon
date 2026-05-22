@@ -30,7 +30,7 @@
 		remoteSettings.snapshot?.uiEffective?.chatTitle?.enabled !== false
 	);
 	let titleProvider = $derived<SessionProvider>(
-		titleSelectionOverride?.harnessId
+		titleSelectionOverride?.agentId
 			?? (remoteSettings.snapshot?.uiEffective?.chatTitle?.provider as SessionProvider)
 			?? 'claude'
 	);
@@ -49,9 +49,9 @@
 			?? remoteSettings.snapshot?.uiEffective?.chatTitle?.modelProtocol
 			?? null
 	);
-	const titleSelectorMode: ModelSelectorMode = { harness: 'select', source: 'select', surface: 'settings' };
+	const titleSelectorMode: ModelSelectorMode = { agent: 'select', source: 'select', surface: 'settings' };
 	const titleSelectorValue = $derived({
-		harnessId: titleProvider,
+		agentId: titleProvider,
 		model: titleModel,
 		modelEndpointId: titleModelEndpointId,
 		modelProtocol: titleModelProtocol,
@@ -128,7 +128,7 @@
 		const previousOverride = titleSelectionOverride;
 		const token = ++titleSelectionSaveToken;
 		titleSelectionOverride = {
-			harnessId: next.harnessId,
+			agentId: next.agentId,
 			model: next.modelValue,
 			apiProviderId: next.apiProviderId,
 			modelEndpointId: next.modelEndpointId,
@@ -139,7 +139,7 @@
 			chatTitle: {
 				...base,
 				enabled: titleEnabled,
-				provider: next.harnessId,
+				provider: next.agentId,
 				model: next.model,
 				apiProviderId: next.apiProviderId,
 				modelEndpointId: next.modelEndpointId,

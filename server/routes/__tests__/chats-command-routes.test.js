@@ -44,7 +44,7 @@ function createSession(overrides = {}) {
   };
 }
 
-function createRouteHarness(sessionOverrides = {}) {
+function createRouteAgent(sessionOverrides = {}) {
   const sessions = new Map([
     ['123', createSession(sessionOverrides)],
   ]);
@@ -112,8 +112,8 @@ function createRouteHarness(sessionOverrides = {}) {
     appendMessages: mock(() => Promise.resolve(undefined)),
   };
   const providers = {
-    hasHarness: mock(() => true),
-    isHarnessSessionRunning: mock(() => false),
+    hasAgent: mock(() => true),
+    isAgentSessionRunning: mock(() => false),
     getRunningSessions: mock(() => ({ claude: [{ id: '123' }] })),
     startSession: mock(() => Promise.resolve(undefined)),
     modelSupportsImages: mock(() => Promise.resolve(true)),
@@ -166,20 +166,20 @@ describe('REST chat command routes', () => {
   });
 
   it('POST /run returns before provider completion and persists before running', async () => {
-    const harness = createRouteHarness();
+    const agent = createRouteAgent();
     const order = [];
     let resolveRun;
     const runPromise = new Promise((resolve) => { resolveRun = resolve; });
-    harness.queue.appendUserMessage.mockImplementation(() => {
+    agent.queue.appendUserMessage.mockImplementation(() => {
       order.push('append');
       return Promise.resolve();
     });
-    harness.queue.runAcceptedTurn.mockImplementation(() => {
+    agent.queue.runAcceptedTurn.mockImplementation(() => {
       order.push('run');
       return runPromise;
     });
 
-    const { response, body } = await callJson(harness.routes['/api/v1/chats/run'].POST, agentRunBody());
+    const { response, body } = await callJson(agent.routes['/api/v1/chats/run'].POST, agentRunBody());
 
     expect(response.status).toBe(202);
     expect(body).toMatchObject({
@@ -191,7 +191,7 @@ describe('REST chat command routes', () => {
     });
     expect(typeof body.turnId).toBe('string');
     expect(order).toEqual(['append', 'run']);
-    expect(harness.queue.appendUserMessage).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
+    expect(agent.queue.appendUserMessage).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
       clientRequestId: 'req-run-1',
       clientMessageId: 'msg-run-1',
       turnId: body.turnId,
@@ -202,46 +202,46 @@ describe('REST chat command routes', () => {
   });
 
   it('POST /run deduplicates same payload retries without re-running side effects', async () => {
-    const harness = createRouteHarness();
-    const handler = harness.routes['/api/v1/chats/run'].POST;
+    const agent = createRouteAgent();
+    const handler = agent.routes['/api/v1/chats/run'].POST;
 
     await callJson(handler, agentRunBody());
     const retry = await callJson(handler, agentRunBody());
 
     expect(retry.response.status).toBe(202);
     expect(retry.body.status).toBe('duplicate');
-    expect(harness.queue.appendUserMessage).toHaveBeenCalledTimes(1);
-    expect(harness.queue.runAcceptedTurn).toHaveBeenCalledTimes(1);
+    expect(agent.queue.appendUserMessage).toHaveBeenCalledTimes(1);
+    expect(agent.queue.runAcceptedTurn).toHaveBeenCalledTimes(1);
   });
 
   it('POST /run rejects conflicting idempotency retries', async () => {
-    const harness = createRouteHarness();
-    const handler = harness.routes['/api/v1/chats/run'].POST;
+    const agent = createRouteAgent();
+    const handler = agent.routes['/api/v1/chats/run'].POST;
 
     await callJson(handler, agentRunBody());
     const conflict = await callJson(handler, agentRunBody({ command: 'different command' }));
 
     expect(conflict.response.status).toBe(409);
     expect(conflict.body.errorCode).toBe('IDEMPOTENCY_CONFLICT');
-    expect(harness.queue.appendUserMessage).toHaveBeenCalledTimes(1);
+    expect(agent.queue.appendUserMessage).toHaveBeenCalledTimes(1);
   });
 
   it('POST /run validates content and session existence', async () => {
-    const emptyHarness = createRouteHarness();
-    const empty = await callJson(emptyHarness.routes['/api/v1/chats/run'].POST, agentRunBody({ command: '   ' }));
+    const emptyAgent = createRouteAgent();
+    const empty = await callJson(emptyAgent.routes['/api/v1/chats/run'].POST, agentRunBody({ command: '   ' }));
     expect(empty.response.status).toBe(400);
     expect(empty.body.error).toContain('command or images');
 
-    const missingHarness = createRouteHarness();
-    missingHarness.registry.getChat.mockReturnValue(null);
-    const missing = await callJson(missingHarness.routes['/api/v1/chats/run'].POST, agentRunBody());
+    const missingAgent = createRouteAgent();
+    missingAgent.registry.getChat.mockReturnValue(null);
+    const missing = await callJson(missingAgent.routes['/api/v1/chats/run'].POST, agentRunBody());
     expect(missing.response.status).toBe(404);
     expect(missing.body.errorCode).toBe('SESSION_NOT_FOUND');
   });
 
   it('POST /fork-run forks once and schedules the target turn', async () => {
-    const harness = createRouteHarness();
-    const { response, body } = await callJson(harness.routes['/api/v1/chats/fork-run'].POST, {
+    const agent = createRouteAgent();
+    const { response, body } = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
       ...agentRunBody({
         clientRequestId: 'req-fork-run-1',
         clientMessageId: 'msg-fork-run-1',
@@ -256,17 +256,17 @@ describe('REST chat command routes', () => {
     expect(body.sourceChatId).toBe('123');
     expect(body.chatId).toBe('456');
     expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
-    expect(harness.queue.appendUserMessage).toHaveBeenCalledWith('456', 'continue here', expect.objectContaining({
+    expect(agent.queue.appendUserMessage).toHaveBeenCalledWith('456', 'continue here', expect.objectContaining({
       clientRequestId: 'req-fork-run-1',
       clientMessageId: 'msg-fork-run-1',
     }));
   });
 
   it('POST /fork-run rejects busy source sessions before copying', async () => {
-    const harness = createRouteHarness();
-    harness.providers.isHarnessSessionRunning.mockReturnValue(true);
+    const agent = createRouteAgent();
+    agent.providers.isAgentSessionRunning.mockReturnValue(true);
 
-    const { response, body } = await callJson(harness.routes['/api/v1/chats/fork-run'].POST, {
+    const { response, body } = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
       ...agentRunBody({
         clientRequestId: 'req-fork-run-2',
         clientMessageId: 'msg-fork-run-2',
@@ -279,12 +279,12 @@ describe('REST chat command routes', () => {
     expect(response.status).toBe(409);
     expect(body.errorCode).toBe('SESSION_BUSY');
     expect(forkChatFileCopy).not.toHaveBeenCalled();
-    expect(harness.queue.appendUserMessage).not.toHaveBeenCalled();
+    expect(agent.queue.appendUserMessage).not.toHaveBeenCalled();
   });
 
   it('POST /queue/enqueue accepts, deduplicates, and preserves queue state', async () => {
-    const harness = createRouteHarness();
-    const handler = harness.routes['/api/v1/chats/queue/enqueue'].POST;
+    const agent = createRouteAgent();
+    const handler = agent.routes['/api/v1/chats/queue/enqueue'].POST;
     const payload = { clientRequestId: 'req-queue-1', chatId: '123', content: 'queued' };
 
     const first = await callJson(handler, payload);
@@ -300,37 +300,37 @@ describe('REST chat command routes', () => {
     expect(first.body.queue.version).toBe(1);
     expect(retry.response.status).toBe(202);
     expect(retry.body.status).toBe('duplicate');
-    expect(harness.queue.enqueueChat).toHaveBeenCalledTimes(1);
+    expect(agent.queue.enqueueChat).toHaveBeenCalledTimes(1);
   });
 
   it('POST /queue/enqueue rejects conflicting retries', async () => {
-    const harness = createRouteHarness();
-    const handler = harness.routes['/api/v1/chats/queue/enqueue'].POST;
+    const agent = createRouteAgent();
+    const handler = agent.routes['/api/v1/chats/queue/enqueue'].POST;
 
     await callJson(handler, { clientRequestId: 'req-queue-1', chatId: '123', content: 'first' });
     const conflict = await callJson(handler, { clientRequestId: 'req-queue-1', chatId: '123', content: 'second' });
 
     expect(conflict.response.status).toBe(409);
     expect(conflict.body.errorCode).toBe('IDEMPOTENCY_CONFLICT');
-    expect(harness.queue.enqueueChat).toHaveBeenCalledTimes(1);
+    expect(agent.queue.enqueueChat).toHaveBeenCalledTimes(1);
   });
 
   it('queue mutations return normalized authoritative state', async () => {
-    const harness = createRouteHarness();
+    const agent = createRouteAgent();
 
-    const paused = await callJson(harness.routes['/api/v1/chats/queue/pause'].POST, { chatId: '123' });
-    const resumed = await callJson(harness.routes['/api/v1/chats/queue/resume'].POST, { chatId: '123' });
+    const paused = await callJson(agent.routes['/api/v1/chats/queue/pause'].POST, { chatId: '123' });
+    const resumed = await callJson(agent.routes['/api/v1/chats/queue/resume'].POST, { chatId: '123' });
 
     expect(paused.body.queue.paused).toBe(true);
     expect(paused.body.queue.version).toBe(2);
     expect(resumed.body.queue.paused).toBe(false);
     expect(resumed.body.queue.version).toBe(3);
-    expect(harness.queue.triggerDrain).toHaveBeenCalledTimes(1);
+    expect(agent.queue.triggerDrain).toHaveBeenCalledTimes(1);
   });
 
   it('POST /permissions/decision deduplicates identical decisions and rejects conflicts', async () => {
-    const harness = createRouteHarness();
-    const handler = harness.routes['/api/v1/chats/permissions/decision'].POST;
+    const agent = createRouteAgent();
+    const handler = agent.routes['/api/v1/chats/permissions/decision'].POST;
     const decision = {
       clientRequestId: 'req-permission-1',
       chatId: '123',
@@ -347,12 +347,12 @@ describe('REST chat command routes', () => {
     expect(retry.body.status).toBe('duplicate');
     expect(conflict.response.status).toBe(409);
     expect(conflict.body.errorCode).toBe('IDEMPOTENCY_CONFLICT');
-    expect(harness.providers.resolvePermission).toHaveBeenCalledTimes(1);
+    expect(agent.providers.resolvePermission).toHaveBeenCalledTimes(1);
   });
 
   it('POST /stop deduplicates abort requests', async () => {
-    const harness = createRouteHarness();
-    const handler = harness.routes['/api/v1/chats/stop'].POST;
+    const agent = createRouteAgent();
+    const handler = agent.routes['/api/v1/chats/stop'].POST;
     const payload = { clientRequestId: 'req-stop-1', chatId: '123', provider: 'claude' };
 
     const first = await callJson(handler, payload);
@@ -361,14 +361,14 @@ describe('REST chat command routes', () => {
     expect(first.body.stopped).toBe(true);
     expect(retry.body.status).toBe('duplicate');
     expect(retry.body.stopped).toBe(true);
-    expect(harness.queue.abort).toHaveBeenCalledTimes(1);
+    expect(agent.queue.abort).toHaveBeenCalledTimes(1);
   });
 
   it('PATCH /execution-settings normalizes modes and patches provider and registry', async () => {
-    const harness = createRouteHarness();
+    const agent = createRouteAgent();
 
     const { response, body } = await callJson(
-      harness.routes['/api/v1/chats/execution-settings'].PATCH,
+      agent.routes['/api/v1/chats/execution-settings'].PATCH,
       {
         chatId: '123',
         permissionMode: 'bogus',
@@ -388,11 +388,11 @@ describe('REST chat command routes', () => {
       claudeThinkingMode: 'auto',
       ampAgentMode: 'smart',
     });
-    expect(harness.providers.setPermissionMode).toHaveBeenCalledWith('123', 'default');
-    expect(harness.providers.setThinkingMode).toHaveBeenCalledWith('123', 'think-hard');
-    expect(harness.providers.setClaudeThinkingMode).toHaveBeenCalledWith('123', 'auto');
-    expect(harness.providers.setAmpAgentMode).toHaveBeenCalledWith('123', 'smart');
-    expect(harness.registry.updateChat).toHaveBeenCalledWith('123', expect.objectContaining({
+    expect(agent.providers.setPermissionMode).toHaveBeenCalledWith('123', 'default');
+    expect(agent.providers.setThinkingMode).toHaveBeenCalledWith('123', 'think-hard');
+    expect(agent.providers.setClaudeThinkingMode).toHaveBeenCalledWith('123', 'auto');
+    expect(agent.providers.setAmpAgentMode).toHaveBeenCalledWith('123', 'smart');
+    expect(agent.registry.updateChat).toHaveBeenCalledWith('123', expect.objectContaining({
       permissionMode: 'default',
       thinkingMode: 'think-hard',
       claudeThinkingMode: 'auto',
@@ -401,10 +401,10 @@ describe('REST chat command routes', () => {
   });
 
   it('PATCH /model patches model selection metadata', async () => {
-    const harness = createRouteHarness();
+    const agent = createRouteAgent();
 
     const { response, body } = await callJson(
-      harness.routes['/api/v1/chats/model'].PATCH,
+      agent.routes['/api/v1/chats/model'].PATCH,
       {
         chatId: '123',
         model: 'endpoint:model-a',
@@ -424,11 +424,11 @@ describe('REST chat command routes', () => {
       modelEndpointId: 'endpoint',
       modelProtocol: 'openai-compatible',
     });
-    expect(harness.providers.setModel).toHaveBeenCalledWith('123', 'endpoint:model-a', {
+    expect(agent.providers.setModel).toHaveBeenCalledWith('123', 'endpoint:model-a', {
       apiProviderId: 'provider-1',
       modelEndpointId: 'endpoint',
     });
-    expect(harness.registry.updateChat).toHaveBeenCalledWith('123', expect.objectContaining({
+    expect(agent.registry.updateChat).toHaveBeenCalledWith('123', expect.objectContaining({
       model: 'endpoint:model-a',
       apiProviderId: 'provider-1',
       modelEndpointId: 'endpoint',

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { maybeGenerateChatTitle } from '../title-generator.js';
 
 const runSingleQueryMock = mock(() => Promise.resolve('Test Chat Title'));
-const getHarnessAuthStatusMapMock = mock(() => Promise.resolve({
+const getAgentAuthStatusMapMock = mock(() => Promise.resolve({
   claude: { authenticated: false },
   codex: { authenticated: false },
   opencode: { authenticated: false },
@@ -10,9 +10,9 @@ const getHarnessAuthStatusMapMock = mock(() => Promise.resolve({
 const getModelsMock = mock(() => Promise.resolve([]));
 const mockProviders = {
   runSingleQuery: runSingleQueryMock,
-  getHarnessAuthStatusMap: getHarnessAuthStatusMapMock,
+  getAgentAuthStatusMap: getAgentAuthStatusMapMock,
   getModels: getModelsMock,
-  getHarnessCatalog: mock(() => Promise.resolve({ harnesses: [], apiProviders: [] })),
+  getAgentCatalog: mock(() => Promise.resolve({ agents: [], apiProviders: [] })),
 };
 
 const setSessionNameMock = mock(() => Promise.resolve(undefined));
@@ -28,7 +28,7 @@ const mockSettings = {
 
 const allMocks = [
   runSingleQueryMock, setSessionNameMock,
-  getChatNameMock, getUiSettingsMock, getHarnessAuthStatusMapMock, getModelsMock, mockProviders.getHarnessCatalog,
+  getChatNameMock, getUiSettingsMock, getAgentAuthStatusMapMock, getModelsMock, mockProviders.getAgentCatalog,
 ];
 
 describe('maybeGenerateChatTitle', () => {
@@ -37,7 +37,7 @@ describe('maybeGenerateChatTitle', () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({
       chatTitle: { enabled: true, provider: 'claude', model: 'opus' },
     }));
-    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+    getAgentAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
@@ -98,7 +98,7 @@ describe('maybeGenerateChatTitle', () => {
 
   it('auto-enables and defaults to codex when codex is authenticated', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
-    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+    getAgentAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: true },
       opencode: { authenticated: true },
@@ -121,7 +121,7 @@ describe('maybeGenerateChatTitle', () => {
 
   it('auto-enables and skips DeepSeek R1 when selecting OpenCode defaults', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
-    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+    getAgentAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: true },
@@ -147,7 +147,7 @@ describe('maybeGenerateChatTitle', () => {
 
   it('does not auto-enable OpenCode title generation when no OpenCode models were discovered', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
-    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+    getAgentAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: true },
@@ -252,7 +252,7 @@ describe('maybeGenerateChatTitle', () => {
     expect(opts.model).toBe('anthropic/claude-sonnet-4-5');
   });
 
-  it('passes API provider metadata to configured title generation harness', async () => {
+  it('passes API provider metadata to configured title generation agent', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({
       chatTitle: {
         enabled: true,

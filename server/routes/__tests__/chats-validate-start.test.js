@@ -42,7 +42,7 @@ const historyCache = {
 };
 const providers = {
   startSession: mock(() => Promise.resolve(undefined)),
-  isHarnessSessionRunning: mock(() => false),
+  isAgentSessionRunning: mock(() => false),
 };
 
 const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);

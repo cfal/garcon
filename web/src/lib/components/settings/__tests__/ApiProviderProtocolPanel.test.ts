@@ -1,10 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import ApiProviderProtocolPanelTestHarness from './ApiProviderProtocolPanelTestHarness.svelte';
+import ApiProviderProtocolPanelTestHost from './ApiProviderProtocolPanelTestHost.svelte';
 
 describe('ApiProviderProtocolPanel', () => {
   it('shows protocol-specific Anthropic add-provider templates', async () => {
-    render(ApiProviderProtocolPanelTestHarness, {
+    render(ApiProviderProtocolPanelTestHost, {
       protocol: 'anthropic-messages',
       title: 'Anthropic Providers',
       description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.',
@@ -26,7 +26,7 @@ describe('ApiProviderProtocolPanel', () => {
   });
 
   it('shows protocol-specific OpenAI add-provider templates', async () => {
-    render(ApiProviderProtocolPanelTestHarness, {
+    render(ApiProviderProtocolPanelTestHost, {
       protocol: 'openai-compatible',
       title: 'OpenAI Providers',
       description: 'Use OpenAI-compatible endpoints with Codex and Direct Chat. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.',
@@ -47,8 +47,8 @@ describe('ApiProviderProtocolPanel', () => {
     ]);
   });
 
-  it('opens OpenAI providers with API capability switches instead of harness exposure toggles', async () => {
-    render(ApiProviderProtocolPanelTestHarness, {
+  it('opens OpenAI providers with API capability switches instead of agent exposure toggles', async () => {
+    render(ApiProviderProtocolPanelTestHost, {
       protocol: 'openai-compatible',
       title: 'OpenAI Providers',
       description: 'Use OpenAI-compatible endpoints with Codex and Direct Chat. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.',
@@ -67,8 +67,8 @@ describe('ApiProviderProtocolPanel', () => {
     expect(screen.queryByText('Use with Direct (Responses)')).toBeNull();
   });
 
-  it('opens Anthropic providers without per-harness exposure switches', async () => {
-    render(ApiProviderProtocolPanelTestHarness, {
+  it('opens Anthropic providers without per-agent exposure switches', async () => {
+    render(ApiProviderProtocolPanelTestHost, {
       protocol: 'anthropic-messages',
       title: 'Anthropic Providers',
       description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.',
@@ -84,7 +84,7 @@ describe('ApiProviderProtocolPanel', () => {
   });
 
   it('renders saved provider rows without built-in or disabled badges', () => {
-    render(ApiProviderProtocolPanelTestHarness, {
+    render(ApiProviderProtocolPanelTestHost, {
       protocol: 'openai-compatible',
       title: 'OpenAI Providers',
       description: 'Use OpenAI-compatible endpoints with Codex and Direct Chat. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.',

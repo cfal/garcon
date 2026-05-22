@@ -215,15 +215,15 @@
 			buildPermissionOptions(form.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES)
 		);
 		const thinkingOptions = $derived(buildThinkingOptions());
-		const modelSelectorMode: ModelSelectorMode = { harness: 'select', source: 'select', surface: 'composer' };
+		const modelSelectorMode: ModelSelectorMode = { agent: 'select', source: 'select', surface: 'composer' };
 		const modelSelectorValue = $derived({
-			harnessId: form.provider,
+			agentId: form.provider,
 			model: form.modelValue,
 		});
 		const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
 		function handleModelSelectorChange(next: ModelSelectorChange): void {
-			form.selectProvider(next.harnessId);
+			form.selectProvider(next.agentId);
 			form.handleModelChange(next.modelValue);
 		}
 	</script>

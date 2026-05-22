@@ -58,8 +58,8 @@ const historyCache = {
 const providers = {
   startSession: mock(() => Promise.resolve(undefined)),
   getModels: mock(() => Promise.resolve([])),
-  isHarnessSessionRunning: mock(() => false),
-  hasHarness: mock(() => true),
+  isAgentSessionRunning: mock(() => false),
+  hasAgent: mock(() => true),
   modelSupportsImages: mock(() => Promise.resolve(false)),
 };
 
@@ -81,8 +81,8 @@ describe('POST /api/v1/chats/start', () => {
     historyCache.appendMessages.mockClear();
     providers.startSession.mockClear();
     providers.getModels.mockClear();
-    providers.hasHarness.mockClear();
-    providers.hasHarness.mockImplementation(() => true);
+    providers.hasAgent.mockClear();
+    providers.hasAgent.mockImplementation(() => true);
     providers.modelSupportsImages.mockClear();
   });
 
@@ -90,7 +90,7 @@ describe('POST /api/v1/chats/start', () => {
     await fs.rm(testBasePath, { recursive: true, force: true });
   });
 
-  it('persists top-level startup defaults before starting the harness session', async () => {
+  it('persists top-level startup defaults before starting the agent session', async () => {
     const projectPath = path.join(testBasePath, 'project-a');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
@@ -191,7 +191,7 @@ describe('POST /api/v1/chats/start', () => {
     const body = await response.json();
 
     expect(response.status).toBe(422);
-    expect(body.error).toBe('Images unsupported for harness: factory');
+    expect(body.error).toBe('Images unsupported for agent: factory');
     expect(providers.startSession).not.toHaveBeenCalled();
   });
 
@@ -252,7 +252,7 @@ describe('POST /api/v1/chats/start', () => {
   it('rejects unsupported providers instead of defaulting to Claude', async () => {
     const projectPath = path.join(testBasePath, 'project-f');
     await fs.mkdir(projectPath, { recursive: true });
-    providers.hasHarness.mockImplementation((harnessId) => harnessId !== 'unknown-provider');
+    providers.hasAgent.mockImplementation((agentId) => agentId !== 'unknown-provider');
     parseJsonBody.mockImplementation(() => Promise.resolve({
       chatId: '792',
       provider: 'unknown-provider',
@@ -266,7 +266,7 @@ describe('POST /api/v1/chats/start', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('Unsupported harness: unknown-provider');
+    expect(body.error).toBe('Unsupported agent: unknown-provider');
     expect(registry.addChat).not.toHaveBeenCalled();
     expect(providers.startSession).not.toHaveBeenCalled();
   });

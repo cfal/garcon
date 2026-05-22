@@ -1,6 +1,6 @@
 // Shared default policy for title/commit generation auto-selection.
 // These defaults are used when users have not explicitly configured
-// harness/model settings.
+// agent/model settings.
 
 import {
   DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,

@@ -1,50 +1,50 @@
 import type { SessionProvider } from '$lib/types/app';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
-import { nativeSourceLabelFor } from '$lib/i18n/harness-labels';
+import { nativeSourceLabelFor } from '$lib/i18n/agent-labels';
 import type { ApiProtocol } from '$shared/providers';
 import type {
 	FilteredModelResult,
 	FilteredModelRowsResult,
-	HarnessSelectorOption,
+	AgentSelectorOption,
 	ModelSelectorChange,
 	ModelSelectorRow,
 	ModelSelectorValue,
 	ModelSourceOption,
 } from './model-selector-types';
 
-export function nativeSourceKey(harnessId: SessionProvider): string {
-	return `native:${harnessId}`;
+export function nativeSourceKey(agentId: SessionProvider): string {
+	return `native:${agentId}`;
 }
 
 export function endpointSourceKey(endpointId: string): string {
 	return `endpoint:${endpointId}`;
 }
 
-export function modelSourceKeyFor(harnessId: SessionProvider, model: ModelOption): string {
+export function modelSourceKeyFor(agentId: SessionProvider, model: ModelOption): string {
 	if (model.endpointId) return endpointSourceKey(model.endpointId);
-	return nativeSourceKey(harnessId);
+	return nativeSourceKey(agentId);
 }
 
-export function buildHarnessOptions(modelCatalog: ModelCatalogStore): HarnessSelectorOption[] {
-	return modelCatalog.getSelectableHarnesses().map((harnessId) => {
-		const metadata = modelCatalog.getHarness(harnessId);
+export function buildAgentOptions(modelCatalog: ModelCatalogStore): AgentSelectorOption[] {
+	return modelCatalog.getSelectableAgents().map((agentId) => {
+		const metadata = modelCatalog.getAgent(agentId);
 		return {
-			value: harnessId,
-			label: modelCatalog.getHarnessLabel(harnessId),
+			value: agentId,
+			label: modelCatalog.getAgentLabel(agentId),
 			description: metadata?.description ?? '',
 		};
 	});
 }
 
-export function nativeSourceLabel(harnessId: SessionProvider, modelCatalog: ModelCatalogStore): string {
-	return nativeSourceLabelFor(harnessId, modelCatalog.getHarnessLabel(harnessId));
+export function nativeSourceLabel(agentId: SessionProvider, modelCatalog: ModelCatalogStore): string {
+	return nativeSourceLabelFor(agentId, modelCatalog.getAgentLabel(agentId));
 }
 
 export function buildModelSources(
 	modelCatalog: ModelCatalogStore,
-	harnessId: SessionProvider,
+	agentId: SessionProvider,
 ): ModelSourceOption[] {
-	const models = modelCatalog.getModels(harnessId);
+	const models = modelCatalog.getModels(agentId);
 	const nativeModels: ModelOption[] = [];
 	const endpointModels = new Map<string, ModelOption[]>();
 
@@ -65,9 +65,9 @@ export function buildModelSources(
 	const sources: ModelSourceOption[] = [];
 	if (nativeModels.length > 0) {
 		sources.push({
-			key: nativeSourceKey(harnessId),
-			label: nativeSourceLabel(harnessId, modelCatalog),
-			description: modelCatalog.getHarnessLabel(harnessId),
+			key: nativeSourceKey(agentId),
+			label: nativeSourceLabel(agentId, modelCatalog),
+			description: modelCatalog.getAgentLabel(agentId),
 			apiProviderId: null,
 			endpointId: null,
 			protocol: null,
@@ -105,18 +105,18 @@ export function findSelectedModelOption(
 	modelCatalog: ModelCatalogStore,
 	value: ModelSelectorValue,
 ): ModelOption | null {
-	if (!value.harnessId) return null;
+	if (!value.agentId) return null;
 	const modelValue = currentModelValue(modelCatalog, value);
 	if (!modelValue) return null;
-	return modelCatalog.getModelForSelection(value.harnessId, modelValue, value.modelEndpointId);
+	return modelCatalog.getModelForSelection(value.agentId, modelValue, value.modelEndpointId);
 }
 
 export function currentModelValue(
 	modelCatalog: ModelCatalogStore,
 	value: ModelSelectorValue,
 ): string {
-	const model = value.model || modelCatalog.getDefaultModel(value.harnessId);
-	return modelCatalog.selectionValueFor(value.harnessId, model, value.modelEndpointId);
+	const model = value.model || modelCatalog.getDefaultModel(value.agentId);
+	return modelCatalog.selectionValueFor(value.agentId, model, value.modelEndpointId);
 }
 
 export function selectedSourceKey(
@@ -125,9 +125,9 @@ export function selectedSourceKey(
 ): string | null {
 	const selectedModel = findSelectedModelOption(modelCatalog, value);
 	if (!selectedModel) {
-		return buildModelSources(modelCatalog, value.harnessId)[0]?.key ?? null;
+		return buildModelSources(modelCatalog, value.agentId)[0]?.key ?? null;
 	}
-	return modelSourceKeyFor(value.harnessId, selectedModel);
+	return modelSourceKeyFor(value.agentId, selectedModel);
 }
 
 export function filterModelOptions(
@@ -188,13 +188,13 @@ export function filterModelRows(
 
 export function buildModelSelectorChange(
 	modelCatalog: ModelCatalogStore,
-	harnessId: SessionProvider,
+	agentId: SessionProvider,
 	modelValue: string,
 ): ModelSelectorChange | null {
-	if (!harnessId || !modelValue) return null;
-	const selection = modelCatalog.selectionFor(harnessId, modelValue);
+	if (!agentId || !modelValue) return null;
+	const selection = modelCatalog.selectionFor(agentId, modelValue);
 	return {
-		harnessId,
+		agentId,
 		modelValue,
 		model: selection.model,
 		apiProviderId: selection.apiProviderId,

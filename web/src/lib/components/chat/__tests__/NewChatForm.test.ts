@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import NewChatFormTestHarness from './NewChatFormTestHarness.svelte';
+import NewChatFormTestHost from './NewChatFormTestHost.svelte';
 import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
@@ -54,7 +54,7 @@ describe('NewChatForm', () => {
 		const pending = deferred<Awaited<ReturnType<typeof settingsApi.getRemoteSettings>>>();
 		vi.mocked(settingsApi.getRemoteSettings).mockReturnValueOnce(pending.promise);
 
-		const { container } = render(NewChatFormTestHarness);
+		const { container } = render(NewChatFormTestHost);
 
 		const projectPathInput = screen.getByLabelText('Project Path');
 		const messageInput = screen.getByPlaceholderText('How can I help you today?');
@@ -99,7 +99,7 @@ describe('NewChatForm', () => {
 			]
 		});
 
-		render(NewChatFormTestHarness);
+		render(NewChatFormTestHost);
 
 		const openButton = await screen.findByRole('button', { name: 'Select a different worktree' });
 		await fireEvent.click(openButton);

@@ -42,16 +42,16 @@ import { PiProvider } from './providers/pi-cli.js';
 import { ProviderRegistry } from './providers/index.js';
 import { ApiProviderStore } from './providers/api-provider-store.js';
 import { ApiProviderEndpointResolver } from './providers/api-provider-endpoint-resolver.js';
-import { createAmpHarness } from './harnesses/amp/index.js';
-import { createClaudeHarness } from './harnesses/claude/index.js';
-import { createCodexHarness } from './harnesses/codex/index.js';
-import { createCursorHarness } from './harnesses/cursor/index.js';
-import { createDirectAnthropicHarness } from './harnesses/direct/anthropic.js';
-import { createDirectOpenAiChatHarness } from './harnesses/direct/openai-chat.js';
-import { createDirectOpenAiResponsesHarness } from './harnesses/direct/openai-responses.js';
-import { createFactoryHarness } from './harnesses/factory/index.js';
-import { createOpenCodeHarness } from './harnesses/opencode/index.js';
-import { createPiHarness } from './harnesses/pi/index.js';
+import { createAmpAgent } from './agents/amp/index.js';
+import { createClaudeAgent } from './agents/claude/index.js';
+import { createCodexAgent } from './agents/codex/index.js';
+import { createCursorAgent } from './agents/cursor/index.js';
+import { createDirectAnthropicAgent } from './agents/direct/anthropic.js';
+import { createDirectOpenAiChatAgent } from './agents/direct/openai-chat.js';
+import { createDirectOpenAiResponsesAgent } from './agents/direct/openai-responses.js';
+import { createFactoryAgent } from './agents/factory/index.js';
+import { createOpenCodeAgent } from './agents/opencode/index.js';
+import { createPiAgent } from './agents/pi/index.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
@@ -115,24 +115,24 @@ export async function startServer() {
 
     const endpointResolver = new ApiProviderEndpointResolver(() => apiProviderStore.list());
 
-    // Build first-class harnesses from concrete execution providers.
-	    const harnesses = [
-	      createClaudeHarness(claudeProvider),
-	      createCodexHarness(codexProvider),
-	      createDirectOpenAiResponsesHarness(apiProviderStore),
-	      createDirectOpenAiChatHarness(apiProviderStore),
-	      createDirectAnthropicHarness(apiProviderStore),
-	      createOpenCodeHarness(opencodeProvider),
-	      createAmpHarness(ampProvider),
-	      createCursorHarness({ workspaceDir }),
-	      createFactoryHarness(factoryProvider),
-	      createPiHarness(piProvider),
+    // Build first-class agents from concrete execution providers.
+	    const agents = [
+	      createClaudeAgent(claudeProvider),
+	      createCodexAgent(codexProvider),
+	      createDirectOpenAiResponsesAgent(apiProviderStore),
+	      createDirectOpenAiChatAgent(apiProviderStore),
+	      createDirectAnthropicAgent(apiProviderStore),
+	      createOpenCodeAgent(opencodeProvider),
+	      createAmpAgent(ampProvider),
+	      createCursorAgent({ workspaceDir }),
+	      createFactoryAgent(factoryProvider),
+	      createPiAgent(piProvider),
 	    ];
 
-	    // Tier 2: Harness registry wrapping plugin runtime + registry + store + resolver
+	    // Tier 2: Agent registry wrapping plugin runtime + registry + store + resolver
 	    const providerRegistry = new ProviderRegistry({
 	      registry: chatRegistry,
-	      harnesses,
+	      agents,
 	      endpointResolver,
 	      apiProviderStore,
 	    });

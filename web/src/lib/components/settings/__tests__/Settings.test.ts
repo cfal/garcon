@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-import SettingsTestHarness from './SettingsTestHarness.svelte';
+import SettingsTestHost from './SettingsTestHost.svelte';
 
 vi.mock('$lib/api/settings.js', () => ({
   getRemoteSettings: vi.fn(),
@@ -11,9 +11,9 @@ vi.mock('$lib/api/settings.js', () => ({
 }));
 
 vi.mock('$lib/api/providers.js', () => ({
-  getHarnessAuthStatus: vi.fn(),
-  getHarnessReadiness: vi.fn(),
-  launchHarnessAuthLogin: vi.fn(),
+  getAgentAuthStatus: vi.fn(),
+  getAgentReadiness: vi.fn(),
+  launchAgentAuthLogin: vi.fn(),
 }));
 
 const settingsApi = await import('$lib/api/settings.js');
@@ -23,22 +23,22 @@ describe('Settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(settingsApi.getRemoteSettings).mockReturnValue(new Promise(() => { }));
-    vi.mocked(providersApi.getHarnessAuthStatus).mockResolvedValue({
+    vi.mocked(providersApi.getAgentAuthStatus).mockResolvedValue({
       authenticated: false,
       canReauth: true,
       label: '',
     });
-    vi.mocked(providersApi.getHarnessReadiness).mockResolvedValue({});
+    vi.mocked(providersApi.getAgentReadiness).mockResolvedValue({});
   });
 
-  it('renders a tabbed layout with providers, harnesses, local, and remote settings', async () => {
+  it('renders a tabbed layout with providers, agents, local, and remote settings', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const appShell = createAppShellStore();
     appShell.openSettings('remote');
     const remoteSettings = new RemoteSettingsStore();
     const refreshSpy = vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
 
-    const rendered = render(SettingsTestHarness, { appShell, remoteSettings });
+    const rendered = render(SettingsTestHost, { appShell, remoteSettings });
 
     try {
       await waitFor(() => {
@@ -46,7 +46,7 @@ describe('Settings', () => {
       });
       expect(screen.getByRole('tablist')).toBeTruthy();
       expect(screen.getByRole('tab', { name: 'Providers' })).toBeTruthy();
-      expect(screen.getByRole('tab', { name: 'Other Harnesses' })).toBeTruthy();
+      expect(screen.getByRole('tab', { name: 'Other Agents' })).toBeTruthy();
       expect(screen.getByRole('tab', { name: 'Local Settings' })).toBeTruthy();
       expect(screen.getByRole('tab', { name: 'Remote Settings' })).toBeTruthy();
       expect(screen.queryByRole('heading', { name: 'Remote Settings' })).toBeNull();
@@ -67,15 +67,15 @@ describe('Settings', () => {
       expect(screen.getByText('Use OpenAI-compatible endpoints with Codex and Direct Chat. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.')).toBeTruthy();
       expect(screen.getByText('Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.')).toBeTruthy();
 
-      await fireEvent.click(screen.getByRole('tab', { name: 'Other Harnesses' }));
-      expect(appShell.settingsTab).toBe('other-harnesses');
-      expect(screen.queryByRole('heading', { name: 'Other Harnesses' })).toBeNull();
-      expect(screen.getByText('These harnesses manage providers and authentication internally.')).toBeTruthy();
-	      const otherHarnessNames = ['Amp', 'Cursor', 'Factory', 'OpenCode', 'Pi'].map((name) => screen.getByText(name));
-	      expect(otherHarnessNames[0].compareDocumentPosition(otherHarnessNames[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-	      expect(otherHarnessNames[1].compareDocumentPosition(otherHarnessNames[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-	      expect(otherHarnessNames[2].compareDocumentPosition(otherHarnessNames[3]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-	      expect(otherHarnessNames[3].compareDocumentPosition(otherHarnessNames[4]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      await fireEvent.click(screen.getByRole('tab', { name: 'Other Agents' }));
+      expect(appShell.settingsTab).toBe('other-agents');
+      expect(screen.queryByRole('heading', { name: 'Other Agents' })).toBeNull();
+      expect(screen.getByText('These agents manage provider and authentication workflows internally.')).toBeTruthy();
+	      const otherAgentNames = ['Amp', 'Cursor', 'Factory', 'OpenCode', 'Pi'].map((name) => screen.getByText(name));
+	      expect(otherAgentNames[0].compareDocumentPosition(otherAgentNames[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	      expect(otherAgentNames[1].compareDocumentPosition(otherAgentNames[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	      expect(otherAgentNames[2].compareDocumentPosition(otherAgentNames[3]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	      expect(otherAgentNames[3].compareDocumentPosition(otherAgentNames[4]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(screen.getByText('Pi')).toBeTruthy();
       expect(screen.getByText('pi')).toBeTruthy();
 

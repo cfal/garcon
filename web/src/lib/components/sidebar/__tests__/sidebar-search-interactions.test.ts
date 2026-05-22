@@ -6,7 +6,7 @@ import SavedSearchManagerDialog from '../SavedSearchManagerDialog.svelte';
 import SidebarControlsRow from '../SidebarControlsRow.svelte';
 import SidebarSearchDock from '../SidebarSearchDock.svelte';
 import SidebarSearchContext from '../SidebarSearchContext.svelte';
-import SidebarSearchDialogHarness from './SidebarSearchDialogHarness.svelte';
+import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
 
 import type { SavedChatSearch } from '$lib/api/settings';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -53,7 +53,7 @@ describe('sidebar search interactions', () => {
 	it('opens the highlighted chat from the query input and respects Ctrl-J selection', async () => {
 		const onSelectChat = vi.fn();
 
-		render(SidebarSearchDialogHarness, {
+		render(SidebarSearchDialogHost, {
 			filteredChats: [
 				createChat('chat-1', 'First chat'),
 				createChat('chat-2', 'Second chat'),
@@ -78,7 +78,7 @@ describe('sidebar search interactions', () => {
 		const onCreateSavedSearch = vi.fn();
 		const onApplySavedSearch = vi.fn();
 
-		render(SidebarSearchDialogHarness, {
+		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat('chat-1', 'First chat')],
 			savedSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
 			onSelectChat,
@@ -109,7 +109,7 @@ describe('sidebar search interactions', () => {
 	});
 
 	it('removes the dedicated close button from the search dialog header', async () => {
-		render(SidebarSearchDialogHarness, {
+		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat('chat-1', 'First chat')],
 		});
 
@@ -120,7 +120,7 @@ describe('sidebar search interactions', () => {
 	it('closes when clicking outside the dialog panel', async () => {
 		const onClose = vi.fn();
 
-		render(SidebarSearchDialogHarness, {
+		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat('chat-1', 'First chat')],
 			onClose,
 		});
@@ -139,7 +139,7 @@ describe('sidebar search interactions', () => {
 	it('closes from Ctrl-S inside the dialog', async () => {
 		const onClose = vi.fn();
 
-		render(SidebarSearchDialogHarness, {
+		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat('chat-1', 'First chat')],
 			onClose,
 		});
@@ -155,7 +155,7 @@ describe('sidebar search interactions', () => {
 	});
 
 	it('uses a command-palette shell with a fixed scrollable results pane', async () => {
-		render(SidebarSearchDialogHarness, {
+		render(SidebarSearchDialogHost, {
 			filteredChats: [
 				createChat('chat-1', 'First chat'),
 				createChat('chat-2', 'Second chat'),
@@ -188,7 +188,7 @@ describe('sidebar search interactions', () => {
 	it('disables save for an empty query, enables it for a non-empty query, and opens the add dialog callback', async () => {
 		const onCreateSavedSearch = vi.fn();
 
-		render(SidebarSearchDialogHarness, {
+		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat('chat-1', 'First chat')],
 			onCreateSavedSearch,
 		});
@@ -206,7 +206,7 @@ describe('sidebar search interactions', () => {
 	});
 
 	it('clears the query from the inline input control without closing the dialog', async () => {
-		render(SidebarSearchDialogHarness, {
+		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat('chat-1', 'First chat')],
 		});
 
@@ -223,7 +223,7 @@ describe('sidebar search interactions', () => {
 	});
 
 	it('omits the saved-search pill container when there are no saved searches', async () => {
-		render(SidebarSearchDialogHarness, {
+		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat('chat-1', 'First chat')],
 			savedSearches: [],
 		});
@@ -234,7 +234,7 @@ describe('sidebar search interactions', () => {
 	});
 
 	it('keeps chat rows shrinkable within the dialog width', async () => {
-		render(SidebarSearchDialogHarness, {
+		render(SidebarSearchDialogHost, {
 			filteredChats: [
 				createChat(
 					'chat-1',

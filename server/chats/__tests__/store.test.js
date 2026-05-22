@@ -164,7 +164,7 @@ describe('ChatRegistry', () => {
   });
 
   describe('getChatByProviderSessionId', () => {
-    it('finds a chat by harness session ID', () => {
+    it('finds a chat by agent session ID', () => {
       registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p', providerSessionId: 'ps1' });
       const result = registry.getChatByProviderSessionId('ps1');
       expect(result).not.toBeNull();

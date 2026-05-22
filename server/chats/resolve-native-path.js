@@ -5,7 +5,7 @@ import { promises as fs } from 'fs';
 import { createClaudeNativePath } from '../providers/claude-cli.js';
 import { findPiSessionFileBySessionId } from '../providers/pi-session-paths.js';
 import { createArtificialNativePath } from './artificial-native-path.js';
-import { isEndpointOnlyHarnessId } from '../../common/providers.ts';
+import { isEndpointOnlyAgentId } from '../../common/providers.ts';
 
 export async function resolveMissingNativePath(session, options = {}) {
   if (!session || !session.providerSessionId) {
@@ -50,7 +50,7 @@ export async function resolveMissingNativePath(session, options = {}) {
     return found || createArtificialNativePath(session.provider, session.providerSessionId);
   }
 
-  if (isEndpointOnlyHarnessId(session.provider)) {
+  if (isEndpointOnlyAgentId(session.provider)) {
     return createArtificialNativePath(session.provider, session.providerSessionId);
   }
 

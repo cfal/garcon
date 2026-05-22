@@ -211,9 +211,9 @@
 	);
 	const thinkingOptions = $derived(buildThinkingOptions());
 	const canAttachImages = $derived(modelCatalog.supportsImages(providerState.provider, providerState.model));
-	const modelSelectorMode: ModelSelectorMode = { harness: 'fixed', source: 'hidden', surface: 'composer' };
+	const modelSelectorMode: ModelSelectorMode = { agent: 'fixed', source: 'hidden', surface: 'composer' };
 	const modelSelectorValue = $derived({
-		harnessId: providerState.provider,
+		agentId: providerState.provider,
 		model: providerState.model,
 		apiProviderId: providerState.apiProviderId,
 		modelEndpointId: providerState.modelEndpointId,

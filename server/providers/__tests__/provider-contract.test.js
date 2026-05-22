@@ -4,104 +4,104 @@ import {
   DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
   DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-  endpointSupportsHarness,
-  harnessesForEndpoint,
-  harnessesForProtocol,
+  endpointSupportsAgent,
+  agentsForEndpoint,
+  agentsForProtocol,
   isApiProviderTemplateId,
-  isEndpointOnlyHarnessId,
-  isHarnessCompatibleWithProtocol,
-  isOAuthHarnessId,
-  isOtherSettingsHarnessId,
-  isVisibleHarnessId,
+  isEndpointOnlyAgentId,
+  isAgentCompatibleWithProtocol,
+  isOAuthAgentId,
+  isOtherSettingsAgentId,
+  isVisibleAgentId,
 } from '../../../common/providers.ts';
 import { templatesForProtocol } from '../../../common/api-provider-templates.ts';
 
-describe('shared harness/API provider contract', () => {
+describe('shared agent/API provider contract', () => {
   it('maps Anthropic-compatible endpoints to Claude Code and Direct Anthropic', () => {
-    expect(harnessesForProtocol('anthropic-messages')).toEqual([
+    expect(agentsForProtocol('anthropic-messages')).toEqual([
       'claude',
       DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
     ]);
-    expect(isHarnessCompatibleWithProtocol('claude', 'anthropic-messages')).toBe(true);
-    expect(isHarnessCompatibleWithProtocol(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, 'anthropic-messages')).toBe(true);
-    expect(isHarnessCompatibleWithProtocol('codex', 'anthropic-messages')).toBe(false);
-    expect(isHarnessCompatibleWithProtocol(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, 'anthropic-messages')).toBe(false);
+    expect(isAgentCompatibleWithProtocol('claude', 'anthropic-messages')).toBe(true);
+    expect(isAgentCompatibleWithProtocol(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, 'anthropic-messages')).toBe(true);
+    expect(isAgentCompatibleWithProtocol('codex', 'anthropic-messages')).toBe(false);
+    expect(isAgentCompatibleWithProtocol(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, 'anthropic-messages')).toBe(false);
   });
 
   it('maps OpenAI-compatible endpoints to broad compatible consumers', () => {
-    expect(harnessesForProtocol('openai-compatible')).toEqual([
+    expect(agentsForProtocol('openai-compatible')).toEqual([
       'codex',
       DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
       DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
     ]);
-    expect(isHarnessCompatibleWithProtocol('codex', 'openai-compatible')).toBe(true);
-    expect(isHarnessCompatibleWithProtocol(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, 'openai-compatible')).toBe(true);
-    expect(isHarnessCompatibleWithProtocol(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, 'openai-compatible')).toBe(true);
-    expect(isHarnessCompatibleWithProtocol('claude', 'openai-compatible')).toBe(false);
-    expect(isHarnessCompatibleWithProtocol(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, 'openai-compatible')).toBe(false);
+    expect(isAgentCompatibleWithProtocol('codex', 'openai-compatible')).toBe(true);
+    expect(isAgentCompatibleWithProtocol(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, 'openai-compatible')).toBe(true);
+    expect(isAgentCompatibleWithProtocol(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, 'openai-compatible')).toBe(true);
+    expect(isAgentCompatibleWithProtocol('claude', 'openai-compatible')).toBe(false);
+    expect(isAgentCompatibleWithProtocol(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, 'openai-compatible')).toBe(false);
   });
 
-  it('maps OpenAI-compatible endpoint capabilities to harnesses', () => {
-    expect(endpointSupportsHarness('codex', {
+  it('maps OpenAI-compatible endpoint capabilities to agents', () => {
+    expect(endpointSupportsAgent('codex', {
       protocol: 'openai-compatible',
       capabilities: { chatCompletions: true, responses: true },
     })).toBe(true);
-    expect(endpointSupportsHarness(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, {
+    expect(endpointSupportsAgent(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, {
       protocol: 'openai-compatible',
       capabilities: { chatCompletions: true, responses: false },
     })).toBe(true);
-    expect(endpointSupportsHarness(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, {
+    expect(endpointSupportsAgent(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, {
       protocol: 'openai-compatible',
       capabilities: { chatCompletions: true, responses: false },
     })).toBe(false);
-    expect(endpointSupportsHarness(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, {
+    expect(endpointSupportsAgent(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, {
       protocol: 'openai-compatible',
       capabilities: { chatCompletions: false, responses: true },
     })).toBe(true);
-    expect(harnessesForEndpoint({
+    expect(agentsForEndpoint({
       protocol: 'openai-compatible',
       capabilities: { chatCompletions: false, responses: true },
     })).toEqual(['codex', DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]);
   });
 
-  it('does not treat API provider ids as visible harness ids', () => {
-    expect(isVisibleHarnessId('claude')).toBe(true);
-    expect(isVisibleHarnessId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(true);
-    expect(isVisibleHarnessId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(true);
-    expect(isVisibleHarnessId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(true);
-    expect(isVisibleHarnessId('cursor')).toBe(true);
-    expect(isVisibleHarnessId('pi')).toBe(true);
-    expect(isVisibleHarnessId('zai')).toBe(false);
-    expect(isVisibleHarnessId('openrouter')).toBe(false);
-    expect(isVisibleHarnessId('ollama')).toBe(false);
-    expect(isVisibleHarnessId('alibaba-cloud')).toBe(false);
-    expect(isVisibleHarnessId('fireworks')).toBe(false);
-    expect(isVisibleHarnessId('gemini')).toBe(false);
-    expect(isVisibleHarnessId('together')).toBe(false);
+  it('does not treat API provider ids as visible agent ids', () => {
+    expect(isVisibleAgentId('claude')).toBe(true);
+    expect(isVisibleAgentId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(true);
+    expect(isVisibleAgentId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(true);
+    expect(isVisibleAgentId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(true);
+    expect(isVisibleAgentId('cursor')).toBe(true);
+    expect(isVisibleAgentId('pi')).toBe(true);
+    expect(isVisibleAgentId('zai')).toBe(false);
+    expect(isVisibleAgentId('openrouter')).toBe(false);
+    expect(isVisibleAgentId('ollama')).toBe(false);
+    expect(isVisibleAgentId('alibaba-cloud')).toBe(false);
+    expect(isVisibleAgentId('fireworks')).toBe(false);
+    expect(isVisibleAgentId('gemini')).toBe(false);
+    expect(isVisibleAgentId('together')).toBe(false);
   });
 
-  it('keeps settings auth rows narrower than visible harnesses', () => {
-    expect(isOAuthHarnessId('claude')).toBe(true);
-    expect(isOAuthHarnessId('codex')).toBe(true);
-    expect(isOAuthHarnessId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(false);
-    expect(isOAuthHarnessId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(false);
-    expect(isOAuthHarnessId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(false);
-    expect(isOtherSettingsHarnessId('opencode')).toBe(true);
-    expect(isOtherSettingsHarnessId('amp')).toBe(true);
-    expect(isOtherSettingsHarnessId('cursor')).toBe(true);
-    expect(isOtherSettingsHarnessId('factory')).toBe(true);
-    expect(isOtherSettingsHarnessId('pi')).toBe(true);
-    expect(isOtherSettingsHarnessId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(false);
-    expect(isOtherSettingsHarnessId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(false);
-    expect(isOtherSettingsHarnessId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(false);
+  it('keeps settings auth rows narrower than visible agents', () => {
+    expect(isOAuthAgentId('claude')).toBe(true);
+    expect(isOAuthAgentId('codex')).toBe(true);
+    expect(isOAuthAgentId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(false);
+    expect(isOAuthAgentId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(false);
+    expect(isOAuthAgentId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(false);
+    expect(isOtherSettingsAgentId('opencode')).toBe(true);
+    expect(isOtherSettingsAgentId('amp')).toBe(true);
+    expect(isOtherSettingsAgentId('cursor')).toBe(true);
+    expect(isOtherSettingsAgentId('factory')).toBe(true);
+    expect(isOtherSettingsAgentId('pi')).toBe(true);
+    expect(isOtherSettingsAgentId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(false);
+    expect(isOtherSettingsAgentId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(false);
+    expect(isOtherSettingsAgentId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(false);
   });
 
-  it('identifies endpoint-only direct harnesses', () => {
-    expect(isEndpointOnlyHarnessId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(true);
-    expect(isEndpointOnlyHarnessId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(true);
-    expect(isEndpointOnlyHarnessId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(true);
-    expect(isEndpointOnlyHarnessId('claude')).toBe(false);
-    expect(isEndpointOnlyHarnessId('pi')).toBe(false);
+  it('identifies endpoint-only direct agents', () => {
+    expect(isEndpointOnlyAgentId(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID)).toBe(true);
+    expect(isEndpointOnlyAgentId(DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID)).toBe(true);
+    expect(isEndpointOnlyAgentId(DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID)).toBe(true);
+    expect(isEndpointOnlyAgentId('claude')).toBe(false);
+    expect(isEndpointOnlyAgentId('pi')).toBe(false);
   });
 
   it('returns protocol-specific add-provider templates', () => {

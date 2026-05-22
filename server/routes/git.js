@@ -3,7 +3,7 @@ import { classifyGitError } from '../git/git-error-classifier.js';
 import { parseJsonBody, MalformedJsonError } from '../lib/http-request.js';
 import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
-import { isHarnessId } from '../../common/providers.ts';
+import { isAgentId } from '../../common/providers.ts';
 
 const MALFORMED_BODY = () =>
   Response.json({ error: 'Request body is not valid JSON.' }, { status: 400 });
@@ -32,16 +32,16 @@ function optionalProtocol(value) {
 }
 
 function isAllowedGenerationProvider(providers, value) {
-  if (!isHarnessId(value)) return false;
-  if (typeof providers?.hasHarness === 'function') {
-    return providers.hasHarness(value);
+  if (!isAgentId(value)) return false;
+  if (typeof providers?.hasAgent === 'function') {
+    return providers.hasAgent(value);
   }
   return true;
 }
 
-async function getHarnessCatalog(providers) {
+async function getAgentCatalog(providers) {
   try {
-    return await providers?.getHarnessCatalog?.();
+    return await providers?.getAgentCatalog?.();
   } catch {
     return null;
   }
@@ -49,26 +49,26 @@ async function getHarnessCatalog(providers) {
 
 async function resolveCommitMessageConfig(settings, providers) {
   const ui = await settings?.getUiSettings?.() ?? {};
-  const authByHarness = await providers?.getHarnessAuthStatusMap?.() ?? {
+  const authByAgent = await providers?.getAgentAuthStatusMap?.() ?? {
     claude: { authenticated: false },
     codex: { authenticated: false },
     opencode: { authenticated: false },
     amp: { authenticated: false },
     factory: { authenticated: false },
   };
-  const [readinessByHarness, catalog, opencodeModels, factoryModels] = await Promise.all([
-    providers?.getHarnessReadinessMap?.() ?? {},
-    getHarnessCatalog(providers),
+  const [readinessByAgent, catalog, opencodeModels, factoryModels] = await Promise.all([
+    providers?.getAgentReadinessMap?.() ?? {},
+    getAgentCatalog(providers),
     providers?.getModels?.('opencode') ?? [],
     providers?.getModels?.('factory') ?? [],
   ]);
   const catalogModels = Object.fromEntries(
-    (catalog?.harnesses ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
+    (catalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
   );
   return resolveEffectiveGenerationUiConfig({
     persisted: ui?.commitMessage,
-    authByHarness,
-    modelsByHarness: {
+    authByAgent,
+    modelsByAgent: {
       claude: CLAUDE_MODELS.OPTIONS,
       codex: CODEX_MODELS.OPTIONS,
       opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
@@ -76,7 +76,7 @@ async function resolveCommitMessageConfig(settings, providers) {
       factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
       ...catalogModels,
     },
-    readinessByHarness,
+    readinessByAgent,
   });
 }
 

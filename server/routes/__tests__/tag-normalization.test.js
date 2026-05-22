@@ -56,7 +56,7 @@ const historyCache = {
 };
 const providers = {
   startSession: mock(() => undefined),
-  isHarnessSessionRunning: mock(() => false),
+  isAgentSessionRunning: mock(() => false),
   runSingleQuery: mock(() => Promise.resolve('')),
 };
 

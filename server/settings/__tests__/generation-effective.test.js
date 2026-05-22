@@ -2,16 +2,16 @@ import { describe, expect, it } from 'bun:test';
 import { resolveEffectiveGenerationConfig } from '../generation-effective.js';
 
 describe('resolveEffectiveGenerationConfig', () => {
-  it('disables generation when no harness is authenticated and no settings were persisted', () => {
+  it('disables generation when no agent is authenticated and no settings were persisted', () => {
     const result = resolveEffectiveGenerationConfig({
       persisted: {},
-      authByHarness: {
+      authByAgent: {
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: false },
         factory: { authenticated: false },
       },
-      modelsByHarness: { opencode: [], factory: [] },
+      modelsByAgent: { opencode: [], factory: [] },
     });
 
     expect(result).toEqual({
@@ -25,16 +25,16 @@ describe('resolveEffectiveGenerationConfig', () => {
     });
   });
 
-  it('auto-selects codex defaults when codex is the highest authenticated harness', () => {
+  it('auto-selects codex defaults when codex is the highest authenticated agent', () => {
     const result = resolveEffectiveGenerationConfig({
       persisted: {},
-      authByHarness: {
+      authByAgent: {
         claude: { authenticated: false },
         codex: { authenticated: true },
         opencode: { authenticated: true },
         factory: { authenticated: false },
       },
-      modelsByHarness: { opencode: [], factory: [] },
+      modelsByAgent: { opencode: [], factory: [] },
     });
 
     expect(result).toEqual({
@@ -51,14 +51,14 @@ describe('resolveEffectiveGenerationConfig', () => {
   it('auto-selects Direct Anthropic endpoint models before Codex when ready', () => {
     const result = resolveEffectiveGenerationConfig({
       persisted: {},
-      authByHarness: {
+      authByAgent: {
         claude: { authenticated: false },
         codex: { authenticated: true },
       },
-      readinessByHarness: {
+      readinessByAgent: {
         'direct-anthropic-compatible': { ready: true },
       },
-      modelsByHarness: {
+      modelsByAgent: {
         'direct-anthropic-compatible': [
           { value: 'acme_anthropic:acme-sonnet', label: 'Acme: Acme Sonnet' },
         ],
@@ -79,13 +79,13 @@ describe('resolveEffectiveGenerationConfig', () => {
   it('prefers OpenCode non-R1 defaults when OpenCode is selected', () => {
     const result = resolveEffectiveGenerationConfig({
       persisted: {},
-      authByHarness: {
+      authByAgent: {
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: true },
         factory: { authenticated: false },
       },
-      modelsByHarness: {
+      modelsByAgent: {
         opencode: [
           { value: 'deepseek-r1', label: 'DeepSeek R1' },
           { value: 'deepseek-v3', label: 'DeepSeek V3' },
@@ -108,13 +108,13 @@ describe('resolveEffectiveGenerationConfig', () => {
   it('does not auto-select OpenCode when no OpenCode models were discovered', () => {
     const result = resolveEffectiveGenerationConfig({
       persisted: {},
-      authByHarness: {
+      authByAgent: {
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: true },
         factory: { authenticated: false },
       },
-      modelsByHarness: { opencode: [] },
+      modelsByAgent: { opencode: [] },
     });
 
     expect(result).toEqual({
@@ -128,16 +128,16 @@ describe('resolveEffectiveGenerationConfig', () => {
     });
   });
 
-  it('respects explicitly persisted settings even without authenticated harnesses', () => {
+  it('respects explicitly persisted settings even without authenticated agents', () => {
     const result = resolveEffectiveGenerationConfig({
       persisted: { enabled: true, provider: 'opencode', model: 'openai/gpt-4.1' },
-      authByHarness: {
+      authByAgent: {
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: false },
         factory: { authenticated: false },
       },
-      modelsByHarness: { opencode: [], factory: [] },
+      modelsByAgent: { opencode: [], factory: [] },
     });
 
     expect(result).toEqual({
@@ -151,16 +151,16 @@ describe('resolveEffectiveGenerationConfig', () => {
     });
   });
 
-  it('preserves a persisted amp harness and fills its default model', () => {
+  it('preserves a persisted amp agent and fills its default model', () => {
     const result = resolveEffectiveGenerationConfig({
       persisted: { enabled: true, provider: 'amp' },
-      authByHarness: {
+      authByAgent: {
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: false },
         amp: { authenticated: false },
       },
-      modelsByHarness: { opencode: [], amp: [] },
+      modelsByAgent: { opencode: [], amp: [] },
     });
 
     expect(result).toEqual({
@@ -174,17 +174,17 @@ describe('resolveEffectiveGenerationConfig', () => {
     });
   });
 
-  it('preserves a persisted factory harness and fills its default model', () => {
+  it('preserves a persisted factory agent and fills its default model', () => {
     const result = resolveEffectiveGenerationConfig({
       persisted: { enabled: true, provider: 'factory' },
-      authByHarness: {
+      authByAgent: {
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: false },
         amp: { authenticated: false },
         factory: { authenticated: false },
       },
-      modelsByHarness: { opencode: [], amp: [], factory: [] },
+      modelsByAgent: { opencode: [], amp: [], factory: [] },
     });
 
     expect(result).toEqual({
@@ -198,11 +198,11 @@ describe('resolveEffectiveGenerationConfig', () => {
     });
   });
 
-  it('uses dynamic harness model defaults from catalog-shaped model maps', () => {
+  it('uses dynamic agent model defaults from catalog-shaped model maps', () => {
     const result = resolveEffectiveGenerationConfig({
       persisted: { enabled: true, provider: 'direct-openai-compatible' },
-      authByHarness: {},
-      modelsByHarness: {
+      authByAgent: {},
+      modelsByAgent: {
         'direct-openai-compatible': [
           { value: 'zai_openai:glm-5.1', label: 'Z.AI: GLM-5.1' },
         ],

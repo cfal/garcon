@@ -59,7 +59,7 @@ mock.module('../loaders/direct-compatible-history-loader.js', () => ({
 }));
 
 import { ProviderRegistry } from '../index.js';
-import { createHarnessCapabilities } from '../../harnesses/capabilities.js';
+import { createAgentCapabilities } from '../../agents/capabilities.js';
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -67,7 +67,7 @@ afterEach(() => {
 
 function makeEndpointResolver(endpointOptions = {}) {
   return {
-    getModelOptions: mock((harnessId) => endpointOptions[harnessId] ?? []),
+    getModelOptions: mock((agentId) => endpointOptions[agentId] ?? []),
     resolveSelection: mock(({ model, apiProviderId = null, modelEndpointId = null }) => ({
       model: modelEndpointId ? model.replace(`${modelEndpointId}:`, '') : model,
       apiProviderId,
@@ -132,7 +132,7 @@ function baseRuntime(overrides = {}) {
   };
 }
 
-function harnessFromRuntime(id, label, runtime, capabilities, runSingleQuery) {
+function agentFromRuntime(id, label, runtime, capabilities, runSingleQuery) {
   return {
     id,
     label,
@@ -149,7 +149,7 @@ function harnessFromRuntime(id, label, runtime, capabilities, runSingleQuery) {
         source: 'none',
       }),
     },
-    capabilities: createHarnessCapabilities({
+    capabilities: createAgentCapabilities({
       ...capabilities,
       ...(runtime.getModels ? { getModels: () => runtime.getModels() } : {}),
     }),
@@ -268,15 +268,15 @@ function makeRegistry(args = {}) {
   return {
     registry: new ProviderRegistry({
       registry: mockRegistry,
-      harnesses: [
-        harnessFromRuntime('claude', 'Claude', baseRuntime(), {
+      agents: [
+        agentFromRuntime('claude', 'Claude', baseRuntime(), {
           supportsFork: true,
           supportsImages: true,
           acceptsApiProviderEndpoints: true,
           supportedProtocols: ['anthropic-messages'],
           authLoginSupported: true,
         }, claudeQuery),
-        harnessFromRuntime('codex', 'Codex', baseRuntime({
+        agentFromRuntime('codex', 'Codex', baseRuntime({
           startSession: codex.startSession,
           runTurn: codex.runTurn,
           abort: codex.abort,
@@ -289,7 +289,7 @@ function makeRegistry(args = {}) {
           supportedProtocols: ['openai-compatible'],
           authLoginSupported: true,
         }, codexQuery),
-        harnessFromRuntime('opencode', 'OpenCode', baseRuntime({
+        agentFromRuntime('opencode', 'OpenCode', baseRuntime({
           async startSession(request) {
             const providerSessionId = await opencode.startSession(request);
             return { providerSessionId, nativePath: `opencode:${providerSessionId}` };
@@ -306,35 +306,35 @@ function makeRegistry(args = {}) {
           supportedProtocols: [],
           authLoginSupported: false,
         }, opencode.runSingleQuery),
-        harnessFromRuntime('amp', 'Amp', amp, {
+        agentFromRuntime('amp', 'Amp', amp, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
         }, ampQuery),
-        harnessFromRuntime('cursor', 'Cursor', cursor, {
+        agentFromRuntime('cursor', 'Cursor', cursor, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
         }, cursorQuery),
-        harnessFromRuntime('factory', 'Factory', factory, {
+        agentFromRuntime('factory', 'Factory', factory, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
         }, factoryQuery),
-        harnessFromRuntime('pi', 'Pi', pi, {
+        agentFromRuntime('pi', 'Pi', pi, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
         }, piQuery),
-        ...(args.harnesses ?? []),
+        ...(args.agents ?? []),
       ],
       endpointResolver: args.endpointResolver ?? makeEndpointResolver(),
       apiProviderStore: args.apiProviderStore ?? makeApiProviderStore(),
@@ -360,7 +360,7 @@ describe('ProviderRegistry.runSingleQuery', () => {
     piQuery.mockClear();
   });
 
-  it('routes one-shot prompts to native harnesses', async () => {
+  it('routes one-shot prompts to native agents', async () => {
     const { registry, opencode } = makeRegistry();
 
     expect(await registry.runSingleQuery('prompt', {})).toBe('claude-response');
@@ -408,7 +408,7 @@ describe('ProviderRegistry.runSingleQuery', () => {
     });
 
     expect(endpointResolver.resolveSelection).toHaveBeenCalledWith({
-      harnessId: 'codex',
+      agentId: 'codex',
       model: 'acme_openai:acme-code',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
@@ -424,7 +424,7 @@ describe('ProviderRegistry.runSingleQuery', () => {
 });
 
 describe('ProviderRegistry catalog and API provider mutations', () => {
-  it('returns harness and API provider catalog entries', async () => {
+  it('returns agent and API provider catalog entries', async () => {
     const endpointOption = {
       value: 'acme_openai:acme-code',
       label: 'Acme: Acme Code',
@@ -457,8 +457,8 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
         'direct-anthropic-compatible': [anthropicEndpointOption],
       }),
       apiProviderStore: makeApiProviderStore([apiProvider]),
-      harnesses: [
-        harnessFromRuntime('direct-openai-compatible', 'Direct (Chat Completions)', baseRuntime({
+      agents: [
+        agentFromRuntime('direct-openai-compatible', 'Direct (Chat Completions)', baseRuntime({
           getModels: mock(() => [{ value: 'raw-openai', label: 'Raw OpenAI' }]),
         }), {
           supportsFork: false,
@@ -467,7 +467,7 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
           supportedProtocols: ['openai-compatible'],
           authLoginSupported: false,
         }),
-        harnessFromRuntime('direct-openai-responses-compatible', 'Direct (Responses)', baseRuntime({
+        agentFromRuntime('direct-openai-responses-compatible', 'Direct (Responses)', baseRuntime({
           getModels: mock(() => [{ value: 'raw-openai-response', label: 'Raw OpenAI Response' }]),
         }), {
           supportsFork: false,
@@ -476,7 +476,7 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
           supportedProtocols: ['openai-compatible'],
           authLoginSupported: false,
         }),
-        harnessFromRuntime('direct-anthropic-compatible', 'Direct (Anthropic)', baseRuntime({
+        agentFromRuntime('direct-anthropic-compatible', 'Direct (Anthropic)', baseRuntime({
           getModels: mock(() => [{ value: 'raw-anthropic', label: 'Raw Anthropic' }]),
         }), {
           supportsFork: false,
@@ -488,11 +488,11 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       ],
     });
 
-    const catalog = await registry.getHarnessCatalog();
-    expect(catalog.harnesses.find((entry) => entry.id === 'codex')?.models).toContainEqual(endpointOption);
-    expect(catalog.harnesses.find((entry) => entry.id === 'direct-openai-compatible')?.models).toEqual([endpointOption]);
-    expect(catalog.harnesses.find((entry) => entry.id === 'direct-openai-responses-compatible')?.models).toEqual([endpointOption]);
-    expect(catalog.harnesses.find((entry) => entry.id === 'direct-anthropic-compatible')?.models).toEqual([anthropicEndpointOption]);
+    const catalog = await registry.getAgentCatalog();
+    expect(catalog.agents.find((entry) => entry.id === 'codex')?.models).toContainEqual(endpointOption);
+    expect(catalog.agents.find((entry) => entry.id === 'direct-openai-compatible')?.models).toEqual([endpointOption]);
+    expect(catalog.agents.find((entry) => entry.id === 'direct-openai-responses-compatible')?.models).toEqual([endpointOption]);
+    expect(catalog.agents.find((entry) => entry.id === 'direct-anthropic-compatible')?.models).toEqual([anthropicEndpointOption]);
     expect(catalog.apiProviders).toEqual([apiProvider]);
   });
 
@@ -500,8 +500,8 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
     const { registry, cursor } = makeRegistry();
     cursor.getModels.mockReturnValueOnce([{ value: 'auto', label: 'Auto', supportsImages: false }]);
 
-    const catalog = await registry.getHarnessCatalog();
-    const cursorEntry = catalog.harnesses.find((entry) => entry.id === 'cursor');
+    const catalog = await registry.getAgentCatalog();
+    const cursorEntry = catalog.agents.find((entry) => entry.id === 'cursor');
 
     expect(cursorEntry?.models).toEqual([{ value: 'auto', label: 'Auto', supportsImages: false }]);
     expect(cursorEntry?.defaultModel).toBe('auto');

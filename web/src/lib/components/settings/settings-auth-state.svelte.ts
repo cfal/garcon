@@ -1,9 +1,9 @@
 import {
-	getHarnessAuthStatus,
-	getHarnessReadiness,
-	launchHarnessAuthLogin,
+	getAgentAuthStatus,
+	getAgentReadiness,
+	launchAgentAuthLogin,
 	type DeviceAuthInfo,
-	type HarnessReadiness
+	type AgentReadiness
 } from '$lib/api/providers.js';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 
@@ -15,7 +15,7 @@ export interface AuthStatus {
 	error: string | null;
 }
 
-export type SettingsHarnessId = string;
+export type SettingsAgentId = string;
 
 const AUTH_POLL_INTERVAL_MS = 1500;
 const AUTH_POLL_TIMEOUT_MS = 5 * 60_000;
@@ -29,15 +29,15 @@ const DEFAULT_AUTH: AuthStatus = {
 
 export class SettingsAuthState {
 	readonly #modelCatalog: ModelCatalogStore;
-	#authPollTimers: Partial<Record<SettingsHarnessId, ReturnType<typeof setTimeout>>> = {};
-	#authPollSessionIds: Partial<Record<SettingsHarnessId, number>> = {};
-	#authPollStartedAt: Partial<Record<SettingsHarnessId, number>> = {};
+	#authPollTimers: Partial<Record<SettingsAgentId, ReturnType<typeof setTimeout>>> = {};
+	#authPollSessionIds: Partial<Record<SettingsAgentId, number>> = {};
+	#authPollStartedAt: Partial<Record<SettingsAgentId, number>> = {};
 	#nextAuthPollSessionId = 0;
 
-	authByHarness = $state<Record<string, AuthStatus>>({});
-	readinessByHarness = $state<Record<string, HarnessReadiness>>({});
-	deviceAuthInfo = $state<Partial<Record<SettingsHarnessId, DeviceAuthInfo>>>({});
-	loginPending = $state<Partial<Record<SettingsHarnessId, boolean>>>({});
+	authByAgent = $state<Record<string, AuthStatus>>({});
+	readinessByAgent = $state<Record<string, AgentReadiness>>({});
+	deviceAuthInfo = $state<Partial<Record<SettingsAgentId, DeviceAuthInfo>>>({});
+	loginPending = $state<Partial<Record<SettingsAgentId, boolean>>>({});
 
 	constructor(modelCatalog: ModelCatalogStore) {
 		this.#modelCatalog = modelCatalog;
@@ -45,8 +45,8 @@ export class SettingsAuthState {
 
 	initialize(): () => void {
 		void this.#modelCatalog.forceRefresh();
-		for (const harnessId of this.#harnessIds()) {
-			void this.#checkAuth(harnessId);
+		for (const agentId of this.#agentIds()) {
+			void this.#checkAuth(agentId);
 		}
 		void this.#checkReadiness();
 
@@ -56,66 +56,66 @@ export class SettingsAuthState {
 	}
 
 	destroy(): void {
-		for (const harnessId of this.#harnessIds()) {
-			this.#stopAuthPolling(harnessId);
+		for (const agentId of this.#agentIds()) {
+			this.#stopAuthPolling(agentId);
 		}
 	}
 
-	authFor(harnessId: SettingsHarnessId): AuthStatus {
-		return this.authByHarness[harnessId] ?? { ...DEFAULT_AUTH };
+	authFor(agentId: SettingsAgentId): AuthStatus {
+		return this.authByAgent[agentId] ?? { ...DEFAULT_AUTH };
 	}
 
-	readinessFor(harnessId: SettingsHarnessId): HarnessReadiness | undefined {
-		return this.readinessByHarness[harnessId];
+	readinessFor(agentId: SettingsAgentId): AgentReadiness | undefined {
+		return this.readinessByAgent[agentId];
 	}
 
-	deviceAuthFor(harnessId: SettingsHarnessId): DeviceAuthInfo | undefined {
-		return this.deviceAuthInfo[harnessId];
+	deviceAuthFor(agentId: SettingsAgentId): DeviceAuthInfo | undefined {
+		return this.deviceAuthInfo[agentId];
 	}
 
-	isLoginPending(harnessId: SettingsHarnessId): boolean {
-		return this.loginPending[harnessId] ?? false;
+	isLoginPending(agentId: SettingsAgentId): boolean {
+		return this.loginPending[agentId] ?? false;
 	}
 
-	async handleLogin(harnessId: SettingsHarnessId): Promise<void> {
-		if (!this.supportsAuthLogin(harnessId)) return;
-		this.#setAuth(harnessId, { ...this.authFor(harnessId), error: null });
-		this.loginPending = { ...this.loginPending, [harnessId]: true };
+	async handleLogin(agentId: SettingsAgentId): Promise<void> {
+		if (!this.supportsAuthLogin(agentId)) return;
+		this.#setAuth(agentId, { ...this.authFor(agentId), error: null });
+		this.loginPending = { ...this.loginPending, [agentId]: true };
 
 		try {
-			const result = await launchHarnessAuthLogin(harnessId);
+			const result = await launchAgentAuthLogin(agentId);
 			if (result.deviceAuth) {
-				this.deviceAuthInfo = { ...this.deviceAuthInfo, [harnessId]: result.deviceAuth };
-				this.loginPending = { ...this.loginPending, [harnessId]: false };
+				this.deviceAuthInfo = { ...this.deviceAuthInfo, [agentId]: result.deviceAuth };
+				this.loginPending = { ...this.loginPending, [agentId]: false };
 				window.open(result.deviceAuth.url, '_blank', 'noopener');
-				this.#startAuthPolling(harnessId);
+				this.#startAuthPolling(agentId);
 				return;
 			}
 
-			await this.#checkAuth(harnessId);
-			this.loginPending = { ...this.loginPending, [harnessId]: false };
-			if (!this.authFor(harnessId).authenticated) {
-				this.#startAuthPolling(harnessId);
+			await this.#checkAuth(agentId);
+			this.loginPending = { ...this.loginPending, [agentId]: false };
+			if (!this.authFor(agentId).authenticated) {
+				this.#startAuthPolling(agentId);
 			}
 		} catch (err) {
-			this.#stopAuthPolling(harnessId);
-			this.#clearDeviceAuth(harnessId);
-			this.#setAuth(harnessId, {
-				...this.authFor(harnessId),
+			this.#stopAuthPolling(agentId);
+			this.#clearDeviceAuth(agentId);
+			this.#setAuth(agentId, {
+				...this.authFor(agentId),
 				loading: false,
 				error: err instanceof Error ? err.message : String(err)
 			});
 		}
 	}
 
-	#setAuth(harnessId: SettingsHarnessId, auth: AuthStatus): void {
-		this.authByHarness = { ...this.authByHarness, [harnessId]: auth };
+	#setAuth(agentId: SettingsAgentId, auth: AuthStatus): void {
+		this.authByAgent = { ...this.authByAgent, [agentId]: auth };
 	}
 
-	async #checkAuth(harnessId: SettingsHarnessId): Promise<void> {
+	async #checkAuth(agentId: SettingsAgentId): Promise<void> {
 		try {
-			const data = await getHarnessAuthStatus(harnessId);
-			this.#setAuth(harnessId, {
+			const data = await getAgentAuthStatus(agentId);
+			this.#setAuth(agentId, {
 				authenticated: data.authenticated,
 				canReauth: data.canReauth,
 				label: data.label,
@@ -123,7 +123,7 @@ export class SettingsAuthState {
 				error: null
 			});
 		} catch (err) {
-			this.#setAuth(harnessId, {
+			this.#setAuth(agentId, {
 				authenticated: false,
 				canReauth: true,
 				label: '',
@@ -135,73 +135,73 @@ export class SettingsAuthState {
 
 	async #checkReadiness(): Promise<void> {
 		try {
-			this.readinessByHarness = await getHarnessReadiness();
+			this.readinessByAgent = await getAgentReadiness();
 		} catch {
-			this.readinessByHarness = {};
+			this.readinessByAgent = {};
 		}
 	}
 
-	#stopAuthPolling(harnessId: SettingsHarnessId): void {
-		const timer = this.#authPollTimers[harnessId];
+	#stopAuthPolling(agentId: SettingsAgentId): void {
+		const timer = this.#authPollTimers[agentId];
 		if (timer) clearTimeout(timer);
-		delete this.#authPollTimers[harnessId];
-		delete this.#authPollSessionIds[harnessId];
-		delete this.#authPollStartedAt[harnessId];
+		delete this.#authPollTimers[agentId];
+		delete this.#authPollSessionIds[agentId];
+		delete this.#authPollStartedAt[agentId];
 	}
 
-	async #pollAuthUntilAuthenticated(harnessId: SettingsHarnessId, sessionId: number): Promise<void> {
-		if (this.#authPollSessionIds[harnessId] !== sessionId) return;
+	async #pollAuthUntilAuthenticated(agentId: SettingsAgentId, sessionId: number): Promise<void> {
+		if (this.#authPollSessionIds[agentId] !== sessionId) return;
 
-		await this.#checkAuth(harnessId);
-		if (this.#authPollSessionIds[harnessId] !== sessionId) return;
+		await this.#checkAuth(agentId);
+		if (this.#authPollSessionIds[agentId] !== sessionId) return;
 
-		if (this.authFor(harnessId).authenticated) {
-			this.#stopAuthPolling(harnessId);
-			this.#clearDeviceAuth(harnessId);
+		if (this.authFor(agentId).authenticated) {
+			this.#stopAuthPolling(agentId);
+			this.#clearDeviceAuth(agentId);
 			return;
 		}
 
-		const startedAt = this.#authPollStartedAt[harnessId];
+		const startedAt = this.#authPollStartedAt[agentId];
 		if (startedAt === undefined) return;
 		if (Date.now() - startedAt >= AUTH_POLL_TIMEOUT_MS) {
-			this.#stopAuthPolling(harnessId);
+			this.#stopAuthPolling(agentId);
 			return;
 		}
 
-		this.#authPollTimers[harnessId] = setTimeout(() => {
-			void this.#pollAuthUntilAuthenticated(harnessId, sessionId);
+		this.#authPollTimers[agentId] = setTimeout(() => {
+			void this.#pollAuthUntilAuthenticated(agentId, sessionId);
 		}, AUTH_POLL_INTERVAL_MS);
 	}
 
-	#startAuthPolling(harnessId: SettingsHarnessId): void {
-		this.#stopAuthPolling(harnessId);
+	#startAuthPolling(agentId: SettingsAgentId): void {
+		this.#stopAuthPolling(agentId);
 		const sessionId = ++this.#nextAuthPollSessionId;
-		this.#authPollSessionIds[harnessId] = sessionId;
-		this.#authPollStartedAt[harnessId] = Date.now();
-		this.#authPollTimers[harnessId] = setTimeout(() => {
-			void this.#pollAuthUntilAuthenticated(harnessId, sessionId);
+		this.#authPollSessionIds[agentId] = sessionId;
+		this.#authPollStartedAt[agentId] = Date.now();
+		this.#authPollTimers[agentId] = setTimeout(() => {
+			void this.#pollAuthUntilAuthenticated(agentId, sessionId);
 		}, AUTH_POLL_INTERVAL_MS);
 	}
 
-	#clearDeviceAuth(harnessId: SettingsHarnessId): void {
-		this.deviceAuthInfo = { ...this.deviceAuthInfo, [harnessId]: undefined };
-		this.loginPending = { ...this.loginPending, [harnessId]: false };
+	#clearDeviceAuth(agentId: SettingsAgentId): void {
+		this.deviceAuthInfo = { ...this.deviceAuthInfo, [agentId]: undefined };
+		this.loginPending = { ...this.loginPending, [agentId]: false };
 	}
 
-	supportsAuthLogin(harnessId: SettingsHarnessId): boolean {
-		return this.#modelCatalog.getHarness(harnessId)?.authLoginSupported === true;
+	supportsAuthLogin(agentId: SettingsAgentId): boolean {
+		return this.#modelCatalog.getAgent(agentId)?.authLoginSupported === true;
 	}
 
-	#harnessIds(): SettingsHarnessId[] {
+	#agentIds(): SettingsAgentId[] {
 		const catalog = this.#modelCatalog as unknown as {
-			getHarnessMetadataList?: () => Array<{ id: string }>;
-			getHarnesses?: () => string[];
+			getAgentMetadataList?: () => Array<{ id: string }>;
+			getAgents?: () => string[];
 		};
-		if (typeof catalog.getHarnessMetadataList === 'function') {
-			return catalog.getHarnessMetadataList().map((metadata) => metadata.id);
+		if (typeof catalog.getAgentMetadataList === 'function') {
+			return catalog.getAgentMetadataList().map((metadata) => metadata.id);
 		}
-		if (typeof catalog.getHarnesses === 'function') {
-			return catalog.getHarnesses();
+		if (typeof catalog.getAgents === 'function') {
+			return catalog.getAgents();
 		}
 		return [];
 	}

@@ -8,13 +8,13 @@ mock.module('../../lib/http-request.js', () => ({
 
 import createProviderRoutes from '../providers.js';
 
-describe('harness auth login routes', () => {
+describe('agent auth login routes', () => {
   const providers = {
-    getHarnessAuthStatus: mock(() => Promise.resolve(null)),
-    getHarnessAuthStatusMap: mock(() => Promise.resolve({})),
-    getHarnessReadinessMap: mock(() => Promise.resolve({})),
-    getHarnessCatalog: mock(() => Promise.resolve({ harnesses: [], apiProviders: [] })),
-    launchHarnessAuthLogin: mock(() => Promise.resolve({ launched: true, alreadyRunning: false })),
+    getAgentAuthStatus: mock(() => Promise.resolve(null)),
+    getAgentAuthStatusMap: mock(() => Promise.resolve({})),
+    getAgentReadinessMap: mock(() => Promise.resolve({})),
+    getAgentCatalog: mock(() => Promise.resolve({ agents: [], apiProviders: [] })),
+    launchAgentAuthLogin: mock(() => Promise.resolve({ launched: true, alreadyRunning: false })),
     getApiProviderCatalog: mock(() => []),
     createApiProvider: mock((input) => Promise.resolve({ id: 'custom_one', ...input })),
     updateApiProvider: mock((id, input) => Promise.resolve({ id, ...input })),
@@ -31,57 +31,57 @@ describe('harness auth login routes', () => {
     }
   });
 
-  it('launches Claude login via the harness auth route', async () => {
-    parseJsonBody.mockResolvedValueOnce({ harnessId: 'claude' });
-    const handler = routes['/api/v1/harnesses/auth/login'].POST;
+  it('launches Claude login via the agent auth route', async () => {
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude' });
+    const handler = routes['/api/v1/agents/auth/login'].POST;
 
-    const response = await handler(new Request('http://localhost/api/v1/harnesses/auth/login', { method: 'POST' }));
+    const response = await handler(new Request('http://localhost/api/v1/agents/auth/login', { method: 'POST' }));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ launched: true, alreadyRunning: false });
-    expect(providers.launchHarnessAuthLogin).toHaveBeenCalledWith('claude');
+    expect(providers.launchAgentAuthLogin).toHaveBeenCalledWith('claude');
   });
 
   it('returns an error response when auth launch fails', async () => {
-    parseJsonBody.mockResolvedValueOnce({ harnessId: 'codex' });
-    const handler = routes['/api/v1/harnesses/auth/login'].POST;
-    providers.launchHarnessAuthLogin.mockImplementationOnce(() => {
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'codex' });
+    const handler = routes['/api/v1/agents/auth/login'].POST;
+    providers.launchAgentAuthLogin.mockImplementationOnce(() => {
       throw new Error('spawn failed');
     });
 
-    const response = await handler(new Request('http://localhost/api/v1/harnesses/auth/login', { method: 'POST' }));
+    const response = await handler(new Request('http://localhost/api/v1/agents/auth/login', { method: 'POST' }));
     const body = await response.json();
 
     expect(response.status).toBe(500);
     expect(body.error).toBe('spawn failed');
   });
 
-  it('validates missing harnessId for auth launch', async () => {
+  it('validates missing agentId for auth launch', async () => {
     parseJsonBody.mockResolvedValueOnce({});
-    const handler = routes['/api/v1/harnesses/auth/login'].POST;
+    const handler = routes['/api/v1/agents/auth/login'].POST;
 
-    const response = await handler(new Request('http://localhost/api/v1/harnesses/auth/login', { method: 'POST' }));
+    const response = await handler(new Request('http://localhost/api/v1/agents/auth/login', { method: 'POST' }));
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('harnessId is required');
-    expect(providers.launchHarnessAuthLogin).not.toHaveBeenCalled();
+    expect(body.error).toBe('agentId is required');
+    expect(providers.launchAgentAuthLogin).not.toHaveBeenCalled();
   });
 
-  it('returns the clean harness/API provider catalog', async () => {
-    providers.getHarnessCatalog.mockImplementationOnce(() => Promise.resolve({
-      harnesses: [{ id: 'claude', kind: 'harness', models: [] }],
+  it('returns the clean agent/API provider catalog', async () => {
+    providers.getAgentCatalog.mockImplementationOnce(() => Promise.resolve({
+      agents: [{ id: 'claude', kind: 'agent', models: [] }],
       apiProviders: [{ id: 'zai', endpoints: [] }],
     }));
-    const handler = routes['/api/v1/harnesses'].GET;
+    const handler = routes['/api/v1/agents'].GET;
 
-    const response = await handler(new Request('http://localhost/api/v1/harnesses'));
+    const response = await handler(new Request('http://localhost/api/v1/agents'));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      harnesses: [{ id: 'claude', kind: 'harness', models: [] }],
+      agents: [{ id: 'claude', kind: 'agent', models: [] }],
       apiProviders: [{ id: 'zai', endpoints: [] }],
     });
   });

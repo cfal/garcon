@@ -40,7 +40,7 @@ function createMockCtx() {
       reorderSavedSearches: mock(() => Promise.resolve({ success: true })),
     },
     providers: {
-      getHarnessAuthStatusMap: mock(() => Promise.resolve({
+      getAgentAuthStatusMap: mock(() => Promise.resolve({
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: false },
@@ -78,7 +78,7 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getHarnessAuthStatusMap.mockClear();
+    ctx.providers.getAgentAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
   });
@@ -150,7 +150,7 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getHarnessAuthStatusMap.mockClear();
+    ctx.providers.getAgentAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
   });
@@ -208,7 +208,7 @@ describe('GET /api/app/settings', () => {
   it('auto-enables generation defaults from authenticated provider priority', async () => {
     ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(1));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
-    ctx.providers.getHarnessAuthStatusMap.mockImplementation(() => Promise.resolve({
+    ctx.providers.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: true },
       opencode: { authenticated: true },
@@ -271,7 +271,7 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getHarnessAuthStatusMap.mockClear();
+    ctx.providers.getAgentAuthStatusMap.mockClear();
     ctx.providers.getModels.mockClear();
     parseJsonBody.mockClear();
   });

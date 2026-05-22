@@ -55,14 +55,14 @@ const mockAppShell = {
 	projectBasePath: '/',
 };
 const mockModelCatalog = {
-		harnessMetadata: {
+		agentMetadata: {
 			claude: { label: 'Claude' },
 			codex: { label: 'Codex' },
 			'direct-anthropic-compatible': { label: 'Direct (Anthropic)' },
 			'direct-openai-compatible': { label: 'Direct (Chat Completions)' },
 		},
-		getHarnesses: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
-		getSelectableHarnesses: vi.fn(() => [
+		getAgents: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
+		getSelectableAgents: vi.fn(() => [
 			'claude',
 			'codex',
 			'direct-anthropic-compatible',
@@ -142,7 +142,7 @@ describe('NewChatFormState', () => {
 
 	beforeEach(() => {
 		vi.useFakeTimers();
-		mockModelCatalog.getSelectableHarnesses.mockImplementation(() => [
+		mockModelCatalog.getSelectableAgents.mockImplementation(() => [
 			'claude',
 			'codex',
 			'direct-anthropic-compatible',
@@ -212,7 +212,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('falls back when Direct Anthropic has no endpoint models', async () => {
-		mockModelCatalog.getSelectableHarnesses.mockReturnValue(['claude', 'codex']);
+		mockModelCatalog.getSelectableAgents.mockReturnValue(['claude', 'codex']);
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
 			lastProvider: 'direct-anthropic-compatible',
 			lastProjectPath: '/workspace/project',
@@ -228,7 +228,7 @@ describe('NewChatFormState', () => {
 		expect(formState.modelValue).toBe('opus');
 	});
 
-	it('falls back when startup defaults reference a non-harness API provider id', async () => {
+	it('falls back when startup defaults reference a non-agent API provider id', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
 			lastProvider: 'zai' as RemoteSettingsSnapshot['lastProvider'],
 			lastProjectPath: '/workspace/project',

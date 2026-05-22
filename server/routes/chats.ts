@@ -86,8 +86,8 @@ interface HistoryCacheDep {
 }
 
 interface ProvidersDep {
-  hasHarness(harnessId: string): boolean;
-  isHarnessSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
+  hasAgent(agentId: string): boolean;
+  isAgentSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   startSession(chatId: string, command: string, opts: Record<string, unknown>): Promise<void>;
   forkProviderSession?(args: { sourceSession: unknown; sourceChatId: string; targetChatId: string }): Promise<{ providerSessionId: string; nativePath: string | null } | null>;
@@ -347,7 +347,7 @@ export default function createChatRoutes(
             lastMessage: lastPreview,
             firstMessage: firstPreview,
           },
-          isActive: providers.isHarnessSessionRunning(session.provider as string, session.providerSessionId as string | null),
+          isActive: providers.isAgentSessionRunning(session.provider as string, session.providerSessionId as string | null),
           isPinned,
           isArchived,
           isUnread,
@@ -410,8 +410,8 @@ export default function createChatRoutes(
       if (!provider) {
         return Response.json({ success: false, error: 'provider is required' }, { status: 400 });
       }
-      if (!providers.hasHarness(provider)) {
-        return Response.json({ success: false, error: `Unsupported harness: ${provider}` }, { status: 400 });
+      if (!providers.hasAgent(provider)) {
+        return Response.json({ success: false, error: `Unsupported agent: ${provider}` }, { status: 400 });
       }
       if (initialImages.length > 0) {
         let imageSupport = false;
@@ -421,7 +421,7 @@ export default function createChatRoutes(
         const hasBackendSelection = Boolean(apiProviderId && modelEndpointId);
         const supportsImages = hasBackendSelection ? imageSupport : providerSupportsImages(provider);
         if (!supportsImages) {
-          return Response.json({ success: false, error: `Images unsupported for harness: ${provider}` }, { status: 422 });
+          return Response.json({ success: false, error: `Images unsupported for agent: ${provider}` }, { status: 422 });
         }
       }
       if (!projectPath) {
@@ -825,7 +825,7 @@ export default function createChatRoutes(
       }
 
       if (!providerSupportsFork(sourceSession.provider)) {
-        return Response.json({ success: false, error: `Fork unsupported for harness: ${sourceSession.provider}` }, { status: 422 });
+        return Response.json({ success: false, error: `Fork unsupported for agent: ${sourceSession.provider}` }, { status: 422 });
       }
 
       const existingTarget = registry.getChat(chatId);
@@ -927,9 +927,9 @@ export default function createChatRoutes(
       const sourceSession = registry.getChat(sourceChatId);
       if (!sourceSession) return jsonError('Source session not found', 404, 'SESSION_NOT_FOUND');
       if (!providerSupportsFork(sourceSession.provider)) {
-        return jsonError(`Fork unsupported for harness: ${sourceSession.provider}`, 422, 'UNSUPPORTED_PROVIDER');
+        return jsonError(`Fork unsupported for agent: ${sourceSession.provider}`, 422, 'UNSUPPORTED_PROVIDER');
       }
-      if (providers.isHarnessSessionRunning(sourceSession.provider, sourceSession.providerSessionId)) {
+      if (providers.isAgentSessionRunning(sourceSession.provider, sourceSession.providerSessionId)) {
         return jsonError('Cannot fork a chat while it is processing', 409, 'SESSION_BUSY', true);
       }
 

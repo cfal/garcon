@@ -13,7 +13,7 @@ import {
   labelForProtocol,
   type ApiProtocol,
   type ApiProviderTemplateId,
-  type HarnessModelOption,
+  type AgentModelOption,
   type ModelDiscoveryKind,
   type OpenAiEndpointCapabilities,
 } from '../../common/providers.js';
@@ -45,7 +45,7 @@ export interface StoredApiProviderEndpoint {
   apiKeyLabel?: string;
   capabilities?: OpenAiEndpointCapabilities;
   defaultModel: string;
-  models: HarnessModelOption[];
+  models: AgentModelOption[];
   supportsImages: boolean;
   modelDiscovery: ModelDiscoveryKind;
   headers?: Record<string, string>;
@@ -59,7 +59,7 @@ export interface CreateApiProviderInput {
   apiKey?: string;
   capabilities?: OpenAiEndpointCapabilities;
   defaultModel: string;
-  models: HarnessModelOption[];
+  models: AgentModelOption[];
   supportsImages: boolean;
   modelDiscovery: ModelDiscoveryKind;
 }
@@ -71,7 +71,7 @@ export interface UpdateApiProviderEndpointInput {
   clearApiKey?: boolean;
   capabilities?: OpenAiEndpointCapabilities;
   defaultModel?: string;
-  models?: HarnessModelOption[];
+  models?: AgentModelOption[];
   supportsImages?: boolean;
   modelDiscovery?: ModelDiscoveryKind;
 }
@@ -134,16 +134,16 @@ function labelApiKey(apiKey: string | undefined): string {
   return `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`;
 }
 
-function normalizeManualModels(models: HarnessModelOption[], defaultModel: string): HarnessModelOption[] {
+function normalizeManualModels(models: AgentModelOption[], defaultModel: string): AgentModelOption[] {
   const fallback = normalizeRequiredString(defaultModel, 'defaultModel');
-  const normalized: HarnessModelOption[] = [];
+  const normalized: AgentModelOption[] = [];
   if (Array.isArray(models)) {
     for (const model of models) {
       if (!model || typeof model !== 'object') continue;
       const value = typeof model.value === 'string' ? model.value.trim() : '';
       const label = typeof model.label === 'string' ? model.label.trim() : '';
       if (!value || !label) continue;
-      const normalizedModel: HarnessModelOption = { value, label };
+      const normalizedModel: AgentModelOption = { value, label };
       if (typeof model.supportsImages === 'boolean') normalizedModel.supportsImages = model.supportsImages;
       if (typeof model.isLocal === 'boolean') normalizedModel.isLocal = model.isLocal;
       if (typeof model.apiProviderId === 'string') normalizedModel.apiProviderId = model.apiProviderId;
@@ -222,7 +222,7 @@ function normalizeStoredEndpoint(value: unknown): StoredApiProviderEndpoint | nu
     apiKeyLabel: typeof raw.apiKeyLabel === 'string' ? raw.apiKeyLabel : labelApiKey(typeof raw.apiKey === 'string' ? raw.apiKey : ''),
     capabilities: normalizeOpenAiCapabilities(protocol, raw.capabilities),
     defaultModel,
-    models: normalizeManualModels(Array.isArray(raw.models) ? raw.models as HarnessModelOption[] : [], defaultModel),
+    models: normalizeManualModels(Array.isArray(raw.models) ? raw.models as AgentModelOption[] : [], defaultModel),
     supportsImages: Boolean(raw.supportsImages),
     modelDiscovery: normalizeModelDiscovery(protocol, raw.modelDiscovery),
     headers: normalizeHeaders(raw.headers),

@@ -3,7 +3,7 @@ import type { SessionProvider } from '$lib/types/app';
 import { getLocale } from '$lib/paraglide/runtime.js';
 import type {
 	FilteredModelRowsResult,
-	HarnessSelectorOption,
+	AgentSelectorOption,
 	ModelSelectorChange,
 	ModelSelectorMode,
 	ModelSelectorRow,
@@ -11,7 +11,7 @@ import type {
 	ModelSourceOption,
 } from './model-selector-types';
 import {
-	buildHarnessOptions,
+	buildAgentOptions,
 	buildModelRows,
 	buildModelSelectorChange,
 	buildModelSources,
@@ -30,7 +30,7 @@ interface ModelSelectorStateOptions {
 
 interface RowsCache {
 	catalogVersion: number;
-	harnessId: SessionProvider;
+	agentId: SessionProvider;
 	sourceKey: string | null;
 	models: ModelOption[];
 	source: ModelSourceOption | null;
@@ -38,8 +38,8 @@ interface RowsCache {
 }
 
 interface SelectionView {
-	harnessId: SessionProvider;
-	harnessLabel: string;
+	agentId: SessionProvider;
+	agentLabel: string;
 	modelValue: string;
 	sourceKey: string | null;
 	source: ModelSourceOption | null;
@@ -57,7 +57,7 @@ export class ModelSelectorState {
 	query = $state('');
 	activeSourceKey = $state<string | null>(null);
 	activeModelIndex = $state(0);
-	draftHarnessId = $state<SessionProvider | null>(null);
+	draftAgentId = $state<SessionProvider | null>(null);
 	draftModelValue = $state<string | null>(null);
 
 	readonly #options: ModelSelectorStateOptions;
@@ -85,23 +85,23 @@ export class ModelSelectorState {
 		return this.#options.modelCatalog;
 	}
 
-	get harnessOptions(): HarnessSelectorOption[] {
-		return buildHarnessOptions(this.modelCatalog);
+	get agentOptions(): AgentSelectorOption[] {
+		return buildAgentOptions(this.modelCatalog);
 	}
 
-	get harnessId(): SessionProvider {
-		return this.draftSelection.harnessId;
+	get agentId(): SessionProvider {
+		return this.draftSelection.agentId;
 	}
 
-	get harnessLabel(): string {
-		return this.draftSelection.harnessLabel;
+	get agentLabel(): string {
+		return this.draftSelection.agentLabel;
 	}
 
 	get sources(): ModelSourceOption[] {
-		return this.sourcesFor(this.harnessId);
+		return this.sourcesFor(this.agentId);
 	}
 
-	sourcesFor(harnessId: SessionProvider): ModelSourceOption[] {
+	sourcesFor(agentId: SessionProvider): ModelSourceOption[] {
 		const catalogVersion = this.modelCatalog.version ?? 0;
 		const locale = getLocale();
 		if (this.#sourcesCacheVersion !== catalogVersion || this.#sourcesCacheLocale !== locale) {
@@ -110,22 +110,22 @@ export class ModelSelectorState {
 			this.#sourcesCacheLocale = locale;
 		}
 
-		const cached = this.#sourcesCache.get(harnessId);
+		const cached = this.#sourcesCache.get(agentId);
 		if (cached) return cached;
 
-		const sources = buildModelSources(this.modelCatalog, harnessId);
-		this.#sourcesCache.set(harnessId, sources);
+		const sources = buildModelSources(this.modelCatalog, agentId);
+		this.#sourcesCache.set(agentId, sources);
 		return sources;
 	}
 
 	#sourceKeyForModel(
-		harnessId: SessionProvider,
+		agentId: SessionProvider,
 		modelValue: string,
 		modelEndpointId?: string | null,
 	): string | null {
-		const selectedModel = this.modelCatalog.getModelForSelection(harnessId, modelValue, modelEndpointId);
-		if (selectedModel) return modelSourceKeyFor(harnessId, selectedModel);
-		return this.sourcesFor(harnessId)[0]?.key ?? null;
+		const selectedModel = this.modelCatalog.getModelForSelection(agentId, modelValue, modelEndpointId);
+		if (selectedModel) return modelSourceKeyFor(agentId, selectedModel);
+		return this.sourcesFor(agentId)[0]?.key ?? null;
 	}
 
 	get sourceKey(): string | null {
@@ -137,7 +137,7 @@ export class ModelSelectorState {
 	}
 
 	get availableModels(): ModelOption[] {
-		if (this.mode.source === 'hidden') return this.modelCatalog.getModels(this.harnessId);
+		if (this.mode.source === 'hidden') return this.modelCatalog.getModels(this.agentId);
 		return this.source?.models ?? [];
 	}
 
@@ -165,13 +165,13 @@ export class ModelSelectorState {
 		const models = this.availableModels;
 		const source = this.modelLabelSource;
 		const sourceKey = this.sourceKey;
-		const cacheKey = this.#rowsCacheKey(this.harnessId, sourceKey, source);
+		const cacheKey = this.#rowsCacheKey(this.agentId, sourceKey, source);
 		const cached = this.#rowsCache.get(cacheKey);
 
 		if (
 			cached &&
 			cached.catalogVersion === catalogVersion &&
-			cached.harnessId === this.harnessId &&
+			cached.agentId === this.agentId &&
 			cached.sourceKey === sourceKey &&
 			cached.models === models &&
 			cached.source === source
@@ -182,7 +182,7 @@ export class ModelSelectorState {
 		const rows = buildModelRows(models, source);
 		this.#rowsCache.set(cacheKey, {
 			catalogVersion,
-			harnessId: this.harnessId,
+			agentId: this.agentId,
 			sourceKey,
 			models,
 			source,
@@ -217,8 +217,8 @@ export class ModelSelectorState {
 
 	get triggerPrimary(): string {
 		const committed = this.committedSelection;
-		if (this.mode.surface === 'settings') return committed.harnessLabel;
-		if (this.mode.harness === 'select') return committed.harnessLabel;
+		if (this.mode.surface === 'settings') return committed.agentLabel;
+		if (this.mode.agent === 'select') return committed.agentLabel;
 		return committed.modelLabel;
 	}
 
@@ -230,28 +230,28 @@ export class ModelSelectorState {
 			}
 			return committed.modelLabel;
 		}
-		if (this.mode.harness === 'select') return committed.modelLabel;
+		if (this.mode.agent === 'select') return committed.modelLabel;
 		return '';
 	}
 
 	get triggerTitle(): string {
 		const committed = this.committedSelection;
 		return [
-			committed.harnessLabel,
+			committed.agentLabel,
 			this.mode.source === 'select' ? committed.source?.label : '',
 			committed.modelLabel,
 		].filter(Boolean).join(' / ');
 	}
 
 	get draftSelection(): SelectionView {
-		const harnessId = this.open && this.draftHarnessId ? this.draftHarnessId : this.value.harnessId;
+		const agentId = this.open && this.draftAgentId ? this.draftAgentId : this.value.agentId;
 		const modelValue = this.open && this.draftModelValue !== null
 			? this.draftModelValue
 			: this.open
 				? ''
 				: currentModelValue(this.modelCatalog, this.value);
 		return this.#selectionView({
-			harnessId,
+			agentId,
 			modelValue,
 			modelEndpointId: this.open ? null : this.value.modelEndpointId,
 			sourceKey: this.activeSourceKey,
@@ -260,7 +260,7 @@ export class ModelSelectorState {
 
 	get committedSelection(): SelectionView {
 		return this.#selectionView({
-			harnessId: this.value.harnessId,
+			agentId: this.value.agentId,
 			modelValue: currentModelValue(this.modelCatalog, this.value),
 			modelEndpointId: this.value.modelEndpointId,
 			sourceKey: null,
@@ -365,112 +365,112 @@ export class ModelSelectorState {
 		return false;
 	}
 
-	selectHarness(harnessId: SessionProvider): void {
-		if (harnessId === this.harnessId) return;
-		const sources = this.sourcesFor(harnessId);
+	selectAgent(agentId: SessionProvider): void {
+		if (agentId === this.agentId) return;
+		const sources = this.sourcesFor(agentId);
 		const currentSourceKey = this.sourceKey;
 		const source = sources.find((entry) => entry.key === currentSourceKey) ?? sources[0] ?? null;
-		const modelValue = this.#committedModelValueFor(harnessId, source?.key ?? null);
+		const modelValue = this.#committedModelValueFor(agentId, source?.key ?? null);
 		this.query = '';
-		this.#setDraftSelection(harnessId, modelValue, source?.key ?? null);
+		this.#setDraftSelection(agentId, modelValue, source?.key ?? null);
 		this.resetActiveModelIndex();
 	}
 
 	selectSource(sourceKey: string): void {
 		if (sourceKey === this.sourceKey) return;
 		const source = this.sources.find((entry) => entry.key === sourceKey) ?? null;
-		const modelValue = this.#committedModelValueFor(this.harnessId, source?.key ?? null);
+		const modelValue = this.#committedModelValueFor(this.agentId, source?.key ?? null);
 		this.query = '';
-		this.#setDraftSelection(this.harnessId, modelValue, source?.key ?? null);
+		this.#setDraftSelection(this.agentId, modelValue, source?.key ?? null);
 		this.resetActiveModelIndex();
 	}
 
 	selectModel(modelValue: string): void {
-		this.#setDraftSelection(this.harnessId, modelValue, this.sourceKey);
+		this.#setDraftSelection(this.agentId, modelValue, this.sourceKey);
 		this.resetActiveModelIndex();
 	}
 
-	emit(harnessId: SessionProvider, modelValue: string): void {
-		const next = buildModelSelectorChange(this.modelCatalog, harnessId, modelValue);
+	emit(agentId: SessionProvider, modelValue: string): void {
+		const next = buildModelSelectorChange(this.modelCatalog, agentId, modelValue);
 		if (!next) return;
 		void this.#options.onChange(next);
 	}
 
 	#commitDraftSelection(): void {
-		if (!this.draftHarnessId || this.draftModelValue === null || !this.draftModelValue) return;
+		if (!this.draftAgentId || this.draftModelValue === null || !this.draftModelValue) return;
 		const committedModelValue = currentModelValue(this.modelCatalog, this.value);
-		if (this.draftHarnessId === this.value.harnessId && this.draftModelValue === committedModelValue) {
+		if (this.draftAgentId === this.value.agentId && this.draftModelValue === committedModelValue) {
 			return;
 		}
-		this.emit(this.draftHarnessId, this.draftModelValue);
+		this.emit(this.draftAgentId, this.draftModelValue);
 	}
 
 	#startDraftFromValue(): void {
-		const harnessId = this.value.harnessId;
+		const agentId = this.value.agentId;
 		const modelValue = currentModelValue(this.modelCatalog, this.value);
 		this.#setDraftSelection(
-			harnessId,
+			agentId,
 			modelValue,
-			this.#sourceKeyForModel(harnessId, modelValue, this.value.modelEndpointId),
+			this.#sourceKeyForModel(agentId, modelValue, this.value.modelEndpointId),
 		);
 	}
 
 	#setDraftSelection(
-		harnessId: SessionProvider,
+		agentId: SessionProvider,
 		modelValue: string | null,
 		sourceKey: string | null,
 	): void {
-		this.draftHarnessId = harnessId;
+		this.draftAgentId = agentId;
 		this.draftModelValue = modelValue;
 		this.activeSourceKey = sourceKey;
 	}
 
-	#committedModelValueFor(harnessId: SessionProvider, sourceKey: string | null): string | null {
-		if (harnessId !== this.value.harnessId) return null;
+	#committedModelValueFor(agentId: SessionProvider, sourceKey: string | null): string | null {
+		if (agentId !== this.value.agentId) return null;
 		const modelValue = currentModelValue(this.modelCatalog, this.value);
 		if (!modelValue) return null;
 		const selectedModel = this.modelCatalog.getModelForSelection(
-			harnessId,
+			agentId,
 			modelValue,
 			this.value.modelEndpointId,
 		);
 		if (!selectedModel) return null;
 		if (this.mode.source === 'hidden') return modelValue;
 		if (!sourceKey) return null;
-		return modelSourceKeyFor(harnessId, selectedModel) === sourceKey ? modelValue : null;
+		return modelSourceKeyFor(agentId, selectedModel) === sourceKey ? modelValue : null;
 	}
 
 	#clearDraft(): void {
-		this.draftHarnessId = null;
+		this.draftAgentId = null;
 		this.draftModelValue = null;
 		this.activeSourceKey = null;
 	}
 
 	#selectionView(input: {
-		harnessId: SessionProvider;
+		agentId: SessionProvider;
 		modelValue: string;
 		modelEndpointId?: string | null;
 		sourceKey?: string | null;
 	}): SelectionView {
-		const harnessLabel = this.modelCatalog.getHarnessLabel(input.harnessId);
-		const sources = this.sourcesFor(input.harnessId);
+		const agentLabel = this.modelCatalog.getAgentLabel(input.agentId);
+		const sources = this.sourcesFor(input.agentId);
 		let sourceKey: string | null = null;
 		if (this.mode.source !== 'hidden') {
 			sourceKey = input.sourceKey && sources.some((source) => source.key === input.sourceKey)
 				? input.sourceKey
-				: this.#sourceKeyForModel(input.harnessId, input.modelValue, input.modelEndpointId);
+				: this.#sourceKeyForModel(input.agentId, input.modelValue, input.modelEndpointId);
 		}
 		const source = sourceKey ? sources.find((entry) => entry.key === sourceKey) ?? null : null;
 		const selectedModel = this.modelCatalog.getModelForSelection(
-			input.harnessId,
+			input.agentId,
 			input.modelValue,
 			input.modelEndpointId,
 		);
 		const modelLabelSource = this.mode.source === 'select' ? source : null;
 		const modelLabel = modelDisplayLabel(selectedModel, input.modelValue, modelLabelSource);
 		return {
-			harnessId: input.harnessId,
-			harnessLabel,
+			agentId: input.agentId,
+			agentLabel,
 			modelValue: input.modelValue,
 			sourceKey,
 			source,
@@ -481,10 +481,10 @@ export class ModelSelectorState {
 	}
 
 	#rowsCacheKey(
-		harnessId: SessionProvider,
+		agentId: SessionProvider,
 		sourceKey: string | null,
 		source: ModelSourceOption | null,
 	): string {
-		return `${harnessId}:${source ? 'source' : 'flat'}:${sourceKey ?? 'all'}`;
+		return `${agentId}:${source ? 'source' : 'flat'}:${sourceKey ?? 'all'}`;
 	}
 }

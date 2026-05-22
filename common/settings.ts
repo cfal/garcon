@@ -14,14 +14,14 @@ import {
   isPermissionMode,
   isThinkingMode,
 } from './chat-modes';
-import type { HarnessId, ApiProtocol } from './providers';
-import { isHarnessId } from './providers';
+import type { AgentId, ApiProtocol } from './providers';
+import { isAgentId } from './providers';
 
 export type PinnedInsertPosition = 'top' | 'bottom';
 
 export interface GenerationUiSettings {
   enabled?: boolean;
-  provider?: HarnessId;
+  provider?: AgentId;
   model?: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
@@ -72,7 +72,7 @@ export interface RemoteSettingsSnapshot {
   uiEffective: RemoteUiEffectiveSettings;
   paths: RemotePathSettings;
   pinnedChatIds: string[];
-  lastProvider: HarnessId;
+  lastProvider: AgentId;
   lastProjectPath: string;
   lastModel: string;
   lastApiProviderId: string | null;
@@ -124,7 +124,7 @@ function normalizeGenerationUiSettings(value: unknown): GenerationUiSettings | u
 
   const normalized: GenerationUiSettings = {};
   if (typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
-  if (isHarnessId(raw.provider)) normalized.provider = raw.provider;
+  if (isAgentId(raw.provider)) normalized.provider = raw.provider;
   if (typeof raw.model === 'string') normalized.model = raw.model;
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
   if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
@@ -142,7 +142,7 @@ function normalizeGenerationUiEffectiveSettings(
   const raw = asRecord(value);
   if (!raw) return undefined;
   if (typeof raw.enabled !== 'boolean') return undefined;
-  if (!isHarnessId(raw.provider)) return undefined;
+  if (!isAgentId(raw.provider)) return undefined;
   if (typeof raw.model !== 'string') return undefined;
 
   const normalized: NonNullable<RemoteUiEffectiveSettings['chatTitle']> = {
@@ -242,7 +242,7 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
 
   if (version === null) return null;
   if (!ui || !uiEffective || !paths || !pinnedChatIds) return null;
-  if (!isHarnessId(raw.lastProvider)) return null;
+  if (!isAgentId(raw.lastProvider)) return null;
   if (lastProjectPath === null || lastModel === null || projectBasePath === null) return null;
   if (!isPermissionMode(raw.lastPermissionMode)) return null;
   if (!isThinkingMode(raw.lastThinkingMode)) return null;

@@ -20,7 +20,7 @@ const mockProviders = {
   setThinkingMode: mock(() => Promise.resolve(undefined)),
   setClaudeThinkingMode: mock(() => Promise.resolve(undefined)),
   setModel: mock(() => Promise.resolve(undefined)),
-  isHarnessSessionRunning: mock(() => false),
+  isAgentSessionRunning: mock(() => false),
 };
 
 const mockRegistry = {
@@ -71,7 +71,7 @@ const injectedMocks = [
   mockProviders.getRunningSessions, mockProviders.resolvePermission,
   mockProviders.setPermissionMode, mockProviders.setThinkingMode,
   mockProviders.setClaudeThinkingMode, mockProviders.setModel,
-  mockProviders.isHarnessSessionRunning,
+  mockProviders.isAgentSessionRunning,
   mockRegistry.getChat, mockRegistry.updateChat,
   mockQueue.submit, mockQueue.abort, mockQueue.triggerDrain,
   mockQueue.readChatQueue, mockQueue.enqueueChat, mockQueue.dequeueChat,
@@ -107,7 +107,7 @@ describe('chat WebSocket handler', () => {
   beforeEach(() => {
     injectedMocks.forEach(m => m.mockClear());
     moduleMocks.forEach(m => m.mockClear());
-    mockProviders.isHarnessSessionRunning.mockImplementation(() => false);
+    mockProviders.isAgentSessionRunning.mockImplementation(() => false);
     mockForkDeps.forkChatFileCopy.mockImplementation(() => Promise.resolve({
       sourceChatId: '123',
       chatId: '456',
@@ -313,7 +313,7 @@ describe('chat WebSocket handler', () => {
         if (chatId === '123') return { provider: 'claude', providerSessionId: 'source-session' };
         return null;
       });
-      mockProviders.isHarnessSessionRunning.mockImplementation(() => true);
+      mockProviders.isAgentSessionRunning.mockImplementation(() => true);
 
       await chatHandler.message(ws, {
         type: 'fork-run',
@@ -499,7 +499,7 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('thinking-mode-set', () => {
-    it('persists thinking mode to registry and harness session', async () => {
+    it('persists thinking mode to registry and agent session', async () => {
       await chatHandler.message(ws, {
         type: 'thinking-mode-set',
         chatId: '123',
@@ -530,7 +530,7 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('claude-thinking-mode-set', () => {
-	it('persists Claude thinking mode to registry and harness session', async () => {
+	it('persists Claude thinking mode to registry and agent session', async () => {
 	  await chatHandler.message(ws, {
 	    type: 'claude-thinking-mode-set',
 	    chatId: '123',

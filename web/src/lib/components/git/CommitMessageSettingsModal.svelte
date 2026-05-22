@@ -61,9 +61,9 @@ Return only the commit message now.`;
 	let isDefaultPrompt = $derived(!customPrompt || customPrompt === DEFAULT_PROMPT);
 	const modelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
-	const modelSelectorMode: ModelSelectorMode = { harness: 'select', source: 'select', surface: 'settings' };
+	const modelSelectorMode: ModelSelectorMode = { agent: 'select', source: 'select', surface: 'settings' };
 	const modelSelectorValue = $derived({
-		harnessId: provider,
+		agentId: provider,
 		model,
 	});
 	let loaded = $state(false);
@@ -137,7 +137,7 @@ Return only the commit message now.`;
 	}
 
 	async function handleModelSelectorChange(next: ModelSelectorChange) {
-		provider = next.harnessId;
+		provider = next.agentId;
 		model = next.modelValue;
 		await persist();
 	}

@@ -1,49 +1,49 @@
-// Harness and API provider routes. Harness routes expose native auth and
+// Agent and API provider routes. Agent routes expose native auth and
 // readiness; API provider routes manage persisted compatible endpoints.
 
 import { parseJsonBody } from '../lib/http-request.js';
 
 export default function createProviderRoutes(providers) {
-  async function getHarnesses() {
+  async function getAgents() {
     try {
-      return Response.json(await providers.getHarnessCatalog());
+      return Response.json(await providers.getAgentCatalog());
     } catch (error) {
       return Response.json({ error: error.message }, { status: 500 });
     }
   }
 
-  async function getHarnessAuth(_request, url) {
-    const harnessId = url.searchParams.get('harness');
+  async function getAgentAuth(_request, url) {
+    const agentId = url.searchParams.get('agent');
     try {
-      if (harnessId) {
-        const status = await providers.getHarnessAuthStatus(harnessId);
+      if (agentId) {
+        const status = await providers.getAgentAuthStatus(agentId);
         if (!status) {
-          return Response.json({ error: `Unknown harness: ${harnessId}` }, { status: 400 });
+          return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
         }
-        return Response.json({ [harnessId]: status });
+        return Response.json({ [agentId]: status });
       }
-      return Response.json(await providers.getHarnessAuthStatusMap());
+      return Response.json(await providers.getAgentAuthStatusMap());
     } catch (error) {
       return Response.json({ error: error.message }, { status: 500 });
     }
   }
 
-  async function getHarnessReadiness() {
+  async function getAgentReadiness() {
     try {
-      return Response.json(await providers.getHarnessReadinessMap());
+      return Response.json(await providers.getAgentReadinessMap());
     } catch (error) {
       return Response.json({ error: error.message }, { status: 500 });
     }
   }
 
-  async function postHarnessAuthLogin(request) {
+  async function postAgentAuthLogin(request) {
     try {
       const body = await parseJsonBody(request);
-      const harnessId = typeof body?.harnessId === 'string' ? body.harnessId : '';
-      if (!harnessId) {
-        return Response.json({ error: 'harnessId is required' }, { status: 400 });
+      const agentId = typeof body?.agentId === 'string' ? body.agentId : '';
+      if (!agentId) {
+        return Response.json({ error: 'agentId is required' }, { status: 400 });
       }
-      return Response.json(await providers.launchHarnessAuthLogin(harnessId));
+      return Response.json(await providers.launchAgentAuthLogin(agentId));
     } catch (error) {
       return Response.json({ error: error.message }, { status: 500 });
     }
@@ -115,10 +115,10 @@ export default function createProviderRoutes(providers) {
   }
 
   return {
-    '/api/v1/harnesses': { GET: getHarnesses },
-    '/api/v1/harnesses/auth': { GET: getHarnessAuth },
-    '/api/v1/harnesses/readiness': { GET: getHarnessReadiness },
-    '/api/v1/harnesses/auth/login': { POST: postHarnessAuthLogin },
+    '/api/v1/agents': { GET: getAgents },
+    '/api/v1/agents/auth': { GET: getAgentAuth },
+    '/api/v1/agents/readiness': { GET: getAgentReadiness },
+    '/api/v1/agents/auth/login': { POST: postAgentAuthLogin },
     '/api/v1/api-providers': {
       GET: getApiProviders,
       POST: postApiProvider,

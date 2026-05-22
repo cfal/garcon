@@ -13,10 +13,10 @@ import {
   type ThinkingMode,
 } from '../../common/chat-modes.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
-import type { HarnessId, ApiProtocol } from '../../common/providers.js';
+import type { AgentId, ApiProtocol } from '../../common/providers.js';
 
 export type { AgentCommandImage, AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode };
-export type ProviderName = HarnessId;
+export type ProviderName = AgentId;
 
 export type CodexConfigValue = string | number | boolean | CodexConfigValue[] | { [key: string]: CodexConfigValue };
 export type CodexConfigObject = { [key: string]: CodexConfigValue };
@@ -54,7 +54,7 @@ export interface ProviderEventMetadata {
   providerRequestId?: string;
 }
 
-// Request to start a new harness session.
+// Request to start a new agent session.
 export interface StartSessionRequest extends ProviderExecutionConfig {
   command: string;
   images?: AgentCommandImage[];

@@ -22,31 +22,31 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
     ? await settings.getRemoteSettingsSnapshotSource()
     : null;
 
-  const getHarnessCatalog = async () => {
+  const getAgentCatalog = async () => {
     try {
-      return await providers?.getHarnessCatalog?.();
+      return await providers?.getAgentCatalog?.();
     } catch {
       return null;
     }
   };
 
   const [
-    authByHarness, readinessByHarness, harnessCatalog, opencodeModels, factoryModels,
+    authByAgent, readinessByAgent, agentCatalog, opencodeModels, factoryModels,
   ] = await Promise.all([
-    providers?.getHarnessAuthStatusMap?.() ?? Promise.resolve({
+    providers?.getAgentAuthStatusMap?.() ?? Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
       amp: { authenticated: false },
       factory: { authenticated: false },
     }),
-    providers?.getHarnessReadinessMap?.() ?? Promise.resolve({}),
-    getHarnessCatalog(),
+    providers?.getAgentReadinessMap?.() ?? Promise.resolve({}),
+    getAgentCatalog(),
     providers?.getModels?.('opencode') ?? Promise.resolve([]),
     providers?.getModels?.('factory') ?? Promise.resolve([]),
   ]);
   const catalogModels = Object.fromEntries(
-    (harnessCatalog?.harnesses ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
+    (agentCatalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
   );
 
   const [
@@ -87,7 +87,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       settings.getLastModelProtocol?.() ?? Promise.resolve(null),
     ]);
 
-  const modelsByHarness = {
+  const modelsByAgent = {
     claude: CLAUDE_MODELS.OPTIONS,
     codex: CODEX_MODELS.OPTIONS,
     opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
@@ -99,15 +99,15 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.chatTitle),
-      authByHarness,
-      modelsByHarness,
-      readinessByHarness,
+      authByAgent,
+      modelsByAgent,
+      readinessByAgent,
     }),
     commitMessage: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.commitMessage),
-      authByHarness,
-      modelsByHarness,
-      readinessByHarness,
+      authByAgent,
+      modelsByAgent,
+      readinessByAgent,
     }),
   };
 

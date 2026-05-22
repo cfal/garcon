@@ -2,18 +2,18 @@ import type { SessionProvider } from '$lib/types/app';
 import type { ModelOption } from '$lib/stores/model-catalog.svelte';
 import type { ApiProtocol } from '$shared/providers';
 
-export type ModelSelectorHarnessMode = 'select' | 'fixed' | 'hidden';
+export type ModelSelectorAgentMode = 'select' | 'fixed' | 'hidden';
 export type ModelSelectorSourceMode = 'select' | 'hidden';
 export type ModelSelectorSurface = 'composer' | 'settings';
 
 export interface ModelSelectorMode {
-	harness: ModelSelectorHarnessMode;
+	agent: ModelSelectorAgentMode;
 	source: ModelSelectorSourceMode;
 	surface: ModelSelectorSurface;
 }
 
 export interface ModelSelectorValue {
-	harnessId: SessionProvider;
+	agentId: SessionProvider;
 	model: string;
 	apiProviderId?: string | null;
 	modelEndpointId?: string | null;
@@ -21,7 +21,7 @@ export interface ModelSelectorValue {
 }
 
 export interface ModelSelectorChange {
-	harnessId: SessionProvider;
+	agentId: SessionProvider;
 	modelValue: string;
 	model: string;
 	apiProviderId: string | null;
@@ -29,7 +29,7 @@ export interface ModelSelectorChange {
 	modelProtocol: ApiProtocol | null;
 }
 
-export interface HarnessSelectorOption {
+export interface AgentSelectorOption {
 	value: SessionProvider;
 	label: string;
 	description: string;

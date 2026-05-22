@@ -1,5 +1,5 @@
-// Shared harness and API provider contracts. Harnesses execute chats; API
-// providers expose protocol-specific model endpoints that harnesses may use.
+// Shared agent and API provider contracts. Agents execute chats; API
+// providers expose protocol-specific model endpoints that agents may use.
 
 export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID = 'direct-openai-compatible' as const;
 export const DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID = 'direct-openai-responses-compatible' as const;
@@ -8,7 +8,7 @@ export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL = 'Direct (
 export const DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL = 'Direct (Responses)' as const;
 export const DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL = 'Direct (Anthropic)' as const;
 
-export const BUILTIN_HARNESSES = [
+export const BUILTIN_AGENTS = [
   'claude',
   'codex',
   'cursor',
@@ -21,8 +21,8 @@ export const BUILTIN_HARNESSES = [
   DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
 ] as const;
 
-export type BuiltinHarnessId = (typeof BUILTIN_HARNESSES)[number];
-export type HarnessId = BuiltinHarnessId | (string & {});
+export type BuiltinAgentId = (typeof BUILTIN_AGENTS)[number];
+export type AgentId = BuiltinAgentId | (string & {});
 
 export type ApiProtocol =
   | 'anthropic-messages'
@@ -48,7 +48,7 @@ export const API_PROVIDER_TEMPLATE_IDS = [
 
 export type ApiProviderTemplateId = (typeof API_PROVIDER_TEMPLATE_IDS)[number];
 
-export interface HarnessCapabilities {
+export interface AgentCapabilities {
   supportsFork: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
@@ -61,7 +61,7 @@ export interface OpenAiEndpointCapabilities {
   responses: boolean;
 }
 
-export const BUILTIN_HARNESS_CAPABILITIES: Record<BuiltinHarnessId, HarnessCapabilities> = {
+export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilities> = {
   claude: {
     supportsFork: true,
     supportsImages: true,
@@ -134,7 +134,7 @@ export const BUILTIN_HARNESS_CAPABILITIES: Record<BuiltinHarnessId, HarnessCapab
   },
 };
 
-const HARNESS_IDS_BY_PROTOCOL: Record<ApiProtocol, readonly BuiltinHarnessId[]> = {
+const AGENT_IDS_BY_PROTOCOL: Record<ApiProtocol, readonly BuiltinAgentId[]> = {
   'anthropic-messages': ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
   'openai-compatible': [
     'codex',
@@ -143,7 +143,7 @@ const HARNESS_IDS_BY_PROTOCOL: Record<ApiProtocol, readonly BuiltinHarnessId[]> 
   ],
 };
 
-export interface HarnessModelOption {
+export interface AgentModelOption {
   value: string;
   label: string;
   supportsImages?: boolean;
@@ -154,18 +154,18 @@ export interface HarnessModelOption {
   protocol?: ApiProtocol;
 }
 
-export interface HarnessCatalogEntry {
-  id: HarnessId;
+export interface AgentCatalogEntry {
+  id: AgentId;
   label: string;
   description?: string;
-  kind: 'harness';
+  kind: 'agent';
   supportsFork: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: ApiProtocol[];
   authLoginSupported: boolean;
   defaultModel: string;
-  models: HarnessModelOption[];
+  models: AgentModelOption[];
 }
 
 export interface ApiProviderCatalogEntry {
@@ -183,15 +183,15 @@ export interface ApiProviderEndpointCatalogEntry {
   baseUrl: string;
   capabilities?: OpenAiEndpointCapabilities;
   defaultModel: string;
-  models: HarnessModelOption[];
+  models: AgentModelOption[];
   supportsImages: boolean;
   hasApiKey: boolean;
   apiKeyLabel?: string;
   modelDiscovery?: ModelDiscoveryKind;
 }
 
-export interface HarnessCatalog {
-  harnesses: HarnessCatalogEntry[];
+export interface AgentCatalog {
+  agents: AgentCatalogEntry[];
   apiProviders: ApiProviderCatalogEntry[];
 }
 
@@ -206,23 +206,23 @@ export interface ApiProviderModelDiscoveryRequest {
 
 export interface ApiProviderModelDiscoveryResponse {
   success: boolean;
-  models?: HarnessModelOption[];
+  models?: AgentModelOption[];
   error?: string;
 }
 
 const ENDPOINT_MODEL_VALUE_SEPARATOR = ':';
 const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;
-const SETTINGS_OAUTH_HARNESSES = ['claude', 'codex'] as const;
-const SETTINGS_OTHER_HARNESSES = ['amp', 'cursor', 'factory', 'opencode', 'pi'] as const;
-export const ENDPOINT_ONLY_HARNESSES = [
+const SETTINGS_OAUTH_AGENTS = ['claude', 'codex'] as const;
+const SETTINGS_OTHER_AGENTS = ['amp', 'cursor', 'factory', 'opencode', 'pi'] as const;
+export const ENDPOINT_ONLY_AGENTS = [
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
   DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
   DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
 ] as const;
 
-export type OAuthHarnessId = (typeof SETTINGS_OAUTH_HARNESSES)[number];
-export type OtherSettingsHarnessId = (typeof SETTINGS_OTHER_HARNESSES)[number];
-export type EndpointOnlyHarnessId = (typeof ENDPOINT_ONLY_HARNESSES)[number];
+export type OAuthAgentId = (typeof SETTINGS_OAUTH_AGENTS)[number];
+export type OtherSettingsAgentId = (typeof SETTINGS_OTHER_AGENTS)[number];
+export type EndpointOnlyAgentId = (typeof ENDPOINT_ONLY_AGENTS)[number];
 
 export function endpointModelOptionValue(endpointId: string, rawModel: string): string {
   return `${endpointId}${ENDPOINT_MODEL_VALUE_SEPARATOR}${rawModel}`;
@@ -233,24 +233,24 @@ export function rawModelFromEndpointOptionValue(endpointId: string, selectedMode
   return selectedModel.startsWith(prefix) ? selectedModel.slice(prefix.length) : selectedModel;
 }
 
-export function isHarnessId(value: unknown): value is HarnessId {
+export function isAgentId(value: unknown): value is AgentId {
   return typeof value === 'string' && SAFE_ID_RE.test(value);
 }
 
-export function isVisibleHarnessId(value: string): boolean {
-  return (BUILTIN_HARNESSES as readonly string[]).includes(value);
+export function isVisibleAgentId(value: string): boolean {
+  return (BUILTIN_AGENTS as readonly string[]).includes(value);
 }
 
-export function isOAuthHarnessId(value: string): value is OAuthHarnessId {
-  return (SETTINGS_OAUTH_HARNESSES as readonly string[]).includes(value);
+export function isOAuthAgentId(value: string): value is OAuthAgentId {
+  return (SETTINGS_OAUTH_AGENTS as readonly string[]).includes(value);
 }
 
-export function isOtherSettingsHarnessId(value: string): value is OtherSettingsHarnessId {
-  return (SETTINGS_OTHER_HARNESSES as readonly string[]).includes(value);
+export function isOtherSettingsAgentId(value: string): value is OtherSettingsAgentId {
+  return (SETTINGS_OTHER_AGENTS as readonly string[]).includes(value);
 }
 
-export function isEndpointOnlyHarnessId(value: string): value is EndpointOnlyHarnessId {
-  return (ENDPOINT_ONLY_HARNESSES as readonly string[]).includes(value);
+export function isEndpointOnlyAgentId(value: string): value is EndpointOnlyAgentId {
+  return (ENDPOINT_ONLY_AGENTS as readonly string[]).includes(value);
 }
 
 export function isApiProviderId(value: unknown): value is string {
@@ -261,59 +261,59 @@ export function isApiProviderTemplateId(value: unknown): value is ApiProviderTem
   return typeof value === 'string' && (API_PROVIDER_TEMPLATE_IDS as readonly string[]).includes(value);
 }
 
-export function harnessesForProtocol(protocol: ApiProtocol): readonly BuiltinHarnessId[] {
-  return HARNESS_IDS_BY_PROTOCOL[protocol];
+export function agentsForProtocol(protocol: ApiProtocol): readonly BuiltinAgentId[] {
+  return AGENT_IDS_BY_PROTOCOL[protocol];
 }
 
-export function isHarnessCompatibleWithProtocol(harnessId: string, protocol: ApiProtocol): boolean {
-  return harnessesForProtocol(protocol).includes(harnessId as BuiltinHarnessId);
+export function isAgentCompatibleWithProtocol(agentId: string, protocol: ApiProtocol): boolean {
+  return agentsForProtocol(protocol).includes(agentId as BuiltinAgentId);
 }
 
-export interface EndpointHarnessCompatibilityInput {
+export interface EndpointAgentCompatibilityInput {
   protocol: ApiProtocol;
   capabilities?: OpenAiEndpointCapabilities;
 }
 
-export function endpointSupportsHarness(
-  harnessId: HarnessId,
-  endpoint: EndpointHarnessCompatibilityInput,
+export function endpointSupportsAgent(
+  agentId: AgentId,
+  endpoint: EndpointAgentCompatibilityInput,
 ): boolean {
   if (endpoint.protocol === 'anthropic-messages') {
-    return harnessId === 'claude' || harnessId === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID;
+    return agentId === 'claude' || agentId === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID;
   }
 
   const capabilities = endpoint.capabilities ?? {
     chatCompletions: false,
     responses: false,
   };
-  if (harnessId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID) {
+  if (agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID) {
     return capabilities.chatCompletions;
   }
-  if (harnessId === 'codex' || harnessId === DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID) {
+  if (agentId === 'codex' || agentId === DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID) {
     return capabilities.responses;
   }
   return false;
 }
 
-export function harnessesForEndpoint(endpoint: EndpointHarnessCompatibilityInput): HarnessId[] {
-  return harnessesForProtocol(endpoint.protocol)
-    .filter((harnessId) => endpointSupportsHarness(harnessId, endpoint));
+export function agentsForEndpoint(endpoint: EndpointAgentCompatibilityInput): AgentId[] {
+  return agentsForProtocol(endpoint.protocol)
+    .filter((agentId) => endpointSupportsAgent(agentId, endpoint));
 }
 
 export function labelForProtocol(protocol: ApiProtocol): string {
   return protocol === 'anthropic-messages' ? 'Anthropic-compatible' : 'OpenAI-compatible';
 }
 
-export function supportsFork(harnessId: HarnessId): boolean {
-  if (harnessId in BUILTIN_HARNESS_CAPABILITIES) {
-    return BUILTIN_HARNESS_CAPABILITIES[harnessId as BuiltinHarnessId].supportsFork;
+export function supportsFork(agentId: AgentId): boolean {
+  if (agentId in BUILTIN_AGENT_CAPABILITIES) {
+    return BUILTIN_AGENT_CAPABILITIES[agentId as BuiltinAgentId].supportsFork;
   }
   return false;
 }
 
-export function supportsImages(harnessId: HarnessId): boolean {
-  if (harnessId in BUILTIN_HARNESS_CAPABILITIES) {
-    return BUILTIN_HARNESS_CAPABILITIES[harnessId as BuiltinHarnessId].supportsImages;
+export function supportsImages(agentId: AgentId): boolean {
+  if (agentId in BUILTIN_AGENT_CAPABILITIES) {
+    return BUILTIN_AGENT_CAPABILITIES[agentId as BuiltinAgentId].supportsImages;
   }
   return false;
 }

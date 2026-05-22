@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
-import RouterIntegrationHarness from './RouterIntegrationHarness.svelte';
+import RouterIntegrationHost from './RouterIntegrationHost.svelte';
 import type { EventRouterStores } from '../router.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
@@ -69,7 +69,7 @@ function renderRouterWithRawMessages(
 		cleanup: vi.fn(),
 	};
 
-	render(RouterIntegrationHarness, { connection, drainHandle, stores });
+	render(RouterIntegrationHost, { connection, drainHandle, stores });
 }
 
 describe('event router integration', () => {

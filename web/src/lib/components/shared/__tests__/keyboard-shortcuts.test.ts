@@ -1,7 +1,7 @@
 import { render } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
-import KeyboardShortcutsHarness from './KeyboardShortcutsHarness.svelte';
+import KeyboardShortcutsHost from './KeyboardShortcutsHost.svelte';
 
 function createMockAppShell() {
 	return {
@@ -17,7 +17,7 @@ describe('KeyboardShortcuts', () => {
 	it('opens sidebar search on Ctrl-S with the same global scope as the command palette', async () => {
 		const appShell = createMockAppShell();
 
-		render(KeyboardShortcutsHarness, {
+		render(KeyboardShortcutsHost, {
 			appShell,
 			onToggleCommandMenu: vi.fn(),
 		});
@@ -30,7 +30,7 @@ describe('KeyboardShortcuts', () => {
 	it('opens sidebar search on Ctrl-S even when focus is inside an input', async () => {
 		const appShell = createMockAppShell();
 
-		render(KeyboardShortcutsHarness, {
+		render(KeyboardShortcutsHost, {
 			appShell,
 			onToggleCommandMenu: vi.fn(),
 		});
@@ -50,7 +50,7 @@ describe('KeyboardShortcuts', () => {
 	it('requests delete on Ctrl-D', async () => {
 		const appShell = createMockAppShell();
 
-		render(KeyboardShortcutsHarness, {
+		render(KeyboardShortcutsHost, {
 			appShell,
 			onToggleCommandMenu: vi.fn(),
 		});
@@ -63,7 +63,7 @@ describe('KeyboardShortcuts', () => {
 	it('requests delete on Ctrl-D even when focus is inside an input', async () => {
 		const appShell = createMockAppShell();
 
-		render(KeyboardShortcutsHarness, {
+		render(KeyboardShortcutsHost, {
 			appShell,
 			onToggleCommandMenu: vi.fn(),
 		});

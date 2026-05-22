@@ -55,8 +55,8 @@ interface ProviderRegistryDep {
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   }): Promise<void>;
-  hasHarness(harnessId: string): boolean;
-  isHarnessSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
+  hasAgent(agentId: string): boolean;
+  isAgentSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
 }
 
 interface QueueManagerDep {
@@ -247,10 +247,10 @@ export class ChatHandler {
       return;
     }
     if (!providerSupportsFork(sourceSession.provider)) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, `Fork unsupported for harness: ${sourceSession.provider}`));
+      writer.send(new AgentRunFailedMessage(sourceChatId, `Fork unsupported for agent: ${sourceSession.provider}`));
       return;
     }
-    if (this.#providers.isHarnessSessionRunning(sourceSession.provider, sourceSession.providerSessionId)) {
+    if (this.#providers.isAgentSessionRunning(sourceSession.provider, sourceSession.providerSessionId)) {
       writer.send(new AgentRunFailedMessage(sourceChatId, 'Cannot fork a chat while it is processing'));
       return;
     }

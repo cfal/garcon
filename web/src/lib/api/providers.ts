@@ -1,4 +1,4 @@
-// Harness and API provider HTTP client. Harnesses own runtime auth;
+// Agent and API provider HTTP client. Agents own runtime auth;
 // API providers own persisted compatible endpoint configuration.
 
 import { apiDelete, apiGet, apiPost, apiPut } from './client.js';
@@ -8,16 +8,16 @@ import type {
 	ApiProviderModelDiscoveryRequest,
 	ApiProviderModelDiscoveryResponse,
 	ApiProviderTemplateId,
-	HarnessCatalog,
-	HarnessId,
-	HarnessModelOption,
+	AgentCatalog,
+	AgentId,
+	AgentModelOption,
 	ModelDiscoveryKind,
 	OpenAiEndpointCapabilities
 } from '$shared/providers';
 
-export type HarnessName = HarnessId;
+export type AgentName = AgentId;
 
-export interface HarnessAuthStatus {
+export interface AgentAuthStatus {
 	authenticated: boolean;
 	canReauth: boolean;
 	label: string;
@@ -25,7 +25,7 @@ export interface HarnessAuthStatus {
 	detail?: string;
 }
 
-export interface HarnessReadiness {
+export interface AgentReadiness {
 	ready: boolean;
 	nativeReady: boolean;
 	endpointReady: boolean;
@@ -37,7 +37,7 @@ export interface DeviceAuthInfo {
 	code: string;
 }
 
-export interface HarnessAuthLoginResult {
+export interface AgentAuthLoginResult {
 	launched: boolean;
 	alreadyRunning: boolean;
 	deviceAuth?: DeviceAuthInfo;
@@ -51,7 +51,7 @@ export interface ApiProviderEndpointInput {
 	clearApiKey?: boolean;
 	capabilities?: OpenAiEndpointCapabilities;
 	defaultModel: string;
-	models: Array<Pick<HarnessModelOption, 'value' | 'label' | 'supportsImages' | 'isLocal'>>;
+	models: Array<Pick<AgentModelOption, 'value' | 'label' | 'supportsImages' | 'isLocal'>>;
 	supportsImages: boolean;
 	modelDiscovery?: ModelDiscoveryKind;
 }
@@ -62,23 +62,23 @@ export interface ApiProviderInput {
 	endpoint: ApiProviderEndpointInput;
 }
 
-export async function getHarnessAuthStatus(harness: HarnessName): Promise<HarnessAuthStatus> {
-	const result = await apiGet<Record<string, HarnessAuthStatus>>(
-		`/api/v1/harnesses/auth?harness=${encodeURIComponent(harness)}`
+export async function getAgentAuthStatus(agent: AgentName): Promise<AgentAuthStatus> {
+	const result = await apiGet<Record<string, AgentAuthStatus>>(
+		`/api/v1/agents/auth?agent=${encodeURIComponent(agent)}`
 	);
-	return result[harness];
+	return result[agent];
 }
 
-export async function getHarnessReadiness(): Promise<Record<string, HarnessReadiness>> {
-	return apiGet<Record<string, HarnessReadiness>>('/api/v1/harnesses/readiness');
+export async function getAgentReadiness(): Promise<Record<string, AgentReadiness>> {
+	return apiGet<Record<string, AgentReadiness>>('/api/v1/agents/readiness');
 }
 
-export async function getHarnessCatalog(): Promise<HarnessCatalog> {
-	return apiGet<HarnessCatalog>('/api/v1/harnesses');
+export async function getAgentCatalog(): Promise<AgentCatalog> {
+	return apiGet<AgentCatalog>('/api/v1/agents');
 }
 
-export async function launchHarnessAuthLogin(harness: HarnessName): Promise<HarnessAuthLoginResult> {
-	return apiPost<HarnessAuthLoginResult>('/api/v1/harnesses/auth/login', { harnessId: harness });
+export async function launchAgentAuthLogin(agent: AgentName): Promise<AgentAuthLoginResult> {
+	return apiPost<AgentAuthLoginResult>('/api/v1/agents/auth/login', { agentId: agent });
 }
 
 export async function getApiProviders(): Promise<{ apiProviders: ApiProviderCatalogEntry[] }> {

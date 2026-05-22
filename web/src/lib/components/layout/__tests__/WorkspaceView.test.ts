@@ -12,7 +12,7 @@ vi.mock('$lib/components/split/SplitContainer.svelte', () => ({
 	default: SplitContainerStub
 }));
 
-import WorkspaceViewTestHarness from './WorkspaceViewTestHarness.svelte';
+import WorkspaceViewTestHost from './WorkspaceViewTestHost.svelte';
 
 function dispatchDragEvent(
 	target: HTMLElement,
@@ -28,7 +28,7 @@ function dispatchDragEvent(
 
 describe('WorkspaceView header visibility', () => {
 	it('hides the top header on desktop for the chat tab', () => {
-		const { container } = render(WorkspaceViewTestHarness, {
+		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
 			alwaysFullscreenOnGitPanel: true,
 			isMobile: false
@@ -45,7 +45,7 @@ describe('WorkspaceView header visibility', () => {
 	});
 
 	it('keeps the top header visible on desktop for non-chat tabs', () => {
-		const { container } = render(WorkspaceViewTestHarness, {
+		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'preview',
 			isMobile: false
 		});
@@ -55,7 +55,7 @@ describe('WorkspaceView header visibility', () => {
 	});
 
 	it('hides the top header on mobile chat tab', () => {
-		const { container } = render(WorkspaceViewTestHarness, {
+		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
 			isMobile: true
 		});
@@ -67,7 +67,7 @@ describe('WorkspaceView header visibility', () => {
 	});
 
 	it('shows exit fullscreen title when desktop fullscreen is active', () => {
-		render(WorkspaceViewTestHarness, {
+		render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
 			alwaysFullscreenOnGitPanel: true,
 			isMobile: false,
@@ -78,7 +78,7 @@ describe('WorkspaceView header visibility', () => {
 	});
 
 	it('hides fullscreen control on git tab when always-fullscreen-on-git is enabled', () => {
-		render(WorkspaceViewTestHarness, {
+		render(WorkspaceViewTestHost, {
 			activeTab: 'git',
 			alwaysFullscreenOnGitPanel: true,
 			isMobile: false
@@ -88,7 +88,7 @@ describe('WorkspaceView header visibility', () => {
 	});
 
 	it('shows fullscreen control on git tab when always-fullscreen-on-git is disabled', () => {
-		render(WorkspaceViewTestHarness, {
+		render(WorkspaceViewTestHost, {
 			activeTab: 'git',
 			alwaysFullscreenOnGitPanel: false,
 			isMobile: false
@@ -98,7 +98,7 @@ describe('WorkspaceView header visibility', () => {
 	});
 
 	it('uses semantic token classes for header and active tabs', () => {
-		const { container } = render(WorkspaceViewTestHarness, {
+		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'files',
 			isMobile: false
 		});
@@ -145,7 +145,7 @@ describe('WorkspaceView header visibility', () => {
 			splitPane: vi.fn(),
 		};
 
-		const { container } = render(WorkspaceViewTestHarness, {
+		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
 			isMobile: false,
 			splitLayout,
@@ -227,7 +227,7 @@ describe('WorkspaceView header visibility', () => {
 			splitPane: vi.fn(),
 		};
 
-		const { container } = render(WorkspaceViewTestHarness, {
+		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
 			isMobile: false,
 			splitLayout,
@@ -329,7 +329,7 @@ describe('WorkspaceView header visibility', () => {
 			splitPane: vi.fn(),
 		};
 
-		const { container } = render(WorkspaceViewTestHarness, {
+		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
 			isMobile: false,
 			splitLayout,

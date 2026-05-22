@@ -8,11 +8,11 @@
 	import type { ModelSelectorState } from './model-selector-state.svelte';
 	import VirtualModelList from './VirtualModelList.svelte';
 
-	type CompactPane = 'harness' | 'source' | 'model';
+	type CompactPane = 'agent' | 'source' | 'model';
 
 	interface Props {
 		selector: ModelSelectorState;
-		showHarness: boolean;
+		showAgent: boolean;
 		showSource: boolean;
 		modelListId: string;
 		onCancel: () => void;
@@ -21,7 +21,7 @@
 
 	let {
 		selector,
-		showHarness,
+		showAgent,
 		showSource,
 		modelListId,
 		onCancel,
@@ -37,24 +37,24 @@
 	const hasFilteredModels = $derived(selector.filteredModelRows.items.length > 0);
 	const canFinish = $derived(Boolean(selector.currentModelValue));
 	const previousPane = $derived.by<CompactPane | null>(() => {
-		if (pane === 'source') return showHarness ? 'harness' : null;
+		if (pane === 'source') return showAgent ? 'agent' : null;
 		if (pane === 'model') {
-			if (shouldShowSourcePaneFor(selector.harnessId)) return 'source';
-			return showHarness ? 'harness' : null;
+			if (shouldShowSourcePaneFor(selector.agentId)) return 'source';
+			return showAgent ? 'agent' : null;
 		}
 		return null;
 	});
 	const headerTitle = $derived.by(() => {
-		if (pane === 'harness') return m.model_selector_harness();
-		if (pane === 'source') return m.model_selector_provider_title({ harness: selector.harnessLabel });
+		if (pane === 'agent') return m.model_selector_agent();
+		if (pane === 'source') return m.model_selector_provider_title({ agent: selector.agentLabel });
 		const parts = [
-			showHarness || showSource ? selector.harnessLabel : '',
+			showAgent || showSource ? selector.agentLabel : '',
 			showSource ? selector.source?.label : '',
 		].filter(Boolean);
 		return parts.length > 0 ? parts.join(' / ') : m.model_selector_model();
 	});
 	const headerSubtitle = $derived.by(() => {
-		if (pane === 'harness') return '';
+		if (pane === 'agent') return '';
 		if (pane === 'source') return '';
 		return m.model_selector_model();
 	});
@@ -77,23 +77,23 @@
 
 	function firstPane(): CompactPane {
 		if (selector.currentModelValue) return 'model';
-		if (showHarness) return 'harness';
-		if (shouldShowSourcePaneFor(selector.harnessId)) return 'source';
+		if (showAgent) return 'agent';
+		if (shouldShowSourcePaneFor(selector.agentId)) return 'source';
 		return 'model';
 	}
 
-	function shouldShowSourcePaneFor(harnessId: SessionProvider): boolean {
-		return showSource && selector.sourcesFor(harnessId).length > 1;
+	function shouldShowSourcePaneFor(agentId: SessionProvider): boolean {
+		return showSource && selector.sourcesFor(agentId).length > 1;
 	}
 
-	function paneAfterHarness(harnessId: SessionProvider): CompactPane {
-		if (shouldShowSourcePaneFor(harnessId)) return 'source';
+	function paneAfterAgent(agentId: SessionProvider): CompactPane {
+		if (shouldShowSourcePaneFor(agentId)) return 'source';
 		return 'model';
 	}
 
-	function handleHarnessSelect(harnessId: SessionProvider): void {
-		selector.selectHarness(harnessId);
-		pane = paneAfterHarness(harnessId);
+	function handleAgentSelect(agentId: SessionProvider): void {
+		selector.selectAgent(agentId);
+		pane = paneAfterAgent(agentId);
 	}
 
 	function handleSourceSelect(sourceKey: string): void {
@@ -151,17 +151,17 @@
 	</header>
 
 	<div data-slot="model-selector-compact-pane" class="flex min-h-0 flex-1 flex-col">
-		{#if pane === 'harness'}
+		{#if pane === 'agent'}
 			<div class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]">
-				{#each selector.harnessOptions as option (option.value)}
+				{#each selector.agentOptions as option (option.value)}
 					<button
 						type="button"
 						class={cn(
 							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-							option.value === selector.harnessId && 'bg-accent text-accent-foreground'
+							option.value === selector.agentId && 'bg-accent text-accent-foreground'
 						)}
-						aria-pressed={option.value === selector.harnessId}
-						onclick={() => handleHarnessSelect(option.value)}
+						aria-pressed={option.value === selector.agentId}
+						onclick={() => handleAgentSelect(option.value)}
 					>
 						<span class="min-w-0 flex-1">
 							<span class="block truncate font-medium">{option.label}</span>
@@ -169,7 +169,7 @@
 								<span class="block truncate text-xs text-muted-foreground">{option.description}</span>
 							{/if}
 						</span>
-						{#if option.value === selector.harnessId}
+						{#if option.value === selector.agentId}
 							<Check class="size-4 shrink-0" />
 						{/if}
 					</button>

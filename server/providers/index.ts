@@ -1,5 +1,5 @@
-// Unified harness registry. Routes all operations through adapter instances
-// keyed by harness ID. Also provides preview/message loading, harness auth,
+// Unified agent registry. Routes all operations through adapter instances
+// keyed by agent ID. Also provides preview/message loading, agent auth,
 // readiness, and API provider mutations.
 
 import { resolveFileMentionsInCommand } from '../chats/file-mentions.ts';
@@ -21,25 +21,25 @@ import { requireChatExecutionConfig } from './types.js';
 import type { ApiProviderStore, CreateApiProviderInput, UpdateApiProviderInput } from './api-provider-store.js';
 import type { ApiProviderEndpointResolver, ResolvedModelSelection } from './api-provider-endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from './api-provider-endpoint-resolver.js';
-import type { Harness } from '../harnesses/types.js';
+import type { Agent } from '../agents/types.js';
 import {
   API_PROVIDER_TEMPLATE_IDS,
   isApiProviderTemplateId,
-  isEndpointOnlyHarnessId,
-  isVisibleHarnessId,
+  isEndpointOnlyAgentId,
+  isVisibleAgentId,
   labelForProtocol,
   type ApiProviderCatalogEntry,
   type ApiProviderModelDiscoveryRequest,
   type ApiProviderModelDiscoveryResponse,
   type ApiProviderTemplateId,
   type ApiProtocol,
-  type HarnessCatalog,
-  type HarnessCatalogEntry,
-  type HarnessModelOption,
+  type AgentCatalog,
+  type AgentCatalogEntry,
+  type AgentModelOption,
   type ModelDiscoveryKind,
   type OpenAiEndpointCapabilities,
 } from '../../common/providers.js';
-const STATIC_HARNESS_MODELS: Record<string, { defaultModel: string; models: HarnessModelOption[] }> = {
+const STATIC_HARNESS_MODELS: Record<string, { defaultModel: string; models: AgentModelOption[] }> = {
   claude: { defaultModel: CLAUDE_MODELS.DEFAULT, models: CLAUDE_MODELS.OPTIONS },
   codex: { defaultModel: CODEX_MODELS.DEFAULT, models: CODEX_MODELS.OPTIONS },
   amp: { defaultModel: AMP_MODELS.DEFAULT, models: AMP_MODELS.OPTIONS },
@@ -76,9 +76,9 @@ function redactApiProviderForCatalog(apiProvider: any): ApiProviderCatalogEntry 
   };
 }
 
-function dedupeModels(models: HarnessModelOption[]): HarnessModelOption[] {
+function dedupeModels(models: AgentModelOption[]): AgentModelOption[] {
   const seen = new Set<string>();
-  const result: HarnessModelOption[] = [];
+  const result: AgentModelOption[] = [];
   for (const model of models) {
     if (!model.value || seen.has(model.value)) continue;
     seen.add(model.value);
@@ -87,10 +87,10 @@ function dedupeModels(models: HarnessModelOption[]): HarnessModelOption[] {
   return result;
 }
 
-async function nativeModelsForHarness(id: string, harness: Harness): Promise<HarnessModelOption[]> {
-  let fetched: HarnessModelOption[] = [];
-  const getModels = harness.capabilities.getModels;
-  if (!isEndpointOnlyHarnessId(id) && getModels) {
+async function nativeModelsForAgent(id: string, agent: Agent): Promise<AgentModelOption[]> {
+  let fetched: AgentModelOption[] = [];
+  const getModels = agent.capabilities.getModels;
+  if (!isEndpointOnlyAgentId(id) && getModels) {
     try {
       fetched = await getModels();
     } catch (error) {
@@ -101,7 +101,7 @@ async function nativeModelsForHarness(id: string, harness: Harness): Promise<Har
   return dedupeModels([...fetched, ...fallback]);
 }
 
-function defaultModelForHarness(id: string, nativeModels: HarnessModelOption[], endpointModels: HarnessModelOption[]): string {
+function defaultModelForAgent(id: string, nativeModels: AgentModelOption[], endpointModels: AgentModelOption[]): string {
   const fallbackDefault = STATIC_HARNESS_MODELS[id]?.defaultModel;
   if (fallbackDefault && nativeModels.some((model) => model.value === fallbackDefault)) {
     return fallbackDefault;
@@ -225,18 +225,18 @@ function normalizeApiProviderCapabilities(
   return { chatCompletions, responses };
 }
 
-function normalizeApiProviderModels(value: unknown, defaultModel: string): HarnessModelOption[] {
+function normalizeApiProviderModels(value: unknown, defaultModel: string): AgentModelOption[] {
   if (!Array.isArray(value)) {
     return [{ value: defaultModel, label: defaultModel }];
   }
-  const models: HarnessModelOption[] = [];
+  const models: AgentModelOption[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue;
     const model = entry as Record<string, unknown>;
     const modelValue = typeof model.value === 'string' ? model.value.trim() : '';
     const label = typeof model.label === 'string' ? model.label.trim() : '';
     if (!modelValue || !label) continue;
-    const normalized: HarnessModelOption = { value: modelValue, label };
+    const normalized: AgentModelOption = { value: modelValue, label };
     if (typeof model.supportsImages === 'boolean') normalized.supportsImages = model.supportsImages;
     if (typeof model.isLocal === 'boolean') normalized.isLocal = model.isLocal;
     models.push(normalized);
@@ -382,7 +382,7 @@ async function testOllamaTags(input: ApiProviderModelDiscoveryFlatInput): Promis
       return { success: false, error: `Ollama model discovery failed with HTTP ${response.status}.` };
     }
     const body = await response.json() as { models?: Array<{ name?: string }> };
-    const models: HarnessModelOption[] = (body.models ?? [])
+    const models: AgentModelOption[] = (body.models ?? [])
       .filter((model): model is { name: string } => typeof model.name === 'string' && model.name.length > 0)
       .map((model) => ({ value: model.name, label: `${model.name} (local)`, isLocal: true }));
     return { success: true, models: models.length > 0 ? dedupeModels(models) : undefined };
@@ -401,7 +401,7 @@ async function testOpenAiModels(input: ApiProviderModelDiscoveryFlatInput): Prom
     if (!response.ok) return { success: false, error: `Model discovery failed with HTTP ${response.status}.` };
 
     const body = await response.json() as { data?: Array<{ id?: string; name?: string }> };
-    const models: HarnessModelOption[] = (body.data ?? [])
+    const models: AgentModelOption[] = (body.data ?? [])
       .filter((model): model is { id: string; name?: string } => typeof model.id === 'string' && model.id.length > 0)
       .map((model) => ({ value: model.id, label: model.name || model.id }));
     return { success: true, models: models.length > 0 ? dedupeModels(models) : undefined };
@@ -412,7 +412,7 @@ async function testOpenAiModels(input: ApiProviderModelDiscoveryFlatInput): Prom
 
 async function testAnthropicModels(input: ApiProviderModelDiscoveryFlatInput): Promise<ApiProviderModelDiscoveryResponse> {
   try {
-    const models: HarnessModelOption[] = [];
+    const models: AgentModelOption[] = [];
     let afterId: string | null = null;
 
     for (let page = 0; page < 5; page += 1) {
@@ -460,14 +460,14 @@ function selectionRequestFields(selection: ResolvedModelSelection): {
 
 export class ProviderRegistry {
   #registry: IChatRegistry;
-  #harnesses = new Map<string, Harness>();
+  #agents = new Map<string, Agent>();
   #endpointResolver: ApiProviderEndpointResolver;
   #apiProviderStore: ApiProviderStore;
   #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
 
   constructor(args: {
     registry: IChatRegistry;
-    harnesses: Harness[];
+    agents: Agent[];
     endpointResolver: ApiProviderEndpointResolver;
     apiProviderStore: ApiProviderStore;
   }) {
@@ -475,19 +475,19 @@ export class ProviderRegistry {
     this.#endpointResolver = args.endpointResolver;
     this.#apiProviderStore = args.apiProviderStore;
 
-    for (const harness of args.harnesses) {
-      this.#harnesses.set(harness.id, harness);
+    for (const agent of args.agents) {
+      this.#agents.set(agent.id, agent);
     }
   }
 
-  hasHarness(harnessId: string): boolean {
-    return this.#harnesses.has(harnessId);
+  hasAgent(agentId: string): boolean {
+    return this.#agents.has(agentId);
   }
 
-  #harnessFor(harnessId: string): Harness {
-    const harness = this.#harnesses.get(harnessId);
-    if (!harness) throw new Error(`Unsupported harness: ${harnessId}`);
-    return harness;
+  #agentFor(agentId: string): Agent {
+    const agent = this.#agents.get(agentId);
+    if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
+    return agent;
   }
 
   #setTurnMetadata(chatId: string, opts: { clientRequestId?: string; turnId?: string }): void {
@@ -524,7 +524,7 @@ export class ProviderRegistry {
 
     const entry = requireChatEntry(chatId, rawEntry);
     const selection = this.#endpointResolver.resolveSelection({
-      harnessId: entry.provider,
+      agentId: entry.provider,
       model: entry.model,
       apiProviderId: entry.apiProviderId,
       modelEndpointId: entry.modelEndpointId,
@@ -547,11 +547,11 @@ export class ProviderRegistry {
       ...selectionRequestFields(selection),
     };
 
-    const harness = this.#harnessFor(entry.provider);
+    const agent = this.#agentFor(entry.provider);
     this.#setTurnMetadata(chatId, opts);
     let started: StartedProviderSession;
     try {
-      started = await harness.runtime.startSession(request);
+      started = await agent.runtime.startSession(request);
     } catch (error) {
       this.#turnMetadataByChatId.delete(chatId);
       throw error;
@@ -573,14 +573,14 @@ export class ProviderRegistry {
 
     const { provider, providerSessionId } = rawEntry;
     if (!providerSessionId) {
-      throw new Error(`Session missing harness session ID: ${chatId}`);
+      throw new Error(`Session missing agent session ID: ${chatId}`);
     }
 
     const entry = requireChatEntry(chatId, rawEntry);
     const effectiveModel = opts.model ?? entry.model;
 
     const previousSelection = this.#endpointResolver.resolveSelection({
-      harnessId: provider,
+      agentId: provider,
       model: entry.model,
       apiProviderId: rawEntry.apiProviderId,
       modelEndpointId: rawEntry.modelEndpointId,
@@ -589,7 +589,7 @@ export class ProviderRegistry {
     const nextApiProviderId = opts.apiProviderId !== undefined ? opts.apiProviderId : rawEntry.apiProviderId;
     const nextEndpointId = opts.modelEndpointId !== undefined ? opts.modelEndpointId : rawEntry.modelEndpointId;
     const selection = this.#endpointResolver.resolveSelection({
-      harnessId: provider,
+      agentId: provider,
       model: effectiveModel,
       apiProviderId: nextApiProviderId,
       modelEndpointId: nextEndpointId,
@@ -597,13 +597,13 @@ export class ProviderRegistry {
 
     assertSameApiProviderBoundary(previousSelection, selection);
 
-    const harness = this.#harnessFor(provider);
+    const agent = this.#agentFor(provider);
     const resolvedCommand = await resolveFileMentionsInCommand(command, entry.projectPath);
     this.#setTurnMetadata(chatId, opts);
     let startedTurn = false;
     try {
       startedTurn = true;
-      await harness.runtime.runTurn({
+      await agent.runtime.runTurn({
         chatId,
         providerSessionId,
         command: resolvedCommand,
@@ -630,22 +630,22 @@ export class ProviderRegistry {
     const entry = this.#registry.getChat(chatId);
     const providerSessionId = entry?.providerSessionId;
     if (!providerSessionId) return false;
-    const harness = this.#harnesses.get(entry.provider);
-    if (!harness) return false;
-    return harness.runtime.abort(providerSessionId);
+    const agent = this.#agents.get(entry.provider);
+    if (!agent) return false;
+    return agent.runtime.abort(providerSessionId);
   }
 
   isChatRunning(chatId: string): boolean {
     const entry = this.#registry.getChat(chatId);
     if (!entry) return false;
-    return this.isHarnessSessionRunning(entry.provider, entry.providerSessionId);
+    return this.isAgentSessionRunning(entry.provider, entry.providerSessionId);
   }
 
-  isHarnessSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean {
+  isAgentSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean {
     if (!providerSessionId) return false;
-    const harness = this.#harnesses.get(provider);
-    if (!harness) return false;
-    return harness.runtime.isRunning(providerSessionId);
+    const agent = this.#agents.get(provider);
+    if (!agent) return false;
+    return agent.runtime.isRunning(providerSessionId);
   }
 
   getRunningSessions(): Record<string, Array<{ id: string;[key: string]: unknown }>> {
@@ -660,16 +660,16 @@ export class ProviderRegistry {
         .filter((e): e is NonNullable<typeof e> => Boolean(e));
 
     const result: Record<string, Array<{ id: string;[key: string]: unknown }>> = {};
-    for (const [provider, harness] of this.#harnesses.entries()) {
-      result[provider] = mapToChatId(harness.runtime.getRunningSessions());
+    for (const [provider, agent] of this.#agents.entries()) {
+      result[provider] = mapToChatId(agent.runtime.getRunningSessions());
     }
     return result;
   }
 
   getRunningSessionCount(): number {
     let total = 0;
-    for (const harness of this.#harnesses.values()) {
-      total += harness.runtime.getRunningSessions().length;
+    for (const agent of this.#agents.values()) {
+      total += agent.runtime.getRunningSessions().length;
     }
     return total;
   }
@@ -683,9 +683,9 @@ export class ProviderRegistry {
       return;
     }
 
-    const harness = this.#harnesses.get(chat.provider);
-    if (harness?.runtime.resolvePermission) {
-      Promise.resolve(harness.runtime.resolvePermission(permissionRequestId, decision)).catch((err: Error) => {
+    const agent = this.#agents.get(chat.provider);
+    if (agent?.runtime.resolvePermission) {
+      Promise.resolve(agent.runtime.resolvePermission(permissionRequestId, decision)).catch((err: Error) => {
         console.warn(`providers: ${chat.provider} permission reply failed:`, err.message);
       });
       return;
@@ -699,16 +699,16 @@ export class ProviderRegistry {
     sourceChatId: string;
     targetChatId: string;
   }): Promise<StartedProviderSession | null> {
-    const harness = this.#harnesses.get(args.sourceSession.provider);
-    if (!harness?.forkSession) return null;
+    const agent = this.#agents.get(args.sourceSession.provider);
+    if (!agent?.forkSession) return null;
     const source = requireChatEntry(args.sourceChatId, args.sourceSession);
     const selection = this.#endpointResolver.resolveSelection({
-      harnessId: source.provider,
+      agentId: source.provider,
       model: source.model,
       apiProviderId: source.apiProviderId,
       modelEndpointId: source.modelEndpointId,
     });
-    return harness.forkSession({
+    return agent.forkSession({
       ...args,
       sourceSession: {
         ...source,
@@ -724,7 +724,7 @@ export class ProviderRegistry {
     const entry = this.#registry.getChat(chatId);
     const providerSessionId = entry?.providerSessionId;
     if (!providerSessionId || entry.provider !== 'claude') return;
-    const runtime = this.#harnesses.get('claude')?.runtime as any;
+    const runtime = this.#agents.get('claude')?.runtime as any;
     runtime?.setInternalPermissionMode?.(providerSessionId, mode);
   }
 
@@ -732,7 +732,7 @@ export class ProviderRegistry {
     const entry = this.#registry.getChat(chatId);
     const providerSessionId = entry?.providerSessionId;
     if (!providerSessionId || entry.provider !== 'claude') return;
-    const runtime = this.#harnesses.get('claude')?.runtime as any;
+    const runtime = this.#agents.get('claude')?.runtime as any;
     runtime?.setInternalThinkingMode?.(providerSessionId, mode);
   }
 
@@ -740,7 +740,7 @@ export class ProviderRegistry {
     const entry = this.#registry.getChat(chatId);
     const providerSessionId = entry?.providerSessionId;
     if (!providerSessionId || entry.provider !== 'claude') return;
-    const runtime = this.#harnesses.get('claude')?.runtime as any;
+    const runtime = this.#agents.get('claude')?.runtime as any;
     runtime?.setInternalClaudeThinkingMode?.(providerSessionId, mode);
   }
 
@@ -753,13 +753,13 @@ export class ProviderRegistry {
     const entry = this.#registry.getChat(chatId);
     if (!entry) return;
     const previous = this.#endpointResolver.resolveSelection({
-      harnessId: entry.provider,
+      agentId: entry.provider,
       model: entry.model,
       apiProviderId: entry.apiProviderId,
       modelEndpointId: entry.modelEndpointId,
     });
     const next = this.#endpointResolver.resolveSelection({
-      harnessId: entry.provider,
+      agentId: entry.provider,
       model,
       apiProviderId: metadata.apiProviderId !== undefined ? metadata.apiProviderId : entry.apiProviderId,
       modelEndpointId: metadata.modelEndpointId !== undefined ? metadata.modelEndpointId : entry.modelEndpointId,
@@ -769,12 +769,12 @@ export class ProviderRegistry {
 
   async runSingleQuery(prompt: string, options: { provider?: string;[key: string]: unknown } = {}): Promise<string> {
     const { provider = 'claude', ...rest } = options;
-    const harness = this.#harnesses.get(provider);
-    if (harness?.runSingleQuery) {
+    const agent = this.#agents.get(provider);
+    if (agent?.runSingleQuery) {
       const model = typeof rest.model === 'string' ? rest.model : '';
       if (model) {
         const selection = this.#endpointResolver.resolveSelection({
-          harnessId: provider,
+          agentId: provider,
           model,
           apiProviderId: typeof rest.apiProviderId === 'string' ? rest.apiProviderId : null,
           modelEndpointId: typeof rest.modelEndpointId === 'string' ? rest.modelEndpointId : null,
@@ -784,27 +784,27 @@ export class ProviderRegistry {
         if (selection.codexConfig) rest.codexConfig = selection.codexConfig;
         Object.assign(rest, selectionRequestFields(selection));
       }
-      return harness.runSingleQuery(prompt, rest);
+      return agent.runSingleQuery(prompt, rest);
     }
     throw new Error(`Single query unsupported for provider: ${provider}`);
   }
 
   async getPreview(session: ProviderChatEntry | null): Promise<unknown> {
     if (!session?.provider) return null;
-    const harness = this.#harnesses.get(session.provider);
-    if (!harness?.transcript.getPreview) return null;
-    return harness.transcript.getPreview(session);
+    const agent = this.#agents.get(session.provider);
+    if (!agent?.transcript.getPreview) return null;
+    return agent.transcript.getPreview(session);
   }
 
   async loadMessages(session: ProviderChatEntry | null, chatId?: string): Promise<unknown[]> {
     if (!session?.provider) return [];
-    const harness = this.#harnesses.get(session.provider);
-    if (!harness) return [];
-    return harness.transcript.loadMessages(session, { chatId });
+    const agent = this.#agents.get(session.provider);
+    if (!agent) return [];
+    return agent.transcript.loadMessages(session, { chatId });
   }
 
   async getModels(provider: string): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
-    const getModels = this.#harnesses.get(provider)?.capabilities.getModels;
+    const getModels = this.#agents.get(provider)?.capabilities.getModels;
     if (getModels) return getModels();
     return [];
   }
@@ -816,59 +816,59 @@ export class ProviderRegistry {
     modelEndpointId?: string | null;
   }): Promise<boolean> {
     return this.#endpointResolver.modelSupportsImages({
-      harnessId: input.provider as any,
+      agentId: input.provider as any,
       model: input.model,
       apiProviderId: input.apiProviderId,
       modelEndpointId: input.modelEndpointId,
     });
   }
 
-  async launchHarnessAuthLogin(harnessId: string): Promise<{
+  async launchAgentAuthLogin(agentId: string): Promise<{
     launched: boolean;
     alreadyRunning: boolean;
     deviceAuth?: { url: string; code: string };
   }> {
-    const harness = this.#harnesses.get(harnessId);
-    if (!harness) throw new Error(`Unsupported harness: ${harnessId}`);
-    if (!harness.capabilities.authLoginSupported || !harness.auth.launchLogin) {
-      throw new Error(`Auth login is not supported for harness: ${harnessId}`);
+    const agent = this.#agents.get(agentId);
+    if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
+    if (!agent.capabilities.authLoginSupported || !agent.auth.launchLogin) {
+      throw new Error(`Auth login is not supported for agent: ${agentId}`);
     }
-    return harness.auth.launchLogin();
+    return agent.auth.launchLogin();
   }
 
-  async getHarnessAuthStatus(harnessId: string): Promise<unknown | null> {
-    const harness = this.#harnesses.get(harnessId);
-    if (!harness) return null;
-    return harness.auth.getAuthStatus();
+  async getAgentAuthStatus(agentId: string): Promise<unknown | null> {
+    const agent = this.#agents.get(agentId);
+    if (!agent) return null;
+    return agent.auth.getAuthStatus();
   }
 
-  async getHarnessAuthStatusMap(): Promise<Record<string, unknown>> {
+  async getAgentAuthStatusMap(): Promise<Record<string, unknown>> {
     const authEntries = await Promise.all(
-      Array.from(this.#harnesses.values()).map(async (harness) => [harness.id, await harness.auth.getAuthStatus()] as const),
+      Array.from(this.#agents.values()).map(async (agent) => [agent.id, await agent.auth.getAuthStatus()] as const),
     );
     return Object.fromEntries(authEntries);
   }
 
-  async getHarnessReadinessMap(): Promise<Record<string, {
+  async getAgentReadinessMap(): Promise<Record<string, {
     ready: boolean;
     nativeReady: boolean;
     endpointReady: boolean;
     reason: string;
   }>> {
-    const auth = await this.getHarnessAuthStatusMap();
+    const auth = await this.getAgentAuthStatusMap();
     const result: Record<string, { ready: boolean; nativeReady: boolean; endpointReady: boolean; reason: string }> = {};
-    for (const [harnessId] of this.#harnesses.entries()) {
-      if (!isVisibleHarnessId(harnessId)) continue;
-      const endpointReady = this.#endpointResolver.getModelOptions(harnessId as any).length > 0;
-      const nativeReady = Boolean((auth[harnessId] as any)?.authenticated);
-      result[harnessId] = {
+    for (const [agentId] of this.#agents.entries()) {
+      if (!isVisibleAgentId(agentId)) continue;
+      const endpointReady = this.#endpointResolver.getModelOptions(agentId as any).length > 0;
+      const nativeReady = Boolean((auth[agentId] as any)?.authenticated);
+      result[agentId] = {
         ready: nativeReady || endpointReady,
         nativeReady,
         endpointReady,
         reason: endpointReady
           ? 'At least one compatible API provider endpoint is configured.'
           : nativeReady
-            ? 'Native harness authentication is available.'
+            ? 'Native agent authentication is available.'
             : 'No native authentication or compatible API provider endpoint is configured.',
       };
     }
@@ -876,40 +876,40 @@ export class ProviderRegistry {
   }
 
   startPurgeTimers(): void {
-    for (const harness of this.#harnesses.values()) {
-      harness.runtime.startPurgeTimer?.();
+    for (const agent of this.#agents.values()) {
+      agent.runtime.startPurgeTimer?.();
     }
   }
 
   shutdown(): void {
-    for (const harness of this.#harnesses.values()) {
-      harness.runtime.shutdown?.();
+    for (const agent of this.#agents.values()) {
+      agent.runtime.shutdown?.();
     }
   }
 
   onMessages(cb: (chatId: string, messages: unknown[], metadata?: TurnEventMetadata) => void): void {
-    for (const harness of this.#harnesses.values()) {
-      harness.runtime.onMessages((chatId, messages, eventMetadata) => {
+    for (const agent of this.#agents.values()) {
+      agent.runtime.onMessages((chatId, messages, eventMetadata) => {
         cb(chatId, messages, mergeTurnEventMetadata(this.#turnMetadataByChatId.get(chatId), eventMetadata));
       });
     }
   }
 
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void {
-    for (const harness of this.#harnesses.values()) {
-      harness.runtime.onProcessing(cb);
+    for (const agent of this.#agents.values()) {
+      agent.runtime.onProcessing(cb);
     }
   }
 
   onSessionCreated(cb: (chatId: string) => void): void {
-    for (const harness of this.#harnesses.values()) {
-      harness.runtime.onSessionCreated(cb);
+    for (const agent of this.#agents.values()) {
+      agent.runtime.onSessionCreated(cb);
     }
   }
 
   onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void {
-    for (const harness of this.#harnesses.values()) {
-      harness.runtime.onFinished((chatId, exitCode, eventMetadata) => {
+    for (const agent of this.#agents.values()) {
+      agent.runtime.onFinished((chatId, exitCode, eventMetadata) => {
         const metadata = mergeTurnEventMetadata(this.#turnMetadataByChatId.get(chatId), eventMetadata);
         cb(chatId, exitCode, metadata);
         this.#turnMetadataByChatId.delete(chatId);
@@ -918,8 +918,8 @@ export class ProviderRegistry {
   }
 
   onFailed(cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void): void {
-    for (const harness of this.#harnesses.values()) {
-      harness.runtime.onFailed((chatId, errorMessage) => {
+    for (const agent of this.#agents.values()) {
+      agent.runtime.onFailed((chatId, errorMessage) => {
         const metadata = this.#turnMetadataByChatId.get(chatId);
         cb(chatId, errorMessage, metadata);
         this.#turnMetadataByChatId.delete(chatId);
@@ -927,31 +927,31 @@ export class ProviderRegistry {
     }
   }
 
-  async getHarnessCatalog(): Promise<HarnessCatalog> {
+  async getAgentCatalog(): Promise<AgentCatalog> {
     const apiProviders = this.#apiProviderStore.redactedList();
-    const harnesses = (await Promise.all(Array.from(this.#harnesses.entries()).map(async ([id, harness]) => {
-      if (!isVisibleHarnessId(id)) return null;
+    const agents = (await Promise.all(Array.from(this.#agents.entries()).map(async ([id, agent]) => {
+      if (!isVisibleAgentId(id)) return null;
       const endpointModels = this.#endpointResolver.getModelOptions(id as any);
-      const nativeModels = await nativeModelsForHarness(id, harness);
-      const models = isEndpointOnlyHarnessId(id)
+      const nativeModels = await nativeModelsForAgent(id, agent);
+      const models = isEndpointOnlyAgentId(id)
         ? dedupeModels(endpointModels)
         : dedupeModels([...nativeModels, ...endpointModels]);
       return {
         id: id as any,
-        label: harness.label,
-        kind: 'harness',
-        supportsFork: harness.capabilities.supportsFork,
-        supportsImages: harness.capabilities.supportsImages,
-        acceptsApiProviderEndpoints: harness.capabilities.acceptsApiProviderEndpoints,
-        supportedProtocols: harness.capabilities.supportedProtocols,
-        authLoginSupported: harness.capabilities.authLoginSupported,
-        defaultModel: defaultModelForHarness(id, nativeModels, endpointModels),
+        label: agent.label,
+        kind: 'agent',
+        supportsFork: agent.capabilities.supportsFork,
+        supportsImages: agent.capabilities.supportsImages,
+        acceptsApiProviderEndpoints: agent.capabilities.acceptsApiProviderEndpoints,
+        supportedProtocols: agent.capabilities.supportedProtocols,
+        authLoginSupported: agent.capabilities.authLoginSupported,
+        defaultModel: defaultModelForAgent(id, nativeModels, endpointModels),
         models,
       };
-    }))).filter((entry): entry is HarnessCatalogEntry => Boolean(entry));
+    }))).filter((entry): entry is AgentCatalogEntry => Boolean(entry));
 
     return {
-      harnesses,
+      agents,
       apiProviders: apiProviders as any,
     };
   }

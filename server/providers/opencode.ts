@@ -242,8 +242,8 @@ function modelsFromProviders(providers: any[]): OpenCodeModelOption[] {
   for (const provider of providers) {
     const providerId = provider.id || provider.name;
     const providerName = provider.name || providerId;
-    const harnessModelsObj = provider.models || {};
-    for (const [modelKey, model] of Object.entries(harnessModelsObj)) {
+    const agentModelsObj = provider.models || {};
+    for (const [modelKey, model] of Object.entries(agentModelsObj)) {
       const m = model as any;
       const modelId = m.id || modelKey;
       models.push({

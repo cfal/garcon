@@ -76,7 +76,7 @@ describe('ApiProviderEndpointResolver', () => {
     });
 
     const selection = resolver.resolveSelection({
-      harnessId: 'direct-openai-compatible',
+      agentId: 'direct-openai-compatible',
       model: 'acme_openai:acme-code',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
@@ -91,7 +91,7 @@ describe('ApiProviderEndpointResolver', () => {
       envOverrides: undefined,
     });
     expect(resolver.modelSupportsImages({
-      harnessId: 'direct-openai-compatible',
+      agentId: 'direct-openai-compatible',
       model: 'acme_openai:acme-code',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
@@ -114,7 +114,7 @@ describe('ApiProviderEndpointResolver', () => {
     });
 
     const selection = resolver.resolveSelection({
-      harnessId: 'direct-anthropic-compatible',
+      agentId: 'direct-anthropic-compatible',
       model: 'acme_anthropic:acme-claude',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_anthropic',
@@ -134,7 +134,7 @@ describe('ApiProviderEndpointResolver', () => {
     const resolver = makeResolver();
 
     expect(resolver.resolveSelection({
-      harnessId: 'claude',
+      agentId: 'claude',
       model: 'acme_anthropic:acme-claude',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_anthropic',
@@ -145,7 +145,7 @@ describe('ApiProviderEndpointResolver', () => {
     });
 
     const codexSelection = resolver.resolveSelection({
-      harnessId: 'codex',
+      agentId: 'codex',
       model: 'acme_openai:acme-code',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
@@ -179,7 +179,7 @@ describe('ApiProviderEndpointResolver', () => {
     const resolver = makeResolver();
 
     expect(resolver.resolveSelection({
-      harnessId: 'claude',
+      agentId: 'claude',
       model: 'acme_anthropic_blank:llama3',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_anthropic_blank',
@@ -189,7 +189,7 @@ describe('ApiProviderEndpointResolver', () => {
     });
 
     const codexSelection = resolver.resolveSelection({
-      harnessId: 'codex',
+      agentId: 'codex',
       model: 'acme_openai_blank:llama3',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai_blank',
@@ -211,18 +211,18 @@ describe('ApiProviderEndpointResolver', () => {
     });
   });
 
-  it('rejects protocol-incompatible harness selections', () => {
+  it('rejects protocol-incompatible agent selections', () => {
     const resolver = makeResolver();
 
     expect(() => resolver.resolveSelection({
-      harnessId: 'claude',
+      agentId: 'claude',
       model: 'acme_openai:acme-code',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
     })).toThrow(ModelSelectionError);
 
     expect(() => resolver.resolveSelection({
-      harnessId: 'direct-anthropic-compatible',
+      agentId: 'direct-anthropic-compatible',
       model: 'acme_openai:acme-code',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',

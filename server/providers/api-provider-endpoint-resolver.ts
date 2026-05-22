@@ -1,15 +1,15 @@
-// Resolves API-provider endpoint metadata for harnesses. Answers which
-// model options are exposed to each harness and builds routing
+// Resolves API-provider endpoint metadata for agents. Answers which
+// model options are exposed to each agent and builds routing
 // metadata for compatible endpoint execution.
 
 import type {
-  HarnessId,
+  AgentId,
   ApiProtocol,
-  HarnessModelOption,
+  AgentModelOption,
 } from '../../common/providers.js';
 import {
   endpointModelOptionValue,
-  endpointSupportsHarness,
+  endpointSupportsAgent,
   rawModelFromEndpointOptionValue,
 } from '../../common/providers.js';
 import type {
@@ -46,11 +46,11 @@ export class ModelSelectionError extends Error {
 export class ApiProviderEndpointResolver {
   constructor(private readonly getApiProviders: () => StoredApiProvider[]) {}
 
-  getModelOptions(harnessId: HarnessId): HarnessModelOption[] {
-    const options: HarnessModelOption[] = [];
+  getModelOptions(agentId: AgentId): AgentModelOption[] {
+    const options: AgentModelOption[] = [];
     for (const apiProvider of this.getApiProviders()) {
       for (const endpoint of apiProvider.endpoints) {
-        if (!endpointSupportsHarness(harnessId, endpoint)) continue;
+        if (!endpointSupportsAgent(agentId, endpoint)) continue;
         for (const model of endpoint.models) {
           const rawModel = model.rawModel || model.value;
           options.push({
@@ -71,14 +71,14 @@ export class ApiProviderEndpointResolver {
   }
 
   resolveSelection(input: {
-    harnessId?: HarnessId;
+    agentId?: AgentId;
     model: string;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   }): ResolvedModelSelection {
-    const harnessId = input.harnessId;
-    if (!harnessId) {
-      throw new ModelSelectionError('harnessId is required for model selection', 'SELECTION_INCOMPLETE');
+    const agentId = input.agentId;
+    if (!agentId) {
+      throw new ModelSelectionError('agentId is required for model selection', 'SELECTION_INCOMPLETE');
     }
     if (!input.apiProviderId && !input.modelEndpointId) {
       return {
@@ -94,11 +94,11 @@ export class ApiProviderEndpointResolver {
     }
 
     const resolved = this.#requireEndpoint(input.apiProviderId, input.modelEndpointId);
-    this.#assertEndpointCompatible(harnessId, resolved.endpoint);
+    this.#assertEndpointCompatible(agentId, resolved.endpoint);
 
     const matchedModel = this.#resolveModel(resolved.apiProvider, resolved.endpoint, input.model);
-    const envOverrides = buildEnvOverrides(harnessId, resolved.endpoint);
-    const codexConfig = buildCodexProviderConfig(harnessId, resolved.apiProvider, resolved.endpoint);
+    const envOverrides = buildEnvOverrides(agentId, resolved.endpoint);
+    const codexConfig = buildCodexProviderConfig(agentId, resolved.apiProvider, resolved.endpoint);
     return {
       model: matchedModel.rawModel,
       apiProviderId: resolved.apiProvider.id,
@@ -111,15 +111,15 @@ export class ApiProviderEndpointResolver {
   }
 
   modelSupportsImages(input: {
-    harnessId?: HarnessId;
+    agentId?: AgentId;
     model: string;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   }): boolean {
-    const harnessId = input.harnessId;
-    if (!harnessId || !input.apiProviderId || !input.modelEndpointId) return false;
+    const agentId = input.agentId;
+    if (!agentId || !input.apiProviderId || !input.modelEndpointId) return false;
     const resolved = this.#requireEndpoint(input.apiProviderId, input.modelEndpointId);
-    this.#assertEndpointCompatible(harnessId, resolved.endpoint);
+    this.#assertEndpointCompatible(agentId, resolved.endpoint);
     const selectedRawModel = rawModelFromEndpointOptionValue(resolved.endpoint.id, input.model);
     const matched = resolved.endpoint.models.find((m) => {
       const rawModel = m.rawModel || m.value;
@@ -140,10 +140,10 @@ export class ApiProviderEndpointResolver {
     return { apiProvider, endpoint };
   }
 
-  #assertEndpointCompatible(harnessId: HarnessId, endpoint: StoredApiProviderEndpoint): void {
-    if (!endpointSupportsHarness(harnessId, endpoint)) {
+  #assertEndpointCompatible(agentId: AgentId, endpoint: StoredApiProviderEndpoint): void {
+    if (!endpointSupportsAgent(agentId, endpoint)) {
       throw new ModelSelectionError(
-        `${endpoint.protocol} endpoint cannot be used with ${harnessId}.`,
+        `${endpoint.protocol} endpoint cannot be used with ${agentId}.`,
         'ENDPOINT_NOT_EXPOSED',
       );
     }
@@ -169,10 +169,10 @@ export class ApiProviderEndpointResolver {
 }
 
 function buildEnvOverrides(
-  harnessId: HarnessId,
+  agentId: AgentId,
   endpoint: StoredApiProviderEndpoint,
 ): Record<string, string> | undefined {
-  if (harnessId === 'claude' && endpoint.protocol === 'anthropic-messages') {
+  if (agentId === 'claude' && endpoint.protocol === 'anthropic-messages') {
     return {
       ANTHROPIC_BASE_URL: endpoint.baseUrl,
       ...(endpoint.apiKey ? { ANTHROPIC_AUTH_TOKEN: endpoint.apiKey } : {}),
@@ -184,11 +184,11 @@ function buildEnvOverrides(
 }
 
 function buildCodexProviderConfig(
-  harnessId: HarnessId,
+  agentId: AgentId,
   apiProvider: StoredApiProvider,
   endpoint: StoredApiProviderEndpoint,
 ): CodexProviderConfig | undefined {
-  if (harnessId !== 'codex' || endpoint.protocol !== 'openai-compatible') {
+  if (agentId !== 'codex' || endpoint.protocol !== 'openai-compatible') {
     return undefined;
   }
   if (!endpoint.capabilities?.responses) {

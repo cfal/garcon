@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import ChatPaneTestHarness from './ChatPaneTestHarness.svelte';
+import ChatPaneTestHost from './ChatPaneTestHost.svelte';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(() => Promise.resolve({
@@ -26,7 +26,7 @@ vi.mock('$lib/api/chats.js', () => ({
 describe('ChatPane', () => {
 	it('shows chat history and a composer target when unfocused', async () => {
 		const onFocus = vi.fn();
-		render(ChatPaneTestHarness, { isFocused: false, onFocus });
+		render(ChatPaneTestHost, { isFocused: false, onFocus });
 
 		const composerTarget = screen.getByRole('button', {
 			name: 'Focus chat composer for Pane Test Chat',
@@ -43,7 +43,7 @@ describe('ChatPane', () => {
 	});
 
 	it('renders the full workspace for the focused pane', () => {
-		render(ChatPaneTestHarness, { isFocused: true });
+		render(ChatPaneTestHost, { isFocused: true });
 
 		expect(screen.getByTestId('focused-workspace')).toBeTruthy();
 		expect(screen.queryByText('Reply...')).toBeNull();

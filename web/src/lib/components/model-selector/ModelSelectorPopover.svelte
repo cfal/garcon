@@ -46,18 +46,18 @@
 
 	let isCompactLayout = $state(false);
 
-	const showHarness = $derived(mode.harness === 'select');
+	const showAgent = $derived(mode.agent === 'select');
 	const showSource = $derived(mode.source === 'select');
 	const surfaceIsSettings = $derived(mode.surface === 'settings');
 	const contentWidthClass = $derived.by(() => {
 		if (isCompactLayout) return 'w-[min(24rem,calc(100vw-1rem))]';
-		if (!showHarness && !showSource) return 'w-[min(22rem,calc(100vw-1rem))]';
-		if (showHarness && showSource) return 'w-[min(50rem,calc(100vw-1rem))]';
+		if (!showAgent && !showSource) return 'w-[min(22rem,calc(100vw-1rem))]';
+		if (showAgent && showSource) return 'w-[min(50rem,calc(100vw-1rem))]';
 		return 'w-[min(38rem,calc(100vw-1rem))]';
 	});
 	const contentHeightClass = $derived.by(() => {
 		if (isCompactLayout) return 'h-[min(32rem,calc(100vh-1rem))]';
-		return !showHarness && !showSource
+		return !showAgent && !showSource
 			? 'h-[18rem]'
 			: 'h-[26rem]';
 	});
@@ -67,7 +67,7 @@
 			: 'inline-flex h-9 min-w-0 max-w-[11rem] items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-[15rem]'
 	);
 	const showTriggerSecondaryLine = $derived(
-		surfaceIsSettings || mode.harness === 'select' || Boolean(selector.triggerSecondary)
+		surfaceIsSettings || mode.agent === 'select' || Boolean(selector.triggerSecondary)
 	);
 	const modelListId = $derived(`model-selector-model-list-${selector.instanceId}`);
 
@@ -130,7 +130,7 @@
 		{#if isCompactLayout}
 			<ModelSelectorCompactLayout
 				{selector}
-				{showHarness}
+				{showAgent}
 				{showSource}
 				{modelListId}
 				onCancel={() => selector.discardAndClose()}
@@ -139,7 +139,7 @@
 		{:else}
 			<ModelSelectorColumnsLayout
 				{selector}
-				{showHarness}
+				{showAgent}
 				{showSource}
 				{modelListId}
 			/>
