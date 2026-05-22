@@ -467,14 +467,28 @@ export class AcpHarnessRuntime extends AbsProvider implements HarnessRuntime {
     const permissionRequestId = `${this.#policy.harnessId}-${session.id}-${requestId}`;
     const toolCall = asObject(params.toolCall);
     const toolId = asString(toolCall.toolCallId ?? toolCall.callId ?? toolCall.id) ?? permissionRequestId;
-    const rawName = asString(toolCall.kind ?? toolCall.title ?? toolCall.name) ?? 'Permission';
-    const rawInput = toolCall.rawInput ?? toolCall.input ?? {};
-    const requestedTool = new UnknownToolUseMessage(
-      new Date().toISOString(),
-      toolId,
-      rawName,
-      normalizeToolInput(rawInput),
-    );
+    const context = this.#sessionUpdateContext(session);
+    const convertedRequestedTool = this.#converter.permissionToolUse?.(toolCall, context) ?? null;
+    const rawName = asString(toolCall.toolName ?? toolCall.tool_name ?? toolCall.kind ?? toolCall.title ?? toolCall.name) ?? 'Permission';
+    const rawInput = toolCall.rawInput ?? toolCall.raw_input ?? toolCall.input ?? toolCall.args;
+    const fallbackInput = normalizeToolInput(rawInput);
+    if (Object.keys(fallbackInput).length === 0) {
+      if (Array.isArray(toolCall.locations) && toolCall.locations.length > 0) {
+        fallbackInput.locations = toolCall.locations;
+      }
+      if (Array.isArray(toolCall.content) && toolCall.content.length > 0) {
+        fallbackInput.content = toolCall.content;
+      }
+      const title = asString(toolCall.title);
+      if (title) fallbackInput.title = title;
+    }
+    const requestedTool = convertedRequestedTool
+      ?? new UnknownToolUseMessage(
+        context.timestamp,
+        toolId,
+        rawName,
+        fallbackInput,
+      );
 
     session.pendingPermissionIds.add(permissionRequestId);
     this.#pendingPermissions.set(permissionRequestId, {

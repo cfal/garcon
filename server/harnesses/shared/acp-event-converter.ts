@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../../../common/chat-types.js';
+import type { ToolUseChatMessage } from '../../../common/chat-types.js';
 import type { AcpSessionUpdateNotification } from '../../acp/protocol.js';
 
 export interface AcpSessionUpdateContext {
@@ -13,6 +14,10 @@ export interface AcpEventConverter {
     notification: AcpSessionUpdateNotification,
     context: AcpSessionUpdateContext,
   ): ChatMessage[];
+  permissionToolUse?(
+    toolCall: Record<string, unknown>,
+    context: AcpSessionUpdateContext,
+  ): ToolUseChatMessage | null;
   endTurn?(sessionId: string, context: AcpSessionUpdateContext): ChatMessage[];
 }
 
