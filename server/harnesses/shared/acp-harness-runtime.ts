@@ -7,18 +7,18 @@ import {
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
-import { AbsProvider } from '../base.js';
-import type { HarnessRuntime } from '../harness-plugin.js';
-import { normalizeToolInput } from '../normalize-util.js';
-import type { PermissionMode, ProviderEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../types.js';
-import { AcpCapabilityCache } from './capability-cache.js';
-import { AcpClient } from './client.js';
-import { isRecoverableLoadFailure } from './errors.js';
-import type { AcpSessionRequestPermission, AcpSessionUpdateNotification } from './protocol.js';
-import type { AcpAdvertisedCapabilities, ReconnectStrategy } from './reconnect-policy.js';
-import { reconnectOrder } from './reconnect-policy.js';
-import { AcpTransport } from './transport.js';
-import type { AcpEventConverter, AcpSessionUpdateContext } from './event-converter.js';
+import { AbsProvider } from '../../providers/base.js';
+import { normalizeToolInput } from '../../providers/normalize-util.js';
+import type { PermissionMode, ProviderEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../../providers/types.js';
+import type { HarnessRuntime } from '../types.js';
+import { AcpCapabilityCache } from '../../acp/capability-cache.js';
+import { AcpClient } from '../../acp/client.js';
+import { isRecoverableLoadFailure } from '../../acp/errors.js';
+import type { AcpSessionRequestPermission, AcpSessionUpdateNotification } from '../../acp/protocol.js';
+import type { AcpAdvertisedCapabilities, ReconnectStrategy } from '../../acp/reconnect-policy.js';
+import { reconnectOrder } from '../../acp/reconnect-policy.js';
+import { AcpTransport } from '../../acp/transport.js';
+import type { AcpEventConverter, AcpSessionUpdateContext } from './acp-event-converter.js';
 
 type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
@@ -28,7 +28,7 @@ interface PendingPermissionRequest {
   sessionId: string;
 }
 
-interface AcpRuntimeSession {
+interface AcpHarnessRuntimeSession {
   id: string;
   remoteSessionId: string;
   chatId: string;
@@ -46,7 +46,7 @@ interface AcpRuntimeSession {
   providerRequestId?: string;
 }
 
-export interface AcpRuntimePolicy {
+export interface AcpHarnessPolicy {
   harnessId: string;
   command: string;
   args?: string[];
@@ -61,7 +61,7 @@ export interface AcpRuntimePolicy {
   resolveNativePath?: (sessionId: string) => string | null;
 }
 
-export interface AcpRuntimeOptions {
+export interface AcpHarnessRuntimeOptions {
   converter: AcpEventConverter;
   capabilityCache?: AcpCapabilityCache;
 }
@@ -102,14 +102,14 @@ function providerRequestIdFromUpdate(notification: AcpSessionUpdateNotification)
   return asString(update.requestId ?? update.request_id);
 }
 
-export class AcpRuntime extends AbsProvider implements HarnessRuntime {
-  #policy: AcpRuntimePolicy;
+export class AcpHarnessRuntime extends AbsProvider implements HarnessRuntime {
+  #policy: AcpHarnessPolicy;
   #converter: AcpEventConverter;
   #capabilityCache: AcpCapabilityCache;
-  #sessions = new Map<string, AcpRuntimeSession>();
+  #sessions = new Map<string, AcpHarnessRuntimeSession>();
   #pendingPermissions = new Map<string, PendingPermissionRequest>();
 
-  constructor(policy: AcpRuntimePolicy, options: AcpRuntimeOptions) {
+  constructor(policy: AcpHarnessPolicy, options: AcpHarnessRuntimeOptions) {
     super();
     this.#policy = policy;
     this.#converter = options.converter;
@@ -128,7 +128,7 @@ export class AcpRuntime extends AbsProvider implements HarnessRuntime {
     const sessionId = created.sessionId;
     const now = new Date().toISOString();
     const capabilities = client.getAdvertisedCapabilities();
-    const session: AcpRuntimeSession = {
+    const session: AcpHarnessRuntimeSession = {
       id: sessionId,
       remoteSessionId: sessionId,
       chatId: request.chatId,
@@ -249,14 +249,14 @@ export class AcpRuntime extends AbsProvider implements HarnessRuntime {
     return client;
   }
 
-  async #sessionForTurn(request: ResumeTurnRequest): Promise<AcpRuntimeSession> {
+  async #sessionForTurn(request: ResumeTurnRequest): Promise<AcpHarnessRuntimeSession> {
     const existing = this.#sessions.get(request.providerSessionId);
     if (existing) return existing;
 
     const client = await this.#connectClient(request);
     const capabilities = client.getAdvertisedCapabilities();
     const order = reconnectOrder(capabilities);
-    const baseSession: AcpRuntimeSession = {
+    const baseSession: AcpHarnessRuntimeSession = {
       id: request.providerSessionId,
       remoteSessionId: request.providerSessionId,
       chatId: request.chatId,
@@ -285,7 +285,7 @@ export class AcpRuntime extends AbsProvider implements HarnessRuntime {
   }
 
   async #reconnectSession(
-    session: AcpRuntimeSession,
+    session: AcpHarnessRuntimeSession,
     request: ResumeTurnRequest,
     order: ReconnectStrategy[],
   ): Promise<boolean> {
@@ -332,7 +332,7 @@ export class AcpRuntime extends AbsProvider implements HarnessRuntime {
     return false;
   }
 
-  async #runPrompt(session: AcpRuntimeSession, request: StartSessionRequest | ResumeTurnRequest): Promise<void> {
+  async #runPrompt(session: AcpHarnessRuntimeSession, request: StartSessionRequest | ResumeTurnRequest): Promise<void> {
     session.running = true;
     session.state = 'running';
     session.aborted = false;
@@ -396,13 +396,13 @@ export class AcpRuntime extends AbsProvider implements HarnessRuntime {
     }
   }
 
-  #emitFlushedMessages(session: AcpRuntimeSession): void {
+  #emitFlushedMessages(session: AcpHarnessRuntimeSession): void {
     const context = this.#sessionUpdateContext(session);
     const messages = this.#converter.endTurn?.(session.id, context) ?? [];
     this.emitMessages(session.chatId, messages);
   }
 
-  #bindClientEvents(session: AcpRuntimeSession): void {
+  #bindClientEvents(session: AcpHarnessRuntimeSession): void {
     session.client.onRpcMessage((message) => {
       if (message.method === 'session/update') {
         this.#onSessionUpdate(message.params);
@@ -487,7 +487,7 @@ export class AcpRuntime extends AbsProvider implements HarnessRuntime {
     ]);
   }
 
-  #cancelPermissionsForSession(session: AcpRuntimeSession, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
+  #cancelPermissionsForSession(session: AcpHarnessRuntimeSession, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
     for (const permissionRequestId of session.pendingPermissionIds) {
       if (!this.#pendingPermissions.has(permissionRequestId)) continue;
       this.#pendingPermissions.delete(permissionRequestId);
@@ -498,7 +498,7 @@ export class AcpRuntime extends AbsProvider implements HarnessRuntime {
     session.pendingPermissionIds.clear();
   }
 
-  async #waitForUpdateQuietPeriod(session: AcpRuntimeSession): Promise<void> {
+  async #waitForUpdateQuietPeriod(session: AcpHarnessRuntimeSession): Promise<void> {
     const quietMs = 125;
     const timeoutMs = 1_500;
     const startedAt = Date.now();
@@ -542,14 +542,14 @@ export class AcpRuntime extends AbsProvider implements HarnessRuntime {
     return createArtificialNativePath(this.#policy.harnessId, sessionId);
   }
 
-  #sessionByRemoteId(remoteSessionId: string): AcpRuntimeSession | null {
+  #sessionByRemoteId(remoteSessionId: string): AcpHarnessRuntimeSession | null {
     for (const session of this.#sessions.values()) {
       if (session.remoteSessionId === remoteSessionId) return session;
     }
     return null;
   }
 
-  #sessionUpdateContext(session: AcpRuntimeSession): AcpSessionUpdateContext {
+  #sessionUpdateContext(session: AcpHarnessRuntimeSession): AcpSessionUpdateContext {
     return {
       chatId: session.chatId,
       sessionId: session.id,

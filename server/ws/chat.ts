@@ -10,6 +10,7 @@ import {
   ClientRequestErrorMessage,
 } from '../../common/ws-events.ts';
 import type { ClientRequestErrorCode } from '../../common/ws-events.ts';
+import type { PendingUserInput } from '../../common/pending-user-input.js';
 import {
   parseClientWsMessage,
   AgentRunRequest,
@@ -332,7 +333,7 @@ export class ChatHandler {
       const result = this.#historyCache.getPaginatedMessages(chatId, limit, offset);
 
       writer.send(new ChatLogResponseMessage(
-        clientRequestId, chatId, result.messages, this.#pendingInputs.listForChat(chatId), result.total,
+        clientRequestId, chatId, result.messages as ChatMessage[], this.#pendingInputs.listForChat(chatId) as PendingUserInput[], result.total,
         result.hasMore, result.offset, result.limit,
       ));
     } catch (error: unknown) {

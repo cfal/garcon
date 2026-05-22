@@ -59,16 +59,7 @@ mock.module('../loaders/direct-compatible-history-loader.js', () => ({
 }));
 
 import { ProviderRegistry } from '../index.js';
-import {
-  createAmpAdapter,
-  createClaudeAdapter,
-  createCodexAdapter,
-  createCursorAdapter,
-  createFactoryAdapter,
-  createOpenCodeAdapter,
-  createPiAdapter,
-} from '../provider-adapters.js';
-import { adapterToHarnessPlugin, createHarnessCapabilities } from '../harness-plugin-bridge.js';
+import { createHarnessCapabilities } from '../../harnesses/capabilities.js';
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -124,8 +115,32 @@ function makeApiProviderStore(apiProviders = []) {
   };
 }
 
-function pluginFromAdapter(adapter, capabilities) {
-  return adapterToHarnessPlugin(adapter, {
+function baseRuntime(overrides = {}) {
+  return {
+    startSession: mock(() => Promise.resolve({ providerSessionId: 'session', nativePath: null })),
+    runTurn: mock(() => Promise.resolve()),
+    abort: mock(() => false),
+    isRunning: mock(() => false),
+    getRunningSessions: mock(() => []),
+    startPurgeTimer: mock(() => {}),
+    onMessages: mock(() => {}),
+    onProcessing: mock(() => {}),
+    onSessionCreated: mock(() => {}),
+    onFinished: mock(() => {}),
+    onFailed: mock(() => {}),
+    ...overrides,
+  };
+}
+
+function harnessFromRuntime(id, label, runtime, capabilities, runSingleQuery) {
+  return {
+    id,
+    label,
+    runtime,
+    transcript: {
+      async loadMessages() { return []; },
+      async getPreview() { return null; },
+    },
     auth: {
       getAuthStatus: async () => ({
         authenticated: false,
@@ -136,9 +151,10 @@ function pluginFromAdapter(adapter, capabilities) {
     },
     capabilities: createHarnessCapabilities({
       ...capabilities,
-      ...(adapter.getModels ? { getModels: () => adapter.getModels() } : {}),
+      ...(runtime.getModels ? { getModels: () => runtime.getModels() } : {}),
     }),
-  });
+    ...(runSingleQuery ? { runSingleQuery } : {}),
+  };
 }
 
 function makeRegistry(args = {}) {
@@ -253,55 +269,71 @@ function makeRegistry(args = {}) {
     registry: new ProviderRegistry({
       registry: mockRegistry,
       harnesses: [
-        pluginFromAdapter(createClaudeAdapter(claude), {
+        harnessFromRuntime('claude', 'Claude', baseRuntime(), {
           supportsFork: true,
           supportsImages: true,
           acceptsApiProviderEndpoints: true,
           supportedProtocols: ['anthropic-messages'],
           authLoginSupported: true,
-        }),
-        pluginFromAdapter(createCodexAdapter(codex), {
+        }, claudeQuery),
+        harnessFromRuntime('codex', 'Codex', baseRuntime({
+          startSession: codex.startSession,
+          runTurn: codex.runTurn,
+          abort: codex.abort,
+          isRunning: codex.isRunning,
+          getRunningSessions: codex.getRunningSessions,
+        }), {
           supportsFork: true,
           supportsImages: true,
           acceptsApiProviderEndpoints: true,
           supportedProtocols: ['openai-compatible'],
           authLoginSupported: true,
-        }),
-        pluginFromAdapter(createOpenCodeAdapter(opencode), {
+        }, codexQuery),
+        harnessFromRuntime('opencode', 'OpenCode', baseRuntime({
+          async startSession(request) {
+            const providerSessionId = await opencode.startSession(request);
+            return { providerSessionId, nativePath: `opencode:${providerSessionId}` };
+          },
+          runTurn: opencode.runTurn,
+          abort: opencode.abort,
+          isRunning: opencode.isRunning,
+          getRunningSessions: opencode.getRunningSessions,
+          getModels: opencode.getModels,
+        }), {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
-        }),
-        pluginFromAdapter(createAmpAdapter(amp), {
+        }, opencode.runSingleQuery),
+        harnessFromRuntime('amp', 'Amp', amp, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
-        }),
-        pluginFromAdapter(createCursorAdapter(cursor), {
+        }, ampQuery),
+        harnessFromRuntime('cursor', 'Cursor', cursor, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
-        }),
-        pluginFromAdapter(createFactoryAdapter(factory), {
+        }, cursorQuery),
+        harnessFromRuntime('factory', 'Factory', factory, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
-        }),
-        pluginFromAdapter(createPiAdapter(pi), {
+        }, factoryQuery),
+        harnessFromRuntime('pi', 'Pi', pi, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
-        }),
+        }, piQuery),
         ...(args.harnesses ?? []),
       ],
       endpointResolver: args.endpointResolver ?? makeEndpointResolver(),
@@ -328,7 +360,7 @@ describe('ProviderRegistry.runSingleQuery', () => {
     piQuery.mockClear();
   });
 
-  it('routes one-shot prompts to native harness adapters', async () => {
+  it('routes one-shot prompts to native harnesses', async () => {
     const { registry, opencode } = makeRegistry();
 
     expect(await registry.runSingleQuery('prompt', {})).toBe('claude-response');
@@ -426,63 +458,27 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
       }),
       apiProviderStore: makeApiProviderStore([apiProvider]),
       harnesses: [
-        pluginFromAdapter({
-          id: 'direct-openai-compatible',
-          label: 'Direct (Chat Completions)',
-          startSession: mock(),
-          runTurn: mock(),
-          abort: mock(),
-          isRunning: mock(() => false),
-          getRunningSessions: mock(() => []),
+        harnessFromRuntime('direct-openai-compatible', 'Direct (Chat Completions)', baseRuntime({
           getModels: mock(() => [{ value: 'raw-openai', label: 'Raw OpenAI' }]),
-          onMessages: mock(),
-          onProcessing: mock(),
-          onSessionCreated: mock(),
-          onFinished: mock(),
-          onFailed: mock(),
-        }, {
+        }), {
           supportsFork: false,
           supportsImages: true,
           acceptsApiProviderEndpoints: true,
           supportedProtocols: ['openai-compatible'],
           authLoginSupported: false,
         }),
-        pluginFromAdapter({
-          id: 'direct-openai-responses-compatible',
-          label: 'Direct (Responses)',
-          startSession: mock(),
-          runTurn: mock(),
-          abort: mock(),
-          isRunning: mock(() => false),
-          getRunningSessions: mock(() => []),
+        harnessFromRuntime('direct-openai-responses-compatible', 'Direct (Responses)', baseRuntime({
           getModels: mock(() => [{ value: 'raw-openai-response', label: 'Raw OpenAI Response' }]),
-          onMessages: mock(),
-          onProcessing: mock(),
-          onSessionCreated: mock(),
-          onFinished: mock(),
-          onFailed: mock(),
-        }, {
+        }), {
           supportsFork: false,
           supportsImages: true,
           acceptsApiProviderEndpoints: true,
           supportedProtocols: ['openai-compatible'],
           authLoginSupported: false,
         }),
-        pluginFromAdapter({
-          id: 'direct-anthropic-compatible',
-          label: 'Direct (Anthropic)',
-          startSession: mock(),
-          runTurn: mock(),
-          abort: mock(),
-          isRunning: mock(() => false),
-          getRunningSessions: mock(() => []),
+        harnessFromRuntime('direct-anthropic-compatible', 'Direct (Anthropic)', baseRuntime({
           getModels: mock(() => [{ value: 'raw-anthropic', label: 'Raw Anthropic' }]),
-          onMessages: mock(),
-          onProcessing: mock(),
-          onSessionCreated: mock(),
-          onFinished: mock(),
-          onFailed: mock(),
-        }, {
+        }), {
           supportsFork: false,
           supportsImages: true,
           acceptsApiProviderEndpoints: true,

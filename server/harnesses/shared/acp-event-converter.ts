@@ -1,5 +1,5 @@
-import type { ChatMessage } from '../../common/chat-types.js';
-import type { AcpSessionUpdateNotification } from './protocol.js';
+import type { ChatMessage } from '../../../common/chat-types.js';
+import type { AcpSessionUpdateNotification } from '../../acp/protocol.js';
 
 export interface AcpSessionUpdateContext {
   chatId: string;

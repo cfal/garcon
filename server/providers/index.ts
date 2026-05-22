@@ -21,7 +21,7 @@ import { requireChatExecutionConfig } from './types.js';
 import type { ApiProviderStore, CreateApiProviderInput, UpdateApiProviderInput } from './api-provider-store.js';
 import type { ApiProviderEndpointResolver, ResolvedModelSelection } from './api-provider-endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from './api-provider-endpoint-resolver.js';
-import type { HarnessPlugin } from './harness-plugin.js';
+import type { Harness } from '../harnesses/types.js';
 import {
   API_PROVIDER_TEMPLATE_IDS,
   isApiProviderTemplateId,
@@ -87,7 +87,7 @@ function dedupeModels(models: HarnessModelOption[]): HarnessModelOption[] {
   return result;
 }
 
-async function nativeModelsForHarness(id: string, harness: HarnessPlugin): Promise<HarnessModelOption[]> {
+async function nativeModelsForHarness(id: string, harness: Harness): Promise<HarnessModelOption[]> {
   let fetched: HarnessModelOption[] = [];
   const getModels = harness.capabilities.getModels;
   if (!isEndpointOnlyHarnessId(id) && getModels) {
@@ -460,14 +460,14 @@ function selectionRequestFields(selection: ResolvedModelSelection): {
 
 export class ProviderRegistry {
   #registry: IChatRegistry;
-  #harnesses = new Map<string, HarnessPlugin>();
+  #harnesses = new Map<string, Harness>();
   #endpointResolver: ApiProviderEndpointResolver;
   #apiProviderStore: ApiProviderStore;
   #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
 
   constructor(args: {
     registry: IChatRegistry;
-    harnesses: HarnessPlugin[];
+    harnesses: Harness[];
     endpointResolver: ApiProviderEndpointResolver;
     apiProviderStore: ApiProviderStore;
   }) {
@@ -484,7 +484,7 @@ export class ProviderRegistry {
     return this.#harnesses.has(harnessId);
   }
 
-  #harnessFor(harnessId: string): HarnessPlugin {
+  #harnessFor(harnessId: string): Harness {
     const harness = this.#harnesses.get(harnessId);
     if (!harness) throw new Error(`Unsupported harness: ${harnessId}`);
     return harness;

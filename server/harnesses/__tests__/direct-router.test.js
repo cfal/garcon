@@ -3,9 +3,9 @@ import {
   buildDirectAnthropicConfig,
   buildDirectOpenAiConfig,
   buildDirectOpenAiResponsesConfig,
-  createDirectOpenAiCompatibleRouterAdapter,
-  createDirectOpenAiResponsesCompatibleRouterAdapter,
-} from '../provider-adapters.ts';
+  createDirectOpenAiChatRuntime,
+  createDirectOpenAiResponsesRuntime,
+} from '../direct/router.ts';
 
 function endpoint(overrides = {}) {
   return {
@@ -73,7 +73,7 @@ describe('buildDirectOpenAiResponsesConfig', () => {
   });
 });
 
-describe('Direct OpenAI router adapters', () => {
+describe('Direct OpenAI router runtimes', () => {
   it('routes models by Chat Completions and Responses capabilities', async () => {
     const apiProviderStore = {
       list: () => [{
@@ -96,8 +96,8 @@ describe('Direct OpenAI router adapters', () => {
       }],
     };
 
-    const chatAdapter = createDirectOpenAiCompatibleRouterAdapter(apiProviderStore);
-    const responsesAdapter = createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore);
+    const chatAdapter = createDirectOpenAiChatRuntime(apiProviderStore);
+    const responsesAdapter = createDirectOpenAiResponsesRuntime(apiProviderStore);
 
     expect(await chatAdapter.getModels?.()).toEqual([
       { value: 'chat-model', label: 'Acme: Chat Model', supportsImages: false },

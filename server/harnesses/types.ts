@@ -5,7 +5,7 @@ import type {
   ResumeTurnRequest,
   StartSessionRequest,
   StartedProviderSession,
-} from './types.js';
+} from '../providers/types.js';
 
 export type SupportedHarnessProtocol = 'anthropic-messages' | 'openai-compatible';
 
@@ -18,7 +18,7 @@ export interface HarnessRuntime {
   resolvePermission?(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> | void;
   shutdown?(): void;
   startPurgeTimer?(): ReturnType<typeof setInterval>;
-  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: ProviderEventMetadata) => void): void;
+  onMessages(cb: (chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
   onFinished(cb: (chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void): void;
@@ -48,19 +48,21 @@ export interface HarnessCapabilityDriver {
   authLoginSupported: boolean;
 }
 
-export interface HarnessPlugin {
+export interface ForkHarnessSessionArgs {
+  sourceSession: ProviderChatEntry;
+  sourceChatId: string;
+  targetChatId: string;
+  envOverrides?: StartSessionRequest['envOverrides'];
+  codexConfig?: StartSessionRequest['codexConfig'];
+}
+
+export interface Harness {
   id: string;
   label: string;
   runtime: HarnessRuntime;
   transcript: HarnessTranscriptSource;
   auth: HarnessAuthDriver;
   capabilities: HarnessCapabilityDriver;
-  forkSession?(args: {
-    sourceSession: ProviderChatEntry;
-    sourceChatId: string;
-    targetChatId: string;
-    envOverrides?: StartSessionRequest['envOverrides'];
-    codexConfig?: StartSessionRequest['codexConfig'];
-  }): Promise<StartedProviderSession | null>;
+  forkSession?(args: ForkHarnessSessionArgs): Promise<StartedProviderSession | null>;
   runSingleQuery?(prompt: string, options?: Record<string, unknown>): Promise<string>;
 }

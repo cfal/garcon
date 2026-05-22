@@ -1,6 +1,6 @@
-import { getCursorBinary } from '../../../config.js';
-import type { AcpRuntimePolicy } from '../../acp/runtime.js';
-import type { PermissionMode, ResumeTurnRequest, StartSessionRequest } from '../../types.js';
+import { getCursorBinary } from '../../config.js';
+import type { PermissionMode, ResumeTurnRequest, StartSessionRequest } from '../../providers/types.js';
+import type { AcpHarnessPolicy } from '../shared/acp-harness-runtime.js';
 
 function mappedMode(permissionMode: PermissionMode): string {
   return permissionMode === 'plan' ? 'plan' : 'agent';
@@ -23,7 +23,7 @@ function buildEnv(request: StartSessionRequest | ResumeTurnRequest): Record<stri
   return { ...process.env, ...request.envOverrides };
 }
 
-export function createCursorAcpPolicy(): AcpRuntimePolicy {
+export function createCursorAcpPolicy(): AcpHarnessPolicy {
   return {
     harnessId: 'cursor',
     command: getCursorBinary(),

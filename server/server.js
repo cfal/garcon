@@ -37,32 +37,21 @@ import { ClaudeProvider } from './providers/claude-cli.js';
 import { CodexAppServerProvider } from './providers/codex-app-server/provider.js';
 import { OpenCodeProvider } from './providers/opencode.js';
 import { AmpProvider } from './providers/amp-cli.js';
-import { CursorRequestIdentityStore } from './providers/cursor-request-identities.js';
 import { FactoryProvider } from './providers/factory-cli.js';
 import { PiProvider } from './providers/pi-cli.js';
 import { ProviderRegistry } from './providers/index.js';
-import { getClaudeAuthStatus } from './providers/claude-auth.js';
-import { getCodexAuthStatus } from './providers/codex-auth.js';
-import { getOpenCodeAuthStatus } from './providers/opencode-auth.js';
-import { getAmpAuthStatus } from './providers/amp-auth.js';
-import { getFactoryAuthStatus } from './providers/factory-auth.js';
-import { getPiAuthStatus } from './providers/pi-auth.js';
 import { ApiProviderStore } from './providers/api-provider-store.js';
 import { ApiProviderEndpointResolver } from './providers/api-provider-endpoint-resolver.js';
-import {
-  createClaudeAdapter,
-  createCodexAdapter,
-  createOpenCodeAdapter,
-  createAmpAdapter,
-  createFactoryAdapter,
-  createPiAdapter,
-  createDirectOpenAiCompatibleRouterAdapter,
-  createDirectOpenAiResponsesCompatibleRouterAdapter,
-  createDirectAnthropicCompatibleRouterAdapter,
-} from './providers/provider-adapters.js';
-import { adapterToHarnessPlugin, createHarnessCapabilities } from './providers/harness-plugin-bridge.js';
-import { launchProviderAuthLogin } from './providers/auth-login.js';
-import { createCursorHarnessPlugin } from './providers/harnesses/cursor/cursor-harness.js';
+import { createAmpHarness } from './harnesses/amp/index.js';
+import { createClaudeHarness } from './harnesses/claude/index.js';
+import { createCodexHarness } from './harnesses/codex/index.js';
+import { createCursorHarness } from './harnesses/cursor/index.js';
+import { createDirectAnthropicHarness } from './harnesses/direct/anthropic.js';
+import { createDirectOpenAiChatHarness } from './harnesses/direct/openai-chat.js';
+import { createDirectOpenAiResponsesHarness } from './harnesses/direct/openai-responses.js';
+import { createFactoryHarness } from './harnesses/factory/index.js';
+import { createOpenCodeHarness } from './harnesses/opencode/index.js';
+import { createPiHarness } from './harnesses/pi/index.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
@@ -117,7 +106,6 @@ export async function startServer() {
 	    const claudeProvider = new ClaudeProvider();
 	    const opencodeProvider = new OpenCodeProvider();
 	    const ampProvider = new AmpProvider();
-	    const cursorRequestIdentities = new CursorRequestIdentityStore(workspaceDir);
 	    const factoryProvider = new FactoryProvider();
 	    const piProvider = new PiProvider();
 
@@ -127,125 +115,18 @@ export async function startServer() {
 
     const endpointResolver = new ApiProviderEndpointResolver(() => apiProviderStore.list());
 
-    // Build harness adapters from concrete harness instances.
-    const claudeAdapter = createClaudeAdapter(claudeProvider);
-    const codexAdapter = createCodexAdapter(codexProvider);
-    const opencodeAdapter = createOpenCodeAdapter(opencodeProvider);
-    const ampAdapter = createAmpAdapter(ampProvider);
-	    const factoryAdapter = createFactoryAdapter(factoryProvider);
-	    const piAdapter = createPiAdapter(piProvider);
-	    const directOpenAiResponsesAdapter = createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore);
-	    const directOpenAiAdapter = createDirectOpenAiCompatibleRouterAdapter(apiProviderStore);
-	    const directAnthropicAdapter = createDirectAnthropicCompatibleRouterAdapter(apiProviderStore);
-
-	    const noAuthStatus = {
-	      authenticated: false,
-	      canReauth: false,
-	      label: '',
-	      source: 'none',
-	    };
-	    const withAdapterModels = (adapter, input) => createHarnessCapabilities({
-	      ...input,
-	      ...(adapter.getModels ? { getModels: () => adapter.getModels() } : {}),
-	    });
+    // Build first-class harnesses from concrete execution providers.
 	    const harnesses = [
-	      adapterToHarnessPlugin(claudeAdapter, {
-	        auth: {
-	          getAuthStatus: () => getClaudeAuthStatus(),
-	          launchLogin: () => launchProviderAuthLogin('claude'),
-	        },
-	        capabilities: withAdapterModels(claudeAdapter, {
-	          supportsFork: true,
-	          supportsImages: true,
-	          acceptsApiProviderEndpoints: true,
-	          supportedProtocols: ['anthropic-messages'],
-	          authLoginSupported: true,
-	        }),
-	      }),
-	      adapterToHarnessPlugin(codexAdapter, {
-	        auth: {
-	          getAuthStatus: () => getCodexAuthStatus(),
-	          launchLogin: () => launchProviderAuthLogin('codex'),
-	        },
-	        capabilities: withAdapterModels(codexAdapter, {
-	          supportsFork: true,
-	          supportsImages: true,
-	          acceptsApiProviderEndpoints: true,
-	          supportedProtocols: ['openai-compatible'],
-	          authLoginSupported: true,
-	        }),
-	      }),
-	      adapterToHarnessPlugin(directOpenAiResponsesAdapter, {
-	        auth: { getAuthStatus: async () => noAuthStatus },
-	        capabilities: withAdapterModels(directOpenAiResponsesAdapter, {
-	          supportsFork: false,
-	          supportsImages: true,
-	          acceptsApiProviderEndpoints: true,
-	          supportedProtocols: ['openai-compatible'],
-	          authLoginSupported: false,
-	        }),
-	      }),
-	      adapterToHarnessPlugin(directOpenAiAdapter, {
-	        auth: { getAuthStatus: async () => noAuthStatus },
-	        capabilities: withAdapterModels(directOpenAiAdapter, {
-	          supportsFork: false,
-	          supportsImages: true,
-	          acceptsApiProviderEndpoints: true,
-	          supportedProtocols: ['openai-compatible'],
-	          authLoginSupported: false,
-	        }),
-	      }),
-	      adapterToHarnessPlugin(directAnthropicAdapter, {
-	        auth: { getAuthStatus: async () => noAuthStatus },
-	        capabilities: withAdapterModels(directAnthropicAdapter, {
-	          supportsFork: false,
-	          supportsImages: true,
-	          acceptsApiProviderEndpoints: true,
-	          supportedProtocols: ['anthropic-messages'],
-	          authLoginSupported: false,
-	        }),
-	      }),
-	      adapterToHarnessPlugin(opencodeAdapter, {
-	        auth: { getAuthStatus: () => getOpenCodeAuthStatus(opencodeProvider) },
-	        capabilities: withAdapterModels(opencodeAdapter, {
-	          supportsFork: false,
-	          supportsImages: false,
-	          acceptsApiProviderEndpoints: false,
-	          supportedProtocols: [],
-	          authLoginSupported: false,
-	        }),
-	      }),
-	      adapterToHarnessPlugin(ampAdapter, {
-	        auth: { getAuthStatus: () => getAmpAuthStatus() },
-	        capabilities: withAdapterModels(ampAdapter, {
-	          supportsFork: false,
-	          supportsImages: false,
-	          acceptsApiProviderEndpoints: false,
-	          supportedProtocols: [],
-	          authLoginSupported: false,
-	        }),
-	      }),
-	      createCursorHarnessPlugin({ requestIdentities: cursorRequestIdentities }),
-	      adapterToHarnessPlugin(factoryAdapter, {
-	        auth: { getAuthStatus: () => getFactoryAuthStatus() },
-	        capabilities: withAdapterModels(factoryAdapter, {
-	          supportsFork: false,
-	          supportsImages: false,
-	          acceptsApiProviderEndpoints: false,
-	          supportedProtocols: [],
-	          authLoginSupported: false,
-	        }),
-	      }),
-	      adapterToHarnessPlugin(piAdapter, {
-	        auth: { getAuthStatus: () => getPiAuthStatus() },
-	        capabilities: withAdapterModels(piAdapter, {
-	          supportsFork: false,
-	          supportsImages: false,
-	          acceptsApiProviderEndpoints: false,
-	          supportedProtocols: [],
-	          authLoginSupported: false,
-	        }),
-	      }),
+	      createClaudeHarness(claudeProvider),
+	      createCodexHarness(codexProvider),
+	      createDirectOpenAiResponsesHarness(apiProviderStore),
+	      createDirectOpenAiChatHarness(apiProviderStore),
+	      createDirectAnthropicHarness(apiProviderStore),
+	      createOpenCodeHarness(opencodeProvider),
+	      createAmpHarness(ampProvider),
+	      createCursorHarness({ workspaceDir }),
+	      createFactoryHarness(factoryProvider),
+	      createPiHarness(piProvider),
 	    ];
 
 	    // Tier 2: Harness registry wrapping plugin runtime + registry + store + resolver

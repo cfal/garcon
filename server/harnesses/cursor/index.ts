@@ -1,26 +1,26 @@
-import { runSingleQuery as runSingleQueryCursor } from '../../cursor-cli.js';
-import { getCursorModels } from '../../cursor-models.js';
-import { CursorRequestIdentityStore } from '../../cursor-request-identities.js';
-import { AcpRuntime } from '../../acp/runtime.js';
-import { createHarnessCapabilities } from '../../harness-plugin-bridge.js';
-import type { HarnessPlugin } from '../../harness-plugin.js';
+import { runSingleQuery as runSingleQueryCursor } from '../../providers/cursor-cli.js';
+import { getCursorModels } from '../../providers/cursor-models.js';
+import { CursorRequestIdentityStore } from '../../providers/cursor-request-identities.js';
+import { createHarnessCapabilities } from '../capabilities.js';
+import { AcpHarnessRuntime } from '../shared/acp-harness-runtime.js';
+import type { Harness } from '../types.js';
 import { createCursorAcpPolicy } from './cursor-acp-policy.js';
-import { cursorAuthDriver } from './cursor-auth-driver.js';
 import { CursorAcpEventConverter } from './cursor-acp-event-converter.js';
+import { cursorAuthDriver } from './cursor-auth-driver.js';
 import { CursorReplayHealth } from './cursor-replay-health.js';
 import { createCursorTranscriptSource } from './cursor-transcript-source.js';
 
-interface CreateCursorHarnessPluginArgs {
-  requestIdentities: CursorRequestIdentityStore;
+export interface CreateCursorHarnessArgs {
+  workspaceDir: string;
 }
 
-export function createCursorHarnessPlugin(args: CreateCursorHarnessPluginArgs): HarnessPlugin {
+export function createCursorHarness(args: CreateCursorHarnessArgs): Harness {
+  const requestIdentities = new CursorRequestIdentityStore(args.workspaceDir);
   const replayHealth = new CursorReplayHealth();
-  const runtime = new AcpRuntime(createCursorAcpPolicy(), {
+  const runtime = new AcpHarnessRuntime(createCursorAcpPolicy(), {
     converter: new CursorAcpEventConverter(),
   });
-  // Keeps transcript durability on SQLite until ACP replay reliability improves.
-  const transcript = createCursorTranscriptSource(args.requestIdentities);
+  const transcript = createCursorTranscriptSource(requestIdentities);
 
   return {
     id: 'cursor',

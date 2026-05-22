@@ -3,10 +3,10 @@ import {
   ThinkingMessage,
   ToolResultMessage,
   type ChatMessage,
-} from '../../../../common/chat-types.js';
-import { normalizeCursorToolResultContent } from '../../converters/cursor-tool-result.js';
-import { convertCursorToolUse } from '../../converters/cursor-tool-use.js';
-import { asObject, asString, type AcpEventConverter, type AcpSessionUpdateContext } from '../../acp/event-converter.js';
+} from '../../../common/chat-types.js';
+import { normalizeCursorToolResultContent } from '../../providers/converters/cursor-tool-result.js';
+import { convertCursorToolUse } from '../../providers/converters/cursor-tool-use.js';
+import { asObject, asString, type AcpEventConverter, type AcpSessionUpdateContext } from '../shared/acp-event-converter.js';
 
 interface TurnBuffer {
   assistantText: string;
