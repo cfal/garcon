@@ -79,7 +79,10 @@ export class HistoryCache {
       const loaded = await this.#loadFromProvider(key);
       const current = this.#cacheByChatId.get(key);
       const liveTail = current?.completeness === 'tail' ? current.messages : [];
-      const messages = trimTail(mergeChatMessages(loaded, liveTail), MAX_MESSAGES_PER_ENTRY);
+      const messages = trimTail(
+        mergeChatMessages(loaded, liveTail, { dedupeUserProviderEchoes: true }),
+        MAX_MESSAGES_PER_ENTRY,
+      );
       this.#cacheByChatId.set(key, {
         chatId: key,
         messages,
@@ -182,16 +185,32 @@ function trimTail(messages, maxMessages) {
   return messages.length > maxMessages ? messages.slice(-maxMessages) : messages;
 }
 
-function mergeChatMessages(base, incoming) {
-  const seen = new Set(base.map(chatMessageIdentity));
+function mergeChatMessages(base, incoming, options = {}) {
+  const seen = new Set();
+  const providerUserEchoTexts = new Set();
   const merged = [...base];
+  for (const message of base) {
+    rememberMessageIdentity(message, seen, providerUserEchoTexts);
+  }
   for (const message of incoming ?? []) {
     const key = chatMessageIdentity(message);
     if (seen.has(key)) continue;
-    seen.add(key);
+    if (options.dedupeUserProviderEchoes && hasClientUserIdentity(message)) {
+      const text = userTextFingerprint(message);
+      if (text && providerUserEchoTexts.has(text)) continue;
+    }
+    rememberMessageIdentity(message, seen, providerUserEchoTexts);
     merged.push(message);
   }
   return merged;
+}
+
+function rememberMessageIdentity(message, seen, providerUserEchoTexts) {
+  seen.add(chatMessageIdentity(message));
+  if (message?.type === 'user-message' && !hasClientUserIdentity(message)) {
+    const text = userTextFingerprint(message);
+    if (text) providerUserEchoTexts.add(text);
+  }
 }
 
 function chatMessageIdentity(message) {
@@ -199,13 +218,25 @@ function chatMessageIdentity(message) {
   if (typeof message.toolId === 'string' && message.toolId) {
     return `${message.type}:tool:${message.toolId}`;
   }
-  if (message.type === 'user-message') {
-    const metadata = message.metadata && typeof message.metadata === 'object' ? message.metadata : {};
-    const requestId = metadata.clientRequestId || metadata.messageId;
-    if (typeof requestId === 'string' && requestId) return `${message.type}:client:${requestId}`;
+  if (message.type === 'user-message' && hasClientUserIdentity(message)) {
+    return `${message.type}:client:${userClientIdentity(message)}`;
   }
   if (typeof message.content === 'string') {
     return `${message.type}:text:${message.content.trim()}`;
   }
   return `${message.type}:json:${JSON.stringify(message)}`;
+}
+
+function hasClientUserIdentity(message) {
+  return userClientIdentity(message) !== null;
+}
+
+function userClientIdentity(message) {
+  const metadata = message?.metadata && typeof message.metadata === 'object' ? message.metadata : {};
+  const requestId = metadata.clientRequestId || metadata.messageId;
+  return typeof requestId === 'string' && requestId ? requestId : null;
+}
+
+function userTextFingerprint(message) {
+  return typeof message?.content === 'string' ? message.content.trim() : null;
 }

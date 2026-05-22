@@ -423,6 +423,17 @@ describe('ProviderRegistry catalog and API provider mutations', () => {
     expect(catalog.apiProviders).toEqual([apiProvider]);
   });
 
+  it('uses Cursor discovered models without static fallbacks', async () => {
+    const { registry, cursor } = makeRegistry();
+    cursor.getModels.mockReturnValueOnce([{ value: 'auto', label: 'Auto', supportsImages: false }]);
+
+    const catalog = await registry.getHarnessCatalog();
+    const cursorEntry = catalog.harnesses.find((entry) => entry.id === 'cursor');
+
+    expect(cursorEntry?.models).toEqual([{ value: 'auto', label: 'Auto', supportsImages: false }]);
+    expect(cursorEntry?.defaultModel).toBe('auto');
+  });
+
   it('normalizes API provider payloads before storing them', async () => {
     const apiProviderStore = makeApiProviderStore();
     const { registry } = makeRegistry({ apiProviderStore });

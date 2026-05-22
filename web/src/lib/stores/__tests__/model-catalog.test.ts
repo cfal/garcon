@@ -6,7 +6,7 @@ vi.mock('$lib/api/client', () => ({
 	apiFetch: vi.fn()
 }));
 
-const STORAGE_KEY = 'pref_model_catalog';
+const STORAGE_KEY = 'pref_model_catalog_v2';
 const PI_MODEL = { value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true };
 
 function mockResponse(body: unknown, status = 200): Response {
@@ -50,7 +50,7 @@ describe('ModelCatalogStore', () => {
 			const store = createModelCatalogStore();
 				expect(store.getModels('claude').length).toBeGreaterThan(0);
 				expect(store.getModels('codex').length).toBeGreaterThan(0);
-				expect(store.getModels('cursor').length).toBeGreaterThan(0);
+				expect(store.getModels('cursor')).toEqual([]);
 				expect(store.getModels('factory').length).toBeGreaterThan(0);
 			expect(store.getModels('pi')).toEqual([]);
 			expect(store.getModels('direct-anthropic-compatible')).toEqual([]);
@@ -63,7 +63,7 @@ describe('ModelCatalogStore', () => {
 			expect(store.getModels('zai')).toEqual([]);
 				expect(store.getDefaultModel('claude')).toBe('opus');
 				expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
-				expect(store.getDefaultModel('cursor')).toBe('gpt-5.3-codex');
+				expect(store.getDefaultModel('cursor')).toBe('');
 				expect(store.getDefaultModel('pi')).toBe('');
 			expect(store.getModels('codex')[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
 			const codexModelValues = store.getModels('codex').map((model) => model.value);
@@ -99,7 +99,7 @@ describe('ModelCatalogStore', () => {
 
 	it('hydrates cached harness models from localStorage', () => {
 		localStorage.setItem(
-			'pref_model_catalog',
+			STORAGE_KEY,
 			JSON.stringify({
 				harnessModels: {
 					opencode: [{ value: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' }]
@@ -128,7 +128,7 @@ describe('ModelCatalogStore', () => {
 
 	it('removes stale cached Pi default entries', () => {
 		localStorage.setItem(
-			'pref_model_catalog',
+			STORAGE_KEY,
 			JSON.stringify({
 				harnessModels: {
 					pi: [
@@ -160,7 +160,7 @@ describe('ModelCatalogStore', () => {
 
 	it('hydrates cached harness capabilities from localStorage', () => {
 		localStorage.setItem(
-			'pref_model_catalog',
+			STORAGE_KEY,
 			JSON.stringify({
 				harnessModels: {},
 				harnessMetadata: {
@@ -195,7 +195,7 @@ describe('ModelCatalogStore', () => {
 
 	it('normalizes cached direct harness labels from localStorage', () => {
 		localStorage.setItem(
-			'pref_model_catalog',
+			STORAGE_KEY,
 			JSON.stringify({
 				harnessModels: {},
 				harnessMetadata: {
@@ -239,7 +239,7 @@ describe('ModelCatalogStore', () => {
 
 	it('does not expose API provider ids as harnesses from cached metadata', () => {
 		localStorage.setItem(
-			'pref_model_catalog',
+			STORAGE_KEY,
 			JSON.stringify({
 				harnessModels: {
 					zai: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
@@ -417,6 +417,36 @@ describe('ModelCatalogStore', () => {
 		expect(codexModels[0]).toMatchObject({ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' });
 		expect(codexModels.find((m) => m.value === 'gpt-5.5')).toBeTruthy();
 		expect(codexModels.length).toBeGreaterThan(1);
+	});
+
+	it('uses Cursor catalog results without static model merging', async () => {
+		vi.mocked(clientApi.apiFetch).mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				catalog: {
+					harnesses: [
+						{
+							id: 'cursor',
+							label: 'Cursor',
+							kind: 'harness',
+							supportsFork: false,
+							supportsImages: false,
+							acceptsApiProviderEndpoints: false,
+							supportedProtocols: [],
+							defaultModel: 'auto',
+							models: [{ value: 'auto', label: 'Auto', supportsImages: false }]
+						}
+					],
+					apiProviders: []
+				}
+			})
+		} as Response);
+
+		const store = createModelCatalogStore();
+		await store.forceRefresh();
+
+		expect(store.getModels('cursor')).toEqual([{ value: 'auto', label: 'Auto', supportsImages: false }]);
+		expect(store.getDefaultModel('cursor')).toBe('auto');
 	});
 
 	it('records an error for invalid catalog responses', async () => {

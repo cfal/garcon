@@ -1,5 +1,4 @@
 import { getCursorBinary } from '../config.js';
-import { CURSOR_MODELS } from '../../common/models.js';
 
 export interface CursorModelOption {
   value: string;
@@ -71,5 +70,5 @@ export async function getCursorModels(): Promise<CursorModelOption[]> {
   } catch (error) {
     console.warn('cursor: model discovery failed:', error instanceof Error ? error.message : String(error));
   }
-  return CURSOR_MODELS.OPTIONS;
+  return [];
 }

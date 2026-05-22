@@ -10,9 +10,9 @@ import {
 import { getCursorBinary } from '../config.js';
 import { createArtificialNativePath } from '../chats/artificial-native-path.js';
 import { AbsProvider } from './base.js';
+import { normalizeCursorToolResultContent } from './converters/cursor-tool-result.js';
 import { convertCursorToolUse } from './converters/cursor-tool-use.js';
 import { getCursorModels } from './cursor-models.js';
-import { normalizeToolResultContent } from './normalize-util.js';
 import type {
   PermissionMode,
   ResumeTurnRequest,
@@ -111,6 +111,23 @@ function getToolCallId(event: Record<string, unknown>): string {
   return asString(nested?.call_id ?? nested?.callId ?? nested?.toolCallId ?? nested?.tool_call_id ?? nested?.id) ?? '';
 }
 
+function getToolName(event: Record<string, unknown>): string | undefined {
+  const direct = asString(event.toolName ?? event.tool_name ?? event.name ?? event.tool);
+  if (direct) return direct;
+
+  const toolCall = asObject(event.tool_call ?? event.toolCall);
+  const nested = Object.values(toolCall)
+    .map((entry) => asObject(entry))
+    .find((entry) => Object.keys(entry).length > 0);
+  return asString(nested?.toolName ?? nested?.tool_name ?? nested?.name ?? nested?.tool);
+}
+
+function getHighLevelToolCallResult(event: Record<string, unknown>): unknown {
+  const direct = event.highLevelToolCallResult ?? event.high_level_tool_call_result;
+  if (direct !== undefined) return direct;
+  return asObject(asObject(event.providerOptions).cursor).highLevelToolCallResult;
+}
+
 function extractToolResultPayload(event: Record<string, unknown>): unknown {
   const direct = event.result ?? event.output ?? event.tool_result ?? event.toolResult;
   if (direct !== undefined) return direct;
@@ -199,7 +216,6 @@ function buildCursorArgs(
     '--print',
     '--output-format',
     'stream-json',
-    '--stream-partial-output',
     '--workspace',
     request.projectPath,
     '--trust',
@@ -358,7 +374,12 @@ export class CursorProvider extends AbsProvider {
       if (event.subtype === 'completed' || 'result' in event || 'output' in event) {
         const payload = extractToolResultPayload(event);
         this.emitMessages(session.chatId, [
-          new ToolResultMessage(timestamp, toolId, normalizeToolResultContent(payload), isToolResultError(event, payload)),
+          new ToolResultMessage(
+            timestamp,
+            toolId,
+            normalizeCursorToolResultContent(getToolName(event), payload, getHighLevelToolCallResult(event)),
+            isToolResultError(event, payload),
+          ),
         ]);
       }
       return;

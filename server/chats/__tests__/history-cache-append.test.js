@@ -145,6 +145,64 @@ describe('appendMessages', () => {
     ]);
   });
 
+  it('deduplicates provider-history user echoes against live client messages', async () => {
+    const selectedChatId = 'cursor-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { provider: 'cursor', providerSessionId: 'cursor-session-1' } : null
+    ));
+    mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'user-message', timestamp: ts, content: 'Prompt' },
+      { type: 'assistant-message', timestamp: ts, content: 'Reply' },
+    ]));
+
+    await cache.appendMessages(selectedChatId, [
+      {
+        type: 'user-message',
+        timestamp: '2026-01-01T00:00:01Z',
+        content: 'Prompt',
+        metadata: {
+          clientRequestId: 'req-1',
+          messageId: 'msg-1',
+        },
+      },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Live tail' },
+    ]);
+    const messages = await cache.ensureLoaded(selectedChatId);
+
+    expect(messages.filter((message) => message.type === 'user-message')).toHaveLength(1);
+    expect(messages.map((message) => message.content)).toEqual([
+      'Prompt',
+      'Reply',
+      'Live tail',
+    ]);
+  });
+
+  it('keeps repeated client user messages when they have distinct client identities', async () => {
+    await cache.appendMessages(chatId, [
+      {
+        type: 'user-message',
+        timestamp: ts,
+        content: 'Repeat prompt',
+        metadata: {
+          clientRequestId: 'req-1',
+          messageId: 'msg-1',
+        },
+      },
+      {
+        type: 'user-message',
+        timestamp: '2026-01-01T00:00:01Z',
+        content: 'Repeat prompt',
+        metadata: {
+          clientRequestId: 'req-2',
+          messageId: 'msg-2',
+        },
+      },
+    ]);
+
+    const entry = cache._cacheByChatId.get(chatId);
+    expect(entry.messages).toHaveLength(2);
+  });
+
   it('deduplicates tool-use messages by toolId when merging history and tail', async () => {
     const selectedChatId = 'tool-chat';
     mockRegistry.getChat.mockImplementation((id) => (

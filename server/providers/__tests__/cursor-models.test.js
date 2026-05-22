@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
-import { CURSOR_MODELS } from '../../../common/models.js';
 import { getCursorModels, parseCursorModelsOutput } from '../cursor-models.js';
 
 function procWithOutput(stdoutText, exitCode = 0, stderrText = '') {
@@ -56,9 +55,9 @@ gpt-5.3-codex - Duplicate
     expect(spawnMock.mock.calls[0][0].slice(-1)).toEqual(['models']);
   });
 
-  it('falls back to static models when discovery returns no usable models', async () => {
+  it('returns no models when Cursor reports none for the account', async () => {
     spawnMock.mockReturnValueOnce(procWithOutput('No models available for this account\n'));
 
-    await expect(getCursorModels()).resolves.toBe(CURSOR_MODELS.OPTIONS);
+    await expect(getCursorModels()).resolves.toEqual([]);
   });
 });

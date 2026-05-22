@@ -93,7 +93,6 @@ describe('CursorProvider lifecycle', () => {
       '--print',
       '--output-format',
       'stream-json',
-      '--stream-partial-output',
       '--workspace',
       '/proj',
       '--trust',
@@ -139,7 +138,6 @@ describe('CursorProvider lifecycle', () => {
       '--print',
       '--output-format',
       'stream-json',
-      '--stream-partial-output',
       '--workspace',
       '/proj',
       '--trust',
@@ -182,6 +180,46 @@ describe('CursorProvider lifecycle', () => {
     ]);
     expect(emitted.filter((message) => message.type === 'bash-tool-use')).toHaveLength(1);
     expect(emitted.find((message) => message.type === 'tool-result')?.content).toEqual({ stdout: '/proj' });
+  });
+
+  it('normalizes live Cursor Glob results to canonical file lists', async () => {
+    const provider = new CursorProvider();
+    const messages = mock();
+    provider.onMessages(messages);
+
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const turnPromise = provider.runTurn({
+      command: 'find daml files',
+      providerSessionId: 'cursor-session-3',
+      chatId: 'chat-3',
+      projectPath: '/proj',
+      model: 'kimi-k2.5',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    proc.pushJson({
+      type: 'tool_call',
+      subtype: 'completed',
+      call_id: 'functions.Glob:0',
+      toolName: 'Glob',
+      args: { glob_pattern: 'contracts/**/daml.yaml' },
+      result: 'Result of search in "" (total 2 files):\n- ./contracts/a/daml.yaml\n- ./contracts/b/daml.yaml\n',
+    });
+    proc.pushJson({ type: 'result', subtype: 'success', session_id: 'cursor-session-3' });
+    proc.close(0);
+
+    await turnPromise;
+
+    const emitted = messages.mock.calls.flatMap((call) => call[1]);
+    expect(emitted.find((message) => message.type === 'glob-tool-use')?.pattern)
+      .toBe('contracts/**/daml.yaml');
+    expect(emitted.find((message) => message.type === 'tool-result')?.content).toEqual({
+      filenames: ['./contracts/a/daml.yaml', './contracts/b/daml.yaml'],
+      numFiles: 2,
+    });
   });
 
   it('runs one-shot prompts with print JSON mode', async () => {

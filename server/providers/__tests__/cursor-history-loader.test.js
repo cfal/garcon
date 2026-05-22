@@ -89,6 +89,164 @@ describe('Cursor history loader', () => {
     expect(messages[4].content).toEqual({ ok: true });
   });
 
+  it('unwraps user queries when Cursor prefixes them with timestamp metadata', () => {
+    const messages = normalizeCursorBlobs([
+      {
+        id: 'user-1',
+        rowid: 1,
+        sequence: 1,
+        content: {
+          role: 'user',
+          timestamp: '2026-05-22T01:00:00.000Z',
+          content: [
+            { type: 'text', text: '<system_reminder>Ask mode is active.</system_reminder>' },
+            {
+              type: 'text',
+              text: '<timestamp>Friday, May 22, 2026, 9:31 AM (UTC)</timestamp>\n<user_query>\nhi\n</user_query>',
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].type).toBe('user-message');
+    expect(messages[0].content).toBe('hi');
+  });
+
+  it('keeps the user query when Cursor combines metadata and query tags in one part', () => {
+    const messages = normalizeCursorBlobs([
+      {
+        id: 'user-1',
+        rowid: 1,
+        sequence: 1,
+        content: {
+          role: 'user',
+          timestamp: '2026-05-22T01:00:00.000Z',
+          content: [
+            {
+              type: 'text',
+              text: '<system_reminder>Ask mode is active.</system_reminder>\n<timestamp>Friday, May 22, 2026, 9:31 AM (UTC)</timestamp>\n<user_query>\nhi\n</user_query>',
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].type).toBe('user-message');
+    expect(messages[0].content).toBe('hi');
+  });
+
+  it('normalizes Cursor Glob and Read tool results from high-level metadata', () => {
+    const messages = normalizeCursorBlobs([
+      {
+        id: 'assistant-tools',
+        rowid: 1,
+        sequence: 1,
+        content: {
+          role: 'assistant',
+          timestamp: '2026-05-22T01:00:00.000Z',
+          content: [
+            {
+              type: 'tool-call',
+              toolName: 'Glob',
+              toolCallId: 'functions.Glob:0',
+              args: { glob_pattern: 'contracts/**/daml.yaml' },
+            },
+            {
+              type: 'tool-call',
+              toolName: 'Read',
+              toolCallId: 'functions.Read:1',
+              args: { path: '/repo/contracts/ccip/core/daml.yaml' },
+            },
+          ],
+        },
+      },
+      {
+        id: 'glob-result',
+        rowid: 2,
+        sequence: 2,
+        content: {
+          role: 'tool',
+          timestamp: '2026-05-22T01:00:01.000Z',
+          providerOptions: {
+            cursor: {
+              highLevelToolCallResult: {
+                output: {
+                  success: {
+                    files: ['./contracts/ccip/core/daml.yaml', './contracts/ccip/runtime/daml.yaml'],
+                    totalFiles: 2,
+                  },
+                },
+              },
+            },
+          },
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: 'functions.Glob:0',
+              toolName: 'Glob',
+              result: 'Result of search in "" (total 2 files):\n- ./contracts/ccip/core/daml.yaml\n- ./contracts/ccip/runtime/daml.yaml\n',
+            },
+          ],
+        },
+      },
+      {
+        id: 'read-result',
+        rowid: 3,
+        sequence: 3,
+        content: {
+          role: 'tool',
+          timestamp: '2026-05-22T01:00:02.000Z',
+          providerOptions: {
+            cursor: {
+              highLevelToolCallResult: {
+                output: {
+                  success: {
+                    content: 'sdk-version: 3.4.11\n',
+                    totalLines: 1,
+                    fileSize: 24,
+                    path: '/repo/contracts/ccip/core/daml.yaml',
+                    readRange: { startLine: 1, endLine: 1 },
+                  },
+                },
+              },
+            },
+          },
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: 'functions.Read:1',
+              toolName: 'Read',
+              result: '     1|sdk-version: 3.4.11\n',
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(messages.map((message) => message.type)).toEqual([
+      'glob-tool-use',
+      'read-tool-use',
+      'tool-result',
+      'tool-result',
+    ]);
+    expect(messages[0].pattern).toBe('contracts/**/daml.yaml');
+    expect(messages[1].filePath).toBe('/repo/contracts/ccip/core/daml.yaml');
+    expect(messages[2].content).toEqual({
+      filenames: ['./contracts/ccip/core/daml.yaml', './contracts/ccip/runtime/daml.yaml'],
+      numFiles: 2,
+    });
+    expect(messages[3].content).toEqual({
+      content: 'sdk-version: 3.4.11\n',
+      totalLines: 1,
+      fileSize: 24,
+      path: '/repo/contracts/ccip/core/daml.yaml',
+      readRange: { startLine: 1, endLine: 1 },
+    });
+  });
+
   it('loads Cursor store.db blobs and builds previews', async () => {
     const sessionId = 'session-db';
     const projectPath = '/tmp/project';

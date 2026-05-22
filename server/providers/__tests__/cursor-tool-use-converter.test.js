@@ -38,6 +38,32 @@ describe('convertCursorToolUse', () => {
     expect(message.patch).toContain('*** Begin Patch');
   });
 
+  it('maps Cursor Glob glob_pattern args to canonical pattern', () => {
+    const message = convertCursorToolUse(ts, {
+      type: 'tool-call',
+      toolName: 'Glob',
+      toolCallId: 'glob-1',
+      args: { glob_pattern: 'contracts/**/daml.yaml' },
+    });
+
+    expect(message.type).toBe('glob-tool-use');
+    expect(message.toolId).toBe('glob-1');
+    expect(message.pattern).toBe('contracts/**/daml.yaml');
+  });
+
+  it('maps Cursor Read path args to canonical filePath', () => {
+    const message = convertCursorToolUse(ts, {
+      type: 'tool-call',
+      toolName: 'Read',
+      toolCallId: 'read-1',
+      args: { path: '/repo/contracts/ccip/core/daml.yaml' },
+    });
+
+    expect(message.type).toBe('read-tool-use');
+    expect(message.toolId).toBe('read-1');
+    expect(message.filePath).toBe('/repo/contracts/ccip/core/daml.yaml');
+  });
+
   it('normalizes Cursor todo items into canonical todos', () => {
     const message = convertCursorToolUse(ts, {
       id: 'todo-1',

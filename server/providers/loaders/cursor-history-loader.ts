@@ -10,8 +10,8 @@ import {
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
+import { normalizeCursorToolResultContent } from '../converters/cursor-tool-result.js';
 import { convertCursorToolUse } from '../converters/cursor-tool-use.js';
-import { normalizeToolResultContent } from '../normalize-util.js';
 
 interface CursorDbBlob {
   rowid: number;
@@ -29,6 +29,9 @@ interface CursorMessageBlob {
   rowid: number;
   sequence: number;
 }
+
+const USER_QUERY_OPEN_TAG = '<user_query>';
+const USER_QUERY_CLOSE_TAG = '</user_query>';
 
 export interface CursorPreview {
   createdAt: string | null;
@@ -75,6 +78,7 @@ export function cursorStoreDbPath(sessionId: string, projectPath: string, cursor
 function isInternalCursorText(value: unknown): boolean {
   if (typeof value !== 'string') return false;
   const normalized = value.trim();
+  if (normalized.includes(USER_QUERY_OPEN_TAG)) return false;
   return normalized.startsWith('<user_info>') || normalized.startsWith('<system_reminder>');
 }
 
@@ -90,11 +94,10 @@ function isInternalCursorPart(part: unknown): boolean {
 function unwrapUserQueryText(value: string, role: 'assistant' | 'user'): string {
   if (role !== 'user') return value;
   const normalized = value.trimStart();
-  const openTag = '<user_query>';
-  const closeTag = '</user_query>';
-  if (!normalized.startsWith(openTag)) return value;
-  const afterOpen = normalized.slice(openTag.length);
-  const closeIndex = afterOpen.lastIndexOf(closeTag);
+  const openIndex = normalized.indexOf(USER_QUERY_OPEN_TAG);
+  if (openIndex < 0) return value;
+  const afterOpen = normalized.slice(openIndex + USER_QUERY_OPEN_TAG.length);
+  const closeIndex = afterOpen.lastIndexOf(USER_QUERY_CLOSE_TAG);
   const inner = closeIndex >= 0 ? afterOpen.slice(0, closeIndex) : afterOpen;
   return inner.trim();
 }
@@ -314,10 +317,11 @@ function normalizeCursorContent(content: Record<string, unknown>, blob: CursorMe
         ?? normalizeToolId(highLevelToolCallResult.tool_call_id)
         ?? normalizeToolId(content.id)
         ?? '';
+      const toolName = rawItem.toolName ?? rawItem.tool_name ?? highLevelToolCallResult.toolName ?? highLevelToolCallResult.tool_name;
       messages.push(new ToolResultMessage(
         timestamp,
         toolId,
-        normalizeToolResultContent(extractCursorToolResultContent(rawItem)),
+        normalizeCursorToolResultContent(toolName, extractCursorToolResultContent(rawItem), highLevelToolCallResult),
         Boolean(rawItem.isError || rawItem.is_error),
       ));
     }

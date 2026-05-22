@@ -241,7 +241,7 @@ export function convertCursorToolUse(timestamp: string, part: unknown): CursorTo
       return new GlobToolUseMessage(
         timestamp,
         envelope.id,
-        asString(input.pattern ?? input.glob ?? input.query),
+        asString(input.pattern ?? input.glob_pattern ?? input.globPattern ?? input.filePattern ?? input.glob ?? input.query),
         asString(input.path ?? input.cwd),
       );
 
