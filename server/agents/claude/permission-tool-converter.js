@@ -2,7 +2,7 @@
 // ToolUseMessage subclasses. Delegates to the existing tool-use
 // converter since permission requests share the same name+input shape.
 
-import { convertClaudeToolUse } from './claude-tool-use.js';
+import { convertClaudeToolUse } from './tool-use-converter.js';
 
 /**
  * Converts a Claude permission request's tool name and input into a

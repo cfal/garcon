@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { normalizeCursorToolResultContent } from '../converters/cursor-tool-result.js';
+import { normalizeCursorToolResultContent } from '../cursor/tool-result-converter.js';
 
 describe('normalizeCursorToolResultContent', () => {
   it('maps Cursor high-level Glob results to canonical file lists', () => {

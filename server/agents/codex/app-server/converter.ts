@@ -20,7 +20,7 @@ import {
   WriteToolUseMessage,
   type ChatMessage,
 } from "../../../../common/chat-types.js";
-import { stripResolvedFileMentionContext } from "../../../chats/file-mentions.ts";
+import { stripResolvedFileMentionContext } from "../../shared/file-mention-context.js";
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from "../../shared/normalize-util.js";
 import type { CodexThread, CodexThreadItem, CodexTurn, CodexUserInput } from './protocol.js';
 

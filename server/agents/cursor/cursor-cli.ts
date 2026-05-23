@@ -10,11 +10,11 @@ import {
 import { getCursorBinary } from "../../config.js";
 import { createArtificialNativePath, getArtificialAgentSessionId } from "../../chats/artificial-native-path.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
-import { normalizeCursorToolResultContent } from "../converters/cursor-tool-result.js";
-import { convertCursorToolUse } from "../converters/cursor-tool-use.js";
+import { normalizeCursorToolResultContent } from "./tool-result-converter.js";
+import { convertCursorToolUse } from "./tool-use-converter.js";
 import { getCursorModels } from './cursor-models.js';
 import { CursorRequestIdentityStore } from './cursor-request-identities.js';
-import { loadCursorChatMessagesBySessionId } from "../loaders/cursor-history-loader.js";
+import { loadCursorChatMessagesBySessionId } from "./history-loader.js";
 import type {
   PermissionMode,
   AgentChatEntry,

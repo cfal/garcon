@@ -6,7 +6,7 @@ import path from 'path';
 import {
   getPiPreviewFromSessionPath,
   loadPiChatMessages,
-} from '../loaders/pi-history-loader.js';
+} from '../pi/history-loader.js';
 
 let tempRoot;
 

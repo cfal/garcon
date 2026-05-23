@@ -6,9 +6,9 @@ import {
   UserMessage,
   type ChatMessage,
 } from '../../../common/chat-types.js';
-import { convertAmpToolUse } from '../converters/amp-tool-use.js';
+import { convertAmpToolUse } from './tool-use-converter.js';
 import { normalizeToolResultContent } from '../shared/normalize-util.js';
-import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
+import { stripResolvedFileMentionContext } from '../shared/file-mention-context.js';
 
 export interface AmpContentPart {
   type: string;

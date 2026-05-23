@@ -9,9 +9,9 @@ import {
   UserMessage,
   type ChatMessage,
 } from '../../../common/chat-types.js';
-import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
-import { normalizeCursorToolResultContent } from '../converters/cursor-tool-result.js';
-import { convertCursorToolUse } from '../converters/cursor-tool-use.js';
+import { stripResolvedFileMentionContext } from '../shared/file-mention-context.js';
+import { normalizeCursorToolResultContent } from './tool-result-converter.js';
+import { convertCursorToolUse } from './tool-use-converter.js';
 
 interface CursorDbBlob {
   rowid: number;

@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { loadFactoryChatMessages } from '../loaders/factory-history-loader.js';
+import { loadFactoryChatMessages } from '../factory/history-loader.js';
 
 const tmpDir = path.join(os.tmpdir(), 'garcon-factory-history-tests');
 

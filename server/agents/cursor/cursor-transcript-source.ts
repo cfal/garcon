@@ -1,7 +1,7 @@
 import type { ChatMessage } from '../../../common/chat-types.js';
 import { getArtificialAgentSessionId } from '../../chats/artificial-native-path.js';
 import { CursorRequestIdentityStore } from './cursor-request-identities.js';
-import { getCursorPreviewFromSessionId, loadCursorChatMessagesBySessionId } from '../loaders/cursor-history-loader.js';
+import { getCursorPreviewFromSessionId, loadCursorChatMessagesBySessionId } from './history-loader.js';
 import type { AgentChatEntry } from '../session-types.js';
 import type { AgentTranscriptSource } from '../types.js';
 

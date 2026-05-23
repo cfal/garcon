@@ -8,9 +8,9 @@ import {
   UserMessage,
   type ChatMessage,
 } from '../../../common/chat-types.js';
-import { convertFactoryToolUse } from '../converters/factory-tool-use.js';
+import { convertFactoryToolUse } from './tool-use-converter.js';
 import { normalizeToolResultContent } from '../shared/normalize-util.js';
-import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
+import { stripResolvedFileMentionContext } from '../shared/file-mention-context.js';
 
 const FACTORY_HOME = path.join(os.homedir(), '.factory');
 const FACTORY_SESSION_DISCOVERY_INDEX = path.join(FACTORY_HOME, 'cache', 'session-discovery-index.json');

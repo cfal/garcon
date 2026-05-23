@@ -7,8 +7,8 @@ import {
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import { normalizeToolResultContent } from '../shared/normalize-util.js';
-import { convertPiToolUse } from './pi-tool-use.js';
-import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
+import { convertPiToolUse } from './tool-use-converter.js';
+import { stripResolvedFileMentionContext } from '../shared/file-mention-context.js';
 
 interface PiTextContent {
   type: 'text';

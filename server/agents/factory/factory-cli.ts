@@ -9,7 +9,7 @@ import {
   type ChatMessage,
 } from "../../../common/chat-types.js";
 import { normalizeToolResultContent }  from "../shared/normalize-util.js";
-import { convertFactoryToolUse } from "../converters/factory-tool-use.js";
+import { convertFactoryToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AgentCommandImage, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession, ThinkingMode } from "../session-types.js";

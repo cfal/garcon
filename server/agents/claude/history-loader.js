@@ -3,11 +3,11 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { readJsonlTailLines } from './common.ts';
+import { readJsonlTailLines } from '../shared/history-loader-utils.ts';
 import { normalizeToolResultContent } from '../shared/normalize-util.js';
 import { UserMessage, AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage } from '../../../common/chat-types.js';
-import { convertClaudeToolUse } from '../converters/claude-tool-use.js';
-import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
+import { convertClaudeToolUse } from './tool-use-converter.js';
+import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
 
 const HEAD_READ_BYTES = 32 * 1024;
 

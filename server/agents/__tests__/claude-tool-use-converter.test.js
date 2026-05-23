@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { convertClaudeToolUse } from '../converters/claude-tool-use.js';
+import { convertClaudeToolUse } from '../claude/tool-use-converter.js';
 import {
   BashToolUseMessage,
   ReadToolUseMessage,

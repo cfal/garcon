@@ -4,8 +4,8 @@
 import { promises as fs } from 'fs';
 import fsSync from 'fs';
 import readline from 'readline';
-import { readJsonlTailLines } from './common.ts';
-import { normalizeCodexJsonlEntry, extractTextContent } from './codex-history-normalizer.js';
+import { readJsonlTailLines } from '../shared/history-loader-utils.ts';
+import { normalizeCodexJsonlEntry, extractTextContent } from './history-normalizer.js';
 
 // Reads a Codex JSONL file and returns ChatMessage[].
 // Uses per-content-class dedup. event_msg user messages are treated as

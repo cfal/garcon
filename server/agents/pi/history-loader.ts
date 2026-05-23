@@ -10,7 +10,7 @@ import {
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import { findPiSessionFileBySessionId } from '../pi/pi-session-paths.js';
-import { convertPiMessage } from '../converters/pi-messages.js';
+import { convertPiMessage } from './message-converter.js';
 
 export interface PiPreview {
   createdAt: string | null;

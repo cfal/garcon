@@ -4,7 +4,7 @@ mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => undefined),
 }));
 
-mock.module('../../agents/loaders/claude-history-loader.js', () => ({
+mock.module('../../agents/claude/history-loader.js', () => ({
   getClaudeSessionMessagesFromNativePath: mock(() => undefined),
 }));
 

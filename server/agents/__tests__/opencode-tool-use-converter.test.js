@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { convertOpenCodeToolUse } from '../converters/opencode-tool-use.js';
+import { convertOpenCodeToolUse } from '../opencode/tool-use-converter.js';
 import {
   BashToolUseMessage,
   ReadToolUseMessage,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { convertPiMessage } from '../converters/pi-messages.js';
+import { convertPiMessage } from '../pi/message-converter.js';
 
 describe('convertPiMessage', () => {
   it('converts user text and images', () => {

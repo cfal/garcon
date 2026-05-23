@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { convertPiToolUse } from '../converters/pi-tool-use.js';
+import { convertPiToolUse } from '../pi/tool-use-converter.js';
 
 describe('convertPiToolUse', () => {
   const ts = '2026-01-01T00:00:00.000Z';

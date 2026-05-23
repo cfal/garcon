@@ -33,27 +33,27 @@ mock.module('../pi/pi-cli.js', () => ({
   runSingleQuery: piQuery,
 }));
 
-mock.module('../loaders/claude-history-loader.js', () => ({
+mock.module('../claude/history-loader.js', () => ({
   getClaudePreviewFromNativePath: mock(() => Promise.resolve(null)),
   loadClaudeChatMessages: mock(() => Promise.resolve([])),
 }));
 
-mock.module('../loaders/codex-history-loader.js', () => ({
+mock.module('../codex/history-loader.js', () => ({
   getCodexPreviewFromNativePath: mock(() => Promise.resolve(null)),
   loadCodexChatMessages: mock(() => Promise.resolve([])),
 }));
 
-mock.module('../loaders/opencode-history-loader.js', () => ({
+mock.module('../opencode/history-loader.js', () => ({
   getOpenCodePreviewFromSessionId: mock(() => Promise.resolve(null)),
   loadOpenCodeChatMessages: mock(() => Promise.resolve([])),
 }));
 
-mock.module('../loaders/factory-history-loader.js', () => ({
+mock.module('../factory/history-loader.js', () => ({
   getFactoryPreviewFromSessionId: mock(() => Promise.resolve(null)),
   loadFactoryChatMessagesBySessionId: mock(() => Promise.resolve([])),
 }));
 
-mock.module('../loaders/direct-compatible-history-loader.js', () => ({
+mock.module('../direct/history-loader.js', () => ({
   getDirectCompatiblePreviewFromSessionId: mock(() => Promise.resolve(null)),
   loadDirectCompatibleChatMessages: mock(() => Promise.resolve([])),
 }));

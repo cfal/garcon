@@ -6,8 +6,9 @@
 // The composition root binds this to the OpenCodeProvider instance.
 
 import { UserMessage, AssistantMessage, ThinkingMessage, ToolResultMessage } from '../../../common/chat-types.js';
-import { convertOpenCodeToolUse } from '../converters/opencode-tool-use.js';
-import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
+import { convertOpenCodeToolUse } from './tool-use-converter.js';
+import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
+import { normalizeToolResultContent } from '../shared/normalize-util.js';
 
 const PREVIEW_TAIL_MESSAGE_LIMIT = 20;
 
@@ -71,8 +72,6 @@ function extractTextFromParts(parts) {
     .map((p) => p.text || '')
     .join('\n');
 }
-
-import { normalizeToolResultContent } from '../shared/normalize-util.js';
 
 // Fetches messages for an OpenCode session and returns ChatMessage[].
 // getClient: () => Promise<OpenCodeClient>

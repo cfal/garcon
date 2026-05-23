@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { getAmpPreview, loadAmpChatMessages } from '../loaders/amp-history-loader.js';
+import { getAmpPreview, loadAmpChatMessages } from '../amp/history-loader.js';
 
 const THREAD_EXPORT_FIXTURE = {
   id: 'T-123',

@@ -9,7 +9,7 @@ import {
   getCursorPreviewFromSessionId,
   loadCursorChatMessagesBySessionId,
   normalizeCursorBlobs,
-} from '../loaders/cursor-history-loader.js';
+} from '../cursor/history-loader.js';
 
 let tempRoot;
 

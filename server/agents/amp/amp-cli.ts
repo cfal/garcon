@@ -8,10 +8,10 @@ import path from 'path';
 import { normalizeToolResultContent }  from "../shared/normalize-util.js";
 import { getAmpBinary } from "../../config.js";
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, type ChatMessage } from "../../../common/chat-types.js";
-import { convertAmpToolUse } from "../converters/amp-tool-use.js";
+import { convertAmpToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
-import type { AmpThreadExport } from "../loaders/amp-history-loader.js";
+import type { AmpThreadExport } from "./history-loader.js";
 import type { StartSessionRequest, ResumeTurnRequest, StartedAgentSession } from "../session-types.js";
 
 interface AmpSession {

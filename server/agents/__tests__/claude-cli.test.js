@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, createClaudeNativePath } from '../claude/claude-cli.js';
-import { convertClaudePermissionTool } from '../converters/claude-permission-tool.js';
+import { convertClaudePermissionTool } from '../claude/permission-tool-converter.js';
 import { BashToolUseMessage, ExitPlanModeToolUseMessage } from '../../../common/chat-types.js';
 
 describe('createClaudeNativePath', () => {

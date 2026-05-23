@@ -3,8 +3,8 @@
 
 import { normalizeToolResultContent } from '../shared/normalize-util.js';
 import { UserMessage, AssistantMessage, ThinkingMessage, WebSearchToolUseMessage, ToolResultMessage } from '../../../common/chat-types.js';
-import { convertCodexFunctionCall, convertCodexCustomToolCall } from '../converters/codex-tool-use.js';
-import { stripResolvedFileMentionContext } from '../../chats/file-mentions.ts';
+import { convertCodexFunctionCall, convertCodexCustomToolCall } from './legacy-tool-use-converter.js';
+import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
 
 // Extracts plaintext from Codex content arrays or raw strings.
 export function extractTextContent(content) {

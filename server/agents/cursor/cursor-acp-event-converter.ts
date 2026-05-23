@@ -5,8 +5,8 @@ import {
   type ChatMessage,
   type ToolUseChatMessage,
 } from '../../../common/chat-types.js';
-import { normalizeCursorToolResultContent } from '../converters/cursor-tool-result.js';
-import { convertCursorToolUse } from '../converters/cursor-tool-use.js';
+import { normalizeCursorToolResultContent } from './tool-result-converter.js';
+import { convertCursorToolUse } from './tool-use-converter.js';
 import { asObject, asString, type AcpEventConverter, type AcpSessionUpdateContext } from '../shared/acp-event-converter.js';
 
 const TERMINAL_TOOL_STATUSES = new Set(['completed', 'failed', 'errored', 'rejected', 'cancelled']);

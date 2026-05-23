@@ -20,7 +20,7 @@ import {
   WebSearchToolUseMessage,
   WriteToolUseMessage,
 } from '../../../common/chat-types.js';
-import { convertAmpToolUse } from '../converters/amp-tool-use.js';
+import { convertAmpToolUse } from '../amp/tool-use-converter.js';
 
 const TS = '2026-01-01T00:00:00.000Z';
 

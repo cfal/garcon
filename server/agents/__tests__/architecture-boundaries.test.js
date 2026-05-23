@@ -26,6 +26,22 @@ describe('agent architecture boundaries', () => {
     expect(walk('server/providers')).toEqual([]);
   });
 
+  test('keeps agent converters and history loaders colocated with their owning agent', () => {
+    expect(existsSync('server/agents/converters')).toBe(false);
+    expect(existsSync('server/agents/loaders')).toBe(false);
+
+    for (const root of ['server/agents', 'server/chats', 'server/routes', 'server/ws']) {
+      for (const file of walk(root)) {
+        if (file.endsWith('architecture-boundaries.test.js')) continue;
+        const source = readFileSync(file, 'utf8');
+        expect(source).not.toContain('agents/converters');
+        expect(source).not.toContain('agents/loaders');
+        expect(source).not.toContain('../converters/');
+        expect(source).not.toContain('../loaders/');
+      }
+    }
+  });
+
   test('does not keep the transitional adapter/plugin layer', () => {
     expect(existsSync('server/providers/provider-adapter.ts')).toBe(false);
     expect(existsSync('server/providers/provider-adapters.ts')).toBe(false);

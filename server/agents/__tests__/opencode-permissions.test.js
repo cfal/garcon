@@ -9,7 +9,7 @@ import {
   mapPermissionMode,
   OPENCODE_PERMISSION_KEYS,
 } from '../opencode/opencode.js';
-import { convertOpencodePermissionTool } from '../converters/opencode-permission-tool.js';
+import { convertOpencodePermissionTool } from '../opencode/permission-tool-converter.js';
 import { EnterPlanModeToolUseMessage, RequestPermissionsToolUseMessage, UnknownToolUseMessage } from '../../../common/chat-types.js';
 
 describe('mapPermissionDecision', () => {

@@ -1,7 +1,7 @@
 import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage } from "../../../../common/chat-types.js";
 import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from "../../shared/event-emitter-runtime.js";
-import { loadCodexChatMessages, getCodexPreviewFromNativePath } from "../../loaders/codex-history-loader.js";
+import { loadCodexChatMessages, getCodexPreviewFromNativePath } from "../history-loader.js";
 import type { AgentChatEntry, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../../session-types.js";
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';

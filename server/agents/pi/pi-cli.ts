@@ -8,8 +8,8 @@ import {
   ToolResultMessage,
 } from "../../../common/chat-types.js";
 import { normalizeToolResultContent }  from "../shared/normalize-util.js";
-import { convertPiMessage } from "../converters/pi-messages.js";
-import { convertPiToolUse } from "../converters/pi-tool-use.js";
+import { convertPiMessage } from "./message-converter.js";
+import { convertPiToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { createArtificialNativePath, isArtificialNativePath } from "../../chats/artificial-native-path.js";
 import {
