@@ -145,9 +145,13 @@ describe('agent architecture boundaries', () => {
     }
   });
 
-  test('chat store normalizes current agent fields without provider compatibility shims', () => {
+  test('chat store keeps legacy provider fields inside one-time persistence migration', () => {
     const source = readFileSync('server/chats/store.ts', 'utf8');
     expect(source).toContain('rawEntry.agentSessionId');
+    expect(source).toContain('migratePersistedChatEntry');
+    expect(source).toContain('LEGACY_AGENT_SESSION_ID_FIELD');
+    expect(source).not.toContain('providerSessionId:');
+    expect(source).not.toContain('provider:');
     expect(source).not.toMatch(/rawEntry\.provider(?:SessionId)?/);
     expect(source).not.toContain('...(rawEntry as Record<string, unknown>)');
   });

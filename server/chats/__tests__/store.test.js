@@ -68,7 +68,7 @@ describe('ChatRegistry', () => {
     it('normalizes current agent fields without preserving unknown persisted fields', async () => {
       const filePath = path.join(tmpDir, 'chats.json');
       await fs.writeFile(filePath, JSON.stringify({
-        version: 1,
+        version: 2,
         sessions: {
           c1: {
             agentId: 'claude',
@@ -96,6 +96,36 @@ describe('ChatRegistry', () => {
       expect(persisted.sessions.c1.agentId).toBe('claude');
       expect(persisted.sessions.c1.agentSessionId).toBe('native-1');
       expect(persisted.sessions.c1.unexpected).toBeUndefined();
+    });
+
+    it('migrates legacy persisted provider fields to current agent fields', async () => {
+      const filePath = path.join(tmpDir, 'chats.json');
+      await fs.writeFile(filePath, JSON.stringify({
+        version: 1,
+        sessions: {
+          c1: {
+            provider: 'claude',
+            providerSessionId: 'native-1',
+            nativePath: '/tmp/native-1.jsonl',
+            projectPath: '/p',
+            model: 'opus',
+          },
+        },
+      }));
+
+      const fresh = new ChatRegistry(tmpDir);
+      await fresh.init();
+
+      const entry = fresh.getChat('c1');
+      expect(entry?.agentId).toBe('claude');
+      expect(entry?.agentSessionId).toBe('native-1');
+
+      const persisted = JSON.parse(await fs.readFile(filePath, 'utf8'));
+      expect(persisted.version).toBe(2);
+      expect(persisted.sessions.c1.agentId).toBe('claude');
+      expect(persisted.sessions.c1.agentSessionId).toBe('native-1');
+      expect(persisted.sessions.c1.provider).toBeUndefined();
+      expect(persisted.sessions.c1.providerSessionId).toBeUndefined();
     });
   });
 
@@ -239,7 +269,7 @@ describe('ChatRegistry', () => {
 
     it('normalizes invalid persisted mode values on init', async () => {
       await fs.writeFile(path.join(tmpDir, 'chats.json'), JSON.stringify({
-        version: 1,
+        version: 2,
         sessions: {
           c1: {
             agentId: 'claude',
@@ -261,6 +291,54 @@ describe('ChatRegistry', () => {
       expect(fresh.getChat('c1')?.permissionMode).toBe('default');
       expect(fresh.getChat('c1')?.thinkingMode).toBe('none');
       expect(fresh.getChat('c1')?.claudeThinkingMode).toBe('auto');
+    });
+
+    it('recovers missing agentSessionId from artificial native paths during migration', async () => {
+      await fs.writeFile(path.join(tmpDir, 'chats.json'), JSON.stringify({
+        version: 1,
+        sessions: {
+          c1: {
+            agentId: 'amp',
+            nativePath: '!amp:amp-thread-1',
+            projectPath: '/p',
+            tags: [],
+            model: 'default',
+          },
+        },
+      }, null, 2), 'utf8');
+
+      const fresh = new ChatRegistry(tmpDir);
+      await fresh.init();
+
+      expect(fresh.getChat('c1')?.agentSessionId).toBe('amp-thread-1');
+      const changed = await fresh.reconcileSessions(async () => '/should-not-be-used');
+      expect(changed).toBe(false);
+      expect(fresh.getChat('c1')?.nativePath).toBe('!amp:amp-thread-1');
+    });
+
+    it('recovers missing agentSessionId from jsonl native paths during migration', async () => {
+      const nativePath = path.join(tmpDir, 'native-1.jsonl');
+      await fs.writeFile(nativePath, '', 'utf8');
+      await fs.writeFile(path.join(tmpDir, 'chats.json'), JSON.stringify({
+        version: 1,
+        sessions: {
+          c1: {
+            agentId: 'claude',
+            nativePath,
+            projectPath: '/p',
+            tags: [],
+            model: 'opus',
+          },
+        },
+      }, null, 2), 'utf8');
+
+      const fresh = new ChatRegistry(tmpDir);
+      await fresh.init();
+
+      expect(fresh.getChat('c1')?.agentSessionId).toBe('native-1');
+      const changed = await fresh.reconcileSessions(async () => '/should-not-be-used');
+      expect(changed).toBe(false);
+      expect(fresh.getChat('c1')?.nativePath).toBe(nativePath);
     });
   });
 

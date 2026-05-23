@@ -16,9 +16,12 @@ import {
 } from '../../common/chat-modes.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentName } from "../agents/session-types.js";
-import { isArtificialNativePath } from './artificial-native-path.js';
+import { isArtificialNativePath, parseArtificialNativePath } from './artificial-native-path.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 
+const CHAT_REGISTRY_VERSION = 2;
+const LEGACY_AGENT_ID_FIELD = 'provider';
+const LEGACY_AGENT_SESSION_ID_FIELD = 'providerSessionId';
 const NATIVE_PATH_LRU_MAX = 64;
 const ALLOWED_PATCH_FIELDS = [
   'agentId',
@@ -103,7 +106,7 @@ export interface IChatRegistry {
 }
 
 function createEmptyRegistry(): ChatRegistrySnapshot {
-  return { version: 1, sessions: {} };
+  return { version: CHAT_REGISTRY_VERSION, sessions: {} };
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -144,6 +147,47 @@ function normalizeNullableString(value: unknown): string | null {
 function normalizeAgentId(rawEntry: Record<string, unknown>): AgentName {
   const value = rawEntry.agentId;
   return typeof value === 'string' ? value as AgentName : '';
+}
+
+function migratePersistedChatEntry(rawEntry: Record<string, unknown>): {
+  entry: Record<string, unknown>;
+  migrated: boolean;
+} {
+  const entry = { ...rawEntry };
+  let migrated = LEGACY_AGENT_ID_FIELD in rawEntry || LEGACY_AGENT_SESSION_ID_FIELD in rawEntry;
+
+  const legacyAgentId = rawEntry[LEGACY_AGENT_ID_FIELD];
+  if (typeof entry.agentId !== 'string' && typeof legacyAgentId === 'string') {
+    entry.agentId = legacyAgentId;
+    migrated = true;
+  }
+
+  if (typeof entry.agentSessionId !== 'string') {
+    const recoveredAgentSessionId = recoverAgentSessionId(rawEntry, normalizeAgentId(entry));
+    if (recoveredAgentSessionId) {
+      entry.agentSessionId = recoveredAgentSessionId;
+      migrated = true;
+    }
+  }
+
+  return { entry, migrated };
+}
+
+function recoverAgentSessionId(rawEntry: Record<string, unknown>, agentId: AgentName): string | null {
+  const legacySessionId = rawEntry[LEGACY_AGENT_SESSION_ID_FIELD];
+  if (typeof legacySessionId === 'string' && legacySessionId) return legacySessionId;
+
+  const nativePath = normalizeNullableString(rawEntry.nativePath);
+  if (!nativePath) return null;
+
+  const artificial = parseArtificialNativePath(nativePath);
+  if (artificial && (!agentId || artificial.agentId === agentId)) {
+    return artificial.agentSessionId;
+  }
+
+  if (path.extname(nativePath) !== '.jsonl') return null;
+  const basename = path.basename(nativePath, '.jsonl');
+  return basename || null;
 }
 
 function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegistryEntry {
@@ -202,14 +246,20 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         return this.#registry;
       }
       const sessions: Record<string, ChatRegistryEntry> = {};
+      let migrated = parsed.version !== CHAT_REGISTRY_VERSION;
       for (const [chatId, rawEntry] of Object.entries(parsed.sessions)) {
         if (!isObjectRecord(rawEntry)) continue;
-        sessions[chatId] = normalizeChatRegistryEntry(rawEntry);
+        const migratedEntry = migratePersistedChatEntry(rawEntry);
+        sessions[chatId] = normalizeChatRegistryEntry(migratedEntry.entry);
+        migrated = migrated || migratedEntry.migrated;
       }
       this.#registry = {
-        version: typeof parsed.version === 'number' ? parsed.version : 1,
+        version: CHAT_REGISTRY_VERSION,
         sessions,
       };
+      if (migrated) {
+        await this.saveRegistry(this.#registry);
+      }
       return this.#registry;
     } catch (error: unknown) {
       const errno = error as NodeJS.ErrnoException;
