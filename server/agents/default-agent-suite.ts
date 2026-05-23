@@ -48,7 +48,7 @@ export const coreAgentModules = [
   },
 ] satisfies readonly AgentModule[];
 
-export const optionalAgentModules = [
+export const integratedAgentModules = [
   {
     id: 'direct-openai-responses-compatible',
     createAgent: (context) => createDirectOpenAiResponsesAgent(context.apiProviderReader),
@@ -85,7 +85,7 @@ export const optionalAgentModules = [
 
 export const defaultAgentModules = [
   ...coreAgentModules,
-  ...optionalAgentModules,
+  ...integratedAgentModules,
 ] satisfies readonly AgentModule[];
 
 export function createDefaultAgents(
