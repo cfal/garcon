@@ -121,11 +121,7 @@ function createRouteAgent(sessionOverrides = {}) {
     modelSupportsImages: mock(() => Promise.resolve(true)),
     runSingleQuery: mock(() => Promise.resolve('title')),
     resolvePermission: mock(() => undefined),
-    setPermissionMode: mock(() => Promise.resolve(undefined)),
-    setThinkingMode: mock(() => Promise.resolve(undefined)),
-    setClaudeThinkingMode: mock(() => Promise.resolve(undefined)),
-    setAmpAgentMode: mock(() => Promise.resolve(undefined)),
-    setModel: mock(() => Promise.resolve(undefined)),
+    updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
   const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
   return { sessions, registry, settings, queue, pathCache, metadata, historyCache, agents, routes };
@@ -390,11 +386,7 @@ describe('REST chat command routes', () => {
       claudeThinkingMode: 'auto',
       ampAgentMode: 'smart',
     });
-    expect(agent.agents.setPermissionMode).toHaveBeenCalledWith('123', 'default');
-    expect(agent.agents.setThinkingMode).toHaveBeenCalledWith('123', 'think-hard');
-    expect(agent.agents.setClaudeThinkingMode).toHaveBeenCalledWith('123', 'auto');
-    expect(agent.agents.setAmpAgentMode).toHaveBeenCalledWith('123', 'smart');
-    expect(agent.registry.updateChat).toHaveBeenCalledWith('123', expect.objectContaining({
+    expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith('123', expect.objectContaining({
       permissionMode: 'default',
       thinkingMode: 'think-hard',
       claudeThinkingMode: 'auto',
@@ -426,10 +418,11 @@ describe('REST chat command routes', () => {
       modelEndpointId: 'endpoint',
       modelProtocol: 'openai-compatible',
     });
-    expect(agent.agents.setModel).toHaveBeenCalledWith('123', 'endpoint:model-a', {
+    expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith('123', expect.objectContaining({
+      model: 'endpoint:model-a',
       apiProviderId: 'provider-1',
       modelEndpointId: 'endpoint',
-    });
+    }));
     expect(agent.registry.updateChat).toHaveBeenCalledWith('123', expect.objectContaining({
       model: 'endpoint:model-a',
       apiProviderId: 'provider-1',

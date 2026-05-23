@@ -8,6 +8,7 @@ import {
 import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, PI_MODELS } from '../../common/models.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { Agent, AgentModelQuery } from './types.js';
+import type { AgentDirectory } from './directory.js';
 
 const STATIC_AGENT_MODELS: Record<string, { defaultModel: string; models: AgentModelOption[] }> = {
   claude: { defaultModel: CLAUDE_MODELS.DEFAULT, models: CLAUDE_MODELS.OPTIONS },
@@ -53,12 +54,12 @@ function defaultModelForAgent(id: string, nativeModels: AgentModelOption[], endp
 
 export class AgentCatalogService {
   constructor(private readonly deps: {
-    agents: Map<string, Agent>;
+    directory: AgentDirectory;
     endpointResolver: ApiProviderEndpointResolver;
   }) {}
 
   async getModels(agentId: string, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
-    const getModels = this.deps.agents.get(agentId)?.capabilities.getModels;
+    const getModels = this.deps.directory.get(agentId)?.capabilities.getModels;
     if (getModels) return getModels(query);
     return [];
   }
@@ -82,7 +83,7 @@ export class AgentCatalogService {
   }
 
   async getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}): Promise<AgentCatalogEntry | null> {
-    const agent = this.deps.agents.get(agentId);
+    const agent = this.deps.directory.get(agentId);
     if (!agent || !isVisibleAgentId(agentId)) return null;
     const endpointModels = this.deps.endpointResolver.getModelOptions(agentId as AgentId);
     const nativeModels = await nativeModelsForAgent(agentId, agent, query);
@@ -104,7 +105,7 @@ export class AgentCatalogService {
   }
 
   async getAgentCatalogEntries(): Promise<AgentCatalogEntry[]> {
-    return (await Promise.all(Array.from(this.deps.agents.keys()).map((id) => this.getAgentCatalogEntry(id))))
+    return (await Promise.all(this.deps.directory.list().map((agent) => this.getAgentCatalogEntry(agent.id))))
       .filter((entry): entry is AgentCatalogEntry => Boolean(entry));
   }
 }

@@ -18,7 +18,7 @@ import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { getProjectBasePath, getWorkspaceDir } from '../config.js';
 import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
 import { CommandLedger, type CommandLedgerRecord } from '../commands/command-ledger.js';
-import type { RunAgentTurnOptions } from "../agents/session-types.js";
+import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
 import {
   ChatCommandService,
   CommandValidationError,
@@ -101,11 +101,7 @@ interface AgentRegistryDep {
   modelSupportsImages(input: { agentId: string; model: string; apiProviderId?: string | null; modelEndpointId?: string | null }): Promise<boolean>;
   runSingleQuery(prompt: string, opts?: Record<string, unknown>): Promise<string>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
-  setPermissionMode(chatId: string, mode: import('../../common/chat-modes.js').PermissionMode): Promise<void>;
-  setThinkingMode(chatId: string, mode: import('../../common/chat-modes.js').ThinkingMode): Promise<void>;
-  setClaudeThinkingMode(chatId: string, mode: import('../../common/chat-modes.js').ClaudeThinkingMode): Promise<void>;
-  setAmpAgentMode(chatId: string, mode: import('../../common/chat-modes.js').AmpAgentMode): Promise<void>;
-  setModel(chatId: string, model: string, metadata?: { apiProviderId?: string | null; modelEndpointId?: string | null }): Promise<void>;
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<unknown>;
 }
 
 interface PendingInputsDep {
@@ -1102,24 +1098,20 @@ export default function createChatRoutes(
       const body = await parseJsonBody(request) as ExecutionSettingsPatchRequest & Record<string, unknown>;
       const chatId = requireStringField(body, 'chatId');
       if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-      const patch: Record<string, unknown> = {};
+      const patch: AgentSessionSettingsPatch = {};
       if (body.permissionMode !== undefined) {
         patch.permissionMode = normalizePermissionMode(body.permissionMode);
-        await agents.setPermissionMode(chatId, patch.permissionMode as never);
       }
       if (body.thinkingMode !== undefined) {
         patch.thinkingMode = normalizeThinkingMode(body.thinkingMode);
-        await agents.setThinkingMode(chatId, patch.thinkingMode as never);
       }
       if (body.claudeThinkingMode !== undefined) {
         patch.claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);
-        await agents.setClaudeThinkingMode(chatId, patch.claudeThinkingMode as never);
       }
       if (body.ampAgentMode !== undefined) {
         patch.ampAgentMode = normalizeAmpAgentMode(body.ampAgentMode);
-        await agents.setAmpAgentMode(chatId, patch.ampAgentMode as never);
       }
-      if (Object.keys(patch).length > 0) await registry.updateChat(chatId, patch);
+      if (Object.keys(patch).length > 0) await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
       if ((error as Error).message === 'Malformed JSON') return jsonError('Malformed JSON', 400);
@@ -1136,15 +1128,11 @@ export default function createChatRoutes(
       const apiProviderId = optionalStringOrNull(body.apiProviderId);
       const modelEndpointId = optionalStringOrNull(body.modelEndpointId);
       const modelProtocol = optionalStringOrNull(body.modelProtocol);
-      const metadataForProvider = apiProviderId !== undefined || modelEndpointId !== undefined
-        ? { apiProviderId, modelEndpointId }
-        : undefined;
-      await agents.setModel(chatId, model, metadataForProvider);
-      const patch: Record<string, unknown> = { model };
+      const patch: AgentSessionSettingsPatch = { model };
       if (apiProviderId !== undefined) patch.apiProviderId = apiProviderId;
       if (modelEndpointId !== undefined) patch.modelEndpointId = modelEndpointId;
-      if (modelProtocol !== undefined) patch.modelProtocol = modelProtocol;
-      await registry.updateChat(chatId, patch);
+      if (modelProtocol !== undefined) patch.modelProtocol = modelProtocol as AgentSessionSettingsPatch['modelProtocol'];
+      await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
       if ((error as Error).message === 'Malformed JSON') return jsonError('Malformed JSON', 400);

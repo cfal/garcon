@@ -55,6 +55,27 @@ export interface AgentEventMetadata {
   upstreamRequestId?: string;
 }
 
+export interface AgentSessionSettingsPatch {
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
+  ampAgentMode?: AmpAgentMode;
+  model?: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+}
+
+export class UnsupportedAgentSettingError extends Error {
+  constructor(
+    readonly agentId: string,
+    readonly setting: keyof AgentSessionSettingsPatch,
+  ) {
+    super(`${agentId} does not support live setting: ${setting}`);
+    this.name = 'UnsupportedAgentSettingError';
+  }
+}
+
 // Request to start a new agent session.
 export interface StartSessionRequest extends AgentExecutionConfig {
   command: string;

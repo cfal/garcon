@@ -11,6 +11,7 @@ import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } f
 import type {
   AgentChatEntry,
   AgentEventMetadata,
+  AgentSessionSettingsPatch,
   StartSessionRequest,
   StartedAgentSession,
   RunAgentTurnOptions,
@@ -28,6 +29,7 @@ import {
 import type { ApiProtocol } from "../../common/api-providers.js";
 import type { AgentModelQuery } from './types.js';
 import { AgentCatalogService } from './catalog-service.js';
+import { AgentDirectory } from './directory.js';
 
 function requireChatEntry(chatId: string, entry: AgentChatEntry | null | undefined): AgentChatEntry & {
   projectPath: string;
@@ -81,9 +83,18 @@ function mergeRuntimeConfig<T extends Record<string, unknown>>(
   return Object.assign(target, runtimeConfig);
 }
 
+function liveSessionSettingsPatch(patch: AgentSessionSettingsPatch): AgentSessionSettingsPatch {
+  const live: AgentSessionSettingsPatch = {};
+  if (patch.permissionMode !== undefined) live.permissionMode = patch.permissionMode;
+  if (patch.thinkingMode !== undefined) live.thinkingMode = patch.thinkingMode;
+  if (patch.claudeThinkingMode !== undefined) live.claudeThinkingMode = patch.claudeThinkingMode;
+  if (patch.ampAgentMode !== undefined) live.ampAgentMode = patch.ampAgentMode;
+  return live;
+}
+
 export class AgentRegistry {
   #registry: IChatRegistry;
-  #agents = new Map<string, Agent>();
+  #directory: AgentDirectory;
   #endpointResolver: ApiProviderEndpointResolver;
   #catalog: AgentCatalogService;
   #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
@@ -95,40 +106,35 @@ export class AgentRegistry {
   }) {
     this.#registry = args.registry;
     this.#endpointResolver = args.endpointResolver;
-
-    for (const agent of args.agents) {
-      this.#agents.set(agent.id, agent);
-    }
+    this.#directory = new AgentDirectory(args.agents);
     this.#catalog = new AgentCatalogService({
-      agents: this.#agents,
+      directory: this.#directory,
       endpointResolver: this.#endpointResolver,
     });
   }
 
   hasAgent(agentId: string): boolean {
-    return this.#agents.has(agentId);
+    return this.#directory.has(agentId);
   }
 
   supportsFork(agentId: string): boolean {
-    return this.#agents.get(agentId)?.capabilities.supportsFork ?? false;
+    return this.#directory.get(agentId)?.capabilities.supportsFork ?? false;
   }
 
   supportsImages(agentId: string): boolean {
-    return this.#agents.get(agentId)?.capabilities.supportsImages ?? false;
+    return this.#directory.get(agentId)?.capabilities.supportsImages ?? false;
   }
 
   acceptsApiProviderEndpoints(agentId: string): boolean {
-    return this.#agents.get(agentId)?.capabilities.acceptsApiProviderEndpoints ?? false;
+    return this.#directory.get(agentId)?.capabilities.acceptsApiProviderEndpoints ?? false;
   }
 
   supportedProtocols(agentId: string): ApiProtocol[] {
-    return this.#agents.get(agentId)?.capabilities.supportedProtocols ?? [];
+    return this.#directory.get(agentId)?.capabilities.supportedProtocols ?? [];
   }
 
   #agentFor(agentId: string): Agent {
-    const agent = this.#agents.get(agentId);
-    if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
-    return agent;
+    return this.#directory.require(agentId);
   }
 
   #endpointRuntimeConfig(agent: Agent, selection: ResolvedModelSelection): AgentEndpointRuntimeConfig {
@@ -285,7 +291,7 @@ export class AgentRegistry {
     const entry = this.#registry.getChat(chatId);
     const agentSessionId = entry?.agentSessionId;
     if (!agentSessionId) return false;
-    const agent = this.#agents.get(entry.agentId);
+    const agent = this.#directory.get(entry.agentId);
     if (!agent) return false;
     return agent.runtime.abort(agentSessionId);
   }
@@ -298,7 +304,7 @@ export class AgentRegistry {
 
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {
     if (!agentSessionId) return false;
-    const agent = this.#agents.get(agentId);
+    const agent = this.#directory.get(agentId);
     if (!agent) return false;
     return agent.runtime.isRunning(agentSessionId);
   }
@@ -315,15 +321,15 @@ export class AgentRegistry {
         .filter((e): e is NonNullable<typeof e> => Boolean(e));
 
     const result: Record<string, Array<{ id: string;[key: string]: unknown }>> = {};
-    for (const [agentId, agent] of this.#agents.entries()) {
-      result[agentId] = mapToChatId(agent.runtime.getRunningSessions());
+    for (const agent of this.#directory.list()) {
+      result[agent.id] = mapToChatId(agent.runtime.getRunningSessions());
     }
     return result;
   }
 
   getRunningSessionCount(): number {
     let total = 0;
-    for (const agent of this.#agents.values()) {
+    for (const agent of this.#directory.list()) {
       total += agent.runtime.getRunningSessions().length;
     }
     return total;
@@ -338,7 +344,7 @@ export class AgentRegistry {
       return;
     }
 
-    const agent = this.#agents.get(chat.agentId);
+    const agent = this.#directory.get(chat.agentId);
     if (agent?.runtime.resolvePermission) {
       Promise.resolve(agent.runtime.resolvePermission(permissionRequestId, decision)).catch((err: Error) => {
         console.warn(`agents: ${chat.agentId} permission reply failed:`, err.message);
@@ -354,7 +360,7 @@ export class AgentRegistry {
     sourceChatId: string;
     targetChatId: string;
   }): Promise<StartedAgentSession | null> {
-    const agent = this.#agents.get(args.sourceSession.agentId);
+    const agent = this.#directory.get(args.sourceSession.agentId);
     if (!agent?.forkSession) return null;
     const source = requireChatEntry(args.sourceChatId, args.sourceSession);
     const selection = this.#endpointResolver.resolveSelection({
@@ -375,58 +381,37 @@ export class AgentRegistry {
     });
   }
 
-  async setPermissionMode(chatId: string, mode: PermissionMode): Promise<void> {
+  async updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry> {
     const entry = this.#registry.getChat(chatId);
-    const agentSessionId = entry?.agentSessionId;
-    if (!agentSessionId) return;
-    await this.#agents.get(entry.agentId)?.runtime.setPermissionMode?.(agentSessionId, mode);
-  }
+    if (!entry) throw new Error(`Session not found: ${chatId}`);
 
-  async setThinkingMode(chatId: string, mode: ThinkingMode): Promise<void> {
-    const entry = this.#registry.getChat(chatId);
-    const agentSessionId = entry?.agentSessionId;
-    if (!agentSessionId) return;
-    await this.#agents.get(entry.agentId)?.runtime.setThinkingMode?.(agentSessionId, mode);
-  }
+    if (patch.model !== undefined || patch.apiProviderId !== undefined || patch.modelEndpointId !== undefined) {
+      const previous = this.#endpointResolver.resolveSelection({
+        agentId: entry.agentId,
+        model: entry.model,
+        apiProviderId: entry.apiProviderId,
+        modelEndpointId: entry.modelEndpointId,
+      });
+      const next = this.#endpointResolver.resolveSelection({
+        agentId: entry.agentId,
+        model: patch.model ?? entry.model,
+        apiProviderId: patch.apiProviderId !== undefined ? patch.apiProviderId : entry.apiProviderId,
+        modelEndpointId: patch.modelEndpointId !== undefined ? patch.modelEndpointId : entry.modelEndpointId,
+      });
+      assertSameApiProviderBoundary(previous, next);
+    }
 
-  async setClaudeThinkingMode(chatId: string, mode: ClaudeThinkingMode): Promise<void> {
-    const entry = this.#registry.getChat(chatId);
-    const agentSessionId = entry?.agentSessionId;
-    if (!agentSessionId) return;
-    await this.#agents.get(entry.agentId)?.runtime.setClaudeThinkingMode?.(agentSessionId, mode);
-  }
+    const livePatch = liveSessionSettingsPatch(patch);
+    if (entry.agentSessionId && Object.keys(livePatch).length > 0) {
+      await this.#directory.get(entry.agentId)?.runtime.updateSessionSettings?.(entry.agentSessionId, livePatch);
+    }
 
-  async setAmpAgentMode(chatId: string, mode: AmpAgentMode): Promise<void> {
-    const entry = this.#registry.getChat(chatId);
-    const agentSessionId = entry?.agentSessionId;
-    if (!agentSessionId) return;
-    await this.#agents.get(entry.agentId)?.runtime.setAmpAgentMode?.(agentSessionId, mode);
-  }
-
-  async setModel(chatId: string, model: string, metadata: {
-    apiProviderId?: string | null;
-    modelEndpointId?: string | null;
-  } = {}): Promise<void> {
-    const entry = this.#registry.getChat(chatId);
-    if (!entry) return;
-    const previous = this.#endpointResolver.resolveSelection({
-      agentId: entry.agentId,
-      model: entry.model,
-      apiProviderId: entry.apiProviderId,
-      modelEndpointId: entry.modelEndpointId,
-    });
-    const next = this.#endpointResolver.resolveSelection({
-      agentId: entry.agentId,
-      model,
-      apiProviderId: metadata.apiProviderId !== undefined ? metadata.apiProviderId : entry.apiProviderId,
-      modelEndpointId: metadata.modelEndpointId !== undefined ? metadata.modelEndpointId : entry.modelEndpointId,
-    });
-    assertSameApiProviderBoundary(previous, next);
+    return this.#registry.updateChat(chatId, patch) ?? entry;
   }
 
   async runSingleQuery(prompt: string, options: { agentId?: string;[key: string]: unknown } = {}): Promise<string> {
     const { agentId = 'claude', ...rest } = options;
-    const agent = this.#agents.get(agentId);
+    const agent = this.#directory.get(agentId);
     if (agent?.runSingleQuery) {
       const model = typeof rest.model === 'string' ? rest.model : '';
       if (model) {
@@ -447,14 +432,14 @@ export class AgentRegistry {
 
   async getPreview(session: AgentChatEntry | null): Promise<unknown> {
     if (!session?.agentId) return null;
-    const agent = this.#agents.get(session.agentId);
+    const agent = this.#directory.get(session.agentId);
     if (!agent?.transcript.getPreview) return null;
     return agent.transcript.getPreview(session);
   }
 
   async loadMessages(session: AgentChatEntry | null, chatId?: string): Promise<unknown[]> {
     if (!session?.agentId) return [];
-    const agent = this.#agents.get(session.agentId);
+    const agent = this.#directory.get(session.agentId);
     if (!agent) return [];
     return agent.transcript.loadMessages(session, { chatId });
   }
@@ -474,7 +459,7 @@ export class AgentRegistry {
 
   async resolveNativePath(session: AgentChatEntry): Promise<string | null> {
     if (!session.agentSessionId) return null;
-    const agent = this.#agents.get(session.agentId);
+    const agent = this.#directory.get(session.agentId);
     if (!agent?.transcript.resolveNativePath) return null;
     return agent.transcript.resolveNativePath(session);
   }
@@ -484,7 +469,7 @@ export class AgentRegistry {
     alreadyRunning: boolean;
     deviceAuth?: { url: string; code: string };
   }> {
-    const agent = this.#agents.get(agentId);
+    const agent = this.#directory.get(agentId);
     if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
     if (!agent.capabilities.authLoginSupported || !agent.auth.launchLogin) {
       throw new Error(`Auth login is not supported for agent: ${agentId}`);
@@ -493,14 +478,14 @@ export class AgentRegistry {
   }
 
   async getAgentAuthStatus(agentId: string): Promise<unknown | null> {
-    const agent = this.#agents.get(agentId);
+    const agent = this.#directory.get(agentId);
     if (!agent) return null;
     return agent.auth.getAuthStatus();
   }
 
   async getAgentAuthStatusMap(): Promise<Record<string, unknown>> {
     const authEntries = await Promise.all(
-      Array.from(this.#agents.values()).map(async (agent) => [agent.id, await agent.auth.getAuthStatus()] as const),
+      this.#directory.list().map(async (agent) => [agent.id, await agent.auth.getAuthStatus()] as const),
     );
     return Object.fromEntries(authEntries);
   }
@@ -513,7 +498,8 @@ export class AgentRegistry {
   }>> {
     const auth = await this.getAgentAuthStatusMap();
     const result: Record<string, { ready: boolean; nativeReady: boolean; endpointReady: boolean; reason: string }> = {};
-    for (const [agentId, agent] of this.#agents.entries()) {
+    for (const agent of this.#directory.list()) {
+      const agentId = agent.id;
       if (!isVisibleAgentId(agentId)) continue;
       const endpointReady = agent.capabilities.acceptsApiProviderEndpoints
         && this.#catalog.hasEndpointModels(agentId);
@@ -533,19 +519,19 @@ export class AgentRegistry {
   }
 
   startPurgeTimers(): void {
-    for (const agent of this.#agents.values()) {
+    for (const agent of this.#directory.list()) {
       agent.runtime.startPurgeTimer?.();
     }
   }
 
   shutdown(): void {
-    for (const agent of this.#agents.values()) {
+    for (const agent of this.#directory.list()) {
       agent.runtime.shutdown?.();
     }
   }
 
   onMessages(cb: (chatId: string, messages: unknown[], metadata?: TurnEventMetadata) => void): void {
-    for (const agent of this.#agents.values()) {
+    for (const agent of this.#directory.list()) {
       agent.runtime.onMessages((chatId, messages, eventMetadata) => {
         cb(chatId, messages, mergeTurnEventMetadata(this.#turnMetadataByChatId.get(chatId), eventMetadata));
       });
@@ -553,19 +539,19 @@ export class AgentRegistry {
   }
 
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void {
-    for (const agent of this.#agents.values()) {
+    for (const agent of this.#directory.list()) {
       agent.runtime.onProcessing(cb);
     }
   }
 
   onSessionCreated(cb: (chatId: string) => void): void {
-    for (const agent of this.#agents.values()) {
+    for (const agent of this.#directory.list()) {
       agent.runtime.onSessionCreated(cb);
     }
   }
 
   onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void {
-    for (const agent of this.#agents.values()) {
+    for (const agent of this.#directory.list()) {
       agent.runtime.onFinished((chatId, exitCode, eventMetadata) => {
         const metadata = mergeTurnEventMetadata(this.#turnMetadataByChatId.get(chatId), eventMetadata);
         cb(chatId, exitCode, metadata);
@@ -575,7 +561,7 @@ export class AgentRegistry {
   }
 
   onFailed(cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void): void {
-    for (const agent of this.#agents.values()) {
+    for (const agent of this.#directory.list()) {
       agent.runtime.onFailed((chatId, errorMessage) => {
         const metadata = this.#turnMetadataByChatId.get(chatId);
         cb(chatId, errorMessage, metadata);

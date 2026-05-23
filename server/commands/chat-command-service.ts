@@ -18,7 +18,7 @@ interface QueueDep {
   submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   registerPendingUserInput?(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   appendUserMessage?(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  runAcceptedTurn?(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
 }
 
 interface SubmitRunInput {
@@ -214,7 +214,11 @@ export class ChatCommandService {
   }
 
   #runAcceptedTurn(ledgerKey: string, chatId: string, command: string, options: RunAgentTurnOptions): void {
-    void this.deps.queue.runAcceptedTurn(chatId, command, options)
+    const runAcceptedTurn = this.deps.queue.runAcceptedTurn;
+    if (!runAcceptedTurn) {
+      throw new CommandValidationError('INTERNAL_ERROR', 'Queue turn runner is not configured', 500, true);
+    }
+    void runAcceptedTurn.call(this.deps.queue, chatId, command, options)
       .then(() => this.#requireLedger().update(ledgerKey, { status: 'finished' }))
       .catch((error: Error) => {
         console.error('commands: run failed:', error.message);

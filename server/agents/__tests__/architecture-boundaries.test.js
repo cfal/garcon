@@ -140,9 +140,14 @@ describe('agent architecture boundaries', () => {
   test('keeps the public agent contract faceted without extra driver interfaces', () => {
     const source = readFileSync('server/agents/types.ts', 'utf8');
     expect(source).toContain('export interface AgentRuntime');
+    expect(source).toContain('updateSessionSettings?');
     expect(source).toContain('export interface AgentTranscriptSource');
     expect(source).toContain('export interface AgentAuth');
     expect(source).toContain('export interface AgentCapabilities');
     expect(source).not.toMatch(/Agent(?:RuntimeModeControls|AuthDriver|CapabilityDriver)/);
+    expect(source).not.toContain('setPermissionMode?');
+    expect(source).not.toContain('setThinkingMode?');
+    expect(source).not.toContain('setClaudeThinkingMode?');
+    expect(source).not.toContain('setAmpAgentMode?');
   });
 });

@@ -16,11 +16,7 @@ import { sendWebSocketJson } from '../utils.js';
 const mockAgents = {
   getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [], 'direct-openai-responses-compatible': [] })),
   resolvePermission: mock(() => undefined),
-  setPermissionMode: mock(() => Promise.resolve(undefined)),
-  setThinkingMode: mock(() => Promise.resolve(undefined)),
-  setClaudeThinkingMode: mock(() => Promise.resolve(undefined)),
-  setAmpAgentMode: mock(() => Promise.resolve(undefined)),
-  setModel: mock(() => Promise.resolve(undefined)),
+  updateSessionSettings: mock(() => Promise.resolve(undefined)),
   supportsFork: mock(() => true),
   isAgentSessionRunning: mock(() => false),
 };
@@ -71,8 +67,7 @@ const mockForkDeps = {
 
 const injectedMocks = [
   mockAgents.getRunningSessions, mockAgents.resolvePermission,
-  mockAgents.setPermissionMode, mockAgents.setThinkingMode,
-  mockAgents.setClaudeThinkingMode, mockAgents.setModel,
+  mockAgents.updateSessionSettings,
   mockAgents.supportsFork,
   mockAgents.isAgentSessionRunning,
   mockRegistry.getChat, mockRegistry.updateChat,
@@ -489,14 +484,13 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('permission-mode-set', () => {
-    it('calls setPermissionMode and persists to registry', async () => {
+    it('applies a typed permission mode patch', async () => {
       await chatHandler.message(ws, {
         type: 'permission-mode-set',
         chatId: '123',
         mode: 'bypassPermissions',
       });
-      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { permissionMode: 'bypassPermissions' });
-      expect(mockAgents.setPermissionMode).toHaveBeenCalledWith('123', 'bypassPermissions');
+      expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', { permissionMode: 'bypassPermissions' });
     });
 
     it('ignores non-string mode values', async () => {
@@ -505,20 +499,18 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
         mode: 42,
       });
-      expect(mockRegistry.updateChat).not.toHaveBeenCalled();
-      expect(mockAgents.setPermissionMode).not.toHaveBeenCalled();
+      expect(mockAgents.updateSessionSettings).not.toHaveBeenCalled();
     });
   });
 
   describe('thinking-mode-set', () => {
-    it('persists thinking mode to registry and agent session', async () => {
+    it('applies a typed thinking mode patch', async () => {
       await chatHandler.message(ws, {
         type: 'thinking-mode-set',
         chatId: '123',
         mode: 'think-hard',
       });
-      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { thinkingMode: 'think-hard' });
-      expect(mockAgents.setThinkingMode).toHaveBeenCalledWith('123', 'think-hard');
+      expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', { thinkingMode: 'think-hard' });
     });
 
     it('sends error for missing chatId', async () => {
@@ -536,20 +528,18 @@ describe('chat WebSocket handler', () => {
         type: 'thinking-mode-set',
         chatId: '123',
       });
-      expect(mockRegistry.updateChat).not.toHaveBeenCalled();
-      expect(mockAgents.setThinkingMode).not.toHaveBeenCalled();
+      expect(mockAgents.updateSessionSettings).not.toHaveBeenCalled();
     });
   });
 
   describe('claude-thinking-mode-set', () => {
-	it('persists Claude thinking mode to registry and agent session', async () => {
+		it('applies a typed Claude thinking mode patch', async () => {
 	  await chatHandler.message(ws, {
 	    type: 'claude-thinking-mode-set',
 	    chatId: '123',
 	    mode: 'off',
 	  });
-	  expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { claudeThinkingMode: 'off' });
-	  expect(mockAgents.setClaudeThinkingMode).toHaveBeenCalledWith('123', 'off');
+		  expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', { claudeThinkingMode: 'off' });
 	});
 
 	it('sends error for missing chatId', async () => {
@@ -570,8 +560,7 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
         model: 'opus',
       });
-      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { model: 'opus' });
-      expect(mockAgents.setModel).toHaveBeenCalledWith('123', 'opus', undefined);
+      expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', { model: 'opus' });
     });
 
     it('updates API provider metadata when provided', async () => {
@@ -583,15 +572,11 @@ describe('chat WebSocket handler', () => {
         modelEndpointId: 'zai_openai',
         modelProtocol: 'openai-compatible',
       });
-      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+      expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', {
         model: 'zai_openai:glm-5.1',
         apiProviderId: 'zai',
         modelEndpointId: 'zai_openai',
         modelProtocol: 'openai-compatible',
-      });
-      expect(mockAgents.setModel).toHaveBeenCalledWith('123', 'zai_openai:glm-5.1', {
-        apiProviderId: 'zai',
-        modelEndpointId: 'zai_openai',
       });
     });
 
@@ -604,15 +589,11 @@ describe('chat WebSocket handler', () => {
         modelEndpointId: null,
         modelProtocol: null,
       });
-      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+      expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', {
         model: 'opus',
         apiProviderId: null,
         modelEndpointId: null,
         modelProtocol: null,
-      });
-      expect(mockAgents.setModel).toHaveBeenCalledWith('123', 'opus', {
-        apiProviderId: null,
-        modelEndpointId: null,
       });
     });
   });

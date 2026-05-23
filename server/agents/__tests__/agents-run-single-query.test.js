@@ -431,6 +431,50 @@ describe('AgentRegistry.runSingleQuery', () => {
   });
 });
 
+describe('AgentRegistry.updateSessionSettings', () => {
+  it('applies one typed patch to the live runtime and chat registry', async () => {
+    const runtime = baseRuntime({
+      updateSessionSettings: mock(() => Promise.resolve()),
+    });
+    const { registry, mockRegistry } = makeRegistry({
+      registry: {
+        getChat: mock(() => ({
+          agentId: 'test-agent',
+          agentSessionId: 'native-1',
+          projectPath: '/repo',
+          model: 'model-a',
+        })),
+        updateChat: mock((_chatId, patch) => ({ id: '1', ...patch })),
+      },
+      agents: [
+        agentFromRuntime('test-agent', 'Test Agent', runtime, {
+          supportsFork: false,
+          supportsImages: false,
+          acceptsApiProviderEndpoints: false,
+          supportedProtocols: [],
+          authLoginSupported: false,
+        }),
+      ],
+    });
+
+    await registry.updateSessionSettings('1', {
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'think-hard',
+      model: 'model-b',
+    });
+
+    expect(runtime.updateSessionSettings).toHaveBeenCalledWith('native-1', {
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'think-hard',
+    });
+    expect(mockRegistry.updateChat).toHaveBeenCalledWith('1', {
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'think-hard',
+      model: 'model-b',
+    });
+  });
+});
+
 describe('AgentRegistry catalog', () => {
   it('returns agent catalog entries', async () => {
     const endpointOption = {

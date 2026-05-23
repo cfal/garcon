@@ -1,9 +1,9 @@
 import type { ChatMessage } from "../../common/chat-types.js";
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../common/chat-modes.js";
 import type { AgentModelOption } from "../../common/agents.js";
 import type {
   AgentChatEntry,
   AgentEventMetadata,
+  AgentSessionSettingsPatch,
   CodexProviderConfig,
   ResumeTurnRequest,
   StartSessionRequest,
@@ -20,10 +20,7 @@ export interface AgentRuntime {
   abort(agentSessionId: string): boolean | Promise<boolean>;
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
-  setPermissionMode?(agentSessionId: string, mode: PermissionMode): void | Promise<void>;
-  setThinkingMode?(agentSessionId: string, mode: ThinkingMode): void | Promise<void>;
-  setClaudeThinkingMode?(agentSessionId: string, mode: ClaudeThinkingMode): void | Promise<void>;
-  setAmpAgentMode?(agentSessionId: string, mode: AmpAgentMode): void | Promise<void>;
+  updateSessionSettings?(agentSessionId: string, patch: AgentSessionSettingsPatch): void | Promise<void>;
   resolvePermission?(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> | void;
   shutdown?(): void;
   startPurgeTimer?(): ReturnType<typeof setInterval>;

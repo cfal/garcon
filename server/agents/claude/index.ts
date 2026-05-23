@@ -1,8 +1,13 @@
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
-import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
 import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude, type ClaudeCliRuntime } from './claude-cli.js';
-import type { ClaudeStartSessionRequest, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
+import type {
+  AgentSessionSettingsPatch,
+  ClaudeStartSessionRequest,
+  ResumeTurnRequest,
+  StartSessionRequest,
+  StartedAgentSession,
+} from '../session-types.js';
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { launchAgentAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
@@ -11,9 +16,7 @@ import type { Agent, AgentRuntime } from '../types.js';
 import { buildClaudeEndpointRuntime } from './endpoint-runtime.js';
 
 interface ClaudeAgentRuntime extends AgentRuntime {
-  setPermissionMode(agentSessionId: string, mode: PermissionMode): void;
-  setThinkingMode(agentSessionId: string, mode: ThinkingMode): void;
-  setClaudeThinkingMode(agentSessionId: string, mode: ClaudeThinkingMode): void;
+  updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void;
 }
 
 function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
@@ -50,14 +53,10 @@ function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
     onSessionCreated(cb) { claude.onSessionCreated(cb); },
     onFinished(cb) { claude.onFinished(cb); },
     onFailed(cb) { claude.onFailed(cb); },
-    setPermissionMode(agentSessionId, mode) {
-      claude.setInternalPermissionMode(agentSessionId, mode);
-    },
-    setThinkingMode(agentSessionId, mode) {
-      claude.setInternalThinkingMode(agentSessionId, mode);
-    },
-    setClaudeThinkingMode(agentSessionId, mode) {
-      claude.setInternalClaudeThinkingMode(agentSessionId, mode);
+    updateSessionSettings(agentSessionId, patch) {
+      if (patch.permissionMode !== undefined) claude.setInternalPermissionMode(agentSessionId, patch.permissionMode);
+      if (patch.thinkingMode !== undefined) claude.setInternalThinkingMode(agentSessionId, patch.thinkingMode);
+      if (patch.claudeThinkingMode !== undefined) claude.setInternalClaudeThinkingMode(agentSessionId, patch.claudeThinkingMode);
     },
   };
 }

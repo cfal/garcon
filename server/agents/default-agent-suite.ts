@@ -83,25 +83,15 @@ export const optionalAgentModules = [
   },
 ] satisfies readonly AgentModule[];
 
-export function getEnabledOptionalAgentIds(envValue = process.env.GARCON_OPTIONAL_AGENTS ?? ''): AgentId[] {
-  const enabled = new Set<AgentId>();
-  const available = new Set(optionalAgentModules.map((module) => module.id));
-  for (const raw of envValue.split(',')) {
-    const id = raw.trim();
-    if (available.has(id as AgentId)) enabled.add(id as AgentId);
-  }
-  return [...enabled];
-}
+export const defaultAgentModules = [
+  ...coreAgentModules,
+  ...optionalAgentModules,
+] satisfies readonly AgentModule[];
 
-export function createEnabledAgents(
+export function createDefaultAgents(
   context: AgentModuleContext,
-  options: { optionalAgents?: readonly AgentId[] } = {},
 ): Agent[] {
-  const enabledOptional = new Set(options.optionalAgents ?? []);
-  return [
-    ...coreAgentModules,
-    ...optionalAgentModules.filter((module) => enabledOptional.has(module.id)),
-  ].map((module) => module.createAgent(context));
+  return defaultAgentModules.map((module) => module.createAgent(context));
 }
 
 export function createDefaultAgentSuite(options: DefaultAgentSuiteOptions): DefaultAgentSuite {
@@ -113,8 +103,6 @@ export function createDefaultAgentSuite(options: DefaultAgentSuiteOptions): Defa
 
   return {
     codexAppServerRuntime,
-    agents: createEnabledAgents(context, {
-      optionalAgents: getEnabledOptionalAgentIds(),
-    }),
+    agents: createDefaultAgents(context),
   };
 }

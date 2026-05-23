@@ -9,7 +9,7 @@ import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
 import type { RunAgentTurnOptions } from "./agents/session-types.js";
-import { writeJsonFileAtomic } from './lib/atomic-json.js';
+import { writeJsonFileAtomic } from './lib/json-file-store.js';
 import { KeyedPromiseLock } from './lib/keyed-lock.js';
 
 function emptyQueue(): QueueState {

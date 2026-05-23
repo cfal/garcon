@@ -31,11 +31,10 @@ import {
   QueueResumeRequest,
   QueueQueryRequest,
 } from '../../common/ws-requests.ts';
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { QueueState } from '../../common/queue-state.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
-import type { RunAgentTurnOptions } from "../agents/session-types.js";
+import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
 import {
   ChatCommandService,
   queueDrainOptions,
@@ -50,14 +49,7 @@ type WS = import('bun').ServerWebSocket<unknown>;
 interface AgentRegistryDep {
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
-  setPermissionMode(chatId: string, mode: PermissionMode): Promise<void>;
-  setThinkingMode(chatId: string, mode: ThinkingMode): Promise<void>;
-  setClaudeThinkingMode(chatId: string, mode: ClaudeThinkingMode): Promise<void>;
-  setAmpAgentMode(chatId: string, mode: AmpAgentMode): Promise<void>;
-  setModel(chatId: string, model: string, metadata?: {
-    apiProviderId?: string | null;
-    modelEndpointId?: string | null;
-  }): Promise<void>;
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<unknown>;
   hasAgent(agentId: string): boolean;
   supportsFork(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
@@ -373,44 +365,31 @@ export class ChatHandler {
       } else if (data instanceof PermissionModeSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
-          await this.#registry.updateChat(chatId, { permissionMode: data.mode });
-          await this.#agents.setPermissionMode(chatId, data.mode);
+          await this.#agents.updateSessionSettings(chatId, { permissionMode: data.mode });
         }
       } else if (data instanceof ThinkingModeSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
-          await this.#registry.updateChat(chatId, { thinkingMode: data.mode });
-          await this.#agents.setThinkingMode(chatId, data.mode);
+          await this.#agents.updateSessionSettings(chatId, { thinkingMode: data.mode });
         }
       } else if (data instanceof ClaudeThinkingModeSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
-          await this.#registry.updateChat(chatId, { claudeThinkingMode: data.mode });
-          await this.#agents.setClaudeThinkingMode(chatId, data.mode);
+          await this.#agents.updateSessionSettings(chatId, { claudeThinkingMode: data.mode });
         }
       } else if (data instanceof AmpAgentModeSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
-          await this.#registry.updateChat(chatId, { ampAgentMode: data.mode });
-          await this.#agents.setAmpAgentMode(chatId, data.mode);
+          await this.#agents.updateSessionSettings(chatId, { ampAgentMode: data.mode });
         }
       } else if (data instanceof ModelSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (data.model) {
-          const metadata = data.apiProviderId !== undefined || data.modelEndpointId !== undefined
-            ? { apiProviderId: data.apiProviderId, modelEndpointId: data.modelEndpointId }
-            : undefined;
-          await this.#agents.setModel(chatId, data.model, metadata);
-          const patch: {
-            model: string;
-            apiProviderId?: string | null;
-            modelEndpointId?: string | null;
-            modelProtocol?: typeof data.modelProtocol;
-          } = { model: data.model };
+          const patch: AgentSessionSettingsPatch = { model: data.model };
           if (data.apiProviderId !== undefined) patch.apiProviderId = data.apiProviderId;
           if (data.modelEndpointId !== undefined) patch.modelEndpointId = data.modelEndpointId;
           if (data.modelProtocol !== undefined) patch.modelProtocol = data.modelProtocol;
-          await this.#registry.updateChat(chatId, patch);
+          await this.#agents.updateSessionSettings(chatId, patch);
         }
       } else if (data instanceof ChatLogQueryRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
