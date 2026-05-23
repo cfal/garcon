@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { promises as fs } from 'fs';
+import { readFileSync } from 'node:fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
@@ -49,5 +50,20 @@ describe('json file store', () => {
     await expect(store.read()).resolves.toEqual({ version: 1, records: [] });
     await fs.writeFile(filePath, JSON.stringify({ records: [{ id: 'a' }] }), 'utf8');
     await expect(store.read()).resolves.toEqual({ version: 1, records: [{ id: 'a' }] });
+  });
+
+  it('keeps JSON persistence modules on the shared atomic writer', () => {
+    for (const file of [
+      'server/auth/store.js',
+      'server/chats/store.ts',
+      'server/settings/store.js',
+      'server/chats/share-store.ts',
+      'server/chats/metadata-store.js',
+      'server/api-providers/store.ts',
+    ]) {
+      const source = readFileSync(file, 'utf8');
+      expect(source).toContain('writeJsonFileAtomic');
+      expect(source).not.toMatch(/fs\.writeFile\([^)]*JSON\.stringify/s);
+    }
   });
 });

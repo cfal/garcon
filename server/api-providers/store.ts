@@ -4,6 +4,7 @@
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import {
   apiProviderTemplate,
   type ApiProviderTemplate,
@@ -459,10 +460,6 @@ export class ApiProviderStore {
   }
 
   async #write(snapshot: ApiProviderStoreSnapshot): Promise<void> {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    const filePath = this.filePath;
-    const tmp = `${filePath}.${process.pid}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(snapshot, null, 2), { mode: 0o600 });
-    await fs.rename(tmp, filePath);
+    await writeJsonFileAtomic(this.filePath, snapshot, { mode: 0o600 });
   }
 }

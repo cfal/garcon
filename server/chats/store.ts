@@ -3,7 +3,6 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import {
   normalizeAmpAgentMode,
@@ -18,6 +17,7 @@ import {
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentName } from "../agents/session-types.js";
 import { isArtificialNativePath } from './artificial-native-path.js';
+import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 
 const NATIVE_PATH_LRU_MAX = 64;
 const ALLOWED_PATCH_FIELDS = [
@@ -413,12 +413,8 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
   }
 
   async saveRegistry(registry: ChatRegistrySnapshot): Promise<void> {
-    await fs.mkdir(this.#workspaceDir, { recursive: true });
     const target = this.#sessionsFilePath();
-    const suffix = `${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}`;
-    const tmp = path.join(this.#workspaceDir, `chats.json.tmp.${suffix}`);
-    await fs.writeFile(tmp, JSON.stringify(registry, null, 2), 'utf8');
-    await fs.rename(tmp, target);
+    await writeJsonFileAtomic(target, registry);
     this.#registry = registry;
   }
 

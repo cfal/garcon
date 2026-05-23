@@ -58,6 +58,21 @@ describe('agent architecture boundaries', () => {
     expect(source).not.toContain('discoverApiProviderModels(');
   });
 
+  test('keeps AgentRegistry as a facade over focused agent services', () => {
+    expect(existsSync('server/agents/runtime-router.ts')).toBe(true);
+    expect(existsSync('server/agents/event-bus.ts')).toBe(true);
+    expect(existsSync('server/agents/session-settings-service.ts')).toBe(true);
+
+    const source = readFileSync('server/agents/registry.ts', 'utf8');
+    expect(source).toContain('new AgentRuntimeRouter');
+    expect(source).toContain('new AgentEventBus');
+    expect(source).toContain('new AgentSessionSettingsService');
+    expect(source).not.toContain('resolveFileMentionsInCommand');
+    expect(source).not.toContain('assertSameApiProviderBoundary');
+    expect(source).not.toContain('#turnMetadataByChatId');
+    expect(source).not.toContain('liveSessionSettingsPatch');
+  });
+
   test('keeps shared agent contracts split from API provider templates', () => {
     expect(existsSync('common/providers.ts')).toBe(false);
     const source = readFileSync('common/agents.ts', 'utf8');

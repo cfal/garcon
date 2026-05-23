@@ -2,6 +2,7 @@
 // missing entries, while live appends keep latest preview text durable.
 
 import { promises as fs } from 'fs';
+import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
 
 const DEFAULT_PREVIEW_TIMEOUT_MS = 5_000;
 const DEFAULT_SAVE_DELAY_MS = 100;
@@ -193,9 +194,7 @@ export class MetadataIndex {
       version: METADATA_VERSION,
       chats: Object.fromEntries(this.#metadataByChatId),
     };
-    const tmpPath = `${this.#metadataPath}.tmp.${process.pid}.${Date.now()}`;
-    await fs.writeFile(tmpPath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
-    await fs.rename(tmpPath, this.#metadataPath);
+    await writeJsonFileAtomic(this.#metadataPath, snapshot);
   }
 }
 

@@ -7,6 +7,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
+import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
 import {
   DEFAULT_AMP_AGENT_MODE,
   DEFAULT_CLAUDE_THINKING_MODE,
@@ -266,8 +267,7 @@ export class SettingsStore extends EventEmitter {
   }
 
   async #writeToDisk(settings) {
-    await fs.mkdir(this.#workspaceDir, { recursive: true });
-    await fs.writeFile(this.#settingsPath(), JSON.stringify(settings, null, 2), 'utf8');
+    await writeJsonFileAtomic(this.#settingsPath(), settings);
   }
 
   async #readFromDisk() {
