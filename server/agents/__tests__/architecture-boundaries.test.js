@@ -16,9 +16,14 @@ describe('agent architecture boundaries', () => {
     for (const file of walk('server/acp')) {
       const source = readFileSync(file, 'utf8');
       expect(source).not.toContain('common/chat-types');
-      expect(source).not.toContain('providers/base');
-      expect(source).not.toContain('agents/');
+      expect(source).not.toContain('server/agents');
+      expect(source).not.toContain('../agents');
+      expect(source).not.toContain('api-providers');
     }
+  });
+
+  test('keeps server/providers empty', () => {
+    expect(walk('server/providers')).toEqual([]);
   });
 
   test('does not keep the transitional adapter/plugin layer', () => {
@@ -28,9 +33,27 @@ describe('agent architecture boundaries', () => {
     expect(existsSync('server/providers/agent-plugin-bridge.ts')).toBe(false);
   });
 
+  test('keeps AgentRegistry out of API provider mutation ownership', () => {
+    const source = readFileSync('server/agents/registry.ts', 'utf8');
+    expect(source).not.toContain('createApiProvider(');
+    expect(source).not.toContain('updateApiProvider(');
+    expect(source).not.toContain('deleteApiProvider(');
+    expect(source).not.toContain('testApiProvider(');
+    expect(source).not.toContain('discoverApiProviderModels(');
+  });
+
+  test('keeps shared agent contracts split from API provider templates', () => {
+    expect(existsSync('common/providers.ts')).toBe(false);
+    const source = readFileSync('common/agents.ts', 'utf8');
+    expect(source).not.toContain('API_PROVIDER_TEMPLATE_IDS');
+    expect(source).not.toContain('ApiProviderTemplateId');
+  });
+
   test('composition root creates Cursor through the Cursor agent factory', () => {
     const source = readFileSync('server/server.js', 'utf8');
+    expect(source).toContain('const agentRegistry = new AgentRegistry');
     expect(source).toContain('createCursorAgent');
+    expect(source).not.toContain('providerRegistry');
     expect(source).not.toContain('CursorRequestIdentityStore');
     expect(source).not.toContain('adapterToAgent');
   });

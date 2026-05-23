@@ -78,7 +78,7 @@ export default function createShareRoutes(
       const partial = {
         chatId,
         title,
-        provider: session.provider as string,
+        agentId: session.agentId as string,
         model: session.model as string,
         projectPath: session.projectPath as string,
         sharedAt: new Date().toISOString(),

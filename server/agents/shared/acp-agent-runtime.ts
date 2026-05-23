@@ -9,7 +9,7 @@ import {
 import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
 import { AbsProvider } from './event-emitter-runtime.js';
 import { normalizeToolInput } from './normalize-util.js';
-import type { PermissionMode, ProviderEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../session-types.js';
+import type { PermissionMode, AgentEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import type { AgentRuntime } from '../types.js';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';
@@ -116,7 +116,7 @@ export class AcpAgentRuntime extends AbsProvider implements AgentRuntime {
     this.#capabilityCache = options.capabilityCache ?? new AcpCapabilityCache();
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
+  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const client = await this.#connectClient(request);
     const model = this.#mappedModel(request.model);
     const created = await client.newSession({
@@ -150,7 +150,7 @@ export class AcpAgentRuntime extends AbsProvider implements AgentRuntime {
     void this.#runPrompt(session, request);
 
     return {
-      providerSessionId: sessionId,
+      agentSessionId: sessionId,
       nativePath: this.#nativePathFor(sessionId),
     };
   }
@@ -158,13 +158,13 @@ export class AcpAgentRuntime extends AbsProvider implements AgentRuntime {
   async runTurn(request: ResumeTurnRequest): Promise<void> {
     const session = await this.#sessionForTurn(request);
     if (session.running) {
-      throw new Error(`Session ${request.providerSessionId} is already running`);
+      throw new Error(`Session ${request.agentSessionId} is already running`);
     }
     await this.#runPrompt(session, request);
   }
 
-  abort(providerSessionId: string): boolean {
-    const session = this.#sessions.get(providerSessionId);
+  abort(agentSessionId: string): boolean {
+    const session = this.#sessions.get(agentSessionId);
     if (!session || !session.running) return false;
     session.aborted = true;
     session.state = 'aborted';
@@ -172,8 +172,8 @@ export class AcpAgentRuntime extends AbsProvider implements AgentRuntime {
     return true;
   }
 
-  isRunning(providerSessionId: string): boolean {
-    return this.#sessions.get(providerSessionId)?.running === true;
+  isRunning(agentSessionId: string): boolean {
+    return this.#sessions.get(agentSessionId)?.running === true;
   }
 
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }> {
@@ -250,15 +250,15 @@ export class AcpAgentRuntime extends AbsProvider implements AgentRuntime {
   }
 
   async #sessionForTurn(request: ResumeTurnRequest): Promise<AcpAgentRuntimeSession> {
-    const existing = this.#sessions.get(request.providerSessionId);
+    const existing = this.#sessions.get(request.agentSessionId);
     if (existing) return existing;
 
     const client = await this.#connectClient(request);
     const capabilities = client.getAdvertisedCapabilities();
     const order = reconnectOrder(capabilities);
     const baseSession: AcpAgentRuntimeSession = {
-      id: request.providerSessionId,
-      remoteSessionId: request.providerSessionId,
+      id: request.agentSessionId,
+      remoteSessionId: request.agentSessionId,
       chatId: request.chatId,
       projectPath: request.projectPath,
       client,
@@ -272,14 +272,14 @@ export class AcpAgentRuntime extends AbsProvider implements AgentRuntime {
       lastActivityAt: Date.now(),
       lastUpdateAt: 0,
     };
-    this.#sessions.set(request.providerSessionId, baseSession);
+    this.#sessions.set(request.agentSessionId, baseSession);
     this.#bindClientEvents(baseSession);
 
     const connected = await this.#reconnectSession(baseSession, request, order);
     if (!connected) {
-      this.#sessions.delete(request.providerSessionId);
+      this.#sessions.delete(request.agentSessionId);
       client.close();
-      throw new Error(`Unable to restore ${this.#policy.agentId} session ${request.providerSessionId}. Start a new chat session.`);
+      throw new Error(`Unable to restore ${this.#policy.agentId} session ${request.agentSessionId}. Start a new chat session.`);
     }
     return baseSession;
   }
@@ -374,7 +374,7 @@ export class AcpAgentRuntime extends AbsProvider implements AgentRuntime {
 
       if (success) {
         const metadata = session.providerRequestId
-          ? { providerRequestId: session.providerRequestId } satisfies ProviderEventMetadata
+          ? { providerRequestId: session.providerRequestId } satisfies AgentEventMetadata
           : undefined;
         this.emitFinished(session.chatId, 0, metadata);
       } else if (!session.aborted && failureMessage) {
@@ -448,7 +448,7 @@ export class AcpAgentRuntime extends AbsProvider implements AgentRuntime {
     }
     const context = this.#sessionUpdateContext(session);
     const converted = this.#converter.fromSessionUpdate(params, context);
-    const metadata = providerRequestId ? { providerRequestId } satisfies ProviderEventMetadata : undefined;
+    const metadata = providerRequestId ? { providerRequestId } satisfies AgentEventMetadata : undefined;
     this.emitMessages(session.chatId, converted, metadata);
   }
 

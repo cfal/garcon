@@ -8,7 +8,7 @@ import type { PendingUserInput } from '$shared/pending-user-input';
 
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
 	return {
-		provider: () => 'claude',
+		agentId: () => 'claude',
 		selectedChat: () => ({ id: 'chat-a', projectPath: '/repo' } as never),
 		currentChatId: () => 'chat-a',
 		setCurrentChatId: vi.fn(),

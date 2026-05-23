@@ -144,7 +144,7 @@ describe('OpenAiCompatibleResponsesProvider', () => {
     });
     const emitted = await messagesPromise;
 
-    expect(started.nativePath).toBe(`!direct-openai-responses-compatible:${started.providerSessionId}`);
+    expect(started.nativePath).toBe(`!direct-openai-responses-compatible:${started.agentSessionId}`);
     expect(requestBody).toEqual({
       model: 'selected-model',
       input: [{ role: 'user', content: 'hi' }],
@@ -154,7 +154,7 @@ describe('OpenAiCompatibleResponsesProvider', () => {
     expect(emitted.chatId).toBe('chat-1');
     expect(emitted.messages[0].content).toBe('hello world');
 
-    const persisted = await fs.readFile(path.join(dir, `${started.providerSessionId}.jsonl`), 'utf8');
+    const persisted = await fs.readFile(path.join(dir, `${started.agentSessionId}.jsonl`), 'utf8');
     expect(persisted).toContain('"content":"hi"');
     expect(persisted).toContain('"content":"hello world"');
   });
@@ -179,7 +179,7 @@ describe('OpenAiCompatibleResponsesProvider', () => {
     const provider = new OpenAiCompatibleResponsesProvider(providerConfig(dir));
     await provider.runTurn({
       chatId: 'chat-1',
-      providerSessionId: sessionId,
+      agentSessionId: sessionId,
       command: 'second message',
       projectPath: '/tmp/project',
       model: 'selected-model',

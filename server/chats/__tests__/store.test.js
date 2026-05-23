@@ -17,17 +17,17 @@ describe('ChatRegistry', () => {
 
   describe('addChat / getChat', () => {
     it('adds and retrieves a chat entry', () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
       const entry = registry.getChat('c1');
       expect(entry).not.toBeNull();
-      expect(entry.provider).toBe('claude');
+      expect(entry.agentId).toBe('claude');
       expect(entry.model).toBe('opus');
       expect(entry.nextForkOrdinal).toBe(1);
     });
 
     it('throws on duplicate chat ID', () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
-      expect(() => registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' }))
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
+      expect(() => registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' }))
         .toThrow('already exists');
     });
 
@@ -38,7 +38,7 @@ describe('ChatRegistry', () => {
     it('normalizes invalid mode values on add', () => {
       registry.addChat({
         id: 'c1',
-        provider: 'claude',
+        agentId: 'claude',
         model: 'opus',
         projectPath: '/p',
         permissionMode: 'bogus',
@@ -55,7 +55,7 @@ describe('ChatRegistry', () => {
     it('normalizes invalid nextForkOrdinal values on add', () => {
       registry.addChat({
         id: 'c1',
-        provider: 'claude',
+        agentId: 'claude',
         model: 'opus',
         projectPath: '/p',
         nextForkOrdinal: 0,
@@ -68,7 +68,7 @@ describe('ChatRegistry', () => {
 
   describe('updateChat', () => {
     it('patches allowed fields', () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
       registry.updateChat('c1', { model: 'sonnet', nativePath: '/new.jsonl' });
       const entry = registry.getChat('c1');
       expect(entry.model).toBe('sonnet');
@@ -81,7 +81,7 @@ describe('ChatRegistry', () => {
     });
 
     it('normalizes invalid mode patches', () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
 
       registry.updateChat('c1', {
         permissionMode: 'bogus',
@@ -96,7 +96,7 @@ describe('ChatRegistry', () => {
     });
 
     it('patches nextForkOrdinal with positive integers only', () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
 
       registry.updateChat('c1', { nextForkOrdinal: 4 });
       expect(registry.getChat('c1')?.nextForkOrdinal).toBe(4);
@@ -108,7 +108,7 @@ describe('ChatRegistry', () => {
 
   describe('removeChat', () => {
     it('removes a chat and emits chat-removed', () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
       const events = [];
       registry.onChatRemoved((id) => events.push(id));
 
@@ -126,7 +126,7 @@ describe('ChatRegistry', () => {
 
   describe('chat-read-updated event', () => {
     it('emits chat-read-updated on lastReadAt patch', () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
       const events = [];
       registry.onChatReadUpdated((id, ts) => events.push({ id, ts }));
 
@@ -136,7 +136,7 @@ describe('ChatRegistry', () => {
     });
 
     it('does not emit for non-read patches', () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
       const events = [];
       registry.onChatReadUpdated((id, ts) => events.push({ id, ts }));
 
@@ -148,7 +148,7 @@ describe('ChatRegistry', () => {
 
   describe('getChatByNativePath', () => {
     it('finds a chat by native path', () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p', nativePath: '/tmp/a.jsonl' });
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p', nativePath: '/tmp/a.jsonl' });
       const result = registry.getChatByNativePath('/tmp/a.jsonl');
       expect(result).not.toBeNull();
       expect(result[0]).toBe('c1');
@@ -163,23 +163,23 @@ describe('ChatRegistry', () => {
     });
   });
 
-  describe('getChatByProviderSessionId', () => {
+  describe('getChatByAgentSessionId', () => {
     it('finds a chat by agent session ID', () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p', providerSessionId: 'ps1' });
-      const result = registry.getChatByProviderSessionId('ps1');
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p', agentSessionId: 'ps1' });
+      const result = registry.getChatByAgentSessionId('ps1');
       expect(result).not.toBeNull();
       expect(result[0]).toBe('c1');
     });
 
     it('returns null for unknown session ID', () => {
-      expect(registry.getChatByProviderSessionId('unknown')).toBeNull();
+      expect(registry.getChatByAgentSessionId('unknown')).toBeNull();
     });
   });
 
   describe('listAllChats', () => {
     it('returns a shallow copy of all sessions', () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
-      registry.addChat({ id: 'c2', provider: 'codex', model: 'gpt', projectPath: '/q' });
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
+      registry.addChat({ id: 'c2', agentId: 'codex', model: 'gpt', projectPath: '/q' });
       const all = registry.listAllChats();
       expect(Object.keys(all)).toEqual(['c1', 'c2']);
     });
@@ -187,13 +187,13 @@ describe('ChatRegistry', () => {
 
   describe('init from disk', () => {
     it('loads saved registry on init', async () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
       await registry.saveRegistry(registry.getRegistry());
 
       const fresh = new ChatRegistry(tmpDir);
       await fresh.init();
       expect(fresh.getChat('c1')).not.toBeNull();
-      expect(fresh.getChat('c1').provider).toBe('claude');
+      expect(fresh.getChat('c1').agentId).toBe('claude');
     });
 
     it('returns empty registry for missing file', async () => {
@@ -209,11 +209,11 @@ describe('ChatRegistry', () => {
         version: 1,
         sessions: {
           c1: {
-            provider: 'claude',
+            agentId: 'claude',
             nativePath: null,
             projectPath: '/p',
             tags: [],
-            providerSessionId: 'ps1',
+            agentSessionId: 'ps1',
             model: 'opus',
             permissionMode: 'bogus',
             thinkingMode: 'very-hard',
@@ -232,8 +232,8 @@ describe('ChatRegistry', () => {
   });
 
   describe('reconcileSessions', () => {
-    it('discards chats missing providerSessionId', async () => {
-      registry.addChat({ id: 'c1', provider: 'claude', model: 'opus', projectPath: '/p' });
+    it('discards chats missing agentSessionId', async () => {
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
 
       const changed = await registry.reconcileSessions(async () => '/should-not-be-used.jsonl');
 
@@ -244,10 +244,10 @@ describe('ChatRegistry', () => {
     it('repairs missing nativePath when resolver succeeds', async () => {
       registry.addChat({
         id: 'c1',
-        provider: 'claude',
+        agentId: 'claude',
         model: 'opus',
         projectPath: '/p',
-        providerSessionId: 'ps1',
+        agentSessionId: 'ps1',
         nativePath: null,
       });
 
@@ -260,10 +260,10 @@ describe('ChatRegistry', () => {
     it('discards chats when nativePath reconciliation fails', async () => {
       registry.addChat({
         id: 'c1',
-        provider: 'claude',
+        agentId: 'claude',
         model: 'opus',
         projectPath: '/p',
-        providerSessionId: 'ps1',
+        agentSessionId: 'ps1',
         nativePath: null,
       });
 
@@ -276,18 +276,18 @@ describe('ChatRegistry', () => {
     it('preserves unresolved chats when nativePath reconciliation throws', async () => {
       registry.addChat({
         id: 'c1',
-        provider: 'codex',
+        agentId: 'codex',
         model: 'gpt',
         projectPath: '/p',
-        providerSessionId: 'ps1',
+        agentSessionId: 'ps1',
         nativePath: null,
       });
       registry.addChat({
         id: 'c2',
-        provider: 'codex',
+        agentId: 'codex',
         model: 'gpt',
         projectPath: '/p',
-        providerSessionId: 'ps2',
+        agentSessionId: 'ps2',
         nativePath: null,
       });
       const resolver = mock(async () => {
@@ -297,8 +297,8 @@ describe('ChatRegistry', () => {
       const changed = await registry.reconcileSessions(resolver);
 
       expect(changed).toBe(false);
-      expect(registry.getChat('c1')?.providerSessionId).toBe('ps1');
-      expect(registry.getChat('c2')?.providerSessionId).toBe('ps2');
+      expect(registry.getChat('c1')?.agentSessionId).toBe('ps1');
+      expect(registry.getChat('c2')?.agentSessionId).toBe('ps2');
       expect(resolver).toHaveBeenCalledTimes(1);
     });
 
@@ -308,10 +308,10 @@ describe('ChatRegistry', () => {
 
       registry.addChat({
         id: 'c1',
-        provider: 'claude',
+        agentId: 'claude',
         model: 'opus',
         projectPath: '/p',
-        providerSessionId: 'ps1',
+        agentSessionId: 'ps1',
         nativePath: existingNativePath,
       });
 
@@ -324,10 +324,10 @@ describe('ChatRegistry', () => {
     it('repairs stale nativePath when the stored file is missing', async () => {
       registry.addChat({
         id: 'c1',
-        provider: 'claude',
+        agentId: 'claude',
         model: 'opus',
         projectPath: '/p',
-        providerSessionId: 'ps1',
+        agentSessionId: 'ps1',
         nativePath: '/tmp/missing.jsonl',
       });
 
@@ -340,10 +340,10 @@ describe('ChatRegistry', () => {
     it('preserves Codex chats with stale nativePath when repair cannot resolve a replacement', async () => {
       registry.addChat({
         id: 'c1',
-        provider: 'codex',
+        agentId: 'codex',
         model: 'gpt',
         projectPath: '/p',
-        providerSessionId: 'thread-1',
+        agentSessionId: 'thread-1',
         nativePath: '/tmp/missing-codex.jsonl',
       });
 
@@ -356,10 +356,10 @@ describe('ChatRegistry', () => {
     it('keeps Amp pseudo native paths without filesystem checks', async () => {
       registry.addChat({
         id: 'c1',
-        provider: 'amp',
+        agentId: 'amp',
         model: 'default',
         projectPath: '/p',
-        providerSessionId: 'amp-thread-1',
+        agentSessionId: 'amp-thread-1',
         nativePath: '!amp:amp-thread-1',
       });
 

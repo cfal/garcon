@@ -13,7 +13,7 @@ import {
 	getModelCatalog, setModelCatalog,
 	getChatState, setChatState,
 	getComposerState, setComposerState,
-	getProviderState, setProviderState,
+	getAgentState, setAgentState,
 	getChatLifecycle, setChatLifecycle,
 } from '../index';
 
@@ -44,8 +44,8 @@ describe('context factories', () => {
 		expect(typeof setChatState).toBe('function');
 		expect(typeof getComposerState).toBe('function');
 		expect(typeof setComposerState).toBe('function');
-		expect(typeof getProviderState).toBe('function');
-		expect(typeof setProviderState).toBe('function');
+		expect(typeof getAgentState).toBe('function');
+		expect(typeof setAgentState).toBe('function');
 		expect(typeof getChatLifecycle).toBe('function');
 		expect(typeof setChatLifecycle).toBe('function');
 	});

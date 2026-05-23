@@ -28,7 +28,7 @@
 			id: chatId,
 			projectPath: config.projectPath,
 			startup: {
-					provider: config.provider,
+					agentId: config.agentId,
 					model: config.model,
 					apiProviderId: config.apiProviderId ?? null,
 					modelEndpointId: config.modelEndpointId ?? null,

@@ -111,7 +111,7 @@ describe('AmpProvider lifecycle', () => {
     const started = await startedPromise;
 
     expect(started).toEqual({
-      providerSessionId: threadId,
+      agentSessionId: threadId,
       nativePath: `!amp:${threadId}`,
     });
 
@@ -148,13 +148,13 @@ describe('AmpProvider lifecycle', () => {
     });
 
     const started = await startedPromise;
-    expect(provider.abort(started.providerSessionId)).toBe(true);
+    expect(provider.abort(started.agentSessionId)).toBe(true);
     firstProc.kill();
     await firstProc.exited;
 
     const resumedTurn = provider.runTurn({
       command: 'resume',
-      providerSessionId: started.providerSessionId,
+      agentSessionId: started.agentSessionId,
       chatId: 'chat-2',
       projectPath: '/proj',
       model: 'default',

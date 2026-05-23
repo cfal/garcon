@@ -13,10 +13,10 @@ import {
   labelForProtocol,
   type ApiProtocol,
   type ApiProviderTemplateId,
-  type AgentModelOption,
   type ModelDiscoveryKind,
   type OpenAiEndpointCapabilities,
-} from '../../common/providers.js';
+} from '../../common/api-providers.js';
+import type { AgentModelOption } from '../../common/agents.js';
 import { getConfigDir } from '../config.js';
 
 const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;

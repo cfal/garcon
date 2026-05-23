@@ -1,5 +1,5 @@
 // Shared constants for permission modes, thinking modes, and related
-// UI labels. Consolidates duplicated definitions from provider-state
+// UI labels. Consolidates duplicated definitions from agent-state
 // and new-chat-form-state into a single source of truth.
 
 import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';

@@ -12,7 +12,7 @@ import { normalizeToolResultContent }  from "../shared/normalize-util.js";
 import { convertFactoryToolUse } from "../converters/factory-tool-use.js";
 import { AbsProvider } from "../shared/event-emitter-runtime.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
-import type { AgentCommandImage, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedProviderSession, ThinkingMode } from "../session-types.js";
+import type { AgentCommandImage, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession, ThinkingMode } from "../session-types.js";
 import { getFactoryModelMetadata, getFactoryModels } from './factory-models.js';
 
 interface FactorySession {
@@ -27,9 +27,9 @@ interface FactorySession {
   sessionCreatedEmitted: boolean;
   startTime: number;
   startedSession: {
-    promise: Promise<StartedProviderSession>;
+    promise: Promise<StartedAgentSession>;
     reject: (error: unknown) => void;
-    resolve: (value: StartedProviderSession) => void;
+    resolve: (value: StartedAgentSession) => void;
     resolved: boolean;
   } | null;
   turnResolve: (() => void) | null;
@@ -207,7 +207,7 @@ async function buildFactoryPrompt(
 }
 
 function buildFactoryArgs(
-  request: Pick<ResumeTurnRequest, 'model' | 'permissionMode' | 'projectPath' | 'thinkingMode'> & { providerSessionId?: string | null },
+  request: Pick<ResumeTurnRequest, 'model' | 'permissionMode' | 'projectPath' | 'thinkingMode'> & { agentSessionId?: string | null },
   reasoningEffort: string | undefined,
 ): string[] {
   const args = [
@@ -223,8 +223,8 @@ function buildFactoryArgs(
   if (request.model) {
     args.push('--model', request.model);
   }
-  if (request.providerSessionId) {
-    args.push('--session-id', request.providerSessionId);
+  if (request.agentSessionId) {
+    args.push('--session-id', request.agentSessionId);
   }
   if (reasoningEffort) {
     args.push('--reasoning-effort', reasoningEffort);
@@ -369,7 +369,7 @@ export class FactoryProvider extends AbsProvider {
         if (session.startedSession && !session.startedSession.resolved) {
           session.startedSession.resolved = true;
           session.startedSession.resolve({
-            providerSessionId: session.id,
+            agentSessionId: session.id,
             nativePath: createArtificialNativePath('factory', session.id),
           });
         }
@@ -481,9 +481,9 @@ export class FactoryProvider extends AbsProvider {
   }
 
   async #createSessionTracker(): Promise<FactorySession['startedSession']> {
-    let resolveRef: ((value: StartedProviderSession) => void) | null = null;
+    let resolveRef: ((value: StartedAgentSession) => void) | null = null;
     let rejectRef: ((error: unknown) => void) | null = null;
-    const promise = new Promise<StartedProviderSession>((resolve, reject) => {
+    const promise = new Promise<StartedAgentSession>((resolve, reject) => {
       resolveRef = resolve;
       rejectRef = reject;
     });
@@ -501,13 +501,13 @@ export class FactoryProvider extends AbsProvider {
     };
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
+  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const modelMetadata = request.model ? await getFactoryModelMetadata(request.model) : null;
     const reasoningEffort = mapFactoryReasoningEffort(request.thinkingMode, modelMetadata?.reasoningEfforts);
     const supportsImages = modelMetadata?.supportsImages ?? FACTORY_IMAGE_CAPABLE_MODE_PATTERN.test(request.model);
     const args = buildFactoryArgs(request, reasoningEffort);
     const { cleanup, prompt } = await buildFactoryPrompt(request.command, request.images, supportsImages, request.permissionMode);
-    const startedSession = await this.#createSessionTracker() as FactorySession['startedSession'] & { promise: Promise<StartedProviderSession> };
+    const startedSession = await this.#createSessionTracker() as FactorySession['startedSession'] & { promise: Promise<StartedAgentSession> };
     const session: FactorySession = {
       aborted: false,
       chatId: request.chatId,
@@ -535,9 +535,9 @@ export class FactoryProvider extends AbsProvider {
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
-    const existingSession = this.#runningSessions.get(request.providerSessionId);
+    const existingSession = this.#runningSessions.get(request.agentSessionId);
     if (existingSession?.isRunning) {
-      throw new Error(`Session ${request.providerSessionId} is already running`);
+      throw new Error(`Session ${request.agentSessionId} is already running`);
     }
 
     const modelMetadata = request.model ? await getFactoryModelMetadata(request.model) : null;
@@ -549,7 +549,7 @@ export class FactoryProvider extends AbsProvider {
       aborted: false,
       chatId: request.chatId,
       finalized: false,
-      id: request.providerSessionId,
+      id: request.agentSessionId,
       isRunning: true,
       process: null,
       resultSeen: false,
@@ -562,7 +562,7 @@ export class FactoryProvider extends AbsProvider {
     session.chatId = request.chatId;
     session.cleanup = cleanup;
     session.finalized = false;
-    session.id = request.providerSessionId;
+    session.id = request.agentSessionId;
     session.isRunning = true;
     session.process = null;
     session.resultSeen = false;
@@ -579,8 +579,8 @@ export class FactoryProvider extends AbsProvider {
     }
   }
 
-  abort(providerSessionId: string): boolean {
-    const session = this.#runningSessions.get(providerSessionId);
+  abort(agentSessionId: string): boolean {
+    const session = this.#runningSessions.get(agentSessionId);
     if (!session?.process) return false;
     session.aborted = true;
     session.process.kill();
@@ -588,8 +588,8 @@ export class FactoryProvider extends AbsProvider {
     return true;
   }
 
-  isRunning(providerSessionId: string): boolean {
-    return this.#runningSessions.get(providerSessionId)?.isRunning === true;
+  isRunning(agentSessionId: string): boolean {
+    return this.#runningSessions.get(agentSessionId)?.isRunning === true;
   }
 
   getRunningSessions(): Array<{ id: string; startedAt: string; status: string }> {

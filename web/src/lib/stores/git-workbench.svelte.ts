@@ -25,8 +25,8 @@ import {
 	gitDeleteUntracked,
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
-import type { SessionProvider } from '$lib/types/app.js';
-import type { ApiProtocol } from '$shared/providers';
+import type { SessionAgentId } from '$lib/types/app.js';
+import type { ApiProtocol } from '$shared/api-providers';
 import * as m from '$lib/paraglide/messages.js';
 import {
 	computeCommonDirPrefix as computeCommonDirPrefixSync,
@@ -186,7 +186,7 @@ export class GitWorkbenchStore {
 
 	// Commit message generation settings (persisted via app settings)
 		commitGenerationEnabled = $state(true);
-		commitProvider = $state<SessionProvider>('claude');
+		commitAgentId = $state<SessionAgentId>('claude');
 		commitModel = $state('');
 		commitApiProviderId = $state<string | null>(null);
 		commitModelEndpointId = $state<string | null>(null);
@@ -530,10 +530,10 @@ export class GitWorkbenchStore {
 		switch (err.errorCode) {
 			case 'commit_message_no_staged_files':
 				return m.git_commit_message_errors_no_staged_files();
-			case 'commit_message_provider_auth_required':
-				return m.git_commit_message_errors_provider_auth_required();
-			case 'commit_message_provider_unavailable':
-				return m.git_commit_message_errors_provider_unavailable();
+			case 'commit_message_agent_auth_required':
+				return m.git_commit_message_errors_agent_auth_required();
+			case 'commit_message_agent_unavailable':
+				return m.git_commit_message_errors_agent_unavailable();
 			case 'commit_message_rate_limited':
 				return m.git_commit_message_errors_rate_limited();
 			case 'commit_message_timeout':
@@ -1189,12 +1189,12 @@ export class GitWorkbenchStore {
 		}
 		this.isGeneratingMessage = true;
 		try {
-			// Hydrate provider/model from persisted settings before generating.
+			// Hydrate agent/model from persisted settings before generating.
 				await this.hydrateCommitSettings();
 				const data = await generateCommitMessageApi(
 					projectPath,
 					files,
-					this.commitProvider,
+					this.commitAgentId,
 					this.commitModel,
 					this.commitCustomPrompt,
 					this.commitApiProviderId,
@@ -1231,9 +1231,9 @@ export class GitWorkbenchStore {
 			const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
 				const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
 				this.commitGenerationEnabled = cm.enabled !== false;
-				const provider = cm.provider as string;
-				if (typeof provider === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(provider)) {
-					this.commitProvider = provider as SessionProvider;
+				const agentId = cm.agentId as string;
+				if (typeof agentId === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(agentId)) {
+					this.commitAgentId = agentId as SessionAgentId;
 				}
 				if (typeof cm.model === 'string' && cm.model) {
 					this.commitModel = cm.model;

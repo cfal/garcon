@@ -24,7 +24,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
 
   const getAgentCatalog = async () => {
     try {
-      return await providers?.getAgentCatalog?.();
+      return { agents: await providers?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
     } catch {
       return null;
     }
@@ -50,7 +50,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
   );
 
   const [
-    version, ui, paths, pinnedChatIds, lastProvider, lastProjectPath, lastModel,
+    version, ui, paths, pinnedChatIds, lastAgentId, lastProjectPath, lastModel,
     lastPermissionMode, lastThinkingMode, lastClaudeThinkingMode, lastAmpAgentMode,
     lastApiProviderId, lastModelEndpointId, lastModelProtocol,
   ] = settingsSource
@@ -59,7 +59,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       sanitizeRemoteUiSnapshot(settingsSource.ui),
       settingsSource.paths,
       settingsSource.pinnedChatIds,
-      settingsSource.lastProvider,
+      settingsSource.lastAgentId,
       settingsSource.lastProjectPath,
       settingsSource.lastModel,
       settingsSource.lastPermissionMode,
@@ -75,7 +75,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       settings.getUiSettings(),
       settings.getPathSettings(),
       settings.getPinnedChatIds(),
-      settings.getLastProvider(),
+      settings.getLastAgentId(),
       settings.getLastProjectPath(),
       settings.getLastModel(),
       settings.getLastPermissionMode(),
@@ -122,7 +122,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       browseStartPath: typeof paths?.browseStartPath === 'string' ? paths.browseStartPath : '',
     },
     pinnedChatIds: Array.isArray(pinnedChatIds) ? pinnedChatIds : [],
-    lastProvider,
+    lastAgentId,
     lastProjectPath,
     lastModel,
     lastApiProviderId: lastApiProviderId ?? null,

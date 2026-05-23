@@ -1,33 +1,33 @@
 import type { ChatMessage } from "../../common/chat-types.js";
 import type {
-  ProviderChatEntry,
-  ProviderEventMetadata,
+  AgentChatEntry,
+  AgentEventMetadata,
   ResumeTurnRequest,
   StartSessionRequest,
-  StartedProviderSession,
+  StartedAgentSession,
 } from './session-types.js';
 
 export type SupportedAgentProtocol = 'anthropic-messages' | 'openai-compatible';
 
 export interface AgentRuntime {
-  startSession(request: StartSessionRequest): Promise<StartedProviderSession>;
+  startSession(request: StartSessionRequest): Promise<StartedAgentSession>;
   runTurn(request: ResumeTurnRequest): Promise<void>;
-  abort(providerSessionId: string): boolean | Promise<boolean>;
-  isRunning(providerSessionId: string): boolean;
+  abort(agentSessionId: string): boolean | Promise<boolean>;
+  isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   resolvePermission?(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> | void;
   shutdown?(): void;
   startPurgeTimer?(): ReturnType<typeof setInterval>;
-  onMessages(cb: (chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void): void;
+  onMessages(cb: (chatId: string, messages: unknown[], metadata?: AgentEventMetadata) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
-  onFinished(cb: (chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void): void;
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void): void;
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
 }
 
 export interface AgentTranscriptSource {
-  loadMessages(session: ProviderChatEntry, context?: { chatId?: string }): Promise<ChatMessage[]>;
-  getPreview?(session: ProviderChatEntry): Promise<unknown>;
+  loadMessages(session: AgentChatEntry, context?: { chatId?: string }): Promise<ChatMessage[]>;
+  getPreview?(session: AgentChatEntry): Promise<unknown>;
 }
 
 export interface AgentAuthDriver {
@@ -49,7 +49,7 @@ export interface AgentCapabilityDriver {
 }
 
 export interface ForkAgentSessionArgs {
-  sourceSession: ProviderChatEntry;
+  sourceSession: AgentChatEntry;
   sourceChatId: string;
   targetChatId: string;
   envOverrides?: StartSessionRequest['envOverrides'];
@@ -63,6 +63,6 @@ export interface Agent {
   transcript: AgentTranscriptSource;
   auth: AgentAuthDriver;
   capabilities: AgentCapabilityDriver;
-  forkSession?(args: ForkAgentSessionArgs): Promise<StartedProviderSession | null>;
+  forkSession?(args: ForkAgentSessionArgs): Promise<StartedAgentSession | null>;
   runSingleQuery?(prompt: string, options?: Record<string, unknown>): Promise<string>;
 }

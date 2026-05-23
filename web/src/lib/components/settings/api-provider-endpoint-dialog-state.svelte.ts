@@ -5,7 +5,7 @@ import {
 	testApiProvider,
 	updateApiProvider,
 	type ApiProviderInput
-} from '$lib/api/providers.js';
+} from '$lib/api/api-providers.js';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import {
@@ -16,7 +16,7 @@ import {
 	type ApiProtocol,
 	type ModelDiscoveryKind,
 	type OpenAiEndpointCapabilities
-} from '$shared/providers';
+} from '$shared/api-providers';
 
 interface DialogOptions {
 	modelCatalog: ModelCatalogStore;

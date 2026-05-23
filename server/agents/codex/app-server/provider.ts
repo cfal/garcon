@@ -2,7 +2,7 @@ import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage } f
 import { promises as fs } from 'fs';
 import { AbsProvider } from "../../shared/event-emitter-runtime.js";
 import { loadCodexChatMessages, getCodexPreviewFromNativePath } from "../../loaders/codex-history-loader.js";
-import type { ProviderChatEntry, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from "../../session-types.js";
+import type { AgentChatEntry, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../../session-types.js";
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
 import {
@@ -46,7 +46,7 @@ interface RunningCodexSession {
 }
 
 interface CodexForkSessionRequest {
-  sourceSession: ProviderChatEntry;
+  sourceSession: AgentChatEntry;
   envOverrides?: Record<string, string>;
   codexConfig?: StartSessionRequest['codexConfig'];
 }
@@ -74,7 +74,7 @@ export class CodexAppServerProvider extends AbsProvider {
     this.#terminalBackfillTimeoutMs = options.terminalBackfillTimeoutMs ?? 2_000;
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
+  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const client = this.#newClient(request);
     let cleanupImages: (() => Promise<void>) | null = null;
     let activeSession: RunningCodexSession | null = null;
@@ -110,7 +110,7 @@ export class CodexAppServerProvider extends AbsProvider {
       });
       session.nativePath = nativePath;
       this.#threadListCaches.clear();
-      return { providerSessionId: threadId, nativePath };
+      return { agentSessionId: threadId, nativePath };
     } catch (error) {
       const message = humanizeCodexAppServerError(error);
       if (activeSession) {
@@ -169,8 +169,8 @@ export class CodexAppServerProvider extends AbsProvider {
     }
   }
 
-  abort(providerSessionId: string): boolean {
-    const session = this.#sessions.get(providerSessionId);
+  abort(agentSessionId: string): boolean {
+    const session = this.#sessions.get(agentSessionId);
     if (!session) return false;
     session.status = 'aborted';
 
@@ -186,8 +186,8 @@ export class CodexAppServerProvider extends AbsProvider {
     return true;
   }
 
-  isRunning(providerSessionId: string): boolean {
-    const status = this.#sessions.get(providerSessionId)?.status;
+  isRunning(agentSessionId: string): boolean {
+    const status = this.#sessions.get(agentSessionId)?.status;
     return status === 'running' || status === 'completing';
   }
 
@@ -197,11 +197,11 @@ export class CodexAppServerProvider extends AbsProvider {
       .map((session) => ({ id: session.threadId, status: session.status, startedAt: session.startedAt }));
   }
 
-  async loadMessages(session: ProviderChatEntry): Promise<unknown[]> {
-    if (!session.providerSessionId) return this.#loadLegacyMessages(session);
+  async loadMessages(session: AgentChatEntry): Promise<unknown[]> {
+    if (!session.agentSessionId) return this.#loadLegacyMessages(session);
 
     try {
-      const response = await this.#readThread(session.providerSessionId, true);
+      const response = await this.#readThread(session.agentSessionId, true);
       return convertCodexAppServerThread(response.thread);
     } catch (error) {
       console.warn('codex: app-server thread/read failed, falling back to JSONL:', (error as Error).message);
@@ -209,10 +209,10 @@ export class CodexAppServerProvider extends AbsProvider {
     }
   }
 
-  async getPreview(session: ProviderChatEntry): Promise<unknown> {
-    if (!session.providerSessionId) return this.#getLegacyPreview(session);
+  async getPreview(session: AgentChatEntry): Promise<unknown> {
+    if (!session.agentSessionId) return this.#getLegacyPreview(session);
 
-    const listedThread = await this.#listedThreadForPreview(session.providerSessionId);
+    const listedThread = await this.#listedThreadForPreview(session.agentSessionId);
     if (listedThread) return getCodexThreadPreview(listedThread);
 
     if (session.nativePath) {
@@ -221,7 +221,7 @@ export class CodexAppServerProvider extends AbsProvider {
     }
 
     try {
-      const response = await this.#readThread(session.providerSessionId, false);
+      const response = await this.#readThread(session.agentSessionId, false);
       return getCodexThreadPreview(response.thread);
     } catch (error) {
       console.warn('codex: app-server preview failed, falling back to JSONL:', (error as Error).message);
@@ -229,14 +229,14 @@ export class CodexAppServerProvider extends AbsProvider {
     }
   }
 
-  async forkSession(args: CodexForkSessionRequest): Promise<StartedProviderSession | null> {
+  async forkSession(args: CodexForkSessionRequest): Promise<StartedAgentSession | null> {
     const sourceSession = args.sourceSession;
-    const sourceThreadId = sourceSession.providerSessionId;
+    const sourceThreadId = sourceSession.agentSessionId;
     if (!sourceThreadId) return null;
 
     return this.#withOperationClient(args, async (client) => {
       const forked = await client.forkThread(buildThreadForkParams({
-        providerSessionId: sourceThreadId,
+        agentSessionId: sourceThreadId,
         nativePath: sourceSession.nativePath,
         model: sourceSession.model,
         projectPath: sourceSession.projectPath,
@@ -247,15 +247,15 @@ export class CodexAppServerProvider extends AbsProvider {
         timeoutMs: this.#materializationTimeoutMs,
       });
       this.#threadListCaches.clear();
-      return { providerSessionId: forked.thread.id, nativePath };
+      return { agentSessionId: forked.thread.id, nativePath };
     });
   }
 
-  async resolveNativePath(session: ProviderChatEntry): Promise<string | null> {
-    if (!session.providerSessionId) return null;
+  async resolveNativePath(session: AgentChatEntry): Promise<string | null> {
+    if (!session.agentSessionId) return null;
 
     const threads = await this.#getThreadListCache(false);
-    const nativePath = threads?.get(session.providerSessionId)?.path ?? null;
+    const nativePath = threads?.get(session.agentSessionId)?.path ?? null;
     if (!nativePath) return null;
 
     try {
@@ -624,11 +624,11 @@ export class CodexAppServerProvider extends AbsProvider {
     return null;
   }
 
-  #loadLegacyMessages(session: ProviderChatEntry): Promise<unknown[]> {
+  #loadLegacyMessages(session: AgentChatEntry): Promise<unknown[]> {
     return loadCodexChatMessages(session.nativePath);
   }
 
-  #getLegacyPreview(session: ProviderChatEntry): Promise<unknown> {
+  #getLegacyPreview(session: AgentChatEntry): Promise<unknown> {
     return getCodexPreviewFromNativePath(session.nativePath);
   }
 }

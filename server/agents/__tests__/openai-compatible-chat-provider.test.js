@@ -63,7 +63,7 @@ describe('OpenAiCompatibleChatProvider', () => {
 
     await provider.runTurn({
       chatId: '123',
-      providerSessionId: sessionId,
+      agentSessionId: sessionId,
       command: 'second message',
       projectPath: '/tmp/project',
       model: 'selected-model',

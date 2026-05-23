@@ -271,7 +271,7 @@ describe('POST /api/chats/reorder-quick', () => {
   });
 
   it('propagates store error for cross-group reorder', async () => {
-    registry.getChat.mockImplementation(() => ({ provider: 'claude' }));
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude' }));
     settings.reorderRelative.mockResolvedValue({ success: false, error: 'Cross-group reorder is not allowed' });
     parseJsonBody.mockResolvedValue({ chatId: 'a', chatIdAbove: 'b' });
 
@@ -284,7 +284,7 @@ describe('POST /api/chats/reorder-quick', () => {
   });
 
   it('delegates chatIdAbove reorder to settings.reorderRelative', async () => {
-    registry.getChat.mockImplementation(() => ({ provider: 'claude' }));
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude' }));
     settings.reorderRelative.mockResolvedValue({ success: true });
     parseJsonBody.mockResolvedValue({ chatId: 'c', chatIdAbove: 'a' });
 
@@ -298,7 +298,7 @@ describe('POST /api/chats/reorder-quick', () => {
   });
 
   it('delegates chatIdBelow reorder to settings.reorderRelative', async () => {
-    registry.getChat.mockImplementation(() => ({ provider: 'claude' }));
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude' }));
     settings.reorderRelative.mockResolvedValue({ success: true });
     parseJsonBody.mockResolvedValue({ chatId: 'z', chatIdBelow: 'x' });
 

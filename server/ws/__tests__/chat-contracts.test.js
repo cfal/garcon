@@ -63,7 +63,7 @@ const mockForkDeps = {
   forkChatFileCopy: mock(() => Promise.resolve({
     sourceChatId: '123',
     chatId: '456',
-    provider: 'claude',
+    agentId: 'claude',
   })),
 };
 
@@ -111,7 +111,7 @@ describe('chat WebSocket handler', () => {
     mockForkDeps.forkChatFileCopy.mockImplementation(() => Promise.resolve({
       sourceChatId: '123',
       chatId: '456',
-      provider: 'claude',
+      agentId: 'claude',
     }));
     mockPendingInputs.listForChat.mockReturnValue([]);
     ws = createMockWs();
@@ -244,8 +244,8 @@ describe('chat WebSocket handler', () => {
   describe('fork-run', () => {
     it('forks the source chat, notifies the client, and submits the fork turn', async () => {
       const sourceSession = {
-        provider: 'claude',
-        providerSessionId: 'source-session',
+        agentId: 'claude',
+        agentSessionId: 'source-session',
         projectPath: '/repo',
         model: 'opus',
       };
@@ -271,7 +271,7 @@ describe('chat WebSocket handler', () => {
         registry: mockRegistry,
         settings: mockForkDeps.settings,
         metadata: mockForkDeps.metadata,
-        forkProviderSession: undefined,
+        forkAgentSession: undefined,
       });
       expect(sendWebSocketJson.mock.calls[0][1]).toMatchObject({
         type: 'chat-fork-created',
@@ -287,7 +287,7 @@ describe('chat WebSocket handler', () => {
 
     it('rejects unsupported source providers', async () => {
       mockRegistry.getChat.mockImplementation((chatId) => {
-        if (chatId === '123') return { provider: 'opencode', providerSessionId: 'source-session' };
+        if (chatId === '123') return { agentId: 'opencode', agentSessionId: 'source-session' };
         return null;
       });
 
@@ -310,7 +310,7 @@ describe('chat WebSocket handler', () => {
 
     it('rejects a source chat that is currently processing', async () => {
       mockRegistry.getChat.mockImplementation((chatId) => {
-        if (chatId === '123') return { provider: 'claude', providerSessionId: 'source-session' };
+        if (chatId === '123') return { agentId: 'claude', agentSessionId: 'source-session' };
         return null;
       });
       mockProviders.isAgentSessionRunning.mockImplementation(() => true);
@@ -335,8 +335,8 @@ describe('chat WebSocket handler', () => {
     it('reports target turn failures against the forked chat after creation', async () => {
       let targetCreated = false;
       mockRegistry.getChat.mockImplementation((chatId) => {
-        if (chatId === '123') return { provider: 'claude', providerSessionId: 'source-session' };
-        if (chatId === '456' && targetCreated) return { provider: 'claude', providerSessionId: 'fork-session' };
+        if (chatId === '123') return { agentId: 'claude', agentSessionId: 'source-session' };
+        if (chatId === '456' && targetCreated) return { agentId: 'claude', agentSessionId: 'fork-session' };
         return null;
       });
       mockForkDeps.forkChatFileCopy.mockImplementationOnce(async () => {
@@ -344,7 +344,7 @@ describe('chat WebSocket handler', () => {
         return {
           sourceChatId: '123',
           chatId: '456',
-          provider: 'claude',
+          agentId: 'claude',
         };
       });
       mockQueue.submit.mockRejectedValueOnce(new Error('fork turn failed'));
@@ -370,7 +370,7 @@ describe('chat WebSocket handler', () => {
       await chatHandler.message(ws, {
         type: 'agent-stop',
         chatId: '123',
-        provider: 'claude',
+        agentId: 'claude',
       });
       expect(mockQueue.abort).toHaveBeenCalledWith('123');
     });
@@ -637,9 +637,9 @@ describe('chat WebSocket handler', () => {
 
     it('returns messages for a valid chat', async () => {
       mockRegistry.getChat.mockReturnValue({
-        provider: 'claude',
+        agentId: 'claude',
         nativePath: '/tmp/session.jsonl',
-        providerSessionId: 'abc',
+        agentSessionId: 'abc',
       });
       await chatHandler.message(ws, {
         type: 'chat-log-query',
@@ -671,9 +671,9 @@ describe('chat WebSocket handler', () => {
 
     it('respects limit and offset params', async () => {
       mockRegistry.getChat.mockReturnValue({
-        provider: 'claude',
+        agentId: 'claude',
         nativePath: '/tmp/session.jsonl',
-        providerSessionId: 'abc',
+        agentSessionId: 'abc',
       });
       await chatHandler.message(ws, {
         type: 'chat-log-query',
@@ -688,9 +688,9 @@ describe('chat WebSocket handler', () => {
 
     it('includes clientRequestId in response', async () => {
       mockRegistry.getChat.mockReturnValue({
-        provider: 'claude',
+        agentId: 'claude',
         nativePath: '/tmp/test.jsonl',
-        providerSessionId: 'x',
+        agentSessionId: 'x',
       });
       await chatHandler.message(ws, {
         type: 'chat-log-query',
@@ -703,9 +703,9 @@ describe('chat WebSocket handler', () => {
 
     it('silently ignores requests without clientRequestId', async () => {
       mockRegistry.getChat.mockReturnValue({
-        provider: 'claude',
+        agentId: 'claude',
         nativePath: '/tmp/test.jsonl',
-        providerSessionId: 'x',
+        agentSessionId: 'x',
       });
       sendWebSocketJson.mockClear();
       await chatHandler.message(ws, {

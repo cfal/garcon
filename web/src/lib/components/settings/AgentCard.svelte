@@ -10,7 +10,7 @@
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { DeviceAuthInfo, AgentReadiness } from '$lib/api/providers.js';
+	import type { DeviceAuthInfo, AgentReadiness } from '$lib/api/agents.js';
 
 	interface AuthStatus {
 		authenticated: boolean;

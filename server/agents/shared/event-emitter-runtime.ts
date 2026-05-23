@@ -7,18 +7,18 @@
 // know them.
 
 import { EventEmitter } from 'events';
-import type { ProviderEventMetadata } from "../session-types.js";
+import type { AgentEventMetadata } from "../session-types.js";
 
-export type MessagesCallback = (chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void;
+export type MessagesCallback = (chatId: string, messages: unknown[], metadata?: AgentEventMetadata) => void;
 export type ProcessingCallback = (chatId: string, isProcessing: boolean) => void;
 export type SessionCreatedCallback = (chatId: string) => void;
-export type FinishedCallback = (chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void;
+export type FinishedCallback = (chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void;
 export type FailedCallback = (chatId: string, errorMessage: string) => void;
 
 export class AbsProvider extends EventEmitter {
   // Emit helpers (used by subclasses)
 
-  emitMessages(chatId: string, messages: unknown[], metadata?: ProviderEventMetadata): void {
+  emitMessages(chatId: string, messages: unknown[], metadata?: AgentEventMetadata): void {
     if (messages.length > 0) {
       if (metadata) {
         this.emit('messages', chatId, messages, metadata);
@@ -36,7 +36,7 @@ export class AbsProvider extends EventEmitter {
     this.emit('session-created', chatId);
   }
 
-  emitFinished(chatId: string, exitCode: number = 0, metadata?: ProviderEventMetadata): void {
+  emitFinished(chatId: string, exitCode: number = 0, metadata?: AgentEventMetadata): void {
     if (metadata) {
       this.emit('finished', chatId, exitCode, metadata);
     } else {

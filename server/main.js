@@ -42,7 +42,7 @@ Environment Variables:
 
 Notes:
   Environment variables take precedence over CLI options where both are available.
-  Server and PTY/provider subprocesses inherit the current process environment.
+  Server and PTY/agent subprocesses inherit the current process environment.
 `;
   process.stdout.write(helpText);
 }

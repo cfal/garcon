@@ -146,7 +146,7 @@ describe('metadata-store', () => {
       })), 'utf8');
       const providers = { getPreview: mock(() => Promise.resolve(null)) };
       const index = new MetadataIndex(
-        makeRegistry({ 'persisted-chat': { provider: 'codex', providerSessionId: 'thread-1' } }),
+        makeRegistry({ 'persisted-chat': { agentId: 'codex', agentSessionId: 'thread-1' } }),
         providers,
         { metadataPath },
       );
@@ -168,7 +168,7 @@ describe('metadata-store', () => {
         })),
       };
       const index = new MetadataIndex(
-        makeRegistry({ 'missing-chat': { provider: 'codex', providerSessionId: 'thread-1' } }),
+        makeRegistry({ 'missing-chat': { agentId: 'codex', agentSessionId: 'thread-1' } }),
         providers,
       );
 
@@ -181,7 +181,7 @@ describe('metadata-store', () => {
 
     it('does not wait indefinitely for a stalled provider preview', async () => {
       const stalledRegistry = makeRegistry({
-        'stalled-chat': { provider: 'opencode', providerSessionId: 'opencode-session' },
+        'stalled-chat': { agentId: 'opencode', agentSessionId: 'opencode-session' },
       });
       const stalledProviders = {
         getPreview: mock(() => new Promise(() => {})),
@@ -209,7 +209,7 @@ describe('metadata-store', () => {
         getPreview: mock(() => new Promise(() => {})),
       };
       const index = new MetadataIndex(
-        makeRegistry({ 'stalled-chat': { provider: 'opencode', providerSessionId: 'opencode-session' } }),
+        makeRegistry({ 'stalled-chat': { agentId: 'opencode', agentSessionId: 'opencode-session' } }),
         stalledProviders,
         { metadataPath, previewTimeoutMs: 5 },
       );

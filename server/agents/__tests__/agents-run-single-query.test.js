@@ -117,7 +117,7 @@ function makeApiProviderStore(apiProviders = []) {
 
 function baseRuntime(overrides = {}) {
   return {
-    startSession: mock(() => Promise.resolve({ providerSessionId: 'session', nativePath: null })),
+    startSession: mock(() => Promise.resolve({ agentSessionId: 'session', nativePath: null })),
     runTurn: mock(() => Promise.resolve()),
     abort: mock(() => false),
     isRunning: mock(() => false),
@@ -160,7 +160,7 @@ function agentFromRuntime(id, label, runtime, capabilities, runSingleQuery) {
 function makeRegistry(args = {}) {
   const mockRegistry = {
     getChat: mock(() => null),
-    getChatByProviderSessionId: mock(() => null),
+    getChatByAgentSessionId: mock(() => null),
     listAllChats: mock(() => ({})),
     updateChat: mock(() => undefined),
     onChatRemoved: mock(() => undefined),
@@ -197,7 +197,7 @@ function makeRegistry(args = {}) {
     onFailed: mock(() => {}),
   };
   const codex = {
-    startSession: mock(() => Promise.resolve({ providerSessionId: 'codex-session', nativePath: null })),
+    startSession: mock(() => Promise.resolve({ agentSessionId: 'codex-session', nativePath: null })),
     runTurn: mock(() => Promise.resolve()),
     isRunning: mock(() => false),
     abort: mock(() => false),
@@ -210,7 +210,7 @@ function makeRegistry(args = {}) {
     onFailed: mock(() => {}),
   };
   const amp = {
-    startSession: mock(() => Promise.resolve({ providerSessionId: 'amp-session', nativePath: 'amp:amp-session' })),
+    startSession: mock(() => Promise.resolve({ agentSessionId: 'amp-session', nativePath: 'amp:amp-session' })),
     runTurn: mock(() => Promise.resolve()),
     isRunning: mock(() => false),
     abort: mock(() => false),
@@ -223,7 +223,7 @@ function makeRegistry(args = {}) {
     onFailed: mock(() => {}),
   };
   const cursor = {
-    startSession: mock(() => Promise.resolve({ providerSessionId: 'cursor-session', nativePath: '!cursor:cursor-session' })),
+    startSession: mock(() => Promise.resolve({ agentSessionId: 'cursor-session', nativePath: '!cursor:cursor-session' })),
     runTurn: mock(() => Promise.resolve()),
     isRunning: mock(() => false),
     abort: mock(() => false),
@@ -237,7 +237,7 @@ function makeRegistry(args = {}) {
     onFailed: mock(() => {}),
   };
   const factory = {
-    startSession: mock(() => Promise.resolve({ providerSessionId: 'factory-session', nativePath: 'factory:factory-session' })),
+    startSession: mock(() => Promise.resolve({ agentSessionId: 'factory-session', nativePath: 'factory:factory-session' })),
     runTurn: mock(() => Promise.resolve()),
     getRunningSessions: mock(() => []),
     isRunning: mock(() => false),
@@ -251,7 +251,7 @@ function makeRegistry(args = {}) {
     onFailed: mock(() => {}),
   };
   const pi = {
-    startSession: mock(() => Promise.resolve({ providerSessionId: 'pi-session', nativePath: '/tmp/pi-session.jsonl' })),
+    startSession: mock(() => Promise.resolve({ agentSessionId: 'pi-session', nativePath: '/tmp/pi-session.jsonl' })),
     runTurn: mock(() => Promise.resolve()),
     getRunningSessions: mock(() => []),
     isRunning: mock(() => false),
@@ -291,8 +291,8 @@ function makeRegistry(args = {}) {
         }, codexQuery),
         agentFromRuntime('opencode', 'OpenCode', baseRuntime({
           async startSession(request) {
-            const providerSessionId = await opencode.startSession(request);
-            return { providerSessionId, nativePath: `opencode:${providerSessionId}` };
+            const agentSessionId = await opencode.startSession(request);
+            return { agentSessionId, nativePath: `opencode:${agentSessionId}` };
           },
           runTurn: opencode.runTurn,
           abort: opencode.abort,
@@ -364,12 +364,12 @@ describe('AgentRegistry.runSingleQuery', () => {
     const { registry, opencode } = makeRegistry();
 
     expect(await registry.runSingleQuery('prompt', {})).toBe('claude-response');
-    expect(await registry.runSingleQuery('prompt', { provider: 'codex' })).toBe('codex-response');
-    expect(await registry.runSingleQuery('prompt', { provider: 'opencode' })).toBe('opencode-response');
-    expect(await registry.runSingleQuery('prompt', { provider: 'amp' })).toBe('amp-response');
-    expect(await registry.runSingleQuery('prompt', { provider: 'cursor' })).toBe('cursor-response');
-    expect(await registry.runSingleQuery('prompt', { provider: 'factory' })).toBe('factory-response');
-    expect(await registry.runSingleQuery('prompt', { provider: 'pi' })).toBe('pi-response');
+    expect(await registry.runSingleQuery('prompt', { agentId: 'codex' })).toBe('codex-response');
+    expect(await registry.runSingleQuery('prompt', { agentId: 'opencode' })).toBe('opencode-response');
+    expect(await registry.runSingleQuery('prompt', { agentId: 'amp' })).toBe('amp-response');
+    expect(await registry.runSingleQuery('prompt', { agentId: 'cursor' })).toBe('cursor-response');
+    expect(await registry.runSingleQuery('prompt', { agentId: 'factory' })).toBe('factory-response');
+    expect(await registry.runSingleQuery('prompt', { agentId: 'pi' })).toBe('pi-response');
     expect(opencode.runSingleQuery).toHaveBeenCalled();
   });
 
@@ -401,7 +401,7 @@ describe('AgentRegistry.runSingleQuery', () => {
     const { registry } = makeRegistry({ endpointResolver });
 
     await registry.runSingleQuery('hello', {
-      provider: 'codex',
+      agentId: 'codex',
       model: 'acme_openai:acme-code',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
@@ -423,8 +423,8 @@ describe('AgentRegistry.runSingleQuery', () => {
   });
 });
 
-describe('AgentRegistry catalog and API provider mutations', () => {
-  it('returns agent and API provider catalog entries', async () => {
+describe('AgentRegistry catalog', () => {
+  it('returns agent catalog entries', async () => {
     const endpointOption = {
       value: 'acme_openai:acme-code',
       label: 'Acme: Acme Code',
@@ -441,14 +441,6 @@ describe('AgentRegistry catalog and API provider mutations', () => {
       rawModel: 'acme-sonnet',
       protocol: 'anthropic-messages',
     };
-    const apiProvider = {
-      id: 'acme',
-      label: 'Acme',
-      templateId: 'custom',
-      createdAt: '2026-05-04T00:00:00.000Z',
-      updatedAt: '2026-05-04T00:00:00.000Z',
-      endpoints: [],
-    };
     const { registry } = makeRegistry({
       endpointResolver: makeEndpointResolver({
         codex: [endpointOption],
@@ -456,7 +448,6 @@ describe('AgentRegistry catalog and API provider mutations', () => {
         'direct-openai-responses-compatible': [endpointOption],
         'direct-anthropic-compatible': [anthropicEndpointOption],
       }),
-      apiProviderStore: makeApiProviderStore([apiProvider]),
       agents: [
         agentFromRuntime('direct-openai-compatible', 'Direct (Chat Completions)', baseRuntime({
           getModels: mock(() => [{ value: 'raw-openai', label: 'Raw OpenAI' }]),
@@ -488,191 +479,24 @@ describe('AgentRegistry catalog and API provider mutations', () => {
       ],
     });
 
-    const catalog = await registry.getAgentCatalog();
-    expect(catalog.agents.find((entry) => entry.id === 'codex')?.models).toContainEqual(endpointOption);
-    expect(catalog.agents.find((entry) => entry.id === 'direct-openai-compatible')?.models).toEqual([endpointOption]);
-    expect(catalog.agents.find((entry) => entry.id === 'direct-openai-responses-compatible')?.models).toEqual([endpointOption]);
-    expect(catalog.agents.find((entry) => entry.id === 'direct-anthropic-compatible')?.models).toEqual([anthropicEndpointOption]);
-    expect(catalog.apiProviders).toEqual([apiProvider]);
+    const catalog = await registry.getAgentCatalogEntries();
+    expect(catalog.find((entry) => entry.id === 'codex')?.models).toContainEqual(endpointOption);
+    expect(catalog.find((entry) => entry.id === 'direct-openai-compatible')?.models).toEqual([endpointOption]);
+    expect(catalog.find((entry) => entry.id === 'direct-openai-responses-compatible')?.models).toEqual([endpointOption]);
+    expect(catalog.find((entry) => entry.id === 'direct-anthropic-compatible')?.models).toEqual([anthropicEndpointOption]);
   });
 
   it('uses Cursor discovered models without static fallbacks', async () => {
     const { registry, cursor } = makeRegistry();
     cursor.getModels.mockReturnValueOnce([{ value: 'auto', label: 'Auto', supportsImages: false }]);
 
-    const catalog = await registry.getAgentCatalog();
-    const cursorEntry = catalog.agents.find((entry) => entry.id === 'cursor');
+    const catalog = await registry.getAgentCatalogEntries();
+    const cursorEntry = catalog.find((entry) => entry.id === 'cursor');
 
     expect(cursorEntry?.models).toEqual([{ value: 'auto', label: 'Auto', supportsImages: false }]);
     expect(cursorEntry?.defaultModel).toBe('auto');
   });
 
-  it('normalizes API provider payloads before storing them', async () => {
-    const apiProviderStore = makeApiProviderStore();
-    const { registry } = makeRegistry({ apiProviderStore });
-
-    const created = await registry.createApiProvider({
-      templateId: 'custom',
-      label: ' Acme ',
-      endpoint: {
-        protocol: 'openai-compatible',
-        baseUrl: 'api.acme.test/v1/',
-        apiKey: 'sk-test',
-        capabilities: { chatCompletions: false, responses: true },
-        defaultModel: 'acme-code',
-        models: [{ value: ' acme-code ', label: ' Acme Code ', supportsImages: false }],
-        supportsImages: false,
-      },
-    });
-
-    expect(apiProviderStore.createApiProvider).toHaveBeenCalledWith({
-      templateId: 'custom',
-      label: 'Acme',
-      protocol: 'openai-compatible',
-      baseUrl: 'https://api.acme.test/v1',
-      apiKey: 'sk-test',
-      capabilities: { chatCompletions: false, responses: true },
-      defaultModel: 'acme-code',
-      models: [{ value: 'acme-code', label: 'Acme Code', supportsImages: false }],
-      supportsImages: false,
-      modelDiscovery: 'openai-models',
-    });
-    expect(created.endpoints[0].hasApiKey).toBe(true);
-    expect('apiKey' in created.endpoints[0]).toBe(false);
-  });
-
-  it('stores Anthropic API providers without OpenAI capabilities', async () => {
-    const apiProviderStore = makeApiProviderStore();
-    const { registry } = makeRegistry({ apiProviderStore });
-
-    await registry.createApiProvider({
-      templateId: 'custom',
-      label: 'Acme Anthropic',
-      endpoint: {
-        protocol: 'anthropic-messages',
-        baseUrl: 'https://api.acme.test',
-        apiKey: 'sk-test',
-        defaultModel: 'acme-sonnet',
-        models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
-        supportsImages: false,
-      },
-    });
-
-    expect(apiProviderStore.createApiProvider).toHaveBeenCalledWith({
-      templateId: 'custom',
-      label: 'Acme Anthropic',
-      protocol: 'anthropic-messages',
-      baseUrl: 'https://api.acme.test',
-      apiKey: 'sk-test',
-      defaultModel: 'acme-sonnet',
-      models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
-      supportsImages: false,
-      modelDiscovery: 'none',
-    });
-  });
-
-  it('rejects OpenAI-compatible API provider payloads with no supported API surface', async () => {
-    const apiProviderStore = makeApiProviderStore();
-    const { registry } = makeRegistry({ apiProviderStore });
-
-    await expect(registry.createApiProvider({
-      templateId: 'custom',
-      label: 'Acme',
-      endpoint: {
-        protocol: 'openai-compatible',
-        baseUrl: 'https://api.acme.test/v1',
-        capabilities: { chatCompletions: false, responses: false },
-        defaultModel: 'acme-code',
-        models: [],
-        supportsImages: false,
-      },
-    })).rejects.toThrow('OpenAI-compatible endpoints must support Chat Completions or Responses.');
-    expect(apiProviderStore.createApiProvider).not.toHaveBeenCalled();
-  });
-
-  it('discovers OpenAI-compatible models from the configured API base path', async () => {
-    globalThis.fetch = mock(async () => new Response(JSON.stringify({
-      data: [{ id: 'glm-5.1', name: 'GLM-5.1' }],
-    })));
-    const { registry } = makeRegistry();
-
-    const result = await registry.discoverApiProviderModels({
-      protocol: 'openai-compatible',
-      baseUrl: 'https://api.z.ai/api/coding/paas/v4',
-      apiKey: 'sk-zai',
-      modelDiscovery: 'openai-models',
-    });
-
-    expect(result).toEqual({
-      success: true,
-      models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
-    });
-    const [url, options] = globalThis.fetch.mock.calls[0];
-    expect(url).toBe('https://api.z.ai/api/coding/paas/v4/models');
-    expect(options.headers).toEqual({ Authorization: 'Bearer sk-zai' });
-  });
-
-  it('discovers Anthropic-compatible models with Anthropic headers', async () => {
-    globalThis.fetch = mock(async () => new Response(JSON.stringify({
-      data: [{ id: 'claude-sonnet-4-20250514', display_name: 'Claude Sonnet 4' }],
-      has_more: false,
-      last_id: 'claude-sonnet-4-20250514',
-    })));
-    const { registry } = makeRegistry();
-
-    const result = await registry.discoverApiProviderModels({
-      protocol: 'anthropic-messages',
-      baseUrl: 'https://api.anthropic.com',
-      apiKey: 'sk-ant',
-      modelDiscovery: 'anthropic-models',
-    });
-
-    expect(result).toEqual({
-      success: true,
-      models: [{ value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' }],
-    });
-    const [url, options] = globalThis.fetch.mock.calls[0];
-    expect(url).toBe('https://api.anthropic.com/v1/models?limit=1000');
-    expect(options.headers).toEqual({
-      'x-api-key': 'sk-ant',
-      'anthropic-version': '2023-06-01',
-    });
-  });
-
-  it('uses the stored endpoint key when editing and no replacement key is provided', async () => {
-    globalThis.fetch = mock(async () => new Response(JSON.stringify({
-      data: [{ id: 'acme-code' }],
-    })));
-    const apiProviderStore = makeApiProviderStore([{
-      id: 'acme',
-      label: 'Acme',
-      templateId: 'custom',
-      createdAt: '2026-05-04T00:00:00.000Z',
-      updatedAt: '2026-05-04T00:00:00.000Z',
-      endpoints: [{
-        id: 'acme_openai',
-        protocol: 'openai-compatible',
-        baseUrl: 'https://api.acme.test/v1',
-        apiKey: 'sk-stored',
-        capabilities: { chatCompletions: false, responses: true },
-        defaultModel: 'acme-code',
-        models: [{ value: 'acme-code', label: 'Acme Code' }],
-        supportsImages: false,
-        modelDiscovery: 'openai-models',
-      }],
-    }]);
-    const { registry } = makeRegistry({ apiProviderStore });
-
-    await registry.discoverApiProviderModels({
-      protocol: 'openai-compatible',
-      baseUrl: 'https://api.acme.test/v1',
-      endpointId: 'acme_openai',
-      modelDiscovery: 'openai-models',
-    });
-
-    const [, options] = globalThis.fetch.mock.calls[0];
-    expect(options.headers).toEqual({ Authorization: 'Bearer sk-stored' });
-  });
 });
 
 describe('AgentRegistry session option hydration', () => {
@@ -680,7 +504,7 @@ describe('AgentRegistry session option hydration', () => {
     const { registry, opencode } = makeRegistry({
       registry: {
         getChat: mock(() => ({
-          provider: 'opencode',
+          agentId: 'opencode',
           projectPath: '/proj',
           model: 'openai/gpt-5',
           permissionMode: 'bypassPermissions',
@@ -709,7 +533,7 @@ describe('AgentRegistry session option hydration', () => {
       endpointResolver,
       registry: {
         getChat: mock(() => ({
-          provider: 'codex',
+          agentId: 'codex',
           projectPath: '/proj',
           model: 'acme_openai:acme-code',
           apiProviderId: 'acme',
@@ -723,7 +547,7 @@ describe('AgentRegistry session option hydration', () => {
     await registry.startSession('123', 'hello', {});
 
     expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
-      providerSessionId: 'codex-session',
+      agentSessionId: 'codex-session',
       nativePath: null,
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',

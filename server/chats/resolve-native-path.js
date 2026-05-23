@@ -5,15 +5,15 @@ import { promises as fs } from 'fs';
 import { createClaudeNativePath } from "../agents/claude/claude-cli.js";
 import { findPiSessionFileBySessionId } from "../agents/pi/pi-session-paths.js";
 import { createArtificialNativePath } from './artificial-native-path.js';
-import { isEndpointOnlyAgentId } from '../../common/providers.ts';
+import { isEndpointOnlyAgentId } from '../../common/agents.ts';
 
 export async function resolveMissingNativePath(session, options = {}) {
-  if (!session || !session.providerSessionId) {
+  if (!session || !session.agentSessionId) {
     return null;
   }
 
-  if (session.provider === 'claude') {
-    const candidate = await createClaudeNativePath(session.projectPath, session.providerSessionId);
+  if (session.agentId === 'claude') {
+    const candidate = await createClaudeNativePath(session.projectPath, session.agentSessionId);
     if (!candidate) return null;
     try {
       await fs.access(candidate);
@@ -23,35 +23,35 @@ export async function resolveMissingNativePath(session, options = {}) {
     }
   }
 
-  if (session.provider === 'codex') {
+  if (session.agentId === 'codex') {
     return options.resolveCodexNativePath
       ? options.resolveCodexNativePath(session)
       : null;
   }
 
-  if (session.provider === 'opencode') {
-    return createArtificialNativePath(session.provider, session.providerSessionId);
+  if (session.agentId === 'opencode') {
+    return createArtificialNativePath(session.agentId, session.agentSessionId);
   }
 
-  if (session.provider === 'amp') {
-    return createArtificialNativePath(session.provider, session.providerSessionId);
+  if (session.agentId === 'amp') {
+    return createArtificialNativePath(session.agentId, session.agentSessionId);
   }
 
-  if (session.provider === 'cursor') {
-    return createArtificialNativePath(session.provider, session.providerSessionId);
+  if (session.agentId === 'cursor') {
+    return createArtificialNativePath(session.agentId, session.agentSessionId);
   }
 
-  if (session.provider === 'factory') {
-    return createArtificialNativePath(session.provider, session.providerSessionId);
+  if (session.agentId === 'factory') {
+    return createArtificialNativePath(session.agentId, session.agentSessionId);
   }
 
-  if (session.provider === 'pi') {
-    const found = await findPiSessionFileBySessionId(session.providerSessionId, session.projectPath);
-    return found || createArtificialNativePath(session.provider, session.providerSessionId);
+  if (session.agentId === 'pi') {
+    const found = await findPiSessionFileBySessionId(session.agentSessionId, session.projectPath);
+    return found || createArtificialNativePath(session.agentId, session.agentSessionId);
   }
 
-  if (isEndpointOnlyAgentId(session.provider)) {
-    return createArtificialNativePath(session.provider, session.providerSessionId);
+  if (isEndpointOnlyAgentId(session.agentId)) {
+    return createArtificialNativePath(session.agentId, session.agentSessionId);
   }
 
   return null;

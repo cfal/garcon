@@ -7,7 +7,7 @@ import { AssistantMessage } from "../../../common/chat-types.js";
 import type { SharedModelOption } from "../../../common/models.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import { AbsProvider } from "../shared/event-emitter-runtime.js";
-import type { AgentCommandImage, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from "../session-types.js";
+import type { AgentCommandImage, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../session-types.js";
 import { DirectSessionStore, type DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from "../shared/sse.js";
 
@@ -281,7 +281,7 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
     }
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
+  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const sessionId = crypto.randomUUID();
     const userContent = buildOpenAiCompatibleUserContent(request.command, request.images);
     const textContent = extractOpenAiCompatibleTextContent(userContent);
@@ -305,19 +305,19 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
     void this.#runTurnInternal(session);
 
     return {
-      providerSessionId: sessionId,
+      agentSessionId: sessionId,
       nativePath: createArtificialNativePath(this.#config.providerId, sessionId),
     };
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
-    const session = this.#sessions.get(request.providerSessionId)
-      ?? await this.#hydrateSession(request.providerSessionId, request);
+    const session = this.#sessions.get(request.agentSessionId)
+      ?? await this.#hydrateSession(request.agentSessionId, request);
     if (!session) {
-      throw new Error(`Unknown ${this.#config.providerLabel} session: ${request.providerSessionId}`);
+      throw new Error(`Unknown ${this.#config.providerLabel} session: ${request.agentSessionId}`);
     }
     if (session.isRunning) {
-      throw new Error(`Session ${request.providerSessionId} is already running`);
+      throw new Error(`Session ${request.agentSessionId} is already running`);
     }
 
     if (request.model) {
@@ -340,8 +340,8 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
     await this.#runTurnInternal(session);
   }
 
-  abort(providerSessionId: string): boolean {
-    const session = this.#sessions.get(providerSessionId);
+  abort(agentSessionId: string): boolean {
+    const session = this.#sessions.get(agentSessionId);
     if (!session?.isRunning) return false;
 
     session.aborted = true;
@@ -349,8 +349,8 @@ export class OpenAiCompatibleChatProvider extends AbsProvider {
     return true;
   }
 
-  isRunning(providerSessionId: string): boolean {
-    return this.#sessions.get(providerSessionId)?.isRunning === true;
+  isRunning(agentSessionId: string): boolean {
+    return this.#sessions.get(agentSessionId)?.isRunning === true;
   }
 
   getRunningSessions(): Array<{ id: string; startedAt: string; status: string }> {

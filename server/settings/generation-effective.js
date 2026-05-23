@@ -40,7 +40,7 @@ function pickDefaultModel(agentId, modelsByAgent) {
 export function resolveEffectiveGenerationConfig({ persisted, authByAgent, modelsByAgent, readinessByAgent }) {
   const cfg = persisted && typeof persisted === 'object' ? persisted : {};
   const persistedEnabled = typeof cfg.enabled === 'boolean' ? cfg.enabled : null;
-  const persistedAgent = isAgent(cfg.provider) ? cfg.provider : null;
+  const persistedAgent = isAgent(cfg.agentId) ? cfg.agentId : null;
   const persistedModel = typeof cfg.model === 'string' && cfg.model.trim() ? cfg.model : '';
   const persistedApiProviderId = typeof cfg.apiProviderId === 'string' ? cfg.apiProviderId : null;
   const persistedEndpointId = typeof cfg.modelEndpointId === 'string' ? cfg.modelEndpointId : null;
@@ -55,7 +55,7 @@ export function resolveEffectiveGenerationConfig({ persisted, authByAgent, model
 
   return {
     enabled: selectedEnabled,
-    provider: selectedAgent,
+    agentId: selectedAgent,
     model: selectedModel,
     apiProviderId: persistedApiProviderId,
     modelEndpointId: persistedEndpointId,

@@ -108,7 +108,7 @@ describe('CursorProvider lifecycle', () => {
     });
 
     await expect(startedPromise).resolves.toEqual({
-      providerSessionId: 'cursor-session-1',
+      agentSessionId: 'cursor-session-1',
       nativePath: '!cursor:cursor-session-1',
     });
 
@@ -128,7 +128,7 @@ describe('CursorProvider lifecycle', () => {
 
     const turnPromise = provider.runTurn({
       command: 'continue',
-      providerSessionId: 'cursor-session-2',
+      agentSessionId: 'cursor-session-2',
       chatId: 'chat-2',
       projectPath: '/proj',
       model: 'gpt-5.3-codex',
@@ -207,7 +207,7 @@ describe('CursorProvider lifecycle', () => {
 
     const turnPromise = provider.runTurn({
       command: 'find daml files',
-      providerSessionId: 'cursor-session-3',
+      agentSessionId: 'cursor-session-3',
       chatId: 'chat-3',
       projectPath: '/proj',
       model: 'kimi-k2.5',

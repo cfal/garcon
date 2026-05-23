@@ -8,7 +8,7 @@ import {
   type ChatMessage,
 } from "../../../common/chat-types.js";
 import { getCursorBinary } from "../../config.js";
-import { createArtificialNativePath, getArtificialProviderSessionId } from "../../chats/artificial-native-path.js";
+import { createArtificialNativePath, getArtificialAgentSessionId } from "../../chats/artificial-native-path.js";
 import { AbsProvider } from "../shared/event-emitter-runtime.js";
 import { normalizeCursorToolResultContent } from "../converters/cursor-tool-result.js";
 import { convertCursorToolUse } from "../converters/cursor-tool-use.js";
@@ -17,10 +17,10 @@ import { CursorRequestIdentityStore } from './cursor-request-identities.js';
 import { loadCursorChatMessagesBySessionId } from "../loaders/cursor-history-loader.js";
 import type {
   PermissionMode,
-  ProviderChatEntry,
+  AgentChatEntry,
   ResumeTurnRequest,
   StartSessionRequest,
-  StartedProviderSession,
+  StartedAgentSession,
 } from "../session-types.js";
 
 interface CursorSession {
@@ -38,9 +38,9 @@ interface CursorSession {
   sessionCreatedEmitted: boolean;
   startTime: number;
   startedSession: {
-    promise: Promise<StartedProviderSession>;
+    promise: Promise<StartedAgentSession>;
     reject: (error: unknown) => void;
-    resolve: (value: StartedProviderSession) => void;
+    resolve: (value: StartedAgentSession) => void;
     resolved: boolean;
   } | null;
   turnResolve: (() => void) | null;
@@ -55,10 +55,10 @@ type CursorCliEvent = Record<string, unknown> & {
 
 const CURSOR_PROMPT_PLAN_MODE = 'plan';
 
-function createStartTracker(): CursorSession['startedSession'] & { promise: Promise<StartedProviderSession> } {
-  let resolveRef: ((value: StartedProviderSession) => void) | null = null;
+function createStartTracker(): CursorSession['startedSession'] & { promise: Promise<StartedAgentSession> } {
+  let resolveRef: ((value: StartedAgentSession) => void) | null = null;
   let rejectRef: ((error: unknown) => void) | null = null;
-  const promise = new Promise<StartedProviderSession>((resolve, reject) => {
+  const promise = new Promise<StartedAgentSession>((resolve, reject) => {
     resolveRef = resolve;
     rejectRef = reject;
   });
@@ -225,7 +225,7 @@ function shouldForcePermissions(permissionMode: PermissionMode): boolean {
 function buildCursorArgs(
   request: StartSessionRequest | ResumeTurnRequest,
   prompt: string,
-  providerSessionId?: string,
+  agentSessionId?: string,
 ): string[] {
   const args = [
     '--print',
@@ -236,8 +236,8 @@ function buildCursorArgs(
     '--trust',
   ];
 
-  if (providerSessionId) {
-    args.push('--resume', providerSessionId);
+  if (agentSessionId) {
+    args.push('--resume', agentSessionId);
   } else if (request.model && request.model !== 'default') {
     args.push('--model', request.model);
   }
@@ -353,14 +353,14 @@ export class CursorProvider extends AbsProvider {
     }
 
     this.#requestIdentities.rememberProviderSession(this.#identityInput(session, {
-      providerSessionId: sessionId,
+      agentSessionId: sessionId,
     }));
 
     const tracker = session.startedSession;
     if (tracker && !tracker.resolved) {
       tracker.resolved = true;
       tracker.resolve({
-        providerSessionId: sessionId,
+        agentSessionId: sessionId,
         nativePath: createArtificialNativePath('cursor', sessionId),
       });
     }
@@ -369,16 +369,16 @@ export class CursorProvider extends AbsProvider {
   #identityInput(
     session: CursorSession,
     patch: {
-      providerSessionId?: string;
+      agentSessionId?: string;
       providerRequestId?: string;
       userEchoSeen?: boolean;
     } = {},
   ) {
-    const providerSessionId = patch.providerSessionId
+    const agentSessionId = patch.agentSessionId
       ?? (session.id.startsWith('pending-') ? undefined : session.id);
     return {
       chatId: session.chatId,
-      providerSessionId,
+      agentSessionId,
       clientRequestId: session.clientRequestId,
       turnId: session.turnId,
       providerRequestId: patch.providerRequestId ?? session.providerRequestId,
@@ -408,7 +408,7 @@ export class CursorProvider extends AbsProvider {
       const sessionId = getSessionId(event);
       if (sessionId && session.id !== sessionId) this.#activateSession(session, sessionId);
       this.#requestIdentities.markUserEcho(this.#identityInput(session, {
-        providerSessionId: sessionId,
+        agentSessionId: sessionId,
         userEchoSeen: true,
       }));
       return;
@@ -620,7 +620,7 @@ export class CursorProvider extends AbsProvider {
     session.userEchoSeen = false;
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
+  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const prompt = buildCursorPrompt(request);
     const startedSession = createStartTracker();
     const session = createSession(request.chatId, startedSession);
@@ -642,19 +642,19 @@ export class CursorProvider extends AbsProvider {
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
-    const existingSession = this.#runningSessions.get(request.providerSessionId);
+    const existingSession = this.#runningSessions.get(request.agentSessionId);
     if (existingSession?.isRunning) {
-      throw new Error(`Session ${request.providerSessionId} is already running`);
+      throw new Error(`Session ${request.agentSessionId} is already running`);
     }
 
     const prompt = buildCursorPrompt(request);
     const session = existingSession ?? {
       ...createSession(request.chatId),
-      id: request.providerSessionId,
+      id: request.agentSessionId,
       sessionCreatedEmitted: true,
     };
     this.#resetSessionForTurn(session, request.chatId);
-    session.id = request.providerSessionId;
+    session.id = request.agentSessionId;
     session.sessionCreatedEmitted = true;
     this.#runningSessions.set(session.id, session);
     this.#rememberTurnIdentity(session, request);
@@ -662,7 +662,7 @@ export class CursorProvider extends AbsProvider {
     this.emitProcessing(request.chatId, true);
 
     try {
-      this.#spawnCursor(session, request, buildCursorArgs(request, prompt, request.providerSessionId));
+      this.#spawnCursor(session, request, buildCursorArgs(request, prompt, request.agentSessionId));
       await this.#waitForTurnComplete(session);
     } catch (error) {
       if (session.isRunning) {
@@ -674,8 +674,8 @@ export class CursorProvider extends AbsProvider {
     }
   }
 
-  abort(providerSessionId: string): boolean {
-    const session = this.#runningSessions.get(providerSessionId);
+  abort(agentSessionId: string): boolean {
+    const session = this.#runningSessions.get(agentSessionId);
     if (!session?.process) return false;
     session.aborted = true;
     session.process.kill();
@@ -683,8 +683,8 @@ export class CursorProvider extends AbsProvider {
     return true;
   }
 
-  isRunning(providerSessionId: string): boolean {
-    return this.#runningSessions.get(providerSessionId)?.isRunning === true;
+  isRunning(agentSessionId: string): boolean {
+    return this.#runningSessions.get(agentSessionId)?.isRunning === true;
   }
 
   getRunningSessions(): Array<{ id: string; startedAt: string; status: string }> {
@@ -697,14 +697,14 @@ export class CursorProvider extends AbsProvider {
       }));
   }
 
-  async loadMessages(session: ProviderChatEntry, context: { chatId?: string } = {}): Promise<ChatMessage[]> {
-    const providerSessionId = session.providerSessionId
-      || getArtificialProviderSessionId(session.nativePath, 'cursor')
+  async loadMessages(session: AgentChatEntry, context: { chatId?: string } = {}): Promise<ChatMessage[]> {
+    const agentSessionId = session.agentSessionId
+      || getArtificialAgentSessionId(session.nativePath, 'cursor')
       || '';
-    const messages = await loadCursorChatMessagesBySessionId(providerSessionId, session.projectPath);
+    const messages = await loadCursorChatMessagesBySessionId(agentSessionId, session.projectPath);
     return this.#requestIdentities.applyToMessages(messages, {
       chatId: context.chatId,
-      providerSessionId,
+      agentSessionId,
     });
   }
 

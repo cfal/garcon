@@ -10,14 +10,14 @@ vi.mock('$lib/api/settings.js', () => ({
   sendTelegramTest: vi.fn(),
 }));
 
-vi.mock('$lib/api/providers.js', () => ({
+vi.mock('$lib/api/agents.js', () => ({
   getAgentAuthStatus: vi.fn(),
   getAgentReadiness: vi.fn(),
   launchAgentAuthLogin: vi.fn(),
 }));
 
 const settingsApi = await import('$lib/api/settings.js');
-const providersApi = await import('$lib/api/providers.js');
+const providersApi = await import('$lib/api/agents.js');
 
 describe('Settings', () => {
   beforeEach(() => {

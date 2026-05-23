@@ -26,7 +26,7 @@
 
 	let messages = $state<ChatMessage[]>([]);
 	let title = $state('');
-	let provider = $state('');
+	let agentId = $state('');
 	let sharedAt = $state('');
 	let isLoading = $state(true);
 	let errorMsg = $state<string | null>(null);
@@ -55,7 +55,7 @@
 			const resp = await getSharedChat(token);
 			const snapshot = resp.snapshot;
 			title = snapshot.title;
-			provider = snapshot.provider;
+			agentId = snapshot.agentId;
 			sharedAt = snapshot.sharedAt;
 			messages = (snapshot.messages ?? [])
 				.map((raw: unknown) => {
@@ -129,9 +129,9 @@
 					{#if sharedAt}
 						<p class="text-xs text-muted-foreground">{formattedSharedDate()}</p>
 					{/if}
-					{#if provider}
+					{#if agentId}
 						<span class="text-[10px] px-1.5 py-0.5 rounded-full border bg-muted text-muted-foreground capitalize flex-shrink-0">
-							{provider}
+							{agentId}
 						</span>
 					{/if}
 				</div>

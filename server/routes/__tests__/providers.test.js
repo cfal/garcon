@@ -6,27 +6,33 @@ mock.module('../../lib/http-request.js', () => ({
   parseJsonBody,
 }));
 
-import createProviderRoutes from '../providers.js';
+import createAgentRoutes from '../agents.js';
+import createApiProviderRoutes from '../api-providers.js';
 
 describe('agent auth login routes', () => {
-  const providers = {
+  const agents = {
     getAgentAuthStatus: mock(() => Promise.resolve(null)),
     getAgentAuthStatusMap: mock(() => Promise.resolve({})),
     getAgentReadinessMap: mock(() => Promise.resolve({})),
-    getAgentCatalog: mock(() => Promise.resolve({ agents: [], apiProviders: [] })),
+    getAgentCatalogEntries: mock(() => Promise.resolve([])),
     launchAgentAuthLogin: mock(() => Promise.resolve({ launched: true, alreadyRunning: false })),
-    getApiProviderCatalog: mock(() => []),
-    createApiProvider: mock((input) => Promise.resolve({ id: 'custom_one', ...input })),
-    updateApiProvider: mock((id, input) => Promise.resolve({ id, ...input })),
-    deleteApiProvider: mock(() => Promise.resolve(undefined)),
-    testApiProvider: mock(() => Promise.resolve({ success: true })),
-    discoverApiProviderModels: mock(() => Promise.resolve({ success: true, models: [{ value: 'example', label: 'Example' }] })),
   };
-  const routes = createProviderRoutes(providers);
+  const apiProviders = {
+    getCatalog: mock(() => []),
+    create: mock((input) => Promise.resolve({ id: 'custom_one', ...input })),
+    update: mock((id, input) => Promise.resolve({ id, ...input })),
+    delete: mock(() => Promise.resolve(undefined)),
+    test: mock(() => Promise.resolve({ success: true })),
+    discoverModels: mock(() => Promise.resolve({ success: true, models: [{ value: 'example', label: 'Example' }] })),
+  };
+  const routes = {
+    ...createAgentRoutes({ agents, apiProviders }),
+    ...createApiProviderRoutes(apiProviders),
+  };
 
   beforeEach(() => {
     parseJsonBody.mockClear();
-    for (const fn of Object.values(providers)) {
+    for (const fn of [...Object.values(agents), ...Object.values(apiProviders)]) {
       if (typeof fn?.mockClear === 'function') fn.mockClear();
     }
   });
@@ -40,13 +46,13 @@ describe('agent auth login routes', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ launched: true, alreadyRunning: false });
-    expect(providers.launchAgentAuthLogin).toHaveBeenCalledWith('claude');
+    expect(agents.launchAgentAuthLogin).toHaveBeenCalledWith('claude');
   });
 
   it('returns an error response when auth launch fails', async () => {
     parseJsonBody.mockResolvedValueOnce({ agentId: 'codex' });
     const handler = routes['/api/v1/agents/auth/login'].POST;
-    providers.launchAgentAuthLogin.mockImplementationOnce(() => {
+    agents.launchAgentAuthLogin.mockImplementationOnce(() => {
       throw new Error('spawn failed');
     });
 
@@ -66,14 +72,12 @@ describe('agent auth login routes', () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe('agentId is required');
-    expect(providers.launchAgentAuthLogin).not.toHaveBeenCalled();
+    expect(agents.launchAgentAuthLogin).not.toHaveBeenCalled();
   });
 
   it('returns the clean agent/API provider catalog', async () => {
-    providers.getAgentCatalog.mockImplementationOnce(() => Promise.resolve({
-      agents: [{ id: 'claude', kind: 'agent', models: [] }],
-      apiProviders: [{ id: 'zai', endpoints: [] }],
-    }));
+    agents.getAgentCatalogEntries.mockImplementationOnce(() => Promise.resolve([{ id: 'claude', kind: 'agent', models: [] }]));
+    apiProviders.getCatalog.mockImplementationOnce(() => [{ id: 'zai', endpoints: [] }]);
     const handler = routes['/api/v1/agents'].GET;
 
     const response = await handler(new Request('http://localhost/api/v1/agents'));
@@ -105,7 +109,7 @@ describe('agent auth login routes', () => {
     const body = await response.json();
 
     expect(response.status).toBe(201);
-    expect(providers.createApiProvider).toHaveBeenCalledWith(input);
+    expect(apiProviders.create).toHaveBeenCalledWith(input);
     expect(body.id).toBe('custom_one');
   });
 
@@ -121,7 +125,7 @@ describe('agent auth login routes', () => {
       },
     };
     parseJsonBody.mockImplementationOnce(() => Promise.resolve(input));
-    providers.testApiProvider.mockImplementationOnce(() => Promise.resolve({ success: true }));
+    apiProviders.test.mockImplementationOnce(() => Promise.resolve({ success: true }));
     const handler = routes['/api/v1/api-providers/test'].POST;
 
     const response = await handler(new Request('http://localhost/api/v1/api-providers/test', { method: 'POST' }));
@@ -129,8 +133,8 @@ describe('agent auth login routes', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ success: true });
-    expect(providers.testApiProvider).toHaveBeenCalledWith(input);
-    expect(providers.createApiProvider).not.toHaveBeenCalled();
+    expect(apiProviders.test).toHaveBeenCalledWith(input);
+    expect(apiProviders.create).not.toHaveBeenCalled();
   });
 
   it('discovers API provider models without persisting them', async () => {
@@ -148,7 +152,7 @@ describe('agent auth login routes', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ success: true, models: [{ value: 'example', label: 'Example' }] });
-    expect(providers.discoverApiProviderModels).toHaveBeenCalledWith(input);
-    expect(providers.createApiProvider).not.toHaveBeenCalled();
+    expect(apiProviders.discoverModels).toHaveBeenCalledWith(input);
+    expect(apiProviders.create).not.toHaveBeenCalled();
   });
 });

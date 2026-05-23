@@ -68,7 +68,7 @@ describe('chats API contract', () => {
 
 		const result = await startChat({
 			chatId: 'c-1',
-			provider: 'claude',
+			agentId: 'claude',
 			projectPath: '/project',
 			model: 'opus',
 			permissionMode: 'default',
@@ -85,7 +85,7 @@ describe('chats API contract', () => {
 
 		const body = JSON.parse(opts.body);
 		expect(body.chatId).toBe('c-1');
-		expect(body.provider).toBe('claude');
+		expect(body.agentId).toBe('claude');
 		expect(body.permissionMode).toBe('default');
 		expect(body.thinkingMode).toBe('none');
 		expect(body.claudeThinkingMode).toBe('auto');
@@ -99,7 +99,7 @@ describe('chats API contract', () => {
 
 		await startChat({
 			chatId: 'c-2',
-			provider: 'claude',
+			agentId: 'claude',
 			projectPath: '/p',
 			model: 'm',
 			permissionMode: 'acceptEdits',
@@ -124,7 +124,7 @@ describe('chats API contract', () => {
 
 		await startChat({
 			chatId: 'c-3',
-			provider: 'claude',
+			agentId: 'claude',
 			projectPath: '/p',
 			model: 'm',
 			permissionMode: 'bogus' as any,
@@ -207,13 +207,13 @@ describe('chats API contract', () => {
 	it('stopChat and permission decision send command identity payloads', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true, commandType: 'agent-stop', clientRequestId: 'req-stop', status: 'accepted', acceptedAt: 't', stopped: true }));
 
-		await stopChat({ clientRequestId: 'req-stop', chatId: 'c-1', provider: 'claude' });
+		await stopChat({ clientRequestId: 'req-stop', chatId: 'c-1', agentId: 'claude' });
 
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/stop');
 		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
 			clientRequestId: 'req-stop',
 			chatId: 'c-1',
-			provider: 'claude',
+			agentId: 'claude',
 		});
 
 		fetchMock.mockResolvedValueOnce(jsonResponse({ success: true, commandType: 'permission-decision', clientRequestId: 'req-perm', status: 'accepted', acceptedAt: 't' }));
@@ -366,7 +366,7 @@ describe('chats API contract', () => {
 	});
 
 	it('forkChat sends POST with sourceChatId and chatId', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true, sourceChatId: '1', chatId: '2', provider: 'claude' }));
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'claude' }));
 
 		const result = await forkChat({ sourceChatId: '1', chatId: '2' });
 

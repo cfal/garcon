@@ -16,7 +16,7 @@ function createChat(id: string, title: string): ChatSessionRecord {
 		id,
 		projectPath: '/tmp/project',
 		title,
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'think',

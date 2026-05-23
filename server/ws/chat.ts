@@ -35,9 +35,9 @@ import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } f
 import type { QueueState } from '../../common/queue-state.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
-import type { RunProviderTurnOptions } from "../agents/session-types.js";
+import type { RunAgentTurnOptions } from "../agents/session-types.js";
 import { requireChatExecutionConfig } from "../agents/session-types.js";
-import { supportsFork as providerSupportsFork } from '../../common/providers.ts';
+import { supportsFork as agentSupportsFork } from '../../common/agents.ts';
 
 const PERMISSION_DEDUP_TTL = 30_000;
 
@@ -56,13 +56,13 @@ interface AgentRegistryDep {
     modelEndpointId?: string | null;
   }): Promise<void>;
   hasAgent(agentId: string): boolean;
-  isAgentSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
+  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
 }
 
 interface QueueManagerDep {
-  submit(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
+  submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   abort(chatId: string): Promise<boolean>;
-  triggerDrain(chatId: string, options: RunProviderTurnOptions): Promise<void>;
+  triggerDrain(chatId: string, options: RunAgentTurnOptions): Promise<void>;
   readChatQueue(chatId: string): Promise<QueueState>;
   enqueueChat(chatId: string, content: string): Promise<unknown>;
   dequeueChat(chatId: string, entryId: string): Promise<unknown>;
@@ -92,17 +92,17 @@ interface ForkDeps {
     registry: IChatRegistry;
     settings: ForkSettingsDep;
     metadata: ForkMetadataDep;
-    forkProviderSession?: (args: {
+    forkAgentSession?: (args: {
       sourceSession: ChatRegistryEntry;
       sourceChatId: string;
       targetChatId: string;
-    }) => Promise<{ providerSessionId: string; nativePath: string | null } | null>;
-  }): Promise<{ sourceChatId: string; chatId: string; provider?: string }>;
-  forkProviderSession?(args: {
+    }) => Promise<{ agentSessionId: string; nativePath: string | null } | null>;
+  }): Promise<{ sourceChatId: string; chatId: string; agentId?: string }>;
+  forkAgentSession?(args: {
     sourceSession: ChatRegistryEntry;
     sourceChatId: string;
     targetChatId: string;
-  }): Promise<{ providerSessionId: string; nativePath: string | null } | null>;
+  }): Promise<{ agentSessionId: string; nativePath: string | null } | null>;
 }
 
 interface HistoryCacheDep {
@@ -189,7 +189,7 @@ export class ChatHandler {
     }
 
     try {
-      const options: RunProviderTurnOptions = {
+      const options: RunAgentTurnOptions = {
         permissionMode: data.permissionMode,
         thinkingMode: data.thinkingMode,
         claudeThinkingMode: data.claudeThinkingMode,
@@ -206,8 +206,8 @@ export class ChatHandler {
     }
   }
 
-  #runOptionsFromForkRequest(data: ForkRunRequest): RunProviderTurnOptions {
-    const options: RunProviderTurnOptions = {};
+  #runOptionsFromForkRequest(data: ForkRunRequest): RunAgentTurnOptions {
+    const options: RunAgentTurnOptions = {};
     if (data.permissionMode !== undefined) options.permissionMode = data.permissionMode;
     if (data.thinkingMode !== undefined) options.thinkingMode = data.thinkingMode;
     if (data.claudeThinkingMode !== undefined) options.claudeThinkingMode = data.claudeThinkingMode;
@@ -246,11 +246,11 @@ export class ChatHandler {
       writer.send(new AgentRunFailedMessage(sourceChatId, 'Source session not found'));
       return;
     }
-    if (!providerSupportsFork(sourceSession.provider)) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, `Fork unsupported for agent: ${sourceSession.provider}`));
+    if (!agentSupportsFork(sourceSession.agentId)) {
+      writer.send(new AgentRunFailedMessage(sourceChatId, `Fork unsupported for agent: ${sourceSession.agentId}`));
       return;
     }
-    if (this.#providers.isAgentSessionRunning(sourceSession.provider, sourceSession.providerSessionId)) {
+    if (this.#providers.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)) {
       writer.send(new AgentRunFailedMessage(sourceChatId, 'Cannot fork a chat while it is processing'));
       return;
     }
@@ -267,7 +267,7 @@ export class ChatHandler {
         registry: this.#registry,
         settings: this.#forkDeps.settings,
         metadata: this.#forkDeps.metadata,
-        forkProviderSession: this.#forkDeps.forkProviderSession,
+        forkAgentSession: this.#forkDeps.forkAgentSession,
       });
       writer.send(new ChatForkCreatedMessage(result.sourceChatId, result.chatId));
       await this.#queue.submit(result.chatId, data.command, this.#runOptionsFromForkRequest(data));
@@ -459,7 +459,7 @@ export class ChatHandler {
   }
 
   // Builds drain options from persisted chat settings for queued turns.
-  #drainOptions(chatId: string): RunProviderTurnOptions {
+  #drainOptions(chatId: string): RunAgentTurnOptions {
     const entry = requireChatExecutionConfig(chatId, this.#registry.getChat(chatId));
     return {
       permissionMode: entry.permissionMode,

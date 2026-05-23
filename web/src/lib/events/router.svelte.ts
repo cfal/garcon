@@ -27,7 +27,7 @@ import {
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PendingPermissionRequest, PendingViewChat, PermissionMode, QueueState } from '$lib/types/chat';
-import type { ChatEntry, SessionProvider } from '$lib/types/app';
+import type { ChatEntry, SessionAgentId } from '$lib/types/app';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 
 import { untrack } from 'svelte';
@@ -55,7 +55,7 @@ import {
 
 // Store references required by the router to build handler contexts.
 export interface EventRouterStores {
-	provider: () => SessionProvider;
+	agentId: () => SessionAgentId;
 	selectedChat: () => ChatEntry | null;
 	currentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
@@ -69,7 +69,7 @@ export interface EventRouterStores {
 		clientRequestId: string,
 		deliveryStatus: 'submitting' | 'accepted' | 'failed',
 	) => void;
-	loadMessages: (chatId: string, loadMore?: boolean, provider?: string) => Promise<ChatMessage[]>;
+	loadMessages: (chatId: string, loadMore?: boolean, agentId?: string) => Promise<ChatMessage[]>;
 	setIsLoading: (v: boolean) => void;
 	setCanAbort: (v: boolean) => void;
 	setLoadingStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
@@ -188,7 +188,7 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 
 	const selectedChat = stores.selectedChat();
 	const currentChatId = stores.currentChatId();
-	const provider = stores.provider();
+	const agentId = stores.agentId();
 	const projectPath = selectedChat?.projectPath || null;
 
 	const onNavigateToChat = stores.navigateToChat
@@ -230,7 +230,7 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 	};
 
 	const chatEventCtx: ChatEventContext = {
-		provider,
+		agentId,
 		projectPath,
 		selectedChat,
 		getCurrentChatId: stores.currentChatId,

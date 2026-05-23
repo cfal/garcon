@@ -208,7 +208,7 @@ describe('Codex app-server request builders', () => {
   it('builds thread/resume params with only the needed experimental field', () => {
     const params = buildThreadResumeParams({
       ...makeRequest(),
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       nativePath: '/tmp/legacy.jsonl',
     });
 
@@ -224,7 +224,7 @@ describe('Codex app-server request builders', () => {
 
   it('builds thread/fork params from durable thread identity', () => {
     const params = buildThreadForkParams({
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       nativePath: '/tmp/legacy.jsonl',
       model: 'gpt-5.4-codex',
       projectPath: '/repo',
@@ -241,7 +241,7 @@ describe('Codex app-server request builders', () => {
 
   it('includes Codex config in thread/fork params', () => {
     const params = buildThreadForkParams({
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       model: 'gpt-5.4-codex',
       projectPath: '/repo',
       codexConfig: { config: { model_provider: 'custom-openai' } },
@@ -427,7 +427,7 @@ describe('CodexAppServerProvider', () => {
     const provider = new CodexAppServerProvider({ createClient: () => fake, materializationTimeoutMs: 20 });
 
     await expect(provider.startSession(makeRequest())).resolves.toEqual({
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       nativePath,
     });
     expect(fake.startThread).toHaveBeenCalledTimes(1);
@@ -456,7 +456,7 @@ describe('CodexAppServerProvider', () => {
 
     const messages = await provider.loadMessages({
       provider: 'codex',
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       nativePath: null,
       projectPath: '/repo',
     });
@@ -483,7 +483,7 @@ describe('CodexAppServerProvider', () => {
 
     const resolvedPath = await provider.resolveNativePath({
       provider: 'codex',
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       nativePath: null,
       projectPath: '/repo',
     });
@@ -506,7 +506,7 @@ describe('CodexAppServerProvider', () => {
 
     await expect(provider.resolveNativePath({
       provider: 'codex',
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       nativePath: null,
       projectPath: '/repo',
     })).rejects.toThrow('app-server unavailable');
@@ -524,7 +524,7 @@ describe('CodexAppServerProvider', () => {
 
     const preview = await provider.getPreview({
       provider: 'codex',
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       nativePath: null,
       projectPath: '/repo',
     });
@@ -545,7 +545,7 @@ describe('CodexAppServerProvider', () => {
 
     const preview = await provider.getPreview({
       provider: 'codex',
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       nativePath: null,
       projectPath: '/repo',
     });
@@ -578,7 +578,7 @@ describe('CodexAppServerProvider', () => {
     const forked = await provider.forkSession({
       sourceSession: {
         provider: 'codex',
-        providerSessionId: 'thread-1',
+        agentSessionId: 'thread-1',
         nativePath: null,
         model: 'gpt-5.4-codex',
         projectPath: '/repo',
@@ -590,7 +590,7 @@ describe('CodexAppServerProvider', () => {
       },
     });
 
-    expect(forked).toEqual({ providerSessionId: 'forked-thread', nativePath });
+    expect(forked).toEqual({ agentSessionId: 'forked-thread', nativePath });
     expect(clientOptions[0].env).toMatchObject({
       OPENAI_API_KEY: 'endpoint-key',
       CODEX_HOME: '/tmp/codex-home',
@@ -622,7 +622,7 @@ describe('CodexAppServerProvider', () => {
     await provider.startSession(makeRequest());
     const session = {
       provider: 'codex',
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       nativePath,
       projectPath: '/repo',
     };
@@ -810,7 +810,7 @@ describe('CodexAppServerProvider', () => {
 
     const first = provider.getPreview({
       provider: 'codex',
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       nativePath: null,
       projectPath: '/repo',
     });
@@ -818,7 +818,7 @@ describe('CodexAppServerProvider', () => {
 
     const second = provider.getPreview({
       provider: 'codex',
-      providerSessionId: 'thread-2',
+      agentSessionId: 'thread-2',
       nativePath: null,
       projectPath: '/repo',
     });
@@ -849,7 +849,7 @@ describe('CodexAppServerProvider', () => {
 
     const preview = await provider.getPreview({
       provider: 'codex',
-      providerSessionId: 'thread-1',
+      agentSessionId: 'thread-1',
       nativePath: null,
       projectPath: '/repo',
     });

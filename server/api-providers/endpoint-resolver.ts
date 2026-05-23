@@ -4,14 +4,14 @@
 
 import type {
   AgentId,
-  ApiProtocol,
   AgentModelOption,
-} from '../../common/providers.js';
+} from '../../common/agents.js';
+import type { ApiProtocol } from '../../common/api-providers.js';
 import {
   endpointModelOptionValue,
   endpointSupportsAgent,
   rawModelFromEndpointOptionValue,
-} from '../../common/providers.js';
+} from '../../common/model-routing.js';
 import type {
   StoredApiProvider,
   StoredApiProviderEndpoint,

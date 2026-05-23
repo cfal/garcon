@@ -4,7 +4,7 @@ export interface SharedChatSnapshot {
   shareToken: string;
   chatId: string;
   title: string;
-  provider: string;
+  agentId: string;
   model: string;
   projectPath: string;
   sharedAt: string;

@@ -5,7 +5,7 @@ import type { ChatSession } from '$lib/types/session';
 function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 	return {
 		id: 'a',
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'opus',
 		title: 'A',
 		projectPath: '/p',
@@ -57,7 +57,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -111,7 +111,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -138,7 +138,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -164,7 +164,7 @@ describe('ChatSessionsStore', () => {
 			id: 'local-draft',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -237,7 +237,7 @@ describe('ChatSessionsStore', () => {
 			id: 'empty-msg',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -266,7 +266,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -286,7 +286,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -309,7 +309,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -341,7 +341,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -574,7 +574,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-arch',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -594,7 +594,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -689,7 +689,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-modes',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'acceptEdits',
 				thinkingMode: 'think-hard',
@@ -721,7 +721,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',

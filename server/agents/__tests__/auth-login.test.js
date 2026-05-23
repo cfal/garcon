@@ -7,7 +7,7 @@ mock.module('bun-pty', () => ({
   spawn,
 }));
 
-import { ProviderAuthLoginManager, parseDeviceAuth } from '../auth-login.js';
+import { AgentAuthLoginManager, parseDeviceAuth } from '../auth-login.js';
 
 function createFakePty() {
   let exitHandler = null;
@@ -55,7 +55,7 @@ describe('parseDeviceAuth', () => {
   });
 });
 
-describe('ProviderAuthLoginManager', () => {
+describe('AgentAuthLoginManager', () => {
   const originalClaudeCode = process.env.CLAUDECODE;
   const originalClaudeBinary = process.env.CLAUDE_BINARY;
 
@@ -70,7 +70,7 @@ describe('ProviderAuthLoginManager', () => {
   it('launches Claude auth login with the configured binary and strips nested Claude env', async () => {
     process.env.CLAUDECODE = '1';
     process.env.CLAUDE_BINARY = '/tmp/custom-claude';
-    const manager = new ProviderAuthLoginManager();
+    const manager = new AgentAuthLoginManager();
     const pty = createFakePty();
     spawn.mockImplementation(() => pty);
 
@@ -96,7 +96,7 @@ describe('ProviderAuthLoginManager', () => {
   });
 
   it('launches Codex with --device-auth and returns parsed device info', async () => {
-    const manager = new ProviderAuthLoginManager();
+    const manager = new AgentAuthLoginManager();
     const pty = createFakePty();
     spawn.mockImplementation(() => pty);
 
@@ -121,7 +121,7 @@ describe('ProviderAuthLoginManager', () => {
   });
 
   it('returns alreadyRunning when a codex session is in progress', async () => {
-    const manager = new ProviderAuthLoginManager();
+    const manager = new AgentAuthLoginManager();
     const pty = createFakePty();
     spawn.mockImplementation(() => pty);
 
@@ -133,10 +133,10 @@ describe('ProviderAuthLoginManager', () => {
     expect(second).toEqual({ launched: false, alreadyRunning: true });
   });
 
-  it('rejects providers without a supported UI login flow', async () => {
-    const manager = new ProviderAuthLoginManager();
+  it('rejects agents without a supported UI login flow', async () => {
+    const manager = new AgentAuthLoginManager();
 
-    expect(manager.launch('amp')).rejects.toThrow('Provider does not support UI login: amp');
+    expect(manager.launch('amp')).rejects.toThrow('Agent does not support UI login: amp');
     expect(spawn).not.toHaveBeenCalled();
   });
 });

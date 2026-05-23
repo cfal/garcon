@@ -161,16 +161,16 @@ Return only the commit message now.`;
 
 const COMMIT_MESSAGE_ERROR_MAP = Object.freeze({
   COMMIT_MESSAGE_NO_STAGED_FILES: { status: 400, errorCode: 'commit_message_no_staged_files' },
-  COMMIT_MESSAGE_PROVIDER_AUTH_REQUIRED: { status: 401, errorCode: 'commit_message_provider_auth_required' },
+  COMMIT_MESSAGE_AGENT_AUTH_REQUIRED: { status: 401, errorCode: 'commit_message_agent_auth_required' },
   COMMIT_MESSAGE_RATE_LIMITED: { status: 429, errorCode: 'commit_message_rate_limited' },
-  COMMIT_MESSAGE_PROVIDER_UNAVAILABLE: { status: 503, errorCode: 'commit_message_provider_unavailable' },
+  COMMIT_MESSAGE_AGENT_UNAVAILABLE: { status: 503, errorCode: 'commit_message_agent_unavailable' },
   COMMIT_MESSAGE_TIMEOUT: { status: 504, errorCode: 'commit_message_timeout' },
   COMMIT_MESSAGE_EMPTY_RESPONSE: { status: 502, errorCode: 'commit_message_empty_response' },
   COMMIT_MESSAGE_INVALID_RESPONSE: { status: 502, errorCode: 'commit_message_invalid_response' },
   COMMIT_MESSAGE_GENERATION_FAILED: { status: 500, errorCode: 'commit_message_generation_failed' },
 });
 
-function classifyCommitMessageProviderError(error) {
+function classifyCommitMessageAgentError(error) {
   const message = String(error?.message || '').toLowerCase();
   if (
     message.includes('401')
@@ -180,7 +180,7 @@ function classifyCommitMessageProviderError(error) {
     || message.includes('login')
     || message.includes('api key')
   ) {
-    return 'COMMIT_MESSAGE_PROVIDER_AUTH_REQUIRED';
+    return 'COMMIT_MESSAGE_AGENT_AUTH_REQUIRED';
   }
   if (
     message.includes('429')
@@ -206,15 +206,15 @@ function classifyCommitMessageProviderError(error) {
     || message.includes('network')
     || message.includes('failed to create opencode session')
   ) {
-    return 'COMMIT_MESSAGE_PROVIDER_UNAVAILABLE';
+    return 'COMMIT_MESSAGE_AGENT_UNAVAILABLE';
   }
   return 'COMMIT_MESSAGE_GENERATION_FAILED';
 }
 
-// Generates a conventional commit message using the given AI provider.
+// Generates a conventional commit message using the configured agent.
 // When customPrompt is non-empty, it is used as the template with
 // {{files}} and {{diff}} placeholders substituted in.
-async function generateCommitMessage(files, diffContext, provider, projectPath, runSingleQueryFn, options = {}) {
+async function generateCommitMessage(files, diffContext, agentId, projectPath, runSingleQueryFn, options = {}) {
   const filesList = files.map((f) => `- ${f}`).join('\n');
   const diffExcerpt = diffContext.substring(0, 4000);
   const { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt } = options;
@@ -231,7 +231,7 @@ async function generateCommitMessage(files, diffContext, provider, projectPath, 
   }
 
   try {
-    const opts = { provider, cwd: projectPath };
+    const opts = { agentId, cwd: projectPath };
     if (model) opts.model = model;
     if (apiProviderId) opts.apiProviderId = apiProviderId;
     if (modelEndpointId) opts.modelEndpointId = modelEndpointId;
@@ -249,7 +249,7 @@ async function generateCommitMessage(files, diffContext, provider, projectPath, 
     if (error instanceof GitDomainError) throw error;
     console.error('Error generating commit message:', error);
     throw new GitDomainError(
-      classifyCommitMessageProviderError(error),
+      classifyCommitMessageAgentError(error),
       'Failed to generate commit message.',
     );
   }
@@ -690,7 +690,7 @@ function tabDiffArgs(contextLines, file, isUnstage) {
 // exposes methods that correspond 1:1 with route handlers, plus a
 // toHttpError() helper for mapping errors to Response objects at the
 // route boundary.
-export function createGitService({ providers, classifyGitError }) {
+export function createGitService({ agents, classifyGitError }) {
 
   async function getStatus({ projectPath }) {
     await assertGitRepository(projectPath);
@@ -899,7 +899,7 @@ export function createGitService({ providers, classifyGitError }) {
   async function generateCommitMessageForFiles({
     projectPath,
     files,
-    provider,
+    agentId,
     model,
     apiProviderId,
     modelEndpointId,
@@ -931,9 +931,9 @@ export function createGitService({ providers, classifyGitError }) {
     const message = await generateCommitMessage(
       files,
       diffContext,
-      provider,
+      agentId,
       projectPath,
-      (prompt, opts) => providers.runSingleQuery(prompt, opts),
+      (prompt, opts) => agents.runSingleQuery(prompt, opts),
       { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt },
     );
     return { message };

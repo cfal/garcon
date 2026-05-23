@@ -1,7 +1,7 @@
-import type { SessionProvider } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
 import { nativeSourceLabelFor } from '$lib/i18n/agent-labels';
-import type { ApiProtocol } from '$shared/providers';
+import type { ApiProtocol } from '$shared/api-providers';
 import type {
 	FilteredModelResult,
 	FilteredModelRowsResult,
@@ -12,7 +12,7 @@ import type {
 	ModelSourceOption,
 } from './model-selector-types';
 
-export function nativeSourceKey(agentId: SessionProvider): string {
+export function nativeSourceKey(agentId: SessionAgentId): string {
 	return `native:${agentId}`;
 }
 
@@ -20,7 +20,7 @@ export function endpointSourceKey(endpointId: string): string {
 	return `endpoint:${endpointId}`;
 }
 
-export function modelSourceKeyFor(agentId: SessionProvider, model: ModelOption): string {
+export function modelSourceKeyFor(agentId: SessionAgentId, model: ModelOption): string {
 	if (model.endpointId) return endpointSourceKey(model.endpointId);
 	return nativeSourceKey(agentId);
 }
@@ -36,13 +36,13 @@ export function buildAgentOptions(modelCatalog: ModelCatalogStore): AgentSelecto
 	});
 }
 
-export function nativeSourceLabel(agentId: SessionProvider, modelCatalog: ModelCatalogStore): string {
+export function nativeSourceLabel(agentId: SessionAgentId, modelCatalog: ModelCatalogStore): string {
 	return nativeSourceLabelFor(agentId, modelCatalog.getAgentLabel(agentId));
 }
 
 export function buildModelSources(
 	modelCatalog: ModelCatalogStore,
-	agentId: SessionProvider,
+	agentId: SessionAgentId,
 ): ModelSourceOption[] {
 	const models = modelCatalog.getModels(agentId);
 	const nativeModels: ModelOption[] = [];
@@ -188,7 +188,7 @@ export function filterModelRows(
 
 export function buildModelSelectorChange(
 	modelCatalog: ModelCatalogStore,
-	agentId: SessionProvider,
+	agentId: SessionAgentId,
 	modelValue: string,
 ): ModelSelectorChange | null {
 	if (!agentId || !modelValue) return null;

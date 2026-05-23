@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Modal for configuring commit message AI generation. Allows
-	// enabling/disabling generation and selecting provider + model.
+	// enabling/disabling generation and selecting agent + model.
 	// Settings are persisted to app settings under ui.commitMessage.
 
 	import { onMount } from 'svelte';
@@ -8,8 +8,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
 	import { getModelCatalog, getRemoteSettings } from '$lib/context';
-	import type { SessionProvider } from '$lib/types/app';
-	import type { ApiProtocol } from '$shared/providers';
+	import type { SessionAgentId } from '$lib/types/app';
+	import type { ApiProtocol } from '$shared/api-providers';
 	import * as m from '$lib/paraglide/messages.js';
 	import SettingsModelSelector from '$lib/components/model-selector/SettingsModelSelector.svelte';
 	import type { ModelSelectorChange, ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
@@ -18,7 +18,7 @@
 		onClose: () => void;
 		onSettingsChanged: (settings: {
 			enabled: boolean;
-			provider: SessionProvider;
+			agentId: SessionAgentId;
 			model: string;
 			apiProviderId?: string | null;
 			modelEndpointId?: string | null;
@@ -31,7 +31,7 @@
 	let { onClose, onSettingsChanged }: Props = $props();
 
 	let enabled = $state(true);
-	let provider = $state<SessionProvider>('claude');
+	let agentId = $state<SessionAgentId>('claude');
 	let model = $state('');
 	const DEFAULT_PROMPT = `Write a high-quality Conventional Commit message based on the staged changes.
 
@@ -63,17 +63,17 @@ Return only the commit message now.`;
 	const remoteSettings = getRemoteSettings();
 	const modelSelectorMode: ModelSelectorMode = { agent: 'select', source: 'select', surface: 'settings' };
 	const modelSelectorValue = $derived({
-		agentId: provider,
+		agentId,
 		model,
 	});
 	let loaded = $state(false);
 
 	function applyModelDefault(persistedModel: string, persistedEndpointId: string | null): void {
 		if (persistedModel) {
-			model = modelCatalog.selectionValueFor(provider, persistedModel, persistedEndpointId);
+			model = modelCatalog.selectionValueFor(agentId, persistedModel, persistedEndpointId);
 		}
 		if (!model) {
-			const models = modelCatalog.getModels(provider);
+			const models = modelCatalog.getModels(agentId);
 			if (models.length > 0) model = models[0].value;
 		}
 	}
@@ -89,8 +89,8 @@ Return only the commit message now.`;
 			const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
 			const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
 			enabled = cm.enabled !== false;
-			if (typeof cm.provider === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(cm.provider)) {
-				provider = cm.provider as SessionProvider;
+			if (typeof cm.agentId === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(cm.agentId)) {
+				agentId = cm.agentId as SessionAgentId;
 			}
 			if (typeof cm.model === 'string') persistedModel = cm.model;
 			if (typeof cm.modelEndpointId === 'string') persistedEndpointId = cm.modelEndpointId;
@@ -102,10 +102,10 @@ Return only the commit message now.`;
 		applyModelDefault(persistedModel, persistedEndpointId);
 
 		loaded = true;
-		const providerAtLoad = provider;
+		const agentIdAtLoad = agentId;
 		const modelAtLoad = model;
 		void modelCatalog.refreshIfStale().then(() => {
-			if (provider !== providerAtLoad || model !== modelAtLoad) return;
+			if (agentId !== agentIdAtLoad || model !== modelAtLoad) return;
 			applyModelDefault(persistedModel, persistedEndpointId);
 		}).catch((err) => {
 			console.warn('[CommitMessageSettingsModal] Failed to refresh models', err);
@@ -116,10 +116,10 @@ Return only the commit message now.`;
 		// Store empty string when the prompt matches the default so the
 		// server uses its built-in prompt and avoids drift if the default changes.
 		const promptToStore = isDefaultPrompt ? '' : customPrompt;
-		const selection = modelCatalog.selectionFor(provider, model);
+		const selection = modelCatalog.selectionFor(agentId, model);
 		const payload = {
 			enabled,
-			provider,
+			agentId,
 			model: selection.model,
 			apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,
@@ -137,7 +137,7 @@ Return only the commit message now.`;
 	}
 
 	async function handleModelSelectorChange(next: ModelSelectorChange) {
-		provider = next.agentId;
+		agentId = next.agentId;
 		model = next.modelValue;
 		await persist();
 	}

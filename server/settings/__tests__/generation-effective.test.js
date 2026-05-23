@@ -16,7 +16,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
     expect(result).toEqual({
       enabled: false,
-      provider: 'claude',
+      agentId: 'claude',
       model: 'haiku',
       apiProviderId: null,
       modelEndpointId: null,
@@ -39,7 +39,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
     expect(result).toEqual({
       enabled: true,
-      provider: 'codex',
+      agentId: 'codex',
       model: 'gpt-5.5',
       apiProviderId: null,
       modelEndpointId: null,
@@ -67,7 +67,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
     expect(result).toEqual({
       enabled: true,
-      provider: 'direct-anthropic-compatible',
+      agentId: 'direct-anthropic-compatible',
       model: 'acme_anthropic:acme-sonnet',
       apiProviderId: null,
       modelEndpointId: null,
@@ -96,7 +96,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
     expect(result).toEqual({
       enabled: true,
-      provider: 'opencode',
+      agentId: 'opencode',
       model: 'deepseek-v3',
       apiProviderId: null,
       modelEndpointId: null,
@@ -119,7 +119,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
     expect(result).toEqual({
       enabled: false,
-      provider: 'claude',
+      agentId: 'claude',
       model: 'haiku',
       apiProviderId: null,
       modelEndpointId: null,
@@ -130,7 +130,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
   it('respects explicitly persisted settings even without authenticated agents', () => {
     const result = resolveEffectiveGenerationConfig({
-      persisted: { enabled: true, provider: 'opencode', model: 'openai/gpt-4.1' },
+      persisted: { enabled: true, agentId: 'opencode', model: 'openai/gpt-4.1' },
       authByAgent: {
         claude: { authenticated: false },
         codex: { authenticated: false },
@@ -142,7 +142,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
     expect(result).toEqual({
       enabled: true,
-      provider: 'opencode',
+      agentId: 'opencode',
       model: 'openai/gpt-4.1',
       apiProviderId: null,
       modelEndpointId: null,
@@ -153,7 +153,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
   it('preserves a persisted amp agent and fills its default model', () => {
     const result = resolveEffectiveGenerationConfig({
-      persisted: { enabled: true, provider: 'amp' },
+      persisted: { enabled: true, agentId: 'amp' },
       authByAgent: {
         claude: { authenticated: false },
         codex: { authenticated: false },
@@ -165,7 +165,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
     expect(result).toEqual({
       enabled: true,
-      provider: 'amp',
+      agentId: 'amp',
       model: 'smart',
       apiProviderId: null,
       modelEndpointId: null,
@@ -176,7 +176,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
   it('preserves a persisted factory agent and fills its default model', () => {
     const result = resolveEffectiveGenerationConfig({
-      persisted: { enabled: true, provider: 'factory' },
+      persisted: { enabled: true, agentId: 'factory' },
       authByAgent: {
         claude: { authenticated: false },
         codex: { authenticated: false },
@@ -189,7 +189,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
     expect(result).toEqual({
       enabled: true,
-      provider: 'factory',
+      agentId: 'factory',
       model: 'claude-opus-4-6',
       apiProviderId: null,
       modelEndpointId: null,
@@ -200,7 +200,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
   it('uses dynamic agent model defaults from catalog-shaped model maps', () => {
     const result = resolveEffectiveGenerationConfig({
-      persisted: { enabled: true, provider: 'direct-openai-compatible' },
+      persisted: { enabled: true, agentId: 'direct-openai-compatible' },
       authByAgent: {},
       modelsByAgent: {
         'direct-openai-compatible': [
@@ -211,7 +211,7 @@ describe('resolveEffectiveGenerationConfig', () => {
 
     expect(result).toEqual({
       enabled: true,
-      provider: 'direct-openai-compatible',
+      agentId: 'direct-openai-compatible',
       model: 'zai_openai:glm-5.1',
       apiProviderId: null,
       modelEndpointId: null,

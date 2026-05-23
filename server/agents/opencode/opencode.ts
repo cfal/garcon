@@ -154,7 +154,7 @@ interface PendingTurnWaiter {
 
 interface PendingPermission {
   originalRequestId: string;
-  providerSessionId: string;
+  agentSessionId: string;
   chatId: string;
 }
 
@@ -493,9 +493,9 @@ export class OpenCodeProvider extends AbsProvider {
     this.#sseListenerStarted = false;
   }
 
-  #createTurnWaiter(providerSessionId: string): PendingTurnWaiter {
-    if (this.#pendingTurnWaiters.has(providerSessionId)) {
-      throw new Error(`Turn already in progress for session ${providerSessionId}`);
+  #createTurnWaiter(agentSessionId: string): PendingTurnWaiter {
+    if (this.#pendingTurnWaiters.has(agentSessionId)) {
+      throw new Error(`Turn already in progress for session ${agentSessionId}`);
     }
     let resolveFn!: () => void;
     let rejectFn!: (error: Error) => void;
@@ -504,21 +504,21 @@ export class OpenCodeProvider extends AbsProvider {
       rejectFn = reject;
     });
     const waiter: PendingTurnWaiter = { promise, resolve: resolveFn, reject: rejectFn };
-    this.#pendingTurnWaiters.set(providerSessionId, waiter);
+    this.#pendingTurnWaiters.set(agentSessionId, waiter);
     return waiter;
   }
 
-  #resolveTurnWaiter(providerSessionId: string): void {
-    const waiter = this.#pendingTurnWaiters.get(providerSessionId);
+  #resolveTurnWaiter(agentSessionId: string): void {
+    const waiter = this.#pendingTurnWaiters.get(agentSessionId);
     if (!waiter) return;
-    this.#pendingTurnWaiters.delete(providerSessionId);
+    this.#pendingTurnWaiters.delete(agentSessionId);
     waiter.resolve();
   }
 
-  #rejectTurnWaiter(providerSessionId: string, error: unknown): void {
-    const waiter = this.#pendingTurnWaiters.get(providerSessionId);
+  #rejectTurnWaiter(agentSessionId: string, error: unknown): void {
+    const waiter = this.#pendingTurnWaiters.get(agentSessionId);
     if (!waiter) return;
-    this.#pendingTurnWaiters.delete(providerSessionId);
+    this.#pendingTurnWaiters.delete(agentSessionId);
     waiter.reject(error instanceof Error ? error : new Error(String(error || 'OpenCode turn failed')));
   }
 
@@ -676,9 +676,9 @@ export class OpenCodeProvider extends AbsProvider {
     this.emitMessages(chatId, messages);
   }
 
-  #cancelPendingPermissionsForSession(providerSessionId: string, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
+  #cancelPendingPermissionsForSession(agentSessionId: string, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
     for (const [permissionRequestId, pending] of this.#pendingPermissions.entries()) {
-      if (pending.providerSessionId !== providerSessionId) continue;
+      if (pending.agentSessionId !== agentSessionId) continue;
       this.#pendingPermissions.delete(permissionRequestId);
       this.#emitPermissionMessages(pending.chatId, [new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason)]);
     }
@@ -727,7 +727,7 @@ export class OpenCodeProvider extends AbsProvider {
             const permissionRequestId = `opencode-${crypto.randomBytes(8).toString('hex')}`;
             this.#pendingPermissions.set(permissionRequestId, {
               originalRequestId: permission.requestId,
-              providerSessionId: sessionId,
+              agentSessionId: sessionId,
               chatId,
             });
 
@@ -877,9 +877,9 @@ export class OpenCodeProvider extends AbsProvider {
         permission: mapPermissionMode(permissionMode),
       }, { signal }),
     );
-    const providerSessionId: string = sessionResult.data.id;
+    const agentSessionId: string = sessionResult.data.id;
 
-    this.#sessions.set(providerSessionId, {
+    this.#sessions.set(agentSessionId, {
       status: 'running',
       chatId,
       model,
@@ -887,30 +887,30 @@ export class OpenCodeProvider extends AbsProvider {
     });
     this.emitProcessing(chatId, true);
     this.emitSessionCreated(chatId);
-    console.log('opencode: session created and registered:', providerSessionId);
+    console.log('opencode: session created and registered:', agentSessionId);
 
     const promptBody = buildPromptBody(command, model);
 
     this.#runRequest(
       'OpenCode prompt submit',
       (signal) => client.session.promptAsync({
-        sessionID: providerSessionId,
+        sessionID: agentSessionId,
         ...promptBody,
       }, { signal }),
     ).catch((err: Error) => {
-      console.error(`opencode: prompt failed for session ${providerSessionId}:`, err.message);
-      const sess = this.#sessions.get(providerSessionId);
+      console.error(`opencode: prompt failed for session ${agentSessionId}:`, err.message);
+      const sess = this.#sessions.get(agentSessionId);
       if (sess) sess.status = 'completed';
       this.emitProcessing(chatId, false);
       this.emitFailed(chatId, err.message);
     });
 
-    return providerSessionId;
+    return agentSessionId;
   }
 
   async runTurn({
     command,
-    providerSessionId,
+    agentSessionId,
     chatId,
     images,
     model,
@@ -926,12 +926,12 @@ export class OpenCodeProvider extends AbsProvider {
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();
 
-    const session = this.#sessions.get(providerSessionId);
+    const session = this.#sessions.get(agentSessionId);
     if (session) {
       session.status = 'running';
       session.chatId = chatId;
     } else {
-      this.#sessions.set(providerSessionId, {
+      this.#sessions.set(agentSessionId, {
         status: 'running',
         chatId,
         model,
@@ -942,21 +942,21 @@ export class OpenCodeProvider extends AbsProvider {
 
     const client = await this.getClient();
     const promptBody = buildPromptBody(command, model);
-    const waiter = this.#createTurnWaiter(providerSessionId);
+    const waiter = this.#createTurnWaiter(agentSessionId);
 
     try {
       await this.#runRequest(
         'OpenCode prompt submit',
         (signal) => client.session.promptAsync({
-          sessionID: providerSessionId,
+          sessionID: agentSessionId,
           ...promptBody,
         }, { signal }),
       );
     } catch (err: any) {
-      console.error(`opencode: query failed for session ${providerSessionId}:`, err.message);
-      const sess = this.#sessions.get(providerSessionId);
+      console.error(`opencode: query failed for session ${agentSessionId}:`, err.message);
+      const sess = this.#sessions.get(agentSessionId);
       if (sess) sess.status = 'completed';
-      this.#rejectTurnWaiter(providerSessionId, err);
+      this.#rejectTurnWaiter(agentSessionId, err);
       this.emitProcessing(chatId, false);
       this.emitFailed(chatId, err.message);
       throw err;
@@ -965,28 +965,28 @@ export class OpenCodeProvider extends AbsProvider {
     await waiter.promise;
   }
 
-  abort(providerSessionId: string): boolean {
-    const session = this.#sessions.get(providerSessionId);
+  abort(agentSessionId: string): boolean {
+    const session = this.#sessions.get(agentSessionId);
     if (!session) return false;
 
     session.status = 'aborted';
-    this.#rejectTurnWaiter(providerSessionId, new Error('OpenCode session aborted'));
-    this.#cancelPendingPermissionsForSession(providerSessionId, 'aborted');
+    this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode session aborted'));
+    this.#cancelPendingPermissionsForSession(agentSessionId, 'aborted');
     this.getClient().then((client: any) => {
       this.#runRequest(
         'OpenCode session abort',
-        (signal) => client.session.abort({ sessionID: providerSessionId }, { signal }),
+        (signal) => client.session.abort({ sessionID: agentSessionId }, { signal }),
       ).catch((err: Error) => {
-        console.warn(`opencode: failed to abort session ${providerSessionId}:`, err.message);
+        console.warn(`opencode: failed to abort session ${agentSessionId}:`, err.message);
       });
     }).catch((err: Error) => {
-      console.warn(`opencode: failed to get client for abort ${providerSessionId}:`, err.message);
+      console.warn(`opencode: failed to get client for abort ${agentSessionId}:`, err.message);
     });
     return true;
   }
 
-  isRunning(providerSessionId: string): boolean {
-    const session = this.#sessions.get(providerSessionId);
+  isRunning(agentSessionId: string): boolean {
+    const session = this.#sessions.get(agentSessionId);
     return session?.status === 'running';
   }
 

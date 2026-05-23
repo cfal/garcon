@@ -1,5 +1,5 @@
 // Path-based wrappers for Claude JSONL reading.
-// Accepts absolute nativePath instead of (projectName, providerSessionId).
+// Accepts absolute nativePath instead of (projectName, agentSessionId).
 
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -268,7 +268,7 @@ async function readFirstUserMessage(filePath) {
 
 // Builds a preview (title, lastActivity, etc.) from an absolute JSONL path.
 export async function getClaudePreviewFromNativePath(nativePath) {
-  const providerSessionId = path.basename(nativePath, '.jsonl');
+  const agentSessionId = path.basename(nativePath, '.jsonl');
 
   try {
     await fs.access(nativePath);
@@ -294,8 +294,8 @@ export async function getClaudePreviewFromNativePath(nativePath) {
     }
 
     if (!entry.sessionId) continue;
-    if (entry.sessionId !== providerSessionId) {
-      console.warn(`claude: skipping non-matching session ID in ${nativePath}, expected ${providerSessionId}: ${entry.sessionId}`);
+    if (entry.sessionId !== agentSessionId) {
+      console.warn(`claude: skipping non-matching session ID in ${nativePath}, expected ${agentSessionId}: ${entry.sessionId}`);
       continue;
     }
 

@@ -73,7 +73,7 @@ describe('GET /api/chats title resolution', () => {
 
   it('uses override title when session name exists', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'claude', projectPath: '/proj', tags: [] },
+      '100': { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     const metaMap = new Map();
     metaMap.set('100', { firstMessage: 'fallback message', createdAt: null, lastActivity: null, lastMessage: '' });
@@ -91,7 +91,7 @@ describe('GET /api/chats title resolution', () => {
 
   it('falls back to firstMessage when no override exists', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '200': { provider: 'claude', projectPath: '/proj', tags: [] },
+      '200': { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     const metaMap = new Map();
     metaMap.set('200', { firstMessage: 'Hello world', createdAt: null, lastActivity: null, lastMessage: '' });
@@ -108,7 +108,7 @@ describe('GET /api/chats title resolution', () => {
 
   it('falls back to "New Session" when no override or metadata', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '300': { provider: 'claude', projectPath: '/proj', tags: [] },
+      '300': { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
@@ -130,7 +130,7 @@ describe('DELETE /api/chats session name cleanup', () => {
   });
 
   it('removes session name when deleting a chat', async () => {
-    registry.getChat.mockImplementation(() => Promise.resolve({ provider: 'claude', projectPath: '/proj' }));
+    registry.getChat.mockImplementation(() => Promise.resolve({ agentId: 'claude', projectPath: '/proj' }));
 
     const url = new URL('http://localhost/api/chats?chatId=500');
     const request = new Request(url, { method: 'DELETE' });
@@ -144,7 +144,7 @@ describe('DELETE /api/chats session name cleanup', () => {
   });
 
   it('cleans up all order list references when deleting a chat', async () => {
-    registry.getChat.mockImplementation(() => Promise.resolve({ provider: 'claude', projectPath: '/proj' }));
+    registry.getChat.mockImplementation(() => Promise.resolve({ agentId: 'claude', projectPath: '/proj' }));
 
     const url = new URL('http://localhost/api/chats?chatId=500');
     const request = new Request(url, { method: 'DELETE' });

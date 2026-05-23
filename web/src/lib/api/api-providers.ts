@@ -1,47 +1,16 @@
-// Agent and API provider HTTP client. Agents own runtime auth;
-// API providers own persisted compatible endpoint configuration.
+// API provider HTTP client. API providers are persisted compatible endpoints.
 
 import { apiDelete, apiGet, apiPost, apiPut } from './client.js';
+import type { AgentModelOption } from '$shared/agents';
 import type {
 	ApiProtocol,
 	ApiProviderCatalogEntry,
 	ApiProviderModelDiscoveryRequest,
 	ApiProviderModelDiscoveryResponse,
 	ApiProviderTemplateId,
-	AgentCatalog,
-	AgentId,
-	AgentModelOption,
 	ModelDiscoveryKind,
 	OpenAiEndpointCapabilities
-} from '$shared/providers';
-
-export type AgentName = AgentId;
-
-export interface AgentAuthStatus {
-	authenticated: boolean;
-	canReauth: boolean;
-	label: string;
-	source?: 'oauth' | 'api-key' | 'environment' | 'cli' | 'none' | 'unknown';
-	detail?: string;
-}
-
-export interface AgentReadiness {
-	ready: boolean;
-	nativeReady: boolean;
-	endpointReady: boolean;
-	reason: string;
-}
-
-export interface DeviceAuthInfo {
-	url: string;
-	code: string;
-}
-
-export interface AgentAuthLoginResult {
-	launched: boolean;
-	alreadyRunning: boolean;
-	deviceAuth?: DeviceAuthInfo;
-}
+} from '$shared/api-providers';
 
 export interface ApiProviderEndpointInput {
 	id?: string;
@@ -60,25 +29,6 @@ export interface ApiProviderInput {
 	templateId: ApiProviderTemplateId;
 	label: string;
 	endpoint: ApiProviderEndpointInput;
-}
-
-export async function getAgentAuthStatus(agent: AgentName): Promise<AgentAuthStatus> {
-	const result = await apiGet<Record<string, AgentAuthStatus>>(
-		`/api/v1/agents/auth?agent=${encodeURIComponent(agent)}`
-	);
-	return result[agent];
-}
-
-export async function getAgentReadiness(): Promise<Record<string, AgentReadiness>> {
-	return apiGet<Record<string, AgentReadiness>>('/api/v1/agents/readiness');
-}
-
-export async function getAgentCatalog(): Promise<AgentCatalog> {
-	return apiGet<AgentCatalog>('/api/v1/agents');
-}
-
-export async function launchAgentAuthLogin(agent: AgentName): Promise<AgentAuthLoginResult> {
-	return apiPost<AgentAuthLoginResult>('/api/v1/agents/auth/login', { agentId: agent });
 }
 
 export async function getApiProviders(): Promise<{ apiProviders: ApiProviderCatalogEntry[] }> {

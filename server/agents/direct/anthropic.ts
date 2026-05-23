@@ -1,8 +1,8 @@
 import {
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
-} from '../../../common/providers.js';
-import type { ApiProviderStore } from '../../api-providers/store.js';
+} from '../../../common/agents.js';
+import type { ApiProviderReader } from '../../api-providers/read-model.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
 import type { Agent } from '../types.js';
@@ -15,8 +15,8 @@ const NO_AUTH_STATUS = {
   source: 'none',
 };
 
-export function createDirectAnthropicAgent(apiProviderStore: ApiProviderStore): Agent {
-  const runtime = createDirectAnthropicRuntime(apiProviderStore);
+export function createDirectAnthropicAgent(apiProviders: ApiProviderReader): Agent {
+  const runtime = createDirectAnthropicRuntime(apiProviders);
   return {
     id: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
     label: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,

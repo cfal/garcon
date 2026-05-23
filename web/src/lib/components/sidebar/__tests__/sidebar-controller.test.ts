@@ -114,7 +114,7 @@ describe('SidebarController', () => {
 				success: true,
 				sourceChatId: 'c-1',
 				chatId: 'c-fork',
-				provider: 'test',
+				agentId: 'test',
 			});
 
 			const result = await controller.forkChat('c-1');

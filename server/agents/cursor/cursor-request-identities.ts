@@ -4,7 +4,7 @@ import { UserMessage, type ChatMessage } from "../../../common/chat-types.js";
 
 interface CursorRequestIdentityRecord {
   chatId: string;
-  providerSessionId?: string;
+  agentSessionId?: string;
   clientRequestId?: string;
   turnId?: string;
   providerRequestId?: string;
@@ -20,7 +20,7 @@ interface CursorRequestIdentityFile {
 
 interface CursorRequestIdentityInput {
   chatId: string;
-  providerSessionId?: string | null;
+  agentSessionId?: string | null;
   clientRequestId?: string | null;
   turnId?: string | null;
   providerRequestId?: string | null;
@@ -29,7 +29,7 @@ interface CursorRequestIdentityInput {
 
 interface CursorHistoryContext {
   chatId?: string;
-  providerSessionId?: string | null;
+  agentSessionId?: string | null;
 }
 
 const MAX_RECORDS = 1000;
@@ -48,12 +48,12 @@ function recordMatchesInput(record: CursorRequestIdentityRecord, input: CursorRe
   const turnId = cleanString(input.turnId);
   if (turnId && record.turnId === turnId) return true;
 
-  const providerSessionId = cleanString(input.providerSessionId);
+  const agentSessionId = cleanString(input.agentSessionId);
   return Boolean(
     input.chatId
-    && providerSessionId
+    && agentSessionId
     && record.chatId === input.chatId
-    && record.providerSessionId === providerSessionId
+    && record.agentSessionId === agentSessionId
     && !record.providerRequestId,
   );
 }
@@ -96,10 +96,10 @@ export class CursorRequestIdentityStore {
 
   applyToMessages(messages: ChatMessage[], context: CursorHistoryContext): ChatMessage[] {
     const chatId = cleanString(context.chatId);
-    const providerSessionId = cleanString(context.providerSessionId);
-    if (!chatId && !providerSessionId) return messages;
+    const agentSessionId = cleanString(context.agentSessionId);
+    if (!chatId && !agentSessionId) return messages;
 
-    const records = this.#recordsForContext(chatId, providerSessionId);
+    const records = this.#recordsForContext(chatId, agentSessionId);
     if (records.length === 0) return messages;
 
     let changed = false;
@@ -136,11 +136,11 @@ export class CursorRequestIdentityStore {
     return changed ? annotated : messages;
   }
 
-  #recordsForContext(chatId?: string, providerSessionId?: string): CursorRequestIdentityRecord[] {
+  #recordsForContext(chatId?: string, agentSessionId?: string): CursorRequestIdentityRecord[] {
     return this.#records
       .filter((record) => (
         (!chatId || record.chatId === chatId)
-        && (!providerSessionId || record.providerSessionId === providerSessionId)
+        && (!agentSessionId || record.agentSessionId === agentSessionId)
       ))
       .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
   }
@@ -150,7 +150,7 @@ export class CursorRequestIdentityStore {
     const now = new Date().toISOString();
     const existing = [...this.#records].reverse().find((record) => recordMatchesInput(record, input));
     if (existing) {
-      existing.providerSessionId = cleanString(input.providerSessionId) ?? existing.providerSessionId;
+      existing.agentSessionId = cleanString(input.agentSessionId) ?? existing.agentSessionId;
       existing.clientRequestId = cleanString(input.clientRequestId) ?? existing.clientRequestId;
       existing.turnId = cleanString(input.turnId) ?? existing.turnId;
       existing.providerRequestId = cleanString(input.providerRequestId) ?? existing.providerRequestId;
@@ -159,7 +159,7 @@ export class CursorRequestIdentityStore {
     } else {
       this.#records.push({
         chatId: input.chatId,
-        providerSessionId: cleanString(input.providerSessionId),
+        agentSessionId: cleanString(input.agentSessionId),
         clientRequestId: cleanString(input.clientRequestId),
         turnId: cleanString(input.turnId),
         providerRequestId: cleanString(input.providerRequestId),

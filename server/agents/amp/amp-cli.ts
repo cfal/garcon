@@ -12,7 +12,7 @@ import { convertAmpToolUse } from "../converters/amp-tool-use.js";
 import { AbsProvider } from "../shared/event-emitter-runtime.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AmpThreadExport } from "../loaders/amp-history-loader.js";
-import type { StartSessionRequest, ResumeTurnRequest, StartedProviderSession } from "../session-types.js";
+import type { StartSessionRequest, ResumeTurnRequest, StartedAgentSession } from "../session-types.js";
 
 interface AmpSession {
   id: string;
@@ -439,7 +439,7 @@ class AmpProvider extends AbsProvider {
     });
   }
 
-  async startSession({ command, chatId, projectPath, model }: StartSessionRequest): Promise<StartedProviderSession> {
+  async startSession({ command, chatId, projectPath, model }: StartSessionRequest): Promise<StartedAgentSession> {
     if (!chatId) throw new Error('chatId is required when starting an Amp session');
     const threadId = await createThread({ cwd: projectPath });
 
@@ -460,12 +460,12 @@ class AmpProvider extends AbsProvider {
     }
 
     return {
-      providerSessionId: threadId,
+      agentSessionId: threadId,
       nativePath: createArtificialNativePath('amp', threadId),
     };
   }
 
-  async runTurn({ command, providerSessionId: threadId, chatId, projectPath, model }: ResumeTurnRequest): Promise<void> {
+  async runTurn({ command, agentSessionId: threadId, chatId, projectPath, model }: ResumeTurnRequest): Promise<void> {
     if (!threadId) throw new Error('Cannot resume without thread ID');
     if (!chatId) throw new Error('Cannot resume without chat ID');
 
@@ -507,8 +507,8 @@ class AmpProvider extends AbsProvider {
     return exportThread(threadId, { cwd });
   }
 
-  abort(providerSessionId: string): boolean {
-    const session = this.#runningSessions.get(providerSessionId);
+  abort(agentSessionId: string): boolean {
+    const session = this.#runningSessions.get(agentSessionId);
     if (!session?.process) return false;
 
     session.aborted = true;
@@ -517,8 +517,8 @@ class AmpProvider extends AbsProvider {
     return true;
   }
 
-  isRunning(providerSessionId: string): boolean {
-    const session = this.#runningSessions.get(providerSessionId);
+  isRunning(agentSessionId: string): boolean {
+    const session = this.#runningSessions.get(agentSessionId);
     return session?.isRunning === true;
   }
 

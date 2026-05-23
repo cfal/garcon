@@ -71,7 +71,7 @@ describe('PATCH /api/v1/chats/tags – tag normalization', () => {
   });
 
   it('converts spaces to hyphens', async () => {
-    registry.getChat.mockReturnValue({ provider: 'claude', projectPath: '/proj', tags: [] });
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
     parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['hello world'] });
 
     const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
@@ -81,7 +81,7 @@ describe('PATCH /api/v1/chats/tags – tag normalization', () => {
   });
 
   it('removes special characters', async () => {
-    registry.getChat.mockReturnValue({ provider: 'claude', projectPath: '/proj', tags: [] });
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
     parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['ops!@#$'] });
 
     const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
@@ -91,7 +91,7 @@ describe('PATCH /api/v1/chats/tags – tag normalization', () => {
   });
 
   it('collapses multiple hyphens', async () => {
-    registry.getChat.mockReturnValue({ provider: 'claude', projectPath: '/proj', tags: [] });
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
     parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['a---b'] });
 
     const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
@@ -101,7 +101,7 @@ describe('PATCH /api/v1/chats/tags – tag normalization', () => {
   });
 
   it('removes leading/trailing hyphens', async () => {
-    registry.getChat.mockReturnValue({ provider: 'claude', projectPath: '/proj', tags: [] });
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
     parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['-leading-trailing-'] });
 
     const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
@@ -111,7 +111,7 @@ describe('PATCH /api/v1/chats/tags – tag normalization', () => {
   });
 
   it('excludes tags that become empty after normalization', async () => {
-    registry.getChat.mockReturnValue({ provider: 'claude', projectPath: '/proj', tags: [] });
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
     parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['!!!', 'valid'] });
 
     const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
@@ -121,7 +121,7 @@ describe('PATCH /api/v1/chats/tags – tag normalization', () => {
   });
 
   it('deduplicates tags case-insensitively', async () => {
-    registry.getChat.mockReturnValue({ provider: 'claude', projectPath: '/proj', tags: [] });
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
     parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['Ops', 'ops', 'OPS'] });
 
     const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
@@ -131,7 +131,7 @@ describe('PATCH /api/v1/chats/tags – tag normalization', () => {
   });
 
   it('sorts the result', async () => {
-    registry.getChat.mockReturnValue({ provider: 'claude', projectPath: '/proj', tags: [] });
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
     parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['zebra', 'alpha', 'mid'] });
 
     const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));

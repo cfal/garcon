@@ -397,7 +397,7 @@
 				onClose={() => { showCommitSettings = false; }}
 				onSettingsChanged={(s) => {
 					wb.commitGenerationEnabled = s.enabled;
-					wb.commitProvider = s.provider;
+					wb.commitAgentId = s.agentId;
 					wb.commitModel = s.model;
 					wb.commitApiProviderId = s.apiProviderId ?? null;
 					wb.commitModelEndpointId = s.modelEndpointId ?? null;

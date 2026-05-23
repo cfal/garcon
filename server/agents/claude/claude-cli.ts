@@ -39,7 +39,7 @@ interface CLIMessage {
 }
 
 interface ClaudeSessionOptions {
-  providerSessionId: string;
+  agentSessionId: string;
   sessionId: string;
   chatId: string;
   projectPath: string;
@@ -68,7 +68,7 @@ interface ClaudeRunningSession {
 
 interface PendingPermission {
   cliRequestId: string;
-  providerSessionId: string;
+  agentSessionId: string;
   chatId: string;
   toolName: string;
   toolInput: Record<string, unknown>;
@@ -115,8 +115,8 @@ function buildClaudePermissionApprovalResponse(
 }
 
 // Builds the Claude session file path from the canonicalized project path.
-async function createClaudeNativePath(projectPath: string, providerSessionId: string): Promise<string | null> {
-  if (!projectPath || !providerSessionId) return null;
+async function createClaudeNativePath(projectPath: string, agentSessionId: string): Promise<string | null> {
+  if (!projectPath || !agentSessionId) return null;
   const canonicalProjectPath = await fs.realpath(projectPath);
   const projectName = canonicalProjectPath.replace(/[\\/:\s~_]/g, '-');
   if (!projectName) return null;
@@ -125,7 +125,7 @@ async function createClaudeNativePath(projectPath: string, providerSessionId: st
     '.claude',
     'projects',
     projectName,
-    `${providerSessionId}.jsonl`,
+    `${agentSessionId}.jsonl`,
   );
 }
 
@@ -377,7 +377,7 @@ class ClaudeProvider extends AbsProvider {
 
     this.#pendingPermissions.set(permissionRequestId, {
       cliRequestId: msg.request_id!,
-      providerSessionId: session.id,
+      agentSessionId: session.id,
       chatId: session.chatId,
       toolName,
       toolInput: msg.request.input || {},
@@ -416,8 +416,8 @@ class ClaudeProvider extends AbsProvider {
     }
   }
 
-  setInternalPermissionMode(providerSessionId: string, mode: PermissionMode): void {
-    const session = this.#runningSessions.get(providerSessionId);
+  setInternalPermissionMode(agentSessionId: string, mode: PermissionMode): void {
+    const session = this.#runningSessions.get(agentSessionId);
     if (!session) return;
 
     session.currentPermissionMode = mode;
@@ -425,7 +425,7 @@ class ClaudeProvider extends AbsProvider {
 
     if (session.process) {
       const requestId = crypto.randomUUID();
-      this.#sendToCLI(providerSessionId, JSON.stringify({
+      this.#sendToCLI(agentSessionId, JSON.stringify({
         type: 'control_request',
         request_id: requestId,
         request: { subtype: 'set_permission_mode', mode },
@@ -433,8 +433,8 @@ class ClaudeProvider extends AbsProvider {
     }
   }
 
-  setInternalThinkingMode(providerSessionId: string, mode: ThinkingMode): void {
-    const session = this.#runningSessions.get(providerSessionId);
+  setInternalThinkingMode(agentSessionId: string, mode: ThinkingMode): void {
+    const session = this.#runningSessions.get(agentSessionId);
     if (!session) return;
 
     session.options = { ...session.options, thinkingMode: mode };
@@ -444,8 +444,8 @@ class ClaudeProvider extends AbsProvider {
     }
   }
 
-  setInternalClaudeThinkingMode(providerSessionId: string, mode: ClaudeThinkingMode): void {
-    const session = this.#runningSessions.get(providerSessionId);
+  setInternalClaudeThinkingMode(agentSessionId: string, mode: ClaudeThinkingMode): void {
+    const session = this.#runningSessions.get(agentSessionId);
     if (!session) return;
 
     session.options = { ...session.options, claudeThinkingMode: mode };
@@ -465,7 +465,7 @@ class ClaudeProvider extends AbsProvider {
 
     const response = buildClaudePermissionApprovalResponse(pending, decision);
 
-    this.#sendToCLI(pending.providerSessionId, JSON.stringify({
+    this.#sendToCLI(pending.agentSessionId, JSON.stringify({
       type: 'control_response',
       response: {
         subtype: 'success',
@@ -586,7 +586,7 @@ class ClaudeProvider extends AbsProvider {
     session.process = null;
 
     for (const [permissionRequestId, pending] of this.#pendingPermissions) {
-      if (pending.providerSessionId === session.id) {
+      if (pending.agentSessionId === session.id) {
         this.#emitPermissionMessages(pending.chatId, [new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, 'cancelled')]);
         this.#pendingPermissions.delete(permissionRequestId);
       }
@@ -651,7 +651,7 @@ class ClaudeProvider extends AbsProvider {
 
   async startClaudeCliSession({
     command,
-    providerSessionId,
+    agentSessionId,
     chatId,
     images,
     model,
@@ -662,11 +662,11 @@ class ClaudeProvider extends AbsProvider {
     envOverrides,
   }: ClaudeStartSessionRequest): Promise<string> {
     if (!chatId) throw new Error('chatId is required when starting a Claude session');
-    if (!providerSessionId) throw new Error('providerSessionId is required when starting a Claude session');
+    if (!agentSessionId) throw new Error('agentSessionId is required when starting a Claude session');
 
     const allOpts: ClaudeSessionOptions = {
-      providerSessionId,
-      sessionId: providerSessionId,
+      agentSessionId,
+      sessionId: agentSessionId,
       chatId,
       images,
       model,
@@ -678,7 +678,7 @@ class ClaudeProvider extends AbsProvider {
     };
 
     const session: ClaudeRunningSession = {
-      id: providerSessionId,
+      id: agentSessionId,
       chatId,
       isRunning: true,
       turnResolve: null,
@@ -691,7 +691,7 @@ class ClaudeProvider extends AbsProvider {
       currentModel: model || '',
       currentEnvOverrides: envOverrides,
     };
-    this.#runningSessions.set(providerSessionId, session);
+    this.#runningSessions.set(agentSessionId, session);
     this.emitProcessing(chatId, true);
 
     this.emitSessionCreated(chatId);
@@ -701,12 +701,12 @@ class ClaudeProvider extends AbsProvider {
     this.#sendUserMessage(session, command, images);
 
     await this.#waitForTurnComplete(session);
-    return providerSessionId;
+    return agentSessionId;
   }
 
   async runClaudeTurn({
     command,
-    providerSessionId,
+    agentSessionId,
     chatId,
     images,
     model,
@@ -716,7 +716,7 @@ class ClaudeProvider extends AbsProvider {
     claudeThinkingMode,
     envOverrides,
   }: ResumeTurnRequest): Promise<void> {
-    if (!providerSessionId) {
+    if (!agentSessionId) {
       throw new Error('Cannot resume without session ID');
     }
     if (!chatId) {
@@ -724,8 +724,8 @@ class ClaudeProvider extends AbsProvider {
     }
 
     const allOpts: ClaudeSessionOptions = {
-      providerSessionId,
-      sessionId: providerSessionId,
+      agentSessionId,
+      sessionId: agentSessionId,
       chatId,
       images,
       model,
@@ -736,10 +736,10 @@ class ClaudeProvider extends AbsProvider {
       envOverrides,
     };
 
-    let session = this.#runningSessions.get(providerSessionId);
+    let session = this.#runningSessions.get(agentSessionId);
     if (!session) {
       session = {
-        id: providerSessionId,
+        id: agentSessionId,
         chatId: chatId,
         isRunning: false,
         turnResolve: null,
@@ -752,7 +752,7 @@ class ClaudeProvider extends AbsProvider {
         currentModel: model || '',
         currentEnvOverrides: envOverrides,
       };
-      this.#runningSessions.set(providerSessionId, session);
+      this.#runningSessions.set(agentSessionId, session);
     } else {
       if (chatId !== session.chatId) {
         throw new Error('Chat ID mismatch');
@@ -782,8 +782,8 @@ class ClaudeProvider extends AbsProvider {
 
     if (!session.process) {
       const spawnOpts: ClaudeSessionOptions = {
-        providerSessionId,
-        sessionId: providerSessionId,
+        agentSessionId,
+        sessionId: agentSessionId,
         chatId: effectiveChatId,
         images: allOpts.images ?? session.options?.images,
         model: allOpts.model ?? session.options?.model,
@@ -795,13 +795,13 @@ class ClaudeProvider extends AbsProvider {
       };
       // Always resume: the session file preserves conversation context.
       // Cross-boundary local/cloud switches are blocked by
-      // AgentRegistry.runProviderTurn before reaching here.
+      // AgentRegistry.runAgentTurn before reaching here.
       this.#spawnCLI(session, spawnOpts, true);
     }
 
     const newMode = permissionMode || 'default';
     if (session.currentPermissionMode && newMode !== session.currentPermissionMode) {
-      this.setInternalPermissionMode(providerSessionId, newMode);
+      this.setInternalPermissionMode(agentSessionId, newMode);
     }
     session.currentPermissionMode = newMode;
 
@@ -809,11 +809,11 @@ class ClaudeProvider extends AbsProvider {
     await this.#waitForTurnComplete(session);
   }
 
-  async abortClaudeInternalSession(providerSessionId: string): Promise<boolean> {
-    const session = this.#runningSessions.get(providerSessionId);
+  async abortClaudeInternalSession(agentSessionId: string): Promise<boolean> {
+    const session = this.#runningSessions.get(agentSessionId);
     if (!session?.process) return false;
 
-    this.#sendToCLI(providerSessionId, JSON.stringify({
+    this.#sendToCLI(agentSessionId, JSON.stringify({
       type: 'control_request',
       request_id: crypto.randomUUID(),
       request: { subtype: 'interrupt' },
@@ -822,7 +822,7 @@ class ClaudeProvider extends AbsProvider {
     const proc = session.process;
     setTimeout(() => {
       if (session.process === proc && !proc.killed) {
-        console.warn(`cli(${providerSessionId.slice(0, 8)}): interrupt not acknowledged, force-killing process`);
+        console.warn(`cli(${agentSessionId.slice(0, 8)}): interrupt not acknowledged, force-killing process`);
         proc.kill();
       }
     }, 5000);
@@ -830,8 +830,8 @@ class ClaudeProvider extends AbsProvider {
     return true;
   }
 
-  isClaudeInternalSessionRunning(providerSessionId: string): boolean {
-    const session = this.#runningSessions.get(providerSessionId);
+  isClaudeInternalSessionRunning(agentSessionId: string): boolean {
+    const session = this.#runningSessions.get(agentSessionId);
     return session?.isRunning === true;
   }
 

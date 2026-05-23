@@ -1,7 +1,7 @@
 <script lang="ts">
 	import ApiProviderProtocolPanel from '../ApiProviderProtocolPanel.svelte';
 	import { setModelCatalog } from '$lib/context';
-	import type { ApiProtocol, ApiProviderCatalogEntry } from '$shared/providers';
+	import type { ApiProtocol, ApiProviderCatalogEntry } from '$shared/api-providers';
 
 	let {
 		protocol,

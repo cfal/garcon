@@ -21,7 +21,7 @@ mock.module('../../git/git-service.js', () => ({
 
 import createGitRoutes from '../git.js';
 
-const providers = {
+const agents = {
   getAgentAuthStatusMap: mock(() => Promise.resolve({
     claude: { authenticated: false },
     codex: { authenticated: false },
@@ -40,7 +40,7 @@ const settings = {
   getUiSettings: mock(() => Promise.resolve({})),
 };
 
-const routes = createGitRoutes(providers, settings);
+const routes = createGitRoutes(agents, settings);
 
 function makeRequest(body) {
   return new Request('http://localhost/api/v1/git/generate-commit-message', {
@@ -56,10 +56,10 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
   beforeEach(() => {
     parseJsonBody.mockClear();
     generateCommitMessageForFiles.mockClear();
-    providers.getAgentAuthStatusMap.mockClear();
-    providers.getModels.mockClear();
-    providers.hasAgent.mockClear();
-    providers.hasAgent.mockImplementation((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId));
+    agents.getAgentAuthStatusMap.mockClear();
+    agents.getModels.mockClear();
+    agents.hasAgent.mockClear();
+    agents.hasAgent.mockImplementation((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId));
     settings.getUiSettings.mockClear();
   });
 
@@ -71,7 +71,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     settings.getUiSettings.mockImplementation(() => Promise.resolve({
       commitMessage: {
         enabled: true,
-        provider: 'amp',
+        agentId: 'amp',
         customPrompt: 'Summarize {{files}}',
       },
     }));
@@ -84,7 +84,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
       projectPath: '/proj',
       files: ['src/a.ts'],
-      provider: 'amp',
+      agentId: 'amp',
       model: 'smart',
       apiProviderId: null,
       modelEndpointId: null,
@@ -97,14 +97,14 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       project: '/proj',
       files: ['src/a.ts'],
-      provider: 'codex',
+      agentId: 'codex',
       model: 'gpt-5.4',
       customPrompt: '',
     }));
     settings.getUiSettings.mockImplementation(() => Promise.resolve({
       commitMessage: {
         enabled: true,
-        provider: 'amp',
+        agentId: 'amp',
         model: 'smart',
         customPrompt: 'Persisted prompt',
       },
@@ -113,7 +113,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     const response = await handler(makeRequest({
       project: '/proj',
       files: ['src/a.ts'],
-      provider: 'codex',
+      agentId: 'codex',
       model: 'gpt-5.4',
       customPrompt: '',
     }));
@@ -122,7 +122,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
       projectPath: '/proj',
       files: ['src/a.ts'],
-      provider: 'codex',
+      agentId: 'codex',
       model: 'gpt-5.4',
       apiProviderId: null,
       modelEndpointId: null,
@@ -135,7 +135,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       project: '/proj',
       files: ['src/a.ts'],
-      provider: 'direct-openai-compatible',
+      agentId: 'direct-openai-compatible',
       model: 'glm-5.1',
       apiProviderId: 'zai',
       modelEndpointId: 'zai_openai',
@@ -146,7 +146,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     const response = await handler(makeRequest({
       project: '/proj',
       files: ['src/a.ts'],
-      provider: 'direct-openai-compatible',
+      agentId: 'direct-openai-compatible',
       model: 'glm-5.1',
       apiProviderId: 'zai',
       modelEndpointId: 'zai_openai',
@@ -158,7 +158,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
       projectPath: '/proj',
       files: ['src/a.ts'],
-      provider: 'direct-openai-compatible',
+      agentId: 'direct-openai-compatible',
       model: 'glm-5.1',
       apiProviderId: 'zai',
       modelEndpointId: 'zai_openai',
@@ -171,7 +171,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       project: '/proj',
       files: ['src/a.ts'],
-      provider: 'direct-anthropic-compatible',
+      agentId: 'direct-anthropic-compatible',
       model: 'acme-sonnet',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_anthropic',
@@ -182,7 +182,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     const response = await handler(makeRequest({
       project: '/proj',
       files: ['src/a.ts'],
-      provider: 'direct-anthropic-compatible',
+      agentId: 'direct-anthropic-compatible',
       model: 'acme-sonnet',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_anthropic',
@@ -194,7 +194,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
       projectPath: '/proj',
       files: ['src/a.ts'],
-      provider: 'direct-anthropic-compatible',
+      agentId: 'direct-anthropic-compatible',
       model: 'acme-sonnet',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_anthropic',

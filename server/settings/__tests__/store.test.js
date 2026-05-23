@@ -194,7 +194,7 @@ describe('settings store', () => {
       const folder = {
         id: 'folder-1',
         name: 'Pinned bugs',
-        filter: { textTokens: ['bug'], tags: ['triage'], providers: ['codex'], models: ['gpt-5.4'] },
+        filter: { textTokens: ['bug'], tags: ['triage'], agents: ['codex'], models: ['gpt-5.4'] },
         createdAt: '2026-03-27T00:00:00.000Z',
       };
 
@@ -203,12 +203,12 @@ describe('settings store', () => {
 
       const updated = await store.updateFolder('folder-1', {
         name: 'Pinned reviews',
-        filter: { textTokens: ['review'], tags: ['triage'], providers: ['claude'], models: [] },
+        filter: { textTokens: ['review'], tags: ['triage'], agents: ['claude'], models: [] },
       });
       expect(updated).toEqual({
         ...folder,
         name: 'Pinned reviews',
-        filter: { textTokens: ['review'], tags: ['triage'], providers: ['claude'], models: [] },
+        filter: { textTokens: ['review'], tags: ['triage'], agents: ['claude'], models: [] },
       });
 
       expect(await store.removeFolder('folder-1')).toBe(true);
@@ -219,7 +219,7 @@ describe('settings store', () => {
       const folder = {
         id: 'folder-1',
         name: 'Pinned bugs',
-        filter: { textTokens: [], tags: [], providers: [], models: [] },
+        filter: { textTokens: [], tags: [], agents: [], models: [] },
         createdAt: '2026-03-27T00:00:00.000Z',
       };
 
@@ -240,7 +240,7 @@ describe('settings store', () => {
 						filter: {
 							textTokens: [' follow-up ', 7],
 							tags: [' ops ', null],
-							providers: [' codex '],
+							agents: [' codex '],
 							models: [' gpt-5 '],
 							status: ' unread ',
 						},
@@ -258,7 +258,7 @@ describe('settings store', () => {
 					filter: {
 						textTokens: ['follow-up'],
 						tags: ['ops'],
-						providers: ['codex'],
+						agents: ['codex'],
 						models: ['gpt-5'],
 						status: 'unread',
 					},
@@ -450,7 +450,7 @@ describe('settings store', () => {
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         chatFolders: [],
         savedChatSearches: [],
-        lastProvider: 'claude', lastProjectPath: '', lastModel: '',
+        lastAgentId: 'claude', lastProjectPath: '', lastModel: '',
         lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
         lastPermissionMode: 'default', lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
@@ -466,7 +466,7 @@ describe('settings store', () => {
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         chatFolders: [],
         savedChatSearches: [],
-        lastProvider: 'claude', lastProjectPath: '', lastModel: '',
+        lastAgentId: 'claude', lastProjectPath: '', lastModel: '',
         lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
         lastPermissionMode: 'default', lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
@@ -479,7 +479,7 @@ describe('settings store', () => {
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         chatFolders: [],
-        lastProvider: 'claude', lastProjectPath: '', lastModel: '',
+        lastAgentId: 'claude', lastProjectPath: '', lastModel: '',
         lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
         lastPermissionMode: 'bogus',
         lastThinkingMode: 'very-hard',
@@ -504,7 +504,7 @@ describe('settings store', () => {
         pinnedChatIds: ['a'],
         normalChatIds: [],
         archivedChatIds: [],
-        lastProvider: 'claude',
+        lastAgentId: 'claude',
         lastModel: '',
         lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
         lastPermissionMode: 'default',
@@ -530,7 +530,7 @@ describe('settings store', () => {
         pinnedChatIds: ['a', 'gone'],
         normalChatIds: ['also-gone'],
         archivedChatIds: [],
-        lastProvider: 'claude',
+        lastAgentId: 'claude',
         lastModel: '',
         lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
         lastPermissionMode: 'default',
@@ -555,7 +555,7 @@ describe('settings store', () => {
         pinnedChatIds: ['a'],
         normalChatIds: ['a', 'b'],
         archivedChatIds: ['a'],
-        lastProvider: 'claude',
+        lastAgentId: 'claude',
         lastModel: '',
         lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
         lastPermissionMode: 'default',
@@ -735,7 +735,7 @@ describe('settings store', () => {
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: ['existing'],
         archivedChatIds: [],
-        lastProvider: 'claude', lastModel: '',
+        lastAgentId: 'claude', lastModel: '',
         lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
         lastPermissionMode: 'default', lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
@@ -759,7 +759,7 @@ describe('settings store', () => {
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [],
         archivedChatIds: [],
-        lastProvider: 'claude', lastProjectPath: '', lastModel: '',
+        lastAgentId: 'claude', lastProjectPath: '', lastModel: '',
         lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
         lastPermissionMode: 'default', lastThinkingMode: 'none',
         lastClaudeThinkingMode: 'auto',
@@ -769,7 +769,7 @@ describe('settings store', () => {
       await Promise.all([
         store.ensureInNormal('chat-1'),
         store.setLastChatDefaults({
-          provider: 'codex',
+          agentId: 'codex',
           projectPath: '/workspace/chat-2',
           model: 'gpt-5.4',
           permissionMode: 'bypassPermissions',
@@ -782,7 +782,7 @@ describe('settings store', () => {
       const settings = await store.loadSettings();
       expect(settings.normalChatIds).toContain('chat-1');
       expect(settings.normalChatIds).toContain('chat-2');
-      expect(settings.lastProvider).toBe('codex');
+      expect(settings.lastAgentId).toBe('codex');
       expect(settings.lastProjectPath).toBe('/workspace/chat-2');
       expect(settings.lastModel).toBe('gpt-5.4');
       expect(settings.lastPermissionMode).toBe('bypassPermissions');
@@ -792,8 +792,8 @@ describe('settings store', () => {
   });
 
   describe('chat startup defaults', () => {
-    it('getLastProvider defaults to "claude"', async () => {
-      expect(await store.getLastProvider()).toBe('claude');
+    it('getLastAgentId defaults to "claude"', async () => {
+      expect(await store.getLastAgentId()).toBe('claude');
     });
 
     it('getLastProjectPath defaults to empty string', async () => {
@@ -806,7 +806,7 @@ describe('settings store', () => {
 
     it('setLastChatDefaults persists the full startup selection', async () => {
       await store.setLastChatDefaults({
-        provider: 'codex',
+        agentId: 'codex',
         projectPath: '/workspace/project-a',
         model: 'gpt-5.4',
         permissionMode: 'bypassPermissions',
@@ -814,7 +814,7 @@ describe('settings store', () => {
         claudeThinkingMode: 'on',
         ampAgentMode: 'deep',
       });
-      expect(await store.getLastProvider()).toBe('codex');
+      expect(await store.getLastAgentId()).toBe('codex');
       expect(await store.getLastProjectPath()).toBe('/workspace/project-a');
       expect(await store.getLastModel()).toBe('gpt-5.4');
       expect(await store.getLastPermissionMode()).toBe('bypassPermissions');
@@ -825,7 +825,7 @@ describe('settings store', () => {
 
     it('preserves unspecified fields when updating only one startup setting', async () => {
       await store.setLastChatDefaults({
-        provider: 'codex',
+        agentId: 'codex',
         projectPath: '/workspace/project-a',
         model: 'gpt-5.4',
         permissionMode: 'bypassPermissions',
@@ -834,7 +834,7 @@ describe('settings store', () => {
         ampAgentMode: 'deep',
       });
       await store.setLastPermissionMode('acceptEdits');
-      expect(await store.getLastProvider()).toBe('codex');
+      expect(await store.getLastAgentId()).toBe('codex');
       expect(await store.getLastProjectPath()).toBe('/workspace/project-a');
       expect(await store.getLastModel()).toBe('gpt-5.4');
       expect(await store.getLastPermissionMode()).toBe('acceptEdits');
@@ -881,7 +881,7 @@ describe('settings store', () => {
 
     it('preserves existing startup modes when an update provides invalid values', async () => {
       await store.setLastChatDefaults({
-        provider: 'claude',
+        agentId: 'claude',
         projectPath: '/workspace/project-a',
         model: 'opus',
         permissionMode: 'acceptEdits',

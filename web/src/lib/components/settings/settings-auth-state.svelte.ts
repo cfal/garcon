@@ -4,7 +4,7 @@ import {
 	launchAgentAuthLogin,
 	type DeviceAuthInfo,
 	type AgentReadiness
-} from '$lib/api/providers.js';
+} from '$lib/api/agents.js';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 
 export interface AuthStatus {

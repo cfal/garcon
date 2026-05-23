@@ -1,6 +1,6 @@
 // Unified agent registry. Routes all operations through agent runtimes
 // keyed by agent ID. Also provides preview/message loading, agent auth,
-// readiness, and API provider mutations.
+// readiness, and model catalog metadata.
 
 import { resolveFileMentionsInCommand } from "../chats/file-mentions.ts";
 import { getMaxSessions } from "../config.js";
@@ -9,36 +9,24 @@ import type { IChatRegistry } from "../chats/store.js";
 import type { AgentCommandImage } from "../../common/ws-requests.js";
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../common/chat-modes.js";
 import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, PI_MODELS } from "../../common/models.js";
-import { apiProviderTemplate } from "../../common/api-provider-templates.js";
 import type {
-  ProviderChatEntry,
-  ProviderEventMetadata,
+  AgentChatEntry,
+  AgentEventMetadata,
   StartSessionRequest,
-  StartedProviderSession,
-  RunProviderTurnOptions,
+  StartedAgentSession,
+  RunAgentTurnOptions,
 } from "./session-types.js";
 import { requireChatExecutionConfig } from "./session-types.js";
-import type { ApiProviderStore, CreateApiProviderInput, UpdateApiProviderInput } from '../api-providers/store.js';
 import type { ApiProviderEndpointResolver, ResolvedModelSelection } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
 import type { Agent } from './types.js';
 import {
-  API_PROVIDER_TEMPLATE_IDS,
-  isApiProviderTemplateId,
   isEndpointOnlyAgentId,
   isVisibleAgentId,
-  labelForProtocol,
-  type ApiProviderCatalogEntry,
-  type ApiProviderModelDiscoveryRequest,
-  type ApiProviderModelDiscoveryResponse,
-  type ApiProviderTemplateId,
-  type ApiProtocol,
-  type AgentCatalog,
   type AgentCatalogEntry,
   type AgentModelOption,
-  type ModelDiscoveryKind,
-  type OpenAiEndpointCapabilities,
-} from "../../common/providers.js";
+} from "../../common/agents.js";
+import type { ApiProtocol } from "../../common/api-providers.js";
 const STATIC_AGENT_MODELS: Record<string, { defaultModel: string; models: AgentModelOption[] }> = {
   claude: { defaultModel: CLAUDE_MODELS.DEFAULT, models: CLAUDE_MODELS.OPTIONS },
   codex: { defaultModel: CODEX_MODELS.DEFAULT, models: CODEX_MODELS.OPTIONS },
@@ -47,7 +35,7 @@ const STATIC_AGENT_MODELS: Record<string, { defaultModel: string; models: AgentM
   pi: { defaultModel: PI_MODELS.DEFAULT, models: PI_MODELS.OPTIONS },
 };
 
-function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | undefined): ProviderChatEntry & {
+function requireChatEntry(chatId: string, entry: AgentChatEntry | null | undefined): AgentChatEntry & {
   projectPath: string;
   model: string;
   permissionMode: PermissionMode;
@@ -62,17 +50,6 @@ function requireChatEntry(chatId: string, entry: ProviderChatEntry | null | unde
   return {
     ...entry,
     ...execution,
-  };
-}
-
-function redactApiProviderForCatalog(apiProvider: any): ApiProviderCatalogEntry {
-  const { endpoints, ...rest } = apiProvider;
-  return {
-    ...rest,
-    endpoints: endpoints.map((ep: any) => {
-      const { apiKey: _, headers: _headers, ...epRest } = ep;
-      return { ...epRest, hasApiKey: Boolean(ep.apiKey), apiKeyLabel: ep.apiKeyLabel ?? '' };
-    }),
   };
 }
 
@@ -94,7 +71,7 @@ async function nativeModelsForAgent(id: string, agent: Agent): Promise<AgentMode
     try {
       fetched = await getModels();
     } catch (error) {
-      console.warn(`providers: failed to fetch ${id} models:`, error instanceof Error ? error.message : String(error));
+      console.warn(`agents: failed to fetch ${id} models:`, error instanceof Error ? error.message : String(error));
     }
   }
   const fallback = STATIC_AGENT_MODELS[id]?.models ?? [];
@@ -117,332 +94,10 @@ interface TurnEventMetadata {
 
 function mergeTurnEventMetadata(
   base: TurnEventMetadata | undefined,
-  event: ProviderEventMetadata | undefined,
+  event: AgentEventMetadata | undefined,
 ): TurnEventMetadata | undefined {
   const metadata = { ...(base ?? {}), ...(event ?? {}) };
   return Object.keys(metadata).length > 0 ? metadata : undefined;
-}
-
-export interface ApiProviderInput {
-  templateId: ApiProviderTemplateId;
-  label: string;
-  endpoint: {
-    protocol: ApiProtocol;
-    baseUrl: string;
-    apiKey?: string;
-    clearApiKey?: boolean;
-    capabilities?: OpenAiEndpointCapabilities;
-    defaultModel: string;
-    models: Array<{ value: string; label: string; supportsImages?: boolean; isLocal?: boolean }>;
-    supportsImages: boolean;
-    modelDiscovery?: ModelDiscoveryKind;
-  };
-}
-
-interface ApiProviderModelDiscoveryFlatInput {
-  protocol: ApiProtocol;
-  baseUrl: string;
-  apiKey?: string;
-  apiProviderId?: string | null;
-  endpointId?: string | null;
-  modelDiscovery: ModelDiscoveryKind;
-}
-
-function requireObject(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object') {
-    throw new Error(`${field} must be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function optionalObject(value: unknown, field: string): Record<string, unknown> | undefined {
-  if (value === undefined) return undefined;
-  return requireObject(value, field);
-}
-
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${field} is required`);
-  }
-  return value.trim();
-}
-
-function optionalString(value: unknown, field: string): string | undefined {
-  if (value === undefined) return undefined;
-  return requireString(value, field);
-}
-
-function optionalBoolean(value: unknown, field: string): boolean | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'boolean') throw new Error(`${field} must be a boolean`);
-  return value;
-}
-
-function normalizeTemplateId(value: unknown): ApiProviderTemplateId {
-  if (isApiProviderTemplateId(value)) return value;
-  throw new Error(`templateId must be ${API_PROVIDER_TEMPLATE_IDS.join(', ')}`);
-}
-
-function normalizeApiProviderBaseUrl(value: unknown): string {
-  const trimmed = requireString(value, 'endpoint.baseUrl');
-  const normalized = trimmed.startsWith('http://') || trimmed.startsWith('https://')
-    ? trimmed
-    : `https://${trimmed}`;
-  const parsed = new URL(normalized);
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('endpoint.baseUrl must use http or https');
-  }
-  if (parsed.search || parsed.hash) {
-    throw new Error('endpoint.baseUrl must not include query or fragment components');
-  }
-  return normalized.replace(/\/+$/, '');
-}
-
-function normalizeOptionalLookupId(value: unknown, field: string): string | null {
-  if (value === undefined || value === null || value === '') return null;
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${field} must be a string`);
-  }
-  return value.trim();
-}
-
-function normalizeProtocol(value: unknown): ApiProtocol {
-  if (value === 'anthropic-messages' || value === 'openai-compatible') return value;
-  throw new Error('endpoint.protocol must be anthropic-messages or openai-compatible');
-}
-
-function normalizeApiProviderCapabilities(
-  protocol: ApiProtocol,
-  value: unknown,
-): OpenAiEndpointCapabilities | undefined {
-  if (protocol !== 'openai-compatible') return undefined;
-  const raw = value === undefined ? {} : requireObject(value, 'endpoint.capabilities');
-  const chatCompletions = optionalBoolean(raw.chatCompletions, 'endpoint.capabilities.chatCompletions') ?? true;
-  const responses = optionalBoolean(raw.responses, 'endpoint.capabilities.responses') ?? false;
-  if (!chatCompletions && !responses) {
-    throw new Error('OpenAI-compatible endpoints must support Chat Completions or Responses.');
-  }
-  return { chatCompletions, responses };
-}
-
-function normalizeApiProviderModels(value: unknown, defaultModel: string): AgentModelOption[] {
-  if (!Array.isArray(value)) {
-    return [{ value: defaultModel, label: defaultModel }];
-  }
-  const models: AgentModelOption[] = [];
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') continue;
-    const model = entry as Record<string, unknown>;
-    const modelValue = typeof model.value === 'string' ? model.value.trim() : '';
-    const label = typeof model.label === 'string' ? model.label.trim() : '';
-    if (!modelValue || !label) continue;
-    const normalized: AgentModelOption = { value: modelValue, label };
-    if (typeof model.supportsImages === 'boolean') normalized.supportsImages = model.supportsImages;
-    if (typeof model.isLocal === 'boolean') normalized.isLocal = model.isLocal;
-    models.push(normalized);
-  }
-  if (models.length > 0) return models;
-  return defaultModel ? [{ value: defaultModel, label: defaultModel }] : [];
-}
-
-function flattenApiProviderInput(input: ApiProviderInput): CreateApiProviderInput {
-  const root = requireObject(input, 'API provider');
-  const endpoint = requireObject(root.endpoint, 'endpoint');
-  const protocol = normalizeProtocol(endpoint.protocol);
-  const templateId = normalizeTemplateId(root.templateId);
-  if (!apiProviderTemplate(protocol, templateId)) {
-    throw new Error(`Unsupported template for ${labelForProtocol(protocol)} providers: ${templateId}`);
-  }
-  const defaultModel = requireString(endpoint.defaultModel, 'endpoint.defaultModel');
-  return {
-    templateId,
-    label: requireString(root.label, 'label'),
-    protocol,
-    baseUrl: normalizeApiProviderBaseUrl(endpoint.baseUrl),
-    apiKey: typeof endpoint.apiKey === 'string' ? endpoint.apiKey : undefined,
-    capabilities: normalizeApiProviderCapabilities(protocol, endpoint.capabilities),
-    defaultModel,
-    models: normalizeApiProviderModels(endpoint.models, defaultModel),
-    supportsImages: optionalBoolean(endpoint.supportsImages, 'endpoint.supportsImages') ?? false,
-    modelDiscovery: normalizeModelDiscovery(protocol, endpoint.modelDiscovery),
-  };
-}
-
-function flattenApiProviderPatch(input: Partial<ApiProviderInput>): UpdateApiProviderInput {
-  const root = requireObject(input, 'API provider');
-  const result: UpdateApiProviderInput = {};
-  const label = optionalString(root.label, 'label');
-  if (label !== undefined) result.label = label;
-  const inputEndpoint = optionalObject(root.endpoint, 'endpoint');
-  if (inputEndpoint) {
-    const protocol = inputEndpoint.protocol === undefined ? undefined : normalizeProtocol(inputEndpoint.protocol);
-    const endpoint: UpdateApiProviderInput['endpoint'] = {};
-    if (inputEndpoint.baseUrl !== undefined) endpoint.baseUrl = normalizeApiProviderBaseUrl(inputEndpoint.baseUrl);
-    if (inputEndpoint.apiKey !== undefined) {
-      if (typeof inputEndpoint.apiKey !== 'string') throw new Error('endpoint.apiKey must be a string');
-      endpoint.apiKey = inputEndpoint.apiKey;
-    }
-    const clearApiKey = optionalBoolean(inputEndpoint.clearApiKey, 'endpoint.clearApiKey');
-    if (clearApiKey !== undefined) endpoint.clearApiKey = clearApiKey;
-    if (inputEndpoint.capabilities !== undefined) {
-      if (!protocol) throw new Error('endpoint.protocol is required when endpoint.capabilities is patched');
-      endpoint.capabilities = normalizeApiProviderCapabilities(protocol, inputEndpoint.capabilities);
-    }
-    if (inputEndpoint.defaultModel !== undefined) endpoint.defaultModel = requireString(inputEndpoint.defaultModel, 'endpoint.defaultModel');
-    if (inputEndpoint.models !== undefined) {
-      const defaultModel = endpoint.defaultModel
-        ?? (typeof inputEndpoint.defaultModel === 'string' ? inputEndpoint.defaultModel : '');
-      endpoint.models = normalizeApiProviderModels(inputEndpoint.models, defaultModel);
-    }
-    const supportsImages = optionalBoolean(inputEndpoint.supportsImages, 'endpoint.supportsImages');
-    if (supportsImages !== undefined) endpoint.supportsImages = supportsImages;
-    if (inputEndpoint.modelDiscovery !== undefined) {
-      if (!protocol) throw new Error('endpoint.protocol is required when endpoint.modelDiscovery is patched');
-      endpoint.modelDiscovery = normalizeModelDiscovery(protocol, inputEndpoint.modelDiscovery);
-    }
-    if (Object.keys(endpoint).length > 0) result.endpoint = endpoint;
-  }
-  return result;
-}
-
-function normalizeModelDiscovery(protocol: ApiProtocol, value: unknown): ModelDiscoveryKind {
-  if (value === 'none') return 'none';
-  if (value === 'ollama-tags') return 'ollama-tags';
-  if (value === 'openrouter-models') return 'openrouter-models';
-  if (value === 'anthropic-models') return 'anthropic-models';
-  if (protocol === 'openai-compatible') return 'openai-models';
-  return 'none';
-}
-
-function defaultModelDiscoveryForProtocol(protocol: ApiProtocol): ModelDiscoveryKind {
-  return protocol === 'anthropic-messages' ? 'anthropic-models' : 'openai-models';
-}
-
-function normalizeModelDiscoveryForFetch(protocol: ApiProtocol, value: unknown): ModelDiscoveryKind {
-  const normalized = normalizeModelDiscovery(protocol, value);
-  return normalized === 'none' ? defaultModelDiscoveryForProtocol(protocol) : normalized;
-}
-
-function flattenApiProviderModelDiscoveryInput(input: ApiProviderModelDiscoveryRequest): ApiProviderModelDiscoveryFlatInput {
-  const root = requireObject(input, 'API provider model discovery');
-  const protocol = normalizeProtocol(root.protocol);
-  return {
-    protocol,
-    baseUrl: normalizeApiProviderBaseUrl(root.baseUrl),
-    apiKey: typeof root.apiKey === 'string' && root.apiKey.length > 0 ? root.apiKey : undefined,
-    apiProviderId: normalizeOptionalLookupId(root.apiProviderId, 'apiProviderId'),
-    endpointId: normalizeOptionalLookupId(root.endpointId, 'endpointId'),
-    modelDiscovery: normalizeModelDiscoveryForFetch(protocol, root.modelDiscovery),
-  };
-}
-
-function bearerHeaders(apiKey: string | undefined): Record<string, string> {
-  return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
-}
-
-function anthropicHeaders(apiKey: string | undefined): Record<string, string> {
-  return {
-    ...(apiKey ? { 'x-api-key': apiKey } : {}),
-    'anthropic-version': '2023-06-01',
-  };
-}
-
-function appendPath(baseUrl: string, suffix: string): string {
-  return `${baseUrl.replace(/\/+$/, '')}/${suffix.replace(/^\/+/, '')}`;
-}
-
-function openAiModelListUrl(baseUrl: string): string {
-  const normalized = baseUrl.replace(/\/+$/, '');
-  const parsed = new URL(normalized);
-  const path = parsed.pathname.replace(/\/+$/, '');
-  if (!path || path === '/') {
-    return appendPath(normalized, '/v1/models');
-  }
-  return appendPath(normalized, '/models');
-}
-
-function anthropicModelListUrl(baseUrl: string): string {
-  const normalized = baseUrl.replace(/\/+$/, '');
-  return normalized.endsWith('/v1')
-    ? appendPath(normalized, '/models')
-    : appendPath(normalized, '/v1/models');
-}
-
-function ollamaDiscoveryBase(baseUrl: string): string {
-  const normalized = baseUrl.replace(/\/+$/, '');
-  return normalized.endsWith('/v1') ? normalized.slice(0, -3) : normalized;
-}
-
-async function testOllamaTags(input: ApiProviderModelDiscoveryFlatInput): Promise<ApiProviderModelDiscoveryResponse> {
-  try {
-    const response = await fetch(`${ollamaDiscoveryBase(input.baseUrl)}/api/tags`, {
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) {
-      return { success: false, error: `Ollama model discovery failed with HTTP ${response.status}.` };
-    }
-    const body = await response.json() as { models?: Array<{ name?: string }> };
-    const models: AgentModelOption[] = (body.models ?? [])
-      .filter((model): model is { name: string } => typeof model.name === 'string' && model.name.length > 0)
-      .map((model) => ({ value: model.name, label: `${model.name} (local)`, isLocal: true }));
-    return { success: true, models: models.length > 0 ? dedupeModels(models) : undefined };
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-async function testOpenAiModels(input: ApiProviderModelDiscoveryFlatInput): Promise<ApiProviderModelDiscoveryResponse> {
-  try {
-    const url = openAiModelListUrl(input.baseUrl);
-    const response = await fetch(url, {
-      headers: bearerHeaders(input.apiKey),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) return { success: false, error: `Model discovery failed with HTTP ${response.status}.` };
-
-    const body = await response.json() as { data?: Array<{ id?: string; name?: string }> };
-    const models: AgentModelOption[] = (body.data ?? [])
-      .filter((model): model is { id: string; name?: string } => typeof model.id === 'string' && model.id.length > 0)
-      .map((model) => ({ value: model.id, label: model.name || model.id }));
-    return { success: true, models: models.length > 0 ? dedupeModels(models) : undefined };
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-async function testAnthropicModels(input: ApiProviderModelDiscoveryFlatInput): Promise<ApiProviderModelDiscoveryResponse> {
-  try {
-    const models: AgentModelOption[] = [];
-    let afterId: string | null = null;
-
-    for (let page = 0; page < 5; page += 1) {
-      const url = new URL(anthropicModelListUrl(input.baseUrl));
-      url.searchParams.set('limit', '1000');
-      if (afterId) url.searchParams.set('after_id', afterId);
-
-      const response = await fetch(url.toString(), {
-        headers: anthropicHeaders(input.apiKey),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!response.ok) return { success: false, error: `Model discovery failed with HTTP ${response.status}.` };
-
-      const body = await response.json() as {
-        data?: Array<{ id?: string; display_name?: string; name?: string }>;
-        has_more?: boolean;
-        last_id?: string | null;
-      };
-      for (const model of body.data ?? []) {
-        if (typeof model.id !== 'string' || model.id.length === 0) continue;
-        models.push({ value: model.id, label: model.display_name || model.name || model.id });
-      }
-      if (!body.has_more || !body.last_id || body.last_id === afterId) break;
-      afterId = body.last_id;
-    }
-
-    return { success: true, models: models.length > 0 ? dedupeModels(models) : undefined };
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
 }
 
 function selectionRequestFields(selection: ResolvedModelSelection): {
@@ -462,18 +117,15 @@ export class AgentRegistry {
   #registry: IChatRegistry;
   #agents = new Map<string, Agent>();
   #endpointResolver: ApiProviderEndpointResolver;
-  #apiProviderStore: ApiProviderStore;
   #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
 
   constructor(args: {
     registry: IChatRegistry;
     agents: Agent[];
     endpointResolver: ApiProviderEndpointResolver;
-    apiProviderStore: ApiProviderStore;
   }) {
     this.#registry = args.registry;
     this.#endpointResolver = args.endpointResolver;
-    this.#apiProviderStore = args.apiProviderStore;
 
     for (const agent of args.agents) {
       this.#agents.set(agent.id, agent);
@@ -524,7 +176,7 @@ export class AgentRegistry {
 
     const entry = requireChatEntry(chatId, rawEntry);
     const selection = this.#endpointResolver.resolveSelection({
-      agentId: entry.provider,
+      agentId: entry.agentId,
       model: entry.model,
       apiProviderId: entry.apiProviderId,
       modelEndpointId: entry.modelEndpointId,
@@ -547,9 +199,9 @@ export class AgentRegistry {
       ...selectionRequestFields(selection),
     };
 
-    const agent = this.#agentFor(entry.provider);
+    const agent = this.#agentFor(entry.agentId);
     this.#setTurnMetadata(chatId, opts);
-    let started: StartedProviderSession;
+    let started: StartedAgentSession;
     try {
       started = await agent.runtime.startSession(request);
     } catch (error) {
@@ -557,7 +209,7 @@ export class AgentRegistry {
       throw error;
     }
     this.#registry.updateChat(chatId, {
-      providerSessionId: started.providerSessionId,
+      agentSessionId: started.agentSessionId,
       nativePath: started.nativePath,
       apiProviderId: selection.apiProviderId,
       modelEndpointId: selection.endpointId,
@@ -565,14 +217,14 @@ export class AgentRegistry {
     });
   }
 
-  async runProviderTurn(chatId: string, command: string, opts: RunProviderTurnOptions = {}): Promise<void> {
+  async runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
     if (!rawEntry) {
       throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
     }
 
-    const { provider, providerSessionId } = rawEntry;
-    if (!providerSessionId) {
+    const { agentId, agentSessionId } = rawEntry;
+    if (!agentSessionId) {
       throw new Error(`Session missing agent session ID: ${chatId}`);
     }
 
@@ -580,7 +232,7 @@ export class AgentRegistry {
     const effectiveModel = opts.model ?? entry.model;
 
     const previousSelection = this.#endpointResolver.resolveSelection({
-      agentId: provider,
+      agentId,
       model: entry.model,
       apiProviderId: rawEntry.apiProviderId,
       modelEndpointId: rawEntry.modelEndpointId,
@@ -589,7 +241,7 @@ export class AgentRegistry {
     const nextApiProviderId = opts.apiProviderId !== undefined ? opts.apiProviderId : rawEntry.apiProviderId;
     const nextEndpointId = opts.modelEndpointId !== undefined ? opts.modelEndpointId : rawEntry.modelEndpointId;
     const selection = this.#endpointResolver.resolveSelection({
-      agentId: provider,
+      agentId,
       model: effectiveModel,
       apiProviderId: nextApiProviderId,
       modelEndpointId: nextEndpointId,
@@ -597,7 +249,7 @@ export class AgentRegistry {
 
     assertSameApiProviderBoundary(previousSelection, selection);
 
-    const agent = this.#agentFor(provider);
+    const agent = this.#agentFor(agentId);
     const resolvedCommand = await resolveFileMentionsInCommand(command, entry.projectPath);
     this.#setTurnMetadata(chatId, opts);
     let startedTurn = false;
@@ -605,7 +257,7 @@ export class AgentRegistry {
       startedTurn = true;
       await agent.runtime.runTurn({
         chatId,
-        providerSessionId,
+        agentSessionId,
         command: resolvedCommand,
         projectPath: entry.projectPath,
         model: selection.model,
@@ -628,24 +280,24 @@ export class AgentRegistry {
 
   async abortSession(chatId: string): Promise<boolean> {
     const entry = this.#registry.getChat(chatId);
-    const providerSessionId = entry?.providerSessionId;
-    if (!providerSessionId) return false;
-    const agent = this.#agents.get(entry.provider);
+    const agentSessionId = entry?.agentSessionId;
+    if (!agentSessionId) return false;
+    const agent = this.#agents.get(entry.agentId);
     if (!agent) return false;
-    return agent.runtime.abort(providerSessionId);
+    return agent.runtime.abort(agentSessionId);
   }
 
   isChatRunning(chatId: string): boolean {
     const entry = this.#registry.getChat(chatId);
     if (!entry) return false;
-    return this.isAgentSessionRunning(entry.provider, entry.providerSessionId);
+    return this.isAgentSessionRunning(entry.agentId, entry.agentSessionId);
   }
 
-  isAgentSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean {
-    if (!providerSessionId) return false;
-    const agent = this.#agents.get(provider);
+  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {
+    if (!agentSessionId) return false;
+    const agent = this.#agents.get(agentId);
     if (!agent) return false;
-    return agent.runtime.isRunning(providerSessionId);
+    return agent.runtime.isRunning(agentSessionId);
   }
 
   getRunningSessions(): Record<string, Array<{ id: string;[key: string]: unknown }>> {
@@ -653,15 +305,15 @@ export class AgentRegistry {
       arr
         .map((e) => (typeof e === 'string' ? { id: e } : e))
         .map((e) => {
-          const match = e?.id ? this.#registry.getChatByProviderSessionId(e.id) : null;
+          const match = e?.id ? this.#registry.getChatByAgentSessionId(e.id) : null;
           const mapped = match ? match[0] : null;
           return mapped ? { ...e, id: mapped } : null;
         })
         .filter((e): e is NonNullable<typeof e> => Boolean(e));
 
     const result: Record<string, Array<{ id: string;[key: string]: unknown }>> = {};
-    for (const [provider, agent] of this.#agents.entries()) {
-      result[provider] = mapToChatId(agent.runtime.getRunningSessions());
+    for (const [agentId, agent] of this.#agents.entries()) {
+      result[agentId] = mapToChatId(agent.runtime.getRunningSessions());
     }
     return result;
   }
@@ -679,31 +331,31 @@ export class AgentRegistry {
 
     const chat = this.#registry.getChat(chatId);
     if (!chat) {
-      console.warn('providers: resolvePermission, unknown chatId:', chatId);
+      console.warn('agents: resolvePermission, unknown chatId:', chatId);
       return;
     }
 
-    const agent = this.#agents.get(chat.provider);
+    const agent = this.#agents.get(chat.agentId);
     if (agent?.runtime.resolvePermission) {
       Promise.resolve(agent.runtime.resolvePermission(permissionRequestId, decision)).catch((err: Error) => {
-        console.warn(`providers: ${chat.provider} permission reply failed:`, err.message);
+        console.warn(`agents: ${chat.agentId} permission reply failed:`, err.message);
       });
       return;
     }
 
-    console.warn('providers: no permission handler for provider:', chat.provider);
+    console.warn('agents: no permission handler for agent:', chat.agentId);
   }
 
-  async forkProviderSession(args: {
-    sourceSession: ProviderChatEntry;
+  async forkAgentSession(args: {
+    sourceSession: AgentChatEntry;
     sourceChatId: string;
     targetChatId: string;
-  }): Promise<StartedProviderSession | null> {
-    const agent = this.#agents.get(args.sourceSession.provider);
+  }): Promise<StartedAgentSession | null> {
+    const agent = this.#agents.get(args.sourceSession.agentId);
     if (!agent?.forkSession) return null;
     const source = requireChatEntry(args.sourceChatId, args.sourceSession);
     const selection = this.#endpointResolver.resolveSelection({
-      agentId: source.provider,
+      agentId: source.agentId,
       model: source.model,
       apiProviderId: source.apiProviderId,
       modelEndpointId: source.modelEndpointId,
@@ -722,26 +374,26 @@ export class AgentRegistry {
 
   async setPermissionMode(chatId: string, mode: PermissionMode): Promise<void> {
     const entry = this.#registry.getChat(chatId);
-    const providerSessionId = entry?.providerSessionId;
-    if (!providerSessionId || entry.provider !== 'claude') return;
+    const agentSessionId = entry?.agentSessionId;
+    if (!agentSessionId || entry.agentId !== 'claude') return;
     const runtime = this.#agents.get('claude')?.runtime as any;
-    runtime?.setInternalPermissionMode?.(providerSessionId, mode);
+    runtime?.setInternalPermissionMode?.(agentSessionId, mode);
   }
 
   async setThinkingMode(chatId: string, mode: ThinkingMode): Promise<void> {
     const entry = this.#registry.getChat(chatId);
-    const providerSessionId = entry?.providerSessionId;
-    if (!providerSessionId || entry.provider !== 'claude') return;
+    const agentSessionId = entry?.agentSessionId;
+    if (!agentSessionId || entry.agentId !== 'claude') return;
     const runtime = this.#agents.get('claude')?.runtime as any;
-    runtime?.setInternalThinkingMode?.(providerSessionId, mode);
+    runtime?.setInternalThinkingMode?.(agentSessionId, mode);
   }
 
   async setClaudeThinkingMode(chatId: string, mode: ClaudeThinkingMode): Promise<void> {
     const entry = this.#registry.getChat(chatId);
-    const providerSessionId = entry?.providerSessionId;
-    if (!providerSessionId || entry.provider !== 'claude') return;
+    const agentSessionId = entry?.agentSessionId;
+    if (!agentSessionId || entry.agentId !== 'claude') return;
     const runtime = this.#agents.get('claude')?.runtime as any;
-    runtime?.setInternalClaudeThinkingMode?.(providerSessionId, mode);
+    runtime?.setInternalClaudeThinkingMode?.(agentSessionId, mode);
   }
 
   async setAmpAgentMode(_chatId: string, _mode: AmpAgentMode): Promise<void> { }
@@ -753,13 +405,13 @@ export class AgentRegistry {
     const entry = this.#registry.getChat(chatId);
     if (!entry) return;
     const previous = this.#endpointResolver.resolveSelection({
-      agentId: entry.provider,
+      agentId: entry.agentId,
       model: entry.model,
       apiProviderId: entry.apiProviderId,
       modelEndpointId: entry.modelEndpointId,
     });
     const next = this.#endpointResolver.resolveSelection({
-      agentId: entry.provider,
+      agentId: entry.agentId,
       model,
       apiProviderId: metadata.apiProviderId !== undefined ? metadata.apiProviderId : entry.apiProviderId,
       modelEndpointId: metadata.modelEndpointId !== undefined ? metadata.modelEndpointId : entry.modelEndpointId,
@@ -767,14 +419,14 @@ export class AgentRegistry {
     assertSameApiProviderBoundary(previous, next);
   }
 
-  async runSingleQuery(prompt: string, options: { provider?: string;[key: string]: unknown } = {}): Promise<string> {
-    const { provider = 'claude', ...rest } = options;
-    const agent = this.#agents.get(provider);
+  async runSingleQuery(prompt: string, options: { agentId?: string;[key: string]: unknown } = {}): Promise<string> {
+    const { agentId = 'claude', ...rest } = options;
+    const agent = this.#agents.get(agentId);
     if (agent?.runSingleQuery) {
       const model = typeof rest.model === 'string' ? rest.model : '';
       if (model) {
         const selection = this.#endpointResolver.resolveSelection({
-          agentId: provider,
+          agentId,
           model,
           apiProviderId: typeof rest.apiProviderId === 'string' ? rest.apiProviderId : null,
           modelEndpointId: typeof rest.modelEndpointId === 'string' ? rest.modelEndpointId : null,
@@ -786,37 +438,37 @@ export class AgentRegistry {
       }
       return agent.runSingleQuery(prompt, rest);
     }
-    throw new Error(`Single query unsupported for provider: ${provider}`);
+    throw new Error(`Single query unsupported for agent: ${agentId}`);
   }
 
-  async getPreview(session: ProviderChatEntry | null): Promise<unknown> {
-    if (!session?.provider) return null;
-    const agent = this.#agents.get(session.provider);
+  async getPreview(session: AgentChatEntry | null): Promise<unknown> {
+    if (!session?.agentId) return null;
+    const agent = this.#agents.get(session.agentId);
     if (!agent?.transcript.getPreview) return null;
     return agent.transcript.getPreview(session);
   }
 
-  async loadMessages(session: ProviderChatEntry | null, chatId?: string): Promise<unknown[]> {
-    if (!session?.provider) return [];
-    const agent = this.#agents.get(session.provider);
+  async loadMessages(session: AgentChatEntry | null, chatId?: string): Promise<unknown[]> {
+    if (!session?.agentId) return [];
+    const agent = this.#agents.get(session.agentId);
     if (!agent) return [];
     return agent.transcript.loadMessages(session, { chatId });
   }
 
-  async getModels(provider: string): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
-    const getModels = this.#agents.get(provider)?.capabilities.getModels;
+  async getModels(agentId: string): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
+    const getModels = this.#agents.get(agentId)?.capabilities.getModels;
     if (getModels) return getModels();
     return [];
   }
 
   async modelSupportsImages(input: {
-    provider: string;
+    agentId: string;
     model: string;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   }): Promise<boolean> {
     return this.#endpointResolver.modelSupportsImages({
-      agentId: input.provider as any,
+      agentId: input.agentId as any,
       model: input.model,
       apiProviderId: input.apiProviderId,
       modelEndpointId: input.modelEndpointId,
@@ -927,9 +579,8 @@ export class AgentRegistry {
     }
   }
 
-  async getAgentCatalog(): Promise<AgentCatalog> {
-    const apiProviders = this.#apiProviderStore.redactedList();
-    const agents = (await Promise.all(Array.from(this.#agents.entries()).map(async ([id, agent]) => {
+  async getAgentCatalogEntries(): Promise<AgentCatalogEntry[]> {
+    return (await Promise.all(Array.from(this.#agents.entries()).map(async ([id, agent]) => {
       if (!isVisibleAgentId(id)) return null;
       const endpointModels = this.#endpointResolver.getModelOptions(id as any);
       const nativeModels = await nativeModelsForAgent(id, agent);
@@ -949,71 +600,6 @@ export class AgentRegistry {
         models,
       };
     }))).filter((entry): entry is AgentCatalogEntry => Boolean(entry));
-
-    return {
-      agents,
-      apiProviders: apiProviders as any,
-    };
-  }
-
-  getApiProviderCatalog(): ApiProviderCatalogEntry[] {
-    return this.#apiProviderStore.redactedList() as any;
-  }
-
-  async createApiProvider(input: ApiProviderInput): Promise<ApiProviderCatalogEntry> {
-    const apiProvider = await this.#apiProviderStore.createApiProvider(flattenApiProviderInput(input));
-    return redactApiProviderForCatalog(apiProvider);
-  }
-
-  async updateApiProvider(id: string, input: Partial<ApiProviderInput>): Promise<ApiProviderCatalogEntry> {
-    const apiProvider = await this.#apiProviderStore.updateApiProvider(id, flattenApiProviderPatch(input));
-    return redactApiProviderForCatalog(apiProvider);
-  }
-
-  async deleteApiProvider(id: string): Promise<void> {
-    await this.#apiProviderStore.deleteApiProvider(id, (apiProviderId) => this.#registryHasChatsForApiProvider(apiProviderId));
-  }
-
-  async testApiProvider(input: ApiProviderInput): Promise<ApiProviderModelDiscoveryResponse> {
-    const flat = flattenApiProviderInput(input);
-    if (flat.modelDiscovery === 'ollama-tags') return testOllamaTags(flat);
-    if (flat.modelDiscovery === 'anthropic-models') return testAnthropicModels(flat);
-    if (flat.modelDiscovery === 'openai-models' || flat.modelDiscovery === 'openrouter-models') {
-      return testOpenAiModels(flat);
-    }
-    return { success: true };
-  }
-
-  async discoverApiProviderModels(input: ApiProviderModelDiscoveryRequest): Promise<ApiProviderModelDiscoveryResponse> {
-    const flat = flattenApiProviderModelDiscoveryInput(input);
-    const apiKey = flat.apiKey ?? this.#storedApiKeyForDiscovery(flat);
-    const discoveryInput = { ...flat, apiKey };
-    if (discoveryInput.modelDiscovery === 'ollama-tags') return testOllamaTags(discoveryInput);
-    if (discoveryInput.modelDiscovery === 'anthropic-models') return testAnthropicModels(discoveryInput);
-    if (discoveryInput.modelDiscovery === 'openai-models' || discoveryInput.modelDiscovery === 'openrouter-models') {
-      return testOpenAiModels(discoveryInput);
-    }
-    return { success: false, error: `Model discovery is not supported for ${discoveryInput.modelDiscovery}.` };
-  }
-
-  #registryHasChatsForApiProvider(apiProviderId: string): boolean {
-    for (const entry of Object.values(this.#registry.listAllChats())) {
-      if ((entry as any).apiProviderId === apiProviderId) return true;
-    }
-    return false;
-  }
-
-  #storedApiKeyForDiscovery(input: Pick<ApiProviderModelDiscoveryFlatInput, 'apiProviderId' | 'endpointId' | 'protocol'>): string | undefined {
-    if (input.endpointId) {
-      const resolved = this.#apiProviderStore.getEndpoint(input.endpointId);
-      if (resolved?.endpoint.protocol === input.protocol) return resolved.endpoint.apiKey || undefined;
-    }
-    if (input.apiProviderId) {
-      const apiProvider = this.#apiProviderStore.getApiProvider(input.apiProviderId);
-      const endpoint = apiProvider?.endpoints.find((entry) => entry.protocol === input.protocol);
-      return endpoint?.apiKey || undefined;
-    }
-    return undefined;
   }
 
 }

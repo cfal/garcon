@@ -8,7 +8,7 @@
 		PermissionRequestMessage,
 	} from '$shared/chat-types';
 	import type { ChatMessage, ToolResultMessage, ToolUseChatMessage } from '$shared/chat-types';
-	import type { SessionProvider } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/types/app';
 	import { Check, ChevronRight, CircleAlert, LoaderCircle } from '@lucide/svelte';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Copy from '@lucide/svelte/icons/copy';
@@ -44,7 +44,7 @@
 		permissionTerminal?: PermissionTerminal;
 		onPermissionDecision?: (permissionRequestId: string, decision: { allow: boolean; message?: string }) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
-		provider: SessionProvider | string;
+		agentId: SessionAgentId | string;
 		showThinking?: boolean;
 	}
 
@@ -56,7 +56,7 @@
 		permissionTerminal,
 		onPermissionDecision,
 		onExitPlanMode,
-		provider,
+		agentId,
 		showThinking = true
 	}: Props = $props();
 

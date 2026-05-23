@@ -42,7 +42,7 @@ function createRunningChat(overrides: Partial<Record<string, unknown>> = {}) {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
 		title: 'Unread chat',
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'none',
@@ -124,10 +124,10 @@ function createDeps(chat = createRunningChat()) {
 				saveDraft: vi.fn(),
 				restoreDraft: vi.fn(),
 			},
-			providerState: {
-					setProvider: vi.fn(),
+			agentState: {
+					setAgentId: vi.fn(),
 					setModelSelection: vi.fn(),
-					provider: 'claude',
+					agentId: 'claude',
 					model: '',
 					apiProviderId: null,
 					modelEndpointId: null,
@@ -311,7 +311,7 @@ describe('ConversationSessionController', () => {
 			success: true,
 			sourceChatId: '123',
 			chatId: '456',
-			provider: 'claude',
+			agentId: 'claude',
 		});
 		const controller = new ConversationSessionController(deps as never);
 
@@ -345,7 +345,7 @@ describe('ConversationSessionController', () => {
 		}>();
 		mockRunChat.mockReturnValueOnce(accepted.promise);
 		const { deps } = createDeps();
-		deps.providerState.model = 'opus';
+		deps.agentState.model = 'opus';
 		deps.composerState.inputText = 'hello over REST';
 		const controller = new ConversationSessionController(deps as never);
 
@@ -387,7 +387,7 @@ describe('ConversationSessionController', () => {
 	it('marks the pending user message failed and restores composer input on REST rejection', async () => {
 		mockRunChat.mockRejectedValueOnce(new Error('network down'));
 		const { deps } = createDeps();
-		deps.providerState.model = 'opus';
+		deps.agentState.model = 'opus';
 		deps.composerState.inputText = 'please send';
 		const controller = new ConversationSessionController(deps as never);
 

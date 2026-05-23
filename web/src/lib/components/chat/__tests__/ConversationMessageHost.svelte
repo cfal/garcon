@@ -28,5 +28,5 @@
 	{message}
 	index={0}
 	prevMessage={null}
-	provider="claude"
+	agentId="claude"
 />

@@ -11,22 +11,25 @@ mock.module('../../agents/pi/pi-models.js', () => ({
 
 import createModelsRoutes from '../models.js';
 
+const agentCatalogEntries = [
+  { id: 'claude', label: 'Claude', kind: 'agent', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: 'opus', models: [{ value: 'opus', label: 'Opus', supportsImages: true }] },
+  { id: 'codex', label: 'Codex', kind: 'agent', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: 'gpt-5.5', models: [{ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true }, { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', supportsImages: false }] },
+  { id: 'opencode', label: 'OpenCode', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '', models: [] },
+  { id: 'amp', label: 'Amp', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'default', models: [{ value: 'default', label: 'Default' }] },
+  { id: 'factory', label: 'Factory', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'claude-opus-4-6', models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4-6' }] },
+  { id: 'pi', label: 'Pi', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'github-copilot/gpt-5.4', models: [{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }] },
+  { id: 'direct-anthropic-compatible', label: 'Direct (Anthropic)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '', models: [] },
+  { id: 'direct-openai-compatible', label: 'Direct (Chat Completions)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
+  { id: 'direct-openai-responses-compatible', label: 'Direct (Responses)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
+];
+
 const providers = {
-  getModels: mock(() => Promise.resolve([])),
-  getAgentCatalog: mock(() => Promise.resolve({
-    agents: [
-      { id: 'claude', label: 'Claude', kind: 'agent', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: 'opus', models: [{ value: 'opus', label: 'Opus', supportsImages: true }] },
-      { id: 'codex', label: 'Codex', kind: 'agent', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: 'gpt-5.5', models: [{ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true }, { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', supportsImages: false }] },
-      { id: 'opencode', label: 'OpenCode', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '', models: [] },
-      { id: 'amp', label: 'Amp', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'default', models: [{ value: 'default', label: 'Default' }] },
-      { id: 'factory', label: 'Factory', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'claude-opus-4-6', models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4-6' }] },
-      { id: 'pi', label: 'Pi', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'github-copilot/gpt-5.4', models: [{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }] },
-      { id: 'direct-anthropic-compatible', label: 'Direct (Anthropic)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '', models: [] },
-      { id: 'direct-openai-compatible', label: 'Direct (Chat Completions)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
-      { id: 'direct-openai-responses-compatible', label: 'Direct (Responses)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
-    ],
-    apiProviders: [],
-  })),
+  agents: {
+    getAgentCatalogEntries: mock(() => Promise.resolve(agentCatalogEntries)),
+  },
+  apiProviders: {
+    getCatalog: mock(() => []),
+  },
 };
 
 const modelsRoutes = createModelsRoutes(providers);

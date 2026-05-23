@@ -1,5 +1,5 @@
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
-import type { SessionProvider } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/types/app';
 import { getLocale } from '$lib/paraglide/runtime.js';
 import type {
 	FilteredModelRowsResult,
@@ -30,7 +30,7 @@ interface ModelSelectorStateOptions {
 
 interface RowsCache {
 	catalogVersion: number;
-	agentId: SessionProvider;
+	agentId: SessionAgentId;
 	sourceKey: string | null;
 	models: ModelOption[];
 	source: ModelSourceOption | null;
@@ -38,7 +38,7 @@ interface RowsCache {
 }
 
 interface SelectionView {
-	agentId: SessionProvider;
+	agentId: SessionAgentId;
 	agentLabel: string;
 	modelValue: string;
 	sourceKey: string | null;
@@ -57,11 +57,11 @@ export class ModelSelectorState {
 	query = $state('');
 	activeSourceKey = $state<string | null>(null);
 	activeModelIndex = $state(0);
-	draftAgentId = $state<SessionProvider | null>(null);
+	draftAgentId = $state<SessionAgentId | null>(null);
 	draftModelValue = $state<string | null>(null);
 
 	readonly #options: ModelSelectorStateOptions;
-	#sourcesCache = new Map<SessionProvider, ModelSourceOption[]>();
+	#sourcesCache = new Map<SessionAgentId, ModelSourceOption[]>();
 	#sourcesCacheVersion: number | null = null;
 	#sourcesCacheLocale: string | null = null;
 	#rowsCache = new Map<string, RowsCache>();
@@ -89,7 +89,7 @@ export class ModelSelectorState {
 		return buildAgentOptions(this.modelCatalog);
 	}
 
-	get agentId(): SessionProvider {
+	get agentId(): SessionAgentId {
 		return this.draftSelection.agentId;
 	}
 
@@ -101,7 +101,7 @@ export class ModelSelectorState {
 		return this.sourcesFor(this.agentId);
 	}
 
-	sourcesFor(agentId: SessionProvider): ModelSourceOption[] {
+	sourcesFor(agentId: SessionAgentId): ModelSourceOption[] {
 		const catalogVersion = this.modelCatalog.version ?? 0;
 		const locale = getLocale();
 		if (this.#sourcesCacheVersion !== catalogVersion || this.#sourcesCacheLocale !== locale) {
@@ -119,7 +119,7 @@ export class ModelSelectorState {
 	}
 
 	#sourceKeyForModel(
-		agentId: SessionProvider,
+		agentId: SessionAgentId,
 		modelValue: string,
 		modelEndpointId?: string | null,
 	): string | null {
@@ -365,7 +365,7 @@ export class ModelSelectorState {
 		return false;
 	}
 
-	selectAgent(agentId: SessionProvider): void {
+	selectAgent(agentId: SessionAgentId): void {
 		if (agentId === this.agentId) return;
 		const sources = this.sourcesFor(agentId);
 		const currentSourceKey = this.sourceKey;
@@ -390,7 +390,7 @@ export class ModelSelectorState {
 		this.resetActiveModelIndex();
 	}
 
-	emit(agentId: SessionProvider, modelValue: string): void {
+	emit(agentId: SessionAgentId, modelValue: string): void {
 		const next = buildModelSelectorChange(this.modelCatalog, agentId, modelValue);
 		if (!next) return;
 		void this.#options.onChange(next);
@@ -416,7 +416,7 @@ export class ModelSelectorState {
 	}
 
 	#setDraftSelection(
-		agentId: SessionProvider,
+		agentId: SessionAgentId,
 		modelValue: string | null,
 		sourceKey: string | null,
 	): void {
@@ -425,7 +425,7 @@ export class ModelSelectorState {
 		this.activeSourceKey = sourceKey;
 	}
 
-	#committedModelValueFor(agentId: SessionProvider, sourceKey: string | null): string | null {
+	#committedModelValueFor(agentId: SessionAgentId, sourceKey: string | null): string | null {
 		if (agentId !== this.value.agentId) return null;
 		const modelValue = currentModelValue(this.modelCatalog, this.value);
 		if (!modelValue) return null;
@@ -447,7 +447,7 @@ export class ModelSelectorState {
 	}
 
 	#selectionView(input: {
-		agentId: SessionProvider;
+		agentId: SessionAgentId;
 		modelValue: string;
 		modelEndpointId?: string | null;
 		sourceKey?: string | null;
@@ -481,7 +481,7 @@ export class ModelSelectorState {
 	}
 
 	#rowsCacheKey(
-		agentId: SessionProvider,
+		agentId: SessionAgentId,
 		sourceKey: string | null,
 		source: ModelSourceOption | null,
 	): string {

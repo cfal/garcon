@@ -8,7 +8,7 @@
 		PermissionCancelledMessage,
 	} from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
-	import { getChatState, getProviderState, getLocalSettings, getAppShell } from '$lib/context';
+	import { getChatState, getAgentState, getLocalSettings, getAppShell } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createMessageIdAllocator } from '$lib/chat/message-id';
 	import { CHAT_MAX_WIDTH_FEED_CONTENT_CLASS, CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS } from '$lib/chat/chat-max-width';
@@ -39,7 +39,7 @@
 	}: Props = $props();
 
 	const chatState = getChatState();
-	const providerState = getProviderState();
+	const agentState = getAgentState();
 	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
 
@@ -242,7 +242,7 @@
 						permissionTerminal={permTerminal}
 						{onPermissionDecision}
 						{onExitPlanMode}
-						provider={providerState.provider}
+						agentId={agentState.agentId}
 						showThinking={localSettings.showThinking}
 					/>
 					{#snippet failed(error)}

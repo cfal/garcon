@@ -14,7 +14,7 @@
 			'chat-1': {
 				id: 'chat-1',
 				title: 'Pane Test Chat',
-				provider: 'codex',
+				agentId: 'codex',
 				isProcessing: false,
 			},
 		},

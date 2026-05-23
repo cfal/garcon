@@ -6,7 +6,7 @@ import { ChatProcessingUpdatedMessage } from '$shared/ws-events';
 
 function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 	return {
-		provider: 'claude',
+		agentId: 'claude',
 		projectPath: '/project',
 		selectedChat: null,
 		getCurrentChatId: () => null,

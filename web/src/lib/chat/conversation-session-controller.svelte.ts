@@ -25,20 +25,20 @@ import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
 import type { ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
-import type { ProviderState } from '$lib/chat/provider-state.svelte';
+import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { AmpAgentMode, PendingPermissionRequest, PermissionMode, QueueState, ThinkingMode } from '$lib/types/chat';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import type { AppTab, SessionProvider } from '$lib/types/app';
-import type { ApiProtocol } from '$shared/providers';
+import type { AppTab, SessionAgentId } from '$lib/types/app';
+import type { ApiProtocol } from '$shared/api-providers';
 
 export interface SessionControllerDeps {
 	sessions: {
 		selectedChatId: string | null;
 		selectedChat: ChatSessionRecord | null;
 		byId: Record<string, ChatSessionRecord>;
-		startupByChatId: Record<string, { provider: string; model: string; apiProviderId?: string | null; modelEndpointId?: string | null; modelProtocol?: ApiProtocol | null; tags?: string[]; permissionMode: PermissionMode; thinkingMode: ThinkingMode; claudeThinkingMode?: string; ampAgentMode: AmpAgentMode; firstMessage: string; initialImages?: File[] }>;
+		startupByChatId: Record<string, { agentId: string; model: string; apiProviderId?: string | null; modelEndpointId?: string | null; modelProtocol?: ApiProtocol | null; tags?: string[]; permissionMode: PermissionMode; thinkingMode: ThinkingMode; claudeThinkingMode?: string; ampAgentMode: AmpAgentMode; firstMessage: string; initialImages?: File[] }>;
 		isDraft: (chatId: string) => boolean;
 		patchDraftStartup: (chatId: string, patch: Record<string, unknown>) => void;
 		patchChat: (chatId: string, patch: Record<string, unknown>) => void;
@@ -49,18 +49,18 @@ export interface SessionControllerDeps {
 	};
 	chatState: ChatState;
 	composerState: ComposerState;
-	providerState: ProviderState;
+	agentState: AgentState;
 	lifecycle: ChatLifecycleStore;
 	startupCoordinator: StartupCoordinator;
 	modelCatalog: {
-		isLocalModel: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => boolean;
-		selectionFor: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => {
+		isLocalModel: (agentId: SessionAgentId, model: string, modelEndpointId?: string | null) => boolean;
+		selectionFor: (agentId: SessionAgentId, model: string, modelEndpointId?: string | null) => {
 			model: string;
 			apiProviderId: string | null;
 			modelEndpointId: string | null;
 			modelProtocol: ApiProtocol | null;
 		};
-		selectionValueFor: (provider: SessionProvider, model: string, modelEndpointId?: string | null) => string;
+		selectionValueFor: (agentId: SessionAgentId, model: string, modelEndpointId?: string | null) => string;
 	};
 	appShell: {
 		quietRefreshChats: () => Promise<void> | void;
@@ -155,16 +155,16 @@ export class ConversationSessionController {
 		deps.setPendingPermissionRequests([]);
 		deps.setIsViewportPinnedToBottom(true);
 
-		if (selected.provider) {
-			deps.providerState.setProvider(selected.provider);
+		if (selected.agentId) {
+			deps.agentState.setAgentId(selected.agentId);
 		}
 		if (selected.model) {
 			const modelValue = deps.modelCatalog.selectionValueFor(
-				selected.provider,
+				selected.agentId,
 				selected.model,
 				selected.modelEndpointId,
 			);
-			deps.providerState.setModelSelection({
+			deps.agentState.setModelSelection({
 				model: modelValue,
 				apiProviderId: selected.apiProviderId ?? null,
 				modelEndpointId: selected.modelEndpointId ?? null,
@@ -176,26 +176,26 @@ export class ConversationSessionController {
 			deps.lifecycle.setCurrentChatId(null);
 			const startup = deps.sessions.startupByChatId[chatId];
 			if (startup) {
-				deps.providerState.setProvider(startup.provider as Parameters<typeof deps.providerState.setProvider>[0]);
+				deps.agentState.setAgentId(startup.agentId as Parameters<typeof deps.agentState.setAgentId>[0]);
 				const modelValue = deps.modelCatalog.selectionValueFor(
-					startup.provider,
+					startup.agentId,
 					startup.model,
 					startup.modelEndpointId,
 				);
-				deps.providerState.setModelSelection({
+				deps.agentState.setModelSelection({
 					model: modelValue,
 					apiProviderId: startup.apiProviderId ?? null,
 					modelEndpointId: startup.modelEndpointId ?? null,
 					modelProtocol: startup.modelProtocol ?? null,
 				});
 				if (startup.permissionMode) {
-					deps.providerState.permissionMode = startup.permissionMode;
+					deps.agentState.permissionMode = startup.permissionMode;
 				}
 				if (startup.thinkingMode) {
-					deps.providerState.thinkingMode = startup.thinkingMode;
+					deps.agentState.thinkingMode = startup.thinkingMode;
 				}
 				if (startup.ampAgentMode) {
-					deps.providerState.ampAgentMode = startup.ampAgentMode;
+					deps.agentState.ampAgentMode = startup.ampAgentMode;
 				}
 				if (startup.firstMessage?.trim() || (startup.initialImages?.length ?? 0) > 0) {
 					const startupText = startup.firstMessage.trim();
@@ -225,9 +225,9 @@ export class ConversationSessionController {
 			deps.sessions.patchLastReadAt(chatId, selected.lastActivityAt);
 		}
 
-		deps.providerState.permissionMode = selected.permissionMode ?? 'default';
-		deps.providerState.thinkingMode = selected.thinkingMode ?? 'none';
-		deps.providerState.ampAgentMode = selected.ampAgentMode ?? 'smart';
+		deps.agentState.permissionMode = selected.permissionMode ?? 'default';
+		deps.agentState.thinkingMode = selected.thinkingMode ?? 'none';
+		deps.agentState.ampAgentMode = selected.ampAgentMode ?? 'smart';
 
 		this.loadChat(chatId);
 	}
@@ -361,36 +361,36 @@ export class ConversationSessionController {
 
 			if (isDraft) {
 				deps.startupCoordinator.beginLocalStartup(chatId);
-			const provider = startup?.provider ?? selected.provider;
-			const model = startup?.model ?? selected.model ?? deps.providerState.model;
-			const apiProviderId = startup?.apiProviderId ?? selected.apiProviderId ?? deps.providerState.apiProviderId;
-			const modelEndpointId = startup?.modelEndpointId ?? selected.modelEndpointId ?? deps.providerState.modelEndpointId;
-			const modelProtocol = startup?.modelProtocol ?? selected.modelProtocol ?? deps.providerState.modelProtocol;
-			const permissionMode = startup?.permissionMode ?? deps.providerState.permissionMode;
-			const thinkingMode = startup?.thinkingMode ?? deps.providerState.thinkingMode;
-			const ampAgentMode = startup?.ampAgentMode ?? deps.providerState.ampAgentMode;
+				const agentId = startup?.agentId ?? selected.agentId;
+				const model = startup?.model ?? selected.model ?? deps.agentState.model;
+				const apiProviderId = startup?.apiProviderId ?? selected.apiProviderId ?? deps.agentState.apiProviderId;
+				const modelEndpointId = startup?.modelEndpointId ?? selected.modelEndpointId ?? deps.agentState.modelEndpointId;
+				const modelProtocol = startup?.modelProtocol ?? selected.modelProtocol ?? deps.agentState.modelProtocol;
+				const permissionMode = startup?.permissionMode ?? deps.agentState.permissionMode;
+				const thinkingMode = startup?.thinkingMode ?? deps.agentState.thinkingMode;
+				const ampAgentMode = startup?.ampAgentMode ?? deps.agentState.ampAgentMode;
 
 				try {
 					await startChat({
 						clientRequestId,
 						clientMessageId,
 						chatId,
-						provider: provider as typeof deps.providerState.provider,
-					projectPath: selected.projectPath,
-					model,
-					apiProviderId,
-					modelEndpointId,
-					modelProtocol,
-					permissionMode,
-					thinkingMode,
-					claudeThinkingMode: 'auto',
-					ampAgentMode,
-					command: text,
-					tags: startup?.tags,
-					options: {
-						cwd: selected.projectPath,
+						agentId: agentId as typeof deps.agentState.agentId,
 						projectPath: selected.projectPath,
-						sessionId: chatId,
+						model,
+						apiProviderId,
+						modelEndpointId,
+						modelProtocol,
+						permissionMode,
+						thinkingMode,
+						claudeThinkingMode: 'auto',
+						ampAgentMode,
+						command: text,
+						tags: startup?.tags,
+						options: {
+							cwd: selected.projectPath,
+							projectPath: selected.projectPath,
+							sessionId: chatId,
 							images: imagePayload,
 						},
 					});
@@ -415,19 +415,19 @@ export class ConversationSessionController {
 					}
 					deps.chatState.chatMessages = [
 						...deps.chatState.chatMessages,
-					new ErrorMessage(
-						new Date().toISOString(),
-						`Failed to start chat: ${err instanceof Error ? err.message : String(err)}`,
-					),
+						new ErrorMessage(
+							new Date().toISOString(),
+							`Failed to start chat: ${err instanceof Error ? err.message : String(err)}`,
+						),
 					];
 				} finally {
 					deps.composerState.isSubmitting = false;
 				}
 			} else {
 				const selection = deps.modelCatalog.selectionFor(
-				deps.providerState.provider,
-					deps.providerState.model,
-					deps.providerState.modelEndpointId,
+					deps.agentState.agentId,
+					deps.agentState.model,
+					deps.agentState.modelEndpointId,
 				);
 				try {
 					await runChat({
@@ -436,10 +436,10 @@ export class ConversationSessionController {
 						chatId,
 						command: text,
 						images: imagePayload.length > 0 ? imagePayload : undefined,
-						permissionMode: deps.providerState.permissionMode,
-						thinkingMode: deps.providerState.thinkingMode,
+						permissionMode: deps.agentState.permissionMode,
+						thinkingMode: deps.agentState.thinkingMode,
 						claudeThinkingMode: 'auto',
-						ampAgentMode: deps.providerState.ampAgentMode,
+						ampAgentMode: deps.agentState.ampAgentMode,
 						model: selection.model,
 						apiProviderId: selection.apiProviderId,
 						modelEndpointId: selection.modelEndpointId,
@@ -527,9 +527,9 @@ export class ConversationSessionController {
 		}
 
 		const forkChatId = createClientChatId();
-		const model = sourceChat.model ?? deps.providerState.model;
+		const model = sourceChat.model ?? deps.agentState.model;
 		const selection = deps.modelCatalog.selectionFor(
-			sourceChat.provider,
+			sourceChat.agentId,
 			model,
 			sourceChat.modelEndpointId,
 		);
@@ -613,7 +613,7 @@ export class ConversationSessionController {
 		void stopChat({
 			clientRequestId: createClientCommandId(),
 			chatId,
-			provider: deps.providerState.provider,
+			agentId: deps.agentState.agentId,
 		}).then(() => {
 			deps.lifecycle.clearLoading();
 		}).catch((error) => {
@@ -666,12 +666,12 @@ export class ConversationSessionController {
 
 		const resumeWithApproval = (mode: PermissionMode) => {
 			deps.setPreviousPermissionMode(null);
-			deps.providerState.permissionMode = mode;
+			deps.agentState.permissionMode = mode;
 			if (!chatId || !path) return;
 			const selection = deps.modelCatalog.selectionFor(
-				deps.providerState.provider,
-				deps.providerState.model,
-				deps.providerState.modelEndpointId,
+				deps.agentState.agentId,
+				deps.agentState.model,
+				deps.agentState.modelEndpointId,
 			);
 
 			void runChat({
@@ -680,9 +680,9 @@ export class ConversationSessionController {
 				chatId,
 				command: buildApprovalMessage(),
 				permissionMode: mode,
-				thinkingMode: deps.providerState.thinkingMode,
+				thinkingMode: deps.agentState.thinkingMode,
 				claudeThinkingMode: 'auto',
-				ampAgentMode: deps.providerState.ampAgentMode,
+				ampAgentMode: deps.agentState.ampAgentMode,
 				model: selection.model,
 				apiProviderId: selection.apiProviderId,
 				modelEndpointId: selection.modelEndpointId,
@@ -707,7 +707,7 @@ export class ConversationSessionController {
 			case 'bypass-new': {
 				const restoreMode = deps.getPreviousPermissionMode() || 'default';
 				deps.setPreviousPermissionMode(null);
-				deps.providerState.permissionMode = restoreMode;
+				deps.agentState.permissionMode = restoreMode;
 
 				const planMessage = `Implement the following plan:\n\n${plan}`;
 				deps.appShell.openNewChatDialog({ prefill: planMessage });
@@ -797,10 +797,10 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId;
 		if (!chatId) return;
-		const provider = deps.providerState.provider;
-		const selection = deps.modelCatalog.selectionFor(provider, model);
+		const agentId = deps.agentState.agentId;
+		const selection = deps.modelCatalog.selectionFor(agentId, model);
 		if (deps.sessions.isDraft(chatId)) {
-			deps.providerState.setModelSelection({
+			deps.agentState.setModelSelection({
 				model,
 				apiProviderId: selection.apiProviderId,
 				modelEndpointId: selection.modelEndpointId,
@@ -822,13 +822,13 @@ export class ConversationSessionController {
 		}
 
 		// Block switching between local and cloud models within an active
-		// session. The CLI conversation history contains provider-specific
+		// session. The CLI conversation history contains agent-specific
 		// artifacts (e.g. thinking-block signatures) that are invalid when
 		// replayed against a different backend.
-			const currentModel = deps.sessions.selectedChat?.model ?? deps.providerState.model;
-			const currentEndpointId = deps.sessions.selectedChat?.modelEndpointId ?? deps.providerState.modelEndpointId;
-			const wasLocal = deps.modelCatalog.isLocalModel(provider, currentModel, currentEndpointId);
-			const isLocal = deps.modelCatalog.isLocalModel(provider, model, selection.modelEndpointId);
+		const currentModel = deps.sessions.selectedChat?.model ?? deps.agentState.model;
+		const currentEndpointId = deps.sessions.selectedChat?.modelEndpointId ?? deps.agentState.modelEndpointId;
+		const wasLocal = deps.modelCatalog.isLocalModel(agentId, currentModel, currentEndpointId);
+		const isLocal = deps.modelCatalog.isLocalModel(agentId, model, selection.modelEndpointId);
 		if (wasLocal !== isLocal) {
 			const target = isLocal ? 'local' : 'cloud';
 			deps.chatState.chatMessages = [
@@ -838,49 +838,49 @@ export class ConversationSessionController {
 					`Cannot switch to a ${target} model mid-session. Start a new chat to use ${selection.model}.`,
 				),
 			];
-				return;
-			}
+			return;
+		}
 
-			const previousModel = deps.sessions.selectedChat?.model ?? deps.providerState.model;
-			const previousApiProviderId = deps.sessions.selectedChat?.apiProviderId ?? deps.providerState.apiProviderId;
-			const previousEndpointId = deps.sessions.selectedChat?.modelEndpointId ?? deps.providerState.modelEndpointId;
-			const previousProtocol = deps.sessions.selectedChat?.modelProtocol ?? deps.providerState.modelProtocol;
-			deps.providerState.setModelSelection({
-				model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
-			void updateChatModel({
-				chatId,
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			}).catch((error) => {
-				deps.providerState.setModelSelection({
-					model: deps.modelCatalog.selectionValueFor(provider, previousModel, previousEndpointId),
-					apiProviderId: previousApiProviderId ?? null,
-					modelEndpointId: previousEndpointId ?? null,
-					modelProtocol: previousProtocol ?? null,
-				});
-				deps.sessions.patchChat(chatId, {
-					model: previousModel,
-					apiProviderId: previousApiProviderId ?? null,
-					modelEndpointId: previousEndpointId ?? null,
-					modelProtocol: previousProtocol ?? null,
-				});
-				deps.chatState.chatMessages = [
-					...deps.chatState.chatMessages,
-					new ErrorMessage(
-						new Date().toISOString(),
-						`Failed to update model: ${error instanceof Error ? error.message : String(error)}`,
-					),
-				];
+		const previousModel = deps.sessions.selectedChat?.model ?? deps.agentState.model;
+		const previousApiProviderId = deps.sessions.selectedChat?.apiProviderId ?? deps.agentState.apiProviderId;
+		const previousEndpointId = deps.sessions.selectedChat?.modelEndpointId ?? deps.agentState.modelEndpointId;
+		const previousProtocol = deps.sessions.selectedChat?.modelProtocol ?? deps.agentState.modelProtocol;
+		deps.agentState.setModelSelection({
+			model,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+		});
+		void updateChatModel({
+			chatId,
+			model: selection.model,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+		}).catch((error) => {
+			deps.agentState.setModelSelection({
+				model: deps.modelCatalog.selectionValueFor(agentId, previousModel, previousEndpointId),
+				apiProviderId: previousApiProviderId ?? null,
+				modelEndpointId: previousEndpointId ?? null,
+				modelProtocol: previousProtocol ?? null,
 			});
 			deps.sessions.patchChat(chatId, {
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
+				model: previousModel,
+				apiProviderId: previousApiProviderId ?? null,
+				modelEndpointId: previousEndpointId ?? null,
+				modelProtocol: previousProtocol ?? null,
+			});
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(
+					new Date().toISOString(),
+					`Failed to update model: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			];
+		});
+		deps.sessions.patchChat(chatId, {
+			model: selection.model,
+			apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,
 			modelProtocol: selection.modelProtocol,
 		});
@@ -898,7 +898,7 @@ export class ConversationSessionController {
 		const previous = deps.sessions.selectedChat?.permissionMode ?? 'default';
 		deps.sessions.patchChat(chatId, { permissionMode: mode });
 		void updateExecutionSettings({ chatId, permissionMode: mode }).catch((error) => {
-			deps.providerState.permissionMode = previous;
+			deps.agentState.permissionMode = previous;
 			deps.sessions.patchChat(chatId, { permissionMode: previous });
 			deps.chatState.chatMessages = [
 				...deps.chatState.chatMessages,
@@ -922,7 +922,7 @@ export class ConversationSessionController {
 		const previous = deps.sessions.selectedChat?.thinkingMode ?? 'none';
 		deps.sessions.patchChat(chatId, { thinkingMode: mode });
 		void updateExecutionSettings({ chatId, thinkingMode: mode }).catch((error) => {
-			deps.providerState.thinkingMode = previous;
+			deps.agentState.thinkingMode = previous;
 			deps.sessions.patchChat(chatId, { thinkingMode: previous });
 			deps.chatState.chatMessages = [
 				...deps.chatState.chatMessages,
@@ -946,7 +946,7 @@ export class ConversationSessionController {
 		const previous = deps.sessions.selectedChat?.ampAgentMode ?? 'smart';
 		deps.sessions.patchChat(chatId, { ampAgentMode: mode });
 		void updateExecutionSettings({ chatId, ampAgentMode: mode }).catch((error) => {
-			deps.providerState.ampAgentMode = previous;
+			deps.agentState.ampAgentMode = previous;
 			deps.sessions.patchChat(chatId, { ampAgentMode: previous });
 			deps.chatState.chatMessages = [
 				...deps.chatState.chatMessages,

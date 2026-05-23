@@ -32,36 +32,36 @@
 					getSelectableAgents() {
 						return ['claude', 'codex'];
 					},
-					getAgent(provider: string) {
+					getAgent(agentId: string) {
 						return {
-							id: provider,
-							label: provider === 'codex' ? 'Codex' : 'Claude',
+							id: agentId,
+							label: agentId === 'codex' ? 'Codex' : 'Claude',
 							description: '',
 							supportsFork: true,
 							supportsImages: true,
 							acceptsApiProviderEndpoints: true,
-							supportedProtocols: provider === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
-							defaultModel: provider === 'codex' ? 'gpt-5.4' : 'opus',
+							supportedProtocols: agentId === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
+							defaultModel: agentId === 'codex' ? 'gpt-5.4' : 'opus',
 						};
 					},
-					getAgentLabel(provider: string) {
-						return provider === 'codex' ? 'Codex' : 'Claude';
+					getAgentLabel(agentId: string) {
+						return agentId === 'codex' ? 'Codex' : 'Claude';
 					},
-					getDefaultModel(provider: string) {
-					if (provider === 'claude') return 'opus';
-					if (provider === 'codex') return 'gpt-5.4';
+					getDefaultModel(agentId: string) {
+					if (agentId === 'claude') return 'opus';
+					if (agentId === 'codex') return 'gpt-5.4';
 				return '';
 			},
-		getModels(provider: string) {
-			if (provider === 'claude') return [{ value: 'opus', label: 'Opus' }];
-			if (provider === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
+		getModels(agentId: string) {
+			if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
+			if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
 			return [];
 		},
 				supportsImages() {
 					return true;
 				},
-				getModelForSelection(provider: string, model: string) {
-					const models = provider === 'codex'
+				getModelForSelection(agentId: string, model: string) {
+					const models = agentId === 'codex'
 						? [{ value: 'gpt-5.4', label: 'GPT-5.4' }]
 						: [{ value: 'opus', label: 'Opus' }];
 					return models.find((entry) => entry.value === model) ?? null;

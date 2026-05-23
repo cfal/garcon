@@ -155,7 +155,7 @@ describe('AnthropicCompatibleChatProvider', () => {
 
     await provider.runTurn({
       chatId: 'chat-1',
-      providerSessionId: sessionId,
+      agentSessionId: sessionId,
       command: 'second message',
       projectPath: '/tmp/project',
       model: 'selected-model',

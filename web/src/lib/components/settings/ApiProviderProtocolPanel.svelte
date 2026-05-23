@@ -14,8 +14,8 @@
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import TrashIcon from '@lucide/svelte/icons/trash';
 	import { getModelCatalog } from '$lib/context';
-	import type { ApiProtocol, ApiProviderCatalogEntry } from '$shared/providers';
-	import type { DeviceAuthInfo, AgentReadiness } from '$lib/api/providers';
+	import type { ApiProtocol, ApiProviderCatalogEntry } from '$shared/api-providers';
+	import type { DeviceAuthInfo, AgentReadiness } from '$lib/api/agents';
 	import {
 		templatesForProtocol,
 		type ApiProviderTemplateId

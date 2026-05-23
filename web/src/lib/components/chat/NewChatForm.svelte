@@ -212,18 +212,18 @@
 	}
 
 		const permissionOptions = $derived(
-			buildPermissionOptions(form.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES)
+			buildPermissionOptions(form.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES)
 		);
 		const thinkingOptions = $derived(buildThinkingOptions());
 		const modelSelectorMode: ModelSelectorMode = { agent: 'select', source: 'select', surface: 'composer' };
 		const modelSelectorValue = $derived({
-			agentId: form.provider,
+			agentId: form.agentId,
 			model: form.modelValue,
 		});
 		const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
 		function handleModelSelectorChange(next: ModelSelectorChange): void {
-			form.selectProvider(next.agentId);
+			form.selectAgent(next.agentId);
 			form.handleModelChange(next.modelValue);
 		}
 	</script>
@@ -436,7 +436,7 @@
 				></textarea>
 
 				<ComposerBottomBar
-					canAttachImages={modelCatalog.supportsImages(form.provider, form.modelValue)}
+					canAttachImages={modelCatalog.supportsImages(form.agentId, form.modelValue)}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
 					permissionOptions={permissionOptions}

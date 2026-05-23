@@ -1,8 +1,8 @@
 import {
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
-} from '../../../common/providers.js';
-import type { ApiProviderStore } from '../../api-providers/store.js';
+} from '../../../common/agents.js';
+import type { ApiProviderReader } from '../../api-providers/read-model.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
 import type { Agent } from '../types.js';
@@ -15,8 +15,8 @@ const NO_AUTH_STATUS = {
   source: 'none',
 };
 
-export function createDirectOpenAiChatAgent(apiProviderStore: ApiProviderStore): Agent {
-  const runtime = createDirectOpenAiChatRuntime(apiProviderStore);
+export function createDirectOpenAiChatAgent(apiProviders: ApiProviderReader): Agent {
+  const runtime = createDirectOpenAiChatRuntime(apiProviders);
   return {
     id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
     label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,

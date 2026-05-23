@@ -4,7 +4,7 @@
 	import Search from '@lucide/svelte/icons/search';
 	import { cn } from '$lib/utils/cn.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { SessionProvider } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/types/app';
 	import type { ModelSelectorState } from './model-selector-state.svelte';
 	import VirtualModelList from './VirtualModelList.svelte';
 
@@ -82,16 +82,16 @@
 		return 'model';
 	}
 
-	function shouldShowSourcePaneFor(agentId: SessionProvider): boolean {
+	function shouldShowSourcePaneFor(agentId: SessionAgentId): boolean {
 		return showSource && selector.sourcesFor(agentId).length > 1;
 	}
 
-	function paneAfterAgent(agentId: SessionProvider): CompactPane {
+	function paneAfterAgent(agentId: SessionAgentId): CompactPane {
 		if (shouldShowSourcePaneFor(agentId)) return 'source';
 		return 'model';
 	}
 
-	function handleAgentSelect(agentId: SessionProvider): void {
+	function handleAgentSelect(agentId: SessionAgentId): void {
 		selector.selectAgent(agentId);
 		pane = paneAfterAgent(agentId);
 	}

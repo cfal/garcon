@@ -77,7 +77,7 @@ function baseStartRequest(overrides = {}) {
 function baseResumeRequest(overrides = {}) {
   return {
     ...baseStartRequest({ chatId: 'chat-2', command: 'continue' }),
-    providerSessionId: 'pi-session-2',
+    agentSessionId: 'pi-session-2',
     nativePath: path.join(tempRoot, 'pi-session-2.jsonl'),
     ...overrides,
   };
@@ -126,7 +126,7 @@ describe('PiProvider lifecycle', () => {
 
     const started = await startedPromise;
 
-    expect(started.providerSessionId).toBe('pi-session-1');
+    expect(started.agentSessionId).toBe('pi-session-1');
     expect(started.nativePath).toBe(path.join(
       process.env.PI_CODING_AGENT_SESSION_DIR,
       '2026-01-01T00-00-00-000Z_pi-session-1.jsonl',
@@ -188,7 +188,7 @@ describe('PiProvider lifecycle', () => {
     spawnMock.mockReturnValueOnce(proc);
 
     const turnPromise = provider.runTurn(baseResumeRequest({
-      providerSessionId: 'pi-session-tools',
+      agentSessionId: 'pi-session-tools',
       nativePath,
       permissionMode: 'plan',
     }));

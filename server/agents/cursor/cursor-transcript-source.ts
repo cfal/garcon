@@ -1,8 +1,8 @@
 import type { ChatMessage } from '../../../common/chat-types.js';
-import { getArtificialProviderSessionId } from '../../chats/artificial-native-path.js';
+import { getArtificialAgentSessionId } from '../../chats/artificial-native-path.js';
 import { CursorRequestIdentityStore } from './cursor-request-identities.js';
 import { getCursorPreviewFromSessionId, loadCursorChatMessagesBySessionId } from '../loaders/cursor-history-loader.js';
-import type { ProviderChatEntry } from '../session-types.js';
+import type { AgentChatEntry } from '../session-types.js';
 import type { AgentTranscriptSource } from '../types.js';
 
 // Keeps Cursor transcript hydration on SQLite while ACP replay remains unstable.
@@ -12,21 +12,21 @@ export function createCursorTranscriptSource(
   requestIdentities: CursorRequestIdentityStore,
 ): AgentTranscriptSource {
   return {
-    async loadMessages(session: ProviderChatEntry, context?: { chatId?: string }): Promise<ChatMessage[]> {
-      const providerSessionId = session.providerSessionId
-        || getArtificialProviderSessionId(session.nativePath, 'cursor')
+    async loadMessages(session: AgentChatEntry, context?: { chatId?: string }): Promise<ChatMessage[]> {
+      const agentSessionId = session.agentSessionId
+        || getArtificialAgentSessionId(session.nativePath, 'cursor')
         || '';
-      const messages = await loadCursorChatMessagesBySessionId(providerSessionId, session.projectPath);
+      const messages = await loadCursorChatMessagesBySessionId(agentSessionId, session.projectPath);
       return requestIdentities.applyToMessages(messages, {
         chatId: context?.chatId,
-        providerSessionId,
+        agentSessionId,
       });
     },
-    async getPreview(session: ProviderChatEntry): Promise<unknown> {
-      const providerSessionId = session.providerSessionId
-        || getArtificialProviderSessionId(session.nativePath, 'cursor')
+    async getPreview(session: AgentChatEntry): Promise<unknown> {
+      const agentSessionId = session.agentSessionId
+        || getArtificialAgentSessionId(session.nativePath, 'cursor')
         || '';
-      return getCursorPreviewFromSessionId(providerSessionId, session.projectPath);
+      return getCursorPreviewFromSessionId(agentSessionId, session.projectPath);
     },
   };
 }

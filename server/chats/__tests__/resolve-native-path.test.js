@@ -4,8 +4,8 @@ import { resolveMissingNativePath } from '../resolve-native-path.js';
 describe('resolveMissingNativePath', () => {
   it('creates an artificial native path for direct OpenAI-compatible sessions', async () => {
     const path = await resolveMissingNativePath({
-      provider: 'direct-openai-compatible',
-      providerSessionId: 'session-123',
+      agentId: 'direct-openai-compatible',
+      agentSessionId: 'session-123',
     });
 
     expect(path).toBe('!direct-openai-compatible:session-123');
@@ -13,8 +13,8 @@ describe('resolveMissingNativePath', () => {
 
   it('creates an artificial native path for direct Anthropic-compatible sessions', async () => {
     const path = await resolveMissingNativePath({
-      provider: 'direct-anthropic-compatible',
-      providerSessionId: 'session-456',
+      agentId: 'direct-anthropic-compatible',
+      agentSessionId: 'session-456',
     });
 
     expect(path).toBe('!direct-anthropic-compatible:session-456');
@@ -24,8 +24,8 @@ describe('resolveMissingNativePath', () => {
     const resolveCodexNativePath = mock(async () => '/tmp/codex-thread.jsonl');
 
     const path = await resolveMissingNativePath({
-      provider: 'codex',
-      providerSessionId: 'thread-123',
+      agentId: 'codex',
+      agentSessionId: 'thread-123',
     }, { resolveCodexNativePath });
 
     expect(path).toBe('/tmp/codex-thread.jsonl');
@@ -34,8 +34,8 @@ describe('resolveMissingNativePath', () => {
 
   it('does not scan Codex rollout files when no app-server resolver is provided', async () => {
     const path = await resolveMissingNativePath({
-      provider: 'codex',
-      providerSessionId: 'thread-123',
+      agentId: 'codex',
+      agentSessionId: 'thread-123',
     });
 
     expect(path).toBeNull();

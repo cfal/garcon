@@ -21,15 +21,15 @@ function getClaudeLoginCommand() {
   return [process.execPath, '-e', CLAUDE_LOGIN_WRAPPER, getClaudeBinary(), 'auth', 'login'];
 }
 
-function getLoginCommand(provider) {
-  if (provider === 'claude') return getClaudeLoginCommand();
-  if (provider === 'codex') return ['codex', 'login', '--device-auth'];
-  if (provider === 'cursor') return [getCursorBinary(), 'login'];
+function getLoginCommand(agentId) {
+  if (agentId === 'claude') return getClaudeLoginCommand();
+  if (agentId === 'codex') return ['codex', 'login', '--device-auth'];
+  if (agentId === 'cursor') return [getCursorBinary(), 'login'];
   return null;
 }
 
-// Providers that use device-code auth instead of browser redirect.
-const DEVICE_AUTH_PROVIDERS = new Set(['codex']);
+// Agents that use device-code auth instead of browser redirect.
+const DEVICE_AUTH_AGENTS = new Set(['codex']);
 
 const DEVICE_AUTH_TIMEOUT_MS = 10_000;
 
@@ -66,7 +66,7 @@ function readDeviceAuthFromPty(proc) {
   });
 }
 
-function buildLoginEnv(provider) {
+function buildLoginEnv(agentId) {
   const env = {
     ...process.env,
     TERM: 'xterm-256color',
@@ -75,47 +75,47 @@ function buildLoginEnv(provider) {
   };
 
   // Claude refuses to launch inside another Claude Code session.
-  if (provider === 'claude') {
+  if (agentId === 'claude') {
     delete env.CLAUDECODE;
   }
 
   return env;
 }
 
-export class ProviderAuthLoginManager {
+export class AgentAuthLoginManager {
   #sessions = new Map();
 
-  async launch(provider) {
-    const command = getLoginCommand(provider);
+  async launch(agentId) {
+    const command = getLoginCommand(agentId);
     if (!command) {
-      throw new Error(`Provider does not support UI login: ${provider}`);
+      throw new Error(`Agent does not support UI login: ${agentId}`);
     }
 
-    if (this.#sessions.has(provider)) {
+    if (this.#sessions.has(agentId)) {
       return { launched: false, alreadyRunning: true };
     }
 
-    const proc = this.#spawnPty(provider, command);
-    const useDeviceAuth = DEVICE_AUTH_PROVIDERS.has(provider);
+    const proc = this.#spawnPty(agentId, command);
+    const useDeviceAuth = DEVICE_AUTH_AGENTS.has(agentId);
     const deviceAuth = useDeviceAuth ? (await readDeviceAuthFromPty(proc)) ?? undefined : undefined;
     return { launched: true, alreadyRunning: false, deviceAuth };
   }
 
-  #spawnPty(provider, command) {
+  #spawnPty(agentId, command) {
     const [binary, ...args] = command;
     const proc = ptySpawn(binary, args, {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
       cwd: os.homedir(),
-      env: buildLoginEnv(provider),
+      env: buildLoginEnv(agentId),
     });
 
-    this.#sessions.set(provider, proc);
+    this.#sessions.set(agentId, proc);
     proc.onExit((exit) => {
-      this.#sessions.delete(provider);
+      this.#sessions.delete(agentId);
       if (exit.exitCode !== 0) {
-        console.warn(`providers: ${provider} auth login exited with code ${exit.exitCode}${exit.signal ? ` (${exit.signal})` : ''}`);
+        console.warn(`agents: ${agentId} auth login exited with code ${exit.exitCode}${exit.signal ? ` (${exit.signal})` : ''}`);
       }
     });
 
@@ -123,8 +123,8 @@ export class ProviderAuthLoginManager {
   }
 }
 
-const providerAuthLogin = new ProviderAuthLoginManager();
+const agentAuthLogin = new AgentAuthLoginManager();
 
-export function launchProviderAuthLogin(provider) {
-  return providerAuthLogin.launch(provider);
+export function launchAgentAuthLogin(agentId) {
+  return agentAuthLogin.launch(agentId);
 }

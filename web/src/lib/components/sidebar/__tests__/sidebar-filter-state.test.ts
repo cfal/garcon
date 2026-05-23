@@ -8,7 +8,7 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
 		title: 'Unread ops chat',
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'none',
@@ -46,7 +46,7 @@ describe('SidebarFilterState', () => {
 		expect(state.currentFilter).toEqual({
 			textTokens: [],
 			tags: [['ops']],
-			providers: [],
+			agents: [],
 			models: [],
 			project: [],
 			status: 'unread',
@@ -89,7 +89,7 @@ describe('SidebarFilterState', () => {
 				filter: {
 					textTokens: [],
 					tags: [],
-					providers: [],
+					agents: [],
 					models: [],
 					project: [],
 					status: 'active',
@@ -116,7 +116,7 @@ describe('SidebarFilterState', () => {
 		expect(state.currentFilter).toEqual({
 			textTokens: [],
 			tags: [],
-			providers: [],
+			agents: [],
 			models: [],
 			project: [],
 			status: 'unread',

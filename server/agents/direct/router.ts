@@ -5,42 +5,43 @@ import {
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
   DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
   DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
-  endpointSupportsAgent,
-  type ApiProtocol,
   type AgentId,
-} from '../../../common/providers.js';
+} from '../../../common/agents.js';
+import type { ApiProtocol } from '../../../common/api-providers.js';
+import { endpointSupportsAgent } from '../../../common/model-routing.js';
 import { getWorkspaceDir } from '../../config.js';
 import { AnthropicCompatibleChatProvider, type AnthropicCompatibleChatProviderConfig, runAnthropicCompatibleSingleQuery } from './anthropic-compatible-chat-provider.js';
-import type { ApiProviderStore, StoredApiProvider, StoredApiProviderEndpoint } from '../../api-providers/store.js';
+import type { ApiProviderReader } from '../../api-providers/read-model.js';
+import type { StoredApiProvider, StoredApiProviderEndpoint } from '../../api-providers/store.js';
 import { OpenAiCompatibleChatProvider, type OpenAiCompatibleChatProviderConfig, runOpenAiCompatibleSingleQuery } from './openai-compatible-chat-provider.js';
 import {
   OpenAiCompatibleResponsesProvider,
   type OpenAiCompatibleResponsesProviderConfig,
   runOpenAiResponsesSingleQuery,
 } from './openai-compatible-responses-provider.js';
-import type { ProviderEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../session-types.js';
+import type { AgentEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import type { AgentRuntime } from '../types.js';
 
 type DirectEventCallbacks = {
-  messages: Set<(chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void>;
+  messages: Set<(chatId: string, messages: unknown[], metadata?: AgentEventMetadata) => void>;
   processing: Set<(chatId: string, isProcessing: boolean) => void>;
   sessionCreated: Set<(chatId: string) => void>;
-  finished: Set<(chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void>;
+  finished: Set<(chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void>;
   failed: Set<(chatId: string, errorMessage: string) => void>;
 };
 
 export type DirectCompatibleProvider = {
-  startSession(request: StartSessionRequest): Promise<StartedProviderSession>;
+  startSession(request: StartSessionRequest): Promise<StartedAgentSession>;
   runTurn(request: ResumeTurnRequest): Promise<void>;
-  abort(providerSessionId: string): boolean;
-  isRunning(providerSessionId: string): boolean;
+  abort(agentSessionId: string): boolean;
+  isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   getModels?(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
   startPurgeTimer(): ReturnType<typeof setInterval>;
-  onMessages(cb: (chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void): void;
+  onMessages(cb: (chatId: string, messages: unknown[], metadata?: AgentEventMetadata) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
-  onFinished(cb: (chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void): void;
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void): void;
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
 };
 
@@ -49,7 +50,7 @@ interface DirectEndpointRouterConfig<TProvider extends DirectCompatibleProvider>
   label: string;
   protocol: ApiProtocol;
   noEndpointMessage: string;
-  apiProviderStore: ApiProviderStore;
+  apiProviders: ApiProviderReader;
   createProvider(endpoint: StoredApiProviderEndpoint, apiProvider: StoredApiProvider): TProvider;
   runSingleQuery(
     prompt: string,
@@ -74,33 +75,33 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
 
   constructor(private readonly config: DirectEndpointRouterConfig<TProvider>) {}
 
-  async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
+  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const { apiProvider, endpoint } = this.#resolveEndpoint(request.modelEndpointId);
     const provider = this.#providerFor(endpoint, apiProvider);
     const started = await provider.startSession(request);
-    this.#sessionEndpointIds.set(started.providerSessionId, endpoint.id);
+    this.#sessionEndpointIds.set(started.agentSessionId, endpoint.id);
     return started;
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
-    let provider = this.#providerForSession(request.providerSessionId);
+    let provider = this.#providerForSession(request.agentSessionId);
     if (!provider && request.modelEndpointId) {
       const { apiProvider, endpoint } = this.#resolveEndpoint(request.modelEndpointId);
       provider = this.#providerFor(endpoint, apiProvider);
-      this.#sessionEndpointIds.set(request.providerSessionId, endpoint.id);
+      this.#sessionEndpointIds.set(request.agentSessionId, endpoint.id);
     }
     if (!provider) {
-      throw new Error(`Unknown ${this.config.label} session: ${request.providerSessionId}`);
+      throw new Error(`Unknown ${this.config.label} session: ${request.agentSessionId}`);
     }
     await provider.runTurn(request);
   }
 
-  abort(providerSessionId: string): boolean {
-    return this.#providerForSession(providerSessionId)?.abort(providerSessionId) ?? false;
+  abort(agentSessionId: string): boolean {
+    return this.#providerForSession(agentSessionId)?.abort(agentSessionId) ?? false;
   }
 
-  isRunning(providerSessionId: string): boolean {
-    return this.#providerForSession(providerSessionId)?.isRunning(providerSessionId) ?? false;
+  isRunning(agentSessionId: string): boolean {
+    return this.#providerForSession(agentSessionId)?.isRunning(agentSessionId) ?? false;
   }
 
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }> {
@@ -109,7 +110,7 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
 
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
     const models: Array<{ value: string; label: string; supportsImages?: boolean }> = [];
-    for (const apiProvider of this.config.apiProviderStore.list()) {
+    for (const apiProvider of this.config.apiProviders.list()) {
       for (const endpoint of apiProvider.endpoints) {
         if (!this.#isDirectEndpoint(endpoint)) continue;
         for (const model of endpoint.models) {
@@ -151,7 +152,7 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
     this.#purgeTimers.clear();
   }
 
-  onMessages(cb: (chatId: string, messages: unknown[], metadata?: ProviderEventMetadata) => void): void {
+  onMessages(cb: (chatId: string, messages: unknown[], metadata?: AgentEventMetadata) => void): void {
     this.#callbacks.messages.add(cb);
   }
 
@@ -163,7 +164,7 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
     this.#callbacks.sessionCreated.add(cb);
   }
 
-  onFinished(cb: (chatId: string, exitCode: number, metadata?: ProviderEventMetadata) => void): void {
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void): void {
     this.#callbacks.finished.add(cb);
   }
 
@@ -171,14 +172,14 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
     this.#callbacks.failed.add(cb);
   }
 
-  #providerForSession(providerSessionId: string): TProvider | null {
-    const endpointId = this.#sessionEndpointIds.get(providerSessionId);
+  #providerForSession(agentSessionId: string): TProvider | null {
+    const endpointId = this.#sessionEndpointIds.get(agentSessionId);
     if (endpointId) {
       const provider = this.#providers.get(endpointId);
       if (provider) return provider;
     }
     for (const provider of this.#providers.values()) {
-      if (provider.isRunning(providerSessionId)) return provider;
+      if (provider.isRunning(agentSessionId)) return provider;
     }
     return null;
   }
@@ -217,13 +218,13 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
 
   #resolveEndpoint(endpointId?: string | null): { apiProvider: StoredApiProvider; endpoint: StoredApiProviderEndpoint } {
     if (endpointId) {
-      const resolved = this.config.apiProviderStore.getEndpoint(endpointId);
+      const resolved = this.config.apiProviders.getEndpoint(endpointId);
       if (resolved && this.#isDirectEndpoint(resolved.endpoint)) {
         return resolved;
       }
     }
 
-    for (const apiProvider of this.config.apiProviderStore.list()) {
+    for (const apiProvider of this.config.apiProviders.list()) {
       const endpoint = apiProvider.endpoints.find((entry) => this.#isDirectEndpoint(entry));
       if (endpoint) return { apiProvider, endpoint };
     }
@@ -237,13 +238,13 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
   }
 }
 
-export function createDirectOpenAiChatRuntime(apiProviderStore: ApiProviderStore): DirectEndpointRouterRuntime<OpenAiCompatibleChatProvider> {
+export function createDirectOpenAiChatRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<OpenAiCompatibleChatProvider> {
   return new DirectEndpointRouterRuntime<OpenAiCompatibleChatProvider>({
     agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
     label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
     protocol: 'openai-compatible',
     noEndpointMessage: `No OpenAI-compatible Chat Completions endpoint is configured for ${DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL}.`,
-    apiProviderStore,
+    apiProviders,
     createProvider(endpoint) {
       return new OpenAiCompatibleChatProvider(buildDirectOpenAiConfig({
         providerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
@@ -261,13 +262,13 @@ export function createDirectOpenAiChatRuntime(apiProviderStore: ApiProviderStore
   });
 }
 
-export function createDirectOpenAiResponsesRuntime(apiProviderStore: ApiProviderStore): DirectEndpointRouterRuntime<OpenAiCompatibleResponsesProvider> {
+export function createDirectOpenAiResponsesRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<OpenAiCompatibleResponsesProvider> {
   return new DirectEndpointRouterRuntime<OpenAiCompatibleResponsesProvider>({
     agentId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
     label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
     protocol: 'openai-compatible',
     noEndpointMessage: `No OpenAI-compatible Responses endpoint is configured for ${DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL}.`,
-    apiProviderStore,
+    apiProviders,
     createProvider(endpoint) {
       return new OpenAiCompatibleResponsesProvider(buildDirectOpenAiResponsesConfig({
         providerId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
@@ -285,13 +286,13 @@ export function createDirectOpenAiResponsesRuntime(apiProviderStore: ApiProvider
   });
 }
 
-export function createDirectAnthropicRuntime(apiProviderStore: ApiProviderStore): DirectEndpointRouterRuntime<AnthropicCompatibleChatProvider> {
+export function createDirectAnthropicRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<AnthropicCompatibleChatProvider> {
   return new DirectEndpointRouterRuntime<AnthropicCompatibleChatProvider>({
     agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
     label: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
     protocol: 'anthropic-messages',
     noEndpointMessage: `No Anthropic-compatible endpoint is configured for ${DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL}.`,
-    apiProviderStore,
+    apiProviders,
     createProvider(endpoint) {
       return new AnthropicCompatibleChatProvider(buildDirectAnthropicConfig({
         providerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,

@@ -9,7 +9,7 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
 		title: 'Test chat',
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'none',

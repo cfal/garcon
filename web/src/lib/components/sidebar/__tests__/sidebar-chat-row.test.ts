@@ -11,7 +11,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		id: 'chat-1',
 		projectPath: '/very/long/workspace/projects/feature-branch/app',
 		title: 'Shared row chat',
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'think',

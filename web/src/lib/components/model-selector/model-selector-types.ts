@@ -1,6 +1,6 @@
-import type { SessionProvider } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/types/app';
 import type { ModelOption } from '$lib/stores/model-catalog.svelte';
-import type { ApiProtocol } from '$shared/providers';
+import type { ApiProtocol } from '$shared/api-providers';
 
 export type ModelSelectorAgentMode = 'select' | 'fixed' | 'hidden';
 export type ModelSelectorSourceMode = 'select' | 'hidden';
@@ -13,7 +13,7 @@ export interface ModelSelectorMode {
 }
 
 export interface ModelSelectorValue {
-	agentId: SessionProvider;
+	agentId: SessionAgentId;
 	model: string;
 	apiProviderId?: string | null;
 	modelEndpointId?: string | null;
@@ -21,7 +21,7 @@ export interface ModelSelectorValue {
 }
 
 export interface ModelSelectorChange {
-	agentId: SessionProvider;
+	agentId: SessionAgentId;
 	modelValue: string;
 	model: string;
 	apiProviderId: string | null;
@@ -30,7 +30,7 @@ export interface ModelSelectorChange {
 }
 
 export interface AgentSelectorOption {
-	value: SessionProvider;
+	value: SessionAgentId;
 	label: string;
 	description: string;
 }

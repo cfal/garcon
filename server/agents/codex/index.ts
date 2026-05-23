@@ -2,7 +2,7 @@ import type { ChatMessage } from '../../../common/chat-types.js';
 import { runSingleQuery as runSingleQueryCodex } from './app-server/run-single-query.js';
 import type { CodexAppServerProvider } from './app-server/provider.js';
 import { getCodexAuthStatus } from './codex-auth.js';
-import { launchProviderAuthLogin } from '../auth-login.js';
+import { launchAgentAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import type { Agent } from '../types.js';
 
@@ -21,7 +21,7 @@ export function createCodexAgent(codex: CodexAppServerProvider): Agent {
     },
     auth: {
       getAuthStatus: () => getCodexAuthStatus(),
-      launchLogin: () => launchProviderAuthLogin('codex'),
+      launchLogin: () => launchAgentAuthLogin('codex'),
     },
     capabilities: createAgentCapabilities({
       supportsFork: true,

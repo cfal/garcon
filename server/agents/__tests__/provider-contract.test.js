@@ -1,19 +1,23 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  API_PROVIDER_TEMPLATE_IDS,
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
   DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
-  endpointSupportsAgent,
-  agentsForEndpoint,
-  agentsForProtocol,
-  isApiProviderTemplateId,
   isEndpointOnlyAgentId,
-  isAgentCompatibleWithProtocol,
   isOAuthAgentId,
   isOtherSettingsAgentId,
   isVisibleAgentId,
-} from '../../../common/providers.ts';
+} from '../../../common/agents.ts';
+import {
+  API_PROVIDER_TEMPLATE_IDS,
+  isApiProviderTemplateId,
+} from '../../../common/api-providers.ts';
+import {
+  agentsForEndpoint,
+  agentsForProtocol,
+  endpointSupportsAgent,
+  isAgentCompatibleWithProtocol,
+} from '../../../common/model-routing.ts';
 import { templatesForProtocol } from '../../../common/api-provider-templates.ts';
 
 describe('shared agent/API provider contract', () => {

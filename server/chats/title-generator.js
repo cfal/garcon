@@ -42,7 +42,7 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
   const ui = await settings.getUiSettings();
   const getAgentCatalog = async () => {
     try {
-      return await providers?.getAgentCatalog?.();
+      return { agents: await providers?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
     } catch {
       return null;
     }
@@ -81,13 +81,13 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
   const existing = settings.getChatName(chatId);
   if (existing) return;
 
-  const provider = cfg.provider || 'claude';
+  const agentId = cfg.agentId || 'claude';
   const model = cfg.model;
   const prompt = TITLE_GENERATION_PROMPT.replace('{USER_PROMPT}', firstPrompt.trim());
 
   try {
     const titleRaw = await providers.runSingleQuery(prompt, {
-      provider,
+      agentId,
       model,
       cwd: projectPath,
       projectPath,

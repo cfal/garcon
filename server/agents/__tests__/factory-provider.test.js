@@ -94,7 +94,7 @@ describe('FactoryProvider lifecycle', () => {
     const started = await startedPromise;
 
     expect(started).toEqual({
-      providerSessionId: 'factory-session-1',
+      agentSessionId: 'factory-session-1',
       nativePath: '!factory:factory-session-1',
     });
 
@@ -112,7 +112,7 @@ describe('FactoryProvider lifecycle', () => {
 
     const turnPromise = provider.runTurn({
       command: 'continue',
-      providerSessionId: 'factory-session-2',
+      agentSessionId: 'factory-session-2',
       chatId: 'chat-2',
       projectPath: '/proj',
       model: 'claude-opus-4-6',

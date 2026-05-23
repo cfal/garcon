@@ -8,13 +8,13 @@ describe('CursorRequestIdentityStore', () => {
     const store = new CursorRequestIdentityStore();
     store.rememberTurn({
       chatId: 'chat-1',
-      providerSessionId: 'cursor-session-1',
+      agentSessionId: 'cursor-session-1',
       clientRequestId: 'req-1',
       turnId: 'turn-1',
     });
     store.markProviderRequestId({
       chatId: 'chat-1',
-      providerSessionId: 'cursor-session-1',
+      agentSessionId: 'cursor-session-1',
       clientRequestId: 'req-1',
       turnId: 'turn-1',
       providerRequestId: 'cursor-req-1',
@@ -26,7 +26,7 @@ describe('CursorRequestIdentityStore', () => {
       }),
     ], {
       chatId: 'chat-1',
-      providerSessionId: 'cursor-session-1',
+      agentSessionId: 'cursor-session-1',
     });
 
     expect(messages[0].metadata).toEqual({
@@ -40,7 +40,7 @@ describe('CursorRequestIdentityStore', () => {
     const store = new CursorRequestIdentityStore();
     store.markProviderRequestId({
       chatId: 'chat-1',
-      providerSessionId: 'cursor-session-1',
+      agentSessionId: 'cursor-session-1',
       clientRequestId: 'req-1',
       providerRequestId: 'cursor-req-1',
     });
@@ -51,7 +51,7 @@ describe('CursorRequestIdentityStore', () => {
       }),
     ], {
       chatId: 'chat-1',
-      providerSessionId: 'cursor-session-1',
+      agentSessionId: 'cursor-session-1',
     });
 
     expect(messages[0].metadata).toEqual({
@@ -63,13 +63,13 @@ describe('CursorRequestIdentityStore', () => {
     const store = new CursorRequestIdentityStore();
     store.rememberTurn({
       chatId: 'chat-1',
-      providerSessionId: 'cursor-session-1',
+      agentSessionId: 'cursor-session-1',
       clientRequestId: 'req-1',
       turnId: 'turn-1',
     });
     store.markUserEcho({
       chatId: 'chat-1',
-      providerSessionId: 'cursor-session-1',
+      agentSessionId: 'cursor-session-1',
       clientRequestId: 'req-1',
       turnId: 'turn-1',
     });
@@ -81,7 +81,7 @@ describe('CursorRequestIdentityStore', () => {
       new UserMessage('2026-05-22T00:00:01.000Z', 'current'),
     ], {
       chatId: 'chat-1',
-      providerSessionId: 'cursor-session-1',
+      agentSessionId: 'cursor-session-1',
     });
 
     expect(messages[0].metadata).toEqual({ providerRequestId: 'cursor-req-0' });

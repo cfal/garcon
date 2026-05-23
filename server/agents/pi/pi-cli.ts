@@ -23,7 +23,7 @@ import type {
   PermissionMode,
   ResumeTurnRequest,
   StartSessionRequest,
-  StartedProviderSession,
+  StartedAgentSession,
   ThinkingMode,
 } from "../session-types.js";
 
@@ -50,9 +50,9 @@ interface PiSession {
   sessionCreatedEmitted: boolean;
   startTime: number;
   startedSession: {
-    promise: Promise<StartedProviderSession>;
+    promise: Promise<StartedAgentSession>;
     reject: (error: unknown) => void;
-    resolve: (value: StartedProviderSession) => void;
+    resolve: (value: StartedAgentSession) => void;
     resolved: boolean;
   } | null;
   turnResolve: (() => void) | null;
@@ -172,8 +172,8 @@ async function resolveSessionArgument(request: ResumeTurnRequest): Promise<strin
     }
   }
 
-  const sessionPath = await findPiSessionFileBySessionId(request.providerSessionId, request.projectPath);
-  return sessionPath || request.providerSessionId;
+  const sessionPath = await findPiSessionFileBySessionId(request.agentSessionId, request.projectPath);
+  return sessionPath || request.agentSessionId;
 }
 
 async function buildPiRun(
@@ -196,7 +196,7 @@ async function buildPiRun(
   if (configuredSessionDir) {
     args.push('--session-dir', configuredSessionDir);
   }
-  if ('providerSessionId' in request) {
+  if ('agentSessionId' in request) {
     args.push('--session', await resolveSessionArgument(request));
   }
   args.push(...fileArgs);
@@ -264,10 +264,10 @@ function createSession(chatId: string, startedSession: PiSession['startedSession
   };
 }
 
-function createStartTracker(): PiSession['startedSession'] & { promise: Promise<StartedProviderSession> } {
-  let resolveRef: ((value: StartedProviderSession) => void) | null = null;
+function createStartTracker(): PiSession['startedSession'] & { promise: Promise<StartedAgentSession> } {
+  let resolveRef: ((value: StartedAgentSession) => void) | null = null;
   let rejectRef: ((error: unknown) => void) | null = null;
-  const promise = new Promise<StartedProviderSession>((resolve, reject) => {
+  const promise = new Promise<StartedAgentSession>((resolve, reject) => {
     resolveRef = resolve;
     rejectRef = reject;
   });
@@ -314,7 +314,7 @@ export class PiProvider extends AbsProvider {
     if (tracker && !tracker.resolved) {
       tracker.resolved = true;
       tracker.resolve({
-        providerSessionId: header.id,
+        agentSessionId: header.id,
         nativePath: session.nativePath,
       });
     }
@@ -528,7 +528,7 @@ export class PiProvider extends AbsProvider {
     session.turnResolve = null;
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
+  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const startedSession = createStartTracker();
     const session = createSession(request.chatId, startedSession);
     this.#runningSessions.set(session.id, session);
@@ -553,19 +553,19 @@ export class PiProvider extends AbsProvider {
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
-    const existingSession = this.#runningSessions.get(request.providerSessionId);
+    const existingSession = this.#runningSessions.get(request.agentSessionId);
     if (existingSession?.isRunning) {
-      throw new Error(`Session ${request.providerSessionId} is already running`);
+      throw new Error(`Session ${request.agentSessionId} is already running`);
     }
 
     const session = existingSession ?? {
       ...createSession(request.chatId),
-      id: request.providerSessionId,
+      id: request.agentSessionId,
       nativePath: request.nativePath ?? null,
       sessionCreatedEmitted: true,
     };
     this.#resetSessionForTurn(session, request.chatId);
-    session.id = request.providerSessionId;
+    session.id = request.agentSessionId;
     session.nativePath = request.nativePath ?? session.nativePath;
     session.sessionCreatedEmitted = true;
     this.#runningSessions.set(session.id, session);
@@ -590,8 +590,8 @@ export class PiProvider extends AbsProvider {
     }
   }
 
-  abort(providerSessionId: string): boolean {
-    const session = this.#runningSessions.get(providerSessionId);
+  abort(agentSessionId: string): boolean {
+    const session = this.#runningSessions.get(agentSessionId);
     if (!session?.process) return false;
     session.aborted = true;
     session.process.kill();
@@ -599,8 +599,8 @@ export class PiProvider extends AbsProvider {
     return true;
   }
 
-  isRunning(providerSessionId: string): boolean {
-    return this.#runningSessions.get(providerSessionId)?.isRunning === true;
+  isRunning(agentSessionId: string): boolean {
+    return this.#runningSessions.get(agentSessionId)?.isRunning === true;
   }
 
   getRunningSessions(): Array<{ id: string; startedAt: string; status: string }> {

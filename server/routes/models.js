@@ -23,6 +23,11 @@ function piDiscoveryUnavailableResponse(error, catalog, entry) {
 }
 
 export default function createModelsRoutes(providers) {
+  const catalog = async () => ({
+    agents: await providers.agents.getAgentCatalogEntries(),
+    apiProviders: providers.apiProviders.getCatalog(),
+  });
+
   async function getModels(request, url) {
     const agentId = url?.searchParams?.get('agent');
 
@@ -32,13 +37,13 @@ export default function createModelsRoutes(providers) {
         try {
           strictPiModels = await getPiModelsStrict();
         } catch (error) {
-          const catalog = await providers.getAgentCatalog();
-          const entry = catalog.agents.find((agent) => agent.id === agentId);
-          return piDiscoveryUnavailableResponse(error, catalog, entry);
+          const currentCatalog = await catalog();
+          const entry = currentCatalog.agents.find((agent) => agent.id === agentId);
+          return piDiscoveryUnavailableResponse(error, currentCatalog, entry);
         }
 
-        const catalog = await providers.getAgentCatalog();
-        const entry = catalog.agents.find((agent) => agent.id === agentId);
+        const currentCatalog = await catalog();
+        const entry = currentCatalog.agents.find((agent) => agent.id === agentId);
         if (!entry) {
           return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
         }
@@ -49,27 +54,26 @@ export default function createModelsRoutes(providers) {
               defaultModel: entry.defaultModel || strictPiModels[0]?.value || '',
               models: strictPiModels,
             }],
-            apiProviders: catalog.apiProviders,
+            apiProviders: currentCatalog.apiProviders,
           },
         });
       }
 
-      const catalog = await providers.getAgentCatalog();
-      const entry = catalog.agents.find((agent) => agent.id === agentId);
+      const currentCatalog = await catalog();
+      const entry = currentCatalog.agents.find((agent) => agent.id === agentId);
       if (!entry) {
         return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
       }
       return Response.json({
         catalog: {
           agents: [entry],
-          apiProviders: catalog.apiProviders,
+          apiProviders: currentCatalog.apiProviders,
         },
       });
     }
 
-    const catalog = await providers.getAgentCatalog();
     return Response.json({
-      catalog,
+      catalog: await catalog(),
     });
   }
 

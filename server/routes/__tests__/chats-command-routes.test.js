@@ -31,8 +31,8 @@ import { forkChatFileCopy } from '../../chats/fork-chat.js';
 function createSession(overrides = {}) {
   return {
     id: '123',
-    provider: 'claude',
-    providerSessionId: 'provider-session-123',
+    agentId: 'claude',
+    agentSessionId: 'provider-session-123',
     projectPath: '/workspace/project',
     model: 'opus',
     permissionMode: 'default',
@@ -165,7 +165,7 @@ describe('REST chat command routes', () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
-  it('POST /run returns before provider completion and persists before running', async () => {
+  it('POST /run returns before agent completion and persists before running', async () => {
     const agent = createRouteAgent();
     const order = [];
     let resolveRun;
@@ -353,7 +353,7 @@ describe('REST chat command routes', () => {
   it('POST /stop deduplicates abort requests', async () => {
     const agent = createRouteAgent();
     const handler = agent.routes['/api/v1/chats/stop'].POST;
-    const payload = { clientRequestId: 'req-stop-1', chatId: '123', provider: 'claude' };
+    const payload = { clientRequestId: 'req-stop-1', chatId: '123', agentId: 'claude' };
 
     const first = await callJson(handler, payload);
     const retry = await callJson(handler, payload);
@@ -364,7 +364,7 @@ describe('REST chat command routes', () => {
     expect(agent.queue.abort).toHaveBeenCalledTimes(1);
   });
 
-  it('PATCH /execution-settings normalizes modes and patches provider and registry', async () => {
+  it('PATCH /execution-settings normalizes modes and patches agent and registry', async () => {
     const agent = createRouteAgent();
 
     const { response, body } = await callJson(

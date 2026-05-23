@@ -1,6 +1,6 @@
 import { apiFetch } from '$lib/api/client.js';
 import { agentLabelFor } from '$lib/i18n/agent-labels';
-import type { SessionProvider } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/types/app';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS, PI_MODELS } from '$shared/models';
 import {
 	DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
@@ -9,16 +9,18 @@ import {
 	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
 	DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
-	isApiProviderTemplateId,
 	isEndpointOnlyAgentId,
 	isVisibleAgentId,
+} from '$shared/agents';
+import {
+	isApiProviderTemplateId,
 	type ApiProtocol,
 	type ApiProviderCatalogEntry,
 	type ApiProviderEndpointCatalogEntry,
 	type ApiProviderTemplateId,
 	type ModelDiscoveryKind,
 	type OpenAiEndpointCapabilities,
-} from '$shared/providers';
+} from '$shared/api-providers';
 
 export interface ModelOption {
 	value: string;
@@ -388,15 +390,15 @@ export class ModelCatalogStore {
 		this.hydrateFromStorage();
 	}
 
-	getAgents(): SessionProvider[] {
-		return Object.keys(this.agentMetadata).filter(isVisibleAgentId) as SessionProvider[];
+	getAgents(): SessionAgentId[] {
+		return Object.keys(this.agentMetadata).filter(isVisibleAgentId) as SessionAgentId[];
 	}
 
-	getSelectableAgents(): SessionProvider[] {
+	getSelectableAgents(): SessionAgentId[] {
 		return this.getAgents().filter((agentId) => {
 			if (!isEndpointOnlyAgentId(agentId)) return true;
-			return this.getModels(agentId as SessionProvider).length > 0;
-		}) as SessionProvider[];
+			return this.getModels(agentId as SessionAgentId).length > 0;
+		}) as SessionAgentId[];
 	}
 
 	getAgentMetadataList(): AgentMetadata[] {
@@ -413,25 +415,25 @@ export class ModelCatalogStore {
 		return agentLabelFor(id, this.agentMetadata[id]?.label ?? id);
 	}
 
-	getModels(agentId: SessionProvider): ModelOption[] {
+	getModels(agentId: SessionAgentId): ModelOption[] {
 		if (!isVisibleAgentId(agentId)) return [];
 		return this.agentModels[agentId] ?? [];
 	}
 
-	getDefaultModel(agentId: SessionProvider): string {
+	getDefaultModel(agentId: SessionAgentId): string {
 		return this.agentMetadata[agentId]?.defaultModel
 			|| this.getModels(agentId)[0]?.value
 			|| '';
 	}
 
-	getModel(agentId: SessionProvider, model: string): ModelOption | null {
+	getModel(agentId: SessionAgentId, model: string): ModelOption | null {
 		return this.getModels(agentId).find((entry) =>
 			entry.value === model || entry.rawModel === model
 		) ?? null;
 	}
 
 	getModelForSelection(
-		agentId: SessionProvider,
+		agentId: SessionAgentId,
 		model: string,
 		modelEndpointId?: string | null,
 	): ModelOption | null {
@@ -445,12 +447,12 @@ export class ModelCatalogStore {
 		return models.find((entry) => entry.value === model || entry.rawModel === model) ?? null;
 	}
 
-	supportsFork(agentId: SessionProvider): boolean {
+	supportsFork(agentId: SessionAgentId): boolean {
 		if (!isVisibleAgentId(agentId)) return false;
 		return this.agentMetadata[agentId]?.supportsFork ?? false;
 	}
 
-	supportsImages(agentId: SessionProvider, model?: string, modelEndpointId?: string | null): boolean {
+	supportsImages(agentId: SessionAgentId, model?: string, modelEndpointId?: string | null): boolean {
 		if (!isVisibleAgentId(agentId)) return false;
 		if (model) {
 			const selected = this.getModelForSelection(agentId, model, modelEndpointId);
@@ -461,11 +463,11 @@ export class ModelCatalogStore {
 		return this.agentMetadata[agentId]?.supportsImages ?? false;
 	}
 
-	isLocalModel(agentId: SessionProvider, model: string, modelEndpointId?: string | null): boolean {
+	isLocalModel(agentId: SessionAgentId, model: string, modelEndpointId?: string | null): boolean {
 		return this.getModelForSelection(agentId, model, modelEndpointId)?.isLocal === true;
 	}
 
-	selectionFor(agentId: SessionProvider, model: string, modelEndpointId?: string | null): {
+	selectionFor(agentId: SessionAgentId, model: string, modelEndpointId?: string | null): {
 		model: string;
 		apiProviderId: string | null;
 		modelEndpointId: string | null;
@@ -480,7 +482,7 @@ export class ModelCatalogStore {
 		};
 	}
 
-	selectionValueFor(agentId: SessionProvider, model: string, modelEndpointId?: string | null): string {
+	selectionValueFor(agentId: SessionAgentId, model: string, modelEndpointId?: string | null): string {
 		return this.getModelForSelection(agentId, model, modelEndpointId)?.value ?? model;
 	}
 

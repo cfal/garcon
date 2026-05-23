@@ -23,7 +23,7 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '' },
 		pinnedChatIds: [],
-		lastProvider: 'claude',
+		lastAgentId: 'claude',
 		lastProjectPath: '',
 		lastModel: 'opus',
 		lastApiProviderId: null,

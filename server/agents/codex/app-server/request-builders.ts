@@ -72,24 +72,24 @@ export function buildThreadStartParams(request: StartSessionRequest): Record<str
 }
 
 export function buildThreadResumeParams(request: {
-  providerSessionId: string;
+  agentSessionId: string;
   nativePath?: string | null;
 } & Pick<StartSessionRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>): Record<string, unknown> {
   return appendCommonThreadParams({
-    threadId: request.providerSessionId,
+    threadId: request.agentSessionId,
     excludeTurns: true,
   }, request);
 }
 
 export function buildThreadForkParams(sourceSession: {
-  providerSessionId: string;
+  agentSessionId: string;
   nativePath?: string | null;
   model?: string | null;
   projectPath: string;
   codexConfig?: CodexProviderConfig;
 }): Record<string, unknown> {
   const params: Record<string, unknown> = {
-    threadId: sourceSession.providerSessionId,
+    threadId: sourceSession.agentSessionId,
     cwd: sourceSession.projectPath,
     model: sourceSession.model ?? null,
     ephemeral: false,

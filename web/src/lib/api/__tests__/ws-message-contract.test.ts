@@ -157,7 +157,7 @@ describe('parseServerWsMessage', () => {
 				uiEffective: {},
 				paths: { pinnedProjectPaths: [], browseStartPath: '/workspace' },
 				pinnedChatIds: ['chat-1'],
-				lastProvider: 'claude',
+				lastAgentId: 'claude',
 				lastProjectPath: '/workspace/project',
 				lastModel: 'opus',
 				lastPermissionMode: 'default',

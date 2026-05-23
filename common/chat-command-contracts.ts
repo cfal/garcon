@@ -1,6 +1,6 @@
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from './chat-modes.js';
 import type { AgentCommandImage } from './ws-requests.js';
-import type { ApiProtocol } from './providers.js';
+import type { ApiProtocol } from './api-providers.js';
 import type { QueueState } from './queue-state.js';
 
 export type CommandStatus = 'accepted' | 'duplicate' | 'already-applied';
@@ -9,7 +9,7 @@ export type CommandErrorCode =
   | 'VALIDATION_FAILED'
   | 'SESSION_NOT_FOUND'
   | 'IDEMPOTENCY_CONFLICT'
-  | 'UNSUPPORTED_PROVIDER'
+  | 'UNSUPPORTED_AGENT'
   | 'SESSION_BUSY'
   | 'REQUEST_NOT_FOUND'
   | 'INTERNAL_ERROR';
@@ -36,7 +36,7 @@ export interface StartChatCommandRequest {
   clientRequestId: string;
   clientMessageId: string;
   chatId: string;
-  provider: string;
+  agentId: string;
   projectPath: string;
   model: string;
   apiProviderId?: string | null;
@@ -118,7 +118,7 @@ export interface PermissionDecisionCommandRequest {
 export interface AgentStopCommandRequest {
   clientRequestId: string;
   chatId: string;
-  provider?: string;
+  agentId?: string;
 }
 
 export interface AgentStopResponse extends CommandAcceptedResponse {

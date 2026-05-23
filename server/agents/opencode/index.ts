@@ -1,24 +1,24 @@
 import type { OpenCodeProvider } from './opencode.js';
 import { getOpenCodeAuthStatus } from './opencode-auth.js';
-import type { ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../session-types.js';
+import type { ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
 import type { Agent, AgentRuntime } from '../types.js';
 
 function createOpenCodeRuntime(opencode: OpenCodeProvider): AgentRuntime {
   return {
-    async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
-      const providerSessionId = await opencode.startSession(request);
-      return { providerSessionId, nativePath: `opencode:${providerSessionId}` };
+    async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
+      const agentSessionId = await opencode.startSession(request);
+      return { agentSessionId, nativePath: `opencode:${agentSessionId}` };
     },
     runTurn(request: ResumeTurnRequest) {
       return opencode.runTurn(request);
     },
-    abort(providerSessionId) {
-      return opencode.abort(providerSessionId);
+    abort(agentSessionId) {
+      return opencode.abort(agentSessionId);
     },
-    isRunning(providerSessionId) {
-      return opencode.isRunning(providerSessionId);
+    isRunning(agentSessionId) {
+      return opencode.isRunning(agentSessionId);
     },
     getRunningSessions() {
       return opencode.getRunningSessions();

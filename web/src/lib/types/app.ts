@@ -1,9 +1,9 @@
 // Application-level types shared across the Svelte frontend.
 
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$shared/chat-modes';
-import type { ApiProtocol } from '$shared/providers';
+import type { ApiProtocol } from '$shared/api-providers';
 
-export type SessionProvider = string;
+export type SessionAgentId = string;
 
 export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'preview';
 
@@ -17,7 +17,7 @@ export interface ChatEntry {
 	model?: string | null;
 	createdAt?: string;
 	lastActivityAt?: string;
-	provider?: SessionProvider;
+	agentId?: SessionAgentId;
 }
 
 export interface LoadingProgress {
@@ -32,7 +32,7 @@ export interface LoadingProgressMessage extends LoadingProgress {
 }
 
 export interface NewChatConfig {
-	provider: SessionProvider;
+	agentId: SessionAgentId;
 	projectPath: string;
 	model: string;
 	apiProviderId?: string | null;

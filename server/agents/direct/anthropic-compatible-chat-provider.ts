@@ -15,7 +15,7 @@ import type {
   AgentCommandImage,
   ResumeTurnRequest,
   StartSessionRequest,
-  StartedProviderSession,
+  StartedAgentSession,
 } from "../session-types.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -315,7 +315,7 @@ export class AnthropicCompatibleChatProvider extends AbsProvider {
     }
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
+  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const sessionId = crypto.randomUUID();
     const userContent = buildAnthropicCompatibleUserContent(request.command, request.images);
     const textContent = extractAnthropicTextContent(userContent);
@@ -339,19 +339,19 @@ export class AnthropicCompatibleChatProvider extends AbsProvider {
     void this.#runTurnInternal(session);
 
     return {
-      providerSessionId: sessionId,
+      agentSessionId: sessionId,
       nativePath: createArtificialNativePath(this.#config.providerId, sessionId),
     };
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
-    const session = this.#sessions.get(request.providerSessionId)
-      ?? await this.#hydrateSession(request.providerSessionId, request);
+    const session = this.#sessions.get(request.agentSessionId)
+      ?? await this.#hydrateSession(request.agentSessionId, request);
     if (!session) {
-      throw new Error(`Unknown ${this.#config.providerLabel} session: ${request.providerSessionId}`);
+      throw new Error(`Unknown ${this.#config.providerLabel} session: ${request.agentSessionId}`);
     }
     if (session.isRunning) {
-      throw new Error(`Session ${request.providerSessionId} is already running`);
+      throw new Error(`Session ${request.agentSessionId} is already running`);
     }
 
     if (request.model) {
@@ -374,8 +374,8 @@ export class AnthropicCompatibleChatProvider extends AbsProvider {
     await this.#runTurnInternal(session);
   }
 
-  abort(providerSessionId: string): boolean {
-    const session = this.#sessions.get(providerSessionId);
+  abort(agentSessionId: string): boolean {
+    const session = this.#sessions.get(agentSessionId);
     if (!session?.isRunning) return false;
 
     session.aborted = true;
@@ -383,8 +383,8 @@ export class AnthropicCompatibleChatProvider extends AbsProvider {
     return true;
   }
 
-  isRunning(providerSessionId: string): boolean {
-    return this.#sessions.get(providerSessionId)?.isRunning === true;
+  isRunning(agentSessionId: string): boolean {
+    return this.#sessions.get(agentSessionId)?.isRunning === true;
   }
 
   getRunningSessions(): Array<{ id: string; startedAt: string; status: string }> {

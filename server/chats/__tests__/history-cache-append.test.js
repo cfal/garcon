@@ -123,7 +123,7 @@ describe('appendMessages', () => {
   it('loads provider history once and merges a live tail without duplicate assistant text', async () => {
     const selectedChatId = 'selected-chat';
     mockRegistry.getChat.mockImplementation((id) => (
-      id === selectedChatId ? { provider: 'codex', providerSessionId: 'thread-1' } : null
+      id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
     ));
     mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
       { type: 'user-message', timestamp: ts, content: 'Prompt' },
@@ -148,7 +148,7 @@ describe('appendMessages', () => {
   it('deduplicates provider-history user echoes through shared request identity', async () => {
     const selectedChatId = 'cursor-chat';
     mockRegistry.getChat.mockImplementation((id) => (
-      id === selectedChatId ? { provider: 'cursor', providerSessionId: 'cursor-session-1' } : null
+      id === selectedChatId ? { agentId: 'cursor', agentSessionId: 'cursor-session-1' } : null
     ));
     mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
       {
@@ -188,7 +188,7 @@ describe('appendMessages', () => {
   it('does not deduplicate user messages by matching text alone', async () => {
     const selectedChatId = 'cursor-chat-text';
     mockRegistry.getChat.mockImplementation((id) => (
-      id === selectedChatId ? { provider: 'cursor', providerSessionId: 'cursor-session-1' } : null
+      id === selectedChatId ? { agentId: 'cursor', agentSessionId: 'cursor-session-1' } : null
     ));
     mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
       { type: 'user-message', timestamp: ts, content: 'Prompt' },
@@ -240,7 +240,7 @@ describe('appendMessages', () => {
   it('deduplicates tool-use messages by toolId when merging history and tail', async () => {
     const selectedChatId = 'tool-chat';
     mockRegistry.getChat.mockImplementation((id) => (
-      id === selectedChatId ? { provider: 'codex', providerSessionId: 'thread-1' } : null
+      id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
     ));
     mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
       { type: 'bash-tool-use', timestamp: ts, toolId: 'tool-1', command: 'ls' },
@@ -263,7 +263,7 @@ describe('appendMessages', () => {
       loadStarted = resolve;
     });
     mockRegistry.getChat.mockImplementation((id) => (
-      id === selectedChatId ? { provider: 'codex', providerSessionId: 'thread-1' } : null
+      id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
     ));
     mockProviders.loadMessages.mockImplementation(async () => {
       loadStarted();

@@ -8,7 +8,7 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
-import type { RunProviderTurnOptions } from "./agents/session-types.js";
+import type { RunAgentTurnOptions } from "./agents/session-types.js";
 
 function emptyQueue(): QueueState {
   return { entries: [], paused: false, version: 0 };
@@ -26,7 +26,7 @@ function bumpQueue(queue: QueueState): QueueState {
   };
 }
 
-function optionsForQueuedTurn(options: RunProviderTurnOptions): RunProviderTurnOptions {
+function optionsForQueuedTurn(options: RunAgentTurnOptions): RunAgentTurnOptions {
   return {
     ...options,
     clientRequestId: crypto.randomUUID(),
@@ -36,7 +36,7 @@ function optionsForQueuedTurn(options: RunProviderTurnOptions): RunProviderTurnO
 }
 
 interface ProvidersDep {
-  runProviderTurn(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
+  runAgentTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   abortSession(chatId: string): Promise<boolean>;
   isChatRunning(chatId: string): boolean;
 }
@@ -46,7 +46,7 @@ interface PendingInputsDep {
     clientRequestId?: string;
     clientMessageId?: string;
     turnId?: string;
-    images?: RunProviderTurnOptions['images'];
+    images?: RunAgentTurnOptions['images'];
     deliveryStatus?: 'submitting' | 'accepted' | 'failed';
   }): Promise<unknown>;
   updateDeliveryStatus(chatId: string, clientRequestId: string, deliveryStatus: 'submitting' | 'accepted' | 'failed'): unknown;
@@ -56,7 +56,7 @@ type QueueUpdatedCallback = (chatId: string, state: QueueState) => void;
 type DispatchingCallback = (chatId: string, entryId: string, content: string) => void;
 type SessionStoppedCallback = (chatId: string, success: boolean) => void;
 type ChatIdleCallback = (chatId: string) => void;
-type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunProviderTurnOptions) => void;
+type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunAgentTurnOptions) => void;
 
 export class QueueManager extends EventEmitter {
   #busy = new Map<string, boolean>();
@@ -253,13 +253,13 @@ export class QueueManager extends EventEmitter {
 
   // Submits a command to a chat session. Appends the user message to
   // history, runs the provider turn, then drains any queued entries.
-  async submit(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
+  async submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
     const turnOptions = ensureTurnIdentifiers(options);
     await this.registerPendingUserInput(chatId, command, turnOptions);
     await this.runAcceptedTurn(chatId, command, turnOptions);
   }
 
-  async registerPendingUserInput(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
+  async registerPendingUserInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
     if (!command || !this.#pendingInputs) return;
     await this.#pendingInputs.register(chatId, command, {
       clientRequestId: options.clientRequestId,
@@ -270,13 +270,13 @@ export class QueueManager extends EventEmitter {
     });
   }
 
-  async appendUserMessage(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
+  async appendUserMessage(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
     await this.registerPendingUserInput(chatId, command, options);
   }
 
-	  async runAcceptedTurn(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
+	  async runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
 	    try {
-	      await this.#providers!.runProviderTurn(chatId, command, options);
+	      await this.#providers!.runAgentTurn(chatId, command, options);
 	    } catch (error: unknown) {
 	      const message = error instanceof Error ? error.message : String(error);
 	      this.emit('turn-failed', chatId, message, options);
@@ -301,13 +301,13 @@ export class QueueManager extends EventEmitter {
   }
 
   // Triggers drain if the provider is not currently running.
-  async triggerDrain(chatId: string, options: RunProviderTurnOptions): Promise<void> {
+  async triggerDrain(chatId: string, options: RunAgentTurnOptions): Promise<void> {
     if (this.#providers!.isChatRunning(chatId)) return;
     await this.#drain(chatId, options);
   }
 
   // Pops queued entries one at a time, registers a pending overlay, and runs provider turns.
-  async #drain(chatId: string, options: RunProviderTurnOptions): Promise<void> {
+  async #drain(chatId: string, options: RunAgentTurnOptions): Promise<void> {
     this.#draining.add(chatId);
     try {
       while (true) {
@@ -325,7 +325,7 @@ export class QueueManager extends EventEmitter {
         this.emit('dispatching', chatId, entry.id, entry.content);
 
         try {
-	          await this.#providers!.runProviderTurn(chatId, entry.content, queuedTurnOptions);
+	          await this.#providers!.runAgentTurn(chatId, entry.content, queuedTurnOptions);
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
           console.error('queue: error processing queued message:', (error as Error).message);
@@ -380,7 +380,7 @@ export class QueueManager extends EventEmitter {
   }
 }
 
-function ensureTurnIdentifiers(options: RunProviderTurnOptions): RunProviderTurnOptions {
+function ensureTurnIdentifiers(options: RunAgentTurnOptions): RunAgentTurnOptions {
   return {
     ...options,
     clientRequestId: options.clientRequestId ?? crypto.randomUUID(),

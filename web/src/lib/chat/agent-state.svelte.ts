@@ -1,10 +1,10 @@
-// Provider, model, and permission mode state for the active chat session.
+// Agent, model, and permission mode state for the active chat session.
 // Manages cycling through permission modes and models, and persists
 // selections to localStorage.
 
-import type { SessionProvider } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/types/app';
 import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
-import type { ApiProtocol } from '$shared/providers';
+import type { ApiProtocol } from '$shared/api-providers';
 import {
 	AMP_AGENT_MODES,
 	THINKING_MODES,
@@ -13,7 +13,6 @@ import {
 } from '$lib/chat/chat-ui-constants';
 import type { AmpAgentModeOption, ThinkingModeOption } from '$lib/chat/chat-ui-constants';
 
-// Re-export for backwards compatibility with existing consumers.
 export { AMP_AGENT_MODES, THINKING_MODES, MODE_LABELS };
 export type { AmpAgentModeOption, ThinkingModeOption };
 
@@ -51,8 +50,8 @@ export interface ModelSelectionPayload {
 	modelProtocol: ApiProtocol | null;
 }
 
-export class ProviderState {
-	provider = $state<SessionProvider>('claude');
+export class AgentState {
+	agentId = $state<SessionAgentId>('claude');
 	model = $state('opus');
 	apiProviderId = $state<string | null>(null);
 	modelEndpointId = $state<string | null>(null);
@@ -101,9 +100,9 @@ export class ProviderState {
 		this.permissionMode = defaultMode;
 	}
 
-	/** Sets the provider and persists the choice. */
-	setProvider(provider: SessionProvider): void {
-		this.provider = provider;
+	/** Sets the selected agent. */
+	setAgentId(agentId: SessionAgentId): void {
+		this.agentId = agentId;
 	}
 
 	/** Sets the model and persists the choice. */
@@ -120,6 +119,6 @@ export class ProviderState {
 	}
 }
 
-export function createProviderState(): ProviderState {
-	return new ProviderState();
+export function createAgentState(): AgentState {
+	return new AgentState();
 }
