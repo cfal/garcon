@@ -15,7 +15,7 @@ function mockClassifyGitError(error) {
   return { code: 'UNKNOWN', status: 500, message: msg || 'Git operation failed.' };
 }
 
-const mockProviders = {
+const mockAgents = {
   runSingleQuery: () => Promise.resolve('chore: stub'),
 };
 
@@ -58,7 +58,7 @@ describe('GitDomainError', () => {
 });
 
 describe('createGitService', () => {
-  const git = createGitService({ providers: mockProviders, classifyGitError: mockClassifyGitError });
+  const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 
   it('returns an object with all expected service methods', () => {
     const expectedMethods = [
@@ -80,7 +80,7 @@ describe('createGitService', () => {
 describe('getChangesTree', () => {
   it('expands untracked directories to untracked files', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tree-'));
-    const git = createGitService({ providers: mockProviders, classifyGitError: mockClassifyGitError });
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 
     try {
       await runGitCommand(projectPath, ['init']);
@@ -134,7 +134,7 @@ describe('getChangesTree', () => {
 
   it('reports separate staged and unstaged facets for the same file', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-mixed-'));
-    const git = createGitService({ providers: mockProviders, classifyGitError: mockClassifyGitError });
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 
     try {
       await initRepoWithCommit(projectPath);
@@ -160,7 +160,7 @@ describe('getChangesTree', () => {
 describe('getFileReviewData', () => {
   it('keeps staged and working deletion review modes separate', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-review-'));
-    const git = createGitService({ providers: mockProviders, classifyGitError: mockClassifyGitError });
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 
     try {
       await initRepoWithCommit(projectPath);
@@ -184,7 +184,7 @@ describe('getFileReviewData', () => {
 });
 
 describe('toHttpError', () => {
-  const git = createGitService({ providers: mockProviders, classifyGitError: mockClassifyGitError });
+  const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 
   it('maps INVALID_INPUT GitDomainError to 400', async () => {
     const err = new GitDomainError('INVALID_INPUT', 'Missing field');

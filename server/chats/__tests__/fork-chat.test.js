@@ -62,11 +62,11 @@ function createMetadata(initialMetadata = {}) {
   };
 }
 
-async function createSourceNativeFile(providerSessionId) {
-  const nativePath = path.join(tmpDir, `${providerSessionId}.jsonl`);
+async function createSourceNativeFile(agentSessionId) {
+  const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
   const content = [
-    JSON.stringify({ type: 'session', session_id: providerSessionId }),
-    JSON.stringify({ type: 'message', session_id: providerSessionId, text: 'hello' }),
+    JSON.stringify({ type: 'session', session_id: agentSessionId }),
+    JSON.stringify({ type: 'message', session_id: agentSessionId, text: 'hello' }),
     '',
   ].join('\n');
   await fs.writeFile(nativePath, content, 'utf8');
@@ -139,7 +139,7 @@ describe('forkChatFileCopy', () => {
     const sourceNativePath = await createSourceNativeFile('11111111-1111-1111-1111-111111111111');
     const registry = createRegistry({
       '100': {
-        provider: 'claude',
+        agentId: 'claude',
         model: 'sonnet',
         apiProviderId: 'anthropic-custom',
         modelEndpointId: 'endpoint-1',
@@ -147,23 +147,23 @@ describe('forkChatFileCopy', () => {
         projectPath: '/proj',
         nativePath: sourceNativePath,
         tags: ['ops'],
-        providerSessionId: '11111111-1111-1111-1111-111111111111',
+        agentSessionId: '11111111-1111-1111-1111-111111111111',
       },
       '101': {
-        provider: 'claude',
+        agentId: 'claude',
         model: 'sonnet',
         projectPath: '/proj',
         nativePath: null,
         tags: [],
-        providerSessionId: 'child-1',
+        agentSessionId: 'child-1',
       },
       '102': {
-        provider: 'claude',
+        agentId: 'claude',
         model: 'sonnet',
         projectPath: '/proj',
         nativePath: null,
         tags: [],
-        providerSessionId: 'child-2',
+        agentSessionId: 'child-2',
       },
     });
     const settings = createSettings({
@@ -201,12 +201,12 @@ describe('forkChatFileCopy', () => {
     const sourceNativePath = await createSourceNativeFile('22222222-2222-2222-2222-222222222222');
     const registry = createRegistry({
       '200': {
-        provider: 'claude',
+        agentId: 'claude',
         model: 'sonnet',
         projectPath: '/proj',
         nativePath: sourceNativePath,
         tags: [],
-        providerSessionId: '22222222-2222-2222-2222-222222222222',
+        agentSessionId: '22222222-2222-2222-2222-222222222222',
         nextForkOrdinal: 2,
       },
     });
@@ -229,5 +229,47 @@ describe('forkChatFileCopy', () => {
     expect(settings.getChatName('201')).toBe('Bug hunt (1) (2)');
     expect(registry.getChat('200')?.nextForkOrdinal).toBe(3);
     expect(registry.getChat('201')?.nextForkOrdinal).toBe(1);
+  });
+
+  it('uses agent-native fork results when available', async () => {
+    const sourceNativePath = await createSourceNativeFile('33333333-3333-3333-3333-333333333333');
+    const nativeForkPath = path.join(tmpDir, 'native-codex-fork.jsonl');
+    await fs.writeFile(nativeForkPath, '{"type":"session"}\n', 'utf8');
+    const registry = createRegistry({
+      '300': {
+        agentId: 'codex',
+        model: 'gpt-5.4-codex',
+        projectPath: '/proj',
+        nativePath: sourceNativePath,
+        tags: ['codex'],
+        agentSessionId: '33333333-3333-3333-3333-333333333333',
+      },
+    });
+    const settings = createSettings({ '300': 'Codex work' });
+    const metadata = createMetadata({ '300': { firstMessage: 'Codex prompt' } });
+    const forkAgentSession = mock(async () => ({
+      agentSessionId: 'codex-fork-thread',
+      nativePath: nativeForkPath,
+    }));
+
+    const result = await forkChatFileCopy({
+      sourceSession: registry.getChat('300'),
+      sourceChatId: '300',
+      targetChatId: '301',
+      registry,
+      settings,
+      metadata,
+      forkAgentSession,
+    });
+
+    expect(forkAgentSession).toHaveBeenCalledTimes(1);
+    expect(result.agentSessionId).toBe('codex-fork-thread');
+    expect(result.nativePath).toBe(nativeForkPath);
+    expect(registry.getChat('301')).toMatchObject({
+      agentId: 'codex',
+      agentSessionId: 'codex-fork-thread',
+      nativePath: nativeForkPath,
+      tags: ['codex'],
+    });
   });
 });

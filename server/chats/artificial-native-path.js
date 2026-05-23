@@ -1,8 +1,8 @@
 export const ARTIFICIAL_NATIVE_PATH_PREFIX = '!';
 
-export function createArtificialNativePath(provider, providerSessionId) {
-  if (!provider || !providerSessionId) return null;
-  return `${ARTIFICIAL_NATIVE_PATH_PREFIX}${provider}:${providerSessionId}`;
+export function createArtificialNativePath(agentId, agentSessionId) {
+  if (!agentId || !agentSessionId) return null;
+  return `${ARTIFICIAL_NATIVE_PATH_PREFIX}${agentId}:${agentSessionId}`;
 }
 
 export function isArtificialNativePath(nativePath) {
@@ -22,16 +22,16 @@ export function parseArtificialNativePath(nativePath) {
   }
 
   return {
-    provider: body.slice(0, separatorIndex),
-    providerSessionId: body.slice(separatorIndex + 1),
+    agentId: body.slice(0, separatorIndex),
+    agentSessionId: body.slice(separatorIndex + 1),
   };
 }
 
-export function getArtificialProviderSessionId(nativePath, provider) {
+export function getArtificialAgentSessionId(nativePath, agentId) {
   const parsed = parseArtificialNativePath(nativePath);
-  if (!parsed || parsed.provider !== provider) {
+  if (!parsed || parsed.agentId !== agentId) {
     return null;
   }
 
-  return parsed.providerSessionId;
+  return parsed.agentSessionId;
 }

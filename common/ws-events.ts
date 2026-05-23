@@ -6,6 +6,8 @@
 
 import type { ChatMessage } from './chat-types';
 import { parseChatMessages } from './chat-types';
+import type { PendingUserInput, PendingUserInputClearReason } from './pending-user-input';
+import { normalizePendingUserInput } from './pending-user-input';
 import type { QueueState } from './queue-state';
 import { normalizeQueueState } from './queue-state';
 import type { RemoteSettingsSnapshot } from './settings';
@@ -18,6 +20,7 @@ export class AgentRunOutputMessage {
     public messages: ChatMessage[],
     public turnId?: string,
     public clientRequestId?: string,
+    public upstreamRequestId?: string,
   ) { }
 }
 
@@ -28,6 +31,7 @@ export class AgentRunFinishedMessage {
     public exitCode?: number,
     public turnId?: string,
     public clientRequestId?: string,
+    public upstreamRequestId?: string,
   ) { }
 }
 
@@ -38,6 +42,7 @@ export class AgentRunFailedMessage {
     public error: string,
     public turnId?: string,
     public clientRequestId?: string,
+    public upstreamRequestId?: string,
   ) { }
 }
 
@@ -69,6 +74,20 @@ export class QueueStateUpdatedMessage {
 export class QueueDispatchingMessage {
   readonly type = 'queue-dispatching' as const;
   constructor(public chatId: string, public entryId: string, public content: string) { }
+}
+
+export class PendingUserInputUpdatedMessage {
+  readonly type = 'pending-user-input-updated' as const;
+  constructor(public input: PendingUserInput) { }
+}
+
+export class PendingUserInputClearedMessage {
+  readonly type = 'pending-user-input-cleared' as const;
+  constructor(
+    public chatId: string,
+    public clientRequestId: string,
+    public reason: PendingUserInputClearReason,
+  ) { }
 }
 
 export class ChatSessionsRunningMessage {
@@ -130,6 +149,7 @@ export class ChatLogResponseMessage {
     public clientRequestId: string,
     public chatId: string,
     public messages: ChatMessage[],
+    public pendingUserInputs: PendingUserInput[],
     public total: number,
     public hasMore: boolean,
     public offset: number,
@@ -169,6 +189,8 @@ export type ServerWsMessage =
   | ChatProcessingUpdatedMessage
   | QueueStateUpdatedMessage
   | QueueDispatchingMessage
+  | PendingUserInputUpdatedMessage
+  | PendingUserInputClearedMessage
   | ChatSessionsRunningMessage
   | WsFaultMessage
   | ChatTitleUpdatedMessage
@@ -191,6 +213,8 @@ export type EventKey =
   | 'chat-processing-updated'
   | 'queue-state-updated'
   | 'queue-dispatching'
+  | 'pending-user-input-updated'
+  | 'pending-user-input-cleared'
   | 'chat-sessions-running'
   | 'ws-fault'
   | 'chat-title-updated'
@@ -239,6 +263,7 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
         parseChatMessages(data.messages),
         typeof data.turnId === 'string' ? data.turnId : undefined,
         typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
+        typeof data.upstreamRequestId === 'string' ? data.upstreamRequestId : undefined,
       );
     }
     case 'agent-run-finished': {
@@ -249,6 +274,7 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
         data.exitCode as number | undefined,
         typeof data.turnId === 'string' ? data.turnId : undefined,
         typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
+        typeof data.upstreamRequestId === 'string' ? data.upstreamRequestId : undefined,
       );
     }
     case 'agent-run-failed': {
@@ -260,6 +286,7 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
         error,
         typeof data.turnId === 'string' ? data.turnId : undefined,
         typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
+        typeof data.upstreamRequestId === 'string' ? data.upstreamRequestId : undefined,
       );
     }
     case 'chat-session-created': {
@@ -293,6 +320,19 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
       const entryId = requiredStr(data.entryId);
       if (!chatId || !entryId) return null;
       return new QueueDispatchingMessage(chatId, entryId, String(data.content ?? ''));
+    }
+    case 'pending-user-input-updated': {
+      const input = normalizePendingUserInput(data.input);
+      return input ? new PendingUserInputUpdatedMessage(input) : null;
+    }
+    case 'pending-user-input-cleared': {
+      const chatId = requiredStr(data.chatId);
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const reason = data.reason === 'persisted' || data.reason === 'chat-removed'
+        ? data.reason
+        : null;
+      if (!chatId || !clientRequestId || !reason) return null;
+      return new PendingUserInputClearedMessage(chatId, clientRequestId, reason);
     }
     case 'chat-sessions-running':
       return new ChatSessionsRunningMessage(data.sessions as ChatSessionsRunningMessage['sessions']);
@@ -329,8 +369,13 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
       const clientRequestId = requiredStr(data.clientRequestId);
       const chatId = requiredStr(data.chatId);
       if (!clientRequestId || !chatId) return null;
+      const pendingUserInputs = Array.isArray(data.pendingUserInputs)
+        ? data.pendingUserInputs
+          .map(normalizePendingUserInput)
+          .filter((input): input is PendingUserInput => Boolean(input))
+        : [];
       return new ChatLogResponseMessage(
-        clientRequestId, chatId, parseChatMessages(data.messages),
+        clientRequestId, chatId, parseChatMessages(data.messages), pendingUserInputs,
         Number(data.total), Boolean(data.hasMore), Number(data.offset), Number(data.limit),
       );
     }

@@ -10,7 +10,7 @@
 
 	const implicitDragSensors = [PointerSensor.configure({ preventActivation: () => false })];
 	import type { Action } from 'svelte/action';
-	import type { SessionProvider } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList } from '$lib/api/chats.js';
 
@@ -29,7 +29,7 @@
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onReorderGroup: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chatId: string, chatTitle: string, provider: SessionProvider) => void;
+		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
 			onTogglePinned: (chatId: string) => void;
 			onToggleArchive: (chatId: string) => void;

@@ -1,6 +1,6 @@
-import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { JsonFileStore } from '../lib/json-file-store.js';
 
 export type CommandLedgerStatus =
   | 'accepted'
@@ -60,14 +60,39 @@ function ledgerKey(commandType: string, chatId: string, clientRequestId: string)
   return `${commandType}:${chatId}:${clientRequestId}`;
 }
 
+function normalizeLedgerFile(value: unknown): LedgerFile {
+  const parsed = value as Partial<LedgerFile> | null;
+  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.records)) {
+    return { version: 1, records: [] };
+  }
+  return {
+    version: 1,
+    records: parsed.records.filter((record): record is CommandLedgerRecord => {
+      return Boolean(
+        record
+        && typeof record.key === 'string'
+        && typeof record.commandType === 'string'
+        && typeof record.chatId === 'string'
+        && typeof record.clientRequestId === 'string'
+        && typeof record.payloadHash === 'string',
+      );
+    }),
+  };
+}
+
 export class CommandLedger {
-  #filePath: string;
+  #store: JsonFileStore<LedgerFile>;
   #loaded = false;
   #records = new Map<string, CommandLedgerRecord>();
   #locks = new Map<string, Promise<void>>();
 
   constructor(workspaceDir: string) {
-    this.#filePath = path.join(workspaceDir, 'command-ledger.json');
+    const filePath = path.join(workspaceDir, 'command-ledger.json');
+    this.#store = new JsonFileStore<LedgerFile>({
+      filePath,
+      empty: () => ({ version: 1, records: [] }),
+      normalize: normalizeLedgerFile,
+    });
   }
 
   async accept(input: LedgerAcceptInput): Promise<LedgerAcceptResult> {
@@ -119,25 +144,17 @@ export class CommandLedger {
 
   async #load(): Promise<void> {
     if (this.#loaded) return;
-    try {
-      const raw = await fs.readFile(this.#filePath, 'utf8');
-      const parsed = JSON.parse(raw) as LedgerFile;
-      if (parsed.version === 1 && Array.isArray(parsed.records)) {
-        this.#records = new Map(parsed.records.map((record) => [record.key, record]));
-      }
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
+    const parsed = await this.#store.read();
+    this.#records = new Map(parsed.records.map((record) => [record.key, record]));
     this.#loaded = true;
   }
 
   async #persist(): Promise<void> {
-    await fs.mkdir(path.dirname(this.#filePath), { recursive: true });
     const payload: LedgerFile = {
       version: 1,
       records: [...this.#records.values()].slice(-1000),
     };
-    await fs.writeFile(this.#filePath, JSON.stringify(payload, null, 2), 'utf8');
+    await this.#store.write(payload);
   }
 
   async #withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {

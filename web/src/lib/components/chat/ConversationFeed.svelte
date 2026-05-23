@@ -8,7 +8,7 @@
 		PermissionCancelledMessage,
 	} from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
-	import { getChatState, getProviderState, getLocalSettings, getAppShell } from '$lib/context';
+	import { getChatState, getAgentState, getLocalSettings, getAppShell } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createMessageIdAllocator } from '$lib/chat/message-id';
 	import { CHAT_MAX_WIDTH_FEED_CONTENT_CLASS, CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS } from '$lib/chat/chat-max-width';
@@ -39,7 +39,7 @@
 	}: Props = $props();
 
 	const chatState = getChatState();
-	const providerState = getProviderState();
+	const agentState = getAgentState();
 	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
 
@@ -55,7 +55,7 @@
 	// INVARIANT: resetForNewChat must clear chatMessages before populating
 	// the next chat's messages, so this effect fires between chat switches.
 	$effect(() => {
-		if (chatState.chatMessages.length === 0) {
+		if (chatState.displayMessageCount === 0) {
 			getMessageId.reset();
 		}
 	});
@@ -120,14 +120,14 @@
 </script>
 
 {#snippet feedContent()}
-	{#if chatState.isLoadingMessages && chatState.chatMessages.length === 0}
+	{#if chatState.isLoadingMessages && chatState.displayMessageCount === 0}
 		<div class="text-center text-muted-foreground mt-8">
 			<div class="flex items-center justify-center space-x-2">
 				<Loader2 class="h-4 w-4 animate-spin" />
 				<p>{m.chat_chat_loading_chat_messages()}</p>
 			</div>
 		</div>
-	{:else if chatState.loadStatus === 'error' && chatState.chatMessages.length === 0}
+	{:else if chatState.loadStatus === 'error' && chatState.displayMessageCount === 0}
 		<div class="text-center text-muted-foreground mt-8">
 			<div class="flex items-center justify-center space-x-2">
 				<TriangleAlert class="h-4 w-4 text-destructive" />
@@ -148,13 +148,13 @@
 				</Button>
 			{/if}
 		</div>
-	{:else if chatState.chatMessages.length === 0}
+	{:else if chatState.displayMessageCount === 0}
 		<div class="text-center text-muted-foreground mt-8">
 			<p class="text-sm">{m.chat_messages_no_messages()}</p>
 			<p class="text-xs mt-1">{m.chat_messages_send_first_message()}</p>
 		</div>
 	{:else}
-		{#if chatState.loadStatus === 'error' && chatState.chatMessages.length > 0}
+		{#if chatState.loadStatus === 'error' && chatState.displayMessageCount > 0}
 			<div class="text-center text-sm text-muted-foreground py-2 border-b border-border bg-destructive/5">
 				<div class="flex items-center justify-center space-x-2">
 					<TriangleAlert class="h-3 w-3 text-destructive" />
@@ -188,6 +188,10 @@
 				{#if chatState.totalMessages > 0}
 					<span>
 						{m.chat_chat_messages_showing_of({ shown: chatState.chatMessages.length, total: chatState.totalMessages })}
+						{#if chatState.pendingUserInputs.length > 0}
+							+
+							{chatState.pendingUserInputs.length}
+						{/if}
 						| {m.chat_chat_messages_scroll_to_load()}
 					</span>
 				{/if}
@@ -195,11 +199,11 @@
 			</div>
 		{/if}
 
-		{#if !chatState.hasMoreMessages && chatState.chatMessages.length > chatState.visibleMessageCount}
+		{#if !chatState.hasMoreMessages && chatState.displayMessageCount > chatState.visibleMessageCount}
 			<div class="my-1 flex items-center gap-2 text-xs text-muted-foreground">
 				<div class="h-px flex-1 bg-border/70"></div>
 				<span>
-					{m.chat_chat_messages_showing_last({ count: chatState.visibleMessageCount, total: chatState.chatMessages.length })}
+					{m.chat_chat_messages_showing_last({ count: chatState.visibleMessageCount, total: chatState.displayMessageCount })}
 				</span>
 				<Button
 					variant="link"
@@ -238,7 +242,7 @@
 						permissionTerminal={permTerminal}
 						{onPermissionDecision}
 						{onExitPlanMode}
-						provider={providerState.provider}
+						agentId={agentState.agentId}
 						showThinking={localSettings.showThinking}
 					/>
 					{#snippet failed(error)}

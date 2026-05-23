@@ -5,7 +5,7 @@ describe('HistoryCache init wiring', () => {
   let cache;
   let mockRegistry;
   let mockMetadata;
-  let mockProviders;
+  let mockAgents;
   let removedCallbacks;
   let messageCallbacks;
 
@@ -17,13 +17,13 @@ describe('HistoryCache init wiring', () => {
       onChatRemoved: mock((cb) => removedCallbacks.push(cb)),
     };
     mockMetadata = { updateFromAppendedMessages: mock(() => undefined) };
-    mockProviders = {
+    mockAgents = {
       loadMessages: mock(() => Promise.resolve([])),
       isChatRunning: mock(() => false),
       onMessages: mock((cb) => messageCallbacks.push(cb)),
     };
 
-    cache = new HistoryCache(mockRegistry, mockMetadata, mockProviders);
+    cache = new HistoryCache(mockRegistry, mockMetadata, mockAgents);
   });
 
   it('registers onChatRemoved listener during init', () => {
@@ -33,7 +33,7 @@ describe('HistoryCache init wiring', () => {
 
   it('registers onMessages listener during init', () => {
     cache.init();
-    expect(mockProviders.onMessages).toHaveBeenCalledTimes(1);
+    expect(mockAgents.onMessages).toHaveBeenCalledTimes(1);
   });
 
   it('evicts cache entry when chat-removed fires', () => {
@@ -67,7 +67,7 @@ describe('HistoryCache init wiring', () => {
     cache.init();
 
     expect(mockRegistry.onChatRemoved).toHaveBeenCalledTimes(1);
-    expect(mockProviders.onMessages).toHaveBeenCalledTimes(1);
+    expect(mockAgents.onMessages).toHaveBeenCalledTimes(1);
   });
 
   it('clears prune timer on destroy', () => {

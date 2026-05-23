@@ -34,39 +34,39 @@ function normalizeTitle(text) {
   return text.replace(/^["'`]+|["'`]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-// providers: ProviderRegistry (for runSingleQuery)
+// agents: AgentRegistry (for runSingleQuery)
 // settings: SettingsStore (for getUiSettings, getChatName, setSessionName)
-export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt, providers, settings }) {
+export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt, agents, settings }) {
   if (!firstPrompt?.trim()) return;
 
   const ui = await settings.getUiSettings();
-  const getHarnessCatalog = async () => {
+  const getAgentCatalog = async () => {
     try {
-      return await providers?.getHarnessCatalog?.();
+      return { agents: await agents?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
     } catch {
       return null;
     }
   };
-  const [authByHarness, readinessByHarness, catalog, opencodeModels, factoryModels] = await Promise.all([
-    providers?.getHarnessAuthStatusMap?.() ?? Promise.resolve({
+  const [authByAgent, readinessByAgent, catalog, opencodeModels, factoryModels] = await Promise.all([
+    agents?.getAgentAuthStatusMap?.() ?? Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
       amp: { authenticated: false },
       factory: { authenticated: false },
     }),
-    providers?.getHarnessReadinessMap?.() ?? Promise.resolve({}),
-    getHarnessCatalog(),
-    providers?.getModels?.('opencode') ?? Promise.resolve([]),
-    providers?.getModels?.('factory') ?? Promise.resolve([]),
+    agents?.getAgentReadinessMap?.() ?? Promise.resolve({}),
+    getAgentCatalog(),
+    agents?.getModels?.('opencode') ?? Promise.resolve([]),
+    agents?.getModels?.('factory') ?? Promise.resolve([]),
   ]);
   const catalogModels = Object.fromEntries(
-    (catalog?.harnesses ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
+    (catalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
   );
   const cfg = resolveEffectiveGenerationConfig({
     persisted: ui?.chatTitle,
-    authByHarness,
-    modelsByHarness: {
+    authByAgent,
+    modelsByAgent: {
       claude: CLAUDE_MODELS.OPTIONS,
       codex: CODEX_MODELS.OPTIONS,
       opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
@@ -74,20 +74,20 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
       factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
       ...catalogModels,
     },
-    readinessByHarness,
+    readinessByAgent,
   });
   if (!cfg.enabled) return;
 
   const existing = settings.getChatName(chatId);
   if (existing) return;
 
-  const provider = cfg.provider || 'claude';
+  const agentId = cfg.agentId || 'claude';
   const model = cfg.model;
   const prompt = TITLE_GENERATION_PROMPT.replace('{USER_PROMPT}', firstPrompt.trim());
 
   try {
-    const titleRaw = await providers.runSingleQuery(prompt, {
-      provider,
+    const titleRaw = await agents.runSingleQuery(prompt, {
+      agentId,
       model,
       cwd: projectPath,
       projectPath,

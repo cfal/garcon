@@ -18,7 +18,7 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '' },
 		pinnedChatIds: [],
-		lastProvider: 'claude',
+		lastAgentId: 'claude',
 		lastProjectPath: '',
 		lastModel: 'opus',
 		lastApiProviderId: null,
@@ -55,30 +55,30 @@ const mockAppShell = {
 	projectBasePath: '/',
 };
 const mockModelCatalog = {
-		harnessMetadata: {
+		agentMetadata: {
 			claude: { label: 'Claude' },
 			codex: { label: 'Codex' },
 			'direct-anthropic-compatible': { label: 'Direct (Anthropic)' },
 			'direct-openai-compatible': { label: 'Direct (Chat Completions)' },
 		},
-		getHarnesses: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
-		getSelectableHarnesses: vi.fn(() => [
+		getAgents: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
+		getSelectableAgents: vi.fn(() => [
 			'claude',
 			'codex',
 			'direct-anthropic-compatible',
 			'direct-openai-compatible'
 		]),
-		getDefaultModel: vi.fn((provider: string) => {
-			if (provider === 'claude') return 'opus';
-			if (provider === 'codex') return 'gpt-5.4';
-			if (provider === 'direct-anthropic-compatible') return 'acme_anthropic:acme-sonnet';
-			if (provider === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
+		getDefaultModel: vi.fn((agentId: string) => {
+			if (agentId === 'claude') return 'opus';
+			if (agentId === 'codex') return 'gpt-5.4';
+			if (agentId === 'direct-anthropic-compatible') return 'acme_anthropic:acme-sonnet';
+			if (agentId === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
 			return '';
 		}),
-	getModels: vi.fn((provider: string) => {
-		if (provider === 'claude') return [{ value: 'opus', label: 'Opus' }];
-			if (provider === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
-			if (provider === 'direct-anthropic-compatible') {
+	getModels: vi.fn((agentId: string) => {
+		if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
+			if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
+			if (agentId === 'direct-anthropic-compatible') {
 				return [{
 					value: 'acme_anthropic:acme-sonnet',
 					label: 'Acme: Acme Sonnet',
@@ -88,7 +88,7 @@ const mockModelCatalog = {
 					protocol: 'anthropic-messages',
 				}];
 			}
-			if (provider === 'direct-openai-compatible') {
+			if (agentId === 'direct-openai-compatible') {
 				return [{
 					value: 'zai_openai:glm-5.1',
 				label: 'Z.AI: GLM-5.1',
@@ -100,8 +100,8 @@ const mockModelCatalog = {
 		}
 		return [];
 		}),
-		selectionFor: vi.fn((provider: string, model: string) => {
-			if (provider === 'direct-anthropic-compatible' && model === 'acme_anthropic:acme-sonnet') {
+		selectionFor: vi.fn((agentId: string, model: string) => {
+			if (agentId === 'direct-anthropic-compatible' && model === 'acme_anthropic:acme-sonnet') {
 				return {
 					model: 'acme-sonnet',
 					apiProviderId: 'acme',
@@ -109,7 +109,7 @@ const mockModelCatalog = {
 					modelProtocol: 'anthropic-messages',
 				};
 			}
-			if (provider === 'direct-openai-compatible' && model === 'zai_openai:glm-5.1') {
+			if (agentId === 'direct-openai-compatible' && model === 'zai_openai:glm-5.1') {
 				return {
 					model: 'glm-5.1',
 				apiProviderId: 'zai',
@@ -124,11 +124,11 @@ const mockModelCatalog = {
 			modelProtocol: null,
 		};
 		}),
-		selectionValueFor: vi.fn((provider: string, model: string, endpointId?: string | null) => {
-			if (provider === 'direct-anthropic-compatible' && model === 'acme-sonnet' && endpointId === 'acme_anthropic') {
+		selectionValueFor: vi.fn((agentId: string, model: string, endpointId?: string | null) => {
+			if (agentId === 'direct-anthropic-compatible' && model === 'acme-sonnet' && endpointId === 'acme_anthropic') {
 				return 'acme_anthropic:acme-sonnet';
 			}
-			if (provider === 'direct-openai-compatible' && model === 'glm-5.1' && endpointId === 'zai_openai') {
+			if (agentId === 'direct-openai-compatible' && model === 'glm-5.1' && endpointId === 'zai_openai') {
 				return 'zai_openai:glm-5.1';
 			}
 		return model;
@@ -142,7 +142,7 @@ describe('NewChatFormState', () => {
 
 	beforeEach(() => {
 		vi.useFakeTimers();
-		mockModelCatalog.getSelectableHarnesses.mockImplementation(() => [
+		mockModelCatalog.getSelectableAgents.mockImplementation(() => [
 			'claude',
 			'codex',
 			'direct-anthropic-compatible',
@@ -153,14 +153,14 @@ describe('NewChatFormState', () => {
 	});
 
 	it('initializes with default values', () => {
-		expect(formState.provider).toBe('claude');
+		expect(formState.agentId).toBe('claude');
 		expect(formState.validationStatus).toBe('idle');
 		expect(formState.canSubmit).toBe(false);
 	});
 
 	it('loads startup defaults from server settings', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
-			lastProvider: 'codex',
+			lastAgentId: 'codex',
 			lastProjectPath: '/workspace/project',
 			lastModel: 'gpt-5.4',
 			lastPermissionMode: 'acceptEdits',
@@ -171,7 +171,7 @@ describe('NewChatFormState', () => {
 		await formState.loadSettingsAndModels();
 
 		expect(formState.settingsLoaded).toBe(true);
-		expect(formState.provider).toBe('codex');
+		expect(formState.agentId).toBe('codex');
 		expect(formState.modelValue).toBe('gpt-5.4');
 		expect(formState.permissionMode).toBe('acceptEdits');
 		expect(formState.thinkingMode).toBe('think-hard');
@@ -181,7 +181,7 @@ describe('NewChatFormState', () => {
 
 	it('loads API provider startup defaults from server settings', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
-			lastProvider: 'direct-openai-compatible',
+			lastAgentId: 'direct-openai-compatible',
 			lastProjectPath: '/workspace/project',
 			lastModel: 'glm-5.1',
 			lastApiProviderId: 'zai',
@@ -191,13 +191,13 @@ describe('NewChatFormState', () => {
 
 		await formState.loadSettingsAndModels();
 
-		expect(formState.provider).toBe('direct-openai-compatible');
+		expect(formState.agentId).toBe('direct-openai-compatible');
 		expect(formState.modelValue).toBe('zai_openai:glm-5.1');
 	});
 
 	it('loads Direct Anthropic startup defaults from server settings', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
-			lastProvider: 'direct-anthropic-compatible',
+			lastAgentId: 'direct-anthropic-compatible',
 			lastProjectPath: '/workspace/project',
 			lastModel: 'acme-sonnet',
 			lastApiProviderId: 'acme',
@@ -207,14 +207,14 @@ describe('NewChatFormState', () => {
 
 		await formState.loadSettingsAndModels();
 
-		expect(formState.provider).toBe('direct-anthropic-compatible');
+		expect(formState.agentId).toBe('direct-anthropic-compatible');
 		expect(formState.modelValue).toBe('acme_anthropic:acme-sonnet');
 	});
 
 	it('falls back when Direct Anthropic has no endpoint models', async () => {
-		mockModelCatalog.getSelectableHarnesses.mockReturnValue(['claude', 'codex']);
+		mockModelCatalog.getSelectableAgents.mockReturnValue(['claude', 'codex']);
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
-			lastProvider: 'direct-anthropic-compatible',
+			lastAgentId: 'direct-anthropic-compatible',
 			lastProjectPath: '/workspace/project',
 			lastModel: 'acme-sonnet',
 			lastApiProviderId: 'acme',
@@ -224,20 +224,20 @@ describe('NewChatFormState', () => {
 
 		await formState.loadSettingsAndModels();
 
-		expect(formState.provider).toBe('claude');
+		expect(formState.agentId).toBe('claude');
 		expect(formState.modelValue).toBe('opus');
 	});
 
-	it('falls back when startup defaults reference a non-harness API provider id', async () => {
+	it('falls back when startup defaults reference a non-agent API provider id', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
-			lastProvider: 'zai' as RemoteSettingsSnapshot['lastProvider'],
+			lastAgentId: 'zai' as RemoteSettingsSnapshot['lastAgentId'],
 			lastProjectPath: '/workspace/project',
 			lastModel: 'glm-5.1',
 		}));
 
 		await formState.loadSettingsAndModels();
 
-		expect(formState.provider).toBe('claude');
+		expect(formState.agentId).toBe('claude');
 		expect(formState.modelValue).toBe('opus');
 	});
 
@@ -314,7 +314,7 @@ describe('NewChatFormState', () => {
 		formState.projectPath = '/valid/path';
 		formState.validationStatus = 'valid';
 		formState.firstMessage = 'Start this task';
-		formState.provider = 'codex';
+		formState.agentId = 'codex';
 		formState.handleModelChange('gpt-5.4');
 		formState.permissionMode = 'acceptEdits';
 		formState.thinkingMode = 'think-hard';
@@ -323,7 +323,7 @@ describe('NewChatFormState', () => {
 		const config = formState.buildConfig();
 
 		expect(config).toMatchObject({
-			provider: 'codex',
+			agentId: 'codex',
 			projectPath: '/valid/path',
 			model: 'gpt-5.4',
 			permissionMode: 'acceptEdits',

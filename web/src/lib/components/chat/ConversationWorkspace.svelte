@@ -11,7 +11,7 @@
 	import QueueControls from './QueueControls.svelte';
 	import { ChatState } from '$lib/chat/state.svelte';
 	import { ComposerState } from '$lib/chat/composer.svelte';
-	import { ProviderState } from '$lib/chat/provider-state.svelte';
+	import { AgentState } from '$lib/chat/agent-state.svelte';
 	import { getChatQueue } from '$lib/api/chats.js';
 	import { StartupCoordinator } from '$lib/chat/startup-coordinator.js';
 	import { createDrainCursor } from '$lib/ws/drain';
@@ -19,7 +19,7 @@
 	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
-	import { getChatSessions, getLocalSettings, getAppShell, getWs, getNavigation, setChatState, setComposerState, setProviderState, setChatLifecycle, getReadReceiptOutbox, getModelCatalog } from '$lib/context';
+	import { getChatSessions, getLocalSettings, getAppShell, getWs, getNavigation, setChatState, setComposerState, setAgentState, setChatLifecycle, getReadReceiptOutbox, getModelCatalog } from '$lib/context';
 	import type { PendingPermissionRequest, QueueState, PermissionMode, PendingViewChat } from '$lib/types/chat';
 	import { ArrowDown, ArrowUp, Loader2 } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -43,13 +43,13 @@
 
 	const chatState = new ChatState();
 	const composerState = new ComposerState();
-	const providerState = new ProviderState();
+	const agentState = new AgentState();
 	const lifecycle = new ChatLifecycleStore();
 	const startupCoordinator = new StartupCoordinator();
 
 	setChatState(chatState);
 	setComposerState(composerState);
-	setProviderState(providerState);
+	setAgentState(agentState);
 	setChatLifecycle(lifecycle);
 
 	// Per-chat reactive state for permissions and queue.
@@ -84,7 +84,7 @@
 		sessions,
 		chatState,
 		composerState,
-		providerState,
+		agentState,
 		lifecycle,
 		startupCoordinator,
 		appShell,
@@ -117,7 +117,7 @@
 		sessions,
 		chatState,
 		composerState,
-		providerState,
+		agentState,
 			lifecycle,
 			startupCoordinator,
 			modelCatalog,
@@ -232,7 +232,7 @@
 
 	// Scrolls to bottom on new messages and loading status changes unless user scrolled up.
 	$effect(() => {
-		const _count = chatState.chatMessages.length;
+		const _count = chatState.displayMessageCount;
 		const _isLoading = lifecycle.isLoading;
 		if (!chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
 			requestAnimationFrame(() => scroll.scrollToBottom());
@@ -245,7 +245,7 @@
 	// calls from loadChat fire against an undefined container.
 	$effect(() => {
 		const _container = scrollContainer;
-		if (_container && chatState.chatMessages.length > 0) {
+		if (_container && chatState.displayMessageCount > 0) {
 			requestAnimationFrame(() => scroll.scrollToBottom());
 		}
 	});
@@ -318,7 +318,7 @@
 				reserveLoadingStatusSpace={lifecycle.isLoading}
 			/>
 
-			{#if chatState.isUserScrolledUp && chatState.chatMessages.length > 0}
+			{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}
 					<Button
 						variant="outline"
 						size="icon"

@@ -244,7 +244,3 @@ export class ShellManager {
     }
   }
 }
-
-// Backward-compat shim: module-level default instance.
-const _default = new ShellManager();
-export const shellHandler = _default.createHandler();

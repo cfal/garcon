@@ -2,23 +2,23 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { maybeGenerateChatTitle } from '../title-generator.js';
 
 const runSingleQueryMock = mock(() => Promise.resolve('Test Chat Title'));
-const getHarnessAuthStatusMapMock = mock(() => Promise.resolve({
+const getAgentAuthStatusMapMock = mock(() => Promise.resolve({
   claude: { authenticated: false },
   codex: { authenticated: false },
   opencode: { authenticated: false },
 }));
 const getModelsMock = mock(() => Promise.resolve([]));
-const mockProviders = {
+const mockAgents = {
   runSingleQuery: runSingleQueryMock,
-  getHarnessAuthStatusMap: getHarnessAuthStatusMapMock,
+  getAgentAuthStatusMap: getAgentAuthStatusMapMock,
   getModels: getModelsMock,
-  getHarnessCatalog: mock(() => Promise.resolve({ harnesses: [], apiProviders: [] })),
+  getAgentCatalog: mock(() => Promise.resolve({ agents: [], apiProviders: [] })),
 };
 
 const setSessionNameMock = mock(() => Promise.resolve(undefined));
 const getChatNameMock = mock(() => null);
 const getUiSettingsMock = mock(() => Promise.resolve({
-  chatTitle: { enabled: true, provider: 'claude', model: 'opus' },
+  chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
 }));
 const mockSettings = {
   getUiSettings: getUiSettingsMock,
@@ -28,16 +28,16 @@ const mockSettings = {
 
 const allMocks = [
   runSingleQueryMock, setSessionNameMock,
-  getChatNameMock, getUiSettingsMock, getHarnessAuthStatusMapMock, getModelsMock, mockProviders.getHarnessCatalog,
+  getChatNameMock, getUiSettingsMock, getAgentAuthStatusMapMock, getModelsMock, mockAgents.getAgentCatalog,
 ];
 
 describe('maybeGenerateChatTitle', () => {
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
     getUiSettingsMock.mockImplementation(() => Promise.resolve({
-      chatTitle: { enabled: true, provider: 'claude', model: 'opus' },
+      chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
     }));
-    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+    getAgentAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
@@ -52,14 +52,14 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '100',
       projectPath: '/proj',
       firstPrompt: 'Help me fix a bug',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
     expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
     const [prompt, opts] = runSingleQueryMock.mock.calls[0];
     expect(prompt).toContain('Help me fix a bug');
-    expect(opts.provider).toBe('claude');
+    expect(opts.agentId).toBe('claude');
     expect(opts.model).toBe('opus');
 
     expect(setSessionNameMock).toHaveBeenCalledWith('100', 'Test Chat Title');
@@ -74,7 +74,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '200',
       projectPath: '/proj',
       firstPrompt: 'Hello',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -89,7 +89,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '300',
       projectPath: '/proj',
       firstPrompt: 'Hello',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -98,7 +98,7 @@ describe('maybeGenerateChatTitle', () => {
 
   it('auto-enables and defaults to codex when codex is authenticated', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
-    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+    getAgentAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: true },
       opencode: { authenticated: true },
@@ -108,20 +108,20 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '301',
       projectPath: '/proj',
       firstPrompt: 'Hello',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
     expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
     const [, opts] = runSingleQueryMock.mock.calls[0];
-    expect(opts.provider).toBe('codex');
+    expect(opts.agentId).toBe('codex');
     expect(opts.model).toBe('gpt-5.5');
     expect(opts.thinkingMode).toBe('none');
   });
 
   it('auto-enables and skips DeepSeek R1 when selecting OpenCode defaults', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
-    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+    getAgentAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: true },
@@ -135,19 +135,19 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '302',
       projectPath: '/proj',
       firstPrompt: 'Hello',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
     expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
     const [, opts] = runSingleQueryMock.mock.calls[0];
-    expect(opts.provider).toBe('opencode');
+    expect(opts.agentId).toBe('opencode');
     expect(opts.model).toBe('deepseek-v3');
   });
 
   it('does not auto-enable OpenCode title generation when no OpenCode models were discovered', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
-    getHarnessAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+    getAgentAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: true },
@@ -158,7 +158,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '303',
       projectPath: '/proj',
       firstPrompt: 'Hello',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -170,7 +170,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '400',
       projectPath: '/proj',
       firstPrompt: '',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -184,7 +184,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '500',
       projectPath: '/proj',
       firstPrompt: 'Some prompt',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -198,7 +198,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '600',
       projectPath: '/proj',
       firstPrompt: 'A prompt',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -212,7 +212,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '700',
       projectPath: '/proj',
       firstPrompt: 'A prompt',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -227,36 +227,36 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '800',
       projectPath: '/proj',
       firstPrompt: 'A prompt',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
     expect(setSessionNameMock).not.toHaveBeenCalled();
   });
 
-  it('routes to the configured provider', async () => {
+  it('routes to the configured agent', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({
-      chatTitle: { enabled: true, provider: 'opencode', model: 'anthropic/claude-sonnet-4-5' },
+      chatTitle: { enabled: true, agentId: 'opencode', model: 'anthropic/claude-sonnet-4-5' },
     }));
 
     await maybeGenerateChatTitle({
       chatId: '900',
       projectPath: '/proj',
       firstPrompt: 'Do something',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
     const [, opts] = runSingleQueryMock.mock.calls[0];
-    expect(opts.provider).toBe('opencode');
+    expect(opts.agentId).toBe('opencode');
     expect(opts.model).toBe('anthropic/claude-sonnet-4-5');
   });
 
-  it('passes API provider metadata to configured title generation harness', async () => {
+  it('passes API provider metadata to configured title generation agent', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({
       chatTitle: {
         enabled: true,
-        provider: 'direct-openai-compatible',
+        agentId: 'direct-openai-compatible',
         model: 'glm-5.1',
         apiProviderId: 'zai',
         modelEndpointId: 'zai_openai',
@@ -268,12 +268,12 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '901',
       projectPath: '/proj',
       firstPrompt: 'Do something',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
     const [, opts] = runSingleQueryMock.mock.calls[0];
-    expect(opts.provider).toBe('direct-openai-compatible');
+    expect(opts.agentId).toBe('direct-openai-compatible');
     expect(opts.model).toBe('glm-5.1');
     expect(opts.apiProviderId).toBe('zai');
     expect(opts.modelEndpointId).toBe('zai_openai');

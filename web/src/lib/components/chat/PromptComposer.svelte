@@ -3,7 +3,7 @@
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import LoadingStatus from './LoadingStatus.svelte';
-	import { getComposerState, getChatLifecycle, getLocalSettings, getChatSessions, getAppShell, getModelCatalog, getProviderState } from '$lib/context';
+	import { getComposerState, getChatLifecycle, getLocalSettings, getChatSessions, getAppShell, getModelCatalog, getAgentState } from '$lib/context';
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
@@ -30,7 +30,7 @@
 
 	const composerState = getComposerState();
 	const lifecycle = getChatLifecycle();
-	const providerState = getProviderState();
+	const agentState = getAgentState();
 	const localSettings = getLocalSettings();
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
@@ -206,18 +206,18 @@
 	);
 	const permissionOptions = $derived(
 		buildPermissionOptions(
-			providerState.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES
+			agentState.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES
 		)
 	);
 	const thinkingOptions = $derived(buildThinkingOptions());
-	const canAttachImages = $derived(modelCatalog.supportsImages(providerState.provider, providerState.model));
-	const modelSelectorMode: ModelSelectorMode = { harness: 'fixed', source: 'hidden', surface: 'composer' };
+	const canAttachImages = $derived(modelCatalog.supportsImages(agentState.agentId, agentState.model));
+	const modelSelectorMode: ModelSelectorMode = { agent: 'fixed', source: 'hidden', surface: 'composer' };
 	const modelSelectorValue = $derived({
-		harnessId: providerState.provider,
-		model: providerState.model,
-		apiProviderId: providerState.apiProviderId,
-		modelEndpointId: providerState.modelEndpointId,
-		modelProtocol: providerState.modelProtocol,
+		agentId: agentState.agentId,
+		model: agentState.model,
+		apiProviderId: agentState.apiProviderId,
+		modelEndpointId: agentState.modelEndpointId,
+		modelProtocol: agentState.modelProtocol,
 	});
 	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 	const composerShellClass = $derived(cn(
@@ -403,15 +403,15 @@
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={handleImagePick}
 				permissionOptions={permissionOptions}
-				selectedPermission={providerState.permissionMode}
+				selectedPermission={agentState.permissionMode}
 				onPermissionSelect={(mode) => {
-					providerState.permissionMode = mode;
+					agentState.permissionMode = mode;
 					onPermissionModeChange?.(mode);
 				}}
 				thinkingOptions={thinkingOptions}
-				selectedThinking={providerState.thinkingMode}
+				selectedThinking={agentState.thinkingMode}
 				onThinkingSelect={(mode) => {
-					providerState.thinkingMode = mode;
+					agentState.thinkingMode = mode;
 					onThinkingModeChange?.(mode);
 				}}
 				canSend={canSubmit}
@@ -438,7 +438,7 @@
 		<LoadingStatus
 			isLoading={lifecycle.isLoading}
 			status={lifecycle.loadingStatus}
-			provider={providerState.provider}
+			agentId={agentState.agentId}
 			spinnerSelectionKey={sessions.selectedChatId}
 			{onAbort}
 		/>

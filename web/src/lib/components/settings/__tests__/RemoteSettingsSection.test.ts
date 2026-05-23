@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-import RemoteSettingsSectionTestHarness from './RemoteSettingsSectionTestHarness.svelte';
+import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
 import { setTestRemoteSettingsStore } from './remote-settings-test-context';
 
 function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSettingsSnapshot {
@@ -12,7 +12,7 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '' },
 		pinnedChatIds: [],
-		lastProvider: 'claude',
+		lastAgentId: 'claude',
 		lastProjectPath: '',
 		lastModel: 'opus',
 		lastApiProviderId: null,
@@ -47,7 +47,7 @@ describe('RemoteSettingsSection', () => {
 		);
 		setTestRemoteSettingsStore(store);
 
-		render(RemoteSettingsSectionTestHarness);
+		render(RemoteSettingsSectionTestHost);
 
 		const input = await screen.findByDisplayValue('123');
 		await fireEvent.focus(input);

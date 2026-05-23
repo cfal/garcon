@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import SidebarChatList from './SidebarChatList.svelte';
-	import type { SessionProvider } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList } from '$lib/api/chats.js';
 
@@ -20,7 +20,7 @@
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onReorderGroup: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chatId: string, chatTitle: string, provider: SessionProvider) => void;
+		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;

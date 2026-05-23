@@ -6,7 +6,7 @@
       "name": "garcon-server",
       "dependencies": {
         "@earendil-works/pi-coding-agent": "^0.74.0",
-        "@openai/codex-sdk": "0.125.0",
+        "@openai/codex": "0.125.0",
         "@opencode-ai/sdk": "1.14.48",
         "bun-pty": "^0.4.8",
         "jsonwebtoken": "^9.0.3",
@@ -143,8 +143,6 @@
     "@openai/codex-linux-arm64": ["@openai/codex@0.125.0-linux-arm64", "", { "os": "linux", "cpu": "arm64" }, "sha512-pPnJoJD6rZ2Iin0zNt/up36bO2/EOp2B+1/rPHu/lSq3PJbT3Fmnfut2kJy5LylXb7bGA2XQbtqOogZzIbnlkA=="],
 
     "@openai/codex-linux-x64": ["@openai/codex@0.125.0-linux-x64", "", { "os": "linux", "cpu": "x64" }, "sha512-K2NTTEeBpz/G+N2x17UGWfauRt3So+ir4f+U/60l5PPnYEJB/w3YZrlXo2G9og8Dm9BqtoBAjoPV74sRv9tWWQ=="],
-
-    "@openai/codex-sdk": ["@openai/codex-sdk@0.125.0", "", { "dependencies": { "@openai/codex": "0.125.0" } }, "sha512-1xCIHdSbQVF880nJ2aVWdPIsWZbSpKODwuP9y/gvtChDYhYfYEW0DKp2H8ZlctkzIjlzS/WzYmP6ZZPHIvs2Dg=="],
 
     "@openai/codex-win32-arm64": ["@openai/codex@0.125.0-win32-arm64", "", { "os": "win32", "cpu": "arm64" }, "sha512-zxoUakw9oIHIFrAyk400XkkLBJFA6nOym0NDq6sQ/jhdcYraKqNSRCII2nsBwZHk+/4zgUvuk52iuutgysY/rQ=="],
 

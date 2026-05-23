@@ -5,7 +5,7 @@ import type { ChatSession } from '$lib/types/session';
 function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 	return {
 		id: 'a',
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'opus',
 		title: 'A',
 		projectPath: '/p',
@@ -57,7 +57,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -111,7 +111,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -138,7 +138,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -164,7 +164,7 @@ describe('ChatSessionsStore', () => {
 			id: 'local-draft',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -191,6 +191,22 @@ describe('ChatSessionsStore', () => {
 		store.patchPreview('a', 'Hello world');
 
 		expect(store.byId['a']?.lastMessage).toBe('Hello world');
+	});
+
+	it('upsertFromServer does not erase a non-empty preview with a blank payload', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([
+			makeServerSession({ id: 'a', preview: { lastMessage: 'Persisted preview' } }),
+		]);
+		const ref = store.byId['a'];
+
+		store.upsertFromServer([
+			makeServerSession({ id: 'a', preview: { lastMessage: '' } }),
+		]);
+
+		expect(store.byId['a']).toBe(ref);
+		expect(store.byId['a']?.lastMessage).toBe('Persisted preview');
 	});
 
 	it('patchChat updates arbitrary fields', () => {
@@ -221,7 +237,7 @@ describe('ChatSessionsStore', () => {
 			id: 'empty-msg',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -250,7 +266,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -270,7 +286,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -293,7 +309,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -325,7 +341,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -558,7 +574,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-arch',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -578,7 +594,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
@@ -607,12 +623,12 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.claudeThinkingMode).toBe('off');
 	});
 
-	it('toRecord defaults permissionMode, thinkingMode, and claudeThinkingMode for legacy sessions', () => {
+	it('toRecord defaults permissionMode, thinkingMode, and claudeThinkingMode for partial persisted sessions', () => {
 		const store = new ChatSessionsStore();
 
-		const legacy = makeServerSession({ id: 'a' }) as Partial<ChatSession> & { claudeThinkingMode?: string };
-		delete legacy.claudeThinkingMode;
-		store.upsertFromServer([legacy as ChatSession]);
+		const partial = makeServerSession({ id: 'a' }) as Partial<ChatSession> & { claudeThinkingMode?: string };
+		delete partial.claudeThinkingMode;
+		store.upsertFromServer([partial as ChatSession]);
 
 		expect(store.byId['a']?.permissionMode).toBe('default');
 		expect(store.byId['a']?.thinkingMode).toBe('none');
@@ -673,7 +689,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-modes',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'acceptEdits',
 				thinkingMode: 'think-hard',
@@ -705,7 +721,7 @@ describe('ChatSessionsStore', () => {
 			id: 'draft-1',
 			projectPath: '/repo',
 			startup: {
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',

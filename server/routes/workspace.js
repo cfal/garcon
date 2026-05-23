@@ -5,61 +5,53 @@ import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effec
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
-export async function buildRemoteSettingsSnapshot({ settings, providers }) {
+export async function buildRemoteSettingsSnapshot({ settings, agents }) {
   function asPlainObject(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  }
-
-  function sanitizeRemoteUiSnapshot(value) {
-    // Drops obsolete sidebar placement state from stale remote settings.
-    const ui = asPlainObject(value);
-    if (!('searchBarPosition' in ui)) return ui;
-    const { searchBarPosition: _searchBarPosition, ...rest } = ui;
-    return rest;
   }
 
   const settingsSource = typeof settings.getRemoteSettingsSnapshotSource === 'function'
     ? await settings.getRemoteSettingsSnapshotSource()
     : null;
 
-  const getHarnessCatalog = async () => {
+  const getAgentCatalog = async () => {
     try {
-      return await providers?.getHarnessCatalog?.();
+      return { agents: await agents?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
     } catch {
       return null;
     }
   };
 
   const [
-    authByHarness, readinessByHarness, harnessCatalog, opencodeModels, factoryModels,
+    authByAgent, readinessByAgent, agentCatalog, opencodeModels, factoryModels,
   ] = await Promise.all([
-    providers?.getHarnessAuthStatusMap?.() ?? Promise.resolve({
+    agents?.getAgentAuthStatusMap?.() ?? Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
       amp: { authenticated: false },
       factory: { authenticated: false },
     }),
-    providers?.getHarnessReadinessMap?.() ?? Promise.resolve({}),
-    getHarnessCatalog(),
-    providers?.getModels?.('opencode') ?? Promise.resolve([]),
-    providers?.getModels?.('factory') ?? Promise.resolve([]),
+    agents?.getAgentReadinessMap?.() ?? Promise.resolve({}),
+    getAgentCatalog(),
+    agents?.getModels?.('opencode') ?? Promise.resolve([]),
+    agents?.getModels?.('factory') ?? Promise.resolve([]),
   ]);
   const catalogModels = Object.fromEntries(
-    (harnessCatalog?.harnesses ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
+    (agentCatalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
   );
 
   const [
-    version, ui, paths, pinnedChatIds, lastProvider, lastProjectPath, lastModel,
+    version, ui, paths, pinnedChatIds, lastAgentId, lastProjectPath, lastModel,
     lastPermissionMode, lastThinkingMode, lastClaudeThinkingMode, lastAmpAgentMode,
     lastApiProviderId, lastModelEndpointId, lastModelProtocol,
   ] = settingsSource
     ? [
       settingsSource.version,
-      sanitizeRemoteUiSnapshot(settingsSource.ui),
+      asPlainObject(settingsSource.ui),
       settingsSource.paths,
       settingsSource.pinnedChatIds,
-      settingsSource.lastProvider,
+      settingsSource.lastAgentId,
       settingsSource.lastProjectPath,
       settingsSource.lastModel,
       settingsSource.lastPermissionMode,
@@ -75,7 +67,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       settings.getUiSettings(),
       settings.getPathSettings(),
       settings.getPinnedChatIds(),
-      settings.getLastProvider(),
+      settings.getLastAgentId(),
       settings.getLastProjectPath(),
       settings.getLastModel(),
       settings.getLastPermissionMode(),
@@ -87,7 +79,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       settings.getLastModelProtocol?.() ?? Promise.resolve(null),
     ]);
 
-  const modelsByHarness = {
+  const modelsByAgent = {
     claude: CLAUDE_MODELS.OPTIONS,
     codex: CODEX_MODELS.OPTIONS,
     opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
@@ -99,21 +91,21 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.chatTitle),
-      authByHarness,
-      modelsByHarness,
-      readinessByHarness,
+      authByAgent,
+      modelsByAgent,
+      readinessByAgent,
     }),
     commitMessage: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.commitMessage),
-      authByHarness,
-      modelsByHarness,
-      readinessByHarness,
+      authByAgent,
+      modelsByAgent,
+      readinessByAgent,
     }),
   };
 
   return {
     version,
-    ui: sanitizeRemoteUiSnapshot(ui),
+    ui: asPlainObject(ui),
     uiEffective,
     paths: {
       pinnedProjectPaths: Array.isArray(paths?.pinnedProjectPaths)
@@ -122,7 +114,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       browseStartPath: typeof paths?.browseStartPath === 'string' ? paths.browseStartPath : '',
     },
     pinnedChatIds: Array.isArray(pinnedChatIds) ? pinnedChatIds : [],
-    lastProvider,
+    lastAgentId,
     lastProjectPath,
     lastModel,
     lastApiProviderId: lastApiProviderId ?? null,
@@ -137,17 +129,16 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
   };
 }
 
-export default function createWorkspaceRoutes(settings, providers, telegramNotifier) {
+export default function createWorkspaceRoutes(settings, agents, telegramNotifier) {
 
-  const FILTER_KEYS = ['textTokens', 'tags', 'providers', 'models'];
+  const FILTER_KEYS = ['textTokens', 'tags', 'agents', 'models'];
   const VALID_FILTER_STATUS = new Set(['active', 'unread']);
   function sanitizeRemoteUiPatch(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const { searchBarPosition: _searchBarPosition, ...rest } = raw;
-    return Object.keys(rest).length > 0 ? rest : null;
+    return Object.keys(raw).length > 0 ? raw : null;
   }
 	function sanitizeFilter(raw) {
-    const empty = { textTokens: [], tags: [], providers: [], models: [] };
+    const empty = { textTokens: [], tags: [], agents: [], models: [] };
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return empty;
     const out = {};
 		for (const key of FILTER_KEYS) {
@@ -182,7 +173,7 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
 
   async function getAppSettings() {
     try {
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, providers });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents });
       return Response.json(snapshot);
     } catch (error) {
       return Response.json({ success: false, error: error.message }, { status: 500 });
@@ -202,7 +193,7 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
         await settings.setPathSettings(body.paths);
       }
 
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, providers });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       if (error.message === 'Malformed JSON') {

@@ -4,12 +4,8 @@ mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => undefined),
 }));
 
-mock.module('../../providers/loaders/claude-history-loader.js', () => ({
+mock.module('../../agents/claude/history-loader.js', () => ({
   getClaudeSessionMessagesFromNativePath: mock(() => undefined),
-}));
-
-mock.module('../../chats/resolve-native-path.js', () => ({
-  resolveMissingNativePath: mock(() => Promise.resolve(null)),
 }));
 
 mock.module('../../chats/title-generator.js', () => ({
@@ -53,12 +49,12 @@ const historyCache = {
   getPaginatedMessages: mock(() => undefined),
   appendMessages: mock(() => Promise.resolve(undefined)),
 };
-const providers = {
+const agents = {
   startSession: mock(() => undefined),
-  isHarnessSessionRunning: mock(() => false),
+  isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
+const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
 
 const allMocks = [
   settings.reorderWindow, settings.reorderRelative,
@@ -271,7 +267,7 @@ describe('POST /api/chats/reorder-quick', () => {
   });
 
   it('propagates store error for cross-group reorder', async () => {
-    registry.getChat.mockImplementation(() => ({ provider: 'claude' }));
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude' }));
     settings.reorderRelative.mockResolvedValue({ success: false, error: 'Cross-group reorder is not allowed' });
     parseJsonBody.mockResolvedValue({ chatId: 'a', chatIdAbove: 'b' });
 
@@ -284,7 +280,7 @@ describe('POST /api/chats/reorder-quick', () => {
   });
 
   it('delegates chatIdAbove reorder to settings.reorderRelative', async () => {
-    registry.getChat.mockImplementation(() => ({ provider: 'claude' }));
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude' }));
     settings.reorderRelative.mockResolvedValue({ success: true });
     parseJsonBody.mockResolvedValue({ chatId: 'c', chatIdAbove: 'a' });
 
@@ -298,7 +294,7 @@ describe('POST /api/chats/reorder-quick', () => {
   });
 
   it('delegates chatIdBelow reorder to settings.reorderRelative', async () => {
-    registry.getChat.mockImplementation(() => ({ provider: 'claude' }));
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude' }));
     settings.reorderRelative.mockResolvedValue({ success: true });
     parseJsonBody.mockResolvedValue({ chatId: 'z', chatIdBelow: 'x' });
 

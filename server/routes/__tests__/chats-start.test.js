@@ -55,15 +55,17 @@ const historyCache = {
   getPaginatedMessages: mock(() => ({ messages: [], total: 0, hasMore: false, offset: 0, limit: 20 })),
   appendMessages: mock(() => Promise.resolve(undefined)),
 };
-const providers = {
+const agents = {
   startSession: mock(() => Promise.resolve(undefined)),
   getModels: mock(() => Promise.resolve([])),
-  isHarnessSessionRunning: mock(() => false),
-  hasHarness: mock(() => true),
+  isAgentSessionRunning: mock(() => false),
+  hasAgent: mock(() => true),
+  supportsFork: mock(() => true),
+  supportsImages: mock(() => false),
   modelSupportsImages: mock(() => Promise.resolve(false)),
 };
 
-const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
+const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
 const handler = routes['/api/v1/chats/start'].POST;
 
 describe('POST /api/v1/chats/start', () => {
@@ -79,23 +81,23 @@ describe('POST /api/v1/chats/start', () => {
     settings.setLastChatDefaults.mockClear();
     metadata.addNewChatMetadata.mockClear();
     historyCache.appendMessages.mockClear();
-    providers.startSession.mockClear();
-    providers.getModels.mockClear();
-    providers.hasHarness.mockClear();
-    providers.hasHarness.mockImplementation(() => true);
-    providers.modelSupportsImages.mockClear();
+    agents.startSession.mockClear();
+    agents.getModels.mockClear();
+    agents.hasAgent.mockClear();
+    agents.hasAgent.mockImplementation(() => true);
+    agents.modelSupportsImages.mockClear();
   });
 
   afterEach(async () => {
     await fs.rm(testBasePath, { recursive: true, force: true });
   });
 
-  it('persists top-level startup defaults before starting the harness session', async () => {
+  it('persists top-level startup defaults before starting the agent session', async () => {
     const projectPath = path.join(testBasePath, 'project-a');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
       chatId: '123',
-      provider: 'codex',
+      agentId: 'codex',
       projectPath,
       model: 'gpt-5.4',
       permissionMode: 'acceptEdits',
@@ -113,7 +115,7 @@ describe('POST /api/v1/chats/start', () => {
 	    expect(body.success).toBe(true);
 	    expect(body.commandType).toBe('chat-start');
     expect(settings.setLastChatDefaults).toHaveBeenCalledWith({
-      provider: 'codex',
+      agentId: 'codex',
       projectPath,
       model: 'gpt-5.4',
       apiProviderId: null,
@@ -124,7 +126,7 @@ describe('POST /api/v1/chats/start', () => {
       claudeThinkingMode: 'off',
       ampAgentMode: 'smart',
     });
-	    expect(providers.startSession).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
+	    expect(agents.startSession).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
 	      images: [],
 	      projectPath,
 	      clientRequestId: expect.any(String),
@@ -132,12 +134,12 @@ describe('POST /api/v1/chats/start', () => {
 	    }));
   });
 
-  it('keeps the attempted defaults even when provider startup fails', async () => {
+  it('keeps the attempted defaults even when agent startup fails', async () => {
     const projectPath = path.join(testBasePath, 'project-b');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
       chatId: '456',
-      provider: 'claude',
+      agentId: 'claude',
       projectPath,
       model: 'opus',
       permissionMode: 'default',
@@ -147,7 +149,7 @@ describe('POST /api/v1/chats/start', () => {
       options: {},
       tags: ['claude'],
     }));
-    providers.startSession.mockImplementationOnce(() => Promise.reject(new Error('boom')));
+    agents.startSession.mockImplementationOnce(() => Promise.reject(new Error('boom')));
 
     const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
     const body = await response.json();
@@ -155,7 +157,7 @@ describe('POST /api/v1/chats/start', () => {
     expect(response.status).toBe(500);
     expect(body.error).toBe('boom');
     expect(settings.setLastChatDefaults).toHaveBeenCalledWith({
-      provider: 'claude',
+      agentId: 'claude',
       projectPath,
       model: 'opus',
       apiProviderId: null,
@@ -174,7 +176,7 @@ describe('POST /api/v1/chats/start', () => {
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
       chatId: '789',
-      provider: 'factory',
+      agentId: 'factory',
       projectPath,
       model: 'glm-5',
       permissionMode: 'default',
@@ -183,7 +185,7 @@ describe('POST /api/v1/chats/start', () => {
       options: { images: [{ data: 'data:image/png;base64,abc', name: 'diagram.png' }] },
       tags: ['factory'],
     }));
-    providers.getModels.mockResolvedValueOnce([
+    agents.getModels.mockResolvedValueOnce([
       { value: 'glm-5', label: 'Droid Core (GLM-5)', supportsImages: false },
     ]);
 
@@ -191,8 +193,8 @@ describe('POST /api/v1/chats/start', () => {
     const body = await response.json();
 
     expect(response.status).toBe(422);
-    expect(body.error).toBe('Images unsupported for harness: factory');
-    expect(providers.startSession).not.toHaveBeenCalled();
+    expect(body.error).toBe('Images unsupported for agent: factory');
+    expect(agents.startSession).not.toHaveBeenCalled();
   });
 
   it('normalizes invalid mode values from the REST payload before persisting them', async () => {
@@ -200,7 +202,7 @@ describe('POST /api/v1/chats/start', () => {
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
       chatId: '790',
-      provider: 'claude',
+      agentId: 'claude',
       projectPath,
       model: 'opus',
       permissionMode: 'bogus',
@@ -229,7 +231,7 @@ describe('POST /api/v1/chats/start', () => {
     }));
   });
 
-  it('rejects missing providers instead of defaulting to Claude', async () => {
+  it('rejects missing agents instead of defaulting to Claude', async () => {
     const projectPath = path.join(testBasePath, 'project-e');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
@@ -244,18 +246,18 @@ describe('POST /api/v1/chats/start', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('provider is required');
+    expect(body.error).toBe('agentId is required');
     expect(registry.addChat).not.toHaveBeenCalled();
-    expect(providers.startSession).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
   });
 
-  it('rejects unsupported providers instead of defaulting to Claude', async () => {
+  it('rejects unsupported agents instead of defaulting to Claude', async () => {
     const projectPath = path.join(testBasePath, 'project-f');
     await fs.mkdir(projectPath, { recursive: true });
-    providers.hasHarness.mockImplementation((harnessId) => harnessId !== 'unknown-provider');
+    agents.hasAgent.mockImplementation((agentId) => agentId !== 'unknown-provider');
     parseJsonBody.mockImplementation(() => Promise.resolve({
       chatId: '792',
-      provider: 'unknown-provider',
+      agentId: 'unknown-provider',
       projectPath,
       model: 'opus',
       command: 'hello',
@@ -266,8 +268,8 @@ describe('POST /api/v1/chats/start', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('Unsupported harness: unknown-provider');
+    expect(body.error).toBe('Unsupported agent: unknown-provider');
     expect(registry.addChat).not.toHaveBeenCalled();
-    expect(providers.startSession).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
   });
 });

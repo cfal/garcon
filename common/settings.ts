@@ -14,14 +14,15 @@ import {
   isPermissionMode,
   isThinkingMode,
 } from './chat-modes';
-import type { HarnessId, ApiProtocol } from './providers';
-import { isHarnessId } from './providers';
+import type { AgentId } from './agents';
+import { isAgentId } from './agents';
+import type { ApiProtocol } from './api-providers';
 
 export type PinnedInsertPosition = 'top' | 'bottom';
 
 export interface GenerationUiSettings {
   enabled?: boolean;
-  provider?: HarnessId;
+  agentId?: AgentId;
   model?: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
@@ -45,14 +46,14 @@ export interface RemoteUiSettings {
 }
 
 export interface RemoteUiEffectiveSettings {
-  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'provider' | 'model'>> & {
+  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model'>> & {
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
     modelProtocol?: ApiProtocol | null;
     customPrompt?: string;
     useCommonDirPrefix?: boolean;
   };
-  commitMessage?: Required<Pick<GenerationUiSettings, 'enabled' | 'provider' | 'model'>> & {
+  commitMessage?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model'>> & {
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
     modelProtocol?: ApiProtocol | null;
@@ -72,7 +73,7 @@ export interface RemoteSettingsSnapshot {
   uiEffective: RemoteUiEffectiveSettings;
   paths: RemotePathSettings;
   pinnedChatIds: string[];
-  lastProvider: HarnessId;
+  lastAgentId: AgentId;
   lastProjectPath: string;
   lastModel: string;
   lastApiProviderId: string | null;
@@ -124,7 +125,7 @@ function normalizeGenerationUiSettings(value: unknown): GenerationUiSettings | u
 
   const normalized: GenerationUiSettings = {};
   if (typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
-  if (isHarnessId(raw.provider)) normalized.provider = raw.provider;
+  if (isAgentId(raw.agentId)) normalized.agentId = raw.agentId;
   if (typeof raw.model === 'string') normalized.model = raw.model;
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
   if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
@@ -142,12 +143,12 @@ function normalizeGenerationUiEffectiveSettings(
   const raw = asRecord(value);
   if (!raw) return undefined;
   if (typeof raw.enabled !== 'boolean') return undefined;
-  if (!isHarnessId(raw.provider)) return undefined;
+  if (!isAgentId(raw.agentId)) return undefined;
   if (typeof raw.model !== 'string') return undefined;
 
   const normalized: NonNullable<RemoteUiEffectiveSettings['chatTitle']> = {
     enabled: raw.enabled,
-    provider: raw.provider,
+    agentId: raw.agentId,
     model: raw.model,
   };
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
@@ -242,7 +243,7 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
 
   if (version === null) return null;
   if (!ui || !uiEffective || !paths || !pinnedChatIds) return null;
-  if (!isHarnessId(raw.lastProvider)) return null;
+  if (!isAgentId(raw.lastAgentId)) return null;
   if (lastProjectPath === null || lastModel === null || projectBasePath === null) return null;
   if (!isPermissionMode(raw.lastPermissionMode)) return null;
   if (!isThinkingMode(raw.lastThinkingMode)) return null;
@@ -256,7 +257,7 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
     uiEffective,
     paths,
     pinnedChatIds,
-    lastProvider: raw.lastProvider,
+    lastAgentId: raw.lastAgentId,
     lastProjectPath,
     lastModel,
     lastApiProviderId,

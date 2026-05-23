@@ -6,6 +6,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { getConfigDir } from '../config.js';
+import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
 
 function authPath() {
   return path.join(getConfigDir(), 'auth.json');
@@ -32,12 +33,7 @@ async function readFromDisk() {
 }
 
 async function writeToDisk(data) {
-  const dir = getConfigDir();
-  await fs.mkdir(dir, { recursive: true });
-  const filePath = authPath();
-  const tmp = filePath + '.tmp';
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
-  await fs.rename(tmp, filePath);
+  await writeJsonFileAtomic(authPath(), data, { mode: 0o600 });
 }
 
 // Returns the JWT secret, generating and persisting one if missing.

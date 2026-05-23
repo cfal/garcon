@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import SidebarHarness from './SidebarHarness.svelte';
+import SidebarHost from './SidebarHost.svelte';
 
 import { getSavedSearches } from '$lib/api/settings';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -22,7 +22,7 @@ function createChat(id: string, title: string): ChatSessionRecord {
 		id,
 		projectPath: '/tmp/project',
 		title,
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'think',
@@ -55,7 +55,7 @@ describe('sidebar search dialog flow', () => {
 	});
 
 	it('restores the search dialog draft after cancelling add saved search', async () => {
-		render(SidebarHarness, {
+		render(SidebarHost, {
 			chats: [createChat('chat-1', 'First chat')],
 		});
 

@@ -8,17 +8,17 @@ import type {
 } from '$shared/ws-events';
 import { AssistantMessage, ErrorMessage } from '$shared/chat-types';
 import type { ChatMessage, PendingPermissionRequest, PendingViewChat } from '$lib/types/chat';
-import type { ChatEntry, SessionProvider } from '$lib/types/app';
+import type { ChatEntry, SessionAgentId } from '$lib/types/app';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 
 export interface ChatEventContext {
-	provider: SessionProvider;
+	agentId: SessionAgentId;
 	projectPath: string | null;
 	selectedChat: ChatEntry | null;
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
 	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
-	loadMessages: (chatId: string, loadMore?: boolean, provider?: string) => Promise<ChatMessage[]>;
+	loadMessages: (chatId: string, loadMore?: boolean, agentId?: string) => Promise<ChatMessage[]>;
 	setIsSystemChatChange: (v: boolean) => void;
 	setPendingPermissionRequests: (
 		updater:
@@ -120,7 +120,7 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 		// the authoritative reload never happened. Reload now.
 		const reloadId = statusChatId || ctx.selectedChat?.id;
 		if (reloadId) {
-			const chatProvider = ctx.selectedChat?.provider || ctx.provider;
+			const chatProvider = ctx.selectedChat?.agentId || ctx.agentId;
 			ctx.loadMessages(reloadId, false, chatProvider).then((messages) => {
 				// Guard: active chat may have changed while the reload was in flight.
 				if (ctx.getCurrentChatId() !== reloadId) return;

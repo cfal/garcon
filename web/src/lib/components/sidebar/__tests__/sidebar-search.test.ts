@@ -27,9 +27,9 @@ describe('parseChatSearch', () => {
 		expect(spec.tags).toEqual([['ops'], ['bugs']]);
 	});
 
-	it('parses provider, model, and text tokens', () => {
-		const spec = parseChatSearch('provider:claude model:sonnet hello');
-		expect(spec.providers).toEqual(['claude']);
+	it('parses agent, model, and text tokens', () => {
+		const spec = parseChatSearch('agent:claude model:sonnet hello');
+		expect(spec.agents).toEqual(['claude']);
 		expect(spec.models).toEqual(['sonnet']);
 		expect(spec.textTokens).toEqual(['hello']);
 	});
@@ -39,11 +39,11 @@ describe('parseChatSearch', () => {
 		expect(spec.textTokens).toEqual(['hello world']);
 	});
 
-	it('parses mixed tag, quoted text, and provider', () => {
-		const spec = parseChatSearch('tag:ops "some text" provider:claude');
+	it('parses mixed tag, quoted text, and agent', () => {
+		const spec = parseChatSearch('tag:ops "some text" agent:claude');
 		expect(spec.tags).toEqual([['ops']]);
 		expect(spec.textTokens).toEqual(['some text']);
-		expect(spec.providers).toEqual(['claude']);
+		expect(spec.agents).toEqual(['claude']);
 	});
 
 	it('parses status:active', () => {
@@ -51,7 +51,7 @@ describe('parseChatSearch', () => {
 		expect(spec).toEqual({
 			textTokens: [],
 			tags: [],
-			providers: [],
+			agents: [],
 			models: [],
 			status: 'active',
 			project: [],
@@ -63,7 +63,7 @@ describe('parseChatSearch', () => {
 		expect(spec).toEqual({
 			textTokens: [],
 			tags: [],
-			providers: [],
+			agents: [],
 			models: [],
 			status: 'unread',
 			project: [],
@@ -93,9 +93,9 @@ describe('parseChatSearch', () => {
 		expect(spec.tags).toEqual([['a', 'b'], ['c']]);
 	});
 
-	it('parses provider:a|b as OR values', () => {
-		const spec = parseChatSearch('provider:claude|chatgpt');
-		expect(spec.providers).toEqual(['claude', 'chatgpt']);
+	it('parses agent:a|b as OR values', () => {
+		const spec = parseChatSearch('agent:claude|chatgpt');
+		expect(spec.agents).toEqual(['claude', 'chatgpt']);
 	});
 
 	it('parses model:a|b as OR values', () => {
@@ -113,7 +113,7 @@ describe('parseChatSearch', () => {
 
 describe('serializeChatFilter', () => {
 	it('round-trips with parseChatSearch for simple cases', () => {
-		const query = 'tag:ops provider:claude hello';
+		const query = 'tag:ops agent:claude hello';
 		const spec = parseChatSearch(query);
 		const serialized = serializeChatFilter(spec);
 		const reparsed = parseChatSearch(serialized);
@@ -156,8 +156,8 @@ describe('serializeChatFilter', () => {
 		expect(reparsed).toEqual(spec);
 	});
 
-	it('round-trips pipe-separated providers', () => {
-		const query = 'provider:claude|chatgpt';
+	it('round-trips pipe-separated agents', () => {
+		const query = 'agent:claude|chatgpt';
 		const spec = parseChatSearch(query);
 		const serialized = serializeChatFilter(spec);
 		const reparsed = parseChatSearch(serialized);
@@ -287,7 +287,7 @@ describe('matchesChatFilter project', () => {
 	const chat = {
 		title: 'Test',
 		projectPath: '/workspace/garcon-monorepo',
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'sonnet' as const,
 		tags: [],
 		isProcessing: false,
@@ -339,7 +339,7 @@ describe('matchesChatFilter OR groups', () => {
 	const chat = {
 		title: 'Test',
 		projectPath: '/workspace/test',
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'sonnet' as const,
 		tags: ['ops', 'dev'] as string[],
 		isProcessing: false,

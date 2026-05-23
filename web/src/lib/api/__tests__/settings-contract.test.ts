@@ -17,7 +17,7 @@ function makeSnapshot(overrides?: Record<string, unknown>) {
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '' },
 		pinnedChatIds: [],
-		lastProvider: 'claude',
+		lastAgentId: 'claude',
 		lastProjectPath: '',
 		lastModel: '',
 		lastApiProviderId: null,

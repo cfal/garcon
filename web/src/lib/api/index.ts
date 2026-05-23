@@ -5,4 +5,5 @@ export * as auth from './auth.js';
 export * as chats from './chats.js';
 export * as files from './files.js';
 export * as settings from './settings.js';
-export * as providers from './providers.js';
+export * as agents from './agents.js';
+export * as apiProviders from './api-providers.js';

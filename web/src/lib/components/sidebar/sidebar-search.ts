@@ -1,7 +1,7 @@
 // Parses sidebar search queries into structured filter specs and matches
 // chats against them. Supports free-text search across title, projectPath,
 // firstMessage, lastMessage, and tags, plus structured prefix filters:
-// tag:X, provider:Y, model:Z, project:P. The | character creates OR groups
+// tag:X, agent:Y, model:Z, project:P. The | character creates OR groups
 // within an operator, e.g. tag:a|b matches chats with tag "a" or "b".
 
 /** An OR group — values within one group match if ANY element matches. */
@@ -10,21 +10,21 @@ type OrGroup = string[];
 export interface ChatFilterSpec {
 	textTokens: string[];
 	tags: OrGroup[];        // Each group is OR'd; groups are AND'd together
-	providers: string[];      // OR across all values
+	agents: string[];      // OR across all values
 	models: string[];         // OR across all values
 	status?: 'active' | 'unread';
 	project: string[];      // OR across all values
 }
 
 export function emptyFilterSpec(): ChatFilterSpec {
-	return { textTokens: [], tags: [], providers: [], models: [], project: [] };
+	return { textTokens: [], tags: [], agents: [], models: [], project: [] };
 }
 
 export function isEmptyFilter(spec: ChatFilterSpec): boolean {
 	return (
 		spec.textTokens.length === 0 &&
 		spec.tags.length === 0 &&
-		spec.providers.length === 0 &&
+		spec.agents.length === 0 &&
 		spec.models.length === 0 &&
 		spec.status === undefined &&
 		spec.project.length === 0
@@ -41,7 +41,7 @@ function parsePipeValue(raw: string): string[] | null {
 }
 
 /** Parses a raw search query into a structured filter spec.
- *  Prefix filters: tag:X, provider:Y, model:Z, project:P
+ *  Prefix filters: tag:X, agent:Y, model:Z, project:P
  *  The | character creates OR groups within a single operator value.
  *  Everything else is a free-text token. */
 export function parseChatSearch(query: string): ChatFilterSpec {
@@ -64,11 +64,11 @@ export function parseChatSearch(query: string): ChatFilterSpec {
 			if (!value) continue;
 			const parts = parsePipeValue(value);
 			if (parts) spec.tags.push(parts);
-		} else if (lower.startsWith('provider:')) {
-			const value = token.slice(9).trim();
+		} else if (lower.startsWith('agent:')) {
+			const value = token.slice(6).trim();
 			if (!value) continue;
 			const parts = parsePipeValue(value);
-			if (parts) spec.providers.push(...parts);
+			if (parts) spec.agents.push(...parts);
 		} else if (lower.startsWith('model:')) {
 			const value = token.slice(6).trim();
 			if (!value) continue;
@@ -125,7 +125,7 @@ function tokenize(input: string): string[] {
 export interface ChatFilterTarget {
 	title: string;
 	projectPath: string;
-	provider: string;
+	agentId: string;
 	model: string | null;
 	tags: string[];
 	isProcessing: boolean;
@@ -137,7 +137,7 @@ export interface ChatFilterTarget {
 /** Checks whether a chat matches a filter spec.
  *  - All text tokens must appear somewhere in the text haystack (AND)
  *  - Each tag OR group must have at least one match; groups are AND'd (AND)
- *  - Provider filters match any (OR)
+ *  - Agent filters match any (OR)
  *  - Model filters match any (OR)
  *  - Project filters match any value as substring (OR) */
 export function matchesChatFilter(chat: ChatFilterTarget, spec: ChatFilterSpec): boolean {
@@ -158,10 +158,10 @@ export function matchesChatFilter(chat: ChatFilterTarget, spec: ChatFilterSpec):
 		}
 	}
 
-	// Provider filter: chat must match at least one (OR)
-	if (spec.providers.length > 0) {
-		const chatProvider = chat.provider.toLowerCase();
-		if (!spec.providers.some((p) => chatProvider.includes(p))) return false;
+	// Agent filter: chat must match at least one (OR)
+	if (spec.agents.length > 0) {
+		const chatAgent = chat.agentId.toLowerCase();
+		if (!spec.agents.some((agent) => chatAgent.includes(agent))) return false;
 	}
 
 	// Model filter: chat must match at least one (OR)
@@ -199,7 +199,7 @@ export function serializeChatFilter(spec: ChatFilterSpec): string {
 	for (const group of spec.tags) {
 		parts.push(`tag:${group.join('|')}`);
 	}
-	for (const provider of spec.providers) parts.push(`provider:${provider}`);
+	for (const agent of spec.agents) parts.push(`agent:${agent}`);
 	for (const model of spec.models) parts.push(`model:${model}`);
 	if (spec.project.length > 0) {
 		parts.push(`project:${spec.project.join('|')}`);

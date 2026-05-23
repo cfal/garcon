@@ -272,8 +272,8 @@
 							<span class="text-muted-foreground">{m.sidebar_search_legend_tag()}</span>
 						</div>
 						<div class="flex gap-3">
-							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">provider:X</code>
-							<span class="text-muted-foreground">{m.sidebar_search_legend_provider()}</span>
+							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">agent:X</code>
+							<span class="text-muted-foreground">{m.sidebar_search_legend_agent()}</span>
 						</div>
 						<div class="flex gap-3">
 							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">model:X</code>

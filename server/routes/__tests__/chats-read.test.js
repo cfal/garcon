@@ -4,12 +4,8 @@ mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => undefined),
 }));
 
-mock.module('../../providers/loaders/claude-history-loader.js', () => ({
+mock.module('../../agents/claude/history-loader.js', () => ({
   getClaudeSessionMessagesFromNativePath: mock(() => undefined),
-}));
-
-mock.module('../../chats/resolve-native-path.js', () => ({
-  resolveMissingNativePath: mock(() => null),
 }));
 
 mock.module('../../chats/title-generator.js', () => ({
@@ -53,12 +49,12 @@ const historyCache = {
   getPaginatedMessages: mock(() => undefined),
   appendMessages: mock(() => Promise.resolve(undefined)),
 };
-const providers = {
+const agents = {
   startSession: mock(() => undefined),
-  isHarnessSessionRunning: mock(() => false),
+  isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
+const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
 
 const allMocks = [
   registry.getChat, registry.updateChat, metadata.getChatMetadata,
@@ -82,8 +78,8 @@ describe('POST /api/chats/read', () => {
     });
 
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { provider: 'claude', projectPath: '/proj' };
-      if (id === '200') return { provider: 'codex', projectPath: '/proj2' };
+      if (id === '100') return { agentId: 'claude', projectPath: '/proj' };
+      if (id === '200') return { agentId: 'codex', projectPath: '/proj2' };
       return null;
     });
     registry.updateChat.mockResolvedValue({});
@@ -107,7 +103,7 @@ describe('POST /api/chats/read', () => {
     });
 
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { provider: 'claude', projectPath: '/proj' };
+      if (id === '100') return { agentId: 'claude', projectPath: '/proj' };
       return null;
     });
     registry.updateChat.mockResolvedValue({});
@@ -140,7 +136,7 @@ describe('POST /api/chats/read', () => {
       ],
     });
     registry.getChat.mockImplementation((id) => {
-      if (id === '100' || id === '200') return { provider: 'claude', projectPath: '/proj' };
+      if (id === '100' || id === '200') return { agentId: 'claude', projectPath: '/proj' };
       return null;
     });
     registry.updateChat.mockResolvedValue({});
@@ -164,7 +160,7 @@ describe('POST /api/chats/read', () => {
     parseJsonBody.mockResolvedValue({
       entries: [{ chatId: '100', lastReadAt: newer }],
     });
-    registry.getChat.mockReturnValue({ provider: 'claude', projectPath: '/proj', lastReadAt: older });
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', lastReadAt: older });
     registry.updateChat.mockResolvedValue({});
 
     const request = new Request('http://localhost/api/chats/read', { method: 'POST' });
@@ -182,7 +178,7 @@ describe('POST /api/chats/read', () => {
     parseJsonBody.mockResolvedValue({
       entries: [{ chatId: '100', lastReadAt: older }],
     });
-    registry.getChat.mockReturnValue({ provider: 'claude', projectPath: '/proj', lastReadAt: existing });
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', lastReadAt: existing });
     registry.updateChat.mockResolvedValue({});
 
     const request = new Request('http://localhost/api/chats/read', { method: 'POST' });
@@ -198,7 +194,7 @@ describe('POST /api/chats/read', () => {
     parseJsonBody.mockResolvedValue({
       entries: [{ chatId: '100', lastReadAt: readAt }],
     });
-    registry.getChat.mockReturnValue({ provider: 'claude', projectPath: '/proj' });
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj' });
     registry.updateChat.mockResolvedValue({});
 
     const request = new Request('http://localhost/api/chats/read', { method: 'POST' });
@@ -220,7 +216,7 @@ describe('GET /api/chats includes read state', () => {
 
   it('returns lastReadAt and isUnread in session response', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'claude', projectPath: '/proj', tags: [], lastReadAt: '2026-02-25T10:00:00.000Z' },
+      '100': { agentId: 'claude', projectPath: '/proj', tags: [], lastReadAt: '2026-02-25T10:00:00.000Z' },
     }));
     const metaMap = new Map();
     metaMap.set('100', {
@@ -244,7 +240,7 @@ describe('GET /api/chats includes read state', () => {
 
   it('returns isUnread false when fully read', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'claude', projectPath: '/proj', tags: [], lastReadAt: '2026-02-25T13:00:00.000Z' },
+      '100': { agentId: 'claude', projectPath: '/proj', tags: [], lastReadAt: '2026-02-25T13:00:00.000Z' },
     }));
     const metaMap = new Map();
     metaMap.set('100', {
@@ -266,7 +262,7 @@ describe('GET /api/chats includes read state', () => {
 
   it('returns isUnread false when no activity', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'claude', projectPath: '/proj', tags: [] },
+      '100': { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
@@ -281,7 +277,7 @@ describe('GET /api/chats includes read state', () => {
 
   it('returns permissionMode, thinkingMode, and claudeThinkingMode in session response', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'claude', projectPath: '/proj', tags: [], permissionMode: 'acceptEdits', thinkingMode: 'think-hard', claudeThinkingMode: 'on' },
+      '100': { agentId: 'claude', projectPath: '/proj', tags: [], permissionMode: 'acceptEdits', thinkingMode: 'think-hard', claudeThinkingMode: 'on' },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
@@ -295,9 +291,9 @@ describe('GET /api/chats includes read state', () => {
     expect(body.sessions[0].claudeThinkingMode).toBe('on');
   });
 
-  it('defaults permissionMode, thinkingMode, and claudeThinkingMode for legacy sessions', async () => {
+  it('defaults permissionMode, thinkingMode, and claudeThinkingMode for partial persisted sessions', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'claude', projectPath: '/proj', tags: [] },
+      '100': { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
@@ -314,7 +310,7 @@ describe('GET /api/chats includes read state', () => {
   it('normalizes invalid permissionMode, thinkingMode, and claudeThinkingMode values', async () => {
     registry.listAllChats.mockImplementation(() => ({
       '100': {
-        provider: 'claude',
+        agentId: 'claude',
         projectPath: '/proj',
         tags: [],
         permissionMode: 'bogus',
@@ -344,7 +340,7 @@ describe('GET /api/v1/chats/details', () => {
 
   it('returns chat metadata and native path as a flat response', async () => {
     registry.getChat.mockReturnValue({
-      provider: 'claude',
+      agentId: 'claude',
       projectPath: '/proj',
       nativePath: '/tmp/session.jsonl',
     });
@@ -394,7 +390,7 @@ describe('GET /api/v1/chats/details', () => {
 
   it('returns empty details fields when metadata is missing', async () => {
     registry.getChat.mockReturnValue({
-      provider: 'claude',
+      agentId: 'claude',
       projectPath: '/proj',
       nativePath: '/tmp/session.jsonl',
     });

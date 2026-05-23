@@ -103,7 +103,7 @@ export async function reorderSavedSearches(
 export interface ChatFolderFilter {
 	textTokens: string[];
 	tags: string[][];
-	providers: string[];
+	agents: string[];
 	models: string[];
 	status?: 'active' | 'unread';
 	project: string[];

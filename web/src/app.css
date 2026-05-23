@@ -51,6 +51,9 @@
 		--color-provider-codex-bg: hsl(var(--provider-codex-bg));
 	--color-provider-codex-foreground: hsl(var(--provider-codex-foreground));
 	--color-provider-codex-border: hsl(var(--provider-codex-border));
+	--color-provider-cursor-bg: hsl(var(--provider-cursor-bg));
+	--color-provider-cursor-foreground: hsl(var(--provider-cursor-foreground));
+	--color-provider-cursor-border: hsl(var(--provider-cursor-border));
 	--color-provider-claude-bg: hsl(var(--provider-claude-bg));
 	--color-provider-claude-foreground: hsl(var(--provider-claude-foreground));
 	--color-provider-claude-border: hsl(var(--provider-claude-border));
@@ -199,6 +202,9 @@
 		--provider-codex-bg: 146 48% 94%;
 	--provider-codex-foreground: 146 70% 22%;
 	--provider-codex-border: 146 35% 78%;
+	--provider-cursor-bg: 256 78% 96%;
+	--provider-cursor-foreground: 256 62% 30%;
+	--provider-cursor-border: 256 42% 78%;
 	--provider-claude-bg: 214 100% 95%;
 	--provider-claude-foreground: 214 80% 28%;
 	--provider-claude-border: 214 55% 78%;
@@ -371,6 +377,9 @@
 		--provider-codex-bg: 146 38% 22%;
 	--provider-codex-foreground: 146 70% 85%;
 	--provider-codex-border: 146 32% 36%;
+	--provider-cursor-bg: 256 34% 24%;
+	--provider-cursor-foreground: 256 82% 88%;
+	--provider-cursor-border: 256 30% 36%;
 	--provider-claude-bg: 214 48% 24%;
 	--provider-claude-foreground: 214 95% 86%;
 	--provider-claude-border: 214 40% 36%;

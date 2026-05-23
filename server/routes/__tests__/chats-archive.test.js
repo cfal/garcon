@@ -4,12 +4,8 @@ mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => undefined),
 }));
 
-mock.module('../../providers/loaders/claude-history-loader.js', () => ({
+mock.module('../../agents/claude/history-loader.js', () => ({
   getClaudeSessionMessagesFromNativePath: mock(() => undefined),
-}));
-
-mock.module('../../chats/resolve-native-path.js', () => ({
-  resolveMissingNativePath: mock(() => Promise.resolve(null)),
 }));
 
 mock.module('../../chats/title-generator.js', () => ({
@@ -50,12 +46,12 @@ const historyCache = {
   getPaginatedMessages: mock(() => undefined),
   appendMessages: mock(() => Promise.resolve(undefined)),
 };
-const providers = {
+const agents = {
   startSession: mock(() => undefined),
-  isHarnessSessionRunning: mock(() => false),
+  isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
+const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
 
 const allMocks = [
   registry.getChat,
@@ -95,7 +91,7 @@ describe('POST /api/chats/archive', () => {
   });
 
   it('delegates to settings.toggleArchive and returns result', async () => {
-    registry.getChat.mockImplementation(() => ({ provider: 'claude', projectPath: '/proj' }));
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.toggleArchive.mockImplementation(() => Promise.resolve({ isArchived: true }));
 
     const url = new URL('http://localhost/api/chats/archive?chatId=500');
@@ -110,7 +106,7 @@ describe('POST /api/chats/archive', () => {
   });
 
   it('returns isArchived false when unarchiving', async () => {
-    registry.getChat.mockImplementation(() => ({ provider: 'claude', projectPath: '/proj' }));
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.toggleArchive.mockImplementation(() => Promise.resolve({ isArchived: false }));
 
     const url = new URL('http://localhost/api/chats/archive?chatId=500');
@@ -133,7 +129,7 @@ describe('POST /api/chats/pin', () => {
   });
 
   it('delegates to settings.togglePin and returns result', async () => {
-    registry.getChat.mockImplementation(() => ({ provider: 'claude', projectPath: '/proj' }));
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.togglePin.mockImplementation(() => Promise.resolve({ isPinned: true }));
 
     const url = new URL('http://localhost/api/chats/pin?chatId=500');
@@ -148,7 +144,7 @@ describe('POST /api/chats/pin', () => {
   });
 
   it('returns isPinned false when unpinning', async () => {
-    registry.getChat.mockImplementation(() => ({ provider: 'claude', projectPath: '/proj' }));
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.togglePin.mockImplementation(() => Promise.resolve({ isPinned: false }));
 
     const url = new URL('http://localhost/api/chats/pin?chatId=500');
@@ -172,7 +168,7 @@ describe('GET /api/chats archive fields', () => {
 
   it('includes isArchived field on sessions', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'claude', projectPath: '/proj', tags: [] },
+      '100': { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
@@ -189,9 +185,9 @@ describe('GET /api/chats archive fields', () => {
 
   it('returns sessions in pinned, normal, archived order', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { provider: 'claude', projectPath: '/proj', tags: [] },
-      '200': { provider: 'claude', projectPath: '/proj', tags: [] },
-      '300': { provider: 'claude', projectPath: '/proj', tags: [] },
+      '100': { agentId: 'claude', projectPath: '/proj', tags: [] },
+      '200': { agentId: 'claude', projectPath: '/proj', tags: [] },
+      '300': { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);

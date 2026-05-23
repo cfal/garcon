@@ -6,7 +6,6 @@ import {
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../common/chat-modes.ts';
-import { supportsFork } from '../../common/providers.ts';
 
 function escapeRegExp(input) {
   return String(input).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -30,9 +29,9 @@ export function assertJsonlValid(content, targetPath) {
   }
 }
 
-function buildForkDestination(sourcePath, newProviderSessionId) {
+function buildForkDestination(sourcePath, newAgentSessionId) {
   const dir = path.dirname(sourcePath);
-  return path.join(dir, `${newProviderSessionId}.jsonl`);
+  return path.join(dir, `${newAgentSessionId}.jsonl`);
 }
 
 function extractFirstLine(text) {
@@ -60,42 +59,55 @@ export async function forkChatFileCopy({
   registry,
   settings,
   metadata,
+  forkAgentSession,
+  supportsFork,
 }) {
-  const sourceProvider = sourceSession.provider;
-  if (!supportsFork(sourceProvider)) {
-    throw new Error(`Provider does not support fork: ${sourceProvider}`);
+  const sourceAgentId = sourceSession.agentId;
+  if (supportsFork && !supportsFork(sourceAgentId)) {
+    throw new Error(`Agent does not support fork: ${sourceAgentId}`);
   }
 
-  let sourceNativePath = sourceSession.nativePath || null;
-  if (!sourceNativePath) {
-    throw new Error(`Source native path unavailable for chat ${sourceChatId}`);
-  }
-
-  const sourceProviderSessionId = sourceSession.providerSessionId;
-  if (!sourceProviderSessionId) {
-    throw new Error(`Source providerSessionId missing for chat ${sourceChatId}`);
+  const sourceAgentSessionId = sourceSession.agentSessionId;
+  if (!sourceAgentSessionId) {
+    throw new Error(`Source agentSessionId missing for chat ${sourceChatId}`);
   }
 
   const sourceTitle = resolveVisibleChatTitle(sourceChatId, settings, metadata);
   const nextForkOrdinal = normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1;
   const forkTitle = `${sourceTitle} (${nextForkOrdinal})`;
 
-  const newProviderSessionId = crypto.randomUUID();
-  const destinationNativePath = buildForkDestination(sourceNativePath, newProviderSessionId);
+  const nativeFork = forkAgentSession
+    ? await forkAgentSession({ sourceSession, sourceChatId, targetChatId })
+    : null;
 
-  const raw = await fs.readFile(sourceNativePath, 'utf8');
-  const rewritten = raw
-    .split('\n')
-    .map((line) => replaceUuidBounded(line, sourceProviderSessionId, newProviderSessionId))
-    .join('\n');
+  let newAgentSessionId = nativeFork?.agentSessionId || null;
+  let destinationNativePath = nativeFork?.nativePath || null;
+  let ownsDestinationFile = false;
 
-  assertJsonlValid(rewritten, destinationNativePath);
+  if (!newAgentSessionId || !destinationNativePath) {
+    const sourceNativePath = sourceSession.nativePath || null;
+    if (!sourceNativePath) {
+      throw new Error(`Source native path unavailable for chat ${sourceChatId}`);
+    }
 
-  await fs.writeFile(destinationNativePath, rewritten, 'utf8');
+    newAgentSessionId = crypto.randomUUID();
+    destinationNativePath = buildForkDestination(sourceNativePath, newAgentSessionId);
+
+    const raw = await fs.readFile(sourceNativePath, 'utf8');
+    const rewritten = raw
+      .split('\n')
+      .map((line) => replaceUuidBounded(line, sourceAgentSessionId, newAgentSessionId))
+      .join('\n');
+
+    assertJsonlValid(rewritten, destinationNativePath);
+
+    await fs.writeFile(destinationNativePath, rewritten, 'utf8');
+    ownsDestinationFile = true;
+  }
 
   const created = registry.addChat({
     id: targetChatId,
-    provider: sourceProvider,
+    agentId: sourceAgentId,
     model: sourceSession.model || null,
     apiProviderId: sourceSession.apiProviderId ?? null,
     modelEndpointId: sourceSession.modelEndpointId ?? null,
@@ -103,7 +115,7 @@ export async function forkChatFileCopy({
     projectPath: sourceSession.projectPath,
     nativePath: destinationNativePath,
     tags: Array.isArray(sourceSession.tags) ? [...sourceSession.tags] : [],
-    providerSessionId: newProviderSessionId,
+    agentSessionId: newAgentSessionId,
     nextForkOrdinal: 1,
     permissionMode: normalizePermissionMode(sourceSession.permissionMode),
     thinkingMode: normalizeThinkingMode(sourceSession.thinkingMode),
@@ -111,7 +123,7 @@ export async function forkChatFileCopy({
   });
 
   if (!created) {
-    await fs.unlink(destinationNativePath).catch(() => {});
+    if (ownsDestinationFile) await fs.unlink(destinationNativePath).catch(() => {});
     throw new Error(`Chat ID collision: ${targetChatId}`);
   }
 
@@ -128,8 +140,8 @@ export async function forkChatFileCopy({
   return {
     sourceChatId,
     chatId: targetChatId,
-    provider: sourceProvider,
-    providerSessionId: newProviderSessionId,
+    agentId: sourceAgentId,
+    agentSessionId: newAgentSessionId,
     nativePath: destinationNativePath,
   };
 }

@@ -36,11 +36,13 @@ Environment Variables:
   GARCON_HTTP_IDLE_TIMEOUT_SECONDS HTTP idle timeout seconds. Default: 120
   GARCON_TELEGRAM_BOT_TOKEN        Telegram Bot API token for chat notifications.
   CLAUDE_BINARY                    Claude CLI binary path. Default: claude
+  GARCON_CURSOR_BINARY             Cursor Agent CLI binary path. Default: cursor-agent
+  CURSOR_API_KEY                   Cursor Agent API key for native Cursor sessions.
   SHELL                            Fallback shell path when GARCON_TERMINAL_SHELL is unset.
 
 Notes:
   Environment variables take precedence over CLI options where both are available.
-  Server and PTY/provider subprocesses inherit the current process environment.
+  Server and PTY/agent subprocesses inherit the current process environment.
 `;
   process.stdout.write(helpText);
 }

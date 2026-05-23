@@ -31,7 +31,7 @@
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let isSaving = $state(false);
 	let saveError = $state<string | null>(null);
-	let editableFilter = $state<ChatFolderFilter>({ textTokens: [], tags: [], providers: [], models: [], project: [] });
+	let editableFilter = $state<ChatFolderFilter>({ textTokens: [], tags: [], agents: [], models: [], project: [] });
 
 	$effect(() => {
 		if (saveFolderDialog) {
@@ -39,7 +39,7 @@
 			editableFilter = {
 				textTokens: [...saveFolderDialog.filter.textTokens],
 				tags: saveFolderDialog.filter.tags.map((g) => [...g]),
-				providers: [...saveFolderDialog.filter.providers],
+				agents: [...saveFolderDialog.filter.agents],
 				models: [...saveFolderDialog.filter.models],
 				project: [...saveFolderDialog.filter.project],
 				...(saveFolderDialog.filter.status ? { status: saveFolderDialog.filter.status } : {}),
@@ -60,7 +60,7 @@
 
 	interface PreviewChip {
 		label: string;
-		type: 'status' | 'text' | 'tag' | 'provider' | 'model';
+		type: 'status' | 'text' | 'tag' | 'agent' | 'model';
 		value: string;
 	}
 
@@ -74,8 +74,8 @@
 		for (const tagGroup of editableFilter.tags) {
 			chips.push({ label: `tag:${tagGroup.join('|')}`, type: 'tag', value: tagGroup.join('|') });
 		}
-		for (const provider of editableFilter.providers) {
-			chips.push({ label: `provider:${provider}`, type: 'provider', value: provider });
+		for (const agent of editableFilter.agents) {
+			chips.push({ label: `agent:${agent}`, type: 'agent', value: agent });
 		}
 		for (const model of editableFilter.models) {
 			chips.push({ label: `model:${model}`, type: 'model', value: model });
@@ -90,8 +90,8 @@
 			editableFilter = { ...editableFilter, textTokens: editableFilter.textTokens.filter(t => t !== chip.value) };
 		} else if (chip.type === 'tag') {
 			editableFilter = { ...editableFilter, tags: editableFilter.tags.filter(g => g.join('|') !== chip.value) };
-		} else if (chip.type === 'provider') {
-			editableFilter = { ...editableFilter, providers: editableFilter.providers.filter(p => p !== chip.value) };
+		} else if (chip.type === 'agent') {
+			editableFilter = { ...editableFilter, agents: editableFilter.agents.filter(p => p !== chip.value) };
 		} else if (chip.type === 'model') {
 			editableFilter = { ...editableFilter, models: editableFilter.models.filter(m => m !== chip.value) };
 		}

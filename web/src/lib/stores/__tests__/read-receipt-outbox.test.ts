@@ -128,7 +128,7 @@ describe('ReadReceiptOutboxStore', () => {
 		// Set up sessions with the chat so patchLastReadAt works.
 		sessions.upsertFromServer([{
 			id: 'a',
-			provider: 'claude',
+			agentId: 'claude',
 			model: 'opus',
 			title: 'A',
 			projectPath: '/p',
@@ -162,7 +162,7 @@ describe('ReadReceiptOutboxStore', () => {
 		sessions.upsertFromServer([
 			{
 				id: 'a',
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				title: 'Unread',
 				projectPath: '/p',
@@ -181,7 +181,7 @@ describe('ReadReceiptOutboxStore', () => {
 			},
 			{
 				id: 'b',
-				provider: 'claude',
+				agentId: 'claude',
 				model: 'opus',
 				title: 'Read',
 				projectPath: '/p',

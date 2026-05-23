@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { enqueueChatMessage, forkChat, forkRunChat, getChatQueue, runChat } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 import { AssistantMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
+import type { PendingUserInput } from '$shared/pending-user-input';
 
 vi.mock('$lib/api/chats.js', () => ({
 	dequeueChatMessage: vi.fn(),
@@ -41,7 +42,7 @@ function createRunningChat(overrides: Partial<Record<string, unknown>> = {}) {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
 		title: 'Unread chat',
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'none',
@@ -61,6 +62,44 @@ function createRunningChat(overrides: Partial<Record<string, unknown>> = {}) {
 
 function createDeps(chat = createRunningChat()) {
 	const waitForConnection = vi.fn(() => new Promise<void>(() => {}));
+	const chatState = {
+		chatMessages: [] as ChatMessage[],
+		pendingUserInputs: [] as PendingUserInput[],
+		isUserScrolledUp: false,
+		clearMessages: vi.fn(),
+		resetForNewChat: vi.fn(() => {
+			chatState.chatMessages = [];
+			chatState.pendingUserInputs = [];
+		}),
+		restoreMessages: vi.fn(() => false),
+		loadMessages: vi.fn(() => new Promise<never>(() => {})),
+		setMessages: vi.fn((messages: ChatMessage[]) => {
+			chatState.chatMessages = messages;
+		}),
+		setPendingUserInputs: vi.fn((inputs: PendingUserInput[]) => {
+			chatState.pendingUserInputs = inputs;
+		}),
+		upsertPendingUserInput: vi.fn((input: PendingUserInput) => {
+			const index = chatState.pendingUserInputs.findIndex((existing) => existing.clientRequestId === input.clientRequestId);
+			if (index >= 0) {
+				chatState.pendingUserInputs[index] = input;
+				return;
+			}
+			chatState.pendingUserInputs = [...chatState.pendingUserInputs, input];
+		}),
+		updatePendingUserInputDeliveryStatus: vi.fn(
+			(clientRequestId: string, deliveryStatus: 'submitting' | 'accepted' | 'failed') => {
+				chatState.pendingUserInputs = chatState.pendingUserInputs.map((input) =>
+					input.clientRequestId === clientRequestId
+						? { ...input, deliveryStatus }
+						: input,
+				);
+			},
+		),
+		snapshotCache: {
+			markValidated: vi.fn(),
+		},
+	};
 	return {
 		deps: {
 			sessions: {
@@ -76,18 +115,7 @@ function createDeps(chat = createRunningChat()) {
 				setChatProcessing: vi.fn(),
 				setSelectedChatId: vi.fn(),
 			},
-			chatState: {
-					chatMessages: [] as ChatMessage[],
-				isUserScrolledUp: false,
-				clearMessages: vi.fn(),
-				resetForNewChat: vi.fn(),
-				restoreMessages: vi.fn(() => false),
-				loadMessages: vi.fn(() => new Promise<never>(() => {})),
-				setMessages: vi.fn(),
-				snapshotCache: {
-					markValidated: vi.fn(),
-				},
-			},
+			chatState,
 			composerState: {
 				inputText: '',
 				images: [],
@@ -96,10 +124,10 @@ function createDeps(chat = createRunningChat()) {
 				saveDraft: vi.fn(),
 				restoreDraft: vi.fn(),
 			},
-			providerState: {
-					setProvider: vi.fn(),
+			agentState: {
+					setAgentId: vi.fn(),
 					setModelSelection: vi.fn(),
-					provider: 'claude',
+					agentId: 'claude',
 					model: '',
 					apiProviderId: null,
 					modelEndpointId: null,
@@ -208,6 +236,33 @@ describe('ConversationSessionController', () => {
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
 	});
 
+	it('merges loaded Cursor user echoes with local pending messages by request identity', async () => {
+		const { deps } = createDeps();
+		deps.chatState.chatMessages = [
+			new UserMessage('2026-05-14T00:00:00.000Z', 'hello', undefined, {
+				messageId: 'msg-1',
+				clientRequestId: 'req-1',
+				deliveryStatus: 'accepted',
+			}),
+		];
+		deps.chatState.loadMessages = vi.fn().mockResolvedValue([
+			new UserMessage('2026-05-14T00:00:01.000Z', 'hello', undefined, {
+				clientRequestId: 'req-1',
+				upstreamRequestId: 'cursor-req-1',
+			}),
+			new AssistantMessage('2026-05-14T00:00:02.000Z', 'hi'),
+		]);
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.loadChat('chat-1');
+
+		expect(deps.chatState.setMessages).toHaveBeenCalledTimes(1);
+		const merged = vi.mocked(deps.chatState.setMessages).mock.calls[0][0] as ChatMessage[];
+		expect(merged.filter((message) => message.type === 'user-message')).toHaveLength(1);
+		expect((merged[0] as UserMessage).metadata?.upstreamRequestId).toBe('cursor-req-1');
+		expect(merged.map((message) => message.type)).toEqual(['user-message', 'assistant-message']);
+	});
+
 	it('submits /fork with a message as a fork-run request after appending the status message', async () => {
 		const chat = createRunningChat({ id: '123' });
 		const { deps } = createDeps(chat);
@@ -256,7 +311,7 @@ describe('ConversationSessionController', () => {
 			success: true,
 			sourceChatId: '123',
 			chatId: '456',
-			provider: 'claude',
+			agentId: 'claude',
 		});
 		const controller = new ConversationSessionController(deps as never);
 
@@ -290,22 +345,22 @@ describe('ConversationSessionController', () => {
 		}>();
 		mockRunChat.mockReturnValueOnce(accepted.promise);
 		const { deps } = createDeps();
-		deps.providerState.model = 'opus';
+		deps.agentState.model = 'opus';
 		deps.composerState.inputText = 'hello over REST';
 		const controller = new ConversationSessionController(deps as never);
 
 		const submit = controller.submitForChat('chat-1');
 		await Promise.resolve();
 
-		expect(deps.chatState.chatMessages).toHaveLength(1);
-		const pending = deps.chatState.chatMessages[0] as UserMessage;
+		expect(deps.chatState.pendingUserInputs).toHaveLength(1);
+		const pending = deps.chatState.pendingUserInputs[0];
 		expect(pending.content).toBe('hello over REST');
-		expect(pending.metadata?.clientRequestId).toEqual(expect.any(String));
-		expect(pending.metadata?.messageId).toEqual(expect.any(String));
-		expect(pending.metadata?.deliveryStatus).toBe('submitting');
+		expect(pending.clientRequestId).toEqual(expect.any(String));
+		expect(pending.clientMessageId).toEqual(expect.any(String));
+		expect(pending.deliveryStatus).toBe('submitting');
 		expect(mockRunChat).toHaveBeenCalledWith(expect.objectContaining({
-			clientRequestId: pending.metadata?.clientRequestId,
-			clientMessageId: pending.metadata?.messageId,
+			clientRequestId: pending.clientRequestId,
+			clientMessageId: pending.clientMessageId,
 			chatId: 'chat-1',
 			command: 'hello over REST',
 			model: 'opus',
@@ -315,7 +370,7 @@ describe('ConversationSessionController', () => {
 		accepted.resolve({
 			success: true,
 			commandType: 'agent-run',
-			clientRequestId: pending.metadata!.clientRequestId!,
+			clientRequestId: pending.clientRequestId,
 			chatId: 'chat-1',
 			turnId: 'turn-1',
 			status: 'accepted',
@@ -323,8 +378,8 @@ describe('ConversationSessionController', () => {
 		});
 		await submit;
 
-		const delivered = deps.chatState.chatMessages[0] as UserMessage;
-		expect(delivered.metadata?.deliveryStatus).toBe('accepted');
+		const delivered = deps.chatState.pendingUserInputs[0];
+		expect(delivered.deliveryStatus).toBe('accepted');
 		expect(deps.lifecycle.activateLoading).toHaveBeenCalled();
 		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-1', true);
 	});
@@ -332,14 +387,14 @@ describe('ConversationSessionController', () => {
 	it('marks the pending user message failed and restores composer input on REST rejection', async () => {
 		mockRunChat.mockRejectedValueOnce(new Error('network down'));
 		const { deps } = createDeps();
-		deps.providerState.model = 'opus';
+		deps.agentState.model = 'opus';
 		deps.composerState.inputText = 'please send';
 		const controller = new ConversationSessionController(deps as never);
 
 		await controller.submitForChat('chat-1');
 
-		expect((deps.chatState.chatMessages[0] as UserMessage).metadata?.deliveryStatus).toBe('failed');
-		expect(deps.chatState.chatMessages[1]).toMatchObject({
+		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('failed');
+		expect(deps.chatState.chatMessages[0]).toMatchObject({
 			type: 'error',
 			content: 'Failed to send message: network down',
 		});
@@ -380,21 +435,25 @@ describe('ConversationSessionController', () => {
 	});
 
 	it('keeps local pending command messages when a REST history load returns an older snapshot', async () => {
-		const pending = new UserMessage('2026-05-14T00:00:01.000Z', 'pending', undefined, {
-			messageId: 'msg-1',
+		const pending: PendingUserInput = {
+			chatId: 'chat-1',
 			clientRequestId: 'req-1',
+			clientMessageId: 'msg-1',
+			content: 'pending',
+			createdAt: '2026-05-14T00:00:01.000Z',
 			deliveryStatus: 'submitting',
-		});
+		};
 		const loaded = [new AssistantMessage('2026-05-14T00:00:00.000Z', 'older server snapshot')];
 		const { deps } = createDeps();
-		deps.chatState.chatMessages = [pending];
+		deps.chatState.pendingUserInputs = [pending];
 		deps.chatState.restoreMessages = vi.fn(() => false);
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue(loaded);
 		const controller = new ConversationSessionController(deps as never);
 
 		await controller.loadChat('chat-1');
 
-		expect(deps.chatState.setMessages).toHaveBeenCalledWith([loaded[0], pending]);
+		expect(deps.chatState.setMessages).toHaveBeenCalledWith([loaded[0]]);
+		expect(deps.chatState.pendingUserInputs).toEqual([pending]);
 	});
 
 });

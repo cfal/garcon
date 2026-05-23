@@ -1,6 +1,7 @@
 // Composition root. Instantiates all services and wires them together.
 // This is the single place where dependencies are resolved.
 
+import path from 'path';
 import {
   getPort,
   getBindAddress,
@@ -19,7 +20,6 @@ import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/http-route.js';
 import { verifyAuthToken } from './auth/token.js';
 import { init as initAuthStore } from './auth/store.js';
-import { resolveMissingNativePath } from './chats/resolve-native-path.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 
 // Classes
@@ -31,26 +31,13 @@ import { PathCache } from './chats/path-cache.js';
 import { ShellManager } from './ws/shell.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { HistoryCache } from './chats/history-cache.js';
-import { ClaudeProvider } from './providers/claude-cli.js';
-import { CodexProvider } from './providers/codex.js';
-import { OpenCodeProvider } from './providers/opencode.js';
-import { AmpProvider } from './providers/amp-cli.js';
-import { FactoryProvider } from './providers/factory-cli.js';
-import { PiProvider } from './providers/pi-cli.js';
-import { ProviderRegistry } from './providers/index.js';
-import { ApiProviderStore } from './providers/api-provider-store.js';
-import { ApiProviderEndpointResolver } from './providers/api-provider-endpoint-resolver.js';
-import {
-  createClaudeAdapter,
-  createCodexAdapter,
-  createOpenCodeAdapter,
-  createAmpAdapter,
-  createFactoryAdapter,
-  createPiAdapter,
-  createDirectOpenAiCompatibleRouterAdapter,
-  createDirectOpenAiResponsesCompatibleRouterAdapter,
-  createDirectAnthropicCompatibleRouterAdapter,
-} from './providers/provider-adapters.js';
+import { PendingUserInputService } from './chats/pending-user-input-service.js';
+import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
+import { ApiProviderStore } from './api-providers/store.js';
+import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
+import { ApiProviderService } from './api-providers/service.js';
+import { CommandLedger } from './commands/command-ledger.js';
+import { ChatCommandService } from './commands/chat-command-service.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
@@ -67,6 +54,8 @@ import {
   ChatSessionStoppedMessage,
   QueueStateUpdatedMessage,
   QueueDispatchingMessage,
+  PendingUserInputUpdatedMessage,
+  PendingUserInputClearedMessage,
   SettingsChangedMessage,
   WsFaultMessage,
 } from '../common/ws-events.ts';
@@ -83,7 +72,7 @@ export async function startServer() {
   try {
     const workspaceDir = getWorkspaceDir();
 
-    // Tier 0: Leaf modules (no inter-service dependencies)
+    // Leaf modules with no inter-service dependencies.
     const chatRegistry = new ChatRegistry(workspaceDir);
     const settings = new SettingsStore(workspaceDir);
     const pathCache = new PathCache();
@@ -91,70 +80,58 @@ export async function startServer() {
 
     await initAuthStore();
     await chatRegistry.init();
-    await chatRegistry.reconcileSessions(resolveMissingNativePath);
     await settings.init();
 
-    await settings.reconcileWithRegistry(chatRegistry);
-
-    // Tier 1: Standalone providers (EventEmitter-based, no deps)
-    const claudeProvider = new ClaudeProvider();
-    const codexProvider = new CodexProvider();
-    const opencodeProvider = new OpenCodeProvider();
-    const ampProvider = new AmpProvider();
-    const factoryProvider = new FactoryProvider();
-    const piProvider = new PiProvider();
-
-    // Tier 1.5: User-managed API provider store and resolver
+    // User-managed API provider store and resolver.
     const apiProviderStore = new ApiProviderStore();
     await apiProviderStore.init();
 
     const endpointResolver = new ApiProviderEndpointResolver(() => apiProviderStore.list());
 
-    // Build harness adapters from concrete harness instances.
-    const claudeAdapter = createClaudeAdapter(claudeProvider);
-    const codexAdapter = createCodexAdapter(codexProvider);
-    const opencodeAdapter = createOpenCodeAdapter(opencodeProvider);
-    const ampAdapter = createAmpAdapter(ampProvider);
-    const factoryAdapter = createFactoryAdapter(factoryProvider);
-    const piAdapter = createPiAdapter(piProvider);
-    const directOpenAiResponsesAdapter = createDirectOpenAiResponsesCompatibleRouterAdapter(apiProviderStore);
-    const directOpenAiAdapter = createDirectOpenAiCompatibleRouterAdapter(apiProviderStore);
-    const directAnthropicAdapter = createDirectAnthropicCompatibleRouterAdapter(apiProviderStore);
-
-    const initialAdapters = [
-      claudeAdapter,
-      directAnthropicAdapter,
-      codexAdapter,
-      directOpenAiResponsesAdapter,
-      directOpenAiAdapter,
-      opencodeAdapter,
-      ampAdapter,
-      factoryAdapter,
-      piAdapter,
-    ];
-
-    // Tier 2: Harness registry wrapping adapters + registry + store + resolver
-    const providerRegistry = new ProviderRegistry({
-      registry: chatRegistry,
-      adapters: initialAdapters,
-      endpointResolver,
-      apiProviderStore,
-      opencodeInstance: opencodeProvider,
+    const agentSuite = createDefaultAgentSuite({
+      workspaceDir,
+      apiProviderReader: apiProviderStore,
     });
 
-    // Tier 3: Chat infrastructure (uses ProviderRegistry)
-    const metadata = new MetadataIndex(chatRegistry, providerRegistry);
+    const apiProviders = new ApiProviderService({
+      store: apiProviderStore,
+      isApiProviderReferenced(apiProviderId) {
+        return Object.values(chatRegistry.listAllChats()).some((entry) => entry.apiProviderId === apiProviderId);
+      },
+    });
+
+    // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
+    const agentRegistry = new AgentRegistry({
+      registry: chatRegistry,
+      agents: agentSuite.agents,
+      endpointResolver,
+    });
+
+    await chatRegistry.reconcileSessions((session) => agentRegistry.resolveNativePath(session));
+    await settings.reconcileWithRegistry(chatRegistry);
+
+    // Chat infrastructure uses the agent registry through narrow injected APIs.
+    const metadata = new MetadataIndex(chatRegistry, agentRegistry, {
+      metadataPath: path.join(workspaceDir, 'chat-metadata.json'),
+    });
     await metadata.init();
 
-    const historyCache = new HistoryCache(chatRegistry, metadata, providerRegistry);
+    const historyCache = new HistoryCache(chatRegistry, metadata, agentRegistry);
     historyCache.init();
+    const pendingInputs = new PendingUserInputService(historyCache);
 
     const shareStore = new ShareStore(workspaceDir);
     await shareStore.init();
 
-    const queue = new QueueManager(workspaceDir, providerRegistry, historyCache);
+    const queue = new QueueManager(workspaceDir, agentRegistry, pendingInputs);
+    const commandLedger = new CommandLedger(workspaceDir);
+    const chatCommands = new ChatCommandService({
+      chats: chatRegistry,
+      queue,
+      ledger: commandLedger,
+    });
 
-    // Telegram notifications (wires itself to provider + queue events).
+    // Telegram notifications wire themselves to agent and queue events.
     const telegramNotifier = new TelegramNotifier(getTelegramBotToken());
     // Fall back to persisted bot token if env var is empty.
     if (!telegramNotifier.isConfigured) {
@@ -163,10 +140,10 @@ export async function startServer() {
       if (persistedToken) telegramNotifier.setBotToken(persistedToken);
     }
     // eslint-disable-next-line no-unused-vars
-    const _attentionTracker = new AttentionTracker(providerRegistry, queue, settings, chatRegistry, historyCache, telegramNotifier);
+    const _attentionTracker = new AttentionTracker(agentRegistry, queue, settings, chatRegistry, historyCache, telegramNotifier);
 
-    // Start provider purge timers
-    providerRegistry.startPurgeTimers();
+    // Start agent runtime purge timers.
+    agentRegistry.startPurgeTimers();
 
     // Recover stale chat queues from previous server runs.
     try {
@@ -178,14 +155,15 @@ export async function startServer() {
     // Build route and WS handler tables
     const routes = createAllRoutes(
       chatRegistry, settings, queue, pathCache, metadata, historyCache,
-      providerRegistry, telegramNotifier, shareStore,
+      agentRegistry, pendingInputs, telegramNotifier, shareStore, apiProviders, chatCommands,
     );
 
-    const chatHandler = new ChatHandler(providerRegistry, queue, historyCache, chatRegistry, {
+    const chatHandler = new ChatHandler(agentRegistry, queue, historyCache, chatRegistry, pendingInputs, {
       settings,
       metadata,
       forkChatFileCopy,
-    });
+      forkAgentSession: agentRegistry.forkAgentSession.bind(agentRegistry),
+    }, chatCommands);
     const wsHandlers = {
       '/shell': shellManager.createHandler(),
       '/ws': chatHandler.createHandler(),
@@ -282,21 +260,27 @@ export async function startServer() {
     // active or routes are called, both of which happen after server is up.
     const broadcast = (payload) => server.publish('chat', JSON.stringify(payload));
 
-    // Wire provider events to broadcast via ProviderRegistry fan-out.
+    // Wire agent events to broadcast via AgentRegistry fan-out.
     // HistoryCache's init() already self-wired appendMessages via
-    // providers.onMessages(), so only broadcast wiring is needed here.
-    providerRegistry.onMessages((chatId, messages, metadata) => {
-      broadcast(new AgentRunOutputMessage(chatId, messages, metadata?.turnId, metadata?.clientRequestId));
+    // agentRegistry.onMessages(), so only broadcast wiring is needed here.
+    agentRegistry.onMessages((chatId, messages, metadata) => {
+      broadcast(new AgentRunOutputMessage(chatId, messages, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
+      pendingInputs.reconcile(chatId).catch((err) => {
+        console.warn('pending-inputs: reconcile after messages failed:', err.message);
+      });
     });
-    providerRegistry.onProcessing((chatId, isProcessing) => {
+    agentRegistry.onProcessing((chatId, isProcessing) => {
       broadcast(new ChatProcessingUpdatedMessage(chatId, isProcessing));
     });
-    providerRegistry.onSessionCreated((chatId) => {
+    agentRegistry.onSessionCreated((chatId) => {
       broadcast(new ChatSessionCreatedMessage(chatId));
     });
-    providerRegistry.onFinished((chatId, exitCode, metadata) => {
-      broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId));
-      // Defer idle check to next microtask so the provider has time to
+    agentRegistry.onFinished((chatId, exitCode, metadata) => {
+      broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
+      pendingInputs.reconcile(chatId).catch((err) => {
+        console.warn('pending-inputs: reconcile after finish failed:', err.message);
+      });
+      // Defer idle check to next microtask so the runtime has time to
       // clear its isRunning flag (emitFinished fires before the flag flip).
       queueMicrotask(() => {
         queue.checkChatIdle(chatId).catch((err) => {
@@ -304,8 +288,11 @@ export async function startServer() {
         });
       });
     });
-    providerRegistry.onFailed((chatId, errorMessage, metadata) => {
-      broadcast(new AgentRunFailedMessage(chatId, errorMessage, metadata?.turnId, metadata?.clientRequestId));
+    agentRegistry.onFailed((chatId, errorMessage, metadata) => {
+      broadcast(new AgentRunFailedMessage(chatId, errorMessage, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
+      pendingInputs.reconcile(chatId).catch((err) => {
+        console.warn('pending-inputs: reconcile after failure failed:', err.message);
+      });
       queueMicrotask(() => {
         queue.checkChatIdle(chatId).catch((err) => {
           console.warn('queue: checkChatIdle error:', err.message);
@@ -323,13 +310,14 @@ export async function startServer() {
     });
     settings.onRemoteSettingsChanged(async () => {
       try {
-        const snapshot = await buildRemoteSettingsSnapshot({ settings, providers: providerRegistry });
+        const snapshot = await buildRemoteSettingsSnapshot({ settings, agents: agentRegistry });
         broadcast(new SettingsChangedMessage(snapshot));
       } catch (err) {
         console.warn('server: failed to broadcast settings-changed:', err.message);
       }
     });
     chatRegistry.onChatRemoved((chatId) => {
+      pendingInputs.clearChat(chatId, 'chat-removed');
       broadcast(new ChatSessionDeletedWsMessage(chatId));
       shareStore.revokeShareByChatId(chatId).catch((err) => {
         console.warn('share-store: failed to revoke share on chat removal:', err.message);
@@ -346,6 +334,12 @@ export async function startServer() {
     queue.onDispatching((chatId, entryId, content) => {
       broadcast(new QueueDispatchingMessage(chatId, entryId, content));
     });
+    pendingInputs.store.onUpdated((input) => {
+      broadcast(new PendingUserInputUpdatedMessage(input));
+    });
+    pendingInputs.store.onCleared((chatId, clientRequestId, reason) => {
+      broadcast(new PendingUserInputClearedMessage(chatId, clientRequestId, reason));
+    });
     queue.onSessionStopped((chatId, success) => {
       broadcast(new ChatSessionStoppedMessage(chatId, success));
     });
@@ -360,16 +354,17 @@ export async function startServer() {
       shuttingDown = true;
       console.log('server: shutting down...');
       try {
-        const running = providerRegistry.getRunningSessions();
+        const running = agentRegistry.getRunningSessions();
         for (const [, sessions] of Object.entries(running)) {
           for (const session of sessions) {
             if (session.id) {
-              providerRegistry.abortSession(session.id).catch(() => {});
+              agentRegistry.abortSession(session.id).catch(() => {});
             }
           }
         }
-        providerRegistry.shutdown();
+        agentRegistry.shutdown();
         historyCache.destroy();
+        await metadata.flush();
         await chatRegistry.flush();
       } catch (err) {
         console.warn('server: shutdown cleanup error:', err.message);

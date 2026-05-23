@@ -1,16 +1,16 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import ColoredTag from '../shared/ColoredTag.svelte';
-	import { harnessLabelFor } from '$lib/i18n/harness-labels';
-	import type { SessionProvider } from '$lib/types/app';
+	import { agentLabelFor } from '$lib/i18n/agent-labels';
+	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { cn } from '$lib/utils/cn';
 	import { formatSidebarChatTimestamp } from './chat-timestamp.js';
 	import {
-		DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-		DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID
-	} from '$shared/providers';
+		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID
+	} from '$shared/agents';
 
 	interface SidebarChatSummaryProps {
 		session: ChatSessionRecord;
@@ -38,31 +38,32 @@
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
 	let lastMessage = $derived(session.lastMessage || '');
 	let projectPath = $derived(session.projectPath || '');
-	let provider = $derived(session.provider || 'claude');
+	let agentId = $derived(session.agentId || 'claude');
 	let isTagManagementEnabled = $derived(Boolean(onManageTags));
 	let activityTimestamp = $derived(session.lastActivityAt ?? session.createdAt);
 	let formattedTimestamp = $derived(
 		showTimestamp ? formatSidebarChatTimestamp(activityTimestamp, currentTime) : null
 	);
 
-	const PROVIDER_TAG_VARIANTS: Record<string, string> = {
+	const AGENT_TAG_VARIANTS: Record<string, string> = {
 		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
 		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
+		cursor: 'border-provider-cursor-border bg-provider-cursor-bg text-provider-cursor-foreground',
 		opencode: 'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
 		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
 		factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
 		pi: 'border-provider-pi-border bg-provider-pi-bg text-provider-pi-foreground',
-		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
-		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
-		[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
+		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
+		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
+		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
 	};
 
-	let providerTagVariant = $derived(
-		PROVIDER_TAG_VARIANTS[provider] ?? PROVIDER_TAG_VARIANTS.claude
+	let agentTagVariant = $derived(
+		AGENT_TAG_VARIANTS[agentId] ?? AGENT_TAG_VARIANTS.claude
 	);
-	let providerTagLabel = $derived(
-		harnessLabelFor(provider, provider || m.provider_claude())
-		);
+	let agentTagLabel = $derived(
+		agentLabelFor(agentId, agentId || m.agent_claude())
+	);
 	function prefixEllipsis(pathStr: string, maxLen = 40): string {
 		if (!pathStr || pathStr.length <= maxLen) return pathStr;
 		const segments = pathStr.split('/');
@@ -150,7 +151,7 @@
 		</div>
 
 		<div class="mt-1 flex items-center gap-1">
-			<ColoredTag label={providerTagLabel} variant={providerTagVariant} />
+			<ColoredTag label={agentTagLabel} variant={agentTagVariant} />
 			{#each visibleTags as tag (tag)}
 				<ColoredTag label={tag} autoColor onclick={onTagClick ? (event) => handleTagClick(event, tag) : undefined} />
 			{/each}

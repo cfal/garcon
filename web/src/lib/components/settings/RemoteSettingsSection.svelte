@@ -6,9 +6,9 @@
 	import SendIcon from '@lucide/svelte/icons/send';
 	import { getRemoteSettings, getModelCatalog } from '$lib/context';
 	import { sendTelegramTest } from '$lib/api/settings.js';
-	import type { SessionProvider } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/types/app';
 	import type { PinnedInsertPosition } from '$lib/types/session.js';
-	import type { ApiProtocol } from '$shared/providers';
+	import type { ApiProtocol } from '$shared/api-providers';
 	import * as m from '$lib/paraglide/messages.js';
 	import SettingsModelSelector from '$lib/components/model-selector/SettingsModelSelector.svelte';
 	import type {
@@ -29,9 +29,9 @@
 	let titleEnabled = $derived(
 		remoteSettings.snapshot?.uiEffective?.chatTitle?.enabled !== false
 	);
-	let titleProvider = $derived<SessionProvider>(
-		titleSelectionOverride?.harnessId
-			?? (remoteSettings.snapshot?.uiEffective?.chatTitle?.provider as SessionProvider)
+	let titleProvider = $derived<SessionAgentId>(
+		titleSelectionOverride?.agentId
+			?? (remoteSettings.snapshot?.uiEffective?.chatTitle?.agentId as SessionAgentId)
 			?? 'claude'
 	);
 	let titleModel = $derived(
@@ -49,9 +49,9 @@
 			?? remoteSettings.snapshot?.uiEffective?.chatTitle?.modelProtocol
 			?? null
 	);
-	const titleSelectorMode: ModelSelectorMode = { harness: 'select', source: 'select', surface: 'settings' };
+	const titleSelectorMode: ModelSelectorMode = { agent: 'select', source: 'select', surface: 'settings' };
 	const titleSelectorValue = $derived({
-		harnessId: titleProvider,
+		agentId: titleProvider,
 		model: titleModel,
 		modelEndpointId: titleModelEndpointId,
 		modelProtocol: titleModelProtocol,
@@ -102,8 +102,8 @@
 
 	async function persistChatTitleSettings(overrides?: Record<string, unknown>) {
 		const base = remoteSettings.snapshot?.ui?.chatTitle ?? {};
-		const nextProvider = typeof overrides?.provider === 'string'
-			? overrides.provider as SessionProvider
+		const nextProvider = typeof overrides?.agentId === 'string'
+			? overrides.agentId as SessionAgentId
 			: titleProvider;
 		const nextModelInput = typeof overrides?.model === 'string'
 			? overrides.model
@@ -114,7 +114,7 @@
 				...base,
 				enabled: titleEnabled,
 				...overrides,
-				provider: nextProvider,
+				agentId: nextProvider,
 				model: selection.model,
 				apiProviderId: selection.apiProviderId,
 				modelEndpointId: selection.modelEndpointId,
@@ -128,7 +128,7 @@
 		const previousOverride = titleSelectionOverride;
 		const token = ++titleSelectionSaveToken;
 		titleSelectionOverride = {
-			harnessId: next.harnessId,
+			agentId: next.agentId,
 			model: next.modelValue,
 			apiProviderId: next.apiProviderId,
 			modelEndpointId: next.modelEndpointId,
@@ -139,7 +139,7 @@
 			chatTitle: {
 				...base,
 				enabled: titleEnabled,
-				provider: next.harnessId,
+				agentId: next.agentId,
 				model: next.model,
 				apiProviderId: next.apiProviderId,
 				modelEndpointId: next.modelEndpointId,

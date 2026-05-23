@@ -10,7 +10,7 @@
 	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import { getAppShell, getReadReceiptOutbox } from '$lib/context';
-	import type { SessionProvider } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { reorderChats } from '$lib/api/chats.js';
 	import type { ChatOrderList } from '$lib/api/chats.js';
@@ -35,7 +35,7 @@
 	interface ChatDeleteConfirmation {
 		chatId: string;
 		chatTitle: string;
-		provider: SessionProvider;
+		agentId: SessionAgentId;
 	}
 
 	interface ChatRenameConfirmation {
@@ -197,8 +197,8 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		}
 	}
 
-	function showDeleteConfirmation(chatId: string, chatTitle: string, provider: SessionProvider) {
-		chatDeleteConfirmation = { chatId, chatTitle, provider };
+	function showDeleteConfirmation(chatId: string, chatTitle: string, agentId: SessionAgentId) {
+		chatDeleteConfirmation = { chatId, chatTitle, agentId };
 	}
 
 	async function confirmDeleteChat() {
@@ -682,7 +682,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		if (!selectedChatId) return;
 		const selected = chats.find((chat) => chat.id === selectedChatId);
 		if (!selected) return;
-		showDeleteConfirmation(selected.id, selected.title || m.sidebar_chats_new_chat(), selected.provider);
+		showDeleteConfirmation(selected.id, selected.title || m.sidebar_chats_new_chat(), selected.agentId);
 	}));
 
 	onMount(() => appShell.onSidebarSearchRequested(() => {

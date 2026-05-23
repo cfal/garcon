@@ -7,6 +7,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
+import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
 import {
   DEFAULT_AMP_AGENT_MODE,
   DEFAULT_CLAUDE_THINKING_MODE,
@@ -27,7 +28,7 @@ function createEmpty() {
     pinnedChatIds: [],
     normalChatIds: [],
     archivedChatIds: [],
-    lastProvider: 'claude',
+    lastAgentId: 'claude',
     lastProjectPath: '',
     lastModel: '',
     lastApiProviderId: null,
@@ -42,7 +43,7 @@ function createEmpty() {
   };
 }
 
-const FILTER_KEYS = ['textTokens', 'tags', 'providers', 'models'];
+const FILTER_KEYS = ['textTokens', 'tags', 'agents', 'models'];
 const VALID_FILTER_STATUS = new Set(['active', 'unread']);
 
 function normalizeUiSettings(ui) {
@@ -50,10 +51,6 @@ function normalizeUiSettings(ui) {
   const normalized = { ...ui };
   if ('pinnedInsertPosition' in normalized) {
     normalized.pinnedInsertPosition = normalized.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
-  }
-  if ('searchBarPosition' in normalized) {
-    // Drops obsolete sidebar placement state from stale remote settings.
-    delete normalized.searchBarPosition;
   }
   return normalized;
 }
@@ -65,7 +62,7 @@ function sanitizeStringArray(value) {
 }
 
 function sanitizeFolderFilter(raw) {
-  const filter = { textTokens: [], tags: [], providers: [], models: [] };
+  const filter = { textTokens: [], tags: [], agents: [], models: [] };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return filter;
 
   for (const key of FILTER_KEYS) {
@@ -140,7 +137,7 @@ function sanitize(parsed) {
     pinnedChatIds: sanitizeStringArray(parsed.pinnedChatIds),
     normalChatIds: sanitizeStringArray(parsed.normalChatIds),
     archivedChatIds: sanitizeStringArray(parsed.archivedChatIds),
-    lastProvider: typeof parsed.lastProvider === 'string' ? parsed.lastProvider : 'claude',
+    lastAgentId: typeof parsed.lastAgentId === 'string' ? parsed.lastAgentId : 'claude',
     lastProjectPath: typeof parsed.lastProjectPath === 'string' ? parsed.lastProjectPath : '',
     lastModel: typeof parsed.lastModel === 'string' ? parsed.lastModel : '',
     lastApiProviderId: typeof parsed.lastApiProviderId === 'string' ? parsed.lastApiProviderId : null,
@@ -270,8 +267,7 @@ export class SettingsStore extends EventEmitter {
   }
 
   async #writeToDisk(settings) {
-    await fs.mkdir(this.#workspaceDir, { recursive: true });
-    await fs.writeFile(this.#settingsPath(), JSON.stringify(settings, null, 2), 'utf8');
+    await writeJsonFileAtomic(this.#settingsPath(), settings);
   }
 
   async #readFromDisk() {
@@ -468,7 +464,7 @@ export class SettingsStore extends EventEmitter {
       ui: settings.ui || {},
       paths: settings.paths || {},
       pinnedChatIds: settings.pinnedChatIds || [],
-      lastProvider: settings.lastProvider || 'claude',
+      lastAgentId: settings.lastAgentId || 'claude',
       lastProjectPath: settings.lastProjectPath || '',
       lastModel: settings.lastModel || '',
       lastApiProviderId: settings.lastApiProviderId ?? null,
@@ -491,9 +487,9 @@ export class SettingsStore extends EventEmitter {
     return normalizePermissionMode(settings.lastPermissionMode);
   }
 
-  async getLastProvider() {
+  async getLastAgentId() {
     const settings = await this.loadSettings();
-    return settings.lastProvider || 'claude';
+    return settings.lastAgentId || 'claude';
   }
 
   async getLastProjectPath() {
@@ -524,9 +520,9 @@ export class SettingsStore extends EventEmitter {
   async setLastChatDefaults(defaults) {
     return this.#withLock(async () => {
       const settings = await this.loadSettings();
-      settings.lastProvider = typeof defaults?.provider === 'string'
-        ? defaults.provider
-        : (settings.lastProvider || 'claude');
+      settings.lastAgentId = typeof defaults?.agentId === 'string'
+        ? defaults.agentId
+        : (settings.lastAgentId || 'claude');
       settings.lastProjectPath = typeof defaults?.projectPath === 'string'
         ? defaults.projectPath
         : (settings.lastProjectPath || '');

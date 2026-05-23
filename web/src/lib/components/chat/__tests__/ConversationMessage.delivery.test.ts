@@ -1,10 +1,10 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import { UserMessage, type UserMessageDeliveryStatus } from '$shared/chat-types';
-import ConversationMessageHarness from './ConversationMessageHarness.svelte';
+import ConversationMessageHost from './ConversationMessageHost.svelte';
 
 function renderUserDeliveryStatus(deliveryStatus: UserMessageDeliveryStatus) {
-	render(ConversationMessageHarness, {
+	render(ConversationMessageHost, {
 		message: new UserMessage('2026-05-14T00:00:00.000Z', 'hello', undefined, {
 			messageId: 'msg-1',
 			clientRequestId: 'req-1',

@@ -1,13 +1,11 @@
 // Handles queue-state-updated and queue-dispatching events.
 
 import type { QueueStateUpdatedMessage, QueueDispatchingMessage } from '$shared/ws-events';
-import { UserMessage } from '$shared/chat-types';
-import type { ChatMessage, QueueState } from '$lib/types/chat';
+import type { QueueState } from '$lib/types/chat';
 
 export interface QueueContext {
 	currentChatId: string | null;
 	selectedChatId: string | null;
-	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
 	setMessageQueue: (chatId: string, queue: QueueState | null) => void;
 	activateLoadingFor: (chatId?: string | null) => void;
 	setCanAbort: (v: boolean) => void;
@@ -25,11 +23,7 @@ export function handleQueueUpdated(msg: QueueStateUpdatedMessage, ctx: QueueCont
 }
 
 export function handleQueueSending(msg: QueueDispatchingMessage, ctx: QueueContext) {
-	if (isForCurrentSession(msg.chatId, ctx) && msg.content) {
-		ctx.setChatMessages((previous) => [
-			...previous,
-			new UserMessage(new Date().toISOString(), String(msg.content)),
-		]);
+	if (isForCurrentSession(msg.chatId, ctx)) {
 		ctx.activateLoadingFor(msg.chatId || ctx.currentChatId);
 		ctx.setCanAbort(true);
 		ctx.onChatProcessing?.(msg.chatId || undefined);

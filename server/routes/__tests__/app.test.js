@@ -22,7 +22,7 @@ function createMockCtx() {
       getPathSettings: mock(() => Promise.resolve({})),
       setPathSettings: mock(() => Promise.resolve({})),
       getPinnedChatIds: mock(() => Promise.resolve([])),
-      getLastProvider: mock(() => Promise.resolve('claude')),
+      getLastAgentId: mock(() => Promise.resolve('claude')),
       getLastProjectPath: mock(() => Promise.resolve('')),
       getLastModel: mock(() => Promise.resolve('')),
       getLastPermissionMode: mock(() => Promise.resolve('default')),
@@ -39,8 +39,8 @@ function createMockCtx() {
       removeSavedSearch: mock(() => Promise.resolve(false)),
       reorderSavedSearches: mock(() => Promise.resolve({ success: true })),
     },
-    providers: {
-      getHarnessAuthStatusMap: mock(() => Promise.resolve({
+    agents: {
+      getAgentAuthStatusMap: mock(() => Promise.resolve({
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: false },
@@ -51,7 +51,7 @@ function createMockCtx() {
 }
 
 const ctx = createMockCtx();
-const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.providers);
+const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.agents);
 
 function makeRequest(url, method, body) {
   return new Request(url, {
@@ -72,14 +72,14 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
-    ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastAgentId.mockClear();
     ctx.settings.getLastProjectPath.mockClear();
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getHarnessAuthStatusMap.mockClear();
-    ctx.providers.getModels.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
   });
 
@@ -144,14 +144,14 @@ describe('GET /api/app/settings', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
-    ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastAgentId.mockClear();
     ctx.settings.getLastProjectPath.mockClear();
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getHarnessAuthStatusMap.mockClear();
-    ctx.providers.getModels.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
   });
 
@@ -160,7 +160,7 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({ theme: 'dark' }));
     ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({ pinnedProjectPaths: ['/home'], browseStartPath: '/workspace' }));
     ctx.settings.getPinnedChatIds.mockImplementation(() => Promise.resolve(['a', 'b']));
-    ctx.settings.getLastProvider.mockImplementation(() => Promise.resolve('codex'));
+    ctx.settings.getLastAgentId.mockImplementation(() => Promise.resolve('codex'));
     ctx.settings.getLastProjectPath.mockImplementation(() => Promise.resolve('/workspace/project'));
     ctx.settings.getLastModel.mockImplementation(() => Promise.resolve('gpt-5.4'));
     ctx.settings.getLastPermissionMode.mockImplementation(() => Promise.resolve('acceptEdits'));
@@ -174,7 +174,7 @@ describe('GET /api/app/settings', () => {
     expect(body.ui).toEqual({ theme: 'dark' });
     expect(body.paths).toEqual({ pinnedProjectPaths: ['/home'], browseStartPath: '/workspace' });
     expect(body.pinnedChatIds).toEqual(['a', 'b']);
-    expect(body.lastProvider).toBe('codex');
+    expect(body.lastAgentId).toBe('codex');
     expect(body.lastProjectPath).toBe('/workspace/project');
     expect(body.lastModel).toBe('gpt-5.4');
     expect(body.lastApiProviderId).toBeNull();
@@ -184,36 +184,23 @@ describe('GET /api/app/settings', () => {
     expect(body.lastThinkingMode).toBe('think-hard');
     expect(body.lastClaudeThinkingMode).toBe('on');
     expect(body.uiEffective.chatTitle.enabled).toBe(false);
-    expect(body.uiEffective.chatTitle.provider).toBe('claude');
+    expect(body.uiEffective.chatTitle.agentId).toBe('claude');
     expect(body.uiEffective.chatTitle.model).toBe('haiku');
     expect(body.uiEffective.commitMessage.enabled).toBe(false);
-    expect(body.uiEffective.commitMessage.provider).toBe('claude');
+    expect(body.uiEffective.commitMessage.agentId).toBe('claude');
     expect(body.uiEffective.commitMessage.model).toBe('haiku');
     expect(body.chatSortOrder).toBeUndefined();
   });
 
-  it('strips the legacy remote sidebar controls position from the snapshot', async () => {
-    ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(2));
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({
-      searchBarPosition: 'top',
-      pinnedInsertPosition: 'bottom',
-    }));
-
-    const response = await handler();
-    const body = await response.json();
-
-    expect(body.ui).toEqual({ pinnedInsertPosition: 'bottom' });
-  });
-
-  it('auto-enables generation defaults from authenticated provider priority', async () => {
+  it('auto-enables generation defaults from authenticated agent priority', async () => {
     ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(1));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
-    ctx.providers.getHarnessAuthStatusMap.mockImplementation(() => Promise.resolve({
+    ctx.agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: true },
       opencode: { authenticated: true },
     }));
-    ctx.providers.getModels.mockImplementation(() => Promise.resolve([
+    ctx.agents.getModels.mockImplementation(() => Promise.resolve([
       { value: 'deepseek-r1', label: 'DeepSeek R1' },
       { value: 'openai/gpt-4.1', label: 'GPT-4.1' },
     ]));
@@ -223,10 +210,10 @@ describe('GET /api/app/settings', () => {
 
     expect(body.version).toBe(1);
     expect(body.uiEffective.chatTitle.enabled).toBe(true);
-    expect(body.uiEffective.chatTitle.provider).toBe('codex');
+    expect(body.uiEffective.chatTitle.agentId).toBe('codex');
     expect(body.uiEffective.chatTitle.model).toBe('gpt-5.5');
     expect(body.uiEffective.commitMessage.enabled).toBe(true);
-    expect(body.uiEffective.commitMessage.provider).toBe('codex');
+    expect(body.uiEffective.commitMessage.agentId).toBe('codex');
     expect(body.uiEffective.commitMessage.model).toBe('gpt-5.5');
   });
 
@@ -235,7 +222,7 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({
       commitMessage: {
         enabled: true,
-        provider: 'codex',
+        agentId: 'codex',
         model: 'gpt-5.5',
         customPrompt: 'Write a short message',
         useCommonDirPrefix: true,
@@ -247,7 +234,7 @@ describe('GET /api/app/settings', () => {
 
     expect(body.version).toBe(3);
     expect(body.uiEffective.commitMessage.enabled).toBe(true);
-    expect(body.uiEffective.commitMessage.provider).toBe('codex');
+    expect(body.uiEffective.commitMessage.agentId).toBe('codex');
     expect(body.uiEffective.commitMessage.model).toBe('gpt-5.5');
     expect(body.uiEffective.commitMessage.customPrompt).toBe('Write a short message');
     expect(body.uiEffective.commitMessage.useCommonDirPrefix).toBe(true);
@@ -265,14 +252,14 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
-    ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastAgentId.mockClear();
     ctx.settings.getLastProjectPath.mockClear();
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getHarnessAuthStatusMap.mockClear();
-    ctx.providers.getModels.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
   });
 
@@ -288,18 +275,6 @@ describe('PUT /api/app/settings', () => {
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ fontSize: 14 });
   });
 
-  it('drops the legacy sidebar controls position from ui patches', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { searchBarPosition: 'top' } }));
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({ pinnedInsertPosition: 'top' }));
-    ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
-
-    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { ui: { searchBarPosition: 'top' } }));
-    const body = await response.json();
-
-    expect(body.success).toBe(true);
-    expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
-  });
-
   it('patches paths settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ paths: { lastDir: '/tmp' } }));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
@@ -313,7 +288,7 @@ describe('PUT /api/app/settings', () => {
   });
 
   it('patches ui.chatTitle settings', async () => {
-    const chatTitleConfig = { enabled: true, provider: 'opencode', model: 'anthropic/claude-sonnet-4-5' };
+    const chatTitleConfig = { enabled: true, agentId: 'opencode', model: 'anthropic/claude-sonnet-4-5' };
     parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { chatTitle: chatTitleConfig } }));
     ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({ chatTitle: chatTitleConfig }));
     ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
@@ -507,7 +482,7 @@ describe('folders API', () => {
   });
 
   it('returns saved folders', async () => {
-    const folders = [{ id: 'folder-1', name: 'Review', filter: { textTokens: ['bug'], tags: [], providers: [], models: [] }, createdAt: '2026-03-27T00:00:00.000Z' }];
+    const folders = [{ id: 'folder-1', name: 'Review', filter: { textTokens: ['bug'], tags: [], agents: [], models: [] }, createdAt: '2026-03-27T00:00:00.000Z' }];
     ctx.settings.getFolders.mockImplementation(() => Promise.resolve(folders));
 
     const response = await getHandler();
@@ -524,7 +499,7 @@ describe('folders API', () => {
       filter: {
         textTokens: [' bug ', '', 7],
         tags: [' triage ', null],
-        providers: [' codex '],
+        agents: [' codex '],
         models: [' gpt-5.4 ', false],
         status: ' unread ',
 				ignored: ['value'],
@@ -542,7 +517,7 @@ describe('folders API', () => {
       filter: {
         textTokens: ['bug'],
         tags: ['triage'],
-        providers: ['codex'],
+        agents: ['codex'],
         models: ['gpt-5.4'],
 					status: 'unread',
       },
@@ -557,7 +532,7 @@ describe('folders API', () => {
       filter: {
         textTokens: [' one '],
         tags: [' alpha ', ''],
-        providers: [' codex '],
+        agents: [' codex '],
         models: [' gpt-5 '],
 				status: 'invalid',
 			},
@@ -572,7 +547,7 @@ describe('folders API', () => {
       filter: {
         textTokens: ['one'],
         tags: ['alpha'],
-        providers: ['codex'],
+        agents: ['codex'],
         models: ['gpt-5'],
       },
     });

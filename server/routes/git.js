@@ -3,7 +3,7 @@ import { classifyGitError } from '../git/git-error-classifier.js';
 import { parseJsonBody, MalformedJsonError } from '../lib/http-request.js';
 import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
-import { isHarnessId } from '../../common/providers.ts';
+import { isAgentId } from '../../common/agents.ts';
 
 const MALFORMED_BODY = () =>
   Response.json({ error: 'Request body is not valid JSON.' }, { status: 400 });
@@ -31,44 +31,44 @@ function optionalProtocol(value) {
   return value === 'openai-compatible' || value === 'anthropic-messages' ? value : null;
 }
 
-function isAllowedGenerationProvider(providers, value) {
-  if (!isHarnessId(value)) return false;
-  if (typeof providers?.hasHarness === 'function') {
-    return providers.hasHarness(value);
+function isAllowedGenerationAgent(agents, value) {
+  if (!isAgentId(value)) return false;
+  if (typeof agents?.hasAgent === 'function') {
+    return agents.hasAgent(value);
   }
   return true;
 }
 
-async function getHarnessCatalog(providers) {
+async function getAgentCatalog(agents) {
   try {
-    return await providers?.getHarnessCatalog?.();
+    return { agents: await agents?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
   } catch {
     return null;
   }
 }
 
-async function resolveCommitMessageConfig(settings, providers) {
+async function resolveCommitMessageConfig(settings, agents) {
   const ui = await settings?.getUiSettings?.() ?? {};
-  const authByHarness = await providers?.getHarnessAuthStatusMap?.() ?? {
+  const authByAgent = await agents?.getAgentAuthStatusMap?.() ?? {
     claude: { authenticated: false },
     codex: { authenticated: false },
     opencode: { authenticated: false },
     amp: { authenticated: false },
     factory: { authenticated: false },
   };
-  const [readinessByHarness, catalog, opencodeModels, factoryModels] = await Promise.all([
-    providers?.getHarnessReadinessMap?.() ?? {},
-    getHarnessCatalog(providers),
-    providers?.getModels?.('opencode') ?? [],
-    providers?.getModels?.('factory') ?? [],
+  const [readinessByAgent, catalog, opencodeModels, factoryModels] = await Promise.all([
+    agents?.getAgentReadinessMap?.() ?? {},
+    getAgentCatalog(agents),
+    agents?.getModels?.('opencode') ?? [],
+    agents?.getModels?.('factory') ?? [],
   ]);
   const catalogModels = Object.fromEntries(
-    (catalog?.harnesses ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
+    (catalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
   );
   return resolveEffectiveGenerationUiConfig({
     persisted: ui?.commitMessage,
-    authByHarness,
-    modelsByHarness: {
+    authByAgent,
+    modelsByAgent: {
       claude: CLAUDE_MODELS.OPTIONS,
       codex: CODEX_MODELS.OPTIONS,
       opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
@@ -76,7 +76,7 @@ async function resolveCommitMessageConfig(settings, providers) {
       factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
       ...catalogModels,
     },
-    readinessByHarness,
+    readinessByAgent,
   });
 }
 
@@ -92,8 +92,8 @@ function isValidLineIndices(value) {
   return Array.isArray(value) && value.every(isNonNegativeInteger);
 }
 
-export default function createGitRoutes(providers, settings) {
-  const git = createGitService({ providers, classifyGitError });
+export default function createGitRoutes(agents, settings) {
+  const git = createGitService({ agents, classifyGitError });
 
   async function getStatus(request, url) {
     const project = url.searchParams.get('project');
@@ -255,12 +255,12 @@ export default function createGitRoutes(providers, settings) {
       if (!project || !files || files.length === 0) {
         return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
       }
-      if (hasOwn(body, 'provider') && !isAllowedGenerationProvider(providers, body.provider)) {
-        return Response.json({ error: 'Invalid provider.' }, { status: 400 });
+      if (hasOwn(body, 'agentId') && !isAllowedGenerationAgent(agents, body.agentId)) {
+        return Response.json({ error: 'Invalid agent.' }, { status: 400 });
       }
 
-      const persistedConfig = await resolveCommitMessageConfig(settings, providers);
-      const provider = hasOwn(body, 'provider') ? body.provider : persistedConfig.provider;
+      const persistedConfig = await resolveCommitMessageConfig(settings, agents);
+      const agentId = hasOwn(body, 'agentId') ? body.agentId : persistedConfig.agentId;
       const model = hasOwn(body, 'model')
         ? (typeof body.model === 'string' ? body.model : '')
         : (typeof persistedConfig.model === 'string' ? persistedConfig.model : '');
@@ -280,7 +280,7 @@ export default function createGitRoutes(providers, settings) {
       const result = await git.generateCommitMessageForFiles({
         projectPath: project,
         files,
-        provider,
+        agentId,
         model,
         apiProviderId,
         modelEndpointId,

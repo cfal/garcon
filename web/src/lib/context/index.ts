@@ -12,7 +12,7 @@ import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
-import type { ProviderState } from '$lib/chat/provider-state.svelte';
+import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { FileViewerStore } from '$lib/stores/file-viewer.svelte';
 import type { ReadReceiptOutboxStore } from '$lib/stores/read-receipt-outbox.svelte';
@@ -37,5 +37,5 @@ export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettin
 // Chat-level contexts (set in ConversationWorkspace.svelte)
 export const [getChatState, setChatState] = createContext<ChatState>();
 export const [getComposerState, setComposerState] = createContext<ComposerState>();
-export const [getProviderState, setProviderState] = createContext<ProviderState>();
+export const [getAgentState, setAgentState] = createContext<AgentState>();
 export const [getChatLifecycle, setChatLifecycle] = createContext<ChatLifecycleStore>();
