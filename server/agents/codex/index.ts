@@ -1,8 +1,8 @@
 import type { ChatMessage } from '../../../common/chat-types.js';
-import { runSingleQuery as runSingleQueryCodex } from '../../providers/codex-app-server/run-single-query.js';
-import type { CodexAppServerProvider } from '../../providers/codex-app-server/provider.js';
-import { getCodexAuthStatus } from '../../providers/codex-auth.js';
-import { launchProviderAuthLogin } from '../../providers/auth-login.js';
+import { runSingleQuery as runSingleQueryCodex } from './app-server/run-single-query.js';
+import type { CodexAppServerProvider } from './app-server/provider.js';
+import { getCodexAuthStatus } from './codex-auth.js';
+import { launchProviderAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import type { Agent } from '../types.js';
 

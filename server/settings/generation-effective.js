@@ -1,5 +1,5 @@
 import {
-  GENERATION_HARNESS_PRIORITY,
+  GENERATION_AGENT_PRIORITY,
   GENERATION_MODEL_DEFAULTS,
   OPENCODE_PREFERRED_MODEL_PATTERNS,
 } from '../../common/generation-defaults.ts';
@@ -15,7 +15,7 @@ function hasAutoModel(agentId, modelsByAgent) {
 }
 
 function pickAutoAgent(authByAgent, readinessByAgent, modelsByAgent) {
-  return GENERATION_HARNESS_PRIORITY.find((agentId) =>
+  return GENERATION_AGENT_PRIORITY.find((agentId) =>
     (authByAgent?.[agentId]?.authenticated || readinessByAgent?.[agentId]?.ready)
       && hasAutoModel(agentId, modelsByAgent)
   ) ?? null;

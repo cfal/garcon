@@ -1,24 +1,24 @@
 import {
-  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL,
-  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL,
-  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL,
+  DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+  DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
+  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
   endpointSupportsAgent,
   type ApiProtocol,
   type AgentId,
 } from '../../../common/providers.js';
 import { getWorkspaceDir } from '../../config.js';
-import { AnthropicCompatibleChatProvider, type AnthropicCompatibleChatProviderConfig, runAnthropicCompatibleSingleQuery } from '../../providers/anthropic-compatible-chat-provider.js';
-import type { ApiProviderStore, StoredApiProvider, StoredApiProviderEndpoint } from '../../providers/api-provider-store.js';
-import { OpenAiCompatibleChatProvider, type OpenAiCompatibleChatProviderConfig, runOpenAiCompatibleSingleQuery } from '../../providers/openai-compatible-chat-provider.js';
+import { AnthropicCompatibleChatProvider, type AnthropicCompatibleChatProviderConfig, runAnthropicCompatibleSingleQuery } from './anthropic-compatible-chat-provider.js';
+import type { ApiProviderStore, StoredApiProvider, StoredApiProviderEndpoint } from '../../api-providers/store.js';
+import { OpenAiCompatibleChatProvider, type OpenAiCompatibleChatProviderConfig, runOpenAiCompatibleSingleQuery } from './openai-compatible-chat-provider.js';
 import {
   OpenAiCompatibleResponsesProvider,
   type OpenAiCompatibleResponsesProviderConfig,
   runOpenAiResponsesSingleQuery,
-} from '../../providers/openai-compatible-responses-provider.js';
-import type { ProviderEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../../providers/types.js';
+} from './openai-compatible-responses-provider.js';
+import type { ProviderEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../session-types.js';
 import type { AgentRuntime } from '../types.js';
 
 type DirectEventCallbacks = {
@@ -239,21 +239,21 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
 
 export function createDirectOpenAiChatRuntime(apiProviderStore: ApiProviderStore): DirectEndpointRouterRuntime<OpenAiCompatibleChatProvider> {
   return new DirectEndpointRouterRuntime<OpenAiCompatibleChatProvider>({
-    agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-    label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL,
+    agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+    label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
     protocol: 'openai-compatible',
-    noEndpointMessage: `No OpenAI-compatible Chat Completions endpoint is configured for ${DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL}.`,
+    noEndpointMessage: `No OpenAI-compatible Chat Completions endpoint is configured for ${DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL}.`,
     apiProviderStore,
     createProvider(endpoint) {
       return new OpenAiCompatibleChatProvider(buildDirectOpenAiConfig({
-        providerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-        providerLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL,
+        providerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+        providerLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
         endpoint,
       }));
     },
     runSingleQuery(prompt, endpoint, apiProvider, options) {
       return runOpenAiCompatibleSingleQuery(buildDirectOpenAiConfig({
-        providerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
+        providerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
         providerLabel: apiProvider.label,
         endpoint,
       }), prompt, options);
@@ -263,21 +263,21 @@ export function createDirectOpenAiChatRuntime(apiProviderStore: ApiProviderStore
 
 export function createDirectOpenAiResponsesRuntime(apiProviderStore: ApiProviderStore): DirectEndpointRouterRuntime<OpenAiCompatibleResponsesProvider> {
   return new DirectEndpointRouterRuntime<OpenAiCompatibleResponsesProvider>({
-    agentId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-    label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL,
+    agentId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+    label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
     protocol: 'openai-compatible',
-    noEndpointMessage: `No OpenAI-compatible Responses endpoint is configured for ${DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL}.`,
+    noEndpointMessage: `No OpenAI-compatible Responses endpoint is configured for ${DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL}.`,
     apiProviderStore,
     createProvider(endpoint) {
       return new OpenAiCompatibleResponsesProvider(buildDirectOpenAiResponsesConfig({
-        providerId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-        providerLabel: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL,
+        providerId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+        providerLabel: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
         endpoint,
       }));
     },
     runSingleQuery(prompt, endpoint, apiProvider, options) {
       return runOpenAiResponsesSingleQuery(buildDirectOpenAiResponsesConfig({
-        providerId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
+        providerId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
         providerLabel: apiProvider.label,
         endpoint,
       }), prompt, options);
@@ -287,21 +287,21 @@ export function createDirectOpenAiResponsesRuntime(apiProviderStore: ApiProvider
 
 export function createDirectAnthropicRuntime(apiProviderStore: ApiProviderStore): DirectEndpointRouterRuntime<AnthropicCompatibleChatProvider> {
   return new DirectEndpointRouterRuntime<AnthropicCompatibleChatProvider>({
-    agentId: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-    label: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL,
+    agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+    label: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
     protocol: 'anthropic-messages',
-    noEndpointMessage: `No Anthropic-compatible endpoint is configured for ${DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL}.`,
+    noEndpointMessage: `No Anthropic-compatible endpoint is configured for ${DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL}.`,
     apiProviderStore,
     createProvider(endpoint) {
       return new AnthropicCompatibleChatProvider(buildDirectAnthropicConfig({
-        providerId: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-        providerLabel: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL,
+        providerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+        providerLabel: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
         endpoint,
       }));
     },
     runSingleQuery(prompt, endpoint, apiProvider, options) {
       return runAnthropicCompatibleSingleQuery(buildDirectAnthropicConfig({
-        providerId: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+        providerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
         providerLabel: apiProvider.label,
         endpoint,
       }), prompt, options);

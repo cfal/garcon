@@ -1,7 +1,7 @@
 // Serves the GET /api/v1/models endpoint using the live agent catalog from
 // the registry.
 
-import { getPiModelsStrict, isPiModelDiscoveryUnavailableError } from '../providers/pi-models.js';
+import { getPiModelsStrict, isPiModelDiscoveryUnavailableError } from "../agents/pi/pi-models.js";
 
 function piDiscoveryUnavailableResponse(error, catalog, entry) {
   const reason = error instanceof Error ? error.message : String(error);

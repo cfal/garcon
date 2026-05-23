@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { convertCodexFunctionCall, convertCodexCustomToolCall } from '../../providers/converters/codex-tool-use.js';
+import { convertCodexFunctionCall, convertCodexCustomToolCall } from '../../agents/converters/codex-tool-use.js';
 import {
   BashToolUseMessage,
   EditToolUseMessage,

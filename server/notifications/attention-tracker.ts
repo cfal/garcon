@@ -34,7 +34,7 @@ function toolDisplayName(requestedTool: unknown): string {
 // Minimal interfaces for injected dependencies. Avoids importing concrete
 // classes and keeps the module unit-testable with plain mocks.
 
-interface ProviderRegistryDep {
+interface AgentRegistryDep {
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onFinished(cb: (chatId: string, exitCode: number) => void): void;
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
@@ -69,7 +69,7 @@ interface TelegramConfig {
 }
 
 export class AttentionTracker {
-  #providers: ProviderRegistryDep;
+  #providers: AgentRegistryDep;
   #queue: QueueManagerDep;
   #settings: SettingsStoreDep;
   #registry: ChatRegistryDep;
@@ -89,7 +89,7 @@ export class AttentionTracker {
   #lastAssistantMessage = new Map<string, string>();
 
   constructor(
-    providers: ProviderRegistryDep,
+    providers: AgentRegistryDep,
     queue: QueueManagerDep,
     settings: SettingsStoreDep,
     registry: ChatRegistryDep,

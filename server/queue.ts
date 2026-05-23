@@ -8,7 +8,7 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
-import type { RunProviderTurnOptions } from './providers/types.js';
+import type { RunProviderTurnOptions } from "./agents/session-types.js";
 
 function emptyQueue(): QueueState {
   return { entries: [], paused: false, version: 0 };

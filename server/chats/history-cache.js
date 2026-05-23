@@ -19,7 +19,7 @@ export class HistoryCache {
 
   // registry: ChatRegistry
   // metadata: MetadataIndex
-  // providers: ProviderRegistry
+  // providers: AgentRegistry
   constructor(registry, metadata, providers) {
     this.#registry = registry;
     this.#metadata = metadata;

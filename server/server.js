@@ -33,15 +33,15 @@ import { ShellManager } from './ws/shell.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { HistoryCache } from './chats/history-cache.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
-import { ClaudeProvider } from './providers/claude-cli.js';
-import { CodexAppServerProvider } from './providers/codex-app-server/provider.js';
-import { OpenCodeProvider } from './providers/opencode.js';
-import { AmpProvider } from './providers/amp-cli.js';
-import { FactoryProvider } from './providers/factory-cli.js';
-import { PiProvider } from './providers/pi-cli.js';
-import { ProviderRegistry } from './providers/index.js';
-import { ApiProviderStore } from './providers/api-provider-store.js';
-import { ApiProviderEndpointResolver } from './providers/api-provider-endpoint-resolver.js';
+import { ClaudeProvider } from './agents/claude/claude-cli.js';
+import { CodexAppServerProvider } from './agents/codex/app-server/provider.js';
+import { OpenCodeProvider } from './agents/opencode/opencode.js';
+import { AmpProvider } from './agents/amp/amp-cli.js';
+import { FactoryProvider } from './agents/factory/factory-cli.js';
+import { PiProvider } from './agents/pi/pi-cli.js';
+import { AgentRegistry } from './agents/registry.js';
+import { ApiProviderStore } from './api-providers/store.js';
+import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
 import { createAmpAgent } from './agents/amp/index.js';
 import { createClaudeAgent } from './agents/claude/index.js';
 import { createCodexAgent } from './agents/codex/index.js';
@@ -129,15 +129,15 @@ export async function startServer() {
 	      createPiAgent(piProvider),
 	    ];
 
-	    // Tier 2: Agent registry wrapping plugin runtime + registry + store + resolver
-	    const providerRegistry = new ProviderRegistry({
+	    // Tier 2: Agent registry wrapping runtimes + registry + store + resolver
+	    const providerRegistry = new AgentRegistry({
 	      registry: chatRegistry,
 	      agents,
 	      endpointResolver,
 	      apiProviderStore,
 	    });
 
-    // Tier 3: Chat infrastructure (uses ProviderRegistry)
+    // Tier 3: Chat infrastructure (uses AgentRegistry)
     const metadata = new MetadataIndex(chatRegistry, providerRegistry, {
       metadataPath: path.join(workspaceDir, 'chat-metadata.json'),
     });
@@ -281,7 +281,7 @@ export async function startServer() {
     // active or routes are called, both of which happen after server is up.
     const broadcast = (payload) => server.publish('chat', JSON.stringify(payload));
 
-    // Wire provider events to broadcast via ProviderRegistry fan-out.
+    // Wire agent events to broadcast via AgentRegistry fan-out.
     // HistoryCache's init() already self-wired appendMessages via
     // providers.onMessages(), so only broadcast wiring is needed here.
     providerRegistry.onMessages((chatId, messages, metadata) => {

@@ -1,12 +1,12 @@
 // Shared agent and API provider contracts. Agents execute chats; API
 // providers expose protocol-specific model endpoints that agents may use.
 
-export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID = 'direct-openai-compatible' as const;
-export const DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID = 'direct-openai-responses-compatible' as const;
-export const DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID = 'direct-anthropic-compatible' as const;
-export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL = 'Direct (Chat Completions)' as const;
-export const DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL = 'Direct (Responses)' as const;
-export const DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL = 'Direct (Anthropic)' as const;
+export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID = 'direct-openai-compatible' as const;
+export const DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID = 'direct-openai-responses-compatible' as const;
+export const DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID = 'direct-anthropic-compatible' as const;
+export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL = 'Direct (Chat Completions)' as const;
+export const DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL = 'Direct (Responses)' as const;
+export const DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL = 'Direct (Anthropic)' as const;
 
 export const BUILTIN_AGENTS = [
   'claude',
@@ -16,9 +16,9 @@ export const BUILTIN_AGENTS = [
   'amp',
   'factory',
   'pi',
-  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+  DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 ] as const;
 
 export type BuiltinAgentId = (typeof BUILTIN_AGENTS)[number];
@@ -111,21 +111,21 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
     supportedProtocols: [],
     authLoginSupported: false,
   },
-  [DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: {
+  [DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
     authLoginSupported: false,
   },
-  [DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: {
+  [DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
     authLoginSupported: false,
   },
-  [DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: {
+  [DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
@@ -135,11 +135,11 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
 };
 
 const AGENT_IDS_BY_PROTOCOL: Record<ApiProtocol, readonly BuiltinAgentId[]> = {
-  'anthropic-messages': ['claude', DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID],
+  'anthropic-messages': ['claude', DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID],
   'openai-compatible': [
     'codex',
-    DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-    DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
+    DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+    DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
   ],
 };
 
@@ -215,9 +215,9 @@ const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;
 const SETTINGS_OAUTH_AGENTS = ['claude', 'codex'] as const;
 const SETTINGS_OTHER_AGENTS = ['amp', 'cursor', 'factory', 'opencode', 'pi'] as const;
 export const ENDPOINT_ONLY_AGENTS = [
-  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-  DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
+  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+  DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 ] as const;
 
 export type OAuthAgentId = (typeof SETTINGS_OAUTH_AGENTS)[number];
@@ -279,17 +279,17 @@ export function endpointSupportsAgent(
   endpoint: EndpointAgentCompatibilityInput,
 ): boolean {
   if (endpoint.protocol === 'anthropic-messages') {
-    return agentId === 'claude' || agentId === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID;
+    return agentId === 'claude' || agentId === DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID;
   }
 
   const capabilities = endpoint.capabilities ?? {
     chatCompletions: false,
     responses: false,
   };
-  if (agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID) {
+  if (agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {
     return capabilities.chatCompletions;
   }
-  if (agentId === 'codex' || agentId === DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID) {
+  if (agentId === 'codex' || agentId === DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID) {
     return capabilities.responses;
   }
   return false;

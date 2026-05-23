@@ -1,5 +1,5 @@
 import { getCursorBinary } from '../../config.js';
-import type { PermissionMode, ResumeTurnRequest, StartSessionRequest } from '../../providers/types.js';
+import type { PermissionMode, ResumeTurnRequest, StartSessionRequest } from '../session-types.js';
 import type { AcpAgentPolicy } from '../shared/acp-agent-runtime.js';
 
 function mappedMode(permissionMode: PermissionMode): string {

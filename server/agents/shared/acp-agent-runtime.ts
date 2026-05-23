@@ -7,9 +7,9 @@ import {
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
-import { AbsProvider } from '../../providers/base.js';
-import { normalizeToolInput } from '../../providers/normalize-util.js';
-import type { PermissionMode, ProviderEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../../providers/types.js';
+import { AbsProvider } from './event-emitter-runtime.js';
+import { normalizeToolInput } from './normalize-util.js';
+import type { PermissionMode, ProviderEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../session-types.js';
 import type { AgentRuntime } from '../types.js';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';

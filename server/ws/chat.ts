@@ -35,8 +35,8 @@ import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } f
 import type { QueueState } from '../../common/queue-state.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
-import type { RunProviderTurnOptions } from '../providers/types.js';
-import { requireChatExecutionConfig } from '../providers/types.js';
+import type { RunProviderTurnOptions } from "../agents/session-types.js";
+import { requireChatExecutionConfig } from "../agents/session-types.js";
 import { supportsFork as providerSupportsFork } from '../../common/providers.ts';
 
 const PERMISSION_DEDUP_TTL = 30_000;
@@ -44,7 +44,7 @@ const PERMISSION_DEDUP_TTL = 30_000;
 // Bun's ServerWebSocket parameterized over the per-socket data bag.
 type WS = import('bun').ServerWebSocket<unknown>;
 
-interface ProviderRegistryDep {
+interface AgentRegistryDep {
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
   setPermissionMode(chatId: string, mode: PermissionMode): Promise<void>;
@@ -141,7 +141,7 @@ interface RequestErrorParams {
 }
 
 export class ChatHandler {
-  #providers: ProviderRegistryDep;
+  #providers: AgentRegistryDep;
   #queue: QueueManagerDep;
   #historyCache: HistoryCacheDep;
   #pendingInputs: PendingInputsDep;
@@ -150,7 +150,7 @@ export class ChatHandler {
   #recentPermissionDecisions = new Map<string, number>();
 
   constructor(
-    providers: ProviderRegistryDep,
+    providers: AgentRegistryDep,
     queue: QueueManagerDep,
     historyCache: HistoryCacheDep,
     registry: IChatRegistry,

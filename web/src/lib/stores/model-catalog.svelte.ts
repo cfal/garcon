@@ -3,12 +3,12 @@ import { agentLabelFor } from '$lib/i18n/agent-labels';
 import type { SessionProvider } from '$lib/types/app';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS, PI_MODELS } from '$shared/models';
 import {
-	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-	DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL,
-	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL,
-	DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-	DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL,
+	DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+	DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
+	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
+	DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+	DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
 	isApiProviderTemplateId,
 	isEndpointOnlyAgentId,
 	isVisibleAgentId,
@@ -64,12 +64,12 @@ const STATIC_FALLBACKS: AgentModels = {
 	amp: AMP_MODELS.OPTIONS,
 	factory: FACTORY_MODELS.OPTIONS,
 	pi: PI_MODELS.OPTIONS,
-	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: [],
-	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: [],
-	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: [],
+	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: [],
+	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: [],
+	[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: [],
 };
 
-const STATIC_HARNESS_METADATA: AgentMetadataMap = {
+const STATIC_AGENT_METADATA: AgentMetadataMap = {
 	claude: { id: 'claude', label: 'Claude', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], authLoginSupported: true, defaultModel: CLAUDE_MODELS.DEFAULT },
 	codex: { id: 'codex', label: 'Codex', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], authLoginSupported: true, defaultModel: CODEX_MODELS.DEFAULT },
 	cursor: { id: 'cursor', label: 'Cursor', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: '' },
@@ -77,20 +77,20 @@ const STATIC_HARNESS_METADATA: AgentMetadataMap = {
 	amp: { id: 'amp', label: 'Amp', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: AMP_MODELS.DEFAULT },
 	factory: { id: 'factory', label: 'Factory', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: FACTORY_MODELS.DEFAULT },
 	pi: { id: 'pi', label: 'Pi', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: PI_MODELS.DEFAULT },
-	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID, label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], authLoginSupported: false, defaultModel: '' },
-	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: { id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID, label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], authLoginSupported: false, defaultModel: '' },
-	[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: { id: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID, label: DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], authLoginSupported: false, defaultModel: '' },
+	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: { id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID, label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], authLoginSupported: false, defaultModel: '' },
+	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: { id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID, label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], authLoginSupported: false, defaultModel: '' },
+	[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: { id: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID, label: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], authLoginSupported: false, defaultModel: '' },
 };
 
 function normalizeAgentLabel(id: string, label: string): string {
-	if (id === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID) {
-		return DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_LABEL;
+	if (id === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {
+		return DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL;
 	}
-	if (id === DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID) {
-		return DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL;
+	if (id === DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID) {
+		return DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL;
 	}
-	if (id === DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID) {
-		return DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_LABEL;
+	if (id === DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID) {
+		return DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL;
 	}
 	return label;
 }
@@ -233,9 +233,9 @@ function mergeWithFallbacks(models: AgentModels): AgentModels {
 		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
 		pi: mergeStaticModels(removeLegacyPiDefaultModels(models.pi), STATIC_FALLBACKS.pi!),
 		opencode: models.opencode?.length ? models.opencode : [],
-		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID] : [],
-		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID] : [],
-		[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: models[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]?.length ? models[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID] : [],
+		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]?.length ? models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID] : [],
+		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]?.length ? models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID] : [],
+		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: models[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]?.length ? models[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID] : [],
 	};
 	for (const [key, value] of Object.entries(models)) {
 		if (!(key in result) && value?.length && isVisibleAgentId(key)) {
@@ -323,7 +323,7 @@ function readPersisted(): ModelCatalogSnapshot {
 	if (typeof window === 'undefined') {
 		return {
 			agentModels: { ...STATIC_FALLBACKS },
-			agentMetadata: { ...STATIC_HARNESS_METADATA },
+			agentMetadata: { ...STATIC_AGENT_METADATA },
 			apiProviderCatalog: [],
 			lastFetchedAt: null,
 		};
@@ -334,7 +334,7 @@ function readPersisted(): ModelCatalogSnapshot {
 		if (!raw) {
 			return {
 				agentModels: { ...STATIC_FALLBACKS },
-				agentMetadata: { ...STATIC_HARNESS_METADATA },
+				agentMetadata: { ...STATIC_AGENT_METADATA },
 				apiProviderCatalog: [],
 				lastFetchedAt: null,
 			};
@@ -347,8 +347,8 @@ function readPersisted(): ModelCatalogSnapshot {
 		);
 		const agentMetadata = filterVisibleAgentMetadata(
 				typeof parsed.agentMetadata === 'object' && parsed.agentMetadata !== null
-					? { ...STATIC_HARNESS_METADATA, ...(parsed.agentMetadata as AgentMetadataMap) }
-					: { ...STATIC_HARNESS_METADATA }
+					? { ...STATIC_AGENT_METADATA, ...(parsed.agentMetadata as AgentMetadataMap) }
+					: { ...STATIC_AGENT_METADATA }
 		);
 		const apiProviderCatalog = normalizeApiProviders(parsed.apiProviderCatalog);
 		const lastFetchedAt =
@@ -357,7 +357,7 @@ function readPersisted(): ModelCatalogSnapshot {
 	} catch {
 		return {
 			agentModels: { ...STATIC_FALLBACKS },
-			agentMetadata: { ...STATIC_HARNESS_METADATA },
+			agentMetadata: { ...STATIC_AGENT_METADATA },
 			apiProviderCatalog: [],
 			lastFetchedAt: null,
 		};
@@ -377,7 +377,7 @@ function hasNonEmptyPiModels(snapshot: ModelCatalogSnapshot): boolean {
 
 export class ModelCatalogStore {
 	agentModels = $state<AgentModels>({ ...STATIC_FALLBACKS });
-	agentMetadata = $state<AgentMetadataMap>({ ...STATIC_HARNESS_METADATA });
+	agentMetadata = $state<AgentMetadataMap>({ ...STATIC_AGENT_METADATA });
 	apiProviderCatalog = $state<ApiProviderCatalogEntry[]>([]);
 	lastFetchedAt = $state<number | null>(null);
 	isRefreshing = $state(false);
@@ -561,7 +561,7 @@ export class ModelCatalogStore {
 			let persistable = true;
 			if (catalogResult && Object.keys(catalogResult.agentModels).length > 0) {
 				let nextModels = mergeWithFallbacks(catalogResult.agentModels);
-				let nextMetadata = filterVisibleAgentMetadata({ ...STATIC_HARNESS_METADATA, ...catalogResult.agentMetadata });
+				let nextMetadata = filterVisibleAgentMetadata({ ...STATIC_AGENT_METADATA, ...catalogResult.agentMetadata });
 				if (hasExplicitEmptyPiModels(catalogResult.agentModels)) {
 					const strictPi = await this.#resolveStrictPiModels(nextModels, nextMetadata);
 					nextModels = strictPi.models;

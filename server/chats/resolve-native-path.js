@@ -2,8 +2,8 @@
 // Shared by both the REST route and the WebSocket handler.
 
 import { promises as fs } from 'fs';
-import { createClaudeNativePath } from '../providers/claude-cli.js';
-import { findPiSessionFileBySessionId } from '../providers/pi-session-paths.js';
+import { createClaudeNativePath } from "../agents/claude/claude-cli.js";
+import { findPiSessionFileBySessionId } from "../agents/pi/pi-session-paths.js";
 import { createArtificialNativePath } from './artificial-native-path.js';
 import { isEndpointOnlyAgentId } from '../../common/providers.ts';
 

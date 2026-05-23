@@ -1,11 +1,11 @@
-import type { ChatMessage } from '../../common/chat-types.js';
+import type { ChatMessage } from "../../common/chat-types.js";
 import type {
   ProviderChatEntry,
   ProviderEventMetadata,
   ResumeTurnRequest,
   StartSessionRequest,
   StartedProviderSession,
-} from '../providers/types.js';
+} from './session-types.js';
 
 export type SupportedAgentProtocol = 'anthropic-messages' | 'openai-compatible';
 

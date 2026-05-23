@@ -1,6 +1,6 @@
-import type { OpenCodeProvider } from '../../providers/opencode.js';
-import { getOpenCodeAuthStatus } from '../../providers/opencode-auth.js';
-import type { ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../../providers/types.js';
+import type { OpenCodeProvider } from './opencode.js';
+import { getOpenCodeAuthStatus } from './opencode-auth.js';
+import type { ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../session-types.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
 import type { Agent, AgentRuntime } from '../types.js';

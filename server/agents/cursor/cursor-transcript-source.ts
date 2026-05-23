@@ -1,8 +1,8 @@
 import type { ChatMessage } from '../../../common/chat-types.js';
 import { getArtificialProviderSessionId } from '../../chats/artificial-native-path.js';
-import { CursorRequestIdentityStore } from '../../providers/cursor-request-identities.js';
-import { getCursorPreviewFromSessionId, loadCursorChatMessagesBySessionId } from '../../providers/loaders/cursor-history-loader.js';
-import type { ProviderChatEntry } from '../../providers/types.js';
+import { CursorRequestIdentityStore } from './cursor-request-identities.js';
+import { getCursorPreviewFromSessionId, loadCursorChatMessagesBySessionId } from '../loaders/cursor-history-loader.js';
+import type { ProviderChatEntry } from '../session-types.js';
 import type { AgentTranscriptSource } from '../types.js';
 
 // Keeps Cursor transcript hydration on SQLite while ACP replay remains unstable.

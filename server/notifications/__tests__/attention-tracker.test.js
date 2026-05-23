@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { AttentionTracker } from '../../notifications/attention-tracker.js';
 import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, UserMessage, AssistantMessage, BashToolUseMessage } from '../../../common/chat-types.js';
 
-function createMockProviderRegistry() {
+function createMockAgentRegistry() {
   const emitter = new EventEmitter();
   return {
     onMessages: (cb) => emitter.on('messages', cb),
@@ -60,7 +60,7 @@ describe('AttentionTracker', () => {
   let providers, queue, settings, registry, history, telegram;
 
   beforeEach(() => {
-    providers = createMockProviderRegistry();
+    providers = createMockAgentRegistry();
     queue = createMockQueue();
     settings = createMockSettings();
     registry = createMockRegistry();

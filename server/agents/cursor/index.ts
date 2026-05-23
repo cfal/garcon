@@ -1,6 +1,6 @@
-import { runSingleQuery as runSingleQueryCursor } from '../../providers/cursor-cli.js';
-import { getCursorModels } from '../../providers/cursor-models.js';
-import { CursorRequestIdentityStore } from '../../providers/cursor-request-identities.js';
+import { runSingleQuery as runSingleQueryCursor } from './cursor-cli.js';
+import { getCursorModels } from './cursor-models.js';
+import { CursorRequestIdentityStore } from './cursor-request-identities.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { AcpAgentRuntime } from '../shared/acp-agent-runtime.js';
 import type { Agent } from '../types.js';

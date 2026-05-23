@@ -34,7 +34,7 @@ function normalizeTitle(text) {
   return text.replace(/^["'`]+|["'`]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-// providers: ProviderRegistry (for runSingleQuery)
+// providers: AgentRegistry (for runSingleQuery)
 // settings: SettingsStore (for getUiSettings, getChatName, setSessionName)
 export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt, providers, settings }) {
   if (!firstPrompt?.trim()) return;

@@ -1,5 +1,5 @@
-import { runSingleQuery as runSingleQueryFactory, type FactoryProvider } from '../../providers/factory-cli.js';
-import { getFactoryAuthStatus } from '../../providers/factory-auth.js';
+import { runSingleQuery as runSingleQueryFactory, type FactoryProvider } from './factory-cli.js';
+import { getFactoryAuthStatus } from './factory-auth.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
 import type { Agent } from '../types.js';

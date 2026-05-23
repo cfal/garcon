@@ -17,9 +17,9 @@ import {
 import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { supportsFork as providerSupportsFork, supportsImages as providerSupportsImages } from '../../common/providers.ts';
 import { getProjectBasePath, getWorkspaceDir } from '../config.js';
-import { ModelSelectionError } from '../providers/api-provider-endpoint-resolver.js';
+import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
 import { CommandLedger, type CommandLedgerRecord } from '../commands/command-ledger.js';
-import { requireChatExecutionConfig, type RunProviderTurnOptions } from '../providers/types.js';
+import { requireChatExecutionConfig, type RunProviderTurnOptions } from "../agents/session-types.js";
 import { normalizeQueueState } from '../../common/queue-state.ts';
 import type {
   AgentRunCommandRequest,

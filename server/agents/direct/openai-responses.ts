@@ -1,8 +1,8 @@
 import {
-  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-  DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
 } from '../../../common/providers.js';
-import type { ApiProviderStore } from '../../providers/api-provider-store.js';
+import type { ApiProviderStore } from '../../api-providers/store.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
 import type { Agent } from '../types.js';
@@ -18,8 +18,8 @@ const NO_AUTH_STATUS = {
 export function createDirectOpenAiResponsesAgent(apiProviderStore: ApiProviderStore): Agent {
   const runtime = createDirectOpenAiResponsesRuntime(apiProviderStore);
   return {
-    id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID,
-    label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_LABEL,
+    id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+    label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
     runtime,
     transcript: EMPTY_TRANSCRIPT_SOURCE,
     auth: { async getAuthStatus() { return NO_AUTH_STATUS; } },

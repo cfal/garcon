@@ -3,7 +3,7 @@ import {
   normalizeCodexJsonlEntry,
   extractTextContent,
   parseApplyPatch,
-} from '../../providers/loaders/codex-history-normalizer.js';
+} from '../../agents/loaders/codex-history-normalizer.js';
 import { BashToolUseMessage, EditToolUseMessage, UnknownToolUseMessage } from '../../../common/chat-types.js';
 
 describe('extractTextContent', () => {

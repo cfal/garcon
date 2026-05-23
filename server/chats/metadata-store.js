@@ -19,7 +19,7 @@ export class MetadataIndex {
   #savePromise = Promise.resolve();
 
   // registry: ChatRegistry
-  // providers: ProviderRegistry
+  // providers: AgentRegistry
   constructor(registry, providers, options = {}) {
     this.#registry = registry;
     this.#providers = providers;

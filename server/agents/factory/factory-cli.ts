@@ -1,0 +1,616 @@
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+import { getFactoryBinary } from "../../config.js";
+import {
+  AssistantMessage,
+  ThinkingMessage,
+  ToolResultMessage,
+  type ChatMessage,
+} from "../../../common/chat-types.js";
+import { normalizeToolResultContent }  from "../shared/normalize-util.js";
+import { convertFactoryToolUse } from "../converters/factory-tool-use.js";
+import { AbsProvider } from "../shared/event-emitter-runtime.js";
+import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
+import type { AgentCommandImage, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedProviderSession, ThinkingMode } from "../session-types.js";
+import { getFactoryModelMetadata, getFactoryModels } from './factory-models.js';
+
+interface FactorySession {
+  aborted: boolean;
+  chatId: string;
+  cleanup?: (() => Promise<void>) | undefined;
+  finalized: boolean;
+  id: string;
+  isRunning: boolean;
+  process: ReturnType<typeof Bun.spawn> | null;
+  resultSeen: boolean;
+  sessionCreatedEmitted: boolean;
+  startTime: number;
+  startedSession: {
+    promise: Promise<StartedProviderSession>;
+    reject: (error: unknown) => void;
+    resolve: (value: StartedProviderSession) => void;
+    resolved: boolean;
+  } | null;
+  turnResolve: (() => void) | null;
+}
+
+interface FactorySystemInitEvent {
+  cwd?: string;
+  model?: string;
+  reasoning_effort?: string;
+  session_id?: string;
+  subtype?: string;
+  type: 'system';
+}
+
+interface FactoryMessageEvent {
+  id?: string;
+  role?: string;
+  session_id?: string;
+  text?: string;
+  timestamp?: number | string;
+  type: 'message';
+}
+
+interface FactoryToolCallEvent {
+  id?: string;
+  parameters?: Record<string, unknown>;
+  session_id?: string;
+  toolId?: string;
+  toolName?: string;
+  type: 'tool_call';
+}
+
+interface FactoryToolResultEvent {
+  id?: string;
+  isError?: boolean;
+  session_id?: string;
+  toolId?: string;
+  type: 'tool_result';
+  value?: unknown;
+}
+
+interface FactoryCompletionEvent {
+  finalText?: string;
+  session_id?: string;
+  subtype?: string;
+  type: 'completion' | 'result';
+}
+
+type FactoryCliEvent =
+  | FactoryCompletionEvent
+  | FactoryMessageEvent
+  | FactorySystemInitEvent
+  | FactoryToolCallEvent
+  | FactoryToolResultEvent
+  | Record<string, unknown>;
+
+const FACTORY_ALLOWED_TOOLS = [
+  'Read',
+  'LS',
+  'Execute',
+  'Edit',
+  'ApplyPatch',
+  'Grep',
+  'Glob',
+  'Create',
+  'WebSearch',
+  'FetchUrl',
+  'TodoWrite',
+  'Task',
+];
+
+const FACTORY_IMAGE_CAPABLE_MODE_PATTERN = /^(claude-|gpt-|kimi-k2\.5|custom:)/;
+const FACTORY_PLAN_PREFIX = [
+  'You are operating in Garcon plan mode.',
+  'Do not modify files, run mutating commands, or carry out implementation.',
+  'Analyze the task, inspect the codebase, and respond with a concrete implementation plan only.',
+].join('\n');
+
+function toIsoString(value: number | string | undefined): string {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value).toISOString();
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return new Date().toISOString();
+}
+
+function mapFactoryReasoningEffort(thinkingMode: ThinkingMode, supportedReasoningEfforts: string[] | undefined): string | undefined {
+  if (thinkingMode === 'none') return undefined;
+  if (!supportedReasoningEfforts || supportedReasoningEfforts.length === 0) return undefined;
+
+  const normalized = new Set(supportedReasoningEfforts.map((entry) => entry.toLowerCase()));
+  if (thinkingMode === 'think') {
+    if (normalized.has('low')) return 'low';
+    if (normalized.has('minimal')) return 'minimal';
+  }
+  if (thinkingMode === 'think-hard' && normalized.has('medium')) return 'medium';
+  if (thinkingMode === 'think-harder' && normalized.has('high')) return 'high';
+  if (thinkingMode === 'ultrathink') {
+    if (normalized.has('xhigh')) return 'xhigh';
+    if (normalized.has('max')) return 'max';
+    if (normalized.has('high')) return 'high';
+  }
+  if (normalized.has('high')) return 'high';
+  if (normalized.has('medium')) return 'medium';
+  if (normalized.has('low')) return 'low';
+  if (normalized.has('minimal')) return 'minimal';
+  if (normalized.has('off')) return 'off';
+  if (normalized.has('none')) return 'none';
+  return undefined;
+}
+
+async function writeImagesToTempFiles(images: AgentCommandImage[]): Promise<{ cleanup: () => Promise<void>; paths: string[] }> {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'factory-images-'));
+  const filePaths: string[] = [];
+
+  for (let index = 0; index < images.length; index += 1) {
+    const image = images[index];
+    const match = image.data?.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) continue;
+    const mimeType = match[1];
+    const extension = mimeType === 'image/jpeg'
+      ? '.jpg'
+      : mimeType === 'image/gif'
+        ? '.gif'
+        : mimeType === 'image/webp'
+          ? '.webp'
+          : '.png';
+    const filePath = path.join(tempDir, `image-${index}${extension}`);
+    await fs.writeFile(filePath, Buffer.from(match[2], 'base64'));
+    filePaths.push(filePath);
+  }
+
+  return {
+    cleanup: async () => {
+      await fs.rm(tempDir, { force: true, recursive: true }).catch(() => { });
+    },
+    paths: filePaths,
+  };
+}
+
+async function buildFactoryPrompt(
+  command: string,
+  images: AgentCommandImage[] | undefined,
+  modelSupportsImages: boolean,
+  permissionMode: PermissionMode,
+): Promise<{ cleanup?: () => Promise<void>; prompt: string }> {
+  let prompt = command;
+
+  if (permissionMode === 'plan') {
+    prompt = `${FACTORY_PLAN_PREFIX}\n\n${command}`;
+  }
+
+  if (!images?.length || !modelSupportsImages) {
+    return { prompt };
+  }
+
+  const { cleanup, paths } = await writeImagesToTempFiles(images);
+  if (paths.length === 0) {
+    return { prompt, cleanup };
+  }
+
+  const imagePreamble = [
+    'The user attached image files.',
+    'Inspect them if relevant before answering.',
+    ...paths.map((filePath) => `- ${filePath}`),
+  ].join('\n');
+
+  return {
+    cleanup,
+    prompt: `${imagePreamble}\n\n${prompt}`,
+  };
+}
+
+function buildFactoryArgs(
+  request: Pick<ResumeTurnRequest, 'model' | 'permissionMode' | 'projectPath' | 'thinkingMode'> & { providerSessionId?: string | null },
+  reasoningEffort: string | undefined,
+): string[] {
+  const args = [
+    'exec',
+    '--output-format',
+    'debug',
+    '--cwd',
+    request.projectPath,
+    '--enabled-tools',
+    FACTORY_ALLOWED_TOOLS.join(','),
+  ];
+
+  if (request.model) {
+    args.push('--model', request.model);
+  }
+  if (request.providerSessionId) {
+    args.push('--session-id', request.providerSessionId);
+  }
+  if (reasoningEffort) {
+    args.push('--reasoning-effort', reasoningEffort);
+  }
+  if (request.permissionMode === 'acceptEdits') {
+    args.push('--auto', 'medium');
+  } else if (request.permissionMode === 'bypassPermissions') {
+    args.push('--skip-permissions-unsafe');
+  }
+
+  return args;
+}
+
+async function runFactoryExec(args: string[], prompt: string): Promise<{ stderr: string; stdout: string }> {
+  const factoryBinary = getFactoryBinary();
+  const proc = Bun.spawn([factoryBinary, ...args], {
+    stdin: new Blob([prompt]),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout as ReadableStream).text(),
+    new Response(proc.stderr as ReadableStream).text(),
+    proc.exited,
+  ]);
+
+  if (exitCode !== 0) {
+    const details = (stderr || stdout || '').trim();
+    throw new Error(`Factory exec failed with code ${exitCode}${details ? `: ${details}` : ''}`);
+  }
+
+  return { stdout, stderr };
+}
+
+export async function runSingleQuery(prompt: string, options: Record<string, unknown> = {}): Promise<string> {
+  const request = {
+    model: typeof options.model === 'string' ? options.model : '',
+    permissionMode: typeof options.permissionMode === 'string' ? options.permissionMode as PermissionMode : 'default',
+    projectPath: typeof options.cwd === 'string'
+      ? options.cwd
+      : typeof options.projectPath === 'string'
+        ? options.projectPath
+        : process.cwd(),
+    thinkingMode: typeof options.thinkingMode === 'string' ? options.thinkingMode as ThinkingMode : 'none',
+  };
+  const metadata = request.model ? await getFactoryModelMetadata(request.model) : null;
+  const reasoningEffort = mapFactoryReasoningEffort(request.thinkingMode, metadata?.reasoningEfforts);
+  const supportsImages = metadata?.supportsImages ?? FACTORY_IMAGE_CAPABLE_MODE_PATTERN.test(request.model);
+  const args = buildFactoryArgs(request, reasoningEffort).map((entry) => entry);
+  args[1] = '--output-format';
+  args[2] = 'json';
+
+  const { cleanup, prompt: nextPrompt } = await buildFactoryPrompt(prompt, undefined, supportsImages, request.permissionMode);
+  try {
+    const { stdout } = await runFactoryExec(args, nextPrompt);
+    const parsed = JSON.parse(stdout) as { result?: string };
+    return typeof parsed.result === 'string' ? parsed.result.trim() : '';
+  } finally {
+    if (cleanup) await cleanup();
+  }
+}
+
+function convertFactoryMessageEvent(event: FactoryMessageEvent): ChatMessage[] {
+  const timestamp = toIsoString(event.timestamp);
+  if (event.role === 'assistant' && typeof event.text === 'string' && event.text.trim()) {
+    return [new AssistantMessage(timestamp, event.text)];
+  }
+  if (event.role === 'thinking' && typeof event.text === 'string' && event.text.trim()) {
+    return [new ThinkingMessage(timestamp, event.text)];
+  }
+  return [];
+}
+
+export class FactoryProvider extends AbsProvider {
+  #runningSessions = new Map<string, FactorySession>();
+
+  async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
+    return getFactoryModels();
+  }
+
+  #finalizeTurn(session: FactorySession, exitCode?: number): void {
+    if (session.finalized) return;
+    session.finalized = true;
+    const wasRunning = session.isRunning;
+    session.isRunning = false;
+    if (wasRunning) this.emitProcessing(session.chatId, false);
+
+    if (session.startedSession && !session.startedSession.resolved) {
+      session.startedSession.resolved = true;
+      session.startedSession.reject(new Error(`Factory process exited before session init${exitCode != null ? ` (code ${exitCode})` : ''}`));
+    } else if (!session.resultSeen && !session.aborted) {
+      this.emitFailed(session.chatId, `Factory process exited before completion${exitCode != null ? ` (code ${exitCode})` : ''}`);
+    }
+
+    const resolve = session.turnResolve;
+    session.turnResolve = null;
+    if (session.cleanup) {
+      void session.cleanup().catch(() => { });
+      session.cleanup = undefined;
+    }
+    resolve?.();
+  }
+
+  async #pipeStderr(sessionId: string, proc: ReturnType<typeof Bun.spawn>): Promise<void> {
+    if (!proc.stderr) return;
+    const reader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true });
+        for (const line of text.split('\n')) {
+          if (line.trim()) {
+            console.log(`factory(${sessionId.slice(0, 8)}): stderr: ${line}`);
+          }
+        }
+      }
+    } catch {
+      // Stream closed.
+    }
+  }
+
+  #routeEvent(session: FactorySession, event: FactoryCliEvent): void {
+    const type = typeof event.type === 'string' ? event.type : '';
+    switch (type) {
+      case 'system': {
+        const initEvent = event as FactorySystemInitEvent;
+        if (initEvent.subtype !== 'init' || !initEvent.session_id) return;
+
+        if (!session.id) {
+          session.id = initEvent.session_id;
+          this.#runningSessions.set(session.id, session);
+        }
+
+        if (!session.sessionCreatedEmitted) {
+          this.emitSessionCreated(session.chatId);
+          session.sessionCreatedEmitted = true;
+        }
+
+        if (session.startedSession && !session.startedSession.resolved) {
+          session.startedSession.resolved = true;
+          session.startedSession.resolve({
+            providerSessionId: session.id,
+            nativePath: createArtificialNativePath('factory', session.id),
+          });
+        }
+        break;
+      }
+
+      case 'message': {
+        const chatMessages = convertFactoryMessageEvent(event as FactoryMessageEvent);
+        if (chatMessages.length > 0) {
+          this.emitMessages(session.chatId, chatMessages);
+        }
+        break;
+      }
+
+      case 'tool_call':
+        this.emitMessages(session.chatId, [
+          convertFactoryToolUse(new Date().toISOString(), {
+            id: (event as FactoryToolCallEvent).id,
+            parameters: (event as FactoryToolCallEvent).parameters,
+            toolId: (event as FactoryToolCallEvent).toolId,
+            toolName: (event as FactoryToolCallEvent).toolName,
+          }),
+        ]);
+        break;
+
+      case 'tool_result': {
+        const resultEvent = event as FactoryToolResultEvent;
+        this.emitMessages(session.chatId, [
+          new ToolResultMessage(
+            new Date().toISOString(),
+            resultEvent.id || '',
+            normalizeToolResultContent(resultEvent.value),
+            Boolean(resultEvent.isError),
+          ),
+        ]);
+        break;
+      }
+
+      case 'completion':
+      case 'result':
+        session.resultSeen = true;
+        this.emitFinished(session.chatId, 0);
+        this.#finalizeTurn(session, 0);
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  async #readStdout(session: FactorySession, proc: ReturnType<typeof Bun.spawn>): Promise<void> {
+    if (!proc.stdout) return;
+    const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!;
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            this.#routeEvent(session, JSON.parse(line) as FactoryCliEvent);
+          } catch {
+            console.warn(`factory(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
+          }
+        }
+      }
+    } finally {
+      const exitCode = await proc.exited;
+      if (session.process === proc) {
+        session.process = null;
+      }
+      this.#finalizeTurn(session, exitCode);
+    }
+  }
+
+  #spawnFactory(session: FactorySession, args: string[], prompt: string, cwd: string): ReturnType<typeof Bun.spawn> {
+    const factoryBinary = getFactoryBinary();
+    const proc = Bun.spawn([factoryBinary, ...args], {
+      cwd,
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    const stdin = proc.stdin as unknown as { end(): void; write(chunk: string): void };
+    stdin.write(prompt);
+    stdin.end();
+
+    session.process = proc;
+    void this.#readStdout(session, proc);
+    void this.#pipeStderr(session.id || 'pending', proc);
+
+    return proc;
+  }
+
+  #waitForTurnComplete(session: FactorySession): Promise<void> {
+    if (!session.isRunning) return Promise.resolve();
+    return new Promise((resolve) => {
+      session.turnResolve = resolve;
+    });
+  }
+
+  async #createSessionTracker(): Promise<FactorySession['startedSession']> {
+    let resolveRef: ((value: StartedProviderSession) => void) | null = null;
+    let rejectRef: ((error: unknown) => void) | null = null;
+    const promise = new Promise<StartedProviderSession>((resolve, reject) => {
+      resolveRef = resolve;
+      rejectRef = reject;
+    });
+    return {
+      promise,
+      reject: (error) => {
+        rejectRef?.(error);
+      },
+      resolve: (value) => {
+        resolveRef?.(value);
+      },
+      resolved: false,
+      // @ts-expect-error internal convenience for startSession
+      promise,
+    };
+  }
+
+  async startSession(request: StartSessionRequest): Promise<StartedProviderSession> {
+    const modelMetadata = request.model ? await getFactoryModelMetadata(request.model) : null;
+    const reasoningEffort = mapFactoryReasoningEffort(request.thinkingMode, modelMetadata?.reasoningEfforts);
+    const supportsImages = modelMetadata?.supportsImages ?? FACTORY_IMAGE_CAPABLE_MODE_PATTERN.test(request.model);
+    const args = buildFactoryArgs(request, reasoningEffort);
+    const { cleanup, prompt } = await buildFactoryPrompt(request.command, request.images, supportsImages, request.permissionMode);
+    const startedSession = await this.#createSessionTracker() as FactorySession['startedSession'] & { promise: Promise<StartedProviderSession> };
+    const session: FactorySession = {
+      aborted: false,
+      chatId: request.chatId,
+      cleanup,
+      finalized: false,
+      id: '',
+      isRunning: true,
+      process: null,
+      resultSeen: false,
+      sessionCreatedEmitted: false,
+      startTime: Date.now(),
+      startedSession,
+      turnResolve: null,
+    };
+
+    this.emitProcessing(request.chatId, true);
+    try {
+      this.#spawnFactory(session, args, prompt, request.projectPath);
+      return await startedSession.promise;
+    } catch (error) {
+      this.emitProcessing(request.chatId, false);
+      if (cleanup) await cleanup();
+      throw error;
+    }
+  }
+
+  async runTurn(request: ResumeTurnRequest): Promise<void> {
+    const existingSession = this.#runningSessions.get(request.providerSessionId);
+    if (existingSession?.isRunning) {
+      throw new Error(`Session ${request.providerSessionId} is already running`);
+    }
+
+    const modelMetadata = request.model ? await getFactoryModelMetadata(request.model) : null;
+    const reasoningEffort = mapFactoryReasoningEffort(request.thinkingMode, modelMetadata?.reasoningEfforts);
+    const supportsImages = modelMetadata?.supportsImages ?? FACTORY_IMAGE_CAPABLE_MODE_PATTERN.test(request.model);
+    const args = buildFactoryArgs(request, reasoningEffort);
+    const { cleanup, prompt } = await buildFactoryPrompt(request.command, request.images, supportsImages, request.permissionMode);
+    const session: FactorySession = existingSession ?? {
+      aborted: false,
+      chatId: request.chatId,
+      finalized: false,
+      id: request.providerSessionId,
+      isRunning: true,
+      process: null,
+      resultSeen: false,
+      sessionCreatedEmitted: true,
+      startTime: Date.now(),
+      startedSession: null,
+      turnResolve: null,
+    };
+    session.aborted = false;
+    session.chatId = request.chatId;
+    session.cleanup = cleanup;
+    session.finalized = false;
+    session.id = request.providerSessionId;
+    session.isRunning = true;
+    session.process = null;
+    session.resultSeen = false;
+    session.startTime = Date.now();
+    this.#runningSessions.set(session.id, session);
+
+    this.emitProcessing(request.chatId, true);
+    try {
+      this.#spawnFactory(session, args, prompt, request.projectPath);
+      await this.#waitForTurnComplete(session);
+    } catch (error) {
+      if (cleanup) await cleanup();
+      throw error;
+    }
+  }
+
+  abort(providerSessionId: string): boolean {
+    const session = this.#runningSessions.get(providerSessionId);
+    if (!session?.process) return false;
+    session.aborted = true;
+    session.process.kill();
+    this.#finalizeTurn(session, 143);
+    return true;
+  }
+
+  isRunning(providerSessionId: string): boolean {
+    return this.#runningSessions.get(providerSessionId)?.isRunning === true;
+  }
+
+  getRunningSessions(): Array<{ id: string; startedAt: string; status: string }> {
+    return Array.from(this.#runningSessions.values())
+      .filter((session) => session.isRunning && Boolean(session.id))
+      .map((session) => ({
+        id: session.id,
+        startedAt: new Date(session.startTime).toISOString(),
+        status: 'running',
+      }));
+  }
+
+  startPurgeTimer(): ReturnType<typeof setInterval> {
+    const maxAge = 30 * 60 * 1000;
+    return setInterval(() => {
+      const now = Date.now();
+      for (const [id, session] of this.#runningSessions.entries()) {
+        if (!session.isRunning && now - session.startTime > maxAge) {
+          this.#runningSessions.delete(id);
+        }
+      }
+    }, 5 * 60 * 1000);
+  }
+}

@@ -16,7 +16,7 @@ import {
   type ThinkingMode,
 } from '../../common/chat-modes.js';
 import type { ApiProtocol } from '../../common/providers.js';
-import type { ProviderName } from '../providers/types.js';
+import type { ProviderName } from "../agents/session-types.js";
 import { isArtificialNativePath } from './artificial-native-path.js';
 
 const NATIVE_PATH_LRU_MAX = 64;

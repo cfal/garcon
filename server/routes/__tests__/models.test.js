@@ -4,7 +4,7 @@ const getPiModelsStrictMock = mock(() => Promise.resolve([
   { value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true },
 ]));
 
-mock.module('../../providers/pi-models.js', () => ({
+mock.module('../../agents/pi/pi-models.js', () => ({
   getPiModelsStrict: getPiModelsStrictMock,
   isPiModelDiscoveryUnavailableError: (error) => error?.code === 'PI_MODEL_DISCOVERY_UNAVAILABLE',
 }));

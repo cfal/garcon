@@ -2,7 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { loadCodexChatMessages } from '../../providers/loaders/codex-history-loader.js';
+import { loadCodexChatMessages } from '../../agents/loaders/codex-history-loader.js';
 
 async function withTempJsonl(lines, fn) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-load-test-'));

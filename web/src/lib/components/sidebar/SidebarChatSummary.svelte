@@ -7,9 +7,9 @@
 	import { cn } from '$lib/utils/cn';
 	import { formatSidebarChatTimestamp } from './chat-timestamp.js';
 	import {
-		DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID,
-		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID,
-		DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID
+		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID
 	} from '$shared/providers';
 
 	interface SidebarChatSummaryProps {
@@ -53,9 +53,9 @@
 		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
 		factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
 		pi: 'border-provider-pi-border bg-provider-pi-bg text-provider-pi-foreground',
-		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
-		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
-		[DIRECT_ANTHROPIC_COMPATIBLE_HARNESS_ID]: 'border-border bg-muted text-foreground',
+		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
+		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
+		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
 	};
 
 	let providerTagVariant = $derived(

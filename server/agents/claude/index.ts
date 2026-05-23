@@ -1,9 +1,9 @@
 import crypto from 'crypto';
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
-import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude, type ClaudeProvider } from '../../providers/claude-cli.js';
-import type { ClaudeStartSessionRequest, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../../providers/types.js';
-import { getClaudeAuthStatus } from '../../providers/claude-auth.js';
-import { launchProviderAuthLogin } from '../../providers/auth-login.js';
+import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude, type ClaudeProvider } from './claude-cli.js';
+import type { ClaudeStartSessionRequest, ResumeTurnRequest, StartSessionRequest, StartedProviderSession } from '../session-types.js';
+import { getClaudeAuthStatus } from './claude-auth.js';
+import { launchProviderAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
 import type { Agent, AgentRuntime } from '../types.js';

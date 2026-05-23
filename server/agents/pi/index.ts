@@ -1,5 +1,5 @@
-import { runSingleQuery as runSingleQueryPi, type PiProvider } from '../../providers/pi-cli.js';
-import { getPiAuthStatus } from '../../providers/pi-auth.js';
+import { runSingleQuery as runSingleQueryPi, type PiProvider } from './pi-cli.js';
+import { getPiAuthStatus } from './pi-auth.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
 import type { Agent } from '../types.js';

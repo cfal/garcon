@@ -27,7 +27,7 @@ export interface TodoItem {
 }
 
 // Lightweight coercion for already-serialized TodoItem arrays.
-// Provider-specific normalization lives in server/providers/normalize-util.
+// Agent-specific normalization lives in server/agents/shared/normalize-util.
 function asTodoItems(raw: unknown): TodoItem[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const items: TodoItem[] = [];

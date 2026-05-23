@@ -1,5 +1,5 @@
-import { runSingleQuery as runSingleQueryAmp, type AmpProvider } from '../../providers/amp-cli.js';
-import { getAmpAuthStatus } from '../../providers/amp-auth.js';
+import { runSingleQuery as runSingleQueryAmp, type AmpProvider } from './amp-cli.js';
+import { getAmpAuthStatus } from './amp-auth.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
 import type { Agent } from '../types.js';
