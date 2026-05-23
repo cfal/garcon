@@ -1,3 +1,4 @@
+import path from 'path';
 import {
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
@@ -311,27 +312,27 @@ export function createDirectAnthropicRuntime(apiProviders: ApiProviderReader): D
 }
 
 export function directOpenAiSessionDir(endpointId: string): string {
-  return `${getWorkspaceDir()}/openai-compatible-sessions/${endpointId}`;
+  return path.join(getWorkspaceDir(), 'openai-compatible-sessions', endpointId);
 }
 
 export function directOpenAiSessionFilePath(endpointId: string, sessionId: string): string {
-  return `${directOpenAiSessionDir(endpointId)}/${sessionId}.jsonl`;
+  return path.join(directOpenAiSessionDir(endpointId), `${sessionId}.jsonl`);
 }
 
 export function directOpenAiResponsesSessionDir(endpointId: string): string {
-  return `${getWorkspaceDir()}/openai-compatible-responses-sessions/${endpointId}`;
+  return path.join(getWorkspaceDir(), 'openai-compatible-responses-sessions', endpointId);
 }
 
 export function directOpenAiResponsesSessionFilePath(endpointId: string, sessionId: string): string {
-  return `${directOpenAiResponsesSessionDir(endpointId)}/${sessionId}.jsonl`;
+  return path.join(directOpenAiResponsesSessionDir(endpointId), `${sessionId}.jsonl`);
 }
 
 export function directAnthropicSessionDir(endpointId: string): string {
-  return `${getWorkspaceDir()}/anthropic-compatible-sessions/${endpointId}`;
+  return path.join(getWorkspaceDir(), 'anthropic-compatible-sessions', endpointId);
 }
 
 export function directAnthropicSessionFilePath(endpointId: string, sessionId: string): string {
-  return `${directAnthropicSessionDir(endpointId)}/${sessionId}.jsonl`;
+  return path.join(directAnthropicSessionDir(endpointId), `${sessionId}.jsonl`);
 }
 
 export function buildDirectOpenAiConfig(args: {

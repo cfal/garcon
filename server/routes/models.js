@@ -1,20 +1,27 @@
 // Serves the GET /api/v1/models endpoint using the live agent catalog from
 // the registry.
 
-import { getPiModelsStrict, isPiModelDiscoveryUnavailableError } from "../agents/pi/pi-models.js";
+function staleModelsFromDiscoveryError(error) {
+  return error
+    && typeof error === 'object'
+    && Array.isArray(error.staleModels)
+    ? error.staleModels
+    : [];
+}
 
-function piDiscoveryUnavailableResponse(error, catalog, entry) {
+function modelDiscoveryUnavailableResponse(error, catalog, entry) {
   const reason = error instanceof Error ? error.message : String(error);
+  const staleModels = staleModelsFromDiscoveryError(error);
   const body = {
-    error: 'Pi model discovery unavailable',
+    error: 'Model discovery unavailable',
     reason,
   };
-  if (isPiModelDiscoveryUnavailableError(error) && error.staleModels.length > 0 && entry) {
+  if (staleModels.length > 0 && entry) {
     body.catalog = {
       agents: [{
         ...entry,
-        defaultModel: entry.defaultModel || error.staleModels[0]?.value || '',
-        models: error.staleModels,
+        defaultModel: entry.defaultModel || staleModels[0]?.value || '',
+        models: staleModels,
       }],
       apiProviders: catalog.apiProviders,
     };
@@ -32,35 +39,16 @@ export default function createModelsRoutes(providers) {
     const agentId = url?.searchParams?.get('agent');
 
     if (agentId) {
-      if (agentId === 'pi') {
-        let strictPiModels;
-        try {
-          strictPiModels = await getPiModelsStrict();
-        } catch (error) {
-          const currentCatalog = await catalog();
-          const entry = currentCatalog.agents.find((agent) => agent.id === agentId);
-          return piDiscoveryUnavailableResponse(error, currentCatalog, entry);
-        }
-
-        const currentCatalog = await catalog();
-        const entry = currentCatalog.agents.find((agent) => agent.id === agentId);
-        if (!entry) {
-          return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
-        }
-        return Response.json({
-          catalog: {
-            agents: [{
-              ...entry,
-              defaultModel: entry.defaultModel || strictPiModels[0]?.value || '',
-              models: strictPiModels,
-            }],
-            apiProviders: currentCatalog.apiProviders,
-          },
-        });
-      }
-
       const currentCatalog = await catalog();
-      const entry = currentCatalog.agents.find((agent) => agent.id === agentId);
+      let entry;
+      try {
+        entry = typeof providers.agents.getAgentCatalogEntry === 'function'
+          ? await providers.agents.getAgentCatalogEntry(agentId, { strict: agentId === 'pi' })
+          : currentCatalog.agents.find((agent) => agent.id === agentId);
+      } catch (error) {
+        const staleEntry = currentCatalog.agents.find((agent) => agent.id === agentId);
+        return modelDiscoveryUnavailableResponse(error, currentCatalog, staleEntry);
+      }
       if (!entry) {
         return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
       }

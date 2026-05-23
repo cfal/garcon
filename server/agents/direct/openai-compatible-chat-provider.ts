@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import { AssistantMessage } from "../../../common/chat-types.js";
 import type { SharedModelOption } from "../../../common/models.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
-import { AbsProvider } from "../shared/event-emitter-runtime.js";
+import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import type { AgentCommandImage, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../session-types.js";
 import { DirectSessionStore, type DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from "../shared/sse.js";
@@ -147,7 +147,7 @@ export async function runOpenAiCompatibleSingleQuery(
   }
 }
 
-export class OpenAiCompatibleChatProvider extends AbsProvider {
+export class OpenAiCompatibleChatProvider extends AgentEventEmitterRuntime {
   readonly #config: OpenAiCompatibleChatProviderConfig;
   readonly #sessionStore: DirectSessionStore;
   #sessions = new Map<string, ProviderSession>();

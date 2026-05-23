@@ -1,7 +1,7 @@
 import { runSingleQuery as runSingleQueryAmp, type AmpProvider } from './amp-cli.js';
 import { getAmpAuthStatus } from './amp-auth.js';
 import { createAgentCapabilities } from '../capabilities.js';
-import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
+import { createArtificialTranscriptSource } from '../shared/artificial-transcript-source.js';
 import type { Agent } from '../types.js';
 
 export function createAmpAgent(amp: AmpProvider): Agent {
@@ -9,7 +9,7 @@ export function createAmpAgent(amp: AmpProvider): Agent {
     id: 'amp',
     label: 'Amp',
     runtime: amp,
-    transcript: EMPTY_TRANSCRIPT_SOURCE,
+    transcript: createArtificialTranscriptSource('amp'),
     auth: { getAuthStatus: () => getAmpAuthStatus() },
     capabilities: createAgentCapabilities({
       supportsFork: false,

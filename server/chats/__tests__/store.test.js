@@ -64,6 +64,40 @@ describe('ChatRegistry', () => {
       const entry = registry.getChat('c1');
       expect(entry?.nextForkOrdinal).toBe(1);
     });
+
+    it('migrates legacy provider fields without preserving them on save', async () => {
+      const filePath = path.join(tmpDir, 'chats.json');
+      await fs.writeFile(filePath, JSON.stringify({
+        version: 1,
+        sessions: {
+          c1: {
+            provider: 'claude',
+            providerSessionId: 'native-1',
+            nativePath: '/tmp/chat.jsonl',
+            projectPath: '/p',
+            model: 'opus',
+          },
+        },
+      }));
+
+      const fresh = new ChatRegistry(tmpDir);
+      await fresh.init();
+
+      const entry = fresh.getChat('c1');
+      expect(entry?.agentId).toBe('claude');
+      expect(entry?.agentSessionId).toBe('native-1');
+      expect(entry).not.toHaveProperty('provider');
+      expect(entry).not.toHaveProperty('providerSessionId');
+
+      fresh.updateChat('c1', { model: 'sonnet' });
+      await fresh.flush();
+
+      const persisted = JSON.parse(await fs.readFile(filePath, 'utf8'));
+      expect(persisted.sessions.c1.agentId).toBe('claude');
+      expect(persisted.sessions.c1.agentSessionId).toBe('native-1');
+      expect(persisted.sessions.c1.provider).toBeUndefined();
+      expect(persisted.sessions.c1.providerSessionId).toBeUndefined();
+    });
   });
 
   describe('updateChat', () => {

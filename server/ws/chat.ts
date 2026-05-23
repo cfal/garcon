@@ -37,7 +37,6 @@ import type { ChatMessage } from '../../common/chat-types.ts';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { RunAgentTurnOptions } from "../agents/session-types.js";
 import { requireChatExecutionConfig } from "../agents/session-types.js";
-import { supportsFork as agentSupportsFork } from '../../common/agents.ts';
 
 const PERMISSION_DEDUP_TTL = 30_000;
 
@@ -56,6 +55,7 @@ interface AgentRegistryDep {
     modelEndpointId?: string | null;
   }): Promise<void>;
   hasAgent(agentId: string): boolean;
+  supportsFork(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
 }
 
@@ -141,7 +141,7 @@ interface RequestErrorParams {
 }
 
 export class ChatHandler {
-  #providers: AgentRegistryDep;
+  #agents: AgentRegistryDep;
   #queue: QueueManagerDep;
   #historyCache: HistoryCacheDep;
   #pendingInputs: PendingInputsDep;
@@ -150,7 +150,7 @@ export class ChatHandler {
   #recentPermissionDecisions = new Map<string, number>();
 
   constructor(
-    providers: AgentRegistryDep,
+    agents: AgentRegistryDep,
     queue: QueueManagerDep,
     historyCache: HistoryCacheDep,
     registry: IChatRegistry,
@@ -160,7 +160,7 @@ export class ChatHandler {
     },
     forkDeps?: ForkDeps | null,
   ) {
-    this.#providers = providers;
+    this.#agents = agents;
     this.#queue = queue;
     this.#historyCache = historyCache;
     this.#pendingInputs = pendingInputs;
@@ -246,11 +246,11 @@ export class ChatHandler {
       writer.send(new AgentRunFailedMessage(sourceChatId, 'Source session not found'));
       return;
     }
-    if (!agentSupportsFork(sourceSession.agentId)) {
+    if (!this.#agents.supportsFork(sourceSession.agentId)) {
       writer.send(new AgentRunFailedMessage(sourceChatId, `Fork unsupported for agent: ${sourceSession.agentId}`));
       return;
     }
-    if (this.#providers.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)) {
+    if (this.#agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)) {
       writer.send(new AgentRunFailedMessage(sourceChatId, 'Cannot fork a chat while it is processing'));
       return;
     }
@@ -297,7 +297,7 @@ export class ChatHandler {
       alwaysAllow: Boolean(data.alwaysAllow),
     };
 
-    this.#providers.resolvePermission(data.chatId, data.permissionRequestId, decision);
+    this.#agents.resolvePermission(data.chatId, data.permissionRequestId, decision);
   }
 
   #sendRequestError(writer: WebSocketWriter, params: RequestErrorParams): void {
@@ -348,7 +348,7 @@ export class ChatHandler {
   }
 
   #handleGetRunningSessions(_data: ChatRunningQueryRequest, writer: WebSocketWriter): void {
-    writer.send(new ChatSessionsRunningMessage(this.#providers.getRunningSessions()));
+    writer.send(new ChatSessionsRunningMessage(this.#agents.getRunningSessions()));
   }
 
   #handleOpen(ws: WS): void {
@@ -377,25 +377,25 @@ export class ChatHandler {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
           await this.#registry.updateChat(chatId, { permissionMode: data.mode });
-          await this.#providers.setPermissionMode(chatId, data.mode);
+          await this.#agents.setPermissionMode(chatId, data.mode);
         }
       } else if (data instanceof ThinkingModeSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
           await this.#registry.updateChat(chatId, { thinkingMode: data.mode });
-          await this.#providers.setThinkingMode(chatId, data.mode);
+          await this.#agents.setThinkingMode(chatId, data.mode);
         }
       } else if (data instanceof ClaudeThinkingModeSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
           await this.#registry.updateChat(chatId, { claudeThinkingMode: data.mode });
-          await this.#providers.setClaudeThinkingMode(chatId, data.mode);
+          await this.#agents.setClaudeThinkingMode(chatId, data.mode);
         }
       } else if (data instanceof AmpAgentModeSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
           await this.#registry.updateChat(chatId, { ampAgentMode: data.mode });
-          await this.#providers.setAmpAgentMode(chatId, data.mode);
+          await this.#agents.setAmpAgentMode(chatId, data.mode);
         }
       } else if (data instanceof ModelSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
@@ -403,7 +403,7 @@ export class ChatHandler {
           const metadata = data.apiProviderId !== undefined || data.modelEndpointId !== undefined
             ? { apiProviderId: data.apiProviderId, modelEndpointId: data.modelEndpointId }
             : undefined;
-          await this.#providers.setModel(chatId, data.model, metadata);
+          await this.#agents.setModel(chatId, data.model, metadata);
           const patch: {
             model: string;
             apiProviderId?: string | null;
@@ -460,16 +460,17 @@ export class ChatHandler {
 
   // Builds drain options from persisted chat settings for queued turns.
   #drainOptions(chatId: string): RunAgentTurnOptions {
-    const entry = requireChatExecutionConfig(chatId, this.#registry.getChat(chatId));
+    const chatEntry = this.#registry.getChat(chatId);
+    const entry = requireChatExecutionConfig(chatId, chatEntry);
     return {
       permissionMode: entry.permissionMode,
       thinkingMode: entry.thinkingMode,
       claudeThinkingMode: entry.claudeThinkingMode,
       ampAgentMode: entry.ampAgentMode,
       model: entry.model,
-      apiProviderId: this.#registry.getChat(chatId)?.apiProviderId,
-      modelEndpointId: this.#registry.getChat(chatId)?.modelEndpointId,
-      modelProtocol: this.#registry.getChat(chatId)?.modelProtocol,
+      apiProviderId: chatEntry?.apiProviderId,
+      modelEndpointId: chatEntry?.modelEndpointId,
+      modelProtocol: chatEntry?.modelProtocol,
     };
   }
 

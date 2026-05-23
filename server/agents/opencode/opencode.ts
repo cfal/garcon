@@ -1,4 +1,4 @@
-// OpenCode SDK integration. Extends AbsProvider so all output flows
+// OpenCode SDK integration. Extends AgentEventEmitterRuntime so all output flows
 // through typed events wired in the composition root.
 
 import crypto from 'crypto';
@@ -7,7 +7,7 @@ import { normalizeToolResultContent }  from "../shared/normalize-util.js";
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from "../../../common/chat-types.js";
 import { convertOpencodePermissionTool } from "../converters/opencode-permission-tool.js";
 import { convertOpenCodeToolUse } from "../converters/opencode-tool-use.js";
-import { AbsProvider } from "../shared/event-emitter-runtime.js";
+import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import type { PermissionMode } from "../../../common/chat-modes.js";
 import type { StartSessionRequest, ResumeTurnRequest } from "../session-types.js";
 
@@ -377,7 +377,7 @@ async function createOpenCodeInstance(input: {
   };
 }
 
-export class OpenCodeProvider extends AbsProvider {
+export class OpenCodeProvider extends AgentEventEmitterRuntime {
   #instance: OpenCodeInstance | null = null;
   #initPromise: Promise<OpenCodeInstance> | null = null;
   #sseListenerStarted = false;

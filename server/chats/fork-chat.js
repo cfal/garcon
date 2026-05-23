@@ -6,7 +6,6 @@ import {
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../common/chat-modes.ts';
-import { supportsFork } from '../../common/agents.ts';
 
 function escapeRegExp(input) {
   return String(input).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -61,9 +60,10 @@ export async function forkChatFileCopy({
   settings,
   metadata,
   forkAgentSession,
+  supportsFork,
 }) {
   const sourceAgentId = sourceSession.agentId;
-  if (!supportsFork(sourceAgentId)) {
+  if (supportsFork && !supportsFork(sourceAgentId)) {
     throw new Error(`Agent does not support fork: ${sourceAgentId}`);
   }
 

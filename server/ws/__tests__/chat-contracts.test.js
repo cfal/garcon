@@ -19,7 +19,9 @@ const mockProviders = {
   setPermissionMode: mock(() => Promise.resolve(undefined)),
   setThinkingMode: mock(() => Promise.resolve(undefined)),
   setClaudeThinkingMode: mock(() => Promise.resolve(undefined)),
+  setAmpAgentMode: mock(() => Promise.resolve(undefined)),
   setModel: mock(() => Promise.resolve(undefined)),
+  supportsFork: mock(() => true),
   isAgentSessionRunning: mock(() => false),
 };
 
@@ -71,6 +73,7 @@ const injectedMocks = [
   mockProviders.getRunningSessions, mockProviders.resolvePermission,
   mockProviders.setPermissionMode, mockProviders.setThinkingMode,
   mockProviders.setClaudeThinkingMode, mockProviders.setModel,
+  mockProviders.supportsFork,
   mockProviders.isAgentSessionRunning,
   mockRegistry.getChat, mockRegistry.updateChat,
   mockQueue.submit, mockQueue.abort, mockQueue.triggerDrain,
@@ -108,6 +111,7 @@ describe('chat WebSocket handler', () => {
     injectedMocks.forEach(m => m.mockClear());
     moduleMocks.forEach(m => m.mockClear());
     mockProviders.isAgentSessionRunning.mockImplementation(() => false);
+    mockProviders.supportsFork.mockImplementation(() => true);
     mockForkDeps.forkChatFileCopy.mockImplementation(() => Promise.resolve({
       sourceChatId: '123',
       chatId: '456',
@@ -286,6 +290,7 @@ describe('chat WebSocket handler', () => {
     });
 
     it('rejects unsupported source providers', async () => {
+      mockProviders.supportsFork.mockImplementation(() => false);
       mockRegistry.getChat.mockImplementation((chatId) => {
         if (chatId === '123') return { agentId: 'opencode', agentSessionId: 'source-session' };
         return null;

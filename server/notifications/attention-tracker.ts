@@ -1,4 +1,4 @@
-// Translates low-level provider and queue events into Telegram
+// Translates low-level agent and queue events into Telegram
 // notifications when a chat requires user attention.
 //
 // Three notification triggers:
@@ -51,7 +51,7 @@ interface SettingsStoreDep {
 }
 
 interface ChatRegistryDep {
-  getChat(chatId: string): { provider: string; projectPath: string } | null;
+  getChat(chatId: string): { agentId: string; projectPath: string } | null;
 }
 
 interface HistoryCacheDep {
@@ -69,7 +69,7 @@ interface TelegramConfig {
 }
 
 export class AttentionTracker {
-  #providers: AgentRegistryDep;
+  #agents: AgentRegistryDep;
   #queue: QueueManagerDep;
   #settings: SettingsStoreDep;
   #registry: ChatRegistryDep;
@@ -89,14 +89,14 @@ export class AttentionTracker {
   #lastAssistantMessage = new Map<string, string>();
 
   constructor(
-    providers: AgentRegistryDep,
+    agents: AgentRegistryDep,
     queue: QueueManagerDep,
     settings: SettingsStoreDep,
     registry: ChatRegistryDep,
     history: HistoryCacheDep,
     telegram: TelegramNotifier,
   ) {
-    this.#providers = providers;
+    this.#agents = agents;
     this.#queue = queue;
     this.#settings = settings;
     this.#registry = registry;
@@ -107,9 +107,9 @@ export class AttentionTracker {
   }
 
   #wire(): void {
-    this.#providers.onMessages((chatId, messages) => this.#handleMessages(chatId, messages));
-    this.#providers.onFinished((chatId, exitCode) => this.#handleFinished(chatId, exitCode));
-    this.#providers.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
+    this.#agents.onMessages((chatId, messages) => this.#handleMessages(chatId, messages));
+    this.#agents.onFinished((chatId, exitCode) => this.#handleFinished(chatId, exitCode));
+    this.#agents.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
     this.#queue.onSessionStopped((chatId) => this.#handleSessionStopped(chatId));
   }
@@ -218,10 +218,10 @@ export class AttentionTracker {
   // With generated title:        Without title:
   //   Title (bold)                 User message (bold)
   //   > user message (quote)      response or status
-  //   response or status          provider · path
-  //   provider · path
+  //   response or status          agent - path
+  //   agent - path
   #formatMessage(
-    meta: { title: string; hasGeneratedTitle: boolean; provider: string; projectPath: string },
+    meta: { title: string; hasGeneratedTitle: boolean; agentId: string; projectPath: string },
     userMsg: string | null,
     assistantMsg: string | null,
     status: string | null,
@@ -244,7 +244,7 @@ export class AttentionTracker {
       lines.push(escapeHtml(truncate(assistantMsg, 400)));
     }
     const pathShort = meta.projectPath.replace(/^\/home\/[^/]+\//, '~/');
-    lines.push(`<code>${escapeHtml(meta.provider)} · ${escapeHtml(pathShort)}</code>`);
+    lines.push(`<code>${escapeHtml(meta.agentId)} - ${escapeHtml(pathShort)}</code>`);
     return lines.join('\n');
   }
 
@@ -253,7 +253,7 @@ export class AttentionTracker {
     this.#lastAssistantMessage.delete(chatId);
   }
 
-  #chatMeta(chatId: string): { title: string; hasGeneratedTitle: boolean; provider: string; projectPath: string } {
+  #chatMeta(chatId: string): { title: string; hasGeneratedTitle: boolean; agentId: string; projectPath: string } {
     const chat = this.#registry.getChat(chatId);
     const generatedTitle = this.#settings.getChatName(chatId);
     const title = generatedTitle
@@ -262,7 +262,7 @@ export class AttentionTracker {
     return {
       title,
       hasGeneratedTitle: Boolean(generatedTitle),
-      provider: chat?.provider ?? 'unknown',
+      agentId: chat?.agentId ?? 'unknown',
       projectPath: chat?.projectPath ?? '',
     };
   }

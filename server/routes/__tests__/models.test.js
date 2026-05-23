@@ -1,14 +1,5 @@
 import { describe, it, expect, mock } from 'bun:test';
 
-const getPiModelsStrictMock = mock(() => Promise.resolve([
-  { value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true },
-]));
-
-mock.module('../../agents/pi/pi-models.js', () => ({
-  getPiModelsStrict: getPiModelsStrictMock,
-  isPiModelDiscoveryUnavailableError: (error) => error?.code === 'PI_MODEL_DISCOVERY_UNAVAILABLE',
-}));
-
 import createModelsRoutes from '../models.js';
 
 const agentCatalogEntries = [
@@ -26,6 +17,7 @@ const agentCatalogEntries = [
 const providers = {
   agents: {
     getAgentCatalogEntries: mock(() => Promise.resolve(agentCatalogEntries)),
+    getAgentCatalogEntry: mock((agentId) => Promise.resolve(agentCatalogEntries.find((agent) => agent.id === agentId) ?? null)),
   },
   apiProviders: {
     getCatalog: mock(() => []),
@@ -126,15 +118,17 @@ describe('GET /api/v1/models', () => {
   });
 
   it('uses strict Pi discovery for the Pi agent filter', async () => {
-    getPiModelsStrictMock.mockResolvedValueOnce([
-      { value: 'openrouter/openai/gpt-5.4', label: 'openrouter: gpt-5.4', supportsImages: true },
-    ]);
+    providers.agents.getAgentCatalogEntry.mockResolvedValueOnce({
+      ...agentCatalogEntries.find((agent) => agent.id === 'pi'),
+      defaultModel: 'openrouter/openai/gpt-5.4',
+      models: [{ value: 'openrouter/openai/gpt-5.4', label: 'openrouter: gpt-5.4', supportsImages: true }],
+    });
     const url = new URL('http://localhost/api/v1/models?agent=pi');
     const response = await handler(new Request(url), url);
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(getPiModelsStrictMock).toHaveBeenCalled();
+    expect(providers.agents.getAgentCatalogEntry).toHaveBeenCalledWith('pi', { strict: true });
     expect(body.catalog.agents).toHaveLength(1);
     expect(body.catalog.agents[0].id).toBe('pi');
     expect(body.catalog.agents[0].models).toEqual([
@@ -142,19 +136,19 @@ describe('GET /api/v1/models', () => {
     ]);
   });
 
-  it('returns a Pi-specific 503 when strict Pi discovery has no stale models', async () => {
+  it('returns a 503 when strict model discovery has no stale models', async () => {
     const error = Object.assign(new Error('auth storage: auth.json is locked'), {
       code: 'PI_MODEL_DISCOVERY_UNAVAILABLE',
       staleModels: [],
     });
-    getPiModelsStrictMock.mockRejectedValueOnce(error);
+    providers.agents.getAgentCatalogEntry.mockRejectedValueOnce(error);
     const url = new URL('http://localhost/api/v1/models?agent=pi');
     const response = await handler(new Request(url), url);
     const body = await response.json();
 
     expect(response.status).toBe(503);
     expect(body).toEqual({
-      error: 'Pi model discovery unavailable',
+      error: 'Model discovery unavailable',
       reason: 'auth storage: auth.json is locked',
     });
   });
@@ -167,13 +161,13 @@ describe('GET /api/v1/models', () => {
       code: 'PI_MODEL_DISCOVERY_UNAVAILABLE',
       staleModels,
     });
-    getPiModelsStrictMock.mockRejectedValueOnce(error);
+    providers.agents.getAgentCatalogEntry.mockRejectedValueOnce(error);
     const url = new URL('http://localhost/api/v1/models?agent=pi');
     const response = await handler(new Request(url), url);
     const body = await response.json();
 
     expect(response.status).toBe(503);
-    expect(body.error).toBe('Pi model discovery unavailable');
+    expect(body.error).toBe('Model discovery unavailable');
     expect(body.catalog.agents).toHaveLength(1);
     expect(body.catalog.agents[0].id).toBe('pi');
     expect(body.catalog.agents[0].models).toEqual(staleModels);

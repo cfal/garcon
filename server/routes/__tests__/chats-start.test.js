@@ -60,6 +60,8 @@ const providers = {
   getModels: mock(() => Promise.resolve([])),
   isAgentSessionRunning: mock(() => false),
   hasAgent: mock(() => true),
+  supportsFork: mock(() => true),
+  supportsImages: mock(() => false),
   modelSupportsImages: mock(() => Promise.resolve(false)),
 };
 

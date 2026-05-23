@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { AssistantMessage } from "../../../common/chat-types.js";
 import type { SharedModelOption } from "../../../common/models.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
-import { AbsProvider } from "../shared/event-emitter-runtime.js";
+import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import {
   DirectSessionStore,
   type DirectConversationMessage,
@@ -197,7 +197,7 @@ export async function runAnthropicCompatibleSingleQuery(
   }
 }
 
-export class AnthropicCompatibleChatProvider extends AbsProvider {
+export class AnthropicCompatibleChatProvider extends AgentEventEmitterRuntime {
   readonly #config: AnthropicCompatibleChatProviderConfig;
   readonly #sessionStore: DirectSessionStore;
   #sessions = new Map<string, ProviderSession>();

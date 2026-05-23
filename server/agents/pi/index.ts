@@ -1,7 +1,9 @@
 import { runSingleQuery as runSingleQueryPi, type PiProvider } from './pi-cli.js';
+import { getPiModelsStrict } from './pi-models.js';
+import { findPiSessionFileBySessionId } from './pi-session-paths.js';
 import { getPiAuthStatus } from './pi-auth.js';
 import { createAgentCapabilities } from '../capabilities.js';
-import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
+import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
 import type { Agent } from '../types.js';
 
 export function createPiAgent(pi: PiProvider): Agent {
@@ -9,7 +11,19 @@ export function createPiAgent(pi: PiProvider): Agent {
     id: 'pi',
     label: 'Pi',
     runtime: pi,
-    transcript: EMPTY_TRANSCRIPT_SOURCE,
+    transcript: {
+      async loadMessages() {
+        return [];
+      },
+      async getPreview() {
+        return null;
+      },
+      async resolveNativePath(session) {
+        if (!session.agentSessionId) return null;
+        const found = await findPiSessionFileBySessionId(session.agentSessionId, session.projectPath);
+        return found || createArtificialNativePath(session.agentId, session.agentSessionId);
+      },
+    },
     auth: { getAuthStatus: () => getPiAuthStatus() },
     capabilities: createAgentCapabilities({
       supportsFork: false,
@@ -17,7 +31,7 @@ export function createPiAgent(pi: PiProvider): Agent {
       acceptsApiProviderEndpoints: false,
       supportedProtocols: [],
       authLoginSupported: false,
-      getModels: () => pi.getModels(),
+      getModels: (query) => query?.strict ? getPiModelsStrict() : pi.getModels(),
     }),
     runSingleQuery: runSingleQueryPi,
   };

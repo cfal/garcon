@@ -1,4 +1,4 @@
-// Persistent metadata index for chat list rendering. Provider previews repair
+// Persistent metadata index for chat list rendering. Agent previews repair
 // missing entries, while live appends keep latest preview text durable.
 
 import { promises as fs } from 'fs';
@@ -10,7 +10,7 @@ const METADATA_VERSION = 1;
 export class MetadataIndex {
   #metadataByChatId = new Map();
   #registry;
-  #providers;
+  #agents;
   #initialized = false;
   #previewTimeoutMs;
   #metadataPath;
@@ -19,10 +19,10 @@ export class MetadataIndex {
   #savePromise = Promise.resolve();
 
   // registry: ChatRegistry
-  // providers: AgentRegistry
-  constructor(registry, providers, options = {}) {
+  // agents: AgentRegistry
+  constructor(registry, agents, options = {}) {
     this.#registry = registry;
-    this.#providers = providers;
+    this.#agents = agents;
     this.#previewTimeoutMs = options.previewTimeoutMs ?? DEFAULT_PREVIEW_TIMEOUT_MS;
     this.#metadataPath = options.metadataPath ?? null;
     this.#saveDelayMs = options.saveDelayMs ?? DEFAULT_SAVE_DELAY_MS;
@@ -39,7 +39,7 @@ export class MetadataIndex {
 
     this.#metadataByChatId = await this.#loadPersistedMetadata();
     this.#pruneMissingRegistryEntries();
-    await this.#repairMissingMetadataFromProviderPreviews();
+    await this.#repairMissingMetadataFromAgentPreviews();
     this.#pruneMissingRegistryEntries();
     this.#scheduleSave();
   }
@@ -99,7 +99,7 @@ export class MetadataIndex {
     await this.#savePromise;
   }
 
-  async #repairMissingMetadataFromProviderPreviews() {
+  async #repairMissingMetadataFromAgentPreviews() {
     const sessions = this.#registry.listAllChats();
     const missingEntries = Object.entries(sessions)
       .filter(([chatId]) => !this.#metadataByChatId.has(String(chatId)));
@@ -127,7 +127,7 @@ export class MetadataIndex {
   }
 
   async #buildMetadataFromPreview(chatId, session) {
-    const preview = await this.#providers.getPreview(session);
+    const preview = await this.#agents.getPreview(session);
     if (!preview) {
       throw new Error(`Failed to build preview for chat: ${chatId}`);
     }
@@ -140,7 +140,7 @@ export class MetadataIndex {
       lastActivity: preview.lastActivity || null,
       lastMessage: preview.lastMessage || preview.firstMessage || '',
       firstMessage: preview.firstMessage,
-      source: 'provider-preview',
+      source: 'agent-preview',
     };
   }
 
@@ -203,14 +203,15 @@ function normalizePersistedMetadata(chatId, value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const firstMessage = typeof value.firstMessage === 'string' ? value.firstMessage : '';
   if (!firstMessage) return null;
+  const source = value.source === 'provider-preview' ? 'agent-preview' : value.source;
   return {
     chatId,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : null,
     lastActivity: typeof value.lastActivity === 'string' ? value.lastActivity : null,
     lastMessage: typeof value.lastMessage === 'string' ? value.lastMessage : firstMessage,
     firstMessage,
-    source: value.source === 'live' || value.source === 'provider-preview' || value.source === 'startup'
-      ? value.source
+    source: source === 'live' || source === 'agent-preview' || source === 'startup'
+      ? source
       : 'startup',
   };
 }

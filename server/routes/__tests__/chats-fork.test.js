@@ -60,6 +60,7 @@ const historyCache = {
 };
 const providers = {
   startSession: mock(() => undefined),
+  supportsFork: mock(() => true),
   isAgentSessionRunning: mock(() => false),
 };
 
@@ -74,6 +75,7 @@ describe('POST /api/v1/chats/fork', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
+    providers.supportsFork.mockImplementation(() => true);
   });
 
   it('returns 400 for missing sourceChatId', async () => {
@@ -138,6 +140,7 @@ describe('POST /api/v1/chats/fork', () => {
 
   it('returns 422 for unsupported agent', async () => {
     parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '200' });
+    providers.supportsFork.mockImplementation(() => false);
     registry.getChat.mockImplementation((id) => {
       if (id === '100') return { agentId: 'opencode', projectPath: '/proj' };
       return null;

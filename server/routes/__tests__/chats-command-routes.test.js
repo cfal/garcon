@@ -113,6 +113,8 @@ function createRouteAgent(sessionOverrides = {}) {
   };
   const providers = {
     hasAgent: mock(() => true),
+    supportsFork: mock(() => true),
+    supportsImages: mock(() => true),
     isAgentSessionRunning: mock(() => false),
     getRunningSessions: mock(() => ({ claude: [{ id: '123' }] })),
     startSession: mock(() => Promise.resolve(undefined)),

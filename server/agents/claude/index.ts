@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { promises as fs } from 'fs';
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
 import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude, type ClaudeProvider } from './claude-cli.js';
 import type { ClaudeStartSessionRequest, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
@@ -9,9 +10,9 @@ import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
 import type { Agent, AgentRuntime } from '../types.js';
 
 interface ClaudeAgentRuntime extends AgentRuntime {
-  setInternalPermissionMode(agentSessionId: string, mode: PermissionMode): void;
-  setInternalThinkingMode(agentSessionId: string, mode: ThinkingMode): void;
-  setInternalClaudeThinkingMode(agentSessionId: string, mode: ClaudeThinkingMode): void;
+  setPermissionMode(agentSessionId: string, mode: PermissionMode): void;
+  setThinkingMode(agentSessionId: string, mode: ThinkingMode): void;
+  setClaudeThinkingMode(agentSessionId: string, mode: ClaudeThinkingMode): void;
 }
 
 function createClaudeRuntime(claude: ClaudeProvider): ClaudeAgentRuntime {
@@ -48,13 +49,13 @@ function createClaudeRuntime(claude: ClaudeProvider): ClaudeAgentRuntime {
     onSessionCreated(cb) { claude.onSessionCreated(cb); },
     onFinished(cb) { claude.onFinished(cb); },
     onFailed(cb) { claude.onFailed(cb); },
-    setInternalPermissionMode(agentSessionId, mode) {
+    setPermissionMode(agentSessionId, mode) {
       claude.setInternalPermissionMode(agentSessionId, mode);
     },
-    setInternalThinkingMode(agentSessionId, mode) {
+    setThinkingMode(agentSessionId, mode) {
       claude.setInternalThinkingMode(agentSessionId, mode);
     },
-    setInternalClaudeThinkingMode(agentSessionId, mode) {
+    setClaudeThinkingMode(agentSessionId, mode) {
       claude.setInternalClaudeThinkingMode(agentSessionId, mode);
     },
   };
@@ -65,7 +66,20 @@ export function createClaudeAgent(claude: ClaudeProvider): Agent {
     id: 'claude',
     label: 'Claude',
     runtime: createClaudeRuntime(claude),
-    transcript: EMPTY_TRANSCRIPT_SOURCE,
+    transcript: {
+      ...EMPTY_TRANSCRIPT_SOURCE,
+      async resolveNativePath(session) {
+        if (!session.agentSessionId) return null;
+        const candidate = await createClaudeNativePath(session.projectPath, session.agentSessionId);
+        if (!candidate) return null;
+        try {
+          await fs.access(candidate);
+          return candidate;
+        } catch {
+          return null;
+        }
+      },
+    },
     auth: {
       getAuthStatus: () => getClaudeAuthStatus(),
       launchLogin: () => launchAgentAuthLogin('claude'),

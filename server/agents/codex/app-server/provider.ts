@@ -1,6 +1,6 @@
 import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage } from "../../../../common/chat-types.js";
 import { promises as fs } from 'fs';
-import { AbsProvider } from "../../shared/event-emitter-runtime.js";
+import { AgentEventEmitterRuntime } from "../../shared/event-emitter-runtime.js";
 import { loadCodexChatMessages, getCodexPreviewFromNativePath } from "../../loaders/codex-history-loader.js";
 import type { AgentChatEntry, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../../session-types.js";
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
@@ -57,7 +57,7 @@ export interface CodexAppServerProviderOptions {
   terminalBackfillTimeoutMs?: number;
 }
 
-export class CodexAppServerProvider extends AbsProvider {
+export class CodexAppServerProvider extends AgentEventEmitterRuntime {
   #sessions = new Map<string, RunningCodexSession>();
   #pendingApprovals = new Map<string, CodexPendingApproval & { client: CodexAppServerClient }>();
   #utilityClient: CodexAppServerClient | null = null;

@@ -5,7 +5,7 @@ import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effec
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
-export async function buildRemoteSettingsSnapshot({ settings, providers }) {
+export async function buildRemoteSettingsSnapshot({ settings, agents }) {
   function asPlainObject(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
@@ -24,7 +24,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
 
   const getAgentCatalog = async () => {
     try {
-      return { agents: await providers?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
+      return { agents: await agents?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
     } catch {
       return null;
     }
@@ -33,17 +33,17 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
   const [
     authByAgent, readinessByAgent, agentCatalog, opencodeModels, factoryModels,
   ] = await Promise.all([
-    providers?.getAgentAuthStatusMap?.() ?? Promise.resolve({
+    agents?.getAgentAuthStatusMap?.() ?? Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
       amp: { authenticated: false },
       factory: { authenticated: false },
     }),
-    providers?.getAgentReadinessMap?.() ?? Promise.resolve({}),
+    agents?.getAgentReadinessMap?.() ?? Promise.resolve({}),
     getAgentCatalog(),
-    providers?.getModels?.('opencode') ?? Promise.resolve([]),
-    providers?.getModels?.('factory') ?? Promise.resolve([]),
+    agents?.getModels?.('opencode') ?? Promise.resolve([]),
+    agents?.getModels?.('factory') ?? Promise.resolve([]),
   ]);
   const catalogModels = Object.fromEntries(
     (agentCatalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
@@ -137,9 +137,9 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
   };
 }
 
-export default function createWorkspaceRoutes(settings, providers, telegramNotifier) {
+export default function createWorkspaceRoutes(settings, agents, telegramNotifier) {
 
-  const FILTER_KEYS = ['textTokens', 'tags', 'providers', 'models'];
+  const FILTER_KEYS = ['textTokens', 'tags', 'agents', 'models'];
   const VALID_FILTER_STATUS = new Set(['active', 'unread']);
   function sanitizeRemoteUiPatch(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -147,13 +147,19 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
     return Object.keys(rest).length > 0 ? rest : null;
   }
 	function sanitizeFilter(raw) {
-    const empty = { textTokens: [], tags: [], providers: [], models: [] };
+    const empty = { textTokens: [], tags: [], agents: [], models: [] };
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return empty;
     const out = {};
 		for (const key of FILTER_KEYS) {
 			out[key] = Array.isArray(raw[key])
         ? raw[key].filter((v) => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
 				: [];
+    }
+    if (out.agents.length === 0 && Array.isArray(raw.providers)) {
+      out.agents = raw.providers
+        .filter((v) => typeof v === 'string')
+        .map((v) => v.trim())
+        .filter(Boolean);
     }
 		if (typeof raw.status === 'string') {
 			const status = raw.status.trim();
@@ -182,7 +188,7 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
 
   async function getAppSettings() {
     try {
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, providers });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents });
       return Response.json(snapshot);
     } catch (error) {
       return Response.json({ success: false, error: error.message }, { status: 500 });
@@ -202,7 +208,7 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
         await settings.setPathSettings(body.paths);
       }
 
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, providers });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       if (error.message === 'Malformed JSON') {

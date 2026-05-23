@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { AssistantMessage } from "../../../common/chat-types.js";
 import type { SharedModelOption } from "../../../common/models.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
-import { AbsProvider } from "../shared/event-emitter-runtime.js";
+import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import type {
   AgentCommandImage,
   ResumeTurnRequest,
@@ -214,7 +214,7 @@ export async function runOpenAiResponsesSingleQuery(
   }
 }
 
-export class OpenAiCompatibleResponsesProvider extends AbsProvider {
+export class OpenAiCompatibleResponsesProvider extends AgentEventEmitterRuntime {
   readonly #config: OpenAiCompatibleResponsesProviderConfig;
   readonly #sessionStore: DirectSessionStore;
   #sessions = new Map<string, ProviderSession>();

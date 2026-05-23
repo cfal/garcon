@@ -2,42 +2,41 @@ import { describe, expect, it, mock } from 'bun:test';
 import { resolveMissingNativePath } from '../resolve-native-path.js';
 
 describe('resolveMissingNativePath', () => {
-  it('creates an artificial native path for direct OpenAI-compatible sessions', async () => {
+  it('delegates native path lookup to a resolver function', async () => {
+    const resolver = mock(async () => '/tmp/native.jsonl');
+
     const path = await resolveMissingNativePath({
-      agentId: 'direct-openai-compatible',
+      agentId: 'claude',
       agentSessionId: 'session-123',
-    });
+    }, resolver);
 
-    expect(path).toBe('!direct-openai-compatible:session-123');
+    expect(path).toBe('/tmp/native.jsonl');
+    expect(resolver).toHaveBeenCalledTimes(1);
   });
 
-  it('creates an artificial native path for direct Anthropic-compatible sessions', async () => {
+  it('delegates native path lookup to a resolver object', async () => {
+    const resolver = {
+      resolveNativePath: mock(async () => '!cursor:session-456'),
+    };
+
     const path = await resolveMissingNativePath({
-      agentId: 'direct-anthropic-compatible',
+      agentId: 'cursor',
       agentSessionId: 'session-456',
-    });
+    }, resolver);
 
-    expect(path).toBe('!direct-anthropic-compatible:session-456');
+    expect(path).toBe('!cursor:session-456');
+    expect(resolver.resolveNativePath).toHaveBeenCalledTimes(1);
   });
 
-  it('uses the Codex app-server resolver when reconciling Codex sessions', async () => {
-    const resolveCodexNativePath = mock(async () => '/tmp/codex-thread.jsonl');
+  it('returns null when a session has no native session id', async () => {
+    const resolver = mock(async () => '/tmp/native.jsonl');
 
     const path = await resolveMissingNativePath({
-      agentId: 'codex',
-      agentSessionId: 'thread-123',
-    }, { resolveCodexNativePath });
-
-    expect(path).toBe('/tmp/codex-thread.jsonl');
-    expect(resolveCodexNativePath).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not scan Codex rollout files when no app-server resolver is provided', async () => {
-    const path = await resolveMissingNativePath({
-      agentId: 'codex',
-      agentSessionId: 'thread-123',
-    });
+      agentId: 'claude',
+      agentSessionId: null,
+    }, resolver);
 
     expect(path).toBeNull();
+    expect(resolver).not.toHaveBeenCalled();
   });
 });

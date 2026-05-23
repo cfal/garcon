@@ -1,4 +1,6 @@
 import type { ChatMessage } from "../../common/chat-types.js";
+import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../common/chat-modes.js";
+import type { AgentModelOption } from "../../common/agents.js";
 import type {
   AgentChatEntry,
   AgentEventMetadata,
@@ -9,7 +11,14 @@ import type {
 
 export type SupportedAgentProtocol = 'anthropic-messages' | 'openai-compatible';
 
-export interface AgentRuntime {
+export interface AgentRuntimeModeControls {
+  setPermissionMode?(agentSessionId: string, mode: PermissionMode): void | Promise<void>;
+  setThinkingMode?(agentSessionId: string, mode: ThinkingMode): void | Promise<void>;
+  setClaudeThinkingMode?(agentSessionId: string, mode: ClaudeThinkingMode): void | Promise<void>;
+  setAmpAgentMode?(agentSessionId: string, mode: AmpAgentMode): void | Promise<void>;
+}
+
+export interface AgentRuntime extends AgentRuntimeModeControls {
   startSession(request: StartSessionRequest): Promise<StartedAgentSession>;
   runTurn(request: ResumeTurnRequest): Promise<void>;
   abort(agentSessionId: string): boolean | Promise<boolean>;
@@ -28,6 +37,7 @@ export interface AgentRuntime {
 export interface AgentTranscriptSource {
   loadMessages(session: AgentChatEntry, context?: { chatId?: string }): Promise<ChatMessage[]>;
   getPreview?(session: AgentChatEntry): Promise<unknown>;
+  resolveNativePath?(session: AgentChatEntry): Promise<string | null>;
 }
 
 export interface AgentAuthDriver {
@@ -39,8 +49,17 @@ export interface AgentAuthDriver {
   }>;
 }
 
+export interface AgentModelQuery {
+  strict?: boolean;
+}
+
+export interface AgentModelDiscoveryError extends Error {
+  code: 'model_discovery_unavailable';
+  staleModels?: AgentModelOption[];
+}
+
 export interface AgentCapabilityDriver {
-  getModels?(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
+  getModels?(query?: AgentModelQuery): Promise<AgentModelOption[]>;
   supportsFork: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;

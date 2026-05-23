@@ -7,7 +7,7 @@ import {
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
-import { AbsProvider } from './event-emitter-runtime.js';
+import { AgentEventEmitterRuntime } from './event-emitter-runtime.js';
 import { normalizeToolInput } from './normalize-util.js';
 import type { PermissionMode, AgentEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import type { AgentRuntime } from '../types.js';
@@ -102,7 +102,7 @@ function providerRequestIdFromUpdate(notification: AcpSessionUpdateNotification)
   return asString(update.requestId ?? update.request_id);
 }
 
-export class AcpAgentRuntime extends AbsProvider implements AgentRuntime {
+export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRuntime {
   #policy: AcpAgentPolicy;
   #converter: AcpEventConverter;
   #capabilityCache: AcpCapabilityCache;

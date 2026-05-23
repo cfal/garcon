@@ -9,6 +9,7 @@ import { CursorAcpEventConverter } from './cursor-acp-event-converter.js';
 import { cursorAuthDriver } from './cursor-auth-driver.js';
 import { CursorReplayHealth } from './cursor-replay-health.js';
 import { createCursorTranscriptSource } from './cursor-transcript-source.js';
+import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
 
 export interface CreateCursorAgentArgs {
   workspaceDir: string;
@@ -37,6 +38,10 @@ export function createCursorAgent(args: CreateCursorAgentArgs): Agent {
         return messages;
       },
       getPreview: transcript.getPreview,
+      async resolveNativePath(session) {
+        if (!session.agentSessionId) return null;
+        return createArtificialNativePath('cursor', session.agentSessionId);
+      },
     },
     auth: cursorAuthDriver,
     capabilities: createAgentCapabilities({

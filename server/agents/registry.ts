@@ -23,10 +23,12 @@ import type { Agent } from './types.js';
 import {
   isEndpointOnlyAgentId,
   isVisibleAgentId,
+  type AgentId,
   type AgentCatalogEntry,
   type AgentModelOption,
 } from "../../common/agents.js";
 import type { ApiProtocol } from "../../common/api-providers.js";
+import type { AgentModelQuery } from './types.js';
 const STATIC_AGENT_MODELS: Record<string, { defaultModel: string; models: AgentModelOption[] }> = {
   claude: { defaultModel: CLAUDE_MODELS.DEFAULT, models: CLAUDE_MODELS.OPTIONS },
   codex: { defaultModel: CODEX_MODELS.DEFAULT, models: CODEX_MODELS.OPTIONS },
@@ -64,13 +66,14 @@ function dedupeModels(models: AgentModelOption[]): AgentModelOption[] {
   return result;
 }
 
-async function nativeModelsForAgent(id: string, agent: Agent): Promise<AgentModelOption[]> {
+async function nativeModelsForAgent(id: string, agent: Agent, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
   let fetched: AgentModelOption[] = [];
   const getModels = agent.capabilities.getModels;
   if (!isEndpointOnlyAgentId(id) && getModels) {
     try {
-      fetched = await getModels();
+      fetched = await getModels(query);
     } catch (error) {
+      if (query.strict) throw error;
       console.warn(`agents: failed to fetch ${id} models:`, error instanceof Error ? error.message : String(error));
     }
   }
@@ -134,6 +137,22 @@ export class AgentRegistry {
 
   hasAgent(agentId: string): boolean {
     return this.#agents.has(agentId);
+  }
+
+  supportsFork(agentId: string): boolean {
+    return this.#agents.get(agentId)?.capabilities.supportsFork ?? false;
+  }
+
+  supportsImages(agentId: string): boolean {
+    return this.#agents.get(agentId)?.capabilities.supportsImages ?? false;
+  }
+
+  acceptsApiProviderEndpoints(agentId: string): boolean {
+    return this.#agents.get(agentId)?.capabilities.acceptsApiProviderEndpoints ?? false;
+  }
+
+  supportedProtocols(agentId: string): ApiProtocol[] {
+    return this.#agents.get(agentId)?.capabilities.supportedProtocols ?? [];
   }
 
   #agentFor(agentId: string): Agent {
@@ -375,28 +394,30 @@ export class AgentRegistry {
   async setPermissionMode(chatId: string, mode: PermissionMode): Promise<void> {
     const entry = this.#registry.getChat(chatId);
     const agentSessionId = entry?.agentSessionId;
-    if (!agentSessionId || entry.agentId !== 'claude') return;
-    const runtime = this.#agents.get('claude')?.runtime as any;
-    runtime?.setInternalPermissionMode?.(agentSessionId, mode);
+    if (!agentSessionId) return;
+    await this.#agents.get(entry.agentId)?.runtime.setPermissionMode?.(agentSessionId, mode);
   }
 
   async setThinkingMode(chatId: string, mode: ThinkingMode): Promise<void> {
     const entry = this.#registry.getChat(chatId);
     const agentSessionId = entry?.agentSessionId;
-    if (!agentSessionId || entry.agentId !== 'claude') return;
-    const runtime = this.#agents.get('claude')?.runtime as any;
-    runtime?.setInternalThinkingMode?.(agentSessionId, mode);
+    if (!agentSessionId) return;
+    await this.#agents.get(entry.agentId)?.runtime.setThinkingMode?.(agentSessionId, mode);
   }
 
   async setClaudeThinkingMode(chatId: string, mode: ClaudeThinkingMode): Promise<void> {
     const entry = this.#registry.getChat(chatId);
     const agentSessionId = entry?.agentSessionId;
-    if (!agentSessionId || entry.agentId !== 'claude') return;
-    const runtime = this.#agents.get('claude')?.runtime as any;
-    runtime?.setInternalClaudeThinkingMode?.(agentSessionId, mode);
+    if (!agentSessionId) return;
+    await this.#agents.get(entry.agentId)?.runtime.setClaudeThinkingMode?.(agentSessionId, mode);
   }
 
-  async setAmpAgentMode(_chatId: string, _mode: AmpAgentMode): Promise<void> { }
+  async setAmpAgentMode(chatId: string, mode: AmpAgentMode): Promise<void> {
+    const entry = this.#registry.getChat(chatId);
+    const agentSessionId = entry?.agentSessionId;
+    if (!agentSessionId) return;
+    await this.#agents.get(entry.agentId)?.runtime.setAmpAgentMode?.(agentSessionId, mode);
+  }
 
   async setModel(chatId: string, model: string, metadata: {
     apiProviderId?: string | null;
@@ -455,9 +476,9 @@ export class AgentRegistry {
     return agent.transcript.loadMessages(session, { chatId });
   }
 
-  async getModels(agentId: string): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
+  async getModels(agentId: string, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
     const getModels = this.#agents.get(agentId)?.capabilities.getModels;
-    if (getModels) return getModels();
+    if (getModels) return getModels(query);
     return [];
   }
 
@@ -468,11 +489,18 @@ export class AgentRegistry {
     modelEndpointId?: string | null;
   }): Promise<boolean> {
     return this.#endpointResolver.modelSupportsImages({
-      agentId: input.agentId as any,
+      agentId: input.agentId as AgentId,
       model: input.model,
       apiProviderId: input.apiProviderId,
       modelEndpointId: input.modelEndpointId,
     });
+  }
+
+  async resolveNativePath(session: AgentChatEntry): Promise<string | null> {
+    if (!session.agentSessionId) return null;
+    const agent = this.#agents.get(session.agentId);
+    if (!agent?.transcript.resolveNativePath) return null;
+    return agent.transcript.resolveNativePath(session);
   }
 
   async launchAgentAuthLogin(agentId: string): Promise<{
@@ -509,9 +537,10 @@ export class AgentRegistry {
   }>> {
     const auth = await this.getAgentAuthStatusMap();
     const result: Record<string, { ready: boolean; nativeReady: boolean; endpointReady: boolean; reason: string }> = {};
-    for (const [agentId] of this.#agents.entries()) {
+    for (const [agentId, agent] of this.#agents.entries()) {
       if (!isVisibleAgentId(agentId)) continue;
-      const endpointReady = this.#endpointResolver.getModelOptions(agentId as any).length > 0;
+      const endpointReady = agent.capabilities.acceptsApiProviderEndpoints
+        && this.#endpointResolver.getModelOptions(agentId as AgentId).length > 0;
       const nativeReady = Boolean((auth[agentId] as any)?.authenticated);
       result[agentId] = {
         ready: nativeReady || endpointReady,
@@ -579,27 +608,31 @@ export class AgentRegistry {
     }
   }
 
+  async getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}): Promise<AgentCatalogEntry | null> {
+    const agent = this.#agents.get(agentId);
+    if (!agent || !isVisibleAgentId(agentId)) return null;
+    const endpointModels = this.#endpointResolver.getModelOptions(agentId as AgentId);
+    const nativeModels = await nativeModelsForAgent(agentId, agent, query);
+    const models = isEndpointOnlyAgentId(agentId)
+      ? dedupeModels(endpointModels)
+      : dedupeModels([...nativeModels, ...endpointModels]);
+    return {
+      id: agentId as AgentId,
+      label: agent.label,
+      kind: 'agent',
+      supportsFork: agent.capabilities.supportsFork,
+      supportsImages: agent.capabilities.supportsImages,
+      acceptsApiProviderEndpoints: agent.capabilities.acceptsApiProviderEndpoints,
+      supportedProtocols: agent.capabilities.supportedProtocols,
+      authLoginSupported: agent.capabilities.authLoginSupported,
+      defaultModel: defaultModelForAgent(agentId, nativeModels, endpointModels),
+      models,
+    };
+  }
+
   async getAgentCatalogEntries(): Promise<AgentCatalogEntry[]> {
-    return (await Promise.all(Array.from(this.#agents.entries()).map(async ([id, agent]) => {
-      if (!isVisibleAgentId(id)) return null;
-      const endpointModels = this.#endpointResolver.getModelOptions(id as any);
-      const nativeModels = await nativeModelsForAgent(id, agent);
-      const models = isEndpointOnlyAgentId(id)
-        ? dedupeModels(endpointModels)
-        : dedupeModels([...nativeModels, ...endpointModels]);
-      return {
-        id: id as any,
-        label: agent.label,
-        kind: 'agent',
-        supportsFork: agent.capabilities.supportsFork,
-        supportsImages: agent.capabilities.supportsImages,
-        acceptsApiProviderEndpoints: agent.capabilities.acceptsApiProviderEndpoints,
-        supportedProtocols: agent.capabilities.supportedProtocols,
-        authLoginSupported: agent.capabilities.authLoginSupported,
-        defaultModel: defaultModelForAgent(id, nativeModels, endpointModels),
-        models,
-      };
-    }))).filter((entry): entry is AgentCatalogEntry => Boolean(entry));
+    return (await Promise.all(Array.from(this.#agents.keys()).map((id) => this.getAgentCatalogEntry(id))))
+      .filter((entry): entry is AgentCatalogEntry => Boolean(entry));
   }
 
 }

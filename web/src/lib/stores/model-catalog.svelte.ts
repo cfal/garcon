@@ -9,6 +9,8 @@ import {
 	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
 	DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
+	BUILTIN_AGENT_CAPABILITIES,
+	type BuiltinAgentId,
 	isEndpointOnlyAgentId,
 	isVisibleAgentId,
 } from '$shared/agents';
@@ -71,18 +73,43 @@ const STATIC_FALLBACKS: AgentModels = {
 	[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: [],
 };
 
-const STATIC_AGENT_METADATA: AgentMetadataMap = {
-	claude: { id: 'claude', label: 'Claude', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], authLoginSupported: true, defaultModel: CLAUDE_MODELS.DEFAULT },
-	codex: { id: 'codex', label: 'Codex', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], authLoginSupported: true, defaultModel: CODEX_MODELS.DEFAULT },
-	cursor: { id: 'cursor', label: 'Cursor', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: '' },
-	opencode: { id: 'opencode', label: 'OpenCode', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: '' },
-	amp: { id: 'amp', label: 'Amp', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: AMP_MODELS.DEFAULT },
-	factory: { id: 'factory', label: 'Factory', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: FACTORY_MODELS.DEFAULT },
-	pi: { id: 'pi', label: 'Pi', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false, defaultModel: PI_MODELS.DEFAULT },
-	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: { id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID, label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], authLoginSupported: false, defaultModel: '' },
-	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: { id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID, label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], authLoginSupported: false, defaultModel: '' },
-	[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: { id: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID, label: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL, supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], authLoginSupported: false, defaultModel: '' },
+const STATIC_AGENT_LABELS: Record<BuiltinAgentId, string> = {
+	claude: 'Claude',
+	codex: 'Codex',
+	cursor: 'Cursor',
+	opencode: 'OpenCode',
+	amp: 'Amp',
+	factory: 'Factory',
+	pi: 'Pi',
+	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
+	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
+	[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL
 };
+
+const STATIC_AGENT_DEFAULT_MODELS: Record<BuiltinAgentId, string> = {
+	claude: CLAUDE_MODELS.DEFAULT,
+	codex: CODEX_MODELS.DEFAULT,
+	cursor: '',
+	opencode: '',
+	amp: AMP_MODELS.DEFAULT,
+	factory: FACTORY_MODELS.DEFAULT,
+	pi: PI_MODELS.DEFAULT,
+	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: '',
+	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: '',
+	[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: ''
+};
+
+const STATIC_AGENT_METADATA: AgentMetadataMap = Object.fromEntries(
+	Object.entries(BUILTIN_AGENT_CAPABILITIES).map(([id, capabilities]) => [
+		id,
+		{
+			id,
+			label: STATIC_AGENT_LABELS[id as BuiltinAgentId],
+			...capabilities,
+			defaultModel: STATIC_AGENT_DEFAULT_MODELS[id as BuiltinAgentId]
+		}
+	])
+) as AgentMetadataMap;
 
 function normalizeAgentLabel(id: string, label: string): string {
 	if (id === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {

@@ -15,15 +15,15 @@ export class HistoryCache {
   #initialized = false;
   #registry;
   #metadata;
-  #providers;
+  #agents;
 
   // registry: ChatRegistry
   // metadata: MetadataIndex
-  // providers: AgentRegistry
-  constructor(registry, metadata, providers) {
+  // agents: AgentRegistry
+  constructor(registry, metadata, agents) {
     this.#registry = registry;
     this.#metadata = metadata;
-    this.#providers = providers;
+    this.#agents = agents;
   }
 
   init() {
@@ -33,8 +33,8 @@ export class HistoryCache {
       // Evict cache entry when a chat is removed from registry.
       this.#registry.onChatRemoved((chatId) => this.evictChat(chatId));
 
-      // Self-wire: append provider messages to cache as they arrive.
-      this.#providers.onMessages((chatId, messages) => {
+      // Self-wire: append agent messages to cache as they arrive.
+      this.#agents.onMessages((chatId, messages) => {
         this.appendMessages(chatId, messages).catch((err) => {
           console.warn('history-cache: appendMessages failed:', err.message);
         });
@@ -78,7 +78,7 @@ export class HistoryCache {
     if (pending) return pending;
 
     const loadPromise = (async () => {
-      const loaded = await this.#loadFromProvider(key);
+      const loaded = await this.#loadFromAgent(key);
       const current = this.#cacheByChatId.get(key);
       const liveTail = current?.completeness === 'tail' ? current.messages : [];
       const messages = trimTail(
@@ -159,7 +159,7 @@ export class HistoryCache {
       .sort((a, b) => a.lastAccessAt - b.lastAccessAt);
 
     for (const entry of entries) {
-      const active = this.#providers.isChatRunning(entry.chatId);
+      const active = this.#agents.isChatRunning(entry.chatId);
       if (active) continue;
 
       const isStale = now - entry.lastAccessAt > STALE_NON_ACTIVE_MS;
@@ -171,10 +171,10 @@ export class HistoryCache {
     }
   }
 
-  async #loadFromProvider(chatId) {
+  async #loadFromAgent(chatId) {
     const session = this.#registry.getChat(chatId);
     if (!session) return [];
-    return this.#providers.loadMessages(session, chatId);
+    return this.#agents.loadMessages(session, chatId);
   }
 
   // Exposed for tests that need to inspect/populate cache directly.

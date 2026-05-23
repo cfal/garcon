@@ -34,7 +34,7 @@ function createMockSettings(telegramConfig = { enabled: true, chatId: '99999' })
   };
 }
 
-function createMockRegistry(entry = { provider: 'claude', projectPath: '/home/user/repo' }) {
+function createMockRegistry(entry = { agentId: 'claude', projectPath: '/home/user/repo' }) {
   return {
     getChat: mock(() => entry),
   };
@@ -98,6 +98,19 @@ describe('AttentionTracker', () => {
       expect(html).toContain('<b>deploy the app</b>');
       expect(html).toContain('Needs permission: Bash');
       expect(html).toContain('claude');
+    });
+
+    it('uses agentId from the chat registry in notification metadata', async () => {
+      registry = createMockRegistry({ agentId: 'codex', projectPath: '/home/user/repo' });
+      createTracker();
+      historyMessages.push({ type: 'user-message', content: 'deploy the app' });
+      const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
+      const msg = new PermissionRequestMessage('2024-01-01T00:00:01Z', 'perm-1', bashTool);
+      providers.emitMessages('c1', [msg]);
+
+      await new Promise(r => setTimeout(r, 10));
+      const [, html] = telegram.send.mock.calls[0];
+      expect(html).toContain('codex');
     });
 
     it('deduplicates permission notifications by ID', async () => {

@@ -1,6 +1,6 @@
 // Amp CLI transport. Uses a spawn-per-turn model: each user message
 // spawns a fresh `amp` process (new chat or `amp threads continue`).
-// Parses JSONL stdout and routes messages through AbsProvider events.
+// Parses JSONL stdout and routes messages through AgentEventEmitterRuntime events.
 
 import { promises as fs } from 'fs';
 import os from 'os';
@@ -9,7 +9,7 @@ import { normalizeToolResultContent }  from "../shared/normalize-util.js";
 import { getAmpBinary } from "../../config.js";
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, type ChatMessage } from "../../../common/chat-types.js";
 import { convertAmpToolUse } from "../converters/amp-tool-use.js";
-import { AbsProvider } from "../shared/event-emitter-runtime.js";
+import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AmpThreadExport } from "../loaders/amp-history-loader.js";
 import type { StartSessionRequest, ResumeTurnRequest, StartedAgentSession } from "../session-types.js";
@@ -280,7 +280,7 @@ function buildContinueArgs(threadId: string, model?: string): string[] {
   return args;
 }
 
-class AmpProvider extends AbsProvider {
+class AmpProvider extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, AmpSession>();
 
   constructor() {

@@ -4,7 +4,7 @@ import {
 } from '../../../common/agents.js';
 import type { ApiProviderReader } from '../../api-providers/read-model.js';
 import { createAgentCapabilities } from '../capabilities.js';
-import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
+import { createArtificialTranscriptSource } from '../shared/artificial-transcript-source.js';
 import type { Agent } from '../types.js';
 import { createDirectOpenAiResponsesRuntime } from './router.js';
 
@@ -21,7 +21,7 @@ export function createDirectOpenAiResponsesAgent(apiProviders: ApiProviderReader
     id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
     label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
     runtime,
-    transcript: EMPTY_TRANSCRIPT_SOURCE,
+    transcript: createArtificialTranscriptSource(DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID),
     auth: { async getAuthStatus() { return NO_AUTH_STATUS; } },
     capabilities: createAgentCapabilities({
       supportsFork: false,

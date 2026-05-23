@@ -1,5 +1,5 @@
 // Claude CLI transport. Spawns the `claude` binary with stdin/stdout
-// pipes, exchanging JSONL messages. Extends AbsProvider so all output
+// pipes, exchanging JSONL messages. Extends AgentEventEmitterRuntime so all output
 // flows through typed events wired in the composition root.
 
 import crypto from 'crypto';
@@ -11,7 +11,7 @@ import { getClaudeBinary } from "../../config.js";
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from "../../../common/chat-types.js";
 import { convertClaudePermissionTool } from "../converters/claude-permission-tool.js";
 import { convertClaudeToolUse } from "../converters/claude-tool-use.js";
-import { AbsProvider } from "../shared/event-emitter-runtime.js";
+import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../../common/chat-modes.js";
 import type { ClaudeStartSessionRequest, ResumeTurnRequest } from "../session-types.js";
 import type { AgentCommandImage } from "../../../common/ws-requests.js";
@@ -268,7 +268,7 @@ function buildClaudeCLIArgs({
   return args;
 }
 
-class ClaudeProvider extends AbsProvider {
+class ClaudeProvider extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
   #pendingPermissions = new Map<string, PendingPermission>();
   #pendingControlRequests = new Map<string, PendingControlRequest>();

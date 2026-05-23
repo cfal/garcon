@@ -133,25 +133,37 @@ function normalizeNextForkOrdinal(value: unknown): number | undefined {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function normalizeString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function normalizeAgentId(rawEntry: Record<string, unknown>): AgentName {
+  const value = rawEntry.agentId ?? rawEntry.provider;
+  return typeof value === 'string' ? value as AgentName : '';
+}
+
 function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegistryEntry {
-  const agentId = rawEntry.agentId ?? rawEntry.provider;
   const agentSessionId = rawEntry.agentSessionId ?? rawEntry.providerSessionId;
   return {
-    ...(rawEntry as Record<string, unknown>),
-    agentId,
-    agentSessionId: typeof agentSessionId === 'string' ? agentSessionId : null,
-    nativePath: typeof rawEntry.nativePath === 'string' ? rawEntry.nativePath : null,
-    projectPath: typeof rawEntry.projectPath === 'string' ? rawEntry.projectPath : '',
+    agentId: normalizeAgentId(rawEntry),
+    agentSessionId: normalizeNullableString(agentSessionId),
+    nativePath: normalizeNullableString(rawEntry.nativePath),
+    projectPath: normalizeString(rawEntry.projectPath),
     tags: Array.isArray(rawEntry.tags) ? rawEntry.tags.filter((tag): tag is string => typeof tag === 'string') : [],
-    model: typeof rawEntry.model === 'string' ? rawEntry.model : '',
-    apiProviderId: typeof rawEntry.apiProviderId === 'string' ? rawEntry.apiProviderId : null,
-    modelEndpointId: typeof rawEntry.modelEndpointId === 'string' ? rawEntry.modelEndpointId : null,
+    model: normalizeString(rawEntry.model),
+    apiProviderId: normalizeNullableString(rawEntry.apiProviderId),
+    modelEndpointId: normalizeNullableString(rawEntry.modelEndpointId),
     modelProtocol: rawEntry.modelProtocol === 'openai-compatible' || rawEntry.modelProtocol === 'anthropic-messages'
       ? rawEntry.modelProtocol
       : null,
+    lastReadAt: normalizeNullableString(rawEntry.lastReadAt),
     nextForkOrdinal: normalizeNextForkOrdinal(rawEntry.nextForkOrdinal),
     ...normalizeRegistryModes(rawEntry),
-  } as ChatRegistryEntry;
+  };
 }
 
 export class ChatRegistry extends EventEmitter implements IChatRegistry {

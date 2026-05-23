@@ -9,7 +9,7 @@ import {
 } from "../../../common/chat-types.js";
 import { getCursorBinary } from "../../config.js";
 import { createArtificialNativePath, getArtificialAgentSessionId } from "../../chats/artificial-native-path.js";
-import { AbsProvider } from "../shared/event-emitter-runtime.js";
+import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { normalizeCursorToolResultContent } from "../converters/cursor-tool-result.js";
 import { convertCursorToolUse } from "../converters/cursor-tool-use.js";
 import { getCursorModels } from './cursor-models.js';
@@ -326,7 +326,7 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
   }
 }
 
-export class CursorProvider extends AbsProvider {
+export class CursorProvider extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, CursorSession>();
   #requestIdentities: CursorRequestIdentityStore;
 

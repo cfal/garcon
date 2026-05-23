@@ -49,12 +49,74 @@ describe('agent architecture boundaries', () => {
     expect(source).not.toContain('ApiProviderTemplateId');
   });
 
-  test('composition root creates Cursor through the Cursor agent factory', () => {
+  test('composition root creates agents through the default agent suite', () => {
     const source = readFileSync('server/server.js', 'utf8');
     expect(source).toContain('const agentRegistry = new AgentRegistry');
-    expect(source).toContain('createCursorAgent');
+    expect(source).toContain('createDefaultAgentSuite');
+    expect(source).not.toContain('new CodexAppServerProvider');
+    expect(source).not.toContain('new ClaudeProvider');
+    expect(source).not.toContain('createCursorAgent(');
     expect(source).not.toContain('providerRegistry');
     expect(source).not.toContain('CursorRequestIdentityStore');
     expect(source).not.toContain('adapterToAgent');
+  });
+
+  test('generic chat and route modules do not import concrete agent internals', () => {
+    const checkedRoots = ['server/chats', 'server/routes', 'server/ws'];
+    const forbidden = [
+      '../agents/claude',
+      '../agents/pi',
+      '../agents/codex',
+      '../agents/cursor',
+      '../agents/opencode',
+      '../agents/amp',
+      '../agents/factory',
+      '../../agents/claude',
+      '../../agents/pi',
+      '../../agents/codex',
+      '../../agents/cursor',
+      '../../agents/opencode',
+      '../../agents/amp',
+      '../../agents/factory',
+    ];
+
+    for (const root of checkedRoots) {
+      for (const file of walk(root)) {
+        if (file.includes('__tests__')) continue;
+        const source = readFileSync(file, 'utf8');
+        for (const importPath of forbidden) {
+          expect(source, `${file} imports ${importPath}`).not.toContain(importPath);
+        }
+      }
+    }
+  });
+
+  test('server execution paths use AgentRegistry for runtime capabilities', () => {
+    const files = [
+      'server/routes/chats.ts',
+      'server/ws/chat.ts',
+      'server/chats/fork-chat.js',
+    ];
+
+    for (const file of files) {
+      const source = readFileSync(file, 'utf8');
+      expect(source).not.toContain('supportsFork as');
+      expect(source).not.toContain('supportsImages as');
+      expect(source).not.toContain('BUILTIN_AGENT_CAPABILITIES');
+    }
+  });
+
+  test('does not use provider terminology for agent runtime base classes', () => {
+    for (const file of walk('server/agents')) {
+      if (file.includes('__tests__')) continue;
+      const source = readFileSync(file, 'utf8');
+      expect(source).not.toContain('AbsProvider');
+    }
+  });
+
+  test('chat store normalizes legacy provider fields without preserving raw entries', () => {
+    const source = readFileSync('server/chats/store.ts', 'utf8');
+    expect(source).toContain('rawEntry.providerSessionId');
+    expect(source).not.toContain('...(rawEntry as Record<string, unknown>)');
   });
 });

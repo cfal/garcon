@@ -158,8 +158,8 @@ describe('metadata-store', () => {
       expect(index.getChatMetadata('persisted-chat').lastMessage).toBe('last persisted');
     });
 
-    it('repairs missing metadata from provider previews', async () => {
-      const providers = {
+    it('repairs missing metadata from agent previews', async () => {
+      const agents = {
         getPreview: mock(() => Promise.resolve({
           firstMessage: 'first repaired',
           lastMessage: 'last repaired',
@@ -169,14 +169,14 @@ describe('metadata-store', () => {
       };
       const index = new MetadataIndex(
         makeRegistry({ 'missing-chat': { agentId: 'codex', agentSessionId: 'thread-1' } }),
-        providers,
+        agents,
       );
 
       await index.init();
 
-      expect(providers.getPreview).toHaveBeenCalledTimes(1);
+      expect(agents.getPreview).toHaveBeenCalledTimes(1);
       expect(index.getChatMetadata('missing-chat').lastMessage).toBe('last repaired');
-      expect(index.getChatMetadata('missing-chat').source).toBe('provider-preview');
+      expect(index.getChatMetadata('missing-chat').source).toBe('agent-preview');
     });
 
     it('does not wait indefinitely for a stalled provider preview', async () => {

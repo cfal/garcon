@@ -10,7 +10,7 @@ import {
 } from "../../../common/chat-types.js";
 import { normalizeToolResultContent }  from "../shared/normalize-util.js";
 import { convertFactoryToolUse } from "../converters/factory-tool-use.js";
-import { AbsProvider } from "../shared/event-emitter-runtime.js";
+import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AgentCommandImage, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession, ThinkingMode } from "../session-types.js";
 import { getFactoryModelMetadata, getFactoryModels } from './factory-models.js';
@@ -299,7 +299,7 @@ function convertFactoryMessageEvent(event: FactoryMessageEvent): ChatMessage[] {
   return [];
 }
 
-export class FactoryProvider extends AbsProvider {
+export class FactoryProvider extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, FactorySession>();
 
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {

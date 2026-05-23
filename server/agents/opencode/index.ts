@@ -2,14 +2,15 @@ import type { OpenCodeProvider } from './opencode.js';
 import { getOpenCodeAuthStatus } from './opencode-auth.js';
 import type { ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import { createAgentCapabilities } from '../capabilities.js';
-import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
+import { createArtificialTranscriptSource } from '../shared/artificial-transcript-source.js';
+import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
 import type { Agent, AgentRuntime } from '../types.js';
 
 function createOpenCodeRuntime(opencode: OpenCodeProvider): AgentRuntime {
   return {
     async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
       const agentSessionId = await opencode.startSession(request);
-      return { agentSessionId, nativePath: `opencode:${agentSessionId}` };
+      return { agentSessionId, nativePath: createArtificialNativePath('opencode', agentSessionId) };
     },
     runTurn(request: ResumeTurnRequest) {
       return opencode.runTurn(request);
@@ -45,7 +46,7 @@ export function createOpenCodeAgent(opencode: OpenCodeProvider): Agent {
     id: 'opencode',
     label: 'OpenCode',
     runtime: createOpenCodeRuntime(opencode),
-    transcript: EMPTY_TRANSCRIPT_SOURCE,
+    transcript: createArtificialTranscriptSource('opencode'),
     auth: { getAuthStatus: () => getOpenCodeAuthStatus(opencode) },
     capabilities: createAgentCapabilities({
       supportsFork: false,

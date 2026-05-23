@@ -20,7 +20,6 @@ import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/http-route.js';
 import { verifyAuthToken } from './auth/token.js';
 import { init as initAuthStore } from './auth/store.js';
-import { resolveMissingNativePath } from './chats/resolve-native-path.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 
 // Classes
@@ -33,26 +32,10 @@ import { ShellManager } from './ws/shell.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { HistoryCache } from './chats/history-cache.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
-import { ClaudeProvider } from './agents/claude/claude-cli.js';
-import { CodexAppServerProvider } from './agents/codex/app-server/provider.js';
-import { OpenCodeProvider } from './agents/opencode/opencode.js';
-import { AmpProvider } from './agents/amp/amp-cli.js';
-import { FactoryProvider } from './agents/factory/factory-cli.js';
-import { PiProvider } from './agents/pi/pi-cli.js';
-import { AgentRegistry } from './agents/registry.js';
+import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
 import { ApiProviderService } from './api-providers/service.js';
-import { createAmpAgent } from './agents/amp/index.js';
-import { createClaudeAgent } from './agents/claude/index.js';
-import { createCodexAgent } from './agents/codex/index.js';
-import { createCursorAgent } from './agents/cursor/index.js';
-import { createDirectAnthropicAgent } from './agents/direct/anthropic.js';
-import { createDirectOpenAiChatAgent } from './agents/direct/openai-chat.js';
-import { createDirectOpenAiResponsesAgent } from './agents/direct/openai-responses.js';
-import { createFactoryAgent } from './agents/factory/index.js';
-import { createOpenCodeAgent } from './agents/opencode/index.js';
-import { createPiAgent } from './agents/pi/index.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
@@ -87,48 +70,26 @@ export async function startServer() {
   try {
     const workspaceDir = getWorkspaceDir();
 
-    // Tier 0: Leaf modules (no inter-service dependencies)
+    // Leaf modules with no inter-service dependencies.
     const chatRegistry = new ChatRegistry(workspaceDir);
     const settings = new SettingsStore(workspaceDir);
     const pathCache = new PathCache();
     const shellManager = new ShellManager();
-    const codexProvider = new CodexAppServerProvider();
 
     await initAuthStore();
     await chatRegistry.init();
-    await chatRegistry.reconcileSessions((session) => resolveMissingNativePath(session, {
-      resolveCodexNativePath: codexProvider.resolveNativePath.bind(codexProvider),
-    }));
     await settings.init();
 
-    await settings.reconcileWithRegistry(chatRegistry);
-
-	    // Tier 1: Standalone providers (EventEmitter-based, no deps)
-	    const claudeProvider = new ClaudeProvider();
-	    const opencodeProvider = new OpenCodeProvider();
-	    const ampProvider = new AmpProvider();
-	    const factoryProvider = new FactoryProvider();
-	    const piProvider = new PiProvider();
-
-    // Tier 1.5: User-managed API provider store and resolver
+    // User-managed API provider store and resolver.
     const apiProviderStore = new ApiProviderStore();
     await apiProviderStore.init();
 
     const endpointResolver = new ApiProviderEndpointResolver(() => apiProviderStore.list());
 
-    // Build first-class agents from concrete execution providers.
-	    const agents = [
-	      createClaudeAgent(claudeProvider),
-	      createCodexAgent(codexProvider),
-	      createDirectOpenAiResponsesAgent(apiProviderStore),
-	      createDirectOpenAiChatAgent(apiProviderStore),
-	      createDirectAnthropicAgent(apiProviderStore),
-	      createOpenCodeAgent(opencodeProvider),
-	      createAmpAgent(ampProvider),
-	      createCursorAgent({ workspaceDir }),
-	      createFactoryAgent(factoryProvider),
-	      createPiAgent(piProvider),
-	    ];
+    const agentSuite = createDefaultAgentSuite({
+      workspaceDir,
+      apiProviderReader: apiProviderStore,
+    });
 
     const apiProviders = new ApiProviderService({
       store: apiProviderStore,
@@ -137,14 +98,17 @@ export async function startServer() {
       },
     });
 
-	    // Tier 2: Agent registry wrapping runtimes + registry + resolver
-	    const agentRegistry = new AgentRegistry({
-	      registry: chatRegistry,
-	      agents,
-	      endpointResolver,
-	    });
+    // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
+    const agentRegistry = new AgentRegistry({
+      registry: chatRegistry,
+      agents: agentSuite.agents,
+      endpointResolver,
+    });
 
-    // Tier 3: Chat infrastructure (uses AgentRegistry)
+    await chatRegistry.reconcileSessions((session) => agentRegistry.resolveNativePath(session));
+    await settings.reconcileWithRegistry(chatRegistry);
+
+    // Chat infrastructure uses the agent registry through narrow injected APIs.
     const metadata = new MetadataIndex(chatRegistry, agentRegistry, {
       metadataPath: path.join(workspaceDir, 'chat-metadata.json'),
     });
@@ -290,7 +254,7 @@ export async function startServer() {
 
     // Wire agent events to broadcast via AgentRegistry fan-out.
     // HistoryCache's init() already self-wired appendMessages via
-    // providers.onMessages(), so only broadcast wiring is needed here.
+    // agentRegistry.onMessages(), so only broadcast wiring is needed here.
     agentRegistry.onMessages((chatId, messages, metadata) => {
       broadcast(new AgentRunOutputMessage(chatId, messages, metadata?.turnId, metadata?.clientRequestId, metadata?.providerRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
@@ -338,7 +302,7 @@ export async function startServer() {
     });
     settings.onRemoteSettingsChanged(async () => {
       try {
-        const snapshot = await buildRemoteSettingsSnapshot({ settings, providers: agentRegistry });
+        const snapshot = await buildRemoteSettingsSnapshot({ settings, agents: agentRegistry });
         broadcast(new SettingsChangedMessage(snapshot));
       } catch (err) {
         console.warn('server: failed to broadcast settings-changed:', err.message);

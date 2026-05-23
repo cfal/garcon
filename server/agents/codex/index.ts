@@ -18,6 +18,9 @@ export function createCodexAgent(codex: CodexAppServerProvider): Agent {
       getPreview(session) {
         return codex.getPreview(session);
       },
+      resolveNativePath(session) {
+        return codex.resolveNativePath(session);
+      },
     },
     auth: {
       getAuthStatus: () => getCodexAuthStatus(),

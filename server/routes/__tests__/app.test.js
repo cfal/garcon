@@ -507,7 +507,7 @@ describe('folders API', () => {
   });
 
   it('returns saved folders', async () => {
-    const folders = [{ id: 'folder-1', name: 'Review', filter: { textTokens: ['bug'], tags: [], providers: [], models: [] }, createdAt: '2026-03-27T00:00:00.000Z' }];
+    const folders = [{ id: 'folder-1', name: 'Review', filter: { textTokens: ['bug'], tags: [], agents: [], models: [] }, createdAt: '2026-03-27T00:00:00.000Z' }];
     ctx.settings.getFolders.mockImplementation(() => Promise.resolve(folders));
 
     const response = await getHandler();
@@ -542,7 +542,7 @@ describe('folders API', () => {
       filter: {
         textTokens: ['bug'],
         tags: ['triage'],
-        providers: ['codex'],
+        agents: ['codex'],
         models: ['gpt-5.4'],
 					status: 'unread',
       },
@@ -557,7 +557,7 @@ describe('folders API', () => {
       filter: {
         textTokens: [' one '],
         tags: [' alpha ', ''],
-        providers: [' codex '],
+        agents: [' codex '],
         models: [' gpt-5 '],
 				status: 'invalid',
 			},
@@ -572,7 +572,7 @@ describe('folders API', () => {
       filter: {
         textTokens: ['one'],
         tags: ['alpha'],
-        providers: ['codex'],
+        agents: ['codex'],
         models: ['gpt-5'],
       },
     });
