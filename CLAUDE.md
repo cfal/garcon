@@ -56,7 +56,7 @@ Required for every WS/API contract change:
 - Do not ship known tool behavior through `UnknownToolUseMessage`.
 - Do not add or preserve client parsing or rendering paths that depend on `unknown-tool-use` for known tool families.
 - Do not key frontend display behavior off `UnknownToolUseMessage.rawName`.
-- Keep agent-specific translation logic inside `server/agents/converters/*`.
+- Keep agent-specific translation logic inside the owning `server/agents/<agent>/` folder.
 - Keep `common/chat-types.ts` as the single shared contract for all rendered tool-use messages, including provider-specific explicit variants.
 
 Required for every known tool-use addition or change:

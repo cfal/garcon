@@ -58,13 +58,13 @@ const historyCache = {
   getPaginatedMessages: mock(() => undefined),
   appendMessages: mock(() => Promise.resolve(undefined)),
 };
-const providers = {
+const agents = {
   startSession: mock(() => undefined),
   supportsFork: mock(() => true),
   isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
+const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
 
 const allMocks = [
   registry.getChat, parseJsonBody, forkChatFileCopy,
@@ -75,7 +75,7 @@ describe('POST /api/v1/chats/fork', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
-    providers.supportsFork.mockImplementation(() => true);
+    agents.supportsFork.mockImplementation(() => true);
   });
 
   it('returns 400 for missing sourceChatId', async () => {
@@ -140,7 +140,7 @@ describe('POST /api/v1/chats/fork', () => {
 
   it('returns 422 for unsupported agent', async () => {
     parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '200' });
-    providers.supportsFork.mockImplementation(() => false);
+    agents.supportsFork.mockImplementation(() => false);
     registry.getChat.mockImplementation((id) => {
       if (id === '100') return { agentId: 'opencode', projectPath: '/proj' };
       return null;

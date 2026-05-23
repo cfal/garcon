@@ -57,10 +57,10 @@ function createMockTelegram() {
 }
 
 describe('AttentionTracker', () => {
-  let providers, queue, settings, registry, history, telegram;
+  let agents, queue, settings, registry, history, telegram;
 
   beforeEach(() => {
-    providers = createMockAgentRegistry();
+    agents = createMockAgentRegistry();
     queue = createMockQueue();
     settings = createMockSettings();
     registry = createMockRegistry();
@@ -70,7 +70,7 @@ describe('AttentionTracker', () => {
   });
 
   function createTracker() {
-    return new AttentionTracker(providers, queue, settings, registry, history, telegram);
+    return new AttentionTracker(agents, queue, settings, registry, history, telegram);
   }
 
   // Simulates a conversation round: adds messages to history and emits
@@ -78,7 +78,7 @@ describe('AttentionTracker', () => {
   function simulateConversation(chatId, userText, assistantText) {
     historyMessages.push({ type: 'user-message', content: userText });
     historyMessages.push({ type: 'assistant-message', content: assistantText });
-    providers.emitMessages(chatId, [new AssistantMessage('2024-01-01T00:00:01Z', assistantText)]);
+    agents.emitMessages(chatId, [new AssistantMessage('2024-01-01T00:00:01Z', assistantText)]);
   }
 
   describe('permission notifications', () => {
@@ -87,7 +87,7 @@ describe('AttentionTracker', () => {
       historyMessages.push({ type: 'user-message', content: 'deploy the app' });
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage('2024-01-01T00:00:01Z', 'perm-1', bashTool);
-      providers.emitMessages('c1', [msg]);
+      agents.emitMessages('c1', [msg]);
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).toHaveBeenCalledTimes(1);
@@ -106,7 +106,7 @@ describe('AttentionTracker', () => {
       historyMessages.push({ type: 'user-message', content: 'deploy the app' });
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage('2024-01-01T00:00:01Z', 'perm-1', bashTool);
-      providers.emitMessages('c1', [msg]);
+      agents.emitMessages('c1', [msg]);
 
       await new Promise(r => setTimeout(r, 10));
       const [, html] = telegram.send.mock.calls[0];
@@ -117,8 +117,8 @@ describe('AttentionTracker', () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      providers.emitMessages('c1', [msg]);
-      providers.emitMessages('c1', [msg]);
+      agents.emitMessages('c1', [msg]);
+      agents.emitMessages('c1', [msg]);
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).toHaveBeenCalledTimes(1);
@@ -130,10 +130,10 @@ describe('AttentionTracker', () => {
       const reqMsg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
       const resMsg = new PermissionResolvedMessage('2024-01-01T00:00:01Z', 'perm-1', true);
 
-      providers.emitMessages('c1', [reqMsg]);
-      providers.emitMessages('c1', [resMsg]);
+      agents.emitMessages('c1', [reqMsg]);
+      agents.emitMessages('c1', [resMsg]);
 
-      providers.emitFinished('c1', 0);
+      agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -146,10 +146,10 @@ describe('AttentionTracker', () => {
       const reqMsg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
       const cancelMsg = new PermissionCancelledMessage('2024-01-01T00:00:01Z', 'perm-1', 'cancelled');
 
-      providers.emitMessages('c1', [reqMsg]);
-      providers.emitMessages('c1', [cancelMsg]);
+      agents.emitMessages('c1', [reqMsg]);
+      agents.emitMessages('c1', [cancelMsg]);
 
-      providers.emitFinished('c1', 0);
+      agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -161,7 +161,7 @@ describe('AttentionTracker', () => {
     it('sends notification with user message as title and response', async () => {
       createTracker();
       simulateConversation('c1', 'fix the bug', 'Fixed the null pointer in main.ts');
-      providers.emitFinished('c1', 0);
+      agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -178,7 +178,7 @@ describe('AttentionTracker', () => {
       settings.getChatName = mock(() => 'Bug Fix Session');
       createTracker();
       simulateConversation('c1', 'fix the bug', 'Fixed the null pointer in main.ts');
-      providers.emitFinished('c1', 0);
+      agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -191,7 +191,7 @@ describe('AttentionTracker', () => {
     it('falls back to truncated chat ID when no history', async () => {
       createTracker();
       historyMessages = null;
-      providers.emitFinished('c1', 0);
+      agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -202,7 +202,7 @@ describe('AttentionTracker', () => {
     it('sends failed notification with detail instead of response', async () => {
       createTracker();
       simulateConversation('c1', 'deploy it', 'Starting deploy...');
-      providers.emitFailed('c1', 'CLI crashed');
+      agents.emitFailed('c1', 'CLI crashed');
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -214,7 +214,7 @@ describe('AttentionTracker', () => {
 
     it('sends failed notification when turn finishes with non-zero exit code', async () => {
       createTracker();
-      providers.emitFinished('c1', 1);
+      agents.emitFinished('c1', 1);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -226,7 +226,7 @@ describe('AttentionTracker', () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      providers.emitMessages('c1', [msg]);
+      agents.emitMessages('c1', [msg]);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -235,7 +235,7 @@ describe('AttentionTracker', () => {
 
     it('shortens home directory path in footer', async () => {
       createTracker();
-      providers.emitFinished('c1', 0);
+      agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -264,7 +264,7 @@ describe('AttentionTracker', () => {
     it('sends nothing when telegram is disabled', async () => {
       settings = createMockSettings({ enabled: false, chatId: '99999' });
       createTracker();
-      providers.emitFinished('c1', 0);
+      agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -274,7 +274,7 @@ describe('AttentionTracker', () => {
     it('sends nothing when chatId is empty', async () => {
       settings = createMockSettings({ enabled: true, chatId: '' });
       createTracker();
-      providers.emitFinished('c1', 0);
+      agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -284,7 +284,7 @@ describe('AttentionTracker', () => {
     it('sends nothing when telegram notifier is not configured', async () => {
       telegram = { isConfigured: false, send: mock(() => Promise.resolve(true)) };
       createTracker();
-      providers.emitFinished('c1', 0);
+      agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));

@@ -231,7 +231,7 @@ describe('forkChatFileCopy', () => {
     expect(registry.getChat('201')?.nextForkOrdinal).toBe(1);
   });
 
-  it('uses provider-native fork results when available', async () => {
+  it('uses agent-native fork results when available', async () => {
     const sourceNativePath = await createSourceNativeFile('33333333-3333-3333-3333-333333333333');
     const nativeForkPath = path.join(tmpDir, 'native-codex-fork.jsonl');
     await fs.writeFile(nativeForkPath, '{"type":"session"}\n', 'utf8');

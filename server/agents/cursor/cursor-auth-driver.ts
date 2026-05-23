@@ -1,7 +1,7 @@
-import type { AgentAuthDriver } from '../types.js';
+import type { AgentAuth } from '../types.js';
 import { getCursorAuthStatus } from './cursor-auth.js';
 
-export const cursorAuthDriver: AgentAuthDriver = {
+export const cursorAuthDriver: AgentAuth = {
   async getAuthStatus() {
     return getCursorAuthStatus();
   },

@@ -8,17 +8,17 @@ describe('appendMessages', () => {
   let cache;
   let mockRegistry;
   let mockMetadata;
-  let mockProviders;
+  let mockAgents;
 
   beforeEach(() => {
     mockRegistry = { getChat: mock(() => null) };
     mockMetadata = { updateFromAppendedMessages: mock(() => undefined) };
-    mockProviders = {
+    mockAgents = {
       loadMessages: mock(() => Promise.resolve([])),
       isChatRunning: mock(() => false),
     };
 
-    cache = new HistoryCache(mockRegistry, mockMetadata, mockProviders);
+    cache = new HistoryCache(mockRegistry, mockMetadata, mockAgents);
     cache._cacheByChatId.set(chatId, {
       chatId,
       messages: [],
@@ -107,7 +107,7 @@ describe('appendMessages', () => {
     expect(cache._cacheByChatId.get(chatId2).messages[0].content).toBe('Chat 2');
   });
 
-  it('appends to an uncached chat without loading provider history', async () => {
+  it('appends to an uncached chat without loading agent history', async () => {
     cache._cacheByChatId.delete(chatId);
 
     await cache.appendMessages(chatId, [
@@ -115,17 +115,17 @@ describe('appendMessages', () => {
     ]);
 
     const entry = cache._cacheByChatId.get(chatId);
-    expect(mockProviders.loadMessages).toHaveBeenCalledTimes(0);
+    expect(mockAgents.loadMessages).toHaveBeenCalledTimes(0);
     expect(entry.completeness).toBe('tail');
     expect(entry.messages.map((message) => message.content)).toEqual(['Background update']);
   });
 
-  it('loads provider history once and merges a live tail without duplicate assistant text', async () => {
+  it('loads agent history once and merges a live tail without duplicate assistant text', async () => {
     const selectedChatId = 'selected-chat';
     mockRegistry.getChat.mockImplementation((id) => (
       id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
     ));
-    mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
       { type: 'user-message', timestamp: ts, content: 'Prompt' },
       { type: 'assistant-message', timestamp: ts, content: 'Already present' },
     ]));
@@ -136,7 +136,7 @@ describe('appendMessages', () => {
     ]);
     const messages = await cache.ensureLoaded(selectedChatId);
 
-    expect(mockProviders.loadMessages).toHaveBeenCalledTimes(1);
+    expect(mockAgents.loadMessages).toHaveBeenCalledTimes(1);
     expect(cache._cacheByChatId.get(selectedChatId).completeness).toBe('full');
     expect(messages.map((message) => message.content)).toEqual([
       'Prompt',
@@ -145,12 +145,12 @@ describe('appendMessages', () => {
     ]);
   });
 
-  it('deduplicates provider-history user echoes through shared request identity', async () => {
+  it('deduplicates agent-history user echoes through shared request identity', async () => {
     const selectedChatId = 'cursor-chat';
     mockRegistry.getChat.mockImplementation((id) => (
       id === selectedChatId ? { agentId: 'cursor', agentSessionId: 'cursor-session-1' } : null
     ));
-    mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
       {
         type: 'user-message',
         timestamp: ts,
@@ -190,7 +190,7 @@ describe('appendMessages', () => {
     mockRegistry.getChat.mockImplementation((id) => (
       id === selectedChatId ? { agentId: 'cursor', agentSessionId: 'cursor-session-1' } : null
     ));
-    mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
       { type: 'user-message', timestamp: ts, content: 'Prompt' },
       { type: 'assistant-message', timestamp: ts, content: 'Reply' },
     ]));
@@ -242,7 +242,7 @@ describe('appendMessages', () => {
     mockRegistry.getChat.mockImplementation((id) => (
       id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
     ));
-    mockProviders.loadMessages.mockImplementation(() => Promise.resolve([
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
       { type: 'bash-tool-use', timestamp: ts, toolId: 'tool-1', command: 'ls' },
     ]));
 
@@ -265,7 +265,7 @@ describe('appendMessages', () => {
     mockRegistry.getChat.mockImplementation((id) => (
       id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
     ));
-    mockProviders.loadMessages.mockImplementation(async () => {
+    mockAgents.loadMessages.mockImplementation(async () => {
       loadStarted();
       await new Promise((resolve) => {
         releaseLoad = resolve;

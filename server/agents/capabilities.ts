@@ -1,4 +1,4 @@
-import type { AgentCapabilityDriver, SupportedAgentProtocol } from './types.js';
+import type { AgentCapabilities, SupportedAgentProtocol } from './types.js';
 
 export interface CreateAgentCapabilitiesInput {
   supportsFork?: boolean;
@@ -6,10 +6,10 @@ export interface CreateAgentCapabilitiesInput {
   acceptsApiProviderEndpoints?: boolean;
   supportedProtocols?: SupportedAgentProtocol[];
   authLoginSupported?: boolean;
-  getModels?: AgentCapabilityDriver['getModels'];
+  getModels?: AgentCapabilities['getModels'];
 }
 
-export function createAgentCapabilities(input: CreateAgentCapabilitiesInput = {}): AgentCapabilityDriver {
+export function createAgentCapabilities(input: CreateAgentCapabilitiesInput = {}): AgentCapabilities {
   return {
     supportsFork: input.supportsFork ?? false,
     supportsImages: input.supportsImages ?? false,

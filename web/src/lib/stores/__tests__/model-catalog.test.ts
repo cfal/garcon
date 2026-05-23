@@ -126,7 +126,7 @@ describe('ModelCatalogStore', () => {
 		expect(store.isStale(60_000)).toBe(false);
 	});
 
-	it('removes stale cached Pi default entries', () => {
+	it('hydrates cached Pi entries as stored', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
@@ -153,9 +153,10 @@ describe('ModelCatalogStore', () => {
 
 		const store = createModelCatalogStore();
 		expect(store.getModels('pi')).toEqual([
+			{ value: 'default', label: 'Pi Default' },
 			{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }
 		]);
-		expect(store.getDefaultModel('pi')).toBe('github-copilot/gpt-5.4');
+		expect(store.getDefaultModel('pi')).toBe('default');
 	});
 
 	it('hydrates cached agent capabilities from localStorage', () => {

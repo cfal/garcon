@@ -14,7 +14,7 @@ const agentCatalogEntries = [
   { id: 'direct-openai-responses-compatible', label: 'Direct (Responses)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
 ];
 
-const providers = {
+const modelCatalog = {
   agents: {
     getAgentCatalogEntries: mock(() => Promise.resolve(agentCatalogEntries)),
     getAgentCatalogEntry: mock((agentId) => Promise.resolve(agentCatalogEntries.find((agent) => agent.id === agentId) ?? null)),
@@ -24,7 +24,7 @@ const providers = {
   },
 };
 
-const modelsRoutes = createModelsRoutes(providers);
+const modelsRoutes = createModelsRoutes(modelCatalog);
 const handler = modelsRoutes['/api/v1/models'].GET;
 
 describe('GET /api/v1/models', () => {
@@ -118,7 +118,7 @@ describe('GET /api/v1/models', () => {
   });
 
   it('uses strict Pi discovery for the Pi agent filter', async () => {
-    providers.agents.getAgentCatalogEntry.mockResolvedValueOnce({
+    modelCatalog.agents.getAgentCatalogEntry.mockResolvedValueOnce({
       ...agentCatalogEntries.find((agent) => agent.id === 'pi'),
       defaultModel: 'openrouter/openai/gpt-5.4',
       models: [{ value: 'openrouter/openai/gpt-5.4', label: 'openrouter: gpt-5.4', supportsImages: true }],
@@ -128,7 +128,7 @@ describe('GET /api/v1/models', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(providers.agents.getAgentCatalogEntry).toHaveBeenCalledWith('pi', { strict: true });
+    expect(modelCatalog.agents.getAgentCatalogEntry).toHaveBeenCalledWith('pi', { strict: true });
     expect(body.catalog.agents).toHaveLength(1);
     expect(body.catalog.agents[0].id).toBe('pi');
     expect(body.catalog.agents[0].models).toEqual([
@@ -141,7 +141,7 @@ describe('GET /api/v1/models', () => {
       code: 'PI_MODEL_DISCOVERY_UNAVAILABLE',
       staleModels: [],
     });
-    providers.agents.getAgentCatalogEntry.mockRejectedValueOnce(error);
+    modelCatalog.agents.getAgentCatalogEntry.mockRejectedValueOnce(error);
     const url = new URL('http://localhost/api/v1/models?agent=pi');
     const response = await handler(new Request(url), url);
     const body = await response.json();
@@ -161,7 +161,7 @@ describe('GET /api/v1/models', () => {
       code: 'PI_MODEL_DISCOVERY_UNAVAILABLE',
       staleModels,
     });
-    providers.agents.getAgentCatalogEntry.mockRejectedValueOnce(error);
+    modelCatalog.agents.getAgentCatalogEntry.mockRejectedValueOnce(error);
     const url = new URL('http://localhost/api/v1/models?agent=pi');
     const response = await handler(new Request(url), url);
     const body = await response.json();

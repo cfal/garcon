@@ -51,10 +51,6 @@ function normalizeUiSettings(ui) {
   if ('pinnedInsertPosition' in normalized) {
     normalized.pinnedInsertPosition = normalized.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
   }
-  if ('searchBarPosition' in normalized) {
-    // Drops obsolete sidebar placement state from stale remote settings.
-    delete normalized.searchBarPosition;
-  }
   return normalized;
 }
 

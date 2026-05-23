@@ -122,12 +122,12 @@ describe('queue-updated event', () => {
 });
 
 describe('orchestration', () => {
-  let mockProviders;
+  let mockAgents;
   let mockPendingInputs;
   let orchQueue;
 
   beforeEach(async () => {
-    mockProviders = {
+    mockAgents = {
       runAgentTurn: mock(() => Promise.resolve()),
       abortSession: mock(() => Promise.resolve(true)),
       isChatRunning: mock(() => false),
@@ -136,13 +136,13 @@ describe('orchestration', () => {
       register: mock(() => Promise.resolve()),
       updateDeliveryStatus: mock(() => undefined),
     };
-    orchQueue = new QueueManager(workspaceDir, mockProviders, mockPendingInputs);
+    orchQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs);
   });
 
   describe('submit', () => {
     it('runs agent turn with the given command', async () => {
       await orchQueue.submit('c1', 'hello', { permissionMode: 'default' });
-      expect(mockProviders.runAgentTurn).toHaveBeenCalledWith('c1', 'hello', expect.objectContaining({
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'hello', expect.objectContaining({
         permissionMode: 'default',
         clientRequestId: expect.any(String),
         clientMessageId: expect.any(String),
@@ -187,18 +187,18 @@ describe('orchestration', () => {
       await orchQueue.submit('c1', 'initial', {});
 
       // Initial turn + drain turn
-      expect(mockProviders.runAgentTurn).toHaveBeenCalledTimes(2);
-      expect(mockProviders.runAgentTurn.mock.calls[1][1]).toBe('queued msg');
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(2);
+      expect(mockAgents.runAgentTurn.mock.calls[1][1]).toBe('queued msg');
     });
 
     it('propagates agent errors to caller', async () => {
-      mockProviders.runAgentTurn.mockRejectedValue(new Error('agent fail'));
+      mockAgents.runAgentTurn.mockRejectedValue(new Error('agent fail'));
 
       await expect(orchQueue.submit('c1', 'hello', {})).rejects.toThrow('agent fail');
     });
 
     it('emits turn-failed with command identity when agent execution fails', async () => {
-      mockProviders.runAgentTurn.mockRejectedValue(new Error('agent fail'));
+      mockAgents.runAgentTurn.mockRejectedValue(new Error('agent fail'));
       const failures = [];
       orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
 
@@ -223,7 +223,7 @@ describe('orchestration', () => {
   describe('abort', () => {
     it('calls turn runner abortSession', async () => {
       await orchQueue.abort('c1');
-      expect(mockProviders.abortSession).toHaveBeenCalledWith('c1');
+      expect(mockAgents.abortSession).toHaveBeenCalledWith('c1');
     });
 
     it('emits session-stopped event', async () => {
@@ -246,11 +246,11 @@ describe('orchestration', () => {
 
   describe('triggerDrain', () => {
     it('is a no-op when agent is running', async () => {
-      mockProviders.isChatRunning.mockReturnValue(true);
+      mockAgents.isChatRunning.mockReturnValue(true);
       await orchQueue.enqueueChat('c1', 'queued');
 
       await orchQueue.triggerDrain('c1', {});
-      expect(mockProviders.runAgentTurn).not.toHaveBeenCalled();
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
     });
 
     it('drains queued entries when agent is idle', async () => {
@@ -261,7 +261,7 @@ describe('orchestration', () => {
 
       await orchQueue.triggerDrain('c1', {});
 
-      expect(mockProviders.runAgentTurn).toHaveBeenCalledWith('c1', 'queued msg', expect.objectContaining({
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'queued msg', expect.objectContaining({
         clientRequestId: expect.any(String),
         clientMessageId: expect.any(String),
         turnId: expect.any(String),
@@ -287,7 +287,7 @@ describe('orchestration', () => {
     it('pauses on agent error via resetAndPauseChat', async () => {
       await orchQueue.enqueueChat('c1', 'will fail');
 
-      mockProviders.runAgentTurn.mockRejectedValue(new Error('agent error'));
+      mockAgents.runAgentTurn.mockRejectedValue(new Error('agent error'));
 
       await orchQueue.triggerDrain('c1', {});
 
@@ -319,7 +319,7 @@ describe('orchestration', () => {
         permissionMode: 'default',
       });
 
-      const queuedTurnOptions = mockProviders.runAgentTurn.mock.calls[0]?.[2];
+      const queuedTurnOptions = mockAgents.runAgentTurn.mock.calls[0]?.[2];
       expect(queuedTurnOptions.permissionMode).toBe('default');
       expect(queuedTurnOptions.clientRequestId).toEqual(expect.any(String));
       expect(queuedTurnOptions.clientMessageId).toEqual(expect.any(String));
@@ -353,7 +353,7 @@ describe('orchestration', () => {
 
     it('does NOT fire when drain exits because agent is running', async () => {
       await orchQueue.enqueueChat('c1', 'msg');
-      mockProviders.isChatRunning.mockReturnValue(true);
+      mockAgents.isChatRunning.mockReturnValue(true);
 
       const idleEvents = [];
       orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
@@ -373,7 +373,7 @@ describe('orchestration', () => {
     });
 
     it('does NOT emit when agent is running', async () => {
-      mockProviders.isChatRunning.mockReturnValue(true);
+      mockAgents.isChatRunning.mockReturnValue(true);
 
       const idleEvents = [];
       orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));

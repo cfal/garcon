@@ -34,31 +34,31 @@ function normalizeTitle(text) {
   return text.replace(/^["'`]+|["'`]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-// providers: AgentRegistry (for runSingleQuery)
+// agents: AgentRegistry (for runSingleQuery)
 // settings: SettingsStore (for getUiSettings, getChatName, setSessionName)
-export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt, providers, settings }) {
+export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt, agents, settings }) {
   if (!firstPrompt?.trim()) return;
 
   const ui = await settings.getUiSettings();
   const getAgentCatalog = async () => {
     try {
-      return { agents: await providers?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
+      return { agents: await agents?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
     } catch {
       return null;
     }
   };
   const [authByAgent, readinessByAgent, catalog, opencodeModels, factoryModels] = await Promise.all([
-    providers?.getAgentAuthStatusMap?.() ?? Promise.resolve({
+    agents?.getAgentAuthStatusMap?.() ?? Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
       amp: { authenticated: false },
       factory: { authenticated: false },
     }),
-    providers?.getAgentReadinessMap?.() ?? Promise.resolve({}),
+    agents?.getAgentReadinessMap?.() ?? Promise.resolve({}),
     getAgentCatalog(),
-    providers?.getModels?.('opencode') ?? Promise.resolve([]),
-    providers?.getModels?.('factory') ?? Promise.resolve([]),
+    agents?.getModels?.('opencode') ?? Promise.resolve([]),
+    agents?.getModels?.('factory') ?? Promise.resolve([]),
   ]);
   const catalogModels = Object.fromEntries(
     (catalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
@@ -86,7 +86,7 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
   const prompt = TITLE_GENERATION_PROMPT.replace('{USER_PROMPT}', firstPrompt.trim());
 
   try {
-    const titleRaw = await providers.runSingleQuery(prompt, {
+    const titleRaw = await agents.runSingleQuery(prompt, {
       agentId,
       model,
       cwd: projectPath,

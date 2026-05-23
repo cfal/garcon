@@ -90,7 +90,7 @@ export function buildApprovalResponse(
   }
 
   if (pending.method === 'execCommandApproval' || pending.method === 'applyPatchApproval') {
-    return { decision: legacyReviewDecision(decision) };
+    return { decision: historicalReviewDecision(decision) };
   }
 
   return {};
@@ -106,7 +106,7 @@ function fileChangeDecision(decision: { allow: boolean; alwaysAllow?: boolean })
   return decision.alwaysAllow ? 'acceptForSession' : 'accept';
 }
 
-function legacyReviewDecision(decision: { allow: boolean; alwaysAllow?: boolean }): string {
+function historicalReviewDecision(decision: { allow: boolean; alwaysAllow?: boolean }): string {
   if (!decision.allow) return 'denied';
   return decision.alwaysAllow ? 'approved_for_session' : 'approved';
 }

@@ -981,7 +981,7 @@ export class GitWorkbenchStore {
 	}> {
 		const grouped = new Map<string, { target: GitDiffActionTarget; lineIndices: number[] }>();
 		for (const rawKey of this.selectedLineKeys) {
-			const parsed = decodeLineSelectionKey(rawKey) ?? this.decodeLegacySelectionKey(rawKey);
+			const parsed = decodeLineSelectionKey(rawKey);
 			if (!parsed) continue;
 			const key = `${parsed.filePath}|${parsed.tab}|${mode}`;
 			const existing = grouped.get(key) ?? {
@@ -999,24 +999,10 @@ export class GitWorkbenchStore {
 		return Array.from(grouped.values());
 	}
 
-	private decodeLegacySelectionKey(rawKey: string): GitLineSelectionKey | null {
-		if (!this.selectedFile) return null;
-		const [side, rawIndex] = rawKey.split(':');
-		const diffLineIndex = Number(rawIndex);
-		if (side !== 'before' && side !== 'after') return null;
-		if (!Number.isInteger(diffLineIndex) || diffLineIndex < 0) return null;
-		return {
-			filePath: this.selectedFile,
-			tab: this.activeTab,
-			side,
-			diffLineIndex,
-		};
-	}
-
 	private clearSelectionForFile(filePath: string, tab: GitDiffTab): void {
 		this.selectedLineKeys = new Set(
 			Array.from(this.selectedLineKeys).filter((rawKey) => {
-				const parsed = decodeLineSelectionKey(rawKey) ?? this.decodeLegacySelectionKey(rawKey);
+				const parsed = decodeLineSelectionKey(rawKey);
 				return !parsed || parsed.filePath !== filePath || parsed.tab !== tab;
 			}),
 		);

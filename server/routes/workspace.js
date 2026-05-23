@@ -10,14 +10,6 @@ export async function buildRemoteSettingsSnapshot({ settings, agents }) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
 
-  function sanitizeRemoteUiSnapshot(value) {
-    // Drops obsolete sidebar placement state from stale remote settings.
-    const ui = asPlainObject(value);
-    if (!('searchBarPosition' in ui)) return ui;
-    const { searchBarPosition: _searchBarPosition, ...rest } = ui;
-    return rest;
-  }
-
   const settingsSource = typeof settings.getRemoteSettingsSnapshotSource === 'function'
     ? await settings.getRemoteSettingsSnapshotSource()
     : null;
@@ -56,7 +48,7 @@ export async function buildRemoteSettingsSnapshot({ settings, agents }) {
   ] = settingsSource
     ? [
       settingsSource.version,
-      sanitizeRemoteUiSnapshot(settingsSource.ui),
+      asPlainObject(settingsSource.ui),
       settingsSource.paths,
       settingsSource.pinnedChatIds,
       settingsSource.lastAgentId,
@@ -113,7 +105,7 @@ export async function buildRemoteSettingsSnapshot({ settings, agents }) {
 
   return {
     version,
-    ui: sanitizeRemoteUiSnapshot(ui),
+    ui: asPlainObject(ui),
     uiEffective,
     paths: {
       pinnedProjectPaths: Array.isArray(paths?.pinnedProjectPaths)
@@ -143,8 +135,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
   const VALID_FILTER_STATUS = new Set(['active', 'unread']);
   function sanitizeRemoteUiPatch(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const { searchBarPosition: _searchBarPosition, ...rest } = raw;
-    return Object.keys(rest).length > 0 ? rest : null;
+    return Object.keys(raw).length > 0 ? raw : null;
   }
 	function sanitizeFilter(raw) {
     const empty = { textTokens: [], tags: [], agents: [], models: [] };
@@ -154,12 +145,6 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
 			out[key] = Array.isArray(raw[key])
         ? raw[key].filter((v) => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
 				: [];
-    }
-    if (out.agents.length === 0 && Array.isArray(raw.providers)) {
-      out.agents = raw.providers
-        .filter((v) => typeof v === 'string')
-        .map((v) => v.trim())
-        .filter(Boolean);
     }
 		if (typeof raw.status === 'string') {
 			const status = raw.status.trim();

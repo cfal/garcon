@@ -130,9 +130,19 @@ describe('agent architecture boundaries', () => {
     }
   });
 
-  test('chat store normalizes legacy provider fields without preserving raw entries', () => {
+  test('chat store normalizes current agent fields without provider compatibility shims', () => {
     const source = readFileSync('server/chats/store.ts', 'utf8');
-    expect(source).toContain('rawEntry.providerSessionId');
+    expect(source).toContain('rawEntry.agentSessionId');
+    expect(source).not.toMatch(/rawEntry\.provider(?:SessionId)?/);
     expect(source).not.toContain('...(rawEntry as Record<string, unknown>)');
+  });
+
+  test('keeps the public agent contract faceted without extra driver interfaces', () => {
+    const source = readFileSync('server/agents/types.ts', 'utf8');
+    expect(source).toContain('export interface AgentRuntime');
+    expect(source).toContain('export interface AgentTranscriptSource');
+    expect(source).toContain('export interface AgentAuth');
+    expect(source).toContain('export interface AgentCapabilities');
+    expect(source).not.toMatch(/Agent(?:RuntimeModeControls|AuthDriver|CapabilityDriver)/);
   });
 });

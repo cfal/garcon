@@ -543,7 +543,7 @@ export default function createChatRoutes(
         return Response.json({ success: false, error: (error as Error).message }, { status });
       }
 
-      void maybeGenerateChatTitle({ chatId, projectPath, firstPrompt: command, providers: agents, settings });
+      void maybeGenerateChatTitle({ chatId, projectPath, firstPrompt: command, agents, settings });
 
       const accepted = await commandLedger.update(ledger.record.key, { status: 'running', turnId });
       return Response.json(acceptedResponse(accepted ?? ledger.record), { status: 202 });

@@ -317,7 +317,7 @@ describe('wire format parsing', () => {
 	});
 
 	it('parses bash-tool-use from wire data', () => {
-		const data = { type: 'bash-tool-use', timestamp: TS, toolId: 'id-legacy', command: 'echo hello' };
+		const data = { type: 'bash-tool-use', timestamp: TS, toolId: 'id-wire', command: 'echo hello' };
 		const parsed = parseChatMessage(data);
 		expect(parsed).toBeInstanceOf(BashToolUseMessage);
 		expect((parsed as BashToolUseMessage).command).toBe('echo hello');
@@ -355,7 +355,7 @@ describe('wire format parsing', () => {
 		const data = {
 			type: 'unknown-tool-use',
 			timestamp: TS,
-			toolId: 'id-unk-legacy',
+			toolId: 'id-unk-wire',
 			rawName: 'customX',
 			input: { a: 1, b: 'two' },
 		};

@@ -71,20 +71,20 @@ describe('loadCodexChatMessages', () => {
       JSON.stringify({
         type: 'event_msg',
         timestamp: tsAssistant,
-        payload: { type: 'agent_message', message: 'legacy assistant reply' },
+        payload: { type: 'agent_message', message: 'jsonl assistant reply' },
       }),
       JSON.stringify({
         type: 'event_msg',
         timestamp: tsThinking,
-        payload: { type: 'agent_reasoning', message: 'legacy thinking reply' },
+        payload: { type: 'agent_reasoning', message: 'jsonl thinking reply' },
       }),
     ];
 
     const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
 
     expect(messages).toEqual([
-      { type: 'assistant-message', timestamp: tsAssistant, content: 'legacy assistant reply' },
-      { type: 'thinking', timestamp: tsThinking, content: 'legacy thinking reply' },
+      { type: 'assistant-message', timestamp: tsAssistant, content: 'jsonl assistant reply' },
+      { type: 'thinking', timestamp: tsThinking, content: 'jsonl thinking reply' },
     ]);
   });
 

@@ -198,26 +198,26 @@ export class CodexAppServerProvider extends AgentEventEmitterRuntime {
   }
 
   async loadMessages(session: AgentChatEntry): Promise<unknown[]> {
-    if (!session.agentSessionId) return this.#loadLegacyMessages(session);
+    if (!session.agentSessionId) return this.#loadJsonlMessages(session);
 
     try {
       const response = await this.#readThread(session.agentSessionId, true);
       return convertCodexAppServerThread(response.thread);
     } catch (error) {
       console.warn('codex: app-server thread/read failed, falling back to JSONL:', (error as Error).message);
-      return this.#loadLegacyMessages(session);
+      return this.#loadJsonlMessages(session);
     }
   }
 
   async getPreview(session: AgentChatEntry): Promise<unknown> {
-    if (!session.agentSessionId) return this.#getLegacyPreview(session);
+    if (!session.agentSessionId) return this.#getJsonlPreview(session);
 
     const listedThread = await this.#listedThreadForPreview(session.agentSessionId);
     if (listedThread) return getCodexThreadPreview(listedThread);
 
     if (session.nativePath) {
-      const legacyPreview = await this.#getLegacyPreview(session);
-      if (legacyPreview) return legacyPreview;
+      const jsonlPreview = await this.#getJsonlPreview(session);
+      if (jsonlPreview) return jsonlPreview;
     }
 
     try {
@@ -225,7 +225,7 @@ export class CodexAppServerProvider extends AgentEventEmitterRuntime {
       return getCodexThreadPreview(response.thread);
     } catch (error) {
       console.warn('codex: app-server preview failed, falling back to JSONL:', (error as Error).message);
-      return this.#getLegacyPreview(session);
+      return this.#getJsonlPreview(session);
     }
   }
 
@@ -624,11 +624,11 @@ export class CodexAppServerProvider extends AgentEventEmitterRuntime {
     return null;
   }
 
-  #loadLegacyMessages(session: AgentChatEntry): Promise<unknown[]> {
+  #loadJsonlMessages(session: AgentChatEntry): Promise<unknown[]> {
     return loadCodexChatMessages(session.nativePath);
   }
 
-  #getLegacyPreview(session: AgentChatEntry): Promise<unknown> {
+  #getJsonlPreview(session: AgentChatEntry): Promise<unknown> {
     return getCodexPreviewFromNativePath(session.nativePath);
   }
 }

@@ -623,12 +623,12 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.claudeThinkingMode).toBe('off');
 	});
 
-	it('toRecord defaults permissionMode, thinkingMode, and claudeThinkingMode for legacy sessions', () => {
+	it('toRecord defaults permissionMode, thinkingMode, and claudeThinkingMode for partial persisted sessions', () => {
 		const store = new ChatSessionsStore();
 
-		const legacy = makeServerSession({ id: 'a' }) as Partial<ChatSession> & { claudeThinkingMode?: string };
-		delete legacy.claudeThinkingMode;
-		store.upsertFromServer([legacy as ChatSession]);
+		const partial = makeServerSession({ id: 'a' }) as Partial<ChatSession> & { claudeThinkingMode?: string };
+		delete partial.claudeThinkingMode;
+		store.upsertFromServer([partial as ChatSession]);
 
 		expect(store.byId['a']?.permissionMode).toBe('default');
 		expect(store.byId['a']?.thinkingMode).toBe('none');

@@ -142,15 +142,14 @@ function normalizeNullableString(value: unknown): string | null {
 }
 
 function normalizeAgentId(rawEntry: Record<string, unknown>): AgentName {
-  const value = rawEntry.agentId ?? rawEntry.provider;
+  const value = rawEntry.agentId;
   return typeof value === 'string' ? value as AgentName : '';
 }
 
 function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegistryEntry {
-  const agentSessionId = rawEntry.agentSessionId ?? rawEntry.providerSessionId;
   return {
     agentId: normalizeAgentId(rawEntry),
-    agentSessionId: normalizeNullableString(agentSessionId),
+    agentSessionId: normalizeNullableString(rawEntry.agentSessionId),
     nativePath: normalizeNullableString(rawEntry.nativePath),
     projectPath: normalizeString(rawEntry.projectPath),
     tags: Array.isArray(rawEntry.tags) ? rawEntry.tags.filter((tag): tag is string => typeof tag === 'string') : [],

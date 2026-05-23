@@ -53,12 +53,12 @@ const historyCache = {
   getPaginatedMessages: mock(() => undefined),
   appendMessages: mock(() => Promise.resolve(undefined)),
 };
-const providers = {
+const agents = {
   startSession: mock(() => undefined),
   isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
+const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
 
 const allMocks = [
   registry.getChat, registry.updateChat, metadata.getChatMetadata,
@@ -295,7 +295,7 @@ describe('GET /api/chats includes read state', () => {
     expect(body.sessions[0].claudeThinkingMode).toBe('on');
   });
 
-  it('defaults permissionMode, thinkingMode, and claudeThinkingMode for legacy sessions', async () => {
+  it('defaults permissionMode, thinkingMode, and claudeThinkingMode for partial persisted sessions', async () => {
     registry.listAllChats.mockImplementation(() => ({
       '100': { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));

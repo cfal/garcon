@@ -1,12 +1,11 @@
 export type {
   ForkAgentSessionArgs,
   Agent,
-  AgentAuthDriver,
-  AgentCapabilityDriver,
+  AgentAuth,
+  AgentCapabilities,
   AgentModelDiscoveryError,
   AgentModelQuery,
   AgentRuntime,
-  AgentRuntimeModeControls,
   AgentTranscriptSource,
   SupportedAgentProtocol,
 } from './types.js';

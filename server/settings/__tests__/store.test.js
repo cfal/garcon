@@ -138,9 +138,9 @@ describe('settings store', () => {
       expect(ui.fontSize).toBe(14);
     });
 
-    it('keeps pinnedInsertPosition remote and drops legacy sidebar controls position', async () => {
+    it('normalizes pinnedInsertPosition values', async () => {
       await writeRaw({
-        ui: { pinnedInsertPosition: 'sideways', searchBarPosition: 'ceiling' },
+        ui: { pinnedInsertPosition: 'sideways' },
         paths: {},
         chatNames: {},
         pinnedChatIds: [],
@@ -150,11 +150,9 @@ describe('settings store', () => {
 
       const loaded = await store.getUiSettings();
       expect(loaded.pinnedInsertPosition).toBe('top');
-      expect(loaded.searchBarPosition).toBeUndefined();
 
-      await store.setUiSettings({ searchBarPosition: 'top', pinnedInsertPosition: 'bottom' });
+      await store.setUiSettings({ pinnedInsertPosition: 'bottom' });
       const saved = await store.getUiSettings();
-      expect(saved.searchBarPosition).toBeUndefined();
       expect(saved.pinnedInsertPosition).toBe('bottom');
     });
 

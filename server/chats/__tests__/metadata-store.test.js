@@ -8,7 +8,7 @@ const mockRegistry = {
   listAllChats: () => ({}),
   onChatRemoved: mock(() => {}),
 };
-const mockProviders = {
+const mockAgents = {
   getPreview: mock(() => Promise.resolve(null)),
 };
 
@@ -37,7 +37,7 @@ describe('metadata-store', () => {
     chatCounter += 1;
     chatId = `meta-test-${chatCounter}`;
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-metadata-test-'));
-    metadata = new MetadataIndex(mockRegistry, mockProviders);
+    metadata = new MetadataIndex(mockRegistry, mockAgents);
     metadata.addNewChatMetadata(chatId, 'initial message');
   });
 
@@ -118,7 +118,7 @@ describe('metadata-store', () => {
 
     it('saves live updates to disk', async () => {
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
-      const index = new MetadataIndex(mockRegistry, mockProviders, { metadataPath, saveDelayMs: 0 });
+      const index = new MetadataIndex(mockRegistry, mockAgents, { metadataPath, saveDelayMs: 0 });
       index.addNewChatMetadata('live-chat', 'first');
 
       index.updateFromAppendedMessages('live-chat', [
@@ -133,7 +133,7 @@ describe('metadata-store', () => {
   });
 
   describe('init', () => {
-    it('loads persisted metadata before provider preview repair', async () => {
+    it('loads persisted metadata before agent preview repair', async () => {
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
         'persisted-chat': {
@@ -144,17 +144,17 @@ describe('metadata-store', () => {
           source: 'live',
         },
       })), 'utf8');
-      const providers = { getPreview: mock(() => Promise.resolve(null)) };
+      const agents = { getPreview: mock(() => Promise.resolve(null)) };
       const index = new MetadataIndex(
         makeRegistry({ 'persisted-chat': { agentId: 'codex', agentSessionId: 'thread-1' } }),
-        providers,
+        agents,
         { metadataPath },
       );
 
       await index.init();
       await index.flush();
 
-      expect(providers.getPreview).toHaveBeenCalledTimes(0);
+      expect(agents.getPreview).toHaveBeenCalledTimes(0);
       expect(index.getChatMetadata('persisted-chat').lastMessage).toBe('last persisted');
     });
 
@@ -179,22 +179,22 @@ describe('metadata-store', () => {
       expect(index.getChatMetadata('missing-chat').source).toBe('agent-preview');
     });
 
-    it('does not wait indefinitely for a stalled provider preview', async () => {
+    it('does not wait indefinitely for a stalled agent preview', async () => {
       const stalledRegistry = makeRegistry({
         'stalled-chat': { agentId: 'opencode', agentSessionId: 'opencode-session' },
       });
-      const stalledProviders = {
+      const stalledAgents = {
         getPreview: mock(() => new Promise(() => {})),
       };
-      const index = new MetadataIndex(stalledRegistry, stalledProviders, { previewTimeoutMs: 5 });
+      const index = new MetadataIndex(stalledRegistry, stalledAgents, { previewTimeoutMs: 5 });
 
       await index.init();
 
-      expect(stalledProviders.getPreview).toHaveBeenCalledTimes(1);
+      expect(stalledAgents.getPreview).toHaveBeenCalledTimes(1);
       expect(index.getChatMetadata('stalled-chat')).toBeNull();
     });
 
-    it('keeps persisted metadata when provider preview repair would stall', async () => {
+    it('keeps persisted metadata when agent preview repair would stall', async () => {
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
         'stalled-chat': {
@@ -205,19 +205,19 @@ describe('metadata-store', () => {
           source: 'live',
         },
       })), 'utf8');
-      const stalledProviders = {
+      const stalledAgents = {
         getPreview: mock(() => new Promise(() => {})),
       };
       const index = new MetadataIndex(
         makeRegistry({ 'stalled-chat': { agentId: 'opencode', agentSessionId: 'opencode-session' } }),
-        stalledProviders,
+        stalledAgents,
         { metadataPath, previewTimeoutMs: 5 },
       );
 
       await index.init();
       await index.flush();
 
-      expect(stalledProviders.getPreview).toHaveBeenCalledTimes(0);
+      expect(stalledAgents.getPreview).toHaveBeenCalledTimes(0);
       expect(index.getChatMetadata('stalled-chat').lastMessage).toBe('persisted last');
     });
 
@@ -232,7 +232,7 @@ describe('metadata-store', () => {
           source: 'live',
         },
       })), 'utf8');
-      const index = new MetadataIndex(makeRegistry({}), mockProviders, { metadataPath });
+      const index = new MetadataIndex(makeRegistry({}), mockAgents, { metadataPath });
 
       await index.init();
       await index.flush();

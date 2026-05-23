@@ -39,7 +39,7 @@ function createMockCtx() {
       removeSavedSearch: mock(() => Promise.resolve(false)),
       reorderSavedSearches: mock(() => Promise.resolve({ success: true })),
     },
-    providers: {
+    agents: {
       getAgentAuthStatusMap: mock(() => Promise.resolve({
         claude: { authenticated: false },
         codex: { authenticated: false },
@@ -51,7 +51,7 @@ function createMockCtx() {
 }
 
 const ctx = createMockCtx();
-const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.providers);
+const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.agents);
 
 function makeRequest(url, method, body) {
   return new Request(url, {
@@ -78,8 +78,8 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getAgentAuthStatusMap.mockClear();
-    ctx.providers.getModels.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
   });
 
@@ -150,8 +150,8 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getAgentAuthStatusMap.mockClear();
-    ctx.providers.getModels.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
   });
 
@@ -192,28 +192,15 @@ describe('GET /api/app/settings', () => {
     expect(body.chatSortOrder).toBeUndefined();
   });
 
-  it('strips the legacy remote sidebar controls position from the snapshot', async () => {
-    ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(2));
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({
-      searchBarPosition: 'top',
-      pinnedInsertPosition: 'bottom',
-    }));
-
-    const response = await handler();
-    const body = await response.json();
-
-    expect(body.ui).toEqual({ pinnedInsertPosition: 'bottom' });
-  });
-
-  it('auto-enables generation defaults from authenticated provider priority', async () => {
+  it('auto-enables generation defaults from authenticated agent priority', async () => {
     ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(1));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
-    ctx.providers.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
+    ctx.agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: true },
       opencode: { authenticated: true },
     }));
-    ctx.providers.getModels.mockImplementation(() => Promise.resolve([
+    ctx.agents.getModels.mockImplementation(() => Promise.resolve([
       { value: 'deepseek-r1', label: 'DeepSeek R1' },
       { value: 'openai/gpt-4.1', label: 'GPT-4.1' },
     ]));
@@ -271,8 +258,8 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getAgentAuthStatusMap.mockClear();
-    ctx.providers.getModels.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
   });
 
@@ -286,18 +273,6 @@ describe('PUT /api/app/settings', () => {
 
     expect(body.success).toBe(true);
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ fontSize: 14 });
-  });
-
-  it('drops the legacy sidebar controls position from ui patches', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { searchBarPosition: 'top' } }));
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({ pinnedInsertPosition: 'top' }));
-    ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
-
-    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { ui: { searchBarPosition: 'top' } }));
-    const body = await response.json();
-
-    expect(body.success).toBe(true);
-    expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
   });
 
   it('patches paths settings', async () => {
@@ -524,7 +499,7 @@ describe('folders API', () => {
       filter: {
         textTokens: [' bug ', '', 7],
         tags: [' triage ', null],
-        providers: [' codex '],
+        agents: [' codex '],
         models: [' gpt-5.4 ', false],
         status: ' unread ',
 				ignored: ['value'],

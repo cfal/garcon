@@ -111,7 +111,7 @@ function createRouteAgent(sessionOverrides = {}) {
     getPaginatedMessages: mock(() => ({ messages: [], total: 0, hasMore: false, offset: 0, limit: 20 })),
     appendMessages: mock(() => Promise.resolve(undefined)),
   };
-  const providers = {
+  const agents = {
     hasAgent: mock(() => true),
     supportsFork: mock(() => true),
     supportsImages: mock(() => true),
@@ -127,8 +127,8 @@ function createRouteAgent(sessionOverrides = {}) {
     setAmpAgentMode: mock(() => Promise.resolve(undefined)),
     setModel: mock(() => Promise.resolve(undefined)),
   };
-  const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
-  return { sessions, registry, settings, queue, pathCache, metadata, historyCache, providers, routes };
+  const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+  return { sessions, registry, settings, queue, pathCache, metadata, historyCache, agents, routes };
 }
 
 async function callJson(handler, body, method = 'POST') {
@@ -266,7 +266,7 @@ describe('REST chat command routes', () => {
 
   it('POST /fork-run rejects busy source sessions before copying', async () => {
     const agent = createRouteAgent();
-    agent.providers.isAgentSessionRunning.mockReturnValue(true);
+    agent.agents.isAgentSessionRunning.mockReturnValue(true);
 
     const { response, body } = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
       ...agentRunBody({
@@ -349,7 +349,7 @@ describe('REST chat command routes', () => {
     expect(retry.body.status).toBe('duplicate');
     expect(conflict.response.status).toBe(409);
     expect(conflict.body.errorCode).toBe('IDEMPOTENCY_CONFLICT');
-    expect(agent.providers.resolvePermission).toHaveBeenCalledTimes(1);
+    expect(agent.agents.resolvePermission).toHaveBeenCalledTimes(1);
   });
 
   it('POST /stop deduplicates abort requests', async () => {
@@ -390,10 +390,10 @@ describe('REST chat command routes', () => {
       claudeThinkingMode: 'auto',
       ampAgentMode: 'smart',
     });
-    expect(agent.providers.setPermissionMode).toHaveBeenCalledWith('123', 'default');
-    expect(agent.providers.setThinkingMode).toHaveBeenCalledWith('123', 'think-hard');
-    expect(agent.providers.setClaudeThinkingMode).toHaveBeenCalledWith('123', 'auto');
-    expect(agent.providers.setAmpAgentMode).toHaveBeenCalledWith('123', 'smart');
+    expect(agent.agents.setPermissionMode).toHaveBeenCalledWith('123', 'default');
+    expect(agent.agents.setThinkingMode).toHaveBeenCalledWith('123', 'think-hard');
+    expect(agent.agents.setClaudeThinkingMode).toHaveBeenCalledWith('123', 'auto');
+    expect(agent.agents.setAmpAgentMode).toHaveBeenCalledWith('123', 'smart');
     expect(agent.registry.updateChat).toHaveBeenCalledWith('123', expect.objectContaining({
       permissionMode: 'default',
       thinkingMode: 'think-hard',
@@ -426,7 +426,7 @@ describe('REST chat command routes', () => {
       modelEndpointId: 'endpoint',
       modelProtocol: 'openai-compatible',
     });
-    expect(agent.providers.setModel).toHaveBeenCalledWith('123', 'endpoint:model-a', {
+    expect(agent.agents.setModel).toHaveBeenCalledWith('123', 'endpoint:model-a', {
       apiProviderId: 'provider-1',
       modelEndpointId: 'endpoint',
     });

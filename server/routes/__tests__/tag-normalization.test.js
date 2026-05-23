@@ -54,13 +54,13 @@ const historyCache = {
   getPaginatedMessages: mock(() => undefined),
   appendMessages: mock(() => Promise.resolve(undefined)),
 };
-const providers = {
+const agents = {
   startSession: mock(() => undefined),
   isAgentSessionRunning: mock(() => false),
   runSingleQuery: mock(() => Promise.resolve('')),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
+const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
 const handler = chatsRoutes['/api/v1/chats/tags'].PATCH;
 
 describe('PATCH /api/v1/chats/tags – tag normalization', () => {

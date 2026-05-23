@@ -119,7 +119,7 @@ export interface RequiredChatExecutionConfig extends PersistedChatExecutionConfi
   ampAgentMode: AmpAgentMode;
 }
 
-// Validates persisted execution settings before they reach providers or queue drain.
+// Validates persisted execution settings before they reach agents or queue drain.
 export function requireChatExecutionConfig(
   chatId: string,
   entry: PersistedChatExecutionConfig | null | undefined,

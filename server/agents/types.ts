@@ -11,19 +11,16 @@ import type {
 
 export type SupportedAgentProtocol = 'anthropic-messages' | 'openai-compatible';
 
-export interface AgentRuntimeModeControls {
-  setPermissionMode?(agentSessionId: string, mode: PermissionMode): void | Promise<void>;
-  setThinkingMode?(agentSessionId: string, mode: ThinkingMode): void | Promise<void>;
-  setClaudeThinkingMode?(agentSessionId: string, mode: ClaudeThinkingMode): void | Promise<void>;
-  setAmpAgentMode?(agentSessionId: string, mode: AmpAgentMode): void | Promise<void>;
-}
-
-export interface AgentRuntime extends AgentRuntimeModeControls {
+export interface AgentRuntime {
   startSession(request: StartSessionRequest): Promise<StartedAgentSession>;
   runTurn(request: ResumeTurnRequest): Promise<void>;
   abort(agentSessionId: string): boolean | Promise<boolean>;
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
+  setPermissionMode?(agentSessionId: string, mode: PermissionMode): void | Promise<void>;
+  setThinkingMode?(agentSessionId: string, mode: ThinkingMode): void | Promise<void>;
+  setClaudeThinkingMode?(agentSessionId: string, mode: ClaudeThinkingMode): void | Promise<void>;
+  setAmpAgentMode?(agentSessionId: string, mode: AmpAgentMode): void | Promise<void>;
   resolvePermission?(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> | void;
   shutdown?(): void;
   startPurgeTimer?(): ReturnType<typeof setInterval>;
@@ -40,7 +37,7 @@ export interface AgentTranscriptSource {
   resolveNativePath?(session: AgentChatEntry): Promise<string | null>;
 }
 
-export interface AgentAuthDriver {
+export interface AgentAuth {
   getAuthStatus(): Promise<unknown>;
   launchLogin?(): Promise<{
     launched: boolean;
@@ -58,7 +55,7 @@ export interface AgentModelDiscoveryError extends Error {
   staleModels?: AgentModelOption[];
 }
 
-export interface AgentCapabilityDriver {
+export interface AgentCapabilities {
   getModels?(query?: AgentModelQuery): Promise<AgentModelOption[]>;
   supportsFork: boolean;
   supportsImages: boolean;
@@ -80,8 +77,8 @@ export interface Agent {
   label: string;
   runtime: AgentRuntime;
   transcript: AgentTranscriptSource;
-  auth: AgentAuthDriver;
-  capabilities: AgentCapabilityDriver;
+  auth: AgentAuth;
+  capabilities: AgentCapabilities;
   forkSession?(args: ForkAgentSessionArgs): Promise<StartedAgentSession | null>;
   runSingleQuery?(prompt: string, options?: Record<string, unknown>): Promise<string>;
 }

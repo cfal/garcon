@@ -29,10 +29,10 @@ function modelDiscoveryUnavailableResponse(error, catalog, entry) {
   return Response.json(body, { status: 503 });
 }
 
-export default function createModelsRoutes(providers) {
+export default function createModelsRoutes(modelCatalog) {
   const catalog = async () => ({
-    agents: await providers.agents.getAgentCatalogEntries(),
-    apiProviders: providers.apiProviders.getCatalog(),
+    agents: await modelCatalog.agents.getAgentCatalogEntries(),
+    apiProviders: modelCatalog.apiProviders.getCatalog(),
   });
 
   async function getModels(request, url) {
@@ -42,8 +42,8 @@ export default function createModelsRoutes(providers) {
       const currentCatalog = await catalog();
       let entry;
       try {
-        entry = typeof providers.agents.getAgentCatalogEntry === 'function'
-          ? await providers.agents.getAgentCatalogEntry(agentId, { strict: agentId === 'pi' })
+        entry = typeof modelCatalog.agents.getAgentCatalogEntry === 'function'
+          ? await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict: agentId === 'pi' })
           : currentCatalog.agents.find((agent) => agent.id === agentId);
       } catch (error) {
         const staleEntry = currentCatalog.agents.find((agent) => agent.id === agentId);

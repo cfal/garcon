@@ -245,14 +245,6 @@ function mergeStaticModels(remote: ModelOption[] | undefined, fallback: ModelOpt
 	return missing.length ? [...remote, ...missing] : remote;
 }
 
-function removeLegacyPiDefaultModels(models: ModelOption[] | undefined): ModelOption[] | undefined {
-	return models?.filter((model) => model.value !== 'default');
-}
-
-function normalizeAgentDefaultModel(id: string, defaultModel: string): string {
-	return id === 'pi' && defaultModel === 'default' ? '' : defaultModel;
-}
-
 function mergeWithFallbacks(models: AgentModels): AgentModels {
 	const result: AgentModels = {
 		claude: mergeStaticModels(models.claude, STATIC_FALLBACKS.claude!),
@@ -260,7 +252,7 @@ function mergeWithFallbacks(models: AgentModels): AgentModels {
 		cursor: models.cursor?.length ? models.cursor : [],
 		amp: models.amp?.length ? models.amp : STATIC_FALLBACKS.amp!,
 		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
-		pi: mergeStaticModels(removeLegacyPiDefaultModels(models.pi), STATIC_FALLBACKS.pi!),
+		pi: mergeStaticModels(models.pi, STATIC_FALLBACKS.pi!),
 		opencode: models.opencode?.length ? models.opencode : [],
 		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]?.length ? models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID] : [],
 		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]?.length ? models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID] : [],
@@ -296,7 +288,7 @@ function filterVisibleAgentMetadata(agentMetadata: AgentMetadataMap): AgentMetad
 				{
 					...metadata,
 					label: normalizeAgentLabel(id, metadata.label),
-					defaultModel: normalizeAgentDefaultModel(id, metadata.defaultModel),
+					defaultModel: metadata.defaultModel,
 				}
 			])
 	);

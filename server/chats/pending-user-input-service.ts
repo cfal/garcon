@@ -81,7 +81,7 @@ export class PendingUserInputService {
         await this.#historyCache.ensureLoaded(chatId);
         messages = this.#historyCache.getMessages(chatId);
       } catch {
-        // Falls back to the current cached history when provider reload fails.
+        // Falls back to the current cached history when agent reload fails.
       }
 
       const persistedUserCount = durableUserCount(messages);
@@ -112,7 +112,7 @@ export class PendingUserInputService {
     try {
       await this.#historyCache.ensureLoaded(chatId);
     } catch {
-      // Falls back to the current cached history when provider reload fails.
+      // Falls back to the current cached history when agent reload fails.
     }
     return {
       createdAt: new Date().toISOString(),

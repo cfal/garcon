@@ -209,7 +209,7 @@ describe('Codex app-server request builders', () => {
     const params = buildThreadResumeParams({
       ...makeRequest(),
       agentSessionId: 'thread-1',
-      nativePath: '/tmp/legacy.jsonl',
+      nativePath: '/tmp/jsonl.jsonl',
     });
 
     expect(params).toMatchObject({
@@ -225,7 +225,7 @@ describe('Codex app-server request builders', () => {
   it('builds thread/fork params from durable thread identity', () => {
     const params = buildThreadForkParams({
       agentSessionId: 'thread-1',
-      nativePath: '/tmp/legacy.jsonl',
+      nativePath: '/tmp/jsonl.jsonl',
       model: 'gpt-5.4-codex',
       projectPath: '/repo',
     });

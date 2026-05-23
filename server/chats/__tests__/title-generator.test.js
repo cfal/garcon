@@ -8,7 +8,7 @@ const getAgentAuthStatusMapMock = mock(() => Promise.resolve({
   opencode: { authenticated: false },
 }));
 const getModelsMock = mock(() => Promise.resolve([]));
-const mockProviders = {
+const mockAgents = {
   runSingleQuery: runSingleQueryMock,
   getAgentAuthStatusMap: getAgentAuthStatusMapMock,
   getModels: getModelsMock,
@@ -28,7 +28,7 @@ const mockSettings = {
 
 const allMocks = [
   runSingleQueryMock, setSessionNameMock,
-  getChatNameMock, getUiSettingsMock, getAgentAuthStatusMapMock, getModelsMock, mockProviders.getAgentCatalog,
+  getChatNameMock, getUiSettingsMock, getAgentAuthStatusMapMock, getModelsMock, mockAgents.getAgentCatalog,
 ];
 
 describe('maybeGenerateChatTitle', () => {
@@ -52,7 +52,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '100',
       projectPath: '/proj',
       firstPrompt: 'Help me fix a bug',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -74,7 +74,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '200',
       projectPath: '/proj',
       firstPrompt: 'Hello',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -89,7 +89,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '300',
       projectPath: '/proj',
       firstPrompt: 'Hello',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -108,7 +108,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '301',
       projectPath: '/proj',
       firstPrompt: 'Hello',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -135,7 +135,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '302',
       projectPath: '/proj',
       firstPrompt: 'Hello',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -158,7 +158,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '303',
       projectPath: '/proj',
       firstPrompt: 'Hello',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -170,7 +170,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '400',
       projectPath: '/proj',
       firstPrompt: '',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -184,7 +184,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '500',
       projectPath: '/proj',
       firstPrompt: 'Some prompt',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -198,7 +198,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '600',
       projectPath: '/proj',
       firstPrompt: 'A prompt',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -212,7 +212,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '700',
       projectPath: '/proj',
       firstPrompt: 'A prompt',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -227,14 +227,14 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '800',
       projectPath: '/proj',
       firstPrompt: 'A prompt',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
     expect(setSessionNameMock).not.toHaveBeenCalled();
   });
 
-  it('routes to the configured provider', async () => {
+  it('routes to the configured agent', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({
       chatTitle: { enabled: true, agentId: 'opencode', model: 'anthropic/claude-sonnet-4-5' },
     }));
@@ -243,7 +243,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '900',
       projectPath: '/proj',
       firstPrompt: 'Do something',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 
@@ -268,7 +268,7 @@ describe('maybeGenerateChatTitle', () => {
       chatId: '901',
       projectPath: '/proj',
       firstPrompt: 'Do something',
-      providers: mockProviders,
+      agents: mockAgents,
       settings: mockSettings,
     });
 

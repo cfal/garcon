@@ -203,15 +203,14 @@ function normalizePersistedMetadata(chatId, value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const firstMessage = typeof value.firstMessage === 'string' ? value.firstMessage : '';
   if (!firstMessage) return null;
-  const source = value.source === 'provider-preview' ? 'agent-preview' : value.source;
   return {
     chatId,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : null,
     lastActivity: typeof value.lastActivity === 'string' ? value.lastActivity : null,
     lastMessage: typeof value.lastMessage === 'string' ? value.lastMessage : firstMessage,
     firstMessage,
-    source: source === 'live' || source === 'agent-preview' || source === 'startup'
-      ? source
+    source: value.source === 'live' || value.source === 'agent-preview' || value.source === 'startup'
+      ? value.source
       : 'startup',
   };
 }

@@ -55,7 +55,7 @@ const historyCache = {
   getPaginatedMessages: mock(() => ({ messages: [], total: 0, hasMore: false, offset: 0, limit: 20 })),
   appendMessages: mock(() => Promise.resolve(undefined)),
 };
-const providers = {
+const agents = {
   startSession: mock(() => Promise.resolve(undefined)),
   getModels: mock(() => Promise.resolve([])),
   isAgentSessionRunning: mock(() => false),
@@ -65,7 +65,7 @@ const providers = {
   modelSupportsImages: mock(() => Promise.resolve(false)),
 };
 
-const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
+const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
 const handler = routes['/api/v1/chats/start'].POST;
 
 describe('POST /api/v1/chats/start', () => {
@@ -81,11 +81,11 @@ describe('POST /api/v1/chats/start', () => {
     settings.setLastChatDefaults.mockClear();
     metadata.addNewChatMetadata.mockClear();
     historyCache.appendMessages.mockClear();
-    providers.startSession.mockClear();
-    providers.getModels.mockClear();
-    providers.hasAgent.mockClear();
-    providers.hasAgent.mockImplementation(() => true);
-    providers.modelSupportsImages.mockClear();
+    agents.startSession.mockClear();
+    agents.getModels.mockClear();
+    agents.hasAgent.mockClear();
+    agents.hasAgent.mockImplementation(() => true);
+    agents.modelSupportsImages.mockClear();
   });
 
   afterEach(async () => {
@@ -126,7 +126,7 @@ describe('POST /api/v1/chats/start', () => {
       claudeThinkingMode: 'off',
       ampAgentMode: 'smart',
     });
-	    expect(providers.startSession).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
+	    expect(agents.startSession).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
 	      images: [],
 	      projectPath,
 	      clientRequestId: expect.any(String),
@@ -134,7 +134,7 @@ describe('POST /api/v1/chats/start', () => {
 	    }));
   });
 
-  it('keeps the attempted defaults even when provider startup fails', async () => {
+  it('keeps the attempted defaults even when agent startup fails', async () => {
     const projectPath = path.join(testBasePath, 'project-b');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
@@ -149,7 +149,7 @@ describe('POST /api/v1/chats/start', () => {
       options: {},
       tags: ['claude'],
     }));
-    providers.startSession.mockImplementationOnce(() => Promise.reject(new Error('boom')));
+    agents.startSession.mockImplementationOnce(() => Promise.reject(new Error('boom')));
 
     const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
     const body = await response.json();
@@ -185,7 +185,7 @@ describe('POST /api/v1/chats/start', () => {
       options: { images: [{ data: 'data:image/png;base64,abc', name: 'diagram.png' }] },
       tags: ['factory'],
     }));
-    providers.getModels.mockResolvedValueOnce([
+    agents.getModels.mockResolvedValueOnce([
       { value: 'glm-5', label: 'Droid Core (GLM-5)', supportsImages: false },
     ]);
 
@@ -194,7 +194,7 @@ describe('POST /api/v1/chats/start', () => {
 
     expect(response.status).toBe(422);
     expect(body.error).toBe('Images unsupported for agent: factory');
-    expect(providers.startSession).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
   });
 
   it('normalizes invalid mode values from the REST payload before persisting them', async () => {
@@ -248,13 +248,13 @@ describe('POST /api/v1/chats/start', () => {
     expect(response.status).toBe(400);
     expect(body.error).toBe('agentId is required');
     expect(registry.addChat).not.toHaveBeenCalled();
-    expect(providers.startSession).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
   });
 
   it('rejects unsupported agents instead of defaulting to Claude', async () => {
     const projectPath = path.join(testBasePath, 'project-f');
     await fs.mkdir(projectPath, { recursive: true });
-    providers.hasAgent.mockImplementation((agentId) => agentId !== 'unknown-provider');
+    agents.hasAgent.mockImplementation((agentId) => agentId !== 'unknown-provider');
     parseJsonBody.mockImplementation(() => Promise.resolve({
       chatId: '792',
       agentId: 'unknown-provider',
@@ -270,6 +270,6 @@ describe('POST /api/v1/chats/start', () => {
     expect(response.status).toBe(400);
     expect(body.error).toBe('Unsupported agent: unknown-provider');
     expect(registry.addChat).not.toHaveBeenCalled();
-    expect(providers.startSession).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
   });
 });
