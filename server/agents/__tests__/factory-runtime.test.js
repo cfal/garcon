@@ -8,7 +8,7 @@ mock.module('../factory/factory-models.js', () => ({
   getFactoryModels: mock(async () => []),
 }));
 
-import { FactoryProvider } from '../factory/factory-cli.js';
+import { FactoryCliRuntime } from '../factory/factory-cli.js';
 
 function createFakeProc() {
   const encoder = new TextEncoder();
@@ -57,7 +57,7 @@ function createFakeProc() {
   return proc;
 }
 
-describe('FactoryProvider lifecycle', () => {
+describe('FactoryCliRuntime lifecycle', () => {
   let originalSpawn;
   let spawnMock;
 
@@ -72,7 +72,7 @@ describe('FactoryProvider lifecycle', () => {
   });
 
   it('resolves startSession on system init before the turn finishes', async () => {
-    const provider = new FactoryProvider();
+    const provider = new FactoryCliRuntime();
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
 
@@ -103,7 +103,7 @@ describe('FactoryProvider lifecycle', () => {
   });
 
   it('continues an existing session and emits assistant messages', async () => {
-    const provider = new FactoryProvider();
+    const provider = new FactoryCliRuntime();
     const messages = mock();
     provider.onMessages(messages);
 

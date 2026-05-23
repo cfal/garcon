@@ -20,7 +20,7 @@ export class AgentRunOutputMessage {
     public messages: ChatMessage[],
     public turnId?: string,
     public clientRequestId?: string,
-    public providerRequestId?: string,
+    public upstreamRequestId?: string,
   ) { }
 }
 
@@ -31,7 +31,7 @@ export class AgentRunFinishedMessage {
     public exitCode?: number,
     public turnId?: string,
     public clientRequestId?: string,
-    public providerRequestId?: string,
+    public upstreamRequestId?: string,
   ) { }
 }
 
@@ -42,7 +42,7 @@ export class AgentRunFailedMessage {
     public error: string,
     public turnId?: string,
     public clientRequestId?: string,
-    public providerRequestId?: string,
+    public upstreamRequestId?: string,
   ) { }
 }
 
@@ -263,7 +263,7 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
         parseChatMessages(data.messages),
         typeof data.turnId === 'string' ? data.turnId : undefined,
         typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
-        typeof data.providerRequestId === 'string' ? data.providerRequestId : undefined,
+        typeof data.upstreamRequestId === 'string' ? data.upstreamRequestId : undefined,
       );
     }
     case 'agent-run-finished': {
@@ -274,7 +274,7 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
         data.exitCode as number | undefined,
         typeof data.turnId === 'string' ? data.turnId : undefined,
         typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
-        typeof data.providerRequestId === 'string' ? data.providerRequestId : undefined,
+        typeof data.upstreamRequestId === 'string' ? data.upstreamRequestId : undefined,
       );
     }
     case 'agent-run-failed': {
@@ -286,7 +286,7 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
         error,
         typeof data.turnId === 'string' ? data.turnId : undefined,
         typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
-        typeof data.providerRequestId === 'string' ? data.providerRequestId : undefined,
+        typeof data.upstreamRequestId === 'string' ? data.upstreamRequestId : undefined,
       );
     }
     case 'chat-session-created': {

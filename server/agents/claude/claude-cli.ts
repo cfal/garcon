@@ -268,7 +268,7 @@ function buildClaudeCLIArgs({
   return args;
 }
 
-class ClaudeProvider extends AgentEventEmitterRuntime {
+class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
   #pendingPermissions = new Map<string, PendingPermission>();
   #pendingControlRequests = new Map<string, PendingControlRequest>();
@@ -862,4 +862,4 @@ class ClaudeProvider extends AgentEventEmitterRuntime {
   }
 }
 
-export { ClaudeProvider, buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, createClaudeNativePath, runSingleQuery };
+export { ClaudeCliRuntime, buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, createClaudeNativePath, runSingleQuery };

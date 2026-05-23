@@ -74,7 +74,7 @@ describe('applyChatMessages', () => {
 		const result = applyChatMessages(current, [
 			new UserMessage('2026-01-01T00:00:01Z', 'Question', undefined, {
 				clientRequestId: 'req-1',
-				providerRequestId: 'cursor-req-1',
+				upstreamRequestId: 'cursor-req-1',
 			}),
 		]);
 

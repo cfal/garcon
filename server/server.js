@@ -36,6 +36,8 @@ import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
 import { ApiProviderService } from './api-providers/service.js';
+import { CommandLedger } from './commands/command-ledger.js';
+import { ChatCommandService } from './commands/chat-command-service.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
@@ -122,8 +124,14 @@ export async function startServer() {
     await shareStore.init();
 
     const queue = new QueueManager(workspaceDir, agentRegistry, pendingInputs);
+    const commandLedger = new CommandLedger(workspaceDir);
+    const chatCommands = new ChatCommandService({
+      chats: chatRegistry,
+      queue,
+      ledger: commandLedger,
+    });
 
-    // Telegram notifications (wires itself to provider + queue events).
+    // Telegram notifications wire themselves to agent and queue events.
     const telegramNotifier = new TelegramNotifier(getTelegramBotToken());
     // Fall back to persisted bot token if env var is empty.
     if (!telegramNotifier.isConfigured) {
@@ -134,7 +142,7 @@ export async function startServer() {
     // eslint-disable-next-line no-unused-vars
     const _attentionTracker = new AttentionTracker(agentRegistry, queue, settings, chatRegistry, historyCache, telegramNotifier);
 
-    // Start provider purge timers
+    // Start agent runtime purge timers.
     agentRegistry.startPurgeTimers();
 
     // Recover stale chat queues from previous server runs.
@@ -147,7 +155,7 @@ export async function startServer() {
     // Build route and WS handler tables
     const routes = createAllRoutes(
       chatRegistry, settings, queue, pathCache, metadata, historyCache,
-      agentRegistry, pendingInputs, telegramNotifier, shareStore, apiProviders,
+      agentRegistry, pendingInputs, telegramNotifier, shareStore, apiProviders, chatCommands,
     );
 
     const chatHandler = new ChatHandler(agentRegistry, queue, historyCache, chatRegistry, pendingInputs, {
@@ -155,7 +163,7 @@ export async function startServer() {
       metadata,
       forkChatFileCopy,
       forkAgentSession: agentRegistry.forkAgentSession.bind(agentRegistry),
-    });
+    }, chatCommands);
     const wsHandlers = {
       '/shell': shellManager.createHandler(),
       '/ws': chatHandler.createHandler(),
@@ -256,7 +264,7 @@ export async function startServer() {
     // HistoryCache's init() already self-wired appendMessages via
     // agentRegistry.onMessages(), so only broadcast wiring is needed here.
     agentRegistry.onMessages((chatId, messages, metadata) => {
-      broadcast(new AgentRunOutputMessage(chatId, messages, metadata?.turnId, metadata?.clientRequestId, metadata?.providerRequestId));
+      broadcast(new AgentRunOutputMessage(chatId, messages, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         console.warn('pending-inputs: reconcile after messages failed:', err.message);
       });
@@ -268,11 +276,11 @@ export async function startServer() {
       broadcast(new ChatSessionCreatedMessage(chatId));
     });
     agentRegistry.onFinished((chatId, exitCode, metadata) => {
-      broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId, metadata?.providerRequestId));
+      broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         console.warn('pending-inputs: reconcile after finish failed:', err.message);
       });
-      // Defer idle check to next microtask so the provider has time to
+      // Defer idle check to next microtask so the runtime has time to
       // clear its isRunning flag (emitFinished fires before the flag flip).
       queueMicrotask(() => {
         queue.checkChatIdle(chatId).catch((err) => {
@@ -281,7 +289,7 @@ export async function startServer() {
       });
     });
     agentRegistry.onFailed((chatId, errorMessage, metadata) => {
-      broadcast(new AgentRunFailedMessage(chatId, errorMessage, metadata?.turnId, metadata?.clientRequestId, metadata?.providerRequestId));
+      broadcast(new AgentRunFailedMessage(chatId, errorMessage, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         console.warn('pending-inputs: reconcile after failure failed:', err.message);
       });

@@ -33,7 +33,7 @@ interface CursorSession {
   id: string;
   isRunning: boolean;
   process: ReturnType<typeof Bun.spawn> | null;
-  providerRequestId?: string;
+  upstreamRequestId?: string;
   resultSeen: boolean;
   sessionCreatedEmitted: boolean;
   startTime: number;
@@ -86,7 +86,7 @@ function createSession(chatId: string, startedSession: CursorSession['startedSes
     id: `pending-${crypto.randomUUID()}`,
     isRunning: true,
     process: null,
-    providerRequestId: undefined,
+    upstreamRequestId: undefined,
     resultSeen: false,
     sessionCreatedEmitted: false,
     startTime: Date.now(),
@@ -326,7 +326,7 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
   }
 }
 
-export class CursorProvider extends AgentEventEmitterRuntime {
+export class CursorRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, CursorSession>();
   #requestIdentities: CursorRequestIdentityStore;
 
@@ -370,7 +370,7 @@ export class CursorProvider extends AgentEventEmitterRuntime {
     session: CursorSession,
     patch: {
       agentSessionId?: string;
-      providerRequestId?: string;
+      upstreamRequestId?: string;
       userEchoSeen?: boolean;
     } = {},
   ) {
@@ -381,7 +381,7 @@ export class CursorProvider extends AgentEventEmitterRuntime {
       agentSessionId,
       clientRequestId: session.clientRequestId,
       turnId: session.turnId,
-      providerRequestId: patch.providerRequestId ?? session.providerRequestId,
+      upstreamRequestId: patch.upstreamRequestId ?? session.upstreamRequestId,
       userEchoSeen: patch.userEchoSeen,
     };
   }
@@ -389,7 +389,7 @@ export class CursorProvider extends AgentEventEmitterRuntime {
   #rememberTurnIdentity(session: CursorSession, request: StartSessionRequest | ResumeTurnRequest): void {
     session.clientRequestId = request.clientRequestId;
     session.turnId = request.turnId;
-    session.providerRequestId = undefined;
+    session.upstreamRequestId = undefined;
     session.userEchoSeen = false;
     this.#requestIdentities.rememberTurn(this.#identityInput(session));
   }
@@ -456,11 +456,11 @@ export class CursorProvider extends AgentEventEmitterRuntime {
       }
       const sessionId = getSessionId(event);
       if (sessionId && session.id !== sessionId) this.#activateSession(session, sessionId);
-      const providerRequestId = getRequestId(event);
-      if (providerRequestId) {
-        session.providerRequestId = providerRequestId;
-        this.#requestIdentities.markProviderRequestId(this.#identityInput(session, {
-          providerRequestId,
+      const upstreamRequestId = getRequestId(event);
+      if (upstreamRequestId) {
+        session.upstreamRequestId = upstreamRequestId;
+        this.#requestIdentities.markUpstreamRequestId(this.#identityInput(session, {
+          upstreamRequestId,
         }));
       }
       session.resultSeen = true;
@@ -468,7 +468,7 @@ export class CursorProvider extends AgentEventEmitterRuntime {
       this.emitFinished(
         session.chatId,
         exitCode,
-        providerRequestId ? { providerRequestId } : undefined,
+        upstreamRequestId ? { upstreamRequestId } : undefined,
       );
       this.#finalizeTurn(session, exitCode);
       return;
@@ -611,7 +611,7 @@ export class CursorProvider extends AgentEventEmitterRuntime {
     session.finalized = false;
     session.isRunning = true;
     session.process = null;
-    session.providerRequestId = undefined;
+    session.upstreamRequestId = undefined;
     session.resultSeen = false;
     session.startTime = Date.now();
     session.startedSession = null;

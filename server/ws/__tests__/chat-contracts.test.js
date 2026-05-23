@@ -130,6 +130,9 @@ describe('chat WebSocket handler', () => {
 
   describe('agent-run', () => {
     it('delegates to queue.submit with the chat ID', async () => {
+      mockRegistry.getChat.mockImplementation((chatId) => (
+        chatId === '123' ? { agentId: 'claude', agentSessionId: 'session-123', model: 'opus' } : null
+      ));
       await chatHandler.message(ws, {
         type: 'agent-run',
         chatId: '123',
@@ -138,12 +141,11 @@ describe('chat WebSocket handler', () => {
         thinkingMode: 'none',
         model: 'opus',
       });
-      expect(mockQueue.submit).toHaveBeenCalledWith('123', 'hello', {
+      expect(mockQueue.submit).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
         permissionMode: 'default',
         thinkingMode: 'none',
-        claudeThinkingMode: undefined,
         model: 'opus',
-      });
+      }));
     });
 
     it('rejects agent-run payloads with missing chatId', async () => {
@@ -177,6 +179,9 @@ describe('chat WebSocket handler', () => {
     });
 
     it('sends agent-run-failed when queue.submit throws', async () => {
+      mockRegistry.getChat.mockImplementation((chatId) => (
+        chatId === '123' ? { agentId: 'claude', agentSessionId: 'session-123', model: 'opus' } : null
+      ));
       mockQueue.submit.mockRejectedValueOnce(new Error('agent timeout'));
       await chatHandler.message(ws, {
         type: 'agent-run',
@@ -210,6 +215,9 @@ describe('chat WebSocket handler', () => {
     });
 
     it('accepts image-only agent-run payloads', async () => {
+      mockRegistry.getChat.mockImplementation((chatId) => (
+        chatId === '123' ? { agentId: 'claude', agentSessionId: 'session-123', model: 'opus' } : null
+      ));
       await chatHandler.message(ws, {
         type: 'agent-run',
         chatId: '123',
@@ -219,13 +227,12 @@ describe('chat WebSocket handler', () => {
         model: 'opus',
         images: [{ data: 'data:image/png;base64,abc', name: 'a.png' }],
       });
-      expect(mockQueue.submit).toHaveBeenCalledWith('123', '', {
+      expect(mockQueue.submit).toHaveBeenCalledWith('123', '', expect.objectContaining({
         images: [{ data: 'data:image/png;base64,abc', name: 'a.png' }],
         permissionMode: 'default',
         thinkingMode: 'none',
-        claudeThinkingMode: undefined,
         model: 'opus',
-      });
+      }));
     });
 
     it('rejects agent-run payloads with neither command nor images', async () => {
@@ -282,11 +289,11 @@ describe('chat WebSocket handler', () => {
         sourceChatId: '123',
         chatId: '456',
       });
-      expect(mockQueue.submit).toHaveBeenCalledWith('456', 'continue in fork', {
+      expect(mockQueue.submit).toHaveBeenCalledWith('456', 'continue in fork', expect.objectContaining({
         permissionMode: 'default',
         thinkingMode: 'none',
         model: 'opus',
-      });
+      }));
     });
 
     it('rejects unsupported source agents', async () => {

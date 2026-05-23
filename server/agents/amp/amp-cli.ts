@@ -280,7 +280,7 @@ function buildContinueArgs(threadId: string, model?: string): string[] {
   return args;
 }
 
-class AmpProvider extends AgentEventEmitterRuntime {
+class AmpCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, AmpSession>();
 
   constructor() {
@@ -549,4 +549,4 @@ class AmpProvider extends AgentEventEmitterRuntime {
   }
 }
 
-export { AMP_DEFAULT_FLAGS, AmpProvider, convertAmpMessageToChatMessages, createThread, exportThread, runSingleQuery };
+export { AMP_DEFAULT_FLAGS, AmpCliRuntime, convertAmpMessageToChatMessages, createThread, exportThread, runSingleQuery };

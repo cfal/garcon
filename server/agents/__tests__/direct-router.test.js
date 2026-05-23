@@ -25,8 +25,8 @@ function endpoint(overrides = {}) {
 describe('buildDirectOpenAiConfig', () => {
   it('omits Authorization for blank-key Direct endpoints', () => {
     const config = buildDirectOpenAiConfig({
-      providerId: 'direct-openai-compatible',
-      providerLabel: 'Example',
+      runtimeId: 'direct-openai-compatible',
+      runtimeLabel: 'Example',
       endpoint: endpoint(),
     });
 
@@ -37,8 +37,8 @@ describe('buildDirectOpenAiConfig', () => {
 
   it('preserves managed headers for OpenRouter-style endpoints', () => {
     const config = buildDirectOpenAiConfig({
-      providerId: 'direct-openai-compatible',
-      providerLabel: 'OpenRouter',
+      runtimeId: 'direct-openai-compatible',
+      runtimeLabel: 'OpenRouter',
       endpoint: endpoint({
         apiKey: 'sk-openrouter',
         headers: {
@@ -60,8 +60,8 @@ describe('buildDirectOpenAiConfig', () => {
 describe('buildDirectOpenAiResponsesConfig', () => {
   it('uses separate Direct Responses session paths', () => {
     const config = buildDirectOpenAiResponsesConfig({
-      providerId: 'direct-openai-responses-compatible',
-      providerLabel: 'Example',
+      runtimeId: 'direct-openai-responses-compatible',
+      runtimeLabel: 'Example',
       endpoint: endpoint({
         capabilities: { chatCompletions: false, responses: true },
       }),
@@ -111,8 +111,8 @@ describe('Direct OpenAI router runtimes', () => {
 describe('buildDirectAnthropicConfig', () => {
   it('uses stored endpoint credentials and session paths', () => {
     const config = buildDirectAnthropicConfig({
-      providerId: 'direct-anthropic-compatible',
-      providerLabel: 'Example',
+      runtimeId: 'direct-anthropic-compatible',
+      runtimeLabel: 'Example',
       endpoint: {
         id: 'example_anthropic',
         protocol: 'anthropic-messages',

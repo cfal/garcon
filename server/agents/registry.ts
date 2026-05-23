@@ -8,7 +8,6 @@ import type { IChatRegistry } from "../chats/store.js";
 
 import type { AgentCommandImage } from "../../common/ws-requests.js";
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../common/chat-modes.js";
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, PI_MODELS } from "../../common/models.js";
 import type {
   AgentChatEntry,
   AgentEventMetadata,
@@ -20,22 +19,15 @@ import { requireChatExecutionConfig } from "./session-types.js";
 import type { ApiProviderEndpointResolver, ResolvedModelSelection } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
 import type { Agent } from './types.js';
+import type { AgentEndpointRuntimeConfig } from './types.js';
 import {
-  isEndpointOnlyAgentId,
   isVisibleAgentId,
-  type AgentId,
   type AgentCatalogEntry,
   type AgentModelOption,
 } from "../../common/agents.js";
 import type { ApiProtocol } from "../../common/api-providers.js";
 import type { AgentModelQuery } from './types.js';
-const STATIC_AGENT_MODELS: Record<string, { defaultModel: string; models: AgentModelOption[] }> = {
-  claude: { defaultModel: CLAUDE_MODELS.DEFAULT, models: CLAUDE_MODELS.OPTIONS },
-  codex: { defaultModel: CODEX_MODELS.DEFAULT, models: CODEX_MODELS.OPTIONS },
-  amp: { defaultModel: AMP_MODELS.DEFAULT, models: AMP_MODELS.OPTIONS },
-  factory: { defaultModel: FACTORY_MODELS.DEFAULT, models: FACTORY_MODELS.OPTIONS },
-  pi: { defaultModel: PI_MODELS.DEFAULT, models: PI_MODELS.OPTIONS },
-};
+import { AgentCatalogService } from './catalog-service.js';
 
 function requireChatEntry(chatId: string, entry: AgentChatEntry | null | undefined): AgentChatEntry & {
   projectPath: string;
@@ -55,43 +47,9 @@ function requireChatEntry(chatId: string, entry: AgentChatEntry | null | undefin
   };
 }
 
-function dedupeModels(models: AgentModelOption[]): AgentModelOption[] {
-  const seen = new Set<string>();
-  const result: AgentModelOption[] = [];
-  for (const model of models) {
-    if (!model.value || seen.has(model.value)) continue;
-    seen.add(model.value);
-    result.push(model);
-  }
-  return result;
-}
-
-async function nativeModelsForAgent(id: string, agent: Agent, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
-  let fetched: AgentModelOption[] = [];
-  const getModels = agent.capabilities.getModels;
-  if (!isEndpointOnlyAgentId(id) && getModels) {
-    try {
-      fetched = await getModels(query);
-    } catch (error) {
-      if (query.strict) throw error;
-      console.warn(`agents: failed to fetch ${id} models:`, error instanceof Error ? error.message : String(error));
-    }
-  }
-  const fallback = STATIC_AGENT_MODELS[id]?.models ?? [];
-  return dedupeModels([...fetched, ...fallback]);
-}
-
-function defaultModelForAgent(id: string, nativeModels: AgentModelOption[], endpointModels: AgentModelOption[]): string {
-  const fallbackDefault = STATIC_AGENT_MODELS[id]?.defaultModel;
-  if (fallbackDefault && nativeModels.some((model) => model.value === fallbackDefault)) {
-    return fallbackDefault;
-  }
-  return nativeModels[0]?.value ?? endpointModels[0]?.value ?? fallbackDefault ?? '';
-}
-
 interface TurnEventMetadata {
   clientRequestId?: string;
-  providerRequestId?: string;
+  upstreamRequestId?: string;
   turnId?: string;
 }
 
@@ -116,10 +74,18 @@ function selectionRequestFields(selection: ResolvedModelSelection): {
   };
 }
 
+function mergeRuntimeConfig<T extends Record<string, unknown>>(
+  target: T,
+  runtimeConfig: AgentEndpointRuntimeConfig,
+): T & AgentEndpointRuntimeConfig {
+  return Object.assign(target, runtimeConfig);
+}
+
 export class AgentRegistry {
   #registry: IChatRegistry;
   #agents = new Map<string, Agent>();
   #endpointResolver: ApiProviderEndpointResolver;
+  #catalog: AgentCatalogService;
   #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
 
   constructor(args: {
@@ -133,6 +99,10 @@ export class AgentRegistry {
     for (const agent of args.agents) {
       this.#agents.set(agent.id, agent);
     }
+    this.#catalog = new AgentCatalogService({
+      agents: this.#agents,
+      endpointResolver: this.#endpointResolver,
+    });
   }
 
   hasAgent(agentId: string): boolean {
@@ -159,6 +129,20 @@ export class AgentRegistry {
     const agent = this.#agents.get(agentId);
     if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
     return agent;
+  }
+
+  #endpointRuntimeConfig(agent: Agent, selection: ResolvedModelSelection): AgentEndpointRuntimeConfig {
+    if (!agent.prepareEndpointRuntime) return {};
+    const reference = this.#endpointResolver.resolveEndpointReference(selection);
+    if (!reference || !selection.apiProviderId || !selection.endpointId || !selection.protocol) return {};
+    return agent.prepareEndpointRuntime({
+      model: selection.model,
+      apiProviderId: selection.apiProviderId,
+      modelEndpointId: selection.endpointId,
+      modelProtocol: selection.protocol,
+      isLocal: selection.isLocal,
+      ...reference,
+    }) ?? {};
   }
 
   #setTurnMetadata(chatId: string, opts: { clientRequestId?: string; turnId?: string }): void {
@@ -201,6 +185,8 @@ export class AgentRegistry {
       modelEndpointId: entry.modelEndpointId,
     });
 
+    const agent = this.#agentFor(entry.agentId);
+    const runtimeConfig = this.#endpointRuntimeConfig(agent, selection);
     const resolvedCommand = await resolveFileMentionsInCommand(command, entry.projectPath);
     const request: StartSessionRequest = {
       chatId,
@@ -213,12 +199,10 @@ export class AgentRegistry {
       clientRequestId: opts.clientRequestId,
       turnId: opts.turnId,
       images: opts.images,
-      envOverrides: selection.envOverrides,
-      ...(selection.codexConfig ? { codexConfig: selection.codexConfig } : {}),
+      ...runtimeConfig,
       ...selectionRequestFields(selection),
     };
 
-    const agent = this.#agentFor(entry.agentId);
     this.#setTurnMetadata(chatId, opts);
     let started: StartedAgentSession;
     try {
@@ -269,6 +253,7 @@ export class AgentRegistry {
     assertSameApiProviderBoundary(previousSelection, selection);
 
     const agent = this.#agentFor(agentId);
+    const runtimeConfig = this.#endpointRuntimeConfig(agent, selection);
     const resolvedCommand = await resolveFileMentionsInCommand(command, entry.projectPath);
     this.#setTurnMetadata(chatId, opts);
     let startedTurn = false;
@@ -286,9 +271,8 @@ export class AgentRegistry {
         clientRequestId: opts.clientRequestId,
         turnId: opts.turnId,
         images: opts.images,
-        envOverrides: selection.envOverrides,
         nativePath: rawEntry.nativePath,
-        ...(selection.codexConfig ? { codexConfig: selection.codexConfig } : {}),
+        ...runtimeConfig,
         ...selectionRequestFields(selection),
       });
     } catch (error) {
@@ -379,6 +363,7 @@ export class AgentRegistry {
       apiProviderId: source.apiProviderId,
       modelEndpointId: source.modelEndpointId,
     });
+    const runtimeConfig = this.#endpointRuntimeConfig(agent, selection);
     return agent.forkSession({
       ...args,
       sourceSession: {
@@ -386,8 +371,7 @@ export class AgentRegistry {
         model: selection.model,
         ...selectionRequestFields(selection),
       },
-      envOverrides: selection.envOverrides,
-      ...(selection.codexConfig ? { codexConfig: selection.codexConfig } : {}),
+      ...runtimeConfig,
     });
   }
 
@@ -453,8 +437,7 @@ export class AgentRegistry {
           modelEndpointId: typeof rest.modelEndpointId === 'string' ? rest.modelEndpointId : null,
         });
         rest.model = selection.model;
-        if (selection.envOverrides) rest.envOverrides = selection.envOverrides;
-        if (selection.codexConfig) rest.codexConfig = selection.codexConfig;
+        mergeRuntimeConfig(rest, this.#endpointRuntimeConfig(agent, selection));
         Object.assign(rest, selectionRequestFields(selection));
       }
       return agent.runSingleQuery(prompt, rest);
@@ -477,9 +460,7 @@ export class AgentRegistry {
   }
 
   async getModels(agentId: string, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
-    const getModels = this.#agents.get(agentId)?.capabilities.getModels;
-    if (getModels) return getModels(query);
-    return [];
+    return this.#catalog.getModels(agentId, query);
   }
 
   async modelSupportsImages(input: {
@@ -488,12 +469,7 @@ export class AgentRegistry {
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   }): Promise<boolean> {
-    return this.#endpointResolver.modelSupportsImages({
-      agentId: input.agentId as AgentId,
-      model: input.model,
-      apiProviderId: input.apiProviderId,
-      modelEndpointId: input.modelEndpointId,
-    });
+    return this.#catalog.modelSupportsImages(input);
   }
 
   async resolveNativePath(session: AgentChatEntry): Promise<string | null> {
@@ -540,7 +516,7 @@ export class AgentRegistry {
     for (const [agentId, agent] of this.#agents.entries()) {
       if (!isVisibleAgentId(agentId)) continue;
       const endpointReady = agent.capabilities.acceptsApiProviderEndpoints
-        && this.#endpointResolver.getModelOptions(agentId as AgentId).length > 0;
+        && this.#catalog.hasEndpointModels(agentId);
       const nativeReady = Boolean((auth[agentId] as any)?.authenticated);
       result[agentId] = {
         ready: nativeReady || endpointReady,
@@ -609,30 +585,11 @@ export class AgentRegistry {
   }
 
   async getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}): Promise<AgentCatalogEntry | null> {
-    const agent = this.#agents.get(agentId);
-    if (!agent || !isVisibleAgentId(agentId)) return null;
-    const endpointModels = this.#endpointResolver.getModelOptions(agentId as AgentId);
-    const nativeModels = await nativeModelsForAgent(agentId, agent, query);
-    const models = isEndpointOnlyAgentId(agentId)
-      ? dedupeModels(endpointModels)
-      : dedupeModels([...nativeModels, ...endpointModels]);
-    return {
-      id: agentId as AgentId,
-      label: agent.label,
-      kind: 'agent',
-      supportsFork: agent.capabilities.supportsFork,
-      supportsImages: agent.capabilities.supportsImages,
-      acceptsApiProviderEndpoints: agent.capabilities.acceptsApiProviderEndpoints,
-      supportedProtocols: agent.capabilities.supportedProtocols,
-      authLoginSupported: agent.capabilities.authLoginSupported,
-      defaultModel: defaultModelForAgent(agentId, nativeModels, endpointModels),
-      models,
-    };
+    return this.#catalog.getAgentCatalogEntry(agentId, query);
   }
 
   async getAgentCatalogEntries(): Promise<AgentCatalogEntry[]> {
-    return (await Promise.all(Array.from(this.#agents.keys()).map((id) => this.getAgentCatalogEntry(id))))
-      .filter((entry): entry is AgentCatalogEntry => Boolean(entry));
+    return this.#catalog.getAgentCatalogEntries();
   }
 
 }

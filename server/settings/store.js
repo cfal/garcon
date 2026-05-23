@@ -136,9 +136,7 @@ function sanitize(parsed) {
     pinnedChatIds: sanitizeStringArray(parsed.pinnedChatIds),
     normalChatIds: sanitizeStringArray(parsed.normalChatIds),
     archivedChatIds: sanitizeStringArray(parsed.archivedChatIds),
-    lastAgentId: typeof parsed.lastAgentId === 'string'
-      ? parsed.lastAgentId
-      : (typeof parsed.lastProvider === 'string' ? parsed.lastProvider : 'claude'),
+    lastAgentId: typeof parsed.lastAgentId === 'string' ? parsed.lastAgentId : 'claude',
     lastProjectPath: typeof parsed.lastProjectPath === 'string' ? parsed.lastProjectPath : '',
     lastModel: typeof parsed.lastModel === 'string' ? parsed.lastModel : '',
     lastApiProviderId: typeof parsed.lastApiProviderId === 'string' ? parsed.lastApiProviderId : null,

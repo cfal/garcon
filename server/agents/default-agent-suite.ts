@@ -1,10 +1,10 @@
 import type { ApiProviderReader } from '../api-providers/read-model.js';
-import { ClaudeProvider } from './claude/claude-cli.js';
-import { CodexAppServerProvider } from './codex/app-server/provider.js';
-import { OpenCodeProvider } from './opencode/opencode.js';
-import { AmpProvider } from './amp/amp-cli.js';
-import { FactoryProvider } from './factory/factory-cli.js';
-import { PiProvider } from './pi/pi-cli.js';
+import { ClaudeCliRuntime } from './claude/claude-cli.js';
+import { CodexAppServerRuntime } from './codex/app-server/runtime.js';
+import { OpenCodeRuntime } from './opencode/opencode.js';
+import { AmpCliRuntime } from './amp/amp-cli.js';
+import { FactoryCliRuntime } from './factory/factory-cli.js';
+import { PiCliRuntime } from './pi/pi-cli.js';
 import { createAmpAgent } from './amp/index.js';
 import { createClaudeAgent } from './claude/index.js';
 import { createCodexAgent } from './codex/index.js';
@@ -16,38 +16,105 @@ import { createFactoryAgent } from './factory/index.js';
 import { createOpenCodeAgent } from './opencode/index.js';
 import { createPiAgent } from './pi/index.js';
 import type { Agent } from './types.js';
+import type { AgentId } from '../../common/agents.js';
 
 export interface DefaultAgentSuiteOptions {
   workspaceDir: string;
   apiProviderReader: ApiProviderReader;
 }
 
+export interface AgentModuleContext extends DefaultAgentSuiteOptions {
+  codexAppServerRuntime?: CodexAppServerRuntime;
+}
+
+export interface AgentModule {
+  id: AgentId;
+  createAgent(context: AgentModuleContext): Agent;
+}
+
 export interface DefaultAgentSuite {
   agents: Agent[];
-  codexAppServerProvider: CodexAppServerProvider;
+  codexAppServerRuntime: CodexAppServerRuntime;
+}
+
+export const coreAgentModules = [
+  {
+    id: 'claude',
+    createAgent: () => createClaudeAgent(new ClaudeCliRuntime()),
+  },
+  {
+    id: 'codex',
+    createAgent: (context) => createCodexAgent(context.codexAppServerRuntime ?? new CodexAppServerRuntime()),
+  },
+] satisfies readonly AgentModule[];
+
+export const optionalAgentModules = [
+  {
+    id: 'direct-openai-responses-compatible',
+    createAgent: (context) => createDirectOpenAiResponsesAgent(context.apiProviderReader),
+  },
+  {
+    id: 'direct-openai-compatible',
+    createAgent: (context) => createDirectOpenAiChatAgent(context.apiProviderReader),
+  },
+  {
+    id: 'direct-anthropic-compatible',
+    createAgent: (context) => createDirectAnthropicAgent(context.apiProviderReader),
+  },
+  {
+    id: 'opencode',
+    createAgent: () => createOpenCodeAgent(new OpenCodeRuntime()),
+  },
+  {
+    id: 'amp',
+    createAgent: () => createAmpAgent(new AmpCliRuntime()),
+  },
+  {
+    id: 'cursor',
+    createAgent: (context) => createCursorAgent({ workspaceDir: context.workspaceDir }),
+  },
+  {
+    id: 'factory',
+    createAgent: () => createFactoryAgent(new FactoryCliRuntime()),
+  },
+  {
+    id: 'pi',
+    createAgent: () => createPiAgent(new PiCliRuntime()),
+  },
+] satisfies readonly AgentModule[];
+
+export function getEnabledOptionalAgentIds(envValue = process.env.GARCON_OPTIONAL_AGENTS ?? ''): AgentId[] {
+  const enabled = new Set<AgentId>();
+  const available = new Set(optionalAgentModules.map((module) => module.id));
+  for (const raw of envValue.split(',')) {
+    const id = raw.trim();
+    if (available.has(id as AgentId)) enabled.add(id as AgentId);
+  }
+  return [...enabled];
+}
+
+export function createEnabledAgents(
+  context: AgentModuleContext,
+  options: { optionalAgents?: readonly AgentId[] } = {},
+): Agent[] {
+  const enabledOptional = new Set(options.optionalAgents ?? []);
+  return [
+    ...coreAgentModules,
+    ...optionalAgentModules.filter((module) => enabledOptional.has(module.id)),
+  ].map((module) => module.createAgent(context));
 }
 
 export function createDefaultAgentSuite(options: DefaultAgentSuiteOptions): DefaultAgentSuite {
-  const claudeProvider = new ClaudeProvider();
-  const codexAppServerProvider = new CodexAppServerProvider();
-  const opencodeProvider = new OpenCodeProvider();
-  const ampProvider = new AmpProvider();
-  const factoryProvider = new FactoryProvider();
-  const piProvider = new PiProvider();
+  const codexAppServerRuntime = new CodexAppServerRuntime();
+  const context: AgentModuleContext = {
+    ...options,
+    codexAppServerRuntime,
+  };
 
   return {
-    codexAppServerProvider,
-    agents: [
-      createClaudeAgent(claudeProvider),
-      createCodexAgent(codexAppServerProvider),
-      createDirectOpenAiResponsesAgent(options.apiProviderReader),
-      createDirectOpenAiChatAgent(options.apiProviderReader),
-      createDirectAnthropicAgent(options.apiProviderReader),
-      createOpenCodeAgent(opencodeProvider),
-      createAmpAgent(ampProvider),
-      createCursorAgent({ workspaceDir: options.workspaceDir }),
-      createFactoryAgent(factoryProvider),
-      createPiAgent(piProvider),
-    ],
+    codexAppServerRuntime,
+    agents: createEnabledAgents(context, {
+      optionalAgents: getEnabledOptionalAgentIds(),
+    }),
   };
 }

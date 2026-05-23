@@ -43,7 +43,7 @@ interface AcpAgentRuntimeSession {
   startedAt: string;
   lastActivityAt: number;
   lastUpdateAt: number;
-  providerRequestId?: string;
+  upstreamRequestId?: string;
 }
 
 export interface AcpAgentPolicy {
@@ -97,7 +97,7 @@ function humanizeError(error: unknown): string {
   return String(error);
 }
 
-function providerRequestIdFromUpdate(notification: AcpSessionUpdateNotification): string | undefined {
+function upstreamRequestIdFromUpdate(notification: AcpSessionUpdateNotification): string | undefined {
   const update = asObject(notification.update);
   return asString(update.requestId ?? update.request_id);
 }
@@ -341,7 +341,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     session.projectPath = request.projectPath;
     session.lastActivityAt = Date.now();
     session.lastUpdateAt = Date.now();
-    session.providerRequestId = undefined;
+    session.upstreamRequestId = undefined;
     this.#converter.beginTurn?.(session.id);
     this.emitProcessing(session.chatId, true);
 
@@ -358,7 +358,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
         ...(promptConfig ? { config: promptConfig } : {}),
       });
       if (typeof result.requestId === 'string' && result.requestId) {
-        session.providerRequestId = result.requestId;
+        session.upstreamRequestId = result.requestId;
       }
       await this.#waitForUpdateQuietPeriod(session);
       success = !session.aborted;
@@ -373,8 +373,8 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       this.#emitFlushedMessages(session);
 
       if (success) {
-        const metadata = session.providerRequestId
-          ? { providerRequestId: session.providerRequestId } satisfies AgentEventMetadata
+        const metadata = session.upstreamRequestId
+          ? { upstreamRequestId: session.upstreamRequestId } satisfies AgentEventMetadata
           : undefined;
         this.emitFinished(session.chatId, 0, metadata);
       } else if (!session.aborted && failureMessage) {
@@ -442,13 +442,13 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
 
     session.lastUpdateAt = Date.now();
     session.lastActivityAt = Date.now();
-    const providerRequestId = providerRequestIdFromUpdate(params);
-    if (providerRequestId) {
-      session.providerRequestId = providerRequestId;
+    const upstreamRequestId = upstreamRequestIdFromUpdate(params);
+    if (upstreamRequestId) {
+      session.upstreamRequestId = upstreamRequestId;
     }
     const context = this.#sessionUpdateContext(session);
     const converted = this.#converter.fromSessionUpdate(params, context);
-    const metadata = providerRequestId ? { providerRequestId } satisfies AgentEventMetadata : undefined;
+    const metadata = upstreamRequestId ? { upstreamRequestId } satisfies AgentEventMetadata : undefined;
     this.emitMessages(session.chatId, converted, metadata);
   }
 

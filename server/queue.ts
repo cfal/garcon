@@ -9,6 +9,8 @@ import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
 import type { RunAgentTurnOptions } from "./agents/session-types.js";
+import { writeJsonFileAtomic } from './lib/atomic-json.js';
+import { KeyedPromiseLock } from './lib/keyed-lock.js';
 
 function emptyQueue(): QueueState {
   return { entries: [], paused: false, version: 0 };
@@ -66,7 +68,7 @@ function requireTurnRunner(runner: AgentTurnRunnerDep | null): AgentTurnRunnerDe
 }
 
 export class QueueManager extends EventEmitter {
-  #busy = new Map<string, boolean>();
+  #locks = new KeyedPromiseLock();
   #draining = new Set<string>();
   #workspaceDir: string;
   #turnRunner: AgentTurnRunnerDep | null;
@@ -106,22 +108,13 @@ export class QueueManager extends EventEmitter {
   }
 
   async #withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    while (this.#busy.get(key)) {
-      await new Promise(r => setImmediate(r));
-    }
-    this.#busy.set(key, true);
-    try {
-      return await fn();
-    } finally {
-      this.#busy.delete(key);
-    }
+    return this.#locks.runExclusive(key, fn);
   }
 
   async #writeChatQueue(chatId: string, queue: unknown): Promise<void> {
     const filePath = this.#chatQueueFilePath(chatId);
     const normalized = normalizeForPersist(queue);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(normalized, null, 2), 'utf8');
+    await writeJsonFileAtomic(filePath, normalized);
   }
 
   async readChatQueue(chatId: string): Promise<QueueState> {
@@ -381,7 +374,7 @@ export class QueueManager extends EventEmitter {
         }
         if (modified) {
           data.paused = true;
-          await fs.writeFile(filePath, JSON.stringify(normalizeForPersist(data), null, 2), 'utf8');
+          await writeJsonFileAtomic(filePath, normalizeForPersist(data));
           console.log(`queue: recovered stale chat queue: ${qf}`);
         }
       } catch (error: unknown) {

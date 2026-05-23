@@ -299,7 +299,7 @@ function convertFactoryMessageEvent(event: FactoryMessageEvent): ChatMessage[] {
   return [];
 }
 
-export class FactoryProvider extends AgentEventEmitterRuntime {
+export class FactoryCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, FactorySession>();
 
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {

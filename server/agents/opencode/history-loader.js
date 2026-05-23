@@ -3,7 +3,7 @@
 // preview data via the SDK rather than JSONL files.
 //
 // Both exported functions accept a getClient callback: () => Promise<client>.
-// The composition root binds this to the OpenCodeProvider instance.
+// The composition root binds this to the OpenCodeRuntime instance.
 
 import { UserMessage, AssistantMessage, ThinkingMessage, ToolResultMessage } from '../../../common/chat-types.js';
 import { convertOpenCodeToolUse } from './tool-use-converter.js';

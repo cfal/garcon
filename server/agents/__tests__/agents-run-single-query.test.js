@@ -74,8 +74,8 @@ function makeEndpointResolver(endpointOptions = {}) {
       endpointId: modelEndpointId,
       protocol: modelEndpointId ? 'openai-compatible' : null,
       isLocal: false,
-      envOverrides: undefined,
     })),
+    resolveEndpointReference: mock(() => null),
     modelSupportsImages: mock(() => false),
   };
 }
@@ -132,7 +132,7 @@ function baseRuntime(overrides = {}) {
   };
 }
 
-function agentFromRuntime(id, label, runtime, capabilities, runSingleQuery) {
+function agentFromRuntime(id, label, runtime, capabilities, runSingleQuery, prepareEndpointRuntime) {
   return {
     id,
     label,
@@ -153,6 +153,7 @@ function agentFromRuntime(id, label, runtime, capabilities, runSingleQuery) {
       ...capabilities,
       ...(runtime.getModels ? { getModels: () => runtime.getModels() } : {}),
     }),
+    ...(prepareEndpointRuntime ? { prepareEndpointRuntime } : {}),
     ...(runSingleQuery ? { runSingleQuery } : {}),
   };
 }
@@ -275,7 +276,7 @@ function makeRegistry(args = {}) {
           acceptsApiProviderEndpoints: true,
           supportedProtocols: ['anthropic-messages'],
           authLoginSupported: true,
-        }, claudeQuery),
+        }, claudeQuery, args.prepareEndpointRuntimeByAgentId?.claude),
         agentFromRuntime('codex', 'Codex', baseRuntime({
           startSession: codex.startSession,
           runTurn: codex.runTurn,
@@ -288,7 +289,7 @@ function makeRegistry(args = {}) {
           acceptsApiProviderEndpoints: true,
           supportedProtocols: ['openai-compatible'],
           authLoginSupported: true,
-        }, codexQuery),
+        }, codexQuery, args.prepareEndpointRuntimeByAgentId?.codex),
         agentFromRuntime('opencode', 'OpenCode', baseRuntime({
           async startSession(request) {
             const agentSessionId = await opencode.startSession(request);
@@ -305,35 +306,35 @@ function makeRegistry(args = {}) {
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
-        }, opencode.runSingleQuery),
+        }, opencode.runSingleQuery, args.prepareEndpointRuntimeByAgentId?.opencode),
         agentFromRuntime('amp', 'Amp', amp, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
-        }, ampQuery),
+        }, ampQuery, args.prepareEndpointRuntimeByAgentId?.amp),
         agentFromRuntime('cursor', 'Cursor', cursor, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
-        }, cursorQuery),
+        }, cursorQuery, args.prepareEndpointRuntimeByAgentId?.cursor),
         agentFromRuntime('factory', 'Factory', factory, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
-        }, factoryQuery),
+        }, factoryQuery, args.prepareEndpointRuntimeByAgentId?.factory),
         agentFromRuntime('pi', 'Pi', pi, {
           supportsFork: false,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
           authLoginSupported: false,
-        }, piQuery),
+        }, piQuery, args.prepareEndpointRuntimeByAgentId?.pi),
         ...(args.agents ?? []),
       ],
       endpointResolver: args.endpointResolver ?? makeEndpointResolver(),
@@ -395,10 +396,16 @@ describe('AgentRegistry.runSingleQuery', () => {
       endpointId: modelEndpointId,
       protocol: modelEndpointId ? 'openai-compatible' : null,
       isLocal: false,
-      envOverrides: undefined,
-      codexConfig,
     }));
-    const { registry } = makeRegistry({ endpointResolver });
+    endpointResolver.resolveEndpointReference.mockReturnValue({
+      apiProvider: { id: 'acme', label: 'Acme', endpoints: [] },
+      endpoint: { id: 'acme_openai', protocol: 'openai-compatible' },
+    });
+    const prepareEndpointRuntime = mock(() => ({ codexConfig }));
+    const { registry } = makeRegistry({
+      endpointResolver,
+      prepareEndpointRuntimeByAgentId: { codex: prepareEndpointRuntime },
+    });
 
     await registry.runSingleQuery('hello', {
       agentId: 'codex',
@@ -420,6 +427,7 @@ describe('AgentRegistry.runSingleQuery', () => {
       modelProtocol: 'openai-compatible',
       codexConfig,
     });
+    expect(prepareEndpointRuntime).toHaveBeenCalled();
   });
 });
 

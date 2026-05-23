@@ -18,7 +18,13 @@ import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { getProjectBasePath, getWorkspaceDir } from '../config.js';
 import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
 import { CommandLedger, type CommandLedgerRecord } from '../commands/command-ledger.js';
-import { requireChatExecutionConfig, type RunAgentTurnOptions } from "../agents/session-types.js";
+import type { RunAgentTurnOptions } from "../agents/session-types.js";
+import {
+  ChatCommandService,
+  CommandValidationError,
+  queueDrainOptions,
+  runOptionsFromCommandRequest,
+} from '../commands/chat-command-service.js';
 import { normalizeQueueState } from '../../common/queue-state.ts';
 import type {
   AgentRunCommandRequest,
@@ -205,48 +211,6 @@ function acceptedResponse(record: CommandLedgerRecord, status: 'accepted' | 'dup
   };
 }
 
-function runOptionsFromBody(body: AgentRunCommandRequest | ForkRunCommandRequest): RunAgentTurnOptions {
-  const options: RunAgentTurnOptions = {};
-  if (body.images !== undefined) options.images = body.images;
-  if (body.model !== undefined) options.model = body.model;
-  if (body.permissionMode !== undefined) options.permissionMode = normalizePermissionMode(body.permissionMode);
-  if (body.thinkingMode !== undefined) options.thinkingMode = normalizeThinkingMode(body.thinkingMode);
-  if (body.claudeThinkingMode !== undefined) options.claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);
-  if (body.ampAgentMode !== undefined) options.ampAgentMode = normalizeAmpAgentMode(body.ampAgentMode);
-  if (body.apiProviderId !== undefined) options.apiProviderId = body.apiProviderId;
-  if (body.modelEndpointId !== undefined) options.modelEndpointId = body.modelEndpointId;
-  if (body.modelProtocol !== undefined) options.modelProtocol = body.modelProtocol;
-  return options;
-}
-
-function queueDrainOptions(chatId: string, registry: IChatRegistry): RunAgentTurnOptions {
-  const entry = requireChatExecutionConfig(chatId, registry.getChat(chatId));
-  const chat = registry.getChat(chatId);
-  return {
-    permissionMode: entry.permissionMode,
-    thinkingMode: entry.thinkingMode,
-    claudeThinkingMode: entry.claudeThinkingMode,
-    ampAgentMode: entry.ampAgentMode,
-    model: entry.model,
-    apiProviderId: chat?.apiProviderId,
-    modelEndpointId: chat?.modelEndpointId,
-    modelProtocol: chat?.modelProtocol,
-  };
-}
-
-async function registerPendingQueueInput(
-  queue: QueueDep,
-  chatId: string,
-  command: string,
-  options: RunAgentTurnOptions,
-): Promise<void> {
-  if (typeof queue.registerPendingUserInput === 'function') {
-    await queue.registerPendingUserInput(chatId, command, options);
-    return;
-  }
-  await queue.appendUserMessage?.(chatId, command, options);
-}
-
 export default function createChatRoutes(
   registry: IChatRegistry,
   settings: SettingsDep,
@@ -261,8 +225,14 @@ export default function createChatRoutes(
     listForChat: () => [],
     clearChat: () => undefined,
   },
+  commandService?: ChatCommandService,
 ): RouteMap {
   const commandLedger = new CommandLedger(getWorkspaceDir());
+  const commands = commandService ?? new ChatCommandService({
+    chats: registry,
+    queue,
+    ledger: commandLedger,
+  });
 
   async function validateStartPath(_request: Request, url: URL): Promise<Response> {
     const dirPath = String(url.searchParams.get('path') || '').trim();
@@ -868,7 +838,6 @@ export default function createChatRoutes(
       const session = registry.getChat(chatId);
       if (!session) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
 
-      const turnId = crypto.randomUUID();
       const payload = {
         chatId,
         clientMessageId,
@@ -883,34 +852,26 @@ export default function createChatRoutes(
         modelEndpointId: body.modelEndpointId,
         modelProtocol: body.modelProtocol,
       };
-      const ledger = await commandLedger.accept({ commandType: 'agent-run', chatId, clientRequestId, payload, turnId });
-      if (ledger.kind === 'conflict') {
-        return jsonError('clientRequestId was reused with different payload', 409, 'IDEMPOTENCY_CONFLICT');
-      }
-      if (ledger.kind === 'duplicate') {
-        return Response.json(acceptedResponse(ledger.record, 'duplicate'), { status: 202 });
-      }
 
-      const options = runOptionsFromBody(body as AgentRunCommandRequest);
-      options.clientRequestId = clientRequestId;
-      options.clientMessageId = clientMessageId;
-      options.turnId = ledger.record.turnId ?? turnId;
-      await registerPendingQueueInput(queue, chatId, command, options);
-      const scheduled = await commandLedger.update(ledger.record.key, {
-        status: 'scheduled',
-        turnId: options.turnId,
+      const options = runOptionsFromCommandRequest(body as AgentRunCommandRequest);
+      const result = await commands.submitRun({
+        transport: 'http',
+        chatId,
+        command,
+        images,
+        clientRequestId,
+        clientMessageId,
+        options,
+        payload,
       });
-      void queue.runAcceptedTurn(chatId, command, options)
-        .then(() => commandLedger.update(ledger.record.key, { status: 'finished' }))
-        .catch((error: Error) => {
-          console.error('commands: agent-run failed:', error.message);
-          commandLedger.update(ledger.record.key, { status: 'failed', error: error.message }).catch(() => {});
-        });
 
-      return Response.json(acceptedResponse(scheduled ?? ledger.record), { status: 202 });
+      return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if ((error as Error).message === 'Malformed JSON') {
         return jsonError('Malformed JSON', 400);
+      }
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
       }
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }
@@ -935,7 +896,6 @@ export default function createChatRoutes(
         return jsonError('Cannot fork a chat while it is processing', 409, 'SESSION_BUSY', true);
       }
 
-      const turnId = crypto.randomUUID();
       const payload = {
         sourceChatId,
         chatId,
@@ -951,47 +911,43 @@ export default function createChatRoutes(
         modelEndpointId: body.modelEndpointId,
         modelProtocol: body.modelProtocol,
       };
-      const ledger = await commandLedger.accept({ commandType: 'fork-run', chatId, clientRequestId, payload, turnId });
-      if (ledger.kind === 'conflict') {
-        return jsonError('clientRequestId was reused with different payload', 409, 'IDEMPOTENCY_CONFLICT');
-      }
-      if (ledger.kind === 'duplicate') {
-        return Response.json(acceptedResponse(ledger.record, 'duplicate'), { status: 202 });
-      }
 
-      if (!registry.getChat(chatId)) {
-        await forkChatFileCopy({
-          sourceSession,
-          sourceChatId,
-          targetChatId: chatId,
-          registry,
-          settings,
-          metadata,
-          forkAgentSession: agents.forkAgentSession?.bind(agents),
-          supportsFork: agents.supportsFork.bind(agents),
-        });
-      }
-
-      const options = runOptionsFromBody(body as ForkRunCommandRequest);
-      options.clientRequestId = clientRequestId;
-      options.clientMessageId = clientMessageId;
-      options.turnId = ledger.record.turnId ?? turnId;
-      await registerPendingQueueInput(queue, chatId, command, options);
-      const scheduled = await commandLedger.update(ledger.record.key, { status: 'scheduled', turnId: options.turnId });
-      void queue.runAcceptedTurn(chatId, command, options)
-        .then(() => commandLedger.update(ledger.record.key, { status: 'finished' }))
-        .catch((error: Error) => {
-          console.error('commands: fork-run failed:', error.message);
-          commandLedger.update(ledger.record.key, { status: 'failed', error: error.message }).catch(() => {});
-        });
+      const options = runOptionsFromCommandRequest(body as ForkRunCommandRequest);
+      const result = await commands.submitForkRun({
+        transport: 'http',
+        sourceChatId,
+        chatId,
+        command,
+        images: Array.isArray(body.images) ? body.images : undefined,
+        clientRequestId,
+        clientMessageId,
+        options,
+        payload,
+        ensureForked: async () => {
+          if (registry.getChat(chatId)) return;
+          await forkChatFileCopy({
+            sourceSession,
+            sourceChatId,
+            targetChatId: chatId,
+            registry,
+            settings,
+            metadata,
+            forkAgentSession: agents.forkAgentSession?.bind(agents),
+            supportsFork: agents.supportsFork.bind(agents),
+          });
+        },
+      });
 
       return Response.json({
-        ...acceptedResponse(scheduled ?? ledger.record),
+        ...result,
         sourceChatId,
       }, { status: 202 });
     } catch (error: unknown) {
       if ((error as Error).message === 'Malformed JSON') {
         return jsonError('Malformed JSON', 400);
+      }
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
       }
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }

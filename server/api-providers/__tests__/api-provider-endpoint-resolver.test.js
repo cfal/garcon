@@ -88,7 +88,6 @@ describe('ApiProviderEndpointResolver', () => {
       endpointId: 'acme_openai',
       protocol: 'openai-compatible',
       isLocal: false,
-      envOverrides: undefined,
     });
     expect(resolver.modelSupportsImages({
       agentId: 'direct-openai-compatible',
@@ -126,23 +125,21 @@ describe('ApiProviderEndpointResolver', () => {
       endpointId: 'acme_anthropic',
       protocol: 'anthropic-messages',
       isLocal: false,
-      envOverrides: undefined,
     });
   });
 
-  it('builds Claude env overrides and Codex Responses routing for compatible endpoints', () => {
+  it('exposes endpoint references without building agent runtime config', () => {
     const resolver = makeResolver();
 
-    expect(resolver.resolveSelection({
+    const claudeSelection = resolver.resolveSelection({
       agentId: 'claude',
       model: 'acme_anthropic:acme-claude',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_anthropic',
-    }).envOverrides).toEqual({
-      ANTHROPIC_BASE_URL: 'https://api.acme.test/anthropic',
-      ANTHROPIC_AUTH_TOKEN: 'secret',
-      ANTHROPIC_API_KEY: '',
     });
+    const claudeReference = resolver.resolveEndpointReference(claudeSelection);
+    expect(claudeReference?.apiProvider.id).toBe('acme');
+    expect(claudeReference?.endpoint.id).toBe('acme_anthropic');
 
     const codexSelection = resolver.resolveSelection({
       agentId: 'codex',
@@ -150,32 +147,12 @@ describe('ApiProviderEndpointResolver', () => {
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
     });
-    expect(codexSelection.envOverrides).toBeUndefined();
-    expect(codexSelection.codexConfig).toEqual({
-      config: {
-        model_provider: 'garcon_acme_openai',
-        model_providers: {
-          garcon_acme_openai: {
-            name: 'Acme',
-            base_url: 'https://api.acme.test/v1',
-            wire_api: 'responses',
-            requires_openai_auth: false,
-            supports_websockets: false,
-            env_key: 'GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI',
-            http_headers: {
-              'HTTP-Referer': 'https://github.com/cfal/garcon',
-              'X-OpenRouter-Title': 'Garcon',
-            },
-          },
-        },
-      },
-      env: {
-        GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI: 'secret',
-      },
-    });
+    const codexReference = resolver.resolveEndpointReference(codexSelection);
+    expect(codexReference?.apiProvider.id).toBe('acme');
+    expect(codexReference?.endpoint.id).toBe('acme_openai');
   });
 
-  it('omits API key env vars for blank-key endpoints', () => {
+  it('keeps blank-key endpoint selections free of runtime config', () => {
     const resolver = makeResolver();
 
     expect(resolver.resolveSelection({
@@ -183,9 +160,10 @@ describe('ApiProviderEndpointResolver', () => {
       model: 'acme_anthropic_blank:llama3',
       apiProviderId: 'acme',
       modelEndpointId: 'acme_anthropic_blank',
-    }).envOverrides).toEqual({
-      ANTHROPIC_BASE_URL: 'http://localhost:11434',
-      ANTHROPIC_API_KEY: '',
+    })).toMatchObject({
+      model: 'llama3',
+      endpointId: 'acme_anthropic_blank',
+      isLocal: true,
     });
 
     const codexSelection = resolver.resolveSelection({
@@ -194,20 +172,10 @@ describe('ApiProviderEndpointResolver', () => {
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai_blank',
     });
-    expect(codexSelection.envOverrides).toBeUndefined();
-    expect(codexSelection.codexConfig).toEqual({
-      config: {
-        model_provider: 'garcon_acme_openai_blank',
-        model_providers: {
-          garcon_acme_openai_blank: {
-            name: 'Acme',
-            base_url: 'http://localhost:11434/v1',
-            wire_api: 'responses',
-            requires_openai_auth: false,
-            supports_websockets: false,
-          },
-        },
-      },
+    expect(codexSelection).toMatchObject({
+      model: 'llama3',
+      endpointId: 'acme_openai_blank',
+      isLocal: true,
     });
   });
 

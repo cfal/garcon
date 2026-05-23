@@ -7,7 +7,7 @@ interface CursorRequestIdentityRecord {
   agentSessionId?: string;
   clientRequestId?: string;
   turnId?: string;
-  providerRequestId?: string;
+  upstreamRequestId?: string;
   userEchoSeen?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -23,7 +23,7 @@ interface CursorRequestIdentityInput {
   agentSessionId?: string | null;
   clientRequestId?: string | null;
   turnId?: string | null;
-  providerRequestId?: string | null;
+  upstreamRequestId?: string | null;
   userEchoSeen?: boolean;
 }
 
@@ -39,8 +39,8 @@ function cleanString(value: string | null | undefined): string | undefined {
 }
 
 function recordMatchesInput(record: CursorRequestIdentityRecord, input: CursorRequestIdentityInput): boolean {
-  const providerRequestId = cleanString(input.providerRequestId);
-  if (providerRequestId && record.providerRequestId === providerRequestId) return true;
+  const upstreamRequestId = cleanString(input.upstreamRequestId);
+  if (upstreamRequestId && record.upstreamRequestId === upstreamRequestId) return true;
 
   const clientRequestId = cleanString(input.clientRequestId);
   if (clientRequestId && record.clientRequestId === clientRequestId) return true;
@@ -54,7 +54,7 @@ function recordMatchesInput(record: CursorRequestIdentityRecord, input: CursorRe
     && agentSessionId
     && record.chatId === input.chatId
     && record.agentSessionId === agentSessionId
-    && !record.providerRequestId,
+    && !record.upstreamRequestId,
   );
 }
 
@@ -90,7 +90,7 @@ export class CursorRequestIdentityStore {
     this.#upsert({ ...input, userEchoSeen: true });
   }
 
-  markProviderRequestId(input: CursorRequestIdentityInput): void {
+  markUpstreamRequestId(input: CursorRequestIdentityInput): void {
     this.#upsert(input);
   }
 
@@ -105,9 +105,9 @@ export class CursorRequestIdentityStore {
     let changed = false;
     const annotated = messages.map((message) => {
       if (!isUserMessage(message)) return message;
-      const providerRequestId = cleanString(message.metadata?.providerRequestId);
-      if (!providerRequestId) return message;
-      const record = records.find((entry) => entry.providerRequestId === providerRequestId);
+      const upstreamRequestId = cleanString(message.metadata?.upstreamRequestId);
+      if (!upstreamRequestId) return message;
+      const record = records.find((entry) => entry.upstreamRequestId === upstreamRequestId);
       if (!record?.clientRequestId && !record?.turnId) return message;
       changed = true;
       return withUserMetadata(message, {
@@ -119,10 +119,10 @@ export class CursorRequestIdentityStore {
     const latestUserIndex = annotated.findLastIndex((message) => isUserMessage(message));
     if (latestUserIndex >= 0) {
       const latestUser = annotated[latestUserIndex];
-      if (isUserMessage(latestUser) && !latestUser.metadata?.providerRequestId) {
+      if (isUserMessage(latestUser) && !latestUser.metadata?.upstreamRequestId) {
         const liveEcho = [...records]
           .reverse()
-          .find((record) => record.userEchoSeen && !record.providerRequestId && (record.clientRequestId || record.turnId));
+          .find((record) => record.userEchoSeen && !record.upstreamRequestId && (record.clientRequestId || record.turnId));
         if (liveEcho) {
           changed = true;
           annotated[latestUserIndex] = withUserMetadata(latestUser, {
@@ -146,14 +146,14 @@ export class CursorRequestIdentityStore {
   }
 
   #upsert(input: CursorRequestIdentityInput): void {
-    if (!input.clientRequestId && !input.turnId && !input.providerRequestId) return;
+    if (!input.clientRequestId && !input.turnId && !input.upstreamRequestId) return;
     const now = new Date().toISOString();
     const existing = [...this.#records].reverse().find((record) => recordMatchesInput(record, input));
     if (existing) {
       existing.agentSessionId = cleanString(input.agentSessionId) ?? existing.agentSessionId;
       existing.clientRequestId = cleanString(input.clientRequestId) ?? existing.clientRequestId;
       existing.turnId = cleanString(input.turnId) ?? existing.turnId;
-      existing.providerRequestId = cleanString(input.providerRequestId) ?? existing.providerRequestId;
+      existing.upstreamRequestId = cleanString(input.upstreamRequestId) ?? existing.upstreamRequestId;
       existing.userEchoSeen = input.userEchoSeen ?? existing.userEchoSeen;
       existing.updatedAt = now;
     } else {
@@ -162,7 +162,7 @@ export class CursorRequestIdentityStore {
         agentSessionId: cleanString(input.agentSessionId),
         clientRequestId: cleanString(input.clientRequestId),
         turnId: cleanString(input.turnId),
-        providerRequestId: cleanString(input.providerRequestId),
+        upstreamRequestId: cleanString(input.upstreamRequestId),
         userEchoSeen: input.userEchoSeen,
         createdAt: now,
         updatedAt: now,

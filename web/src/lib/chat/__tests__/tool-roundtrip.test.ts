@@ -284,7 +284,7 @@ describe('wire format parsing', () => {
 		const msg = new UserMessage(TS, 'hello', undefined, {
 			messageId: 'msg-1',
 			clientRequestId: 'req-1',
-			providerRequestId: 'cursor-req-1',
+			upstreamRequestId: 'cursor-req-1',
 			turnId: 'turn-1',
 			deliveryStatus: 'submitting',
 		});
@@ -293,7 +293,7 @@ describe('wire format parsing', () => {
 		expect(parsed.metadata).toEqual({
 			messageId: 'msg-1',
 			clientRequestId: 'req-1',
-			providerRequestId: 'cursor-req-1',
+			upstreamRequestId: 'cursor-req-1',
 			turnId: 'turn-1',
 			deliveryStatus: 'submitting',
 		});

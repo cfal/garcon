@@ -1,4 +1,4 @@
-import type { OpenCodeProvider } from './opencode.js';
+import type { OpenCodeRuntime } from './opencode.js';
 import { getOpenCodeAuthStatus } from './opencode-auth.js';
 import type { ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import { createAgentCapabilities } from '../capabilities.js';
@@ -6,7 +6,7 @@ import { createArtificialTranscriptSource } from '../shared/artificial-transcrip
 import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
 import type { Agent, AgentRuntime } from '../types.js';
 
-function createOpenCodeRuntime(opencode: OpenCodeProvider): AgentRuntime {
+function createOpenCodeRuntime(opencode: OpenCodeRuntime): AgentRuntime {
   return {
     async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
       const agentSessionId = await opencode.startSession(request);
@@ -41,7 +41,7 @@ function createOpenCodeRuntime(opencode: OpenCodeProvider): AgentRuntime {
   };
 }
 
-export function createOpenCodeAgent(opencode: OpenCodeProvider): Agent {
+export function createOpenCodeAgent(opencode: OpenCodeRuntime): Agent {
   return {
     id: 'opencode',
     label: 'OpenCode',

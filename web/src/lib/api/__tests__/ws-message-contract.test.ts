@@ -28,13 +28,13 @@ describe('parseServerWsMessage', () => {
 			messages: [{ type: 'assistant-message', timestamp: '2025-01-01T00:00:00Z', content: 'hi' }],
 			turnId: 'turn-1',
 			clientRequestId: 'req-1',
-			providerRequestId: 'cursor-req-1',
+			upstreamRequestId: 'cursor-req-1',
 		});
 		expect(msg).toBeInstanceOf(AgentRunOutputMessage);
 		expect((msg as AgentRunOutputMessage).chatId).toBe('c-1');
 		expect((msg as AgentRunOutputMessage).turnId).toBe('turn-1');
 		expect((msg as AgentRunOutputMessage).clientRequestId).toBe('req-1');
-		expect((msg as AgentRunOutputMessage).providerRequestId).toBe('cursor-req-1');
+		expect((msg as AgentRunOutputMessage).upstreamRequestId).toBe('cursor-req-1');
 	});
 
 	it('parses agent-run-finished with exitCode', () => {
@@ -44,13 +44,13 @@ describe('parseServerWsMessage', () => {
 			exitCode: 0,
 			turnId: 'turn-1',
 			clientRequestId: 'req-1',
-			providerRequestId: 'cursor-req-1',
+			upstreamRequestId: 'cursor-req-1',
 		});
 		expect(msg).toBeInstanceOf(AgentRunFinishedMessage);
 		expect((msg as AgentRunFinishedMessage).exitCode).toBe(0);
 		expect((msg as AgentRunFinishedMessage).turnId).toBe('turn-1');
 		expect((msg as AgentRunFinishedMessage).clientRequestId).toBe('req-1');
-		expect((msg as AgentRunFinishedMessage).providerRequestId).toBe('cursor-req-1');
+		expect((msg as AgentRunFinishedMessage).upstreamRequestId).toBe('cursor-req-1');
 	});
 
 	it('parses agent-run-failed', () => {
@@ -60,13 +60,13 @@ describe('parseServerWsMessage', () => {
 			error: 'timeout',
 			turnId: 'turn-1',
 			clientRequestId: 'req-1',
-			providerRequestId: 'cursor-req-1',
+			upstreamRequestId: 'cursor-req-1',
 		});
 		expect(msg).toBeInstanceOf(AgentRunFailedMessage);
 		expect((msg as AgentRunFailedMessage).error).toBe('timeout');
 		expect((msg as AgentRunFailedMessage).turnId).toBe('turn-1');
 		expect((msg as AgentRunFailedMessage).clientRequestId).toBe('req-1');
-		expect((msg as AgentRunFailedMessage).providerRequestId).toBe('cursor-req-1');
+		expect((msg as AgentRunFailedMessage).upstreamRequestId).toBe('cursor-req-1');
 	});
 
 	it('parses chat-session-created', () => {

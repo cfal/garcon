@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { OpenAiCompatibleChatProvider } from '../direct/openai-compatible-chat-provider.ts';
+import { OpenAiCompatibleChatRuntime } from '../direct/openai-compatible-chat-runtime.ts';
 
 const createdDirs = [];
 const originalFetch = globalThis.fetch;
@@ -22,12 +22,12 @@ function streamResponse(content) {
 }
 
 async function tempDir() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-openai-provider-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-openai-runtime-'));
   createdDirs.push(dir);
   return dir;
 }
 
-describe('OpenAiCompatibleChatProvider', () => {
+describe('OpenAiCompatibleChatRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
     for (const dir of createdDirs.splice(0)) {
@@ -50,9 +50,9 @@ describe('OpenAiCompatibleChatProvider', () => {
       return streamResponse('second response');
     });
 
-    const provider = new OpenAiCompatibleChatProvider({
-      providerId: 'direct-openai-compatible',
-      providerLabel: 'Direct (Chat Completions)',
+    const runtime = new OpenAiCompatibleChatRuntime({
+      runtimeId: 'direct-openai-compatible',
+      runtimeLabel: 'Direct (Chat Completions)',
       defaultModel: 'fallback-model',
       fallbackModels: [{ value: 'fallback-model', label: 'Fallback' }],
       getApiKey: () => 'sk-test',
@@ -61,7 +61,7 @@ describe('OpenAiCompatibleChatProvider', () => {
       getSessionFilePath: (id) => path.join(dir, `${id}.jsonl`),
     });
 
-    await provider.runTurn({
+    await runtime.runTurn({
       chatId: '123',
       agentSessionId: sessionId,
       command: 'second message',

@@ -1,165 +1,122 @@
-// Shared Anthropic-compatible chat provider. Implements direct server-side
-// execution against Anthropic Messages endpoints.
+// Shared OpenAI-compatible chat runtime. Implements the common
+// streaming, persistence, and session lifecycle used by remote
+// chat-completions APIs such as OpenRouter and Z.AI.
 
 import crypto from 'crypto';
 import { AssistantMessage } from "../../../common/chat-types.js";
 import type { SharedModelOption } from "../../../common/models.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
-import {
-  DirectSessionStore,
-  type DirectConversationMessage,
-} from "./session-store.js";
+import type { AgentCommandImage, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../session-types.js";
+import { DirectSessionStore, type DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from "../shared/sse.js";
-import type {
-  AgentCommandImage,
-  ResumeTurnRequest,
-  StartSessionRequest,
-  StartedAgentSession,
-} from "../session-types.js";
 
+const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 const MAX_MESSAGES_PER_SESSION = 200;
-const DEFAULT_MAX_TOKENS = 4096;
-const ANTHROPIC_VERSION = '2023-06-01';
 
-interface AnthropicTextContentBlock {
-  type: 'text';
-  text: string;
+interface OpenAiCompatibleContentPart {
+  type: string;
+  text?: string;
+  image_url?: { url: string };
 }
 
-interface AnthropicImageContentBlock {
-  type: 'image';
-  source: {
-    type: 'base64';
-    media_type: string;
-    data: string;
-  };
-}
-
-type AnthropicContent = string | Array<AnthropicTextContentBlock | AnthropicImageContentBlock>;
-
-interface AnthropicConversationMessage {
+interface ConversationMessage {
   role: 'user' | 'assistant';
-  content: AnthropicContent;
+  content: string | OpenAiCompatibleContentPart[];
 }
 
-interface ProviderSession {
+interface RuntimeSession {
   abortController: AbortController | null;
   aborted: boolean;
   chatId: string;
   id: string;
   isRunning: boolean;
-  messages: AnthropicConversationMessage[];
+  messages: ConversationMessage[];
   model: string;
   startTime: number;
 }
 
-export interface AnthropicCompatibleChatProviderConfig {
-  providerId: string;
-  providerLabel: string;
+interface ModelFetchContext {
+  apiKey: string;
+  baseUrl: string;
+  requestTimeoutMs: number;
+  fallbackModels: SharedModelOption[];
+}
+
+export interface OpenAiCompatibleChatRuntimeConfig {
+  runtimeId: string;
+  runtimeLabel: string;
   defaultModel: string;
   fallbackModels: SharedModelOption[];
   getApiKey: () => string;
   getBaseUrl: () => string;
   getSessionDir: () => string;
   getSessionFilePath: (sessionId: string) => string;
-  maxTokens?: number;
+  buildHeaders?: (apiKey: string) => Record<string, string>;
+  fetchModels?: (ctx: ModelFetchContext) => Promise<SharedModelOption[]>;
 }
 
-function appendPath(baseUrl: string, suffix: string): string {
-  return `${baseUrl.replace(/\/+$/, '')}/${suffix.replace(/^\/+/, '')}`;
-}
-
-export function anthropicMessagesUrl(baseUrl: string): string {
-  const normalized = baseUrl.replace(/\/+$/, '');
-  return normalized.endsWith('/v1')
-    ? appendPath(normalized, '/messages')
-    : appendPath(normalized, '/v1/messages');
-}
-
-export function buildAnthropicCompatibleHeaders(apiKey: string): Record<string, string> {
-  return {
-    ...(apiKey ? { 'x-api-key': apiKey } : {}),
-    'anthropic-version': ANTHROPIC_VERSION,
-    'content-type': 'application/json',
+function buildHeaders(config: OpenAiCompatibleChatRuntimeConfig, apiKey: string): Record<string, string> {
+  return config.buildHeaders?.(apiKey) ?? {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
   };
 }
 
-export function buildAnthropicCompatibleUserContent(
-  text: string,
-  images?: AgentCommandImage[],
-): AnthropicContent {
-  if (!images?.length) return text;
-
-  const blocks: Array<AnthropicTextContentBlock | AnthropicImageContentBlock> = [];
-  for (const image of images) {
-    const match = image.data?.match?.(/^data:([^;]+);base64,(.+)$/);
-    if (!match) continue;
-    blocks.push({
-      type: 'image',
-      source: {
-        type: 'base64',
-        media_type: match[1],
-        data: match[2],
-      },
-    });
+function appendDeltaText(accumulated: string, delta: unknown): string {
+  if (typeof delta === 'string') {
+    return accumulated + delta;
   }
-
-  blocks.push({ type: 'text', text });
-  return blocks;
+  if (!Array.isArray(delta)) {
+    return accumulated;
+  }
+  return accumulated + delta
+    .filter((part) => part && typeof part === 'object')
+    .map((part) => {
+      const maybe = part as { text?: unknown };
+      return typeof maybe.text === 'string' ? maybe.text : '';
+    })
+    .join('');
 }
 
-export function extractAnthropicTextContent(content: AnthropicContent): string {
+export function buildOpenAiCompatibleUserContent(
+  text: string,
+  images?: AgentCommandImage[],
+): string | OpenAiCompatibleContentPart[] {
+  if (!images?.length) return text;
+
+  const parts: OpenAiCompatibleContentPart[] = [{ type: 'text', text }];
+  for (const image of images) {
+    if (!image.data) continue;
+    parts.push({ type: 'image_url', image_url: { url: image.data } });
+  }
+  return parts;
+}
+
+export function extractOpenAiCompatibleTextContent(content: ConversationMessage['content']): string {
   if (typeof content === 'string') return content;
+
   return content
-    .filter((part): part is AnthropicTextContentBlock => part.type === 'text')
-    .map((part) => part.text)
+    .filter((part) => part.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text!)
     .join('\n');
 }
 
-function persistedToAnthropicMessage(message: DirectConversationMessage): AnthropicConversationMessage {
+function persistedToOpenAiMessage(message: DirectConversationMessage): ConversationMessage {
   return {
     role: message.role,
     content: message.content,
   };
 }
 
-function appendAnthropicDelta(accumulated: string, data: string): {
-  accumulated: string;
-  errorMessage: string | null;
-} {
-  try {
-    const parsed = JSON.parse(data) as {
-      type?: string;
-      delta?: { type?: string; text?: string };
-      error?: { message?: string };
-    };
-
-    if (parsed.type === 'error' && parsed.error?.message) {
-      return { accumulated, errorMessage: parsed.error.message };
-    }
-
-    if (
-      parsed.type === 'content_block_delta'
-      && parsed.delta?.type === 'text_delta'
-      && typeof parsed.delta.text === 'string'
-    ) {
-      return { accumulated: accumulated + parsed.delta.text, errorMessage: null };
-    }
-  } catch {
-    return { accumulated, errorMessage: null };
-  }
-
-  return { accumulated, errorMessage: null };
-}
-
-export async function runAnthropicCompatibleSingleQuery(
-  config: AnthropicCompatibleChatProviderConfig,
+export async function runOpenAiCompatibleSingleQuery(
+  config: OpenAiCompatibleChatRuntimeConfig,
   prompt: string,
   options: Record<string, unknown> = {},
 ): Promise<string> {
+  const apiKey = config.getApiKey();
   const model = typeof options.model === 'string' && options.model
     ? options.model
     : config.defaultModel;
@@ -168,12 +125,11 @@ export async function runAnthropicCompatibleSingleQuery(
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const response = await fetch(anthropicMessagesUrl(config.getBaseUrl()), {
+    const response = await fetch(`${config.getBaseUrl()}/chat/completions`, {
       method: 'POST',
-      headers: buildAnthropicCompatibleHeaders(config.getApiKey()),
+      headers: buildHeaders(config, apiKey),
       body: JSON.stringify({
         model,
-        max_tokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
         messages: [{ role: 'user', content: prompt }],
       }),
       signal: controller.signal,
@@ -181,28 +137,25 @@ export async function runAnthropicCompatibleSingleQuery(
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`${config.providerLabel} API error ${response.status}: ${errorText}`);
+      throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    const data = await response.json() as {
-      content?: Array<{ type?: string; text?: string }>;
-    };
-    return (data.content ?? [])
-      .filter((part) => part.type === 'text' && typeof part.text === 'string')
-      .map((part) => part.text)
-      .join('')
-      .trim();
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    return data.choices?.[0]?.message?.content?.trim() || '';
   } finally {
     clearTimeout(timer);
   }
 }
 
-export class AnthropicCompatibleChatProvider extends AgentEventEmitterRuntime {
-  readonly #config: AnthropicCompatibleChatProviderConfig;
+export class OpenAiCompatibleChatRuntime extends AgentEventEmitterRuntime {
+  readonly #config: OpenAiCompatibleChatRuntimeConfig;
   readonly #sessionStore: DirectSessionStore;
-  #sessions = new Map<string, ProviderSession>();
+  #sessions = new Map<string, RuntimeSession>();
+  #modelCache: SharedModelOption[] | null = null;
+  #modelCacheTime = 0;
+  #modelFetchPromise: Promise<SharedModelOption[]> | null = null;
 
-  constructor(config: AnthropicCompatibleChatProviderConfig) {
+  constructor(config: OpenAiCompatibleChatRuntimeConfig) {
     super();
     this.#config = config;
     this.#sessionStore = new DirectSessionStore({
@@ -215,23 +168,23 @@ export class AnthropicCompatibleChatProvider extends AgentEventEmitterRuntime {
     try {
       await this.#sessionStore.append(sessionId, role, content);
     } catch (error: any) {
-      console.warn(`${this.#config.providerId}(${sessionId.slice(0, 8)}): persist failed:`, error?.message ?? String(error));
+      console.warn(`${this.#config.runtimeId}(${sessionId.slice(0, 8)}): persist failed:`, error?.message ?? String(error));
     }
   }
 
-  async #hydrateSession(sessionId: string, request: ResumeTurnRequest): Promise<ProviderSession | null> {
+  async #hydrateSession(sessionId: string, request: ResumeTurnRequest): Promise<RuntimeSession | null> {
     const messages = await this.#sessionStore.read(sessionId);
     if (!messages) {
-      throw new Error(`Cannot hydrate ${this.#config.providerLabel} session without persisted messages: ${sessionId}`);
+      throw new Error(`Cannot hydrate ${this.#config.runtimeLabel} session without persisted messages: ${sessionId}`);
     }
 
-    const session: ProviderSession = {
+    const session: RuntimeSession = {
       abortController: null,
       aborted: false,
       chatId: request.chatId,
       id: sessionId,
       isRunning: false,
-      messages: messages.map(persistedToAnthropicMessage),
+      messages: messages.map(persistedToOpenAiMessage),
       model: request.model || this.#config.defaultModel,
       startTime: Date.now(),
     };
@@ -239,18 +192,19 @@ export class AnthropicCompatibleChatProvider extends AgentEventEmitterRuntime {
     return session;
   }
 
-  async #streamMessage(session: ProviderSession): Promise<string> {
+  async #streamCompletion(session: RuntimeSession): Promise<string> {
+    const apiKey = this.#config.getApiKey();
     const abortController = new AbortController();
     session.abortController = abortController;
+
     const streamTimer = setTimeout(() => abortController.abort(), STREAM_TIMEOUT_MS);
 
     try {
-      const response = await fetch(anthropicMessagesUrl(this.#config.getBaseUrl()), {
+      const response = await fetch(`${this.#config.getBaseUrl()}/chat/completions`, {
         method: 'POST',
-        headers: buildAnthropicCompatibleHeaders(this.#config.getApiKey()),
+        headers: buildHeaders(this.#config, apiKey),
         body: JSON.stringify({
           model: session.model,
-          max_tokens: this.#config.maxTokens ?? DEFAULT_MAX_TOKENS,
           messages: session.messages,
           stream: true,
         }),
@@ -259,23 +213,35 @@ export class AnthropicCompatibleChatProvider extends AgentEventEmitterRuntime {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`${this.#config.providerLabel} API error ${response.status}: ${errorText}`);
+        throw new Error(`${this.#config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
       if (!response.body) {
-        throw new Error(`${this.#config.providerLabel} response did not include a stream body.`);
+        throw new Error(`${this.#config.runtimeLabel} response did not include a stream body.`);
       }
 
       let accumulated = '';
       let lastStreamError = '';
 
       await readSseDataEvents(response.body, (data) => {
-        const result = appendAnthropicDelta(accumulated, data);
-        accumulated = result.accumulated;
-        if (result.errorMessage) lastStreamError = result.errorMessage;
+        if (data === '[DONE]') return;
+
+        try {
+          const parsed = JSON.parse(data) as {
+            choices?: Array<{ delta?: { content?: unknown } }>;
+            error?: { message?: string };
+          };
+          if (parsed.error?.message) {
+            lastStreamError = parsed.error.message;
+            return;
+          }
+          accumulated = appendDeltaText(accumulated, parsed.choices?.[0]?.delta?.content);
+        } catch {
+          // Skips malformed chunks.
+        }
       });
 
       if (!accumulated.trim() && lastStreamError) {
-        throw new Error(`${this.#config.providerLabel} stream error: ${lastStreamError}`);
+        throw new Error(`${this.#config.runtimeLabel} stream error: ${lastStreamError}`);
       }
 
       return accumulated;
@@ -285,17 +251,17 @@ export class AnthropicCompatibleChatProvider extends AgentEventEmitterRuntime {
     }
   }
 
-  async #runTurnInternal(session: ProviderSession): Promise<void> {
+  async #runTurnInternal(session: RuntimeSession): Promise<void> {
     session.isRunning = true;
     session.aborted = false;
     this.emitProcessing(session.chatId, true);
 
     try {
-      const response = await this.#streamMessage(session);
+      const response = await this.#streamCompletion(session);
       if (session.aborted) return;
 
       if (!response.trim()) {
-        this.emitFailed(session.chatId, `Empty response from ${this.#config.providerLabel}`);
+        this.emitFailed(session.chatId, `Empty response from ${this.#config.runtimeLabel}`);
         return;
       }
 
@@ -317,10 +283,10 @@ export class AnthropicCompatibleChatProvider extends AgentEventEmitterRuntime {
 
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const sessionId = crypto.randomUUID();
-    const userContent = buildAnthropicCompatibleUserContent(request.command, request.images);
-    const textContent = extractAnthropicTextContent(userContent);
+    const userContent = buildOpenAiCompatibleUserContent(request.command, request.images);
+    const textContent = extractOpenAiCompatibleTextContent(userContent);
 
-    const session: ProviderSession = {
+    const session: RuntimeSession = {
       abortController: null,
       aborted: false,
       chatId: request.chatId,
@@ -340,7 +306,7 @@ export class AnthropicCompatibleChatProvider extends AgentEventEmitterRuntime {
 
     return {
       agentSessionId: sessionId,
-      nativePath: createArtificialNativePath(this.#config.providerId, sessionId),
+      nativePath: createArtificialNativePath(this.#config.runtimeId, sessionId),
     };
   }
 
@@ -348,7 +314,7 @@ export class AnthropicCompatibleChatProvider extends AgentEventEmitterRuntime {
     const session = this.#sessions.get(request.agentSessionId)
       ?? await this.#hydrateSession(request.agentSessionId, request);
     if (!session) {
-      throw new Error(`Unknown ${this.#config.providerLabel} session: ${request.agentSessionId}`);
+      throw new Error(`Unknown ${this.#config.runtimeLabel} session: ${request.agentSessionId}`);
     }
     if (session.isRunning) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
@@ -358,8 +324,8 @@ export class AnthropicCompatibleChatProvider extends AgentEventEmitterRuntime {
       session.model = request.model;
     }
 
-    const userContent = buildAnthropicCompatibleUserContent(request.command, request.images);
-    const textContent = extractAnthropicTextContent(userContent);
+    const userContent = buildOpenAiCompatibleUserContent(request.command, request.images);
+    const textContent = extractOpenAiCompatibleTextContent(userContent);
 
     if (session.messages.length >= MAX_MESSAGES_PER_SESSION) {
       const first = session.messages[0];
@@ -398,6 +364,48 @@ export class AnthropicCompatibleChatProvider extends AgentEventEmitterRuntime {
   }
 
   async getModels(): Promise<SharedModelOption[]> {
+    if (!this.#config.fetchModels) {
+      return this.#config.fallbackModels;
+    }
+
+    if (this.#modelCache && Date.now() - this.#modelCacheTime < MODEL_CACHE_TTL_MS) {
+      return this.#modelCache;
+    }
+
+    if (this.#modelFetchPromise) {
+      return this.#modelFetchPromise;
+    }
+
+    this.#modelFetchPromise = this.#fetchModels();
+    try {
+      return await this.#modelFetchPromise;
+    } finally {
+      this.#modelFetchPromise = null;
+    }
+  }
+
+  async #fetchModels(): Promise<SharedModelOption[]> {
+    const apiKey = this.#config.getApiKey();
+    if (!apiKey) {
+      return this.#config.fallbackModels;
+    }
+
+    try {
+      const models = await this.#config.fetchModels!({
+        apiKey,
+        baseUrl: this.#config.getBaseUrl(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
+        fallbackModels: this.#config.fallbackModels,
+      });
+      if (models.length > 0) {
+        this.#modelCache = models;
+        this.#modelCacheTime = Date.now();
+        return models;
+      }
+    } catch (error) {
+      console.warn(`${this.#config.runtimeId}: model fetch failed:`, error instanceof Error ? error.message : error);
+    }
+
     return this.#config.fallbackModels;
   }
 

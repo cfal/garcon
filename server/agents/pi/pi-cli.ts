@@ -283,7 +283,7 @@ function createStartTracker(): PiSession['startedSession'] & { promise: Promise<
   };
 }
 
-export class PiProvider extends AgentEventEmitterRuntime {
+export class PiCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, PiSession>();
 
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {

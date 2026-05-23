@@ -52,7 +52,7 @@ export interface AgentExecutionConfig extends PersistedChatExecutionConfig {
 }
 
 export interface AgentEventMetadata {
-  providerRequestId?: string;
+  upstreamRequestId?: string;
 }
 
 // Request to start a new agent session.

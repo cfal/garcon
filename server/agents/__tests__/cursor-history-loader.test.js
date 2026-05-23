@@ -89,7 +89,7 @@ describe('Cursor history loader', () => {
       'tool-result',
     ]);
     expect(messages[0].content).toBe('Hello Cursor');
-    expect(messages[0].metadata?.providerRequestId).toBe('cursor-req-1');
+    expect(messages[0].metadata?.upstreamRequestId).toBe('cursor-req-1');
     expect(messages[2].patch).toBe('*** Begin Patch');
     expect(messages[4].content).toEqual({ ok: true });
   });

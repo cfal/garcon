@@ -36,7 +36,11 @@ import type { QueueState } from '../../common/queue-state.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { RunAgentTurnOptions } from "../agents/session-types.js";
-import { requireChatExecutionConfig } from "../agents/session-types.js";
+import {
+  ChatCommandService,
+  queueDrainOptions,
+  runOptionsFromCommandRequest,
+} from '../commands/chat-command-service.js';
 
 const PERMISSION_DEDUP_TTL = 30_000;
 
@@ -146,6 +150,7 @@ export class ChatHandler {
   #historyCache: HistoryCacheDep;
   #pendingInputs: PendingInputsDep;
   #registry: IChatRegistry;
+  #commands: ChatCommandService;
   #forkDeps: ForkDeps | null;
   #recentPermissionDecisions = new Map<string, number>();
 
@@ -159,12 +164,14 @@ export class ChatHandler {
       listForChat: () => [],
     },
     forkDeps?: ForkDeps | null,
+    commands?: ChatCommandService | null,
   ) {
     this.#agents = agents;
     this.#queue = queue;
     this.#historyCache = historyCache;
     this.#pendingInputs = pendingInputs;
     this.#registry = registry;
+    this.#commands = commands ?? new ChatCommandService({ chats: registry, queue });
     this.#forkDeps = forkDeps ?? null;
   }
 
@@ -189,35 +196,16 @@ export class ChatHandler {
     }
 
     try {
-      const options: RunAgentTurnOptions = {
-        permissionMode: data.permissionMode,
-        thinkingMode: data.thinkingMode,
-        claudeThinkingMode: data.claudeThinkingMode,
-        model: data.model,
-      };
-      if (data.images !== undefined) options.images = data.images;
-      if (data.ampAgentMode !== undefined) options.ampAgentMode = data.ampAgentMode;
-      if (data.apiProviderId !== undefined) options.apiProviderId = data.apiProviderId;
-      if (data.modelEndpointId !== undefined) options.modelEndpointId = data.modelEndpointId;
-      if (data.modelProtocol !== undefined) options.modelProtocol = data.modelProtocol;
-      await this.#queue.submit(chatId, data.command, options);
+      await this.#commands.submitRun({
+        transport: 'websocket',
+        chatId,
+        command: data.command,
+        images: data.images,
+        options: runOptionsFromCommandRequest(data),
+      });
     } catch (error: unknown) {
       writer.send(new AgentRunFailedMessage(chatId, (error as Error).message));
     }
-  }
-
-  #runOptionsFromForkRequest(data: ForkRunRequest): RunAgentTurnOptions {
-    const options: RunAgentTurnOptions = {};
-    if (data.permissionMode !== undefined) options.permissionMode = data.permissionMode;
-    if (data.thinkingMode !== undefined) options.thinkingMode = data.thinkingMode;
-    if (data.claudeThinkingMode !== undefined) options.claudeThinkingMode = data.claudeThinkingMode;
-    if (data.ampAgentMode !== undefined) options.ampAgentMode = data.ampAgentMode;
-    if (data.model !== undefined) options.model = data.model;
-    if (data.images !== undefined) options.images = data.images;
-    if (data.apiProviderId !== undefined) options.apiProviderId = data.apiProviderId;
-    if (data.modelEndpointId !== undefined) options.modelEndpointId = data.modelEndpointId;
-    if (data.modelProtocol !== undefined) options.modelProtocol = data.modelProtocol;
-    return options;
   }
 
   async #handleForkRun(data: ForkRunRequest, writer: WebSocketWriter): Promise<void> {
@@ -260,17 +248,26 @@ export class ChatHandler {
     }
 
     try {
-      const result = await this.#forkDeps.forkChatFileCopy({
-        sourceSession,
+      await this.#commands.submitForkRun({
+        transport: 'websocket',
         sourceChatId,
-        targetChatId,
-        registry: this.#registry,
-        settings: this.#forkDeps.settings,
-        metadata: this.#forkDeps.metadata,
-        forkAgentSession: this.#forkDeps.forkAgentSession,
+        chatId: targetChatId,
+        command: data.command,
+        images: data.images,
+        options: runOptionsFromCommandRequest(data),
+        ensureForked: async () => {
+          const result = await this.#forkDeps!.forkChatFileCopy({
+            sourceSession,
+            sourceChatId,
+            targetChatId,
+            registry: this.#registry,
+            settings: this.#forkDeps!.settings,
+            metadata: this.#forkDeps!.metadata,
+            forkAgentSession: this.#forkDeps!.forkAgentSession,
+          });
+          writer.send(new ChatForkCreatedMessage(result.sourceChatId, result.chatId));
+        },
       });
-      writer.send(new ChatForkCreatedMessage(result.sourceChatId, result.chatId));
-      await this.#queue.submit(result.chatId, data.command, this.#runOptionsFromForkRequest(data));
     } catch (error: unknown) {
       const chatId = this.#registry.getChat(targetChatId) ? targetChatId : sourceChatId;
       writer.send(new AgentRunFailedMessage(chatId, (error as Error).message));
@@ -426,7 +423,7 @@ export class ChatHandler {
           return writer.send(new WsFaultMessage('queue-enqueue requires non-empty string content'));
         }
         await this.#queue.enqueueChat(chatId, data.content);
-        this.#queue.triggerDrain(chatId, this.#drainOptions(chatId)).catch((err: Error) => {
+        this.#queue.triggerDrain(chatId, queueDrainOptions(chatId, this.#registry)).catch((err: Error) => {
           console.error('queue: enqueue drain error:', err.message);
         });
       } else if (data instanceof QueueDropRequest) {
@@ -444,7 +441,7 @@ export class ChatHandler {
       } else if (data instanceof QueueResumeRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         await this.#queue.resumeChatQueue(chatId);
-        this.#queue.triggerDrain(chatId, this.#drainOptions(chatId)).catch((err: Error) => {
+        this.#queue.triggerDrain(chatId, queueDrainOptions(chatId, this.#registry)).catch((err: Error) => {
           console.error('queue: resume drain error:', err.message);
         });
       } else if (data instanceof QueueQueryRequest) {
@@ -456,22 +453,6 @@ export class ChatHandler {
       console.error('ws: chat error:', (error as Error).message);
       writer.send(new WsFaultMessage((error as Error).message));
     }
-  }
-
-  // Builds drain options from persisted chat settings for queued turns.
-  #drainOptions(chatId: string): RunAgentTurnOptions {
-    const chatEntry = this.#registry.getChat(chatId);
-    const entry = requireChatExecutionConfig(chatId, chatEntry);
-    return {
-      permissionMode: entry.permissionMode,
-      thinkingMode: entry.thinkingMode,
-      claudeThinkingMode: entry.claudeThinkingMode,
-      ampAgentMode: entry.ampAgentMode,
-      model: entry.model,
-      apiProviderId: chatEntry?.apiProviderId,
-      modelEndpointId: chatEntry?.modelEndpointId,
-      modelProtocol: chatEntry?.modelProtocol,
-    };
   }
 
   #sendMissingSessionError(writer: WebSocketWriter, type: string): void {

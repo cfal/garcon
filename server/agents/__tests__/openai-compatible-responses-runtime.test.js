@@ -3,13 +3,13 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  OpenAiCompatibleResponsesProvider,
+  OpenAiCompatibleResponsesRuntime,
   applyResponsesStreamEvent,
   buildOpenAiResponsesUserContent,
   extractOpenAiResponsesTextContent,
   extractResponsesOutputText,
   runOpenAiResponsesSingleQuery,
-} from '../direct/openai-compatible-responses-provider.ts';
+} from '../direct/openai-compatible-responses-runtime.ts';
 
 const createdDirs = [];
 const originalFetch = globalThis.fetch;
@@ -30,15 +30,15 @@ function streamResponse(chunks) {
 }
 
 async function tempDir() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-openai-responses-provider-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-openai-responses-runtime-'));
   createdDirs.push(dir);
   return dir;
 }
 
-function providerConfig(dir) {
+function runtimeConfig(dir) {
   return {
-    providerId: 'direct-openai-responses-compatible',
-    providerLabel: 'Direct (Responses)',
+    runtimeId: 'direct-openai-responses-compatible',
+    runtimeLabel: 'Direct (Responses)',
     defaultModel: 'fallback-model',
     fallbackModels: [{ value: 'fallback-model', label: 'Fallback' }],
     getApiKey: () => 'sk-test',
@@ -48,7 +48,7 @@ function providerConfig(dir) {
   };
 }
 
-describe('OpenAiCompatibleResponsesProvider', () => {
+describe('OpenAiCompatibleResponsesRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
     for (const dir of createdDirs.splice(0)) {
@@ -104,7 +104,7 @@ describe('OpenAiCompatibleResponsesProvider', () => {
     });
 
     const dir = await tempDir();
-    const result = await runOpenAiResponsesSingleQuery(providerConfig(dir), 'hi', {
+    const result = await runOpenAiResponsesSingleQuery(runtimeConfig(dir), 'hi', {
       model: 'selected-model',
     });
 
@@ -128,12 +128,12 @@ describe('OpenAiCompatibleResponsesProvider', () => {
       ]);
     });
 
-    const provider = new OpenAiCompatibleResponsesProvider(providerConfig(dir));
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(dir));
     const messagesPromise = new Promise((resolve) => {
-      provider.onMessages((chatId, messages) => resolve({ chatId, messages }));
+      runtime.onMessages((chatId, messages) => resolve({ chatId, messages }));
     });
 
-    const started = await provider.startSession({
+    const started = await runtime.startSession({
       chatId: 'chat-1',
       command: 'hi',
       projectPath: '/tmp/project',
@@ -176,8 +176,8 @@ describe('OpenAiCompatibleResponsesProvider', () => {
       ]);
     });
 
-    const provider = new OpenAiCompatibleResponsesProvider(providerConfig(dir));
-    await provider.runTurn({
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(dir));
+    await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: sessionId,
       command: 'second message',

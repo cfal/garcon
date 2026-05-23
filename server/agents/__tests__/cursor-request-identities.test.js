@@ -12,17 +12,17 @@ describe('CursorRequestIdentityStore', () => {
       clientRequestId: 'req-1',
       turnId: 'turn-1',
     });
-    store.markProviderRequestId({
+    store.markUpstreamRequestId({
       chatId: 'chat-1',
       agentSessionId: 'cursor-session-1',
       clientRequestId: 'req-1',
       turnId: 'turn-1',
-      providerRequestId: 'cursor-req-1',
+      upstreamRequestId: 'cursor-req-1',
     });
 
     const messages = store.applyToMessages([
       new UserMessage('2026-05-22T00:00:00.000Z', 'hi', undefined, {
-        providerRequestId: 'cursor-req-1',
+        upstreamRequestId: 'cursor-req-1',
       }),
     ], {
       chatId: 'chat-1',
@@ -30,7 +30,7 @@ describe('CursorRequestIdentityStore', () => {
     });
 
     expect(messages[0].metadata).toEqual({
-      providerRequestId: 'cursor-req-1',
+      upstreamRequestId: 'cursor-req-1',
       clientRequestId: 'req-1',
       turnId: 'turn-1',
     });
@@ -38,16 +38,16 @@ describe('CursorRequestIdentityStore', () => {
 
   it('does not annotate a different Cursor request id', () => {
     const store = new CursorRequestIdentityStore();
-    store.markProviderRequestId({
+    store.markUpstreamRequestId({
       chatId: 'chat-1',
       agentSessionId: 'cursor-session-1',
       clientRequestId: 'req-1',
-      providerRequestId: 'cursor-req-1',
+      upstreamRequestId: 'cursor-req-1',
     });
 
     const messages = store.applyToMessages([
       new UserMessage('2026-05-22T00:00:00.000Z', 'hi', undefined, {
-        providerRequestId: 'cursor-req-2',
+        upstreamRequestId: 'cursor-req-2',
       }),
     ], {
       chatId: 'chat-1',
@@ -55,7 +55,7 @@ describe('CursorRequestIdentityStore', () => {
     });
 
     expect(messages[0].metadata).toEqual({
-      providerRequestId: 'cursor-req-2',
+      upstreamRequestId: 'cursor-req-2',
     });
   });
 
@@ -76,7 +76,7 @@ describe('CursorRequestIdentityStore', () => {
 
     const messages = store.applyToMessages([
       new UserMessage('2026-05-22T00:00:00.000Z', 'earlier', undefined, {
-        providerRequestId: 'cursor-req-0',
+        upstreamRequestId: 'cursor-req-0',
       }),
       new UserMessage('2026-05-22T00:00:01.000Z', 'current'),
     ], {
@@ -84,7 +84,7 @@ describe('CursorRequestIdentityStore', () => {
       agentSessionId: 'cursor-session-1',
     });
 
-    expect(messages[0].metadata).toEqual({ providerRequestId: 'cursor-req-0' });
+    expect(messages[0].metadata).toEqual({ upstreamRequestId: 'cursor-req-0' });
     expect(messages[1].metadata).toEqual({
       clientRequestId: 'req-1',
       turnId: 'turn-1',

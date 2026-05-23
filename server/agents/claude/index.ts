@@ -1,13 +1,14 @@
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
-import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude, type ClaudeProvider } from './claude-cli.js';
+import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude, type ClaudeCliRuntime } from './claude-cli.js';
 import type { ClaudeStartSessionRequest, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { launchAgentAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
 import type { Agent, AgentRuntime } from '../types.js';
+import { buildClaudeEndpointRuntime } from './endpoint-runtime.js';
 
 interface ClaudeAgentRuntime extends AgentRuntime {
   setPermissionMode(agentSessionId: string, mode: PermissionMode): void;
@@ -15,7 +16,7 @@ interface ClaudeAgentRuntime extends AgentRuntime {
   setClaudeThinkingMode(agentSessionId: string, mode: ClaudeThinkingMode): void;
 }
 
-function createClaudeRuntime(claude: ClaudeProvider): ClaudeAgentRuntime {
+function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
   return {
     async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
       const agentSessionId = crypto.randomUUID();
@@ -61,7 +62,7 @@ function createClaudeRuntime(claude: ClaudeProvider): ClaudeAgentRuntime {
   };
 }
 
-export function createClaudeAgent(claude: ClaudeProvider): Agent {
+export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
   return {
     id: 'claude',
     label: 'Claude',
@@ -91,6 +92,7 @@ export function createClaudeAgent(claude: ClaudeProvider): Agent {
       supportedProtocols: ['anthropic-messages'],
       authLoginSupported: true,
     }),
+    prepareEndpointRuntime: buildClaudeEndpointRuntime,
     runSingleQuery: runSingleQueryClaude,
   };
 }

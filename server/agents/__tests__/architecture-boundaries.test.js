@@ -69,8 +69,8 @@ describe('agent architecture boundaries', () => {
     const source = readFileSync('server/server.js', 'utf8');
     expect(source).toContain('const agentRegistry = new AgentRegistry');
     expect(source).toContain('createDefaultAgentSuite');
-    expect(source).not.toContain('new CodexAppServerProvider');
-    expect(source).not.toContain('new ClaudeProvider');
+    expect(source).not.toContain('new CodexAppServerRuntime');
+    expect(source).not.toContain('new ClaudeCliRuntime');
     expect(source).not.toContain('createCursorAgent(');
     expect(source).not.toContain('providerRegistry');
     expect(source).not.toContain('CursorRequestIdentityStore');

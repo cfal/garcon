@@ -40,7 +40,7 @@ interface ResponsesInputMessage {
   content: ResponsesInputContent;
 }
 
-interface ProviderSession {
+interface RuntimeSession {
   abortController: AbortController | null;
   aborted: boolean;
   chatId: string;
@@ -51,9 +51,9 @@ interface ProviderSession {
   startTime: number;
 }
 
-export interface OpenAiCompatibleResponsesProviderConfig {
-  providerId: string;
-  providerLabel: string;
+export interface OpenAiCompatibleResponsesRuntimeConfig {
+  runtimeId: string;
+  runtimeLabel: string;
   defaultModel: string;
   fallbackModels: SharedModelOption[];
   getApiKey: () => string;
@@ -64,7 +64,7 @@ export interface OpenAiCompatibleResponsesProviderConfig {
 }
 
 function buildHeaders(
-  config: OpenAiCompatibleResponsesProviderConfig,
+  config: OpenAiCompatibleResponsesRuntimeConfig,
   apiKey: string,
 ): Record<string, string> {
   return config.buildHeaders?.(apiKey) ?? {
@@ -179,7 +179,7 @@ export function applyResponsesStreamEvent(accumulated: string, event: unknown): 
 }
 
 export async function runOpenAiResponsesSingleQuery(
-  config: OpenAiCompatibleResponsesProviderConfig,
+  config: OpenAiCompatibleResponsesRuntimeConfig,
   prompt: string,
   options: Record<string, unknown> = {},
 ): Promise<string> {
@@ -205,7 +205,7 @@ export async function runOpenAiResponsesSingleQuery(
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`${config.providerLabel} Responses API error ${response.status}: ${errorText}`);
+      throw new Error(`${config.runtimeLabel} Responses API error ${response.status}: ${errorText}`);
     }
 
     return extractResponsesOutputText(await response.json());
@@ -214,12 +214,12 @@ export async function runOpenAiResponsesSingleQuery(
   }
 }
 
-export class OpenAiCompatibleResponsesProvider extends AgentEventEmitterRuntime {
-  readonly #config: OpenAiCompatibleResponsesProviderConfig;
+export class OpenAiCompatibleResponsesRuntime extends AgentEventEmitterRuntime {
+  readonly #config: OpenAiCompatibleResponsesRuntimeConfig;
   readonly #sessionStore: DirectSessionStore;
-  #sessions = new Map<string, ProviderSession>();
+  #sessions = new Map<string, RuntimeSession>();
 
-  constructor(config: OpenAiCompatibleResponsesProviderConfig) {
+  constructor(config: OpenAiCompatibleResponsesRuntimeConfig) {
     super();
     this.#config = config;
     this.#sessionStore = new DirectSessionStore({
@@ -233,19 +233,19 @@ export class OpenAiCompatibleResponsesProvider extends AgentEventEmitterRuntime 
       await this.#sessionStore.append(sessionId, role, content);
     } catch (error: unknown) {
       console.warn(
-        `${this.#config.providerId}(${sessionId.slice(0, 8)}): persist failed:`,
+        `${this.#config.runtimeId}(${sessionId.slice(0, 8)}): persist failed:`,
         error instanceof Error ? error.message : String(error),
       );
     }
   }
 
-  async #hydrateSession(sessionId: string, request: ResumeTurnRequest): Promise<ProviderSession> {
+  async #hydrateSession(sessionId: string, request: ResumeTurnRequest): Promise<RuntimeSession> {
     const messages = await this.#sessionStore.read(sessionId);
     if (!messages) {
-      throw new Error(`Cannot hydrate ${this.#config.providerLabel} session without persisted messages: ${sessionId}`);
+      throw new Error(`Cannot hydrate ${this.#config.runtimeLabel} session without persisted messages: ${sessionId}`);
     }
 
-    const session: ProviderSession = {
+    const session: RuntimeSession = {
       abortController: null,
       aborted: false,
       chatId: request.chatId,
@@ -259,7 +259,7 @@ export class OpenAiCompatibleResponsesProvider extends AgentEventEmitterRuntime 
     return session;
   }
 
-  async #streamResponse(session: ProviderSession): Promise<string> {
+  async #streamResponse(session: RuntimeSession): Promise<string> {
     const apiKey = this.#config.getApiKey();
     const abortController = new AbortController();
     session.abortController = abortController;
@@ -280,10 +280,10 @@ export class OpenAiCompatibleResponsesProvider extends AgentEventEmitterRuntime 
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`${this.#config.providerLabel} Responses API error ${response.status}: ${errorText}`);
+        throw new Error(`${this.#config.runtimeLabel} Responses API error ${response.status}: ${errorText}`);
       }
       if (!response.body) {
-        throw new Error(`${this.#config.providerLabel} response did not include a stream body.`);
+        throw new Error(`${this.#config.runtimeLabel} response did not include a stream body.`);
       }
 
       let accumulated = '';
@@ -299,7 +299,7 @@ export class OpenAiCompatibleResponsesProvider extends AgentEventEmitterRuntime 
       });
 
       if (!accumulated.trim() && streamError) {
-        throw new Error(`${this.#config.providerLabel} Responses stream error: ${streamError}`);
+        throw new Error(`${this.#config.runtimeLabel} Responses stream error: ${streamError}`);
       }
       return accumulated;
     } finally {
@@ -308,7 +308,7 @@ export class OpenAiCompatibleResponsesProvider extends AgentEventEmitterRuntime 
     }
   }
 
-  async #runTurnInternal(session: ProviderSession): Promise<void> {
+  async #runTurnInternal(session: RuntimeSession): Promise<void> {
     session.isRunning = true;
     session.aborted = false;
     this.emitProcessing(session.chatId, true);
@@ -317,7 +317,7 @@ export class OpenAiCompatibleResponsesProvider extends AgentEventEmitterRuntime 
       const response = await this.#streamResponse(session);
       if (session.aborted) return;
       if (!response.trim()) {
-        this.emitFailed(session.chatId, `Empty response from ${this.#config.providerLabel}`);
+        this.emitFailed(session.chatId, `Empty response from ${this.#config.runtimeLabel}`);
         return;
       }
 
@@ -342,7 +342,7 @@ export class OpenAiCompatibleResponsesProvider extends AgentEventEmitterRuntime 
     const userContent = buildOpenAiResponsesUserContent(request.command, request.images);
     const textContent = extractOpenAiResponsesTextContent(userContent);
 
-    const session: ProviderSession = {
+    const session: RuntimeSession = {
       abortController: null,
       aborted: false,
       chatId: request.chatId,
@@ -360,7 +360,7 @@ export class OpenAiCompatibleResponsesProvider extends AgentEventEmitterRuntime 
 
     return {
       agentSessionId: sessionId,
-      nativePath: createArtificialNativePath(this.#config.providerId, sessionId),
+      nativePath: createArtificialNativePath(this.#config.runtimeId, sessionId),
     };
   }
 

@@ -41,11 +41,11 @@ function configuredProvidersResult() {
 }
 
 async function importProvider() {
-  const { OpenCodeProvider } = await import('../opencode/opencode.js');
-  return OpenCodeProvider;
+  const { OpenCodeRuntime } = await import('../opencode/opencode.js');
+  return OpenCodeRuntime;
 }
 
-describe('OpenCodeProvider model discovery', () => {
+describe('OpenCodeRuntime model discovery', () => {
   it('starts OpenCode and lists models from configured providers', async () => {
     const configProviders = mock(() => Promise.resolve(configuredProvidersResult()));
     const providerList = mock(() => Promise.resolve({ data: { all: [], connected: [] } }));
@@ -58,8 +58,8 @@ describe('OpenCodeProvider model discovery', () => {
       server: { close: mock(() => {}) },
     }));
 
-    const OpenCodeProvider = await importProvider();
-    const provider = new OpenCodeProvider({ createInstance });
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({ createInstance });
 
     expect(await provider.getModels()).toEqual([
       { value: 'openai/gpt-5.5', label: 'OpenAI: GPT-5.5' },
@@ -102,8 +102,8 @@ describe('OpenCodeProvider model discovery', () => {
       server: { close: mock(() => {}) },
     }));
 
-    const OpenCodeProvider = await importProvider();
-    const provider = new OpenCodeProvider({ createInstance });
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({ createInstance });
 
     expect(await provider.getModels()).toEqual([
       { value: 'openai/gpt-5.5', label: 'OpenAI: GPT-5.5' },
@@ -122,8 +122,8 @@ describe('OpenCodeProvider model discovery', () => {
       server: { close },
     }));
 
-    const OpenCodeProvider = await importProvider();
-    const provider = new OpenCodeProvider({
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({
       createInstance,
       modelDiscoveryTimeoutMs: 5,
       unavailableRetryMs: 1_000,
@@ -158,8 +158,8 @@ describe('OpenCodeProvider model discovery', () => {
       server: { close: mock(() => {}) },
     }));
 
-    const OpenCodeProvider = await importProvider();
-    const provider = new OpenCodeProvider({
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({
       createInstance,
       modelDiscoveryTimeoutMs: 5,
       unavailableRetryMs: 1_000,
@@ -193,8 +193,8 @@ describe('OpenCodeProvider model discovery', () => {
       server: { close: mock(() => {}) },
     }));
 
-    const OpenCodeProvider = await importProvider();
-    const provider = new OpenCodeProvider({
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({
       createInstance,
       modelDiscoveryTimeoutMs: 5,
       unavailableRetryMs: 1_000,
@@ -222,8 +222,8 @@ describe('OpenCodeProvider model discovery', () => {
   it('marks startup failures unavailable and skips immediate retries', async () => {
     const createInstance = mock(() => never());
 
-    const OpenCodeProvider = await importProvider();
-    const provider = new OpenCodeProvider({
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({
       createInstance,
       startupTimeoutMs: 5,
       unavailableRetryMs: 1_000,
@@ -247,8 +247,8 @@ describe('OpenCodeProvider model discovery', () => {
       server: { close },
     }));
 
-    const OpenCodeProvider = await importProvider();
-    const provider = new OpenCodeProvider({ createInstance });
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({ createInstance });
 
     await provider.getClient();
     provider.shutdown();

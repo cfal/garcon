@@ -1,4 +1,4 @@
-import { runSingleQuery as runSingleQueryPi, type PiProvider } from './pi-cli.js';
+import { runSingleQuery as runSingleQueryPi, type PiCliRuntime } from './pi-cli.js';
 import { getPiModelsStrict } from './pi-models.js';
 import { findPiSessionFileBySessionId } from './pi-session-paths.js';
 import { getPiAuthStatus } from './pi-auth.js';
@@ -6,7 +6,7 @@ import { createAgentCapabilities } from '../capabilities.js';
 import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
 import type { Agent } from '../types.js';
 
-export function createPiAgent(pi: PiProvider): Agent {
+export function createPiAgent(pi: PiCliRuntime): Agent {
   return {
     id: 'pi',
     label: 'Pi',

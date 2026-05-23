@@ -11,15 +11,15 @@ import {
 import type { ApiProtocol } from '../../../common/api-providers.js';
 import { endpointSupportsAgent } from '../../../common/model-routing.js';
 import { getWorkspaceDir } from '../../config.js';
-import { AnthropicCompatibleChatProvider, type AnthropicCompatibleChatProviderConfig, runAnthropicCompatibleSingleQuery } from './anthropic-compatible-chat-provider.js';
+import { AnthropicCompatibleChatRuntime, type AnthropicCompatibleChatRuntimeConfig, runAnthropicCompatibleSingleQuery } from './anthropic-compatible-chat-runtime.js';
 import type { ApiProviderReader } from '../../api-providers/read-model.js';
 import type { StoredApiProvider, StoredApiProviderEndpoint } from '../../api-providers/store.js';
-import { OpenAiCompatibleChatProvider, type OpenAiCompatibleChatProviderConfig, runOpenAiCompatibleSingleQuery } from './openai-compatible-chat-provider.js';
+import { OpenAiCompatibleChatRuntime, type OpenAiCompatibleChatRuntimeConfig, runOpenAiCompatibleSingleQuery } from './openai-compatible-chat-runtime.js';
 import {
-  OpenAiCompatibleResponsesProvider,
-  type OpenAiCompatibleResponsesProviderConfig,
+  OpenAiCompatibleResponsesRuntime,
+  type OpenAiCompatibleResponsesRuntimeConfig,
   runOpenAiResponsesSingleQuery,
-} from './openai-compatible-responses-provider.js';
+} from './openai-compatible-responses-runtime.js';
 import type { AgentEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import type { AgentRuntime } from '../types.js';
 
@@ -31,7 +31,7 @@ type DirectEventCallbacks = {
   failed: Set<(chatId: string, errorMessage: string) => void>;
 };
 
-export type DirectCompatibleProvider = {
+export type DirectCompatibleRuntime = {
   startSession(request: StartSessionRequest): Promise<StartedAgentSession>;
   runTurn(request: ResumeTurnRequest): Promise<void>;
   abort(agentSessionId: string): boolean;
@@ -46,13 +46,13 @@ export type DirectCompatibleProvider = {
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
 };
 
-interface DirectEndpointRouterConfig<TProvider extends DirectCompatibleProvider> {
+interface DirectEndpointRouterConfig<TRuntime extends DirectCompatibleRuntime> {
   agentId: AgentId;
   label: string;
   protocol: ApiProtocol;
   noEndpointMessage: string;
   apiProviders: ApiProviderReader;
-  createProvider(endpoint: StoredApiProviderEndpoint, apiProvider: StoredApiProvider): TProvider;
+  createRuntime(endpoint: StoredApiProviderEndpoint, apiProvider: StoredApiProvider): TRuntime;
   runSingleQuery(
     prompt: string,
     endpoint: StoredApiProviderEndpoint,
@@ -61,8 +61,8 @@ interface DirectEndpointRouterConfig<TProvider extends DirectCompatibleProvider>
   ): Promise<string>;
 }
 
-export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvider> implements AgentRuntime {
-  #providers = new Map<string, TProvider>();
+export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntime> implements AgentRuntime {
+  #runtimes = new Map<string, TRuntime>();
   #sessionEndpointIds = new Map<string, string>();
   #purgeTimers = new Map<string, ReturnType<typeof setInterval>>();
   #purgeTimersStarted = false;
@@ -74,39 +74,39 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
     failed: new Set(),
   };
 
-  constructor(private readonly config: DirectEndpointRouterConfig<TProvider>) {}
+  constructor(private readonly config: DirectEndpointRouterConfig<TRuntime>) {}
 
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const { apiProvider, endpoint } = this.#resolveEndpoint(request.modelEndpointId);
-    const provider = this.#providerFor(endpoint, apiProvider);
-    const started = await provider.startSession(request);
+    const runtime = this.#runtimeFor(endpoint, apiProvider);
+    const started = await runtime.startSession(request);
     this.#sessionEndpointIds.set(started.agentSessionId, endpoint.id);
     return started;
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
-    let provider = this.#providerForSession(request.agentSessionId);
-    if (!provider && request.modelEndpointId) {
+    let runtime = this.#runtimeForSession(request.agentSessionId);
+    if (!runtime && request.modelEndpointId) {
       const { apiProvider, endpoint } = this.#resolveEndpoint(request.modelEndpointId);
-      provider = this.#providerFor(endpoint, apiProvider);
+      runtime = this.#runtimeFor(endpoint, apiProvider);
       this.#sessionEndpointIds.set(request.agentSessionId, endpoint.id);
     }
-    if (!provider) {
+    if (!runtime) {
       throw new Error(`Unknown ${this.config.label} session: ${request.agentSessionId}`);
     }
-    await provider.runTurn(request);
+    await runtime.runTurn(request);
   }
 
   abort(agentSessionId: string): boolean {
-    return this.#providerForSession(agentSessionId)?.abort(agentSessionId) ?? false;
+    return this.#runtimeForSession(agentSessionId)?.abort(agentSessionId) ?? false;
   }
 
   isRunning(agentSessionId: string): boolean {
-    return this.#providerForSession(agentSessionId)?.isRunning(agentSessionId) ?? false;
+    return this.#runtimeForSession(agentSessionId)?.isRunning(agentSessionId) ?? false;
   }
 
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }> {
-    return Array.from(this.#providers.values()).flatMap((provider) => provider.getRunningSessions());
+    return Array.from(this.#runtimes.values()).flatMap((runtime) => runtime.getRunningSessions());
   }
 
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
@@ -134,15 +134,15 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
 
   startPurgeTimer(): ReturnType<typeof setInterval> {
     this.#purgeTimersStarted = true;
-    for (const [endpointId, provider] of this.#providers.entries()) {
+    for (const [endpointId, runtime] of this.#runtimes.entries()) {
       if (!this.#purgeTimers.has(endpointId)) {
-        this.#purgeTimers.set(endpointId, provider.startPurgeTimer());
+        this.#purgeTimers.set(endpointId, runtime.startPurgeTimer());
       }
     }
     return setInterval(() => {
-      for (const [endpointId, provider] of this.#providers.entries()) {
+      for (const [endpointId, runtime] of this.#runtimes.entries()) {
         if (!this.#purgeTimers.has(endpointId)) {
-          this.#purgeTimers.set(endpointId, provider.startPurgeTimer());
+          this.#purgeTimers.set(endpointId, runtime.startPurgeTimer());
         }
       }
     }, 5 * 60 * 1000);
@@ -173,46 +173,46 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
     this.#callbacks.failed.add(cb);
   }
 
-  #providerForSession(agentSessionId: string): TProvider | null {
+  #runtimeForSession(agentSessionId: string): TRuntime | null {
     const endpointId = this.#sessionEndpointIds.get(agentSessionId);
     if (endpointId) {
-      const provider = this.#providers.get(endpointId);
-      if (provider) return provider;
+      const runtime = this.#runtimes.get(endpointId);
+      if (runtime) return runtime;
     }
-    for (const provider of this.#providers.values()) {
-      if (provider.isRunning(agentSessionId)) return provider;
+    for (const runtime of this.#runtimes.values()) {
+      if (runtime.isRunning(agentSessionId)) return runtime;
     }
     return null;
   }
 
-  #providerFor(endpoint: StoredApiProviderEndpoint, apiProvider: StoredApiProvider): TProvider {
-    const existing = this.#providers.get(endpoint.id);
+  #runtimeFor(endpoint: StoredApiProviderEndpoint, apiProvider: StoredApiProvider): TRuntime {
+    const existing = this.#runtimes.get(endpoint.id);
     if (existing) return existing;
 
-    const provider = this.config.createProvider(endpoint, apiProvider);
-    this.#attachForwarders(provider);
-    this.#providers.set(endpoint.id, provider);
+    const runtime = this.config.createRuntime(endpoint, apiProvider);
+    this.#attachForwarders(runtime);
+    this.#runtimes.set(endpoint.id, runtime);
 
     if (this.#purgeTimersStarted) {
-      this.#purgeTimers.set(endpoint.id, provider.startPurgeTimer());
+      this.#purgeTimers.set(endpoint.id, runtime.startPurgeTimer());
     }
-    return provider;
+    return runtime;
   }
 
-  #attachForwarders(provider: TProvider): void {
-    provider.onMessages((chatId, messages, metadata) => {
+  #attachForwarders(runtime: TRuntime): void {
+    runtime.onMessages((chatId, messages, metadata) => {
       for (const cb of this.#callbacks.messages) cb(chatId, messages, metadata);
     });
-    provider.onProcessing((chatId, isProcessing) => {
+    runtime.onProcessing((chatId, isProcessing) => {
       for (const cb of this.#callbacks.processing) cb(chatId, isProcessing);
     });
-    provider.onSessionCreated((chatId) => {
+    runtime.onSessionCreated((chatId) => {
       for (const cb of this.#callbacks.sessionCreated) cb(chatId);
     });
-    provider.onFinished((chatId, exitCode, metadata) => {
+    runtime.onFinished((chatId, exitCode, metadata) => {
       for (const cb of this.#callbacks.finished) cb(chatId, exitCode, metadata);
     });
-    provider.onFailed((chatId, errorMessage) => {
+    runtime.onFailed((chatId, errorMessage) => {
       for (const cb of this.#callbacks.failed) cb(chatId, errorMessage);
     });
   }
@@ -239,72 +239,72 @@ export class DirectEndpointRouterRuntime<TProvider extends DirectCompatibleProvi
   }
 }
 
-export function createDirectOpenAiChatRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<OpenAiCompatibleChatProvider> {
-  return new DirectEndpointRouterRuntime<OpenAiCompatibleChatProvider>({
+export function createDirectOpenAiChatRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<OpenAiCompatibleChatRuntime> {
+  return new DirectEndpointRouterRuntime<OpenAiCompatibleChatRuntime>({
     agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
     label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
     protocol: 'openai-compatible',
     noEndpointMessage: `No OpenAI-compatible Chat Completions endpoint is configured for ${DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL}.`,
     apiProviders,
-    createProvider(endpoint) {
-      return new OpenAiCompatibleChatProvider(buildDirectOpenAiConfig({
-        providerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-        providerLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
+    createRuntime(endpoint) {
+      return new OpenAiCompatibleChatRuntime(buildDirectOpenAiConfig({
+        runtimeId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+        runtimeLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
         endpoint,
       }));
     },
     runSingleQuery(prompt, endpoint, apiProvider, options) {
       return runOpenAiCompatibleSingleQuery(buildDirectOpenAiConfig({
-        providerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-        providerLabel: apiProvider.label,
+        runtimeId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+        runtimeLabel: apiProvider.label,
         endpoint,
       }), prompt, options);
     },
   });
 }
 
-export function createDirectOpenAiResponsesRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<OpenAiCompatibleResponsesProvider> {
-  return new DirectEndpointRouterRuntime<OpenAiCompatibleResponsesProvider>({
+export function createDirectOpenAiResponsesRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<OpenAiCompatibleResponsesRuntime> {
+  return new DirectEndpointRouterRuntime<OpenAiCompatibleResponsesRuntime>({
     agentId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
     label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
     protocol: 'openai-compatible',
     noEndpointMessage: `No OpenAI-compatible Responses endpoint is configured for ${DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL}.`,
     apiProviders,
-    createProvider(endpoint) {
-      return new OpenAiCompatibleResponsesProvider(buildDirectOpenAiResponsesConfig({
-        providerId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
-        providerLabel: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
+    createRuntime(endpoint) {
+      return new OpenAiCompatibleResponsesRuntime(buildDirectOpenAiResponsesConfig({
+        runtimeId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+        runtimeLabel: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
         endpoint,
       }));
     },
     runSingleQuery(prompt, endpoint, apiProvider, options) {
       return runOpenAiResponsesSingleQuery(buildDirectOpenAiResponsesConfig({
-        providerId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
-        providerLabel: apiProvider.label,
+        runtimeId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+        runtimeLabel: apiProvider.label,
         endpoint,
       }), prompt, options);
     },
   });
 }
 
-export function createDirectAnthropicRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<AnthropicCompatibleChatProvider> {
-  return new DirectEndpointRouterRuntime<AnthropicCompatibleChatProvider>({
+export function createDirectAnthropicRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<AnthropicCompatibleChatRuntime> {
+  return new DirectEndpointRouterRuntime<AnthropicCompatibleChatRuntime>({
     agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
     label: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
     protocol: 'anthropic-messages',
     noEndpointMessage: `No Anthropic-compatible endpoint is configured for ${DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL}.`,
     apiProviders,
-    createProvider(endpoint) {
-      return new AnthropicCompatibleChatProvider(buildDirectAnthropicConfig({
-        providerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-        providerLabel: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
+    createRuntime(endpoint) {
+      return new AnthropicCompatibleChatRuntime(buildDirectAnthropicConfig({
+        runtimeId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+        runtimeLabel: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
         endpoint,
       }));
     },
     runSingleQuery(prompt, endpoint, apiProvider, options) {
       return runAnthropicCompatibleSingleQuery(buildDirectAnthropicConfig({
-        providerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-        providerLabel: apiProvider.label,
+        runtimeId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+        runtimeLabel: apiProvider.label,
         endpoint,
       }), prompt, options);
     },
@@ -336,13 +336,13 @@ export function directAnthropicSessionFilePath(endpointId: string, sessionId: st
 }
 
 export function buildDirectOpenAiConfig(args: {
-  providerId: string;
-  providerLabel: string;
+  runtimeId: string;
+  runtimeLabel: string;
   endpoint: StoredApiProviderEndpoint;
-}): OpenAiCompatibleChatProviderConfig {
+}): OpenAiCompatibleChatRuntimeConfig {
   return {
-    providerId: args.providerId,
-    providerLabel: args.providerLabel,
+    runtimeId: args.runtimeId,
+    runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.defaultModel,
     fallbackModels: args.endpoint.models,
     getApiKey: () => args.endpoint.apiKey,
@@ -358,13 +358,13 @@ export function buildDirectOpenAiConfig(args: {
 }
 
 export function buildDirectOpenAiResponsesConfig(args: {
-  providerId: string;
-  providerLabel: string;
+  runtimeId: string;
+  runtimeLabel: string;
   endpoint: StoredApiProviderEndpoint;
-}): OpenAiCompatibleResponsesProviderConfig {
+}): OpenAiCompatibleResponsesRuntimeConfig {
   return {
-    providerId: args.providerId,
-    providerLabel: args.providerLabel,
+    runtimeId: args.runtimeId,
+    runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.defaultModel,
     fallbackModels: args.endpoint.models,
     getApiKey: () => args.endpoint.apiKey,
@@ -380,13 +380,13 @@ export function buildDirectOpenAiResponsesConfig(args: {
 }
 
 export function buildDirectAnthropicConfig(args: {
-  providerId: string;
-  providerLabel: string;
+  runtimeId: string;
+  runtimeLabel: string;
   endpoint: StoredApiProviderEndpoint;
-}): AnthropicCompatibleChatProviderConfig {
+}): AnthropicCompatibleChatRuntimeConfig {
   return {
-    providerId: args.providerId,
-    providerLabel: args.providerLabel,
+    runtimeId: args.runtimeId,
+    runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.defaultModel,
     fallbackModels: args.endpoint.models,
     getApiKey: () => args.endpoint.apiKey,

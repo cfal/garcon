@@ -248,7 +248,7 @@ describe('ConversationSessionController', () => {
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue([
 			new UserMessage('2026-05-14T00:00:01.000Z', 'hello', undefined, {
 				clientRequestId: 'req-1',
-				providerRequestId: 'cursor-req-1',
+				upstreamRequestId: 'cursor-req-1',
 			}),
 			new AssistantMessage('2026-05-14T00:00:02.000Z', 'hi'),
 		]);
@@ -259,7 +259,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.chatState.setMessages).toHaveBeenCalledTimes(1);
 		const merged = vi.mocked(deps.chatState.setMessages).mock.calls[0][0] as ChatMessage[];
 		expect(merged.filter((message) => message.type === 'user-message')).toHaveLength(1);
-		expect((merged[0] as UserMessage).metadata?.providerRequestId).toBe('cursor-req-1');
+		expect((merged[0] as UserMessage).metadata?.upstreamRequestId).toBe('cursor-req-1');
 		expect(merged.map((message) => message.type)).toEqual(['user-message', 'assistant-message']);
 	});
 

@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { PiProvider } from '../pi/pi-cli.js';
+import { PiCliRuntime } from '../pi/pi-cli.js';
 
 const originalSpawn = Bun.spawn;
 const originalEnv = { ...process.env };
@@ -93,7 +93,7 @@ function sessionHeader(id = 'pi-session-1') {
   };
 }
 
-describe('PiProvider lifecycle', () => {
+describe('PiCliRuntime lifecycle', () => {
   let spawnMock;
 
   beforeEach(async () => {
@@ -112,7 +112,7 @@ describe('PiProvider lifecycle', () => {
   });
 
   it('resolves startSession from the Pi JSON session header', async () => {
-    const provider = new PiProvider();
+    const provider = new PiCliRuntime();
     const processing = mock();
     const created = mock();
     provider.onProcessing(processing);
@@ -144,7 +144,7 @@ describe('PiProvider lifecycle', () => {
   it('continues an existing session using the native session path', async () => {
     const nativePath = path.join(tempRoot, 'pi-session-2.jsonl');
     await fs.writeFile(nativePath, '{}\n', 'utf8');
-    const provider = new PiProvider();
+    const provider = new PiCliRuntime();
     const messages = mock();
     const finished = mock();
     provider.onMessages(messages);
@@ -180,7 +180,7 @@ describe('PiProvider lifecycle', () => {
   it('emits tool-use and tool-result events from Pi JSON stream events', async () => {
     const nativePath = path.join(tempRoot, 'pi-session-tools.jsonl');
     await fs.writeFile(nativePath, '{}\n', 'utf8');
-    const provider = new PiProvider();
+    const provider = new PiCliRuntime();
     const messages = mock();
     provider.onMessages(messages);
 
@@ -227,7 +227,7 @@ describe('PiProvider lifecycle', () => {
   });
 
   it('rejects startSession when the process exits before a session header', async () => {
-    const provider = new PiProvider();
+    const provider = new PiCliRuntime();
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
 
@@ -238,7 +238,7 @@ describe('PiProvider lifecycle', () => {
   });
 
   it('rejects Pi default because Pi runs require an explicit model', async () => {
-    const provider = new PiProvider();
+    const provider = new PiCliRuntime();
 
     await expect(provider.startSession(baseStartRequest({ model: 'default' })))
       .rejects.toThrow('Pi requires an explicit model selection.');
@@ -248,7 +248,7 @@ describe('PiProvider lifecycle', () => {
   it('does not pass Garcon embedded Pi package metadata to the Pi CLI', async () => {
     process.env.PI_PACKAGE_DIR = path.join(tempRoot, 'garcon-pi-package');
     process.env.GARCON_EMBEDDED_PI_PACKAGE_DIR = process.env.PI_PACKAGE_DIR;
-    const provider = new PiProvider();
+    const provider = new PiCliRuntime();
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
 
@@ -265,7 +265,7 @@ describe('PiProvider lifecycle', () => {
   });
 
   it('aborts a running Pi process', async () => {
-    const provider = new PiProvider();
+    const provider = new PiCliRuntime();
     const processing = mock();
     provider.onProcessing(processing);
     const proc = createFakeProc();

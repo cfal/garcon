@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
-import { CursorProvider, runSingleQuery } from '../cursor/cursor-cli.js';
+import { CursorRuntime, runSingleQuery } from '../cursor/cursor-cli.js';
 
 function createFakeProc() {
   const encoder = new TextEncoder();
@@ -61,7 +61,7 @@ function createCommandProc(stdoutText, exitCode = 0) {
   };
 }
 
-describe('CursorProvider lifecycle', () => {
+describe('CursorRuntime lifecycle', () => {
   let originalSpawn;
   let spawnMock;
 
@@ -76,7 +76,7 @@ describe('CursorProvider lifecycle', () => {
   });
 
   it('resolves startSession on system init and requests Cursor stream JSON', async () => {
-    const provider = new CursorProvider();
+    const provider = new CursorRuntime();
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
 
@@ -117,7 +117,7 @@ describe('CursorProvider lifecycle', () => {
   });
 
   it('continues a session, deduplicates tool calls, and emits tool results', async () => {
-    const provider = new CursorProvider();
+    const provider = new CursorRuntime();
     const messages = mock();
     const finished = mock();
     provider.onMessages(messages);
@@ -192,13 +192,13 @@ describe('CursorProvider lifecycle', () => {
       'assistant-message',
       'tool-result',
     ]);
-    expect(finished).toHaveBeenCalledWith('chat-2', 0, { providerRequestId: 'cursor-req-2' });
+    expect(finished).toHaveBeenCalledWith('chat-2', 0, { upstreamRequestId: 'cursor-req-2' });
     expect(emitted.filter((message) => message.type === 'bash-tool-use')).toHaveLength(1);
     expect(emitted.find((message) => message.type === 'tool-result')?.content).toEqual({ stdout: '/proj' });
   });
 
   it('normalizes live Cursor Glob results to canonical file lists', async () => {
-    const provider = new CursorProvider();
+    const provider = new CursorRuntime();
     const messages = mock();
     provider.onMessages(messages);
 

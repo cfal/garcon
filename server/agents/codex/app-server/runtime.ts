@@ -51,13 +51,13 @@ interface CodexForkSessionRequest {
   codexConfig?: StartSessionRequest['codexConfig'];
 }
 
-export interface CodexAppServerProviderOptions {
+export interface CodexAppServerRuntimeOptions {
   createClient?: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   materializationTimeoutMs?: number;
   terminalBackfillTimeoutMs?: number;
 }
 
-export class CodexAppServerProvider extends AgentEventEmitterRuntime {
+export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #sessions = new Map<string, RunningCodexSession>();
   #pendingApprovals = new Map<string, CodexPendingApproval & { client: CodexAppServerClient }>();
   #utilityClient: CodexAppServerClient | null = null;
@@ -67,7 +67,7 @@ export class CodexAppServerProvider extends AgentEventEmitterRuntime {
   #materializationTimeoutMs: number;
   #terminalBackfillTimeoutMs: number;
 
-  constructor(options: CodexAppServerProviderOptions = {}) {
+  constructor(options: CodexAppServerRuntimeOptions = {}) {
     super();
     this.#createClient = options.createClient ?? ((clientOptions) => new CodexAppServerClient(clientOptions));
     this.#materializationTimeoutMs = options.materializationTimeoutMs ?? 10_000;

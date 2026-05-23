@@ -32,7 +32,7 @@ export function chatMessageIdentityTokens(
 
   if (type === 'user-message') {
     const metadata = asRecord(raw.metadata);
-    addToken(tokens, `${type}:provider-request`, metadata.providerRequestId);
+    addToken(tokens, `${type}:upstream-request`, metadata.upstreamRequestId);
     addToken(tokens, `${type}:client-request`, metadata.clientRequestId);
     addToken(tokens, `${type}:turn`, metadata.turnId);
     addToken(tokens, `${type}:message`, metadata.messageId);

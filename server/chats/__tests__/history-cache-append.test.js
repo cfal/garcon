@@ -156,7 +156,7 @@ describe('appendMessages', () => {
         timestamp: ts,
         content: 'Prompt',
         metadata: {
-          providerRequestId: 'cursor-req-1',
+          upstreamRequestId: 'cursor-req-1',
           clientRequestId: 'req-1',
         },
       },

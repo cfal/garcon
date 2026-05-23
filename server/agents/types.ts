@@ -4,10 +4,13 @@ import type { AgentModelOption } from "../../common/agents.js";
 import type {
   AgentChatEntry,
   AgentEventMetadata,
+  CodexProviderConfig,
   ResumeTurnRequest,
   StartSessionRequest,
   StartedAgentSession,
 } from './session-types.js';
+import type { ApiProtocol } from '../../common/api-providers.js';
+import type { StoredApiProvider, StoredApiProviderEndpoint } from '../api-providers/store.js';
 
 export type SupportedAgentProtocol = 'anthropic-messages' | 'openai-compatible';
 
@@ -64,6 +67,21 @@ export interface AgentCapabilities {
   authLoginSupported: boolean;
 }
 
+export interface AgentEndpointSelection {
+  model: string;
+  apiProviderId: string;
+  modelEndpointId: string;
+  modelProtocol: ApiProtocol;
+  isLocal: boolean;
+  apiProvider: StoredApiProvider;
+  endpoint: StoredApiProviderEndpoint;
+}
+
+export interface AgentEndpointRuntimeConfig {
+  envOverrides?: Record<string, string>;
+  codexConfig?: CodexProviderConfig;
+}
+
 export interface ForkAgentSessionArgs {
   sourceSession: AgentChatEntry;
   sourceChatId: string;
@@ -79,6 +97,7 @@ export interface Agent {
   transcript: AgentTranscriptSource;
   auth: AgentAuth;
   capabilities: AgentCapabilities;
+  prepareEndpointRuntime?(selection: AgentEndpointSelection): AgentEndpointRuntimeConfig | undefined;
   forkSession?(args: ForkAgentSessionArgs): Promise<StartedAgentSession | null>;
   runSingleQuery?(prompt: string, options?: Record<string, unknown>): Promise<string>;
 }

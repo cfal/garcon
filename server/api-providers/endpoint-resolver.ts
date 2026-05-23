@@ -16,7 +16,6 @@ import type {
   StoredApiProvider,
   StoredApiProviderEndpoint,
 } from "./store.js";
-import type { CodexConfigObject, CodexProviderConfig } from "../agents/session-types.js";
 
 export interface ResolvedModelSelection {
   model: string;
@@ -24,8 +23,6 @@ export interface ResolvedModelSelection {
   endpointId: string | null;
   protocol: ApiProtocol | null;
   isLocal: boolean;
-  envOverrides?: Record<string, string>;
-  codexConfig?: CodexProviderConfig;
 }
 
 export type ModelSelectionErrorCode =
@@ -97,16 +94,12 @@ export class ApiProviderEndpointResolver {
     this.#assertEndpointCompatible(agentId, resolved.endpoint);
 
     const matchedModel = this.#resolveModel(resolved.apiProvider, resolved.endpoint, input.model);
-    const envOverrides = buildEnvOverrides(agentId, resolved.endpoint);
-    const codexConfig = buildCodexProviderConfig(agentId, resolved.apiProvider, resolved.endpoint);
     return {
       model: matchedModel.rawModel,
       apiProviderId: resolved.apiProvider.id,
       endpointId: resolved.endpoint.id,
       protocol: resolved.endpoint.protocol,
       isLocal: matchedModel.isLocal,
-      envOverrides,
-      ...(codexConfig ? { codexConfig } : {}),
     };
   }
 
@@ -126,6 +119,14 @@ export class ApiProviderEndpointResolver {
       return m.value === input.model || rawModel === selectedRawModel;
     });
     return matched?.supportsImages ?? resolved.endpoint.supportsImages;
+  }
+
+  resolveEndpointReference(selection: ResolvedModelSelection): {
+    apiProvider: StoredApiProvider;
+    endpoint: StoredApiProviderEndpoint;
+  } | null {
+    if (!selection.apiProviderId || !selection.endpointId) return null;
+    return this.#requireEndpoint(selection.apiProviderId, selection.endpointId);
   }
 
   #requireEndpoint(apiProviderId: string, endpointId: string): { apiProvider: StoredApiProvider; endpoint: StoredApiProviderEndpoint } {
@@ -166,69 +167,6 @@ export class ApiProviderEndpointResolver {
       isLocal: matched.isLocal === true || endpoint.modelDiscovery === 'ollama-tags' || apiProvider.templateId === 'ollama',
     };
   }
-}
-
-function buildEnvOverrides(
-  agentId: AgentId,
-  endpoint: StoredApiProviderEndpoint,
-): Record<string, string> | undefined {
-  if (agentId === 'claude' && endpoint.protocol === 'anthropic-messages') {
-    return {
-      ANTHROPIC_BASE_URL: endpoint.baseUrl,
-      ...(endpoint.apiKey ? { ANTHROPIC_AUTH_TOKEN: endpoint.apiKey } : {}),
-      ANTHROPIC_API_KEY: '',
-    };
-  }
-
-  return undefined;
-}
-
-function buildCodexProviderConfig(
-  agentId: AgentId,
-  apiProvider: StoredApiProvider,
-  endpoint: StoredApiProviderEndpoint,
-): CodexProviderConfig | undefined {
-  if (agentId !== 'codex' || endpoint.protocol !== 'openai-compatible') {
-    return undefined;
-  }
-  if (!endpoint.capabilities?.responses) {
-    return undefined;
-  }
-
-  const providerId = codexProviderIdForEndpoint(endpoint.id);
-  const envKey = endpoint.apiKey ? codexApiKeyEnvForEndpoint(endpoint.id) : null;
-  const providerConfig: CodexConfigObject = {
-    name: apiProvider.label || endpoint.id,
-    base_url: endpoint.baseUrl,
-    wire_api: 'responses',
-    requires_openai_auth: false,
-    supports_websockets: false,
-  };
-
-  if (envKey) {
-    providerConfig.env_key = envKey;
-  }
-  if (endpoint.headers && Object.keys(endpoint.headers).length > 0) {
-    providerConfig.http_headers = { ...endpoint.headers };
-  }
-
-  return {
-    config: {
-      model_provider: providerId,
-      model_providers: {
-        [providerId]: providerConfig,
-      },
-    },
-    ...(envKey ? { env: { [envKey]: endpoint.apiKey } } : {}),
-  };
-}
-
-function codexProviderIdForEndpoint(endpointId: string): string {
-  return `garcon_${endpointId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
-}
-
-function codexApiKeyEnvForEndpoint(endpointId: string): string {
-  return `GARCON_CODEX_PROVIDER_API_KEY_${endpointId.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
 }
 
 export function assertSameApiProviderBoundary(previous: ResolvedModelSelection, next: ResolvedModelSelection): void {

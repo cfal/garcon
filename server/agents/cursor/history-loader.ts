@@ -294,7 +294,7 @@ function textFromPart(part: unknown, role: 'assistant' | 'user'): string {
   return text ? unwrapUserQueryText(text, role) : '';
 }
 
-function providerRequestIdFromContent(content: Record<string, unknown>, nestedMessage: Record<string, unknown>): string | undefined {
+function upstreamRequestIdFromContent(content: Record<string, unknown>, nestedMessage: Record<string, unknown>): string | undefined {
   const cursorOptions = asObject(asObject(content.providerOptions).cursor);
   const nestedCursorOptions = asObject(asObject(nestedMessage.providerOptions).cursor);
   return asString(
@@ -341,8 +341,8 @@ function normalizeCursorContent(content: Record<string, unknown>, blob: CursorMe
 
   const role = roleValue === 'user' ? 'user' : 'assistant';
   const rawContent = content.content ?? nestedMessage.content;
-  const providerRequestId = role === 'user' ? providerRequestIdFromContent(content, nestedMessage) : undefined;
-  const userMetadata = providerRequestId ? { providerRequestId } : undefined;
+  const upstreamRequestId = role === 'user' ? upstreamRequestIdFromContent(content, nestedMessage) : undefined;
+  const userMetadata = upstreamRequestId ? { upstreamRequestId } : undefined;
 
   if (Array.isArray(rawContent)) {
     for (let partIndex = 0; partIndex < rawContent.length; partIndex += 1) {

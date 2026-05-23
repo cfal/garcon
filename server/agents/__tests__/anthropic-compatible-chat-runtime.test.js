@@ -3,12 +3,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  AnthropicCompatibleChatProvider,
+  AnthropicCompatibleChatRuntime,
   anthropicMessagesUrl,
   buildAnthropicCompatibleHeaders,
   buildAnthropicCompatibleUserContent,
   runAnthropicCompatibleSingleQuery,
-} from '../direct/anthropic-compatible-chat-provider.ts';
+} from '../direct/anthropic-compatible-chat-runtime.ts';
 
 const originalFetch = globalThis.fetch;
 const createdDirs = [];
@@ -29,15 +29,15 @@ function streamResponse(chunks) {
 }
 
 async function tempDir() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-anthropic-provider-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-anthropic-runtime-'));
   createdDirs.push(dir);
   return dir;
 }
 
-function makeProvider(dir, overrides = {}) {
-  return new AnthropicCompatibleChatProvider({
-    providerId: 'direct-anthropic-compatible',
-    providerLabel: 'Direct (Anthropic)',
+function makeRuntime(dir, overrides = {}) {
+  return new AnthropicCompatibleChatRuntime({
+    runtimeId: 'direct-anthropic-compatible',
+    runtimeLabel: 'Direct (Anthropic)',
     defaultModel: 'acme-sonnet',
     fallbackModels: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
     getApiKey: () => 'sk-ant',
@@ -48,13 +48,13 @@ function makeProvider(dir, overrides = {}) {
   });
 }
 
-function waitForMessages(provider) {
+function waitForMessages(runtime) {
   return new Promise((resolve) => {
-    provider.onMessages((_chatId, messages) => resolve(messages));
+    runtime.onMessages((_chatId, messages) => resolve(messages));
   });
 }
 
-describe('AnthropicCompatibleChatProvider', () => {
+describe('AnthropicCompatibleChatRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
     for (const dir of createdDirs.splice(0)) {
@@ -108,10 +108,10 @@ describe('AnthropicCompatibleChatProvider', () => {
       ]);
     });
 
-    const provider = makeProvider(dir);
-    const messagesPromise = waitForMessages(provider);
+    const runtime = makeRuntime(dir);
+    const messagesPromise = waitForMessages(runtime);
 
-    await provider.startSession({
+    await runtime.startSession({
       chatId: 'chat-1',
       command: 'hello?',
       projectPath: '/tmp/project',
@@ -148,12 +148,12 @@ describe('AnthropicCompatibleChatProvider', () => {
       ]);
     });
 
-    const provider = makeProvider(dir, {
+    const runtime = makeRuntime(dir, {
       defaultModel: 'fallback-model',
       fallbackModels: [{ value: 'fallback-model', label: 'Fallback' }],
     });
 
-    await provider.runTurn({
+    await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: sessionId,
       command: 'second message',
@@ -185,8 +185,8 @@ describe('AnthropicCompatibleChatProvider', () => {
     });
 
     const result = await runAnthropicCompatibleSingleQuery({
-      providerId: 'direct-anthropic-compatible',
-      providerLabel: 'Direct (Anthropic)',
+      runtimeId: 'direct-anthropic-compatible',
+      runtimeLabel: 'Direct (Anthropic)',
       defaultModel: 'acme-sonnet',
       fallbackModels: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
       getApiKey: () => 'sk-ant',

@@ -1,4 +1,4 @@
-// Permission flow tests for OpenCodeProvider (V2-only).
+// Permission flow tests for OpenCodeRuntime (V2-only).
 // Tests permission extraction, decision mapping, guard paths, and the full
 // permission lifecycle through the SSE event stream.
 
@@ -201,12 +201,12 @@ describe('mapPermissionMode', () => {
   });
 });
 
-describe('OpenCodeProvider resolvePermission guards', () => {
+describe('OpenCodeRuntime resolvePermission guards', () => {
   let provider;
   let client;
 
   beforeEach(async () => {
-    const { OpenCodeProvider } = await import('../opencode/opencode.js');
+    const { OpenCodeRuntime } = await import('../opencode/opencode.js');
     client = {
       permission: { reply: mock(() => Promise.resolve({ data: true })) },
       event: { subscribe: mock(() => Promise.resolve({ stream: [] })) },
@@ -219,7 +219,7 @@ describe('OpenCodeProvider resolvePermission guards', () => {
         list: mock(() => Promise.resolve({ data: { all: [], connected: [] } })),
       },
     };
-    provider = new OpenCodeProvider({
+    provider = new OpenCodeRuntime({
       createInstance: mock(() => Promise.resolve({
         client,
         server: { close: () => {} },

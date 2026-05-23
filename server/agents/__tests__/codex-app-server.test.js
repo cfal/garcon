@@ -8,7 +8,7 @@ import { buildApprovalResponse, createPendingApproval } from '../codex/app-serve
 import { CodexAppServerClient } from '../codex/app-server/client.ts';
 import { convertCodexAppServerLiveItem, convertCodexAppServerThread, getCodexThreadPreview } from '../codex/app-server/converter.ts';
 import { waitForMaterializedThread } from '../codex/app-server/durability.ts';
-import { CodexAppServerProvider } from '../codex/app-server/provider.ts';
+import { CodexAppServerRuntime } from '../codex/app-server/runtime.ts';
 import {
   buildThreadForkParams,
   buildThreadResumeParams,
@@ -404,7 +404,7 @@ describe('Codex app-server approvals', () => {
   });
 });
 
-describe('CodexAppServerProvider', () => {
+describe('CodexAppServerRuntime', () => {
   let tmpDir;
 
   beforeEach(async () => {
@@ -424,7 +424,7 @@ describe('CodexAppServerProvider', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
 
     await expect(provider.startSession(makeRequest())).resolves.toEqual({
       agentSessionId: 'thread-1',
@@ -452,7 +452,7 @@ describe('CodexAppServerProvider', () => {
         }),
       }),
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
 
     const messages = await provider.loadMessages({
       provider: 'codex',
@@ -479,7 +479,7 @@ describe('CodexAppServerProvider', () => {
         throw new Error('thread not loaded: thread-1');
       },
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
 
     const resolvedPath = await provider.resolveNativePath({
       provider: 'codex',
@@ -502,7 +502,7 @@ describe('CodexAppServerProvider', () => {
         throw new Error('thread not loaded: thread-1');
       },
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
 
     await expect(provider.resolveNativePath({
       provider: 'codex',
@@ -520,7 +520,7 @@ describe('CodexAppServerProvider', () => {
         thread: makeThread({ preview: 'Preview text' }),
       }),
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
 
     const preview = await provider.getPreview({
       provider: 'codex',
@@ -541,7 +541,7 @@ describe('CodexAppServerProvider', () => {
         backwardsCursor: null,
       }),
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
 
     const preview = await provider.getPreview({
       provider: 'codex',
@@ -567,7 +567,7 @@ describe('CodexAppServerProvider', () => {
       unsubscribeThread: async () => ({ status: 'unsubscribed' }),
     });
     const clientOptions = [];
-    const provider = new CodexAppServerProvider({
+    const provider = new CodexAppServerRuntime({
       createClient: (options) => {
         clientOptions.push(options);
         return operationClient;
@@ -618,7 +618,7 @@ describe('CodexAppServerProvider', () => {
         backwardsCursor: null,
       }),
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
     await provider.startSession(makeRequest());
     const session = {
       provider: 'codex',
@@ -656,7 +656,7 @@ describe('CodexAppServerProvider', () => {
         }),
       }),
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake, terminalBackfillTimeoutMs: 20 });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, terminalBackfillTimeoutMs: 20 });
     const emitted = [];
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -695,7 +695,7 @@ describe('CodexAppServerProvider', () => {
       }),
     });
     const clients = [active, utility];
-    const provider = new CodexAppServerProvider({ createClient: () => clients.shift(), terminalBackfillTimeoutMs: 20 });
+    const provider = new CodexAppServerRuntime({ createClient: () => clients.shift(), terminalBackfillTimeoutMs: 20 });
     const emitted = [];
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     const originalWarn = console.warn;
@@ -735,7 +735,7 @@ describe('CodexAppServerProvider', () => {
         }),
       }),
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake, terminalBackfillTimeoutMs: 20 });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, terminalBackfillTimeoutMs: 20 });
     const emitted = [];
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -772,7 +772,7 @@ describe('CodexAppServerProvider', () => {
         }),
       }),
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake, terminalBackfillTimeoutMs: 20 });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, terminalBackfillTimeoutMs: 20 });
     const emitted = [];
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -806,7 +806,7 @@ describe('CodexAppServerProvider', () => {
         return { thread: makeThread({ id: threadId, preview: threadId }) };
       },
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
 
     const first = provider.getPreview({
       provider: 'codex',
@@ -845,7 +845,7 @@ describe('CodexAppServerProvider', () => {
         return { thread: makeThread({ preview: 'Recovered preview' }) };
       },
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
 
     const preview = await provider.getPreview({
       provider: 'codex',
@@ -867,7 +867,7 @@ describe('CodexAppServerProvider', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
     await provider.startSession(makeRequest());
 
     const emitted = [];
@@ -895,7 +895,7 @@ describe('CodexAppServerProvider', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerProvider({ createClient: () => fake });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
 

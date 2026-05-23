@@ -1,12 +1,13 @@
 import type { ChatMessage } from '../../../common/chat-types.js';
 import { runSingleQuery as runSingleQueryCodex } from './app-server/run-single-query.js';
-import type { CodexAppServerProvider } from './app-server/provider.js';
+import type { CodexAppServerRuntime } from './app-server/runtime.js';
 import { getCodexAuthStatus } from './codex-auth.js';
 import { launchAgentAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import type { Agent } from '../types.js';
+import { buildCodexAppServerEndpointRuntime } from './app-server/endpoint-runtime.js';
 
-export function createCodexAgent(codex: CodexAppServerProvider): Agent {
+export function createCodexAgent(codex: CodexAppServerRuntime): Agent {
   return {
     id: 'codex',
     label: 'Codex',
@@ -33,6 +34,7 @@ export function createCodexAgent(codex: CodexAppServerProvider): Agent {
       supportedProtocols: ['openai-compatible'],
       authLoginSupported: true,
     }),
+    prepareEndpointRuntime: buildCodexAppServerEndpointRuntime,
     forkSession(args) {
       return codex.forkSession(args);
     },

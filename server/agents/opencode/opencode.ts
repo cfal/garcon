@@ -158,7 +158,7 @@ interface PendingPermission {
   chatId: string;
 }
 
-interface OpenCodeProviderOptions {
+interface OpenCodeRuntimeOptions {
   startupTimeoutMs?: number;
   modelDiscoveryTimeoutMs?: number;
   requestTimeoutMs?: number;
@@ -171,7 +171,7 @@ interface OpenCodeProviderOptions {
   }) => Promise<OpenCodeInstance>;
 }
 
-interface NormalizedOpenCodeProviderOptions {
+interface NormalizedOpenCodeRuntimeOptions {
   startupTimeoutMs: number;
   modelDiscoveryTimeoutMs: number;
   requestTimeoutMs: number;
@@ -209,7 +209,7 @@ class OpenCodeTimeoutError extends Error {
   }
 }
 
-function normalizeOptions(options: OpenCodeProviderOptions): NormalizedOpenCodeProviderOptions {
+function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRuntimeOptions {
   return {
     startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS,
     modelDiscoveryTimeoutMs: options.modelDiscoveryTimeoutMs ?? DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS,
@@ -377,7 +377,7 @@ async function createOpenCodeInstance(input: {
   };
 }
 
-export class OpenCodeProvider extends AgentEventEmitterRuntime {
+export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #instance: OpenCodeInstance | null = null;
   #initPromise: Promise<OpenCodeInstance> | null = null;
   #sseListenerStarted = false;
@@ -392,9 +392,9 @@ export class OpenCodeProvider extends AgentEventEmitterRuntime {
   #unavailableReason = '';
 
   #available: boolean | null = null;
-  readonly #options: NormalizedOpenCodeProviderOptions;
+  readonly #options: NormalizedOpenCodeRuntimeOptions;
 
-  constructor(options: OpenCodeProviderOptions = {}) {
+  constructor(options: OpenCodeRuntimeOptions = {}) {
     super();
     this.#options = normalizeOptions(options);
   }
