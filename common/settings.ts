@@ -33,7 +33,17 @@ export interface GenerationUiSettings {
 
 export interface TelegramNotificationSettings {
   enabled?: boolean;
-  chatId?: string;
+}
+
+export interface RemoteTelegramStatus {
+  botTokenAvailable: boolean;
+  botUsername: string | null;
+  botFirstName: string | null;
+  recipientUsername: string | null;
+  recipientDisplayName: string | null;
+  recipientLinked: boolean;
+  pendingLink: boolean;
+  linkUrl: string | null;
 }
 
 export interface RemoteUiSettings {
@@ -84,7 +94,7 @@ export interface RemoteSettingsSnapshot {
   lastClaudeThinkingMode: ClaudeThinkingMode;
   lastAmpAgentMode: AmpAgentMode;
   projectBasePath: string;
-  telegramBotTokenAvailable: boolean;
+  telegram: RemoteTelegramStatus;
 }
 
 export interface UpdateRemoteSettingsInput {
@@ -179,17 +189,14 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
   const notifications = asRecord(raw.notifications);
   if (notifications) {
     const telegramRaw = asRecord(notifications.telegram);
-    if (telegramRaw) {
-      const telegramSettings: TelegramNotificationSettings = {};
-      if (typeof telegramRaw.enabled === 'boolean') {
-        telegramSettings.enabled = telegramRaw.enabled;
-      }
-      if (typeof telegramRaw.chatId === 'string') {
-        telegramSettings.chatId = telegramRaw.chatId;
-      }
-      if (Object.keys(telegramSettings).length > 0) {
-        normalized.notifications = { telegram: telegramSettings };
-      }
+      if (telegramRaw) {
+        const telegramSettings: TelegramNotificationSettings = {};
+        if (typeof telegramRaw.enabled === 'boolean') {
+          telegramSettings.enabled = telegramRaw.enabled;
+        }
+        if (Object.keys(telegramSettings).length > 0) {
+          normalized.notifications = { telegram: telegramSettings };
+        }
     }
   }
 
@@ -225,6 +232,41 @@ function normalizeRemoteSettingsVersion(value: unknown): number | null {
     : null;
 }
 
+function normalizeNullableString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function normalizeRemoteTelegramStatus(value: unknown): RemoteTelegramStatus | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  if (typeof raw.botTokenAvailable !== 'boolean') return null;
+  if (typeof raw.recipientLinked !== 'boolean') return null;
+  if (typeof raw.pendingLink !== 'boolean') return null;
+
+  const botUsername = normalizeNullableString(raw.botUsername);
+  const botFirstName = normalizeNullableString(raw.botFirstName);
+  const recipientUsername = normalizeNullableString(raw.recipientUsername);
+  const recipientDisplayName = normalizeNullableString(raw.recipientDisplayName);
+  const linkUrl = normalizeNullableString(raw.linkUrl);
+
+  if (botUsername === null && raw.botUsername !== undefined && raw.botUsername !== null) return null;
+  if (botFirstName === null && raw.botFirstName !== undefined && raw.botFirstName !== null) return null;
+  if (recipientUsername === null && raw.recipientUsername !== undefined && raw.recipientUsername !== null) return null;
+  if (recipientDisplayName === null && raw.recipientDisplayName !== undefined && raw.recipientDisplayName !== null) return null;
+  if (linkUrl === null && raw.linkUrl !== undefined && raw.linkUrl !== null) return null;
+
+  return {
+    botTokenAvailable: raw.botTokenAvailable,
+    botUsername,
+    botFirstName,
+    recipientUsername,
+    recipientDisplayName,
+    recipientLinked: raw.recipientLinked,
+    pendingLink: raw.pendingLink,
+    linkUrl,
+  };
+}
+
 export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsSnapshot | null {
   const raw = asRecord(value);
   if (!raw) return null;
@@ -240,6 +282,7 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
   const lastApiProviderId = safeOptionalId(raw.lastApiProviderId);
   const lastModelEndpointId = safeOptionalId(raw.lastModelEndpointId);
   const lastModelProtocol = safeOptionalProtocol(raw.lastModelProtocol);
+  const telegram = normalizeRemoteTelegramStatus(raw.telegram);
 
   if (version === null) return null;
   if (!ui || !uiEffective || !paths || !pinnedChatIds) return null;
@@ -249,7 +292,7 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
   if (!isThinkingMode(raw.lastThinkingMode)) return null;
   if (!isClaudeThinkingMode(raw.lastClaudeThinkingMode)) return null;
   if (!isAmpAgentMode(raw.lastAmpAgentMode)) return null;
-  if (typeof raw.telegramBotTokenAvailable !== 'boolean') return null;
+  if (!telegram) return null;
 
   return {
     version,
@@ -268,6 +311,6 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
     lastClaudeThinkingMode: raw.lastClaudeThinkingMode,
     lastAmpAgentMode: raw.lastAmpAgentMode,
     projectBasePath,
-    telegramBotTokenAvailable: raw.telegramBotTokenAvailable,
+    telegram,
   };
 }

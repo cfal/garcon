@@ -65,7 +65,10 @@ interface TurnResult {
 
 interface TelegramConfig {
   enabled: boolean;
-  chatId: string;
+}
+
+interface TelegramSettingsDep {
+  getRecipientChatId(): string;
 }
 
 export class AttentionTracker {
@@ -75,6 +78,7 @@ export class AttentionTracker {
   #registry: ChatRegistryDep;
   #history: HistoryCacheDep;
   #telegram: TelegramNotifier;
+  #telegramSettings: TelegramSettingsDep;
 
   // Tracks pending permission request IDs per chat to avoid duplicate
   // notifications and to suppress idle notifications when a permission
@@ -95,6 +99,7 @@ export class AttentionTracker {
     registry: ChatRegistryDep,
     history: HistoryCacheDep,
     telegram: TelegramNotifier,
+    telegramSettings: TelegramSettingsDep,
   ) {
     this.#agents = agents;
     this.#queue = queue;
@@ -102,6 +107,7 @@ export class AttentionTracker {
     this.#registry = registry;
     this.#history = history;
     this.#telegram = telegram;
+    this.#telegramSettings = telegramSettings;
 
     this.#wire();
   }
@@ -283,8 +289,9 @@ export class AttentionTracker {
     if (!this.#telegram.isConfigured) return;
     try {
       const config = await this.#getTelegramConfig();
-      if (!config.enabled || !config.chatId) return;
-      const ok = await this.#telegram.send(config.chatId, html, 'HTML');
+      const chatId = this.#telegramSettings.getRecipientChatId();
+      if (!config.enabled || !chatId) return;
+      const ok = await this.#telegram.send(chatId, html, 'HTML');
       if (!ok) {
         console.warn(`attention: telegram delivery failed for chat ${chatId}`);
       }
@@ -299,7 +306,6 @@ export class AttentionTracker {
     const telegram = (notifications?.telegram ?? {}) as Record<string, unknown>;
     return {
       enabled: telegram.enabled === true,
-      chatId: typeof telegram.chatId === 'string' ? telegram.chatId : '',
     };
   }
 }

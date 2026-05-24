@@ -34,7 +34,6 @@ Environment Variables:
   GARCON_WS_BACKPRESSURE_LIMIT     WebSocket backpressure limit (bytes). Default: 2097152
   GARCON_WS_MAX_PAYLOAD_LENGTH     WebSocket max payload length (bytes). Default: 16777216
   GARCON_HTTP_IDLE_TIMEOUT_SECONDS HTTP idle timeout seconds. Default: 120
-  GARCON_TELEGRAM_BOT_TOKEN        Telegram Bot API token for chat notifications.
   CLAUDE_BINARY                    Claude CLI binary path. Default: claude
   GARCON_CURSOR_BINARY             Cursor Agent CLI binary path. Default: cursor-agent
   CURSOR_API_KEY                   Cursor Agent API key for native Cursor sessions.

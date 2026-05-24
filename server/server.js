@@ -14,7 +14,6 @@ import {
   getHttpIdleTimeoutSeconds,
   getWorkspaceDir,
   isAuthDisabled,
-  getTelegramBotToken,
 } from './config.js';
 import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/http-route.js';
@@ -40,6 +39,7 @@ import { CommandLedger } from './commands/command-ledger.js';
 import { ChatCommandService } from './commands/chat-command-service.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
+import { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
 import {
   AgentRunOutputMessage,
@@ -132,15 +132,11 @@ export async function startServer() {
     });
 
     // Telegram notifications wire themselves to agent and queue events.
-    const telegramNotifier = new TelegramNotifier(getTelegramBotToken());
-    // Fall back to persisted bot token if env var is empty.
-    if (!telegramNotifier.isConfigured) {
-      const uiSettings = await settings.getUiSettings();
-      const persistedToken = uiSettings?.notifications?.telegram?.botToken;
-      if (persistedToken) telegramNotifier.setBotToken(persistedToken);
-    }
+    const telegramSettings = new TelegramSettingsStore();
+    await telegramSettings.init();
+    const telegramNotifier = new TelegramNotifier(telegramSettings.getBotToken());
     // eslint-disable-next-line no-unused-vars
-    const _attentionTracker = new AttentionTracker(agentRegistry, queue, settings, chatRegistry, historyCache, telegramNotifier);
+    const _attentionTracker = new AttentionTracker(agentRegistry, queue, settings, chatRegistry, historyCache, telegramNotifier, telegramSettings);
 
     // Start agent runtime purge timers.
     agentRegistry.startPurgeTimers();
@@ -155,7 +151,7 @@ export async function startServer() {
     // Build route and WS handler tables
     const routes = createAllRoutes(
       chatRegistry, settings, queue, pathCache, metadata, historyCache,
-      agentRegistry, pendingInputs, telegramNotifier, shareStore, apiProviders, chatCommands,
+      agentRegistry, pendingInputs, telegramNotifier, telegramSettings, shareStore, apiProviders, chatCommands,
     );
 
     const chatHandler = new ChatHandler(agentRegistry, queue, historyCache, chatRegistry, pendingInputs, {
@@ -308,13 +304,18 @@ export async function startServer() {
     settings.onListChanged((reason, chatId) => {
       broadcast(new ChatListRefreshRequestedMessage(reason, chatId));
     });
-    settings.onRemoteSettingsChanged(async () => {
+    const broadcastRemoteSettings = async () => {
       try {
-        const snapshot = await buildRemoteSettingsSnapshot({ settings, agents: agentRegistry });
+        const snapshot = await buildRemoteSettingsSnapshot({ settings, agents: agentRegistry, telegramSettings });
         broadcast(new SettingsChangedMessage(snapshot));
       } catch (err) {
         console.warn('server: failed to broadcast settings-changed:', err.message);
       }
+    };
+    settings.onRemoteSettingsChanged(broadcastRemoteSettings);
+    telegramSettings.onChanged(() => {
+      telegramNotifier.setBotToken(telegramSettings.getBotToken());
+      void broadcastRemoteSettings();
     });
     chatRegistry.onChatRemoved((chatId) => {
       pendingInputs.clearChat(chatId, 'chat-removed');

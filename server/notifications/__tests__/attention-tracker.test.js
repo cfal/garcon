@@ -25,7 +25,7 @@ function createMockQueue() {
   };
 }
 
-function createMockSettings(telegramConfig = { enabled: true, chatId: '99999' }) {
+function createMockSettings(telegramConfig = { enabled: true }) {
   return {
     getUiSettings: mock(() => Promise.resolve({
       notifications: { telegram: telegramConfig },
@@ -56,8 +56,14 @@ function createMockTelegram() {
   };
 }
 
+function createMockTelegramSettings(chatId = '99999') {
+  return {
+    getRecipientChatId: mock(() => chatId),
+  };
+}
+
 describe('AttentionTracker', () => {
-  let agents, queue, settings, registry, history, telegram;
+  let agents, queue, settings, registry, history, telegram, telegramSettings;
 
   beforeEach(() => {
     agents = createMockAgentRegistry();
@@ -67,10 +73,11 @@ describe('AttentionTracker', () => {
     historyMessages = [];
     history = createMockHistory();
     telegram = createMockTelegram();
+    telegramSettings = createMockTelegramSettings();
   });
 
   function createTracker() {
-    return new AttentionTracker(agents, queue, settings, registry, history, telegram);
+    return new AttentionTracker(agents, queue, settings, registry, history, telegram, telegramSettings);
   }
 
   // Simulates a conversation round: adds messages to history and emits
@@ -262,7 +269,7 @@ describe('AttentionTracker', () => {
 
   describe('settings gating', () => {
     it('sends nothing when telegram is disabled', async () => {
-      settings = createMockSettings({ enabled: false, chatId: '99999' });
+      settings = createMockSettings({ enabled: false });
       createTracker();
       agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
@@ -271,8 +278,8 @@ describe('AttentionTracker', () => {
       expect(telegram.send).not.toHaveBeenCalled();
     });
 
-    it('sends nothing when chatId is empty', async () => {
-      settings = createMockSettings({ enabled: true, chatId: '' });
+    it('sends nothing when recipient is not linked', async () => {
+      telegramSettings = createMockTelegramSettings('');
       createTracker();
       agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');

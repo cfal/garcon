@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+	beginTelegramRecipientLink,
+	clearTelegramBotToken,
+	clearTelegramRecipient,
 	getRemoteSettings,
+	resolveTelegramRecipientLink,
+	saveTelegramBotToken,
+	sendTelegramTest,
+	testTelegramBotToken,
 	updateRemoteSettings,
 } from '../settings';
 
@@ -25,13 +32,22 @@ function makeSnapshot(overrides?: Record<string, unknown>) {
 		lastModelProtocol: null,
 		lastPermissionMode: 'default',
 		lastThinkingMode: 'none',
-		lastClaudeThinkingMode: 'auto',
-		lastAmpAgentMode: 'smart',
-		projectBasePath: '/workspace',
-		telegramBotTokenAvailable: false,
-		...overrides,
-	};
-}
+			lastClaudeThinkingMode: 'auto',
+			lastAmpAgentMode: 'smart',
+			projectBasePath: '/workspace',
+			telegram: {
+				botTokenAvailable: false,
+				botUsername: null,
+				botFirstName: null,
+				recipientUsername: null,
+				recipientDisplayName: null,
+				recipientLinked: false,
+				pendingLink: false,
+				linkUrl: null,
+			},
+			...overrides,
+		};
+	}
 
 describe('settings API contract', () => {
 	let fetchMock: ReturnType<typeof vi.fn>;
@@ -84,10 +100,135 @@ describe('settings API contract', () => {
 		await expect(getRemoteSettings()).rejects.toThrow('Invalid remote settings response');
 	});
 
+	it('drops raw Telegram bot tokens from remote settings payloads', async () => {
+		const payload = makeSnapshot({
+			ui: {
+				notifications: {
+					telegram: {
+						enabled: true,
+						chatId: '123',
+						botToken: 'secret-token',
+					},
+				},
+			},
+		});
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		const result = await getRemoteSettings();
+		const telegram = result.ui.notifications?.telegram as Record<string, unknown>;
+
+		expect(telegram.enabled).toBe(true);
+		expect(telegram.chatId).toBeUndefined();
+		expect(telegram.botToken).toBeUndefined();
+	});
+
 	it('rejects malformed PUT settings payloads', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true, settings: { version: 'oops' } }));
 
 		await expect(updateRemoteSettings({ ui: { pinnedInsertPosition: 'bottom' } }))
 			.rejects.toThrow('Invalid remote settings update response');
+	});
+
+	it('saves Telegram bot token without expecting the token in the response', async () => {
+		const snapshot = makeSnapshot({
+			telegram: {
+				botTokenAvailable: true,
+				botUsername: 'garcon_bot',
+				botFirstName: 'Garcon',
+					recipientUsername: null,
+					recipientDisplayName: null,
+					recipientLinked: false,
+					pendingLink: true,
+					linkUrl: 'https://t.me/garcon_bot?start=abc',
+				},
+			});
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, settings: snapshot }));
+
+		const result = await saveTelegramBotToken('secret-token');
+
+			expect(result.settings.telegram.botTokenAvailable).toBe(true);
+			expect(result.settings.telegram.linkUrl).toBe('https://t.me/garcon_bot?start=abc');
+			const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/app/telegram/token');
+		expect(opts.method).toBe('PUT');
+		expect(JSON.parse(opts.body)).toEqual({ botToken: 'secret-token' });
+	});
+
+	it('clears Telegram bot token and returns the canonical settings snapshot', async () => {
+		const snapshot = makeSnapshot();
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, settings: snapshot }));
+
+		const result = await clearTelegramBotToken();
+
+		expect(result.settings.telegram.botTokenAvailable).toBe(false);
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/app/telegram/token');
+		expect(opts.method).toBe('DELETE');
+	});
+
+	it('tests a Telegram token through the token test endpoint', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			success: true,
+			bot: { id: 123, username: 'garcon_bot', firstName: 'Garcon' },
+		}));
+
+		const result = await testTelegramBotToken('secret-token');
+
+		expect(result.bot.username).toBe('garcon_bot');
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/app/telegram/token/test');
+		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toEqual({ botToken: 'secret-token' });
+	});
+
+	it('creates and resolves a Telegram recipient link', async () => {
+		const pending = makeSnapshot({
+			telegram: {
+				botTokenAvailable: true,
+				botUsername: 'garcon_bot',
+				botFirstName: 'Garcon',
+				recipientUsername: null,
+				recipientDisplayName: null,
+				recipientLinked: false,
+				pendingLink: true,
+				linkUrl: 'https://t.me/garcon_bot?start=abc',
+			},
+		});
+		const linked = makeSnapshot({
+			telegram: {
+				...pending.telegram,
+				recipientUsername: 'alice',
+				recipientDisplayName: 'Alice',
+				recipientLinked: true,
+				pendingLink: false,
+				linkUrl: null,
+			},
+		});
+		fetchMock
+			.mockResolvedValueOnce(jsonResponse({ success: true, linkUrl: pending.telegram.linkUrl, settings: pending }))
+			.mockResolvedValueOnce(jsonResponse({ success: true, settings: linked }));
+
+		const link = await beginTelegramRecipientLink();
+		const resolved = await resolveTelegramRecipientLink();
+
+		expect(link.linkUrl).toBe('https://t.me/garcon_bot?start=abc');
+		expect(resolved.settings.telegram.recipientLinked).toBe(true);
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/app/telegram/recipient/link');
+		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/app/telegram/recipient/resolve');
+	});
+
+	it('clears Telegram recipient and sends test messages to the linked recipient', async () => {
+		const snapshot = makeSnapshot();
+		fetchMock
+			.mockResolvedValueOnce(jsonResponse({ success: true, settings: snapshot }))
+			.mockResolvedValueOnce(jsonResponse({ success: true }));
+
+		await clearTelegramRecipient();
+		await sendTelegramTest();
+
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/app/telegram/recipient');
+		expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
+		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/app/telegram/test');
+		expect(fetchMock.mock.calls[1][1].method).toBe('POST');
 	});
 });

@@ -5,9 +5,15 @@ import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import SettingsTestHost from './SettingsTestHost.svelte';
 
 vi.mock('$lib/api/settings.js', () => ({
+  beginTelegramRecipientLink: vi.fn(),
+  clearTelegramBotToken: vi.fn(),
+  clearTelegramRecipient: vi.fn(),
   getRemoteSettings: vi.fn(),
+  resolveTelegramRecipientLink: vi.fn(),
+  saveTelegramBotToken: vi.fn(),
   updateRemoteSettings: vi.fn(),
   sendTelegramTest: vi.fn(),
+  testTelegramBotToken: vi.fn(),
 }));
 
 vi.mock('$lib/api/agents.js', () => ({

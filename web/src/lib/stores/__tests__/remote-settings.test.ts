@@ -25,13 +25,22 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 		lastModelProtocol: null,
 		lastPermissionMode: 'default',
 		lastThinkingMode: 'none',
-		lastClaudeThinkingMode: 'auto',
-		lastAmpAgentMode: 'smart',
-		projectBasePath: '/workspace',
-		telegramBotTokenAvailable: false,
-		...overrides,
-	};
-}
+			lastClaudeThinkingMode: 'auto',
+			lastAmpAgentMode: 'smart',
+			projectBasePath: '/workspace',
+			telegram: {
+				botTokenAvailable: false,
+				botUsername: null,
+				botFirstName: null,
+				recipientUsername: null,
+				recipientDisplayName: null,
+				recipientLinked: false,
+				pendingLink: false,
+				linkUrl: null,
+			},
+			...overrides,
+		};
+	}
 
 describe('RemoteSettingsStore', () => {
 	beforeEach(() => {

@@ -6,7 +6,6 @@ mock.module('../../lib/http-request.js', () => ({
 
 mock.module('../../config.js', () => ({
   getProjectBasePath: mock(() => '/home'),
-  getTelegramBotToken: mock(() => ''),
 }));
 
 import createWorkspaceRoutes from '../workspace.js';
@@ -312,6 +311,230 @@ describe('PUT /api/app/settings', () => {
     expect(body.lastPermissionMode).toBeUndefined();
     expect(body.lastThinkingMode).toBeUndefined();
     expect(body.lastClaudeThinkingMode).toBeUndefined();
+  });
+});
+
+describe('Telegram token settings API', () => {
+  function createTelegramRoutes() {
+    const publicStatus = {
+      botTokenAvailable: false,
+      botUsername: null,
+      botFirstName: null,
+      recipientUsername: null,
+      recipientDisplayName: null,
+      recipientLinked: false,
+      pendingLink: false,
+      linkUrl: null,
+    };
+    const telegramNotifier = {
+      isConfigured: false,
+      getBotIdentity: mock(() => Promise.resolve({ id: 123, username: 'garcon_bot', firstName: 'Garcon' })),
+      resolveRecipientLink: mock(() => Promise.resolve({
+        recipient: {
+          chatId: '99999',
+          username: 'alice',
+          displayName: 'Alice',
+          nextOffset: 12,
+        },
+        nextOffset: 12,
+      })),
+      setBotToken: mock((botToken) => {
+        telegramNotifier.isConfigured = Boolean(botToken);
+      }),
+      send: mock(() => Promise.resolve(true)),
+    };
+    const telegramSettings = {
+      getBotToken: mock(() => 'secret-token'),
+      getRecipientChatId: mock(() => publicStatus.recipientLinked ? '99999' : ''),
+      getPendingLinkCode: mock(() => 'abc123'),
+      getUpdateOffset: mock(() => null),
+      getPublicStatus: mock(() => publicStatus),
+      setBotToken: mock((botToken, identity) => {
+        publicStatus.botTokenAvailable = Boolean(botToken);
+        publicStatus.botUsername = identity.username;
+        publicStatus.botFirstName = identity.firstName;
+        return Promise.resolve(undefined);
+      }),
+      clearBotToken: mock(() => {
+        publicStatus.botTokenAvailable = false;
+        publicStatus.botUsername = null;
+        publicStatus.botFirstName = null;
+        publicStatus.recipientUsername = null;
+        publicStatus.recipientDisplayName = null;
+        publicStatus.recipientLinked = false;
+        publicStatus.pendingLink = false;
+        publicStatus.linkUrl = null;
+        return Promise.resolve(undefined);
+      }),
+      beginRecipientLink: mock(() => {
+        publicStatus.pendingLink = true;
+        publicStatus.linkUrl = 'https://t.me/garcon_bot?start=abc123';
+        return Promise.resolve(publicStatus.linkUrl);
+      }),
+      setUpdateOffset: mock(() => Promise.resolve(undefined)),
+      completeRecipientLink: mock((recipient) => {
+        publicStatus.recipientLinked = true;
+        publicStatus.recipientUsername = recipient.username;
+        publicStatus.recipientDisplayName = recipient.displayName;
+        publicStatus.pendingLink = false;
+        publicStatus.linkUrl = null;
+        return Promise.resolve(undefined);
+      }),
+      clearRecipient: mock(() => {
+        publicStatus.recipientLinked = false;
+        publicStatus.recipientUsername = null;
+        publicStatus.recipientDisplayName = null;
+        publicStatus.pendingLink = false;
+        publicStatus.linkUrl = null;
+        return Promise.resolve(undefined);
+      }),
+    };
+    const routes = createWorkspaceRoutes(ctx.settings, ctx.agents, telegramNotifier, telegramSettings);
+    return { routes, telegramNotifier, telegramSettings, publicStatus };
+  }
+
+  beforeEach(() => {
+    ctx.settings.getUiSettings.mockClear();
+    ctx.settings.getPathSettings.mockClear();
+    ctx.settings.getRemoteSettingsVersion.mockClear();
+    ctx.settings.getPinnedChatIds.mockClear();
+    ctx.settings.getLastAgentId.mockClear();
+    ctx.settings.getLastProjectPath.mockClear();
+    ctx.settings.getLastModel.mockClear();
+    ctx.settings.getLastPermissionMode.mockClear();
+    ctx.settings.getLastThinkingMode.mockClear();
+    ctx.settings.getLastClaudeThinkingMode.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getModels.mockClear();
+    parseJsonBody.mockClear();
+  });
+
+  it('stores the bot token server-side and returns only token availability', async () => {
+    const { routes, telegramNotifier, telegramSettings } = createTelegramRoutes();
+    parseJsonBody.mockImplementation(() => Promise.resolve({ botToken: '  secret-token  ' }));
+
+    const response = await routes['/api/v1/app/telegram/token'].PUT(
+      makeRequest('http://localhost/api/app/telegram/token', 'PUT', { botToken: 'secret-token' }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.settings.telegram.botTokenAvailable).toBe(true);
+    expect(body.settings.telegram.botUsername).toBe('garcon_bot');
+    expect(body.settings.telegram.pendingLink).toBe(true);
+    expect(body.settings.telegram.linkUrl).toBe('https://t.me/garcon_bot?start=abc123');
+    expect(JSON.stringify(body)).not.toContain('secret-token');
+    expect(telegramNotifier.getBotIdentity).toHaveBeenCalledWith('secret-token');
+    expect(telegramSettings.setBotToken).toHaveBeenCalledWith(
+      'secret-token',
+      { id: 123, username: 'garcon_bot', firstName: 'Garcon' },
+    );
+    expect(telegramNotifier.setBotToken).toHaveBeenCalledWith('secret-token');
+    expect(telegramSettings.beginRecipientLink).toHaveBeenCalledWith();
+  });
+
+  it('does not store the bot token when Telegram validation fails', async () => {
+    const { routes, telegramNotifier, telegramSettings } = createTelegramRoutes();
+    telegramNotifier.getBotIdentity.mockImplementationOnce(() => Promise.reject(new Error('Unauthorized')));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ botToken: 'bad-token' }));
+
+    const response = await routes['/api/v1/app/telegram/token'].PUT(
+      makeRequest('http://localhost/api/app/telegram/token', 'PUT', { botToken: 'bad-token' }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.errorCode).toBe('telegram_token_test_failed');
+    expect(body.details).toBe('Unauthorized');
+    expect(telegramSettings.setBotToken).not.toHaveBeenCalled();
+    expect(telegramSettings.beginRecipientLink).not.toHaveBeenCalled();
+    expect(telegramNotifier.setBotToken).not.toHaveBeenCalled();
+  });
+
+  it('clears the bot token and returns unavailable status', async () => {
+    const { routes, telegramNotifier, telegramSettings } = createTelegramRoutes();
+    let uiSettings = { notifications: { telegram: { enabled: true } } };
+    telegramNotifier.isConfigured = true;
+    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve(uiSettings));
+    ctx.settings.setUiSettings.mockImplementation((patch) => {
+      uiSettings = { ...uiSettings, ...patch };
+      return Promise.resolve(uiSettings);
+    });
+
+    const response = await routes['/api/v1/app/telegram/token'].DELETE();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.settings.telegram.botTokenAvailable).toBe(false);
+    expect(body.settings.ui.notifications.telegram.enabled).toBe(false);
+    expect(telegramSettings.clearBotToken).toHaveBeenCalled();
+    expect(telegramNotifier.setBotToken).toHaveBeenCalledWith('');
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({
+      notifications: { telegram: { enabled: false } },
+    });
+  });
+
+  it('tests a typed Telegram token without saving it', async () => {
+    const { routes, telegramNotifier, telegramSettings } = createTelegramRoutes();
+    parseJsonBody.mockImplementation(() => Promise.resolve({ botToken: 'typed-token' }));
+
+    const response = await routes['/api/v1/app/telegram/token/test'].POST(
+      makeRequest('http://localhost/api/app/telegram/token/test', 'POST', { botToken: 'typed-token' }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.bot.username).toBe('garcon_bot');
+    expect(telegramNotifier.getBotIdentity).toHaveBeenCalledWith('typed-token');
+    expect(telegramSettings.setBotToken).not.toHaveBeenCalled();
+  });
+
+  it('creates and resolves a Telegram recipient link', async () => {
+    const { routes, telegramSettings, telegramNotifier } = createTelegramRoutes();
+
+    const linkResponse = await routes['/api/v1/app/telegram/recipient/link'].POST(
+      makeRequest('http://localhost/api/app/telegram/recipient/link', 'POST', {}),
+    );
+    const linkBody = await linkResponse.json();
+
+    expect(linkResponse.status).toBe(200);
+    expect(linkBody.linkUrl).toBe('https://t.me/garcon_bot?start=abc123');
+    expect(linkBody.settings.telegram.pendingLink).toBe(true);
+    expect(telegramSettings.beginRecipientLink).toHaveBeenCalledWith();
+
+    const resolveResponse = await routes['/api/v1/app/telegram/recipient/resolve'].POST();
+    const resolveBody = await resolveResponse.json();
+
+    expect(resolveResponse.status).toBe(200);
+    expect(resolveBody.settings.telegram.recipientLinked).toBe(true);
+    expect(telegramNotifier.resolveRecipientLink).toHaveBeenCalledWith('abc123', null, 20);
+    expect(telegramSettings.completeRecipientLink).toHaveBeenCalled();
+  });
+
+  it('sends test notification to the linked recipient only', async () => {
+    const { routes, publicStatus, telegramNotifier } = createTelegramRoutes();
+
+    let response = await routes['/api/v1/app/telegram/test'].POST(
+      makeRequest('http://localhost/api/app/telegram/test', 'POST', {}),
+    );
+    expect(response.status).toBe(400);
+
+    telegramNotifier.isConfigured = true;
+    publicStatus.recipientLinked = true;
+    response = await routes['/api/v1/app/telegram/test'].POST(
+      makeRequest('http://localhost/api/app/telegram/test', 'POST', {}),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(telegramNotifier.send).toHaveBeenCalledWith(
+      '99999',
+      'Garcon: test notification. Your Telegram integration is working.',
+    );
   });
 });
 

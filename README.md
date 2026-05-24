@@ -97,13 +97,14 @@ Useful options and environment variables:
 - `GARCON_WORKSPACE_DIR` / `--workspace-dir`: explicit workspace directory.
 - `GARCON_PROJECT_BASE_DIR` / `--project-base-dir`: filesystem access boundary.
 - `GARCON_TERMINAL_SHELL`: shell used by PTY sessions.
-- `GARCON_TELEGRAM_BOT_TOKEN`: enables Telegram notifications.
 - `CLAUDE_BINARY`, `AMP_BINARY`, `FACTORY_BINARY`: override CLI binary paths.
 - `GARCON_CODEX_CLI`: override the Codex CLI used for app-server.
 - `GARCON_CURSOR_BINARY`: override the Cursor Agent CLI binary path.
 - `CURSOR_API_KEY`: Cursor Agent API key for native Cursor sessions.
 - `GARCON_PI_BINARY` / `PI_BINARY`: override the Pi CLI binary path.
 - `PI_CODING_AGENT_SESSION_DIR`: optional Pi session directory override.
+
+Telegram notifications are configured from the server settings UI.
 
 Run `bun run help` for the full option list.
 

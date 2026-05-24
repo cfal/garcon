@@ -162,12 +162,21 @@ describe('parseServerWsMessage', () => {
 				lastModel: 'opus',
 				lastPermissionMode: 'default',
 				lastThinkingMode: 'none',
-				lastClaudeThinkingMode: 'auto',
-				lastAmpAgentMode: 'smart',
-				projectBasePath: '/workspace',
-				telegramBotTokenAvailable: false,
-			},
-		});
+					lastClaudeThinkingMode: 'auto',
+					lastAmpAgentMode: 'smart',
+					projectBasePath: '/workspace',
+					telegram: {
+						botTokenAvailable: false,
+						botUsername: null,
+						botFirstName: null,
+						recipientUsername: null,
+						recipientDisplayName: null,
+						recipientLinked: false,
+						pendingLink: false,
+						linkUrl: null,
+					},
+				},
+			});
 		expect(msg).toBeInstanceOf(SettingsChangedMessage);
 		expect((msg as SettingsChangedMessage).settings.version).toBe(2);
 		expect((msg as SettingsChangedMessage).settings.ui.pinnedInsertPosition).toBe('bottom');
