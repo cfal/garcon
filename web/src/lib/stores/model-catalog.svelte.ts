@@ -1,4 +1,5 @@
 import { apiFetch } from '$lib/api/client.js';
+import { getApiProviders } from '$lib/api/api-providers.js';
 import { agentLabelFor } from '$lib/i18n/agent-labels';
 import type { SessionAgentId } from '$lib/types/app';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS, PI_MODELS } from '$shared/models';
@@ -613,6 +614,17 @@ export class ModelCatalogStore {
 			this.isRefreshing = false;
 		}
 	}
+
+	async refreshApiProviders(): Promise<void> {
+		try {
+			const response = await getApiProviders();
+			this.apiProviderCatalog = response.apiProviders;
+			this.version += 1;
+		} catch (error) {
+			this.error = error instanceof Error ? error.message : 'Unknown error';
+		}
+	}
+
 }
 
 export function createModelCatalogStore(): ModelCatalogStore {
