@@ -80,7 +80,10 @@
 				if (endpoint.protocol === protocol) rows.push({ apiProvider, endpoint });
 			}
 		}
-		return rows;
+		return rows.sort((a, b) =>
+			a.apiProvider.label.localeCompare(b.apiProvider.label, undefined, { sensitivity: 'base' })
+			|| a.endpoint.baseUrl.localeCompare(b.endpoint.baseUrl, undefined, { sensitivity: 'base' })
+		);
 	});
 
 	function beginCreate(templateId: ApiProviderTemplateId) {

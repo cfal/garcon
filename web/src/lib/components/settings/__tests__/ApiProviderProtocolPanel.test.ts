@@ -124,4 +124,79 @@ describe('ApiProviderProtocolPanel', () => {
     expect(screen.queryByText('builtin')).toBeNull();
     expect(screen.queryByText('Disabled')).toBeNull();
   });
+
+  it('renders endpoint rows sorted alphabetically by provider label', () => {
+    render(ApiProviderProtocolPanelTestHost, {
+      protocol: 'openai-compatible',
+      title: 'OpenAI Providers',
+      description: 'Use OpenAI-compatible endpoints with Codex and Direct Chat. Direct Chat can use Chat Completions or Responses; Codex requires Responses API compatibility.',
+      addLabel: 'Add OpenAI-compatible provider',
+      apiProviderCatalog: [
+        {
+          id: 'zebra',
+          label: 'Zebra AI',
+          templateId: 'custom',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          endpoints: [
+            {
+              id: 'zebra_openai',
+              protocol: 'openai-compatible',
+              baseUrl: 'https://zebra.ai/v1',
+              capabilities: { chatCompletions: true, responses: false },
+              defaultModel: 'zebra-1',
+              models: [{ value: 'zebra-1', label: 'Zebra 1' }],
+              supportsImages: false,
+              hasApiKey: true,
+              modelDiscovery: 'openai-models'
+            }
+          ]
+        },
+        {
+          id: 'alpha',
+          label: 'Alpha Corp',
+          templateId: 'custom',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          endpoints: [
+            {
+              id: 'alpha_openai',
+              protocol: 'openai-compatible',
+              baseUrl: 'https://alpha.com/v1',
+              capabilities: { chatCompletions: true, responses: false },
+              defaultModel: 'alpha-1',
+              models: [{ value: 'alpha-1', label: 'Alpha 1' }],
+              supportsImages: false,
+              hasApiKey: true,
+              modelDiscovery: 'openai-models'
+            }
+          ]
+        },
+        {
+          id: 'middle',
+          label: 'Middle Inc',
+          templateId: 'custom',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          endpoints: [
+            {
+              id: 'middle_openai',
+              protocol: 'openai-compatible',
+              baseUrl: 'https://middle.io/v1',
+              capabilities: { chatCompletions: true, responses: false },
+              defaultModel: 'middle-1',
+              models: [{ value: 'middle-1', label: 'Middle 1' }],
+              supportsImages: false,
+              hasApiKey: true,
+              modelDiscovery: 'openai-models'
+            }
+          ]
+        }
+      ]
+    });
+
+    const labels = screen.getAllByText(/Alpha Corp|Middle Inc|Zebra AI/).map((el) => el.textContent);
+    expect(labels).toEqual(['Alpha Corp', 'Middle Inc', 'Zebra AI']);
+  });
+
 });
