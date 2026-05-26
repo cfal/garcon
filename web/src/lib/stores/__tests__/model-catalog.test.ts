@@ -6,13 +6,16 @@ vi.mock('$lib/api/client', () => ({
 	apiFetch: vi.fn()
 }));
 
-const STORAGE_KEY = 'pref_model_catalog_v2';
+const STORAGE_KEY = 'pref_model_catalog_v3';
+const LEGACY_STORAGE_KEY = 'pref_model_catalog_v2';
 const PI_MODEL = { value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true };
 
-function mockResponse(body: unknown, status = 200): Response {
+function mockResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
 	return {
 		ok: status >= 200 && status < 300,
 		status,
+		headers: new Headers(headers),
+		text: async () => '',
 		json: async () => body
 	} as unknown as Response;
 }
@@ -124,6 +127,59 @@ describe('ModelCatalogStore', () => {
 			{ value: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' }
 		]);
 		expect(store.isStale(60_000)).toBe(false);
+	});
+
+	it('migrates v2 snapshots without an etag and validates them on startup', async () => {
+		localStorage.setItem(
+			LEGACY_STORAGE_KEY,
+			JSON.stringify({
+				agentModels: {
+					opencode: [{ value: 'old/model', label: 'Old Model' }]
+				},
+				agentMetadata: {
+					opencode: {
+						id: 'opencode',
+						label: 'OpenCode',
+						supportsFork: false,
+						supportsImages: false,
+						acceptsApiProviderEndpoints: false,
+						supportedProtocols: [],
+						defaultModel: 'old/model'
+					}
+				},
+				apiProviderCatalog: [],
+				lastFetchedAt: Date.now()
+			})
+		);
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(
+			catalogBody([
+				{
+					id: 'opencode',
+					label: 'OpenCode',
+					kind: 'agent',
+					supportsFork: false,
+					supportsImages: false,
+					acceptsApiProviderEndpoints: false,
+					supportedProtocols: [],
+					defaultModel: 'new/model',
+					models: [{ value: 'new/model', label: 'New Model' }]
+				}
+			]),
+			200,
+			{ etag: 'W/"model-catalog:new"' }
+		));
+
+		const store = createModelCatalogStore();
+		expect(store.getModels('opencode')[0]?.value).toBe('old/model');
+		expect(store.etag).toBeNull();
+
+		await store.refreshIfStale();
+
+		expect(clientApi.apiFetch).toHaveBeenCalledWith('/api/v1/models');
+		expect(store.getModels('opencode')[0]?.value).toBe('new/model');
+		expect(store.etag).toBe('W/"model-catalog:new"');
+		expect(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').etag)
+			.toBe('W/"model-catalog:new"');
 	});
 
 	it('hydrates cached Pi entries as stored', () => {
@@ -307,6 +363,78 @@ describe('ModelCatalogStore', () => {
 		expect(store.getModels('opencode')).toEqual([{ value: 'moonshot/kimi-k2', label: 'Kimi K2' }]);
 		expect(store.getModels('claude').length).toBeGreaterThan(0);
 		expect(store.getModels('codex').length).toBeGreaterThan(0);
+	});
+
+	it('keeps hydrated models when the server returns 304', async () => {
+		const json = vi.fn();
+		localStorage.setItem(
+			STORAGE_KEY,
+			JSON.stringify({
+				agentModels: {
+					opencode: [{ value: 'moonshot/kimi-k2', label: 'Kimi K2' }]
+				},
+				agentMetadata: {
+					opencode: {
+						id: 'opencode',
+						label: 'OpenCode',
+						supportsFork: false,
+						supportsImages: false,
+						acceptsApiProviderEndpoints: false,
+						supportedProtocols: [],
+						defaultModel: 'moonshot/kimi-k2'
+					}
+				},
+				apiProviderCatalog: [],
+				etag: 'W/"model-catalog:cached"',
+				lastFetchedAt: 100,
+				lastValidatedAt: 100
+			})
+		);
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce({
+			ok: false,
+			status: 304,
+			headers: new Headers({ etag: 'W/"model-catalog:cached"' }),
+			text: async () => '',
+			json
+		} as unknown as Response);
+
+		const store = createModelCatalogStore();
+		await store.refreshIfStale();
+
+		expect(clientApi.apiFetch).toHaveBeenCalledWith('/api/v1/models', {
+			headers: { 'If-None-Match': 'W/"model-catalog:cached"' }
+		});
+		expect(json).not.toHaveBeenCalled();
+		expect(store.getModels('opencode')).toEqual([
+			{ value: 'moonshot/kimi-k2', label: 'Kimi K2' }
+		]);
+		expect(store.lastValidatedAt).toEqual(expect.any(Number));
+		expect(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').lastValidatedAt)
+			.toEqual(expect.any(Number));
+	});
+
+	it('does not revalidate repeatedly inside the validation retry window', async () => {
+		vi.mocked(clientApi.apiFetch).mockResolvedValue(
+			mockResponse(catalogBody([
+				{
+					id: 'opencode',
+					label: 'OpenCode',
+					kind: 'agent',
+					supportsFork: false,
+					supportsImages: false,
+					acceptsApiProviderEndpoints: false,
+					supportedProtocols: [],
+					defaultModel: 'moonshot/kimi-k2',
+					models: [{ value: 'moonshot/kimi-k2', label: 'Kimi K2' }]
+				}
+			]), 200, { etag: 'W/"model-catalog:fresh"' })
+		);
+
+		const store = createModelCatalogStore();
+		await store.refreshIfStale();
+		await store.refreshIfStale();
+
+		expect(clientApi.apiFetch).toHaveBeenCalledTimes(1);
 	});
 
 	it('parses catalog.agents and catalog.apiProviders from API response', async () => {
@@ -493,6 +621,7 @@ describe('ModelCatalogStore', () => {
 		expect(store.error).toBe('auth storage: auth.json is locked');
 		expect(store.getModels('pi')).toEqual([]);
 		expect(store.lastFetchedAt).toBeNull();
+		expect(store.lastValidatedAt).toBeNull();
 		expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
 	});
 
@@ -515,8 +644,12 @@ describe('ModelCatalogStore', () => {
 		expect(store.error).toBe('auth storage: auth.json is locked');
 		expect(store.getModels('pi')).toEqual([PI_MODEL]);
 		expect(store.lastFetchedAt).toBeNull();
+		expect(store.lastValidatedAt).toBeNull();
+		expect(store.etag).toBeNull();
 		expect(persisted.agentModels.pi).toEqual([PI_MODEL]);
 		expect(persisted.lastFetchedAt).toBeNull();
+		expect(persisted.lastValidatedAt).toBeNull();
+		expect(persisted.etag).toBeNull();
 	});
 
 	it('preserves cached Pi models on strict discovery failures without storing an empty refresh', async () => {
@@ -555,8 +688,12 @@ describe('ModelCatalogStore', () => {
 		expect(store.error).toBe('auth storage: auth.json is locked');
 		expect(store.getModels('pi')).toEqual([PI_MODEL]);
 		expect(store.lastFetchedAt).toBeNull();
+		expect(store.lastValidatedAt).toBeNull();
+		expect(store.etag).toBeNull();
 		expect(persisted.agentModels.pi).toEqual([PI_MODEL]);
 		expect(persisted.lastFetchedAt).toBeNull();
+		expect(persisted.lastValidatedAt).toBeNull();
+		expect(persisted.etag).toBeNull();
 	});
 
 	it('prefers model-level image capability when present', async () => {

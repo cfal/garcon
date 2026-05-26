@@ -1,6 +1,11 @@
 // Serves the GET /api/v1/models endpoint using the live agent catalog from
 // the registry.
 
+import {
+  catalogResponseFromSnapshot,
+  getCatalogResponseSnapshot,
+} from './model-catalog-cache.js';
+
 function staleModelsFromDiscoveryError(error) {
   return error
     && typeof error === 'object'
@@ -60,9 +65,8 @@ export default function createModelsRoutes(modelCatalog) {
       });
     }
 
-    return Response.json({
-      catalog: await catalog(),
-    });
+    const snapshot = await getCatalogResponseSnapshot(modelCatalog);
+    return catalogResponseFromSnapshot(request, snapshot);
   }
 
   return {

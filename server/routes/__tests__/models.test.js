@@ -1,6 +1,7 @@
-import { describe, it, expect, mock } from 'bun:test';
+import { beforeEach, describe, it, expect, mock } from 'bun:test';
 
 import createModelsRoutes from '../models.js';
+import { clearCatalogResponseCacheForTests } from '../model-catalog-cache.js';
 
 const agentCatalogEntries = [
   { id: 'claude', label: 'Claude', kind: 'agent', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: 'opus', models: [{ value: 'opus', label: 'Opus', supportsImages: true }] },
@@ -28,13 +29,111 @@ const modelsRoutes = createModelsRoutes(modelCatalog);
 const handler = modelsRoutes['/api/v1/models'].GET;
 
 describe('GET /api/v1/models', () => {
+  beforeEach(() => {
+    clearCatalogResponseCacheForTests();
+    modelCatalog.agents.getAgentCatalogEntries.mockClear();
+    modelCatalog.agents.getAgentCatalogEntry.mockClear();
+    modelCatalog.apiProviders.getCatalog.mockClear();
+  });
+
   it('returns only the agent/API provider catalog', async () => {
     const response = await handler();
     const body = await response.json();
 
+    expect(response.headers.get('etag')).toMatch(/^W\/"model-catalog:/);
+    expect(response.headers.get('cache-control')).toBe('private, no-cache');
     expect(Object.keys(body)).toEqual(['catalog']);
     expect(Array.isArray(body.catalog.agents)).toBe(true);
     expect(Array.isArray(body.catalog.apiProviders)).toBe(true);
+  });
+
+  it('returns 304 when the model catalog etag matches', async () => {
+    const url = new URL('http://localhost/api/v1/models');
+    const first = await handler(new Request(url), url);
+    const etag = first.headers.get('etag');
+
+    const second = await handler(
+      new Request(url, {
+        headers: { 'If-None-Match': etag },
+      }),
+      url,
+    );
+
+    expect(first.status).toBe(200);
+    expect(etag).toMatch(/^W\/"model-catalog:/);
+    expect(second.status).toBe(304);
+    expect(second.headers.get('etag')).toBe(etag);
+    expect(second.headers.get('cache-control')).toBe('private, no-cache');
+    expect(await second.text()).toBe('');
+  });
+
+  it('reuses a fresh aggregate catalog snapshot across full catalog requests', async () => {
+    const url = new URL('http://localhost/api/v1/models');
+
+    await handler(new Request(url), url);
+    await handler(new Request(url), url);
+
+    expect(modelCatalog.agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);
+  });
+
+  it('changes the etag when model catalog content changes', async () => {
+    modelCatalog.agents.getAgentCatalogEntries
+      .mockResolvedValueOnce([
+        { ...agentCatalogEntries[0], models: [{ value: 'opus', label: 'Opus' }] },
+      ])
+      .mockResolvedValueOnce([
+        { ...agentCatalogEntries[0], models: [{ value: 'sonnet', label: 'Sonnet' }] },
+      ]);
+
+    const url = new URL('http://localhost/api/v1/models');
+    const first = await handler(new Request(url), url);
+    clearCatalogResponseCacheForTests();
+    const second = await handler(new Request(url), url);
+
+    expect(first.headers.get('etag')).not.toBe(second.headers.get('etag'));
+  });
+
+  it('keeps the etag stable when catalog ordering changes', async () => {
+    modelCatalog.agents.getAgentCatalogEntries
+      .mockResolvedValueOnce([
+        {
+          ...agentCatalogEntries[0],
+          models: [
+            { value: 'sonnet', label: 'Sonnet' },
+            { value: 'opus', label: 'Opus' },
+          ],
+        },
+        {
+          ...agentCatalogEntries[1],
+          models: [
+            { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
+            { value: 'gpt-5.5', label: 'GPT-5.5' },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          ...agentCatalogEntries[1],
+          models: [
+            { value: 'gpt-5.5', label: 'GPT-5.5' },
+            { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
+          ],
+        },
+        {
+          ...agentCatalogEntries[0],
+          models: [
+            { value: 'opus', label: 'Opus' },
+            { value: 'sonnet', label: 'Sonnet' },
+          ],
+        },
+      ]);
+
+    const url = new URL('http://localhost/api/v1/models');
+    const first = await handler(new Request(url), url);
+    clearCatalogResponseCacheForTests();
+    const second = await handler(new Request(url), url);
+
+    expect(first.headers.get('etag')).toBe(second.headers.get('etag'));
   });
 
   it('returns catalog.agents with capability metadata', async () => {

@@ -2,6 +2,7 @@ import { apiFetch } from '$lib/api/client.js';
 import { getApiProviders } from '$lib/api/api-providers.js';
 import { agentLabelFor } from '$lib/i18n/agent-labels';
 import type { SessionAgentId } from '$lib/types/app';
+import type { ModelCatalogResponse } from '$shared/model-catalog';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS, PI_MODELS } from '$shared/models';
 import {
 	DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
@@ -55,11 +56,15 @@ interface ModelCatalogSnapshot {
 	agentModels: AgentModels;
 	agentMetadata: AgentMetadataMap;
 	apiProviderCatalog: ApiProviderCatalogEntry[];
+	etag: string | null;
 	lastFetchedAt: number | null;
+	lastValidatedAt: number | null;
 }
 
-const STORAGE_KEY = 'pref_model_catalog_v2';
+const STORAGE_KEY = 'pref_model_catalog_v3';
+const LEGACY_STORAGE_KEY = 'pref_model_catalog_v2';
 const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000;
+const VALIDATION_RETRY_MS = 30_000;
 
 const STATIC_FALLBACKS: AgentModels = {
 	claude: CLAUDE_MODELS.OPTIONS,
@@ -341,48 +346,51 @@ function parseCatalogResponse(data: unknown): {
 	};
 }
 
+function emptySnapshot(): ModelCatalogSnapshot {
+	return {
+		agentModels: { ...STATIC_FALLBACKS },
+		agentMetadata: { ...STATIC_AGENT_METADATA },
+		apiProviderCatalog: [],
+		etag: null,
+		lastFetchedAt: null,
+		lastValidatedAt: null,
+	};
+}
+
+function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapshot {
+	const agentModels = mergeWithFallbacks(
+		typeof parsed.agentModels === 'object' && parsed.agentModels !== null
+			? parsed.agentModels as AgentModels
+			: {},
+	);
+	const agentMetadata = filterVisibleAgentMetadata(
+		typeof parsed.agentMetadata === 'object' && parsed.agentMetadata !== null
+			? { ...STATIC_AGENT_METADATA, ...(parsed.agentMetadata as AgentMetadataMap) }
+			: { ...STATIC_AGENT_METADATA }
+	);
+	const apiProviderCatalog = normalizeApiProviders(parsed.apiProviderCatalog);
+	const lastFetchedAt = typeof parsed.lastFetchedAt === 'number' ? parsed.lastFetchedAt : null;
+	const lastValidatedAt = typeof parsed.lastValidatedAt === 'number' ? parsed.lastValidatedAt : lastFetchedAt;
+
+	return {
+		agentModels,
+		agentMetadata,
+		apiProviderCatalog,
+		etag: typeof parsed.etag === 'string' ? parsed.etag : null,
+		lastFetchedAt,
+		lastValidatedAt,
+	};
+}
+
 function readPersisted(): ModelCatalogSnapshot {
-	if (typeof window === 'undefined') {
-		return {
-			agentModels: { ...STATIC_FALLBACKS },
-			agentMetadata: { ...STATIC_AGENT_METADATA },
-			apiProviderCatalog: [],
-			lastFetchedAt: null,
-		};
-	}
+	if (typeof window === 'undefined') return emptySnapshot();
 
 	try {
-		const raw = localStorage.getItem(STORAGE_KEY);
-		if (!raw) {
-			return {
-				agentModels: { ...STATIC_FALLBACKS },
-				agentMetadata: { ...STATIC_AGENT_METADATA },
-				apiProviderCatalog: [],
-				lastFetchedAt: null,
-			};
-		}
-		const parsed = JSON.parse(raw) as Record<string, unknown>;
-		const agentModels = mergeWithFallbacks(
-			typeof parsed.agentModels === 'object' && parsed.agentModels !== null
-				? parsed.agentModels as AgentModels
-				: {},
-		);
-		const agentMetadata = filterVisibleAgentMetadata(
-				typeof parsed.agentMetadata === 'object' && parsed.agentMetadata !== null
-					? { ...STATIC_AGENT_METADATA, ...(parsed.agentMetadata as AgentMetadataMap) }
-					: { ...STATIC_AGENT_METADATA }
-		);
-		const apiProviderCatalog = normalizeApiProviders(parsed.apiProviderCatalog);
-		const lastFetchedAt =
-			typeof parsed.lastFetchedAt === 'number' ? parsed.lastFetchedAt : null;
-		return { agentModels, agentMetadata, apiProviderCatalog, lastFetchedAt };
+		const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+		if (!raw) return emptySnapshot();
+		return normalizeSnapshot(JSON.parse(raw) as Record<string, unknown>);
 	} catch {
-		return {
-			agentModels: { ...STATIC_FALLBACKS },
-			agentMetadata: { ...STATIC_AGENT_METADATA },
-			apiProviderCatalog: [],
-			lastFetchedAt: null,
-		};
+		return emptySnapshot();
 	}
 }
 
@@ -397,14 +405,41 @@ function hasNonEmptyPiModels(snapshot: ModelCatalogSnapshot): boolean {
 	return Boolean(snapshot.agentModels.pi?.length);
 }
 
+interface CatalogApplyResult {
+	agentModels: AgentModels;
+	agentMetadata: AgentMetadataMap;
+	apiProviderCatalog: ApiProviderCatalogEntry[];
+	requiresStrictPiValidation: boolean;
+}
+
+function applyCatalogResult(
+	currentMetadata: AgentMetadataMap,
+	catalogResult: NonNullable<ReturnType<typeof parseCatalogResponse>>
+): CatalogApplyResult {
+	return {
+		agentModels: mergeWithFallbacks(catalogResult.agentModels),
+		agentMetadata: filterVisibleAgentMetadata({
+			...STATIC_AGENT_METADATA,
+			...currentMetadata,
+			...catalogResult.agentMetadata
+		}),
+		apiProviderCatalog: catalogResult.apiProviderCatalog,
+		requiresStrictPiValidation: hasExplicitEmptyPiModels(catalogResult.agentModels),
+	};
+}
+
 export class ModelCatalogStore {
 	agentModels = $state<AgentModels>({ ...STATIC_FALLBACKS });
 	agentMetadata = $state<AgentMetadataMap>({ ...STATIC_AGENT_METADATA });
 	apiProviderCatalog = $state<ApiProviderCatalogEntry[]>([]);
+	etag = $state<string | null>(null);
 	lastFetchedAt = $state<number | null>(null);
+	lastValidatedAt = $state<number | null>(null);
 	isRefreshing = $state(false);
 	error = $state<string | null>(null);
 	version = $state(0);
+	#syncPromise: Promise<void> | null = null;
+	#lastSyncAttemptAt = 0;
 
 	constructor() {
 		this.hydrateFromStorage();
@@ -553,57 +588,85 @@ export class ModelCatalogStore {
 		this.agentModels = snapshot.agentModels;
 		this.agentMetadata = snapshot.agentMetadata;
 		this.apiProviderCatalog = snapshot.apiProviderCatalog;
+		this.etag = snapshot.etag;
 		this.lastFetchedAt = snapshot.lastFetchedAt;
+		this.lastValidatedAt = snapshot.lastValidatedAt;
 		this.version += 1;
 	}
 
-	async refreshIfStale(ttlMs: number = DEFAULT_TTL_MS): Promise<void> {
-		if (!this.isStale(ttlMs)) return;
-		await this.forceRefresh();
+	async refreshIfStale(_ttlMs: number = DEFAULT_TTL_MS): Promise<void> {
+		await this.syncWithServer();
 	}
 
 	isStale(ttlMs: number = DEFAULT_TTL_MS): boolean {
-		if (this.lastFetchedAt === null) return true;
-		return Date.now() - this.lastFetchedAt >= ttlMs;
+		const checkedAt = this.lastValidatedAt ?? this.lastFetchedAt;
+		if (checkedAt === null) return true;
+		return Date.now() - checkedAt >= ttlMs;
 	}
 
 	async forceRefresh(): Promise<void> {
-		if (this.isRefreshing) return;
+		await this.syncWithServer({ force: true });
+	}
+
+	async syncWithServer(options: { force?: boolean } = {}): Promise<void> {
+		const now = Date.now();
+		if (this.#syncPromise) return this.#syncPromise;
+		if (!options.force && now - this.#lastSyncAttemptAt < VALIDATION_RETRY_MS) return;
+
+		this.#lastSyncAttemptAt = now;
+		this.#syncPromise = this.#syncWithServer(options)
+			.finally(() => {
+				this.#syncPromise = null;
+			});
+		return this.#syncPromise;
+	}
+
+	async #syncWithServer(options: { force?: boolean }): Promise<void> {
 		this.isRefreshing = true;
 		this.error = null;
 
 		try {
-			const response = await apiFetch('/api/v1/models');
+			const response = await this.#fetchCatalogResponse(options);
+			const responseEtag = response.headers?.get?.('etag') ?? null;
+
+			if (response.status === 304) {
+				this.etag = responseEtag ?? this.etag;
+				this.lastValidatedAt = Date.now();
+				this.#persistCurrentSnapshot();
+				return;
+			}
+
 			if (!response.ok) {
 				throw new Error(`Failed to fetch model catalog: ${response.status}`);
 			}
-			const data = (await response.json()) as unknown;
+			const data = (await response.json()) as ModelCatalogResponse;
 
 			const catalogResult = parseCatalogResponse(data);
 			let persistable = true;
 			if (catalogResult && Object.keys(catalogResult.agentModels).length > 0) {
-				let nextModels = mergeWithFallbacks(catalogResult.agentModels);
-				let nextMetadata = filterVisibleAgentMetadata({ ...STATIC_AGENT_METADATA, ...catalogResult.agentMetadata });
-				if (hasExplicitEmptyPiModels(catalogResult.agentModels)) {
-					const strictPi = await this.#resolveStrictPiModels(nextModels, nextMetadata);
-					nextModels = strictPi.models;
-					nextMetadata = strictPi.metadata;
+				let applied = applyCatalogResult(this.agentMetadata, catalogResult);
+				if (applied.requiresStrictPiValidation) {
+					const strictPi = await this.#resolveStrictPiModels(applied.agentModels, applied.agentMetadata);
+					applied = {
+						agentModels: strictPi.models,
+						agentMetadata: strictPi.metadata,
+						apiProviderCatalog: applied.apiProviderCatalog,
+						requiresStrictPiValidation: false,
+					};
 					persistable = strictPi.persistable;
 				}
-				this.agentModels = nextModels;
-				this.agentMetadata = nextMetadata;
-				this.apiProviderCatalog = catalogResult.apiProviderCatalog;
+				this.agentModels = applied.agentModels;
+				this.agentMetadata = applied.agentMetadata;
+				this.apiProviderCatalog = applied.apiProviderCatalog;
 			} else {
 				throw new Error('Model catalog response is invalid');
 			}
 
-			this.lastFetchedAt = persistable ? Date.now() : null;
-			const snapshot = {
-				agentModels: this.agentModels,
-				agentMetadata: this.agentMetadata,
-				apiProviderCatalog: this.apiProviderCatalog,
-				lastFetchedAt: this.lastFetchedAt,
-			};
+			const now = Date.now();
+			this.etag = persistable ? responseEtag : null;
+			this.lastFetchedAt = persistable ? now : null;
+			this.lastValidatedAt = persistable ? now : null;
+			const snapshot = this.#currentSnapshot();
 			if (persistable || hasNonEmptyPiModels(snapshot)) {
 				persist(snapshot);
 			}
@@ -613,6 +676,33 @@ export class ModelCatalogStore {
 		} finally {
 			this.isRefreshing = false;
 		}
+	}
+
+	#fetchCatalogResponse(options: { force?: boolean }): Promise<Response> {
+		if (!options.force && this.etag) {
+			return apiFetch('/api/v1/models', {
+				headers: {
+					'If-None-Match': this.etag
+				}
+			});
+		}
+		return apiFetch('/api/v1/models');
+	}
+
+	#currentSnapshot(): ModelCatalogSnapshot {
+		return {
+			agentModels: this.agentModels,
+			agentMetadata: this.agentMetadata,
+			apiProviderCatalog: this.apiProviderCatalog,
+			etag: this.etag,
+			lastFetchedAt: this.lastFetchedAt,
+			lastValidatedAt: this.lastValidatedAt,
+		};
+	}
+
+	#persistCurrentSnapshot(): void {
+		persist(this.#currentSnapshot());
+		this.version += 1;
 	}
 
 	async refreshApiProviders(): Promise<void> {
