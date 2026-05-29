@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ConversationMessage from './ConversationMessage.svelte';
+	import ChatBashToolGroup from './tools/ChatBashToolGroup.svelte';
 	import {
 		isToolUseMessage,
 		ToolResultMessage,
@@ -11,6 +12,7 @@
 	import { getChatState, getProviderState, getLocalSettings, getAppShell } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createMessageIdAllocator } from '$lib/chat/message-id';
+	import { buildConversationFeedRenderItems } from '$lib/chat/conversation-feed-items';
 	import { CHAT_MAX_WIDTH_FEED_CONTENT_CLASS, CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS } from '$lib/chat/chat-max-width';
 	import { Loader2, TriangleAlert, RefreshCw } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -101,6 +103,8 @@
 				.map((r) => r.permissionRequestId),
 		),
 	);
+
+	const renderItems = $derived(buildConversationFeedRenderItems(chatState.visibleMessages));
 
 	const feedScrollAreaClass = 'h-full overflow-hidden relative';
 	const feedViewportClass = $derived(
@@ -212,12 +216,18 @@
 			</div>
 		{/if}
 
-		{#each chatState.visibleMessages as message, index (getMessageId(message))}
-			{@const isToolResult = message instanceof ToolResultMessage}
-			{@const isPermissionTerminal = message instanceof PermissionResolvedMessage || message instanceof PermissionCancelledMessage}
-			{@const isServerExitPlanPermission = message instanceof PermissionRequestMessage && message.requestedTool.type === 'exit-plan-mode-tool-use'}
-			{#if !isToolResult && !isPermissionTerminal && !isServerExitPlanPermission}
-				{@const prevMessage = index > 0 ? chatState.visibleMessages[index - 1] : null}
+		{#each renderItems as item (item.kind === 'message' ? getMessageId(item.message) : item.id)}
+			{#if item.kind === 'bash-group'}
+				<svelte:boundary>
+					<ChatBashToolGroup messages={item.messages} />
+					{#snippet failed(error)}
+						<div class="px-4 py-2 text-sm text-destructive bg-destructive/10 rounded border border-destructive/20">
+							Failed to render message{error instanceof Error ? `: ${error.message}` : ''}
+						</div>
+					{/snippet}
+				</svelte:boundary>
+			{:else}
+				{@const message = item.message}
 				{@const toolResult = isToolUseMessage(message)
 					? toolResultIndex.get(message.toolId)
 					: undefined}
@@ -232,8 +242,8 @@
 				<svelte:boundary>
 					<ConversationMessage
 						{message}
-						{index}
-						{prevMessage}
+						index={item.index}
+						prevMessage={item.prevMessage}
 						{toolResult}
 						permissionTerminal={permTerminal}
 						{onPermissionDecision}
