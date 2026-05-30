@@ -56,4 +56,22 @@ describe('buildConversationFeedRenderItems', () => {
 		if (items[0].kind !== 'bash-group') throw new Error('expected bash group')
 		expect(items[0].messages.map((message) => message.toolId)).toEqual(['bash-1', 'bash-2'])
 	})
+
+	it('keeps the group id stable as more adjacent bash tool uses arrive', () => {
+		const firstBatch = [
+			new BashToolUseMessage(TS, 'bash-1', 'pwd'),
+			new BashToolUseMessage(TS, 'bash-2', 'rg foo'),
+		]
+		const secondBatch = [
+			...firstBatch,
+			new BashToolUseMessage(TS, 'bash-3', 'bun run test'),
+		]
+
+		const firstItems = buildConversationFeedRenderItems(firstBatch)
+		const secondItems = buildConversationFeedRenderItems(secondBatch)
+
+		expect(firstItems[0]).toMatchObject({ kind: 'bash-group' })
+		expect(secondItems[0]).toMatchObject({ kind: 'bash-group' })
+		expect(firstItems[0].id).toBe(secondItems[0].id)
+	})
 })

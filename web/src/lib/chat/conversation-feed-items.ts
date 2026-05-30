@@ -33,7 +33,7 @@ function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
 }
 
 function bashGroupId(messages: BashToolUseMessage[]): string {
-	return `bash-group-${messages.map((message) => message.toolId).join('-')}`
+	return `bash-group-${messages[0]?.toolId ?? 'empty'}`
 }
 
 export function buildConversationFeedRenderItems(messages: ChatMessage[]): ConversationFeedRenderItem[] {
