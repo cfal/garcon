@@ -71,6 +71,7 @@
 	});
 
 	onDestroy(() => {
+		composerState.flushDraftSave();
 		imageAttachments.revokeAll();
 	});
 
@@ -144,7 +145,7 @@
 		// Auto-save draft on input.
 		const chatId = sessions.selectedChatId;
 		if (chatId) {
-			composerState.saveDraft(chatId);
+			composerState.queueDraftSave(chatId);
 		}
 	}
 

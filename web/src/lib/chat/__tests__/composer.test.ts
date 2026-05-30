@@ -1,10 +1,15 @@
 // Unit tests for ComposerState class. Tests synchronous state management;
 // submitMessage and localStorage-dependent draft methods are not tested here.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { ComposerState } from '../composer.svelte';
 
 describe('ComposerState', () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		localStorage.clear();
+	});
+
 	it('starts with empty state', () => {
 		const state = new ComposerState();
 		expect(state.inputText).toBe('');
@@ -55,5 +60,43 @@ describe('ComposerState', () => {
 
 		expect(state.inputText).toBe('');
 		expect(state.images).toEqual([]);
+	});
+
+	it('debounces draft writes and persists the latest queued text', () => {
+		vi.useFakeTimers();
+		const composer = new ComposerState();
+		composer.inputText = 'first';
+		composer.queueDraftSave('chat-1');
+		composer.inputText = 'second';
+		composer.queueDraftSave('chat-1');
+
+		expect(localStorage.getItem('chat_draft_chat-1')).toBeNull();
+		vi.advanceTimersByTime(250);
+
+		expect(localStorage.getItem('chat_draft_chat-1')).toBe('second');
+	});
+
+	it('does not let an old chat draft save after restore changes the input', () => {
+		vi.useFakeTimers();
+		const composer = new ComposerState();
+		composer.inputText = 'old chat text';
+		composer.queueDraftSave('old-chat');
+
+		composer.restoreDraft('new-chat');
+		composer.inputText = 'new chat text';
+		vi.runAllTimers();
+
+		expect(localStorage.getItem('chat_draft_old-chat')).toBeNull();
+	});
+
+	it('flushes a pending draft immediately', () => {
+		vi.useFakeTimers();
+		const composer = new ComposerState();
+		composer.inputText = 'draft body';
+		composer.queueDraftSave('chat-2');
+
+		composer.flushDraftSave();
+
+		expect(localStorage.getItem('chat_draft_chat-2')).toBe('draft body');
 	});
 });

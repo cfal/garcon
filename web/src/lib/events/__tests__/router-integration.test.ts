@@ -5,6 +5,7 @@ import type { EventRouterStores } from '../router.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { PendingUserInput } from '$shared/pending-user-input';
+import type { ChatMessage } from '$shared/chat-types';
 
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
 	return {
@@ -176,5 +177,33 @@ describe('event router integration', () => {
 		], stores);
 
 		expect(pendingUserInputs[0]?.deliveryStatus).toBe('failed');
+	});
+
+	it('preserves streamed output order before same-drain stop messages', () => {
+		let currentMessages: ChatMessage[] = [];
+		const stores = createStores({
+			chatMessages: () => currentMessages,
+			setChatMessages: (updater) => {
+				currentMessages = typeof updater === 'function' ? updater(currentMessages) : updater;
+			},
+		});
+
+		renderRouterWithRawMessages([
+			{
+				type: 'agent-run-output',
+				chatId: 'chat-a',
+				messages: [{ type: 'assistant-message', timestamp: '2026-05-14T00:00:01.000Z', content: 'streamed' }],
+			},
+			{
+				type: 'chat-session-stopped',
+				chatId: 'chat-a',
+				success: true,
+			},
+		], stores);
+
+		expect(currentMessages.map((message) => 'content' in message ? String(message.content) : '')).toEqual([
+			'streamed',
+			'Chat interrupted by user.',
+		]);
 	});
 });
