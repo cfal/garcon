@@ -34,6 +34,14 @@ describe('TelegramNotifier', () => {
     expect(notifier.isConfigured).toBe(true);
   });
 
+  it('updates configured status when token changes', () => {
+    const notifier = new TelegramNotifier('');
+    notifier.setBotToken('some-token');
+    expect(notifier.isConfigured).toBe(true);
+    notifier.setBotToken('');
+    expect(notifier.isConfigured).toBe(false);
+  });
+
   it('returns true on successful send', async () => {
     globalThis.fetch = mock(() => Promise.resolve({ ok: true }));
     const notifier = new TelegramNotifier('bot-token');
@@ -61,5 +69,68 @@ describe('TelegramNotifier', () => {
     const notifier = new TelegramNotifier('bot-token');
     const result = await notifier.send('12345', 'test');
     expect(result).toBe(false);
+  });
+
+  it('gets bot identity from getMe', async () => {
+    globalThis.fetch = mock(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        result: { id: 123, username: 'Garcon_Bot', first_name: 'Garcon' },
+      }),
+    }));
+    const notifier = new TelegramNotifier('bot-token');
+
+    const identity = await notifier.getBotIdentity();
+
+    expect(identity).toEqual({ id: 123, username: 'garcon_bot', firstName: 'Garcon' });
+    const [url] = globalThis.fetch.mock.calls[0];
+    expect(url).toBe('https://api.telegram.org/botbot-token/getMe');
+  });
+
+  it('resolves recipient link by matching /start code in a private chat without requiring a username', async () => {
+    globalThis.fetch = mock(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        result: [
+          {
+            update_id: 10,
+            message: {
+              text: '/start wrong',
+              from: { username: 'alice', first_name: 'Alice' },
+              chat: { id: 99999, type: 'private' },
+            },
+          },
+          {
+            update_id: 11,
+            message: {
+              text: '/start abc123',
+              from: { username: 'Mallory', first_name: 'Mallory' },
+              chat: { id: -1001, type: 'group', title: 'Group' },
+            },
+          },
+          {
+            update_id: 12,
+            message: {
+              text: '/start abc123',
+              from: { first_name: 'Alice' },
+              chat: { id: 99999, type: 'private' },
+            },
+          },
+        ],
+      }),
+    }));
+    const notifier = new TelegramNotifier('bot-token');
+
+    const result = await notifier.resolveRecipientLink('abc123', null, 0);
+
+    expect(result.nextOffset).toBe(13);
+    expect(result.recipient).toEqual({
+      chatId: '99999',
+      username: null,
+      displayName: 'Alice',
+      nextOffset: 13,
+    });
   });
 });

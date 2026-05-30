@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { FILE_CONTEXT_SEPARATOR, stripResolvedFileMentionContext } from '../agents/shared/file-mention-context.js';
 
 export interface FileMentionToken {
 	path: string;
@@ -11,7 +12,6 @@ const MAX_MENTIONED_FILES = 8;
 const MAX_FILE_BYTES = 128 * 1024;
 const MAX_TOTAL_BYTES = 384 * 1024;
 const BINARY_SAMPLE_BYTES = 4096;
-const FILE_CONTEXT_SEPARATOR = '\n\nReferenced file contents from @file mentions:\n\n';
 
 function canStartMention(input: string, index: number): boolean {
 	return index === 0 || /\s/.test(input[index - 1]);
@@ -155,7 +155,4 @@ export async function resolveFileMentionsInCommand(command: string, projectPath:
 	return `${command}${FILE_CONTEXT_SEPARATOR}${sections.join('\n\n')}`;
 }
 
-export function stripResolvedFileMentionContext(content: string): string {
-	const index = content.indexOf(FILE_CONTEXT_SEPARATOR);
-	return index === -1 ? content : content.slice(0, index);
-}
+export { stripResolvedFileMentionContext };

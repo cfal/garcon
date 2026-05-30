@@ -13,7 +13,7 @@ import createGitRoutes from '../git.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
 const ctx = {
-  providers: {
+  agents: {
     runSingleQuery: mock(() => Promise.resolve('feat: auto commit')),
   },
   settings: {
@@ -21,7 +21,7 @@ const ctx = {
   },
 };
 
-const routes = createGitRoutes(ctx.providers, ctx.settings);
+const routes = createGitRoutes(ctx.agents, ctx.settings);
 
 function makeUrl(path, params = {}) {
   const url = new URL(`http://localhost${path}`);
@@ -279,7 +279,7 @@ describe('POST /api/v1/git/generate-commit-message contract', () => {
 
   it('returns typed errorCode when no staged changes are found', async () => {
     parseJsonBody.mockImplementation(() =>
-      Promise.resolve({ project: '/definitely-not-a-repo', files: ['a.ts'], provider: 'claude' }),
+      Promise.resolve({ project: '/definitely-not-a-repo', files: ['a.ts'], agentId: 'claude' }),
     );
     const response = await handler(makeRequest({}));
     const body = await response.json();

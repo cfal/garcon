@@ -8,12 +8,12 @@
 
 	interface Props {
 		selector: ModelSelectorState;
-		showHarness: boolean;
+		showAgent: boolean;
 		showSource: boolean;
 		modelListId: string;
 	}
 
-	let { selector, showHarness, showSource, modelListId }: Props = $props();
+	let { selector, showAgent, showSource, modelListId }: Props = $props();
 
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let activeOptionId = $state<string | undefined>(undefined);
@@ -51,19 +51,19 @@
 </script>
 
 <div data-slot="model-selector-columns" class="flex h-full min-h-0">
-	{#if showHarness}
+	{#if showAgent}
 		<section class="min-h-0 touch-pan-y overflow-y-auto overscroll-contain border-r border-border p-1 [-webkit-overflow-scrolling:touch] sm:w-56">
-			<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{m.model_selector_harness()}</div>
+			<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{m.model_selector_agent()}</div>
 			<div class="space-y-1">
-				{#each selector.harnessOptions as option (option.value)}
+				{#each selector.agentOptions as option (option.value)}
 					<button
 						type="button"
 						class={cn(
 							'flex w-full touch-pan-y items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-							option.value === selector.harnessId && 'bg-accent text-accent-foreground'
+							option.value === selector.agentId && 'bg-accent text-accent-foreground'
 						)}
-						aria-pressed={option.value === selector.harnessId}
-						onclick={() => selector.selectHarness(option.value)}
+						aria-pressed={option.value === selector.agentId}
+						onclick={() => selector.selectAgent(option.value)}
 					>
 						<span class="min-w-0 flex-1">
 							<span class="block truncate font-medium">{option.label}</span>
@@ -71,7 +71,7 @@
 								<span class="block truncate text-xs text-muted-foreground">{option.description}</span>
 							{/if}
 						</span>
-						{#if option.value === selector.harnessId}
+						{#if option.value === selector.agentId}
 							<Check class="mt-0.5 size-4 shrink-0" />
 						{/if}
 					</button>

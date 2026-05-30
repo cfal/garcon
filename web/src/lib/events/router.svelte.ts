@@ -15,6 +15,8 @@ import {
 	ChatProcessingUpdatedMessage,
 	QueueStateUpdatedMessage,
 	QueueDispatchingMessage,
+	PendingUserInputUpdatedMessage,
+	PendingUserInputClearedMessage,
 	ChatSessionsRunningMessage,
 	WsFaultMessage,
 	ChatTitleUpdatedMessage,
@@ -23,8 +25,9 @@ import {
 	ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
+import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PendingPermissionRequest, PendingViewChat, PermissionMode, QueueState } from '$lib/types/chat';
-import type { ChatEntry, SessionProvider } from '$lib/types/app';
+import type { ChatEntry, SessionAgentId } from '$lib/types/app';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 
 import { untrack } from 'svelte';
@@ -52,13 +55,21 @@ import {
 
 // Store references required by the router to build handler contexts.
 export interface EventRouterStores {
-	provider: () => SessionProvider;
+	agentId: () => SessionAgentId;
 	selectedChat: () => ChatEntry | null;
 	currentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
 	chatMessages: () => ChatMessage[];
 	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
-	loadMessages: (chatId: string, loadMore?: boolean, provider?: string) => Promise<ChatMessage[]>;
+	pendingUserInputs: () => PendingUserInput[];
+	setPendingUserInputs: (inputs: PendingUserInput[]) => void;
+	upsertPendingUserInput: (input: PendingUserInput) => void;
+	clearPendingUserInput: (clientRequestId: string) => void;
+	updatePendingUserInputDeliveryStatus: (
+		clientRequestId: string,
+		deliveryStatus: 'submitting' | 'accepted' | 'failed',
+	) => void;
+	loadMessages: (chatId: string, loadMore?: boolean, agentId?: string) => Promise<ChatMessage[]>;
 	setIsLoading: (v: boolean) => void;
 	setCanAbort: (v: boolean) => void;
 	setLoadingStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
@@ -138,21 +149,13 @@ function applyServerMessages(
 	stores.setChatMessages(updated);
 }
 
-function markPendingUserMessageDelivery(
+function markPendingUserInputDelivery(
 	clientRequestId: string | undefined,
 	stores: EventRouterStores,
 	deliveryStatus: 'accepted' | 'failed',
 ) {
 	if (!clientRequestId) return;
-	stores.setChatMessages((previous) => previous.map((message) => {
-		if (!(message instanceof UserMessage)) return message;
-		if (message.metadata?.clientRequestId !== clientRequestId) return message;
-		if (message.metadata.deliveryStatus !== 'submitting') return message;
-		return new UserMessage(message.timestamp, message.content, message.images, {
-			...message.metadata,
-			deliveryStatus,
-		});
-	}));
+	stores.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus);
 }
 
 // Creates helper functions used by multiple handler contexts.
@@ -185,7 +188,7 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 
 	const selectedChat = stores.selectedChat();
 	const currentChatId = stores.currentChatId();
-	const provider = stores.provider();
+	const agentId = stores.agentId();
 	const projectPath = selectedChat?.projectPath || null;
 
 	const onNavigateToChat = stores.navigateToChat
@@ -227,7 +230,7 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 	};
 
 	const chatEventCtx: ChatEventContext = {
-		provider,
+		agentId,
 		projectPath,
 		selectedChat,
 		getCurrentChatId: stores.currentChatId,
@@ -268,7 +271,6 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 	const queueCtx: QueueContext = {
 		currentChatId,
 		selectedChatId: selectedChat?.id || null,
-		setChatMessages: stores.setChatMessages,
 		setMessageQueue: stores.setMessageQueue,
 		activateLoadingFor,
 		setCanAbort: stores.setCanAbort,
@@ -306,17 +308,20 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 				activateLoadingFor(msg.chatId);
 				stores.setCanAbort(true);
 				onChatProcessing(msg.chatId);
-				markPendingUserMessageDelivery(msg.clientRequestId, stores, 'accepted');
+				markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
 				applyServerMessages(msg, stores);
 				handlePlanModeMessages(msg, planModeCtx);
 				handlePermissionLifecycleFromBatch(msg, permLifecycleCtx);
 		},
 		'agent-run-finished': (msg) => {
-			if (msg instanceof AgentRunFinishedMessage) handleAgentComplete(msg, lifecycleCtx);
+			if (msg instanceof AgentRunFinishedMessage) {
+				markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
+				handleAgentComplete(msg, lifecycleCtx);
+			}
 			},
 			'agent-run-failed': (msg) => {
 				if (msg instanceof AgentRunFailedMessage) {
-					markPendingUserMessageDelivery(msg.clientRequestId, stores, 'failed');
+					markPendingUserInputDelivery(msg.clientRequestId, stores, 'failed');
 					handleAgentError(msg, lifecycleCtx);
 				}
 			},
@@ -353,6 +358,24 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 					new Date().toISOString(),
 				);
 			}
+		},
+		'pending-user-input-updated': (msg) => {
+			if (!(msg instanceof PendingUserInputUpdatedMessage)) return;
+			stores.upsertPendingUserInput(msg.input);
+		},
+		'pending-user-input-cleared': (msg) => {
+			if (!(msg instanceof PendingUserInputClearedMessage)) return;
+			if (msg.reason !== 'persisted') {
+				stores.clearPendingUserInput(msg.clientRequestId);
+				return;
+			}
+			void stores.loadMessages(msg.chatId).then((messages) => {
+				if (stores.currentChatId() && stores.currentChatId() !== msg.chatId) return;
+				stores.setChatMessages(messages);
+				stores.clearPendingUserInput(msg.clientRequestId);
+			}).catch(() => {
+				// The local pending overlay remains visible until the next successful reload.
+			});
 		},
 		'chat-sessions-running': (msg) => {
 			if (msg instanceof ChatSessionsRunningMessage) handleRunningChats(msg, runningCtx);

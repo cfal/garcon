@@ -6,11 +6,14 @@ import {
 	getToolDisplayLabel,
 } from '../tool-display-registry';
 import {
+	ApplyPatchToolUseMessage,
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
 	BashToolUseMessage,
+	ExternalToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	ListToolUseMessage,
+	McpToolUseMessage,
 } from '$shared/chat-types';
 
 describe('TOOL_DISPLAY_REGISTRY', () => {
@@ -48,6 +51,9 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 			'amp-find-thread-tool-use',
 			'amp-read-thread-tool-use',
 			'amp-task-list-tool-use',
+			'external-tool-use',
+			'mcp-tool-use',
+			'request-permissions-tool-use',
 			'unknown-tool-use',
 			'default',
 		];
@@ -92,6 +98,11 @@ describe('tool display helpers', () => {
 		expect(label).toBe('List');
 	});
 
+	it('returns structured external and MCP labels from typed fields', () => {
+		expect(getToolDisplayLabel(new ExternalToolUseMessage('', 'tool-1', 'search', {}, 'app'))).toBe('app.search');
+		expect(getToolDisplayLabel(new McpToolUseMessage('', 'tool-2', 'github', 'list_prs', {}))).toBe('github.list_prs');
+	});
+
 	it('returns the display label for Amp-specific tool-use messages', () => {
 		const label = getToolDisplayLabel(new AmpFinderToolUseMessage('', 'tool-2', 'find auth'));
 		expect(label).toBe('Finder');
@@ -114,6 +125,18 @@ describe('tool display helpers', () => {
 		);
 		expect(details).toEqual({
 			plan: 'Implement the change.',
+		});
+	});
+
+	it('shows patch-only ApplyPatch messages as diffs', () => {
+		const message = new ApplyPatchToolUseMessage('', 'tool-5', undefined, undefined, undefined, '*** Begin Patch');
+		const props = TOOL_DISPLAY_REGISTRY['apply-patch-tool-use'].input.getContentProps?.(
+			message as unknown as Record<string, unknown>,
+		);
+		expect(props).toMatchObject({
+			oldContent: '',
+			newContent: '*** Begin Patch',
+			badge: 'Patch',
 		});
 	});
 });

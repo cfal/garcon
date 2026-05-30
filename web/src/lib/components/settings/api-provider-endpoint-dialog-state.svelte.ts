@@ -5,7 +5,7 @@ import {
 	testApiProvider,
 	updateApiProvider,
 	type ApiProviderInput
-} from '$lib/api/providers.js';
+} from '$lib/api/api-providers.js';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import {
@@ -16,7 +16,7 @@ import {
 	type ApiProtocol,
 	type ModelDiscoveryKind,
 	type OpenAiEndpointCapabilities
-} from '$shared/providers';
+} from '$shared/api-providers';
 
 interface DialogOptions {
 	modelCatalog: ModelCatalogStore;
@@ -257,7 +257,7 @@ export class ApiProviderEndpointDialogState {
 			} else {
 				await createApiProvider(this.payload());
 			}
-			await this.options.modelCatalog.forceRefresh();
+			await this.options.modelCatalog.refreshApiProviders();
 			this.options.onSaved?.();
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : String(err);
@@ -333,7 +333,7 @@ export async function deleteApiProviderEndpoint(modelCatalog: ModelCatalogStore,
 	const found = modelCatalog.findEndpoint(endpointId);
 	if (!found) throw new Error(m.settings_api_provider_dialog_endpoint_missing());
 	await deleteApiProvider(found.apiProvider.id);
-	await modelCatalog.forceRefresh();
+	await modelCatalog.refreshApiProviders();
 }
 
 function parseModelsText(text: string): ModelOption[] {

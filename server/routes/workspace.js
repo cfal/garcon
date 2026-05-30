@@ -1,65 +1,79 @@
 import { parseJsonBody } from '../lib/http-request.js';
-import { getProjectBasePath, getTelegramBotToken } from '../config.js';
+import { getProjectBasePath } from '../config.js';
 import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
-export async function buildRemoteSettingsSnapshot({ settings, providers }) {
-  function asPlainObject(value) {
-    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  }
+const TELEGRAM_LINK_POLL_SECONDS = 20;
 
-  function sanitizeRemoteUiSnapshot(value) {
-    // Drops obsolete sidebar placement state from stale remote settings.
-    const ui = asPlainObject(value);
-    if (!('searchBarPosition' in ui)) return ui;
-    const { searchBarPosition: _searchBarPosition, ...rest } = ui;
-    return rest;
-  }
+const emptyTelegramStatus = {
+  botTokenAvailable: false,
+  botUsername: null,
+  botFirstName: null,
+  recipientUsername: null,
+  recipientDisplayName: null,
+  recipientLinked: false,
+  pendingLink: false,
+  linkUrl: null,
+};
 
+function telegramTokenTestFailedResponse(error) {
+  return Response.json({
+    success: false,
+    error: 'Telegram token test failed',
+    errorCode: 'telegram_token_test_failed',
+    details: error instanceof Error ? error.message : String(error),
+  }, { status: 400 });
+}
+
+function asPlainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+export async function buildRemoteSettingsSnapshot({ settings, agents, telegramSettings }) {
   const settingsSource = typeof settings.getRemoteSettingsSnapshotSource === 'function'
     ? await settings.getRemoteSettingsSnapshotSource()
     : null;
 
-  const getHarnessCatalog = async () => {
+  const getAgentCatalog = async () => {
     try {
-      return await providers?.getHarnessCatalog?.();
+      return { agents: await agents?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
     } catch {
       return null;
     }
   };
 
   const [
-    authByHarness, readinessByHarness, harnessCatalog, opencodeModels, factoryModels,
+    authByAgent, readinessByAgent, agentCatalog, opencodeModels, factoryModels,
   ] = await Promise.all([
-    providers?.getHarnessAuthStatusMap?.() ?? Promise.resolve({
+    agents?.getAgentAuthStatusMap?.() ?? Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: false },
       opencode: { authenticated: false },
       amp: { authenticated: false },
       factory: { authenticated: false },
     }),
-    providers?.getHarnessReadinessMap?.() ?? Promise.resolve({}),
-    getHarnessCatalog(),
-    providers?.getModels?.('opencode') ?? Promise.resolve([]),
-    providers?.getModels?.('factory') ?? Promise.resolve([]),
+    agents?.getAgentReadinessMap?.() ?? Promise.resolve({}),
+    getAgentCatalog(),
+    agents?.getModels?.('opencode') ?? Promise.resolve([]),
+    agents?.getModels?.('factory') ?? Promise.resolve([]),
   ]);
   const catalogModels = Object.fromEntries(
-    (harnessCatalog?.harnesses ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
+    (agentCatalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
   );
 
   const [
-    version, ui, paths, pinnedChatIds, lastProvider, lastProjectPath, lastModel,
+    version, ui, paths, pinnedChatIds, lastAgentId, lastProjectPath, lastModel,
     lastPermissionMode, lastThinkingMode, lastClaudeThinkingMode, lastAmpAgentMode,
     lastApiProviderId, lastModelEndpointId, lastModelProtocol,
   ] = settingsSource
     ? [
       settingsSource.version,
-      sanitizeRemoteUiSnapshot(settingsSource.ui),
+      asPlainObject(settingsSource.ui),
       settingsSource.paths,
       settingsSource.pinnedChatIds,
-      settingsSource.lastProvider,
+      settingsSource.lastAgentId,
       settingsSource.lastProjectPath,
       settingsSource.lastModel,
       settingsSource.lastPermissionMode,
@@ -75,7 +89,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       settings.getUiSettings(),
       settings.getPathSettings(),
       settings.getPinnedChatIds(),
-      settings.getLastProvider(),
+      settings.getLastAgentId(),
       settings.getLastProjectPath(),
       settings.getLastModel(),
       settings.getLastPermissionMode(),
@@ -87,7 +101,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       settings.getLastModelProtocol?.() ?? Promise.resolve(null),
     ]);
 
-  const modelsByHarness = {
+  const modelsByAgent = {
     claude: CLAUDE_MODELS.OPTIONS,
     codex: CODEX_MODELS.OPTIONS,
     opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
@@ -99,21 +113,21 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.chatTitle),
-      authByHarness,
-      modelsByHarness,
-      readinessByHarness,
+      authByAgent,
+      modelsByAgent,
+      readinessByAgent,
     }),
     commitMessage: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.commitMessage),
-      authByHarness,
-      modelsByHarness,
-      readinessByHarness,
+      authByAgent,
+      modelsByAgent,
+      readinessByAgent,
     }),
   };
 
   return {
     version,
-    ui: sanitizeRemoteUiSnapshot(ui),
+    ui: asPlainObject(ui),
     uiEffective,
     paths: {
       pinnedProjectPaths: Array.isArray(paths?.pinnedProjectPaths)
@@ -122,7 +136,7 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
       browseStartPath: typeof paths?.browseStartPath === 'string' ? paths.browseStartPath : '',
     },
     pinnedChatIds: Array.isArray(pinnedChatIds) ? pinnedChatIds : [],
-    lastProvider,
+    lastAgentId,
     lastProjectPath,
     lastModel,
     lastApiProviderId: lastApiProviderId ?? null,
@@ -133,21 +147,29 @@ export async function buildRemoteSettingsSnapshot({ settings, providers }) {
     lastClaudeThinkingMode,
     lastAmpAgentMode,
     projectBasePath: getProjectBasePath(),
-    telegramBotTokenAvailable: Boolean(getTelegramBotToken()),
+    telegram: telegramSettings?.getPublicStatus?.() ?? emptyTelegramStatus,
   };
 }
 
-export default function createWorkspaceRoutes(settings, providers, telegramNotifier) {
+export default function createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings) {
 
-  const FILTER_KEYS = ['textTokens', 'tags', 'providers', 'models'];
+  const FILTER_KEYS = ['textTokens', 'tags', 'agents', 'models'];
   const VALID_FILTER_STATUS = new Set(['active', 'unread']);
   function sanitizeRemoteUiPatch(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const { searchBarPosition: _searchBarPosition, ...rest } = raw;
-    return Object.keys(rest).length > 0 ? rest : null;
+    const patch = { ...raw };
+    const notifications = asPlainObject(patch.notifications);
+    if (notifications.telegram && typeof notifications.telegram === 'object' && !Array.isArray(notifications.telegram)) {
+      const telegram = {};
+      if (typeof notifications.telegram.enabled === 'boolean') {
+        telegram.enabled = notifications.telegram.enabled;
+      }
+      patch.notifications = Object.keys(telegram).length > 0 ? { telegram } : {};
+    }
+    return Object.keys(patch).length > 0 ? patch : null;
   }
 	function sanitizeFilter(raw) {
-    const empty = { textTokens: [], tags: [], providers: [], models: [] };
+    const empty = { textTokens: [], tags: [], agents: [], models: [] };
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return empty;
     const out = {};
 		for (const key of FILTER_KEYS) {
@@ -182,7 +204,7 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
 
   async function getAppSettings() {
     try {
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, providers });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json(snapshot);
     } catch (error) {
       return Response.json({ success: false, error: error.message }, { status: 500 });
@@ -202,7 +224,7 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
         await settings.setPathSettings(body.paths);
       }
 
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, providers });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       if (error.message === 'Malformed JSON') {
@@ -215,22 +237,143 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
   async function postTelegramTest(request) {
     try {
       if (!telegramNotifier?.isConfigured) {
-        return Response.json({ success: false, error: 'GARCON_TELEGRAM_BOT_TOKEN is not set' }, { status: 400 });
+        return Response.json({ success: false, error: 'Telegram bot token is not configured' }, { status: 400 });
       }
-      const body = await parseJsonBody(request);
-      const chatId = typeof body.chatId === 'string' ? body.chatId.trim() : '';
+      const chatId = telegramSettings?.getRecipientChatId?.() ?? '';
       if (!chatId) {
-        return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
+        return Response.json({ success: false, error: 'Telegram recipient is not linked' }, { status: 400 });
       }
       const ok = await telegramNotifier.send(chatId, 'Garcon: test notification. Your Telegram integration is working.');
       if (!ok) {
-        return Response.json({ success: false, error: 'Telegram delivery failed. Check your bot token and chat ID.' }, { status: 502 });
+        return Response.json({ success: false, error: 'Telegram delivery failed. Check your bot token and linked recipient.' }, { status: 502 });
       }
       return Response.json({ success: true });
     } catch (error) {
       if (error.message === 'Malformed JSON') {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
+      const status = error.message.startsWith('Telegram ') || error.message.includes('bot token') ? 400 : 500;
+      return Response.json({ success: false, error: error.message }, { status });
+    }
+  }
+
+  async function putTelegramToken(request) {
+    try {
+      if (!telegramSettings) {
+        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+      }
+      const body = await parseJsonBody(request);
+      const botToken = typeof body.botToken === 'string' ? body.botToken.trim() : '';
+      if (!botToken) {
+        return Response.json({
+          success: false,
+          error: 'botToken is required',
+          errorCode: 'telegram_bot_token_required',
+        }, { status: 400 });
+      }
+      let identity;
+      try {
+        identity = await telegramNotifier.getBotIdentity(botToken);
+      } catch (error) {
+        return telegramTokenTestFailedResponse(error);
+      }
+      await telegramSettings.setBotToken(botToken, identity);
+      telegramNotifier?.setBotToken?.(botToken);
+      await telegramSettings.beginRecipientLink();
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      return Response.json({ success: true, settings: snapshot });
+    } catch (error) {
+      if (error.message === 'Malformed JSON') {
+        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
+      }
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
+  async function deleteTelegramToken() {
+    try {
+      if (!telegramSettings) {
+        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+      }
+      await telegramSettings.clearBotToken();
+      telegramNotifier?.setBotToken?.('');
+      await settings.setUiSettings({ notifications: { telegram: { enabled: false } } });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      return Response.json({ success: true, settings: snapshot });
+    } catch (error) {
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
+  async function postTelegramTokenTest(request) {
+    try {
+      if (!telegramSettings) {
+        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+      }
+      let botToken = '';
+      try {
+        const body = await parseJsonBody(request) ?? {};
+        botToken = typeof body.botToken === 'string' ? body.botToken.trim() : '';
+      } catch (error) {
+        if (error.message !== 'Malformed JSON') throw error;
+      }
+      const tokenToTest = botToken || telegramSettings.getBotToken();
+      const identity = await telegramNotifier.getBotIdentity(tokenToTest);
+      return Response.json({ success: true, bot: identity });
+    } catch (error) {
+      return telegramTokenTestFailedResponse(error);
+    }
+  }
+
+  async function postTelegramRecipientLink() {
+    try {
+      if (!telegramSettings) {
+        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+      }
+      const linkUrl = await telegramSettings.beginRecipientLink();
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      return Response.json({ success: true, linkUrl, settings: snapshot });
+    } catch (error) {
+      return Response.json({ success: false, error: error.message }, { status: 400 });
+    }
+  }
+
+  async function postTelegramRecipientResolve() {
+    try {
+      if (!telegramSettings) {
+        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+      }
+      const linkCode = telegramSettings.getPendingLinkCode();
+      const offset = telegramSettings.getUpdateOffset();
+      const result = await telegramNotifier.resolveRecipientLink(
+        linkCode,
+        offset,
+        TELEGRAM_LINK_POLL_SECONDS,
+      );
+      if (result.nextOffset !== offset) {
+        await telegramSettings.setUpdateOffset(result.nextOffset);
+      }
+      if (!result.recipient) {
+        const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+        return Response.json({ success: false, error: 'No matching Telegram /start message found yet', settings: snapshot });
+      }
+      await telegramSettings.completeRecipientLink(result.recipient);
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      return Response.json({ success: true, settings: snapshot });
+    } catch (error) {
+      return Response.json({ success: false, error: error.message }, { status: 400 });
+    }
+  }
+
+  async function deleteTelegramRecipient() {
+    try {
+      if (!telegramSettings) {
+        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+      }
+      await telegramSettings.clearRecipient();
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      return Response.json({ success: true, settings: snapshot });
+    } catch (error) {
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
   }
@@ -452,6 +595,11 @@ export default function createWorkspaceRoutes(settings, providers, telegramNotif
     '/api/v1/app/session-name': { PUT: putSessionNameHandler },
     '/api/v1/app/settings': { GET: getAppSettings, PUT: putAppSettings },
     '/api/v1/app/telegram/test': { POST: postTelegramTest },
+    '/api/v1/app/telegram/token/test': { POST: postTelegramTokenTest },
+    '/api/v1/app/telegram/token': { PUT: putTelegramToken, DELETE: deleteTelegramToken },
+    '/api/v1/app/telegram/recipient/link': { POST: postTelegramRecipientLink },
+    '/api/v1/app/telegram/recipient/resolve': { POST: postTelegramRecipientResolve },
+    '/api/v1/app/telegram/recipient': { DELETE: deleteTelegramRecipient },
     '/api/v1/app/folders': { GET: getFolders, POST: postFolder, PUT: putFolder, DELETE: deleteFolder },
     '/api/v1/app/saved-searches': { GET: getSavedSearches, POST: postSavedSearch, PUT: putSavedSearch, DELETE: deleteSavedSearch },
     '/api/v1/app/saved-searches/reorder': { PUT: putSavedSearchReorder },

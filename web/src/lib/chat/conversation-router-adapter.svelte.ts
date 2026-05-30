@@ -8,7 +8,7 @@ import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
-import type { ProviderState } from '$lib/chat/provider-state.svelte';
+import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { PendingPermissionRequest, QueueState, PermissionMode, PendingViewChat } from '$lib/types/chat';
@@ -33,7 +33,7 @@ export interface ConversationRouterDeps {
 	};
 	chatState: ChatState;
 	composerState: ComposerState;
-	providerState: ProviderState;
+	agentState: AgentState;
 	lifecycle: ChatLifecycleStore;
 	startupCoordinator: StartupCoordinator;
 	appShell: { quietRefreshChats: () => void };
@@ -56,7 +56,7 @@ function selectedChatForRouter(deps: ConversationRouterDeps) {
 	return {
 		id: chat.id,
 		projectPath: chat.projectPath,
-		provider: chat.provider,
+		agentId: chat.agentId,
 		model: chat.model,
 		title: chat.title,
 	};
@@ -65,7 +65,7 @@ function selectedChatForRouter(deps: ConversationRouterDeps) {
 // Assembles the EventRouterStores contract from workspace dependencies.
 export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStores {
 	return {
-		provider: () => deps.providerState.provider,
+		agentId: () => deps.agentState.agentId,
 		selectedChat: () => selectedChatForRouter(deps),
 		currentChatId: () => deps.lifecycle.currentChatId,
 		setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),
@@ -78,6 +78,12 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				deps.chatState.chatMessages = updater;
 			}
 		},
+		pendingUserInputs: () => deps.chatState.pendingUserInputs,
+		setPendingUserInputs: (inputs) => deps.chatState.setPendingUserInputs(inputs),
+		upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
+		clearPendingUserInput: (clientRequestId) => deps.chatState.clearPendingUserInput(clientRequestId),
+		updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
+			deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
 		loadMessages: (chatId) => deps.chatState.loadMessages(chatId),
 		setIsLoading: (v) => deps.lifecycle.setIsLoading(v),
 		setCanAbort: (v) => deps.lifecycle.setCanAbort(v),
@@ -90,9 +96,9 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 		pendingViewChat: deps.getPendingViewChat,
 		setPendingViewChat: deps.setPendingViewChat,
 		setMessageQueue: deps.setMessageQueue,
-		permissionMode: () => deps.providerState.permissionMode,
+		permissionMode: () => deps.agentState.permissionMode,
 		previousPermissionMode: deps.getPreviousPermissionMode,
-		setPermissionMode: (mode) => { deps.providerState.permissionMode = mode; },
+		setPermissionMode: (mode) => { deps.agentState.permissionMode = mode; },
 		setPreviousPermissionMode: deps.setPreviousPermissionMode,
 		reconcileProcessing: (activeChatIds) => deps.sessions.reconcileProcessing(activeChatIds),
 		setChatProcessing: (chatId, isProcessing) => deps.sessions.setChatProcessing(chatId, isProcessing),

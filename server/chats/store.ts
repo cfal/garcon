@@ -1,9 +1,8 @@
 // Chat registry. Manages a single chats.json file that maps
-// chat IDs to provider-specific session metadata.
+// chat IDs to agent-specific session metadata.
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import {
   normalizeAmpAgentMode,
@@ -15,16 +14,21 @@ import {
   type PermissionMode,
   type ThinkingMode,
 } from '../../common/chat-modes.js';
-import type { ApiProtocol } from '../../common/providers.js';
-import type { ProviderName } from '../providers/types.js';
-import { isArtificialNativePath } from './artificial-native-path.js';
+import type { ApiProtocol } from '../../common/api-providers.js';
+import type { AgentName } from "../agents/session-types.js";
+import { isArtificialNativePath, parseArtificialNativePath } from './artificial-native-path.js';
+import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 
+const CHAT_REGISTRY_VERSION = 2;
+const LEGACY_AGENT_ID_FIELD = 'provider';
+const LEGACY_AGENT_SESSION_ID_FIELD = 'providerSessionId';
 const NATIVE_PATH_LRU_MAX = 64;
 const ALLOWED_PATCH_FIELDS = [
+  'agentId',
   'nativePath',
   'projectPath',
   'tags',
-  'providerSessionId',
+  'agentSessionId',
   'nextForkOrdinal',
   'model',
   'apiProviderId',
@@ -38,11 +42,11 @@ const ALLOWED_PATCH_FIELDS = [
 ] as const;
 
 export interface ChatRegistryEntry {
-  provider: ProviderName;
+  agentId: AgentName;
   nativePath: string | null;
   projectPath: string;
   tags: string[];
-  providerSessionId: string | null;
+  agentSessionId: string | null;
   nextForkOrdinal?: number;
   model: string;
   apiProviderId?: string | null;
@@ -62,12 +66,12 @@ export interface ChatRegistrySnapshot {
 
 export interface NewChatRegistryEntry {
   id: string;
-  provider: ProviderName;
+  agentId: AgentName;
   model: string;
   projectPath: string;
   nativePath?: string | null;
   tags?: string[];
-  providerSessionId?: string | null;
+  agentSessionId?: string | null;
   nextForkOrdinal?: number;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
@@ -94,7 +98,7 @@ export interface IChatRegistry {
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
   removeChat(id: string): boolean;
   getChatByNativePath(nativePath: string | null | undefined): [string, ChatRegistryEntry] | null;
-  getChatByProviderSessionId(providerSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
+  getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
   saveRegistry(registry: ChatRegistrySnapshot): Promise<void>;
   flush(): Promise<void>;
   onChatRemoved(cb: ChatRemovedCallback): void;
@@ -102,7 +106,7 @@ export interface IChatRegistry {
 }
 
 function createEmptyRegistry(): ChatRegistrySnapshot {
-  return { version: 1, sessions: {} };
+  return { version: CHAT_REGISTRY_VERSION, sessions: {} };
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -130,6 +134,79 @@ function normalizeNextForkOrdinal(value: unknown): number | undefined {
       ? value
       : Number.NaN;
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function normalizeString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function normalizeAgentId(rawEntry: Record<string, unknown>): AgentName {
+  const value = rawEntry.agentId;
+  return typeof value === 'string' ? value as AgentName : '';
+}
+
+function migratePersistedChatEntry(rawEntry: Record<string, unknown>): {
+  entry: Record<string, unknown>;
+  migrated: boolean;
+} {
+  const entry = { ...rawEntry };
+  let migrated = LEGACY_AGENT_ID_FIELD in rawEntry || LEGACY_AGENT_SESSION_ID_FIELD in rawEntry;
+
+  const legacyAgentId = rawEntry[LEGACY_AGENT_ID_FIELD];
+  if (typeof entry.agentId !== 'string' && typeof legacyAgentId === 'string') {
+    entry.agentId = legacyAgentId;
+    migrated = true;
+  }
+
+  if (typeof entry.agentSessionId !== 'string') {
+    const recoveredAgentSessionId = recoverAgentSessionId(rawEntry, normalizeAgentId(entry));
+    if (recoveredAgentSessionId) {
+      entry.agentSessionId = recoveredAgentSessionId;
+      migrated = true;
+    }
+  }
+
+  return { entry, migrated };
+}
+
+function recoverAgentSessionId(rawEntry: Record<string, unknown>, agentId: AgentName): string | null {
+  const legacySessionId = rawEntry[LEGACY_AGENT_SESSION_ID_FIELD];
+  if (typeof legacySessionId === 'string' && legacySessionId) return legacySessionId;
+
+  const nativePath = normalizeNullableString(rawEntry.nativePath);
+  if (!nativePath) return null;
+
+  const artificial = parseArtificialNativePath(nativePath);
+  if (artificial && (!agentId || artificial.agentId === agentId)) {
+    return artificial.agentSessionId;
+  }
+
+  if (path.extname(nativePath) !== '.jsonl') return null;
+  const basename = path.basename(nativePath, '.jsonl');
+  return basename || null;
+}
+
+function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegistryEntry {
+  return {
+    agentId: normalizeAgentId(rawEntry),
+    agentSessionId: normalizeNullableString(rawEntry.agentSessionId),
+    nativePath: normalizeNullableString(rawEntry.nativePath),
+    projectPath: normalizeString(rawEntry.projectPath),
+    tags: Array.isArray(rawEntry.tags) ? rawEntry.tags.filter((tag): tag is string => typeof tag === 'string') : [],
+    model: normalizeString(rawEntry.model),
+    apiProviderId: normalizeNullableString(rawEntry.apiProviderId),
+    modelEndpointId: normalizeNullableString(rawEntry.modelEndpointId),
+    modelProtocol: rawEntry.modelProtocol === 'openai-compatible' || rawEntry.modelProtocol === 'anthropic-messages'
+      ? rawEntry.modelProtocol
+      : null,
+    lastReadAt: normalizeNullableString(rawEntry.lastReadAt),
+    nextForkOrdinal: normalizeNextForkOrdinal(rawEntry.nextForkOrdinal),
+    ...normalizeRegistryModes(rawEntry),
+  };
 }
 
 export class ChatRegistry extends EventEmitter implements IChatRegistry {
@@ -169,18 +246,20 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         return this.#registry;
       }
       const sessions: Record<string, ChatRegistryEntry> = {};
+      let migrated = parsed.version !== CHAT_REGISTRY_VERSION;
       for (const [chatId, rawEntry] of Object.entries(parsed.sessions)) {
         if (!isObjectRecord(rawEntry)) continue;
-        sessions[chatId] = {
-          ...(rawEntry as Record<string, unknown>),
-          ...normalizeRegistryModes(rawEntry),
-          nextForkOrdinal: normalizeNextForkOrdinal(rawEntry.nextForkOrdinal),
-        } as ChatRegistryEntry;
+        const migratedEntry = migratePersistedChatEntry(rawEntry);
+        sessions[chatId] = normalizeChatRegistryEntry(migratedEntry.entry);
+        migrated = migrated || migratedEntry.migrated;
       }
       this.#registry = {
-        version: typeof parsed.version === 'number' ? parsed.version : 1,
+        version: CHAT_REGISTRY_VERSION,
         sessions,
       };
+      if (migrated) {
+        await this.saveRegistry(this.#registry);
+      }
       return this.#registry;
     } catch (error: unknown) {
       const errno = error as NodeJS.ErrnoException;
@@ -205,8 +284,8 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     let dirty = false;
 
     for (const [chatId, session] of Object.entries(sessions)) {
-      if (!session?.providerSessionId) {
-        console.warn(`sessions: discarding chat ${chatId} with missing providerSessionId`);
+      if (!session?.agentSessionId) {
+        console.warn(`sessions: discarding chat ${chatId} with missing agentSessionId`);
         if (session?.nativePath) this.#nativePathCache.delete(session.nativePath);
         delete sessions[chatId];
         dirty = true;
@@ -223,11 +302,18 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         }
       }
 
-      const resolvedPath = await resolveNativePath(session).catch((error: Error) => {
-        console.warn(`sessions: failed to reconcile nativePath for ${chatId}:`, error.message);
-        return null;
-      });
+      let resolvedPath: string | null;
+      try {
+        resolvedPath = await resolveNativePath(session);
+      } catch (error) {
+        console.warn(`sessions: nativePath reconciliation aborted at ${chatId}:`, (error as Error).message);
+        break;
+      }
       if (!resolvedPath) {
+        if (session.agentId === 'codex' && session.nativePath) {
+          console.warn(`sessions: preserving Codex chat ${chatId} with unresolved nativePath`);
+          continue;
+        }
         console.warn(`sessions: discarding chat ${chatId} with unresolved nativePath`);
         delete sessions[chatId];
         dirty = true;
@@ -261,12 +347,12 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
 
   addChat({
     id,
-    provider,
+    agentId,
     model,
     projectPath,
     nativePath = null,
     tags = [],
-    providerSessionId = null,
+    agentSessionId = null,
     nextForkOrdinal = 1,
     apiProviderId = null,
     modelEndpointId = null,
@@ -276,7 +362,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     claudeThinkingMode = 'auto',
     ampAgentMode = 'smart',
   }: NewChatRegistryEntry): boolean {
-    if (!provider) throw new Error('Provider not specified');
+    if (!agentId) throw new Error('Agent not specified');
     if (!model) throw new Error('Model not specified');
     if (!projectPath) throw new Error('Project path not specified');
     const registry = this.getRegistry();
@@ -285,11 +371,11 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     }
     const normalizedModes = normalizeRegistryModes({ permissionMode, thinkingMode, claudeThinkingMode, ampAgentMode });
     registry.sessions[id] = {
-      provider,
+      agentId,
       nativePath,
       projectPath,
       tags,
-      providerSessionId,
+      agentSessionId,
       nextForkOrdinal: normalizeNextForkOrdinal(nextForkOrdinal) ?? 1,
       model,
       apiProviderId,
@@ -362,14 +448,14 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     return null;
   }
 
-  getChatByProviderSessionId(providerSessionId: string | null | undefined): [string, ChatRegistryEntry] | null {
+  getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null {
     const registry = this.#registry;
     if (!registry) {
       throw new Error('Registry cache not initialized. Call init() during startup.');
     }
-    if (!providerSessionId) return null;
+    if (!agentSessionId) return null;
     for (const [id, entry] of Object.entries(registry.sessions)) {
-      if (entry.providerSessionId === providerSessionId) {
+      if (entry.agentSessionId === agentSessionId) {
         return [id, entry];
       }
     }
@@ -377,12 +463,8 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
   }
 
   async saveRegistry(registry: ChatRegistrySnapshot): Promise<void> {
-    await fs.mkdir(this.#workspaceDir, { recursive: true });
     const target = this.#sessionsFilePath();
-    const suffix = `${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}`;
-    const tmp = path.join(this.#workspaceDir, `chats.json.tmp.${suffix}`);
-    await fs.writeFile(tmp, JSON.stringify(registry, null, 2), 'utf8');
-    await fs.rename(tmp, target);
+    await writeJsonFileAtomic(target, registry);
     this.#registry = registry;
   }
 

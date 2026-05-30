@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { discoverApiProviderModels } from '$lib/api/providers.js';
+import { createApiProvider, discoverApiProviderModels } from '$lib/api/api-providers.js';
 import { ApiProviderEndpointDialogState } from '../api-provider-endpoint-dialog-state.svelte';
 
-vi.mock('$lib/api/providers.js', () => ({
+vi.mock('$lib/api/api-providers.js', () => ({
 	createApiProvider: vi.fn(),
 	deleteApiProvider: vi.fn(),
 	discoverApiProviderModels: vi.fn(),
@@ -13,7 +13,8 @@ vi.mock('$lib/api/providers.js', () => ({
 function makeModelCatalog(endpoint: unknown = null) {
 	return {
 		findEndpoint: vi.fn(() => endpoint),
-		forceRefresh: vi.fn().mockResolvedValue(undefined)
+		forceRefresh: vi.fn().mockResolvedValue(undefined),
+		refreshApiProviders: vi.fn().mockResolvedValue(undefined)
 	};
 }
 
@@ -396,4 +397,29 @@ describe('ApiProviderEndpointDialogState', () => {
 			modelDiscovery: 'openai-models'
 		});
 	});
+
+	it('calls refreshApiProviders instead of forceRefresh after saving a new provider', async () => {
+		vi.mocked(createApiProvider).mockResolvedValueOnce({} as never);
+		const catalog = makeModelCatalog();
+		const dialog = new ApiProviderEndpointDialogState({
+			modelCatalog: catalog as never,
+			getProtocol: () => 'openai-compatible',
+			getEndpointId: () => null,
+			getTemplateId: () => 'custom',
+			onSaved: vi.fn()
+		});
+
+		dialog.beginCreate();
+		dialog.label = 'Test Provider';
+		dialog.baseUrl = 'https://api.example.com';
+		dialog.apiKey = 'sk-test';
+		dialog.modelsText = 'gpt-4|GPT-4';
+		dialog.defaultModel = 'gpt-4';
+
+		await dialog.save();
+
+		expect(catalog.refreshApiProviders).toHaveBeenCalledOnce();
+		expect(catalog.forceRefresh).not.toHaveBeenCalled();
+	});
+
 });

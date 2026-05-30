@@ -14,14 +14,14 @@
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import TrashIcon from '@lucide/svelte/icons/trash';
 	import { getModelCatalog } from '$lib/context';
-	import type { ApiProtocol, ApiProviderCatalogEntry } from '$shared/providers';
-	import type { DeviceAuthInfo, HarnessReadiness } from '$lib/api/providers';
+	import type { ApiProtocol, ApiProviderCatalogEntry } from '$shared/api-providers';
+	import type { DeviceAuthInfo, AgentReadiness } from '$lib/api/agents';
 	import {
 		templatesForProtocol,
 		type ApiProviderTemplateId
 	} from '$shared/api-provider-templates';
 	import ApiProviderEndpointDialog from './ApiProviderEndpointDialog.svelte';
-	import HarnessCard from './HarnessCard.svelte';
+	import AgentCard from './AgentCard.svelte';
 	import { deleteApiProviderEndpoint } from './api-provider-endpoint-dialog-state.svelte';
 
 	interface AuthStatus {
@@ -32,7 +32,7 @@
 		error: string | null;
 	}
 
-	interface OAuthHarnessConfig {
+	interface OAuthAgentConfig {
 		id: 'claude' | 'codex';
 		name: string;
 	}
@@ -42,7 +42,7 @@
 		title,
 		description,
 		addLabel,
-		oauthHarness = undefined,
+		oauthAgent = undefined,
 		auth = undefined,
 		readiness = undefined,
 		deviceAuth = undefined,
@@ -53,9 +53,9 @@
 		title: string;
 		description: string;
 		addLabel: string;
-		oauthHarness?: OAuthHarnessConfig;
+		oauthAgent?: OAuthAgentConfig;
 		auth?: AuthStatus;
-		readiness?: HarnessReadiness;
+		readiness?: AgentReadiness;
 		deviceAuth?: DeviceAuthInfo;
 		pending?: boolean;
 		onLogin?: () => void;
@@ -80,7 +80,10 @@
 				if (endpoint.protocol === protocol) rows.push({ apiProvider, endpoint });
 			}
 		}
-		return rows;
+		return rows.sort((a, b) =>
+			a.apiProvider.label.localeCompare(b.apiProvider.label, undefined, { sensitivity: 'base' })
+			|| a.endpoint.baseUrl.localeCompare(b.endpoint.baseUrl, undefined, { sensitivity: 'base' })
+		);
 	});
 
 	function beginCreate(templateId: ApiProviderTemplateId) {
@@ -154,10 +157,10 @@
 		</div>
 	{/if}
 
-	{#if oauthHarness && auth}
-		<HarnessCard
-			harnessId={oauthHarness.id}
-			harnessName={oauthHarness.name}
+	{#if oauthAgent && auth}
+		<AgentCard
+			agentId={oauthAgent.id}
+			agentName={oauthAgent.name}
 			{auth}
 			open={oauthOpen}
 			onOpenChange={(open) => { oauthOpen = open; }}

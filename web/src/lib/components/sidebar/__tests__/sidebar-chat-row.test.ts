@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
-import SidebarChatItemHarness from './SidebarChatItemHarness.svelte';
-import SidebarSearchDialogHarness from './SidebarSearchDialogHarness.svelte';
+import SidebarChatItemHost from './SidebarChatItemHost.svelte';
+import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
 
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -11,7 +11,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		id: 'chat-1',
 		projectPath: '/very/long/workspace/projects/feature-branch/app',
 		title: 'Shared row chat',
-		provider: 'claude',
+		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'think',
@@ -37,7 +37,7 @@ describe('shared sidebar chat row', () => {
 		const onTagClick = vi.fn();
 		const onManageTags = vi.fn();
 
-		render(SidebarChatItemHarness, {
+		render(SidebarChatItemHost, {
 			session: createChat(),
 			isPinned: true,
 			onTagClick,
@@ -89,7 +89,7 @@ describe('shared sidebar chat row', () => {
 	});
 
 	it('renders the same chat summary content inside the search dialog rows', async () => {
-		render(SidebarSearchDialogHarness, {
+		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat({ isPinned: true })],
 		});
 
@@ -121,7 +121,7 @@ describe('shared sidebar chat row', () => {
 			lastActivityAt: '2025-01-01T00:00:00.000Z',
 		});
 
-		const { rerender } = render(SidebarChatItemHarness, {
+		const { rerender } = render(SidebarChatItemHost, {
 			session,
 			currentTime: new Date('2025-01-01T03:00:00.000Z'),
 		});

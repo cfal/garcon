@@ -48,7 +48,7 @@
 
 	const chatRecord = $derived(sessions.byId[chatId] ?? null);
 	const chatTitle = $derived(chatRecord?.title || 'Untitled');
-	const providerLabel = $derived(chatRecord?.provider || '');
+	const providerLabel = $derived(chatRecord?.agentId || '');
 	const isProcessing = $derived(chatRecord?.isProcessing ?? false);
 	// Signals a finished, non-focused pane that has new content the user
 	// hasn't acknowledged -- lets the user see at a glance which pane

@@ -5,7 +5,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { getAppShell, getModelCatalog, getRemoteSettings } from '$lib/context';
 	import ApiProvidersSection from './ApiProvidersSection.svelte';
-	import OtherHarnessesSection from './OtherHarnessesSection.svelte';
+	import OtherAgentsSection from './OtherAgentsSection.svelte';
 	import LocalSettingsSection from './LocalSettingsSection.svelte';
 	import RemoteSettingsSection from './RemoteSettingsSection.svelte';
 	import { SettingsAuthState } from './settings-auth-state.svelte.js';
@@ -58,8 +58,8 @@
 					<Tabs.Trigger value="providers" class="h-8 px-2">
 						{m.settings_tab_providers()}
 					</Tabs.Trigger>
-					<Tabs.Trigger value="other-harnesses" class="h-8 px-2">
-						{m.settings_tab_other_harnesses()}
+					<Tabs.Trigger value="other-agents" class="h-8 px-2">
+						{m.settings_tab_other_agents()}
 					</Tabs.Trigger>
 					<Tabs.Trigger value="local" class="h-8 px-2">
 						{m.settings_tab_local_settings()}
@@ -76,8 +76,8 @@
 					<ApiProvidersSection {settingsAuth} />
 				</Tabs.Content>
 
-				<Tabs.Content value="other-harnesses" class="mt-0 space-y-6">
-					<OtherHarnessesSection {settingsAuth} />
+				<Tabs.Content value="other-agents" class="mt-0 space-y-6">
+					<OtherAgentsSection {settingsAuth} />
 				</Tabs.Content>
 
 				<Tabs.Content value="local" class="mt-0 space-y-6">

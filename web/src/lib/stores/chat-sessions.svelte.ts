@@ -30,7 +30,7 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 		id: session.id,
 		projectPath: session.projectPath,
 			title: session.title,
-			provider: session.provider,
+			agentId: session.agentId,
 			model: session.model,
 			apiProviderId: session.apiProviderId ?? null,
 			modelEndpointId: session.modelEndpointId ?? null,
@@ -63,7 +63,7 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.id === b.id &&
 		a.projectPath === b.projectPath &&
 		a.title === b.title &&
-			a.provider === b.provider &&
+			a.agentId === b.agentId &&
 			a.model === b.model &&
 			a.apiProviderId === b.apiProviderId &&
 			a.modelEndpointId === b.modelEndpointId &&
@@ -82,6 +82,12 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.firstMessage === b.firstMessage &&
 		arraysEqual(a.tags, b.tags)
 	);
+}
+
+function preserveLocalPreview(prev: ChatSessionRecord | undefined, next: ChatSessionRecord): void {
+	if (prev?.lastMessage && !next.lastMessage) {
+		next.lastMessage = prev.lastMessage;
+	}
 }
 
 export class ChatSessionsStore {
@@ -129,12 +135,13 @@ export class ChatSessionsStore {
 			}
 		}
 
-		for (const session of sessions) {
-			const next = toRecord(session);
-			const prev = this.byId[next.id];
-			if (prev && sameRecord(prev, next)) {
-				nextById[next.id] = prev;
-			} else {
+			for (const session of sessions) {
+				const next = toRecord(session);
+				const prev = this.byId[next.id];
+				preserveLocalPreview(prev, next);
+				if (prev && sameRecord(prev, next)) {
+					nextById[next.id] = prev;
+				} else {
 				// Preserve WS-authoritative isProcessing flag; the REST
 				// isActive snapshot can lag behind real-time WS events.
 				if (prev?.isProcessing && !next.isProcessing) {
@@ -180,7 +187,7 @@ export class ChatSessionsStore {
 			id,
 			projectPath,
 				title: normalizedStartup.firstMessage.trim() || 'New Session',
-				provider: normalizedStartup.provider,
+				agentId: normalizedStartup.agentId,
 				model: normalizedStartup.model,
 				apiProviderId: normalizedStartup.apiProviderId ?? null,
 				modelEndpointId: normalizedStartup.modelEndpointId ?? null,

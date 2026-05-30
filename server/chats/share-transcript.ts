@@ -252,7 +252,7 @@ function buildTranscriptEntries(snapshot: SharedChatSnapshot): TranscriptEntry[]
 function formatMetadataLines(snapshot: SharedChatSnapshot): string[] {
   return [
     `Title: ${snapshot.title || 'Untitled Chat'}`,
-    `Provider: ${snapshot.provider || 'Unknown'}`,
+    `Agent: ${snapshot.agentId || 'Unknown'}`,
     `Model: ${snapshot.model || 'Unknown'}`,
     `Shared At: ${snapshot.sharedAt || ''}`,
     `Project Path: ${snapshot.projectPath || ''}`,
@@ -273,4 +273,3 @@ export function renderSharedChatText(snapshot: SharedChatSnapshot): string {
 
   return lines.join('\n');
 }
-

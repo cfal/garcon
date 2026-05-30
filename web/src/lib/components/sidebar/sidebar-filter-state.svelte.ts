@@ -28,7 +28,7 @@ function mergeChatFilters(base: ChatFilterSpec | null, search: ChatFilterSpec): 
 	const merged = emptyFilterSpec();
 	merged.textTokens = Array.from(new Set([...(base?.textTokens ?? []), ...search.textTokens]));
 	merged.tags = mergeTagGroups(base?.tags, search.tags);
-	merged.providers = Array.from(new Set([...(base?.providers ?? []), ...search.providers]));
+	merged.agents = Array.from(new Set([...(base?.agents ?? []), ...search.agents]));
 	merged.models = Array.from(new Set([...(base?.models ?? []), ...search.models]));
 	merged.project = Array.from(new Set([...(base?.project ?? []), ...search.project]));
 	merged.status = base?.status;

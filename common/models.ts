@@ -1,5 +1,5 @@
-// Static model lists shared between server and frontend. OpenCode models
-// are fetched dynamically and not included here.
+// Static model lists shared between server and frontend. Provider-owned
+// model catalogs such as Cursor and OpenCode are fetched dynamically.
 
 export interface SharedModelOption {
   value: string;

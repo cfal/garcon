@@ -8,8 +8,9 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
-import { UserMessage } from '../common/chat-types.ts';
-import type { RunProviderTurnOptions } from './providers/types.js';
+import type { RunAgentTurnOptions } from "./agents/session-types.js";
+import { writeJsonFileAtomic } from './lib/json-file-store.js';
+import { KeyedPromiseLock } from './lib/keyed-lock.js';
 
 function emptyQueue(): QueueState {
   return { entries: [], paused: false, version: 0 };
@@ -27,56 +28,74 @@ function bumpQueue(queue: QueueState): QueueState {
   };
 }
 
-function optionsForQueuedTurn(options: RunProviderTurnOptions): RunProviderTurnOptions {
-  const { clientRequestId: _clientRequestId, clientMessageId: _clientMessageId, turnId: _turnId, ...rest } = options;
-  return rest;
+function optionsForQueuedTurn(options: RunAgentTurnOptions): RunAgentTurnOptions {
+  return {
+    ...options,
+    clientRequestId: crypto.randomUUID(),
+    clientMessageId: crypto.randomUUID(),
+    turnId: crypto.randomUUID(),
+  };
 }
 
-interface ProvidersDep {
-  runProviderTurn(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
+interface AgentTurnRunnerDep {
+  runAgentTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   abortSession(chatId: string): Promise<boolean>;
   isChatRunning(chatId: string): boolean;
 }
 
-interface HistoryCacheDep {
-  appendMessages(chatId: string, messages: unknown[]): Promise<void>;
+interface PendingInputsDep {
+  register(chatId: string, content: string, options?: {
+    clientRequestId?: string;
+    clientMessageId?: string;
+    turnId?: string;
+    images?: RunAgentTurnOptions['images'];
+    deliveryStatus?: 'submitting' | 'accepted' | 'failed';
+  }): Promise<unknown>;
+  updateDeliveryStatus(chatId: string, clientRequestId: string, deliveryStatus: 'submitting' | 'accepted' | 'failed'): unknown;
 }
 
 type QueueUpdatedCallback = (chatId: string, state: QueueState) => void;
 type DispatchingCallback = (chatId: string, entryId: string, content: string) => void;
 type SessionStoppedCallback = (chatId: string, success: boolean) => void;
 type ChatIdleCallback = (chatId: string) => void;
-type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunProviderTurnOptions) => void;
+type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunAgentTurnOptions) => void;
+
+function requireTurnRunner(runner: AgentTurnRunnerDep | null): AgentTurnRunnerDep {
+  if (!runner) {
+    throw new Error('QueueManager execution requires an agent turn runner');
+  }
+  return runner;
+}
 
 export class QueueManager extends EventEmitter {
-  #busy = new Map<string, boolean>();
+  #locks = new KeyedPromiseLock();
   #draining = new Set<string>();
   #workspaceDir: string;
-  #providers: ProvidersDep | null;
-  #historyCache: HistoryCacheDep | null;
+  #turnRunner: AgentTurnRunnerDep | null;
+  #pendingInputs: PendingInputsDep | null;
 
-  // providers and historyCache are optional for backward compat in tests
+  // turnRunner and pendingInputs are optional for backward compat in tests
   // that only exercise state management methods.
-  constructor(workspaceDir: string, providers?: ProvidersDep | null, historyCache?: HistoryCacheDep | null) {
+  constructor(workspaceDir: string, turnRunner?: AgentTurnRunnerDep | null, pendingInputs?: PendingInputsDep | null) {
     super();
     this.#workspaceDir = workspaceDir;
-    this.#providers = providers || null;
-    this.#historyCache = historyCache || null;
+    this.#turnRunner = turnRunner || null;
+    this.#pendingInputs = pendingInputs || null;
   }
 
-	  onQueueUpdated(cb: QueueUpdatedCallback): void { this.on('queue-updated', cb); }
-	  onDispatching(cb: DispatchingCallback): void { this.on('dispatching', cb); }
-	  onSessionStopped(cb: SessionStoppedCallback): void { this.on('session-stopped', cb); }
-	  onChatIdle(cb: ChatIdleCallback): void { this.on('chat-idle', cb); }
-	  onTurnFailed(cb: TurnFailedCallback): void { this.on('turn-failed', cb); }
+  onQueueUpdated(cb: QueueUpdatedCallback): void { this.on('queue-updated', cb); }
+  onDispatching(cb: DispatchingCallback): void { this.on('dispatching', cb); }
+  onSessionStopped(cb: SessionStoppedCallback): void { this.on('session-stopped', cb); }
+  onChatIdle(cb: ChatIdleCallback): void { this.on('chat-idle', cb); }
+  onTurnFailed(cb: TurnFailedCallback): void { this.on('turn-failed', cb); }
 
-  // Emits chat-idle if the chat has no queued items and the provider is not
-  // running. Called after a provider turn finishes to cover the initial-session
+  // Emits chat-idle if the chat has no queued items and the agent is not
+  // running. Called after an agent turn finishes to cover the initial-session
   // path where #drain is never invoked. Skips when a drain loop is active
   // for this chat to avoid duplicate emissions.
   async checkChatIdle(chatId: string): Promise<void> {
     if (this.#draining.has(chatId)) return;
-    if (this.#providers?.isChatRunning(chatId)) return;
+    if (this.#turnRunner?.isChatRunning(chatId)) return;
     const queue = await this.readChatQueue(chatId);
     const hasPending = queue.entries.some(e => e.status === 'queued' || e.status === 'sending');
     if (!hasPending) {
@@ -89,22 +108,13 @@ export class QueueManager extends EventEmitter {
   }
 
   async #withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    while (this.#busy.get(key)) {
-      await new Promise(r => setImmediate(r));
-    }
-    this.#busy.set(key, true);
-    try {
-      return await fn();
-    } finally {
-      this.#busy.delete(key);
-    }
+    return this.#locks.runExclusive(key, fn);
   }
 
   async #writeChatQueue(chatId: string, queue: unknown): Promise<void> {
     const filePath = this.#chatQueueFilePath(chatId);
     const normalized = normalizeForPersist(queue);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(normalized, null, 2), 'utf8');
+    await writeJsonFileAtomic(filePath, normalized);
   }
 
   async readChatQueue(chatId: string): Promise<QueueState> {
@@ -242,37 +252,44 @@ export class QueueManager extends EventEmitter {
   }
 
   // Submits a command to a chat session. Appends the user message to
-  // history, runs the provider turn, then drains any queued entries.
-  async submit(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
-    await this.appendUserMessage(chatId, command, options);
-    await this.runAcceptedTurn(chatId, command, options);
+  // history, runs the agent turn, then drains any queued entries.
+  async submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
+    const turnOptions = ensureTurnIdentifiers(options);
+    await this.registerPendingUserInput(chatId, command, turnOptions);
+    await this.runAcceptedTurn(chatId, command, turnOptions);
   }
 
-  async appendUserMessage(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
-    if (command && this.#historyCache) {
-      const userMsg = new UserMessage(new Date().toISOString(), String(command), options.images, {
-        messageId: options.clientMessageId,
-        clientRequestId: options.clientRequestId,
-        turnId: options.turnId,
-      });
-      await this.#historyCache.appendMessages(chatId, [userMsg]);
+  async registerPendingUserInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
+    if (!command || !this.#pendingInputs) return;
+    await this.#pendingInputs.register(chatId, command, {
+      clientRequestId: options.clientRequestId,
+      clientMessageId: options.clientMessageId,
+      turnId: options.turnId,
+      images: options.images,
+      deliveryStatus: 'accepted',
+    });
+  }
+
+  async appendUserMessage(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
+    await this.registerPendingUserInput(chatId, command, options);
+  }
+
+  async runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
+    const turnRunner = requireTurnRunner(this.#turnRunner);
+    try {
+      await turnRunner.runAgentTurn(chatId, command, options);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emit('turn-failed', chatId, message, options);
+      throw error;
     }
+    await this.#drain(chatId, options);
   }
 
-	  async runAcceptedTurn(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void> {
-	    try {
-	      await this.#providers!.runProviderTurn(chatId, command, options);
-	    } catch (error: unknown) {
-	      const message = error instanceof Error ? error.message : String(error);
-	      this.emit('turn-failed', chatId, message, options);
-	      throw error;
-	    }
-	    await this.#drain(chatId, options);
-	  }
-
-  // Aborts the running harness session and pauses the queue if entries remain.
+  // Aborts the running agent session and pauses the queue if entries remain.
   async abort(chatId: string): Promise<boolean> {
-    const success = await this.#providers!.abortSession(chatId);
+    const turnRunner = requireTurnRunner(this.#turnRunner);
+    const success = await turnRunner.abortSession(chatId);
     if (success) {
       try {
         const current = await this.readChatQueue(chatId);
@@ -285,18 +302,20 @@ export class QueueManager extends EventEmitter {
     return success;
   }
 
-  // Triggers drain if the provider is not currently running.
-  async triggerDrain(chatId: string, options: RunProviderTurnOptions): Promise<void> {
-    if (this.#providers!.isChatRunning(chatId)) return;
+  // Triggers drain if the agent is not currently running.
+  async triggerDrain(chatId: string, options: RunAgentTurnOptions): Promise<void> {
+    const turnRunner = requireTurnRunner(this.#turnRunner);
+    if (turnRunner.isChatRunning(chatId)) return;
     await this.#drain(chatId, options);
   }
 
-  // Pops queued entries one at a time, appends to history, and runs provider turns.
-  async #drain(chatId: string, options: RunProviderTurnOptions): Promise<void> {
+  // Pops queued entries one at a time, registers a pending overlay, and runs agent turns.
+  async #drain(chatId: string, options: RunAgentTurnOptions): Promise<void> {
+    const turnRunner = requireTurnRunner(this.#turnRunner);
     this.#draining.add(chatId);
     try {
       while (true) {
-        if (this.#providers!.isChatRunning(chatId)) break;
+        if (turnRunner.isChatRunning(chatId)) break;
 
         const result = await this.popNextChat(chatId);
         if (!result) {
@@ -305,17 +324,12 @@ export class QueueManager extends EventEmitter {
         }
 
         const { entry } = result;
+        const queuedTurnOptions = optionsForQueuedTurn(options);
+        await this.registerPendingUserInput(chatId, entry.content, queuedTurnOptions);
         this.emit('dispatching', chatId, entry.id, entry.content);
 
-        if (this.#historyCache) {
-          const userMsg = new UserMessage(new Date().toISOString(), String(entry.content));
-          this.#historyCache.appendMessages(chatId, [userMsg]).catch((err: Error) => {
-            console.warn(`queue: failed to append queued message for ${chatId}:`, err.message);
-          });
-        }
-
         try {
-	          await this.#providers!.runProviderTurn(chatId, entry.content, optionsForQueuedTurn(options));
+          await turnRunner.runAgentTurn(chatId, entry.content, queuedTurnOptions);
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
           console.error('queue: error processing queued message:', (error as Error).message);
@@ -360,7 +374,7 @@ export class QueueManager extends EventEmitter {
         }
         if (modified) {
           data.paused = true;
-          await fs.writeFile(filePath, JSON.stringify(normalizeForPersist(data), null, 2), 'utf8');
+          await writeJsonFileAtomic(filePath, normalizeForPersist(data));
           console.log(`queue: recovered stale chat queue: ${qf}`);
         }
       } catch (error: unknown) {
@@ -368,4 +382,13 @@ export class QueueManager extends EventEmitter {
       }
     }
   }
+}
+
+function ensureTurnIdentifiers(options: RunAgentTurnOptions): RunAgentTurnOptions {
+  return {
+    ...options,
+    clientRequestId: options.clientRequestId ?? crypto.randomUUID(),
+    clientMessageId: options.clientMessageId ?? crypto.randomUUID(),
+    turnId: options.turnId ?? crypto.randomUUID(),
+  };
 }

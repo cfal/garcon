@@ -8,7 +8,7 @@ import {
   isThinkingMode,
 } from './chat-modes.js';
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from './chat-modes.js';
-import type { ApiProtocol } from './providers.js';
+import type { ApiProtocol } from './api-providers.js';
 
 // Narrows an unknown value to string | null for chatId fields.
 function strOrNull(v: unknown): string | null {
@@ -173,10 +173,10 @@ export class ForkRunRequest {
 
 export class AgentStopRequest {
   readonly type = 'agent-stop' as const;
-  constructor(public chatId: string | null, public provider?: string) { }
+  constructor(public chatId: string | null, public agentId?: string) { }
 
   static fromJson(data: Record<string, unknown>): AgentStopRequest {
-    return new AgentStopRequest(strOrNull(data.chatId), strOrUndef(data.provider));
+    return new AgentStopRequest(strOrNull(data.chatId), strOrUndef(data.agentId));
   }
 }
 
@@ -291,7 +291,7 @@ export class QueueEnqueueRequest {
   constructor(
     public chatId: string | null,
     public content: string,
-    public provider?: string,
+    public agentId?: string,
     public projectName?: string,
     public projectPath?: string,
   ) { }
@@ -300,7 +300,7 @@ export class QueueEnqueueRequest {
     return new QueueEnqueueRequest(
       strOrNull(data.chatId),
       typeof data.content === 'string' ? data.content : '',
-      strOrUndef(data.provider),
+      strOrUndef(data.agentId),
       strOrUndef(data.projectName),
       strOrUndef(data.projectPath),
     );

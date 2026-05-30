@@ -1,6 +1,7 @@
-// Bounded in-memory cache of ChatMessage[] arrays by chatId. Once loaded,
-// the cache is authoritative -- messages are never re-read from JSONL
-// while the cache entry exists. Live provider events append directly.
+// Bounded in-memory cache of ChatMessage[] arrays by chatId. Entries may be
+// full history loads or live tails captured before the user opens a chat.
+
+import { mergeChatMessagesByIdentity } from '../../common/chat-message-identity.js';
 
 const CACHE_LIMIT = 100;
 const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
@@ -14,15 +15,15 @@ export class HistoryCache {
   #initialized = false;
   #registry;
   #metadata;
-  #providers;
+  #agents;
 
   // registry: ChatRegistry
   // metadata: MetadataIndex
-  // providers: ProviderRegistry
-  constructor(registry, metadata, providers) {
+  // agents: AgentRegistry
+  constructor(registry, metadata, agents) {
     this.#registry = registry;
     this.#metadata = metadata;
-    this.#providers = providers;
+    this.#agents = agents;
   }
 
   init() {
@@ -32,8 +33,8 @@ export class HistoryCache {
       // Evict cache entry when a chat is removed from registry.
       this.#registry.onChatRemoved((chatId) => this.evictChat(chatId));
 
-      // Self-wire: append provider messages to cache as they arrive.
-      this.#providers.onMessages((chatId, messages) => {
+      // Self-wire: append agent messages to cache as they arrive.
+      this.#agents.onMessages((chatId, messages) => {
         this.appendMessages(chatId, messages).catch((err) => {
           console.warn('history-cache: appendMessages failed:', err.message);
         });
@@ -67,17 +68,27 @@ export class HistoryCache {
 
   async ensureLoaded(chatId) {
     const key = String(chatId);
-    const existing = this.getMessages(key);
-    if (existing) return existing;
+    const existing = this.#cacheByChatId.get(key);
+    if (existing?.completeness === 'full') {
+      existing.lastAccessAt = Date.now();
+      return existing.messages;
+    }
 
     const pending = this.#inFlightLoads.get(key);
     if (pending) return pending;
 
     const loadPromise = (async () => {
-      const messages = await this.#loadFromProvider(key);
+      const loaded = await this.#loadFromAgent(key);
+      const current = this.#cacheByChatId.get(key);
+      const liveTail = current?.completeness === 'tail' ? current.messages : [];
+      const messages = trimTail(
+        mergeChatMessages(loaded, liveTail, { includeContentToken: true }),
+        MAX_MESSAGES_PER_ENTRY,
+      );
       this.#cacheByChatId.set(key, {
         chatId: key,
         messages,
+        completeness: 'full',
         lastAccessAt: Date.now(),
       });
       return messages;
@@ -97,22 +108,11 @@ export class HistoryCache {
     let entry = this.#cacheByChatId.get(key);
 
     if (!entry) {
-      await this.ensureLoaded(key);
-      entry = this.#cacheByChatId.get(key);
-      if (!entry) {
-        entry = { chatId: key, messages: [], lastAccessAt: Date.now() };
-        this.#cacheByChatId.set(key, entry);
-      }
+      entry = { chatId: key, messages: [], completeness: 'tail', lastAccessAt: Date.now() };
+      this.#cacheByChatId.set(key, entry);
     }
 
-    for (const m of appendedMessages) {
-      entry.messages.push(m);
-    }
-
-    if (entry.messages.length > MAX_MESSAGES_PER_ENTRY) {
-      entry.messages = entry.messages.slice(-MAX_MESSAGES_PER_ENTRY);
-    }
-
+    entry.messages = trimTail(mergeChatMessages(entry.messages, appendedMessages), MAX_MESSAGES_PER_ENTRY);
     entry.lastAccessAt = Date.now();
 
     try {
@@ -159,7 +159,7 @@ export class HistoryCache {
       .sort((a, b) => a.lastAccessAt - b.lastAccessAt);
 
     for (const entry of entries) {
-      const active = this.#providers.isChatRunning(entry.chatId);
+      const active = this.#agents.isChatRunning(entry.chatId);
       if (active) continue;
 
       const isStale = now - entry.lastAccessAt > STALE_NON_ACTIVE_MS;
@@ -171,10 +171,10 @@ export class HistoryCache {
     }
   }
 
-  async #loadFromProvider(chatId) {
+  async #loadFromAgent(chatId) {
     const session = this.#registry.getChat(chatId);
     if (!session) return [];
-    return this.#providers.loadMessages(session);
+    return this.#agents.loadMessages(session, chatId);
   }
 
   // Exposed for tests that need to inspect/populate cache directly.
@@ -182,3 +182,11 @@ export class HistoryCache {
 }
 
 export { CACHE_LIMIT as _CACHE_LIMIT, STALE_NON_ACTIVE_MS as _STALE_NON_ACTIVE_MS, MAX_MESSAGES_PER_ENTRY as _MAX_MESSAGES_PER_ENTRY };
+
+function trimTail(messages, maxMessages) {
+  return messages.length > maxMessages ? messages.slice(-maxMessages) : messages;
+}
+
+function mergeChatMessages(base, incoming, options = {}) {
+  return mergeChatMessagesByIdentity(base, incoming ?? [], options);
+}

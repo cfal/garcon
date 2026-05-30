@@ -23,13 +23,16 @@ import {
 	AmpSkillToolUseMessage,
 	AmpMermaidToolUseMessage,
 	AmpHandoffToolUseMessage,
-	AmpLookAtToolUseMessage,
-	AmpFindThreadToolUseMessage,
-	AmpReadThreadToolUseMessage,
-	AmpTaskListToolUseMessage,
-	UnknownToolUseMessage,
-	PermissionRequestMessage,
-	UserMessage,
+		AmpLookAtToolUseMessage,
+		AmpFindThreadToolUseMessage,
+		AmpReadThreadToolUseMessage,
+		AmpTaskListToolUseMessage,
+		ExternalToolUseMessage,
+		McpToolUseMessage,
+		RequestPermissionsToolUseMessage,
+		UnknownToolUseMessage,
+		PermissionRequestMessage,
+		UserMessage,
 	parseChatMessage,
 } from '$shared/chat-types';
 
@@ -94,11 +97,12 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('ApplyPatchToolUseMessage preserves diff fields', () => {
-		const msg = new ApplyPatchToolUseMessage(TS, 'id-6', '/tmp/p.ts', 'before', 'after');
+		const msg = new ApplyPatchToolUseMessage(TS, 'id-6', '/tmp/p.ts', 'before', 'after', 'patch text');
 		const parsed = roundTrip(msg);
 		expect(parsed.filePath).toBe('/tmp/p.ts');
 		expect(parsed.oldString).toBe('before');
 		expect(parsed.newString).toBe('after');
+		expect(parsed.patch).toBe('patch text');
 	});
 
 	it('GrepToolUseMessage preserves pattern and path', () => {
@@ -244,6 +248,29 @@ describe('tool-use serialization round-trip', () => {
 		expect(parsed.status).toBe('done');
 	});
 
+	it('ExternalToolUseMessage preserves tool metadata', () => {
+		const msg = new ExternalToolUseMessage(TS, 'id-external-1', 'search', { q: 'threads' }, 'app');
+		const parsed = roundTrip(msg);
+		expect(parsed.name).toBe('search');
+		expect(parsed.namespace).toBe('app');
+		expect(parsed.input).toEqual({ q: 'threads' });
+	});
+
+	it('McpToolUseMessage preserves server and tool metadata', () => {
+		const msg = new McpToolUseMessage(TS, 'id-mcp-1', 'github', 'list_prs', { state: 'open' });
+		const parsed = roundTrip(msg);
+		expect(parsed.server).toBe('github');
+		expect(parsed.tool).toBe('list_prs');
+		expect(parsed.input).toEqual({ state: 'open' });
+	});
+
+	it('RequestPermissionsToolUseMessage preserves requested permissions', () => {
+		const msg = new RequestPermissionsToolUseMessage(TS, 'id-permissions-1', { network: { enabled: true } }, 'Need API access');
+		const parsed = roundTrip(msg);
+		expect(parsed.permissions).toEqual({ network: { enabled: true } });
+		expect(parsed.reason).toBe('Need API access');
+	});
+
 	it('UnknownToolUseMessage preserves rawName and input without metadata', () => {
 		const msg = new UnknownToolUseMessage(TS, 'id-18', 'custom_tool', { key: 'val' });
 		const parsed = roundTrip(msg);
@@ -257,6 +284,7 @@ describe('wire format parsing', () => {
 		const msg = new UserMessage(TS, 'hello', undefined, {
 			messageId: 'msg-1',
 			clientRequestId: 'req-1',
+			upstreamRequestId: 'cursor-req-1',
 			turnId: 'turn-1',
 			deliveryStatus: 'submitting',
 		});
@@ -265,6 +293,7 @@ describe('wire format parsing', () => {
 		expect(parsed.metadata).toEqual({
 			messageId: 'msg-1',
 			clientRequestId: 'req-1',
+			upstreamRequestId: 'cursor-req-1',
 			turnId: 'turn-1',
 			deliveryStatus: 'submitting',
 		});
@@ -288,7 +317,7 @@ describe('wire format parsing', () => {
 	});
 
 	it('parses bash-tool-use from wire data', () => {
-		const data = { type: 'bash-tool-use', timestamp: TS, toolId: 'id-legacy', command: 'echo hello' };
+		const data = { type: 'bash-tool-use', timestamp: TS, toolId: 'id-wire', command: 'echo hello' };
 		const parsed = parseChatMessage(data);
 		expect(parsed).toBeInstanceOf(BashToolUseMessage);
 		expect((parsed as BashToolUseMessage).command).toBe('echo hello');
@@ -326,7 +355,7 @@ describe('wire format parsing', () => {
 		const data = {
 			type: 'unknown-tool-use',
 			timestamp: TS,
-			toolId: 'id-unk-legacy',
+			toolId: 'id-unk-wire',
 			rawName: 'customX',
 			input: { a: 1, b: 'two' },
 		};

@@ -1,20 +1,32 @@
-// Serves the GET /api/v1/models endpoint using the live harness catalog from
+// Serves the GET /api/v1/models endpoint using the live agent catalog from
 // the registry.
 
-import { getPiModelsStrict, isPiModelDiscoveryUnavailableError } from '../providers/pi-models.js';
+import {
+  catalogResponseFromSnapshot,
+  getCatalogResponseSnapshot,
+} from './model-catalog-cache.js';
 
-function piDiscoveryUnavailableResponse(error, catalog, entry) {
+function staleModelsFromDiscoveryError(error) {
+  return error
+    && typeof error === 'object'
+    && Array.isArray(error.staleModels)
+    ? error.staleModels
+    : [];
+}
+
+function modelDiscoveryUnavailableResponse(error, catalog, entry) {
   const reason = error instanceof Error ? error.message : String(error);
+  const staleModels = staleModelsFromDiscoveryError(error);
   const body = {
-    error: 'Pi model discovery unavailable',
+    error: 'Model discovery unavailable',
     reason,
   };
-  if (isPiModelDiscoveryUnavailableError(error) && error.staleModels.length > 0 && entry) {
+  if (staleModels.length > 0 && entry) {
     body.catalog = {
-      harnesses: [{
+      agents: [{
         ...entry,
-        defaultModel: entry.defaultModel || error.staleModels[0]?.value || '',
-        models: error.staleModels,
+        defaultModel: entry.defaultModel || staleModels[0]?.value || '',
+        models: staleModels,
       }],
       apiProviders: catalog.apiProviders,
     };
@@ -22,55 +34,39 @@ function piDiscoveryUnavailableResponse(error, catalog, entry) {
   return Response.json(body, { status: 503 });
 }
 
-export default function createModelsRoutes(providers) {
+export default function createModelsRoutes(modelCatalog) {
+  const catalog = async () => ({
+    agents: await modelCatalog.agents.getAgentCatalogEntries(),
+    apiProviders: modelCatalog.apiProviders.getCatalog(),
+  });
+
   async function getModels(request, url) {
-    const harnessId = url?.searchParams?.get('harness');
+    const agentId = url?.searchParams?.get('agent');
 
-    if (harnessId) {
-      if (harnessId === 'pi') {
-        let strictPiModels;
-        try {
-          strictPiModels = await getPiModelsStrict();
-        } catch (error) {
-          const catalog = await providers.getHarnessCatalog();
-          const entry = catalog.harnesses.find((harness) => harness.id === harnessId);
-          return piDiscoveryUnavailableResponse(error, catalog, entry);
-        }
-
-        const catalog = await providers.getHarnessCatalog();
-        const entry = catalog.harnesses.find((harness) => harness.id === harnessId);
-        if (!entry) {
-          return Response.json({ error: `Unknown harness: ${harnessId}` }, { status: 400 });
-        }
-        return Response.json({
-          catalog: {
-            harnesses: [{
-              ...entry,
-              defaultModel: entry.defaultModel || strictPiModels[0]?.value || '',
-              models: strictPiModels,
-            }],
-            apiProviders: catalog.apiProviders,
-          },
-        });
+    if (agentId) {
+      const currentCatalog = await catalog();
+      let entry;
+      try {
+        entry = typeof modelCatalog.agents.getAgentCatalogEntry === 'function'
+          ? await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict: agentId === 'pi' })
+          : currentCatalog.agents.find((agent) => agent.id === agentId);
+      } catch (error) {
+        const staleEntry = currentCatalog.agents.find((agent) => agent.id === agentId);
+        return modelDiscoveryUnavailableResponse(error, currentCatalog, staleEntry);
       }
-
-      const catalog = await providers.getHarnessCatalog();
-      const entry = catalog.harnesses.find((harness) => harness.id === harnessId);
       if (!entry) {
-        return Response.json({ error: `Unknown harness: ${harnessId}` }, { status: 400 });
+        return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
       }
       return Response.json({
         catalog: {
-          harnesses: [entry],
-          apiProviders: catalog.apiProviders,
+          agents: [entry],
+          apiProviders: currentCatalog.apiProviders,
         },
       });
     }
 
-    const catalog = await providers.getHarnessCatalog();
-    return Response.json({
-      catalog,
-    });
+    const snapshot = await getCatalogResponseSnapshot(modelCatalog);
+    return catalogResponseFromSnapshot(request, snapshot);
   }
 
   return {

@@ -1,8 +1,8 @@
 // Typed API client for git operations. All functions require the `project`
 // parameter (the project path on disk) to scope operations.
 
-import type { SessionProvider } from '$lib/types/app';
-import type { ApiProtocol } from '$shared/providers';
+import type { SessionAgentId } from '$lib/types/app';
+import type { ApiProtocol } from '$shared/api-providers';
 import { apiGet, apiPost } from './client.js';
 
 // Workbench V2 types
@@ -223,7 +223,7 @@ export async function getCommitDiff(
 export async function generateCommitMessage(
 	project: string,
 	files: string[],
-	provider: SessionProvider = 'claude',
+	agentId: SessionAgentId = 'claude',
 	model = '',
 	customPrompt = '',
 	apiProviderId?: string | null,
@@ -231,7 +231,7 @@ export async function generateCommitMessage(
 	modelProtocol?: ApiProtocol | null,
 ): Promise<{ message?: string; error?: string }> {
 	return apiPost('/api/v1/git/generate-commit-message',
-		{ project, files, provider, model, customPrompt, apiProviderId, modelEndpointId, modelProtocol },
+		{ project, files, agentId, model, customPrompt, apiProviderId, modelEndpointId, modelProtocol },
 		{ timeoutMs: 120_000 },
 	);
 }

@@ -6,7 +6,7 @@ function createSnapshot(overrides = {}) {
     shareToken: 'share-token',
     chatId: '123',
     title: 'Investigate flaky share rendering',
-    provider: 'codex',
+    agentId: 'codex',
     model: 'gpt-5',
     projectPath: '/workspace/garcon',
     sharedAt: '2025-01-02T03:04:05.000Z',

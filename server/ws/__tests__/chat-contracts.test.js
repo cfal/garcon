@@ -13,14 +13,12 @@ mock.module('../utils.js', () => ({
 import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
 
-const mockProviders = {
+const mockAgents = {
   getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [], 'direct-openai-responses-compatible': [] })),
   resolvePermission: mock(() => undefined),
-  setPermissionMode: mock(() => Promise.resolve(undefined)),
-  setThinkingMode: mock(() => Promise.resolve(undefined)),
-  setClaudeThinkingMode: mock(() => Promise.resolve(undefined)),
-  setModel: mock(() => Promise.resolve(undefined)),
-  isHarnessSessionRunning: mock(() => false),
+  updateSessionSettings: mock(() => Promise.resolve(undefined)),
+  supportsFork: mock(() => true),
+  isAgentSessionRunning: mock(() => false),
 };
 
 const mockRegistry = {
@@ -52,34 +50,40 @@ const mockHistoryCache = {
   })),
 };
 
+const mockPendingInputs = {
+  reconcile: mock(() => Promise.resolve(undefined)),
+  listForChat: mock(() => []),
+};
+
 const mockForkDeps = {
   settings: {},
   metadata: {},
   forkChatFileCopy: mock(() => Promise.resolve({
     sourceChatId: '123',
     chatId: '456',
-    provider: 'claude',
+    agentId: 'claude',
   })),
 };
 
 const injectedMocks = [
-  mockProviders.getRunningSessions, mockProviders.resolvePermission,
-  mockProviders.setPermissionMode, mockProviders.setThinkingMode,
-  mockProviders.setClaudeThinkingMode, mockProviders.setModel,
-  mockProviders.isHarnessSessionRunning,
+  mockAgents.getRunningSessions, mockAgents.resolvePermission,
+  mockAgents.updateSessionSettings,
+  mockAgents.supportsFork,
+  mockAgents.isAgentSessionRunning,
   mockRegistry.getChat, mockRegistry.updateChat,
   mockQueue.submit, mockQueue.abort, mockQueue.triggerDrain,
   mockQueue.readChatQueue, mockQueue.enqueueChat, mockQueue.dequeueChat,
   mockQueue.clearChatQueue, mockQueue.pauseChatQueue, mockQueue.resumeChatQueue,
   mockHistoryCache.appendMessages, mockHistoryCache.ensureLoaded,
   mockHistoryCache.getPaginatedMessages,
+  mockPendingInputs.reconcile, mockPendingInputs.listForChat,
   mockForkDeps.forkChatFileCopy,
 ];
 
 const moduleMocks = [sendWebSocketJson];
 
 const chatHandlerInstance = new ChatHandler(
-  mockProviders, mockQueue, mockHistoryCache, mockRegistry, mockForkDeps,
+  mockAgents, mockQueue, mockHistoryCache, mockRegistry, mockPendingInputs, mockForkDeps,
 );
 const chatHandler = chatHandlerInstance.createHandler();
 
@@ -101,12 +105,14 @@ describe('chat WebSocket handler', () => {
   beforeEach(() => {
     injectedMocks.forEach(m => m.mockClear());
     moduleMocks.forEach(m => m.mockClear());
-    mockProviders.isHarnessSessionRunning.mockImplementation(() => false);
+    mockAgents.isAgentSessionRunning.mockImplementation(() => false);
+    mockAgents.supportsFork.mockImplementation(() => true);
     mockForkDeps.forkChatFileCopy.mockImplementation(() => Promise.resolve({
       sourceChatId: '123',
       chatId: '456',
-      provider: 'claude',
+      agentId: 'claude',
     }));
+    mockPendingInputs.listForChat.mockReturnValue([]);
     ws = createMockWs();
   });
 
@@ -119,6 +125,9 @@ describe('chat WebSocket handler', () => {
 
   describe('agent-run', () => {
     it('delegates to queue.submit with the chat ID', async () => {
+      mockRegistry.getChat.mockImplementation((chatId) => (
+        chatId === '123' ? { agentId: 'claude', agentSessionId: 'session-123', model: 'opus' } : null
+      ));
       await chatHandler.message(ws, {
         type: 'agent-run',
         chatId: '123',
@@ -127,12 +136,11 @@ describe('chat WebSocket handler', () => {
         thinkingMode: 'none',
         model: 'opus',
       });
-      expect(mockQueue.submit).toHaveBeenCalledWith('123', 'hello', {
+      expect(mockQueue.submit).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
         permissionMode: 'default',
         thinkingMode: 'none',
-        claudeThinkingMode: undefined,
         model: 'opus',
-      });
+      }));
     });
 
     it('rejects agent-run payloads with missing chatId', async () => {
@@ -166,7 +174,10 @@ describe('chat WebSocket handler', () => {
     });
 
     it('sends agent-run-failed when queue.submit throws', async () => {
-      mockQueue.submit.mockRejectedValueOnce(new Error('provider timeout'));
+      mockRegistry.getChat.mockImplementation((chatId) => (
+        chatId === '123' ? { agentId: 'claude', agentSessionId: 'session-123', model: 'opus' } : null
+      ));
+      mockQueue.submit.mockRejectedValueOnce(new Error('agent timeout'));
       await chatHandler.message(ws, {
         type: 'agent-run',
         chatId: '123',
@@ -180,7 +191,7 @@ describe('chat WebSocket handler', () => {
         type: 'agent-run-failed',
         chatId: '123',
       });
-      expect(payload.error).toBe('provider timeout');
+      expect(payload.error).toBe('agent timeout');
     });
 
     it('rejects malformed agent-run payloads before queue submission', async () => {
@@ -199,6 +210,9 @@ describe('chat WebSocket handler', () => {
     });
 
     it('accepts image-only agent-run payloads', async () => {
+      mockRegistry.getChat.mockImplementation((chatId) => (
+        chatId === '123' ? { agentId: 'claude', agentSessionId: 'session-123', model: 'opus' } : null
+      ));
       await chatHandler.message(ws, {
         type: 'agent-run',
         chatId: '123',
@@ -208,13 +222,12 @@ describe('chat WebSocket handler', () => {
         model: 'opus',
         images: [{ data: 'data:image/png;base64,abc', name: 'a.png' }],
       });
-      expect(mockQueue.submit).toHaveBeenCalledWith('123', '', {
+      expect(mockQueue.submit).toHaveBeenCalledWith('123', '', expect.objectContaining({
         images: [{ data: 'data:image/png;base64,abc', name: 'a.png' }],
         permissionMode: 'default',
         thinkingMode: 'none',
-        claudeThinkingMode: undefined,
         model: 'opus',
-      });
+      }));
     });
 
     it('rejects agent-run payloads with neither command nor images', async () => {
@@ -237,8 +250,8 @@ describe('chat WebSocket handler', () => {
   describe('fork-run', () => {
     it('forks the source chat, notifies the client, and submits the fork turn', async () => {
       const sourceSession = {
-        provider: 'claude',
-        providerSessionId: 'source-session',
+        agentId: 'claude',
+        agentSessionId: 'source-session',
         projectPath: '/repo',
         model: 'opus',
       };
@@ -264,22 +277,24 @@ describe('chat WebSocket handler', () => {
         registry: mockRegistry,
         settings: mockForkDeps.settings,
         metadata: mockForkDeps.metadata,
+        forkAgentSession: undefined,
       });
       expect(sendWebSocketJson.mock.calls[0][1]).toMatchObject({
         type: 'chat-fork-created',
         sourceChatId: '123',
         chatId: '456',
       });
-      expect(mockQueue.submit).toHaveBeenCalledWith('456', 'continue in fork', {
+      expect(mockQueue.submit).toHaveBeenCalledWith('456', 'continue in fork', expect.objectContaining({
         permissionMode: 'default',
         thinkingMode: 'none',
         model: 'opus',
-      });
+      }));
     });
 
-    it('rejects unsupported source providers', async () => {
+    it('rejects unsupported source agents', async () => {
+      mockAgents.supportsFork.mockImplementation(() => false);
       mockRegistry.getChat.mockImplementation((chatId) => {
-        if (chatId === '123') return { provider: 'opencode', providerSessionId: 'source-session' };
+        if (chatId === '123') return { agentId: 'opencode', agentSessionId: 'source-session' };
         return null;
       });
 
@@ -302,10 +317,10 @@ describe('chat WebSocket handler', () => {
 
     it('rejects a source chat that is currently processing', async () => {
       mockRegistry.getChat.mockImplementation((chatId) => {
-        if (chatId === '123') return { provider: 'claude', providerSessionId: 'source-session' };
+        if (chatId === '123') return { agentId: 'claude', agentSessionId: 'source-session' };
         return null;
       });
-      mockProviders.isHarnessSessionRunning.mockImplementation(() => true);
+      mockAgents.isAgentSessionRunning.mockImplementation(() => true);
 
       await chatHandler.message(ws, {
         type: 'fork-run',
@@ -327,8 +342,8 @@ describe('chat WebSocket handler', () => {
     it('reports target turn failures against the forked chat after creation', async () => {
       let targetCreated = false;
       mockRegistry.getChat.mockImplementation((chatId) => {
-        if (chatId === '123') return { provider: 'claude', providerSessionId: 'source-session' };
-        if (chatId === '456' && targetCreated) return { provider: 'claude', providerSessionId: 'fork-session' };
+        if (chatId === '123') return { agentId: 'claude', agentSessionId: 'source-session' };
+        if (chatId === '456' && targetCreated) return { agentId: 'claude', agentSessionId: 'fork-session' };
         return null;
       });
       mockForkDeps.forkChatFileCopy.mockImplementationOnce(async () => {
@@ -336,7 +351,7 @@ describe('chat WebSocket handler', () => {
         return {
           sourceChatId: '123',
           chatId: '456',
-          provider: 'claude',
+          agentId: 'claude',
         };
       });
       mockQueue.submit.mockRejectedValueOnce(new Error('fork turn failed'));
@@ -362,7 +377,7 @@ describe('chat WebSocket handler', () => {
       await chatHandler.message(ws, {
         type: 'agent-stop',
         chatId: '123',
-        provider: 'claude',
+        agentId: 'claude',
       });
       expect(mockQueue.abort).toHaveBeenCalledWith('123');
     });
@@ -377,7 +392,7 @@ describe('chat WebSocket handler', () => {
         allow: true,
         alwaysAllow: false,
       });
-      expect(mockProviders.resolvePermission).toHaveBeenCalledWith('123', 'claude-abc123', expect.objectContaining({
+      expect(mockAgents.resolvePermission).toHaveBeenCalledWith('123', 'claude-abc123', expect.objectContaining({
         allow: true,
         alwaysAllow: false,
       }));
@@ -391,7 +406,7 @@ describe('chat WebSocket handler', () => {
         allow: true,
         alwaysAllow: true,
       });
-      expect(mockProviders.resolvePermission).toHaveBeenCalledWith('456', 'opencode-xyz789', {
+      expect(mockAgents.resolvePermission).toHaveBeenCalledWith('456', 'opencode-xyz789', {
         allow: true,
         alwaysAllow: true,
       });
@@ -405,7 +420,7 @@ describe('chat WebSocket handler', () => {
         allow: false,
         alwaysAllow: false,
       });
-      expect(mockProviders.resolvePermission).toHaveBeenCalledWith('789', 'opencode-reject-1', {
+      expect(mockAgents.resolvePermission).toHaveBeenCalledWith('789', 'opencode-reject-1', {
         allow: false,
         alwaysAllow: false,
       });
@@ -422,11 +437,11 @@ describe('chat WebSocket handler', () => {
         alwaysAllow: false,
       };
       await chatHandler.message(ws, msg);
-      expect(mockProviders.resolvePermission).toHaveBeenCalledTimes(1);
+      expect(mockAgents.resolvePermission).toHaveBeenCalledTimes(1);
 
-      mockProviders.resolvePermission.mockClear();
+      mockAgents.resolvePermission.mockClear();
       await chatHandler.message(ws, msg);
-      expect(mockProviders.resolvePermission).not.toHaveBeenCalled();
+      expect(mockAgents.resolvePermission).not.toHaveBeenCalled();
     });
 
     it('forwards different permissionRequestIds independently', async () => {
@@ -444,39 +459,38 @@ describe('chat WebSocket handler', () => {
         allow: false,
         alwaysAllow: false,
       });
-      expect(mockProviders.resolvePermission).toHaveBeenCalledTimes(2);
+      expect(mockAgents.resolvePermission).toHaveBeenCalledTimes(2);
     });
 
     it('is a no-op when permissionRequestId is missing', async () => {
-      mockProviders.resolvePermission.mockClear();
+      mockAgents.resolvePermission.mockClear();
       await chatHandler.message(ws, {
         type: 'permission-decision',
         chatId: '123',
         allow: true,
       });
-      expect(mockProviders.resolvePermission).not.toHaveBeenCalled();
+      expect(mockAgents.resolvePermission).not.toHaveBeenCalled();
     });
 
     it('is a no-op when chatId is missing', async () => {
-      mockProviders.resolvePermission.mockClear();
+      mockAgents.resolvePermission.mockClear();
       await chatHandler.message(ws, {
         type: 'permission-decision',
         permissionRequestId: 'dedup-test-3',
         allow: true,
       });
-      expect(mockProviders.resolvePermission).not.toHaveBeenCalled();
+      expect(mockAgents.resolvePermission).not.toHaveBeenCalled();
     });
   });
 
   describe('permission-mode-set', () => {
-    it('calls setPermissionMode and persists to registry', async () => {
+    it('applies a typed permission mode patch', async () => {
       await chatHandler.message(ws, {
         type: 'permission-mode-set',
         chatId: '123',
         mode: 'bypassPermissions',
       });
-      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { permissionMode: 'bypassPermissions' });
-      expect(mockProviders.setPermissionMode).toHaveBeenCalledWith('123', 'bypassPermissions');
+      expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', { permissionMode: 'bypassPermissions' });
     });
 
     it('ignores non-string mode values', async () => {
@@ -485,20 +499,18 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
         mode: 42,
       });
-      expect(mockRegistry.updateChat).not.toHaveBeenCalled();
-      expect(mockProviders.setPermissionMode).not.toHaveBeenCalled();
+      expect(mockAgents.updateSessionSettings).not.toHaveBeenCalled();
     });
   });
 
   describe('thinking-mode-set', () => {
-    it('persists thinking mode to registry and harness session', async () => {
+    it('applies a typed thinking mode patch', async () => {
       await chatHandler.message(ws, {
         type: 'thinking-mode-set',
         chatId: '123',
         mode: 'think-hard',
       });
-      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { thinkingMode: 'think-hard' });
-      expect(mockProviders.setThinkingMode).toHaveBeenCalledWith('123', 'think-hard');
+      expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', { thinkingMode: 'think-hard' });
     });
 
     it('sends error for missing chatId', async () => {
@@ -516,20 +528,18 @@ describe('chat WebSocket handler', () => {
         type: 'thinking-mode-set',
         chatId: '123',
       });
-      expect(mockRegistry.updateChat).not.toHaveBeenCalled();
-      expect(mockProviders.setThinkingMode).not.toHaveBeenCalled();
+      expect(mockAgents.updateSessionSettings).not.toHaveBeenCalled();
     });
   });
 
   describe('claude-thinking-mode-set', () => {
-	it('persists Claude thinking mode to registry and harness session', async () => {
+		it('applies a typed Claude thinking mode patch', async () => {
 	  await chatHandler.message(ws, {
 	    type: 'claude-thinking-mode-set',
 	    chatId: '123',
 	    mode: 'off',
 	  });
-	  expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { claudeThinkingMode: 'off' });
-	  expect(mockProviders.setClaudeThinkingMode).toHaveBeenCalledWith('123', 'off');
+		  expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', { claudeThinkingMode: 'off' });
 	});
 
 	it('sends error for missing chatId', async () => {
@@ -550,8 +560,7 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
         model: 'opus',
       });
-      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', { model: 'opus' });
-      expect(mockProviders.setModel).toHaveBeenCalledWith('123', 'opus', undefined);
+      expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', { model: 'opus' });
     });
 
     it('updates API provider metadata when provided', async () => {
@@ -563,15 +572,11 @@ describe('chat WebSocket handler', () => {
         modelEndpointId: 'zai_openai',
         modelProtocol: 'openai-compatible',
       });
-      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+      expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', {
         model: 'zai_openai:glm-5.1',
         apiProviderId: 'zai',
         modelEndpointId: 'zai_openai',
         modelProtocol: 'openai-compatible',
-      });
-      expect(mockProviders.setModel).toHaveBeenCalledWith('123', 'zai_openai:glm-5.1', {
-        apiProviderId: 'zai',
-        modelEndpointId: 'zai_openai',
       });
     });
 
@@ -584,15 +589,11 @@ describe('chat WebSocket handler', () => {
         modelEndpointId: null,
         modelProtocol: null,
       });
-      expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+      expect(mockAgents.updateSessionSettings).toHaveBeenCalledWith('123', {
         model: 'opus',
         apiProviderId: null,
         modelEndpointId: null,
         modelProtocol: null,
-      });
-      expect(mockProviders.setModel).toHaveBeenCalledWith('123', 'opus', {
-        apiProviderId: null,
-        modelEndpointId: null,
       });
     });
   });
@@ -629,9 +630,9 @@ describe('chat WebSocket handler', () => {
 
     it('returns messages for a valid chat', async () => {
       mockRegistry.getChat.mockReturnValue({
-        provider: 'claude',
+        agentId: 'claude',
         nativePath: '/tmp/session.jsonl',
-        providerSessionId: 'abc',
+        agentSessionId: 'abc',
       });
       await chatHandler.message(ws, {
         type: 'chat-log-query',
@@ -639,12 +640,14 @@ describe('chat WebSocket handler', () => {
         clientRequestId: 'req-msg-2',
       });
       expect(mockHistoryCache.ensureLoaded).toHaveBeenCalledWith('123');
+      expect(mockPendingInputs.reconcile).toHaveBeenCalledWith('123');
       expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 20, 0);
       const payload = lastSentPayload();
       expect(payload).toMatchObject({
         type: 'chat-log-response',
         clientRequestId: 'req-msg-2',
         chatId: '123',
+        pendingUserInputs: [],
       });
       expect(payload.messages.length).toBe(1);
     });
@@ -661,9 +664,9 @@ describe('chat WebSocket handler', () => {
 
     it('respects limit and offset params', async () => {
       mockRegistry.getChat.mockReturnValue({
-        provider: 'claude',
+        agentId: 'claude',
         nativePath: '/tmp/session.jsonl',
-        providerSessionId: 'abc',
+        agentSessionId: 'abc',
       });
       await chatHandler.message(ws, {
         type: 'chat-log-query',
@@ -672,14 +675,15 @@ describe('chat WebSocket handler', () => {
         limit: 50,
         offset: 10,
       });
+      expect(mockPendingInputs.reconcile).toHaveBeenCalledWith('123');
       expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 50, 10);
     });
 
     it('includes clientRequestId in response', async () => {
       mockRegistry.getChat.mockReturnValue({
-        provider: 'claude',
+        agentId: 'claude',
         nativePath: '/tmp/test.jsonl',
-        providerSessionId: 'x',
+        agentSessionId: 'x',
       });
       await chatHandler.message(ws, {
         type: 'chat-log-query',
@@ -692,9 +696,9 @@ describe('chat WebSocket handler', () => {
 
     it('silently ignores requests without clientRequestId', async () => {
       mockRegistry.getChat.mockReturnValue({
-        provider: 'claude',
+        agentId: 'claude',
         nativePath: '/tmp/test.jsonl',
-        providerSessionId: 'x',
+        agentSessionId: 'x',
       });
       sendWebSocketJson.mockClear();
       await chatHandler.message(ws, {

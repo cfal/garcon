@@ -4,12 +4,8 @@ mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => undefined),
 }));
 
-mock.module('../../providers/loaders/claude-history-loader.js', () => ({
+mock.module('../../agents/claude/history-loader.js', () => ({
   getClaudeSessionMessagesFromNativePath: mock(() => undefined),
-}));
-
-mock.module('../../chats/resolve-native-path.js', () => ({
-  resolveMissingNativePath: mock(() => null),
 }));
 
 mock.module('../../chats/title-generator.js', () => ({
@@ -58,12 +54,13 @@ const historyCache = {
   getPaginatedMessages: mock(() => undefined),
   appendMessages: mock(() => Promise.resolve(undefined)),
 };
-const providers = {
+const agents = {
   startSession: mock(() => undefined),
-  isHarnessSessionRunning: mock(() => false),
+  supportsFork: mock(() => true),
+  isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
+const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
 
 const allMocks = [
   registry.getChat, parseJsonBody, forkChatFileCopy,
@@ -74,6 +71,7 @@ describe('POST /api/v1/chats/fork', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
+    agents.supportsFork.mockImplementation(() => true);
   });
 
   it('returns 400 for missing sourceChatId', async () => {
@@ -136,10 +134,11 @@ describe('POST /api/v1/chats/fork', () => {
     expect(body.error).toContain('not found');
   });
 
-  it('returns 422 for unsupported provider', async () => {
+  it('returns 422 for unsupported agent', async () => {
     parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '200' });
+    agents.supportsFork.mockImplementation(() => false);
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { provider: 'opencode', projectPath: '/proj' };
+      if (id === '100') return { agentId: 'opencode', projectPath: '/proj' };
       return null;
     });
 
@@ -155,8 +154,8 @@ describe('POST /api/v1/chats/fork', () => {
   it('returns 409 when target chat already exists', async () => {
     parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '200' });
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { provider: 'claude', projectPath: '/proj' };
-      if (id === '200') return { provider: 'claude', projectPath: '/proj' };
+      if (id === '100') return { agentId: 'claude', projectPath: '/proj' };
+      if (id === '200') return { agentId: 'claude', projectPath: '/proj' };
       return null;
     });
 
@@ -172,14 +171,14 @@ describe('POST /api/v1/chats/fork', () => {
   it('returns 200 on successful fork', async () => {
     parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '200' });
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { provider: 'claude', projectPath: '/proj' };
+      if (id === '100') return { agentId: 'claude', projectPath: '/proj' };
       return null;
     });
     forkChatFileCopy.mockResolvedValue({
       sourceChatId: '100',
       chatId: '200',
-      provider: 'claude',
-      providerSessionId: 'new-uuid',
+      agentId: 'claude',
+      agentSessionId: 'new-uuid',
       nativePath: '/tmp/new-uuid.jsonl',
     });
 
@@ -191,7 +190,7 @@ describe('POST /api/v1/chats/fork', () => {
     expect(body.success).toBe(true);
     expect(body.sourceChatId).toBe('100');
     expect(body.chatId).toBe('200');
-    expect(body.provider).toBe('claude');
+    expect(body.agentId).toBe('claude');
   });
 
   it('returns 400 for malformed JSON', async () => {
@@ -208,7 +207,7 @@ describe('POST /api/v1/chats/fork', () => {
   it('returns 500 for unexpected errors', async () => {
     parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '200' });
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { provider: 'claude', projectPath: '/proj' };
+      if (id === '100') return { agentId: 'claude', projectPath: '/proj' };
       return null;
     });
     forkChatFileCopy.mockRejectedValue(new Error('Disk full'));

@@ -6,12 +6,12 @@
 	import Copy from '@lucide/svelte/icons/copy';
 	import Check from '@lucide/svelte/icons/check';
 	import { copyToClipboard } from '$lib/utils/clipboard';
-	import type { SessionProvider } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/types/app';
 
 	interface ChatDeleteConfirmation {
 		chatId: string;
 		chatTitle: string;
-		provider: SessionProvider;
+		agentId: SessionAgentId;
 	}
 
 	interface ChatRenameConfirmation {

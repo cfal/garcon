@@ -12,12 +12,12 @@ import {
 import type {
   ApiProtocol,
   ApiProviderTemplateId,
-  HarnessModelOption,
   ModelDiscoveryKind,
   OpenAiEndpointCapabilities,
-} from './providers.js';
+} from './api-providers.js';
+import type { AgentModelOption } from './agents.js';
 
-export type { ApiProviderTemplateId } from './providers.js';
+export type { ApiProviderTemplateId } from './api-providers.js';
 
 export interface ApiProviderTemplate {
   id: ApiProviderTemplateId;
@@ -27,7 +27,7 @@ export interface ApiProviderTemplate {
   apiKeyPlaceholder: string;
   apiKeyRequired: boolean;
   defaultModel: string;
-  models: readonly HarnessModelOption[];
+  models: readonly AgentModelOption[];
   supportsImages: boolean;
   capabilities?: OpenAiEndpointCapabilities;
   modelDiscovery: ModelDiscoveryKind;

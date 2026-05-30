@@ -6,31 +6,34 @@ vi.mock('$lib/api/client', () => ({
 	apiFetch: vi.fn()
 }));
 
-const STORAGE_KEY = 'pref_model_catalog';
+const STORAGE_KEY = 'pref_model_catalog_v3';
+const LEGACY_STORAGE_KEY = 'pref_model_catalog_v2';
 const PI_MODEL = { value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true };
 
-function mockResponse(body: unknown, status = 200): Response {
+function mockResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
 	return {
 		ok: status >= 200 && status < 300,
 		status,
+		headers: new Headers(headers),
+		text: async () => '',
 		json: async () => body
 	} as unknown as Response;
 }
 
-function catalogBody(harnesses: unknown[], apiProviders: unknown[] = []): unknown {
+function catalogBody(agents: unknown[], apiProviders: unknown[] = []): unknown {
 	return {
 		catalog: {
-			harnesses,
+			agents,
 			apiProviders
 		}
 	};
 }
 
-function piHarness(models: unknown[], defaultModel = ''): unknown {
+function piAgent(models: unknown[], defaultModel = ''): unknown {
 	return {
 		id: 'pi',
 		label: 'Pi',
-		kind: 'harness',
+		kind: 'agent',
 		supportsFork: false,
 		supportsImages: false,
 		acceptsApiProviderEndpoints: false,
@@ -48,21 +51,23 @@ describe('ModelCatalogStore', () => {
 
 		it('uses static fallbacks before remote hydration', () => {
 			const store = createModelCatalogStore();
-			expect(store.getModels('claude').length).toBeGreaterThan(0);
-			expect(store.getModels('codex').length).toBeGreaterThan(0);
-			expect(store.getModels('factory').length).toBeGreaterThan(0);
+				expect(store.getModels('claude').length).toBeGreaterThan(0);
+				expect(store.getModels('codex').length).toBeGreaterThan(0);
+				expect(store.getModels('cursor')).toEqual([]);
+				expect(store.getModels('factory').length).toBeGreaterThan(0);
 			expect(store.getModels('pi')).toEqual([]);
 			expect(store.getModels('direct-anthropic-compatible')).toEqual([]);
 			expect(store.getModels('direct-openai-compatible')).toEqual([]);
 			expect(store.getModels('direct-openai-responses-compatible')).toEqual([]);
-			expect(store.getSelectableHarnesses()).toContain('pi');
-			expect(store.getSelectableHarnesses()).not.toContain('direct-anthropic-compatible');
-			expect(store.getSelectableHarnesses()).not.toContain('direct-openai-compatible');
-			expect(store.getSelectableHarnesses()).not.toContain('direct-openai-responses-compatible');
+			expect(store.getSelectableAgents()).toContain('pi');
+			expect(store.getSelectableAgents()).not.toContain('direct-anthropic-compatible');
+			expect(store.getSelectableAgents()).not.toContain('direct-openai-compatible');
+			expect(store.getSelectableAgents()).not.toContain('direct-openai-responses-compatible');
 			expect(store.getModels('zai')).toEqual([]);
-			expect(store.getDefaultModel('claude')).toBe('opus');
-			expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
-			expect(store.getDefaultModel('pi')).toBe('');
+				expect(store.getDefaultModel('claude')).toBe('opus');
+				expect(store.getDefaultModel('codex')).toBe('gpt-5.5');
+				expect(store.getDefaultModel('cursor')).toBe('');
+				expect(store.getDefaultModel('pi')).toBe('');
 			expect(store.getModels('codex')[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
 			const codexModelValues = store.getModels('codex').map((model) => model.value);
 			expect(codexModelValues).toContain('gpt-5.3-codex-spark');
@@ -80,27 +85,29 @@ describe('ModelCatalogStore', () => {
 	it('exposes default capabilities from common contract', () => {
 		const store = createModelCatalogStore();
 		expect(store.supportsFork('claude')).toBe(true);
-		expect(store.supportsFork('codex')).toBe(true);
-		expect(store.supportsFork('opencode')).toBe(false);
-		expect(store.supportsFork('pi')).toBe(false);
+			expect(store.supportsFork('codex')).toBe(true);
+			expect(store.supportsFork('opencode')).toBe(false);
+			expect(store.supportsFork('cursor')).toBe(false);
+			expect(store.supportsFork('pi')).toBe(false);
 		expect(store.supportsFork('zai')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
-		expect(store.supportsImages('codex')).toBe(true);
-		expect(store.supportsImages('opencode')).toBe(false);
-		expect(store.supportsImages('pi')).toBe(false);
+			expect(store.supportsImages('codex')).toBe(true);
+			expect(store.supportsImages('opencode')).toBe(false);
+			expect(store.supportsImages('cursor')).toBe(false);
+			expect(store.supportsImages('pi')).toBe(false);
 		expect(store.supportsImages('zai')).toBe(false);
 		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);
 		expect(store.supportsImages('factory', 'glm-5')).toBe(false);
 	});
 
-	it('hydrates cached harness models from localStorage', () => {
+	it('hydrates cached agent models from localStorage', () => {
 		localStorage.setItem(
-			'pref_model_catalog',
+			STORAGE_KEY,
 			JSON.stringify({
-				harnessModels: {
+				agentModels: {
 					opencode: [{ value: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' }]
 				},
-				harnessMetadata: {
+				agentMetadata: {
 					opencode: {
 						id: 'opencode',
 						label: 'OpenCode',
@@ -122,17 +129,70 @@ describe('ModelCatalogStore', () => {
 		expect(store.isStale(60_000)).toBe(false);
 	});
 
-	it('removes stale cached Pi default entries', () => {
+	it('migrates v2 snapshots without an etag and validates them on startup', async () => {
 		localStorage.setItem(
-			'pref_model_catalog',
+			LEGACY_STORAGE_KEY,
 			JSON.stringify({
-				harnessModels: {
+				agentModels: {
+					opencode: [{ value: 'old/model', label: 'Old Model' }]
+				},
+				agentMetadata: {
+					opencode: {
+						id: 'opencode',
+						label: 'OpenCode',
+						supportsFork: false,
+						supportsImages: false,
+						acceptsApiProviderEndpoints: false,
+						supportedProtocols: [],
+						defaultModel: 'old/model'
+					}
+				},
+				apiProviderCatalog: [],
+				lastFetchedAt: Date.now()
+			})
+		);
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(
+			catalogBody([
+				{
+					id: 'opencode',
+					label: 'OpenCode',
+					kind: 'agent',
+					supportsFork: false,
+					supportsImages: false,
+					acceptsApiProviderEndpoints: false,
+					supportedProtocols: [],
+					defaultModel: 'new/model',
+					models: [{ value: 'new/model', label: 'New Model' }]
+				}
+			]),
+			200,
+			{ etag: 'W/"model-catalog:new"' }
+		));
+
+		const store = createModelCatalogStore();
+		expect(store.getModels('opencode')[0]?.value).toBe('old/model');
+		expect(store.etag).toBeNull();
+
+		await store.refreshIfStale();
+
+		expect(clientApi.apiFetch).toHaveBeenCalledWith('/api/v1/models');
+		expect(store.getModels('opencode')[0]?.value).toBe('new/model');
+		expect(store.etag).toBe('W/"model-catalog:new"');
+		expect(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').etag)
+			.toBe('W/"model-catalog:new"');
+	});
+
+	it('hydrates cached Pi entries as stored', () => {
+		localStorage.setItem(
+			STORAGE_KEY,
+			JSON.stringify({
+				agentModels: {
 					pi: [
 						{ value: 'default', label: 'Pi Default' },
 						{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }
 					]
 				},
-				harnessMetadata: {
+				agentMetadata: {
 					pi: {
 						id: 'pi',
 						label: 'Pi',
@@ -149,17 +209,18 @@ describe('ModelCatalogStore', () => {
 
 		const store = createModelCatalogStore();
 		expect(store.getModels('pi')).toEqual([
+			{ value: 'default', label: 'Pi Default' },
 			{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }
 		]);
-		expect(store.getDefaultModel('pi')).toBe('github-copilot/gpt-5.4');
+		expect(store.getDefaultModel('pi')).toBe('default');
 	});
 
-	it('hydrates cached harness capabilities from localStorage', () => {
+	it('hydrates cached agent capabilities from localStorage', () => {
 		localStorage.setItem(
-			'pref_model_catalog',
+			STORAGE_KEY,
 			JSON.stringify({
-				harnessModels: {},
-				harnessMetadata: {
+				agentModels: {},
+				agentMetadata: {
 					claude: {
 						id: 'claude',
 						label: 'Claude',
@@ -189,12 +250,12 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsImages('codex')).toBe(false);
 	});
 
-	it('normalizes cached direct harness labels from localStorage', () => {
+	it('normalizes cached direct agent labels from localStorage', () => {
 		localStorage.setItem(
-			'pref_model_catalog',
+			STORAGE_KEY,
 			JSON.stringify({
-				harnessModels: {},
-				harnessMetadata: {
+				agentModels: {},
+				agentMetadata: {
 					'direct-openai-compatible': {
 						id: 'direct-openai-compatible',
 						label: 'Direct Chat (OpenAI Chat Completions)',
@@ -228,20 +289,20 @@ describe('ModelCatalogStore', () => {
 		);
 
 		const store = createModelCatalogStore();
-		expect(store.getHarnessLabel('direct-openai-compatible')).toBe('Direct (Chat Completions)');
-		expect(store.getHarnessLabel('direct-openai-responses-compatible')).toBe('Direct (Responses)');
-		expect(store.getHarnessLabel('direct-anthropic-compatible')).toBe('Direct (Anthropic)');
+		expect(store.getAgentLabel('direct-openai-compatible')).toBe('Direct (Chat Completions)');
+		expect(store.getAgentLabel('direct-openai-responses-compatible')).toBe('Direct (Responses)');
+		expect(store.getAgentLabel('direct-anthropic-compatible')).toBe('Direct (Anthropic)');
 	});
 
-	it('does not expose API provider ids as harnesses from cached metadata', () => {
+	it('does not expose API provider ids as agents from cached metadata', () => {
 		localStorage.setItem(
-			'pref_model_catalog',
+			STORAGE_KEY,
 			JSON.stringify({
-				harnessModels: {
+				agentModels: {
 					zai: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
 					openrouter: [{ value: 'openai/gpt-5', label: 'GPT-5' }]
 				},
-				harnessMetadata: {
+				agentMetadata: {
 					zai: {
 						id: 'zai',
 						label: 'Z.AI',
@@ -266,8 +327,8 @@ describe('ModelCatalogStore', () => {
 		);
 
 		const store = createModelCatalogStore();
-		expect(store.getHarnesses()).not.toContain('zai');
-		expect(store.getHarnesses()).not.toContain('openrouter');
+		expect(store.getAgents()).not.toContain('zai');
+		expect(store.getAgents()).not.toContain('openrouter');
 		expect(store.getModels('zai')).toEqual([]);
 		expect(store.getModels('openrouter')).toEqual([]);
 	});
@@ -277,11 +338,11 @@ describe('ModelCatalogStore', () => {
 			ok: true,
 			json: async () => ({
 				catalog: {
-					harnesses: [
+					agents: [
 						{
 							id: 'opencode',
 							label: 'OpenCode',
-							kind: 'harness',
+							kind: 'agent',
 							supportsFork: false,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: false,
@@ -304,16 +365,88 @@ describe('ModelCatalogStore', () => {
 		expect(store.getModels('codex').length).toBeGreaterThan(0);
 	});
 
-	it('parses catalog.harnesses and catalog.apiProviders from API response', async () => {
+	it('keeps hydrated models when the server returns 304', async () => {
+		const json = vi.fn();
+		localStorage.setItem(
+			STORAGE_KEY,
+			JSON.stringify({
+				agentModels: {
+					opencode: [{ value: 'moonshot/kimi-k2', label: 'Kimi K2' }]
+				},
+				agentMetadata: {
+					opencode: {
+						id: 'opencode',
+						label: 'OpenCode',
+						supportsFork: false,
+						supportsImages: false,
+						acceptsApiProviderEndpoints: false,
+						supportedProtocols: [],
+						defaultModel: 'moonshot/kimi-k2'
+					}
+				},
+				apiProviderCatalog: [],
+				etag: 'W/"model-catalog:cached"',
+				lastFetchedAt: 100,
+				lastValidatedAt: 100
+			})
+		);
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce({
+			ok: false,
+			status: 304,
+			headers: new Headers({ etag: 'W/"model-catalog:cached"' }),
+			text: async () => '',
+			json
+		} as unknown as Response);
+
+		const store = createModelCatalogStore();
+		await store.refreshIfStale();
+
+		expect(clientApi.apiFetch).toHaveBeenCalledWith('/api/v1/models', {
+			headers: { 'If-None-Match': 'W/"model-catalog:cached"' }
+		});
+		expect(json).not.toHaveBeenCalled();
+		expect(store.getModels('opencode')).toEqual([
+			{ value: 'moonshot/kimi-k2', label: 'Kimi K2' }
+		]);
+		expect(store.lastValidatedAt).toEqual(expect.any(Number));
+		expect(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').lastValidatedAt)
+			.toEqual(expect.any(Number));
+	});
+
+	it('does not revalidate repeatedly inside the validation retry window', async () => {
+		vi.mocked(clientApi.apiFetch).mockResolvedValue(
+			mockResponse(catalogBody([
+				{
+					id: 'opencode',
+					label: 'OpenCode',
+					kind: 'agent',
+					supportsFork: false,
+					supportsImages: false,
+					acceptsApiProviderEndpoints: false,
+					supportedProtocols: [],
+					defaultModel: 'moonshot/kimi-k2',
+					models: [{ value: 'moonshot/kimi-k2', label: 'Kimi K2' }]
+				}
+			]), 200, { etag: 'W/"model-catalog:fresh"' })
+		);
+
+		const store = createModelCatalogStore();
+		await store.refreshIfStale();
+		await store.refreshIfStale();
+
+		expect(clientApi.apiFetch).toHaveBeenCalledTimes(1);
+	});
+
+	it('parses catalog.agents and catalog.apiProviders from API response', async () => {
 		vi.mocked(clientApi.apiFetch).mockResolvedValue({
 			ok: true,
 			json: async () => ({
 				catalog: {
-					harnesses: [
+					agents: [
 						{
 							id: 'claude',
 							label: 'Claude Code',
-							kind: 'harness',
+							kind: 'agent',
 							supportsFork: true,
 							supportsImages: true,
 							acceptsApiProviderEndpoints: true,
@@ -324,7 +457,7 @@ describe('ModelCatalogStore', () => {
 						{
 							id: 'codex',
 							label: 'Codex',
-							kind: 'harness',
+							kind: 'agent',
 							supportsFork: true,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: true,
@@ -335,7 +468,7 @@ describe('ModelCatalogStore', () => {
 						{
 							id: 'factory',
 							label: 'Factory',
-							kind: 'harness',
+							kind: 'agent',
 							supportsFork: false,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: false,
@@ -388,11 +521,11 @@ describe('ModelCatalogStore', () => {
 			ok: true,
 			json: async () => ({
 				catalog: {
-					harnesses: [
+					agents: [
 						{
 							id: 'codex',
 							label: 'Codex',
-							kind: 'harness',
+							kind: 'agent',
 							supportsFork: true,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: true,
@@ -415,6 +548,36 @@ describe('ModelCatalogStore', () => {
 		expect(codexModels.length).toBeGreaterThan(1);
 	});
 
+	it('uses Cursor catalog results without static model merging', async () => {
+		vi.mocked(clientApi.apiFetch).mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				catalog: {
+					agents: [
+						{
+							id: 'cursor',
+							label: 'Cursor',
+							kind: 'agent',
+							supportsFork: false,
+							supportsImages: false,
+							acceptsApiProviderEndpoints: false,
+							supportedProtocols: [],
+							defaultModel: 'auto',
+							models: [{ value: 'auto', label: 'Auto', supportsImages: false }]
+						}
+					],
+					apiProviders: []
+				}
+			})
+		} as Response);
+
+		const store = createModelCatalogStore();
+		await store.forceRefresh();
+
+		expect(store.getModels('cursor')).toEqual([{ value: 'auto', label: 'Auto', supportsImages: false }]);
+		expect(store.getDefaultModel('cursor')).toBe('auto');
+	});
+
 	it('records an error for invalid catalog responses', async () => {
 		vi.mocked(clientApi.apiFetch).mockResolvedValue({
 			ok: true,
@@ -430,23 +593,23 @@ describe('ModelCatalogStore', () => {
 
 	it('validates explicit empty Pi results before persisting the catalog', async () => {
 		vi.mocked(clientApi.apiFetch)
-			.mockResolvedValueOnce(mockResponse(catalogBody([piHarness([])])))
-			.mockResolvedValueOnce(mockResponse(catalogBody([piHarness([PI_MODEL], PI_MODEL.value)])));
+			.mockResolvedValueOnce(mockResponse(catalogBody([piAgent([])])))
+			.mockResolvedValueOnce(mockResponse(catalogBody([piAgent([PI_MODEL], PI_MODEL.value)])));
 
 		const store = createModelCatalogStore();
 		await store.forceRefresh();
 
 		expect(clientApi.apiFetch).toHaveBeenNthCalledWith(1, '/api/v1/models');
-		expect(clientApi.apiFetch).toHaveBeenNthCalledWith(2, '/api/v1/models?harness=pi');
+		expect(clientApi.apiFetch).toHaveBeenNthCalledWith(2, '/api/v1/models?agent=pi');
 		expect(store.error).toBeNull();
 		expect(store.getModels('pi')).toEqual([PI_MODEL]);
 		expect(store.lastFetchedAt).toEqual(expect.any(Number));
-		expect(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').harnessModels.pi).toEqual([PI_MODEL]);
+		expect(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').agentModels.pi).toEqual([PI_MODEL]);
 	});
 
 	it('does not persist empty Pi results when strict Pi discovery is unavailable', async () => {
 		vi.mocked(clientApi.apiFetch)
-			.mockResolvedValueOnce(mockResponse(catalogBody([piHarness([])])))
+			.mockResolvedValueOnce(mockResponse(catalogBody([piAgent([])])))
 			.mockResolvedValueOnce(mockResponse({
 				error: 'Pi model discovery unavailable',
 				reason: 'auth storage: auth.json is locked'
@@ -458,17 +621,18 @@ describe('ModelCatalogStore', () => {
 		expect(store.error).toBe('auth storage: auth.json is locked');
 		expect(store.getModels('pi')).toEqual([]);
 		expect(store.lastFetchedAt).toBeNull();
+		expect(store.lastValidatedAt).toBeNull();
 		expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
 	});
 
 	it('uses stale Pi models from a strict 503 body without marking them fresh', async () => {
 		vi.mocked(clientApi.apiFetch)
-			.mockResolvedValueOnce(mockResponse(catalogBody([piHarness([])])))
+			.mockResolvedValueOnce(mockResponse(catalogBody([piAgent([])])))
 			.mockResolvedValueOnce(mockResponse({
 				error: 'Pi model discovery unavailable',
 				reason: 'auth storage: auth.json is locked',
 				catalog: {
-					harnesses: [piHarness([PI_MODEL], PI_MODEL.value)],
+					agents: [piAgent([PI_MODEL], PI_MODEL.value)],
 					apiProviders: []
 				}
 			}, 503));
@@ -480,18 +644,22 @@ describe('ModelCatalogStore', () => {
 		expect(store.error).toBe('auth storage: auth.json is locked');
 		expect(store.getModels('pi')).toEqual([PI_MODEL]);
 		expect(store.lastFetchedAt).toBeNull();
-		expect(persisted.harnessModels.pi).toEqual([PI_MODEL]);
+		expect(store.lastValidatedAt).toBeNull();
+		expect(store.etag).toBeNull();
+		expect(persisted.agentModels.pi).toEqual([PI_MODEL]);
 		expect(persisted.lastFetchedAt).toBeNull();
+		expect(persisted.lastValidatedAt).toBeNull();
+		expect(persisted.etag).toBeNull();
 	});
 
 	it('preserves cached Pi models on strict discovery failures without storing an empty refresh', async () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				harnessModels: {
+				agentModels: {
 					pi: [PI_MODEL]
 				},
-				harnessMetadata: {
+				agentMetadata: {
 					pi: {
 						id: 'pi',
 						label: 'Pi',
@@ -507,7 +675,7 @@ describe('ModelCatalogStore', () => {
 			})
 		);
 		vi.mocked(clientApi.apiFetch)
-			.mockResolvedValueOnce(mockResponse(catalogBody([piHarness([])])))
+			.mockResolvedValueOnce(mockResponse(catalogBody([piAgent([])])))
 			.mockResolvedValueOnce(mockResponse({
 				error: 'Pi model discovery unavailable',
 				reason: 'auth storage: auth.json is locked'
@@ -520,8 +688,12 @@ describe('ModelCatalogStore', () => {
 		expect(store.error).toBe('auth storage: auth.json is locked');
 		expect(store.getModels('pi')).toEqual([PI_MODEL]);
 		expect(store.lastFetchedAt).toBeNull();
-		expect(persisted.harnessModels.pi).toEqual([PI_MODEL]);
+		expect(store.lastValidatedAt).toBeNull();
+		expect(store.etag).toBeNull();
+		expect(persisted.agentModels.pi).toEqual([PI_MODEL]);
 		expect(persisted.lastFetchedAt).toBeNull();
+		expect(persisted.lastValidatedAt).toBeNull();
+		expect(persisted.etag).toBeNull();
 	});
 
 	it('prefers model-level image capability when present', async () => {
@@ -529,11 +701,11 @@ describe('ModelCatalogStore', () => {
 			ok: true,
 			json: async () => ({
 				catalog: {
-					harnesses: [
+					agents: [
 						{
 							id: 'factory',
 							label: 'Factory',
-							kind: 'harness',
+							kind: 'agent',
 							supportsFork: false,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: false,
@@ -562,11 +734,11 @@ describe('ModelCatalogStore', () => {
 			ok: true,
 			json: async () => ({
 				catalog: {
-					harnesses: [
+					agents: [
 							{
 								id: 'direct-openai-compatible',
 								label: 'Direct (Chat Completions)',
-							kind: 'harness',
+							kind: 'agent',
 							supportsFork: false,
 							supportsImages: true,
 							acceptsApiProviderEndpoints: true,
@@ -631,11 +803,11 @@ describe('ModelCatalogStore', () => {
 				ok: true,
 				json: async () => ({
 					catalog: {
-						harnesses: [
+						agents: [
 							{
 								id: 'direct-openai-responses-compatible',
 								label: 'Direct (Responses)',
-								kind: 'harness',
+								kind: 'agent',
 								supportsFork: false,
 								supportsImages: true,
 								acceptsApiProviderEndpoints: true,
@@ -683,7 +855,7 @@ describe('ModelCatalogStore', () => {
 			const store = createModelCatalogStore();
 			await store.forceRefresh();
 
-			expect(store.getSelectableHarnesses()).toContain('direct-openai-responses-compatible');
+			expect(store.getSelectableAgents()).toContain('direct-openai-responses-compatible');
 			expect(store.selectionFor('direct-openai-responses-compatible', 'acme_openai:acme-code')).toEqual({
 				model: 'acme-code',
 				apiProviderId: 'acme',
@@ -701,11 +873,11 @@ describe('ModelCatalogStore', () => {
 				ok: true,
 				json: async () => ({
 					catalog: {
-						harnesses: [
+						agents: [
 							{
 								id: 'direct-anthropic-compatible',
 								label: 'Direct (Anthropic)',
-								kind: 'harness',
+								kind: 'agent',
 								supportsFork: false,
 								supportsImages: true,
 								acceptsApiProviderEndpoints: true,
@@ -752,7 +924,7 @@ describe('ModelCatalogStore', () => {
 			const store = createModelCatalogStore();
 			await store.forceRefresh();
 
-			expect(store.getSelectableHarnesses()).toContain('direct-anthropic-compatible');
+			expect(store.getSelectableAgents()).toContain('direct-anthropic-compatible');
 			expect(store.selectionFor('direct-anthropic-compatible', 'acme_anthropic:acme-sonnet')).toEqual({
 				model: 'acme-sonnet',
 				apiProviderId: 'acme',

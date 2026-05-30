@@ -8,7 +8,6 @@ function makeContext(setMessageQueue: (chatId: string, queue: QueueState | null)
 	return {
 		currentChatId: 'chat-a',
 		selectedChatId: 'chat-a',
-		setChatMessages: vi.fn(),
 		setMessageQueue,
 		activateLoadingFor: vi.fn(),
 		setCanAbort: vi.fn(),

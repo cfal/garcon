@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GitWorkbenchStore, type GitWorkbenchDeps } from '../git-workbench.svelte';
+import { GitWorkbenchStore, makeLineSelectionKey, type GitWorkbenchDeps } from '../git-workbench.svelte';
 import { ApiError } from '$lib/api/client.js';
 
 const mockDeps: GitWorkbenchDeps = {
@@ -246,31 +246,36 @@ describe('GitWorkbenchStore', () => {
 
 	describe('line selection', () => {
 		it('toggles line selection', () => {
-			wb.toggleLineSelection('before:0');
+			const key = makeLineSelectionKey('a.ts', 'unstaged', 'before', 0);
+			wb.toggleLineSelection(key);
 
-			expect(wb.selectedLineKeys.has('before:0')).toBe(true);
+			expect(wb.selectedLineKeys.has(key)).toBe(true);
 			expect(wb.hasSelection).toBe(true);
 
-			wb.toggleLineSelection('before:0');
+			wb.toggleLineSelection(key);
 
-			expect(wb.selectedLineKeys.has('before:0')).toBe(false);
+			expect(wb.selectedLineKeys.has(key)).toBe(false);
 			expect(wb.hasSelection).toBe(false);
 		});
 
 		it('selects line range', () => {
-			const allKeys = ['before:0', 'after:1', 'before:2', 'after:3'];
+			const first = makeLineSelectionKey('a.ts', 'unstaged', 'before', 0);
+			const second = makeLineSelectionKey('a.ts', 'unstaged', 'after', 1);
+			const third = makeLineSelectionKey('a.ts', 'unstaged', 'before', 2);
+			const fourth = makeLineSelectionKey('a.ts', 'unstaged', 'after', 3);
+			const allKeys = [first, second, third, fourth];
 
-			wb.selectLineRange('before:0', 'before:2', allKeys);
+			wb.selectLineRange(first, third, allKeys);
 
 			expect(wb.selectedLineKeys.size).toBe(3);
-			expect(wb.selectedLineKeys.has('before:0')).toBe(true);
-			expect(wb.selectedLineKeys.has('after:1')).toBe(true);
-			expect(wb.selectedLineKeys.has('before:2')).toBe(true);
+			expect(wb.selectedLineKeys.has(first)).toBe(true);
+			expect(wb.selectedLineKeys.has(second)).toBe(true);
+			expect(wb.selectedLineKeys.has(third)).toBe(true);
 		});
 
 		it('clears selection', () => {
-			wb.toggleLineSelection('before:0');
-			wb.toggleLineSelection('after:1');
+			wb.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'before', 0));
+			wb.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'after', 1));
 
 			wb.clearSelection();
 
@@ -282,7 +287,10 @@ describe('GitWorkbenchStore', () => {
 	describe('staging', () => {
 		it('stages selected lines and refreshes', async () => {
 			wb.selectedFile = 'a.ts';
-			wb.selectedLineKeys = new Set(['before:0', 'after:1']);
+			wb.selectedLineKeys = new Set([
+				makeLineSelectionKey('a.ts', 'unstaged', 'before', 0),
+				makeLineSelectionKey('a.ts', 'unstaged', 'after', 1),
+			]);
 			mockedApi.gitStageSelection.mockResolvedValue({ success: true });
 			mockedApi.getGitChangesTree.mockResolvedValue({ root: [], hasCommits: true });
 			mockedApi.getGitFileReviewData.mockResolvedValue({
@@ -648,7 +656,7 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('setActiveTab switches tab and clears selection', () => {
-			wb.toggleLineSelection('before:0');
+			wb.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'before', 0));
 			expect(wb.hasSelection).toBe(true);
 
 			wb.setActiveTab('staged');
@@ -658,7 +666,7 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('setActiveTab is no-op when same tab', () => {
-			wb.toggleLineSelection('before:0');
+			wb.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'before', 0));
 			wb.setActiveTab('unstaged');
 
 			expect(wb.hasSelection).toBe(true);

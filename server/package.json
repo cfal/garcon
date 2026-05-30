@@ -8,8 +8,8 @@
     "typecheck": "bunx tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@openai/codex-sdk": "0.125.0",
+    "@earendil-works/pi-coding-agent": "0.75.5",
+    "@openai/codex": "0.125.0",
     "@opencode-ai/sdk": "1.14.48",
     "bun-pty": "^0.4.8",
     "jsonwebtoken": "^9.0.3",

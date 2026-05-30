@@ -60,6 +60,12 @@ describe('queue invariants', () => {
     expect(resumed.version).toBe(3);
     expect(typeof resumed.updatedAt).toBe('string');
   });
+
+  it('throws a clear error when execution is requested without an agent turn runner', async () => {
+    await expect(queue.runAcceptedTurn('c1', 'hello', {})).rejects.toThrow(
+      'QueueManager execution requires an agent turn runner',
+    );
+  });
 });
 
 describe('queue-updated event', () => {
@@ -116,78 +122,83 @@ describe('queue-updated event', () => {
 });
 
 describe('orchestration', () => {
-  let mockProviders;
-  let mockHistoryCache;
+  let mockAgents;
+  let mockPendingInputs;
   let orchQueue;
 
   beforeEach(async () => {
-    mockProviders = {
-      runProviderTurn: mock(() => Promise.resolve()),
+    mockAgents = {
+      runAgentTurn: mock(() => Promise.resolve()),
       abortSession: mock(() => Promise.resolve(true)),
       isChatRunning: mock(() => false),
     };
-    mockHistoryCache = {
-      appendMessages: mock(() => Promise.resolve()),
+    mockPendingInputs = {
+      register: mock(() => Promise.resolve()),
+      updateDeliveryStatus: mock(() => undefined),
     };
-    orchQueue = new QueueManager(workspaceDir, mockProviders, mockHistoryCache);
+    orchQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs);
   });
 
   describe('submit', () => {
-    it('runs provider turn with the given command', async () => {
+    it('runs agent turn with the given command', async () => {
       await orchQueue.submit('c1', 'hello', { permissionMode: 'default' });
-      expect(mockProviders.runProviderTurn).toHaveBeenCalledWith('c1', 'hello', { permissionMode: 'default' });
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'hello', expect.objectContaining({
+        permissionMode: 'default',
+        clientRequestId: expect.any(String),
+        clientMessageId: expect.any(String),
+        turnId: expect.any(String),
+      }));
     });
 
-    it('appends user message to history cache', async () => {
+    it('registers pending input for submitted turns', async () => {
       await orchQueue.submit('c1', 'hello', {});
-      expect(mockHistoryCache.appendMessages).toHaveBeenCalledWith('c1', [
-        expect.objectContaining({ type: 'user-message', content: 'hello' }),
-      ]);
+      expect(mockPendingInputs.register).toHaveBeenCalledWith('c1', 'hello', expect.objectContaining({
+        clientRequestId: expect.any(String),
+        clientMessageId: expect.any(String),
+        turnId: expect.any(String),
+        deliveryStatus: 'accepted',
+      }));
     });
 
-    it('appends user message metadata for accepted REST turns', async () => {
+    it('registers provided metadata for accepted REST turns', async () => {
       await orchQueue.appendUserMessage('c1', 'hello', {
         clientRequestId: 'req-1',
         clientMessageId: 'msg-1',
         turnId: 'turn-1',
       });
 
-      expect(mockHistoryCache.appendMessages).toHaveBeenCalledWith('c1', [
-        expect.objectContaining({
-          type: 'user-message',
-          content: 'hello',
-          metadata: {
-            messageId: 'msg-1',
-            clientRequestId: 'req-1',
-            turnId: 'turn-1',
-          },
-        }),
-      ]);
+      expect(mockPendingInputs.register).toHaveBeenCalledWith('c1', 'hello', {
+        clientRequestId: 'req-1',
+        clientMessageId: 'msg-1',
+        turnId: 'turn-1',
+        images: undefined,
+        deliveryStatus: 'accepted',
+      });
     });
 
-    it('does not append when command is empty', async () => {
+    it('does not register pending input when command is empty', async () => {
       await orchQueue.submit('c1', '', {});
-      expect(mockHistoryCache.appendMessages).not.toHaveBeenCalled();
+      expect(mockPendingInputs.register).not.toHaveBeenCalled();
     });
 
-    it('drains queued entries after provider turn', async () => {
+    it('drains queued entries after agent turn', async () => {
       await orchQueue.enqueueChat('c1', 'queued msg');
 
       await orchQueue.submit('c1', 'initial', {});
 
       // Initial turn + drain turn
-      expect(mockProviders.runProviderTurn).toHaveBeenCalledTimes(2);
-      expect(mockProviders.runProviderTurn.mock.calls[1][1]).toBe('queued msg');
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(2);
+      expect(mockAgents.runAgentTurn.mock.calls[1][1]).toBe('queued msg');
     });
 
-    it('propagates provider errors to caller', async () => {
-      mockProviders.runProviderTurn.mockRejectedValue(new Error('provider fail'));
+    it('propagates agent errors to caller', async () => {
+      mockAgents.runAgentTurn.mockRejectedValue(new Error('agent fail'));
 
-      await expect(orchQueue.submit('c1', 'hello', {})).rejects.toThrow('provider fail');
+      await expect(orchQueue.submit('c1', 'hello', {})).rejects.toThrow('agent fail');
     });
 
-    it('emits turn-failed with command identity when provider execution fails', async () => {
-      mockProviders.runProviderTurn.mockRejectedValue(new Error('provider fail'));
+    it('emits turn-failed with command identity when agent execution fails', async () => {
+      mockAgents.runAgentTurn.mockRejectedValue(new Error('agent fail'));
       const failures = [];
       orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
 
@@ -195,11 +206,11 @@ describe('orchestration', () => {
         clientRequestId: 'req-1',
         clientMessageId: 'msg-1',
         turnId: 'turn-1',
-      })).rejects.toThrow('provider fail');
+      })).rejects.toThrow('agent fail');
 
       expect(failures).toEqual([{
         chatId: 'c1',
-        error: 'provider fail',
+        error: 'agent fail',
         options: {
           clientRequestId: 'req-1',
           clientMessageId: 'msg-1',
@@ -210,9 +221,9 @@ describe('orchestration', () => {
   });
 
   describe('abort', () => {
-    it('calls providers.abortSession', async () => {
+    it('calls turn runner abortSession', async () => {
       await orchQueue.abort('c1');
-      expect(mockProviders.abortSession).toHaveBeenCalledWith('c1');
+      expect(mockAgents.abortSession).toHaveBeenCalledWith('c1');
     });
 
     it('emits session-stopped event', async () => {
@@ -234,15 +245,15 @@ describe('orchestration', () => {
   });
 
   describe('triggerDrain', () => {
-    it('is a no-op when provider is running', async () => {
-      mockProviders.isChatRunning.mockReturnValue(true);
+    it('is a no-op when agent is running', async () => {
+      mockAgents.isChatRunning.mockReturnValue(true);
       await orchQueue.enqueueChat('c1', 'queued');
 
       await orchQueue.triggerDrain('c1', {});
-      expect(mockProviders.runProviderTurn).not.toHaveBeenCalled();
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
     });
 
-    it('drains queued entries when provider is idle', async () => {
+    it('drains queued entries when agent is idle', async () => {
       await orchQueue.enqueueChat('c1', 'queued msg');
 
       const events = [];
@@ -250,7 +261,11 @@ describe('orchestration', () => {
 
       await orchQueue.triggerDrain('c1', {});
 
-      expect(mockProviders.runProviderTurn).toHaveBeenCalledWith('c1', 'queued msg', {});
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'queued msg', expect.objectContaining({
+        clientRequestId: expect.any(String),
+        clientMessageId: expect.any(String),
+        turnId: expect.any(String),
+      }));
       expect(events).toHaveLength(1);
       expect(events[0].content).toBe('queued msg');
     });
@@ -269,10 +284,10 @@ describe('orchestration', () => {
       expect(events[0].content).toBe('msg1');
     });
 
-    it('pauses on provider error via resetAndPauseChat', async () => {
+    it('pauses on agent error via resetAndPauseChat', async () => {
       await orchQueue.enqueueChat('c1', 'will fail');
 
-      mockProviders.runProviderTurn.mockRejectedValue(new Error('provider error'));
+      mockAgents.runAgentTurn.mockRejectedValue(new Error('agent error'));
 
       await orchQueue.triggerDrain('c1', {});
 
@@ -281,14 +296,17 @@ describe('orchestration', () => {
       expect(result.entries[0].status).toBe('queued');
     });
 
-    it('appends queued messages to history cache', async () => {
+    it('registers queued messages as pending input before dispatch', async () => {
       await orchQueue.enqueueChat('c1', 'queued text');
 
       await orchQueue.triggerDrain('c1', {});
 
-      expect(mockHistoryCache.appendMessages).toHaveBeenCalledWith('c1', [
-        expect.objectContaining({ type: 'user-message', content: 'queued text' }),
-      ]);
+      expect(mockPendingInputs.register).toHaveBeenCalledWith('c1', 'queued text', expect.objectContaining({
+        clientRequestId: expect.any(String),
+        clientMessageId: expect.any(String),
+        turnId: expect.any(String),
+        deliveryStatus: 'accepted',
+      }));
     });
 
     it('does not reuse original command identity for drained queued turns', async () => {
@@ -301,9 +319,14 @@ describe('orchestration', () => {
         permissionMode: 'default',
       });
 
-      expect(mockProviders.runProviderTurn).toHaveBeenCalledWith('c1', 'queued text', {
-        permissionMode: 'default',
-      });
+      const queuedTurnOptions = mockAgents.runAgentTurn.mock.calls[0]?.[2];
+      expect(queuedTurnOptions.permissionMode).toBe('default');
+      expect(queuedTurnOptions.clientRequestId).toEqual(expect.any(String));
+      expect(queuedTurnOptions.clientMessageId).toEqual(expect.any(String));
+      expect(queuedTurnOptions.turnId).toEqual(expect.any(String));
+      expect(queuedTurnOptions.clientRequestId).not.toBe('req-active');
+      expect(queuedTurnOptions.clientMessageId).not.toBe('msg-active');
+      expect(queuedTurnOptions.turnId).not.toBe('turn-active');
     });
   });
 
@@ -328,9 +351,9 @@ describe('orchestration', () => {
       expect(idleEvents[0]).toBe('c1');
     });
 
-    it('does NOT fire when drain exits because provider is running', async () => {
+    it('does NOT fire when drain exits because agent is running', async () => {
       await orchQueue.enqueueChat('c1', 'msg');
-      mockProviders.isChatRunning.mockReturnValue(true);
+      mockAgents.isChatRunning.mockReturnValue(true);
 
       const idleEvents = [];
       orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
@@ -341,7 +364,7 @@ describe('orchestration', () => {
   });
 
   describe('checkChatIdle', () => {
-    it('emits chat-idle when queue is empty and provider not running', async () => {
+    it('emits chat-idle when queue is empty and agent not running', async () => {
       const idleEvents = [];
       orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
 
@@ -349,8 +372,8 @@ describe('orchestration', () => {
       expect(idleEvents).toEqual(['c1']);
     });
 
-    it('does NOT emit when provider is running', async () => {
-      mockProviders.isChatRunning.mockReturnValue(true);
+    it('does NOT emit when agent is running', async () => {
+      mockAgents.isChatRunning.mockReturnValue(true);
 
       const idleEvents = [];
       orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));

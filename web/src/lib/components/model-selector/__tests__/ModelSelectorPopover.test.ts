@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import ModelSelectorPopoverHarness from './ModelSelectorPopoverHarness.svelte';
+import ModelSelectorPopoverHost from './ModelSelectorPopoverHost.svelte';
 
 let originalMatchMedia: typeof window.matchMedia | undefined;
 
@@ -66,9 +66,9 @@ describe('ModelSelectorPopover', () => {
 	it('keeps the popup open after model selection and commits the draft on outside close', async () => {
 		const onChange = vi.fn();
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'fixed', source: 'hidden', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'fixed', source: 'hidden', surface: 'composer' },
 			onChange,
 		});
 
@@ -84,7 +84,7 @@ describe('ModelSelectorPopover', () => {
 
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
-				harnessId: 'claude',
+				agentId: 'claude',
 				modelValue: 'model-119',
 				model: 'model-119',
 				apiProviderId: null,
@@ -95,9 +95,9 @@ describe('ModelSelectorPopover', () => {
 	});
 
 	it('renders a bounded unfiltered model catalog slice', async () => {
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'fixed', source: 'hidden', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'fixed', source: 'hidden', surface: 'composer' },
 			onChange: vi.fn(),
 		});
 
@@ -109,12 +109,12 @@ describe('ModelSelectorPopover', () => {
 		expect(within(listbox).getAllByRole('option').length).toBeLessThan(40);
 	});
 
-	it('switches the open harness view without committing until the popup closes', async () => {
+	it('switches the open agent view without committing until the popup closes', async () => {
 		const onChange = vi.fn();
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'select', source: 'hidden', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'hidden', surface: 'composer' },
 			onChange,
 		});
 
@@ -136,7 +136,7 @@ describe('ModelSelectorPopover', () => {
 
 		expect(onChange).toHaveBeenCalledTimes(1);
 		expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-			harnessId: 'codex',
+			agentId: 'codex',
 			modelValue: 'codex-model-0',
 			model: 'codex-model-0',
 		}));
@@ -145,9 +145,9 @@ describe('ModelSelectorPopover', () => {
 	it('keeps the trigger display on the committed selection while editing a draft', async () => {
 		const onChange = vi.fn();
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'select', source: 'hidden', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'hidden', surface: 'composer' },
 			onChange,
 		});
 
@@ -160,12 +160,12 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.queryByRole('button', { name: /Codex .* Codex Model 0/ })).toBeNull();
 	});
 
-	it('does not commit harness navigation without a model selection', async () => {
+	it('does not commit agent navigation without a model selection', async () => {
 		const onChange = vi.fn();
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'select', source: 'hidden', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'hidden', surface: 'composer' },
 			onChange,
 		});
 
@@ -181,9 +181,9 @@ describe('ModelSelectorPopover', () => {
 	it('keeps provider source and model changes draft-only until the popup closes', async () => {
 		const onChange = vi.fn();
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'fixed', source: 'select', surface: 'settings' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'fixed', source: 'select', surface: 'settings' },
 			includeEndpointModel: true,
 			onChange,
 		});
@@ -205,7 +205,7 @@ describe('ModelSelectorPopover', () => {
 
 		expect(onChange).toHaveBeenCalledTimes(1);
 		expect(onChange).toHaveBeenCalledWith({
-			harnessId: 'claude',
+			agentId: 'claude',
 			modelValue: 'acme-claude:endpoint-model',
 			model: 'endpoint-model',
 			apiProviderId: 'acme',
@@ -217,9 +217,9 @@ describe('ModelSelectorPopover', () => {
 	it('does not commit provider navigation without a model selection', async () => {
 		const onChange = vi.fn();
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'fixed', source: 'select', surface: 'settings' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'fixed', source: 'select', surface: 'settings' },
 			includeEndpointModel: true,
 			onChange,
 		});
@@ -238,9 +238,9 @@ describe('ModelSelectorPopover', () => {
 	});
 
 	it('reserves the trigger subtitle row when the committed subtitle is empty', () => {
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: '' },
-			mode: { harness: 'fixed', source: 'hidden', surface: 'settings' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: '' },
+			mode: { agent: 'fixed', source: 'hidden', surface: 'settings' },
 			modelCount: 0,
 			includeDuplicateModel: false,
 			onChange: vi.fn(),
@@ -256,9 +256,9 @@ describe('ModelSelectorPopover', () => {
 	it('uses a compact drill-down layout on narrow screens starting from the selected model', async () => {
 		installMatchMedia(true);
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'select', source: 'select', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
 			includeEndpointModel: true,
 			onChange: vi.fn(),
 		});
@@ -280,17 +280,17 @@ describe('ModelSelectorPopover', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
-		expect(screen.getByText('Harness')).toBeTruthy();
+		expect(screen.getByText('Agent')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
 		expect(screen.getByRole('button', { name: 'Codex' })).toBeTruthy();
 	});
 
-	it('skips the compact provider pane when the selected harness has one provider', async () => {
+	it('skips the compact provider pane when the selected agent has one provider', async () => {
 		installMatchMedia(true);
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'select', source: 'select', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
 			onChange: vi.fn(),
 		});
 
@@ -300,7 +300,7 @@ describe('ModelSelectorPopover', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
-		expect(screen.getByText('Harness')).toBeTruthy();
+		expect(screen.getByText('Agent')).toBeTruthy();
 		expect(screen.queryByText('Claude Providers')).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
 
@@ -311,12 +311,12 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.queryByText('Codex Providers')).toBeNull();
 	});
 
-	it('starts compact selection at harness when no model is selected', async () => {
+	it('starts compact selection at agent when no model is selected', async () => {
 		installMatchMedia(true);
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: '' },
-			mode: { harness: 'select', source: 'select', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: '' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
 			modelCount: 0,
 			includeDuplicateModel: false,
 			onChange: vi.fn(),
@@ -324,7 +324,7 @@ describe('ModelSelectorPopover', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: /Claude/ }));
 
-		expect(screen.getByText('Harness')).toBeTruthy();
+		expect(screen.getByText('Agent')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 	});
@@ -333,9 +333,9 @@ describe('ModelSelectorPopover', () => {
 		installMatchMedia(true);
 		const onChange = vi.fn();
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'select', source: 'select', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
 			onChange,
 		});
 
@@ -348,7 +348,7 @@ describe('ModelSelectorPopover', () => {
 
 		expect(onChange).toHaveBeenCalledTimes(1);
 		expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-			harnessId: 'codex',
+			agentId: 'codex',
 			modelValue: 'codex-model-0',
 			model: 'codex-model-0',
 		}));
@@ -360,9 +360,9 @@ describe('ModelSelectorPopover', () => {
 	it('keeps compact Done disabled until a model is selected after navigation', async () => {
 		installMatchMedia(true);
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'select', source: 'select', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
 			onChange: vi.fn(),
 		});
 
@@ -386,9 +386,9 @@ describe('ModelSelectorPopover', () => {
 		installMatchMedia(true);
 		const onChange = vi.fn();
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'select', source: 'select', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
 			onChange,
 		});
 
@@ -408,9 +408,9 @@ describe('ModelSelectorPopover', () => {
 	});
 
 	it('renders matching model rows as a single visible label', async () => {
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'fixed', source: 'hidden', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'fixed', source: 'hidden', surface: 'composer' },
 			onChange: vi.fn(),
 		});
 
@@ -424,9 +424,9 @@ describe('ModelSelectorPopover', () => {
 	it('filters against the full catalog beyond the mounted slice', async () => {
 		const onChange = vi.fn();
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'fixed', source: 'hidden', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'fixed', source: 'hidden', surface: 'composer' },
 			modelCount: 600,
 			includeDuplicateModel: false,
 			onChange,
@@ -443,7 +443,7 @@ describe('ModelSelectorPopover', () => {
 
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-				harnessId: 'claude',
+				agentId: 'claude',
 				modelValue: 'model-599',
 				model: 'model-599',
 			}));
@@ -453,9 +453,9 @@ describe('ModelSelectorPopover', () => {
 	it('selects an offscreen model through keyboard navigation', async () => {
 		const onChange = vi.fn();
 
-		render(ModelSelectorPopoverHarness, {
-			value: { harnessId: 'claude', model: 'model-0' },
-			mode: { harness: 'fixed', source: 'hidden', surface: 'composer' },
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'fixed', source: 'hidden', surface: 'composer' },
 			modelCount: 600,
 			includeDuplicateModel: false,
 			onChange,
@@ -473,7 +473,7 @@ describe('ModelSelectorPopover', () => {
 
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-				harnessId: 'claude',
+				agentId: 'claude',
 				modelValue: 'model-599',
 				model: 'model-599',
 			}));

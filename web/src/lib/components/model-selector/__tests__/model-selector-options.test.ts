@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
 import {
-	buildHarnessOptions,
+	buildAgentOptions,
 	buildModelRows,
 	buildModelSelectorChange,
 	buildModelSources,
@@ -39,7 +39,7 @@ const codexModels: ModelOption[] = [
 ];
 
 function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCatalogStore {
-	const modelsByHarness: Record<string, ModelOption[]> = {
+	const modelsByAgent: Record<string, ModelOption[]> = {
 		claude: claudeModels,
 		codex: codexModels,
 	};
@@ -66,8 +66,8 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 		: null;
 
 	return {
-		getSelectableHarnesses: () => ['claude', 'codex'],
-		getHarness: (id: string) => ({
+		getSelectableAgents: () => ['claude', 'codex'],
+		getAgent: (id: string) => ({
 			id,
 			label: id === 'codex' ? 'Cached Codex' : 'Cached Claude',
 			description: '',
@@ -77,11 +77,11 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 			supportedProtocols: id === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
 			defaultModel: id === 'codex' ? 'gpt-5.5' : 'opus',
 		}),
-		getHarnessLabel: (id: string) => (id === 'codex' ? 'Codex' : 'Claude'),
-		getModels: (harnessId: string) => modelsByHarness[harnessId] ?? [],
-		getDefaultModel: (harnessId: string) => modelsByHarness[harnessId]?.[0]?.value ?? '',
-		getModelForSelection: (harnessId: string, model: string, endpointId?: string | null) => {
-			const models = modelsByHarness[harnessId] ?? [];
+		getAgentLabel: (id: string) => (id === 'codex' ? 'Codex' : 'Claude'),
+		getModels: (agentId: string) => modelsByAgent[agentId] ?? [],
+		getDefaultModel: (agentId: string) => modelsByAgent[agentId]?.[0]?.value ?? '',
+		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) => {
+			const models = modelsByAgent[agentId] ?? [];
 			if (endpointId) {
 				const selected = models.find((entry) =>
 					entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model)
@@ -90,8 +90,8 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 			}
 			return models.find((entry) => entry.value === model || entry.rawModel === model) ?? null;
 		},
-		selectionFor: (harnessId: string, model: string) => {
-			const selected = (modelsByHarness[harnessId] ?? []).find((entry) =>
+		selectionFor: (agentId: string, model: string) => {
+			const selected = (modelsByAgent[agentId] ?? []).find((entry) =>
 				entry.value === model || entry.rawModel === model
 			);
 			return {
@@ -101,8 +101,8 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 				modelProtocol: selected?.protocol ?? null,
 			};
 		},
-		selectionValueFor: (harnessId: string, model: string, endpointId?: string | null) => {
-			const selected = (modelsByHarness[harnessId] ?? []).find((entry) =>
+		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) => {
+			const selected = (modelsByAgent[agentId] ?? []).find((entry) =>
 				(endpointId ? entry.endpointId === endpointId : true) &&
 				(entry.value === model || entry.rawModel === model)
 			);
@@ -150,7 +150,7 @@ function makeLargeEndpointCatalog(count: number): ModelCatalogStore {
 
 	return {
 		getModels: () => models,
-		getHarnessLabel: () => 'Direct (Responses)',
+		getAgentLabel: () => 'Direct (Responses)',
 		findEndpoint: () => ({
 			apiProvider: {
 				id: 'acme',
@@ -190,10 +190,10 @@ describe('model selector options', () => {
 		expect(nativeSourceLabel('codex', catalog)).toBe('OpenAI OAuth');
 	});
 
-	it('uses catalog display labels instead of raw cached metadata for harness options', () => {
+	it('uses catalog display labels instead of raw cached metadata for agent options', () => {
 		const catalog = makeCatalog();
 
-		expect(buildHarnessOptions(catalog).map((option) => option.label)).toEqual(['Claude', 'Codex']);
+		expect(buildAgentOptions(catalog).map((option) => option.label)).toEqual(['Claude', 'Codex']);
 	});
 
 	it('groups native and endpoint-backed models into source options', () => {
@@ -244,7 +244,7 @@ describe('model selector options', () => {
 
 	it('resolves the selected source from raw model and endpoint metadata', () => {
 		const sourceKey = selectedSourceKey(makeCatalog(), {
-			harnessId: 'claude',
+			agentId: 'claude',
 			model: 'acme-sonnet',
 			modelEndpointId: 'acme-anthropic',
 		});
@@ -256,7 +256,7 @@ describe('model selector options', () => {
 		const change = buildModelSelectorChange(makeCatalog(), 'codex', 'acme-openai:acme-gpt');
 
 		expect(change).toEqual({
-			harnessId: 'codex',
+			agentId: 'codex',
 			modelValue: 'acme-openai:acme-gpt',
 			model: 'acme-gpt',
 			apiProviderId: 'acme',

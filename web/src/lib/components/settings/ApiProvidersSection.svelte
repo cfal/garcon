@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { nativeSourceLabelFor } from '$lib/i18n/harness-labels';
+	import { nativeSourceLabelFor } from '$lib/i18n/agent-labels';
 	import ApiProviderProtocolPanel from './ApiProviderProtocolPanel.svelte';
 	import type { SettingsAuthState } from './settings-auth-state.svelte.js';
 
@@ -13,7 +13,7 @@
 		title={m.settings_api_providers_openai_title()}
 		description={m.settings_api_providers_openai_description()}
 		addLabel={m.settings_api_providers_add_openai_provider()}
-		oauthHarness={{ id: 'codex', name: nativeSourceLabelFor('codex') }}
+		oauthAgent={{ id: 'codex', name: nativeSourceLabelFor('codex') }}
 		auth={settingsAuth.authFor('codex')}
 		readiness={settingsAuth.readinessFor('codex')}
 		deviceAuth={settingsAuth.deviceAuthFor('codex')}
@@ -26,7 +26,7 @@
 		title={m.settings_api_providers_anthropic_title()}
 		description={m.settings_api_providers_anthropic_description()}
 		addLabel={m.settings_api_providers_add_anthropic_provider()}
-		oauthHarness={{ id: 'claude', name: nativeSourceLabelFor('claude') }}
+		oauthAgent={{ id: 'claude', name: nativeSourceLabelFor('claude') }}
 		auth={settingsAuth.authFor('claude')}
 		readiness={settingsAuth.readinessFor('claude')}
 		deviceAuth={settingsAuth.deviceAuthFor('claude')}

@@ -1,4 +1,4 @@
-// Reactive state management for the new-chat form. Encapsulates provider,
+// Reactive state management for the new-chat form. Encapsulates agent,
 // model, permission/thinking mode, path validation, image attachments, and
 // the config payload used to start a session.
 
@@ -7,7 +7,7 @@ import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
 import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
 import type { GitWorktreeItem } from '$lib/api/git.js';
-import type { NewChatConfig, SessionProvider } from '$lib/types/app.js';
+import type { NewChatConfig, SessionAgentId } from '$lib/types/app.js';
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat.js';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import {
@@ -25,9 +25,9 @@ import { normalizeTagSlug } from '$lib/utils/tags.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export class NewChatFormState {
-	// Provider and model
-	provider = $state<SessionProvider>('claude');
-	selectedModelsByProvider = $state<Record<string, string>>({});
+	// Agent and model
+	agentId = $state<SessionAgentId>('claude');
+	selectedModelsByAgent = $state<Record<string, string>>({});
 
 	// Path
 	projectPath = $state('');
@@ -92,7 +92,7 @@ export class NewChatFormState {
 	}
 
 	get permissionModes(): PermissionMode[] {
-		return this.provider === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES;
+		return this.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES;
 	}
 
 	get canSubmit(): boolean {
@@ -104,59 +104,59 @@ export class NewChatFormState {
 	}
 
 	get modelValue(): string {
-		return this.selectedModelsByProvider[this.provider] ?? this.#modelCatalog.getDefaultModel(this.provider);
+		return this.selectedModelsByAgent[this.agentId] ?? this.#modelCatalog.getDefaultModel(this.agentId);
 	}
 
-	// Provider cycling
+	// Agent selection
 
-	selectProvider(next: SessionProvider): void {
-		this.provider = next;
+	selectAgent(next: SessionAgentId): void {
+		this.agentId = next;
 	}
 
 	// Model
 
 	handleModelChange(value: string): void {
-		this.selectedModelsByProvider = {
-			...this.selectedModelsByProvider,
-			[this.provider]: value,
+		this.selectedModelsByAgent = {
+			...this.selectedModelsByAgent,
+			[this.agentId]: value,
 		};
 	}
 
-	/** Validates the selected model against the live model list for a provider. */
-	validateModelAgainstLive(provider: SessionProvider): void {
-		const liveModels = this.#modelCatalog.getModels(provider);
+	/** Validates the selected model against the live model list for an agent. */
+	validateModelAgainstLive(agentId: SessionAgentId): void {
+		const liveModels = this.#modelCatalog.getModels(agentId);
 		if (!liveModels?.length) return;
-		const current = this.selectedModelsByProvider[provider];
+		const current = this.selectedModelsByAgent[agentId];
 		if (!current || !liveModels.some((entry) => entry.value === current)) {
-			this.selectedModelsByProvider = {
-				...this.selectedModelsByProvider,
-				[provider]: liveModels[0].value,
+			this.selectedModelsByAgent = {
+				...this.selectedModelsByAgent,
+				[agentId]: liveModels[0].value,
 			};
 		}
 	}
 
 	validateAllModelsAgainstLive(): void {
-		for (const provider of this.#modelCatalog.getSelectableHarnesses()) {
-			this.validateModelAgainstLive(provider);
+		for (const agentId of this.#modelCatalog.getSelectableAgents()) {
+			this.validateModelAgainstLive(agentId);
 		}
 	}
 
-	#resolveStartupProvider(provider: string): SessionProvider {
-		const providers = this.#modelCatalog.getSelectableHarnesses();
-		if (providers.includes(provider as SessionProvider)) return provider as SessionProvider;
-		if (providers.includes('claude')) return 'claude';
-		return providers[0] ?? 'claude';
+	#resolveStartupAgent(agentId: string): SessionAgentId {
+		const agents = this.#modelCatalog.getSelectableAgents();
+		if (agents.includes(agentId as SessionAgentId)) return agentId as SessionAgentId;
+		if (agents.includes('claude')) return 'claude';
+		return agents[0] ?? 'claude';
 	}
 
-	applyResolvedModel(provider: SessionProvider, model: string, modelEndpointId?: string | null): void {
-		const liveModels = this.#modelCatalog.getModels(provider);
-		const selectionValue = this.#modelCatalog.selectionValueFor(provider, model, modelEndpointId);
+	applyResolvedModel(agentId: SessionAgentId, model: string, modelEndpointId?: string | null): void {
+		const liveModels = this.#modelCatalog.getModels(agentId);
+		const selectionValue = this.#modelCatalog.selectionValueFor(agentId, model, modelEndpointId);
 		const resolvedModel = liveModels.some((entry) => entry.value === selectionValue)
 			? selectionValue
 			: (liveModels[0]?.value ?? model);
-		this.selectedModelsByProvider = {
-			...this.selectedModelsByProvider,
-			[provider]: resolvedModel,
+		this.selectedModelsByAgent = {
+			...this.selectedModelsByAgent,
+			[agentId]: resolvedModel,
 		};
 	}
 
@@ -373,10 +373,10 @@ export class NewChatFormState {
 			return null;
 		}
 		this.error = null;
-		const selection = this.#modelCatalog.selectionFor(this.provider, this.modelValue);
+		const selection = this.#modelCatalog.selectionFor(this.agentId, this.modelValue);
 
 		return {
-			provider: this.provider,
+			agentId: this.agentId,
 			projectPath: this.trimmedPath,
 			model: selection.model,
 			apiProviderId: selection.apiProviderId,
@@ -385,7 +385,7 @@ export class NewChatFormState {
 			permissionMode: normalizePermissionMode(this.permissionMode),
 			thinkingMode: normalizeThinkingMode(this.thinkingMode),
 			claudeThinkingMode: normalizeClaudeThinkingMode(this.claudeThinkingMode),
-			ampAgentMode: this.provider === 'amp' ? normalizeAmpAgentMode(this.ampAgentMode) : undefined,
+			ampAgentMode: this.agentId === 'amp' ? normalizeAmpAgentMode(this.ampAgentMode) : undefined,
 			firstMessage: this.firstMessage.trim(),
 			initialImages: this.attachedImages,
 			tags: this.chatTags.length > 0 ? this.chatTags : undefined,
@@ -419,8 +419,8 @@ export class NewChatFormState {
 			this.validateAllModelsAgainstLive();
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings', err);
-			for (const provider of this.#modelCatalog.getSelectableHarnesses()) {
-				this.applyResolvedModel(provider, this.#modelCatalog.getDefaultModel(provider));
+			for (const agentId of this.#modelCatalog.getSelectableAgents()) {
+				this.applyResolvedModel(agentId, this.#modelCatalog.getDefaultModel(agentId));
 			}
 			if (!this.projectPath) {
 				this.projectPath = this.projectBasePath;
@@ -455,12 +455,12 @@ export class NewChatFormState {
 			this.projectPath = this.projectBasePath;
 		}
 
-		this.provider = this.#resolveStartupProvider(snap.lastProvider);
+		this.agentId = this.#resolveStartupAgent(snap.lastAgentId);
 		if (snap.lastModel) {
-			this.applyResolvedModel(this.provider, snap.lastModel, snap.lastModelEndpointId);
+			this.applyResolvedModel(this.agentId, snap.lastModel, snap.lastModelEndpointId);
 		} else {
-			for (const provider of this.#modelCatalog.getSelectableHarnesses()) {
-				this.applyResolvedModel(provider, this.#modelCatalog.getDefaultModel(provider));
+			for (const agentId of this.#modelCatalog.getSelectableAgents()) {
+				this.applyResolvedModel(agentId, this.#modelCatalog.getDefaultModel(agentId));
 			}
 		}
 		this.permissionMode = normalizePermissionMode(snap.lastPermissionMode);

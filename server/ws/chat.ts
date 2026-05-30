@@ -10,6 +10,7 @@ import {
   ClientRequestErrorMessage,
 } from '../../common/ws-events.ts';
 import type { ClientRequestErrorCode } from '../../common/ws-events.ts';
+import type { PendingUserInput } from '../../common/pending-user-input.js';
 import {
   parseClientWsMessage,
   AgentRunRequest,
@@ -30,38 +31,34 @@ import {
   QueueResumeRequest,
   QueueQueryRequest,
 } from '../../common/ws-requests.ts';
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { QueueState } from '../../common/queue-state.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
-import type { RunProviderTurnOptions } from '../providers/types.js';
-import { requireChatExecutionConfig } from '../providers/types.js';
-import { supportsFork as providerSupportsFork } from '../../common/providers.ts';
+import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
+import {
+  ChatCommandService,
+  queueDrainOptions,
+  runOptionsFromCommandRequest,
+} from '../commands/chat-command-service.js';
 
 const PERMISSION_DEDUP_TTL = 30_000;
 
 // Bun's ServerWebSocket parameterized over the per-socket data bag.
 type WS = import('bun').ServerWebSocket<unknown>;
 
-interface ProviderRegistryDep {
+interface AgentRegistryDep {
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
-  setPermissionMode(chatId: string, mode: PermissionMode): Promise<void>;
-  setThinkingMode(chatId: string, mode: ThinkingMode): Promise<void>;
-  setClaudeThinkingMode(chatId: string, mode: ClaudeThinkingMode): Promise<void>;
-  setAmpAgentMode(chatId: string, mode: AmpAgentMode): Promise<void>;
-  setModel(chatId: string, model: string, metadata?: {
-    apiProviderId?: string | null;
-    modelEndpointId?: string | null;
-  }): Promise<void>;
-  hasHarness(harnessId: string): boolean;
-  isHarnessSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<unknown>;
+  hasAgent(agentId: string): boolean;
+  supportsFork(agentId: string): boolean;
+  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
 }
 
 interface QueueManagerDep {
-  submit(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
+  submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   abort(chatId: string): Promise<boolean>;
-  triggerDrain(chatId: string, options: RunProviderTurnOptions): Promise<void>;
+  triggerDrain(chatId: string, options: RunAgentTurnOptions): Promise<void>;
   readChatQueue(chatId: string): Promise<QueueState>;
   enqueueChat(chatId: string, content: string): Promise<unknown>;
   dequeueChat(chatId: string, entryId: string): Promise<unknown>;
@@ -91,7 +88,17 @@ interface ForkDeps {
     registry: IChatRegistry;
     settings: ForkSettingsDep;
     metadata: ForkMetadataDep;
-  }): Promise<{ sourceChatId: string; chatId: string; provider?: string }>;
+    forkAgentSession?: (args: {
+      sourceSession: ChatRegistryEntry;
+      sourceChatId: string;
+      targetChatId: string;
+    }) => Promise<{ agentSessionId: string; nativePath: string | null } | null>;
+  }): Promise<{ sourceChatId: string; chatId: string; agentId?: string }>;
+  forkAgentSession?(args: {
+    sourceSession: ChatRegistryEntry;
+    sourceChatId: string;
+    targetChatId: string;
+  }): Promise<{ agentSessionId: string; nativePath: string | null } | null>;
 }
 
 interface HistoryCacheDep {
@@ -103,6 +110,11 @@ interface HistoryCacheDep {
     offset: number;
     limit: number;
   };
+}
+
+interface PendingInputsDep {
+  reconcile(chatId: string): Promise<void>;
+  listForChat(chatId: string): unknown[];
 }
 
 class WebSocketWriter {
@@ -125,24 +137,33 @@ interface RequestErrorParams {
 }
 
 export class ChatHandler {
-  #providers: ProviderRegistryDep;
+  #agents: AgentRegistryDep;
   #queue: QueueManagerDep;
   #historyCache: HistoryCacheDep;
+  #pendingInputs: PendingInputsDep;
   #registry: IChatRegistry;
+  #commands: ChatCommandService;
   #forkDeps: ForkDeps | null;
   #recentPermissionDecisions = new Map<string, number>();
 
   constructor(
-    providers: ProviderRegistryDep,
+    agents: AgentRegistryDep,
     queue: QueueManagerDep,
     historyCache: HistoryCacheDep,
     registry: IChatRegistry,
+    pendingInputs: PendingInputsDep = {
+      reconcile: () => Promise.resolve(),
+      listForChat: () => [],
+    },
     forkDeps?: ForkDeps | null,
+    commands?: ChatCommandService | null,
   ) {
-    this.#providers = providers;
+    this.#agents = agents;
     this.#queue = queue;
     this.#historyCache = historyCache;
+    this.#pendingInputs = pendingInputs;
     this.#registry = registry;
+    this.#commands = commands ?? new ChatCommandService({ chats: registry, queue });
     this.#forkDeps = forkDeps ?? null;
   }
 
@@ -167,35 +188,16 @@ export class ChatHandler {
     }
 
     try {
-      const options: RunProviderTurnOptions = {
-        permissionMode: data.permissionMode,
-        thinkingMode: data.thinkingMode,
-        claudeThinkingMode: data.claudeThinkingMode,
-        model: data.model,
-      };
-      if (data.images !== undefined) options.images = data.images;
-      if (data.ampAgentMode !== undefined) options.ampAgentMode = data.ampAgentMode;
-      if (data.apiProviderId !== undefined) options.apiProviderId = data.apiProviderId;
-      if (data.modelEndpointId !== undefined) options.modelEndpointId = data.modelEndpointId;
-      if (data.modelProtocol !== undefined) options.modelProtocol = data.modelProtocol;
-      await this.#queue.submit(chatId, data.command, options);
+      await this.#commands.submitRun({
+        transport: 'websocket',
+        chatId,
+        command: data.command,
+        images: data.images,
+        options: runOptionsFromCommandRequest(data),
+      });
     } catch (error: unknown) {
       writer.send(new AgentRunFailedMessage(chatId, (error as Error).message));
     }
-  }
-
-  #runOptionsFromForkRequest(data: ForkRunRequest): RunProviderTurnOptions {
-    const options: RunProviderTurnOptions = {};
-    if (data.permissionMode !== undefined) options.permissionMode = data.permissionMode;
-    if (data.thinkingMode !== undefined) options.thinkingMode = data.thinkingMode;
-    if (data.claudeThinkingMode !== undefined) options.claudeThinkingMode = data.claudeThinkingMode;
-    if (data.ampAgentMode !== undefined) options.ampAgentMode = data.ampAgentMode;
-    if (data.model !== undefined) options.model = data.model;
-    if (data.images !== undefined) options.images = data.images;
-    if (data.apiProviderId !== undefined) options.apiProviderId = data.apiProviderId;
-    if (data.modelEndpointId !== undefined) options.modelEndpointId = data.modelEndpointId;
-    if (data.modelProtocol !== undefined) options.modelProtocol = data.modelProtocol;
-    return options;
   }
 
   async #handleForkRun(data: ForkRunRequest, writer: WebSocketWriter): Promise<void> {
@@ -224,11 +226,11 @@ export class ChatHandler {
       writer.send(new AgentRunFailedMessage(sourceChatId, 'Source session not found'));
       return;
     }
-    if (!providerSupportsFork(sourceSession.provider)) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, `Fork unsupported for harness: ${sourceSession.provider}`));
+    if (!this.#agents.supportsFork(sourceSession.agentId)) {
+      writer.send(new AgentRunFailedMessage(sourceChatId, `Fork unsupported for agent: ${sourceSession.agentId}`));
       return;
     }
-    if (this.#providers.isHarnessSessionRunning(sourceSession.provider, sourceSession.providerSessionId)) {
+    if (this.#agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)) {
       writer.send(new AgentRunFailedMessage(sourceChatId, 'Cannot fork a chat while it is processing'));
       return;
     }
@@ -238,16 +240,26 @@ export class ChatHandler {
     }
 
     try {
-      const result = await this.#forkDeps.forkChatFileCopy({
-        sourceSession,
+      await this.#commands.submitForkRun({
+        transport: 'websocket',
         sourceChatId,
-        targetChatId,
-        registry: this.#registry,
-        settings: this.#forkDeps.settings,
-        metadata: this.#forkDeps.metadata,
+        chatId: targetChatId,
+        command: data.command,
+        images: data.images,
+        options: runOptionsFromCommandRequest(data),
+        ensureForked: async () => {
+          const result = await this.#forkDeps!.forkChatFileCopy({
+            sourceSession,
+            sourceChatId,
+            targetChatId,
+            registry: this.#registry,
+            settings: this.#forkDeps!.settings,
+            metadata: this.#forkDeps!.metadata,
+            forkAgentSession: this.#forkDeps!.forkAgentSession,
+          });
+          writer.send(new ChatForkCreatedMessage(result.sourceChatId, result.chatId));
+        },
       });
-      writer.send(new ChatForkCreatedMessage(result.sourceChatId, result.chatId));
-      await this.#queue.submit(result.chatId, data.command, this.#runOptionsFromForkRequest(data));
     } catch (error: unknown) {
       const chatId = this.#registry.getChat(targetChatId) ? targetChatId : sourceChatId;
       writer.send(new AgentRunFailedMessage(chatId, (error as Error).message));
@@ -274,7 +286,7 @@ export class ChatHandler {
       alwaysAllow: Boolean(data.alwaysAllow),
     };
 
-    this.#providers.resolvePermission(data.chatId, data.permissionRequestId, decision);
+    this.#agents.resolvePermission(data.chatId, data.permissionRequestId, decision);
   }
 
   #sendRequestError(writer: WebSocketWriter, params: RequestErrorParams): void {
@@ -306,10 +318,11 @@ export class ChatHandler {
       const offset = parseInt(String(data.offset || '0'), 10);
 
       await this.#historyCache.ensureLoaded(chatId);
+      await this.#pendingInputs.reconcile(chatId);
       const result = this.#historyCache.getPaginatedMessages(chatId, limit, offset);
 
       writer.send(new ChatLogResponseMessage(
-        clientRequestId, chatId, result.messages, result.total,
+        clientRequestId, chatId, result.messages as ChatMessage[], this.#pendingInputs.listForChat(chatId) as PendingUserInput[], result.total,
         result.hasMore, result.offset, result.limit,
       ));
     } catch (error: unknown) {
@@ -324,7 +337,7 @@ export class ChatHandler {
   }
 
   #handleGetRunningSessions(_data: ChatRunningQueryRequest, writer: WebSocketWriter): void {
-    writer.send(new ChatSessionsRunningMessage(this.#providers.getRunningSessions()));
+    writer.send(new ChatSessionsRunningMessage(this.#agents.getRunningSessions()));
   }
 
   #handleOpen(ws: WS): void {
@@ -352,44 +365,31 @@ export class ChatHandler {
       } else if (data instanceof PermissionModeSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
-          await this.#registry.updateChat(chatId, { permissionMode: data.mode });
-          await this.#providers.setPermissionMode(chatId, data.mode);
+          await this.#agents.updateSessionSettings(chatId, { permissionMode: data.mode });
         }
       } else if (data instanceof ThinkingModeSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
-          await this.#registry.updateChat(chatId, { thinkingMode: data.mode });
-          await this.#providers.setThinkingMode(chatId, data.mode);
+          await this.#agents.updateSessionSettings(chatId, { thinkingMode: data.mode });
         }
       } else if (data instanceof ClaudeThinkingModeSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
-          await this.#registry.updateChat(chatId, { claudeThinkingMode: data.mode });
-          await this.#providers.setClaudeThinkingMode(chatId, data.mode);
+          await this.#agents.updateSessionSettings(chatId, { claudeThinkingMode: data.mode });
         }
       } else if (data instanceof AmpAgentModeSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (typeof data.mode === 'string') {
-          await this.#registry.updateChat(chatId, { ampAgentMode: data.mode });
-          await this.#providers.setAmpAgentMode(chatId, data.mode);
+          await this.#agents.updateSessionSettings(chatId, { ampAgentMode: data.mode });
         }
       } else if (data instanceof ModelSetRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (data.model) {
-          const metadata = data.apiProviderId !== undefined || data.modelEndpointId !== undefined
-            ? { apiProviderId: data.apiProviderId, modelEndpointId: data.modelEndpointId }
-            : undefined;
-          await this.#providers.setModel(chatId, data.model, metadata);
-          const patch: {
-            model: string;
-            apiProviderId?: string | null;
-            modelEndpointId?: string | null;
-            modelProtocol?: typeof data.modelProtocol;
-          } = { model: data.model };
+          const patch: AgentSessionSettingsPatch = { model: data.model };
           if (data.apiProviderId !== undefined) patch.apiProviderId = data.apiProviderId;
           if (data.modelEndpointId !== undefined) patch.modelEndpointId = data.modelEndpointId;
           if (data.modelProtocol !== undefined) patch.modelProtocol = data.modelProtocol;
-          await this.#registry.updateChat(chatId, patch);
+          await this.#agents.updateSessionSettings(chatId, patch);
         }
       } else if (data instanceof ChatLogQueryRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
@@ -402,7 +402,7 @@ export class ChatHandler {
           return writer.send(new WsFaultMessage('queue-enqueue requires non-empty string content'));
         }
         await this.#queue.enqueueChat(chatId, data.content);
-        this.#queue.triggerDrain(chatId, this.#drainOptions(chatId)).catch((err: Error) => {
+        this.#queue.triggerDrain(chatId, queueDrainOptions(chatId, this.#registry)).catch((err: Error) => {
           console.error('queue: enqueue drain error:', err.message);
         });
       } else if (data instanceof QueueDropRequest) {
@@ -420,7 +420,7 @@ export class ChatHandler {
       } else if (data instanceof QueueResumeRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         await this.#queue.resumeChatQueue(chatId);
-        this.#queue.triggerDrain(chatId, this.#drainOptions(chatId)).catch((err: Error) => {
+        this.#queue.triggerDrain(chatId, queueDrainOptions(chatId, this.#registry)).catch((err: Error) => {
           console.error('queue: resume drain error:', err.message);
         });
       } else if (data instanceof QueueQueryRequest) {
@@ -432,21 +432,6 @@ export class ChatHandler {
       console.error('ws: chat error:', (error as Error).message);
       writer.send(new WsFaultMessage((error as Error).message));
     }
-  }
-
-  // Builds drain options from persisted chat settings for queued turns.
-  #drainOptions(chatId: string): RunProviderTurnOptions {
-    const entry = requireChatExecutionConfig(chatId, this.#registry.getChat(chatId));
-    return {
-      permissionMode: entry.permissionMode,
-      thinkingMode: entry.thinkingMode,
-      claudeThinkingMode: entry.claudeThinkingMode,
-      ampAgentMode: entry.ampAgentMode,
-      model: entry.model,
-      apiProviderId: this.#registry.getChat(chatId)?.apiProviderId,
-      modelEndpointId: this.#registry.getChat(chatId)?.modelEndpointId,
-      modelProtocol: this.#registry.getChat(chatId)?.modelProtocol,
-    };
   }
 
   #sendMissingSessionError(writer: WebSocketWriter, type: string): void {

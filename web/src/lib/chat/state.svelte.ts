@@ -1,9 +1,10 @@
 // Per-chat message state: message arrays, pagination, scroll management,
 // and message persistence via LocalChatSnapshotCache.
 
-	import { parseChatMessages, type ChatMessage } from '$shared/chat-types';
-	import { LocalChatSnapshotCache } from './chat-snapshot-cache';
-	import { getChatMessages } from '$lib/api/chats.js';
+import { parseChatMessages, UserMessage, type ChatMessage } from '$shared/chat-types';
+import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
+import { LocalChatSnapshotCache } from './chat-snapshot-cache';
+import { getChatMessages } from '$lib/api/chats.js';
 
 const MESSAGES_PER_PAGE = 20;
 const INITIAL_VISIBLE_MESSAGES = 100;
@@ -13,6 +14,7 @@ export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 export class ChatState {
 	readonly snapshotCache = new LocalChatSnapshotCache();
 	chatMessages = $state<ChatMessage[]>([]);
+	pendingUserInputs = $state<PendingUserInput[]>([]);
 	visibleMessageCount = $state(INITIAL_VISIBLE_MESSAGES);
 	isLoadingMessages = $state(false);
 	isLoadingMoreMessages = $state(false);
@@ -22,12 +24,34 @@ export class ChatState {
 	loadStatus = $state<ChatLoadStatus>('idle');
 	loadError = $state<string | null>(null);
 
+	get displayMessages(): ChatMessage[] {
+		const combined = [
+			...this.chatMessages.map((message) => ({ message, pending: false })),
+			...this.pendingUserInputs.map((input) => ({
+				message: pendingInputToMessage(input),
+				pending: true,
+			})),
+		];
+		combined.sort((left, right) => {
+			const timestampOrder = left.message.timestamp.localeCompare(right.message.timestamp);
+			if (timestampOrder !== 0) return timestampOrder;
+			if (left.pending !== right.pending) return left.pending ? -1 : 1;
+			return 0;
+		});
+		return combined.map((entry) => entry.message);
+	}
+
+	get displayMessageCount(): number {
+		return this.displayMessages.length;
+	}
+
 	// Visible slice of messages, capped by visibleMessageCount.
 	get visibleMessages(): ChatMessage[] {
-		if (this.chatMessages.length <= this.visibleMessageCount) {
-			return this.chatMessages;
+		const displayMessages = this.displayMessages;
+		if (displayMessages.length <= this.visibleMessageCount) {
+			return displayMessages;
 		}
-		return this.chatMessages.slice(-this.visibleMessageCount);
+		return displayMessages.slice(-this.visibleMessageCount);
 	}
 
 	// Tracks offset for paginated fetches from the server.
@@ -40,8 +64,8 @@ export class ChatState {
 	// the loading state from a newer load.
 	#loadGeneration = 0;
 
-		/** Loads messages for a chat through the REST history endpoint. */
-		async loadMessages(chatId: string): Promise<ChatMessage[]> {
+	/** Loads messages for a chat through the REST history endpoint. */
+	async loadMessages(chatId: string): Promise<ChatMessage[]> {
 		if (!chatId) return [];
 
 		const generation = ++this.#loadGeneration;
@@ -52,8 +76,12 @@ export class ChatState {
 
 		try {
 			const data = await getChatMessages({ chatId, limit: MESSAGES_PER_PAGE, offset: 0 });
-
 			const messages = parseChatMessages(data.messages);
+			const pendingUserInputs = Array.isArray(data.pendingUserInputs)
+				? data.pendingUserInputs
+					.map(normalizePendingUserInput)
+					.filter((input): input is PendingUserInput => Boolean(input))
+				: [];
 
 			if (data.hasMore !== undefined) {
 				this.hasMoreMessages = Boolean(data.hasMore);
@@ -64,6 +92,7 @@ export class ChatState {
 			}
 
 			this.#messagesOffset = messages.length;
+			this.pendingUserInputs = sortPendingInputs(pendingUserInputs);
 			this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 			return messages;
 		} catch (error) {
@@ -78,7 +107,7 @@ export class ChatState {
 	}
 
 	/** Loads older messages and prepends them to the current array. */
-		async loadMoreMessages(chatId: string): Promise<boolean> {
+	async loadMoreMessages(chatId: string): Promise<boolean> {
 		if (this.#isLoadingMore || this.isLoadingMoreMessages) return false;
 		if (!this.hasMoreMessages || !chatId) return false;
 
@@ -87,7 +116,6 @@ export class ChatState {
 
 		try {
 			const data = await getChatMessages({ chatId, limit: MESSAGES_PER_PAGE, offset: this.#messagesOffset });
-
 			const messages = parseChatMessages(data.messages);
 			if (messages.length === 0) return false;
 
@@ -116,14 +144,45 @@ export class ChatState {
 		this.chatMessages = [...this.chatMessages, ...msgs];
 	}
 
-	/** Replaces the entire message array. */
+	/** Replaces the entire durable message array. */
 	setMessages(msgs: ChatMessage[]): void {
 		this.chatMessages = msgs;
+	}
+
+	setPendingUserInputs(inputs: PendingUserInput[]): void {
+		this.pendingUserInputs = sortPendingInputs(inputs);
+	}
+
+	upsertPendingUserInput(input: PendingUserInput): void {
+		const next = this.pendingUserInputs.slice();
+		const index = next.findIndex((entry) => entry.clientRequestId === input.clientRequestId);
+		if (index >= 0) {
+			next[index] = input;
+		} else {
+			next.push(input);
+		}
+		this.pendingUserInputs = sortPendingInputs(next);
+	}
+
+	clearPendingUserInput(clientRequestId: string): void {
+		this.pendingUserInputs = this.pendingUserInputs.filter((input) => input.clientRequestId !== clientRequestId);
+	}
+
+	updatePendingUserInputDeliveryStatus(
+		clientRequestId: string,
+		deliveryStatus: 'submitting' | 'accepted' | 'failed',
+	): void {
+		this.pendingUserInputs = this.pendingUserInputs.map((input) =>
+			input.clientRequestId === clientRequestId
+				? { ...input, deliveryStatus }
+				: input,
+		);
 	}
 
 	/** Clears all messages and resets pagination state. */
 	clearMessages(): void {
 		this.chatMessages = [];
+		this.pendingUserInputs = [];
 		this.#messagesOffset = 0;
 		this.hasMoreMessages = false;
 		this.totalMessages = 0;
@@ -137,9 +196,9 @@ export class ChatState {
 	}
 
 	/** Loads all remaining paginated messages so the full history is available. */
-		async loadAllMessages(chatId: string): Promise<void> {
-			while (this.hasMoreMessages) {
-				const loaded = await this.loadMoreMessages(chatId);
+	async loadAllMessages(chatId: string): Promise<void> {
+		while (this.hasMoreMessages) {
+			const loaded = await this.loadMoreMessages(chatId);
 			if (!loaded) break;
 		}
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.chatMessages.length);
@@ -148,6 +207,7 @@ export class ChatState {
 	/** Resets scroll and pagination state for a new chat selection. */
 	resetForNewChat(): void {
 		this.chatMessages = [];
+		this.pendingUserInputs = [];
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.isUserScrolledUp = false;
 		this.#messagesOffset = 0;
@@ -157,12 +217,12 @@ export class ChatState {
 		this.loadError = null;
 	}
 
-	/** Persists current messages via the snapshot cache. */
+	/** Persists current durable messages via the snapshot cache. */
 	persistMessages(chatId: string): void {
 		this.snapshotCache.persist(chatId, this.chatMessages);
 	}
 
-	/** Restores messages from the snapshot cache. */
+	/** Restores durable messages from the snapshot cache. */
 	restoreMessages(chatId: string): boolean {
 		const restored = this.snapshotCache.restore(chatId);
 		if (!restored) return false;
@@ -178,4 +238,17 @@ export class ChatState {
 
 export function createChatState(): ChatState {
 	return new ChatState();
+}
+
+function sortPendingInputs(inputs: PendingUserInput[]): PendingUserInput[] {
+	return inputs.slice().sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+function pendingInputToMessage(input: PendingUserInput): UserMessage {
+	return new UserMessage(input.createdAt, input.content, input.images, {
+		clientRequestId: input.clientRequestId,
+		messageId: input.clientMessageId,
+		turnId: input.turnId,
+		deliveryStatus: input.deliveryStatus,
+	});
 }

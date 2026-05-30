@@ -14,14 +14,15 @@ import {
   isPermissionMode,
   isThinkingMode,
 } from './chat-modes';
-import type { HarnessId, ApiProtocol } from './providers';
-import { isHarnessId } from './providers';
+import type { AgentId } from './agents';
+import { isAgentId } from './agents';
+import type { ApiProtocol } from './api-providers';
 
 export type PinnedInsertPosition = 'top' | 'bottom';
 
 export interface GenerationUiSettings {
   enabled?: boolean;
-  provider?: HarnessId;
+  agentId?: AgentId;
   model?: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
@@ -32,7 +33,17 @@ export interface GenerationUiSettings {
 
 export interface TelegramNotificationSettings {
   enabled?: boolean;
-  chatId?: string;
+}
+
+export interface RemoteTelegramStatus {
+  botTokenAvailable: boolean;
+  botUsername: string | null;
+  botFirstName: string | null;
+  recipientUsername: string | null;
+  recipientDisplayName: string | null;
+  recipientLinked: boolean;
+  pendingLink: boolean;
+  linkUrl: string | null;
 }
 
 export interface RemoteUiSettings {
@@ -45,14 +56,14 @@ export interface RemoteUiSettings {
 }
 
 export interface RemoteUiEffectiveSettings {
-  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'provider' | 'model'>> & {
+  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model'>> & {
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
     modelProtocol?: ApiProtocol | null;
     customPrompt?: string;
     useCommonDirPrefix?: boolean;
   };
-  commitMessage?: Required<Pick<GenerationUiSettings, 'enabled' | 'provider' | 'model'>> & {
+  commitMessage?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model'>> & {
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
     modelProtocol?: ApiProtocol | null;
@@ -72,7 +83,7 @@ export interface RemoteSettingsSnapshot {
   uiEffective: RemoteUiEffectiveSettings;
   paths: RemotePathSettings;
   pinnedChatIds: string[];
-  lastProvider: HarnessId;
+  lastAgentId: AgentId;
   lastProjectPath: string;
   lastModel: string;
   lastApiProviderId: string | null;
@@ -83,7 +94,7 @@ export interface RemoteSettingsSnapshot {
   lastClaudeThinkingMode: ClaudeThinkingMode;
   lastAmpAgentMode: AmpAgentMode;
   projectBasePath: string;
-  telegramBotTokenAvailable: boolean;
+  telegram: RemoteTelegramStatus;
 }
 
 export interface UpdateRemoteSettingsInput {
@@ -124,7 +135,7 @@ function normalizeGenerationUiSettings(value: unknown): GenerationUiSettings | u
 
   const normalized: GenerationUiSettings = {};
   if (typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
-  if (isHarnessId(raw.provider)) normalized.provider = raw.provider;
+  if (isAgentId(raw.agentId)) normalized.agentId = raw.agentId;
   if (typeof raw.model === 'string') normalized.model = raw.model;
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
   if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
@@ -142,12 +153,12 @@ function normalizeGenerationUiEffectiveSettings(
   const raw = asRecord(value);
   if (!raw) return undefined;
   if (typeof raw.enabled !== 'boolean') return undefined;
-  if (!isHarnessId(raw.provider)) return undefined;
+  if (!isAgentId(raw.agentId)) return undefined;
   if (typeof raw.model !== 'string') return undefined;
 
   const normalized: NonNullable<RemoteUiEffectiveSettings['chatTitle']> = {
     enabled: raw.enabled,
-    provider: raw.provider,
+    agentId: raw.agentId,
     model: raw.model,
   };
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
@@ -178,17 +189,14 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
   const notifications = asRecord(raw.notifications);
   if (notifications) {
     const telegramRaw = asRecord(notifications.telegram);
-    if (telegramRaw) {
-      const telegramSettings: TelegramNotificationSettings = {};
-      if (typeof telegramRaw.enabled === 'boolean') {
-        telegramSettings.enabled = telegramRaw.enabled;
-      }
-      if (typeof telegramRaw.chatId === 'string') {
-        telegramSettings.chatId = telegramRaw.chatId;
-      }
-      if (Object.keys(telegramSettings).length > 0) {
-        normalized.notifications = { telegram: telegramSettings };
-      }
+      if (telegramRaw) {
+        const telegramSettings: TelegramNotificationSettings = {};
+        if (typeof telegramRaw.enabled === 'boolean') {
+          telegramSettings.enabled = telegramRaw.enabled;
+        }
+        if (Object.keys(telegramSettings).length > 0) {
+          normalized.notifications = { telegram: telegramSettings };
+        }
     }
   }
 
@@ -224,6 +232,41 @@ function normalizeRemoteSettingsVersion(value: unknown): number | null {
     : null;
 }
 
+function normalizeNullableString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function normalizeRemoteTelegramStatus(value: unknown): RemoteTelegramStatus | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  if (typeof raw.botTokenAvailable !== 'boolean') return null;
+  if (typeof raw.recipientLinked !== 'boolean') return null;
+  if (typeof raw.pendingLink !== 'boolean') return null;
+
+  const botUsername = normalizeNullableString(raw.botUsername);
+  const botFirstName = normalizeNullableString(raw.botFirstName);
+  const recipientUsername = normalizeNullableString(raw.recipientUsername);
+  const recipientDisplayName = normalizeNullableString(raw.recipientDisplayName);
+  const linkUrl = normalizeNullableString(raw.linkUrl);
+
+  if (botUsername === null && raw.botUsername !== undefined && raw.botUsername !== null) return null;
+  if (botFirstName === null && raw.botFirstName !== undefined && raw.botFirstName !== null) return null;
+  if (recipientUsername === null && raw.recipientUsername !== undefined && raw.recipientUsername !== null) return null;
+  if (recipientDisplayName === null && raw.recipientDisplayName !== undefined && raw.recipientDisplayName !== null) return null;
+  if (linkUrl === null && raw.linkUrl !== undefined && raw.linkUrl !== null) return null;
+
+  return {
+    botTokenAvailable: raw.botTokenAvailable,
+    botUsername,
+    botFirstName,
+    recipientUsername,
+    recipientDisplayName,
+    recipientLinked: raw.recipientLinked,
+    pendingLink: raw.pendingLink,
+    linkUrl,
+  };
+}
+
 export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsSnapshot | null {
   const raw = asRecord(value);
   if (!raw) return null;
@@ -239,16 +282,17 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
   const lastApiProviderId = safeOptionalId(raw.lastApiProviderId);
   const lastModelEndpointId = safeOptionalId(raw.lastModelEndpointId);
   const lastModelProtocol = safeOptionalProtocol(raw.lastModelProtocol);
+  const telegram = normalizeRemoteTelegramStatus(raw.telegram);
 
   if (version === null) return null;
   if (!ui || !uiEffective || !paths || !pinnedChatIds) return null;
-  if (!isHarnessId(raw.lastProvider)) return null;
+  if (!isAgentId(raw.lastAgentId)) return null;
   if (lastProjectPath === null || lastModel === null || projectBasePath === null) return null;
   if (!isPermissionMode(raw.lastPermissionMode)) return null;
   if (!isThinkingMode(raw.lastThinkingMode)) return null;
   if (!isClaudeThinkingMode(raw.lastClaudeThinkingMode)) return null;
   if (!isAmpAgentMode(raw.lastAmpAgentMode)) return null;
-  if (typeof raw.telegramBotTokenAvailable !== 'boolean') return null;
+  if (!telegram) return null;
 
   return {
     version,
@@ -256,7 +300,7 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
     uiEffective,
     paths,
     pinnedChatIds,
-    lastProvider: raw.lastProvider,
+    lastAgentId: raw.lastAgentId,
     lastProjectPath,
     lastModel,
     lastApiProviderId,
@@ -267,6 +311,6 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
     lastClaudeThinkingMode: raw.lastClaudeThinkingMode,
     lastAmpAgentMode: raw.lastAmpAgentMode,
     projectBasePath,
-    telegramBotTokenAvailable: raw.telegramBotTokenAvailable,
+    telegram,
   };
 }

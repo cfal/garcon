@@ -6,7 +6,6 @@ mock.module('../../lib/http-request.js', () => ({
 
 mock.module('../../config.js', () => ({
   getProjectBasePath: mock(() => '/home'),
-  getTelegramBotToken: mock(() => ''),
 }));
 
 import createWorkspaceRoutes from '../workspace.js';
@@ -22,7 +21,7 @@ function createMockCtx() {
       getPathSettings: mock(() => Promise.resolve({})),
       setPathSettings: mock(() => Promise.resolve({})),
       getPinnedChatIds: mock(() => Promise.resolve([])),
-      getLastProvider: mock(() => Promise.resolve('claude')),
+      getLastAgentId: mock(() => Promise.resolve('claude')),
       getLastProjectPath: mock(() => Promise.resolve('')),
       getLastModel: mock(() => Promise.resolve('')),
       getLastPermissionMode: mock(() => Promise.resolve('default')),
@@ -39,8 +38,8 @@ function createMockCtx() {
       removeSavedSearch: mock(() => Promise.resolve(false)),
       reorderSavedSearches: mock(() => Promise.resolve({ success: true })),
     },
-    providers: {
-      getHarnessAuthStatusMap: mock(() => Promise.resolve({
+    agents: {
+      getAgentAuthStatusMap: mock(() => Promise.resolve({
         claude: { authenticated: false },
         codex: { authenticated: false },
         opencode: { authenticated: false },
@@ -51,7 +50,7 @@ function createMockCtx() {
 }
 
 const ctx = createMockCtx();
-const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.providers);
+const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.agents);
 
 function makeRequest(url, method, body) {
   return new Request(url, {
@@ -72,14 +71,14 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
-    ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastAgentId.mockClear();
     ctx.settings.getLastProjectPath.mockClear();
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getHarnessAuthStatusMap.mockClear();
-    ctx.providers.getModels.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
   });
 
@@ -144,14 +143,14 @@ describe('GET /api/app/settings', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
-    ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastAgentId.mockClear();
     ctx.settings.getLastProjectPath.mockClear();
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getHarnessAuthStatusMap.mockClear();
-    ctx.providers.getModels.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
   });
 
@@ -160,7 +159,7 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({ theme: 'dark' }));
     ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({ pinnedProjectPaths: ['/home'], browseStartPath: '/workspace' }));
     ctx.settings.getPinnedChatIds.mockImplementation(() => Promise.resolve(['a', 'b']));
-    ctx.settings.getLastProvider.mockImplementation(() => Promise.resolve('codex'));
+    ctx.settings.getLastAgentId.mockImplementation(() => Promise.resolve('codex'));
     ctx.settings.getLastProjectPath.mockImplementation(() => Promise.resolve('/workspace/project'));
     ctx.settings.getLastModel.mockImplementation(() => Promise.resolve('gpt-5.4'));
     ctx.settings.getLastPermissionMode.mockImplementation(() => Promise.resolve('acceptEdits'));
@@ -174,7 +173,7 @@ describe('GET /api/app/settings', () => {
     expect(body.ui).toEqual({ theme: 'dark' });
     expect(body.paths).toEqual({ pinnedProjectPaths: ['/home'], browseStartPath: '/workspace' });
     expect(body.pinnedChatIds).toEqual(['a', 'b']);
-    expect(body.lastProvider).toBe('codex');
+    expect(body.lastAgentId).toBe('codex');
     expect(body.lastProjectPath).toBe('/workspace/project');
     expect(body.lastModel).toBe('gpt-5.4');
     expect(body.lastApiProviderId).toBeNull();
@@ -184,36 +183,23 @@ describe('GET /api/app/settings', () => {
     expect(body.lastThinkingMode).toBe('think-hard');
     expect(body.lastClaudeThinkingMode).toBe('on');
     expect(body.uiEffective.chatTitle.enabled).toBe(false);
-    expect(body.uiEffective.chatTitle.provider).toBe('claude');
+    expect(body.uiEffective.chatTitle.agentId).toBe('claude');
     expect(body.uiEffective.chatTitle.model).toBe('haiku');
     expect(body.uiEffective.commitMessage.enabled).toBe(false);
-    expect(body.uiEffective.commitMessage.provider).toBe('claude');
+    expect(body.uiEffective.commitMessage.agentId).toBe('claude');
     expect(body.uiEffective.commitMessage.model).toBe('haiku');
     expect(body.chatSortOrder).toBeUndefined();
   });
 
-  it('strips the legacy remote sidebar controls position from the snapshot', async () => {
-    ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(2));
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({
-      searchBarPosition: 'top',
-      pinnedInsertPosition: 'bottom',
-    }));
-
-    const response = await handler();
-    const body = await response.json();
-
-    expect(body.ui).toEqual({ pinnedInsertPosition: 'bottom' });
-  });
-
-  it('auto-enables generation defaults from authenticated provider priority', async () => {
+  it('auto-enables generation defaults from authenticated agent priority', async () => {
     ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(1));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
-    ctx.providers.getHarnessAuthStatusMap.mockImplementation(() => Promise.resolve({
+    ctx.agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: true },
       opencode: { authenticated: true },
     }));
-    ctx.providers.getModels.mockImplementation(() => Promise.resolve([
+    ctx.agents.getModels.mockImplementation(() => Promise.resolve([
       { value: 'deepseek-r1', label: 'DeepSeek R1' },
       { value: 'openai/gpt-4.1', label: 'GPT-4.1' },
     ]));
@@ -223,10 +209,10 @@ describe('GET /api/app/settings', () => {
 
     expect(body.version).toBe(1);
     expect(body.uiEffective.chatTitle.enabled).toBe(true);
-    expect(body.uiEffective.chatTitle.provider).toBe('codex');
+    expect(body.uiEffective.chatTitle.agentId).toBe('codex');
     expect(body.uiEffective.chatTitle.model).toBe('gpt-5.5');
     expect(body.uiEffective.commitMessage.enabled).toBe(true);
-    expect(body.uiEffective.commitMessage.provider).toBe('codex');
+    expect(body.uiEffective.commitMessage.agentId).toBe('codex');
     expect(body.uiEffective.commitMessage.model).toBe('gpt-5.5');
   });
 
@@ -235,7 +221,7 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({
       commitMessage: {
         enabled: true,
-        provider: 'codex',
+        agentId: 'codex',
         model: 'gpt-5.5',
         customPrompt: 'Write a short message',
         useCommonDirPrefix: true,
@@ -247,7 +233,7 @@ describe('GET /api/app/settings', () => {
 
     expect(body.version).toBe(3);
     expect(body.uiEffective.commitMessage.enabled).toBe(true);
-    expect(body.uiEffective.commitMessage.provider).toBe('codex');
+    expect(body.uiEffective.commitMessage.agentId).toBe('codex');
     expect(body.uiEffective.commitMessage.model).toBe('gpt-5.5');
     expect(body.uiEffective.commitMessage.customPrompt).toBe('Write a short message');
     expect(body.uiEffective.commitMessage.useCommonDirPrefix).toBe(true);
@@ -265,14 +251,14 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
-    ctx.settings.getLastProvider.mockClear();
+    ctx.settings.getLastAgentId.mockClear();
     ctx.settings.getLastProjectPath.mockClear();
     ctx.settings.getLastModel.mockClear();
     ctx.settings.getLastPermissionMode.mockClear();
     ctx.settings.getLastThinkingMode.mockClear();
     ctx.settings.getLastClaudeThinkingMode.mockClear();
-    ctx.providers.getHarnessAuthStatusMap.mockClear();
-    ctx.providers.getModels.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
   });
 
@@ -288,18 +274,6 @@ describe('PUT /api/app/settings', () => {
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ fontSize: 14 });
   });
 
-  it('drops the legacy sidebar controls position from ui patches', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { searchBarPosition: 'top' } }));
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({ pinnedInsertPosition: 'top' }));
-    ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
-
-    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { ui: { searchBarPosition: 'top' } }));
-    const body = await response.json();
-
-    expect(body.success).toBe(true);
-    expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
-  });
-
   it('patches paths settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ paths: { lastDir: '/tmp' } }));
     ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
@@ -313,7 +287,7 @@ describe('PUT /api/app/settings', () => {
   });
 
   it('patches ui.chatTitle settings', async () => {
-    const chatTitleConfig = { enabled: true, provider: 'opencode', model: 'anthropic/claude-sonnet-4-5' };
+    const chatTitleConfig = { enabled: true, agentId: 'opencode', model: 'anthropic/claude-sonnet-4-5' };
     parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { chatTitle: chatTitleConfig } }));
     ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({ chatTitle: chatTitleConfig }));
     ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
@@ -337,6 +311,230 @@ describe('PUT /api/app/settings', () => {
     expect(body.lastPermissionMode).toBeUndefined();
     expect(body.lastThinkingMode).toBeUndefined();
     expect(body.lastClaudeThinkingMode).toBeUndefined();
+  });
+});
+
+describe('Telegram token settings API', () => {
+  function createTelegramRoutes() {
+    const publicStatus = {
+      botTokenAvailable: false,
+      botUsername: null,
+      botFirstName: null,
+      recipientUsername: null,
+      recipientDisplayName: null,
+      recipientLinked: false,
+      pendingLink: false,
+      linkUrl: null,
+    };
+    const telegramNotifier = {
+      isConfigured: false,
+      getBotIdentity: mock(() => Promise.resolve({ id: 123, username: 'garcon_bot', firstName: 'Garcon' })),
+      resolveRecipientLink: mock(() => Promise.resolve({
+        recipient: {
+          chatId: '99999',
+          username: 'alice',
+          displayName: 'Alice',
+          nextOffset: 12,
+        },
+        nextOffset: 12,
+      })),
+      setBotToken: mock((botToken) => {
+        telegramNotifier.isConfigured = Boolean(botToken);
+      }),
+      send: mock(() => Promise.resolve(true)),
+    };
+    const telegramSettings = {
+      getBotToken: mock(() => 'secret-token'),
+      getRecipientChatId: mock(() => publicStatus.recipientLinked ? '99999' : ''),
+      getPendingLinkCode: mock(() => 'abc123'),
+      getUpdateOffset: mock(() => null),
+      getPublicStatus: mock(() => publicStatus),
+      setBotToken: mock((botToken, identity) => {
+        publicStatus.botTokenAvailable = Boolean(botToken);
+        publicStatus.botUsername = identity.username;
+        publicStatus.botFirstName = identity.firstName;
+        return Promise.resolve(undefined);
+      }),
+      clearBotToken: mock(() => {
+        publicStatus.botTokenAvailable = false;
+        publicStatus.botUsername = null;
+        publicStatus.botFirstName = null;
+        publicStatus.recipientUsername = null;
+        publicStatus.recipientDisplayName = null;
+        publicStatus.recipientLinked = false;
+        publicStatus.pendingLink = false;
+        publicStatus.linkUrl = null;
+        return Promise.resolve(undefined);
+      }),
+      beginRecipientLink: mock(() => {
+        publicStatus.pendingLink = true;
+        publicStatus.linkUrl = 'https://t.me/garcon_bot?start=abc123';
+        return Promise.resolve(publicStatus.linkUrl);
+      }),
+      setUpdateOffset: mock(() => Promise.resolve(undefined)),
+      completeRecipientLink: mock((recipient) => {
+        publicStatus.recipientLinked = true;
+        publicStatus.recipientUsername = recipient.username;
+        publicStatus.recipientDisplayName = recipient.displayName;
+        publicStatus.pendingLink = false;
+        publicStatus.linkUrl = null;
+        return Promise.resolve(undefined);
+      }),
+      clearRecipient: mock(() => {
+        publicStatus.recipientLinked = false;
+        publicStatus.recipientUsername = null;
+        publicStatus.recipientDisplayName = null;
+        publicStatus.pendingLink = false;
+        publicStatus.linkUrl = null;
+        return Promise.resolve(undefined);
+      }),
+    };
+    const routes = createWorkspaceRoutes(ctx.settings, ctx.agents, telegramNotifier, telegramSettings);
+    return { routes, telegramNotifier, telegramSettings, publicStatus };
+  }
+
+  beforeEach(() => {
+    ctx.settings.getUiSettings.mockClear();
+    ctx.settings.getPathSettings.mockClear();
+    ctx.settings.getRemoteSettingsVersion.mockClear();
+    ctx.settings.getPinnedChatIds.mockClear();
+    ctx.settings.getLastAgentId.mockClear();
+    ctx.settings.getLastProjectPath.mockClear();
+    ctx.settings.getLastModel.mockClear();
+    ctx.settings.getLastPermissionMode.mockClear();
+    ctx.settings.getLastThinkingMode.mockClear();
+    ctx.settings.getLastClaudeThinkingMode.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getModels.mockClear();
+    parseJsonBody.mockClear();
+  });
+
+  it('stores the bot token server-side and returns only token availability', async () => {
+    const { routes, telegramNotifier, telegramSettings } = createTelegramRoutes();
+    parseJsonBody.mockImplementation(() => Promise.resolve({ botToken: '  secret-token  ' }));
+
+    const response = await routes['/api/v1/app/telegram/token'].PUT(
+      makeRequest('http://localhost/api/app/telegram/token', 'PUT', { botToken: 'secret-token' }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.settings.telegram.botTokenAvailable).toBe(true);
+    expect(body.settings.telegram.botUsername).toBe('garcon_bot');
+    expect(body.settings.telegram.pendingLink).toBe(true);
+    expect(body.settings.telegram.linkUrl).toBe('https://t.me/garcon_bot?start=abc123');
+    expect(JSON.stringify(body)).not.toContain('secret-token');
+    expect(telegramNotifier.getBotIdentity).toHaveBeenCalledWith('secret-token');
+    expect(telegramSettings.setBotToken).toHaveBeenCalledWith(
+      'secret-token',
+      { id: 123, username: 'garcon_bot', firstName: 'Garcon' },
+    );
+    expect(telegramNotifier.setBotToken).toHaveBeenCalledWith('secret-token');
+    expect(telegramSettings.beginRecipientLink).toHaveBeenCalledWith();
+  });
+
+  it('does not store the bot token when Telegram validation fails', async () => {
+    const { routes, telegramNotifier, telegramSettings } = createTelegramRoutes();
+    telegramNotifier.getBotIdentity.mockImplementationOnce(() => Promise.reject(new Error('Unauthorized')));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ botToken: 'bad-token' }));
+
+    const response = await routes['/api/v1/app/telegram/token'].PUT(
+      makeRequest('http://localhost/api/app/telegram/token', 'PUT', { botToken: 'bad-token' }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.errorCode).toBe('telegram_token_test_failed');
+    expect(body.details).toBe('Unauthorized');
+    expect(telegramSettings.setBotToken).not.toHaveBeenCalled();
+    expect(telegramSettings.beginRecipientLink).not.toHaveBeenCalled();
+    expect(telegramNotifier.setBotToken).not.toHaveBeenCalled();
+  });
+
+  it('clears the bot token and returns unavailable status', async () => {
+    const { routes, telegramNotifier, telegramSettings } = createTelegramRoutes();
+    let uiSettings = { notifications: { telegram: { enabled: true } } };
+    telegramNotifier.isConfigured = true;
+    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve(uiSettings));
+    ctx.settings.setUiSettings.mockImplementation((patch) => {
+      uiSettings = { ...uiSettings, ...patch };
+      return Promise.resolve(uiSettings);
+    });
+
+    const response = await routes['/api/v1/app/telegram/token'].DELETE();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.settings.telegram.botTokenAvailable).toBe(false);
+    expect(body.settings.ui.notifications.telegram.enabled).toBe(false);
+    expect(telegramSettings.clearBotToken).toHaveBeenCalled();
+    expect(telegramNotifier.setBotToken).toHaveBeenCalledWith('');
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({
+      notifications: { telegram: { enabled: false } },
+    });
+  });
+
+  it('tests a typed Telegram token without saving it', async () => {
+    const { routes, telegramNotifier, telegramSettings } = createTelegramRoutes();
+    parseJsonBody.mockImplementation(() => Promise.resolve({ botToken: 'typed-token' }));
+
+    const response = await routes['/api/v1/app/telegram/token/test'].POST(
+      makeRequest('http://localhost/api/app/telegram/token/test', 'POST', { botToken: 'typed-token' }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.bot.username).toBe('garcon_bot');
+    expect(telegramNotifier.getBotIdentity).toHaveBeenCalledWith('typed-token');
+    expect(telegramSettings.setBotToken).not.toHaveBeenCalled();
+  });
+
+  it('creates and resolves a Telegram recipient link', async () => {
+    const { routes, telegramSettings, telegramNotifier } = createTelegramRoutes();
+
+    const linkResponse = await routes['/api/v1/app/telegram/recipient/link'].POST(
+      makeRequest('http://localhost/api/app/telegram/recipient/link', 'POST', {}),
+    );
+    const linkBody = await linkResponse.json();
+
+    expect(linkResponse.status).toBe(200);
+    expect(linkBody.linkUrl).toBe('https://t.me/garcon_bot?start=abc123');
+    expect(linkBody.settings.telegram.pendingLink).toBe(true);
+    expect(telegramSettings.beginRecipientLink).toHaveBeenCalledWith();
+
+    const resolveResponse = await routes['/api/v1/app/telegram/recipient/resolve'].POST();
+    const resolveBody = await resolveResponse.json();
+
+    expect(resolveResponse.status).toBe(200);
+    expect(resolveBody.settings.telegram.recipientLinked).toBe(true);
+    expect(telegramNotifier.resolveRecipientLink).toHaveBeenCalledWith('abc123', null, 20);
+    expect(telegramSettings.completeRecipientLink).toHaveBeenCalled();
+  });
+
+  it('sends test notification to the linked recipient only', async () => {
+    const { routes, publicStatus, telegramNotifier } = createTelegramRoutes();
+
+    let response = await routes['/api/v1/app/telegram/test'].POST(
+      makeRequest('http://localhost/api/app/telegram/test', 'POST', {}),
+    );
+    expect(response.status).toBe(400);
+
+    telegramNotifier.isConfigured = true;
+    publicStatus.recipientLinked = true;
+    response = await routes['/api/v1/app/telegram/test'].POST(
+      makeRequest('http://localhost/api/app/telegram/test', 'POST', {}),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(telegramNotifier.send).toHaveBeenCalledWith(
+      '99999',
+      'Garcon: test notification. Your Telegram integration is working.',
+    );
   });
 });
 
@@ -507,7 +705,7 @@ describe('folders API', () => {
   });
 
   it('returns saved folders', async () => {
-    const folders = [{ id: 'folder-1', name: 'Review', filter: { textTokens: ['bug'], tags: [], providers: [], models: [] }, createdAt: '2026-03-27T00:00:00.000Z' }];
+    const folders = [{ id: 'folder-1', name: 'Review', filter: { textTokens: ['bug'], tags: [], agents: [], models: [] }, createdAt: '2026-03-27T00:00:00.000Z' }];
     ctx.settings.getFolders.mockImplementation(() => Promise.resolve(folders));
 
     const response = await getHandler();
@@ -524,7 +722,7 @@ describe('folders API', () => {
       filter: {
         textTokens: [' bug ', '', 7],
         tags: [' triage ', null],
-        providers: [' codex '],
+        agents: [' codex '],
         models: [' gpt-5.4 ', false],
         status: ' unread ',
 				ignored: ['value'],
@@ -542,7 +740,7 @@ describe('folders API', () => {
       filter: {
         textTokens: ['bug'],
         tags: ['triage'],
-        providers: ['codex'],
+        agents: ['codex'],
         models: ['gpt-5.4'],
 					status: 'unread',
       },
@@ -557,7 +755,7 @@ describe('folders API', () => {
       filter: {
         textTokens: [' one '],
         tags: [' alpha ', ''],
-        providers: [' codex '],
+        agents: [' codex '],
         models: [' gpt-5 '],
 				status: 'invalid',
 			},
@@ -572,7 +770,7 @@ describe('folders API', () => {
       filter: {
         textTokens: ['one'],
         tags: ['alpha'],
-        providers: ['codex'],
+        agents: ['codex'],
         models: ['gpt-5'],
       },
     });

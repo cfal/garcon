@@ -149,8 +149,8 @@ describe('AppShellStore', () => {
 			store.openSettings('remote');
 			expect(store.settingsTab).toBe('remote');
 
-			store.setSettingsTab('other-harnesses');
-			expect(store.settingsTab).toBe('other-harnesses');
+			store.setSettingsTab('other-agents');
+			expect(store.settingsTab).toBe('other-agents');
 		});
 	});
 });

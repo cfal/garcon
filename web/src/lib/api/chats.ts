@@ -2,7 +2,7 @@
 
 import { apiGet, apiPost, apiPatch, apiDelete } from './client.js';
 import type { ChatSession } from '$lib/types/session.js';
-import type { SessionProvider } from '$lib/types/app.js';
+import type { SessionAgentId } from '$lib/types/app.js';
 import {
 	normalizeAmpAgentMode,
 	normalizeClaudeThinkingMode,
@@ -13,8 +13,9 @@ import {
 	type PermissionMode,
 	type ThinkingMode,
 } from '$shared/chat-modes';
-import type { ApiProtocol } from '$shared/providers';
+import type { ApiProtocol } from '$shared/api-providers';
 import type { ChatMessage } from '$shared/chat-types';
+import type { PendingUserInput } from '$shared/pending-user-input';
 import type {
 	AgentRunCommandRequest,
 	AgentStopCommandRequest,
@@ -37,7 +38,7 @@ export interface StartChatParams {
 	clientRequestId?: string;
 	clientMessageId?: string;
 	chatId: string;
-	provider: SessionProvider;
+	agentId: SessionAgentId;
 	projectPath: string;
 	model: string;
 	apiProviderId?: string | null;
@@ -156,6 +157,7 @@ export async function getRunningChats(): Promise<RunningChatsResponse> {
 
 export async function getChatMessages(params: { chatId: string; limit?: number; offset?: number }): Promise<{
 	messages: ChatMessage[];
+	pendingUserInputs: PendingUserInput[];
 	total: number;
 	hasMore: boolean;
 	offset: number;
@@ -238,7 +240,7 @@ export interface ForkChatResponse {
 	success: boolean;
 	sourceChatId: string;
 	chatId: string;
-	provider: string;
+	agentId: string;
 }
 
 /** Forks (clones) an existing chat session into a new chat. */

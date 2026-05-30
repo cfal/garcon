@@ -2,7 +2,7 @@
 
 <p align="center"><strong>Garcon is a unified coding workspace for AI coding agents - use it from your phone or computer, with seamless access to your local machine.</strong></p>
 
-<p align="center">Works with Claude Code, Codex, OpenCode, Amp, Factory Droid, Pi, and any OpenAI/Anthropic-compatible endpoint.</p>
+<p align="center">Works with Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, Pi, and OpenAI/Anthropic-compatible endpoints.</p>
 
 <p align="center">
   <img src="screenshots/main-screen-top.png" alt="Garcon IDE" width="100%" />
@@ -41,9 +41,10 @@
 
 ## What It Does
 
-- Runs persistent coding sessions across Claude Code, Codex, OpenCode, Amp, Factory, Pi, and direct API-compatible providers.
+- Runs persistent coding sessions across Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory, Pi, and direct API-backed agents.
 - Sessions are shared with the CLI, so you can switch between Garcon and the terminal at any time.
 - Supports Anthropic Messages, OpenAI Chat Completions, OpenAI Responses, Ollama, OpenRouter, Gemini, Fireworks, Together, Alibaba Cloud, Z.AI, and custom endpoints.
+- Codex uses `codex app-server` for live turns, history, approvals, and forks.
 - Per-session controls for model, permissions, thinking, images, tags, queue, read state, pin, archive, reorder, fork, and share.
 - Unified workspace for your entire dev flow, with a file browser, editor, terminal, and Git workbench.
 - Git workbench with status, split diffs, line/hunk/file staging, commits, branches, remotes, push/pull/fetch, worktrees, and revert/reset.
@@ -53,9 +54,10 @@
 ## Requirements
 
 - [Bun](https://bun.sh/) and `git`
-- At least one backend with working provider:
+- At least one working agent or API provider:
   - Claude Code: Claude subscription, `ANTHROPIC_API_KEY`, or an Anthropic-compatible endpoint
   - Codex: ChatGPT subscription, `OPENAI_API_KEY`, or an OpenAI-compatible endpoint
+  - Cursor Agent CLI/login or `CURSOR_API_KEY`
   - OpenCode config
   - Amp CLI/login
   - Factory Droid CLI/login or `FACTORY_API_KEY`
@@ -72,7 +74,7 @@ bun run start
 ```
 
 Default URL: `http://127.0.0.1:8080`. On first launch, create an account at
-`/setup`, then configure providers in Settings. To skip local auth:
+`/setup`, then configure agents and API providers in Settings. To skip local auth:
 
 ```bash
 bun run start --disable-auth
@@ -95,24 +97,27 @@ Useful options and environment variables:
 - `GARCON_WORKSPACE_DIR` / `--workspace-dir`: explicit workspace directory.
 - `GARCON_PROJECT_BASE_DIR` / `--project-base-dir`: filesystem access boundary.
 - `GARCON_TERMINAL_SHELL`: shell used by PTY sessions.
-- `GARCON_TELEGRAM_BOT_TOKEN`: enables Telegram notifications.
 - `CLAUDE_BINARY`, `AMP_BINARY`, `FACTORY_BINARY`: override CLI binary paths.
+- `GARCON_CODEX_CLI`: override the Codex CLI used for app-server.
+- `GARCON_CURSOR_BINARY`: override the Cursor Agent CLI binary path.
+- `CURSOR_API_KEY`: Cursor Agent API key for native Cursor sessions.
 - `GARCON_PI_BINARY` / `PI_BINARY`: override the Pi CLI binary path.
 - `PI_CODING_AGENT_SESSION_DIR`: optional Pi session directory override.
 
+Telegram notifications are configured from the server settings UI.
+
 Run `bun run help` for the full option list.
 
-## Providers And Models
+## Agents And Models
 
-Configure providers from Settings. Garcon supports native harnesses, direct
-Anthropic/OpenAI-compatible endpoints, and endpoint-backed models inside
-compatible harnesses. API keys are stored server-side and redacted from client
-responses. Local Ollama is supported via API provider templates and model
-discovery.
+Configure agents and API providers from Settings. Agents execute chats; API
+providers are managed endpoints that compatible agents and direct runners can
+use. API keys are stored server-side and redacted from client responses. Local
+Ollama is supported via API provider templates and model discovery.
 
-Pi is a native-only harness: Garcon runs `pi --mode json`, discovers models from
-Pi's SDK/config, requires an explicit Pi model, and resumes from native Pi
-session files.
+Direct runners are available for OpenAI Chat Completions, OpenAI Responses, and
+Anthropic Messages endpoints. Pi and Cursor are native-only agents that use
+their own CLI/session stores.
 
 ## Build
 
@@ -145,10 +150,12 @@ docker run -d \
   -e GARCON_BIND_ADDRESS=0.0.0.0 \
   -e GARCON_PROJECT_BASE_DIR=/projects \
   -e OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+  -e CURSOR_API_KEY="${CURSOR_API_KEY:-}" \
   -v garcon-data:/home/garcon/.garcon \
   -v "$HOME/repos":/projects \
   -v "$HOME/.claude":/home/garcon/.claude \
   -v "$HOME/.codex":/home/garcon/.codex \
+  -v "$HOME/.cursor":/home/garcon/.cursor \
   -v "$HOME/.opencode":/home/garcon/.opencode \
   -v "$HOME/.opencode/opencode-data":/home/garcon/.local/share/opencode \
   -v "$HOME/.opencode/opencode-state":/home/garcon/.local/state/opencode \
@@ -160,13 +167,13 @@ docker run -d \
 
 Set `GARCON_PROJECT_DIR` for Compose or mount `/projects` for `docker run`.
 Workspace data persists in `garcon-data`. Mount the auth/config directory for
-each native CLI harness you use.
+each native CLI agent you use.
 
 ## Architecture
 
 - `web/`: SvelteKit/Svelte 5 frontend.
-- `server/`: Bun HTTP/WebSocket server, provider adapters, queueing, Git, auth, and notifications.
-- `common/`: shared chat, WebSocket, provider, model, settings, and API contracts.
+- `server/`: Bun HTTP/WebSocket server, agents, API providers, queueing, Git, auth, and notifications.
+- `common/`: shared chat, WebSocket, agent, provider, model, settings, and API contracts.
 
 ## Development
 

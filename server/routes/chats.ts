@@ -1,5 +1,5 @@
 // /api/chats/* route handlers. Provides CRUD for the session registry
-// and dispatches message reads to the appropriate provider parser.
+// and dispatches message reads to the appropriate agent parser.
 
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -8,7 +8,6 @@ import { parseJsonBody } from '../lib/http-request.js';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { isArtificialNativePath } from '../chats/artificial-native-path.js';
-import { UserMessage } from '../../common/chat-types.ts';
 import {
   normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
@@ -16,11 +15,16 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import { forkChatFileCopy } from '../chats/fork-chat.js';
-import { supportsFork as providerSupportsFork, supportsImages as providerSupportsImages } from '../../common/providers.ts';
 import { getProjectBasePath, getWorkspaceDir } from '../config.js';
-import { ModelSelectionError } from '../providers/api-provider-endpoint-resolver.js';
+import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
 import { CommandLedger, type CommandLedgerRecord } from '../commands/command-ledger.js';
-import { requireChatExecutionConfig, type RunProviderTurnOptions } from '../providers/types.js';
+import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
+import {
+  ChatCommandService,
+  CommandValidationError,
+  queueDrainOptions,
+  runOptionsFromCommandRequest,
+} from '../commands/chat-command-service.js';
 import { normalizeQueueState } from '../../common/queue-state.ts';
 import type {
   AgentRunCommandRequest,
@@ -56,11 +60,12 @@ interface SettingsDep {
 
 interface QueueDep {
   deleteChatQueueFile(chatId: string): Promise<void>;
-  submit(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
-  appendUserMessage(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
-  runAcceptedTurn(chatId: string, command: string, options: RunProviderTurnOptions): Promise<void>;
+  submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  registerPendingUserInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  appendUserMessage?(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   abort(chatId: string): Promise<boolean>;
-  triggerDrain(chatId: string, options: RunProviderTurnOptions): Promise<void>;
+  triggerDrain(chatId: string, options: RunAgentTurnOptions): Promise<void>;
   readChatQueue(chatId: string): Promise<unknown>;
   enqueueChat(chatId: string, content: string): Promise<{ entry: { id: string }; queue: unknown }>;
   dequeueChat(chatId: string, entryId: string): Promise<unknown>;
@@ -85,19 +90,31 @@ interface HistoryCacheDep {
   appendMessages(chatId: string, messages: unknown[]): Promise<void>;
 }
 
-interface ProvidersDep {
-  hasHarness(harnessId: string): boolean;
-  isHarnessSessionRunning(provider: string, providerSessionId: string | null | undefined): boolean;
+interface AgentRegistryDep {
+  hasAgent(agentId: string): boolean;
+  supportsFork(agentId: string): boolean;
+  supportsImages(agentId: string): boolean;
+  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   startSession(chatId: string, command: string, opts: Record<string, unknown>): Promise<void>;
-  modelSupportsImages(input: { provider: string; model: string; apiProviderId?: string | null; modelEndpointId?: string | null }): Promise<boolean>;
+  forkAgentSession?(args: { sourceSession: unknown; sourceChatId: string; targetChatId: string }): Promise<{ agentSessionId: string; nativePath: string | null } | null>;
+  modelSupportsImages(input: { agentId: string; model: string; apiProviderId?: string | null; modelEndpointId?: string | null }): Promise<boolean>;
   runSingleQuery(prompt: string, opts?: Record<string, unknown>): Promise<string>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
-  setPermissionMode(chatId: string, mode: import('../../common/chat-modes.js').PermissionMode): Promise<void>;
-  setThinkingMode(chatId: string, mode: import('../../common/chat-modes.js').ThinkingMode): Promise<void>;
-  setClaudeThinkingMode(chatId: string, mode: import('../../common/chat-modes.js').ClaudeThinkingMode): Promise<void>;
-  setAmpAgentMode(chatId: string, mode: import('../../common/chat-modes.js').AmpAgentMode): Promise<void>;
-  setModel(chatId: string, model: string, metadata?: { apiProviderId?: string | null; modelEndpointId?: string | null }): Promise<void>;
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<unknown>;
+}
+
+interface PendingInputsDep {
+  register(chatId: string, content: string, options?: {
+    clientRequestId?: string;
+    clientMessageId?: string;
+    turnId?: string;
+    images?: RunAgentTurnOptions['images'];
+    deliveryStatus?: 'submitting' | 'accepted' | 'failed';
+  }): Promise<unknown>;
+  reconcile(chatId: string): Promise<void>;
+  listForChat(chatId: string): unknown[];
+  clearChat(chatId: string, reason?: 'persisted' | 'chat-removed'): void;
 }
 
 function normalizeTagSlug(raw: string): string {
@@ -190,35 +207,6 @@ function acceptedResponse(record: CommandLedgerRecord, status: 'accepted' | 'dup
   };
 }
 
-function runOptionsFromBody(body: AgentRunCommandRequest | ForkRunCommandRequest): RunProviderTurnOptions {
-  const options: RunProviderTurnOptions = {};
-  if (body.images !== undefined) options.images = body.images;
-  if (body.model !== undefined) options.model = body.model;
-  if (body.permissionMode !== undefined) options.permissionMode = normalizePermissionMode(body.permissionMode);
-  if (body.thinkingMode !== undefined) options.thinkingMode = normalizeThinkingMode(body.thinkingMode);
-  if (body.claudeThinkingMode !== undefined) options.claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);
-  if (body.ampAgentMode !== undefined) options.ampAgentMode = normalizeAmpAgentMode(body.ampAgentMode);
-  if (body.apiProviderId !== undefined) options.apiProviderId = body.apiProviderId;
-  if (body.modelEndpointId !== undefined) options.modelEndpointId = body.modelEndpointId;
-  if (body.modelProtocol !== undefined) options.modelProtocol = body.modelProtocol;
-  return options;
-}
-
-function queueDrainOptions(chatId: string, registry: IChatRegistry): RunProviderTurnOptions {
-  const entry = requireChatExecutionConfig(chatId, registry.getChat(chatId));
-  const chat = registry.getChat(chatId);
-  return {
-    permissionMode: entry.permissionMode,
-    thinkingMode: entry.thinkingMode,
-    claudeThinkingMode: entry.claudeThinkingMode,
-    ampAgentMode: entry.ampAgentMode,
-    model: entry.model,
-    apiProviderId: chat?.apiProviderId,
-    modelEndpointId: chat?.modelEndpointId,
-    modelProtocol: chat?.modelProtocol,
-  };
-}
-
 export default function createChatRoutes(
   registry: IChatRegistry,
   settings: SettingsDep,
@@ -226,9 +214,21 @@ export default function createChatRoutes(
   pathCache: PathCacheDep,
   metadata: MetadataDep,
   historyCache: HistoryCacheDep,
-  providers: ProvidersDep,
+  agents: AgentRegistryDep,
+  pendingInputs: PendingInputsDep = {
+    register: () => Promise.resolve(undefined),
+    reconcile: () => Promise.resolve(undefined),
+    listForChat: () => [],
+    clearChat: () => undefined,
+  },
+  commandService?: ChatCommandService,
 ): RouteMap {
   const commandLedger = new CommandLedger(getWorkspaceDir());
+  const commands = commandService ?? new ChatCommandService({
+    chats: registry,
+    queue,
+    ledger: commandLedger,
+  });
 
   async function validateStartPath(_request: Request, url: URL): Promise<Response> {
     const dirPath = String(url.searchParams.get('path') || '').trim();
@@ -291,10 +291,13 @@ export default function createChatRoutes(
         const lastReadAt = (session.lastReadAt as string) || null;
         const lastActivityAt = (meta?.lastActivity as string) || null;
         const isUnread = Boolean(lastActivityAt && (!lastReadAt || lastActivityAt > lastReadAt));
+        const title = extractFirstLine((overrideTitle || meta?.firstMessage || 'New Session') as string);
+        const firstPreview = extractFirstLine((meta?.firstMessage || title) as string);
+        const lastPreview = extractFirstLine((meta?.lastMessage || meta?.firstMessage || title) as string);
 
         entryMap.set(chatId, {
           id: chatId,
-          provider: session.provider,
+          agentId: session.agentId,
           model: session.model || null,
           apiProviderId: session.apiProviderId ?? null,
           modelEndpointId: session.modelEndpointId ?? null,
@@ -303,15 +306,15 @@ export default function createChatRoutes(
           thinkingMode: normalizeThinkingMode(session.thinkingMode),
           claudeThinkingMode: normalizeClaudeThinkingMode(session.claudeThinkingMode),
           ampAgentMode: normalizeAmpAgentMode(session.ampAgentMode),
-          title: extractFirstLine((overrideTitle || meta?.firstMessage || 'New Session') as string),
+          title,
           projectPath: session.projectPath,
           tags: session.tags || [],
           activity: { createdAt: (meta?.createdAt as string) || inferredCreatedAt, lastActivityAt, lastReadAt },
           preview: {
-            lastMessage: extractFirstLine(meta?.lastMessage as string),
-            firstMessage: extractFirstLine(meta?.firstMessage as string),
+            lastMessage: lastPreview,
+            firstMessage: firstPreview,
           },
-          isActive: providers.isHarnessSessionRunning(session.provider as string, session.providerSessionId as string | null),
+          isActive: agents.isAgentSessionRunning(session.agentId as string, session.agentSessionId as string | null),
           isPinned,
           isArchived,
           isUnread,
@@ -357,13 +360,13 @@ export default function createChatRoutes(
         : crypto.randomUUID();
       const turnId = crypto.randomUUID();
       const chatId = String(body.chatId || '').trim();
-      const provider = typeof body.provider === 'string' ? body.provider.trim() : '';
+      const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : '';
       const apiProviderId = typeof body.apiProviderId === 'string' ? body.apiProviderId : null;
       const modelEndpointId = typeof body.modelEndpointId === 'string' ? body.modelEndpointId : null;
       const modelProtocol = typeof body.modelProtocol === 'string' ? body.modelProtocol : null;
       const projectPath = String(body.projectPath || '').trim();
       const command = String(body.command || '').trim();
-      const tags = Array.isArray(body.tags) ? body.tags : [provider];
+      const tags = Array.isArray(body.tags) ? body.tags : [agentId];
       const requestOptions = body.options && typeof body.options === 'object' ? body.options : {};
       const initialImages = Array.isArray((requestOptions as Record<string, unknown>).images) ? (requestOptions as Record<string, unknown>).images as unknown[] : [];
       const model = typeof body.model === 'string' ? body.model : '';
@@ -371,21 +374,21 @@ export default function createChatRoutes(
       if (!chatId || !/^\d+$/.test(chatId)) {
         return Response.json({ success: false, error: 'Valid numeric chatId is required' }, { status: 400 });
       }
-      if (!provider) {
-        return Response.json({ success: false, error: 'provider is required' }, { status: 400 });
+      if (!agentId) {
+        return Response.json({ success: false, error: 'agentId is required' }, { status: 400 });
       }
-      if (!providers.hasHarness(provider)) {
-        return Response.json({ success: false, error: `Unsupported harness: ${provider}` }, { status: 400 });
+      if (!agents.hasAgent(agentId)) {
+        return Response.json({ success: false, error: `Unsupported agent: ${agentId}` }, { status: 400 });
       }
       if (initialImages.length > 0) {
         let imageSupport = false;
         try {
-          imageSupport = await providers.modelSupportsImages({ provider, model, apiProviderId, modelEndpointId });
+          imageSupport = await agents.modelSupportsImages({ agentId, model, apiProviderId, modelEndpointId });
         } catch {}
         const hasBackendSelection = Boolean(apiProviderId && modelEndpointId);
-        const supportsImages = hasBackendSelection ? imageSupport : providerSupportsImages(provider);
+        const supportsImages = hasBackendSelection ? imageSupport : agents.supportsImages(agentId);
         if (!supportsImages) {
-          return Response.json({ success: false, error: `Images unsupported for harness: ${provider}` }, { status: 422 });
+          return Response.json({ success: false, error: `Images unsupported for agent: ${agentId}` }, { status: 422 });
         }
       }
       if (!projectPath) {
@@ -407,7 +410,7 @@ export default function createChatRoutes(
         clientRequestId,
         turnId,
         payload: {
-          chatId, clientMessageId, provider, projectPath, command, model,
+          chatId, clientMessageId, agentId, projectPath, command, model,
           images: initialImages,
           apiProviderId, modelEndpointId, modelProtocol,
           permissionMode: body.permissionMode,
@@ -431,7 +434,7 @@ export default function createChatRoutes(
             success: false,
             error: `Session already exists: ${chatId}`,
             chatId,
-            provider: existing.provider,
+            agentId: existing.agentId,
           },
           { status: 409 },
         );
@@ -444,11 +447,11 @@ export default function createChatRoutes(
 
       const created = registry.addChat({
         id: chatId,
-        provider,
+        agentId,
         nativePath: null,
         projectPath,
         tags,
-        providerSessionId: null,
+        agentSessionId: null,
         model,
         apiProviderId,
         modelEndpointId,
@@ -464,7 +467,7 @@ export default function createChatRoutes(
       metadata.addNewChatMetadata(chatId, command);
 
       await settings.setLastChatDefaults({
-        provider,
+          agentId,
         projectPath,
         model,
         apiProviderId,
@@ -477,17 +480,17 @@ export default function createChatRoutes(
       });
       await settings.ensureInNormal(chatId);
 
-      await historyCache.appendMessages(chatId, [
-        new UserMessage(new Date().toISOString(), command, initialImages.length > 0 ? initialImages as any : undefined, {
-          messageId: clientMessageId,
-          clientRequestId,
-          turnId,
-        }),
-      ]);
+      await pendingInputs.register(chatId, command, {
+        clientRequestId,
+        clientMessageId,
+        turnId,
+        images: initialImages.length > 0 ? initialImages as any : undefined,
+        deliveryStatus: 'accepted',
+      });
 
       try {
         await commandLedger.update(ledger.record.key, { status: 'scheduled', turnId });
-        await providers.startSession(chatId, command, {
+        await agents.startSession(chatId, command, {
           ...(requestOptions as Record<string, unknown>),
           projectPath,
           clientRequestId,
@@ -495,6 +498,7 @@ export default function createChatRoutes(
         });
       } catch (error: unknown) {
         await commandLedger.update(ledger.record.key, { status: 'failed', error: (error as Error).message });
+        pendingInputs.clearChat(chatId, 'chat-removed');
         registry.removeChat(chatId);
         try {
           await settings.removeFromAllOrderLists(chatId);
@@ -505,7 +509,7 @@ export default function createChatRoutes(
         return Response.json({ success: false, error: (error as Error).message }, { status });
       }
 
-      void maybeGenerateChatTitle({ chatId, projectPath, firstPrompt: command, providers, settings });
+      void maybeGenerateChatTitle({ chatId, projectPath, firstPrompt: command, agents, settings });
 
       const accepted = await commandLedger.update(ledger.record.key, { status: 'running', turnId });
       return Response.json(acceptedResponse(accepted ?? ledger.record), { status: 202 });
@@ -571,7 +575,12 @@ export default function createChatRoutes(
       const offset = parseInt(url.searchParams.get('offset') || '0', 10);
 
       await historyCache.ensureLoaded(chatId);
-      return Response.json(historyCache.getPaginatedMessages(chatId, limit, offset));
+      await pendingInputs.reconcile(chatId);
+      const page = historyCache.getPaginatedMessages(chatId, limit, offset) as Record<string, unknown>;
+      return Response.json({
+        ...page,
+        pendingUserInputs: pendingInputs.listForChat(chatId),
+      });
     } catch (error: unknown) {
       console.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
@@ -782,8 +791,8 @@ export default function createChatRoutes(
         return Response.json({ success: false, error: 'Source session not found' }, { status: 404 });
       }
 
-      if (!providerSupportsFork(sourceSession.provider)) {
-        return Response.json({ success: false, error: `Fork unsupported for harness: ${sourceSession.provider}` }, { status: 422 });
+      if (!agents.supportsFork(sourceSession.agentId)) {
+        return Response.json({ success: false, error: `Fork unsupported for agent: ${sourceSession.agentId}` }, { status: 422 });
       }
 
       const existingTarget = registry.getChat(chatId);
@@ -798,6 +807,8 @@ export default function createChatRoutes(
         registry,
         settings,
         metadata,
+        forkAgentSession: agents.forkAgentSession?.bind(agents),
+        supportsFork: agents.supportsFork.bind(agents),
       });
 
       return Response.json({ success: true, ...result });
@@ -823,7 +834,6 @@ export default function createChatRoutes(
       const session = registry.getChat(chatId);
       if (!session) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
 
-      const turnId = crypto.randomUUID();
       const payload = {
         chatId,
         clientMessageId,
@@ -838,34 +848,26 @@ export default function createChatRoutes(
         modelEndpointId: body.modelEndpointId,
         modelProtocol: body.modelProtocol,
       };
-      const ledger = await commandLedger.accept({ commandType: 'agent-run', chatId, clientRequestId, payload, turnId });
-      if (ledger.kind === 'conflict') {
-        return jsonError('clientRequestId was reused with different payload', 409, 'IDEMPOTENCY_CONFLICT');
-      }
-      if (ledger.kind === 'duplicate') {
-        return Response.json(acceptedResponse(ledger.record, 'duplicate'), { status: 202 });
-      }
 
-      const options = runOptionsFromBody(body as AgentRunCommandRequest);
-      options.clientRequestId = clientRequestId;
-      options.clientMessageId = clientMessageId;
-      options.turnId = ledger.record.turnId ?? turnId;
-      await queue.appendUserMessage(chatId, command, options);
-      const scheduled = await commandLedger.update(ledger.record.key, {
-        status: 'scheduled',
-        turnId: options.turnId,
+      const options = runOptionsFromCommandRequest(body as AgentRunCommandRequest);
+      const result = await commands.submitRun({
+        transport: 'http',
+        chatId,
+        command,
+        images,
+        clientRequestId,
+        clientMessageId,
+        options,
+        payload,
       });
-      void queue.runAcceptedTurn(chatId, command, options)
-        .then(() => commandLedger.update(ledger.record.key, { status: 'finished' }))
-        .catch((error: Error) => {
-          console.error('commands: agent-run failed:', error.message);
-          commandLedger.update(ledger.record.key, { status: 'failed', error: error.message }).catch(() => {});
-        });
 
-      return Response.json(acceptedResponse(scheduled ?? ledger.record), { status: 202 });
+      return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if ((error as Error).message === 'Malformed JSON') {
         return jsonError('Malformed JSON', 400);
+      }
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
       }
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }
@@ -883,14 +885,13 @@ export default function createChatRoutes(
 
       const sourceSession = registry.getChat(sourceChatId);
       if (!sourceSession) return jsonError('Source session not found', 404, 'SESSION_NOT_FOUND');
-      if (!providerSupportsFork(sourceSession.provider)) {
-        return jsonError(`Fork unsupported for harness: ${sourceSession.provider}`, 422, 'UNSUPPORTED_PROVIDER');
+      if (!agents.supportsFork(sourceSession.agentId)) {
+        return jsonError(`Fork unsupported for agent: ${sourceSession.agentId}`, 422, 'UNSUPPORTED_AGENT');
       }
-      if (providers.isHarnessSessionRunning(sourceSession.provider, sourceSession.providerSessionId)) {
+      if (agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)) {
         return jsonError('Cannot fork a chat while it is processing', 409, 'SESSION_BUSY', true);
       }
 
-      const turnId = crypto.randomUUID();
       const payload = {
         sourceChatId,
         chatId,
@@ -906,52 +907,50 @@ export default function createChatRoutes(
         modelEndpointId: body.modelEndpointId,
         modelProtocol: body.modelProtocol,
       };
-      const ledger = await commandLedger.accept({ commandType: 'fork-run', chatId, clientRequestId, payload, turnId });
-      if (ledger.kind === 'conflict') {
-        return jsonError('clientRequestId was reused with different payload', 409, 'IDEMPOTENCY_CONFLICT');
-      }
-      if (ledger.kind === 'duplicate') {
-        return Response.json(acceptedResponse(ledger.record, 'duplicate'), { status: 202 });
-      }
 
-      if (!registry.getChat(chatId)) {
-        await forkChatFileCopy({
-          sourceSession,
-          sourceChatId,
-          targetChatId: chatId,
-          registry,
-          settings,
-          metadata,
-        });
-      }
-
-      const options = runOptionsFromBody(body as ForkRunCommandRequest);
-      options.clientRequestId = clientRequestId;
-      options.clientMessageId = clientMessageId;
-      options.turnId = ledger.record.turnId ?? turnId;
-      await queue.appendUserMessage(chatId, command, options);
-      const scheduled = await commandLedger.update(ledger.record.key, { status: 'scheduled', turnId: options.turnId });
-      void queue.runAcceptedTurn(chatId, command, options)
-        .then(() => commandLedger.update(ledger.record.key, { status: 'finished' }))
-        .catch((error: Error) => {
-          console.error('commands: fork-run failed:', error.message);
-          commandLedger.update(ledger.record.key, { status: 'failed', error: error.message }).catch(() => {});
-        });
+      const options = runOptionsFromCommandRequest(body as ForkRunCommandRequest);
+      const result = await commands.submitForkRun({
+        transport: 'http',
+        sourceChatId,
+        chatId,
+        command,
+        images: Array.isArray(body.images) ? body.images : undefined,
+        clientRequestId,
+        clientMessageId,
+        options,
+        payload,
+        ensureForked: async () => {
+          if (registry.getChat(chatId)) return;
+          await forkChatFileCopy({
+            sourceSession,
+            sourceChatId,
+            targetChatId: chatId,
+            registry,
+            settings,
+            metadata,
+            forkAgentSession: agents.forkAgentSession?.bind(agents),
+            supportsFork: agents.supportsFork.bind(agents),
+          });
+        },
+      });
 
       return Response.json({
-        ...acceptedResponse(scheduled ?? ledger.record),
+        ...result,
         sourceChatId,
       }, { status: 202 });
     } catch (error: unknown) {
       if ((error as Error).message === 'Malformed JSON') {
         return jsonError('Malformed JSON', 400);
       }
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }
   }
 
   async function getRunningChats(): Promise<Response> {
-    return Response.json({ sessions: providers.getRunningSessions() });
+    return Response.json({ sessions: agents.getRunningSessions() });
   }
 
   async function getQueue(_request: Request, url: URL): Promise<Response> {
@@ -1053,7 +1052,7 @@ export default function createChatRoutes(
       const ledger = await commandLedger.accept({ commandType: 'permission-decision', chatId, clientRequestId, payload });
       if (ledger.kind === 'conflict') return jsonError('Conflicting permission decision retry', 409, 'IDEMPOTENCY_CONFLICT');
       if (ledger.kind !== 'duplicate') {
-        providers.resolvePermission(chatId, permissionRequestId, {
+        agents.resolvePermission(chatId, permissionRequestId, {
           allow: Boolean(body.allow),
           alwaysAllow: Boolean(body.alwaysAllow),
         });
@@ -1076,7 +1075,7 @@ export default function createChatRoutes(
         commandType: 'agent-stop',
         chatId,
         clientRequestId,
-        payload: { chatId, provider: body.provider },
+        payload: { chatId, agentId: body.agentId },
       });
       if (ledger.kind === 'conflict') return jsonError('clientRequestId was reused with different payload', 409, 'IDEMPOTENCY_CONFLICT');
       let stopped = false;
@@ -1099,24 +1098,20 @@ export default function createChatRoutes(
       const body = await parseJsonBody(request) as ExecutionSettingsPatchRequest & Record<string, unknown>;
       const chatId = requireStringField(body, 'chatId');
       if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-      const patch: Record<string, unknown> = {};
+      const patch: AgentSessionSettingsPatch = {};
       if (body.permissionMode !== undefined) {
         patch.permissionMode = normalizePermissionMode(body.permissionMode);
-        await providers.setPermissionMode(chatId, patch.permissionMode as never);
       }
       if (body.thinkingMode !== undefined) {
         patch.thinkingMode = normalizeThinkingMode(body.thinkingMode);
-        await providers.setThinkingMode(chatId, patch.thinkingMode as never);
       }
       if (body.claudeThinkingMode !== undefined) {
         patch.claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);
-        await providers.setClaudeThinkingMode(chatId, patch.claudeThinkingMode as never);
       }
       if (body.ampAgentMode !== undefined) {
         patch.ampAgentMode = normalizeAmpAgentMode(body.ampAgentMode);
-        await providers.setAmpAgentMode(chatId, patch.ampAgentMode as never);
       }
-      if (Object.keys(patch).length > 0) await registry.updateChat(chatId, patch);
+      if (Object.keys(patch).length > 0) await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
       if ((error as Error).message === 'Malformed JSON') return jsonError('Malformed JSON', 400);
@@ -1133,15 +1128,11 @@ export default function createChatRoutes(
       const apiProviderId = optionalStringOrNull(body.apiProviderId);
       const modelEndpointId = optionalStringOrNull(body.modelEndpointId);
       const modelProtocol = optionalStringOrNull(body.modelProtocol);
-      const metadataForProvider = apiProviderId !== undefined || modelEndpointId !== undefined
-        ? { apiProviderId, modelEndpointId }
-        : undefined;
-      await providers.setModel(chatId, model, metadataForProvider);
-      const patch: Record<string, unknown> = { model };
+      const patch: AgentSessionSettingsPatch = { model };
       if (apiProviderId !== undefined) patch.apiProviderId = apiProviderId;
       if (modelEndpointId !== undefined) patch.modelEndpointId = modelEndpointId;
-      if (modelProtocol !== undefined) patch.modelProtocol = modelProtocol;
-      await registry.updateChat(chatId, patch);
+      if (modelProtocol !== undefined) patch.modelProtocol = modelProtocol as AgentSessionSettingsPatch['modelProtocol'];
+      await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
       if ((error as Error).message === 'Malformed JSON') return jsonError('Malformed JSON', 400);

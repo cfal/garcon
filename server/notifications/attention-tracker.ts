@@ -1,4 +1,4 @@
-// Translates low-level provider and queue events into Telegram
+// Translates low-level agent and queue events into Telegram
 // notifications when a chat requires user attention.
 //
 // Three notification triggers:
@@ -34,7 +34,7 @@ function toolDisplayName(requestedTool: unknown): string {
 // Minimal interfaces for injected dependencies. Avoids importing concrete
 // classes and keeps the module unit-testable with plain mocks.
 
-interface ProviderRegistryDep {
+interface AgentRegistryDep {
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   onFinished(cb: (chatId: string, exitCode: number) => void): void;
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
@@ -51,7 +51,7 @@ interface SettingsStoreDep {
 }
 
 interface ChatRegistryDep {
-  getChat(chatId: string): { provider: string; projectPath: string } | null;
+  getChat(chatId: string): { agentId: string; projectPath: string } | null;
 }
 
 interface HistoryCacheDep {
@@ -65,16 +65,20 @@ interface TurnResult {
 
 interface TelegramConfig {
   enabled: boolean;
-  chatId: string;
+}
+
+interface TelegramSettingsDep {
+  getRecipientChatId(): string;
 }
 
 export class AttentionTracker {
-  #providers: ProviderRegistryDep;
+  #agents: AgentRegistryDep;
   #queue: QueueManagerDep;
   #settings: SettingsStoreDep;
   #registry: ChatRegistryDep;
   #history: HistoryCacheDep;
   #telegram: TelegramNotifier;
+  #telegramSettings: TelegramSettingsDep;
 
   // Tracks pending permission request IDs per chat to avoid duplicate
   // notifications and to suppress idle notifications when a permission
@@ -89,27 +93,29 @@ export class AttentionTracker {
   #lastAssistantMessage = new Map<string, string>();
 
   constructor(
-    providers: ProviderRegistryDep,
+    agents: AgentRegistryDep,
     queue: QueueManagerDep,
     settings: SettingsStoreDep,
     registry: ChatRegistryDep,
     history: HistoryCacheDep,
     telegram: TelegramNotifier,
+    telegramSettings: TelegramSettingsDep,
   ) {
-    this.#providers = providers;
+    this.#agents = agents;
     this.#queue = queue;
     this.#settings = settings;
     this.#registry = registry;
     this.#history = history;
     this.#telegram = telegram;
+    this.#telegramSettings = telegramSettings;
 
     this.#wire();
   }
 
   #wire(): void {
-    this.#providers.onMessages((chatId, messages) => this.#handleMessages(chatId, messages));
-    this.#providers.onFinished((chatId, exitCode) => this.#handleFinished(chatId, exitCode));
-    this.#providers.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
+    this.#agents.onMessages((chatId, messages) => this.#handleMessages(chatId, messages));
+    this.#agents.onFinished((chatId, exitCode) => this.#handleFinished(chatId, exitCode));
+    this.#agents.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
     this.#queue.onSessionStopped((chatId) => this.#handleSessionStopped(chatId));
   }
@@ -218,10 +224,10 @@ export class AttentionTracker {
   // With generated title:        Without title:
   //   Title (bold)                 User message (bold)
   //   > user message (quote)      response or status
-  //   response or status          provider · path
-  //   provider · path
+  //   response or status          agent - path
+  //   agent - path
   #formatMessage(
-    meta: { title: string; hasGeneratedTitle: boolean; provider: string; projectPath: string },
+    meta: { title: string; hasGeneratedTitle: boolean; agentId: string; projectPath: string },
     userMsg: string | null,
     assistantMsg: string | null,
     status: string | null,
@@ -244,7 +250,7 @@ export class AttentionTracker {
       lines.push(escapeHtml(truncate(assistantMsg, 400)));
     }
     const pathShort = meta.projectPath.replace(/^\/home\/[^/]+\//, '~/');
-    lines.push(`<code>${escapeHtml(meta.provider)} · ${escapeHtml(pathShort)}</code>`);
+    lines.push(`<code>${escapeHtml(meta.agentId)} - ${escapeHtml(pathShort)}</code>`);
     return lines.join('\n');
   }
 
@@ -253,7 +259,7 @@ export class AttentionTracker {
     this.#lastAssistantMessage.delete(chatId);
   }
 
-  #chatMeta(chatId: string): { title: string; hasGeneratedTitle: boolean; provider: string; projectPath: string } {
+  #chatMeta(chatId: string): { title: string; hasGeneratedTitle: boolean; agentId: string; projectPath: string } {
     const chat = this.#registry.getChat(chatId);
     const generatedTitle = this.#settings.getChatName(chatId);
     const title = generatedTitle
@@ -262,7 +268,7 @@ export class AttentionTracker {
     return {
       title,
       hasGeneratedTitle: Boolean(generatedTitle),
-      provider: chat?.provider ?? 'unknown',
+      agentId: chat?.agentId ?? 'unknown',
       projectPath: chat?.projectPath ?? '',
     };
   }
@@ -283,8 +289,9 @@ export class AttentionTracker {
     if (!this.#telegram.isConfigured) return;
     try {
       const config = await this.#getTelegramConfig();
-      if (!config.enabled || !config.chatId) return;
-      const ok = await this.#telegram.send(config.chatId, html, 'HTML');
+      const chatId = this.#telegramSettings.getRecipientChatId();
+      if (!config.enabled || !chatId) return;
+      const ok = await this.#telegram.send(chatId, html, 'HTML');
       if (!ok) {
         console.warn(`attention: telegram delivery failed for chat ${chatId}`);
       }
@@ -299,7 +306,6 @@ export class AttentionTracker {
     const telegram = (notifications?.telegram ?? {}) as Record<string, unknown>;
     return {
       enabled: telegram.enabled === true,
-      chatId: typeof telegram.chatId === 'string' ? telegram.chatId : '',
     };
   }
 }

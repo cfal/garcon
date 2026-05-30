@@ -9,7 +9,7 @@
 	import { getModelCatalog } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-	import type { ApiProtocol } from '$shared/providers';
+	import type { ApiProtocol } from '$shared/api-providers';
 	import type { ApiProviderTemplateId } from '$shared/api-provider-templates';
 	import { ApiProviderEndpointDialogState } from './api-provider-endpoint-dialog-state.svelte';
 

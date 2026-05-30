@@ -56,7 +56,7 @@ describe('Sidebar dialogs', () => {
 				filter: {
 					textTokens: [],
 					tags: [],
-					providers: [],
+					agents: [],
 					models: [],
 					project: [],
 					status: 'unread' as const,
@@ -197,7 +197,7 @@ describe('Sidebar dialogs', () => {
 				filter: {
 					textTokens: ['follow-up'],
 					tags: [],
-					providers: [],
+					agents: [],
 					models: [],
 				project: [],
 },

@@ -25,7 +25,7 @@
 		DropdownMenuSeparator
 	} from '$lib/components/ui/dropdown-menu';
 	import SidebarChatSummary from './SidebarChatSummary.svelte';
-	import type { SessionProvider } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarChatItemProps {
@@ -38,7 +38,7 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
 		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chatId: string, chatTitle: string, provider: SessionProvider) => void;
+		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
@@ -84,7 +84,7 @@
 	let isProcessing = $derived(session.isProcessing);
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
 	let isSelected = $derived(selectedChatId === session.id);
-	let provider = $derived(session.provider || 'claude');
+	let agentId = $derived(session.agentId || 'claude');
 
 	function handleItemClick(e: MouseEvent) {
 		if (isMultiSelectMode) {
@@ -100,7 +100,7 @@
 	}
 
 	function requestDelete() {
-		onDeleteChat(session.id, chatName, provider);
+		onDeleteChat(session.id, chatName, agentId);
 	}
 
 	function requestRename() {
@@ -388,7 +388,7 @@
 							{m.sidebar_tags_manage()}
 						</DropdownMenuItem>
 					{/if}
-					{#if modelCatalog.supportsFork(session.provider)}
+					{#if modelCatalog.supportsFork(session.agentId)}
 						<DropdownMenuItem onclick={() => onForkChat(session.id)}>
 							<Copy />
 							{m.sidebar_chats_fork()}

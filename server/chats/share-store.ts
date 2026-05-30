@@ -5,6 +5,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import type { SharedChatSnapshot } from '../../common/share-types.ts';
+import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 
 interface ShareStoreData {
   version: number;
@@ -68,9 +69,7 @@ export class ShareStore implements IShareStore {
 
   async #persist(): Promise<void> {
     if (!this.#data) return;
-    const tmpPath = this.#filePath() + '.tmp';
-    await fs.writeFile(tmpPath, JSON.stringify(this.#data, null, 2), 'utf8');
-    await fs.rename(tmpPath, this.#filePath());
+    await writeJsonFileAtomic(this.#filePath(), this.#data);
   }
 
   async createShare(chatId: string, partial: Omit<SharedChatSnapshot, 'shareToken'>): Promise<SharedChatSnapshot> {

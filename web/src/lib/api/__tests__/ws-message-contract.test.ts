@@ -28,11 +28,13 @@ describe('parseServerWsMessage', () => {
 			messages: [{ type: 'assistant-message', timestamp: '2025-01-01T00:00:00Z', content: 'hi' }],
 			turnId: 'turn-1',
 			clientRequestId: 'req-1',
+			upstreamRequestId: 'cursor-req-1',
 		});
 		expect(msg).toBeInstanceOf(AgentRunOutputMessage);
 		expect((msg as AgentRunOutputMessage).chatId).toBe('c-1');
 		expect((msg as AgentRunOutputMessage).turnId).toBe('turn-1');
 		expect((msg as AgentRunOutputMessage).clientRequestId).toBe('req-1');
+		expect((msg as AgentRunOutputMessage).upstreamRequestId).toBe('cursor-req-1');
 	});
 
 	it('parses agent-run-finished with exitCode', () => {
@@ -42,11 +44,13 @@ describe('parseServerWsMessage', () => {
 			exitCode: 0,
 			turnId: 'turn-1',
 			clientRequestId: 'req-1',
+			upstreamRequestId: 'cursor-req-1',
 		});
 		expect(msg).toBeInstanceOf(AgentRunFinishedMessage);
 		expect((msg as AgentRunFinishedMessage).exitCode).toBe(0);
 		expect((msg as AgentRunFinishedMessage).turnId).toBe('turn-1');
 		expect((msg as AgentRunFinishedMessage).clientRequestId).toBe('req-1');
+		expect((msg as AgentRunFinishedMessage).upstreamRequestId).toBe('cursor-req-1');
 	});
 
 	it('parses agent-run-failed', () => {
@@ -56,11 +60,13 @@ describe('parseServerWsMessage', () => {
 			error: 'timeout',
 			turnId: 'turn-1',
 			clientRequestId: 'req-1',
+			upstreamRequestId: 'cursor-req-1',
 		});
 		expect(msg).toBeInstanceOf(AgentRunFailedMessage);
 		expect((msg as AgentRunFailedMessage).error).toBe('timeout');
 		expect((msg as AgentRunFailedMessage).turnId).toBe('turn-1');
 		expect((msg as AgentRunFailedMessage).clientRequestId).toBe('req-1');
+		expect((msg as AgentRunFailedMessage).upstreamRequestId).toBe('cursor-req-1');
 	});
 
 	it('parses chat-session-created', () => {
@@ -151,17 +157,26 @@ describe('parseServerWsMessage', () => {
 				uiEffective: {},
 				paths: { pinnedProjectPaths: [], browseStartPath: '/workspace' },
 				pinnedChatIds: ['chat-1'],
-				lastProvider: 'claude',
+				lastAgentId: 'claude',
 				lastProjectPath: '/workspace/project',
 				lastModel: 'opus',
 				lastPermissionMode: 'default',
 				lastThinkingMode: 'none',
-				lastClaudeThinkingMode: 'auto',
-				lastAmpAgentMode: 'smart',
-				projectBasePath: '/workspace',
-				telegramBotTokenAvailable: false,
-			},
-		});
+					lastClaudeThinkingMode: 'auto',
+					lastAmpAgentMode: 'smart',
+					projectBasePath: '/workspace',
+					telegram: {
+						botTokenAvailable: false,
+						botUsername: null,
+						botFirstName: null,
+						recipientUsername: null,
+						recipientDisplayName: null,
+						recipientLinked: false,
+						pendingLink: false,
+						linkUrl: null,
+					},
+				},
+			});
 		expect(msg).toBeInstanceOf(SettingsChangedMessage);
 		expect((msg as SettingsChangedMessage).settings.version).toBe(2);
 		expect((msg as SettingsChangedMessage).settings.ui.pinnedInsertPosition).toBe('bottom');

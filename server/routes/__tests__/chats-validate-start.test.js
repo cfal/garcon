@@ -40,12 +40,12 @@ const historyCache = {
   getPaginatedMessages: mock(() => ({ messages: [], total: 0, hasMore: false, offset: 0, limit: 20 })),
   appendMessages: mock(() => Promise.resolve(undefined)),
 };
-const providers = {
+const agents = {
   startSession: mock(() => Promise.resolve(undefined)),
-  isHarnessSessionRunning: mock(() => false),
+  isAgentSessionRunning: mock(() => false),
 };
 
-const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, providers);
+const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
 const handler = routes['/api/v1/chats/validate-start'].GET;
 
 async function ensureCleanBase() {

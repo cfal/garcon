@@ -1,10 +1,16 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
-import ApiProviderProtocolPanelTestHarness from './ApiProviderProtocolPanelTestHarness.svelte';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { afterEach, describe, expect, it } from 'vitest';
+import ApiProviderProtocolPanelTestHost from './ApiProviderProtocolPanelTestHost.svelte';
 
 describe('ApiProviderProtocolPanel', () => {
+  afterEach(async () => {
+    cleanup();
+    // Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
+    await new Promise((resolve) => window.setTimeout(resolve, 30));
+  });
+
   it('shows protocol-specific Anthropic add-provider templates', async () => {
-    render(ApiProviderProtocolPanelTestHarness, {
+    render(ApiProviderProtocolPanelTestHost, {
       protocol: 'anthropic-messages',
       title: 'Anthropic Providers',
       description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.',
@@ -26,7 +32,7 @@ describe('ApiProviderProtocolPanel', () => {
   });
 
   it('shows protocol-specific OpenAI add-provider templates', async () => {
-    render(ApiProviderProtocolPanelTestHarness, {
+    render(ApiProviderProtocolPanelTestHost, {
       protocol: 'openai-compatible',
       title: 'OpenAI Providers',
       description: 'Use OpenAI-compatible endpoints with Codex and Direct Chat. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.',
@@ -47,8 +53,8 @@ describe('ApiProviderProtocolPanel', () => {
     ]);
   });
 
-  it('opens OpenAI providers with API capability switches instead of harness exposure toggles', async () => {
-    render(ApiProviderProtocolPanelTestHarness, {
+  it('opens OpenAI providers with API capability switches instead of agent exposure toggles', async () => {
+    render(ApiProviderProtocolPanelTestHost, {
       protocol: 'openai-compatible',
       title: 'OpenAI Providers',
       description: 'Use OpenAI-compatible endpoints with Codex and Direct Chat. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.',
@@ -67,8 +73,8 @@ describe('ApiProviderProtocolPanel', () => {
     expect(screen.queryByText('Use with Direct (Responses)')).toBeNull();
   });
 
-  it('opens Anthropic providers without per-harness exposure switches', async () => {
-    render(ApiProviderProtocolPanelTestHarness, {
+  it('opens Anthropic providers without per-agent exposure switches', async () => {
+    render(ApiProviderProtocolPanelTestHost, {
       protocol: 'anthropic-messages',
       title: 'Anthropic Providers',
       description: 'Use Anthropic Messages-compatible endpoints with Claude Code and Direct Chat.',
@@ -84,7 +90,7 @@ describe('ApiProviderProtocolPanel', () => {
   });
 
   it('renders saved provider rows without built-in or disabled badges', () => {
-    render(ApiProviderProtocolPanelTestHarness, {
+    render(ApiProviderProtocolPanelTestHost, {
       protocol: 'openai-compatible',
       title: 'OpenAI Providers',
       description: 'Use OpenAI-compatible endpoints with Codex and Direct Chat. Direct can use Chat Completions or Responses; Codex requires Responses API compatibility.',
@@ -118,4 +124,79 @@ describe('ApiProviderProtocolPanel', () => {
     expect(screen.queryByText('builtin')).toBeNull();
     expect(screen.queryByText('Disabled')).toBeNull();
   });
+
+  it('renders endpoint rows sorted alphabetically by provider label', () => {
+    render(ApiProviderProtocolPanelTestHost, {
+      protocol: 'openai-compatible',
+      title: 'OpenAI Providers',
+      description: 'Use OpenAI-compatible endpoints with Codex and Direct Chat. Direct Chat can use Chat Completions or Responses; Codex requires Responses API compatibility.',
+      addLabel: 'Add OpenAI-compatible provider',
+      apiProviderCatalog: [
+        {
+          id: 'zebra',
+          label: 'Zebra AI',
+          templateId: 'custom',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          endpoints: [
+            {
+              id: 'zebra_openai',
+              protocol: 'openai-compatible',
+              baseUrl: 'https://zebra.ai/v1',
+              capabilities: { chatCompletions: true, responses: false },
+              defaultModel: 'zebra-1',
+              models: [{ value: 'zebra-1', label: 'Zebra 1' }],
+              supportsImages: false,
+              hasApiKey: true,
+              modelDiscovery: 'openai-models'
+            }
+          ]
+        },
+        {
+          id: 'alpha',
+          label: 'Alpha Corp',
+          templateId: 'custom',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          endpoints: [
+            {
+              id: 'alpha_openai',
+              protocol: 'openai-compatible',
+              baseUrl: 'https://alpha.com/v1',
+              capabilities: { chatCompletions: true, responses: false },
+              defaultModel: 'alpha-1',
+              models: [{ value: 'alpha-1', label: 'Alpha 1' }],
+              supportsImages: false,
+              hasApiKey: true,
+              modelDiscovery: 'openai-models'
+            }
+          ]
+        },
+        {
+          id: 'middle',
+          label: 'Middle Inc',
+          templateId: 'custom',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          endpoints: [
+            {
+              id: 'middle_openai',
+              protocol: 'openai-compatible',
+              baseUrl: 'https://middle.io/v1',
+              capabilities: { chatCompletions: true, responses: false },
+              defaultModel: 'middle-1',
+              models: [{ value: 'middle-1', label: 'Middle 1' }],
+              supportsImages: false,
+              hasApiKey: true,
+              modelDiscovery: 'openai-models'
+            }
+          ]
+        }
+      ]
+    });
+
+    const labels = screen.getAllByText(/Alpha Corp|Middle Inc|Zebra AI/).map((el) => el.textContent);
+    expect(labels).toEqual(['Alpha Corp', 'Middle Inc', 'Zebra AI']);
+  });
+
 });
