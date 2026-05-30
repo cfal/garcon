@@ -2,15 +2,16 @@
 // near-bottom detection, pinned-to-bottom state, infinite scroll
 // loading, and layout resize reconciliation.
 
-	import { reconcileScrollAfterHeightDelta } from '$lib/chat/scroll-anchor';
-	import type { ChatState } from '$lib/chat/state.svelte';
+import { tick } from 'svelte';
+import { reconcileScrollAfterHeightDelta } from '$lib/chat/scroll-anchor';
+import type { ChatState } from '$lib/chat/state.svelte';
 
 export interface ScrollControllerDeps {
 	getScrollContainer: () => HTMLDivElement | null;
-		getQueueContainer: () => HTMLDivElement | undefined;
-		chatState: ChatState;
-		sessions: { selectedChatId: string | null };
-	}
+	getQueueContainer: () => HTMLDivElement | undefined;
+	chatState: ChatState;
+	sessions: { selectedChatId: string | null };
+}
 
 export class ConversationScrollController {
 	isPinnedToBottom = $state(true);
@@ -40,9 +41,9 @@ export class ConversationScrollController {
 
 		this.isScrollingToTop = true;
 		try {
-				if (this.deps.chatState.hasMoreMessages) {
-					await this.deps.chatState.loadAllMessages(chatId);
-				}
+			if (this.deps.chatState.hasMoreMessages) {
+				await this.deps.chatState.loadAllMessages(chatId);
+			}
 			const node = this.deps.getScrollContainer();
 			if (node) node.scrollTop = 0;
 		} finally {
@@ -60,17 +61,26 @@ export class ConversationScrollController {
 		if (node.scrollTop < 100 && this.deps.chatState.hasMoreMessages) {
 			const chatId = this.deps.sessions.selectedChatId;
 			if (chatId) {
-				const prevHeight = node.scrollHeight;
-				const prevTop = node.scrollTop;
-					this.deps.chatState.loadMoreMessages(chatId).then((loaded) => {
-					const container = this.deps.getScrollContainer();
-					if (loaded && container) {
-						const newHeight = container.scrollHeight;
-						container.scrollTop = prevTop + (newHeight - prevHeight);
-					}
-				});
+				void this.loadMoreMessagesPreservingAnchor(chatId, node.scrollHeight, node.scrollTop);
 			}
 		}
+	}
+
+	async loadMoreMessagesPreservingAnchor(chatId: string, prevHeight: number, prevTop: number): Promise<void> {
+		const loaded = await this.deps.chatState.loadMoreMessages(chatId);
+		if (!loaded) return;
+		if (this.deps.sessions.selectedChatId !== chatId) return;
+
+		await tick();
+		if (this.deps.sessions.selectedChatId !== chatId) return;
+
+		const container = this.deps.getScrollContainer();
+		if (!container) return;
+
+		const newHeight = container.scrollHeight;
+		container.scrollTop = prevTop + (newHeight - prevHeight);
+		this.deps.chatState.isUserScrolledUp = true;
+		this.isPinnedToBottom = false;
 	}
 
 	// Creates a ResizeObserver for the queue controls container that

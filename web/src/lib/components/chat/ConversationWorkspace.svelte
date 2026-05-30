@@ -245,9 +245,11 @@
 	// calls from loadChat fire against an undefined container.
 	$effect(() => {
 		const _container = scrollContainer;
-		if (_container && chatState.displayMessageCount > 0) {
-			requestAnimationFrame(() => scroll.scrollToBottom());
-		}
+		untrack(() => {
+			if (_container && chatState.displayMessageCount > 0 && localSettings.autoScrollToBottom) {
+				requestAnimationFrame(() => scroll.scrollToBottom());
+			}
+		});
 	});
 
 	// Preserves viewport anchoring when queue controls change height.
