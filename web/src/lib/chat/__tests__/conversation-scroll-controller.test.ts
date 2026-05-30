@@ -96,6 +96,32 @@ describe('ConversationScrollController', () => {
 		cleanup?.();
 	});
 
+	it('preserves the viewport anchor after older messages render', async () => {
+		const scroller = { scrollTop: 40, scrollHeight: 800, clientHeight: 400 } as HTMLDivElement;
+		const chatState = {
+			isUserScrolledUp: true,
+			loadMoreMessages: vi.fn(async () => {
+				Object.defineProperty(scroller, 'scrollHeight', { value: 1100, configurable: true });
+				return true;
+			}),
+		};
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.isPinnedToBottom = false;
+		await controller.loadMoreMessagesPreservingAnchor('chat-1', 800, 40);
+
+		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
+		expect(scroller.scrollTop).toBe(340);
+		expect(chatState.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
+	});
+
 	it('keeps the viewport pinned to bottom when the scroll container height changes', () => {
 		const scrollToBottom = vi.spyOn(ConversationScrollController.prototype, 'scrollToBottom');
 		const scroller = { scrollTop: 120, scrollHeight: 800, clientHeight: 520 } as HTMLDivElement;
