@@ -136,17 +136,22 @@ export function selectPreviewFromBatch(
 	return null;
 }
 
-// Applies server-provided ChatMessage[] from a broadcast envelope.
-// Sidebar preview is handled by the pre-filter in createEventRouter
-// which runs for all chats (including background ones).
-function applyServerMessages(
-	msg: AgentRunOutputMessage,
-	stores: EventRouterStores,
-) {
-	if (msg.messages.length === 0) return;
-	const current = stores.chatMessages();
-	const updated = applyChatMessages(current, msg.messages);
-	stores.setChatMessages(updated);
+// Coalesces output chunks from one drain pass into one message-array write.
+export function createAgentOutputAccumulator(stores: Pick<EventRouterStores, 'setChatMessages'>) {
+	let pendingMessages: ChatMessage[] = [];
+
+	return {
+		enqueue(msg: AgentRunOutputMessage) {
+			if (msg.messages.length === 0) return;
+			pendingMessages.push(...msg.messages);
+		},
+		flush() {
+			if (pendingMessages.length === 0) return;
+			const messages = pendingMessages;
+			pendingMessages = [];
+			stores.setChatMessages((current) => applyChatMessages(current, messages));
+		},
+	};
 }
 
 function markPendingUserInputDelivery(
@@ -183,7 +188,10 @@ function createHelpers(stores: EventRouterStores) {
 }
 
 // Builds the dispatch table mapping EventKey to handler functions.
-function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
+function buildDispatch(
+	stores: EventRouterStores,
+	outputAccumulator: ReturnType<typeof createAgentOutputAccumulator>,
+): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
 	const { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted } = createHelpers(stores);
 
 	const selectedChat = stores.selectedChat();
@@ -303,28 +311,30 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 	};
 
 	return {
-			'agent-run-output': (msg) => {
-				if (!(msg instanceof AgentRunOutputMessage)) return;
-				activateLoadingFor(msg.chatId);
-				stores.setCanAbort(true);
-				onChatProcessing(msg.chatId);
-				markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
-				applyServerMessages(msg, stores);
-				handlePlanModeMessages(msg, planModeCtx);
-				handlePermissionLifecycleFromBatch(msg, permLifecycleCtx);
+		'agent-run-output': (msg) => {
+			if (!(msg instanceof AgentRunOutputMessage)) return;
+			activateLoadingFor(msg.chatId);
+			stores.setCanAbort(true);
+			onChatProcessing(msg.chatId);
+			markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
+			outputAccumulator.enqueue(msg);
+			handlePlanModeMessages(msg, planModeCtx);
+			handlePermissionLifecycleFromBatch(msg, permLifecycleCtx);
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
+				outputAccumulator.flush();
 				markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
 				handleAgentComplete(msg, lifecycleCtx);
 			}
-			},
-			'agent-run-failed': (msg) => {
-				if (msg instanceof AgentRunFailedMessage) {
-					markPendingUserInputDelivery(msg.clientRequestId, stores, 'failed');
-					handleAgentError(msg, lifecycleCtx);
-				}
-			},
+		},
+		'agent-run-failed': (msg) => {
+			if (msg instanceof AgentRunFailedMessage) {
+				outputAccumulator.flush();
+				markPendingUserInputDelivery(msg.clientRequestId, stores, 'failed');
+				handleAgentError(msg, lifecycleCtx);
+			}
+		},
 
 		'chat-session-created': (msg) => {
 			if (msg instanceof ChatSessionCreatedMessage) handleChatCreated(msg, chatEventCtx);
@@ -338,7 +348,10 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 			stores.navigateToChat?.(msg.chatId);
 		},
 		'chat-session-stopped': (msg) => {
-			if (msg instanceof ChatSessionStoppedMessage) handleChatAborted(msg, chatEventCtx);
+			if (msg instanceof ChatSessionStoppedMessage) {
+				outputAccumulator.flush();
+				handleChatAborted(msg, chatEventCtx);
+			}
 		},
 		'chat-processing-updated': (msg) => {
 			if (msg instanceof ChatProcessingUpdatedMessage) handleChatStatus(msg, chatEventCtx);
@@ -365,6 +378,7 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 		},
 		'pending-user-input-cleared': (msg) => {
 			if (!(msg instanceof PendingUserInputClearedMessage)) return;
+			outputAccumulator.flush();
 			if (msg.reason !== 'persisted') {
 				stores.clearPendingUserInput(msg.clientRequestId);
 				return;
@@ -381,7 +395,10 @@ function buildDispatch(stores: EventRouterStores): Partial<Record<EventKey, (msg
 			if (msg instanceof ChatSessionsRunningMessage) handleRunningChats(msg, runningCtx);
 		},
 		'ws-fault': (msg) => {
-			if (msg instanceof WsFaultMessage) handleWsError(msg, chatEventCtx);
+			if (msg instanceof WsFaultMessage) {
+				outputAccumulator.flush();
+				handleWsError(msg, chatEventCtx);
+			}
 		},
 
 		'chat-title-updated': (msg) => {
@@ -418,7 +435,8 @@ export function createEventRouter(
 			const newMessages = drainHandle.drain();
 			if (newMessages.length === 0) return;
 
-			const dispatch = buildDispatch(stores);
+			const outputAccumulator = createAgentOutputAccumulator(stores);
+			const dispatch = buildDispatch(stores, outputAccumulator);
 
 			const selectedChat = stores.selectedChat();
 			const currentChatId = stores.currentChatId();
@@ -457,8 +475,10 @@ export function createEventRouter(
 				const handler = dispatch[event.key];
 				if (handler) handler(event.message);
 			}
+
+			outputAccumulator.flush();
+			});
 		});
-	});
-}
+	}
 
 export { extractFirstLine as _extractFirstLine };

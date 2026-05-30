@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	selectPreviewFromBatch,
 	_extractFirstLine,
+	createAgentOutputAccumulator,
 } from '../router.svelte';
 import {
 	UserMessage,
@@ -11,6 +12,7 @@ import {
 	UnknownToolUseMessage,
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
+import { AgentRunOutputMessage } from '$shared/ws-events';
 
 describe('extractFirstLine', () => {
 	it('returns text before first newline', () => {
@@ -31,6 +33,47 @@ describe('extractFirstLine', () => {
 
 	it('handles leading newline', () => {
 		expect(_extractFirstLine('\nfirst real line')).toBe('');
+	});
+});
+
+describe('createAgentOutputAccumulator', () => {
+	it('coalesces same-drain output chunks into one message write', () => {
+		let current: ChatMessage[] = [];
+		let writes = 0;
+		const accumulator = createAgentOutputAccumulator({
+			setChatMessages: (updater) => {
+				writes += 1;
+				current = typeof updater === 'function' ? updater(current) : updater;
+			},
+		});
+
+		accumulator.enqueue(new AgentRunOutputMessage(
+			'chat-a',
+			[new AssistantMessage('2024-01-01T00:00:00Z', 'first')],
+			'req-1',
+		));
+		accumulator.enqueue(new AgentRunOutputMessage(
+			'chat-a',
+			[new AssistantMessage('2024-01-01T00:00:01Z', 'second')],
+			'req-1',
+		));
+		accumulator.flush();
+
+		expect(writes).toBe(1);
+		expect(current.map((message) => (message as AssistantMessage).content)).toEqual(['first', 'second']);
+	});
+
+	it('does not write when no output was queued', () => {
+		let writes = 0;
+		const accumulator = createAgentOutputAccumulator({
+			setChatMessages: () => {
+				writes += 1;
+			},
+		});
+
+		accumulator.flush();
+
+		expect(writes).toBe(0);
 	});
 });
 

@@ -75,4 +75,68 @@ describe('QueueControls', () => {
 		expect(content).toBeTruthy();
 		expect(content?.textContent).toBe(multiline);
 	});
+
+	it('caps visible queued entries and shows the hidden count', () => {
+		render(QueueControls, {
+			queue: {
+				paused: false,
+				entries: Array.from({ length: 5 }, (_, index) => ({
+					id: `q${index}`,
+					content: `queued ${index}`,
+					status: 'queued' as const,
+					createdAt: '2026-02-27T00:00:00.000Z',
+				})),
+			},
+			onResume: vi.fn(),
+			onPause: vi.fn(),
+			onDequeue: vi.fn(),
+		});
+
+		expect(screen.getByText('queued 0')).toBeTruthy();
+		expect(screen.getByText('queued 2')).toBeTruthy();
+		expect(screen.queryByText('queued 3')).toBeNull();
+		expect(screen.getByText(m.chat_queue_more_pending({ count: 2 }))).toBeTruthy();
+	});
+
+	it('truncates long queued previews', () => {
+		const longText = 'x'.repeat(220);
+		const { container } = render(QueueControls, {
+			queue: {
+				paused: false,
+				entries: [{
+					id: 'q1',
+					content: longText,
+					status: 'queued',
+					createdAt: '2026-02-27T00:00:00.000Z',
+				}],
+			},
+			onResume: vi.fn(),
+			onPause: vi.fn(),
+			onDequeue: vi.fn(),
+		});
+
+		const content = container.querySelector('.whitespace-pre-wrap');
+		expect(content?.textContent).toBe(`${'x'.repeat(180)}...`);
+	});
+
+	it('shows sending entries without offering the queued remove action', () => {
+		render(QueueControls, {
+			queue: {
+				paused: false,
+				entries: [{
+					id: 'q1',
+					content: 'dispatching now',
+					status: 'sending',
+					createdAt: '2026-02-27T00:00:00.000Z',
+				}],
+			},
+			onResume: vi.fn(),
+			onPause: vi.fn(),
+			onDequeue: vi.fn(),
+		});
+
+		expect(screen.getByText(m.chat_queue_sending())).toBeTruthy();
+		expect(screen.queryByRole('button', { name: m.chat_queue_remove_from_queue() })).toBeNull();
+		expect(screen.getByText(m.chat_queue_pending_count({ count: 0 }))).toBeTruthy();
+	});
 });
