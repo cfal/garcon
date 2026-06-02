@@ -48,6 +48,10 @@
 		--color-sidebar-badge-archived-bg: hsl(var(--sidebar-badge-archived-bg));
 		--color-sidebar-badge-archived-foreground: hsl(var(--sidebar-badge-archived-foreground));
 		--color-sidebar-badge-archived-border: hsl(var(--sidebar-badge-archived-border));
+		--color-sidebar-bulk-archive-bg: hsl(var(--sidebar-bulk-archive-bg));
+		--color-sidebar-bulk-archive-foreground: hsl(var(--sidebar-bulk-archive-foreground));
+		--color-sidebar-bulk-unarchive-bg: hsl(var(--sidebar-bulk-unarchive-bg));
+		--color-sidebar-bulk-unarchive-foreground: hsl(var(--sidebar-bulk-unarchive-foreground));
 		--color-provider-codex-bg: hsl(var(--provider-codex-bg));
 	--color-provider-codex-foreground: hsl(var(--provider-codex-foreground));
 	--color-provider-codex-border: hsl(var(--provider-codex-border));
@@ -199,6 +203,10 @@
 		--sidebar-badge-archived-bg: 215 20% 94%;
 		--sidebar-badge-archived-foreground: 215 18% 35%;
 		--sidebar-badge-archived-border: 215 16% 80%;
+		--sidebar-bulk-archive-bg: 146 60% 95%;
+		--sidebar-bulk-archive-foreground: 146 65% 24%;
+		--sidebar-bulk-unarchive-bg: 0 86% 96%;
+		--sidebar-bulk-unarchive-foreground: 0 74% 38%;
 		--provider-codex-bg: 146 48% 94%;
 	--provider-codex-foreground: 146 70% 22%;
 	--provider-codex-border: 146 35% 78%;
@@ -374,6 +382,10 @@
 		--sidebar-badge-archived-bg: 215 18% 22%;
 		--sidebar-badge-archived-foreground: 215 22% 76%;
 		--sidebar-badge-archived-border: 215 14% 34%;
+		--sidebar-bulk-archive-bg: 146 36% 24%;
+		--sidebar-bulk-archive-foreground: 146 76% 86%;
+		--sidebar-bulk-unarchive-bg: 0 34% 24%;
+		--sidebar-bulk-unarchive-foreground: 0 82% 86%;
 		--provider-codex-bg: 146 38% 22%;
 	--provider-codex-foreground: 146 70% 85%;
 	--provider-codex-border: 146 32% 36%;
