@@ -18,6 +18,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
 	import { CHAT_TOOLBAR_TABS } from './chat-toolbar-tabs';
+	import WorkspaceToolbarButton from './WorkspaceToolbarButton.svelte';
 
 	type SplitDropZone = 'left' | 'right' | 'top' | 'bottom' | 'center';
 	type ActiveSplitDropTarget = {
@@ -70,6 +71,10 @@
 	);
 
 	const tabs = CHAT_TOOLBAR_TABS;
+	const splitViewTooltip = $derived(splitLayout.isEnabled ? 'Exit split view' : 'Split view');
+	const fullscreenTooltip = $derived(
+		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen()
+	);
 
 	// Holds the chat submit function registered by ConversationWorkspace.
 	let chatSubmitFn = $state<((message: string) => Promise<boolean>) | null>(null);
@@ -547,59 +552,54 @@
 							<div class="flex items-center gap-1.5">
 								<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-0.5 border border-chat-tabs-rail-border">
 									{#each tabs as tab (tab.id)}
-										<button
-											type="button"
+										<WorkspaceToolbarButton
+											label={tab.label()}
 											onclick={() => onTabChange(tab.id)}
 											class={getTabButtonClasses(tab.id)}
-											aria-pressed={tab.id === activeTab}
-											title={tab.label()}
+											pressed={tab.id === activeTab}
 										>
 											<span class="flex items-center gap-1 sm:gap-1.5">
 												<tab.icon class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 												<span class="hidden lg:inline">{tab.label()}</span>
 											</span>
-										</button>
+										</WorkspaceToolbarButton>
 									{/each}
 								</div>
 								<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border">
-									<button
-										type="button"
+									<WorkspaceToolbarButton
+										label={splitViewTooltip}
 										onclick={toggleSplitMode}
 										class={cn(getUtilityButtonClasses(), splitLayout.isEnabled && 'text-primary bg-primary/10')}
-										title={splitLayout.isEnabled ? 'Exit split view' : 'Split view'}
 									>
 										<span class="flex items-center justify-center">
 											<PanelLeft class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 										</span>
-									</button>
+									</WorkspaceToolbarButton>
 									{#if splitLayout.isEnabled}
-										<button
-											type="button"
+										<WorkspaceToolbarButton
+											label="4-up grid"
 											onclick={setupGrid}
 											class={getUtilityButtonClasses()}
-											title="4-up grid (use up to 4 recent chats)"
 										>
 											<span class="flex items-center justify-center">
 												<Grid2x2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 											</span>
-										</button>
+										</WorkspaceToolbarButton>
 									{/if}
-									<button
-										type="button"
+									<WorkspaceToolbarButton
+										label={m.share_button()}
 										onclick={openShareDialog}
 										class={getUtilityButtonClasses()}
-										title={m.share_button()}
 									>
 										<span class="flex items-center justify-center">
 											<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 										</span>
-									</button>
+									</WorkspaceToolbarButton>
 									{#if canToggleDesktopFullscreen}
-										<button
-											type="button"
+										<WorkspaceToolbarButton
+											label={fullscreenTooltip}
 											onclick={onToggleDesktopFullscreen}
 											class={getUtilityButtonClasses()}
-											title={isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen()}
 										>
 											<span class="flex items-center justify-center">
 												{#if isDesktopFullscreen}
@@ -608,7 +608,7 @@
 													<Maximize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 												{/if}
 											</span>
-										</button>
+										</WorkspaceToolbarButton>
 									{/if}
 								</div>
 							</div>
@@ -626,59 +626,54 @@
 				<div class="flex items-center gap-1.5">
 					<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-0.5 border border-chat-tabs-rail-border shadow-sm">
 						{#each tabs as tab (tab.id)}
-							<button
-								type="button"
+							<WorkspaceToolbarButton
+								label={tab.label()}
 								onclick={() => onTabChange(tab.id)}
 								class={getTabButtonClasses(tab.id)}
-								aria-pressed={tab.id === activeTab}
-								title={tab.label()}
+								pressed={tab.id === activeTab}
 							>
 								<span class="flex items-center gap-1 sm:gap-1.5">
 									<tab.icon class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 									<span class="hidden lg:inline">{tab.label()}</span>
 								</span>
-							</button>
+							</WorkspaceToolbarButton>
 						{/each}
 					</div>
 					<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border shadow-sm">
-						<button
-							type="button"
+						<WorkspaceToolbarButton
+							label={splitViewTooltip}
 							onclick={toggleSplitMode}
 							class={cn(getUtilityButtonClasses(), splitLayout.isEnabled && 'text-primary bg-primary/10')}
-							title={splitLayout.isEnabled ? 'Exit split view' : 'Split view'}
 						>
 							<span class="flex items-center justify-center">
 								<PanelLeft class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 							</span>
-						</button>
+						</WorkspaceToolbarButton>
 						{#if splitLayout.isEnabled}
-							<button
-								type="button"
+							<WorkspaceToolbarButton
+								label="4-up grid"
 								onclick={setupGrid}
 								class={getUtilityButtonClasses()}
-								title="4-up grid (use up to 4 recent chats)"
 							>
 								<span class="flex items-center justify-center">
 									<Grid2x2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 								</span>
-							</button>
+							</WorkspaceToolbarButton>
 						{/if}
-						<button
-							type="button"
+						<WorkspaceToolbarButton
+							label={m.share_button()}
 							onclick={openShareDialog}
 							class={getUtilityButtonClasses()}
-							title={m.share_button()}
 						>
 							<span class="flex items-center justify-center">
 								<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 							</span>
-						</button>
+						</WorkspaceToolbarButton>
 						{#if canToggleDesktopFullscreen}
-							<button
-								type="button"
+							<WorkspaceToolbarButton
+								label={fullscreenTooltip}
 								onclick={onToggleDesktopFullscreen}
 								class={getUtilityButtonClasses()}
-								title={isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen()}
 							>
 								<span class="flex items-center justify-center">
 									{#if isDesktopFullscreen}
@@ -687,7 +682,7 @@
 										<Maximize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
 									{/if}
 								</span>
-							</button>
+							</WorkspaceToolbarButton>
 						{/if}
 					</div>
 				</div>
