@@ -1,3 +1,14 @@
+<script module lang="ts">
+	type ChatToolEventRendererModule = typeof import('./tools/ChatToolEventRenderer.svelte');
+
+	let chatToolEventRendererPromise: Promise<ChatToolEventRendererModule> | null = null;
+
+	function loadChatToolEventRenderer(): Promise<ChatToolEventRendererModule> {
+		chatToolEventRendererPromise ??= import('./tools/ChatToolEventRenderer.svelte');
+		return chatToolEventRendererPromise;
+	}
+</script>
+
 <script lang="ts">
 	import {
 		UserMessage,
@@ -17,7 +28,6 @@
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { parseFileLink } from '$lib/chat/file-link-parser';
-	import ChatToolEventRenderer from './tools/ChatToolEventRenderer.svelte';
 	import PermissionRequestRow from './PermissionRequestRow.svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import {
@@ -296,13 +306,15 @@
 							{onExitPlanMode}
 						/>
 					{:else if asToolUse}
-						<ChatToolEventRenderer
-							toolMessage={asToolUse}
-							toolResult={toolResult ? { content: toolResult.content, isError: toolResult.isError } : undefined}
-							mode="input"
-							autoExpandTools={localSettings.autoExpandTools}
-							onFileOpen={handleToolFileOpen}
-						/>
+						{#await loadChatToolEventRenderer() then { default: ChatToolEventRenderer }}
+							<ChatToolEventRenderer
+								toolMessage={asToolUse}
+								toolResult={toolResult ? { content: toolResult.content, isError: toolResult.isError } : undefined}
+								mode="input"
+								autoExpandTools={localSettings.autoExpandTools}
+								onFileOpen={handleToolFileOpen}
+							/>
+						{/await}
 						{:else if asThinking}
 							<ChatEventCard variant="thinking" compact>
 								{#snippet body()}

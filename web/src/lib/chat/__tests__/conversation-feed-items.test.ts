@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
 	AssistantMessage,
 	BashToolUseMessage,
+	PermissionCancelledMessage,
+	PermissionResolvedMessage,
 	ReadToolUseMessage,
 	ToolResultMessage,
 	UserMessage,
 } from '$shared/chat-types'
-import { buildConversationFeedRenderItems } from '../conversation-feed-items'
+import { buildConversationFeedRenderItems, buildConversationFeedRenderModel } from '../conversation-feed-items'
 
 const TS = '2026-05-29T00:00:00.000Z'
 
@@ -73,5 +75,22 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(firstItems[0]).toMatchObject({ kind: 'bash-group' })
 		expect(secondItems[0]).toMatchObject({ kind: 'bash-group' })
 		expect(firstItems[0].id).toBe(secondItems[0].id)
+	})
+
+	it('builds render items and terminal lookup indexes in one pass', () => {
+		const messages = [
+			new BashToolUseMessage(TS, 'bash-1', 'pwd'),
+			new ToolResultMessage(TS, 'bash-1', { content: 'ok' }, false),
+			new PermissionResolvedMessage(TS, 'perm-1', true),
+			new PermissionCancelledMessage(TS, 'perm-2', 'cancelled'),
+			new AssistantMessage(TS, 'done'),
+		]
+
+		const model = buildConversationFeedRenderModel(messages)
+
+		expect(model.items.map((item) => item.kind)).toEqual(['message', 'message'])
+		expect(model.toolResultIndex.get('bash-1')?.content).toEqual({ content: 'ok' })
+		expect(model.permissionTerminalById.get('perm-1')).toEqual({ state: 'resolved', allowed: true })
+		expect(model.permissionTerminalById.get('perm-2')).toEqual({ state: 'cancelled', reason: 'cancelled' })
 	})
 })

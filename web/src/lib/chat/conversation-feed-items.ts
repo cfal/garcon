@@ -7,6 +7,12 @@ import {
 } from '$shared/chat-types'
 import type { ChatMessage } from '$shared/chat-types'
 
+export interface PermissionTerminalState {
+	state: 'resolved' | 'cancelled'
+	allowed?: boolean
+	reason?: string
+}
+
 export type ConversationFeedRenderItem =
 	| {
 			kind: 'message'
@@ -23,6 +29,12 @@ export type ConversationFeedRenderItem =
 			prevMessage: ChatMessage | null
 	  }
 
+export interface ConversationFeedRenderModel {
+	items: ConversationFeedRenderItem[]
+	toolResultIndex: Map<string, ToolResultMessage>
+	permissionTerminalById: Map<string, PermissionTerminalState>
+}
+
 function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
 	return (
 		message instanceof ToolResultMessage ||
@@ -36,13 +48,29 @@ function bashGroupId(messages: BashToolUseMessage[]): string {
 	return `bash-group-${messages[0]?.toolId ?? 'empty'}`
 }
 
-export function buildConversationFeedRenderItems(messages: ChatMessage[]): ConversationFeedRenderItem[] {
+export function buildConversationFeedRenderModel(messages: ChatMessage[]): ConversationFeedRenderModel {
 	const items: ConversationFeedRenderItem[] = []
+	const toolResultIndex = new Map<string, ToolResultMessage>()
+	const permissionTerminalById = new Map<string, PermissionTerminalState>()
 	let previousRenderable: ChatMessage | null = null
 	let index = 0
 
 	while (index < messages.length) {
 		const message = messages[index]
+
+		if (message instanceof ToolResultMessage) {
+			toolResultIndex.set(message.toolId, message)
+		} else if (message instanceof PermissionResolvedMessage) {
+			permissionTerminalById.set(message.permissionRequestId, {
+				state: 'resolved',
+				allowed: message.allowed,
+			})
+		} else if (message instanceof PermissionCancelledMessage) {
+			permissionTerminalById.set(message.permissionRequestId, {
+				state: 'cancelled',
+				reason: message.reason,
+			})
+		}
 
 		if (shouldSkipStandaloneMessage(message)) {
 			index += 1
@@ -57,6 +85,7 @@ export function buildConversationFeedRenderItems(messages: ChatMessage[]): Conve
 			while (index < messages.length) {
 				const candidate = messages[index]
 				if (candidate instanceof ToolResultMessage) {
+					toolResultIndex.set(candidate.toolId, candidate)
 					index += 1
 					continue
 				}
@@ -97,5 +126,9 @@ export function buildConversationFeedRenderItems(messages: ChatMessage[]): Conve
 		index += 1
 	}
 
-	return items
+	return { items, toolResultIndex, permissionTerminalById }
+}
+
+export function buildConversationFeedRenderItems(messages: ChatMessage[]): ConversationFeedRenderItem[] {
+	return buildConversationFeedRenderModel(messages).items
 }
