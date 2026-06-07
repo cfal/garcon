@@ -9,6 +9,7 @@ export interface LocalSettingsSnapshot {
 	theme: ThemeMode;
 	colorblindMode: boolean;
 	autoExpandTools: boolean;
+	fastMode: boolean;
 	showThinking: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
@@ -28,6 +29,7 @@ export interface LocalSettingsSnapshot {
 type BooleanLocalSettingKey =
 	| 'colorblindMode'
 	| 'autoExpandTools'
+	| 'fastMode'
 	| 'showThinking'
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
@@ -41,6 +43,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	theme: 'system',
 	colorblindMode: false,
 	autoExpandTools: false,
+	fastMode: false,
 	showThinking: true,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
@@ -90,6 +93,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		theme: parseTheme(parsed.theme),
 		colorblindMode: parseBoolean(parsed.colorblindMode, DEFAULTS.colorblindMode),
 		autoExpandTools: parseBoolean(parsed.autoExpandTools, DEFAULTS.autoExpandTools),
+		fastMode: parseBoolean(parsed.fastMode, DEFAULTS.fastMode),
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
@@ -136,6 +140,7 @@ export class LocalSettingsStore {
 	theme = $state<ThemeMode>(DEFAULTS.theme);
 	colorblindMode = $state(DEFAULTS.colorblindMode);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
+	fastMode = $state(DEFAULTS.fastMode);
 	showThinking = $state(DEFAULTS.showThinking);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
@@ -186,6 +191,7 @@ export class LocalSettingsStore {
 			theme: this.theme,
 			colorblindMode: this.colorblindMode,
 			autoExpandTools: this.autoExpandTools,
+			fastMode: this.fastMode,
 			showThinking: this.showThinking,
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
@@ -207,6 +213,7 @@ export class LocalSettingsStore {
 		this.theme = snap.theme;
 		this.colorblindMode = snap.colorblindMode;
 		this.autoExpandTools = snap.autoExpandTools;
+		this.fastMode = snap.fastMode;
 		this.showThinking = snap.showThinking;
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;

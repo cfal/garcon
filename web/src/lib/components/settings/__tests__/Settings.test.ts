@@ -89,6 +89,7 @@ describe('Settings', () => {
       expect(appShell.settingsTab).toBe('local');
       expect(screen.queryByRole('heading', { name: 'Local Settings' })).toBeNull();
       expect(screen.getByText('Max chat width')).toBeTruthy();
+      expect(screen.getByText('Fast mode')).toBeTruthy();
       expect(screen.queryByText('Direct (Anthropic)')).toBeNull();
       expect(screen.queryByText('Direct (Chat Completions)')).toBeNull();
       expect(screen.queryByText('Direct (Responses)')).toBeNull();

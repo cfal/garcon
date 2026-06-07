@@ -148,6 +148,7 @@
 		colorblindMode: false,
 		alwaysFullscreenOnGitPanel: true,
 		autoExpandTools: false,
+		fastMode: false,
 		showThinking: true,
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,

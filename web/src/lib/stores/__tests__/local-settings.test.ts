@@ -10,6 +10,7 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 
 		expect(store.chatMaxWidth).toBe('none');
+		expect(store.fastMode).toBe(false);
 
 		store.destroy();
 	});
@@ -18,9 +19,11 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 
 		store.set('chatMaxWidth', 'medium');
+		store.toggle('fastMode');
 
 		expect(JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}')).toMatchObject({
 			chatMaxWidth: 'medium',
+			fastMode: true,
 		});
 
 		store.destroy();

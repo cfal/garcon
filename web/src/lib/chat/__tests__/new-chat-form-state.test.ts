@@ -86,7 +86,12 @@ const mockModelCatalog = {
 		}),
 	getModels: vi.fn((agentId: string) => {
 		if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
-			if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
+		if (agentId === 'codex') {
+			return [
+				{ value: 'gpt-5.4', label: 'GPT-5.4' },
+				{ value: 'gpt-5.4-fast', label: 'GPT-5.4 Fast Mode' },
+			];
+		}
 			if (agentId === 'direct-anthropic-compatible') {
 				return [{
 					value: 'acme_anthropic:acme-sonnet',
@@ -186,6 +191,24 @@ describe('NewChatFormState', () => {
 		expect(formState.thinkingMode).toBe('think-hard');
 		expect(formState.claudeThinkingMode).toBe('off');
 		expect(formState.projectPath).toBe('/workspace/project');
+	});
+
+	it('uses a matching fast model when fast mode is enabled', async () => {
+		formState = new NewChatFormState(
+			mockAppShell as any,
+			mockModelCatalog as any,
+			mockRemoteSettings as any,
+			{ fastMode: true }
+		);
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
+			lastAgentId: 'codex',
+			lastProjectPath: '/workspace/project',
+			lastModel: 'gpt-5.4',
+		}));
+
+		await formState.loadSettingsAndModels();
+
+		expect(formState.modelValue).toBe('gpt-5.4-fast');
 	});
 
 	it('loads API provider startup defaults from server settings', async () => {

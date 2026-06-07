@@ -42,7 +42,7 @@
 	const modelCatalog = getModelCatalog();
 		const remoteSettings = getRemoteSettings();
 		const sessions = getChatSessions();
-		const form = new NewChatFormState(appShell, modelCatalog, remoteSettings);
+		const form = new NewChatFormState(appShell, modelCatalog, remoteSettings, localSettings);
 	
 		let isMobile = $state(false);
 	let pendingTextareaFocus = $state(true);

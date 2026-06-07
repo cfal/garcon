@@ -4,7 +4,8 @@
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 
 	setLocalSettings({
-		sendByShiftEnter: false
+		sendByShiftEnter: false,
+		fastMode: false,
 	} as never);
 
 	setRemoteSettings(createRemoteSettingsStore());

@@ -21,8 +21,13 @@ import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
 import { canSubmitNewChat, type PathValidationStatus } from '$lib/components/chat/new-chat-submit.js';
+import { fastModeModelValue } from '$lib/chat/fast-mode-models.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import * as m from '$lib/paraglide/messages.js';
+
+interface FastModeSettings {
+	readonly fastMode: boolean;
+}
 
 export class NewChatFormState {
 	// Agent and model
@@ -74,11 +79,18 @@ export class NewChatFormState {
 	readonly #appShell: AppShellStore;
 	readonly #modelCatalog: ModelCatalogStore;
 	readonly #remoteSettings: RemoteSettingsStore;
+	readonly #localSettings?: FastModeSettings;
 
-	constructor(appShell: AppShellStore, modelCatalog: ModelCatalogStore, remoteSettings: RemoteSettingsStore) {
+	constructor(
+		appShell: AppShellStore,
+		modelCatalog: ModelCatalogStore,
+		remoteSettings: RemoteSettingsStore,
+		localSettings?: FastModeSettings
+	) {
 		this.#appShell = appShell;
 		this.#modelCatalog = modelCatalog;
 		this.#remoteSettings = remoteSettings;
+		this.#localSettings = localSettings;
 	}
 
 	// Derived accessors
@@ -104,7 +116,10 @@ export class NewChatFormState {
 	}
 
 	get modelValue(): string {
-		return this.selectedModelsByAgent[this.agentId] ?? this.#modelCatalog.getDefaultModel(this.agentId);
+		return this.#preferredModelForFastMode(
+			this.agentId,
+			this.selectedModelsByAgent[this.agentId] ?? this.#modelCatalog.getDefaultModel(this.agentId)
+		);
 	}
 
 	// Agent selection
@@ -120,6 +135,11 @@ export class NewChatFormState {
 			...this.selectedModelsByAgent,
 			[this.agentId]: value,
 		};
+	}
+
+	#preferredModelForFastMode(agentId: SessionAgentId, modelValue: string): string {
+		if (!this.#localSettings?.fastMode) return modelValue;
+		return fastModeModelValue(this.#modelCatalog.getModels(agentId), modelValue);
 	}
 
 	/** Validates the selected model against the live model list for an agent. */

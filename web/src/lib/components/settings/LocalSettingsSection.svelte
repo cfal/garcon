@@ -102,6 +102,11 @@
 				() => ls.toggle('autoExpandTools')
 			)}
 			{@render settingRow(
+				m.settings_chat_fast_mode(),
+				ls.fastMode,
+				() => ls.toggle('fastMode')
+			)}
+			{@render settingRow(
 				m.settings_chat_show_thinking(),
 				ls.showThinking,
 				() => ls.toggle('showThinking')
