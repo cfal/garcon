@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { enqueueChatMessage, forkChat, forkRunChat, getChatQueue, runChat } from '$lib/api/chats.js';
+import { enqueueChatMessage, forkChat, forkRunChat, getChatQueue, runChat, updateChatModel } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 import { AssistantMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
@@ -26,6 +26,7 @@ const mockForkRunChat = vi.mocked(forkRunChat);
 const mockGetChatQueue = vi.mocked(getChatQueue);
 const mockRunChat = vi.mocked(runChat);
 const mockEnqueueChatMessage = vi.mocked(enqueueChatMessage);
+const mockUpdateChatModel = vi.mocked(updateChatModel);
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -62,6 +63,34 @@ function createRunningChat(overrides: Partial<Record<string, unknown>> = {}) {
 
 function createDeps(chat = createRunningChat()) {
 	const waitForConnection = vi.fn(() => new Promise<void>(() => {}));
+	const agentState = {
+		setAgentId: vi.fn(),
+		setModelSelection: vi.fn((selection: {
+			model: string;
+			apiProviderId: string | null;
+			modelEndpointId: string | null;
+			modelProtocol: null;
+		}) => {
+			agentState.model = selection.model;
+			agentState.apiProviderId = selection.apiProviderId;
+			agentState.modelEndpointId = selection.modelEndpointId;
+			agentState.modelProtocol = selection.modelProtocol;
+		}),
+		agentId: 'claude',
+		model: '',
+		apiProviderId: null as string | null,
+		modelEndpointId: null as string | null,
+		modelProtocol: null,
+		permissionMode: 'default',
+		thinkingMode: 'none',
+		claudeThinkingMode: 'auto',
+	};
+	const localSettings = {
+		fastMode: false,
+		set: vi.fn((key: 'fastMode', value: boolean) => {
+			if (key === 'fastMode') localSettings.fastMode = value;
+		}),
+	};
 	const chatState = {
 		chatMessages: [] as ChatMessage[],
 		pendingUserInputs: [] as PendingUserInput[],
@@ -119,30 +148,20 @@ function createDeps(chat = createRunningChat()) {
 			composerState: {
 				inputText: '',
 				images: [],
+				cancelDraftSave: vi.fn(),
 				clearImages: vi.fn(),
 				clearAfterSubmit: vi.fn(),
 				saveDraft: vi.fn(),
 				restoreDraft: vi.fn(),
 			},
-			agentState: {
-					setAgentId: vi.fn(),
-					setModelSelection: vi.fn(),
-					agentId: 'claude',
-					model: '',
-					apiProviderId: null,
-					modelEndpointId: null,
-					modelProtocol: null,
-					permissionMode: 'default',
-				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
+			agentState,
+			lifecycle: {
+				activateLoading: vi.fn(),
+				clearLoading: vi.fn(),
+				setCanAbort: vi.fn(),
+				setCurrentChatId: vi.fn(),
+				setLoadingStatus: vi.fn(),
 			},
-				lifecycle: {
-					activateLoading: vi.fn(),
-					clearLoading: vi.fn(),
-					setCanAbort: vi.fn(),
-					setCurrentChatId: vi.fn(),
-					setLoadingStatus: vi.fn(),
-				},
 			startupCoordinator: {},
 			ws: {
 				sendMessage: vi.fn(),
@@ -154,6 +173,15 @@ function createDeps(chat = createRunningChat()) {
 			},
 			modelCatalog: {
 				isLocalModel: vi.fn(() => false),
+				getModels: vi.fn((agentId) => {
+					if (agentId === 'claude') {
+						return [
+							{ value: 'sonnet', label: 'Sonnet' },
+							{ value: 'sonnet-fast', label: 'Sonnet Fast Mode' },
+						];
+					}
+					return [];
+				}),
 				selectionFor: vi.fn((_provider, model) => ({
 					model,
 					apiProviderId: null,
@@ -162,10 +190,11 @@ function createDeps(chat = createRunningChat()) {
 				})),
 				selectionValueFor: vi.fn((_provider, model) => model),
 			},
-		readReceiptOutbox: {
-			enqueue: vi.fn(),
-		},
-		navigation: {
+			localSettings,
+			readReceiptOutbox: {
+				enqueue: vi.fn(),
+			},
+			navigation: {
 				setActiveTab: vi.fn(),
 				navigateToChat: vi.fn(),
 			},
@@ -173,11 +202,11 @@ function createDeps(chat = createRunningChat()) {
 			setPendingPermissionRequests: vi.fn(),
 			getPreviousPermissionMode: vi.fn(() => null),
 			setPreviousPermissionMode: vi.fn(),
-				setNeedsServerLoad: vi.fn(),
-				setIsViewportPinnedToBottom: vi.fn(),
-				setMessageQueue: vi.fn(),
-				scrollToBottom: vi.fn(),
-			},
+			setNeedsServerLoad: vi.fn(),
+			setIsViewportPinnedToBottom: vi.fn(),
+			setMessageQueue: vi.fn(),
+			scrollToBottom: vi.fn(),
+		},
 		waitForConnection,
 	};
 }
@@ -189,10 +218,16 @@ describe('ConversationSessionController', () => {
 		mockGetChatQueue.mockReset();
 		mockRunChat.mockReset();
 		mockEnqueueChatMessage.mockReset();
+		mockUpdateChatModel.mockReset();
 		mockGetChatQueue.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
 			queue: { entries: [], paused: false },
+		});
+		mockUpdateChatModel.mockResolvedValue({
+			success: true,
+			chatId: 'chat-1',
+			model: 'sonnet-fast',
 		});
 	});
 
@@ -331,6 +366,49 @@ describe('ConversationSessionController', () => {
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('456');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('456');
+	});
+
+	it('enables fast mode from /fast and switches to a fast model when available', async () => {
+		const chat = createRunningChat({ id: '123', model: 'sonnet' });
+		const { deps } = createDeps(chat);
+		deps.agentState.model = 'sonnet';
+		deps.composerState.inputText = '/fast';
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('123');
+
+		expect(deps.localSettings.set).toHaveBeenCalledWith('fastMode', true);
+		expect(deps.agentState.setModelSelection).toHaveBeenCalledWith(expect.objectContaining({
+			model: 'sonnet-fast',
+		}));
+		expect(deps.sessions.patchChat).toHaveBeenCalledWith('123', expect.objectContaining({
+			model: 'sonnet-fast',
+		}));
+		expect(deps.composerState.cancelDraftSave).toHaveBeenCalledWith('123');
+		expect(deps.composerState.inputText).toBe('');
+		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('123');
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(deps.chatState.chatMessages[0]).toMatchObject({
+			type: 'assistant-message',
+			content: 'Fast mode enabled. Switched to sonnet-fast.',
+		});
+	});
+
+	it('disables fast mode from /fast off without sending a message', async () => {
+		const { deps } = createDeps();
+		deps.localSettings.fastMode = true;
+		deps.composerState.inputText = '/fast off';
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('chat-1');
+
+		expect(deps.localSettings.set).toHaveBeenCalledWith('fastMode', false);
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(deps.chatState.chatMessages[0]).toMatchObject({
+			type: 'assistant-message',
+			content: 'Fast mode disabled.',
+		});
 	});
 
 	it('inserts a pending user message before REST acceptance and marks it accepted afterward', async () => {

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import NewChatFormTestHost from './NewChatFormTestHost.svelte';
 import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
@@ -41,24 +41,30 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 		lastModelProtocol: null,
 		lastPermissionMode: 'default',
 		lastThinkingMode: 'none',
-			lastClaudeThinkingMode: 'auto',
-			lastAmpAgentMode: 'smart',
-			projectBasePath: '/workspace',
-			telegram: {
-				botTokenAvailable: false,
-				botUsername: null,
-				botFirstName: null,
-				recipientUsername: null,
-				recipientDisplayName: null,
-				recipientLinked: false,
-				pendingLink: false,
-				linkUrl: null,
-			},
-			...overrides,
-		};
-	}
+		lastClaudeThinkingMode: 'auto',
+		lastAmpAgentMode: 'smart',
+		projectBasePath: '/workspace',
+		telegram: {
+			botTokenAvailable: false,
+			botUsername: null,
+			botFirstName: null,
+			recipientUsername: null,
+			recipientDisplayName: null,
+			recipientLinked: false,
+			pendingLink: false,
+			linkUrl: null,
+		},
+		...overrides,
+	};
+}
 
 describe('NewChatForm', () => {
+	afterEach(async () => {
+		cleanup();
+		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
+	});
+
 	it('shows a centered spinner and hides the composer until settings load', async () => {
 		const pending = deferred<Awaited<ReturnType<typeof settingsApi.getRemoteSettings>>>();
 		vi.mocked(settingsApi.getRemoteSettings).mockReturnValueOnce(pending.promise);

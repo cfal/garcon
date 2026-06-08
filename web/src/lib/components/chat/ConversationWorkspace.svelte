@@ -58,14 +58,14 @@
 	let pendingViewChat = $state<PendingViewChat | null>(null);
 	let previousPermissionMode = $state<PermissionMode | null>(null);
 	let needsServerLoad = $state(false);
-		const activeQueue = $derived.by(() => {
-			const chatId = sessions.selectedChatId;
-			if (!chatId) return null;
-			return queueByChatId[chatId] ?? null;
-		});
-		function setMessageQueue(chatId: string, q: QueueState | null): void {
-			queueByChatId = { ...queueByChatId, [chatId]: q };
-		}
+	const activeQueue = $derived.by(() => {
+		const chatId = sessions.selectedChatId;
+		if (!chatId) return null;
+		return queueByChatId[chatId] ?? null;
+	});
+	function setMessageQueue(chatId: string, q: QueueState | null): void {
+		queueByChatId = { ...queueByChatId, [chatId]: q };
+	}
 	const scrollToTopButtonClass = $derived(cn(
 		'absolute right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg',
 		reserveTopFloatingToolbar ? 'top-16' : 'top-3',
@@ -99,7 +99,7 @@
 		},
 		getPendingViewChat: () => pendingViewChat,
 		setPendingViewChat: (v) => { pendingViewChat = v; },
-			setMessageQueue,
+		setMessageQueue,
 		getPreviousPermissionMode: () => previousPermissionMode,
 		setPreviousPermissionMode: (mode) => { previousPermissionMode = mode; },
 	});
@@ -107,10 +107,10 @@
 	// Scroll controller.
 	const scroll = new ConversationScrollController({
 		getScrollContainer: () => scrollContainer,
-			getQueueContainer: () => queueControlsContainer,
-			chatState,
-			sessions,
-		});
+		getQueueContainer: () => queueControlsContainer,
+		chatState,
+		sessions,
+	});
 
 	// Session controller.
 	const controller = new ConversationSessionController({
@@ -118,9 +118,10 @@
 		chatState,
 		composerState,
 		agentState,
-			lifecycle,
-			startupCoordinator,
-			modelCatalog,
+		lifecycle,
+		startupCoordinator,
+		modelCatalog,
+		localSettings,
 		appShell,
 		readReceiptOutbox,
 		navigation: {
@@ -134,11 +135,11 @@
 		setPendingPermissionRequests: (v) => { pendingPermissionRequests = v; },
 		getPreviousPermissionMode: () => previousPermissionMode,
 		setPreviousPermissionMode: (v) => { previousPermissionMode = v; },
-			setNeedsServerLoad: (v) => { needsServerLoad = v; },
-			setIsViewportPinnedToBottom: (v) => { scroll.isPinnedToBottom = v; },
-			setMessageQueue,
-			scrollToBottom: () => scroll.scrollToBottom(),
-		});
+		setNeedsServerLoad: (v) => { needsServerLoad = v; },
+		setIsViewportPinnedToBottom: (v) => { scroll.isPinnedToBottom = v; },
+		setMessageQueue,
+		scrollToBottom: () => scroll.scrollToBottom(),
+	});
 
 	// Expose the submit function to sibling components (runs once on mount).
 	$effect(() => {

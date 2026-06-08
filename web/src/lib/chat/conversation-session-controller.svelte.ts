@@ -22,7 +22,9 @@ import { AssistantMessage, ErrorMessage, type ChatImage } from '$shared/chat-typ
 import type { PendingUserInput } from '$shared/pending-user-input';
 import { createClientChatId } from '$lib/chat/client-id';
 import { createClientCommandId } from '$lib/chat/client-command-id';
+import { parseFastCommand, type FastCommandMode } from '$lib/chat/fast-command';
 import { parseForkCommand } from '$lib/chat/fork-command';
+import { fastModeModelValue } from '$lib/chat/fast-mode-models';
 import type { ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
@@ -54,6 +56,7 @@ export interface SessionControllerDeps {
 	startupCoordinator: StartupCoordinator;
 	modelCatalog: {
 		isLocalModel: (agentId: SessionAgentId, model: string, modelEndpointId?: string | null) => boolean;
+		getModels: (agentId: SessionAgentId) => Array<{ value: string; label: string }>;
 		selectionFor: (agentId: SessionAgentId, model: string, modelEndpointId?: string | null) => {
 			model: string;
 			apiProviderId: string | null;
@@ -61,6 +64,10 @@ export interface SessionControllerDeps {
 			modelProtocol: ApiProtocol | null;
 		};
 		selectionValueFor: (agentId: SessionAgentId, model: string, modelEndpointId?: string | null) => string;
+	};
+	localSettings: {
+		fastMode: boolean;
+		set: (key: 'fastMode', value: boolean) => void;
 	};
 	appShell: {
 		quietRefreshChats: () => Promise<void> | void;
@@ -279,12 +286,18 @@ export class ConversationSessionController {
 		const isDraft = selected.status === 'draft';
 		const startup = deps.sessions.startupByChatId[chatId];
 
-			const text = messageOverride ?? deps.composerState.inputText.trim();
-			const submissionImages = imageOverride ?? deps.composerState.images;
-			if (!text && submissionImages.length === 0) return;
-			const restoreComposerOnFailure = messageOverride === undefined && imageOverride === undefined;
-			const previousText = deps.composerState.inputText;
-			const previousImages = [...deps.composerState.images];
+		const text = messageOverride ?? deps.composerState.inputText.trim();
+		const submissionImages = imageOverride ?? deps.composerState.images;
+		if (!text && submissionImages.length === 0) return;
+		const restoreComposerOnFailure = messageOverride === undefined && imageOverride === undefined;
+		const previousText = deps.composerState.inputText;
+		const previousImages = [...deps.composerState.images];
+
+		const fastCommand = parseFastCommand(text);
+		if (fastCommand) {
+			this.#submitFastCommand(chatId, fastCommand.mode, restoreComposerOnFailure);
+			return;
+		}
 
 		if (options.allowForkCommand !== false) {
 			const forkCommand = parseForkCommand(text);
@@ -300,17 +313,17 @@ export class ConversationSessionController {
 			}
 		}
 
-			if (selected.status === 'running' && selected.isProcessing && submissionImages.length > 0) {
-				deps.chatState.chatMessages = [
-					...deps.chatState.chatMessages,
-					new ErrorMessage(new Date().toISOString(), 'Messages with images cannot be queued while a turn is already running.'),
-				];
-				return;
-			}
+		if (selected.status === 'running' && selected.isProcessing && submissionImages.length > 0) {
+			deps.chatState.chatMessages = [
+				...deps.chatState.chatMessages,
+				new ErrorMessage(new Date().toISOString(), 'Messages with images cannot be queued while a turn is already running.'),
+			];
+			return;
+		}
 
-			let imagePayload: ChatImage[] = [];
-			if (submissionImages.length > 0) {
-				try {
+		let imagePayload: ChatImage[] = [];
+		if (submissionImages.length > 0) {
+			try {
 				imagePayload = await Promise.all(submissionImages.map(fileToChatImage));
 			} catch (error) {
 				console.error('[SessionController] Failed to prepare image payload:', error);
@@ -323,155 +336,190 @@ export class ConversationSessionController {
 				];
 				return;
 			}
-			}
+		}
 
-			if (selected.status === 'running' && selected.isProcessing) {
-				try {
-					const result = await enqueueChatMessage({
-						clientRequestId: createClientCommandId(),
-						chatId,
-						content: text,
-					});
-					deps.setMessageQueue(chatId, result.queue);
-					deps.composerState.clearAfterSubmit(chatId);
-				} catch (err) {
-					deps.chatState.chatMessages = [
-						...deps.chatState.chatMessages,
-						new ErrorMessage(
-							new Date().toISOString(),
-							`Failed to queue message: ${err instanceof Error ? err.message : String(err)}`,
-						),
-					];
-				}
-				return;
-			}
-
-			if (deps.lifecycle.isLoading && selected.status === 'draft') return;
-
-			const clientRequestId = createClientCommandId();
-			const clientMessageId = createClientCommandId();
-			deps.chatState.upsertPendingUserInput(
-				pendingUserInput(chatId, text, imagePayload, clientRequestId, clientMessageId),
-			);
-			deps.chatState.isUserScrolledUp = false;
-			if (restoreComposerOnFailure) {
+		if (selected.status === 'running' && selected.isProcessing) {
+			try {
+				const result = await enqueueChatMessage({
+					clientRequestId: createClientCommandId(),
+					chatId,
+					content: text,
+				});
+				deps.setMessageQueue(chatId, result.queue);
 				deps.composerState.clearAfterSubmit(chatId);
+			} catch (err) {
+				deps.chatState.chatMessages = [
+					...deps.chatState.chatMessages,
+					new ErrorMessage(
+						new Date().toISOString(),
+						`Failed to queue message: ${err instanceof Error ? err.message : String(err)}`,
+					),
+				];
 			}
-			deps.composerState.isSubmitting = true;
+			return;
+		}
 
-			if (isDraft) {
-				deps.startupCoordinator.beginLocalStartup(chatId);
-				const agentId = startup?.agentId ?? selected.agentId;
-				const model = startup?.model ?? selected.model ?? deps.agentState.model;
-				const apiProviderId = startup?.apiProviderId ?? selected.apiProviderId ?? deps.agentState.apiProviderId;
-				const modelEndpointId = startup?.modelEndpointId ?? selected.modelEndpointId ?? deps.agentState.modelEndpointId;
-				const modelProtocol = startup?.modelProtocol ?? selected.modelProtocol ?? deps.agentState.modelProtocol;
-				const permissionMode = startup?.permissionMode ?? deps.agentState.permissionMode;
-				const thinkingMode = startup?.thinkingMode ?? deps.agentState.thinkingMode;
-				const ampAgentMode = startup?.ampAgentMode ?? deps.agentState.ampAgentMode;
+		if (deps.lifecycle.isLoading && selected.status === 'draft') return;
 
-				try {
-					await startChat({
-						clientRequestId,
-						clientMessageId,
-						chatId,
-						agentId: agentId as typeof deps.agentState.agentId,
+		const clientRequestId = createClientCommandId();
+		const clientMessageId = createClientCommandId();
+		deps.chatState.upsertPendingUserInput(
+			pendingUserInput(chatId, text, imagePayload, clientRequestId, clientMessageId),
+		);
+		deps.chatState.isUserScrolledUp = false;
+		if (restoreComposerOnFailure) {
+			deps.composerState.clearAfterSubmit(chatId);
+		}
+		deps.composerState.isSubmitting = true;
+
+		if (isDraft) {
+			deps.startupCoordinator.beginLocalStartup(chatId);
+			const agentId = startup?.agentId ?? selected.agentId;
+			const model = startup?.model ?? selected.model ?? deps.agentState.model;
+			const apiProviderId = startup?.apiProviderId ?? selected.apiProviderId ?? deps.agentState.apiProviderId;
+			const modelEndpointId = startup?.modelEndpointId ?? selected.modelEndpointId ?? deps.agentState.modelEndpointId;
+			const modelProtocol = startup?.modelProtocol ?? selected.modelProtocol ?? deps.agentState.modelProtocol;
+			const permissionMode = startup?.permissionMode ?? deps.agentState.permissionMode;
+			const thinkingMode = startup?.thinkingMode ?? deps.agentState.thinkingMode;
+			const ampAgentMode = startup?.ampAgentMode ?? deps.agentState.ampAgentMode;
+
+			try {
+				await startChat({
+					clientRequestId,
+					clientMessageId,
+					chatId,
+					agentId: agentId as typeof deps.agentState.agentId,
+					projectPath: selected.projectPath,
+					model,
+					apiProviderId,
+					modelEndpointId,
+					modelProtocol,
+					permissionMode,
+					thinkingMode,
+					claudeThinkingMode: 'auto',
+					ampAgentMode,
+					command: text,
+					tags: startup?.tags,
+					options: {
+						cwd: selected.projectPath,
 						projectPath: selected.projectPath,
-						model,
-						apiProviderId,
-						modelEndpointId,
-						modelProtocol,
-						permissionMode,
-						thinkingMode,
-						claudeThinkingMode: 'auto',
-						ampAgentMode,
-						command: text,
-						tags: startup?.tags,
-						options: {
-							cwd: selected.projectPath,
-							projectPath: selected.projectPath,
-							sessionId: chatId,
-							images: imagePayload,
-						},
-					});
-					this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
-					deps.lifecycle.activateLoading();
-					deps.lifecycle.setCanAbort(true);
-					deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
-					deps.lifecycle.setCurrentChatId(chatId);
-					deps.sessions.setChatProcessing(chatId, true);
-					deps.sessions.promoteDraft(chatId);
-					deps.appShell.quietRefreshChats();
-				} catch (err) {
-					console.error('[SessionController] Failed to start chat:', err);
-					this.#markPendingUserInputDelivery(clientRequestId, 'failed');
-					deps.startupCoordinator.completeStartup(chatId);
-					deps.lifecycle.clearLoading();
-					deps.sessions.setChatProcessing(chatId, false);
-					if (restoreComposerOnFailure) {
-						deps.composerState.inputText = previousText;
-						deps.composerState.images = previousImages;
-						deps.composerState.saveDraft(chatId);
-					}
-					deps.chatState.chatMessages = [
-						...deps.chatState.chatMessages,
-						new ErrorMessage(
-							new Date().toISOString(),
-							`Failed to start chat: ${err instanceof Error ? err.message : String(err)}`,
-						),
-					];
-				} finally {
-					deps.composerState.isSubmitting = false;
+						sessionId: chatId,
+						images: imagePayload,
+					},
+				});
+				this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
+				deps.lifecycle.activateLoading();
+				deps.lifecycle.setCanAbort(true);
+				deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
+				deps.lifecycle.setCurrentChatId(chatId);
+				deps.sessions.setChatProcessing(chatId, true);
+				deps.sessions.promoteDraft(chatId);
+				deps.appShell.quietRefreshChats();
+			} catch (err) {
+				console.error('[SessionController] Failed to start chat:', err);
+				this.#markPendingUserInputDelivery(clientRequestId, 'failed');
+				deps.startupCoordinator.completeStartup(chatId);
+				deps.lifecycle.clearLoading();
+				deps.sessions.setChatProcessing(chatId, false);
+				if (restoreComposerOnFailure) {
+					deps.composerState.inputText = previousText;
+					deps.composerState.images = previousImages;
+					deps.composerState.saveDraft(chatId);
 				}
-			} else {
-				const selection = deps.modelCatalog.selectionFor(
-					deps.agentState.agentId,
-					deps.agentState.model,
-					deps.agentState.modelEndpointId,
-				);
-				try {
-					await runChat({
-						clientRequestId,
-						clientMessageId,
-						chatId,
-						command: text,
-						images: imagePayload.length > 0 ? imagePayload : undefined,
-						permissionMode: deps.agentState.permissionMode,
-						thinkingMode: deps.agentState.thinkingMode,
-						claudeThinkingMode: 'auto',
-						ampAgentMode: deps.agentState.ampAgentMode,
-						model: selection.model,
-						apiProviderId: selection.apiProviderId,
-						modelEndpointId: selection.modelEndpointId,
-						modelProtocol: selection.modelProtocol,
-					});
-					this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
-					deps.lifecycle.activateLoading();
-					deps.lifecycle.setCanAbort(true);
-					deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
-					deps.lifecycle.setCurrentChatId(chatId);
-					deps.sessions.setChatProcessing(chatId, true);
-				} catch (err) {
-					this.#markPendingUserInputDelivery(clientRequestId, 'failed');
-					deps.lifecycle.clearLoading();
-					deps.sessions.setChatProcessing(chatId, false);
-					if (restoreComposerOnFailure) {
-						deps.composerState.inputText = previousText;
-						deps.composerState.images = previousImages;
-						deps.composerState.saveDraft(chatId);
-					}
-					deps.chatState.chatMessages = [
-						...deps.chatState.chatMessages,
-						new ErrorMessage(
-							new Date().toISOString(),
-							`Failed to send message: ${err instanceof Error ? err.message : String(err)}`,
-						),
-					];
-				} finally {
-					deps.composerState.isSubmitting = false;
+				deps.chatState.chatMessages = [
+					...deps.chatState.chatMessages,
+					new ErrorMessage(
+						new Date().toISOString(),
+						`Failed to start chat: ${err instanceof Error ? err.message : String(err)}`,
+					),
+				];
+			} finally {
+				deps.composerState.isSubmitting = false;
+			}
+		} else {
+			const selection = deps.modelCatalog.selectionFor(
+				deps.agentState.agentId,
+				deps.agentState.model,
+				deps.agentState.modelEndpointId,
+			);
+			try {
+				await runChat({
+					clientRequestId,
+					clientMessageId,
+					chatId,
+					command: text,
+					images: imagePayload.length > 0 ? imagePayload : undefined,
+					permissionMode: deps.agentState.permissionMode,
+					thinkingMode: deps.agentState.thinkingMode,
+					claudeThinkingMode: 'auto',
+					ampAgentMode: deps.agentState.ampAgentMode,
+					model: selection.model,
+					apiProviderId: selection.apiProviderId,
+					modelEndpointId: selection.modelEndpointId,
+					modelProtocol: selection.modelProtocol,
+				});
+				this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
+				deps.lifecycle.activateLoading();
+				deps.lifecycle.setCanAbort(true);
+				deps.lifecycle.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
+				deps.lifecycle.setCurrentChatId(chatId);
+				deps.sessions.setChatProcessing(chatId, true);
+			} catch (err) {
+				this.#markPendingUserInputDelivery(clientRequestId, 'failed');
+				deps.lifecycle.clearLoading();
+				deps.sessions.setChatProcessing(chatId, false);
+				if (restoreComposerOnFailure) {
+					deps.composerState.inputText = previousText;
+					deps.composerState.images = previousImages;
+					deps.composerState.saveDraft(chatId);
 				}
+				deps.chatState.chatMessages = [
+					...deps.chatState.chatMessages,
+					new ErrorMessage(
+						new Date().toISOString(),
+						`Failed to send message: ${err instanceof Error ? err.message : String(err)}`,
+					),
+				];
+			} finally {
+				deps.composerState.isSubmitting = false;
 			}
 		}
+		}
+
+	#submitFastCommand(chatId: string, mode: FastCommandMode, clearComposer: boolean): void {
+		const { deps } = this;
+		const enabled = mode === 'toggle' ? !deps.localSettings.fastMode : mode === 'enable';
+		deps.localSettings.set('fastMode', enabled);
+
+		if (clearComposer) {
+			deps.composerState.cancelDraftSave(chatId);
+			deps.composerState.inputText = '';
+			deps.composerState.saveDraft(chatId);
+		}
+
+		let switchedModel = false;
+		if (enabled) {
+			const fastModel = fastModeModelValue(
+				deps.modelCatalog.getModels(deps.agentState.agentId),
+				deps.agentState.model,
+			);
+			if (fastModel && fastModel !== deps.agentState.model) {
+				this.handleModelChange(fastModel);
+				switchedModel = deps.agentState.model === fastModel;
+			}
+		}
+
+		const content = enabled
+			? switchedModel
+				? `Fast mode enabled. Switched to ${deps.agentState.model}.`
+				: 'Fast mode enabled.'
+			: 'Fast mode disabled.';
+		deps.chatState.chatMessages = [
+			...deps.chatState.chatMessages,
+			new AssistantMessage(new Date().toISOString(), content),
+		];
+		deps.chatState.isUserScrolledUp = false;
+	}
 
 	async #submitForkCommand(
 		sourceChatId: string,
