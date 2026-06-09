@@ -7,7 +7,9 @@ import {
   getPiPreviewFromSessionPath,
   loadPiChatMessages,
 } from '../pi/history-loader.js';
+import { createPiAgent } from '../pi/index.ts';
 
+const originalPiSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
 let tempRoot;
 
 function assistantMessage(content, timestamp = 1767225602000) {
@@ -39,9 +41,15 @@ async function writeJsonl(fileName, entries) {
 describe('Pi history loader', () => {
   beforeEach(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-pi-history-'));
+    process.env.PI_CODING_AGENT_SESSION_DIR = tempRoot;
   });
 
   afterEach(async () => {
+    if (originalPiSessionDir === undefined) {
+      delete process.env.PI_CODING_AGENT_SESSION_DIR;
+    } else {
+      process.env.PI_CODING_AGENT_SESSION_DIR = originalPiSessionDir;
+    }
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
@@ -152,5 +160,75 @@ describe('Pi history loader', () => {
       lastMessage: 'last answer',
       lastActivity: '2026-01-01T00:00:02.000Z',
     });
+  });
+
+  it('loads persisted Pi history through the registered agent transcript source', async () => {
+    const sessionPath = await writeJsonl('2026-01-01T00-00-00-000Z_session-agent-real.jsonl', [
+      { type: 'session', version: 3, id: 'session-agent-real', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
+      {
+        type: 'message',
+        id: 'user-1',
+        parentId: null,
+        timestamp: '2026-01-01T00:00:01.000Z',
+        message: { role: 'user', content: 'restore real path', timestamp: 1767225601000 },
+      },
+      {
+        type: 'message',
+        id: 'assistant-1',
+        parentId: 'user-1',
+        timestamp: '2026-01-01T00:00:02.000Z',
+        message: assistantMessage([{ type: 'text', text: 'restored answer' }], 1767225602000),
+      },
+    ]);
+    const agent = createPiAgent({});
+
+    const messages = await agent.transcript.loadMessages({
+      agentId: 'pi',
+      agentSessionId: 'session-agent-real',
+      nativePath: sessionPath,
+      projectPath: '/tmp/project',
+    });
+    const preview = await agent.transcript.getPreview({
+      agentId: 'pi',
+      agentSessionId: 'session-agent-real',
+      nativePath: sessionPath,
+      projectPath: '/tmp/project',
+    });
+
+    expect(messages.map((message) => message.content)).toEqual(['restore real path', 'restored answer']);
+    expect(preview).toMatchObject({
+      firstMessage: 'restore real path',
+      lastMessage: 'restored answer',
+    });
+  });
+
+  it('resolves artificial Pi native paths by session id through the agent transcript source', async () => {
+    await writeJsonl('2026-01-01T00-00-00-000Z_session-agent-artificial.jsonl', [
+      { type: 'session', version: 3, id: 'session-agent-artificial', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
+      {
+        type: 'message',
+        id: 'user-1',
+        parentId: null,
+        timestamp: '2026-01-01T00:00:01.000Z',
+        message: { role: 'user', content: 'restore artificial path', timestamp: 1767225601000 },
+      },
+      {
+        type: 'message',
+        id: 'assistant-1',
+        parentId: 'user-1',
+        timestamp: '2026-01-01T00:00:02.000Z',
+        message: assistantMessage([{ type: 'text', text: 'resolved by id' }], 1767225602000),
+      },
+    ]);
+    const agent = createPiAgent({});
+
+    const messages = await agent.transcript.loadMessages({
+      agentId: 'pi',
+      agentSessionId: 'session-agent-artificial',
+      nativePath: '!pi:session-agent-artificial',
+      projectPath: '/tmp/project',
+    });
+
+    expect(messages.map((message) => message.content)).toEqual(['restore artificial path', 'resolved by id']);
   });
 });
