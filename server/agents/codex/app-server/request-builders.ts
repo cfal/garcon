@@ -87,6 +87,7 @@ export function buildThreadForkParams(sourceSession: {
   model?: string | null;
   projectPath: string;
   codexConfig?: CodexProviderConfig;
+  threadSource?: 'user' | 'subagent' | 'memory_consolidation';
 }): Record<string, unknown> {
   const params: Record<string, unknown> = {
     threadId: sourceSession.agentSessionId,
@@ -96,6 +97,7 @@ export function buildThreadForkParams(sourceSession: {
     excludeTurns: true,
   };
   if (sourceSession.codexConfig?.config) params.config = sourceSession.codexConfig.config;
+  if (sourceSession.threadSource) params.threadSource = sourceSession.threadSource;
   return params;
 }
 

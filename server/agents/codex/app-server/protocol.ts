@@ -34,7 +34,9 @@ export interface InitializeResponse {
 
 export interface CodexThread {
   id: string;
+  sessionId?: string;
   forkedFromId: string | null;
+  parentThreadId?: string | null;
   preview: string;
   ephemeral: boolean;
   modelProvider: string;
@@ -45,6 +47,7 @@ export interface CodexThread {
   cwd: string;
   cliVersion: string;
   source: unknown;
+  threadSource?: 'user' | 'subagent' | 'memory_consolidation' | null;
   agentNickname: string | null;
   agentRole: string | null;
   gitInfo: unknown;

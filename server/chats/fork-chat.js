@@ -61,6 +61,7 @@ export async function forkChatFileCopy({
   metadata,
   forkAgentSession,
   supportsFork,
+  threadSource = undefined,
 }) {
   const sourceAgentId = sourceSession.agentId;
   if (supportsFork && !supportsFork(sourceAgentId)) {
@@ -77,7 +78,7 @@ export async function forkChatFileCopy({
   const forkTitle = `${sourceTitle} (${nextForkOrdinal})`;
 
   const nativeFork = forkAgentSession
-    ? await forkAgentSession({ sourceSession, sourceChatId, targetChatId })
+    ? await forkAgentSession({ sourceSession, sourceChatId, targetChatId, threadSource })
     : null;
 
   let newAgentSessionId = nativeFork?.agentSessionId || null;

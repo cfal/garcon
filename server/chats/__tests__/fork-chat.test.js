@@ -260,9 +260,14 @@ describe('forkChatFileCopy', () => {
       settings,
       metadata,
       forkAgentSession,
+      threadSource: 'subagent',
     });
 
-    expect(forkAgentSession).toHaveBeenCalledTimes(1);
+    expect(forkAgentSession).toHaveBeenCalledWith(expect.objectContaining({
+      sourceChatId: '300',
+      targetChatId: '301',
+      threadSource: 'subagent',
+    }));
     expect(result.agentSessionId).toBe('codex-fork-thread');
     expect(result.nativePath).toBe(nativeForkPath);
     expect(registry.getChat('301')).toMatchObject({

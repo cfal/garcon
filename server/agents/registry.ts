@@ -132,6 +132,7 @@ export class AgentRegistry {
     sourceSession: AgentChatEntry;
     sourceChatId: string;
     targetChatId: string;
+    threadSource?: 'user' | 'subagent' | 'memory_consolidation';
   }): Promise<StartedAgentSession | null> {
     return this.#runtime.forkAgentSession(args);
   }

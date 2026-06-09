@@ -47,6 +47,7 @@ interface RunningCodexSession {
 
 interface CodexForkSessionRequest {
   sourceSession: AgentChatEntry;
+  threadSource?: 'user' | 'subagent' | 'memory_consolidation';
   envOverrides?: Record<string, string>;
   codexConfig?: StartSessionRequest['codexConfig'];
 }
@@ -241,6 +242,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         model: sourceSession.model,
         projectPath: sourceSession.projectPath,
         codexConfig: args.codexConfig,
+        threadSource: args.threadSource,
       }));
       await this.#unsubscribeBestEffort(client, forked.thread.id);
       const nativePath = await waitForMaterializedThread(forked.thread, {

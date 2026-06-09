@@ -89,6 +89,8 @@ export interface StartedAgentSession {
   nativePath: string | null;
 }
 
+export type AgentThreadSource = 'user' | 'subagent' | 'memory_consolidation';
+
 // Claude start requires a pre-generated agentSessionId.
 export interface ClaudeStartSessionRequest extends StartSessionRequest {
   agentSessionId: string;

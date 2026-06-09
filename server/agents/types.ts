@@ -5,6 +5,7 @@ import type {
   AgentEventMetadata,
   AgentSessionSettingsPatch,
   CodexProviderConfig,
+  AgentThreadSource,
   ResumeTurnRequest,
   StartSessionRequest,
   StartedAgentSession,
@@ -83,6 +84,7 @@ export interface ForkAgentSessionArgs {
   sourceSession: AgentChatEntry;
   sourceChatId: string;
   targetChatId: string;
+  threadSource?: AgentThreadSource;
   envOverrides?: StartSessionRequest['envOverrides'];
   codexConfig?: StartSessionRequest['codexConfig'];
 }

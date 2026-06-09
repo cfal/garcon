@@ -37,6 +37,7 @@ import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.j
 import { ApiProviderService } from './api-providers/service.js';
 import { CommandLedger } from './commands/command-ledger.js';
 import { ChatCommandService } from './commands/chat-command-service.js';
+import { AgentOrchestrator } from './agents/agent-orchestrator.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
@@ -130,6 +131,17 @@ export async function startServer() {
       queue,
       ledger: commandLedger,
     });
+    const agentOrchestrator = new AgentOrchestrator({
+      workspaceDir,
+      registry: chatRegistry,
+      settings,
+      metadata,
+      queue,
+      agents: agentRegistry,
+      forkChatFileCopy,
+      forkAgentSession: agentRegistry.forkAgentSession.bind(agentRegistry),
+    });
+    await agentOrchestrator.init();
 
     // Telegram notifications wire themselves to agent and queue events.
     const telegramSettings = new TelegramSettingsStore();
@@ -151,7 +163,7 @@ export async function startServer() {
     // Build route and WS handler tables
     const routes = createAllRoutes(
       chatRegistry, settings, queue, pathCache, metadata, historyCache,
-      agentRegistry, pendingInputs, telegramNotifier, telegramSettings, shareStore, apiProviders, chatCommands,
+      agentRegistry, pendingInputs, telegramNotifier, telegramSettings, shareStore, apiProviders, chatCommands, agentOrchestrator,
     );
 
     const chatHandler = new ChatHandler(agentRegistry, queue, historyCache, chatRegistry, pendingInputs, {
@@ -260,6 +272,7 @@ export async function startServer() {
     // HistoryCache's init() already self-wired appendMessages via
     // agentRegistry.onMessages(), so only broadcast wiring is needed here.
     agentRegistry.onMessages((chatId, messages, metadata) => {
+      agentOrchestrator.recordMessages(chatId, messages);
       broadcast(new AgentRunOutputMessage(chatId, messages, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         console.warn('pending-inputs: reconcile after messages failed:', err.message);
@@ -272,6 +285,7 @@ export async function startServer() {
       broadcast(new ChatSessionCreatedMessage(chatId));
     });
     agentRegistry.onFinished((chatId, exitCode, metadata) => {
+      agentOrchestrator.recordFinished(chatId);
       broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         console.warn('pending-inputs: reconcile after finish failed:', err.message);
@@ -285,6 +299,7 @@ export async function startServer() {
       });
     });
     agentRegistry.onFailed((chatId, errorMessage, metadata) => {
+      agentOrchestrator.recordFailed(chatId, errorMessage);
       broadcast(new AgentRunFailedMessage(chatId, errorMessage, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         console.warn('pending-inputs: reconcile after failure failed:', err.message);
@@ -366,6 +381,7 @@ export async function startServer() {
         agentRegistry.shutdown();
         historyCache.destroy();
         await metadata.flush();
+        await agentOrchestrator.flush();
         await chatRegistry.flush();
       } catch (err) {
         console.warn('server: shutdown cleanup error:', err.message);

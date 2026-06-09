@@ -253,6 +253,20 @@ describe('Codex app-server request builders', () => {
     });
   });
 
+  it('marks subagent thread/fork params with the Codex thread source', () => {
+    const params = buildThreadForkParams({
+      agentSessionId: 'thread-1',
+      model: 'gpt-5.4-codex',
+      projectPath: '/repo',
+      threadSource: 'subagent',
+    });
+
+    expect(params).toMatchObject({
+      threadId: 'thread-1',
+      threadSource: 'subagent',
+    });
+  });
+
   it('builds turn/start input and thinking effort', () => {
     const params = buildTurnStartParams({
       threadId: 'thread-1',
@@ -583,6 +597,7 @@ describe('CodexAppServerRuntime', () => {
         model: 'gpt-5.4-codex',
         projectPath: '/repo',
       },
+      threadSource: 'subagent',
       envOverrides: { OPENAI_API_KEY: 'endpoint-key' },
       codexConfig: {
         env: { CODEX_HOME: '/tmp/codex-home' },
@@ -597,6 +612,7 @@ describe('CodexAppServerRuntime', () => {
     });
     expect(operationClient.forkThread).toHaveBeenCalledWith(expect.objectContaining({
       threadId: 'thread-1',
+      threadSource: 'subagent',
       config: { model_provider: 'custom-openai' },
     }));
     expect(operationClient.unsubscribeThread).toHaveBeenCalledWith('forked-thread');

@@ -246,6 +246,7 @@ export class AgentRuntimeRouter {
     sourceSession: AgentChatEntry;
     sourceChatId: string;
     targetChatId: string;
+    threadSource?: 'user' | 'subagent' | 'memory_consolidation';
   }): Promise<StartedAgentSession | null> {
     const agent = this.#directory.get(args.sourceSession.agentId);
     if (!agent?.forkSession) return null;
@@ -264,6 +265,7 @@ export class AgentRuntimeRouter {
         model: selection.model,
         ...selectionRequestFields(selection),
       },
+      threadSource: args.threadSource,
       ...runtimeConfig,
     });
   }
