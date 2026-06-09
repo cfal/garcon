@@ -58,6 +58,11 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 	};
 }
 
+function waitForDialogTeardown(): Promise<void> {
+	// Bits UI restores body scroll styles on a delayed timer after dialog close.
+	return new Promise((resolve) => window.setTimeout(resolve, 30));
+}
+
 describe('NewChatForm', () => {
 	afterEach(async () => {
 		cleanup();
@@ -122,6 +127,12 @@ describe('NewChatForm', () => {
 		const worktreeDialog = await screen.findByRole('dialog', { name: 'Select worktree' });
 		expect(worktreeDialog).toBeTruthy();
 		expect(worktreeDialog.textContent).toContain('New worktree');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		await waitFor(() => {
+			expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull();
+		});
+		await waitForDialogTeardown();
 	});
 
 });
