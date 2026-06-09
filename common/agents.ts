@@ -108,7 +108,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
     authLoginSupported: false,
   },
   pi: {
-    supportsFork: false,
+    supportsFork: true,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],

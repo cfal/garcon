@@ -34,7 +34,7 @@ function piAgent(models: unknown[], defaultModel = ''): unknown {
 		id: 'pi',
 		label: 'Pi',
 		kind: 'agent',
-		supportsFork: false,
+		supportsFork: true,
 		supportsImages: false,
 		acceptsApiProviderEndpoints: false,
 		supportedProtocols: [],
@@ -88,7 +88,7 @@ describe('ModelCatalogStore', () => {
 			expect(store.supportsFork('codex')).toBe(true);
 			expect(store.supportsFork('opencode')).toBe(false);
 			expect(store.supportsFork('cursor')).toBe(false);
-			expect(store.supportsFork('pi')).toBe(false);
+			expect(store.supportsFork('pi')).toBe(true);
 		expect(store.supportsFork('zai')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
 			expect(store.supportsImages('codex')).toBe(true);
@@ -196,7 +196,7 @@ describe('ModelCatalogStore', () => {
 					pi: {
 						id: 'pi',
 						label: 'Pi',
-						supportsFork: false,
+						supportsFork: true,
 						supportsImages: false,
 						acceptsApiProviderEndpoints: false,
 						supportedProtocols: [],
@@ -663,7 +663,7 @@ describe('ModelCatalogStore', () => {
 					pi: {
 						id: 'pi',
 						label: 'Pi',
-						supportsFork: false,
+						supportsFork: true,
 						supportsImages: false,
 						acceptsApiProviderEndpoints: false,
 						supportedProtocols: [],

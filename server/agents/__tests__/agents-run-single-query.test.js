@@ -329,7 +329,7 @@ function makeRegistry(args = {}) {
           authLoginSupported: false,
         }, factoryQuery, args.prepareEndpointRuntimeByAgentId?.factory),
         agentFromRuntime('pi', 'Pi', pi, {
-          supportsFork: false,
+          supportsFork: true,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],

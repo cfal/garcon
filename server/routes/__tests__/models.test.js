@@ -9,7 +9,7 @@ const agentCatalogEntries = [
   { id: 'opencode', label: 'OpenCode', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '', models: [] },
   { id: 'amp', label: 'Amp', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'default', models: [{ value: 'default', label: 'Default' }] },
   { id: 'factory', label: 'Factory', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'claude-opus-4-6', models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4-6' }] },
-  { id: 'pi', label: 'Pi', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'github-copilot/gpt-5.4', models: [{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }] },
+  { id: 'pi', label: 'Pi', kind: 'agent', supportsFork: true, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'github-copilot/gpt-5.4', models: [{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }] },
   { id: 'direct-anthropic-compatible', label: 'Direct (Anthropic)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '', models: [] },
   { id: 'direct-openai-compatible', label: 'Direct (Chat Completions)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
   { id: 'direct-openai-responses-compatible', label: 'Direct (Responses)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
@@ -179,7 +179,7 @@ describe('GET /api/v1/models', () => {
 
     const pi = body.catalog.agents.find((p) => p.id === 'pi');
     expect(pi.label).toBe('Pi');
-    expect(pi.supportsFork).toBe(false);
+    expect(pi.supportsFork).toBe(true);
     expect(pi.supportsImages).toBe(false);
     expect(pi.acceptsApiProviderEndpoints).toBe(false);
     expect(pi.supportedProtocols).toEqual([]);

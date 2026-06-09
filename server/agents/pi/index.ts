@@ -1,4 +1,5 @@
 import { runSingleQuery as runSingleQueryPi, type PiCliRuntime } from './pi-cli.js';
+import { forkPiSession } from './pi-fork.js';
 import { getPiModelsStrict } from './pi-models.js';
 import { findPiSessionFileBySessionId } from './pi-session-paths.js';
 import { getPiAuthStatus } from './pi-auth.js';
@@ -26,13 +27,16 @@ export function createPiAgent(pi: PiCliRuntime): Agent {
     },
     auth: { getAuthStatus: () => getPiAuthStatus() },
     capabilities: createAgentCapabilities({
-      supportsFork: false,
+      supportsFork: true,
       supportsImages: false,
       acceptsApiProviderEndpoints: false,
       supportedProtocols: [],
       authLoginSupported: false,
       getModels: (query) => query?.strict ? getPiModelsStrict() : pi.getModels(),
     }),
+    forkSession({ sourceSession }) {
+      return forkPiSession(sourceSession);
+    },
     runSingleQuery: runSingleQueryPi,
   };
 }

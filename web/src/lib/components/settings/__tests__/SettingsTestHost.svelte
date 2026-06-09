@@ -103,7 +103,7 @@
 			id: 'pi',
 			label: 'Pi',
 			description: '',
-			supportsFork: false,
+			supportsFork: true,
 			supportsImages: false,
 			acceptsApiProviderEndpoints: false,
 			supportedProtocols: [],
