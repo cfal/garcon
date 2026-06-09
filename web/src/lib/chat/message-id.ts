@@ -93,7 +93,10 @@ export function createMessageIdAllocator(): MessageIdAllocator {
 		const base = deriveMessageId(message);
 		let candidate = base;
 
-		if (allocated.has(candidate)) {
+		// Loop until we find an unallocated candidate. A single check is
+		// insufficient because collision suffixes (e.g. msg_abc_1) can
+		// themselves collide with another message's base fingerprint.
+		while (allocated.has(candidate)) {
 			const next = (collisionCounter.get(base) ?? 0) + 1;
 			collisionCounter.set(base, next);
 			candidate = `${base}_${next}`;

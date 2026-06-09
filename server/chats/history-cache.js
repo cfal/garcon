@@ -1,7 +1,7 @@
 // Bounded in-memory cache of ChatMessage[] arrays by chatId. Entries may be
 // full history loads or live tails captured before the user opens a chat.
 
-import { mergeChatMessagesByIdentity } from '../../common/chat-message-identity.js';
+import { mergeChatMessagesByIdentity, chatMessageIdentityTokens } from '../../common/chat-message-identity.js';
 
 const CACHE_LIMIT = 100;
 const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
@@ -86,13 +86,14 @@ export class HistoryCache {
       // when the live tail (agent-only) is used as the base and the full
       // history (user + agent) is merged as incoming.
       messages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+      const deduped = deduplicateMessages(messages);
       this.#cacheByChatId.set(key, {
         chatId: key,
-        messages,
+        messages: deduped,
         completeness: 'full',
         lastAccessAt: Date.now(),
       });
-      return messages;
+      return deduped;
     })();
 
     this.#inFlightLoads.set(key, loadPromise);
@@ -113,7 +114,9 @@ export class HistoryCache {
       this.#cacheByChatId.set(key, entry);
     }
 
-    entry.messages = mergeChatMessages(entry.messages, appendedMessages);
+    entry.messages = deduplicateMessages(
+      mergeChatMessages(entry.messages, appendedMessages),
+    );
     entry.lastAccessAt = Date.now();
 
     try {
@@ -186,4 +189,28 @@ export { CACHE_LIMIT as _CACHE_LIMIT, STALE_NON_ACTIVE_MS as _STALE_NON_ACTIVE_M
 
 function mergeChatMessages(base, incoming, options = {}) {
   return mergeChatMessagesByIdentity(base, incoming ?? [], options);
+}
+
+// Removes duplicate messages from a sorted array. Uses identity tokens
+// (including content tokens) for dedup. Messages with no identity tokens
+// (e.g. user messages without metadata) fall back to type+content+timestamp.
+function deduplicateMessages(messages) {
+  if (messages.length <= 1) return messages;
+  const seen = new Set();
+  const result = [];
+  for (const message of messages) {
+    const tokens = chatMessageIdentityTokens(message, { includeContentToken: true });
+    if (tokens.length === 0) {
+      // Fallback for messages with no identity tokens (user messages
+      // without metadata). Dedup by type + content + timestamp.
+      const type = message.type || '';
+      const content = typeof message.content === 'string' ? message.content.trim() : '';
+      const ts = message.timestamp || '';
+      tokens.push(`${type}:fallback:${content}:${ts}`);
+    }
+    if (tokens.some((token) => seen.has(token))) continue;
+    for (const token of tokens) seen.add(token);
+    result.push(message);
+  }
+  return result;
 }
