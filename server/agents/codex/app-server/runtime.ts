@@ -202,7 +202,15 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
     try {
       const response = await this.#readThread(session.agentSessionId, true);
-      return convertCodexAppServerThread(response.thread);
+      const converted = convertCodexAppServerThread(response.thread);
+      // App-server can return an empty turn list when the rollout file is
+      // missing, corrupted, or the thread was not fully materialized. Fall
+      // back to the JSONL file on disk when it exists.
+      if (converted.length === 0 && session.nativePath) {
+        const jsonlMessages = await this.#loadJsonlMessages(session);
+        if (jsonlMessages.length > 0) return jsonlMessages;
+      }
+      return converted;
     } catch (error) {
       console.warn('codex: app-server thread/read failed, falling back to JSONL:', (error as Error).message);
       return this.#loadJsonlMessages(session);

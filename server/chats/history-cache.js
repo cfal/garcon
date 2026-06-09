@@ -6,7 +6,6 @@ import { mergeChatMessagesByIdentity } from '../../common/chat-message-identity.
 const CACHE_LIMIT = 100;
 const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 5 * 60 * 1000;
-const MAX_MESSAGES_PER_ENTRY = 500;
 
 export class HistoryCache {
   #cacheByChatId = new Map();
@@ -81,10 +80,12 @@ export class HistoryCache {
       const loaded = await this.#loadFromAgent(key);
       const current = this.#cacheByChatId.get(key);
       const liveTail = current?.completeness === 'tail' ? current.messages : [];
-      const messages = trimTail(
-        mergeChatMessages(loaded, liveTail, { includeContentToken: true }),
-        MAX_MESSAGES_PER_ENTRY,
-      );
+      const messages = mergeChatMessages(loaded, liveTail, { includeContentToken: true });
+      // Sort chronologically after merge. mergeChatMessagesByIdentity
+      // preserves base-then-incoming order, which scrambles timestamps
+      // when the live tail (agent-only) is used as the base and the full
+      // history (user + agent) is merged as incoming.
+      messages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
       this.#cacheByChatId.set(key, {
         chatId: key,
         messages,
@@ -112,7 +113,7 @@ export class HistoryCache {
       this.#cacheByChatId.set(key, entry);
     }
 
-    entry.messages = trimTail(mergeChatMessages(entry.messages, appendedMessages), MAX_MESSAGES_PER_ENTRY);
+    entry.messages = mergeChatMessages(entry.messages, appendedMessages);
     entry.lastAccessAt = Date.now();
 
     try {
@@ -181,11 +182,7 @@ export class HistoryCache {
   get _cacheByChatId() { return this.#cacheByChatId; }
 }
 
-export { CACHE_LIMIT as _CACHE_LIMIT, STALE_NON_ACTIVE_MS as _STALE_NON_ACTIVE_MS, MAX_MESSAGES_PER_ENTRY as _MAX_MESSAGES_PER_ENTRY };
-
-function trimTail(messages, maxMessages) {
-  return messages.length > maxMessages ? messages.slice(-maxMessages) : messages;
-}
+export { CACHE_LIMIT as _CACHE_LIMIT, STALE_NON_ACTIVE_MS as _STALE_NON_ACTIVE_MS };
 
 function mergeChatMessages(base, incoming, options = {}) {
   return mergeChatMessagesByIdentity(base, incoming ?? [], options);
