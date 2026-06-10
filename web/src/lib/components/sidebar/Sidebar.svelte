@@ -283,41 +283,9 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		tagDialog = null;
 	}
 
-	// Reorder mode state.
-	let isReorderMode = $state(false);
-	let pendingReorder = $state<{ list: ChatOrderList; oldOrder: string[]; newOrder: string[] } | null>(null);
-
-	function enterReorderMode() {
-		searchState.activeQuery = '';
-		pendingReorder = null;
-		isReorderMode = true;
-	}
-
-	async function exitReorderMode() {
-		const pending = pendingReorder;
-		isReorderMode = false;
-		pendingReorder = null;
-		if (pending) {
-			try {
-				await reorderChats(pending);
-				await onQuietRefresh();
-			} catch (error) {
-				console.error('Failed to save chat order:', error);
-			}
-		}
-	}
-
 	function handlePrimaryAction() {
-		if (isReorderMode) {
-			void exitReorderMode();
-			return;
-		}
 		if (selection.isActive) selection.exit();
 		onNewChat();
-	}
-
-	function handleReorderGroup(list: ChatOrderList, oldOrder: string[], newOrder: string[]) {
-		pendingReorder = { list, oldOrder, newOrder };
 	}
 
 	const immediateReorderQueue = createReorderWriteQueue<ChatOrderList>(
@@ -350,7 +318,6 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 	// Multi-select mode handlers.
 
 	function enterMultiSelect(chatId: string) {
-		if (isReorderMode) return;
 		selection.enter(chatId);
 	}
 
@@ -498,12 +465,6 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			e.stopPropagation();
 			selection.exit();
 		}
-	}
-
-	// Exits multi-select when entering reorder mode.
-	function enterReorderModeClean() {
-		if (selection.isActive) selection.exit();
-		enterReorderMode();
 	}
 
 	async function handleForkChat(sourceChatId: string) {
@@ -703,7 +664,6 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 	<div class="order-1 flex-shrink-0">
 		<SidebarSearchDock
 			{isLoading}
-			{isReorderMode}
 			visibleUnreadCount={visibleUnreadChatIds.length}
 			{isMarkingAllRead}
 			sidebarMenuSearches={searchState.sidebarMenuSearches}
@@ -715,7 +675,6 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			onApplyPillSearch={handleApplySidebarPillSearch}
 			onClearActiveQuery={handleClearActiveQuery}
-			primaryLabel={isReorderMode ? m.sidebar_actions_done_reordering() : undefined}
 			{onShowSettings}
 		/>
 	</div>
@@ -729,13 +688,10 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			{isMobile}
 			{currentTime}
 			searchFilter={searchState.activeQuery}
-			{isReorderMode}
 			isMultiSelectMode={selection.isActive}
 			isMultiSelected={(id) => selection.isSelected(id)}
-			onEnterReorderMode={enterReorderModeClean}
 			onEnterMultiSelect={enterMultiSelect}
 			onMultiSelectToggle={handleMultiSelectToggle}
-			onReorderGroup={handleReorderGroup}
 			onChatSelect={handleChatClick}
 			onDeleteChat={showDeleteConfirmation}
 			onStartRenameChat={startRenameChat}

@@ -8,7 +8,6 @@
 	import Archive from '@lucide/svelte/icons/archive';
 	import Edit2 from '@lucide/svelte/icons/pencil';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
 	import ArrowUpToLine from '@lucide/svelte/icons/arrow-up-to-line';
 	import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
@@ -35,9 +34,9 @@
 		isPinned: boolean;
 		isArchived: boolean;
 		isMobile?: boolean;
-		isReorderMode?: boolean;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
+		enableNativeDrag?: boolean;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
@@ -48,7 +47,6 @@
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
-		onEnterReorderMode?: () => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		hasPinnedChats?: boolean;
@@ -63,9 +61,9 @@
 		isPinned,
 		isArchived,
 		isMobile = false,
-		isReorderMode = false,
 		isMultiSelectMode = false,
 		isMultiSelected = false,
+		enableNativeDrag = true,
 		onChatSelect,
 		onDeleteChat,
 		onStartRenameChat,
@@ -76,7 +74,6 @@
 		onShareChat,
 		onTagClick,
 		onManageTags,
-		onEnterReorderMode,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
 		onMoveToTop,
@@ -87,6 +84,7 @@
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
 	let isSelected = $derived(selectedChatId === session.id);
 	let agentId = $derived(session.agentId || 'claude');
+	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
 
 	function handleItemClick(e: MouseEvent) {
 		if (isMultiSelectMode) {
@@ -285,9 +283,9 @@
 		<div>
 			<Button
 				variant="ghost"
-				draggable={!isMultiSelectMode}
-				ondragstart={isMultiSelectMode ? undefined : handleDragStart}
-				ondragend={isMultiSelectMode ? undefined : handleDragEnd}
+				draggable={canNativeDrag}
+				ondragstart={canNativeDrag ? handleDragStart : undefined}
+				ondragend={canNativeDrag ? handleDragEnd : undefined}
 				oncontextmenu={handleRightClick}
 				class={cn(
 					'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30',
@@ -326,7 +324,7 @@
 					{/if}
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align={isAtCursor ? "start" : "end"}>
-					{#if isReorderMode}
+					{#if onMoveToTop || onMoveToBottom}
 						{#if onMoveToTop}
 							<DropdownMenuItem onclick={onMoveToTop}>
 								<ArrowUpToLine />
@@ -339,57 +337,51 @@
 								{m.sidebar_chats_move_to_bottom()}
 							</DropdownMenuItem>
 						{/if}
-					{:else}
-						<DropdownMenuItem onclick={() => onTogglePinned(session.id)}>
-							<Pin />
-							{isPinned ? m.sidebar_chats_unpin() : m.sidebar_chats_pin()}
-						</DropdownMenuItem>
-						<DropdownMenuItem onclick={() => onToggleArchive(session.id)}>
-							<Archive class={cn(isArchived ? 'text-muted-foreground' : '')} />
-							{isArchived ? m.sidebar_chats_unarchive() : m.sidebar_chats_archive()}
-						</DropdownMenuItem>
-						<DropdownMenuItem onclick={requestRename}>
-							<Edit2 />
-							{m.sidebar_tooltips_edit_chat_name()}
-						</DropdownMenuItem>
-						<DropdownMenuItem onclick={requestDetails}>
-							<Info />
-							{m.sidebar_chats_details()}
-						</DropdownMenuItem>
-						<DropdownMenuItem onclick={() => onShareChat(session.id, chatName)}>
-							<Share2 />
-							{m.share_button()}
-						</DropdownMenuItem>
-						{#if onManageTags}
-							<DropdownMenuItem onclick={() => onManageTags?.(session.id, session.tags)}>
-								<Tag />
-								{m.sidebar_tags_manage()}
-							</DropdownMenuItem>
-						{/if}
-						{#if modelCatalog.supportsFork(session.agentId)}
-							<DropdownMenuItem onclick={() => onForkChat(session.id)}>
-								<Copy />
-								{m.sidebar_chats_fork()}
-							</DropdownMenuItem>
-						{/if}
-						{#if onEnterReorderMode}
-							<DropdownMenuItem onclick={() => onEnterReorderMode?.()}>
-								<ArrowUpDown />
-								{m.sidebar_chats_reorder_chats()}
-							</DropdownMenuItem>
-						{/if}
-						{#if onEnterMultiSelect}
-							<DropdownMenuItem onclick={() => onEnterMultiSelect?.(session.id)}>
-								<CheckSquare />
-								{m.sidebar_select_enter()}
-							</DropdownMenuItem>
-						{/if}
 						<DropdownMenuSeparator />
-						<DropdownMenuItem variant="destructive" onclick={requestDelete}>
-							<Trash2 />
-							{m.sidebar_tooltips_delete_chat()}
+					{/if}
+					<DropdownMenuItem onclick={() => onTogglePinned(session.id)}>
+						<Pin />
+						{isPinned ? m.sidebar_chats_unpin() : m.sidebar_chats_pin()}
+					</DropdownMenuItem>
+					<DropdownMenuItem onclick={() => onToggleArchive(session.id)}>
+						<Archive class={cn(isArchived ? 'text-muted-foreground' : '')} />
+						{isArchived ? m.sidebar_chats_unarchive() : m.sidebar_chats_archive()}
+					</DropdownMenuItem>
+					<DropdownMenuItem onclick={requestRename}>
+						<Edit2 />
+						{m.sidebar_tooltips_edit_chat_name()}
+					</DropdownMenuItem>
+					<DropdownMenuItem onclick={requestDetails}>
+						<Info />
+						{m.sidebar_chats_details()}
+					</DropdownMenuItem>
+					<DropdownMenuItem onclick={() => onShareChat(session.id, chatName)}>
+						<Share2 />
+						{m.share_button()}
+					</DropdownMenuItem>
+					{#if onManageTags}
+						<DropdownMenuItem onclick={() => onManageTags?.(session.id, session.tags)}>
+							<Tag />
+							{m.sidebar_tags_manage()}
 						</DropdownMenuItem>
 					{/if}
+					{#if modelCatalog.supportsFork(session.agentId)}
+						<DropdownMenuItem onclick={() => onForkChat(session.id)}>
+							<Copy />
+							{m.sidebar_chats_fork()}
+						</DropdownMenuItem>
+					{/if}
+					{#if onEnterMultiSelect}
+						<DropdownMenuItem onclick={() => onEnterMultiSelect?.(session.id)}>
+							<CheckSquare />
+							{m.sidebar_select_enter()}
+						</DropdownMenuItem>
+					{/if}
+					<DropdownMenuSeparator />
+					<DropdownMenuItem variant="destructive" onclick={requestDelete}>
+						<Trash2 />
+						{m.sidebar_tooltips_delete_chat()}
+					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
 			</div>

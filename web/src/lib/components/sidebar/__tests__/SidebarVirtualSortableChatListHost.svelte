@@ -1,25 +1,41 @@
 <script lang="ts">
-	import SidebarVirtualChatList from '../SidebarVirtualChatList.svelte';
+	import SidebarVirtualSortableChatList from '../SidebarVirtualSortableChatList.svelte';
+	import { SidebarChatReorderState, type SidebarChatOrderMap } from '../sidebar-chat-reorder-state.svelte';
 	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
 	import type { SidebarVirtualChatRow } from '../sidebar-virtual-chat-list';
+	import type { SidebarChatReorderRequest } from '../sidebar-chat-reorder-state.svelte';
 
-	interface SidebarVirtualChatListHostProps {
+	interface SidebarVirtualSortableChatListHostProps {
 		rows: SidebarVirtualChatRow[];
 		selectedChatId?: string | null;
 		isMobile?: boolean;
+		isFiltered?: boolean;
 		rowHeight?: number;
 		onRegisterRecenter?: (callback: () => void) => void;
+		onPersistReorder?: (request: SidebarChatReorderRequest | null) => void;
 	}
 
 	let {
 		rows,
 		selectedChatId = null,
 		isMobile = false,
+		isFiltered = false,
 		rowHeight,
 		onRegisterRecenter,
-	}: SidebarVirtualChatListHostProps = $props();
+		onPersistReorder = () => {},
+	}: SidebarVirtualSortableChatListHostProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
+	let visibleOrders = $derived.by<SidebarChatOrderMap>(() => ({
+		pinned: rows.filter((row) => row.list === 'pinned').map((row) => row.chat.id),
+		normal: rows.filter((row) => row.list === 'normal').map((row) => row.chat.id),
+		archived: rows.filter((row) => row.list === 'archived').map((row) => row.chat.id),
+	}));
+
+	const reorder = new SidebarChatReorderState({
+		get visibleOrders() { return visibleOrders; },
+		get isFiltered() { return isFiltered; },
+	});
 
 	setAppShell({
 		onSidebarRecenterRequested(callback: () => void) {
@@ -36,6 +52,7 @@
 
 	setSplitLayout({
 		isEnabled: false,
+		draggedChatId: null,
 		startDrag() {},
 		endDrag() {},
 	} as never);
@@ -46,13 +63,16 @@
 	data-testid="virtual-sidebar-viewport"
 	style="height:640px; overflow-y:auto;"
 >
-	<SidebarVirtualChatList
+	<SidebarVirtualSortableChatList
 		{rows}
 		{viewportRef}
 		{selectedChatId}
 		currentTime={new Date('2025-01-01T03:00:00.000Z')}
 		{isMobile}
+		{isFiltered}
 		{rowHeight}
+		{reorder}
+		onPersistReorder={onPersistReorder}
 		onChatSelect={() => {}}
 		onDeleteChat={() => {}}
 		onStartRenameChat={() => {}}
@@ -61,6 +81,5 @@
 		onShowDetails={() => {}}
 		onForkChat={() => {}}
 		onShareChat={() => {}}
-		onEnterReorderMode={() => {}}
 	/>
 </div>

@@ -3,7 +3,7 @@ import { tick } from 'svelte';
 import { describe, expect, it } from 'vitest';
 
 import SidebarChatListHost from './SidebarChatListHost.svelte';
-import SidebarVirtualChatListHost from './SidebarVirtualChatListHost.svelte';
+import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatListHost.svelte';
 import type { SidebarVirtualChatRow } from '../sidebar-virtual-chat-list';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -49,9 +49,9 @@ function makeRows(count: number): SidebarVirtualChatRow[] {
 	});
 }
 
-describe('SidebarVirtualChatList', () => {
+describe('SidebarVirtualSortableChatList', () => {
 	it('renders a bounded visible slice for large chat arrays', () => {
-		render(SidebarVirtualChatListHost, {
+		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(500),
 			rowHeight,
 		});
@@ -59,10 +59,11 @@ describe('SidebarVirtualChatList', () => {
 		expect(screen.getByText('Chat 0')).toBeTruthy();
 		expect(screen.queryByText('Chat 499')).toBeNull();
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
+		expect(screen.getByText('Chat 0').closest('button')?.getAttribute('draggable')).toBe('false');
 	});
 
 	it('updates visible rows when the shared viewport scrolls', async () => {
-		render(SidebarVirtualChatListHost, {
+		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(500),
 			rowHeight,
 		});
@@ -79,7 +80,7 @@ describe('SidebarVirtualChatList', () => {
 	it('scrolls an offscreen selected chat into view on recenter requests', async () => {
 		const callbacks: Array<() => void> = [];
 
-		render(SidebarVirtualChatListHost, {
+		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(500),
 			selectedChatId: 'chat-400',
 			rowHeight,
@@ -94,7 +95,7 @@ describe('SidebarVirtualChatList', () => {
 		expect(viewport.scrollTop).toBeGreaterThan(rowHeight * 350);
 	});
 
-	it('uses virtual rendering above the normal chat-list threshold', () => {
+	it('uses virtual rendering for large normal chat lists', () => {
 		render(SidebarChatListHost, {
 			chats: Array.from({ length: 120 }, (_, index) => makeChat(index)),
 		});
@@ -105,13 +106,27 @@ describe('SidebarVirtualChatList', () => {
 		expect(screen.queryByText('Chat 119')).toBeNull();
 	});
 
-	it('keeps small normal chat lists on the full-render path', () => {
+	it('uses virtual rendering for filtered chat lists', () => {
+		const chats = Array.from({ length: 160 }, (_, index) => makeChat(index));
+		render(SidebarChatListHost, {
+			chats,
+			filteredChats: chats.slice(0, 120),
+			searchFilter: 'Chat',
+		});
+
+		expect(document.querySelector('[data-sidebar-virtual-list]')).toBeTruthy();
+		expect(document.querySelector('[data-sidebar-virtual-list]')?.getAttribute('data-sidebar-filtered')).toBe('true');
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
+		expect(screen.getByText('Chat 0')).toBeTruthy();
+		expect(screen.queryByText('Chat 119')).toBeNull();
+	});
+
+	it('uses virtual rendering for small normal chat lists', () => {
 		render(SidebarChatListHost, {
 			chats: Array.from({ length: 20 }, (_, index) => makeChat(index)),
 		});
 
-		expect(document.querySelector('[data-sidebar-virtual-list]')).toBeNull();
+		expect(document.querySelector('[data-sidebar-virtual-list]')).toBeTruthy();
 		expect(screen.getByText('Chat 0')).toBeTruthy();
-		expect(screen.getByText('Chat 19')).toBeTruthy();
 	});
 });

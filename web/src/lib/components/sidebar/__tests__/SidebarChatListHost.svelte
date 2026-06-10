@@ -10,7 +10,6 @@
 		searchFilter?: string;
 		selectedChatId?: string | null;
 		isMobile?: boolean;
-		isReorderMode?: boolean;
 		onImmediateReorder?: (
 			list: ChatOrderList,
 			oldOrder: string[],
@@ -26,7 +25,6 @@
 		searchFilter = '',
 		selectedChatId = null,
 		isMobile = false,
-		isReorderMode = false,
 		onImmediateReorder = () => {},
 		onQuickMove = () => {},
 	}: SidebarChatListHostProps = $props();
@@ -66,9 +64,6 @@
 		{isMobile}
 		currentTime={new Date('2025-01-01T03:00:00.000Z')}
 		{searchFilter}
-		{isReorderMode}
-		onEnterReorderMode={() => {}}
-		onReorderGroup={() => {}}
 		onChatSelect={() => {}}
 		onDeleteChat={() => {}}
 		onStartRenameChat={() => {}}
@@ -77,7 +72,7 @@
 		onShareChat={() => {}}
 		onTogglePinned={() => {}}
 		onToggleArchive={() => {}}
-			{onImmediateReorder}
-			{onQuickMove}
-		/>
-	</div>
+		{onImmediateReorder}
+		{onQuickMove}
+	/>
+</div>
