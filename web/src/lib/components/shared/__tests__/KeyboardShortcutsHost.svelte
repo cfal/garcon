@@ -9,6 +9,8 @@
 			requestRenameSelectedChat: () => void;
 			requestDeleteSelectedChat: () => void;
 			openSettings: () => void;
+			requestNavigateChatAbove: () => void;
+			requestNavigateChatBelow: () => void;
 		};
 		onToggleCommandMenu?: () => void;
 	}
@@ -30,6 +32,12 @@
 		},
 		get openSettings() {
 			return appShell.openSettings;
+		},
+		get requestNavigateChatAbove() {
+			return appShell.requestNavigateChatAbove;
+		},
+		get requestNavigateChatBelow() {
+			return appShell.requestNavigateChatBelow;
 		},
 	} as never);
 </script>

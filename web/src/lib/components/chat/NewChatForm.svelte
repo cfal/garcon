@@ -207,6 +207,7 @@
 		}
 		if (e.key === 'Escape' && onCancel) {
 			e.preventDefault();
+			e.stopPropagation();
 			onCancel();
 		}
 	}

@@ -163,6 +163,20 @@
 		appShell.openNewChatDialog();
 	}
 
+	// Navigates to the chat above or below the currently selected one.
+	// No-op when no chat is selected or at the list boundary.
+	function navigateChatAdjacent(offset: -1 | 1) {
+		const chatId = sessions.selectedChatId;
+		if (!chatId) return;
+		const order = sessions.order;
+		const idx = order.indexOf(chatId);
+		if (idx < 0) return;
+		const targetId = order[idx + offset];
+		if (!targetId) return;
+		sessions.setSelectedChatId(targetId);
+		goto(`/chat/${targetId}`);
+	}
+
 	// Applies the same store mutations the ChatSessionDeletedWsMessage handler
 	// would apply once the server broadcast arrives. Running it eagerly lets
 	// the sidebar and URL update without waiting for the HTTP round-trip.
@@ -203,7 +217,11 @@
 		appShell.setSidebarOpen(false);
 	}
 
-	onMount(() => appShell.onNewChatRequested(() => handleNewChat()));
+	onMount(() => {
+		appShell.onNewChatRequested(() => handleNewChat());
+		appShell.onNavigateChatAboveRequested(() => navigateChatAdjacent(-1));
+		appShell.onNavigateChatBelowRequested(() => navigateChatAdjacent(1));
+	});
 </script>
 
 	{#if !isMobile}

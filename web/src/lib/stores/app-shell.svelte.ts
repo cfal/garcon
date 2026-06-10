@@ -41,6 +41,8 @@ export class AppShellStore {
 	#deleteSelectedCallbacks = new Set<() => void>();
 	#newChatDialogSeedCallbacks = new Set<() => void>();
 	#sidebarSearchCallbacks = new Set<() => void>();
+	#navigateChatAboveCallbacks = new Set<() => void>();
+	#navigateChatBelowCallbacks = new Set<() => void>();
 
 	openSettings(section: string = 'providers'): void {
 		this.showSettings = true;
@@ -154,6 +156,26 @@ export class AppShellStore {
 	/** Toggles the sidebar search dialog via registered callbacks. */
 	openSidebarSearch(): void {
 		for (const cb of this.#sidebarSearchCallbacks) cb();
+	}
+
+	onNavigateChatAboveRequested(cb: () => void): () => void {
+		this.#navigateChatAboveCallbacks.add(cb);
+		return () => { this.#navigateChatAboveCallbacks.delete(cb); };
+	}
+
+	onNavigateChatBelowRequested(cb: () => void): () => void {
+		this.#navigateChatBelowCallbacks.add(cb);
+		return () => { this.#navigateChatBelowCallbacks.delete(cb); };
+	}
+
+	/** Requests navigation to the chat above the currently selected one. */
+	requestNavigateChatAbove(): void {
+		for (const cb of this.#navigateChatAboveCallbacks) cb();
+	}
+
+	/** Requests navigation to the chat below the currently selected one. */
+	requestNavigateChatBelow(): void {
+		for (const cb of this.#navigateChatBelowCallbacks) cb();
 	}
 }
 

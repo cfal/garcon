@@ -58,6 +58,16 @@
 				appShell.requestDeleteSelectedChat();
 				return;
 			}
+			if (e.ctrlKey && e.shiftKey && key === 'j') {
+				e.preventDefault();
+				appShell.requestNavigateChatAbove();
+				return;
+			}
+			if (e.ctrlKey && e.shiftKey && key === 'l') {
+				e.preventDefault();
+				appShell.requestNavigateChatBelow();
+				return;
+			}
 			if (inEditable) return;
 
 			// Ctrl+, -- open settings
