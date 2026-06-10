@@ -5,9 +5,10 @@
 
 	interface SidebarHostProps {
 		chats?: ChatSessionRecord[];
+		isMobile?: boolean;
 	}
 
-	let { chats = [] }: SidebarHostProps = $props();
+	let { chats = [], isMobile = false }: SidebarHostProps = $props();
 
 	setAppShell({
 		onSidebarRecenterRequested() {
@@ -49,6 +50,7 @@ setReadReceiptOutbox({
 	{chats}
 	selectedChatId={null}
 	isLoading={false}
+	{isMobile}
 	onChatSelect={() => {}}
 	onNewChat={() => {}}
 	onQuietRefresh={() => Promise.resolve()}

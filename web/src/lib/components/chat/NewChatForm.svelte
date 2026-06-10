@@ -75,6 +75,8 @@
 		} else if (e.key === 'Backspace' && !tagInputValue && form.chatTags.length > 0) {
 			form.removeTag(form.chatTags[form.chatTags.length - 1]);
 		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			e.stopPropagation();
 			form.showTagInput = false;
 		}
 	}

@@ -10,6 +10,7 @@
 		filteredChats: ChatSessionRecord[];
 		selectedChatId: string | null;
 		isLoading: boolean;
+		isMobile?: boolean;
 		currentTime: Date;
 		searchFilter: string;
 		isReorderMode: boolean;
@@ -38,6 +39,7 @@
 		filteredChats,
 		selectedChatId,
 		isLoading,
+		isMobile = false,
 		currentTime,
 		searchFilter,
 		isReorderMode,
@@ -71,6 +73,7 @@
 		{filteredChats}
 		{selectedChatId}
 		{isLoading}
+		{isMobile}
 		{currentTime}
 		{searchFilter}
 		{isReorderMode}

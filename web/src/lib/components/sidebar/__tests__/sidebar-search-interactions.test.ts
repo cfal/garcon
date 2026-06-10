@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import SavedSearchEditorDialog from '../SavedSearchEditorDialog.svelte';
 import SavedSearchManagerDialog from '../SavedSearchManagerDialog.svelte';
@@ -50,6 +50,12 @@ function createSavedSearch(id: string, title: string, query: string): SavedChatS
 }
 
 describe('sidebar search interactions', () => {
+	afterEach(async () => {
+		cleanup();
+		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
+	});
+
 	it('opens the highlighted chat from the query input and respects Ctrl-J selection', async () => {
 		const onSelectChat = vi.fn();
 

@@ -236,6 +236,7 @@
 					chats={sessions.orderedChats}
 					selectedChatId={sessions.selectedChatId}
 					isLoading={chatRuntime.isLoadingChats}
+					isMobile={false}
 					onChatSelect={handleChatSelect}
 					onNewChat={handleNewChat}
 					onChatDelete={handleChatDelete}
@@ -266,29 +267,30 @@
 	<div class="mobile-shell flex flex-col w-screen overflow-hidden bg-background text-foreground">
 		{#if appShell.sidebarOpen}
 			<div class="fixed inset-0 z-40">
-					<button
-						class="absolute inset-0 bg-black/50 backdrop-blur-sm"
-						onclick={closeMobileSidebar}
-						aria-label={m.layout_close_sidebar()}
-					></button>
+				<button
+					class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+					onclick={closeMobileSidebar}
+					aria-label={m.layout_close_sidebar()}
+				></button>
 				<div class="absolute inset-y-0 left-0 w-[85%] max-w-sm bg-card shadow-2xl z-50">
-						<Sidebar
-							chats={sessions.orderedChats}
-							selectedChatId={sessions.selectedChatId}
-							isLoading={chatRuntime.isLoadingChats}
-							onChatSelect={(chatId) => {
+					<Sidebar
+						chats={sessions.orderedChats}
+						selectedChatId={sessions.selectedChatId}
+						isLoading={chatRuntime.isLoadingChats}
+						isMobile={true}
+						onChatSelect={(chatId) => {
 							handleChatSelect(chatId);
 							closeMobileSidebar();
 						}}
-							onNewChat={handleNewChat}
-							onChatDelete={handleChatDelete}
-							onLocallyDeleteChat={locallyDeleteChat}
-							onQuietRefresh={quietRefresh}
-							onChatRenamed={handleChatRenamed}
-							onShowSettings={() => appShell.openSettings()}
-						/>
-					</div>
+						onNewChat={handleNewChat}
+						onChatDelete={handleChatDelete}
+						onLocallyDeleteChat={locallyDeleteChat}
+						onQuietRefresh={quietRefresh}
+						onChatRenamed={handleChatRenamed}
+						onShowSettings={() => appShell.openSettings()}
+					/>
 				</div>
+			</div>
 		{/if}
 
 		<div class="flex-1 min-h-0 overflow-hidden">

@@ -60,6 +60,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		chats: ChatSessionRecord[];
 		selectedChatId: string | null;
 		isLoading: boolean;
+		isMobile?: boolean;
 		onChatSelect: (chatId: string) => void;
 		onNewChat: () => void;
 		onChatDelete?: (chatId: string) => void;
@@ -76,6 +77,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		chats,
 		selectedChatId,
 		isLoading,
+		isMobile = false,
 		onChatSelect,
 		onNewChat,
 		onChatDelete,
@@ -718,6 +720,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			filteredChats={searchState.filteredChats}
 			{selectedChatId}
 			{isLoading}
+			{isMobile}
 			{currentTime}
 			searchFilter={searchState.activeQuery}
 			{isReorderMode}

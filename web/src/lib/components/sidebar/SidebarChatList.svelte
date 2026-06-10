@@ -19,6 +19,7 @@
 		filteredChats: ChatSessionRecord[];
 		selectedChatId: string | null;
 		isLoading: boolean;
+		isMobile?: boolean;
 		currentTime: Date;
 		searchFilter: string;
 		isReorderMode: boolean;
@@ -47,6 +48,7 @@
 		filteredChats,
 		selectedChatId,
 		isLoading,
+		isMobile = false,
 		currentTime,
 		searchFilter,
 		isReorderMode,
@@ -263,6 +265,7 @@
 									session={chat}
 									{selectedChatId}
 									{currentTime}
+									{isMobile}
 									isPinned={true}
 									isArchived={false}
 									isReorderMode={true}
@@ -312,6 +315,7 @@
 									session={chat}
 									{selectedChatId}
 									{currentTime}
+									{isMobile}
 									isPinned={false}
 									isArchived={false}
 									isReorderMode={true}
@@ -361,6 +365,7 @@
 									session={chat}
 									{selectedChatId}
 									{currentTime}
+									{isMobile}
 									isPinned={false}
 									isArchived={true}
 									isReorderMode={true}
@@ -399,6 +404,7 @@
 						session={gs}
 						{selectedChatId}
 						{currentTime}
+						{isMobile}
 						isPinned={true}
 						isArchived={false}
 						{isMultiSelectMode}
@@ -435,6 +441,7 @@
 								session={chat}
 								{selectedChatId}
 								{currentTime}
+								{isMobile}
 								isPinned={true}
 								isArchived={false}
 								{isMultiSelectMode}
@@ -465,6 +472,7 @@
 					session={gs}
 					{selectedChatId}
 					{currentTime}
+					{isMobile}
 					isPinned={false}
 					isArchived={false}
 					{isMultiSelectMode}
@@ -501,6 +509,7 @@
 								session={chat}
 								{selectedChatId}
 								{currentTime}
+								{isMobile}
 								isPinned={false}
 								isArchived={false}
 								{isMultiSelectMode}
@@ -530,6 +539,7 @@
 				session={gs}
 				{selectedChatId}
 				{currentTime}
+				{isMobile}
 				isPinned={false}
 				isArchived={true}
 				{isMultiSelectMode}

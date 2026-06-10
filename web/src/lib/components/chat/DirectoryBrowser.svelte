@@ -99,9 +99,13 @@
 		return () => abortController.abort();
 	});
 
-	// Close on Escape key.
+	// Close on Escape key. Stops propagation to prevent the global
+	// Escape-to-abort handler from cancelling a running agent.
 	function handleEscape(e: KeyboardEvent) {
-		if (e.key === 'Escape') onClose();
+		if (e.key === 'Escape') {
+			e.stopPropagation();
+			onClose();
+		}
 	}
 
 	onMount(() => {
