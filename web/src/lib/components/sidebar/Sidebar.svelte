@@ -13,7 +13,7 @@
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { reorderChats } from '$lib/api/chats.js';
-	import type { ChatOrderList } from '$lib/api/chats.js';
+	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
 	import { createReorderWriteQueue } from './reorder-write-queue';
 	import { SidebarController } from './sidebar-controller.svelte';
 	import { SidebarSearchState } from './sidebar-search-state.svelte';
@@ -329,15 +329,21 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		},
 	);
 
-	function handleImmediateReorder(list: ChatOrderList, oldOrder: string[], newOrder: string[]) {
-		immediateReorderQueue.enqueue({ list, oldOrder, newOrder });
+	function handleImmediateReorder(
+		list: ChatOrderList,
+		oldOrder: string[],
+		newOrder: string[],
+		onFailure?: () => void,
+	) {
+		immediateReorderQueue.enqueue({ list, oldOrder, newOrder, onFailure });
 	}
 
-	async function handleQuickMove(chatId: string, chatIdAbove?: string, chatIdBelow?: string) {
+	async function handleQuickMove(chatId: string, target: ReorderQuickTarget) {
 		try {
-			await controller.quickMove(chatId, chatIdAbove, chatIdBelow);
+			await controller.quickMove(chatId, target);
 		} catch (error) {
 			console.error('Failed to quick reorder:', error);
+			throw error;
 		}
 	}
 

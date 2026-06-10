@@ -3,7 +3,7 @@
 	import SidebarChatList from './SidebarChatList.svelte';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatOrderList } from '$lib/api/chats.js';
+	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
 
 	interface SidebarContentProps {
 		chats: ChatSessionRecord[];
@@ -30,8 +30,13 @@
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
-		onImmediateReorder: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
-		onQuickMove: (chatId: string, chatIdAbove?: string, chatIdBelow?: string) => void;
+		onImmediateReorder: (
+			list: ChatOrderList,
+			oldOrder: string[],
+			newOrder: string[],
+			onFailure?: () => void,
+		) => void;
+		onQuickMove: (chatId: string, target: ReorderQuickTarget) => Promise<void> | void;
 	}
 
 	let {

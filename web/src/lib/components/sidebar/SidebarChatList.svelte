@@ -2,21 +2,28 @@
 	import { untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import SidebarChatItem from './SidebarChatItem.svelte';
+	import SidebarSortableChatRow from './SidebarSortableChatRow.svelte';
 	import SidebarVirtualChatList from './SidebarVirtualChatList.svelte';
 	import Search from '@lucide/svelte/icons/search';
-	import GripVertical from '@lucide/svelte/icons/grip-vertical';
 	import { DragDropProvider, PointerSensor } from '@dnd-kit/svelte';
-	import { createSortable } from '@dnd-kit/svelte/sortable';
-	import { resolveReorderIndices, hasSortableShape, type DragEndLike } from './drag-reorder';
+	import {
+		arraysEqual,
+		previewReorder,
+		type DragEndLike,
+	} from './drag-reorder';
+	import {
+		SidebarChatReorderState,
+		type SidebarChatOrderMap,
+		type SidebarChatReorderRequest,
+	} from './sidebar-chat-reorder-state.svelte';
 	import type { SidebarVirtualChatRow } from './sidebar-virtual-chat-list';
-
-	const implicitDragSensors = [PointerSensor.configure({ preventActivation: () => false })];
-	import type { Action } from 'svelte/action';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatOrderList } from '$lib/api/chats.js';
+	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
 
+	const implicitDragSensors = [PointerSensor.configure({ preventActivation: () => false })];
 	const VIRTUALIZATION_THRESHOLD = 80;
+
 	interface SidebarChatListProps {
 		viewportRef?: HTMLElement | null;
 		chats: ChatSessionRecord[];
@@ -43,8 +50,13 @@
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
-		onImmediateReorder: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
-		onQuickMove: (chatId: string, chatIdAbove?: string, chatIdBelow?: string) => void;
+		onImmediateReorder: (
+			list: ChatOrderList,
+			oldOrder: string[],
+			newOrder: string[],
+			onFailure?: () => void,
+		) => void;
+		onQuickMove: (chatId: string, target: ReorderQuickTarget) => Promise<void> | void;
 	}
 
 	let {
@@ -78,48 +90,67 @@
 	}: SidebarChatListProps = $props();
 
 	let showChats = $derived(!isLoading && chats.length > 0 && filteredChats.length > 0);
-	// Chats are sorted by recent activity; flat list is always used.
-	// Normal-mode drag is disabled while a search filter is active.
 	let isFiltered = $derived(searchFilter.trim().length > 0);
 
-	// Partition all chats in a single pass.
-	let allPartitioned = $derived.by(() => {
-		const pinned: typeof chats = [];
-		const normal: typeof chats = [];
-		const archived: typeof chats = [];
-		for (const s of chats) {
-			if (s.isPinned) pinned.push(s);
-			else if (s.isArchived) archived.push(s);
-			else normal.push(s);
-		}
-		return { pinned, normal, archived, hasPinned: pinned.length > 0 };
-	});
-
-	// Partition filtered chats in a single pass.
-	let filteredPartitioned = $derived.by(() => {
-		const pinned: typeof filteredChats = [];
-		const normal: typeof filteredChats = [];
-		const archived: typeof filteredChats = [];
-		for (const s of filteredChats) {
-			if (s.isPinned) pinned.push(s);
-			else if (s.isArchived) archived.push(s);
-			else normal.push(s);
-		}
-		return { pinned, normal, archived };
-	});
+	let allPartitioned = $derived.by(() => partitionChats(chats));
+	let filteredPartitioned = $derived.by(() => partitionChats(filteredChats));
 
 	let hasPinnedChats = $derived(allPartitioned.hasPinned);
 	let pinnedAll = $derived(allPartitioned.pinned);
-	let pinnedFiltered = $derived(filteredPartitioned.pinned);
 	let normalAll = $derived(allPartitioned.normal);
-	let normal = $derived(filteredPartitioned.normal);
 	let archivedAll = $derived(allPartitioned.archived);
-	let archived = $derived(filteredPartitioned.archived);
+	let pinnedFiltered = $derived(filteredPartitioned.pinned);
+	let normalFiltered = $derived(filteredPartitioned.normal);
+	let archivedFiltered = $derived(filteredPartitioned.archived);
 	let displayedPinned = $derived(isFiltered ? pinnedFiltered : pinnedAll);
-	let displayedNormal = $derived(isFiltered ? normal : normalAll);
-	let displayedArchived = $derived(isFiltered ? archived : archivedAll);
+	let displayedNormal = $derived(isFiltered ? normalFiltered : normalAll);
+	let displayedArchived = $derived(isFiltered ? archivedFiltered : archivedAll);
 	let virtualRows = $derived.by(() => toVirtualRows(displayedPinned, displayedNormal, displayedArchived));
-	let useVirtualList = $derived(virtualRows.length > VIRTUALIZATION_THRESHOLD);
+	let useVirtualList = $derived(!isFiltered && virtualRows.length > VIRTUALIZATION_THRESHOLD);
+
+	let pinnedDraftOrder = $state<string[]>([]);
+	let normalDraftOrder = $state<string[]>([]);
+	let archivedDraftOrder = $state<string[]>([]);
+	let draftSnapshotByList = $state<Partial<SidebarChatOrderMap>>({});
+
+	let pinnedById = $derived(new Map(pinnedAll.map((chat) => [chat.id, chat])));
+	let normalById = $derived(new Map(normalAll.map((chat) => [chat.id, chat])));
+	let archivedById = $derived(new Map(archivedAll.map((chat) => [chat.id, chat])));
+	let visibleOrders = $derived<SidebarChatOrderMap>({
+		pinned: displayedPinned.map((chat) => chat.id),
+		normal: displayedNormal.map((chat) => chat.id),
+		archived: displayedArchived.map((chat) => chat.id),
+	});
+
+	const normalReorder = new SidebarChatReorderState({
+		get visibleOrders() { return visibleOrders; },
+		get isFiltered() { return isFiltered; },
+	});
+
+	$effect(() => {
+		normalReorder.reconcile();
+	});
+
+	$effect(() => {
+		if (isReorderMode) {
+			pinnedDraftOrder = untrack(() => pinnedAll.map((chat) => chat.id));
+			normalDraftOrder = untrack(() => normalAll.map((chat) => chat.id));
+			archivedDraftOrder = untrack(() => archivedAll.map((chat) => chat.id));
+			draftSnapshotByList = {};
+		}
+	});
+
+	function partitionChats(source: ChatSessionRecord[]) {
+		const pinned: ChatSessionRecord[] = [];
+		const normal: ChatSessionRecord[] = [];
+		const archived: ChatSessionRecord[] = [];
+		for (const chat of source) {
+			if (chat.isPinned) pinned.push(chat);
+			else if (chat.isArchived) archived.push(chat);
+			else normal.push(chat);
+		}
+		return { pinned, normal, archived, hasPinned: pinned.length > 0 };
+	}
 
 	function toVirtualRows(
 		pinnedRows: ChatSessionRecord[],
@@ -160,280 +191,244 @@
 		return rows;
 	}
 
-	// Reorder mode: draft ordering for each group.
-	let pinnedDraftOrder = $state<string[]>([]);
-	let normalDraftOrder = $state<string[]>([]);
-	let archivedDraftOrder = $state<string[]>([]);
-
-	$effect(() => {
-		if (isReorderMode) {
-			pinnedDraftOrder = untrack(() => pinnedAll.map((s) => s.id));
-			normalDraftOrder = untrack(() => normalAll.map((s) => s.id));
-			archivedDraftOrder = untrack(() => archivedAll.map((s) => s.id));
-		}
-	});
-
-	let pinnedById = $derived(new Map(pinnedAll.map((s) => [s.id, s])));
-	let normalById = $derived(new Map(normalAll.map((s) => [s.id, s])));
-	let archivedById = $derived(new Map(archivedAll.map((s) => [s.id, s])));
-
-	function reorderArray(ids: string[], from: number, to: number): string[] {
-		if (from === to) return ids;
-		const next = [...ids];
-		const [moved] = next.splice(from, 1);
-		next.splice(to, 0, moved);
-		return next;
+	function getDraftOrder(list: ChatOrderList): string[] {
+		if (list === 'pinned') return pinnedDraftOrder;
+		if (list === 'archived') return archivedDraftOrder;
+		return normalDraftOrder;
 	}
 
-	function moveToTop(list: ChatOrderList, chatId: string) {
-		const getDraft = () => list === 'pinned' ? pinnedDraftOrder : list === 'normal' ? normalDraftOrder : archivedDraftOrder;
-		const draft = getDraft();
+	function setDraftOrder(list: ChatOrderList, order: string[]): void {
+		if (list === 'pinned') pinnedDraftOrder = order;
+		else if (list === 'archived') archivedDraftOrder = order;
+		else normalDraftOrder = order;
+	}
+
+	function chatById(list: ChatOrderList, chatId: string): ChatSessionRecord | undefined {
+		if (list === 'pinned') return pinnedById.get(chatId);
+		if (list === 'archived') return archivedById.get(chatId);
+		return normalById.get(chatId);
+	}
+
+	function moveToTop(list: ChatOrderList, chatId: string): void {
+		const draft = getDraftOrder(list);
 		const idx = draft.indexOf(chatId);
 		if (idx <= 0) return;
 		const next = [chatId, ...draft.filter((id) => id !== chatId)];
-		if (list === 'pinned') pinnedDraftOrder = next;
-		else if (list === 'normal') normalDraftOrder = next;
-		else archivedDraftOrder = next;
+		setDraftOrder(list, next);
 		onReorderGroup(list, draft, next);
 	}
 
-	function moveToBottom(list: ChatOrderList, chatId: string) {
-		const getDraft = () => list === 'pinned' ? pinnedDraftOrder : list === 'normal' ? normalDraftOrder : archivedDraftOrder;
-		const draft = getDraft();
+	function moveToBottom(list: ChatOrderList, chatId: string): void {
+		const draft = getDraftOrder(list);
 		const idx = draft.indexOf(chatId);
 		if (idx < 0 || idx === draft.length - 1) return;
 		const next = [...draft.filter((id) => id !== chatId), chatId];
-		if (list === 'pinned') pinnedDraftOrder = next;
-		else if (list === 'normal') normalDraftOrder = next;
-		else archivedDraftOrder = next;
+		setDraftOrder(list, next);
 		onReorderGroup(list, draft, next);
 	}
 
-	function handleReorderDragEnd(list: ChatOrderList, event: DragEndLike) {
-		const getDraft = () => list === 'pinned' ? pinnedDraftOrder : list === 'normal' ? normalDraftOrder : archivedDraftOrder;
-		const draft = getDraft();
-		const source = event?.operation?.source;
-		const target = event?.operation?.target;
-		if (!source || !target || !hasSortableShape(source) || !hasSortableShape(target)) return;
-		// Uses dnd-kit-consistent index resolution to avoid stale projected
-		// indices causing "no movement" drags and wrong drop destinations.
-		const indices = resolveReorderIndices(event, draft);
-		if (!indices) return;
-		const next = reorderArray(draft, indices.from, indices.to);
-		if (list === 'pinned') pinnedDraftOrder = next;
-		else if (list === 'normal') normalDraftOrder = next;
-		else archivedDraftOrder = next;
-		onReorderGroup(list, draft, next);
+	function handleDraftDragStart(list: ChatOrderList): void {
+		draftSnapshotByList = {
+			...draftSnapshotByList,
+			[list]: [...getDraftOrder(list)],
+		};
 	}
 
-	// Normal-mode drag state. During a drag the local override takes
-	// precedence so the UI doesn't jump. Outside of a drag, rendering
-	// uses server-derived order directly to avoid stale-effect bugs.
-	let pinnedDragOverride = $state<string[] | null>(null);
-	let normalDragOverride = $state<string[] | null>(null);
-
-	let pinnedLocalOrder = $derived(pinnedDragOverride ?? pinnedAll.map((s) => s.id));
-	let normalLocalOrder = $derived(normalDragOverride ?? normalAll.map((s) => s.id));
-
-	function handleNormalDragStart() {
-		pinnedDragOverride = pinnedAll.map((s) => s.id);
-		normalDragOverride = normalAll.map((s) => s.id);
+	function handleDraftDragOver(list: ChatOrderList, event: DragEndLike): void {
+		const current = getDraftOrder(list);
+		const next = previewReorder(event, current);
+		if (!next || arraysEqual(next, current)) return;
+		setDraftOrder(list, next);
 	}
 
-	function handleNormalPinnedDragEnd(event: DragEndLike) {
-		const current = pinnedDragOverride ?? pinnedAll.map((s) => s.id);
-		pinnedDragOverride = null;
-		normalDragOverride = null;
-		const source = event?.operation?.source;
-		const target = event?.operation?.target;
-		if (!source || !target || !hasSortableShape(source) || !hasSortableShape(target)) return;
-		const indices = resolveReorderIndices(event, current);
-		if (!indices) return;
-		const oldOrder = [...current];
-		const next = reorderArray(current, indices.from, indices.to);
-		onImmediateReorder('pinned', oldOrder, next);
+	function handleDraftDragEnd(list: ChatOrderList, event: DragEndLike): void {
+		const snapshot = draftSnapshotByList[list] ?? getDraftOrder(list);
+		const current = getDraftOrder(list);
+		const nextSnapshots = { ...draftSnapshotByList };
+		delete nextSnapshots[list];
+		draftSnapshotByList = nextSnapshots;
+
+		if (event.canceled) {
+			setDraftOrder(list, snapshot);
+			return;
+		}
+
+		const finalOrder = arraysEqual(snapshot, current)
+			? (previewReorder(event, current) ?? current)
+			: current;
+		if (arraysEqual(snapshot, finalOrder)) return;
+		setDraftOrder(list, finalOrder);
+		onReorderGroup(list, snapshot, finalOrder);
 	}
 
-	function handleNormalNormalDragEnd(event: DragEndLike) {
-		const current = normalDragOverride ?? normalAll.map((s) => s.id);
-		pinnedDragOverride = null;
-		normalDragOverride = null;
-		const source = event?.operation?.source;
-		const target = event?.operation?.target;
-		if (!source || !target || !hasSortableShape(source) || !hasSortableShape(target)) return;
-		const indices = resolveReorderIndices(event, current);
-		if (!indices) return;
-		const oldOrder = [...current];
-		const next = reorderArray(current, indices.from, indices.to);
-		onImmediateReorder('normal', oldOrder, next);
+	function handleNormalDragEnd(list: ChatOrderList, event: DragEndLike): void {
+		persistReorderRequest(normalReorder.finish(list, event));
+	}
+
+	function persistReorderRequest(request: SidebarChatReorderRequest | null): void {
+		if (!request) return;
+		if (request.kind === 'window') {
+			onImmediateReorder(
+				request.list,
+				request.oldOrder,
+				request.newOrder,
+				() => normalReorder.rollbackIfCurrent(request.list, request.newOrder),
+			);
+			return;
+		}
+
+		void Promise.resolve(onQuickMove(request.chatId, request.target))
+			.catch(() => normalReorder.rollbackIfCurrent(request.list, request.visibleOrder));
 	}
 </script>
 
 {#if isLoading}
-	<div class="h-full flex items-center justify-center px-4">
-		<div class="text-center w-full max-w-xs">
-			<div class="w-12 h-12 bg-muted rounded-lg flex items-center justify-center mx-auto mb-4 md:mb-3">
-				<div class="w-6 h-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent"></div>
+	<div class="flex h-full items-center justify-center px-4">
+		<div class="w-full max-w-xs text-center">
+			<div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted md:mb-3">
+				<div class="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent"></div>
 			</div>
-			<h3 class="text-base font-medium text-foreground mb-2 md:mb-1">{m.sidebar_chats_loading_chats()}</h3>
+			<h3 class="mb-2 text-base font-medium text-foreground md:mb-1">{m.sidebar_chats_loading_chats()}</h3>
 			<p class="text-sm text-muted-foreground">{m.sidebar_chats_fetching_chats()}</p>
 		</div>
 	</div>
 {:else if !showChats}
-	<div class="text-center py-12 md:py-8 px-4">
-		<div class="w-12 h-12 bg-muted rounded-lg flex items-center justify-center mx-auto mb-4 md:mb-3">
-			<Search class="w-6 h-6 text-muted-foreground" />
+	<div class="px-4 py-12 text-center md:py-8">
+		<div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted md:mb-3">
+			<Search class="h-6 w-6 text-muted-foreground" />
 		</div>
-		<h3 class="text-base font-medium text-foreground mb-2 md:mb-1">{m.sidebar_chats_no_matching_chats()}</h3>
+		<h3 class="mb-2 text-base font-medium text-foreground md:mb-1">{m.sidebar_chats_no_matching_chats()}</h3>
 		<p class="text-sm text-muted-foreground">{m.sidebar_chats_try_different_search()}</p>
 	</div>
 {:else if isReorderMode}
 	<div class="h-full pb-28 md:pb-4">
 		{#if pinnedDraftOrder.length > 0}
-			<div class="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+			<div class="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				{m.sidebar_chats_reordering_pinned()}
 			</div>
-			<DragDropProvider onDragEnd={(e) => handleReorderDragEnd('pinned', e)}>
+			<DragDropProvider
+				sensors={implicitDragSensors}
+				onDragStart={() => handleDraftDragStart('pinned')}
+				onDragOver={(event) => handleDraftDragOver('pinned', event)}
+				onDragEnd={(event) => handleDraftDragEnd('pinned', event)}
+			>
 				{#each pinnedDraftOrder as chatId, idx (chatId)}
-					{@const chat = pinnedById.get(chatId)}
+					{@const chat = chatById('pinned', chatId)}
 					{#if chat}
-						{@const sortable = createSortable({ id: chat.id, index: idx, group: 'chat-group-pinned' })}
-						{@const attach = sortable.attach as unknown as Action}
-						{@const attachHandle = sortable.attachHandle as unknown as Action}
-						<div class="relative flex items-stretch" use:attach>
-							<button
-								type="button"
-								class="flex items-center justify-center w-8 shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground transition-colors"
-								use:attachHandle
-								aria-label="Drag to reorder"
-							>
-								<GripVertical class="w-4 h-4" />
-							</button>
-							<div class="flex-1 min-w-0">
-								<SidebarChatItem
-									session={chat}
-									{selectedChatId}
-									{currentTime}
-									{isMobile}
-									isPinned={true}
-									isArchived={false}
-									isReorderMode={true}
-									{onChatSelect}
-									{onDeleteChat}
-									{onStartRenameChat}
-										{onTogglePinned}
-										{onToggleArchive}
-										{onShowDetails}
-										{onForkChat}
-									{onShareChat}
-									{onTagClick}
-									{onManageTags}
-										{onEnterReorderMode}
-									onMoveToTop={idx > 0 ? () => moveToTop('pinned', chatId) : undefined}
-									onMoveToBottom={idx < pinnedDraftOrder.length - 1 ? () => moveToBottom('pinned', chatId) : undefined}
-								/>
-							</div>
-						</div>
+						<SidebarSortableChatRow
+							{chat}
+							index={idx}
+							group="chat-group-pinned"
+							{selectedChatId}
+							{currentTime}
+							{isMobile}
+							isPinned={true}
+							isArchived={false}
+							isReorderMode={true}
+							showHandle={true}
+							{onChatSelect}
+							{onDeleteChat}
+							{onStartRenameChat}
+							{onTogglePinned}
+							{onToggleArchive}
+							{onShowDetails}
+							{onForkChat}
+							{onShareChat}
+							{onTagClick}
+							{onManageTags}
+							{onEnterReorderMode}
+							onMoveToTop={idx > 0 ? () => moveToTop('pinned', chatId) : undefined}
+							onMoveToBottom={idx < pinnedDraftOrder.length - 1 ? () => moveToBottom('pinned', chatId) : undefined}
+							{hasPinnedChats}
+						/>
 					{/if}
 				{/each}
 			</DragDropProvider>
 		{/if}
 
 		{#if normalDraftOrder.length > 0}
-			<div class="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+			<div class="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				{m.sidebar_chats_reordering_normal()}
 			</div>
-			<DragDropProvider onDragEnd={(e) => handleReorderDragEnd('normal', e)}>
+			<DragDropProvider
+				sensors={implicitDragSensors}
+				onDragStart={() => handleDraftDragStart('normal')}
+				onDragOver={(event) => handleDraftDragOver('normal', event)}
+				onDragEnd={(event) => handleDraftDragEnd('normal', event)}
+			>
 				{#each normalDraftOrder as chatId, idx (chatId)}
-					{@const chat = normalById.get(chatId)}
+					{@const chat = chatById('normal', chatId)}
 					{#if chat}
-						{@const sortable = createSortable({ id: chat.id, index: idx, group: 'chat-group-normal' })}
-						{@const attach = sortable.attach as unknown as Action}
-						{@const attachHandle = sortable.attachHandle as unknown as Action}
-						<div class="relative flex items-stretch" use:attach>
-							<button
-								type="button"
-								class="flex items-center justify-center w-8 shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground transition-colors"
-								use:attachHandle
-								aria-label="Drag to reorder"
-							>
-								<GripVertical class="w-4 h-4" />
-							</button>
-							<div class="flex-1 min-w-0">
-								<SidebarChatItem
-									session={chat}
-									{selectedChatId}
-									{currentTime}
-									{isMobile}
-									isPinned={false}
-									isArchived={false}
-									isReorderMode={true}
-									{onChatSelect}
-									{onDeleteChat}
-									{onStartRenameChat}
-										{onTogglePinned}
-										{onToggleArchive}
-										{onShowDetails}
-										{onForkChat}
-									{onShareChat}
-									{onTagClick}
-									{onManageTags}
-										{onEnterReorderMode}
-									onMoveToTop={idx > 0 ? () => moveToTop('normal', chatId) : undefined}
-									onMoveToBottom={idx < normalDraftOrder.length - 1 ? () => moveToBottom('normal', chatId) : undefined}
-								/>
-							</div>
-						</div>
+						<SidebarSortableChatRow
+							{chat}
+							index={idx}
+							group="chat-group-normal"
+							{selectedChatId}
+							{currentTime}
+							{isMobile}
+							isPinned={false}
+							isArchived={false}
+							isReorderMode={true}
+							showHandle={true}
+							{onChatSelect}
+							{onDeleteChat}
+							{onStartRenameChat}
+							{onTogglePinned}
+							{onToggleArchive}
+							{onShowDetails}
+							{onForkChat}
+							{onShareChat}
+							{onTagClick}
+							{onManageTags}
+							{onEnterReorderMode}
+							onMoveToTop={idx > 0 ? () => moveToTop('normal', chatId) : undefined}
+							onMoveToBottom={idx < normalDraftOrder.length - 1 ? () => moveToBottom('normal', chatId) : undefined}
+							{hasPinnedChats}
+						/>
 					{/if}
 				{/each}
 			</DragDropProvider>
 		{/if}
 
 		{#if archivedDraftOrder.length > 0}
-			<div class="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+			<div class="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				{m.sidebar_chats_reordering_archived()}
 			</div>
-			<DragDropProvider onDragEnd={(e) => handleReorderDragEnd('archived', e)}>
+			<DragDropProvider
+				sensors={implicitDragSensors}
+				onDragStart={() => handleDraftDragStart('archived')}
+				onDragOver={(event) => handleDraftDragOver('archived', event)}
+				onDragEnd={(event) => handleDraftDragEnd('archived', event)}
+			>
 				{#each archivedDraftOrder as chatId, idx (chatId)}
-					{@const chat = archivedById.get(chatId)}
+					{@const chat = chatById('archived', chatId)}
 					{#if chat}
-						{@const sortable = createSortable({ id: chat.id, index: idx, group: 'chat-group-archived' })}
-						{@const attach = sortable.attach as unknown as Action}
-						{@const attachHandle = sortable.attachHandle as unknown as Action}
-						<div class="relative flex items-stretch" use:attach>
-							<button
-								type="button"
-								class="flex items-center justify-center w-8 shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground transition-colors"
-								use:attachHandle
-								aria-label="Drag to reorder"
-							>
-								<GripVertical class="w-4 h-4" />
-							</button>
-							<div class="flex-1 min-w-0">
-								<SidebarChatItem
-									session={chat}
-									{selectedChatId}
-									{currentTime}
-									{isMobile}
-									isPinned={false}
-									isArchived={true}
-									isReorderMode={true}
-									{onChatSelect}
-									{onDeleteChat}
-									{onStartRenameChat}
-										{onTogglePinned}
-										{onToggleArchive}
-										{onShowDetails}
-										{onForkChat}
-									{onShareChat}
-									{onTagClick}
-									{onManageTags}
-										{onEnterReorderMode}
-									onMoveToTop={idx > 0 ? () => moveToTop('archived', chatId) : undefined}
-									onMoveToBottom={idx < archivedDraftOrder.length - 1 ? () => moveToBottom('archived', chatId) : undefined}
-								/>
-							</div>
-						</div>
+						<SidebarSortableChatRow
+							{chat}
+							index={idx}
+							group="chat-group-archived"
+							{selectedChatId}
+							{currentTime}
+							{isMobile}
+							isPinned={false}
+							isArchived={true}
+							isReorderMode={true}
+							showHandle={true}
+							{onChatSelect}
+							{onDeleteChat}
+							{onStartRenameChat}
+							{onTogglePinned}
+							{onToggleArchive}
+							{onShowDetails}
+							{onForkChat}
+							{onShareChat}
+							{onTagClick}
+							{onManageTags}
+							{onEnterReorderMode}
+							onMoveToTop={idx > 0 ? () => moveToTop('archived', chatId) : undefined}
+							onMoveToBottom={idx < archivedDraftOrder.length - 1 ? () => moveToBottom('archived', chatId) : undefined}
+							{hasPinnedChats}
+						/>
 					{/if}
 				{/each}
 			</DragDropProvider>
@@ -469,169 +464,210 @@
 		{onMultiSelectToggle}
 		{hasPinnedChats}
 	/>
-{:else}
+{:else if isMultiSelectMode}
 	<div class="h-full pb-28 md:pb-4">
-			{#if isFiltered}
-				{#each pinnedFiltered as gs (gs.id)}
-					<SidebarChatItem
-						session={gs}
-						{selectedChatId}
-						{currentTime}
-						{isMobile}
-						isPinned={true}
-						isArchived={false}
-						{isMultiSelectMode}
-						isMultiSelected={isMultiSelected?.(gs.id) ?? false}
-						{onChatSelect}
-						{onDeleteChat}
-						{onStartRenameChat}
-							{onTogglePinned}
-							{onToggleArchive}
-							{onShowDetails}
-							{onForkChat}
-									{onShareChat}
-									{onTagClick}
-									{onManageTags}
-							{onEnterReorderMode}
-						{onEnterMultiSelect}
-						{onMultiSelectToggle}
-						{hasPinnedChats}
-					/>
-				{/each}
-			{:else if pinnedLocalOrder.length > 0}
-				<DragDropProvider
-					sensors={implicitDragSensors}
-					onDragStart={handleNormalDragStart}
-					onDragEnd={handleNormalPinnedDragEnd}
-				>
-					{#each pinnedLocalOrder as chatId, idx (chatId)}
-						{@const chat = pinnedById.get(chatId)}
-					{#if chat}
-						{@const sortable = createSortable({ id: chat.id, index: idx, group: 'pinned-normal' })}
-						{@const attach = sortable.attach as unknown as Action}
-						<div use:attach>
-							<SidebarChatItem
-								session={chat}
-								{selectedChatId}
-								{currentTime}
-								{isMobile}
-								isPinned={true}
-								isArchived={false}
-								{isMultiSelectMode}
-								isMultiSelected={isMultiSelected?.(chat.id) ?? false}
-								{onChatSelect}
-								{onDeleteChat}
-								{onStartRenameChat}
-								{onTogglePinned}
-								{onToggleArchive}
-								{onShowDetails}
-								{onForkChat}
-									{onShareChat}
-									{onTagClick}
-									{onManageTags}
-								{onEnterReorderMode}
-								{onEnterMultiSelect}
-								{onMultiSelectToggle}
-								{hasPinnedChats}
-							/>
-						</div>
-					{/if}
-				{/each}
-			</DragDropProvider>
-		{/if}
-		{#if isFiltered}
-			{#each normal as gs (gs.id)}
-				<SidebarChatItem
-					session={gs}
-					{selectedChatId}
-					{currentTime}
-					{isMobile}
-					isPinned={false}
-					isArchived={false}
-					{isMultiSelectMode}
-					isMultiSelected={isMultiSelected?.(gs.id) ?? false}
-					{onChatSelect}
-					{onDeleteChat}
-					{onStartRenameChat}
-						{onTogglePinned}
-						{onToggleArchive}
-						{onShowDetails}
-						{onForkChat}
-									{onShareChat}
-									{onTagClick}
-									{onManageTags}
-						{onEnterReorderMode}
-					{onEnterMultiSelect}
-					{onMultiSelectToggle}
-					{hasPinnedChats}
-				/>
-			{/each}
-		{:else if normalLocalOrder.length > 0}
-			<DragDropProvider
-				sensors={implicitDragSensors}
-				onDragStart={handleNormalDragStart}
-				onDragEnd={handleNormalNormalDragEnd}
-			>
-				{#each normalLocalOrder as chatId, idx (chatId)}
-					{@const chat = normalById.get(chatId)}
-					{#if chat}
-						{@const sortable = createSortable({ id: chat.id, index: idx, group: 'normal-normal' })}
-						{@const attach = sortable.attach as unknown as Action}
-						<div use:attach>
-							<SidebarChatItem
-								session={chat}
-								{selectedChatId}
-								{currentTime}
-								{isMobile}
-								isPinned={false}
-								isArchived={false}
-								{isMultiSelectMode}
-								isMultiSelected={isMultiSelected?.(chat.id) ?? false}
-								{onChatSelect}
-								{onDeleteChat}
-								{onStartRenameChat}
-									{onTogglePinned}
-									{onToggleArchive}
-									{onShowDetails}
-									{onForkChat}
-									{onShareChat}
-									{onTagClick}
-									{onManageTags}
-									{onEnterReorderMode}
-								{onEnterMultiSelect}
-								{onMultiSelectToggle}
-								{hasPinnedChats}
-							/>
-						</div>
-					{/if}
-				{/each}
-			</DragDropProvider>
-		{/if}
-		{#each archived as gs (gs.id)}
+		{#each displayedPinned as chat (chat.id)}
 			<SidebarChatItem
-				session={gs}
+				session={chat}
+				{selectedChatId}
+				{currentTime}
+				{isMobile}
+				isPinned={true}
+				isArchived={false}
+				{isMultiSelectMode}
+				isMultiSelected={isMultiSelected?.(chat.id) ?? false}
+				{onChatSelect}
+				{onDeleteChat}
+				{onStartRenameChat}
+				{onTogglePinned}
+				{onToggleArchive}
+				{onShowDetails}
+				{onForkChat}
+				{onShareChat}
+				{onTagClick}
+				{onManageTags}
+				{onEnterReorderMode}
+				{onEnterMultiSelect}
+				{onMultiSelectToggle}
+				{hasPinnedChats}
+			/>
+		{/each}
+		{#each displayedNormal as chat (chat.id)}
+			<SidebarChatItem
+				session={chat}
+				{selectedChatId}
+				{currentTime}
+				{isMobile}
+				isPinned={false}
+				isArchived={false}
+				{isMultiSelectMode}
+				isMultiSelected={isMultiSelected?.(chat.id) ?? false}
+				{onChatSelect}
+				{onDeleteChat}
+				{onStartRenameChat}
+				{onTogglePinned}
+				{onToggleArchive}
+				{onShowDetails}
+				{onForkChat}
+				{onShareChat}
+				{onTagClick}
+				{onManageTags}
+				{onEnterReorderMode}
+				{onEnterMultiSelect}
+				{onMultiSelectToggle}
+				{hasPinnedChats}
+			/>
+		{/each}
+		{#each displayedArchived as chat (chat.id)}
+			<SidebarChatItem
+				session={chat}
 				{selectedChatId}
 				{currentTime}
 				{isMobile}
 				isPinned={false}
 				isArchived={true}
 				{isMultiSelectMode}
-				isMultiSelected={isMultiSelected?.(gs.id) ?? false}
+				isMultiSelected={isMultiSelected?.(chat.id) ?? false}
 				{onChatSelect}
 				{onDeleteChat}
 				{onStartRenameChat}
-					{onTogglePinned}
-					{onToggleArchive}
-					{onShowDetails}
-					{onForkChat}
-									{onShareChat}
-									{onTagClick}
-									{onManageTags}
-					{onEnterReorderMode}
+				{onTogglePinned}
+				{onToggleArchive}
+				{onShowDetails}
+				{onForkChat}
+				{onShareChat}
+				{onTagClick}
+				{onManageTags}
+				{onEnterReorderMode}
 				{onEnterMultiSelect}
 				{onMultiSelectToggle}
 				{hasPinnedChats}
 			/>
 		{/each}
+	</div>
+{:else}
+	<div class="h-full pb-28 md:pb-4">
+		{#if normalReorder.orderFor('pinned').length > 0}
+			<DragDropProvider
+				sensors={implicitDragSensors}
+				onDragStart={() => normalReorder.begin('pinned')}
+				onDragOver={(event) => normalReorder.preview('pinned', event)}
+				onDragEnd={(event) => handleNormalDragEnd('pinned', event)}
+			>
+				{#each normalReorder.orderFor('pinned') as chatId, idx (chatId)}
+					{@const chat = chatById('pinned', chatId)}
+					{#if chat}
+						<SidebarSortableChatRow
+							{chat}
+							index={idx}
+							group={isFiltered ? 'pinned-filtered' : 'pinned-normal'}
+							{selectedChatId}
+							{currentTime}
+							{isMobile}
+							isPinned={true}
+							isArchived={false}
+							{isMultiSelectMode}
+							isMultiSelected={isMultiSelected?.(chat.id) ?? false}
+							{onChatSelect}
+							{onDeleteChat}
+							{onStartRenameChat}
+							{onTogglePinned}
+							{onToggleArchive}
+							{onShowDetails}
+							{onForkChat}
+							{onShareChat}
+							{onTagClick}
+							{onManageTags}
+							{onEnterReorderMode}
+							{onEnterMultiSelect}
+							{onMultiSelectToggle}
+							{hasPinnedChats}
+						/>
+					{/if}
+				{/each}
+			</DragDropProvider>
+		{/if}
+
+		{#if normalReorder.orderFor('normal').length > 0}
+			<DragDropProvider
+				sensors={implicitDragSensors}
+				onDragStart={() => normalReorder.begin('normal')}
+				onDragOver={(event) => normalReorder.preview('normal', event)}
+				onDragEnd={(event) => handleNormalDragEnd('normal', event)}
+			>
+				{#each normalReorder.orderFor('normal') as chatId, idx (chatId)}
+					{@const chat = chatById('normal', chatId)}
+					{#if chat}
+						<SidebarSortableChatRow
+							{chat}
+							index={idx}
+							group={isFiltered ? 'normal-filtered' : 'normal-normal'}
+							{selectedChatId}
+							{currentTime}
+							{isMobile}
+							isPinned={false}
+							isArchived={false}
+							{isMultiSelectMode}
+							isMultiSelected={isMultiSelected?.(chat.id) ?? false}
+							{onChatSelect}
+							{onDeleteChat}
+							{onStartRenameChat}
+							{onTogglePinned}
+							{onToggleArchive}
+							{onShowDetails}
+							{onForkChat}
+							{onShareChat}
+							{onTagClick}
+							{onManageTags}
+							{onEnterReorderMode}
+							{onEnterMultiSelect}
+							{onMultiSelectToggle}
+							{hasPinnedChats}
+						/>
+					{/if}
+				{/each}
+			</DragDropProvider>
+		{/if}
+
+		{#if normalReorder.orderFor('archived').length > 0}
+			<DragDropProvider
+				sensors={implicitDragSensors}
+				onDragStart={() => normalReorder.begin('archived')}
+				onDragOver={(event) => normalReorder.preview('archived', event)}
+				onDragEnd={(event) => handleNormalDragEnd('archived', event)}
+			>
+				{#each normalReorder.orderFor('archived') as chatId, idx (chatId)}
+					{@const chat = chatById('archived', chatId)}
+					{#if chat}
+						<SidebarSortableChatRow
+							{chat}
+							index={idx}
+							group={isFiltered ? 'archived-filtered' : 'archived-normal'}
+							{selectedChatId}
+							{currentTime}
+							{isMobile}
+							isPinned={false}
+							isArchived={true}
+							{isMultiSelectMode}
+							isMultiSelected={isMultiSelected?.(chat.id) ?? false}
+							{onChatSelect}
+							{onDeleteChat}
+							{onStartRenameChat}
+							{onTogglePinned}
+							{onToggleArchive}
+							{onShowDetails}
+							{onForkChat}
+							{onShareChat}
+							{onTagClick}
+							{onManageTags}
+							{onEnterReorderMode}
+							{onEnterMultiSelect}
+							{onMultiSelectToggle}
+							{hasPinnedChats}
+						/>
+					{/if}
+				{/each}
+			</DragDropProvider>
+		{/if}
 	</div>
 {/if}

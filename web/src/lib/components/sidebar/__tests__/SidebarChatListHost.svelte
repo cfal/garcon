@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SidebarChatList from '../SidebarChatList.svelte';
 	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
+	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarChatListHostProps {
@@ -10,6 +11,13 @@
 		selectedChatId?: string | null;
 		isMobile?: boolean;
 		isReorderMode?: boolean;
+		onImmediateReorder?: (
+			list: ChatOrderList,
+			oldOrder: string[],
+			newOrder: string[],
+			onFailure?: () => void,
+		) => void;
+		onQuickMove?: (chatId: string, target: ReorderQuickTarget) => Promise<void> | void;
 	}
 
 	let {
@@ -19,6 +27,8 @@
 		selectedChatId = null,
 		isMobile = false,
 		isReorderMode = false,
+		onImmediateReorder = () => {},
+		onQuickMove = () => {},
 	}: SidebarChatListHostProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
@@ -67,7 +77,7 @@
 		onShareChat={() => {}}
 		onTogglePinned={() => {}}
 		onToggleArchive={() => {}}
-		onImmediateReorder={() => {}}
-		onQuickMove={() => {}}
-	/>
-</div>
+			{onImmediateReorder}
+			{onQuickMove}
+		/>
+	</div>

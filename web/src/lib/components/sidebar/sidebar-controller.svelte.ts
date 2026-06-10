@@ -10,6 +10,7 @@ import {
 	getChatDetails,
 	forkChat,
 	setChatTags,
+	type ReorderQuickTarget,
 } from '$lib/api/chats.js';
 
 export interface SidebarControllerDeps {
@@ -33,8 +34,8 @@ export class SidebarController {
 		await this.deps.onQuietRefresh();
 	}
 
-	async quickMove(chatId: string, chatIdAbove?: string, chatIdBelow?: string): Promise<void> {
-		await reorderChatsQuick({ chatId, chatIdAbove, chatIdBelow });
+	async quickMove(chatId: string, target: ReorderQuickTarget): Promise<void> {
+		await reorderChatsQuick({ chatId, ...target });
 		await this.deps.onQuietRefresh();
 	}
 

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { resolveReorderIndices, hasSortableShape, type DragEndLike } from '../drag-reorder';
+import {
+	resolveReorderIndices,
+	hasSortableShape,
+	previewReorder,
+	resolveFilteredRelativeMove,
+	movedId,
+	type DragEndLike,
+} from '../drag-reorder';
 
 function buildEvent(partial: Partial<DragEndLike>): DragEndLike {
 	return {
@@ -74,5 +81,61 @@ describe('resolveReorderIndices', () => {
 			},
 		});
 		expect(resolveReorderIndices(event, ['a', 'b', 'c'])).toBeNull();
+	});
+});
+
+describe('previewReorder', () => {
+	it('returns a reordered array from drag indices', () => {
+		const event = buildEvent({
+			operation: {
+				source: { id: 'a', index: 0, initialIndex: 0 },
+				target: { id: 'c', index: 2 },
+			},
+		});
+
+		expect(previewReorder(event, ['a', 'b', 'c'])).toEqual(['b', 'c', 'a']);
+	});
+
+	it('returns null when the event does not move an item', () => {
+		const event = buildEvent({
+			operation: {
+				source: { id: 'a', index: 0, initialIndex: 0 },
+				target: { id: 'a', index: 0 },
+			},
+		});
+
+		expect(previewReorder(event, ['a', 'b', 'c'])).toBeNull();
+	});
+});
+
+describe('movedId', () => {
+	it('returns the item that moved into the first differing slot', () => {
+		expect(movedId(['a', 'b', 'c'], ['a', 'c', 'b'])).toBe('c');
+	});
+
+	it('returns null when orders have different members', () => {
+		expect(movedId(['a', 'b'], ['a', 'c'])).toBeNull();
+	});
+});
+
+describe('resolveFilteredRelativeMove', () => {
+	it('uses the visible predecessor when one exists', () => {
+		expect(resolveFilteredRelativeMove('c', ['a', 'c', 'b'])).toEqual({
+			chatIdAbove: 'a',
+		});
+	});
+
+	it('uses the visible successor for a top drop', () => {
+		expect(resolveFilteredRelativeMove('c', ['c', 'a', 'b'])).toEqual({
+			chatIdBelow: 'a',
+		});
+	});
+
+	it('returns null when no visible neighbor exists', () => {
+		expect(resolveFilteredRelativeMove('c', ['c'])).toBeNull();
+	});
+
+	it('returns null when the moved chat is not visible', () => {
+		expect(resolveFilteredRelativeMove('missing', ['a', 'b'])).toBeNull();
 	});
 });

@@ -76,3 +76,66 @@ export function resolveReorderIndices(
 	if (sourceIndex === targetIndex) return null;
 	return { from: sourceIndex, to: targetIndex };
 }
+
+export function reorderIds(ids: string[], from: number, to: number): string[] {
+	if (from === to) return ids;
+	const next = [...ids];
+	const [moved] = next.splice(from, 1);
+	next.splice(to, 0, moved);
+	return next;
+}
+
+export function previewReorder(event: DragEndLike, currentIds: string[]): string[] | null {
+	const indices = resolveReorderIndices(event, currentIds);
+	if (!indices) return null;
+	return reorderIds(currentIds, indices.from, indices.to);
+}
+
+export function arraysEqual(left: string[], right: string[]): boolean {
+	if (left.length !== right.length) return false;
+	for (let index = 0; index < left.length; index += 1) {
+		if (left[index] !== right[index]) return false;
+	}
+	return true;
+}
+
+export function sameMembers(left: string[], right: string[]): boolean {
+	if (left.length !== right.length) return false;
+	const seen = new Set(left);
+	if (seen.size !== left.length) return false;
+	for (const id of right) {
+		if (!seen.has(id)) return false;
+	}
+	return true;
+}
+
+export function movedId(before: string[], after: string[]): string | null {
+	if (!sameMembers(before, after)) return null;
+	for (let index = 0; index < before.length; index += 1) {
+		if (before[index] !== after[index]) {
+			const candidate = after[index];
+			return before.includes(candidate) ? candidate : null;
+		}
+	}
+	return null;
+}
+
+export type RelativeReorderTarget =
+	| { chatIdAbove: string; chatIdBelow?: never }
+	| { chatIdBelow: string; chatIdAbove?: never };
+
+export function resolveFilteredRelativeMove(
+	chatId: string,
+	finalVisibleOrder: string[],
+): RelativeReorderTarget | null {
+	const index = finalVisibleOrder.indexOf(chatId);
+	if (index < 0) return null;
+
+	const chatIdAbove = finalVisibleOrder[index - 1];
+	if (chatIdAbove) return { chatIdAbove };
+
+	const chatIdBelow = finalVisibleOrder[index + 1];
+	if (chatIdBelow) return { chatIdBelow };
+
+	return null;
+}
