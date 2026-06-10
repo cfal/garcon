@@ -62,13 +62,17 @@
 		onImmediateReorder,
 		onQuickMove,
 	}: SidebarContentProps = $props();
+
+	let viewportRef = $state<HTMLElement | null>(null);
 </script>
 
 <ScrollArea
+	bind:viewportRef
 	class="flex-1 overflow-y-auto overscroll-contain"
 	scrollbarYClasses="w-1.5"
 >
 	<SidebarChatList
+		{viewportRef}
 		{chats}
 		{filteredChats}
 		{selectedChatId}

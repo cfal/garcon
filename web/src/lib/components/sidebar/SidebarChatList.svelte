@@ -2,11 +2,13 @@
 	import { untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import SidebarChatItem from './SidebarChatItem.svelte';
+	import SidebarVirtualChatList from './SidebarVirtualChatList.svelte';
 	import Search from '@lucide/svelte/icons/search';
 	import GripVertical from '@lucide/svelte/icons/grip-vertical';
 	import { DragDropProvider, PointerSensor } from '@dnd-kit/svelte';
 	import { createSortable } from '@dnd-kit/svelte/sortable';
 	import { resolveReorderIndices, hasSortableShape, type DragEndLike } from './drag-reorder';
+	import type { SidebarVirtualChatRow } from './sidebar-virtual-chat-list';
 
 	const implicitDragSensors = [PointerSensor.configure({ preventActivation: () => false })];
 	import type { Action } from 'svelte/action';
@@ -14,7 +16,9 @@
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList } from '$lib/api/chats.js';
 
+	const VIRTUALIZATION_THRESHOLD = 80;
 	interface SidebarChatListProps {
+		viewportRef?: HTMLElement | null;
 		chats: ChatSessionRecord[];
 		filteredChats: ChatSessionRecord[];
 		selectedChatId: string | null;
@@ -32,18 +36,19 @@
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
-			onTogglePinned: (chatId: string) => void;
-			onToggleArchive: (chatId: string) => void;
-			onShowDetails: (chatId: string, chatTitle: string) => void;
-			onForkChat: (sourceChatId: string) => void;
-			onShareChat: (chatId: string, chatTitle: string) => void;
-			onTagClick?: (tag: string) => void;
-			onManageTags?: (chatId: string, currentTags: string[]) => void;
-			onImmediateReorder: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
-			onQuickMove: (chatId: string, chatIdAbove?: string, chatIdBelow?: string) => void;
-		}
+		onTogglePinned: (chatId: string) => void;
+		onToggleArchive: (chatId: string) => void;
+		onShowDetails: (chatId: string, chatTitle: string) => void;
+		onForkChat: (sourceChatId: string) => void;
+		onShareChat: (chatId: string, chatTitle: string) => void;
+		onTagClick?: (tag: string) => void;
+		onManageTags?: (chatId: string, currentTags: string[]) => void;
+		onImmediateReorder: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
+		onQuickMove: (chatId: string, chatIdAbove?: string, chatIdBelow?: string) => void;
+	}
 
 	let {
+		viewportRef = null,
 		chats,
 		filteredChats,
 		selectedChatId,
@@ -61,15 +66,15 @@
 		onChatSelect,
 		onDeleteChat,
 		onStartRenameChat,
-			onTogglePinned,
-			onToggleArchive,
-			onShowDetails,
-			onForkChat,
-			onShareChat,
-			onTagClick,
-			onManageTags,
-			onImmediateReorder,
-			onQuickMove,
+		onTogglePinned,
+		onToggleArchive,
+		onShowDetails,
+		onForkChat,
+		onShareChat,
+		onTagClick,
+		onManageTags,
+		onImmediateReorder,
+		onQuickMove,
 	}: SidebarChatListProps = $props();
 
 	let showChats = $derived(!isLoading && chats.length > 0 && filteredChats.length > 0);
@@ -110,6 +115,50 @@
 	let normal = $derived(filteredPartitioned.normal);
 	let archivedAll = $derived(allPartitioned.archived);
 	let archived = $derived(filteredPartitioned.archived);
+	let displayedPinned = $derived(isFiltered ? pinnedFiltered : pinnedAll);
+	let displayedNormal = $derived(isFiltered ? normal : normalAll);
+	let displayedArchived = $derived(isFiltered ? archived : archivedAll);
+	let virtualRows = $derived.by(() => toVirtualRows(displayedPinned, displayedNormal, displayedArchived));
+	let useVirtualList = $derived(virtualRows.length > VIRTUALIZATION_THRESHOLD);
+
+	function toVirtualRows(
+		pinnedRows: ChatSessionRecord[],
+		normalRows: ChatSessionRecord[],
+		archivedRows: ChatSessionRecord[],
+	): SidebarVirtualChatRow[] {
+		const rows: SidebarVirtualChatRow[] = [];
+		for (const chat of pinnedRows) {
+			rows.push({
+				type: 'chat',
+				key: `pinned:${chat.id}`,
+				chat,
+				list: 'pinned',
+				isPinned: true,
+				isArchived: false,
+			});
+		}
+		for (const chat of normalRows) {
+			rows.push({
+				type: 'chat',
+				key: `normal:${chat.id}`,
+				chat,
+				list: 'normal',
+				isPinned: false,
+				isArchived: false,
+			});
+		}
+		for (const chat of archivedRows) {
+			rows.push({
+				type: 'chat',
+				key: `archived:${chat.id}`,
+				chat,
+				list: 'archived',
+				isPinned: false,
+				isArchived: true,
+			});
+		}
+		return rows;
+	}
 
 	// Reorder mode: draft ordering for each group.
 	let pinnedDraftOrder = $state<string[]>([]);
@@ -396,6 +445,30 @@
 			</div>
 		{/if}
 	</div>
+{:else if useVirtualList}
+	<SidebarVirtualChatList
+		rows={virtualRows}
+		{viewportRef}
+		{selectedChatId}
+		{currentTime}
+		{isMobile}
+		{isMultiSelectMode}
+		{isMultiSelected}
+		{onChatSelect}
+		{onDeleteChat}
+		{onStartRenameChat}
+		{onTogglePinned}
+		{onToggleArchive}
+		{onShowDetails}
+		{onForkChat}
+		{onShareChat}
+		{onTagClick}
+		{onManageTags}
+		{onEnterReorderMode}
+		{onEnterMultiSelect}
+		{onMultiSelectToggle}
+		{hasPinnedChats}
+	/>
 {:else}
 	<div class="h-full pb-28 md:pb-4">
 			{#if isFiltered}

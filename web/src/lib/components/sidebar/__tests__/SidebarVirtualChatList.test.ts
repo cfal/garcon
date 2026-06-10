@@ -1,0 +1,117 @@
+import { fireEvent, render, screen } from '@testing-library/svelte';
+import { tick } from 'svelte';
+import { describe, expect, it } from 'vitest';
+
+import SidebarChatListHost from './SidebarChatListHost.svelte';
+import SidebarVirtualChatListHost from './SidebarVirtualChatListHost.svelte';
+import type { SidebarVirtualChatRow } from '../sidebar-virtual-chat-list';
+import type { ChatSessionRecord } from '$lib/types/chat-session';
+
+const rowHeight = 88;
+
+function makeChat(index: number, overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
+	return {
+		id: `chat-${index}`,
+		projectPath: '/tmp/project',
+		title: `Chat ${index}`,
+		agentId: 'claude',
+		model: 'sonnet',
+		permissionMode: 'default',
+		thinkingMode: 'think',
+		claudeThinkingMode: 'auto',
+		ampAgentMode: 'smart',
+		createdAt: '2025-01-01T00:00:00.000Z',
+		lastActivityAt: '2025-01-01T00:00:00.000Z',
+		lastReadAt: '2025-01-01T00:00:00.000Z',
+		isPinned: false,
+		isArchived: false,
+		isProcessing: false,
+		isUnread: false,
+		status: 'draft',
+		lastMessage: `Chat ${index} preview`,
+		tags: [],
+		firstMessage: `Chat ${index} first`,
+		...overrides,
+	};
+}
+
+function makeRows(count: number): SidebarVirtualChatRow[] {
+	return Array.from({ length: count }, (_, index) => {
+		const chat = makeChat(index);
+		return {
+			type: 'chat' as const,
+			key: `normal:${chat.id}`,
+			chat,
+			list: 'normal' as const,
+			isPinned: false,
+			isArchived: false,
+		};
+	});
+}
+
+describe('SidebarVirtualChatList', () => {
+	it('renders a bounded visible slice for large chat arrays', () => {
+		render(SidebarVirtualChatListHost, {
+			rows: makeRows(500),
+			rowHeight,
+		});
+
+		expect(screen.getByText('Chat 0')).toBeTruthy();
+		expect(screen.queryByText('Chat 499')).toBeNull();
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
+	});
+
+	it('updates visible rows when the shared viewport scrolls', async () => {
+		render(SidebarVirtualChatListHost, {
+			rows: makeRows(500),
+			rowHeight,
+		});
+
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		viewport.scrollTop = rowHeight * 120;
+		await fireEvent.scroll(viewport);
+		await tick();
+
+		expect(screen.getByText('Chat 120')).toBeTruthy();
+		expect(screen.queryByText('Chat 0')).toBeNull();
+	});
+
+	it('scrolls an offscreen selected chat into view on recenter requests', async () => {
+		const callbacks: Array<() => void> = [];
+
+		render(SidebarVirtualChatListHost, {
+			rows: makeRows(500),
+			selectedChatId: 'chat-400',
+			rowHeight,
+			onRegisterRecenter: (callback) => callbacks.push(callback),
+		});
+		await tick();
+
+		for (const callback of callbacks) callback();
+		await tick();
+
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		expect(viewport.scrollTop).toBeGreaterThan(rowHeight * 350);
+	});
+
+	it('uses virtual rendering above the normal chat-list threshold', () => {
+		render(SidebarChatListHost, {
+			chats: Array.from({ length: 120 }, (_, index) => makeChat(index)),
+		});
+
+		expect(document.querySelector('[data-sidebar-virtual-list]')).toBeTruthy();
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
+		expect(screen.getByText('Chat 0')).toBeTruthy();
+		expect(screen.queryByText('Chat 119')).toBeNull();
+	});
+
+	it('keeps small normal chat lists on the full-render path', () => {
+		render(SidebarChatListHost, {
+			chats: Array.from({ length: 20 }, (_, index) => makeChat(index)),
+		});
+
+		expect(document.querySelector('[data-sidebar-virtual-list]')).toBeNull();
+		expect(screen.getByText('Chat 0')).toBeTruthy();
+		expect(screen.getByText('Chat 19')).toBeTruthy();
+	});
+});
