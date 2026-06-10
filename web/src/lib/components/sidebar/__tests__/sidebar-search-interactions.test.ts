@@ -302,7 +302,6 @@ describe('sidebar search interactions', () => {
 	it('renders sidebar menu searches ahead of the row actions and inserts a separator', async () => {
 			render(SidebarControlsRow, {
 				isLoading: false,
-				isReorderMode: false,
 				visibleUnreadCount: 0,
 			sidebarMenuSearches: [
 				createSavedSearch('search-1', 'Unread', 'status:unread'),
@@ -332,7 +331,6 @@ describe('sidebar search interactions', () => {
 	it('shows mark all as read before settings even without quick search entries', async () => {
 		render(SidebarControlsRow, {
 			isLoading: false,
-			isReorderMode: false,
 			visibleUnreadCount: 1,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
@@ -353,7 +351,6 @@ describe('sidebar search interactions', () => {
 	it('suppresses the dock divider when search context sits directly against the controls row', () => {
 		render(SidebarControlsRow, {
 			isLoading: false,
-			isReorderMode: false,
 			visibleUnreadCount: 0,
 			hasAdjacentSearchContext: true,
 			sidebarMenuSearches: [],
@@ -371,7 +368,6 @@ describe('sidebar search interactions', () => {
 	it('omits the separator when no sidebar menu searches are shown', async () => {
 		render(SidebarControlsRow, {
 			isLoading: false,
-			isReorderMode: false,
 			visibleUnreadCount: 0,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
@@ -455,7 +451,6 @@ describe('sidebar search interactions', () => {
 	it('renders the controls row above the search context', () => {
 		render(SidebarSearchDock, {
 			isLoading: false,
-			isReorderMode: false,
 			visibleUnreadCount: 0,
 			sidebarMenuSearches: [],
 			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],

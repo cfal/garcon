@@ -33,6 +33,9 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
+		"@atlaskit/pragmatic-drag-and-drop": "^1.8.1",
+		"@atlaskit/pragmatic-drag-and-drop-auto-scroll": "^2.1.5",
+		"@atlaskit/pragmatic-drag-and-drop-hitbox": "^1.2.0",
 		"@codemirror/commands": "^6.10.2",
 		"@codemirror/lang-cpp": "^6.0.3",
 		"@codemirror/lang-css": "^6.3.1",
@@ -51,10 +54,10 @@
 		"@codemirror/state": "^6.5.4",
 		"@codemirror/theme-one-dark": "^6.1.3",
 		"@codemirror/view": "^6.39.15",
-		"@dnd-kit/svelte": "^0.3.2",
 		"@humanspeak/svelte-markdown": "^1.0.2",
 		"@lucide/svelte": "^0.575.0",
 		"@tailwindcss/typography": "^0.5.19",
+		"@tanstack/svelte-virtual": "^3.13.28",
 		"@xterm/addon-fit": "^0.11.0",
 		"@xterm/addon-web-links": "^0.12.0",
 		"@xterm/addon-webgl": "^0.19.0",

@@ -1,78 +1,112 @@
 import { describe, expect, it } from 'vitest';
-import { resolveReorderIndices, hasSortableShape, type DragEndLike } from '../drag-reorder';
+import {
+	moveInOrder,
+	moveToBoundary,
+	resolveFilteredRelativeMove,
+	movedId,
+} from '../drag-reorder';
 
-function buildEvent(partial: Partial<DragEndLike>): DragEndLike {
-	return {
-		canceled: false,
-		operation: {
-			source: { id: 'a', index: 0, initialIndex: 0 },
-			target: { id: 'b', index: 1 },
-		},
-		...partial,
-	};
-}
-
-describe('hasSortableShape', () => {
-	it('returns true for an object with id', () => {
-		expect(hasSortableShape({ id: 'a' })).toBe(true);
+describe('moveInOrder', () => {
+	it('moves a source below a lower target on bottom edge', () => {
+		expect(moveInOrder({
+			order: ['a', 'b', 'c'],
+			sourceChatId: 'a',
+			targetChatId: 'c',
+			closestEdge: 'bottom',
+		})).toEqual(['b', 'c', 'a']);
 	});
 
-	it('returns true for numeric id', () => {
-		expect(hasSortableShape({ id: 42 })).toBe(true);
+	it('moves a source above a lower target on top edge', () => {
+		expect(moveInOrder({
+			order: ['a', 'b', 'c'],
+			sourceChatId: 'a',
+			targetChatId: 'c',
+			closestEdge: 'top',
+		})).toEqual(['b', 'a', 'c']);
 	});
 
-	it('returns false for null', () => {
-		expect(hasSortableShape(null)).toBe(false);
+	it('moves a source above a higher target on top edge', () => {
+		expect(moveInOrder({
+			order: ['a', 'b', 'c'],
+			sourceChatId: 'c',
+			targetChatId: 'a',
+			closestEdge: 'top',
+		})).toEqual(['c', 'a', 'b']);
 	});
 
-	it('returns false for undefined', () => {
-		expect(hasSortableShape(undefined)).toBe(false);
+	it('returns null when the edge resolves to the current position', () => {
+		expect(moveInOrder({
+			order: ['a', 'b', 'c'],
+			sourceChatId: 'c',
+			targetChatId: 'b',
+			closestEdge: 'bottom',
+		})).toBeNull();
+	});
+
+	it('returns null when ids are missing', () => {
+		expect(moveInOrder({
+			order: ['a', 'b', 'c'],
+			sourceChatId: 'missing',
+			targetChatId: 'b',
+			closestEdge: 'top',
+		})).toBeNull();
 	});
 });
 
-describe('resolveReorderIndices', () => {
-	it('returns null when drag is canceled', () => {
-		const event = buildEvent({ canceled: true });
-		expect(resolveReorderIndices(event, ['a', 'b'])).toBeNull();
+describe('moveToBoundary', () => {
+	it('moves an item to the start', () => {
+		expect(moveToBoundary({
+			order: ['a', 'b', 'c'],
+			chatId: 'c',
+			boundary: 'start',
+		})).toEqual(['c', 'a', 'b']);
 	});
 
-	it('uses projected source index when it differs from resolved source index', () => {
-		const event = buildEvent({
-			operation: {
-				source: { id: 'a', index: 2, initialIndex: 0 },
-				target: { id: 'b', index: 1 },
-			},
-		});
-		expect(resolveReorderIndices(event, ['a', 'b', 'c'])).toEqual({ from: 0, to: 2 });
+	it('moves an item to the end', () => {
+		expect(moveToBoundary({
+			order: ['a', 'b', 'c'],
+			chatId: 'a',
+			boundary: 'end',
+		})).toEqual(['b', 'c', 'a']);
 	});
 
-	it('uses resolved target index when projected source index is unchanged', () => {
-		const event = buildEvent({
-			operation: {
-				source: { id: 'a', index: 0, initialIndex: 0 },
-				target: { id: 'c', index: 2 },
-			},
-		});
-		expect(resolveReorderIndices(event, ['a', 'b', 'c'])).toEqual({ from: 0, to: 2 });
+	it('returns null when the item is already at the requested boundary', () => {
+		expect(moveToBoundary({
+			order: ['a', 'b', 'c'],
+			chatId: 'a',
+			boundary: 'start',
+		})).toBeNull();
+	});
+});
+
+describe('movedId', () => {
+	it('returns the item that moved into the first differing slot', () => {
+		expect(movedId(['a', 'b', 'c'], ['a', 'c', 'b'])).toBe('c');
 	});
 
-	it('falls back to sortable indices when IDs cannot be resolved', () => {
-		const event = buildEvent({
-			operation: {
-				source: { id: 'missing', index: 1, initialIndex: 0 },
-				target: { id: 'also-missing', index: 1 },
-			},
+	it('returns null when orders have different members', () => {
+		expect(movedId(['a', 'b'], ['a', 'c'])).toBeNull();
+	});
+});
+
+describe('resolveFilteredRelativeMove', () => {
+	it('uses the visible predecessor when one exists', () => {
+		expect(resolveFilteredRelativeMove('c', ['a', 'c', 'b'])).toEqual({
+			chatIdAbove: 'a',
 		});
-		expect(resolveReorderIndices(event, ['a', 'b', 'c'])).toEqual({ from: 0, to: 1 });
 	});
 
-	it('returns null when both projected and target imply no move', () => {
-		const event = buildEvent({
-			operation: {
-				source: { id: 'a', index: 0, initialIndex: 0 },
-				target: { id: 'a', index: 0 },
-			},
+	it('uses the visible successor for a top drop', () => {
+		expect(resolveFilteredRelativeMove('c', ['c', 'a', 'b'])).toEqual({
+			chatIdBelow: 'a',
 		});
-		expect(resolveReorderIndices(event, ['a', 'b', 'c'])).toBeNull();
+	});
+
+	it('returns null when no visible neighbor exists', () => {
+		expect(resolveFilteredRelativeMove('c', ['c'])).toBeNull();
+	});
+
+	it('returns null when the moved chat is not visible', () => {
+		expect(resolveFilteredRelativeMove('missing', ['a', 'b'])).toBeNull();
 	});
 });

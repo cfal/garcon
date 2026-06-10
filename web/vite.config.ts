@@ -24,7 +24,11 @@ export default defineConfig({
 				manualChunks(id) {
 					if (id.includes('@xterm/')) return 'vendor-xterm';
 					if (id.includes('@codemirror/') || id.includes('codemirror')) return 'vendor-codemirror';
-					if (id.includes('@thisbeyond/') || id.includes('dnd-kit')) return 'vendor-dnd';
+					if (
+						id.includes('@atlaskit/pragmatic-drag-and-drop') ||
+						id.includes('@tanstack/svelte-virtual') ||
+						id.includes('@tanstack/virtual-core')
+					) return 'vendor-dnd';
 				}
 			}
 		}

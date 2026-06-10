@@ -256,11 +256,11 @@ export interface ReorderChatsRequest {
 	newOrder: string[];
 }
 
-export interface ReorderQuickRequest {
-	chatId: string;
-	chatIdAbove?: string;
-	chatIdBelow?: string;
-}
+export type ReorderQuickTarget =
+	| { chatIdAbove: string; chatIdBelow?: never }
+	| { chatIdBelow: string; chatIdAbove?: never };
+
+export type ReorderQuickRequest = { chatId: string } & ReorderQuickTarget;
 
 /** Persists a window reorder within a group. */
 export async function reorderChats(body: ReorderChatsRequest): Promise<{ success: boolean }> {

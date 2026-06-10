@@ -355,7 +355,7 @@ describe('chats API contract', () => {
 		expect(body.newOrder).toEqual(['b', 'a']);
 	});
 
-	it('reorderChatsQuick sends chatId with optional neighbors', async () => {
+	it('reorderChatsQuick sends chatId with an above neighbor', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
 		await reorderChatsQuick({ chatId: 'c-1', chatIdAbove: 'c-0' });
@@ -363,6 +363,16 @@ describe('chats API contract', () => {
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.chatId).toBe('c-1');
 		expect(body.chatIdAbove).toBe('c-0');
+	});
+
+	it('reorderChatsQuick sends chatId with a below neighbor', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+
+		await reorderChatsQuick({ chatId: 'c-1', chatIdBelow: 'c-2' });
+
+		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(body.chatId).toBe('c-1');
+		expect(body.chatIdBelow).toBe('c-2');
 	});
 
 	it('forkChat sends POST with sourceChatId and chatId', async () => {

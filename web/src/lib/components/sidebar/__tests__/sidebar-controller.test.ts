@@ -64,31 +64,30 @@ describe('SidebarController', () => {
 	});
 
 	describe('quickMove', () => {
-		it('passes neighbor IDs and refreshes', async () => {
-			mockReorderQuick.mockResolvedValue({ success: true });
+			it('passes an above neighbor and refreshes', async () => {
+				mockReorderQuick.mockResolvedValue({ success: true });
 
-			await controller.quickMove('c-2', 'c-1', 'c-3');
+				await controller.quickMove('c-2', { chatIdAbove: 'c-1' });
 
-			expect(mockReorderQuick).toHaveBeenCalledWith({
-				chatId: 'c-2',
-				chatIdAbove: 'c-1',
-				chatIdBelow: 'c-3',
+				expect(mockReorderQuick).toHaveBeenCalledWith({
+					chatId: 'c-2',
+					chatIdAbove: 'c-1',
+				});
+				expect(quietRefresh).toHaveBeenCalledOnce();
 			});
-			expect(quietRefresh).toHaveBeenCalledOnce();
-		});
 
-		it('handles missing neighbor IDs', async () => {
-			mockReorderQuick.mockResolvedValue({ success: true });
+			it('passes a below neighbor and refreshes', async () => {
+				mockReorderQuick.mockResolvedValue({ success: true });
 
-			await controller.quickMove('c-2');
+				await controller.quickMove('c-2', { chatIdBelow: 'c-3' });
 
-			expect(mockReorderQuick).toHaveBeenCalledWith({
-				chatId: 'c-2',
-				chatIdAbove: undefined,
-				chatIdBelow: undefined,
+				expect(mockReorderQuick).toHaveBeenCalledWith({
+					chatId: 'c-2',
+					chatIdBelow: 'c-3',
+				});
+				expect(quietRefresh).toHaveBeenCalledOnce();
 			});
 		});
-	});
 
 	describe('loadDetails', () => {
 		it('returns chat details from API', async () => {

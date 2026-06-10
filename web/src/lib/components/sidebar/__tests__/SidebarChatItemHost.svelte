@@ -10,6 +10,7 @@
 		isPinned?: boolean;
 		isArchived?: boolean;
 		isMobile?: boolean;
+		enableNativeDrag?: boolean;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 	}
@@ -21,6 +22,7 @@
 		isPinned = false,
 		isArchived = false,
 		isMobile = false,
+		enableNativeDrag = true,
 		onTagClick,
 		onManageTags,
 	}: SidebarChatItemHostProps = $props();
@@ -51,6 +53,7 @@
 	{isPinned}
 	{isArchived}
 	{isMobile}
+	{enableNativeDrag}
 	onChatSelect={() => {}}
 	onDeleteChat={() => {}}
 	onStartRenameChat={() => {}}

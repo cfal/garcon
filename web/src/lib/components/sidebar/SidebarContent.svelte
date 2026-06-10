@@ -3,7 +3,7 @@
 	import SidebarChatList from './SidebarChatList.svelte';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatOrderList } from '$lib/api/chats.js';
+	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
 
 	interface SidebarContentProps {
 		chats: ChatSessionRecord[];
@@ -13,13 +13,10 @@
 		isMobile?: boolean;
 		currentTime: Date;
 		searchFilter: string;
-		isReorderMode: boolean;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: (chatId: string) => boolean;
-		onEnterReorderMode: () => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
-		onReorderGroup: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
@@ -30,8 +27,13 @@
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
-		onImmediateReorder: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
-		onQuickMove: (chatId: string, chatIdAbove?: string, chatIdBelow?: string) => void;
+		onImmediateReorder: (
+			list: ChatOrderList,
+			oldOrder: string[],
+			newOrder: string[],
+			onFailure?: () => void,
+		) => void;
+		onQuickMove: (chatId: string, target: ReorderQuickTarget) => Promise<void> | void;
 	}
 
 	let {
@@ -42,13 +44,10 @@
 		isMobile = false,
 		currentTime,
 		searchFilter,
-		isReorderMode,
 		isMultiSelectMode,
 		isMultiSelected,
-		onEnterReorderMode,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
-		onReorderGroup,
 		onChatSelect,
 		onDeleteChat,
 		onStartRenameChat,
@@ -80,13 +79,10 @@
 		{isMobile}
 		{currentTime}
 		{searchFilter}
-		{isReorderMode}
 		{isMultiSelectMode}
 		{isMultiSelected}
-		{onEnterReorderMode}
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}
-		{onReorderGroup}
 		{onChatSelect}
 		{onDeleteChat}
 		{onStartRenameChat}

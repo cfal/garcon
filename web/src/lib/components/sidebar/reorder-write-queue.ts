@@ -2,6 +2,7 @@ export interface ReorderWrite<TList extends string> {
 	list: TList;
 	oldOrder: string[];
 	newOrder: string[];
+	onFailure?: () => void;
 }
 
 /**
@@ -37,6 +38,7 @@ export function createReorderWriteQueue<TList extends string>(
 					await write(task);
 				} catch (error) {
 					onError(error, task);
+					task.onFailure?.();
 				}
 			}
 		} finally {

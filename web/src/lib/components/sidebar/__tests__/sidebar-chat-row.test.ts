@@ -33,6 +33,23 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 }
 
 describe('shared sidebar chat row', () => {
+	it('keeps standalone desktop rows natively draggable by default', () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+		});
+
+		expect(screen.getByText('Shared row chat').closest('button')?.getAttribute('draggable')).toBe('true');
+	});
+
+	it('can disable native row dragging for Pragmatic wrappers', () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			enableNativeDrag: false,
+		});
+
+		expect(screen.getByText('Shared row chat').closest('button')?.getAttribute('draggable')).toBe('false');
+	});
+
 	it('renders the shared chat summary inside the sidebar item shell', async () => {
 		const onTagClick = vi.fn();
 		const onManageTags = vi.fn();
