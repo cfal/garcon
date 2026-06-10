@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
 	import { getAppShell } from '$lib/context';
 	import SidebarChatItem from './SidebarChatItem.svelte';
 	import {
@@ -67,67 +68,36 @@
 	const desktopBottomPadding = 16;
 	const mobileBottomPadding = 112;
 
-	let scrollTop = $state(0);
-	let viewportHeight = $state(640);
-
 	let effectiveRowHeight = $derived(
 		rowHeight ?? (isMobile ? MOBILE_CHAT_ROW_HEIGHT : DESKTOP_CHAT_ROW_HEIGHT)
 	);
 	let bottomPadding = $derived(isMobile ? mobileBottomPadding : desktopBottomPadding);
-	let totalHeight = $derived(rows.length * effectiveRowHeight + bottomPadding);
-	let startIndex = $derived(
-		Math.min(rows.length, Math.max(0, Math.floor(scrollTop / effectiveRowHeight) - overscan))
-	);
-	let endIndex = $derived.by(() => {
-		const visibleEnd = Math.ceil((scrollTop + viewportHeight) / effectiveRowHeight);
-		return Math.min(rows.length, visibleEnd + overscan);
+	const virtualWindow = new FixedVirtualWindow({
+		get itemCount() { return rows.length; },
+		get rowHeight() { return effectiveRowHeight; },
+		get overscan() { return overscan; },
+		get viewportRef() { return viewportRef; },
+		get bottomPadding() { return bottomPadding; },
 	});
-	let visibleRows = $derived(rows.slice(startIndex, endIndex));
-
-	function syncScrollTop(): void {
-		if (!viewportRef) return;
-		scrollTop = viewportRef.scrollTop;
-	}
-
-	function syncViewportHeight(): void {
-		if (!viewportRef) return;
-		viewportHeight = Math.max(effectiveRowHeight, viewportRef.clientHeight || viewportHeight);
-	}
+	let visibleRows = $derived.by(() =>
+		virtualWindow.visibleIndexes
+			.map((index) => ({ index, row: rows[index] }))
+			.filter((entry): entry is { index: number; row: SidebarVirtualChatRow } => Boolean(entry.row))
+	);
 
 	function scrollChatIntoView(chatId: string | null): void {
-		if (!chatId || !viewportRef) return;
+		if (!chatId) return;
 		const index = rows.findIndex((row) => row.chat.id === chatId);
-		if (index < 0) return;
-
-		const top = index * effectiveRowHeight;
-		const bottom = top + effectiveRowHeight;
-		const viewportBottom = viewportRef.scrollTop + viewportHeight;
-
-		if (top >= viewportRef.scrollTop && bottom <= viewportBottom) return;
-
-		viewportRef.scrollTop = Math.max(0, top - viewportHeight * 0.2);
-		scrollTop = viewportRef.scrollTop;
+		virtualWindow.scrollIndexIntoView(index);
 	}
 
 	$effect(() => {
-		if (!viewportRef) return;
-		const handleScroll = () => syncScrollTop();
-		viewportRef.addEventListener('scroll', handleScroll, { passive: true });
-		syncScrollTop();
-		syncViewportHeight();
-		return () => viewportRef?.removeEventListener('scroll', handleScroll);
+		return virtualWindow.bindViewport();
 	});
 
 	// Tracks browser-owned viewport metrics that Svelte cannot derive.
 	$effect(() => {
-		if (!viewportRef || typeof ResizeObserver === 'undefined') return;
-		const observer = new ResizeObserver((entries) => {
-			for (const entry of entries) {
-				viewportHeight = Math.max(effectiveRowHeight, entry.contentRect.height);
-			}
-		});
-		observer.observe(viewportRef);
-		return () => observer.disconnect();
+		return virtualWindow.observeViewport();
 	});
 
 	onMount(() => appShell.onSidebarRecenterRequested(() => {
@@ -137,27 +107,26 @@
 
 <div
 	class="relative min-h-full"
-	style={`height:${totalHeight}px;`}
+	style={`height:${virtualWindow.totalHeight}px;`}
 	data-sidebar-virtual-list
 >
-	{#each visibleRows as row, visibleIndex (row.key)}
-		{@const absoluteIndex = startIndex + visibleIndex}
+	{#each visibleRows as entry (entry.row.key)}
 		<div
 			class="absolute left-0 right-0 top-0 overflow-hidden bg-sidebar-chat-item-bg"
-			style={`height:${effectiveRowHeight}px; transform:translateY(${absoluteIndex * effectiveRowHeight}px);`}
-			data-sidebar-virtual-row={row.chat.id}
-			data-sidebar-virtual-list-row={row.list}
+			style={`height:${effectiveRowHeight}px; transform:translateY(${virtualWindow.getOffset(entry.index)}px);`}
+			data-sidebar-virtual-row={entry.row.chat.id}
+			data-sidebar-virtual-list-row={entry.row.list}
 		>
 			<svelte:boundary>
 				<SidebarChatItem
-					session={row.chat}
+					session={entry.row.chat}
 					{selectedChatId}
 					{currentTime}
 					{isMobile}
-					isPinned={row.isPinned}
-					isArchived={row.isArchived}
+					isPinned={entry.row.isPinned}
+					isArchived={entry.row.isArchived}
 					{isMultiSelectMode}
-					isMultiSelected={isMultiSelected?.(row.chat.id) ?? false}
+					isMultiSelected={isMultiSelected?.(entry.row.chat.id) ?? false}
 					{onChatSelect}
 					{onDeleteChat}
 					{onStartRenameChat}
@@ -176,9 +145,9 @@
 				{#snippet failed()}
 					<div
 						class="flex h-full items-center border-b border-border/30 px-3 text-sm text-muted-foreground"
-						data-sidebar-virtual-row-error={row.chat.id}
+						data-sidebar-virtual-row-error={entry.row.chat.id}
 					>
-						{row.chat.title || m.sidebar_chats_unnamed()}
+						{entry.row.chat.title || m.sidebar_chats_unnamed()}
 					</div>
 				{/snippet}
 			</svelte:boundary>

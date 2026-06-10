@@ -2,14 +2,13 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import SavedSearchPills from './SavedSearchPills.svelte';
-	import SidebarChatSummary from './SidebarChatSummary.svelte';
+	import SidebarSearchResults from './SidebarSearchResults.svelte';
 	import CircleHelp from '@lucide/svelte/icons/circle-help';
 	import Search from '@lucide/svelte/icons/search';
 	import Save from '@lucide/svelte/icons/save';
 	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
-	import { cn } from '$lib/utils/cn';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
@@ -113,12 +112,6 @@
 		if (!open) return;
 		focusInput();
 	});
-
-	$effect(() => {
-		if (!open) return;
-		const item = document.querySelector<HTMLElement>(`[data-search-index="${highlightedIndex}"]`);
-		item?.scrollIntoView({ block: 'nearest' });
-	});
 </script>
 
 {#if open}
@@ -215,42 +208,13 @@
 					{/if}
 				</div>
 
-				<div class="min-h-0 flex-1 overflow-y-auto" data-slot="search-dialog-results">
-					{#if filteredChats.length === 0}
-						<div class="px-4 py-10 text-center text-sm text-muted-foreground">
-							{m.sidebar_chats_no_matching_chats()}
-						</div>
-					{:else}
-						<div role="listbox">
-							{#each filteredChats as chat, i (chat.id)}
-								<button
-									data-search-index={i}
-									type="button"
-									role="option"
-									aria-selected={i === highlightedIndex}
-									class={cn(
-										'min-w-0 w-full border-b border-border/40 border-l-2 border-l-transparent bg-transparent px-3 py-2.5 text-left font-normal transition-colors duration-150 last:border-b-0',
-										i === highlightedIndex
-											? 'bg-accent text-accent-foreground'
-											: 'hover:bg-accent/40',
-										chat.isProcessing && 'border-l-[3px] border-l-status-processing',
-									)}
-									onclick={() => onSelectChat(chat.id)}
-									onmouseenter={() => onHighlightChange(i)}
-								>
-									<SidebarChatSummary
-										session={chat}
-										isSelected={i === highlightedIndex}
-										isPinned={chat.isPinned}
-										isArchived={chat.isArchived}
-										{currentTime}
-										showTimestamp={true}
-									/>
-								</button>
-							{/each}
-						</div>
-					{/if}
-				</div>
+				<SidebarSearchResults
+					{filteredChats}
+					{currentTime}
+					{highlightedIndex}
+					{onSelectChat}
+					{onHighlightChange}
+				/>
 			</div>
 		</div>
 	</div>

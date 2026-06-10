@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import SavedSearchEditorDialog from '../SavedSearchEditorDialog.svelte';
 import SavedSearchManagerDialog from '../SavedSearchManagerDialog.svelte';
 import SidebarControlsRow from '../SidebarControlsRow.svelte';
+import SidebarSearchDialog from '../SidebarSearchDialog.svelte';
 import SidebarSearchDock from '../SidebarSearchDock.svelte';
 import SidebarSearchContext from '../SidebarSearchContext.svelte';
 import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
@@ -76,6 +77,34 @@ describe('sidebar search interactions', () => {
 		await fireEvent.keyDown(input, { key: 'j', ctrlKey: true });
 		await fireEvent.keyDown(input, { key: 'Enter' });
 		expect(onSelectChat).toHaveBeenNthCalledWith(2, 'chat-2');
+	});
+
+	it('opens a deep virtualized highlighted chat from the query input', async () => {
+		const onSelectChat = vi.fn();
+
+		render(SidebarSearchDialog, {
+			open: true,
+			query: '',
+			filteredChats: Array.from({ length: 120 }, (_, index) =>
+				createChat(`chat-${index}`, `Chat ${index}`)
+			),
+			savedSearches: [],
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			highlightedIndex: 90,
+			onQueryChange: vi.fn(),
+			onSelectChat,
+			onApplySavedSearch: vi.fn(),
+			onCreateSavedSearch: vi.fn(),
+			onOpenManager: vi.fn(),
+			onHighlightChange: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		const input = await screen.findByRole('textbox');
+		input.focus();
+
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(onSelectChat).toHaveBeenCalledWith('chat-90');
 	});
 
 	it('does not let Enter on the manage button, add button, or saved-search pills open a chat', async () => {
