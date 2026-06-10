@@ -7,7 +7,7 @@
 		type Virtualizer,
 	} from '@tanstack/svelte-virtual';
 	import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
-	import { extractClosestEdge, type Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 	import { getAppShell, getSplitLayout } from '$lib/context';
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
 	import {
@@ -22,11 +22,11 @@
 	} from './sidebar-chat-reorder-state.svelte';
 	import {
 		isSidebarChatDragData,
-		isSidebarChatDropTargetData,
-		sidebarDragCanReorder,
+		resolveSidebarDropInstruction,
+		type SidebarDropInstruction,
 	} from './sidebar-pragmatic-dnd';
 	import type { ChatOrderList } from '$lib/api/chats.js';
-	import type { DropTargetRecord } from '@atlaskit/pragmatic-drag-and-drop/types';
+	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import type { SessionAgentId } from '$lib/types/app';
 
 	interface SidebarVirtualSortableChatListProps {
@@ -94,6 +94,7 @@
 
 	let activeDrop = $state<{ chatId: string; edge: Edge | null } | null>(null);
 	let draggingChatId = $state<string | null>(null);
+	let lastValidDrop: SidebarDropInstruction | null = null;
 	let effectiveRowHeight = $derived(
 		rowHeight ?? (isMobile ? MOBILE_CHAT_ROW_HEIGHT : DESKTOP_CHAT_ROW_HEIGHT)
 	);
@@ -169,53 +170,81 @@
 		};
 	});
 
-	function sidebarTargetFrom(dropTargets: DropTargetRecord[]): DropTargetRecord | null {
-		for (const target of dropTargets) {
-			if (isSidebarChatDropTargetData(target.data)) return target;
-		}
-		return null;
-	}
-
 	function startSidebarDrag(list: ChatOrderList, chatId: string): void {
 		if (!dragEnabled) return;
 		draggingChatId = chatId;
 		activeDrop = null;
+		lastValidDrop = null;
 		reorder.begin(list, chatId);
 		splitLayout.startDrag(chatId);
+	}
+
+	function inputIsInsideViewport(input: Input): boolean {
+		if (!viewportRef) return false;
+		const rect = viewportRef.getBoundingClientRect();
+		return (
+			input.clientX >= rect.left &&
+			input.clientX <= rect.right &&
+			input.clientY >= rect.top &&
+			input.clientY <= rect.bottom
+		);
+	}
+
+	function applySidebarDropInstruction(instruction: SidebarDropInstruction): void {
+		activeDrop = { chatId: instruction.targetChatId, edge: instruction.closestEdge };
+		reorder.preview({
+			list: instruction.sourceList,
+			sourceChatId: instruction.sourceChatId,
+			targetChatId: instruction.targetChatId,
+			closestEdge: instruction.closestEdge,
+		});
 	}
 
 	function previewSidebarDrop(
 		sourceData: unknown,
 		dropTargets: DropTargetRecord[],
+		input: Input,
 	): void {
 		if (!isSidebarChatDragData(sourceData) || sourceData.instanceId !== instanceId) return;
-		const targetRecord = sidebarTargetFrom(dropTargets);
-		const targetData = targetRecord?.data;
-		if (!targetRecord || !isSidebarChatDropTargetData(targetData)) {
+		if (draggingChatId !== sourceData.chatId) return;
+		if (!inputIsInsideViewport(input)) {
 			activeDrop = null;
+			lastValidDrop = null;
 			return;
 		}
-		if (!sidebarDragCanReorder(sourceData, targetData)) {
+		const instruction = resolveSidebarDropInstruction(sourceData, dropTargets);
+		if (!instruction) {
 			activeDrop = null;
 			return;
 		}
 
-		const closestEdge = extractClosestEdge(targetRecord.data);
-		activeDrop = { chatId: targetData.chatId, edge: closestEdge };
-		reorder.preview({
-			list: sourceData.list,
-			sourceChatId: sourceData.chatId,
-			targetChatId: targetData.chatId,
-			closestEdge,
-		});
+		lastValidDrop = instruction;
+		applySidebarDropInstruction(instruction);
 	}
 
-	function finishSidebarDrop(sourceData: unknown, dropTargets: DropTargetRecord[]): void {
+	function finishSidebarDrop(
+		sourceData: unknown,
+		dropTargets: DropTargetRecord[],
+		input: Input,
+	): void {
 		if (!isSidebarChatDragData(sourceData) || sourceData.instanceId !== instanceId) return;
-		const targetRecord = sidebarTargetFrom(dropTargets);
-		const targetData = targetRecord?.data;
-		if (targetRecord && isSidebarChatDropTargetData(targetData) && sidebarDragCanReorder(sourceData, targetData)) {
-			previewSidebarDrop(sourceData, dropTargets);
+		if (draggingChatId !== sourceData.chatId) return;
+		const isInsideViewport = inputIsInsideViewport(input);
+		const currentInstruction = isInsideViewport
+			? resolveSidebarDropInstruction(sourceData, dropTargets)
+			: null;
+		const fallbackInstruction = (
+			isInsideViewport &&
+			lastValidDrop?.sourceChatId === sourceData.chatId &&
+			lastValidDrop.sourceList === sourceData.list
+				? lastValidDrop
+				: null
+		);
+		// Uses the last valid row target when virtualization removes the current target at drop time.
+		const instruction = currentInstruction ?? fallbackInstruction;
+
+		if (instruction) {
+			applySidebarDropInstruction(instruction);
 			onPersistReorder(reorder.finish(sourceData.list));
 		} else {
 			reorder.cancel(sourceData.list);
@@ -223,6 +252,7 @@
 
 		activeDrop = null;
 		draggingChatId = null;
+		lastValidDrop = null;
 		setTimeout(() => {
 			if (splitLayout.draggedChatId === sourceData.chatId) {
 				splitLayout.endDrag();
@@ -234,13 +264,26 @@
 		if (!chatId) return;
 		const index = rows.findIndex((row) => row.chat.id === chatId);
 		if (index < 0) return;
-		untrack(() => {
-			$virtualizer.scrollToIndex(index, { align: 'center' });
-		});
+		let mountedRowIsVisible = false;
 		if (viewportRef) {
+			const rowEl = Array.from(
+				viewportRef.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]')
+			).find((element) => element.dataset.sidebarVirtualRow === chatId);
+			if (rowEl) {
+				const viewportRect = viewportRef.getBoundingClientRect();
+				const rowRect = rowEl.getBoundingClientRect();
+				mountedRowIsVisible = rowRect.top >= viewportRect.top && rowRect.bottom <= viewportRect.bottom;
+				if (mountedRowIsVisible) return;
+			}
+		}
+		untrack(() => {
+			$virtualizer.scrollToIndex(index, { align: 'auto' });
+		});
+		if (viewportRef && !mountedRowIsVisible) {
+			const viewportHeight = viewportRef.clientHeight || fallbackViewportHeight;
 			viewportRef.scrollTop = Math.max(
 				0,
-				index * effectiveRowHeight - fallbackViewportHeight * 0.5,
+				index * effectiveRowHeight - viewportHeight * 0.5,
 			);
 		}
 	}
@@ -278,13 +321,13 @@
 			isSidebarChatDragData(source.data) && source.data.instanceId === instanceId
 		),
 		onDrag: ({ source, location }) => {
-			previewSidebarDrop(source.data, location.current.dropTargets);
+			previewSidebarDrop(source.data, location.current.dropTargets, location.current.input);
 		},
 		onDropTargetChange: ({ source, location }) => {
-			previewSidebarDrop(source.data, location.current.dropTargets);
+			previewSidebarDrop(source.data, location.current.dropTargets, location.current.input);
 		},
 		onDrop: ({ source, location }) => {
-			finishSidebarDrop(source.data, location.current.dropTargets);
+			finishSidebarDrop(source.data, location.current.dropTargets, location.current.input);
 		},
 	}));
 </script>
@@ -315,6 +358,8 @@
 					isDragging={draggingChatId === row.chat.id}
 					dropIndicatorEdge={activeDrop?.chatId === row.chat.id ? activeDrop.edge : null}
 					onDragStart={startSidebarDrag}
+					onDragUpdate={previewSidebarDrop}
+					onDropOnRow={finishSidebarDrop}
 					{onChatSelect}
 					{onDeleteChat}
 					{onStartRenameChat}

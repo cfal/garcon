@@ -1,15 +1,16 @@
 import type { ChatOrderList } from '$lib/api/chats.js';
 import type { DropTargetRecord } from '@atlaskit/pragmatic-drag-and-drop/types';
 import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 
-const sidebarChatDragKey = Symbol('sidebar-chat-drag');
-const splitPaneChatDragKey = Symbol('split-pane-chat-drag');
-const sidebarChatDropTargetKey = Symbol('sidebar-chat-drop-target');
+const sidebarChatDragKind = 'sidebar-chat';
+const splitPaneChatDragKind = 'split-pane-chat';
+const sidebarChatDropTargetKind = 'sidebar-chat-row-target';
+const chatOrderLists: ChatOrderList[] = ['pinned', 'normal', 'archived'];
 
 export interface SidebarChatDragData {
-	[sidebarChatDragKey]: true;
-	[splitPaneChatDragKey]: true;
-	kind: 'sidebar-chat';
+	kind: typeof sidebarChatDragKind;
+	splitPaneDragKind: typeof splitPaneChatDragKind;
 	chatId: string;
 	list: ChatOrderList;
 	index: number;
@@ -17,8 +18,7 @@ export interface SidebarChatDragData {
 }
 
 export interface SidebarChatDropTargetData {
-	[sidebarChatDropTargetKey]: true;
-	kind: 'sidebar-chat-row-target';
+	kind: typeof sidebarChatDropTargetKind;
 	chatId: string;
 	list: ChatOrderList;
 	index: number;
@@ -40,9 +40,8 @@ export function getSidebarChatDragData(input: {
 	instanceId: symbol;
 }): SidebarChatDragData {
 	return {
-		[sidebarChatDragKey]: true,
-		[splitPaneChatDragKey]: true,
-		kind: 'sidebar-chat',
+		kind: sidebarChatDragKind,
+		splitPaneDragKind: splitPaneChatDragKind,
 		chatId: input.chatId,
 		list: input.list,
 		index: input.index,
@@ -57,8 +56,7 @@ export function getSidebarChatDropTargetData(input: {
 	instanceId: symbol;
 }): SidebarChatDropTargetData {
 	return {
-		[sidebarChatDropTargetKey]: true,
-		kind: 'sidebar-chat-row-target',
+		kind: sidebarChatDropTargetKind,
 		chatId: input.chatId,
 		list: input.list,
 		index: input.index,
@@ -66,19 +64,36 @@ export function getSidebarChatDropTargetData(input: {
 	};
 }
 
-function asDataRecord(data: unknown): Record<string | symbol, unknown> | null {
+function asDataRecord(data: unknown): Record<string, unknown> | null {
 	if (typeof data !== 'object' || data === null) return null;
-	return data as Record<string | symbol, unknown>;
+	return data as Record<string, unknown>;
+}
+
+function isChatOrderList(value: unknown): value is ChatOrderList {
+	return typeof value === 'string' && chatOrderLists.includes(value as ChatOrderList);
 }
 
 export function isSidebarChatDragData(data: unknown): data is SidebarChatDragData {
 	const record = asDataRecord(data);
-	return record?.[sidebarChatDragKey] === true && record?.[splitPaneChatDragKey] === true;
+	return (
+		record?.kind === sidebarChatDragKind &&
+		record.splitPaneDragKind === splitPaneChatDragKind &&
+		typeof record.chatId === 'string' &&
+		isChatOrderList(record.list) &&
+		typeof record.index === 'number' &&
+		typeof record.instanceId === 'symbol'
+	);
 }
 
 export function isSidebarChatDropTargetData(data: unknown): data is SidebarChatDropTargetData {
 	const record = asDataRecord(data);
-	return record?.[sidebarChatDropTargetKey] === true;
+	return (
+		record?.kind === sidebarChatDropTargetKind &&
+		typeof record.chatId === 'string' &&
+		isChatOrderList(record.list) &&
+		typeof record.index === 'number' &&
+		typeof record.instanceId === 'symbol'
+	);
 }
 
 export function sidebarDragCanReorder(
@@ -97,6 +112,26 @@ export function findSidebarDropTarget(
 ): SidebarChatDropTargetData | null {
 	for (const target of dropTargets) {
 		if (isSidebarChatDropTargetData(target.data)) return target.data;
+	}
+	return null;
+}
+
+export function resolveSidebarDropInstruction(
+	sourceData: unknown,
+	dropTargets: DropTargetRecord[],
+): SidebarDropInstruction | null {
+	if (!isSidebarChatDragData(sourceData)) return null;
+	for (const target of dropTargets) {
+		const targetData = target.data;
+		if (!isSidebarChatDropTargetData(targetData)) continue;
+		if (!sidebarDragCanReorder(sourceData, targetData)) return null;
+		return {
+			sourceChatId: sourceData.chatId,
+			sourceList: sourceData.list,
+			targetChatId: targetData.chatId,
+			targetList: targetData.list,
+			closestEdge: extractClosestEdge(target.data),
+		};
 	}
 	return null;
 }

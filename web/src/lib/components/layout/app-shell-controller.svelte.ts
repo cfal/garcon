@@ -14,45 +14,54 @@ export interface AppShellControllerDeps {
 export class AppShellController {
 	private deps: AppShellControllerDeps;
 	#inFlightFetch: Promise<void> | null = null;
+	#needsFollowUpFetch = false;
 
 	constructor(deps: AppShellControllerDeps) {
 		this.deps = deps;
 	}
 
-	/** Full chat list fetch with loading indicator. */
-	async fetchChats(): Promise<void> {
-		if (this.#inFlightFetch) return this.#inFlightFetch;
+	async #runFetch(showLoading: boolean): Promise<void> {
+		if (showLoading) this.deps.setLoadingChats(true);
+		try {
+			const res = await listChats();
+			this.deps.upsertFromServer(res.sessions ?? []);
+		} catch (err) {
+			const prefix = showLoading ? 'Failed to fetch chats' : 'Quiet refresh failed';
+			console.error(`[AppShellController] ${prefix}:`, err);
+		} finally {
+			if (showLoading) this.deps.setLoadingChats(false);
+		}
+	}
 
-		this.deps.setLoadingChats(true);
+	async #refresh(showLoading: boolean): Promise<void> {
+		if (this.#inFlightFetch) {
+			this.#needsFollowUpFetch = true;
+			return this.#inFlightFetch;
+		}
+
 		this.#inFlightFetch = (async () => {
+			let useLoadingState = showLoading;
 			try {
-				const res = await listChats();
-				this.deps.upsertFromServer(res.sessions ?? []);
-			} catch (err) {
-				console.error('[AppShellController] Failed to fetch chats:', err);
+				do {
+					this.#needsFollowUpFetch = false;
+					await this.#runFetch(useLoadingState);
+					useLoadingState = false;
+				} while (this.#needsFollowUpFetch);
 			} finally {
-				this.deps.setLoadingChats(false);
 				this.#inFlightFetch = null;
 			}
 		})();
 		return this.#inFlightFetch;
 	}
 
+	/** Full chat list fetch with loading indicator. */
+	async fetchChats(): Promise<void> {
+		return this.#refresh(true);
+	}
+
 	/** Silent refresh without loading indicator. */
 	async quietRefresh(): Promise<void> {
-		if (this.#inFlightFetch) return this.#inFlightFetch;
-
-		this.#inFlightFetch = (async () => {
-			try {
-				const res = await listChats();
-				this.deps.upsertFromServer(res.sessions ?? []);
-			} catch (err) {
-				console.error('[AppShellController] Quiet refresh failed:', err);
-			} finally {
-				this.#inFlightFetch = null;
-			}
-		})();
-		return this.#inFlightFetch;
+		return this.#refresh(false);
 	}
 
 	/** Fires the server-side delete in the background. Callers are expected

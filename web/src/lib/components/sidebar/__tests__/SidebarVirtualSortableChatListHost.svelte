@@ -34,7 +34,6 @@
 
 	const reorder = new SidebarChatReorderState({
 		get visibleOrders() { return visibleOrders; },
-		get isFiltered() { return isFiltered; },
 	});
 
 	setAppShell({

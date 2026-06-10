@@ -12,9 +12,8 @@
 	import { getAppShell, getReadReceiptOutbox } from '$lib/context';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import { reorderChats } from '$lib/api/chats.js';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
-	import { createReorderWriteQueue } from './reorder-write-queue';
+	import { createPerListWriteQueue } from './reorder-write-queue';
 	import { SidebarController } from './sidebar-controller.svelte';
 	import { SidebarSearchState } from './sidebar-search-state.svelte';
 	import { ChatSelectionStore } from '$lib/stores/chat-selection.svelte';
@@ -36,6 +35,14 @@
 		chatId: string;
 		chatTitle: string;
 		agentId: SessionAgentId;
+	}
+
+	interface QuickMoveWrite {
+		list: ChatOrderList;
+		chatId: string;
+		target: ReorderQuickTarget;
+		onSuccess?: () => void;
+		onFailure?: () => void;
 	}
 
 	interface ChatRenameConfirmation {
@@ -288,31 +295,23 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		onNewChat();
 	}
 
-	const immediateReorderQueue = createReorderWriteQueue<ChatOrderList>(
-		async ({ list, oldOrder, newOrder }) => {
-			await reorderChats({ list, oldOrder, newOrder });
+	const quickMoveQueue = createPerListWriteQueue<ChatOrderList, QuickMoveWrite>(
+		async ({ chatId, target }) => {
+			await controller.quickMove(chatId, target);
 		},
 		(error, task) => {
-			console.error(`Failed to persist ${task.list} chat order:`, error);
+			console.error(`Failed to quick reorder ${task.list} chat order:`, error);
 		},
 	);
 
-	function handleImmediateReorder(
+	function handleQuickMove(
 		list: ChatOrderList,
-		oldOrder: string[],
-		newOrder: string[],
+		chatId: string,
+		target: ReorderQuickTarget,
+		onSuccess?: () => void,
 		onFailure?: () => void,
 	) {
-		immediateReorderQueue.enqueue({ list, oldOrder, newOrder, onFailure });
-	}
-
-	async function handleQuickMove(chatId: string, target: ReorderQuickTarget) {
-		try {
-			await controller.quickMove(chatId, target);
-		} catch (error) {
-			console.error('Failed to quick reorder:', error);
-			throw error;
-		}
+		quickMoveQueue.enqueue({ list, chatId, target, onSuccess, onFailure });
 	}
 
 	// Multi-select mode handlers.
@@ -701,10 +700,9 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			onForkChat={(id) => { void handleForkChat(id); }}
 			onShareChat={(id, title) => { shareChatDialog = { chatId: id, chatTitle: title }; }}
 			onTagClick={handleTagClick}
-			onManageTags={showTagDialog}
-			onImmediateReorder={handleImmediateReorder}
-			onQuickMove={handleQuickMove}
-		/>
+				onManageTags={showTagDialog}
+				onQuickMove={handleQuickMove}
+			/>
 	</div>
 
 	{#if selection.isActive}

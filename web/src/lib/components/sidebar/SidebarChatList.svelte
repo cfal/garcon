@@ -35,13 +35,13 @@
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
-		onImmediateReorder: (
+		onQuickMove: (
 			list: ChatOrderList,
-			oldOrder: string[],
-			newOrder: string[],
+			chatId: string,
+			target: ReorderQuickTarget,
+			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;
-		onQuickMove: (chatId: string, target: ReorderQuickTarget) => Promise<void> | void;
 	}
 
 	let {
@@ -67,7 +67,6 @@
 		onShareChat,
 		onTagClick,
 		onManageTags,
-		onImmediateReorder,
 		onQuickMove,
 	}: SidebarChatListProps = $props();
 
@@ -99,7 +98,6 @@
 
 	const reorder = new SidebarChatReorderState({
 		get visibleOrders() { return visibleOrders; },
-		get isFiltered() { return isFiltered; },
 	});
 
 	let virtualRows = $derived.by(() => toVirtualRows(
@@ -165,18 +163,13 @@
 
 	function persistReorderRequest(request: SidebarChatReorderRequest | null): void {
 		if (!request) return;
-		if (request.kind === 'window') {
-			onImmediateReorder(
-				request.list,
-				request.oldOrder,
-				request.newOrder,
-				() => reorder.rollbackIfCurrent(request.list, request.newOrder),
-			);
-			return;
-		}
-
-		void Promise.resolve(onQuickMove(request.chatId, request.target))
-			.catch(() => reorder.rollbackIfCurrent(request.list, request.visibleOrder));
+		onQuickMove(
+			request.list,
+			request.chatId,
+			request.target,
+			() => reorder.completeIfCurrent(request.list, request.sequence),
+			() => reorder.rollbackIfCurrent(request.list, request.sequence, request.visibleOrder),
+		);
 	}
 </script>
 

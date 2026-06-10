@@ -24,24 +24,17 @@ export interface SidebarChatBoundaryMove {
 	boundary: BoundaryMove;
 }
 
-export type SidebarChatReorderRequest =
-	| {
-			kind: 'window';
-			list: ChatOrderList;
-			oldOrder: string[];
-			newOrder: string[];
-		}
-	| {
-			kind: 'relative';
-			list: ChatOrderList;
-			chatId: string;
-			target: ReorderQuickTarget;
-			visibleOrder: string[];
-		};
+export interface SidebarChatReorderRequest {
+	kind: 'relative';
+	list: ChatOrderList;
+	chatId: string;
+	target: ReorderQuickTarget;
+	visibleOrder: string[];
+	sequence: number;
+}
 
 interface SidebarChatReorderDeps {
 	get visibleOrders(): SidebarChatOrderMap;
-	get isFiltered(): boolean;
 }
 
 const chatOrderLists: ChatOrderList[] = ['pinned', 'normal', 'archived'];
@@ -57,6 +50,8 @@ export class SidebarChatReorderState {
 	activeChatId = $state<string | null>(null);
 	#startOrderByList = $state<Partial<SidebarChatOrderMap>>({});
 	#overrideByList = $state<Partial<SidebarChatOrderMap>>({});
+	#pendingSequenceByList = $state<Partial<Record<ChatOrderList, number>>>({});
+	#nextSequence = 0;
 
 	constructor(deps: SidebarChatReorderDeps) {
 		this.#deps = deps;
@@ -67,7 +62,7 @@ export class SidebarChatReorderState {
 	}
 
 	begin(list: ChatOrderList, chatId: string): void {
-		const order = this.#deps.visibleOrders[list];
+		const order = this.orderFor(list);
 		this.activeList = list;
 		this.activeChatId = chatId;
 		this.#startOrderByList = {
@@ -83,8 +78,9 @@ export class SidebarChatReorderState {
 	preview(input: SidebarChatPreviewMove): void {
 		if (this.activeList !== input.list || this.activeChatId !== input.sourceChatId) return;
 		const current = this.orderFor(input.list);
+		const baseOrder = this.#startOrderByList[input.list] ?? current;
 		const next = moveInOrder({
-			order: current,
+			order: baseOrder,
 			sourceChatId: input.sourceChatId,
 			targetChatId: input.targetChatId,
 			closestEdge: input.closestEdge,
@@ -108,7 +104,7 @@ export class SidebarChatReorderState {
 			return null;
 		}
 
-		return this.persistOptimisticMove(list, chatId, oldOrder, newOrder);
+		return this.persistOptimisticMove(list, chatId, newOrder);
 	}
 
 	cancel(list: ChatOrderList): void {
@@ -123,27 +119,40 @@ export class SidebarChatReorderState {
 			boundary: input.boundary,
 		});
 		if (!newOrder || arraysEqual(oldOrder, newOrder)) return null;
-		return this.persistOptimisticMove(input.list, input.chatId, oldOrder, newOrder);
+		return this.persistOptimisticMove(input.list, input.chatId, newOrder);
 	}
 
 	clear(list: ChatOrderList): void {
 		const nextOverrides = cloneOrders(this.#overrideByList);
 		const nextStarts = cloneOrders(this.#startOrderByList);
+		const nextPending = { ...this.#pendingSequenceByList };
 		delete nextOverrides[list];
 		delete nextStarts[list];
+		delete nextPending[list];
 		this.#overrideByList = nextOverrides;
 		this.#startOrderByList = nextStarts;
+		this.#pendingSequenceByList = nextPending;
 		if (this.activeList === list) {
 			this.activeList = null;
 			this.activeChatId = null;
 		}
 	}
 
-	rollbackIfCurrent(list: ChatOrderList, failedOrder: string[]): void {
+	rollbackIfCurrent(list: ChatOrderList, sequence: number, failedOrder: string[]): void {
+		if (this.#pendingSequenceByList[list] !== sequence) return;
 		const current = this.#overrideByList[list];
 		if (current && arraysEqual(current, failedOrder)) {
 			this.clear(list);
+			return;
 		}
+		this.completeIfCurrent(list, sequence);
+	}
+
+	completeIfCurrent(list: ChatOrderList, sequence: number): void {
+		if (this.#pendingSequenceByList[list] !== sequence) return;
+		const nextPending = { ...this.#pendingSequenceByList };
+		delete nextPending[list];
+		this.#pendingSequenceByList = nextPending;
 	}
 
 	reconcile(): void {
@@ -151,17 +160,21 @@ export class SidebarChatReorderState {
 		let changed = false;
 		const nextOverrides = cloneOrders(overrides);
 		const nextStarts = cloneOrders(this.#startOrderByList);
+		const nextPending = { ...this.#pendingSequenceByList };
 
 		for (const list of chatOrderLists) {
 			const override = overrides[list];
 			if (!override) continue;
+			const isActiveDragList = this.activeList === list;
+			const hasPendingWrite = this.#pendingSequenceByList[list] !== undefined;
 			const visible = this.#deps.visibleOrders[list];
 			if (
-				arraysEqual(override, visible) ||
+				(!hasPendingWrite && !isActiveDragList && arraysEqual(override, visible)) ||
 				!sameMembers(override, visible)
 			) {
 				delete nextOverrides[list];
 				delete nextStarts[list];
+				delete nextPending[list];
 				changed = true;
 			}
 		}
@@ -169,6 +182,7 @@ export class SidebarChatReorderState {
 		if (changed) {
 			this.#overrideByList = nextOverrides;
 			this.#startOrderByList = nextStarts;
+			this.#pendingSequenceByList = nextPending;
 			if (this.activeList && !this.#startOrderByList[this.activeList]) {
 				this.activeList = null;
 				this.activeChatId = null;
@@ -191,7 +205,6 @@ export class SidebarChatReorderState {
 	private persistOptimisticMove(
 		list: ChatOrderList,
 		chatId: string,
-		oldOrder: string[],
 		newOrder: string[],
 	): SidebarChatReorderRequest | null {
 		this.#overrideByList = {
@@ -199,20 +212,18 @@ export class SidebarChatReorderState {
 			[list]: [...newOrder],
 		};
 
-		if (!this.#deps.isFiltered) {
-			return {
-				kind: 'window',
-				list,
-				oldOrder,
-				newOrder,
-			};
-		}
-
 		const target = resolveFilteredRelativeMove(chatId, newOrder);
 		if (!target) {
 			this.clear(list);
 			return null;
 		}
+
+		const sequence = this.#nextSequence + 1;
+		this.#nextSequence = sequence;
+		this.#pendingSequenceByList = {
+			...this.#pendingSequenceByList,
+			[list]: sequence,
+		};
 
 		return {
 			kind: 'relative',
@@ -220,6 +231,7 @@ export class SidebarChatReorderState {
 			chatId,
 			target,
 			visibleOrder: newOrder,
+			sequence,
 		};
 	}
 }

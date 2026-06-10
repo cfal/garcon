@@ -59,7 +59,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(screen.getByText('Chat 0')).toBeTruthy();
 		expect(screen.queryByText('Chat 499')).toBeNull();
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
-		expect(screen.getByText('Chat 0').closest('button')?.getAttribute('draggable')).toBe('false');
+		expect(screen.getByText('Chat 0').closest('button')?.hasAttribute('draggable')).toBe(false);
 	});
 
 	it('updates visible rows when the shared viewport scrolls', async () => {
@@ -93,6 +93,25 @@ describe('SidebarVirtualSortableChatList', () => {
 
 		const viewport = screen.getByTestId('virtual-sidebar-viewport');
 		expect(viewport.scrollTop).toBeGreaterThan(rowHeight * 350);
+	});
+
+	it('does not scroll when the selected chat is already visible on recenter requests', async () => {
+		const callbacks: Array<() => void> = [];
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(500),
+			selectedChatId: 'chat-2',
+			rowHeight,
+			onRegisterRecenter: (callback) => callbacks.push(callback),
+		});
+		await tick();
+
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		viewport.scrollTop = 0;
+		for (const callback of callbacks) callback();
+		await tick();
+
+		expect(viewport.scrollTop).toBe(0);
 	});
 
 	it('uses virtual rendering for large normal chat lists', () => {

@@ -41,13 +41,13 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('Shared row chat').closest('button')?.getAttribute('draggable')).toBe('true');
 	});
 
-	it('can disable native row dragging for Pragmatic wrappers', () => {
+	it('omits native row dragging for Pragmatic wrappers', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			enableNativeDrag: false,
 		});
 
-		expect(screen.getByText('Shared row chat').closest('button')?.getAttribute('draggable')).toBe('false');
+		expect(screen.getByText('Shared row chat').closest('button')?.hasAttribute('draggable')).toBe(false);
 	});
 
 	it('renders the shared chat summary inside the sidebar item shell', async () => {

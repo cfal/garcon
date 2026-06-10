@@ -10,13 +10,13 @@
 		searchFilter?: string;
 		selectedChatId?: string | null;
 		isMobile?: boolean;
-		onImmediateReorder?: (
-			list: ChatOrderList,
-			oldOrder: string[],
-			newOrder: string[],
-			onFailure?: () => void,
-		) => void;
-		onQuickMove?: (chatId: string, target: ReorderQuickTarget) => Promise<void> | void;
+	onQuickMove?: (
+		list: ChatOrderList,
+		chatId: string,
+		target: ReorderQuickTarget,
+		onSuccess?: () => void,
+		onFailure?: () => void,
+	) => void;
 	}
 
 	let {
@@ -25,7 +25,6 @@
 		searchFilter = '',
 		selectedChatId = null,
 		isMobile = false,
-		onImmediateReorder = () => {},
 		onQuickMove = () => {},
 	}: SidebarChatListHostProps = $props();
 
@@ -70,9 +69,8 @@
 		onShowDetails={() => {}}
 		onForkChat={() => {}}
 		onShareChat={() => {}}
-		onTogglePinned={() => {}}
-		onToggleArchive={() => {}}
-		{onImmediateReorder}
-		{onQuickMove}
-	/>
+			onTogglePinned={() => {}}
+			onToggleArchive={() => {}}
+			{onQuickMove}
+		/>
 </div>

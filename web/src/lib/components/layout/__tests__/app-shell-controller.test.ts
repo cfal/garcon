@@ -78,6 +78,27 @@ describe('AppShellController', () => {
 			await expect(controller.quietRefresh()).resolves.toBeUndefined();
 			expect(deps.upsertFromServer).not.toHaveBeenCalled();
 		});
+
+		it('runs a follow-up fetch when refresh is requested during an in-flight fetch', async () => {
+			let resolveFirst: (value: { sessions: any[]; total: number }) => void = () => {};
+			const first = new Promise<{ sessions: any[]; total: number }>((resolve) => {
+				resolveFirst = resolve;
+			});
+			const staleSessions = [{ id: 'stale' }] as any;
+			const freshSessions = [{ id: 'fresh' }] as any;
+			mockListChats
+				.mockReturnValueOnce(first)
+				.mockResolvedValueOnce({ sessions: freshSessions, total: 1 });
+
+			const firstRefresh = controller.quietRefresh();
+			const secondRefresh = controller.quietRefresh();
+			resolveFirst({ sessions: staleSessions, total: 1 });
+			await Promise.all([firstRefresh, secondRefresh]);
+
+			expect(mockListChats).toHaveBeenCalledTimes(2);
+			expect(deps.upsertFromServer).toHaveBeenNthCalledWith(1, staleSessions);
+			expect(deps.upsertFromServer).toHaveBeenNthCalledWith(2, freshSessions);
+		});
 	});
 
 	describe('deleteChat', () => {

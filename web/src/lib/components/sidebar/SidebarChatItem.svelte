@@ -37,6 +37,7 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
 		enableNativeDrag?: boolean;
+		enableRecenterOnRequest?: boolean;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
@@ -64,6 +65,7 @@
 		isMultiSelectMode = false,
 		isMultiSelected = false,
 		enableNativeDrag = true,
+		enableRecenterOnRequest = true,
 		onChatSelect,
 		onDeleteChat,
 		onStartRenameChat,
@@ -181,6 +183,7 @@
 
 	// Scroll-to-selected on explicit recenter requests (chat focus).
 	onMount(() => appShell.onSidebarRecenterRequested(() => {
+		if (!enableRecenterOnRequest) return;
 		if (!isSelected || !itemEl) return;
 		requestAnimationFrame(() => {
 			if (itemEl) scrollIntoViewport(itemEl);
@@ -283,7 +286,7 @@
 		<div>
 			<Button
 				variant="ghost"
-				draggable={canNativeDrag}
+				draggable={canNativeDrag ? true : undefined}
 				ondragstart={canNativeDrag ? handleDragStart : undefined}
 				ondragend={canNativeDrag ? handleDragEnd : undefined}
 				oncontextmenu={handleRightClick}

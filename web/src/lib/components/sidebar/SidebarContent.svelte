@@ -27,13 +27,13 @@
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
-		onImmediateReorder: (
+		onQuickMove: (
 			list: ChatOrderList,
-			oldOrder: string[],
-			newOrder: string[],
+			chatId: string,
+			target: ReorderQuickTarget,
+			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;
-		onQuickMove: (chatId: string, target: ReorderQuickTarget) => Promise<void> | void;
 	}
 
 	let {
@@ -58,7 +58,6 @@
 		onManageTags,
 		onTogglePinned,
 		onToggleArchive,
-		onImmediateReorder,
 		onQuickMove,
 	}: SidebarContentProps = $props();
 
@@ -91,9 +90,8 @@
 		{onShareChat}
 		{onTagClick}
 		{onManageTags}
-		{onTogglePinned}
-		{onToggleArchive}
-		{onImmediateReorder}
-		{onQuickMove}
-	/>
+			{onTogglePinned}
+			{onToggleArchive}
+			{onQuickMove}
+		/>
 </ScrollArea>

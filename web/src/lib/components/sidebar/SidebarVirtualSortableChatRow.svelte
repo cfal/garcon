@@ -11,6 +11,7 @@
 		attachClosestEdge,
 		type Edge,
 	} from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import SidebarChatItem from './SidebarChatItem.svelte';
 	import {
 		getSidebarChatDragData,
@@ -49,6 +50,8 @@
 		hasPinnedChats?: boolean;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onDragUpdate: (sourceData: unknown, dropTargets: DropTargetRecord[], input: Input) => void;
+		onDropOnRow: (sourceData: unknown, dropTargets: DropTargetRecord[], input: Input) => void;
 	}
 
 	let {
@@ -78,6 +81,8 @@
 		onMultiSelectToggle,
 		onMoveToTop,
 		onMoveToBottom,
+		onDragUpdate,
+		onDropOnRow,
 		hasPinnedChats = false,
 	}: SidebarVirtualSortableChatRowProps = $props();
 
@@ -121,6 +126,15 @@
 				),
 				getDropEffect: () => 'move',
 				getIsSticky: () => true,
+				onDrag: ({ source, location }) => {
+					onDragUpdate(source.data, location.current.dropTargets, location.current.input);
+				},
+				onDropTargetChange: ({ source, location }) => {
+					onDragUpdate(source.data, location.current.dropTargets, location.current.input);
+				},
+				onDrop: ({ source, location }) => {
+					onDropOnRow(source.data, location.current.dropTargets, location.current.input);
+				},
 			}),
 		);
 	});
@@ -154,6 +168,7 @@
 			{isMultiSelectMode}
 			{isMultiSelected}
 			enableNativeDrag={false}
+			enableRecenterOnRequest={false}
 			{onChatSelect}
 			{onDeleteChat}
 			{onStartRenameChat}
