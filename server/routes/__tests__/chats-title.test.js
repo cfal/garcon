@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
+
+const parseJsonBody = mock(() => undefined);
+
 mock.module('../../lib/http-request.js', () => ({
-  parseJsonBody: mock(() => undefined),
+  parseJsonBody,
+  MalformedJsonError,
 }));
 
 mock.module('../../agents/claude/history-loader.js', () => ({
@@ -13,6 +20,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
+import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 const registry = {
   getChat: mock(() => undefined),
@@ -53,11 +61,22 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+const chatsRoutes = createChatRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  commandLedger: createRouteCommandLedger('chats-title'),
+  pendingInputs: createRoutePendingInputs(),
+});
 
 const allMocks = [
   registry.listAllChats, metadata.listAllChatMetadata, registry.getChat, registry.removeChat,
-  settings.getChatName, settings.removeSessionName, settings.removeFromAllOrderLists, settings.getNormalChatIds,
+  settings.getChatName, settings.ensureInNormal, settings.removeSessionName, settings.removeFromAllOrderLists, settings.getNormalChatIds,
+  pathCache.isProjectPathAvailable,
 ];
 
 describe('GET /api/chats title resolution', () => {
@@ -65,6 +84,7 @@ describe('GET /api/chats title resolution', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
+    pathCache.isProjectPathAvailable.mockImplementation(() => Promise.resolve(true));
   });
 
   it('uses override title when session name exists', async () => {
@@ -116,6 +136,59 @@ describe('GET /api/chats title resolution', () => {
     expect(body.sessions[0].title).toBe('New Session');
     expect(body.sessions[0].preview.lastMessage).toBe('New Session');
   });
+
+  it('returns orphaned chats without repairing order lists during a read', async () => {
+    registry.listAllChats.mockImplementation(() => ({
+      '400': { agentId: 'claude', projectPath: '/proj', tags: [] },
+    }));
+    metadata.listAllChatMetadata.mockImplementation(() => new Map());
+    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve([]));
+    settings.getNormalChatIds.mockImplementation(() => Promise.resolve([]));
+    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve([]));
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(body.sessions.map((session) => session.id)).toEqual(['400']);
+    expect(settings.ensureInNormal).not.toHaveBeenCalled();
+  });
+
+  it('checks project path availability concurrently', async () => {
+    let resolveSlow;
+    const slowCheck = new Promise((resolve) => { resolveSlow = resolve; });
+    let resolveFirstCall;
+    const firstCall = new Promise((resolve) => { resolveFirstCall = resolve; });
+    let fastCalled = false;
+
+    registry.listAllChats.mockImplementation(() => ({
+      '500': { agentId: 'claude', projectPath: '/slow', tags: [] },
+      '600': { agentId: 'claude', projectPath: '/fast', tags: [] },
+    }));
+    metadata.listAllChatMetadata.mockImplementation(() => new Map());
+    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve([]));
+    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['500', '600']));
+    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve([]));
+    pathCache.isProjectPathAvailable.mockImplementation((projectPath) => {
+      if (projectPath === '/slow') {
+        resolveFirstCall();
+        return slowCheck;
+      }
+      if (projectPath === '/fast') {
+        fastCalled = true;
+      }
+      return Promise.resolve(true);
+    });
+
+    const responsePromise = handler();
+    await firstCall;
+
+    expect(fastCalled).toBe(true);
+    resolveSlow(true);
+
+    const response = await responsePromise;
+    const body = await response.json();
+    expect(body.sessions.map((session) => session.id)).toEqual(['500', '600']);
+  });
 });
 
 describe('DELETE /api/chats session name cleanup', () => {
@@ -127,9 +200,10 @@ describe('DELETE /api/chats session name cleanup', () => {
 
   it('removes session name when deleting a chat', async () => {
     registry.getChat.mockImplementation(() => Promise.resolve({ agentId: 'claude', projectPath: '/proj' }));
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
 
-    const url = new URL('http://localhost/api/chats?chatId=500');
-    const request = new Request(url, { method: 'DELETE' });
+    const url = new URL('http://localhost/api/chats');
+    const request = new Request(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
 
     const response = await handler(request, url);
     const body = await response.json();
@@ -139,7 +213,7 @@ describe('DELETE /api/chats session name cleanup', () => {
     expect(registry.removeChat).toHaveBeenCalledWith('500');
   });
 
-  it('cleans up all order list references when deleting a chat', async () => {
+  it('keeps query chatId compatibility when deleting a chat', async () => {
     registry.getChat.mockImplementation(() => Promise.resolve({ agentId: 'claude', projectPath: '/proj' }));
 
     const url = new URL('http://localhost/api/chats?chatId=500');

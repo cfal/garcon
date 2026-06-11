@@ -158,4 +158,43 @@ describe('CommandLedger', () => {
     expect(duplicate.kind).toBe('duplicate');
     expect(duplicate.record.status).toBe('finished');
   });
+
+  it('updates a record by command identity', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    await ledger.accept({
+      commandType: 'chat-start',
+      chatId: 'chat-1',
+      clientRequestId: 'req-1',
+      payload: { chatId: 'chat-1' },
+    });
+
+    const updated = await ledger.updateCommand('chat-start', 'chat-1', 'req-1', {
+      status: 'failed',
+      error: 'startup failed',
+    });
+
+    expect(updated).toMatchObject({
+      commandType: 'chat-start',
+      status: 'failed',
+      error: 'startup failed',
+    });
+  });
+
+  it('does not overwrite blocked statuses', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    const accepted = await ledger.accept({
+      commandType: 'chat-start',
+      chatId: 'chat-1',
+      clientRequestId: 'req-1',
+      payload: { chatId: 'chat-1' },
+    });
+
+    await ledger.update(accepted.record.key, { status: 'failed', error: 'startup failed' });
+    const skipped = await ledger.updateUnlessStatus(accepted.record.key, ['failed'], { status: 'running' });
+
+    expect(skipped).toMatchObject({
+      status: 'failed',
+      error: 'startup failed',
+    });
+  });
 });

@@ -23,7 +23,7 @@ export interface AgentRuntime {
   updateSessionSettings?(agentSessionId: string, patch: AgentSessionSettingsPatch): void | Promise<void>;
   resolvePermission?(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> | void;
   shutdown?(): void;
-  startPurgeTimer?(): ReturnType<typeof setInterval>;
+  startPurgeTimer?(): void;
   onMessages(cb: (chatId: string, messages: unknown[], metadata?: AgentEventMetadata) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;

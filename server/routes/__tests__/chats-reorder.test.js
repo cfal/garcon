@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
+
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => undefined),
+  MalformedJsonError,
 }));
 
 mock.module('../../agents/claude/history-loader.js', () => ({
@@ -13,6 +18,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
+import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
 const registry = {
@@ -54,7 +60,17 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+const chatsRoutes = createChatRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  commandLedger: createRouteCommandLedger('chats-reorder'),
+  pendingInputs: createRoutePendingInputs(),
+});
 
 const allMocks = [
   settings.reorderWindow, settings.reorderRelative,
@@ -203,7 +219,7 @@ describe('POST /api/chats/reorder (window-based)', () => {
   });
 
   it('handles malformed JSON', async () => {
-    parseJsonBody.mockRejectedValue(new Error('Malformed JSON'));
+    parseJsonBody.mockRejectedValue(new MalformedJsonError());
 
     const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
     const response = await handler(request);
@@ -308,7 +324,7 @@ describe('POST /api/chats/reorder-quick', () => {
   });
 
   it('handles malformed JSON', async () => {
-    parseJsonBody.mockRejectedValue(new Error('Malformed JSON'));
+    parseJsonBody.mockRejectedValue(new MalformedJsonError());
 
     const request = new Request('http://localhost/api/chats/reorder-quick', { method: 'POST' });
     const response = await handler(request);

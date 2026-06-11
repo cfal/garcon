@@ -76,4 +76,4 @@ ENV GARCON_PORT=8080
 VOLUME ["${HOME}/.garcon"]
 EXPOSE 8080
 
-CMD ["bun", "server/main.js"]
+CMD ["bun", "server/main.ts"]

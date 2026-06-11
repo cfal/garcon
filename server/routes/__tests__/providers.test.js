@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 const parseJsonBody = mock(() => Promise.resolve({}));
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
 
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody,
+  MalformedJsonError,
 }));
 
 import createAgentRoutes from '../agents.js';

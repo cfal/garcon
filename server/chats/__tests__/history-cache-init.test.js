@@ -36,29 +36,29 @@ describe('HistoryCache init wiring', () => {
     expect(mockAgents.onMessages).toHaveBeenCalledTimes(1);
   });
 
-  it('evicts cache entry when chat-removed fires', () => {
+  it('evicts cache entry when chat-removed fires', async () => {
     cache.init();
-    cache._cacheByChatId.set('c1', { chatId: 'c1', messages: [], lastAccessAt: Date.now() });
-    expect(cache._cacheByChatId.has('c1')).toBe(true);
+    await cache.appendMessages('c1', [
+      { type: 'assistant-message', content: 'cached', timestamp: '2026-01-01T00:00:00Z' },
+    ]);
+    expect(cache.getMessages('c1')).not.toBeNull();
 
     removedCallbacks[0]('c1');
 
-    expect(cache._cacheByChatId.has('c1')).toBe(false);
+    expect(cache.getMessages('c1')).toBeNull();
   });
 
   it('appends messages to cache when onMessages fires', async () => {
     cache.init();
-    cache._cacheByChatId.set('c1', { chatId: 'c1', messages: [], lastAccessAt: Date.now() });
 
     const msgs = [{ type: 'user-message', content: 'hi', timestamp: '2026-01-01T00:00:00Z' }];
-    await messageCallbacks[0]('c1', msgs);
+    messageCallbacks[0]('c1', msgs);
 
-    // Allow async appendMessages to settle.
-    await new Promise((r) => setTimeout(r, 10));
+    await Promise.resolve();
 
-    const entry = cache._cacheByChatId.get('c1');
-    expect(entry.messages.length).toBe(1);
-    expect(entry.messages[0].content).toBe('hi');
+    const messages = cache.getMessages('c1');
+    expect(messages.length).toBe(1);
+    expect(messages[0].content).toBe('hi');
   });
 
   it('does not register duplicate listeners on repeated init calls', () => {

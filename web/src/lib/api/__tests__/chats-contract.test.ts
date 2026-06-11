@@ -293,36 +293,39 @@ describe('chats API contract', () => {
 		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
 	});
 
-	it('deleteChat encodes chatId in query string', async () => {
+	it('deleteChat sends chatId in the JSON body', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
 		await deleteChat('chat/special');
 
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/chats?chatId=chat%2Fspecial');
+		expect(url).toBe('/api/v1/chats');
 		expect(opts.method).toBe('DELETE');
+		expect(JSON.parse(opts.body)).toEqual({ chatId: 'chat/special' });
 	});
 
-	it('togglePinned calls POST with chatId query param', async () => {
+	it('togglePinned sends chatId in the JSON body', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true, isPinned: true }));
 
 		const result = await togglePinned('c-1');
 
 		expect(result).toEqual({ success: true, isPinned: true });
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/chats/pin?chatId=c-1');
+		expect(url).toBe('/api/v1/chats/pin');
 		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toEqual({ chatId: 'c-1' });
 	});
 
-	it('toggleArchive calls POST with chatId query param', async () => {
+	it('toggleArchive sends chatId in the JSON body', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true, isArchived: true }));
 
 		const result = await toggleArchive('c-1');
 
 		expect(result).toEqual({ success: true, isArchived: true });
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/chats/archive?chatId=c-1');
+		expect(url).toBe('/api/v1/chats/archive');
 		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toEqual({ chatId: 'c-1' });
 	});
 
 	it('markChatsReadBatch sends entries array', async () => {

@@ -54,11 +54,11 @@ describe('json file store', () => {
 
   it('keeps JSON persistence modules on the shared atomic writer', () => {
     for (const file of [
-      'server/auth/store.js',
+      'server/auth/store.ts',
       'server/chats/store.ts',
-      'server/settings/store.js',
+      'server/settings/store.ts',
       'server/chats/share-store.ts',
-      'server/chats/metadata-store.js',
+      'server/chats/metadata-store.ts',
       'server/api-providers/store.ts',
     ]) {
       const source = readFileSync(file, 'utf8');

@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
+
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => undefined),
+  MalformedJsonError,
 }));
 
 mock.module('../../agents/claude/history-loader.js', () => ({
@@ -13,6 +18,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
+import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
 const registry = {
@@ -54,7 +60,17 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+const chatsRoutes = createChatRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  commandLedger: createRouteCommandLedger('chats-read'),
+  pendingInputs: createRoutePendingInputs(),
+});
 
 const allMocks = [
   registry.getChat, registry.updateChat, metadata.getChatMetadata,

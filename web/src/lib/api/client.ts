@@ -117,8 +117,12 @@ export async function apiPatch<T>(url: string, body?: unknown, options?: ApiFetc
 	return parseResponse<T>(response);
 }
 
-export async function apiDelete<T>(url: string, options?: RequestInit): Promise<T> {
-	const response = await apiFetch(url, { ...options, method: 'DELETE' });
+export async function apiDelete<T>(url: string, body?: unknown, options?: RequestInit): Promise<T> {
+	const response = await apiFetch(url, {
+		...options,
+		method: 'DELETE',
+		body: body !== undefined ? JSON.stringify(body) : undefined
+	});
 	return parseResponse<T>(response);
 }
 

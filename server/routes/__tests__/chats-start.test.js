@@ -5,8 +5,13 @@ import os from 'os';
 
 const testBasePath = path.join(os.tmpdir(), 'garcon-chats-start-test');
 
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
+
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => Promise.resolve({})),
+  MalformedJsonError,
 }));
 
 mock.module('../../chats/title-generator.js', () => ({
@@ -19,6 +24,7 @@ mock.module('../../config.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
+import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 const registry = {
   getChat: mock(() => undefined),
@@ -65,7 +71,17 @@ const agents = {
   modelSupportsImages: mock(() => Promise.resolve(false)),
 };
 
-const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+const routes = createChatRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  commandLedger: createRouteCommandLedger('chats-start'),
+  pendingInputs: createRoutePendingInputs(),
+});
 const handler = routes['/api/v1/chats/start'].POST;
 
 describe('POST /api/v1/chats/start', () => {

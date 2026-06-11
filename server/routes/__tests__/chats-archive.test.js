@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
+
+const parseJsonBody = mock(() => undefined);
+
 mock.module('../../lib/http-request.js', () => ({
-  parseJsonBody: mock(() => undefined),
+  parseJsonBody,
+  MalformedJsonError,
 }));
 
 mock.module('../../agents/claude/history-loader.js', () => ({
@@ -13,6 +20,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
+import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 const registry = {
   getChat: mock(() => undefined),
@@ -51,7 +59,17 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+const chatsRoutes = createChatRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  commandLedger: createRouteCommandLedger('chats-archive'),
+  pendingInputs: createRoutePendingInputs(),
+});
 
 const allMocks = [
   registry.getChat,
@@ -74,7 +92,7 @@ describe('POST /api/chats/archive', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('chatId query parameter is required');
+    expect(body.error).toBe('chatId is required');
   });
 
   it('returns 404 when session not found', async () => {
@@ -93,9 +111,10 @@ describe('POST /api/chats/archive', () => {
   it('delegates to settings.toggleArchive and returns result', async () => {
     registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.toggleArchive.mockImplementation(() => Promise.resolve({ isArchived: true }));
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
 
-    const url = new URL('http://localhost/api/chats/archive?chatId=500');
-    const request = new Request(url, { method: 'POST' });
+    const url = new URL('http://localhost/api/chats/archive');
+    const request = new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
 
     const response = await handler(request, url);
     const body = await response.json();
@@ -105,7 +124,7 @@ describe('POST /api/chats/archive', () => {
     expect(settings.toggleArchive).toHaveBeenCalledWith('500');
   });
 
-  it('returns isArchived false when unarchiving', async () => {
+  it('keeps query chatId compatibility when unarchiving', async () => {
     registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.toggleArchive.mockImplementation(() => Promise.resolve({ isArchived: false }));
 
@@ -131,9 +150,10 @@ describe('POST /api/chats/pin', () => {
   it('delegates to settings.togglePin and returns result', async () => {
     registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.togglePin.mockImplementation(() => Promise.resolve({ isPinned: true }));
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
 
-    const url = new URL('http://localhost/api/chats/pin?chatId=500');
-    const request = new Request(url, { method: 'POST' });
+    const url = new URL('http://localhost/api/chats/pin');
+    const request = new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
 
     const response = await handler(request, url);
     const body = await response.json();
@@ -143,7 +163,7 @@ describe('POST /api/chats/pin', () => {
     expect(settings.togglePin).toHaveBeenCalledWith('500');
   });
 
-  it('returns isPinned false when unpinning', async () => {
+  it('keeps query chatId compatibility when unpinning', async () => {
     registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.togglePin.mockImplementation(() => Promise.resolve({ isPinned: false }));
 

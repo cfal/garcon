@@ -7,10 +7,14 @@ const getAgentAuthStatusMapMock = mock(() => Promise.resolve({
   codex: { authenticated: false },
   opencode: { authenticated: false },
 }));
+const getAgentReadinessMapMock = mock(() => Promise.resolve({}));
+const getAgentCatalogEntriesMock = mock(() => Promise.resolve([]));
 const getModelsMock = mock(() => Promise.resolve([]));
 const mockAgents = {
   runSingleQuery: runSingleQueryMock,
   getAgentAuthStatusMap: getAgentAuthStatusMapMock,
+  getAgentReadinessMap: getAgentReadinessMapMock,
+  getAgentCatalogEntries: getAgentCatalogEntriesMock,
   getModels: getModelsMock,
   getAgentCatalog: mock(() => Promise.resolve({ agents: [], apiProviders: [] })),
 };
@@ -28,7 +32,8 @@ const mockSettings = {
 
 const allMocks = [
   runSingleQueryMock, setSessionNameMock,
-  getChatNameMock, getUiSettingsMock, getAgentAuthStatusMapMock, getModelsMock, mockAgents.getAgentCatalog,
+  getChatNameMock, getUiSettingsMock, getAgentAuthStatusMapMock,
+  getAgentReadinessMapMock, getAgentCatalogEntriesMock, getModelsMock, mockAgents.getAgentCatalog,
 ];
 
 describe('maybeGenerateChatTitle', () => {
@@ -42,6 +47,8 @@ describe('maybeGenerateChatTitle', () => {
       codex: { authenticated: false },
       opencode: { authenticated: false },
     }));
+    getAgentReadinessMapMock.mockImplementation(() => Promise.resolve({}));
+    getAgentCatalogEntriesMock.mockImplementation(() => Promise.resolve([]));
     getModelsMock.mockImplementation(() => Promise.resolve([]));
     runSingleQueryMock.mockImplementation(() => Promise.resolve('Test Chat Title'));
     getChatNameMock.mockImplementation(() => null);
@@ -126,9 +133,15 @@ describe('maybeGenerateChatTitle', () => {
       codex: { authenticated: false },
       opencode: { authenticated: true },
     }));
-    getModelsMock.mockImplementation(() => Promise.resolve([
-      { value: 'deepseek-r1', label: 'DeepSeek R1' },
-      { value: 'deepseek-v3', label: 'DeepSeek V3' },
+    getAgentCatalogEntriesMock.mockImplementation(() => Promise.resolve([
+      {
+        id: 'opencode',
+        kind: 'agent',
+        models: [
+          { value: 'deepseek-r1', label: 'DeepSeek R1' },
+          { value: 'deepseek-v3', label: 'DeepSeek V3' },
+        ],
+      },
     ]));
 
     await maybeGenerateChatTitle({
@@ -152,7 +165,9 @@ describe('maybeGenerateChatTitle', () => {
       codex: { authenticated: false },
       opencode: { authenticated: true },
     }));
-    getModelsMock.mockImplementation(() => Promise.resolve([]));
+    getAgentCatalogEntriesMock.mockImplementation(() => Promise.resolve([
+      { id: 'opencode', kind: 'agent', models: [] },
+    ]));
 
     await maybeGenerateChatTitle({
       chatId: '303',

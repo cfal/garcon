@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { beforeEach, afterEach, describe, expect, it, mock } from 'bun:test';
 
 class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
@@ -32,6 +32,8 @@ const agents = {
     'direct-openai-compatible': { authenticated: false },
     'direct-openai-responses-compatible': { authenticated: false },
   })),
+  getAgentReadinessMap: mock(() => Promise.resolve({})),
+  getAgentCatalogEntries: mock(() => Promise.resolve([])),
   getModels: mock(() => Promise.resolve([])),
   hasAgent: mock((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId)),
 };
@@ -41,6 +43,19 @@ const settings = {
 };
 
 const routes = createGitRoutes(agents, settings);
+const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
+
+beforeEach(() => {
+  process.env.GARCON_PROJECT_BASE_DIR = '/';
+});
+
+afterEach(() => {
+  if (originalProjectBaseDir === undefined) {
+    delete process.env.GARCON_PROJECT_BASE_DIR;
+  } else {
+    process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
+  }
+});
 
 function makeRequest(body) {
   return new Request('http://localhost/api/v1/git/generate-commit-message', {
@@ -57,6 +72,8 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     parseJsonBody.mockClear();
     generateCommitMessageForFiles.mockClear();
     agents.getAgentAuthStatusMap.mockClear();
+    agents.getAgentReadinessMap.mockClear();
+    agents.getAgentCatalogEntries.mockClear();
     agents.getModels.mockClear();
     agents.hasAgent.mockClear();
     agents.hasAgent.mockImplementation((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId));

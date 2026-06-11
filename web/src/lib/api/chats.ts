@@ -177,7 +177,7 @@ export interface DeleteChatResponse {
 
 /** Deletes a chat session. */
 export async function deleteChat(chatId: string): Promise<DeleteChatResponse> {
-	return apiDelete<DeleteChatResponse>(`/api/v1/chats?chatId=${encodeURIComponent(chatId)}`);
+	return apiDelete<DeleteChatResponse>('/api/v1/chats', { chatId });
 }
 
 /** Fetches detailed chat metadata for sidebar details dialog. */
@@ -187,7 +187,7 @@ export async function getChatDetails(chatId: string): Promise<ChatDetailsRespons
 
 /** Toggles the pinned state of a chat session. */
 export async function togglePinned(chatId: string): Promise<{ success: boolean; isPinned: boolean }> {
-	return apiPost(`/api/v1/chats/pin?chatId=${encodeURIComponent(chatId)}`);
+	return apiPost('/api/v1/chats/pin', { chatId });
 }
 
 export interface ToggleArchiveResponse {
@@ -197,7 +197,7 @@ export interface ToggleArchiveResponse {
 
 /** Toggles the archived state of a chat session. */
 export async function toggleArchive(chatId: string): Promise<ToggleArchiveResponse> {
-	return apiPost<ToggleArchiveResponse>(`/api/v1/chats/archive?chatId=${encodeURIComponent(chatId)}`);
+	return apiPost<ToggleArchiveResponse>('/api/v1/chats/archive', { chatId });
 }
 
 export interface MarkReadBatchResponse {
@@ -221,6 +221,7 @@ export type ValidateStartErrorCode =
 	| 'unknown';
 
 export interface ValidateStartResponse {
+	success?: false;
 	valid: boolean;
 	isGitRepo?: boolean;
 	error?: string;

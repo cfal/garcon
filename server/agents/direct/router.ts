@@ -38,7 +38,8 @@ export type DirectCompatibleRuntime = {
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   getModels?(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
-  startPurgeTimer(): ReturnType<typeof setInterval>;
+  startPurgeTimer(): void;
+  shutdown?(): void;
   onMessages(cb: (chatId: string, messages: unknown[], metadata?: AgentEventMetadata) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
@@ -64,8 +65,8 @@ interface DirectEndpointRouterConfig<TRuntime extends DirectCompatibleRuntime> {
 export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntime> implements AgentRuntime {
   #runtimes = new Map<string, TRuntime>();
   #sessionEndpointIds = new Map<string, string>();
-  #purgeTimers = new Map<string, ReturnType<typeof setInterval>>();
   #purgeTimersStarted = false;
+  #runtimeDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
   #callbacks: DirectEventCallbacks = {
     messages: new Set(),
     processing: new Set(),
@@ -132,25 +133,27 @@ export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntim
     return this.config.runSingleQuery(prompt, endpoint, apiProvider, options);
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#runtimeDiscoveryTimer) return;
     this.#purgeTimersStarted = true;
-    for (const [endpointId, runtime] of this.#runtimes.entries()) {
-      if (!this.#purgeTimers.has(endpointId)) {
-        this.#purgeTimers.set(endpointId, runtime.startPurgeTimer());
-      }
+    for (const runtime of this.#runtimes.values()) {
+      runtime.startPurgeTimer();
     }
-    return setInterval(() => {
-      for (const [endpointId, runtime] of this.#runtimes.entries()) {
-        if (!this.#purgeTimers.has(endpointId)) {
-          this.#purgeTimers.set(endpointId, runtime.startPurgeTimer());
-        }
+    this.#runtimeDiscoveryTimer = setInterval(() => {
+      for (const runtime of this.#runtimes.values()) {
+        runtime.startPurgeTimer();
       }
     }, 5 * 60 * 1000);
   }
 
   shutdown(): void {
-    for (const timer of this.#purgeTimers.values()) clearInterval(timer);
-    this.#purgeTimers.clear();
+    if (this.#runtimeDiscoveryTimer) {
+      clearInterval(this.#runtimeDiscoveryTimer);
+      this.#runtimeDiscoveryTimer = null;
+    }
+    for (const runtime of this.#runtimes.values()) {
+      runtime.shutdown?.();
+    }
   }
 
   onMessages(cb: (chatId: string, messages: unknown[], metadata?: AgentEventMetadata) => void): void {
@@ -194,7 +197,7 @@ export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntim
     this.#runtimes.set(endpoint.id, runtime);
 
     if (this.#purgeTimersStarted) {
-      this.#purgeTimers.set(endpoint.id, runtime.startPurgeTimer());
+      runtime.startPurgeTimer();
     }
     return runtime;
   }

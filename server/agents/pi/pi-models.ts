@@ -1,8 +1,9 @@
 import { AuthStorage, createAgentSessionServices, getAgentDir } from '@earendil-works/pi-coding-agent';
 import type { SharedModelOption } from "../../../common/models.js";
+import { isTestEnvironment } from '../../config.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
-const DISCOVERY_RETRY_DELAYS_MS = process.env.NODE_ENV === 'test' ? [0, 0] : [75, 250];
+const DISCOVERY_RETRY_DELAYS_MS = isTestEnvironment() ? [0, 0] : [75, 250];
 
 let cachedModels: SharedModelOption[] | null = null;
 let cachedAt = 0;

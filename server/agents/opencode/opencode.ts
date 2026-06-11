@@ -8,6 +8,7 @@ import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, Per
 import { convertOpencodePermissionTool } from "./permission-tool-converter.js";
 import { convertOpenCodeToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
+import { isTestEnvironment } from '../../config.js';
 import type { PermissionMode } from "../../../common/chat-modes.js";
 import type { StartSessionRequest, ResumeTurnRequest } from "../session-types.js";
 
@@ -390,6 +391,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #modelsPromise: Promise<OpenCodeModelOption[]> | null = null;
   #unavailableUntil = 0;
   #unavailableReason = '';
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   #available: boolean | null = null;
   readonly #options: NormalizedOpenCodeRuntimeOptions;
@@ -402,13 +404,22 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   // Shuts down the spawned opencode server process (if any).
   // Called during garcon graceful shutdown to prevent orphaned processes.
   shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
+    for (const agentSessionId of this.#pendingTurnWaiters.keys()) {
+      this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode runtime shutting down'));
+    }
+    this.#sessions.clear();
+    this.#pendingPermissions.clear();
     this.#closeInstance();
   }
 
   // Returns true if the opencode binary is on $PATH, without spawning a server.
   isAvailable(): boolean {
     if (this.#available !== null) return this.#available;
-    if (process.env.NODE_ENV === 'test') {
+    if (isTestEnvironment()) {
       this.#available = true;
       return true;
     }
@@ -531,7 +542,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     startup = (async () => {
       try {
         if (typeof Bun !== 'undefined' && typeof Bun.which === 'function'
-            && process.env.NODE_ENV !== 'test' && !Bun.which('opencode')) {
+            && !isTestEnvironment() && !Bun.which('opencode')) {
           throw new Error('opencode executable not found in $PATH');
         }
 
@@ -1081,10 +1092,11 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#assistantPartTypes.delete(chatId);
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxAge = 30 * 60 * 1000;
 
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
 
       for (const [id, session] of this.#sessions.entries()) {

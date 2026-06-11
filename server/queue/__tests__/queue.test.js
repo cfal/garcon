@@ -8,10 +8,29 @@ import { QueueManager } from '../../queue.js';
 let workspaceDir = '';
 let queue;
 
+function createStateOnlyAgents() {
+  return {
+    runAgentTurn: mock(() => Promise.reject(new Error('state-only queue cannot run turns'))),
+    abortSession: mock(() => Promise.resolve(false)),
+    isChatRunning: mock(() => false),
+  };
+}
+
+function createPendingInputs() {
+  return {
+    register: mock(() => Promise.resolve()),
+    updateDeliveryStatus: mock(() => undefined),
+  };
+}
+
+function emptyDrainOptions() {
+  return {};
+}
+
 beforeEach(async () => {
   workspaceDir = path.join(os.tmpdir(), `garcon-queue-test-${randomUUID()}`);
   await fs.mkdir(workspaceDir, { recursive: true });
-  queue = new QueueManager(workspaceDir);
+  queue = new QueueManager(workspaceDir, createStateOnlyAgents(), createPendingInputs(), emptyDrainOptions);
 });
 
 afterEach(async () => {
@@ -61,9 +80,9 @@ describe('queue invariants', () => {
     expect(typeof resumed.updatedAt).toBe('string');
   });
 
-  it('throws a clear error when execution is requested without an agent turn runner', async () => {
-    await expect(queue.runAcceptedTurn('c1', 'hello', {})).rejects.toThrow(
-      'QueueManager execution requires an agent turn runner',
+  it('requires execution dependencies at construction', () => {
+    expect(() => new QueueManager(workspaceDir)).toThrow(
+      'QueueManager requires an agent turn runner',
     );
   });
 });
@@ -124,6 +143,7 @@ describe('queue-updated event', () => {
 describe('orchestration', () => {
   let mockAgents;
   let mockPendingInputs;
+  let mockDrainOptions;
   let orchQueue;
 
   beforeEach(async () => {
@@ -136,7 +156,14 @@ describe('orchestration', () => {
       register: mock(() => Promise.resolve()),
       updateDeliveryStatus: mock(() => undefined),
     };
-    orchQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs);
+    mockDrainOptions = mock(() => ({
+      permissionMode: 'plan',
+      thinkingMode: 'think',
+      claudeThinkingMode: 'off',
+      ampAgentMode: 'deep',
+      model: 'persisted-model',
+    }));
+    orchQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs, mockDrainOptions);
   });
 
   describe('submit', () => {
@@ -161,7 +188,7 @@ describe('orchestration', () => {
     });
 
     it('registers provided metadata for accepted REST turns', async () => {
-      await orchQueue.appendUserMessage('c1', 'hello', {
+      await orchQueue.registerPendingUserInput('c1', 'hello', {
         clientRequestId: 'req-1',
         clientMessageId: 'msg-1',
         turnId: 'turn-1',
@@ -249,7 +276,7 @@ describe('orchestration', () => {
       mockAgents.isChatRunning.mockReturnValue(true);
       await orchQueue.enqueueChat('c1', 'queued');
 
-      await orchQueue.triggerDrain('c1', {});
+      await orchQueue.triggerDrain('c1');
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
     });
 
@@ -259,9 +286,14 @@ describe('orchestration', () => {
       const events = [];
       orchQueue.onDispatching((chatId, entryId, content) => events.push({ chatId, entryId, content }));
 
-      await orchQueue.triggerDrain('c1', {});
+      await orchQueue.triggerDrain('c1');
 
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'queued msg', expect.objectContaining({
+        permissionMode: 'plan',
+        thinkingMode: 'think',
+        claudeThinkingMode: 'off',
+        ampAgentMode: 'deep',
+        model: 'persisted-model',
         clientRequestId: expect.any(String),
         clientMessageId: expect.any(String),
         turnId: expect.any(String),
@@ -279,7 +311,7 @@ describe('orchestration', () => {
       const events = [];
       orchQueue.onDispatching((chatId, entryId, content) => events.push({ chatId, content }));
 
-      await orchQueue.triggerDrain('c1', {});
+      await orchQueue.triggerDrain('c1');
       expect(events).toHaveLength(1);
       expect(events[0].content).toBe('msg1');
     });
@@ -289,7 +321,7 @@ describe('orchestration', () => {
 
       mockAgents.runAgentTurn.mockRejectedValue(new Error('agent error'));
 
-      await orchQueue.triggerDrain('c1', {});
+      await orchQueue.triggerDrain('c1');
 
       const result = await orchQueue.readChatQueue('c1');
       expect(result.paused).toBe(true);
@@ -299,7 +331,7 @@ describe('orchestration', () => {
     it('registers queued messages as pending input before dispatch', async () => {
       await orchQueue.enqueueChat('c1', 'queued text');
 
-      await orchQueue.triggerDrain('c1', {});
+      await orchQueue.triggerDrain('c1');
 
       expect(mockPendingInputs.register).toHaveBeenCalledWith('c1', 'queued text', expect.objectContaining({
         clientRequestId: expect.any(String),
@@ -309,18 +341,29 @@ describe('orchestration', () => {
       }));
     });
 
-    it('does not reuse original command identity for drained queued turns', async () => {
+    it('uses persisted chat settings instead of triggering turn overrides for drained queued turns', async () => {
       await orchQueue.enqueueChat('c1', 'queued text');
 
-      await orchQueue.triggerDrain('c1', {
+      await orchQueue.runAcceptedTurn('c1', 'active turn', {
         clientRequestId: 'req-active',
         clientMessageId: 'msg-active',
         turnId: 'turn-active',
-        permissionMode: 'default',
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'ultrathink',
+        claudeThinkingMode: 'on',
+        ampAgentMode: 'smart',
+        model: 'one-shot-model',
       });
 
-      const queuedTurnOptions = mockAgents.runAgentTurn.mock.calls[0]?.[2];
-      expect(queuedTurnOptions.permissionMode).toBe('default');
+      const activeTurnOptions = mockAgents.runAgentTurn.mock.calls[0]?.[2];
+      const queuedTurnOptions = mockAgents.runAgentTurn.mock.calls[1]?.[2];
+      expect(activeTurnOptions.permissionMode).toBe('bypassPermissions');
+      expect(activeTurnOptions.model).toBe('one-shot-model');
+      expect(queuedTurnOptions.permissionMode).toBe('plan');
+      expect(queuedTurnOptions.thinkingMode).toBe('think');
+      expect(queuedTurnOptions.claudeThinkingMode).toBe('off');
+      expect(queuedTurnOptions.ampAgentMode).toBe('deep');
+      expect(queuedTurnOptions.model).toBe('persisted-model');
       expect(queuedTurnOptions.clientRequestId).toEqual(expect.any(String));
       expect(queuedTurnOptions.clientMessageId).toEqual(expect.any(String));
       expect(queuedTurnOptions.turnId).toEqual(expect.any(String));
@@ -337,7 +380,7 @@ describe('orchestration', () => {
       const idleEvents = [];
       orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
 
-      await orchQueue.triggerDrain('c1', {});
+      await orchQueue.triggerDrain('c1');
       expect(idleEvents).toHaveLength(1);
       expect(idleEvents[0]).toBe('c1');
     });
@@ -358,7 +401,7 @@ describe('orchestration', () => {
       const idleEvents = [];
       orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
 
-      await orchQueue.triggerDrain('c1', {});
+      await orchQueue.triggerDrain('c1');
       expect(idleEvents).toHaveLength(0);
     });
   });

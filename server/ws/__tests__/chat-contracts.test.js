@@ -12,6 +12,7 @@ mock.module('../utils.js', () => ({
 
 import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
+import { ChatCommandService } from '../../commands/chat-command-service.js';
 
 const mockAgents = {
   getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [], 'direct-openai-responses-compatible': [] })),
@@ -82,9 +83,15 @@ const injectedMocks = [
 
 const moduleMocks = [sendWebSocketJson];
 
-const chatHandlerInstance = new ChatHandler(
-  mockAgents, mockQueue, mockHistoryCache, mockRegistry, mockPendingInputs, mockForkDeps,
-);
+const chatHandlerInstance = new ChatHandler({
+  agents: mockAgents,
+  queue: mockQueue,
+  historyCache: mockHistoryCache,
+  registry: mockRegistry,
+  pendingInputs: mockPendingInputs,
+  forkDeps: mockForkDeps,
+  commands: new ChatCommandService({ chats: mockRegistry, queue: mockQueue }),
+});
 const chatHandler = chatHandlerInstance.createHandler();
 
 function createMockWs() {
@@ -462,6 +469,31 @@ describe('chat WebSocket handler', () => {
       expect(mockAgents.resolvePermission).toHaveBeenCalledTimes(2);
     });
 
+    it('accepts the same permissionRequestId after the dedup window expires', async () => {
+      const originalDateNow = Date.now;
+      let now = 1_700_000_000_000;
+      Date.now = () => now;
+      try {
+        const msg = {
+          type: 'permission-decision',
+          chatId: '123',
+          permissionRequestId: 'dedup-expiry-1',
+          allow: true,
+          alwaysAllow: false,
+        };
+
+        await chatHandler.message(ws, msg);
+        expect(mockAgents.resolvePermission).toHaveBeenCalledTimes(1);
+
+        mockAgents.resolvePermission.mockClear();
+        now += 30_001;
+        await chatHandler.message(ws, msg);
+        expect(mockAgents.resolvePermission).toHaveBeenCalledTimes(1);
+      } finally {
+        Date.now = originalDateNow;
+      }
+    });
+
     it('is a no-op when permissionRequestId is missing', async () => {
       mockAgents.resolvePermission.mockClear();
       await chatHandler.message(ws, {
@@ -639,7 +671,6 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
         clientRequestId: 'req-msg-2',
       });
-      expect(mockHistoryCache.ensureLoaded).toHaveBeenCalledWith('123');
       expect(mockPendingInputs.reconcile).toHaveBeenCalledWith('123');
       expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 20, 0);
       const payload = lastSentPayload();
@@ -679,6 +710,22 @@ describe('chat WebSocket handler', () => {
       expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 50, 10);
     });
 
+    it('clamps invalid pagination params', async () => {
+      mockRegistry.getChat.mockReturnValue({
+        agentId: 'claude',
+        nativePath: '/tmp/session.jsonl',
+        agentSessionId: 'abc',
+      });
+      await chatHandler.message(ws, {
+        type: 'chat-log-query',
+        chatId: '123',
+        clientRequestId: 'req-msg-4b',
+        limit: '999999',
+        offset: -10,
+      });
+      expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 200, 0);
+    });
+
     it('includes clientRequestId in response', async () => {
       mockRegistry.getChat.mockReturnValue({
         agentId: 'claude',
@@ -711,7 +758,7 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('queue-enqueue', () => {
-    it('calls enqueueChat and drains with persisted chat settings', async () => {
+    it('calls enqueueChat and asks the queue to drain', async () => {
       mockRegistry.getChat.mockReturnValue({
         projectPath: '/repo',
         permissionMode: 'default',
@@ -724,16 +771,10 @@ describe('chat WebSocket handler', () => {
         content: 'queued text',
       });
       expect(mockQueue.enqueueChat).toHaveBeenCalledWith('123', 'queued text');
-      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123', {
-        permissionMode: 'default',
-        thinkingMode: 'none',
-        claudeThinkingMode: 'auto',
-        ampAgentMode: 'smart',
-        model: 'opus',
-      });
+      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123');
     });
 
-    it('normalizes invalid persisted drain settings before triggering the next turn', async () => {
+    it('delegates persisted drain settings to QueueManager', async () => {
       mockRegistry.getChat.mockReturnValue({
         projectPath: '/repo',
         permissionMode: 'bogus',
@@ -748,13 +789,7 @@ describe('chat WebSocket handler', () => {
         content: 'queued text',
       });
 
-      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123', {
-        permissionMode: 'default',
-        thinkingMode: 'none',
-        claudeThinkingMode: 'auto',
-        ampAgentMode: 'smart',
-        model: 'opus',
-      });
+      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123');
     });
 
     it('rejects empty content', async () => {
@@ -768,7 +803,7 @@ describe('chat WebSocket handler', () => {
       expect(payload).toMatchObject({ type: 'ws-fault' });
     });
 
-    it('fails fast when persisted drain settings are missing', async () => {
+    it('does not validate persisted settings in the websocket transport', async () => {
       mockRegistry.getChat.mockReturnValue({
         projectPath: '/repo',
         permissionMode: 'default',
@@ -779,15 +814,14 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
         content: 'queued text',
       });
-      const payload = lastSentPayload();
-      expect(mockQueue.triggerDrain).not.toHaveBeenCalled();
-      expect(payload).toMatchObject({ type: 'ws-fault' });
-      expect(payload.error).toContain('missing model');
+      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123');
+      expect(sendWebSocketJson).not.toHaveBeenCalled();
     });
   });
 
   describe('dequeue-enqueue', () => {
     it('calls dequeueChat with chatId and entryId', async () => {
+      mockRegistry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/repo', model: 'opus' });
       await chatHandler.message(ws, {
         type: 'dequeue-enqueue',
         chatId: '123',
@@ -810,6 +844,7 @@ describe('chat WebSocket handler', () => {
 
   describe('queue-clear', () => {
     it('calls clearChatQueue', async () => {
+      mockRegistry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/repo', model: 'opus' });
       await chatHandler.message(ws, {
         type: 'queue-clear',
         chatId: '123',
@@ -820,6 +855,7 @@ describe('chat WebSocket handler', () => {
 
   describe('queue-pause', () => {
     it('calls pauseChatQueue', async () => {
+      mockRegistry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/repo', model: 'opus' });
       await chatHandler.message(ws, {
         type: 'queue-pause',
         chatId: '123',
@@ -829,7 +865,7 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('queue-resume', () => {
-    it('calls resumeChatQueue and triggerDrain with persisted chat settings', async () => {
+    it('calls resumeChatQueue and asks the queue to drain', async () => {
       mockRegistry.getChat.mockReturnValue({
         projectPath: '/repo',
         permissionMode: 'default',
@@ -841,13 +877,7 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
       });
       expect(mockQueue.resumeChatQueue).toHaveBeenCalledWith('123');
-      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123', {
-        permissionMode: 'default',
-        thinkingMode: 'none',
-        claudeThinkingMode: 'auto',
-        ampAgentMode: 'smart',
-        model: 'opus',
-      });
+      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123');
     });
   });
 

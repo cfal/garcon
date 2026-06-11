@@ -1,7 +1,7 @@
 import { beforeEach, describe, it, expect, mock } from 'bun:test';
 
 import createModelsRoutes from '../models.js';
-import { clearCatalogResponseCacheForTests } from '../model-catalog-cache.js';
+import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
 
 const agentCatalogEntries = [
   { id: 'claude', label: 'Claude', kind: 'agent', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: 'opus', models: [{ value: 'opus', label: 'Opus', supportsImages: true }] },
@@ -25,12 +25,13 @@ const modelCatalog = {
   },
 };
 
-const modelsRoutes = createModelsRoutes(modelCatalog);
+const responseCache = new ModelCatalogResponseCache();
+const modelsRoutes = createModelsRoutes({ modelCatalog, responseCache });
 const handler = modelsRoutes['/api/v1/models'].GET;
 
 describe('GET /api/v1/models', () => {
   beforeEach(() => {
-    clearCatalogResponseCacheForTests();
+    responseCache.clear();
     modelCatalog.agents.getAgentCatalogEntries.mockClear();
     modelCatalog.agents.getAgentCatalogEntry.mockClear();
     modelCatalog.apiProviders.getCatalog.mockClear();
@@ -87,7 +88,7 @@ describe('GET /api/v1/models', () => {
 
     const url = new URL('http://localhost/api/v1/models');
     const first = await handler(new Request(url), url);
-    clearCatalogResponseCacheForTests();
+    responseCache.clear();
     const second = await handler(new Request(url), url);
 
     expect(first.headers.get('etag')).not.toBe(second.headers.get('etag'));
@@ -130,7 +131,7 @@ describe('GET /api/v1/models', () => {
 
     const url = new URL('http://localhost/api/v1/models');
     const first = await handler(new Request(url), url);
-    clearCatalogResponseCacheForTests();
+    responseCache.clear();
     const second = await handler(new Request(url), url);
 
     expect(first.headers.get('etag')).toBe(second.headers.get('etag'));

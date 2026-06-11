@@ -28,6 +28,7 @@ function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
       const claudeRequest: ClaudeStartSessionRequest = { ...request, agentSessionId };
       claude.startClaudeCliSession(claudeRequest).catch((error: Error) => {
         console.error(`agents: claude start failed for chat ${request.chatId}:`, error.message);
+        claude.failClaudeInternalSession(agentSessionId, request.chatId, error.message);
       });
       return { agentSessionId, nativePath };
     },
@@ -46,8 +47,11 @@ function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
     resolvePermission(permissionRequestId, decision) {
       claude.resolveInternalToolApproval(permissionRequestId, decision);
     },
+    shutdown() {
+      claude.shutdown();
+    },
     startPurgeTimer() {
-      return claude.startPurgeTimer();
+      claude.startPurgeTimer();
     },
     onMessages(cb) { claude.onMessages(cb); },
     onProcessing(cb) { claude.onProcessing(cb); },

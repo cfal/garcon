@@ -8,16 +8,13 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
-import type { RunAgentTurnOptions } from "./agents/session-types.js";
+import { requireChatExecutionConfig, type RunAgentTurnOptions } from "./agents/session-types.js";
+import type { IChatRegistry } from './chats/store.js';
 import { writeJsonFileAtomic } from './lib/json-file-store.js';
 import { KeyedPromiseLock } from './lib/keyed-lock.js';
 
 function emptyQueue(): QueueState {
   return { entries: [], paused: false, version: 0 };
-}
-
-function normalizeForPersist(queue: unknown): QueueState {
-  return normalizeQueueState(queue);
 }
 
 function bumpQueue(queue: QueueState): QueueState {
@@ -34,6 +31,21 @@ function optionsForQueuedTurn(options: RunAgentTurnOptions): RunAgentTurnOptions
     clientRequestId: crypto.randomUUID(),
     clientMessageId: crypto.randomUUID(),
     turnId: crypto.randomUUID(),
+  };
+}
+
+export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunAgentTurnOptions {
+  const entry = requireChatExecutionConfig(chatId, registry.getChat(chatId));
+  const chat = registry.getChat(chatId);
+  return {
+    permissionMode: entry.permissionMode,
+    thinkingMode: entry.thinkingMode,
+    claudeThinkingMode: entry.claudeThinkingMode,
+    ampAgentMode: entry.ampAgentMode,
+    model: entry.model,
+    apiProviderId: chat?.apiProviderId,
+    modelEndpointId: chat?.modelEndpointId,
+    modelProtocol: chat?.modelProtocol,
   };
 }
 
@@ -59,28 +71,45 @@ type DispatchingCallback = (chatId: string, entryId: string, content: string) =>
 type SessionStoppedCallback = (chatId: string, success: boolean) => void;
 type ChatIdleCallback = (chatId: string) => void;
 type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunAgentTurnOptions) => void;
+type QueueDrainOptionsResolver = (chatId: string) => RunAgentTurnOptions;
 
-function requireTurnRunner(runner: AgentTurnRunnerDep | null): AgentTurnRunnerDep {
-  if (!runner) {
-    throw new Error('QueueManager execution requires an agent turn runner');
-  }
-  return runner;
+export interface ChatQueueService {
+  deleteChatQueueFile(chatId: string): Promise<void>;
+  submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  registerPendingUserInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  abort(chatId: string): Promise<boolean>;
+  triggerDrain(chatId: string): Promise<void>;
+  readChatQueue(chatId: string): Promise<QueueState>;
+  enqueueChat(chatId: string, content: string): Promise<{ entry: QueueEntry; queue: QueueState }>;
+  dequeueChat(chatId: string, entryId: string): Promise<QueueState>;
+  clearChatQueue(chatId: string): Promise<QueueState>;
+  pauseChatQueue(chatId: string): Promise<QueueState>;
+  resumeChatQueue(chatId: string): Promise<QueueState>;
 }
 
-export class QueueManager extends EventEmitter {
+export class QueueManager extends EventEmitter implements ChatQueueService {
   #locks = new KeyedPromiseLock();
   #draining = new Set<string>();
   #workspaceDir: string;
-  #turnRunner: AgentTurnRunnerDep | null;
-  #pendingInputs: PendingInputsDep | null;
+  #turnRunner: AgentTurnRunnerDep;
+  #pendingInputs: PendingInputsDep;
+  #getDrainOptions: QueueDrainOptionsResolver;
 
-  // turnRunner and pendingInputs are optional for backward compat in tests
-  // that only exercise state management methods.
-  constructor(workspaceDir: string, turnRunner?: AgentTurnRunnerDep | null, pendingInputs?: PendingInputsDep | null) {
+  constructor(
+    workspaceDir: string,
+    turnRunner: AgentTurnRunnerDep,
+    pendingInputs: PendingInputsDep,
+    getDrainOptions: QueueDrainOptionsResolver,
+  ) {
     super();
+    if (!turnRunner) throw new Error('QueueManager requires an agent turn runner');
+    if (!pendingInputs) throw new Error('QueueManager requires a pending input service');
+    if (!getDrainOptions) throw new Error('QueueManager requires a drain option resolver');
     this.#workspaceDir = workspaceDir;
-    this.#turnRunner = turnRunner || null;
-    this.#pendingInputs = pendingInputs || null;
+    this.#turnRunner = turnRunner;
+    this.#pendingInputs = pendingInputs;
+    this.#getDrainOptions = getDrainOptions;
   }
 
   onQueueUpdated(cb: QueueUpdatedCallback): void { this.on('queue-updated', cb); }
@@ -95,7 +124,7 @@ export class QueueManager extends EventEmitter {
   // for this chat to avoid duplicate emissions.
   async checkChatIdle(chatId: string): Promise<void> {
     if (this.#draining.has(chatId)) return;
-    if (this.#turnRunner?.isChatRunning(chatId)) return;
+    if (this.#turnRunner.isChatRunning(chatId)) return;
     const queue = await this.readChatQueue(chatId);
     const hasPending = queue.entries.some(e => e.status === 'queued' || e.status === 'sending');
     if (!hasPending) {
@@ -113,7 +142,7 @@ export class QueueManager extends EventEmitter {
 
   async #writeChatQueue(chatId: string, queue: unknown): Promise<void> {
     const filePath = this.#chatQueueFilePath(chatId);
-    const normalized = normalizeForPersist(queue);
+    const normalized = normalizeQueueState(queue);
     await writeJsonFileAtomic(filePath, normalized);
   }
 
@@ -135,7 +164,7 @@ export class QueueManager extends EventEmitter {
         existing.content += '\n' + content;
         const bumped = bumpQueue(queue);
         await this.#writeChatQueue(chatId, bumped);
-        const result = normalizeForPersist(bumped);
+        const result = normalizeQueueState(bumped);
         this.emit('queue-updated', chatId, result);
         return { entry: existing, queue: result };
       }
@@ -148,7 +177,7 @@ export class QueueManager extends EventEmitter {
       queue.entries.push(entry);
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return { entry, queue: result };
     });
@@ -160,7 +189,7 @@ export class QueueManager extends EventEmitter {
       queue.entries = queue.entries.filter(e => e.id !== entryId);
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -173,7 +202,7 @@ export class QueueManager extends EventEmitter {
       queue.paused = false;
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -185,7 +214,7 @@ export class QueueManager extends EventEmitter {
       queue.paused = queue.entries.length > 0;
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -197,7 +226,7 @@ export class QueueManager extends EventEmitter {
       queue.paused = false;
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -210,7 +239,7 @@ export class QueueManager extends EventEmitter {
         queue.paused = false;
         const bumped = bumpQueue(queue);
         await this.#writeChatQueue(chatId, bumped);
-        this.emit('queue-updated', chatId, normalizeForPersist(bumped));
+        this.emit('queue-updated', chatId, normalizeQueueState(bumped));
         return null;
       }
       if (queue.paused) return null;
@@ -219,7 +248,7 @@ export class QueueManager extends EventEmitter {
       next.status = 'sending';
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return { entry: next, queue: result };
     });
@@ -231,7 +260,7 @@ export class QueueManager extends EventEmitter {
       queue.entries = queue.entries.filter(e => e.id !== entryId);
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -245,7 +274,7 @@ export class QueueManager extends EventEmitter {
       queue.paused = true;
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -260,7 +289,7 @@ export class QueueManager extends EventEmitter {
   }
 
   async registerPendingUserInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
-    if (!command || !this.#pendingInputs) return;
+    if (!command) return;
     await this.#pendingInputs.register(chatId, command, {
       clientRequestId: options.clientRequestId,
       clientMessageId: options.clientMessageId,
@@ -270,26 +299,20 @@ export class QueueManager extends EventEmitter {
     });
   }
 
-  async appendUserMessage(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
-    await this.registerPendingUserInput(chatId, command, options);
-  }
-
   async runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
-    const turnRunner = requireTurnRunner(this.#turnRunner);
     try {
-      await turnRunner.runAgentTurn(chatId, command, options);
+      await this.#turnRunner.runAgentTurn(chatId, command, options);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.emit('turn-failed', chatId, message, options);
       throw error;
     }
-    await this.#drain(chatId, options);
+    await this.#drain(chatId);
   }
 
   // Aborts the running agent session and pauses the queue if entries remain.
   async abort(chatId: string): Promise<boolean> {
-    const turnRunner = requireTurnRunner(this.#turnRunner);
-    const success = await turnRunner.abortSession(chatId);
+    const success = await this.#turnRunner.abortSession(chatId);
     if (success) {
       try {
         const current = await this.readChatQueue(chatId);
@@ -303,19 +326,17 @@ export class QueueManager extends EventEmitter {
   }
 
   // Triggers drain if the agent is not currently running.
-  async triggerDrain(chatId: string, options: RunAgentTurnOptions): Promise<void> {
-    const turnRunner = requireTurnRunner(this.#turnRunner);
-    if (turnRunner.isChatRunning(chatId)) return;
-    await this.#drain(chatId, options);
+  async triggerDrain(chatId: string): Promise<void> {
+    if (this.#turnRunner.isChatRunning(chatId)) return;
+    await this.#drain(chatId);
   }
 
   // Pops queued entries one at a time, registers a pending overlay, and runs agent turns.
-  async #drain(chatId: string, options: RunAgentTurnOptions): Promise<void> {
-    const turnRunner = requireTurnRunner(this.#turnRunner);
+  async #drain(chatId: string): Promise<void> {
     this.#draining.add(chatId);
     try {
       while (true) {
-        if (turnRunner.isChatRunning(chatId)) break;
+        if (this.#turnRunner.isChatRunning(chatId)) break;
 
         const result = await this.popNextChat(chatId);
         if (!result) {
@@ -324,12 +345,12 @@ export class QueueManager extends EventEmitter {
         }
 
         const { entry } = result;
-        const queuedTurnOptions = optionsForQueuedTurn(options);
+        const queuedTurnOptions = optionsForQueuedTurn(this.#getDrainOptions(chatId));
         await this.registerPendingUserInput(chatId, entry.content, queuedTurnOptions);
         this.emit('dispatching', chatId, entry.id, entry.content);
 
         try {
-          await turnRunner.runAgentTurn(chatId, entry.content, queuedTurnOptions);
+          await this.#turnRunner.runAgentTurn(chatId, entry.content, queuedTurnOptions);
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
           console.error('queue: error processing queued message:', (error as Error).message);
@@ -374,7 +395,7 @@ export class QueueManager extends EventEmitter {
         }
         if (modified) {
           data.paused = true;
-          await writeJsonFileAtomic(filePath, normalizeForPersist(data));
+          await writeJsonFileAtomic(filePath, normalizeQueueState(data));
           console.log(`queue: recovered stale chat queue: ${qf}`);
         }
       } catch (error: unknown) {

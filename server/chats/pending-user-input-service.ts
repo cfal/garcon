@@ -2,11 +2,7 @@ import crypto from 'crypto';
 import type { ChatImage, UserMessageDeliveryStatus } from '../../common/chat-types.js';
 import type { PendingUserInput, PendingUserInputClearReason } from '../../common/pending-user-input.js';
 import { PendingUserInputStore, type PendingUserCheckpoint } from './pending-user-input-store.js';
-
-interface HistoryCacheDep {
-  ensureLoaded(chatId: string): Promise<unknown>;
-  getMessages(chatId: string): unknown[] | null;
-}
+import type { HistoryCacheMessageReader } from './history-cache-contract.js';
 
 function durableUserCount(messages: unknown[] | null | undefined): number {
   if (!Array.isArray(messages)) return 0;
@@ -32,12 +28,20 @@ export interface RegisterPendingUserInputOptions {
   deliveryStatus?: UserMessageDeliveryStatus;
 }
 
-export class PendingUserInputService {
+export interface PendingUserInputServiceContract {
+  listForChat(chatId: string): PendingUserInput[];
+  clearChat(chatId: string, reason?: PendingUserInputClearReason): void;
+  updateDeliveryStatus(chatId: string, clientRequestId: string, deliveryStatus: UserMessageDeliveryStatus): PendingUserInput | null;
+  register(chatId: string, content: string, options?: RegisterPendingUserInputOptions): Promise<PendingUserInput>;
+  reconcile(chatId: string): Promise<void>;
+}
+
+export class PendingUserInputService implements PendingUserInputServiceContract {
   readonly store = new PendingUserInputStore();
-  #historyCache: HistoryCacheDep;
+  #historyCache: HistoryCacheMessageReader;
   #reconcileByChatId = new Map<string, Promise<void>>();
 
-  constructor(historyCache: HistoryCacheDep) {
+  constructor(historyCache: HistoryCacheMessageReader) {
     this.#historyCache = historyCache;
   }
 

@@ -15,7 +15,7 @@ function makeService() {
   };
   const queue = {
     submit: mock(() => Promise.resolve(undefined)),
-    appendUserMessage: mock(() => Promise.resolve(undefined)),
+    registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
   };
   const service = new ChatCommandService({
@@ -70,7 +70,7 @@ describe('ChatCommandService', () => {
 
     expect(first.status).toBe('accepted');
     expect(second.status).toBe('duplicate');
-    expect(queue.appendUserMessage).toHaveBeenCalledTimes(1);
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
     expect(queue.runAcceptedTurn).toHaveBeenCalledTimes(1);
   });
 
