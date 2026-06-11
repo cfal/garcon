@@ -5,13 +5,51 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { readJsonlTailLines } from '../shared/history-loader-utils.ts';
 import { normalizeToolResultContent } from '../shared/normalize-util.js';
-import { UserMessage, AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage } from '../../../common/chat-types.js';
+import {
+  UserMessage,
+  AssistantMessage,
+  ThinkingMessage,
+  ToolResultMessage,
+  ErrorMessage,
+  type ChatMessage,
+} from '../../../common/chat-types.js';
 import { convertClaudeToolUse } from './tool-use-converter.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
 
 const HEAD_READ_BYTES = 32 * 1024;
 
-function decodeHtmlEntities(text) {
+interface ClaudePreview {
+  firstMessage: string;
+  lastMessage: string;
+  lastActivity: string | null;
+  createdAt: string | number | null;
+}
+
+interface PaginatedRawMessages {
+  messages: Record<string, unknown>[];
+  total: number;
+  hasMore: boolean;
+  offset: number;
+  limit: number;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function timestampMs(value: unknown): number {
+  if (typeof value !== 'string' && typeof value !== 'number' && !(value instanceof Date)) return 0;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function decodeHtmlEntities(text: string): string {
   if (!text) return text;
   return text
     .replace(/&lt;/g, '<')
@@ -21,11 +59,11 @@ function decodeHtmlEntities(text) {
     .replace(/&amp;/g, '&');
 }
 
-function getMessageText(content) {
+function getMessageText(content: unknown): string {
   if (Array.isArray(content)) {
     const textParts = content
-      .filter((part) => part?.type === 'text' && typeof part.text === 'string')
-      .map((part) => part.text.trim())
+      .map((part) => asRecord(part))
+      .map((part) => typeof part.text === 'string' ? part.text.trim() : '')
       .filter(Boolean);
     return textParts.join('\n');
   }
@@ -35,7 +73,7 @@ function getMessageText(content) {
   return '';
 }
 
-function isSystemUserMessage(text) {
+function isSystemUserMessage(text: string): boolean {
   return (
     text.startsWith('<command-name>') ||
     text.startsWith('<command-message>') ||
@@ -51,7 +89,7 @@ function isSystemUserMessage(text) {
   );
 }
 
-function isSystemAssistantMessage(text) {
+function isSystemAssistantMessage(text: string): boolean {
   return (
     text.startsWith('Invalid API key') ||
     text.includes('{"subtasks":') ||
@@ -60,7 +98,7 @@ function isSystemAssistantMessage(text) {
 }
 
 // Reads a Claude JSONL file and returns ChatMessage[].
-export async function loadClaudeChatMessages(nativePath) {
+export async function loadClaudeChatMessages(nativePath: string | null | undefined): Promise<ChatMessage[]> {
   if (!nativePath) return [];
   try {
     await fs.access(nativePath);
@@ -70,24 +108,23 @@ export async function loadClaudeChatMessages(nativePath) {
 
   try {
     const raw = await fs.readFile(nativePath, 'utf8');
-    const entries = [];
+    const entries: Record<string, unknown>[] = [];
 
     for (const line of raw.split('\n')) {
       if (!line) continue;
       try {
-        const entry = JSON.parse(line);
+        const entry = asRecord(JSON.parse(line));
         if (entry.sessionId) entries.push(entry);
       } catch { }
     }
 
-    entries.sort((a, b) =>
-      new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
-    );
+    entries.sort((a, b) => timestampMs(a.timestamp) - timestampMs(b.timestamp));
 
-    const messages = [];
+    const messages: ChatMessage[] = [];
 
     for (const entry of entries) {
-      const ts = entry.timestamp || new Date().toISOString();
+      const ts = asString(entry.timestamp) || new Date().toISOString();
+      const message = asRecord(entry.message);
 
       // Skip non-message entry types
       if (entry.type === 'progress' || entry.type === 'queue-operation' ||
@@ -105,20 +142,21 @@ export async function loadClaudeChatMessages(nativePath) {
       if (entry.isApiErrorMessage) {
         const errorText = entry.error
           ? (typeof entry.error === 'string' ? entry.error : JSON.stringify(entry.error))
-          : getMessageText(entry.message?.content) || 'API error';
+          : getMessageText(message.content) || 'API error';
         messages.push(new ErrorMessage(ts, errorText));
         continue;
       }
 
       // User messages
-      if (entry.message?.role === 'user') {
-        const content = entry.message.content;
+      if (message.role === 'user') {
+        const content = message.content;
 
         // Emit tool-result messages from user entries
         if (Array.isArray(content)) {
-          for (const part of content) {
+          for (const rawPart of content) {
+            const part = asRecord(rawPart);
             if (part.type === 'tool_result') {
-              messages.push(new ToolResultMessage(ts, part.tool_use_id || '', normalizeToolResultContent(part.content), Boolean(part.is_error)));
+              messages.push(new ToolResultMessage(ts, asString(part.tool_use_id) || '', normalizeToolResultContent(part.content), Boolean(part.is_error)));
             }
           }
         }
@@ -132,16 +170,19 @@ export async function loadClaudeChatMessages(nativePath) {
       }
 
       // Assistant messages
-      if (entry.message?.role === 'assistant' && entry.message?.content) {
-        const content = entry.message.content;
+      if (message.role === 'assistant' && message.content) {
+        const content = message.content;
 
         if (Array.isArray(content)) {
-          for (const part of content) {
-            if (part.type === 'thinking' && part.thinking) {
-              messages.push(new ThinkingMessage(ts, part.thinking));
-            } else if (part.type === 'text' && part.text?.trim()) {
-              if (!isSystemAssistantMessage(part.text)) {
-                messages.push(new AssistantMessage(ts, part.text));
+          for (const rawPart of content) {
+            const part = asRecord(rawPart);
+            const thinking = asString(part.thinking);
+            const text = asString(part.text);
+            if (part.type === 'thinking' && thinking) {
+              messages.push(new ThinkingMessage(ts, thinking));
+            } else if (part.type === 'text' && text?.trim()) {
+              if (!isSystemAssistantMessage(text)) {
+                messages.push(new AssistantMessage(ts, text));
               }
             } else if (part.type === 'tool_use') {
               messages.push(convertClaudeToolUse(ts, part));
@@ -156,9 +197,9 @@ export async function loadClaudeChatMessages(nativePath) {
       }
 
       // Standalone thinking entries (type=thinking at the entry level)
-      if (entry.type === 'thinking' && entry.message?.content) {
-        const thinkContent = typeof entry.message.content === 'string'
-          ? entry.message.content : '';
+      if (entry.type === 'thinking' && message.content) {
+        const thinkContent = typeof message.content === 'string'
+          ? message.content : '';
         if (thinkContent) {
           messages.push(new ThinkingMessage(ts, thinkContent));
         }
@@ -173,30 +214,32 @@ export async function loadClaudeChatMessages(nativePath) {
 }
 
 // Reads session messages from an absolute JSONL path.
-export async function getClaudeSessionMessagesFromNativePath(nativePath, limit = null, offset = 0) {
+export async function getClaudeSessionMessagesFromNativePath(
+  nativePath: string,
+  limit: number | null = null,
+  offset = 0,
+): Promise<Record<string, unknown>[] | PaginatedRawMessages> {
   try {
     await fs.access(nativePath);
   } catch {
-    return limit === null ? [] : { messages: [], total: 0, hasMore: false };
+    return limit === null ? [] : { messages: [], total: 0, hasMore: false, offset, limit };
   }
 
   try {
     const raw = await fs.readFile(nativePath, 'utf8');
-    const messages = [];
+    const messages: Record<string, unknown>[] = [];
 
     for (const line of raw.split('\n')) {
       if (!line) continue;
       try {
-        const entry = JSON.parse(line);
+        const entry = asRecord(JSON.parse(line));
         if (entry.sessionId) {
           messages.push(entry);
         }
       } catch { }
     }
 
-    messages.sort((a, b) =>
-      new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
-    );
+    messages.sort((a, b) => timestampMs(a.timestamp) - timestampMs(b.timestamp));
 
     const total = messages.length;
 
@@ -217,39 +260,43 @@ export async function getClaudeSessionMessagesFromNativePath(nativePath, limit =
     };
   } catch (error) {
     console.error(`claude: error reading messages from ${nativePath}:`, error);
-    return limit === null ? [] : { messages: [], total: 0, hasMore: false };
+    return limit === null ? [] : { messages: [], total: 0, hasMore: false, offset, limit };
   }
 }
 
 // Reads the head of a JSONL file to find the first user message.
-async function readFirstUserMessage(filePath) {
-  let fh;
-  let firstTimestamp = 0;
-  let firstMessage = null;
+async function readFirstUserMessage(filePath: string): Promise<{
+  firstMessage: string | null;
+  firstTimestamp: string | number | null;
+}> {
+  let fh: Awaited<ReturnType<typeof fs.open>> | null = null;
+  let firstTimestamp: string | number | null = null;
+  let firstMessage: string | null = null;
   try {
     fh = await fs.open(filePath, 'r');
     const stats = await fh.stat();
     const readSize = Math.min(HEAD_READ_BYTES, stats.size);
-    if (readSize === 0) return null;
+    if (readSize === 0) return { firstMessage: null, firstTimestamp: null };
 
     const buffer = Buffer.alloc(readSize);
     await fh.read(buffer, 0, readSize, 0);
 
     for (const line of buffer.toString('utf8').split('\n')) {
       if (!line.trim()) continue;
-      let entry;
+      let entry: Record<string, unknown>;
       try {
-        entry = JSON.parse(line);
+        entry = asRecord(JSON.parse(line));
       } catch {
         continue;
       }
-      if (entry.timestamp && !firstTimestamp) {
+      if ((typeof entry.timestamp === 'string' || typeof entry.timestamp === 'number') && !firstTimestamp) {
         firstTimestamp = entry.timestamp;
       }
-      if (entry.message?.role !== 'user') {
+      const message = asRecord(entry.message);
+      if (message.role !== 'user') {
         continue;
       }
-      const text = getMessageText(entry.message.content);
+      const text = getMessageText(message.content);
       if (text && !isSystemUserMessage(text)) {
         firstMessage = text;
       }
@@ -267,7 +314,7 @@ async function readFirstUserMessage(filePath) {
 }
 
 // Builds a preview (title, lastActivity, etc.) from an absolute JSONL path.
-export async function getClaudePreviewFromNativePath(nativePath) {
+export async function getClaudePreviewFromNativePath(nativePath: string): Promise<ClaudePreview | null> {
   const agentSessionId = path.basename(nativePath, '.jsonl');
 
   try {
@@ -282,24 +329,24 @@ export async function getClaudePreviewFromNativePath(nativePath) {
     console.warn(`claude: fully read ${nativePath}`);
   }
 
-  let lastActivity = null;
-  let lastMessage = null;
+  let lastActivity: string | null = null;
+  let lastMessage: string | null = null;
 
   for (let i = lines.length - 1; i >= 0; i--) {
-    let entry;
+    let entry: Record<string, unknown>;
     try {
-      entry = JSON.parse(lines[i]);
+      entry = asRecord(JSON.parse(lines[i]));
     } catch {
       continue;
     }
 
     if (!entry.sessionId) continue;
     if (entry.sessionId !== agentSessionId) {
-      console.warn(`claude: skipping non-matching session ID in ${nativePath}, expected ${agentSessionId}: ${entry.sessionId}`);
+      console.warn(`claude: skipping non-matching session ID in ${nativePath}, expected ${agentSessionId}: ${String(entry.sessionId)}`);
       continue;
     }
 
-    if (!lastActivity && entry.timestamp) {
+    if (!lastActivity && (typeof entry.timestamp === 'string' || typeof entry.timestamp === 'number')) {
       const timestamp = new Date(entry.timestamp);
       if (!Number.isNaN(timestamp.getTime())) {
         const currentTime = timestamp.toISOString();
@@ -308,15 +355,16 @@ export async function getClaudePreviewFromNativePath(nativePath) {
     }
 
     if (!lastMessage) {
-      const role = entry.message?.role;
+      const message = asRecord(entry.message);
+      const role = message.role;
       if (role === 'user') {
-        const text = getMessageText(entry.message?.content);
+        const text = getMessageText(message.content);
         if (!text || isSystemUserMessage(text)) {
           continue;
         }
         lastMessage = '> ' + text;
       } else if (role === 'assistant' && entry.isApiErrorMessage !== true) {
-        const text = getMessageText(entry.message?.content);
+        const text = getMessageText(message.content);
         if (!text || isSystemAssistantMessage(text)) {
           continue;
         }

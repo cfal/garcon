@@ -8,14 +8,21 @@ import {
   RequestPermissionsToolUseMessage,
   TodoReadToolUseMessage,
   UnknownToolUseMessage,
+  type ToolUseChatMessage,
 } from '../../../common/chat-types.js';
 
-function canonicalize(raw) {
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function canonicalize(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   return raw.trim().toLowerCase().replace(/[\s_\-]+/g, '');
 }
 
-function canonicalNameForPermission(rawName) {
+function canonicalNameForPermission(rawName: unknown): string {
   switch (canonicalize(rawName)) {
     case 'bash':
     case 'shellcommand':
@@ -78,10 +85,14 @@ function canonicalNameForPermission(rawName) {
  * OpenCode permission events carry a permission key and metadata rather than
  * full tool input, so ambient approvals map to RequestPermissionsToolUseMessage.
  */
-export function convertOpencodePermissionTool(ts, toolId, permission) {
-  const providerPermission = permission && typeof permission === 'object' ? permission : {};
+export function convertOpencodePermissionTool(
+  ts: string,
+  toolId: string,
+  permission: unknown,
+): ToolUseChatMessage {
+  const providerPermission = asObject(permission);
   const providerTool = providerPermission.tool && typeof providerPermission.tool === 'object'
-    ? providerPermission.tool
+    ? asObject(providerPermission.tool)
     : null;
   const rawName = typeof providerPermission.permission === 'string'
     ? providerPermission.permission

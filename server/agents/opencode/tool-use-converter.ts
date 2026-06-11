@@ -19,18 +19,19 @@ import {
   EnterPlanModeToolUseMessage,
   ExitPlanModeToolUseMessage,
   UnknownToolUseMessage,
+  type ToolUseChatMessage,
 } from '../../../common/chat-types.js';
 import { normalizeTodoItems } from '../shared/normalize-util.js';
 
-function asObject(v) {
-  return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+function asObject(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
 }
 
 // Preserves non-object payloads as { raw: value } for the Unknown fallback,
 // matching the behavior of normalizeToolInput for history data.
-function asInput(v) {
+function asInput(v: unknown): Record<string, unknown> {
   if (v === null || v === undefined || v === '') return {};
-  if (typeof v === 'object' && !Array.isArray(v)) return v;
+  if (typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>;
   if (typeof v === 'string') {
     try {
       const parsed = JSON.parse(v);
@@ -43,11 +44,11 @@ function asInput(v) {
   return {};
 }
 
-function asString(v) {
+function asString(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
 
-function asNumber(v) {
+function asNumber(v: unknown): number | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string') {
     const n = Number(v);
@@ -56,12 +57,12 @@ function asNumber(v) {
   return undefined;
 }
 
-function asChanges(v) {
-  return Array.isArray(v) ? v : undefined;
+function asChanges(v: unknown): Array<{ path?: string; kind?: string }> | undefined {
+  return Array.isArray(v) ? v as Array<{ path?: string; kind?: string }> : undefined;
 }
 
 // Resolves OpenCode tool name to a canonical key for dispatch.
-function canonicalize(raw) {
+function canonicalize(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   return raw.trim().toLowerCase().replace(/[\s_\-]+/g, '');
 }
@@ -70,10 +71,16 @@ function canonicalize(raw) {
  * Converts an OpenCode tool part to a concrete ToolUseMessage.
  * Returns UnknownToolUseMessage for unrecognized or malformed payloads.
  */
-export function convertOpenCodeToolUse(ts, part) {
-  const rawName = typeof part?.tool === 'string' ? part.tool : 'Unknown';
-  const toolId = part?.callID || part?.id || '';
-  const input = asObject(part?.state?.input);
+export function convertOpenCodeToolUse(ts: string, part: unknown): ToolUseChatMessage {
+  const rawPart = asObject(part);
+  const state = asObject(rawPart.state);
+  const rawName = typeof rawPart.tool === 'string' ? rawPart.tool : 'Unknown';
+  const toolId = typeof rawPart.callID === 'string'
+    ? rawPart.callID
+    : typeof rawPart.id === 'string'
+      ? rawPart.id
+      : '';
+  const input = asObject(state.input);
   const key = canonicalize(rawName);
 
   switch (key) {
@@ -167,5 +174,5 @@ export function convertOpenCodeToolUse(ts, part) {
     }
   }
 
-  return new UnknownToolUseMessage(ts, toolId, rawName, asInput(part?.state?.input));
+  return new UnknownToolUseMessage(ts, toolId, rawName, asInput(state.input));
 }
