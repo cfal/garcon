@@ -390,6 +390,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #modelsPromise: Promise<OpenCodeModelOption[]> | null = null;
   #unavailableUntil = 0;
   #unavailableReason = '';
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   #available: boolean | null = null;
   readonly #options: NormalizedOpenCodeRuntimeOptions;
@@ -402,6 +403,15 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   // Shuts down the spawned opencode server process (if any).
   // Called during garcon graceful shutdown to prevent orphaned processes.
   shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
+    for (const agentSessionId of this.#pendingTurnWaiters.keys()) {
+      this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode runtime shutting down'));
+    }
+    this.#sessions.clear();
+    this.#pendingPermissions.clear();
     this.#closeInstance();
   }
 
@@ -1081,10 +1091,11 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#assistantPartTypes.delete(chatId);
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxAge = 30 * 60 * 1000;
 
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
 
       for (const [id, session] of this.#sessions.entries()) {

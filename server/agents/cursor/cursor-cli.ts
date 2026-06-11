@@ -329,6 +329,7 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
 export class CursorRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, CursorSession>();
   #requestIdentities: CursorRequestIdentityStore;
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(requestIdentities = new CursorRequestIdentityStore()) {
     super();
@@ -708,9 +709,10 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
     });
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxAge = 30 * 60 * 1000;
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
       for (const [id, session] of this.#runningSessions.entries()) {
         if (!session.isRunning && now - session.startTime > maxAge) {
@@ -718,5 +720,20 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
         }
       }
     }, 5 * 60 * 1000);
+  }
+
+  shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
+    for (const session of this.#runningSessions.values()) {
+      session.aborted = true;
+      if (session.process && !session.process.killed) {
+        session.process.kill();
+      }
+      this.#finalizeTurn(session, 143);
+    }
+    this.#runningSessions.clear();
   }
 }

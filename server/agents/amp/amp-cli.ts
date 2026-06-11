@@ -282,6 +282,7 @@ function buildContinueArgs(threadId: string, model?: string): string[] {
 
 class AmpCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, AmpSession>();
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -532,10 +533,11 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       }));
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxAge = 30 * 60 * 1000;
 
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
 
       for (const [id, session] of this.#runningSessions.entries()) {
@@ -546,6 +548,21 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
         }
       }
     }, 5 * 60 * 1000);
+  }
+
+  shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
+    for (const session of this.#runningSessions.values()) {
+      session.aborted = true;
+      if (session.process && !session.process.killed) {
+        session.process.kill();
+      }
+      this.#finalizeTurn(session, 143);
+    }
+    this.#runningSessions.clear();
   }
 }
 

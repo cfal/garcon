@@ -31,7 +31,7 @@ function createOpenCodeRuntime(opencode: OpenCodeRuntime): AgentRuntime {
       opencode.shutdown?.();
     },
     startPurgeTimer() {
-      return opencode.startPurgeTimer();
+      opencode.startPurgeTimer();
     },
     onMessages(cb) { opencode.onMessages(cb); },
     onProcessing(cb) { opencode.onProcessing(cb); },

@@ -66,6 +66,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #createClient: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   #materializationTimeoutMs: number;
   #terminalBackfillTimeoutMs: number;
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: CodexAppServerRuntimeOptions = {}) {
     super();
@@ -288,8 +289,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     ]);
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
-    return setInterval(() => {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
+    this.#purgeTimer = setInterval(() => {
       for (const [threadId, session] of this.#sessions.entries()) {
         if (session.status !== 'running') this.#sessions.delete(threadId);
       }
@@ -297,6 +299,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
     for (const session of this.#sessions.values()) {
       session.client.shutdown();
     }

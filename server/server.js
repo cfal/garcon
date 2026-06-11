@@ -377,6 +377,7 @@ export async function startServer() {
           }
         }
         agentRegistry.shutdown();
+        shellManager.shutdown();
         historyCache.destroy();
         await metadata.flush();
         await chatRegistry.flush();

@@ -108,6 +108,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   #capabilityCache: AcpCapabilityCache;
   #sessions = new Map<string, AcpAgentRuntimeSession>();
   #pendingPermissions = new Map<string, PendingPermissionRequest>();
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(policy: AcpAgentPolicy, options: AcpAgentRuntimeOptions) {
     super();
@@ -204,6 +205,10 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   }
 
   shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
     for (const session of this.#sessions.values()) {
       session.client.close();
     }
@@ -211,9 +216,10 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     this.#pendingPermissions.clear();
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxIdleMs = 30 * 60 * 1000;
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
       for (const [sessionId, session] of this.#sessions.entries()) {
         if (session.running) continue;

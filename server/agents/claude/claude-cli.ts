@@ -272,6 +272,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
   #pendingPermissions = new Map<string, PendingPermission>();
   #pendingControlRequests = new Map<string, PendingControlRequest>();
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -860,10 +861,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       }));
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxAge = 30 * 60 * 1000;
 
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
 
       for (const [id, session] of this.#runningSessions.entries()) {
@@ -874,6 +876,28 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         }
       }
     }, 5 * 60 * 1000);
+  }
+
+  shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
+    for (const session of this.#runningSessions.values()) {
+      if (session.process && !session.process.killed) {
+        session.process.kill();
+      }
+      if (session.isRunning) {
+        session.isRunning = false;
+        this.emitProcessing(session.chatId, false);
+      }
+      const resolve = session.turnResolve;
+      session.turnResolve = null;
+      resolve?.();
+    }
+    this.#runningSessions.clear();
+    this.#pendingPermissions.clear();
+    this.#pendingControlRequests.clear();
   }
 }
 

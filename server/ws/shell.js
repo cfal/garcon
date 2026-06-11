@@ -26,6 +26,28 @@ export class ShellManager {
     };
   }
 
+  shutdown() {
+    for (const [ptySessionKey, session] of this.#sessions.entries()) {
+      this.#killSession(ptySessionKey, session);
+    }
+    this.#sessions.clear();
+  }
+
+  #killSession(ptySessionKey, session) {
+    if (session.timeoutId) {
+      clearTimeout(session.timeoutId);
+      session.timeoutId = null;
+    }
+    if (session.pty?.kill) {
+      try {
+        session.pty.kill();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn('shell: failed to kill PTY session:', ptySessionKey, message);
+      }
+    }
+  }
+
   #handleOpen(ws) {
     console.log('shell: client connected');
     this.#getShellState(ws);
@@ -53,8 +75,7 @@ export class ShellManager {
         if (sessionPolicy === 'fresh') {
           const oldSession = this.#sessions.get(ptySessionKey);
           if (oldSession) {
-            if (oldSession.timeoutId) clearTimeout(oldSession.timeoutId);
-            if (oldSession.pty?.kill) oldSession.pty.kill();
+            this.#killSession(ptySessionKey, oldSession);
             this.#sessions.delete(ptySessionKey);
           }
         }
@@ -185,6 +206,7 @@ export class ShellManager {
             }
             if (session && session.timeoutId) {
               clearTimeout(session.timeoutId);
+              session.timeoutId = null;
             }
             this.#sessions.delete(ptySessionKey);
             if (shellState.ptySessionKey === ptySessionKey) {
@@ -233,14 +255,14 @@ export class ShellManager {
     if (session) {
       console.log('shell: PTY session kept alive, will timeout in 30 minutes:', ptySessionKey);
       session.ws = null;
+      if (session.timeoutId) clearTimeout(session.timeoutId);
 
       session.timeoutId = setTimeout(() => {
         console.log('shell: PTY session timeout, killing process:', ptySessionKey);
-        if (session.pty && session.pty.kill) {
-          session.pty.kill();
-        }
+        this.#killSession(ptySessionKey, session);
         this.#sessions.delete(ptySessionKey);
       }, PTY_SESSION_TIMEOUT);
+      session.timeoutId.unref?.();
     }
   }
 }

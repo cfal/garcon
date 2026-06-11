@@ -218,6 +218,7 @@ export class OpenAiCompatibleResponsesRuntime extends AgentEventEmitterRuntime {
   readonly #config: OpenAiCompatibleResponsesRuntimeConfig;
   readonly #sessionStore: DirectSessionStore;
   #sessions = new Map<string, RuntimeSession>();
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: OpenAiCompatibleResponsesRuntimeConfig) {
     super();
@@ -409,9 +410,10 @@ export class OpenAiCompatibleResponsesRuntime extends AgentEventEmitterRuntime {
       }));
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxAge = 30 * 60 * 1000;
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
       for (const [id, session] of this.#sessions.entries()) {
         if (!session.isRunning && now - session.startTime > maxAge) {
@@ -419,5 +421,17 @@ export class OpenAiCompatibleResponsesRuntime extends AgentEventEmitterRuntime {
         }
       }
     }, 5 * 60 * 1000);
+  }
+
+  shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
+    for (const session of this.#sessions.values()) {
+      session.aborted = true;
+      session.abortController?.abort();
+    }
+    this.#sessions.clear();
   }
 }
