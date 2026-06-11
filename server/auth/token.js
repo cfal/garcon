@@ -2,18 +2,8 @@ import jwt from 'jsonwebtoken';
 import { getJwtSecret } from './store.js';
 import { getJwtTokenExpiry } from '../config.js';
 
-// Shares one lazily initialized JWT secret cache across all auth flows.
-let cachedSecret = null;
-
-async function getCachedSecret() {
-  if (!cachedSecret) {
-    cachedSecret = await getJwtSecret();
-  }
-  return cachedSecret;
-}
-
 export async function generateAuthToken({ username }) {
-  const secret = await getCachedSecret();
+  const secret = await getJwtSecret();
   return jwt.sign(
     { username },
     secret,
@@ -27,7 +17,7 @@ export async function verifyAuthToken(token) {
   }
 
   try {
-    const secret = await getCachedSecret();
+    const secret = await getJwtSecret();
     jwt.verify(token, secret);
     return true;
   } catch (error) {

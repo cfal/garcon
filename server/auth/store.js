@@ -12,14 +12,18 @@ function authPath() {
   return path.join(getConfigDir(), 'auth.json');
 }
 
+const cachedJwtSecrets = new Map();
+const inflightJwtSecrets = new Map();
+
 // Ensures the auth config directory exists.
 export async function init() {
   await fs.mkdir(getConfigDir(), { recursive: true });
+  await getJwtSecret();
 }
 
-async function readFromDisk() {
+async function readFromDisk(filePath = authPath()) {
   try {
-    const raw = await fs.readFile(authPath(), 'utf8');
+    const raw = await fs.readFile(filePath, 'utf8');
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed;
@@ -32,20 +36,44 @@ async function readFromDisk() {
   }
 }
 
-async function writeToDisk(data) {
-  await writeJsonFileAtomic(authPath(), data, { mode: 0o600 });
+async function writeToDisk(data, filePath = authPath()) {
+  await writeJsonFileAtomic(filePath, data, { mode: 0o600 });
 }
 
-// Returns the JWT secret, generating and persisting one if missing.
-export async function getJwtSecret() {
-  const data = await readFromDisk();
+async function ensureJwtSecret(filePath) {
+  const data = await readFromDisk(filePath);
   if (typeof data.jwtSecret === 'string' && data.jwtSecret) {
     return data.jwtSecret;
   }
   const secret = crypto.randomBytes(32).toString('hex');
   data.jwtSecret = secret;
-  await writeToDisk(data);
+  await writeToDisk(data, filePath);
   return secret;
+}
+
+// Returns the JWT secret owned by auth store initialization.
+export async function getJwtSecret() {
+  const filePath = authPath();
+  const cachedJwtSecret = cachedJwtSecrets.get(filePath);
+  if (cachedJwtSecret) {
+    return cachedJwtSecret;
+  }
+  const inflightJwtSecret = inflightJwtSecrets.get(filePath);
+  if (inflightJwtSecret) {
+    return inflightJwtSecret;
+  }
+
+  const secretPromise = ensureJwtSecret(filePath)
+    .then((secret) => {
+      cachedJwtSecrets.set(filePath, secret);
+      return secret;
+    })
+    .finally(() => {
+      inflightJwtSecrets.delete(filePath);
+    });
+
+  inflightJwtSecrets.set(filePath, secretPromise);
+  return secretPromise;
 }
 
 // Returns the user object or null if no user has been created.
