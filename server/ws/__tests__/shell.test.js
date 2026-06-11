@@ -123,4 +123,42 @@ describe('ShellManager shutdown', () => {
       type: 'output',
     }));
   });
+
+  it('rejects malformed shell messages without spawning a PTY', async () => {
+    const manager = new ShellManager();
+    const handler = manager.createHandler();
+    const ws = createWs();
+
+    handler.open(ws);
+    await handler.message(ws, {
+      type: 'resize',
+      cols: 0,
+      rows: 24,
+    });
+
+    expect(spawnedPtys).toHaveLength(0);
+    expect(sendWebSocketJson).toHaveBeenCalledWith(ws, {
+      type: 'error',
+      message: 'Invalid shell message',
+    });
+  });
+
+  it('does not print a Claude resume command for Garcon chat ids', async () => {
+    const manager = new ShellManager();
+    const handler = manager.createHandler();
+    const ws = createWs();
+
+    handler.open(ws);
+    await handler.message(ws, {
+      type: 'init',
+      projectPath: '/tmp',
+      chatId: 'chat-1',
+      sessionPolicy: 'reuse',
+    });
+
+    const outputPayloads = sendWebSocketJson.mock.calls
+      .map((call) => call[1])
+      .filter((payload) => payload.type === 'output');
+    expect(outputPayloads.map((payload) => payload.data).join('\n')).not.toContain('claude --resume');
+  });
 });

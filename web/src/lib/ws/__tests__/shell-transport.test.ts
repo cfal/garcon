@@ -58,7 +58,7 @@ describe('attachShellSocket', () => {
 	it('dispatches a parsed exit message', () => {
 		const event = { data: JSON.stringify({ type: 'exit', exitCode: 0 }) } as MessageEvent;
 		socket.onmessage!(event);
-		expect(handlers.onMessage).toHaveBeenCalledWith({ type: 'exit', exitCode: 0, signal: undefined });
+		expect(handlers.onMessage).toHaveBeenCalledWith({ type: 'exit', exitCode: 0 });
 	});
 
 	it('silently drops unparseable JSON', () => {
