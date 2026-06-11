@@ -12,16 +12,48 @@ let workspaceDir;
 function makeService() {
   const chats = {
     getChat: mock((chatId) => (chatId === '1' ? { id: '1', agentId: 'claude' } : null)),
+    addChat: mock(() => true),
+    removeChat: mock(() => true),
   };
   const queue = {
     submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
   };
+  const settings = {
+    getUiSettings: mock(() => Promise.resolve(null)),
+    getChatName: mock(() => null),
+    setSessionName: mock(() => Promise.resolve(undefined)),
+    setLastChatDefaults: mock(() => Promise.resolve(undefined)),
+    ensureInNormal: mock(() => Promise.resolve(undefined)),
+    removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
+  };
+  const metadata = {
+    addNewChatMetadata: mock(() => undefined),
+  };
+  const agents = {
+    hasAgent: mock(() => true),
+    supportsImages: mock(() => true),
+    modelSupportsImages: mock(() => Promise.resolve(true)),
+    startSession: mock(() => Promise.resolve(undefined)),
+    resolvePermission: mock(() => undefined),
+    getAgentAuthStatusMap: mock(() => ({})),
+    getAgentReadinessMap: mock(() => ({})),
+    getAgentCatalogEntries: mock(() => []),
+    runSingleQuery: mock(() => Promise.resolve('')),
+  };
+  const pendingInputs = {
+    register: mock(() => Promise.resolve(undefined)),
+    clearChat: mock(() => undefined),
+  };
   const service = new ChatCommandService({
     chats,
     queue,
     ledger: new CommandLedger(workspaceDir),
+    settings,
+    metadata,
+    agents,
+    pendingInputs,
   });
   return { service, chats, queue };
 }

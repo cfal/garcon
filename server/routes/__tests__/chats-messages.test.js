@@ -9,7 +9,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteCommandLedger } from './chat-routes-test-utils.js';
+import { createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 function createRoutesFixture() {
   const registry = {
@@ -82,6 +82,7 @@ function createRoutesFixture() {
     listForChat: mock(() => []),
     clearChat: mock(() => undefined),
   };
+  const commandLedger = createRouteCommandLedger('chats-messages');
   const routes = createChatRoutes({
     registry,
     settings,
@@ -90,8 +91,16 @@ function createRoutesFixture() {
     metadata,
     historyCache,
     agents,
-    commandLedger: createRouteCommandLedger('chats-messages'),
     pendingInputs,
+    commandService: createRouteCommandService({
+      registry,
+      queue,
+      settings,
+      metadata,
+      agents,
+      commandLedger,
+      pendingInputs,
+    }),
   });
 
   return { historyCache, pendingInputs, routes };

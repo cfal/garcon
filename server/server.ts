@@ -200,7 +200,6 @@ export async function startServer(): Promise<void> {
       metadata,
       historyCache,
       agents: agentRegistry,
-      commandLedger,
       pendingInputs,
       telegramNotifier,
       telegramSettings,

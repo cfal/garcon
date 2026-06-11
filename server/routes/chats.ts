@@ -13,13 +13,9 @@ import {
 } from '../../common/chat-modes.js';
 import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
-import { CommandLedger } from '../commands/command-ledger.js';
 import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
-import {
-  ChatCommandService,
-  CommandValidationError,
-  runOptionsFromCommandRequest,
-} from '../commands/chat-command-service.js';
+import { CommandValidationError, runOptionsFromCommandRequest } from '../commands/chat-command-service.js';
+import type { ChatCommandService } from '../commands/chat-command-service.js';
 import { normalizeQueueState } from '../../common/queue-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
@@ -146,9 +142,8 @@ interface ChatRouteDeps {
   metadata: MetadataDep;
   historyCache: HistoryCacheDep;
   agents: AgentRegistryDep;
-  commandLedger: CommandLedger;
   pendingInputs: PendingInputsDep;
-  commandService?: ChatCommandService;
+  commandService: ChatCommandService;
 }
 
 export default function createChatRoutes({
@@ -159,19 +154,10 @@ export default function createChatRoutes({
   metadata,
   historyCache,
   agents,
-  commandLedger,
   pendingInputs,
   commandService,
 }: ChatRouteDeps): RouteMap {
-  const commands = commandService ?? new ChatCommandService({
-    chats: registry,
-    queue,
-    ledger: commandLedger,
-    settings,
-    metadata,
-    agents,
-    pendingInputs,
-  });
+  const commands = commandService;
 
   async function validateStartPath(_request: Request, url: URL): Promise<Response> {
     const dirPath = String(url.searchParams.get('path') || '').trim();

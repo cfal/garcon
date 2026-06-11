@@ -181,16 +181,18 @@ export function runOptionsFromCommandRequest(
   return options;
 }
 
+interface ChatCommandServiceDeps {
+  chats: Pick<IChatRegistry, 'getChat' | 'addChat' | 'removeChat'>;
+  queue: QueueDep;
+  ledger: CommandLedger;
+  settings: SettingsDep;
+  metadata: MetadataDep;
+  agents: AgentRegistryDep;
+  pendingInputs: PendingInputsDep;
+}
+
 export class ChatCommandService {
-  constructor(private readonly deps: {
-    chats: Pick<IChatRegistry, 'getChat' | 'addChat' | 'removeChat'>;
-    queue: QueueDep;
-    ledger?: CommandLedger;
-    settings?: SettingsDep;
-    metadata?: MetadataDep;
-    agents?: AgentRegistryDep;
-    pendingInputs?: PendingInputsDep;
-  }) {}
+  constructor(private readonly deps: ChatCommandServiceDeps) {}
 
   async submitStart(input: SubmitStartInput): Promise<CommandAcceptedResponse> {
     const clientRequestId = input.clientRequestId?.trim() || crypto.randomUUID();
@@ -206,13 +208,13 @@ export class ChatCommandService {
       throw new CommandValidationError('VALIDATION_FAILED', 'Valid numeric chatId is required');
     }
     if (!agentId) throw new CommandValidationError('VALIDATION_FAILED', 'agentId is required');
-    if (!this.#requireAgents().hasAgent(agentId)) {
+    if (!this.deps.agents.hasAgent(agentId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`);
     }
     if (images.length > 0) {
       let imageSupport = false;
       try {
-        imageSupport = await this.#requireAgents().modelSupportsImages({
+        imageSupport = await this.deps.agents.modelSupportsImages({
           agentId,
           model: input.model,
           apiProviderId: input.apiProviderId,
@@ -220,7 +222,7 @@ export class ChatCommandService {
         });
       } catch {}
       const hasBackendSelection = Boolean(input.apiProviderId && input.modelEndpointId);
-      const supportsImages = hasBackendSelection ? imageSupport : this.#requireAgents().supportsImages(agentId);
+      const supportsImages = hasBackendSelection ? imageSupport : this.deps.agents.supportsImages(agentId);
       if (!supportsImages) {
         throw new CommandValidationError('UNSUPPORTED_AGENT', `Images unsupported for agent: ${agentId}`, 422);
       }
@@ -234,7 +236,7 @@ export class ChatCommandService {
     if (!command) throw new CommandValidationError('VALIDATION_FAILED', 'command is required');
 
     const tags = Array.isArray(input.tags) ? input.tags : [agentId];
-    const ledger = await this.#requireLedger().accept({
+    const ledger = await this.deps.ledger.accept({
       commandType: 'chat-start',
       chatId,
       clientRequestId,
@@ -286,9 +288,9 @@ export class ChatCommandService {
       claudeThinkingMode,
       ampAgentMode,
     });
-    this.#requireMetadata().addNewChatMetadata(chatId, command);
+    this.deps.metadata.addNewChatMetadata(chatId, command);
 
-    await this.#requireSettings().setLastChatDefaults({
+    await this.deps.settings.setLastChatDefaults({
       agentId,
       projectPath,
       model: input.model,
@@ -300,8 +302,8 @@ export class ChatCommandService {
       claudeThinkingMode,
       ampAgentMode,
     });
-    await this.#requireSettings().ensureInNormal(chatId);
-    await this.#requirePendingInputs().register(chatId, command, {
+    await this.deps.settings.ensureInNormal(chatId);
+    await this.deps.pendingInputs.register(chatId, command, {
       clientRequestId,
       clientMessageId,
       turnId,
@@ -310,27 +312,27 @@ export class ChatCommandService {
     });
 
     try {
-      await this.#requireLedger().update(ledger.record.key, { status: 'scheduled', turnId });
-      await this.#requireAgents().startSession(chatId, command, {
+      await this.deps.ledger.update(ledger.record.key, { status: 'scheduled', turnId });
+      await this.deps.agents.startSession(chatId, command, {
         ...(input.requestOptions ?? {}),
         projectPath,
         clientRequestId,
         turnId,
       });
     } catch (error: unknown) {
-      await this.#requireLedger().update(ledger.record.key, { status: 'failed', error: (error as Error).message });
-      this.#requirePendingInputs().clearChat(chatId, 'chat-removed');
+      await this.deps.ledger.update(ledger.record.key, { status: 'failed', error: (error as Error).message });
+      this.deps.pendingInputs.clearChat(chatId, 'chat-removed');
       this.deps.chats.removeChat(chatId);
       try {
-        await this.#requireSettings().removeFromAllOrderLists(chatId);
+        await this.deps.settings.removeFromAllOrderLists(chatId);
       } catch (cleanupError: unknown) {
         console.warn(`sessions: failed to remove ${chatId} from order lists after startup failure:`, (cleanupError as Error).message);
       }
       throw error;
     }
 
-    void maybeGenerateChatTitle({ chatId, projectPath, firstPrompt: command, agents: this.#requireAgents(), settings: this.#requireSettings() });
-    const accepted = await this.#requireLedger().updateUnlessStatus(ledger.record.key, ['failed'], { status: 'running', turnId });
+    void maybeGenerateChatTitle({ chatId, projectPath, firstPrompt: command, agents: this.deps.agents, settings: this.deps.settings });
+    const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed'], { status: 'running', turnId });
     return commandResultFromRecord(accepted ?? ledger.record);
   }
 
@@ -360,7 +362,7 @@ export class ChatCommandService {
 
   async submitQueueEnqueue(input: QueueEnqueueInput): Promise<QueueEnqueueResponse> {
     this.#requireChat(input.chatId);
-    const ledger = await this.#requireLedger().accept({
+    const ledger = await this.deps.ledger.accept({
       commandType: 'queue-enqueue',
       chatId: input.chatId,
       clientRequestId: this.#requireClientRequestId(input.clientRequestId),
@@ -381,7 +383,7 @@ export class ChatCommandService {
     const result = await this.deps.queue.enqueueChat(input.chatId, input.content);
     const state = normalizeQueueState(result.queue);
     const merged = before.entries.some((entry) => entry.status === 'queued');
-    const updated = await this.#requireLedger().update(ledger.record.key, {
+    const updated = await this.deps.ledger.update(ledger.record.key, {
       status: 'scheduled',
       entryId: result.entry.id,
     });
@@ -433,7 +435,7 @@ export class ChatCommandService {
 
   async submitPermissionDecision(input: PermissionDecisionInput): Promise<CommandAcceptedResponse> {
     this.#requireChat(input.chatId);
-    const ledger = await this.#requireLedger().accept({
+    const ledger = await this.deps.ledger.accept({
       commandType: 'permission-decision',
       chatId: input.chatId,
       clientRequestId: this.#requireClientRequestId(input.clientRequestId),
@@ -446,18 +448,18 @@ export class ChatCommandService {
     });
     this.#throwOnConflict(ledger, 'Conflicting permission decision retry');
     if (ledger.kind !== 'duplicate') {
-      this.#requireAgents().resolvePermission(input.chatId, input.permissionRequestId, {
+      this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
         allow: input.allow,
         alwaysAllow: input.alwaysAllow,
       });
-      await this.#requireLedger().update(ledger.record.key, { status: 'scheduled' });
+      await this.deps.ledger.update(ledger.record.key, { status: 'scheduled' });
     }
     return commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted');
   }
 
   async submitStop(input: StopInput): Promise<AgentStopResponse> {
     this.#requireChat(input.chatId);
-    const ledger = await this.#requireLedger().accept({
+    const ledger = await this.deps.ledger.accept({
       commandType: 'agent-stop',
       chatId: input.chatId,
       clientRequestId: this.#requireClientRequestId(input.clientRequestId),
@@ -468,7 +470,7 @@ export class ChatCommandService {
     let stopped = false;
     if (ledger.kind !== 'duplicate') {
       stopped = await this.deps.queue.abort(input.chatId);
-      await this.#requireLedger().update(ledger.record.key, { status: stopped ? 'finished' : 'failed' });
+      await this.deps.ledger.update(ledger.record.key, { status: stopped ? 'finished' : 'failed' });
     }
     return {
       ...commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted'),
@@ -498,7 +500,7 @@ export class ChatCommandService {
     const clientRequestId = this.#requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.#requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();
-    const ledger = await this.#requireLedger().accept({
+    const ledger = await this.deps.ledger.accept({
       commandType: 'agent-run',
       chatId: input.chatId,
       clientRequestId,
@@ -512,7 +514,7 @@ export class ChatCommandService {
     const clientRequestId = this.#requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.#requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();
-    const ledger = await this.#requireLedger().accept({
+    const ledger = await this.deps.ledger.accept({
       commandType: 'fork-run',
       chatId: input.chatId,
       clientRequestId,
@@ -546,7 +548,7 @@ export class ChatCommandService {
     if (input.images !== undefined) options.images = input.images;
 
     await this.#registerPendingInput(input.chatId, input.command, options);
-    const scheduled = await this.#requireLedger().update(ledger.record.key, {
+    const scheduled = await this.deps.ledger.update(ledger.record.key, {
       status: 'scheduled',
       turnId: options.turnId,
     });
@@ -561,10 +563,10 @@ export class ChatCommandService {
 
   #runAcceptedTurn(ledgerKey: string, chatId: string, command: string, options: RunAgentTurnOptions): void {
     void this.deps.queue.runAcceptedTurn(chatId, command, options)
-      .then(() => this.#requireLedger().update(ledgerKey, { status: 'finished' }))
+      .then(() => this.deps.ledger.update(ledgerKey, { status: 'finished' }))
       .catch((error: Error) => {
         console.error('commands: run failed:', error.message);
-        this.#requireLedger().update(ledgerKey, { status: 'failed', error: error.message }).catch(() => {});
+        this.deps.ledger.update(ledgerKey, { status: 'failed', error: error.message }).catch(() => {});
       });
   }
 
@@ -597,41 +599,6 @@ export class ChatCommandService {
       throw new CommandValidationError('VALIDATION_FAILED', `${field} is required`);
     }
     return value.trim();
-  }
-
-  #requireLedger(): CommandLedger {
-    if (!this.deps.ledger) {
-      throw new CommandValidationError('INTERNAL_ERROR', 'Command ledger is not configured', 500, true);
-    }
-    return this.deps.ledger;
-  }
-
-  #requireSettings(): SettingsDep {
-    if (!this.deps.settings) {
-      throw new CommandValidationError('INTERNAL_ERROR', 'Settings service is not configured', 500, true);
-    }
-    return this.deps.settings;
-  }
-
-  #requireMetadata(): MetadataDep {
-    if (!this.deps.metadata) {
-      throw new CommandValidationError('INTERNAL_ERROR', 'Metadata service is not configured', 500, true);
-    }
-    return this.deps.metadata;
-  }
-
-  #requireAgents(): AgentRegistryDep {
-    if (!this.deps.agents) {
-      throw new CommandValidationError('INTERNAL_ERROR', 'Agent registry is not configured', 500, true);
-    }
-    return this.deps.agents;
-  }
-
-  #requirePendingInputs(): PendingInputsDep {
-    if (!this.deps.pendingInputs) {
-      throw new CommandValidationError('INTERNAL_ERROR', 'Pending input service is not configured', 500, true);
-    }
-    return this.deps.pendingInputs;
   }
 
   #throwOnConflict(

@@ -16,7 +16,6 @@ import type { PathCache } from '../chats/path-cache.js';
 import type { MetadataIndex } from '../chats/metadata-store.js';
 import type { HistoryCache } from '../chats/history-cache.js';
 import type { AgentRegistry } from '../agents/registry.js';
-import type { CommandLedger } from '../commands/command-ledger.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
 import type { TelegramSettingsStore } from '../notifications/telegram-settings-store.js';
@@ -33,7 +32,6 @@ export default function createAllRoutes({
   metadata,
   historyCache,
   agents,
-  commandLedger,
   pendingInputs,
   telegramNotifier,
   telegramSettings,
@@ -49,7 +47,6 @@ export default function createAllRoutes({
   metadata: MetadataIndex;
   historyCache: HistoryCache;
   agents: AgentRegistry;
-  commandLedger: CommandLedger;
   pendingInputs: PendingUserInputServiceContract;
   telegramNotifier: TelegramNotifier;
   telegramSettings: TelegramSettingsStore;
@@ -71,7 +68,6 @@ export default function createAllRoutes({
       metadata,
       historyCache,
       agents,
-      commandLedger,
       pendingInputs,
       commandService: chatCommands,
     }),

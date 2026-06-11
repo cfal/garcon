@@ -18,7 +18,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
 const registry = {
@@ -60,6 +60,9 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
+const commandLedger = createRouteCommandLedger('chats-reorder');
+const pendingInputs = createRoutePendingInputs();
+
 const chatsRoutes = createChatRoutes({
   registry,
   settings,
@@ -68,8 +71,16 @@ const chatsRoutes = createChatRoutes({
   metadata,
   historyCache,
   agents,
-  commandLedger: createRouteCommandLedger('chats-reorder'),
-  pendingInputs: createRoutePendingInputs(),
+  pendingInputs,
+  commandService: createRouteCommandService({
+    registry,
+    queue,
+    settings,
+    metadata,
+    agents,
+    commandLedger,
+    pendingInputs,
+  }),
 });
 
 const allMocks = [

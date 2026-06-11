@@ -18,17 +18,29 @@ const mockAgents = {
   getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [], 'direct-openai-responses-compatible': [] })),
   resolvePermission: mock(() => undefined),
   updateSessionSettings: mock(() => Promise.resolve(undefined)),
+  hasAgent: mock(() => true),
+  supportsImages: mock(() => true),
+  modelSupportsImages: mock(() => Promise.resolve(true)),
+  startSession: mock(() => Promise.resolve(undefined)),
   supportsFork: mock(() => true),
   isAgentSessionRunning: mock(() => false),
+  getAgentAuthStatusMap: mock(() => ({})),
+  getAgentReadinessMap: mock(() => ({})),
+  getAgentCatalogEntries: mock(() => []),
+  runSingleQuery: mock(() => Promise.resolve('')),
 };
 
 const mockRegistry = {
   getChat: mock(() => null),
+  addChat: mock(() => true),
+  removeChat: mock(() => true),
   updateChat: mock(() => Promise.resolve(undefined)),
 };
 
 const mockQueue = {
   submit: mock(() => Promise.resolve()),
+  registerPendingUserInput: mock(() => Promise.resolve()),
+  runAcceptedTurn: mock(() => Promise.resolve()),
   abort: mock(() => Promise.resolve(true)),
   triggerDrain: mock(() => Promise.resolve()),
   readChatQueue: mock(() => Promise.resolve({ entries: [], paused: false })),
@@ -52,8 +64,29 @@ const mockHistoryCache = {
 };
 
 const mockPendingInputs = {
+  register: mock(() => Promise.resolve(undefined)),
   reconcile: mock(() => Promise.resolve(undefined)),
   listForChat: mock(() => []),
+  clearChat: mock(() => undefined),
+};
+
+const mockSettings = {
+  getUiSettings: mock(() => Promise.resolve(null)),
+  getChatName: mock(() => null),
+  setSessionName: mock(() => Promise.resolve(undefined)),
+  setLastChatDefaults: mock(() => Promise.resolve(undefined)),
+  ensureInNormal: mock(() => Promise.resolve(undefined)),
+  removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
+};
+
+const mockMetadata = {
+  addNewChatMetadata: mock(() => undefined),
+};
+
+const mockCommandLedger = {
+  accept: mock(() => { throw new Error('Unexpected command ledger use'); }),
+  update: mock(() => { throw new Error('Unexpected command ledger use'); }),
+  updateUnlessStatus: mock(() => { throw new Error('Unexpected command ledger use'); }),
 };
 
 const mockForkDeps = {
@@ -69,15 +102,28 @@ const mockForkDeps = {
 const injectedMocks = [
   mockAgents.getRunningSessions, mockAgents.resolvePermission,
   mockAgents.updateSessionSettings,
+  mockAgents.hasAgent, mockAgents.supportsImages, mockAgents.modelSupportsImages,
+  mockAgents.startSession,
   mockAgents.supportsFork,
   mockAgents.isAgentSessionRunning,
-  mockRegistry.getChat, mockRegistry.updateChat,
-  mockQueue.submit, mockQueue.abort, mockQueue.triggerDrain,
+  mockAgents.getAgentAuthStatusMap, mockAgents.getAgentReadinessMap,
+  mockAgents.getAgentCatalogEntries, mockAgents.runSingleQuery,
+  mockRegistry.getChat, mockRegistry.addChat, mockRegistry.removeChat,
+  mockRegistry.updateChat,
+  mockQueue.submit, mockQueue.registerPendingUserInput,
+  mockQueue.runAcceptedTurn, mockQueue.abort, mockQueue.triggerDrain,
   mockQueue.readChatQueue, mockQueue.enqueueChat, mockQueue.dequeueChat,
   mockQueue.clearChatQueue, mockQueue.pauseChatQueue, mockQueue.resumeChatQueue,
   mockHistoryCache.appendMessages, mockHistoryCache.ensureLoaded,
   mockHistoryCache.getPaginatedMessages,
-  mockPendingInputs.reconcile, mockPendingInputs.listForChat,
+  mockPendingInputs.register, mockPendingInputs.reconcile,
+  mockPendingInputs.listForChat, mockPendingInputs.clearChat,
+  mockSettings.getUiSettings, mockSettings.getChatName,
+  mockSettings.setSessionName, mockSettings.setLastChatDefaults,
+  mockSettings.ensureInNormal, mockSettings.removeFromAllOrderLists,
+  mockMetadata.addNewChatMetadata,
+  mockCommandLedger.accept, mockCommandLedger.update,
+  mockCommandLedger.updateUnlessStatus,
   mockForkDeps.forkChatFileCopy,
 ];
 
@@ -90,7 +136,15 @@ const chatHandlerInstance = new ChatHandler({
   registry: mockRegistry,
   pendingInputs: mockPendingInputs,
   forkDeps: mockForkDeps,
-  commands: new ChatCommandService({ chats: mockRegistry, queue: mockQueue }),
+  commands: new ChatCommandService({
+    chats: mockRegistry,
+    queue: mockQueue,
+    ledger: mockCommandLedger,
+    settings: mockSettings,
+    metadata: mockMetadata,
+    agents: mockAgents,
+    pendingInputs: mockPendingInputs,
+  }),
 });
 const chatHandler = chatHandlerInstance.createHandler();
 

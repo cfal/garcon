@@ -3,11 +3,15 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 
-import createChatRoutes from '../chats.js';
-import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
-
 const testBasePath = path.join(os.homedir(), 'garcon-chats-validate-start-test');
 const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
+
+mock.module('../../config.js', () => ({
+  getProjectBasePath: mock(() => testBasePath),
+}));
+
+import createChatRoutes from '../chats.js';
+import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 const registry = {
   getChat: mock(() => undefined),
@@ -46,6 +50,9 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
+const commandLedger = createRouteCommandLedger('chats-validate-start');
+const pendingInputs = createRoutePendingInputs();
+
 const routes = createChatRoutes({
   registry,
   settings,
@@ -54,8 +61,16 @@ const routes = createChatRoutes({
   metadata,
   historyCache,
   agents,
-  commandLedger: createRouteCommandLedger('chats-validate-start'),
-  pendingInputs: createRoutePendingInputs(),
+  pendingInputs,
+  commandService: createRouteCommandService({
+    registry,
+    queue,
+    settings,
+    metadata,
+    agents,
+    commandLedger,
+    pendingInputs,
+  }),
 });
 const handler = routes['/api/v1/chats/validate-start'].GET;
 
