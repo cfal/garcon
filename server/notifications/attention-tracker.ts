@@ -289,9 +289,9 @@ export class AttentionTracker {
     if (!this.#telegram.isConfigured) return;
     try {
       const config = await this.#getTelegramConfig();
-      const chatId = this.#telegramSettings.getRecipientChatId();
-      if (!config.enabled || !chatId) return;
-      const ok = await this.#telegram.send(chatId, html, 'HTML');
+      const recipientChatId = this.#telegramSettings.getRecipientChatId();
+      if (!config.enabled || !recipientChatId) return;
+      const ok = await this.#telegram.send(recipientChatId, html, 'HTML');
       if (!ok) {
         console.warn(`attention: telegram delivery failed for chat ${chatId}`);
       }

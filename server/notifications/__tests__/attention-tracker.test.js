@@ -297,5 +297,22 @@ describe('AttentionTracker', () => {
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).not.toHaveBeenCalled();
     });
+
+    it('logs the Garcon chat id when Telegram delivery fails', async () => {
+      telegram = { isConfigured: true, send: mock(() => Promise.resolve(false)) };
+      telegramSettings = createMockTelegramSettings('telegram-recipient-1');
+      const warn = console.warn;
+      console.warn = mock(() => undefined);
+      try {
+        createTracker();
+        agents.emitFinished('garcon-chat-1', 0);
+        queue.emitChatIdle('garcon-chat-1');
+
+        await new Promise(r => setTimeout(r, 10));
+        expect(console.warn).toHaveBeenCalledWith('attention: telegram delivery failed for chat garcon-chat-1');
+      } finally {
+        console.warn = warn;
+      }
+    });
   });
 });
