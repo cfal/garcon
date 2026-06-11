@@ -1,8 +1,7 @@
 // App settings persistence (project-settings.json). Manages ui preferences,
 // path settings, chat-scoped session name overrides, and ordering lists.
-// Maintains an in-memory #cache for getChatName() reads; high-level
-// mutations always call loadSettings() then saveSettings() which keeps
-// the cache in sync via identity sharing.
+// Normal reads and mutations use the initialized in-memory cache. loadSettings()
+// is the explicit external-change recovery path and refreshes that cache.
 
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -294,6 +293,13 @@ export class SettingsStore extends EventEmitter {
     return newCache;
   }
 
+  #getCachedSettings() {
+    if (!this.#cache) {
+      this.#cache = createEmpty();
+    }
+    return this.#cache;
+  }
+
   async saveSettings(settings) {
     const validated = settings && typeof settings === 'object' && !Array.isArray(settings)
       ? settings
@@ -309,7 +315,7 @@ export class SettingsStore extends EventEmitter {
     return this.#withLock(async () => {
       const sessions = registry.listAllChats();
       const allChatIds = new Set(Object.keys(sessions));
-      const currentSettings = await this.loadSettings();
+      const currentSettings = this.#getCachedSettings();
       const beforePinned = dedup(currentSettings.pinnedChatIds || []);
 
       let pinned = dedup(currentSettings.pinnedChatIds || []);
@@ -392,7 +398,7 @@ export class SettingsStore extends EventEmitter {
 
   async setSessionName(chatId, title) {
     return this.#withLock(async () => {
-      const settings = await this.loadSettings();
+      const settings = this.#getCachedSettings();
       if (!settings.chatNames) settings.chatNames = {};
       const trimmed = typeof title === 'string' ? title.trim() : '';
       if (!trimmed) {
@@ -407,7 +413,7 @@ export class SettingsStore extends EventEmitter {
 
   async removeSessionName(chatId) {
     return this.#withLock(async () => {
-      const settings = await this.loadSettings();
+      const settings = this.#getCachedSettings();
       if (settings.chatNames) {
         delete settings.chatNames[String(chatId)];
         await this.saveSettings(settings);
@@ -416,13 +422,13 @@ export class SettingsStore extends EventEmitter {
   }
 
   async getUiSettings() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.ui || {};
   }
 
   async setUiSettings(patch) {
     return this.#withLock(async () => {
-      const settings = await this.loadSettings();
+      const settings = this.#getCachedSettings();
       settings.ui = normalizeUiSettings({ ...(settings.ui || {}), ...patch });
       bumpRemoteSettingsVersion(settings);
       await this.saveSettings(settings);
@@ -432,13 +438,13 @@ export class SettingsStore extends EventEmitter {
   }
 
   async getPathSettings() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.paths || {};
   }
 
   async setPathSettings(patch) {
     return this.#withLock(async () => {
-      const settings = await this.loadSettings();
+      const settings = this.#getCachedSettings();
       settings.paths = { ...(settings.paths || {}), ...patch };
       bumpRemoteSettingsVersion(settings);
       await this.saveSettings(settings);
@@ -448,17 +454,17 @@ export class SettingsStore extends EventEmitter {
   }
 
   async getPinnedChatIds() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.pinnedChatIds || [];
   }
 
   async getRemoteSettingsVersion() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return normalizeRemoteSettingsVersion(settings.remoteSettingsVersion);
   }
 
   async getRemoteSettingsSnapshotSource() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return {
       version: normalizeRemoteSettingsVersion(settings.remoteSettingsVersion),
       ui: settings.ui || {},
@@ -478,48 +484,48 @@ export class SettingsStore extends EventEmitter {
   }
 
   async getArchivedChatIds() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.archivedChatIds || [];
   }
 
   async getLastPermissionMode() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return normalizePermissionMode(settings.lastPermissionMode);
   }
 
   async getLastAgentId() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.lastAgentId || 'claude';
   }
 
   async getLastProjectPath() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.lastProjectPath || '';
   }
 
   async getLastModel() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.lastModel || '';
   }
 
   async getLastApiProviderId() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.lastApiProviderId ?? null;
   }
 
   async getLastModelEndpointId() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.lastModelEndpointId ?? null;
   }
 
   async getLastModelProtocol() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.lastModelProtocol ?? null;
   }
 
   async setLastChatDefaults(defaults) {
     return this.#withLock(async () => {
-      const settings = await this.loadSettings();
+      const settings = this.#getCachedSettings();
       settings.lastAgentId = typeof defaults?.agentId === 'string'
         ? defaults.agentId
         : (settings.lastAgentId || 'claude');
@@ -567,7 +573,7 @@ export class SettingsStore extends EventEmitter {
   }
 
   async getLastThinkingMode() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return normalizeThinkingMode(settings.lastThinkingMode);
   }
 
@@ -576,7 +582,7 @@ export class SettingsStore extends EventEmitter {
   }
 
   async getLastClaudeThinkingMode() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return normalizeClaudeThinkingMode(settings.lastClaudeThinkingMode);
   }
 
@@ -585,7 +591,7 @@ export class SettingsStore extends EventEmitter {
   }
 
   async getLastAmpAgentMode() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return normalizeAmpAgentMode(settings.lastAmpAgentMode);
   }
 
@@ -594,7 +600,7 @@ export class SettingsStore extends EventEmitter {
   }
 
   async getNormalChatIds() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.normalChatIds || [];
   }
 
@@ -602,7 +608,7 @@ export class SettingsStore extends EventEmitter {
   // round-trip, removing it from pinned/archived if present.
   async ensureInNormal(chatId) {
     return this.#withLock(async () => {
-      const settings = await this.loadSettings();
+      const settings = this.#getCachedSettings();
       const beforePinned = dedup(settings.pinnedChatIds || []);
       for (const key of ['pinnedChatIds', 'normalChatIds', 'archivedChatIds']) {
         const ids = settings[key] || [];
@@ -626,7 +632,7 @@ export class SettingsStore extends EventEmitter {
 
   async insertNormalChatIdTop(chatId) {
     return this.#withLock(async () => {
-      const settings = await this.loadSettings();
+      const settings = this.#getCachedSettings();
       const ids = (settings.normalChatIds || []).filter((id) => id !== chatId);
       settings.normalChatIds = [chatId, ...ids];
       await this.saveSettings(settings);
@@ -635,7 +641,7 @@ export class SettingsStore extends EventEmitter {
 
   async removeFromAllOrderLists(chatId) {
     return this.#withLock(async () => {
-      const settings = await this.loadSettings();
+      const settings = this.#getCachedSettings();
       const beforePinned = dedup(settings.pinnedChatIds || []);
       let dirty = false;
       for (const key of ['pinnedChatIds', 'normalChatIds', 'archivedChatIds']) {
@@ -662,7 +668,7 @@ export class SettingsStore extends EventEmitter {
   // Toggles pin state for a chat in a single disk round-trip.
   async togglePin(chatId) {
     return this.#withLock(async () => {
-      const s = await this.loadSettings();
+      const s = this.#getCachedSettings();
       const pinned = s.pinnedChatIds || [];
       const isPinned = pinned.includes(chatId);
 
@@ -687,7 +693,7 @@ export class SettingsStore extends EventEmitter {
   // Toggles archive state for a chat in a single disk round-trip.
   async toggleArchive(chatId) {
     return this.#withLock(async () => {
-      const s = await this.loadSettings();
+      const s = this.#getCachedSettings();
       const beforePinned = dedup(s.pinnedChatIds || []);
       const archived = s.archivedChatIds || [];
       const isArchived = archived.includes(chatId);
@@ -733,7 +739,7 @@ export class SettingsStore extends EventEmitter {
     }
 
     return this.#withLock(async () => {
-      const s = await this.loadSettings();
+      const s = this.#getCachedSettings();
       const key = list === 'pinned' ? 'pinnedChatIds' : list === 'archived' ? 'archivedChatIds' : 'normalChatIds';
       const current = dedup(s[key] || []);
 
@@ -761,13 +767,13 @@ export class SettingsStore extends EventEmitter {
   }
 
   async getSavedSearches() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.savedChatSearches || [];
   }
 
   async addSavedSearch(savedSearch) {
     return this.#withLock(async () => {
-      const s = await this.loadSettings();
+      const s = this.#getCachedSettings();
       const searches = s.savedChatSearches || [];
       if (searches.some((entry) => entry.id === savedSearch.id)) {
         throw new Error(`Saved search with ID ${savedSearch.id} already exists`);
@@ -780,7 +786,7 @@ export class SettingsStore extends EventEmitter {
 
   async updateSavedSearch(searchId, patch) {
     return this.#withLock(async () => {
-      const s = await this.loadSettings();
+      const s = this.#getCachedSettings();
       const searches = s.savedChatSearches || [];
       const idx = searches.findIndex((entry) => entry.id === searchId);
       if (idx < 0) {
@@ -795,7 +801,7 @@ export class SettingsStore extends EventEmitter {
 
   async removeSavedSearch(searchId) {
     return this.#withLock(async () => {
-      const s = await this.loadSettings();
+      const s = this.#getCachedSettings();
       const searches = s.savedChatSearches || [];
       const idx = searches.findIndex((entry) => entry.id === searchId);
       if (idx < 0) return false;
@@ -822,7 +828,7 @@ export class SettingsStore extends EventEmitter {
     }
 
     return this.#withLock(async () => {
-      const s = await this.loadSettings();
+      const s = this.#getCachedSettings();
       const searches = s.savedChatSearches || [];
       const currentIds = searches.map((entry) => entry.id);
 
@@ -837,13 +843,13 @@ export class SettingsStore extends EventEmitter {
   }
 
   async getFolders() {
-    const settings = await this.loadSettings();
+    const settings = this.#getCachedSettings();
     return settings.chatFolders || [];
   }
 
   async addFolder(folder) {
     return this.#withLock(async () => {
-      const s = await this.loadSettings();
+      const s = this.#getCachedSettings();
       const folders = s.chatFolders || [];
       if (folders.some((f) => f.id === folder.id)) {
         throw new Error(`Folder with ID ${folder.id} already exists`);
@@ -856,7 +862,7 @@ export class SettingsStore extends EventEmitter {
 
   async updateFolder(folderId, patch) {
     return this.#withLock(async () => {
-      const s = await this.loadSettings();
+      const s = this.#getCachedSettings();
       const folders = s.chatFolders || [];
       const idx = folders.findIndex((f) => f.id === folderId);
       if (idx < 0) {
@@ -871,7 +877,7 @@ export class SettingsStore extends EventEmitter {
 
   async removeFolder(folderId) {
     return this.#withLock(async () => {
-      const s = await this.loadSettings();
+      const s = this.#getCachedSettings();
       const folders = s.chatFolders || [];
       const idx = folders.findIndex((f) => f.id === folderId);
       if (idx < 0) return false;
@@ -884,7 +890,7 @@ export class SettingsStore extends EventEmitter {
   // Moves a single chat relative to a neighbor within the same group.
   async reorderRelative(chatId, refId, mode) {
     return this.#withLock(async () => {
-      const s = await this.loadSettings();
+      const s = this.#getCachedSettings();
       const chatGroup = resolveGroupInSettings(s, chatId);
       const refGroup = resolveGroupInSettings(s, refId);
 
