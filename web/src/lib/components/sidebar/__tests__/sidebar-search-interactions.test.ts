@@ -386,7 +386,7 @@ describe('sidebar search interactions', () => {
 		expect(screen.queryByRole('separator')).toBeNull();
 	});
 
-	it('renders sidebar pill searches and clears the active search banner', async () => {
+	it('renders sidebar pill searches and clears a non-matching active search banner', async () => {
 		const onOpenSearchDialog = vi.fn();
 		const onApplyPillSearch = vi.fn();
 		const onClearActiveQuery = vi.fn();
@@ -413,10 +413,33 @@ describe('sidebar search interactions', () => {
 		expect(onOpenSearchDialog).toHaveBeenCalledTimes(1);
 	});
 
+	it('highlights a matching sidebar pill and clears the active search when pressed again', async () => {
+		const onApplyPillSearch = vi.fn();
+		const onClearActiveQuery = vi.fn();
+
+		render(SidebarSearchContext, {
+			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
+			activeQuery: ' status:unread ',
+			onOpenSearchDialog: vi.fn(),
+			onApplyPillSearch,
+			onClearActiveQuery,
+		});
+
+		const pill = screen.getByRole('button', { name: 'Unread' });
+		expect(pill.getAttribute('aria-pressed')).toBe('true');
+		expect(pill.className).toContain('border-sidebar-ring');
+		expect(pill.className).toContain('text-sidebar-foreground');
+		expect(document.querySelector('[data-slot="active-search-banner"]')).toBeNull();
+
+		await fireEvent.click(pill);
+		expect(onApplyPillSearch).not.toHaveBeenCalled();
+		expect(onClearActiveQuery).toHaveBeenCalledTimes(1);
+	});
+
 	it('tightens the top dock seam when search context sits below the controls row', () => {
 		render(SidebarSearchContext, {
 			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
-			activeQuery: 'tag:ops',
+			activeQuery: 'status:unread',
 			hasAdjacentControlsRow: true,
 			onOpenSearchDialog: vi.fn(),
 			onApplyPillSearch: vi.fn(),
@@ -432,7 +455,7 @@ describe('sidebar search interactions', () => {
 		const topChildSlots = Array.from(topContext?.children ?? []).map((element) =>
 			element.getAttribute('data-slot')
 		);
-		expect(topChildSlots).toEqual(['sidebar-search-pills', 'active-search-banner']);
+		expect(topChildSlots).toEqual(['sidebar-search-pills']);
 	});
 
 	it('omits sidebar search context when there are no pills and no active query', () => {

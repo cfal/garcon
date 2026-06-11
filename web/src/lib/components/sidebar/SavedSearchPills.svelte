@@ -1,12 +1,14 @@
 <script lang="ts">
 	import type { SavedChatSearch } from '$lib/api/settings';
+	import { cn } from '$lib/utils/cn';
 
 	interface SavedSearchPillsProps {
 		searches: SavedChatSearch[];
+		activeSearchId?: string | null;
 		onApply: (search: SavedChatSearch) => void;
 	}
 
-	let { searches, onApply }: SavedSearchPillsProps = $props();
+	let { searches, activeSearchId = null, onApply }: SavedSearchPillsProps = $props();
 </script>
 
 {#if searches.length > 0}
@@ -14,8 +16,14 @@
 		{#each searches as search (search.id)}
 			<button
 				type="button"
-				class="rounded-full border border-border bg-muted/60 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+				class={cn(
+					'rounded-full border px-2.5 py-1 text-xs transition-colors hover:bg-accent hover:text-accent-foreground',
+					search.id === activeSearchId
+						? 'border-sidebar-ring bg-sidebar-accent text-sidebar-foreground'
+						: 'border-border bg-muted/60 text-muted-foreground',
+				)}
 				onclick={() => onApply(search)}
+				aria-pressed={search.id === activeSearchId}
 			>
 				{search.title || search.query}
 			</button>
