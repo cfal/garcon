@@ -284,10 +284,17 @@ export default function createChatRoutes({
       const pinnedIds = new Set(pinnedList);
       const archivedIds = new Set(archivedList);
 
+      const availableSessions = await Promise.all(
+        Object.entries(sessions).map(async ([chatId, session]) => ({
+          chatId,
+          session,
+          isAvailable: await pathCache.isProjectPathAvailable(session.projectPath as string),
+        })),
+      );
+
       const entryMap = new Map<string, Record<string, unknown>>();
-      for (const chatId in sessions) {
-        const session = sessions[chatId];
-        if (!await pathCache.isProjectPathAvailable(session.projectPath as string)) continue;
+      for (const { chatId, session, isAvailable } of availableSessions) {
+        if (!isAvailable) continue;
         const meta = metadataMap.get(chatId) || null;
         const inferredCreatedAt = createdAtFromId(chatId);
         const overrideTitle = settings.getChatName(chatId);
@@ -339,11 +346,6 @@ export default function createChatRoutes({
       }
       if (orphans.length > 0) {
         orphans.sort((a, b) => ((b.activity as Record<string, string>).createdAt || '').localeCompare((a.activity as Record<string, string>).createdAt || ''));
-        for (const entry of orphans) {
-          settings.ensureInNormal(entry.id as string).catch((err: Error) => {
-            console.warn(`chats: failed to repair orphan ${entry.id}:`, err.message);
-          });
-        }
       }
 
       const all = [...pinned, ...orphans, ...normal, ...archived];

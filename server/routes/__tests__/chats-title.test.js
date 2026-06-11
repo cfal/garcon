@@ -72,7 +72,8 @@ const chatsRoutes = createChatRoutes({
 
 const allMocks = [
   registry.listAllChats, metadata.listAllChatMetadata, registry.getChat, registry.removeChat,
-  settings.getChatName, settings.removeSessionName, settings.removeFromAllOrderLists, settings.getNormalChatIds,
+  settings.getChatName, settings.ensureInNormal, settings.removeSessionName, settings.removeFromAllOrderLists, settings.getNormalChatIds,
+  pathCache.isProjectPathAvailable,
 ];
 
 describe('GET /api/chats title resolution', () => {
@@ -80,6 +81,7 @@ describe('GET /api/chats title resolution', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
+    pathCache.isProjectPathAvailable.mockImplementation(() => Promise.resolve(true));
   });
 
   it('uses override title when session name exists', async () => {
@@ -130,6 +132,59 @@ describe('GET /api/chats title resolution', () => {
 
     expect(body.sessions[0].title).toBe('New Session');
     expect(body.sessions[0].preview.lastMessage).toBe('New Session');
+  });
+
+  it('returns orphaned chats without repairing order lists during a read', async () => {
+    registry.listAllChats.mockImplementation(() => ({
+      '400': { agentId: 'claude', projectPath: '/proj', tags: [] },
+    }));
+    metadata.listAllChatMetadata.mockImplementation(() => new Map());
+    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve([]));
+    settings.getNormalChatIds.mockImplementation(() => Promise.resolve([]));
+    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve([]));
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(body.sessions.map((session) => session.id)).toEqual(['400']);
+    expect(settings.ensureInNormal).not.toHaveBeenCalled();
+  });
+
+  it('checks project path availability concurrently', async () => {
+    let resolveSlow;
+    const slowCheck = new Promise((resolve) => { resolveSlow = resolve; });
+    let resolveFirstCall;
+    const firstCall = new Promise((resolve) => { resolveFirstCall = resolve; });
+    let fastCalled = false;
+
+    registry.listAllChats.mockImplementation(() => ({
+      '500': { agentId: 'claude', projectPath: '/slow', tags: [] },
+      '600': { agentId: 'claude', projectPath: '/fast', tags: [] },
+    }));
+    metadata.listAllChatMetadata.mockImplementation(() => new Map());
+    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve([]));
+    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['500', '600']));
+    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve([]));
+    pathCache.isProjectPathAvailable.mockImplementation((projectPath) => {
+      if (projectPath === '/slow') {
+        resolveFirstCall();
+        return slowCheck;
+      }
+      if (projectPath === '/fast') {
+        fastCalled = true;
+      }
+      return Promise.resolve(true);
+    });
+
+    const responsePromise = handler();
+    await firstCall;
+
+    expect(fastCalled).toBe(true);
+    resolveSlow(true);
+
+    const response = await responsePromise;
+    const body = await response.json();
+    expect(body.sessions.map((session) => session.id)).toEqual(['500', '600']);
   });
 });
 
