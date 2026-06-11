@@ -7,17 +7,42 @@ import {
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
+  type AmpAgentMode,
+  type ClaudeThinkingMode,
+  type PermissionMode,
+  type ThinkingMode,
 } from '../../common/chat-modes.ts';
+import type { ApiProtocol } from '../../common/api-providers.js';
+import type { IChatRegistry } from '../chats/store.js';
 import {
   normalizeRemoteSettingsVersion,
   normalizeUiSettings,
 } from './settings-shared.js';
+import type {
+  ChatFolder,
+  ProjectSettings,
+  ReorderResult,
+  SavedChatSearch,
+  SettingsStoreContext,
+  WindowReorderValidation,
+} from './types.js';
 
-function bumpRemoteSettingsVersion(settings) {
+const ORDER_LIST_KEYS = ['pinnedChatIds', 'normalChatIds', 'archivedChatIds'] as const;
+
+type OrderListKey = typeof ORDER_LIST_KEYS[number];
+type ChatOrderGroup = 'pinned' | 'normal' | 'archived';
+
+interface ResolvedChatGroup {
+  group: ChatOrderGroup;
+  list: string[];
+  key: OrderListKey;
+}
+
+function bumpRemoteSettingsVersion(settings: ProjectSettings): void {
   settings.remoteSettingsVersion = normalizeRemoteSettingsVersion(settings.remoteSettingsVersion) + 1;
 }
 
-function sameOrderedStringArray(left, right) {
+function sameOrderedStringArray(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
   for (let i = 0; i < left.length; i += 1) {
     if (left[i] !== right[i]) return false;
@@ -25,7 +50,7 @@ function sameOrderedStringArray(left, right) {
   return true;
 }
 
-function bumpRemoteSettingsVersionForPinnedChange(settings, beforePinned) {
+function bumpRemoteSettingsVersionForPinnedChange(settings: ProjectSettings, beforePinned: string[]): boolean {
   const afterPinned = dedup(settings.pinnedChatIds || []);
   const changed = !sameOrderedStringArray(beforePinned, afterPinned);
   if (changed) {
@@ -34,9 +59,10 @@ function bumpRemoteSettingsVersionForPinnedChange(settings, beforePinned) {
   return changed;
 }
 
-function dedup(ids) {
-  const out = [];
-  const seen = new Set();
+function dedup(ids: unknown): string[] {
+  if (!Array.isArray(ids)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
   for (const raw of ids) {
     if (typeof raw !== 'string') continue;
     const id = raw.trim();
@@ -47,7 +73,7 @@ function dedup(ids) {
   return out;
 }
 
-function findWindowIndex(full, windowIds) {
+function findWindowIndex(full: string[], windowIds: string[]): number {
   if (windowIds.length === 0 || windowIds.length > full.length) return -1;
   for (let i = 0; i <= full.length - windowIds.length; i += 1) {
     let ok = true;
@@ -59,13 +85,13 @@ function findWindowIndex(full, windowIds) {
   return -1;
 }
 
-function applyWindowReorder(full, oldOrder, newOrder) {
+function applyWindowReorder(full: string[], oldOrder: string[], newOrder: string[]): string[] | null {
   const at = findWindowIndex(full, oldOrder);
   if (at < 0) return null;
   return [...full.slice(0, at), ...newOrder, ...full.slice(at + oldOrder.length)];
 }
 
-function validateWindowReorder(rawOldOrder, rawNewOrder) {
+function validateWindowReorder(rawOldOrder: unknown, rawNewOrder: unknown): WindowReorderValidation {
   const oldOrder = dedup(rawOldOrder);
   const newOrder = dedup(rawNewOrder);
 
@@ -84,7 +110,7 @@ function validateWindowReorder(rawOldOrder, rawNewOrder) {
   return { success: true, oldOrder, newOrder };
 }
 
-function moveRelative(list, chatId, refId, mode) {
+function moveRelative(list: string[], chatId: string, refId: string, mode: string): string[] | null {
   const from = list.indexOf(chatId);
   const ref = list.indexOf(refId);
   if (from < 0 || ref < 0) return null;
@@ -96,7 +122,7 @@ function moveRelative(list, chatId, refId, mode) {
   return next;
 }
 
-function resolveGroupInSettings(s, chatId) {
+function resolveGroupInSettings(s: ProjectSettings, chatId: string): ResolvedChatGroup | null {
   const pinned = s.pinnedChatIds || [];
   if (pinned.includes(chatId)) return { group: 'pinned', list: pinned, key: 'pinnedChatIds' };
   const normal = s.normalChatIds || [];
@@ -107,20 +133,20 @@ function resolveGroupInSettings(s, chatId) {
 }
 
 export class ChatNameStore {
-  #context;
+  #context: SettingsStoreContext;
 
-  constructor(context) {
+  constructor(context: SettingsStoreContext) {
     this.#context = context;
   }
 
-  getChatName(chatId) {
+  getChatName(chatId: string): string | null {
     const settings = this.#context.readSettings();
     if (!chatId) return null;
     if (!settings.chatNames) return null;
     return settings.chatNames[chatId] ?? null;
   }
 
-  async setSessionName(chatId, title) {
+  async setSessionName(chatId: string, title: string): Promise<void> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       if (!settings.chatNames) settings.chatNames = {};
@@ -135,7 +161,7 @@ export class ChatNameStore {
     });
   }
 
-  async removeSessionName(chatId) {
+  async removeSessionName(chatId: string): Promise<void> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       if (settings.chatNames) {
@@ -147,18 +173,18 @@ export class ChatNameStore {
 }
 
 export class UiSettingsStore {
-  #context;
+  #context: SettingsStoreContext;
 
-  constructor(context) {
+  constructor(context: SettingsStoreContext) {
     this.#context = context;
   }
 
-  async getUiSettings() {
+  async getUiSettings(): Promise<ProjectSettings['ui']> {
     const settings = this.#context.readSettings();
     return settings.ui || {};
   }
 
-  async setUiSettings(patch) {
+  async setUiSettings(patch: Record<string, unknown>): Promise<ProjectSettings['ui']> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       settings.ui = normalizeUiSettings({ ...(settings.ui || {}), ...patch });
@@ -168,12 +194,12 @@ export class UiSettingsStore {
     });
   }
 
-  async getPathSettings() {
+  async getPathSettings(): Promise<ProjectSettings['paths']> {
     const settings = this.#context.readSettings();
     return settings.paths || {};
   }
 
-  async setPathSettings(patch) {
+  async setPathSettings(patch: Record<string, unknown>): Promise<ProjectSettings['paths']> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       settings.paths = { ...(settings.paths || {}), ...patch };
@@ -183,12 +209,27 @@ export class UiSettingsStore {
     });
   }
 
-  async getRemoteSettingsVersion() {
+  async getRemoteSettingsVersion(): Promise<number> {
     const settings = this.#context.readSettings();
     return normalizeRemoteSettingsVersion(settings.remoteSettingsVersion);
   }
 
-  async getRemoteSettingsSnapshotSource() {
+  async getRemoteSettingsSnapshotSource(): Promise<{
+    version: number;
+    ui: ProjectSettings['ui'];
+    paths: ProjectSettings['paths'];
+    pinnedChatIds: string[];
+    lastAgentId: string;
+    lastProjectPath: string;
+    lastModel: string;
+    lastApiProviderId: string | null;
+    lastModelEndpointId: string | null;
+    lastModelProtocol: ApiProtocol | null;
+    lastPermissionMode: PermissionMode;
+    lastThinkingMode: ThinkingMode;
+    lastClaudeThinkingMode: ClaudeThinkingMode;
+    lastAmpAgentMode: AmpAgentMode;
+  }> {
     const settings = this.#context.readSettings();
     return {
       version: normalizeRemoteSettingsVersion(settings.remoteSettingsVersion),
@@ -210,48 +251,48 @@ export class UiSettingsStore {
 }
 
 export class LastChatDefaultsStore {
-  #context;
+  #context: SettingsStoreContext;
 
-  constructor(context) {
+  constructor(context: SettingsStoreContext) {
     this.#context = context;
   }
 
-  async getLastPermissionMode() {
+  async getLastPermissionMode(): Promise<PermissionMode> {
     const settings = this.#context.readSettings();
     return normalizePermissionMode(settings.lastPermissionMode);
   }
 
-  async getLastAgentId() {
+  async getLastAgentId(): Promise<string> {
     const settings = this.#context.readSettings();
     return settings.lastAgentId || 'claude';
   }
 
-  async getLastProjectPath() {
+  async getLastProjectPath(): Promise<string> {
     const settings = this.#context.readSettings();
     return settings.lastProjectPath || '';
   }
 
-  async getLastModel() {
+  async getLastModel(): Promise<string> {
     const settings = this.#context.readSettings();
     return settings.lastModel || '';
   }
 
-  async getLastApiProviderId() {
+  async getLastApiProviderId(): Promise<string | null> {
     const settings = this.#context.readSettings();
     return settings.lastApiProviderId ?? null;
   }
 
-  async getLastModelEndpointId() {
+  async getLastModelEndpointId(): Promise<string | null> {
     const settings = this.#context.readSettings();
     return settings.lastModelEndpointId ?? null;
   }
 
-  async getLastModelProtocol() {
+  async getLastModelProtocol(): Promise<ApiProtocol | null> {
     const settings = this.#context.readSettings();
     return settings.lastModelProtocol ?? null;
   }
 
-  async setLastChatDefaults(defaults) {
+  async setLastChatDefaults(defaults: Record<string, unknown> | null | undefined): Promise<void> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       settings.lastAgentId = typeof defaults?.agentId === 'string'
@@ -295,46 +336,46 @@ export class LastChatDefaultsStore {
     });
   }
 
-  async setLastPermissionMode(mode) {
+  async setLastPermissionMode(mode: unknown): Promise<void> {
     return this.setLastChatDefaults({ permissionMode: mode });
   }
 
-  async getLastThinkingMode() {
+  async getLastThinkingMode(): Promise<ThinkingMode> {
     const settings = this.#context.readSettings();
     return normalizeThinkingMode(settings.lastThinkingMode);
   }
 
-  async setLastThinkingMode(mode) {
+  async setLastThinkingMode(mode: unknown): Promise<void> {
     return this.setLastChatDefaults({ thinkingMode: mode });
   }
 
-  async getLastClaudeThinkingMode() {
+  async getLastClaudeThinkingMode(): Promise<ClaudeThinkingMode> {
     const settings = this.#context.readSettings();
     return normalizeClaudeThinkingMode(settings.lastClaudeThinkingMode);
   }
 
-  async setLastClaudeThinkingMode(mode) {
+  async setLastClaudeThinkingMode(mode: unknown): Promise<void> {
     return this.setLastChatDefaults({ claudeThinkingMode: mode });
   }
 
-  async getLastAmpAgentMode() {
+  async getLastAmpAgentMode(): Promise<AmpAgentMode> {
     const settings = this.#context.readSettings();
     return normalizeAmpAgentMode(settings.lastAmpAgentMode);
   }
 
-  async setLastAmpAgentMode(mode) {
+  async setLastAmpAgentMode(mode: unknown): Promise<void> {
     return this.setLastChatDefaults({ ampAgentMode: mode });
   }
 }
 
 export class ChatOrderStore {
-  #context;
+  #context: SettingsStoreContext;
 
-  constructor(context) {
+  constructor(context: SettingsStoreContext) {
     this.#context = context;
   }
 
-  async reconcileWithRegistry(registry) {
+  async reconcileWithRegistry(registry: IChatRegistry): Promise<void> {
     return this.#context.mutate(async () => {
       const sessions = registry.listAllChats();
       const allChatIds = new Set(Object.keys(sessions));
@@ -347,7 +388,7 @@ export class ChatOrderStore {
 
       let dirty = false;
 
-      const filterUnknown = (list, name) => {
+      const filterUnknown = (list: string[], name: string): string[] => {
         const unknown = list.filter((id) => !allChatIds.has(id));
         if (unknown.length > 0) {
           console.log(`chat-order: removed unknown chat IDs from ${name}: ${JSON.stringify(unknown)}`);
@@ -361,10 +402,10 @@ export class ChatOrderStore {
       normal = filterUnknown(normal, 'normalChatIds');
       archived = filterUnknown(archived, 'archivedChatIds');
 
-      const claimed = new Set();
-      const dedupeAcross = (list, name) => {
-        const dupes = [];
-        const kept = [];
+      const claimed = new Set<string>();
+      const dedupeAcross = (list: string[], name: string): string[] => {
+        const dupes: string[] = [];
+        const kept: string[] = [];
         for (const id of list) {
           if (claimed.has(id)) {
             dupes.push(id);
@@ -385,7 +426,7 @@ export class ChatOrderStore {
       archived = dedupeAcross(archived, 'archivedChatIds');
 
       const union = new Set([...pinned, ...normal, ...archived]);
-      const missing = [];
+      const missing: string[] = [];
       for (const id of allChatIds) {
         if (!union.has(id)) missing.push(id);
       }
@@ -409,26 +450,26 @@ export class ChatOrderStore {
     });
   }
 
-  async getPinnedChatIds() {
+  async getPinnedChatIds(): Promise<string[]> {
     const settings = this.#context.readSettings();
     return settings.pinnedChatIds || [];
   }
 
-  async getArchivedChatIds() {
+  async getArchivedChatIds(): Promise<string[]> {
     const settings = this.#context.readSettings();
     return settings.archivedChatIds || [];
   }
 
-  async getNormalChatIds() {
+  async getNormalChatIds(): Promise<string[]> {
     const settings = this.#context.readSettings();
     return settings.normalChatIds || [];
   }
 
-  async ensureInNormal(chatId) {
+  async ensureInNormal(chatId: string): Promise<void> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       const beforePinned = dedup(settings.pinnedChatIds || []);
-      for (const key of ['pinnedChatIds', 'normalChatIds', 'archivedChatIds']) {
+      for (const key of ORDER_LIST_KEYS) {
         const ids = settings[key] || [];
         if (ids.includes(chatId)) {
           settings[key] = ids.filter((id) => id !== chatId);
@@ -441,7 +482,7 @@ export class ChatOrderStore {
     });
   }
 
-  async insertNormalChatIdTop(chatId) {
+  async insertNormalChatIdTop(chatId: string): Promise<void> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       const ids = (settings.normalChatIds || []).filter((id) => id !== chatId);
@@ -450,12 +491,12 @@ export class ChatOrderStore {
     });
   }
 
-  async removeFromAllOrderLists(chatId) {
+  async removeFromAllOrderLists(chatId: string): Promise<void> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       const beforePinned = dedup(settings.pinnedChatIds || []);
       let dirty = false;
-      for (const key of ['pinnedChatIds', 'normalChatIds', 'archivedChatIds']) {
+      for (const key of ORDER_LIST_KEYS) {
         const ids = settings[key] || [];
         if (ids.includes(chatId)) {
           settings[key] = ids.filter((id) => id !== chatId);
@@ -469,7 +510,7 @@ export class ChatOrderStore {
     });
   }
 
-  async togglePin(chatId) {
+  async togglePin(chatId: string): Promise<{ isPinned: boolean }> {
     return this.#context.mutate(async () => {
       const s = this.#context.readSettings();
       const pinned = s.pinnedChatIds || [];
@@ -492,7 +533,7 @@ export class ChatOrderStore {
     });
   }
 
-  async toggleArchive(chatId) {
+  async toggleArchive(chatId: string): Promise<{ isArchived: boolean }> {
     return this.#context.mutate(async () => {
       const s = this.#context.readSettings();
       const beforePinned = dedup(s.pinnedChatIds || []);
@@ -515,7 +556,7 @@ export class ChatOrderStore {
     });
   }
 
-  async reorderWindow(list, rawOldOrder, rawNewOrder) {
+  async reorderWindow(list: string, rawOldOrder: unknown, rawNewOrder: unknown): Promise<ReorderResult> {
     const validation = validateWindowReorder(rawOldOrder, rawNewOrder);
     if (!validation.success) return validation;
     const { oldOrder, newOrder } = validation;
@@ -546,7 +587,7 @@ export class ChatOrderStore {
     });
   }
 
-  async reorderRelative(chatId, refId, mode) {
+  async reorderRelative(chatId: string, refId: string, mode: string): Promise<ReorderResult> {
     return this.#context.mutate(async () => {
       const s = this.#context.readSettings();
       const chatGroup = resolveGroupInSettings(s, chatId);
@@ -571,18 +612,18 @@ export class ChatOrderStore {
 }
 
 export class SavedSearchStore {
-  #context;
+  #context: SettingsStoreContext;
 
-  constructor(context) {
+  constructor(context: SettingsStoreContext) {
     this.#context = context;
   }
 
-  async getSavedSearches() {
+  async getSavedSearches(): Promise<SavedChatSearch[]> {
     const settings = this.#context.readSettings();
     return settings.savedChatSearches || [];
   }
 
-  async addSavedSearch(savedSearch) {
+  async addSavedSearch(savedSearch: SavedChatSearch): Promise<SavedChatSearch> {
     return this.#context.mutate(async () => {
       const s = this.#context.readSettings();
       const searches = s.savedChatSearches || [];
@@ -595,7 +636,7 @@ export class SavedSearchStore {
     });
   }
 
-  async updateSavedSearch(searchId, patch) {
+  async updateSavedSearch(searchId: string, patch: Partial<SavedChatSearch>): Promise<SavedChatSearch> {
     return this.#context.mutate(async () => {
       const s = this.#context.readSettings();
       const searches = s.savedChatSearches || [];
@@ -610,7 +651,7 @@ export class SavedSearchStore {
     });
   }
 
-  async removeSavedSearch(searchId) {
+  async removeSavedSearch(searchId: string): Promise<boolean> {
     return this.#context.mutate(async () => {
       const s = this.#context.readSettings();
       const searches = s.savedChatSearches || [];
@@ -622,7 +663,7 @@ export class SavedSearchStore {
     });
   }
 
-  async reorderSavedSearches(oldOrder, newOrder) {
+  async reorderSavedSearches(oldOrder: unknown, newOrder: unknown): Promise<ReorderResult> {
     const validation = validateWindowReorder(oldOrder, newOrder);
     if (!validation.success) return validation;
 
@@ -635,7 +676,7 @@ export class SavedSearchStore {
       if (!result) return { success: false, error: 'oldOrder is not a contiguous subsequence of the current list' };
 
       const byId = new Map(searches.map((entry) => [entry.id, entry]));
-      s.savedChatSearches = result.map((id) => byId.get(id)).filter(Boolean);
+      s.savedChatSearches = result.map((id) => byId.get(id)).filter((entry): entry is SavedChatSearch => Boolean(entry));
       await this.#context.save(s);
       return { success: true };
     });
@@ -643,18 +684,18 @@ export class SavedSearchStore {
 }
 
 export class FolderStore {
-  #context;
+  #context: SettingsStoreContext;
 
-  constructor(context) {
+  constructor(context: SettingsStoreContext) {
     this.#context = context;
   }
 
-  async getFolders() {
+  async getFolders(): Promise<ChatFolder[]> {
     const settings = this.#context.readSettings();
     return settings.chatFolders || [];
   }
 
-  async addFolder(folder) {
+  async addFolder(folder: ChatFolder): Promise<ChatFolder> {
     return this.#context.mutate(async () => {
       const s = this.#context.readSettings();
       const folders = s.chatFolders || [];
@@ -667,7 +708,7 @@ export class FolderStore {
     });
   }
 
-  async updateFolder(folderId, patch) {
+  async updateFolder(folderId: string, patch: Partial<ChatFolder>): Promise<ChatFolder> {
     return this.#context.mutate(async () => {
       const s = this.#context.readSettings();
       const folders = s.chatFolders || [];
@@ -682,7 +723,7 @@ export class FolderStore {
     });
   }
 
-  async removeFolder(folderId) {
+  async removeFolder(folderId: string): Promise<boolean> {
     return this.#context.mutate(async () => {
       const s = this.#context.readSettings();
       const folders = s.chatFolders || [];
