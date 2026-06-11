@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 const spawnedPtys = [];
 const sendWebSocketJson = mock(() => undefined);
+const testBasePath = '/tmp';
 
 mock.module('bun-pty', () => ({
   spawn: mock(() => {
@@ -38,12 +39,13 @@ mock.module('../utils.js', () => ({
 
 mock.module('../../config.js', () => ({
   getUserShell: () => '/bin/sh',
+  getProjectBasePath: () => testBasePath,
 }));
 
 import { ShellManager } from '../shell.js';
 
 function createWs() {
-  return { data: {} };
+  return { data: {}, close: mock(() => undefined) };
 }
 
 beforeEach(() => {
@@ -100,5 +102,25 @@ describe('ShellManager shutdown', () => {
       globalThis.setTimeout = originalSetTimeout;
       globalThis.clearTimeout = originalClearTimeout;
     }
+  });
+
+  it('rejects init requests outside the configured project base', async () => {
+    const manager = new ShellManager();
+    const handler = manager.createHandler();
+    const ws = createWs();
+
+    handler.open(ws);
+    await handler.message(ws, {
+      type: 'init',
+      projectPath: '/',
+      chatId: 'chat-1',
+      sessionPolicy: 'reuse',
+    });
+
+    expect(spawnedPtys).toHaveLength(0);
+    expect(ws.close).toHaveBeenCalledWith(1008, 'outside_project_base');
+    expect(sendWebSocketJson).toHaveBeenCalledWith(ws, expect.objectContaining({
+      type: 'output',
+    }));
   });
 });

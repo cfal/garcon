@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { beforeEach, afterEach, describe, expect, it, mock } from 'bun:test';
 
 class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
@@ -41,6 +41,19 @@ const settings = {
 };
 
 const routes = createGitRoutes(agents, settings);
+const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
+
+beforeEach(() => {
+  process.env.GARCON_PROJECT_BASE_DIR = '/';
+});
+
+afterEach(() => {
+  if (originalProjectBaseDir === undefined) {
+    delete process.env.GARCON_PROJECT_BASE_DIR;
+  } else {
+    process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
+  }
+});
 
 function makeRequest(body) {
   return new Request('http://localhost/api/v1/git/generate-commit-message', {

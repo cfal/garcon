@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 
 class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
@@ -22,6 +22,19 @@ const ctx = {
 };
 
 const routes = createGitRoutes(ctx.agents, ctx.settings);
+const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
+
+beforeEach(() => {
+  process.env.GARCON_PROJECT_BASE_DIR = '/';
+});
+
+afterEach(() => {
+  if (originalProjectBaseDir === undefined) {
+    delete process.env.GARCON_PROJECT_BASE_DIR;
+  } else {
+    process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
+  }
+});
 
 function makeUrl(path, params = {}) {
   const url = new URL(`http://localhost${path}`);
@@ -148,6 +161,38 @@ describe('GET /api/v1/git/changes-tree validation', () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe('Missing required parameter: project.');
+  });
+
+  it('returns 403 when project is outside the configured base', async () => {
+    process.env.GARCON_PROJECT_BASE_DIR = '/tmp/garcon-git-route-base';
+    const url = makeUrl('/api/v1/git/changes-tree', { project: '/' });
+    const request = new Request(url.toString());
+    const response = await handler(request, url);
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.errorCode).toBe('outside_project_base');
+  });
+});
+
+describe('POST /api/v1/git/worktrees/create boundary validation', () => {
+  const handler = routes['/api/v1/git/worktrees/create'].POST;
+
+  beforeEach(() => { parseJsonBody.mockClear(); });
+
+  it('returns 403 when worktreePath is outside the configured base', async () => {
+    process.env.GARCON_PROJECT_BASE_DIR = '/tmp/garcon-git-route-base';
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({
+        project: '/tmp/garcon-git-route-base/repo',
+        worktreePath: '/',
+      }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.errorCode).toBe('outside_project_base');
   });
 });
 

@@ -2,7 +2,6 @@
 // and dispatches message reads to the appropriate agent parser.
 
 import { promises as fs } from 'fs';
-import path from 'path';
 import crypto from 'crypto';
 import { parseJsonBody } from '../lib/http-request.js';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
@@ -15,7 +14,6 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import { forkChatFileCopy } from '../chats/fork-chat.js';
-import { getProjectBasePath } from '../config.js';
 import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
 import { CommandLedger, type CommandLedgerRecord } from '../commands/command-ledger.js';
 import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
@@ -26,6 +24,7 @@ import {
 } from '../commands/chat-command-service.js';
 import { normalizeQueueState } from '../../common/queue-state.ts';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
+import { isWithinProjectBase } from '../lib/path-boundary.js';
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
@@ -140,13 +139,6 @@ function normalizeTags(raw: unknown[]): string[] {
   return result.sort();
 }
 
-function isWithinBasePath(targetPath: string): boolean {
-  const projectBasePath = getProjectBasePath();
-  const resolved = path.resolve(targetPath);
-  const projectBasePathPrefix = projectBasePath.endsWith(path.sep) ? projectBasePath : projectBasePath + path.sep;
-  return resolved === projectBasePath || resolved.startsWith(projectBasePathPrefix);
-}
-
 async function isGitRepository(projectPath: string): Promise<boolean> {
   try {
     const proc = Bun.spawn(['git', 'rev-parse', '--is-inside-work-tree'], {
@@ -239,7 +231,7 @@ export default function createChatRoutes(
       );
     }
 
-    if (!isWithinBasePath(dirPath)) {
+    if (!isWithinProjectBase(dirPath)) {
       return Response.json({
         valid: false,
         error: 'Path is outside the allowed base directory',

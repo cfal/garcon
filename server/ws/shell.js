@@ -2,6 +2,12 @@ import os from 'os';
 import { spawn as ptySpawn } from 'bun-pty';
 import { sendWebSocketJson } from './utils.js';
 import { getUserShell } from '../config.js';
+import {
+  assertWithinProjectBase,
+  isProjectBoundaryError,
+  PROJECT_BOUNDARY_ERROR_CODE,
+  PROJECT_BOUNDARY_ERROR_MESSAGE,
+} from '../lib/path-boundary.ts';
 
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 
@@ -60,7 +66,18 @@ export class ShellManager {
       console.log('shell: message received:', data.type);
 
       if (data.type === 'init') {
-        const projectPath = data.projectPath || process.cwd();
+        let projectPath;
+        try {
+          projectPath = assertWithinProjectBase(data.projectPath || process.cwd());
+        } catch (error) {
+          if (!isProjectBoundaryError(error)) throw error;
+          sendWebSocketJson(ws, {
+            type: 'output',
+            data: `\r\n\x1b[31mError: ${PROJECT_BOUNDARY_ERROR_MESSAGE}\x1b[0m\r\n`,
+          });
+          ws.close?.(1008, PROJECT_BOUNDARY_ERROR_CODE);
+          return;
+        }
         const chatId = data.chatId;
         const initialCommand = data.initialCommand;
 

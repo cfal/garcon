@@ -4,18 +4,15 @@ import mime from 'mime-types';
 import { parseJsonBody } from '../lib/http-request.js';
 import { listDirectory, listDirectoryNames } from './projects.utils.js';
 import { getProjectBasePath } from '../config.js';
+import {
+  assertWithinProjectBase,
+  isProjectBoundaryError,
+  isWithinProjectBase,
+  projectBoundaryErrorResponse,
+} from '../lib/path-boundary.ts';
 
 const MAX_IMAGE_UPLOAD_BODY_BYTES = 30 * 1024 * 1024;
 const MAX_IMAGE_TOTAL_BYTES = 25 * 1024 * 1024;
-
-// All directory validation and browsing is confined to this subtree.
-const PROJECT_BASE_PATH = getProjectBasePath();
-
-function isWithinBasePath(targetPath) {
-  const resolved = path.resolve(targetPath);
-  const projectBasePathPrefix = PROJECT_BASE_PATH.endsWith(path.sep) ? PROJECT_BASE_PATH : PROJECT_BASE_PATH + path.sep;
-  return resolved === PROJECT_BASE_PATH || resolved.startsWith(projectBasePathPrefix);
-}
 
 async function listAllFiles(dirPath, maxDepth = 10, currentDepth = 0, rootPath = dirPath) {
   const skipNames = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
@@ -67,14 +64,24 @@ export default function createFilesRoutes(registry) {
       if (!chat?.projectPath) {
         return { error: Response.json({ error: 'Chat not found or missing projectPath' }, { status: 404 }) };
       }
-      return { projectPath: chat.projectPath };
+      try {
+        return { projectPath: assertWithinProjectBase(chat.projectPath) };
+      } catch (error) {
+        if (isProjectBoundaryError(error)) return { error: projectBoundaryErrorResponse() };
+        throw error;
+      }
     }
 
     const projectPath = url.searchParams.get('projectPath');
     if (!projectPath) {
       return { error: Response.json({ error: 'chatId or projectPath is required' }, { status: 400 }) };
     }
-    return { projectPath };
+    try {
+      return { projectPath: assertWithinProjectBase(projectPath) };
+    } catch (error) {
+      if (isProjectBoundaryError(error)) return { error: projectBoundaryErrorResponse() };
+      throw error;
+    }
   }
 
   async function handleTree(request, url) {
@@ -250,9 +257,9 @@ export default function createFilesRoutes(registry) {
   }
 
   async function handleBrowse(request, url) {
-    const dirPath = url.searchParams.get('path') || PROJECT_BASE_PATH;
+    const dirPath = url.searchParams.get('path') || getProjectBasePath();
 
-    if (!isWithinBasePath(dirPath)) {
+    if (!isWithinProjectBase(dirPath)) {
       return Response.json([]);
     }
 
@@ -265,7 +272,7 @@ export default function createFilesRoutes(registry) {
     try {
       const entries = await listDirectoryNames(dirPath, true);
       return Response.json(
-        entries.filter((e) => e.type === 'directory' && isWithinBasePath(e.path))
+        entries.filter((e) => e.type === 'directory' && isWithinProjectBase(e.path))
       );
     } catch {
       return Response.json([]);

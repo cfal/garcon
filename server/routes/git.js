@@ -4,6 +4,11 @@ import { parseJsonBody, MalformedJsonError } from '../lib/http-request.js';
 import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { isAgentId } from '../../common/agents.ts';
+import {
+  assertWithinProjectBase,
+  isProjectBoundaryError,
+  projectBoundaryErrorResponse,
+} from '../lib/path-boundary.ts';
 
 const MALFORMED_BODY = () =>
   Response.json({ error: 'Request body is not valid JSON.' }, { status: 400 });
@@ -92,8 +97,35 @@ function isValidLineIndices(value) {
   return Array.isArray(value) && value.every(isNonNegativeInteger);
 }
 
+function boundaryCheckedOptions(options) {
+  if (!options || typeof options !== 'object') return options;
+  const next = { ...options };
+  if (typeof next.projectPath === 'string') {
+    next.projectPath = assertWithinProjectBase(next.projectPath);
+  }
+  if (typeof next.worktreePath === 'string') {
+    next.worktreePath = assertWithinProjectBase(next.worktreePath);
+  }
+  return next;
+}
+
+function createBoundaryCheckedGitService(git) {
+  return new Proxy(git, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop === 'toHttpError' && typeof value === 'function') {
+        return (error) => isProjectBoundaryError(error)
+          ? projectBoundaryErrorResponse()
+          : value.call(target, error);
+      }
+      if (typeof value !== 'function') return value;
+      return (options, ...args) => value.call(target, boundaryCheckedOptions(options), ...args);
+    },
+  });
+}
+
 export default function createGitRoutes(agents, settings) {
-  const git = createGitService({ agents, classifyGitError });
+  const git = createBoundaryCheckedGitService(createGitService({ agents, classifyGitError }));
 
   async function getStatus(request, url) {
     const project = url.searchParams.get('project');
