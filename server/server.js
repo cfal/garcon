@@ -389,7 +389,7 @@ export async function startServer() {
     process.on('SIGINT', shutdown);
 
     console.log('');
-    console.log(`Started at http://${bindAddress}:${listenPort}`);
+    console.log(`Started at http://${bindAddress}:${server.port ?? listenPort}`);
     console.log(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
     if (authDisabled && bindAddress !== '127.0.0.1' && bindAddress !== 'localhost') {
       console.warn('WARNING: authentication is disabled while bound to a non-localhost address.');

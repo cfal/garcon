@@ -74,9 +74,6 @@ export function getPort() {
     if (!Number.isFinite(envPort) || envPort < 0 || envPort > 65535) {
       throw new Error(`Invalid GARCON_PORT value: ${process.env.GARCON_PORT}. Must be an integer between 0 and 65535.`);
     }
-    if (envPort === 0) {
-      return randomPort();
-    }
     return envPort;
   }
   const portArgIndex = process.argv.indexOf('--port');
@@ -87,9 +84,6 @@ export function getPort() {
     const argPort = Number(process.argv[portArgIndex + 1]);
     if (!Number.isFinite(argPort) || argPort < 0 || argPort > 65535) {
       throw new Error(`Invalid --port value: ${process.argv[portArgIndex + 1]}. Must be an integer between 0 and 65535.`);
-    }
-    if (argPort === 0) {
-      return randomPort();
     }
     return argPort;
   }
@@ -220,11 +214,6 @@ export function isAuthDisabled() {
     return envBool('DISABLE_AUTH', false);
   }
   return process.argv.includes('--disable-auth');
-}
-
-// Generate a random port in the range 8080..=65535.
-function randomPort() {
-  return 8080 + Math.floor(Math.random() * (65535 - 8080 + 1));
 }
 
 // Parses an integer from an environment variable, returning the fallback when
