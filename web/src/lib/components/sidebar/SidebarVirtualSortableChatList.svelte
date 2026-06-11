@@ -91,10 +91,32 @@
 	const desktopBottomPadding = 16;
 	const mobileBottomPadding = 112;
 	const fallbackViewportHeight = 640;
+	const touchLongPressMs = 360;
+	const touchMoveCancelThresholdPx = 10;
+	const touchAutoScrollEdgePx = 56;
+	const touchAutoScrollMaxPx = 18;
 
 	let activeDrop = $state<{ chatId: string; edge: Edge | null } | null>(null);
 	let draggingChatId = $state<string | null>(null);
+	let listEl = $state<HTMLElement | null>(null);
 	let lastValidDrop: SidebarDropInstruction | null = null;
+	let touchDrag: {
+		identifier: number;
+		sourceChatId: string;
+		sourceList: ChatOrderList;
+		startX: number;
+		startY: number;
+		currentX: number;
+		currentY: number;
+		timer: ReturnType<typeof setTimeout>;
+		activated: boolean;
+	} | null = null;
+	let touchAutoScrollFrame: number | null = null;
+	let suppressTouchClickUntil = 0;
+	let touchSelectionGuard: {
+		body: Record<string, string>;
+		documentElement: Record<string, string>;
+	} | null = null;
 	let effectiveRowHeight = $derived(
 		rowHeight ?? (isMobile ? MOBILE_CHAT_ROW_HEIGHT : DESKTOP_CHAT_ROW_HEIGHT)
 	);
@@ -179,15 +201,19 @@
 		splitLayout.startDrag(chatId);
 	}
 
-	function inputIsInsideViewport(input: Input): boolean {
+	function pointIsInsideViewport(clientX: number, clientY: number): boolean {
 		if (!viewportRef) return false;
 		const rect = viewportRef.getBoundingClientRect();
 		return (
-			input.clientX >= rect.left &&
-			input.clientX <= rect.right &&
-			input.clientY >= rect.top &&
-			input.clientY <= rect.bottom
+			clientX >= rect.left &&
+			clientX <= rect.right &&
+			clientY >= rect.top &&
+			clientY <= rect.bottom
 		);
+	}
+
+	function inputIsInsideViewport(input: Input): boolean {
+		return pointIsInsideViewport(input.clientX, input.clientY);
 	}
 
 	function applySidebarDropInstruction(instruction: SidebarDropInstruction): void {
@@ -260,6 +286,291 @@
 		}, 0);
 	}
 
+	function rowElementFromTarget(target: EventTarget | null): HTMLElement | null {
+		if (!(target instanceof Element)) return null;
+		if (target.closest('[data-sidebar-touch-drag-ignore]')) return null;
+		return target.closest<HTMLElement>('[data-sidebar-virtual-row]');
+	}
+
+	function rowListFromElement(element: HTMLElement): ChatOrderList | null {
+		const list = element.dataset.sidebarVirtualListRow;
+		if (list === 'pinned' || list === 'normal' || list === 'archived') return list;
+		return null;
+	}
+
+	function touchForEvent(event: TouchEvent): Touch | null {
+		if (!touchDrag) return null;
+		for (const touch of Array.from(event.changedTouches)) {
+			if (touch.identifier === touchDrag.identifier) return touch;
+		}
+		return null;
+	}
+
+	function resolveTouchInstruction(clientX: number, clientY: number): SidebarDropInstruction | null {
+		const current = touchDrag;
+		if (!current || !pointIsInsideViewport(clientX, clientY)) return null;
+		const target = document.elementFromPoint(clientX, clientY);
+		if (!(target instanceof Element)) return null;
+		const rowEl = target.closest<HTMLElement>('[data-sidebar-virtual-row]');
+		if (!rowEl) return null;
+		const targetChatId = rowEl.dataset.sidebarVirtualRow;
+		const targetList = rowListFromElement(rowEl);
+		if (!targetChatId || !targetList || targetList !== current.sourceList) return null;
+		if (targetChatId === current.sourceChatId) return null;
+
+		const rect = rowEl.getBoundingClientRect();
+		const closestEdge: Edge = clientY < rect.top + rect.height / 2 ? 'top' : 'bottom';
+		return {
+			sourceChatId: current.sourceChatId,
+			sourceList: current.sourceList,
+			targetChatId,
+			targetList,
+			closestEdge,
+		};
+	}
+
+	function previewTouchDrop(clientX: number, clientY: number): void {
+		const instruction = resolveTouchInstruction(clientX, clientY);
+		if (!instruction) {
+			activeDrop = null;
+			if (!pointIsInsideViewport(clientX, clientY)) lastValidDrop = null;
+			return;
+		}
+		lastValidDrop = instruction;
+		applySidebarDropInstruction(instruction);
+	}
+
+	function stopTouchAutoScroll(): void {
+		if (touchAutoScrollFrame === null) return;
+		cancelAnimationFrame(touchAutoScrollFrame);
+		touchAutoScrollFrame = null;
+	}
+
+	function runTouchAutoScroll(): void {
+		touchAutoScrollFrame = null;
+		const current = touchDrag;
+		if (!current?.activated || !viewportRef) return;
+		const rect = viewportRef.getBoundingClientRect();
+		let delta = 0;
+		if (current.currentY < rect.top + touchAutoScrollEdgePx) {
+			const distance = Math.max(0, rect.top + touchAutoScrollEdgePx - current.currentY);
+			delta = -Math.ceil(Math.min(touchAutoScrollMaxPx, distance / 3));
+		} else if (current.currentY > rect.bottom - touchAutoScrollEdgePx) {
+			const distance = Math.max(0, current.currentY - (rect.bottom - touchAutoScrollEdgePx));
+			delta = Math.ceil(Math.min(touchAutoScrollMaxPx, distance / 3));
+		}
+		if (delta === 0) return;
+		viewportRef.scrollTop += delta;
+		previewTouchDrop(current.currentX, current.currentY);
+		touchAutoScrollFrame = requestAnimationFrame(runTouchAutoScroll);
+	}
+
+	function scheduleTouchAutoScroll(): void {
+		if (touchAutoScrollFrame !== null) return;
+		touchAutoScrollFrame = requestAnimationFrame(runTouchAutoScroll);
+	}
+
+	function setInlineStyle(element: HTMLElement, property: string, value: string): void {
+		if (value) {
+			element.style.setProperty(property, value);
+		} else {
+			element.style.removeProperty(property);
+		}
+	}
+
+	function captureSelectionGuardStyle(element: HTMLElement): Record<string, string> {
+		return {
+			userSelect: element.style.getPropertyValue('user-select'),
+			webkitUserSelect: element.style.getPropertyValue('-webkit-user-select'),
+			webkitTouchCallout: element.style.getPropertyValue('-webkit-touch-callout'),
+		};
+	}
+
+	function applySelectionGuardStyle(element: HTMLElement): void {
+		element.style.setProperty('user-select', 'none');
+		element.style.setProperty('-webkit-user-select', 'none');
+		element.style.setProperty('-webkit-touch-callout', 'none');
+	}
+
+	function restoreSelectionGuardStyle(element: HTMLElement, values: Record<string, string>): void {
+		setInlineStyle(element, 'user-select', values.userSelect ?? '');
+		setInlineStyle(element, '-webkit-user-select', values.webkitUserSelect ?? '');
+		setInlineStyle(element, '-webkit-touch-callout', values.webkitTouchCallout ?? '');
+	}
+
+	function enableTouchSelectionGuard(): void {
+		if (touchSelectionGuard) return;
+		touchSelectionGuard = {
+			body: captureSelectionGuardStyle(document.body),
+			documentElement: captureSelectionGuardStyle(document.documentElement),
+		};
+		applySelectionGuardStyle(document.body);
+		applySelectionGuardStyle(document.documentElement);
+	}
+
+	function restoreTouchSelectionGuard(): void {
+		if (!touchSelectionGuard) return;
+		restoreSelectionGuardStyle(document.body, touchSelectionGuard.body);
+		restoreSelectionGuardStyle(document.documentElement, touchSelectionGuard.documentElement);
+		touchSelectionGuard = null;
+	}
+
+	function clearDocumentSelection(): void {
+		window.getSelection()?.removeAllRanges();
+	}
+
+	function removeTouchDragListeners(): void {
+		window.removeEventListener('touchmove', handleTouchMove);
+		window.removeEventListener('touchend', handleTouchEnd);
+		window.removeEventListener('touchcancel', handleTouchCancel);
+		window.removeEventListener('contextmenu', handleTouchContextMenu, true);
+	}
+
+	function clearTouchDrag(): void {
+		if (touchDrag) clearTimeout(touchDrag.timer);
+		touchDrag = null;
+		stopTouchAutoScroll();
+		removeTouchDragListeners();
+		restoreTouchSelectionGuard();
+	}
+
+	function cancelTouchDrag(): void {
+		const current = touchDrag;
+		if (current?.activated) {
+			reorder.cancel(current.sourceList);
+			if (splitLayout.draggedChatId === current.sourceChatId) {
+				splitLayout.endDrag();
+			}
+		}
+		activeDrop = null;
+		draggingChatId = null;
+		lastValidDrop = null;
+		clearTouchDrag();
+	}
+
+	function activateTouchDrag(): void {
+		const current = touchDrag;
+		if (!current || current.activated || !dragEnabled) return;
+		current.activated = true;
+		clearDocumentSelection();
+		draggingChatId = current.sourceChatId;
+		activeDrop = null;
+		lastValidDrop = null;
+		reorder.begin(current.sourceList, current.sourceChatId);
+		splitLayout.startDrag(current.sourceChatId);
+		previewTouchDrop(current.currentX, current.currentY);
+		scheduleTouchAutoScroll();
+	}
+
+	function handleTouchStart(event: TouchEvent): void {
+		if (!dragEnabled || event.touches.length !== 1) return;
+		const rowEl = rowElementFromTarget(event.target);
+		if (!rowEl) return;
+		const sourceChatId = rowEl.dataset.sidebarVirtualRow;
+		const sourceList = rowListFromElement(rowEl);
+		const touch = event.changedTouches[0];
+		if (!sourceChatId || !sourceList || !touch) return;
+
+		clearTouchDrag();
+		enableTouchSelectionGuard();
+		touchDrag = {
+			identifier: touch.identifier,
+			sourceChatId,
+			sourceList,
+			startX: touch.clientX,
+			startY: touch.clientY,
+			currentX: touch.clientX,
+			currentY: touch.clientY,
+			activated: false,
+			timer: setTimeout(activateTouchDrag, touchLongPressMs),
+		};
+		window.addEventListener('touchmove', handleTouchMove, { passive: false });
+		window.addEventListener('touchend', handleTouchEnd, { passive: false });
+		window.addEventListener('touchcancel', handleTouchCancel, { passive: false });
+		window.addEventListener('contextmenu', handleTouchContextMenu, true);
+	}
+
+	function handleTouchMove(event: TouchEvent): void {
+		const current = touchDrag;
+		const touch = touchForEvent(event);
+		if (!current || !touch) return;
+		current.currentX = touch.clientX;
+		current.currentY = touch.clientY;
+
+		if (!current.activated) {
+			const dx = touch.clientX - current.startX;
+			const dy = touch.clientY - current.startY;
+			if (Math.hypot(dx, dy) > touchMoveCancelThresholdPx) {
+				cancelTouchDrag();
+			}
+			return;
+		}
+
+		event.preventDefault();
+		clearDocumentSelection();
+		previewTouchDrop(touch.clientX, touch.clientY);
+		scheduleTouchAutoScroll();
+	}
+
+	function finishActiveTouchDrag(event: TouchEvent): void {
+		const current = touchDrag;
+		if (!current) return;
+		const touch = touchForEvent(event);
+		const clientX = touch?.clientX ?? current.currentX;
+		const clientY = touch?.clientY ?? current.currentY;
+
+		if (!current.activated) {
+			clearTouchDrag();
+			return;
+		}
+
+		event.preventDefault();
+		clearDocumentSelection();
+		suppressTouchClickUntil = performance.now() + 500;
+		const instruction = resolveTouchInstruction(clientX, clientY) ?? (
+			pointIsInsideViewport(clientX, clientY) &&
+			lastValidDrop?.sourceChatId === current.sourceChatId &&
+			lastValidDrop.sourceList === current.sourceList
+				? lastValidDrop
+				: null
+		);
+
+		if (instruction) {
+			applySidebarDropInstruction(instruction);
+			onPersistReorder(reorder.finish(current.sourceList));
+		} else {
+			reorder.cancel(current.sourceList);
+		}
+
+		if (splitLayout.draggedChatId === current.sourceChatId) {
+			splitLayout.endDrag();
+		}
+		activeDrop = null;
+		draggingChatId = null;
+		lastValidDrop = null;
+		clearTouchDrag();
+	}
+
+	function handleTouchEnd(event: TouchEvent): void {
+		finishActiveTouchDrag(event);
+	}
+
+	function handleTouchCancel(): void {
+		cancelTouchDrag();
+	}
+
+	function handleTouchContextMenu(event: Event): void {
+		if (touchDrag?.activated || performance.now() < suppressTouchClickUntil) {
+			event.preventDefault();
+		}
+	}
+
+	function suppressSyntheticTouchClick(event: MouseEvent): void {
+		if (performance.now() >= suppressTouchClickUntil) return;
+		event.preventDefault();
+		event.stopPropagation();
+	}
+
 	function scrollChatIntoView(chatId: string | null): void {
 		if (!chatId) return;
 		const index = rows.findIndex((row) => row.chat.id === chatId);
@@ -330,9 +641,22 @@
 			finishSidebarDrop(source.data, location.current.dropTargets, location.current.input);
 		},
 	}));
+
+	onMount(() => {
+		const element = listEl;
+		if (!element) return;
+		element.addEventListener('touchstart', handleTouchStart, { passive: true });
+		element.addEventListener('click', suppressSyntheticTouchClick, true);
+		return () => {
+			element.removeEventListener('touchstart', handleTouchStart);
+			element.removeEventListener('click', suppressSyntheticTouchClick, true);
+			cancelTouchDrag();
+		};
+	});
 </script>
 
 <div
+	bind:this={listEl}
 	class="relative min-h-full"
 	style={`height:${totalHeight}px;`}
 	data-sidebar-virtual-list

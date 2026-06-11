@@ -93,7 +93,7 @@
 		return combine(
 			draggable({
 				element: rowEl,
-				canDrag: () => dragEnabled,
+				canDrag: () => dragEnabled && !isMobile,
 				getInitialData: () => getSidebarChatDragData({
 					chatId: row.chat.id,
 					list: row.list,
@@ -145,6 +145,7 @@
 	class={cn(
 		'relative h-full overflow-hidden bg-sidebar-chat-item-bg transition-opacity',
 		dragEnabled && 'cursor-grab active:cursor-grabbing',
+		isMobile && 'select-none [-webkit-touch-callout:none] [-webkit-user-select:none]',
 		isDragging && 'opacity-45',
 	)}
 	data-sidebar-virtual-row={row.chat.id}
