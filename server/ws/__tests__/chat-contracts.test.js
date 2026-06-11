@@ -469,6 +469,31 @@ describe('chat WebSocket handler', () => {
       expect(mockAgents.resolvePermission).toHaveBeenCalledTimes(2);
     });
 
+    it('accepts the same permissionRequestId after the dedup window expires', async () => {
+      const originalDateNow = Date.now;
+      let now = 1_700_000_000_000;
+      Date.now = () => now;
+      try {
+        const msg = {
+          type: 'permission-decision',
+          chatId: '123',
+          permissionRequestId: 'dedup-expiry-1',
+          allow: true,
+          alwaysAllow: false,
+        };
+
+        await chatHandler.message(ws, msg);
+        expect(mockAgents.resolvePermission).toHaveBeenCalledTimes(1);
+
+        mockAgents.resolvePermission.mockClear();
+        now += 30_001;
+        await chatHandler.message(ws, msg);
+        expect(mockAgents.resolvePermission).toHaveBeenCalledTimes(1);
+      } finally {
+        Date.now = originalDateNow;
+      }
+    });
+
     it('is a no-op when permissionRequestId is missing', async () => {
       mockAgents.resolvePermission.mockClear();
       await chatHandler.message(ws, {

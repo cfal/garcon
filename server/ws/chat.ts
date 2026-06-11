@@ -44,7 +44,7 @@ import type { HistoryCachePageReader } from '../chats/history-cache-contract.js'
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 
-const PERMISSION_DEDUP_TTL = 30_000;
+const PERMISSION_DEDUP_TTL_MS = 30_000;
 
 // Bun's ServerWebSocket parameterized over the per-socket data bag.
 type WS = import('bun').ServerWebSocket<unknown>;
@@ -269,12 +269,10 @@ export class ChatHandler {
   #handlePermissionResponse(data: PermissionDecisionRequest): void {
     if (!data.permissionRequestId || !data.chatId) return;
 
-    if (this.#recentPermissionDecisions.has(data.permissionRequestId)) {
+    if (this.#isDuplicatePermissionDecision(data.permissionRequestId)) {
       console.warn('ws: duplicate permission-decision for', data.permissionRequestId, '- ignoring');
       return;
     }
-    this.#recentPermissionDecisions.set(data.permissionRequestId, Date.now());
-    setTimeout(() => this.#recentPermissionDecisions.delete(data.permissionRequestId!), PERMISSION_DEDUP_TTL);
 
     const decision = {
       allow: Boolean(data.allow),
@@ -282,6 +280,22 @@ export class ChatHandler {
     };
 
     this.#agents.resolvePermission(data.chatId, data.permissionRequestId, decision);
+  }
+
+  #isDuplicatePermissionDecision(permissionRequestId: string): boolean {
+    const now = Date.now();
+    this.#prunePermissionDecisionDedup(now);
+    if (this.#recentPermissionDecisions.has(permissionRequestId)) return true;
+    this.#recentPermissionDecisions.set(permissionRequestId, now);
+    return false;
+  }
+
+  #prunePermissionDecisionDedup(now: number): void {
+    for (const [permissionRequestId, decidedAt] of this.#recentPermissionDecisions) {
+      if (now - decidedAt >= PERMISSION_DEDUP_TTL_MS) {
+        this.#recentPermissionDecisions.delete(permissionRequestId);
+      }
+    }
   }
 
   #sendRequestError(writer: WebSocketWriter, params: RequestErrorParams): void {
