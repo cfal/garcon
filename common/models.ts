@@ -12,6 +12,7 @@ export const CLAUDE_MODELS = {
     { value: 'opus', label: 'Opus', supportsImages: true },
     { value: 'sonnet', label: 'Sonnet', supportsImages: true },
     { value: 'haiku', label: 'Haiku', supportsImages: true },
+    { value: 'fable', label: 'Fable', supportsImages: true },
   ] satisfies SharedModelOption[],
   DEFAULT: 'opus',
 };
