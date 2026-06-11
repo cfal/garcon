@@ -33,6 +33,7 @@ import {
 } from '../../common/ws-requests.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
+import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { AgentSessionSettingsPatch } from "../agents/session-types.js";
 import {
   ChatCommandService,
@@ -74,7 +75,7 @@ interface ForkSettingsDep {
 }
 
 interface ForkMetadataDep {
-  getChatMetadata(chatId: string): Record<string, unknown> | null;
+  getChatMetadata(chatId: string): ChatMetadata | null;
   addNewChatMetadata(chatId: string, command: string): void;
 }
 

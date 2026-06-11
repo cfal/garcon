@@ -81,7 +81,7 @@ describe('agent architecture boundaries', () => {
   });
 
   test('composition root creates agents through the default agent suite', () => {
-    const source = readFileSync('server/server.js', 'utf8');
+    const source = readFileSync('server/server.ts', 'utf8');
     expect(source).toContain('const agentRegistry = new AgentRegistry');
     expect(source).toContain('createDefaultAgentSuite');
     expect(source).not.toContain('new CodexAppServerRuntime');
@@ -126,7 +126,7 @@ describe('agent architecture boundaries', () => {
     const files = [
       'server/routes/chats.ts',
       'server/ws/chat.ts',
-      'server/chats/fork-chat.js',
+      'server/chats/fork-chat.ts',
     ];
 
     for (const file of files) {

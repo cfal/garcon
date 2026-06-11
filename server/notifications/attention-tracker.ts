@@ -7,6 +7,7 @@
 // 3. Session stopped     - user-initiated abort
 
 import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, AssistantMessage } from '../../common/chat-types.js';
+import type { ChatMessage } from '../../common/chat-types.js';
 import type { TelegramNotifier } from './telegram.js';
 
 function escapeHtml(text: string): string {
@@ -29,6 +30,12 @@ function toolDisplayName(requestedTool: unknown): string {
       .replace(/\b\w/g, c => c.toUpperCase());
   }
   return 'unknown';
+}
+
+function userMessageContent(message: ChatMessage): string | null {
+  return message.type === 'user-message' && 'content' in message && typeof message.content === 'string'
+    ? message.content
+    : null;
 }
 
 // Minimal interfaces for injected dependencies. Avoids importing concrete
@@ -55,7 +62,7 @@ interface ChatRegistryDep {
 }
 
 interface HistoryCacheDep {
-  getMessages(chatId: string): { type: string; content?: string }[] | null;
+  getMessages(chatId: string): ChatMessage[] | null;
 }
 
 interface TurnResult {
@@ -140,9 +147,8 @@ export class AttentionTracker {
     const messages = this.#history.getMessages(chatId);
     if (!messages) return null;
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].type === 'user-message' && messages[i].content) {
-        return messages[i].content!;
-      }
+      const content = userMessageContent(messages[i]);
+      if (content) return content;
     }
     return null;
   }
@@ -278,9 +284,8 @@ export class AttentionTracker {
     const messages = this.#history.getMessages(chatId);
     if (!messages) return null;
     for (const msg of messages) {
-      if (msg.type === 'user-message' && msg.content) {
-        return truncate(msg.content, 60);
-      }
+      const content = userMessageContent(msg);
+      if (content) return truncate(content, 60);
     }
     return null;
   }

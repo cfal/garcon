@@ -21,12 +21,12 @@ import {
 
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 
-interface ShellSocketState {
+export interface ShellSocketState {
   shellProcess: IPty | null;
   ptySessionKey: string | null;
 }
 
-interface ShellWebSocketData {
+export interface ShellWebSocketData {
   pathname?: string;
   shellState?: ShellSocketState;
 }

@@ -4,7 +4,7 @@ function printHelp() {
   const helpText = `Garcon Server
 
 Usage:
-  bun server/main.js [options]
+  bun server/main.ts [options]
   bun run start -- [options]
 
 Options:
@@ -52,3 +52,5 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   const { startServer } = await import('./server.js');
   await startServer();
 }
+
+export {};

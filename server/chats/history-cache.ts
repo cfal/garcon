@@ -2,7 +2,7 @@
 // full history loads or live tails captured before the user opens a chat.
 
 import { mergeChatMessagesByIdentity, chatMessageIdentityTokens } from '../../common/chat-message-identity.js';
-import type { ChatMessage } from '../../common/chat-types.js';
+import { parseChatMessages, type ChatMessage } from '../../common/chat-types.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { PaginatedChatMessages } from './history-cache-contract.js';
 
@@ -38,9 +38,9 @@ interface HistoryCacheMetadata {
 }
 
 interface HistoryCacheAgents {
-  onMessages(cb: (chatId: string, messages: ChatMessage[]) => void): void;
+  onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   isChatRunning(chatId: string): boolean;
-  loadMessages(session: ChatRegistryEntry, chatId: string): Promise<ChatMessage[]>;
+  loadMessages(session: ChatRegistryEntry, chatId: string): Promise<unknown[]>;
 }
 
 function errorMessage(error: unknown): string {
@@ -92,7 +92,7 @@ export class HistoryCache {
 
       // Self-wire: append agent messages to cache as they arrive.
       this.#agents.onMessages((chatId, messages) => {
-        this.appendMessages(chatId, messages).catch((err) => {
+        this.appendMessages(chatId, parseChatMessages(messages)).catch((err) => {
           console.warn('history-cache: appendMessages failed:', errorMessage(err));
         });
       });
@@ -236,7 +236,7 @@ export class HistoryCache {
   async #loadFromAgent(chatId: string): Promise<ChatMessage[]> {
     const session = this.#registry.getChat(chatId);
     if (!session) return [];
-    return this.#agents.loadMessages(session, chatId);
+    return parseChatMessages(await this.#agents.loadMessages(session, chatId));
   }
 
 }
