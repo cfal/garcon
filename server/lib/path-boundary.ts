@@ -1,5 +1,6 @@
 import path from 'path';
 import { getProjectBasePath } from '../config.js';
+import { jsonError } from './http-error.js';
 
 export const PROJECT_BOUNDARY_ERROR_CODE = 'outside_project_base';
 export const PROJECT_BOUNDARY_ERROR_MESSAGE = 'Path is outside the allowed base directory';
@@ -40,11 +41,5 @@ export function isProjectBoundaryError(error: unknown): error is ProjectBoundary
 }
 
 export function projectBoundaryErrorResponse(): Response {
-  return Response.json(
-    {
-      error: PROJECT_BOUNDARY_ERROR_MESSAGE,
-      errorCode: PROJECT_BOUNDARY_ERROR_CODE,
-    },
-    { status: 403 },
-  );
+  return jsonError(PROJECT_BOUNDARY_ERROR_MESSAGE, 403, PROJECT_BOUNDARY_ERROR_CODE);
 }

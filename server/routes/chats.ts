@@ -25,6 +25,7 @@ import { normalizeTags } from '../../common/tags.ts';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { isWithinProjectBase } from '../lib/path-boundary.js';
 import { extractFirstLine } from '../lib/text.js';
+import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ChatQueueService } from '../queue.js';
 import type { HistoryCachePageReader } from '../chats/history-cache-contract.js';
@@ -34,7 +35,6 @@ import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
-  CommandErrorCode,
   ExecutionSettingsPatchRequest,
   ForkRunCommandRequest,
   ModelPatchRequest,
@@ -99,10 +99,6 @@ function createdAtFromId(id: string): string | null {
   return new Date(ts).toISOString();
 }
 
-function jsonError(error: string, status: number, errorCode: CommandErrorCode = 'VALIDATION_FAILED', retryable = false, details?: string): Response {
-  return Response.json({ success: false, error, errorCode, retryable, details }, { status });
-}
-
 function requireStringField(body: Record<string, unknown>, field: string): string {
   const value = body[field];
   if (typeof value !== 'string' || !value.trim()) {
@@ -115,6 +111,16 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
   return typeof value === 'string' ? value : null;
+}
+
+function pathValidationError(error: string, errorCode: string, status = 200): Response {
+  return Response.json({
+    success: false,
+    valid: false,
+    error,
+    errorCode,
+    retryable: false,
+  }, { status });
 }
 
 function stringArrayOrNull(value: unknown): string[] | null {
@@ -159,36 +165,29 @@ export default function createChatRoutes({
   async function validateStartPath(_request: Request, url: URL): Promise<Response> {
     const dirPath = String(url.searchParams.get('path') || '').trim();
     if (!dirPath) {
-      return Response.json(
-        { valid: false, error: 'path is required', errorCode: 'path_required' },
-        { status: 400 },
-      );
+      return pathValidationError('path is required', 'path_required', 400);
     }
 
     if (!isWithinProjectBase(dirPath)) {
-      return Response.json({
-        valid: false,
-        error: 'Path is outside the allowed base directory',
-        errorCode: 'outside_base_dir',
-      });
+      return pathValidationError('Path is outside the allowed base directory', 'outside_base_dir');
     }
 
     try {
       const stat = await fs.stat(dirPath);
       if (!stat.isDirectory()) {
-        return Response.json({ valid: false, error: 'Not a directory', errorCode: 'not_directory' });
+        return pathValidationError('Not a directory', 'not_directory');
       }
       const isGitRepo = await isGitRepository(dirPath);
       return Response.json({ valid: true, isGitRepo });
     } catch (error: unknown) {
       const err = error as NodeJS.ErrnoException;
       if (err.code === 'ENOENT') {
-        return Response.json({ valid: false, error: 'Path does not exist', errorCode: 'path_not_found' });
+        return pathValidationError('Path does not exist', 'path_not_found');
       }
       if (err.code === 'EACCES' || err.code === 'EPERM') {
-        return Response.json({ valid: false, error: 'Permission denied', errorCode: 'permission_denied' });
+        return pathValidationError('Permission denied', 'permission_denied');
       }
-      return Response.json({ valid: false, error: (error as Error).message, errorCode: 'unknown' });
+      return pathValidationError((error as Error).message, 'unknown');
     }
   }
 
@@ -273,7 +272,7 @@ export default function createChatRoutes({
       return Response.json({ sessions: all, total: all.length });
     } catch (error: unknown) {
       console.error('sessions: error listing sessions:', (error as Error).message);
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -306,20 +305,20 @@ export default function createChatRoutes({
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
       if (error instanceof ModelSelectionError) {
-        return Response.json({ success: false, error: (error as Error).message }, { status: 422 });
+        return jsonError((error as Error).message, 422);
       }
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
   async function deleteSessionHandler(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
-    if (!chatId) return Response.json({ error: 'chatId query parameter is required' }, { status: 400 });
+    if (!chatId) return jsonError('chatId query parameter is required', 400);
 
     try {
       const session = registry.getChat(chatId);
       if (!session) {
-        return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
+        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
       // Remove from the in-memory registry first so the WS broadcast fires
@@ -348,18 +347,18 @@ export default function createChatRoutes({
 
       return Response.json({ success: true });
     } catch (error: unknown) {
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
   async function getMessages(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
-    if (!chatId) return Response.json({ error: 'chatId query parameter is required' }, { status: 400 });
+    if (!chatId) return jsonError('chatId query parameter is required', 400);
 
     try {
       const session = registry.getChat(chatId);
       if (!session) {
-        return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
+        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
       const { limit, offset } = parsePagination(url.searchParams.get('limit'), url.searchParams.get('offset'), { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
@@ -373,18 +372,18 @@ export default function createChatRoutes({
       });
     } catch (error: unknown) {
       console.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
   async function getChatDetails(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
-    if (!chatId) return Response.json({ error: 'chatId query parameter is required' }, { status: 400 });
+    if (!chatId) return jsonError('chatId query parameter is required', 400);
 
     try {
       const session = registry.getChat(chatId);
       if (!session) {
-        return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
+        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
       const meta = metadata.getChatMetadata(chatId);
@@ -396,41 +395,41 @@ export default function createChatRoutes({
         nativePath: session.nativePath || null,
       });
     } catch (error: unknown) {
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
   async function postTogglePin(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
-    if (!chatId) return Response.json({ error: 'chatId query parameter is required' }, { status: 400 });
+    if (!chatId) return jsonError('chatId query parameter is required', 400);
 
     try {
       const session = registry.getChat(chatId);
       if (!session) {
-        return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
+        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
       const result = await settings.togglePin(chatId);
       return Response.json({ success: true, isPinned: result.isPinned });
     } catch (error: unknown) {
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
   async function postToggleArchive(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
-    if (!chatId) return Response.json({ error: 'chatId query parameter is required' }, { status: 400 });
+    if (!chatId) return jsonError('chatId query parameter is required', 400);
 
     try {
       const session = registry.getChat(chatId);
       if (!session) {
-        return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
+        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
       const result = await settings.toggleArchive(chatId);
       return Response.json({ success: true, isArchived: result.isArchived });
     } catch (error: unknown) {
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -460,7 +459,7 @@ export default function createChatRoutes({
 
       return Response.json({ success: true, results });
     } catch (error: unknown) {
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -471,20 +470,20 @@ export default function createChatRoutes({
       const newOrder = stringArrayOrNull(body?.newOrder);
 
       if (!['pinned', 'normal', 'archived'].includes(list)) {
-        return Response.json({ success: false, error: 'list must be "pinned", "normal", or "archived"' }, { status: 400 });
+        return jsonError('list must be "pinned", "normal", or "archived"', 400);
       }
       if (!oldOrder || !newOrder) {
-        return Response.json({ success: false, error: 'oldOrder and newOrder must be arrays' }, { status: 400 });
+        return jsonError('oldOrder and newOrder must be arrays', 400);
       }
 
       const result = await settings.reorderWindow(list, oldOrder, newOrder);
       if (!result.success) {
-        return Response.json({ success: false, error: result.error }, { status: 400 });
+        return jsonError(result.error || 'Unable to reorder chats', 400);
       }
 
       return Response.json({ success: true });
     } catch (error: unknown) {
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -495,30 +494,30 @@ export default function createChatRoutes({
       const chatIdBelow = typeof body?.chatIdBelow === 'string' ? body.chatIdBelow.trim() : '';
 
       if (!chatId) {
-        return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
+        return jsonError('chatId is required', 400);
       }
       if ((chatIdAbove && chatIdBelow) || (!chatIdAbove && !chatIdBelow)) {
-        return Response.json({ success: false, error: 'Exactly one of chatIdAbove or chatIdBelow must be provided' }, { status: 400 });
+        return jsonError('Exactly one of chatIdAbove or chatIdBelow must be provided', 400);
       }
 
       const refId = chatIdAbove || chatIdBelow;
       const mode = chatIdAbove ? 'below' : 'above';
 
       const session = registry.getChat(chatId);
-      if (!session) return Response.json({ success: false, error: 'Chat not found' }, { status: 404 });
+      if (!session) return jsonError('Chat not found', 404, 'SESSION_NOT_FOUND');
 
       const refSession = registry.getChat(refId);
-      if (!refSession) return Response.json({ success: false, error: 'Reference chat not found' }, { status: 404 });
+      if (!refSession) return jsonError('Reference chat not found', 404, 'SESSION_NOT_FOUND');
 
       const result = await settings.reorderRelative(chatId, refId, mode);
       if (!result.success) {
         const status = result.error!.includes('not found') ? 404 : 400;
-        return Response.json({ success: false, error: result.error }, { status });
+        return jsonError(result.error || 'Unable to reorder chats', status, status === 404 ? 'SESSION_NOT_FOUND' : 'VALIDATION_FAILED');
       }
 
       return Response.json({ success: true });
     } catch (error: unknown) {
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -526,12 +525,12 @@ export default function createChatRoutes({
     try {
       const chatId = String(body.chatId || '').trim();
       if (!chatId) {
-        return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
+        return jsonError('chatId is required', 400);
       }
 
       const session = registry.getChat(chatId);
       if (!session) {
-        return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
+        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
       const rawTags = Array.isArray(body.tags) ? body.tags : [];
@@ -540,7 +539,7 @@ export default function createChatRoutes({
       registry.updateChat(chatId, { tags });
       return Response.json({ success: true, chatId, tags });
     } catch (error: unknown) {
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -550,27 +549,27 @@ export default function createChatRoutes({
       const chatId = String(body.chatId || '').trim();
 
       if (!sourceChatId || !/^\d+$/.test(sourceChatId)) {
-        return Response.json({ success: false, error: 'Valid numeric sourceChatId is required' }, { status: 400 });
+        return jsonError('Valid numeric sourceChatId is required', 400);
       }
       if (!chatId || !/^\d+$/.test(chatId)) {
-        return Response.json({ success: false, error: 'Valid numeric chatId is required' }, { status: 400 });
+        return jsonError('Valid numeric chatId is required', 400);
       }
       if (sourceChatId === chatId) {
-        return Response.json({ success: false, error: 'sourceChatId and chatId must differ' }, { status: 400 });
+        return jsonError('sourceChatId and chatId must differ', 400);
       }
 
       const sourceSession = registry.getChat(sourceChatId);
       if (!sourceSession) {
-        return Response.json({ success: false, error: 'Source session not found' }, { status: 404 });
+        return jsonError('Source session not found', 404, 'SESSION_NOT_FOUND');
       }
 
       if (!agents.supportsFork(sourceSession.agentId)) {
-        return Response.json({ success: false, error: `Fork unsupported for agent: ${sourceSession.agentId}` }, { status: 422 });
+        return jsonError(`Fork unsupported for agent: ${sourceSession.agentId}`, 422, 'UNSUPPORTED_AGENT');
       }
 
       const existingTarget = registry.getChat(chatId);
       if (existingTarget) {
-        return Response.json({ success: false, error: `Session already exists: ${chatId}` }, { status: 409 });
+        return jsonError(`Session already exists: ${chatId}`, 409, 'IDEMPOTENCY_CONFLICT');
       }
 
       const result = await forkChatFileCopy({
@@ -586,7 +585,7 @@ export default function createChatRoutes({
 
       return Response.json({ success: true, ...result });
     } catch (error: unknown) {
-      return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 

@@ -221,6 +221,7 @@ export type ValidateStartErrorCode =
 	| 'unknown';
 
 export interface ValidateStartResponse {
+	success?: false;
 	valid: boolean;
 	isGitRepo?: boolean;
 	error?: string;

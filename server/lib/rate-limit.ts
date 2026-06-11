@@ -3,6 +3,7 @@
 // that exceed the configured threshold within the window.
 
 import { isTrustProxyEnabled } from '../config.js';
+import { jsonError } from './http-error.js';
 
 interface RateLimiterOptions {
   windowMs?: number;
@@ -66,10 +67,7 @@ export function createRateLimiter({ windowMs = 60_000, maxRequests = 10 }: RateL
       hits.set(ip, timestamps);
 
       if (timestamps.length > maxRequests) {
-        return Response.json(
-          { error: 'Too many requests. Please try again later.' },
-          { status: 429 },
-        );
+        return jsonError('Too many requests. Please try again later.', 429, 'RATE_LIMITED', true);
       }
       return null;
     },

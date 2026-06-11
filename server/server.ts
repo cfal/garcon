@@ -19,6 +19,7 @@ import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/http-route.js';
 import { malformedJsonResponse } from './lib/json-route.js';
 import { MalformedJsonError } from './lib/http-request.js';
+import { jsonError } from './lib/http-error.js';
 import { verifyAuthToken } from './auth/token.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
@@ -244,7 +245,7 @@ export async function startServer(): Promise<void> {
           return malformedJsonResponse();
         }
         console.error('server: route error:', error);
-        return Response.json({ error: 'Internal server error' }, { status: 500 });
+        return jsonError('Internal server error', 500);
       },
       async fetch(request, server) {
         const url = new URL(request.url);

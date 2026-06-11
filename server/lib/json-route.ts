@@ -1,4 +1,5 @@
 import { MalformedJsonError, parseJsonBody } from './http-request.js';
+import { jsonError } from './http-error.js';
 import type { RouteHandler } from './http-route-types.js';
 
 type JsonBodyHandler<TBody> = (
@@ -9,7 +10,7 @@ type JsonBodyHandler<TBody> = (
 ) => Response | Promise<Response>;
 
 export function malformedJsonResponse(): Response {
-  return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
+  return jsonError('Malformed JSON', 400);
 }
 
 export function withJsonBody<TBody>(handler: JsonBodyHandler<TBody>): RouteHandler {

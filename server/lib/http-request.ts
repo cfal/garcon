@@ -1,4 +1,5 @@
 import { verifyAuthToken } from '../auth/token.js';
+import { jsonError } from './http-error.js';
 
 // Thrown by parseJsonBody when the request body is syntactically invalid JSON.
 // Consumers should check `instanceof` rather than matching the message string.
@@ -37,12 +38,12 @@ export function getTokenFromRequest(request: Request): string | null {
 export async function authenticateHttpRequest(request: Request): Promise<{ errorResponse: Response | null }> {
   const token = getTokenFromRequest(request);
   if (!token) {
-    return { errorResponse: Response.json({ error: 'Access denied. No token provided.' }, { status: 401 }) };
+    return { errorResponse: jsonError('Access denied. No token provided.', 401) };
   }
 
   const isAuthorized = await verifyAuthToken(token);
   if (!isAuthorized) {
-    return { errorResponse: Response.json({ error: 'Invalid token' }, { status: 403 }) };
+    return { errorResponse: jsonError('Invalid token', 403) };
   }
 
   return { errorResponse: null };

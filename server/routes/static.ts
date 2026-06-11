@@ -1,6 +1,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { markRouteNoAuth } from '../lib/http-route.js';
+import { jsonError } from '../lib/http-error.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -26,7 +27,7 @@ export function cacheHeaders(requestPath: string): HeadersInit {
 }
 
 function notFoundResponse(): Response {
-  return Response.json({ success: false, error: 'Not found' }, { status: 404 });
+  return jsonError('Not found', 404);
 }
 
 const noauthServePathname: StaticPathHandler = (function() {
