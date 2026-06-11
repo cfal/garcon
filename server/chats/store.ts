@@ -23,6 +23,8 @@ const CHAT_REGISTRY_VERSION = 2;
 const LEGACY_AGENT_ID_FIELD = 'provider';
 const LEGACY_AGENT_SESSION_ID_FIELD = 'providerSessionId';
 const NATIVE_PATH_LRU_MAX = 64;
+// Uses a fixed short debounce so registry mutations persist promptly while bursts coalesce.
+const REGISTRY_SAVE_DEBOUNCE_MS = 1000;
 const ALLOWED_PATCH_FIELDS = [
   'agentId',
   'nativePath',
@@ -482,13 +484,12 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       clearTimeout(this.#pendingSaveTimer);
       this.#pendingSaveTimer = null;
     }
-    const delayMs = 1000 + Math.floor(Math.random() * 9001);
     this.#pendingSaveTimer = setTimeout(() => {
       this.#pendingSaveTimer = null;
       this.saveRegistry(this.#registry || createEmptyRegistry()).catch((error: Error) => {
         console.warn('sessions: failed to persist registry:', error.message);
       });
-    }, delayMs);
+    }, REGISTRY_SAVE_DEBOUNCE_MS);
   }
 
   #addToNativePathCache(nativePath: string, chatId: string): void {
