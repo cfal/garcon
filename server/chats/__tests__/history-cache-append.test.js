@@ -134,6 +134,25 @@ describe('appendMessages', () => {
     ]);
   });
 
+  it('loads an uncached chat before returning a paginated page', async () => {
+    const selectedChatId = 'uncached-page-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
+    ));
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: 'Prompt' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'First reply' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Second reply' },
+    ]));
+
+    const page = await cache.getPaginatedMessages(selectedChatId, 2, 0);
+
+    expect(mockAgents.loadMessages).toHaveBeenCalledTimes(1);
+    expect(page.total).toBe(3);
+    expect(page.hasMore).toBe(true);
+    expect(page.messages.map((message) => message.content)).toEqual(['First reply', 'Second reply']);
+  });
+
   it('deduplicates agent-history user echoes through shared request identity', async () => {
     const selectedChatId = 'cursor-chat';
     mockRegistry.getChat.mockImplementation((id) => (

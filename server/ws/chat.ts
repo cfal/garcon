@@ -339,9 +339,8 @@ export class ChatHandler {
 
       const { limit, offset } = parsePagination(data.limit, data.offset, { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
 
-      await this.#historyCache.ensureLoaded(chatId);
       await this.#pendingInputs.reconcile(chatId);
-      const result = this.#historyCache.getPaginatedMessages(chatId, limit, offset);
+      const result = await this.#historyCache.getPaginatedMessages(chatId, limit, offset);
 
       writer.send(new ChatLogResponseMessage(
         clientRequestId, chatId, result.messages as ChatMessage[], this.#pendingInputs.listForChat(chatId) as PendingUserInput[], result.total,

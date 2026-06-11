@@ -374,9 +374,8 @@ export default function createChatRoutes({
 
       const { limit, offset } = parsePagination(url.searchParams.get('limit'), url.searchParams.get('offset'), { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
 
-      await historyCache.ensureLoaded(chatId);
       await pendingInputs.reconcile(chatId);
-      const page = historyCache.getPaginatedMessages(chatId, limit, offset);
+      const page = await historyCache.getPaginatedMessages(chatId, limit, offset);
       return Response.json({
         ...page,
         pendingUserInputs: pendingInputs.listForChat(chatId),

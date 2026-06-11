@@ -188,22 +188,20 @@ export class HistoryCache {
     }
   }
 
-  getPaginatedMessages(chatId: string, limit: number, offset: number): PaginatedChatMessages {
+  async getPaginatedMessages(chatId: string, limit: number, offset: number): Promise<PaginatedChatMessages> {
     const key = String(chatId);
+    const messages = await this.ensureLoaded(key);
     const entry = this.#cacheByChatId.get(key);
-    if (!entry) {
-      return { messages: [], total: 0, hasMore: false, offset, limit };
-    }
 
-    entry.lastAccessAt = this.#now();
+    if (entry) entry.lastAccessAt = this.#now();
 
-    const total = entry.messages.length;
+    const total = messages.length;
     const start = Math.max(0, total - offset - limit);
     const end = total - offset;
-    const messages = entry.messages.slice(start, end);
+    const pageMessages = messages.slice(start, end);
 
     return {
-      messages,
+      messages: pageMessages,
       total,
       hasMore: start > 0,
       offset,

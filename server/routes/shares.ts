@@ -54,9 +54,7 @@ export default function createShareRoutes(
         return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
       }
 
-      // Load current messages for the snapshot.
-      await historyCache.ensureLoaded(chatId);
-      const page = historyCache.getPaginatedMessages(chatId, 100_000, 0) as { messages?: unknown[] };
+      const page = await historyCache.getPaginatedMessages(chatId, 100_000, 0) as { messages?: unknown[] };
       const messages = page?.messages ?? [];
 
       const meta = metadata.getChatMetadata(chatId);

@@ -11,10 +11,10 @@ export interface PaginatedChatMessages {
 export interface HistoryCacheServiceContract {
   ensureLoaded(chatId: string): Promise<unknown>;
   getMessages(chatId: string): ChatMessage[] | null;
-  getPaginatedMessages(chatId: string, limit: number, offset: number): PaginatedChatMessages;
+  getPaginatedMessages(chatId: string, limit: number, offset: number): Promise<PaginatedChatMessages>;
   appendMessages(chatId: string, messages: ChatMessage[]): Promise<void>;
 }
 
 export type HistoryCacheMessageReader = Pick<HistoryCacheServiceContract, 'ensureLoaded' | 'getMessages'>;
 
-export type HistoryCachePageReader = Pick<HistoryCacheServiceContract, 'ensureLoaded' | 'getPaginatedMessages'>;
+export type HistoryCachePageReader = Pick<HistoryCacheServiceContract, 'getPaginatedMessages'>;

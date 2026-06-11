@@ -671,7 +671,6 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
         clientRequestId: 'req-msg-2',
       });
-      expect(mockHistoryCache.ensureLoaded).toHaveBeenCalledWith('123');
       expect(mockPendingInputs.reconcile).toHaveBeenCalledWith('123');
       expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 20, 0);
       const payload = lastSentPayload();
