@@ -1,4 +1,5 @@
 import { createGitService } from '../git/git-service.js';
+import type { GitService } from '../git/git-service.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { resolveGenerationContext } from '../settings/generation-config-source.ts';
@@ -18,54 +19,6 @@ import { asJsonBody, type JsonBody } from './route-helpers.js';
 type GitMode = 'working' | 'staged';
 type StageMode = 'stage' | 'unstage';
 type RevertStrategy = 'revert' | 'reset-soft';
-
-interface GitRouteOptions {
-  projectPath: string;
-  [key: string]: unknown;
-}
-
-interface GitRouteService {
-  toHttpError(error: unknown): Response;
-  getStatus(options: GitRouteOptions): Promise<unknown>;
-  getDiff(options: GitRouteOptions): Promise<unknown>;
-  getFileWithDiff(options: GitRouteOptions): Promise<unknown>;
-  initialCommit(options: GitRouteOptions): Promise<unknown>;
-  commit(options: GitRouteOptions): Promise<unknown>;
-  getBranches(options: GitRouteOptions): Promise<unknown>;
-  checkout(options: GitRouteOptions): Promise<unknown>;
-  createBranch(options: GitRouteOptions): Promise<unknown>;
-  getCommits(options: GitRouteOptions): Promise<unknown>;
-  getCommitDiff(options: GitRouteOptions): Promise<unknown>;
-  generateCommitMessageForFiles(options: GitRouteOptions): Promise<unknown>;
-  getRemoteStatus(options: GitRouteOptions): Promise<unknown>;
-  fetch(options: GitRouteOptions): Promise<unknown>;
-  pull(options: GitRouteOptions): Promise<unknown>;
-  push(options: GitRouteOptions): Promise<unknown>;
-  getRemotes(options: GitRouteOptions): Promise<unknown>;
-  discard(options: GitRouteOptions): Promise<unknown>;
-  deleteUntracked(options: GitRouteOptions): Promise<unknown>;
-  getFileReviewData(options: GitRouteOptions): Promise<unknown>;
-  getChangesTree(options: GitRouteOptions): Promise<unknown>;
-  getFileReviewDataBatch(options: GitRouteOptions): Promise<unknown>;
-  stageSelection(options: GitRouteOptions): Promise<unknown>;
-  stageHunk(options: GitRouteOptions): Promise<unknown>;
-  getRepoInfo(options: GitRouteOptions): Promise<unknown>;
-  getWorktrees(options: GitRouteOptions): Promise<unknown>;
-  getTargetCandidates(options: GitRouteOptions): Promise<unknown>;
-  createWorktree(options: GitRouteOptions): Promise<unknown>;
-  removeWorktree(options: GitRouteOptions): Promise<unknown>;
-  commitIndex(options: GitRouteOptions): Promise<unknown>;
-  stageFile(options: GitRouteOptions): Promise<unknown>;
-  revertLastCommit(options: GitRouteOptions): Promise<unknown>;
-}
-
-interface ProxiedGitRouteService extends GitRouteService {
-  [key: string]: unknown;
-}
-
-interface GitServiceFactoryResult {
-  [key: string]: unknown;
-}
 
 interface StageSelectionInput {
   lineIndices: number[];
@@ -112,7 +65,7 @@ function isValidLineIndices(value: unknown): value is number[] {
   return Array.isArray(value) && value.every(isNonNegativeInteger);
 }
 
-function isGitRouteOptions(value: unknown): value is GitRouteOptions {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
@@ -128,9 +81,9 @@ function boundaryCheckedOptions(options: unknown): unknown {
   return next;
 }
 
-function createBoundaryCheckedGitService(git: GitServiceFactoryResult): GitRouteService {
+function createBoundaryCheckedGitService(git: GitService): GitService {
   return new Proxy(git, {
-    get(target: GitServiceFactoryResult, prop: string | symbol, receiver: unknown): unknown {
+    get(target: GitService, prop: string | symbol, receiver: unknown): unknown {
       const value = Reflect.get(target, prop, receiver);
       if (prop === 'toHttpError' && typeof value === 'function') {
         return (error: unknown) => isProjectBoundaryError(error)
@@ -140,7 +93,7 @@ function createBoundaryCheckedGitService(git: GitServiceFactoryResult): GitRoute
       if (typeof value !== 'function') return value;
       return (options: unknown, ...args: unknown[]) => value.call(target, boundaryCheckedOptions(options), ...args);
     },
-  }) as ProxiedGitRouteService;
+  }) as unknown as GitService;
 }
 
 function requiredString(value: unknown): string | null {
@@ -160,7 +113,7 @@ function validStageMode(value: unknown): StageMode | null {
 }
 
 function validSelection(value: unknown): StageSelectionInput | null {
-  if (!isGitRouteOptions(value) || !isValidLineIndices(value.lineIndices)) return null;
+  if (!isRecord(value) || !isValidLineIndices(value.lineIndices)) return null;
   return { lineIndices: value.lineIndices };
 }
 
@@ -544,14 +497,18 @@ export default function createGitRoutes(
       const file = requiredString(input.file);
       const modeRaw = input.mode;
       const mode = validStageMode(modeRaw);
-      const selection = validSelection(input.selection);
+      const selectionRaw = input.selection;
+      const selection = validSelection(selectionRaw);
       const contextLines = input.contextLines;
 
-      if (!project || !file || !modeRaw || !selection?.lineIndices) {
+      if (!project || !file || !modeRaw || !selectionRaw) {
         return Response.json({ error: 'Missing required parameters: project, file, mode, and selection.lineIndices.' }, { status: 400 });
       }
       if (!mode) {
         return Response.json({ error: 'Invalid mode. Expected one of: stage, unstage.' }, { status: 400 });
+      }
+      if (!selection) {
+        return Response.json({ error: 'selection.lineIndices must be an array of non-negative integers.' }, { status: 400 });
       }
 
       const result = await git.stageSelection({

@@ -1,23 +1,335 @@
 import path from 'path';
 import { promises as fs } from 'fs';
 import { GitDomainError } from './git-types.js';
+import type { AgentId } from '../../common/agents.ts';
+import type { ApiProtocol } from '../../common/api-providers.js';
 
 const GIT_LOCK_RETRY_DELAY_MS = 100;
 const GIT_LOCK_MAX_RETRIES = 50;
 
+interface GitCommandResult {
+  stdout: string;
+  stderr: string;
+}
+
+interface GitProcessError extends Error {
+  code?: number;
+  stdout?: string;
+  stderr?: string;
+}
+
+type GitChangeKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
+type GitReviewMode = 'working' | 'staged';
+type GitStageMode = 'stage' | 'unstage';
+type RevertStrategy = 'revert' | 'reset-soft';
+
+interface DiffStats {
+  additions: number;
+  deletions: number;
+}
+
+type NumstatMap = Record<string, DiffStats>;
+
+interface PorcelainStatusEntry {
+  path: string;
+  originalPath?: string;
+  indexStatus: string;
+  workTreeStatus: string;
+}
+
+interface ChangeFacet {
+  status: string;
+  changeKind: GitChangeKind;
+  stats: DiffStats;
+  originalPath?: string;
+}
+
+interface ChangeEntry extends PorcelainStatusEntry {
+  stagedFacet?: ChangeFacet;
+  unstagedFacet?: ChangeFacet;
+}
+
+interface CompatibleTreeFields {
+  staged: boolean;
+  hasUnstaged: boolean;
+  changeKind?: GitChangeKind;
+  additions: number;
+  deletions: number;
+}
+
+interface TreeNode extends Partial<CompatibleTreeFields> {
+  path: string;
+  name: string;
+  kind: 'file' | 'directory';
+  indexStatus: string;
+  workTreeStatus: string;
+  stagedFacet?: ChangeFacet;
+  unstagedFacet?: ChangeFacet;
+  children?: TreeMap | TreeNode[];
+}
+
+type TreeMap = Map<string, TreeNode>;
+
+interface DiffOp {
+  type: 'delete' | 'insert' | 'equal';
+  before: [number, number];
+  after: [number, number];
+}
+
+interface DiffHunkMetadata {
+  id: string;
+  header: string;
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lineStartIndex: number;
+  lineEndIndex: number;
+}
+
+interface ParsedUnifiedPatch {
+  diffOps: DiffOp[];
+  hunks: DiffHunkMetadata[];
+}
+
+interface PatchHunk {
+  rawHeader: string;
+  lines: string[];
+}
+
+interface ParsedPatch {
+  header: string[];
+  hunks: PatchHunk[];
+}
+
+interface TransformedHunk {
+  lines: string[];
+  nextIndex: number;
+}
+
+interface HunkLineCounts {
+  oldCount: number;
+  newCount: number;
+}
+
+interface HunkHeaderResult {
+  header: string;
+  nextOffset: number;
+}
+
+interface ReviewTruncation {
+  truncated: boolean;
+  truncatedReason?: string;
+}
+
+interface CommitMessageOptions {
+  model?: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+  customPrompt?: string;
+}
+
+interface RunSingleQueryOptions extends CommitMessageOptions {
+  [key: string]: unknown;
+  agentId: AgentId;
+  cwd: string;
+}
+
+interface GitAgentRunner {
+  runSingleQuery(prompt: string, options: RunSingleQueryOptions): Promise<string>;
+}
+
+interface ClassifiedGitError {
+  status: number;
+  message: string;
+  details?: unknown;
+}
+
+interface CreateGitServiceOptions {
+  agents: GitAgentRunner;
+  classifyGitError(error: unknown): ClassifiedGitError;
+}
+
+interface ProjectOptions {
+  projectPath: string;
+}
+
+interface FileOptions extends ProjectOptions {
+  file: string;
+}
+
+interface CommitOptions extends ProjectOptions {
+  message: string;
+  files: string[];
+}
+
+interface BranchOptions extends ProjectOptions {
+  branch: string;
+}
+
+interface CommitListOptions extends ProjectOptions {
+  limit: string | number;
+}
+
+interface CommitDiffOptions extends ProjectOptions {
+  commit: string;
+}
+
+interface CommitMessageFileOptions extends ProjectOptions, CommitMessageOptions {
+  files: string[];
+  agentId: AgentId;
+}
+
+interface PushOptions extends ProjectOptions {
+  remote?: string;
+  remoteBranch?: string;
+}
+
+interface FileReviewOptions extends FileOptions {
+  mode?: GitReviewMode;
+  context?: number;
+}
+
+interface BatchFileReviewOptions extends ProjectOptions {
+  files: string[];
+  mode?: GitReviewMode;
+  context?: number;
+}
+
+interface StageSelectionOptions extends FileOptions {
+  mode: GitStageMode;
+  selection: { lineIndices: number[] };
+  contextLines?: number;
+}
+
+interface StageHunkOptions extends FileOptions {
+  mode: GitStageMode;
+  hunkIndex: number;
+  contextLines?: number;
+}
+
+interface WorktreeInfo {
+  path: string;
+  branch: string;
+  name: string;
+  isCurrent: boolean;
+  isMain: boolean;
+  isPathMissing: boolean;
+}
+
+interface RepoInfo {
+  isGitRepository: boolean;
+  repoRoot?: string;
+  currentWorktreePath?: string;
+}
+
+interface TargetCandidate {
+  projectPath: string;
+  repoRoot: string;
+  worktreePath: string;
+  label: string;
+  branch: string;
+  source: 'chat-project' | 'worktree';
+  isCurrent: boolean;
+  isMissing: boolean;
+}
+
+interface BatchReviewResult {
+  files: Record<string, unknown>;
+  errors: Record<string, string>;
+}
+
+interface CommitSummary {
+  hash: string;
+  author: string;
+  email: string;
+  date: string;
+  message: string;
+  stats?: string;
+}
+
+interface RemoteInfo {
+  name: string;
+  url: string;
+}
+
+interface CreateWorktreeOptions extends ProjectOptions {
+  baseRef?: string;
+  worktreePath: string;
+  branch?: string;
+  detach?: boolean;
+}
+
+interface RemoveWorktreeOptions extends ProjectOptions {
+  worktreePath: string;
+  force?: boolean;
+}
+
+interface CommitIndexOptions extends ProjectOptions {
+  message: string;
+}
+
+interface StageFileOptions extends FileOptions {
+  mode: GitStageMode;
+}
+
+interface RevertLastCommitOptions extends ProjectOptions {
+  strategy?: RevertStrategy;
+}
+
+export interface GitService {
+  getStatus(options: ProjectOptions): Promise<unknown>;
+  getDiff(options: FileOptions): Promise<unknown>;
+  getFileWithDiff(options: FileOptions): Promise<unknown>;
+  initialCommit(options: ProjectOptions): Promise<unknown>;
+  commit(options: CommitOptions): Promise<unknown>;
+  getBranches(options: ProjectOptions): Promise<unknown>;
+  checkout(options: BranchOptions): Promise<unknown>;
+  createBranch(options: BranchOptions): Promise<unknown>;
+  getCommits(options: CommitListOptions): Promise<unknown>;
+  getCommitDiff(options: CommitDiffOptions): Promise<unknown>;
+  generateCommitMessageForFiles(options: CommitMessageFileOptions): Promise<unknown>;
+  getRemoteStatus(options: ProjectOptions): Promise<unknown>;
+  getRemotes(options: ProjectOptions): Promise<unknown>;
+  fetch(options: ProjectOptions): Promise<unknown>;
+  pull(options: ProjectOptions): Promise<unknown>;
+  push(options: PushOptions): Promise<unknown>;
+  discard(options: FileOptions): Promise<unknown>;
+  deleteUntracked(options: FileOptions): Promise<unknown>;
+  getFileReviewData(options: FileReviewOptions): Promise<unknown>;
+  getFileReviewDataBatch(options: BatchFileReviewOptions): Promise<unknown>;
+  getChangesTree(options: ProjectOptions): Promise<unknown>;
+  stageSelection(options: StageSelectionOptions): Promise<unknown>;
+  stageHunk(options: StageHunkOptions): Promise<unknown>;
+  getRepoInfo(options: ProjectOptions): Promise<RepoInfo>;
+  getWorktrees(options: ProjectOptions): Promise<{ worktrees: WorktreeInfo[] }>;
+  getTargetCandidates(options: ProjectOptions): Promise<{ targets: TargetCandidate[] }>;
+  createWorktree(options: CreateWorktreeOptions): Promise<unknown>;
+  removeWorktree(options: RemoveWorktreeOptions): Promise<unknown>;
+  commitIndex(options: CommitIndexOptions): Promise<unknown>;
+  stageFile(options: StageFileOptions): Promise<unknown>;
+  revertLastCommit(options: RevertLastCommitOptions): Promise<unknown>;
+  toHttpError(error: unknown): Response;
+}
+
 // Returns true when stderr indicates a git index.lock contention error.
-function isLockError(stderr) {
+function isLockError(stderr: string): boolean {
   const lower = stderr.toLowerCase();
   return lower.includes('index.lock') || lower.includes('unable to create') && lower.includes('.lock');
 }
 
-function sleep(ms) {
+function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function streamText(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+  return stream ? new Response(stream).text() : Promise.resolve('');
 }
 
 // Spawns a git subprocess and returns stdout/stderr on success.
 // Retries transparently when the index.lock is held by another process.
-async function runGit(cwd, args) {
+async function runGit(cwd: string, args: string[]): Promise<GitCommandResult> {
   for (let attempt = 0; ; attempt++) {
     const proc = Bun.spawn(['git', ...args], {
       cwd,
@@ -25,8 +337,8 @@ async function runGit(cwd, args) {
       stderr: 'pipe',
     });
     const [stdout, stderr, exitCode] = await Promise.all([
-      proc.stdout.text(),
-      proc.stderr.text(),
+      streamText(proc.stdout),
+      streamText(proc.stderr),
       proc.exited,
     ]);
     if (exitCode === 0) return { stdout, stderr };
@@ -36,7 +348,7 @@ async function runGit(cwd, args) {
       continue;
     }
 
-    const error = new Error(`git ${args[0]} failed (exit ${exitCode}): ${stderr.trim()}`);
+    const error: GitProcessError = new Error(`git ${args[0]} failed (exit ${exitCode}): ${stderr.trim()}`);
     error.code = exitCode;
     error.stdout = stdout;
     error.stderr = stderr;
@@ -46,7 +358,7 @@ async function runGit(cwd, args) {
 
 // Spawns a git subprocess that reads from stdin (e.g. git apply).
 // Retries transparently on index.lock contention.
-async function runGitWithStdin(cwd, args, input) {
+async function runGitWithStdin(cwd: string, args: string[], input: string): Promise<void> {
   for (let attempt = 0; ; attempt++) {
     const proc = Bun.spawn(['git', ...args], {
       cwd,
@@ -55,7 +367,7 @@ async function runGitWithStdin(cwd, args, input) {
       stderr: 'pipe',
     });
     const [stderr, exitCode] = await Promise.all([
-      proc.stderr.text(),
+      streamText(proc.stderr),
       proc.exited,
     ]);
     if (exitCode === 0) return;
@@ -71,7 +383,7 @@ async function runGitWithStdin(cwd, args, input) {
 
 // Detects binary files by checking for null bytes in the first 8KB.
 // This is the same heuristic Git uses in its buffer_is_binary() function.
-async function isBinaryFile(filePath) {
+async function isBinaryFile(filePath: string): Promise<boolean> {
   try {
     const fileHandle = await fs.open(filePath, 'r');
     try {
@@ -87,7 +399,7 @@ async function isBinaryFile(filePath) {
 }
 
 // Strips git diff metadata headers, keeping only hunk content starting from @@ markers.
-function stripDiffHeaders(diff) {
+function stripDiffHeaders(diff: string): string {
   if (!diff) return '';
   if (diff.startsWith('@@')) return diff;
   const hunkStart = diff.indexOf('\n@@');
@@ -96,7 +408,7 @@ function stripDiffHeaders(diff) {
 
 // Asserts that the given path is an accessible git working tree.
 // Throws on failure with a descriptive error message.
-async function assertGitRepository(projectPath) {
+async function assertGitRepository(projectPath: string): Promise<void> {
   try {
     await fs.access(projectPath);
   } catch {
@@ -116,7 +428,7 @@ async function assertGitRepository(projectPath) {
 }
 
 // Checks whether a file is untracked (status `??`) via git status --porcelain.
-async function isFileUntracked(projectPath, file) {
+async function isFileUntracked(projectPath: string, file: string): Promise<boolean> {
   try {
     const { stdout } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
     return stdout.trimStart().startsWith('??');
@@ -126,7 +438,7 @@ async function isFileUntracked(projectPath, file) {
 }
 
 // Resolves a file path within a project root, guarding against path traversal.
-function resolvePathWithinProject(projectPath, file) {
+function resolvePathWithinProject(projectPath: string, file: string): string {
   const resolvedRoot = path.resolve(projectPath);
   const resolvedFile = path.resolve(resolvedRoot, file);
   const normalizedRoot = `${resolvedRoot}${path.sep}`;
@@ -170,8 +482,18 @@ const COMMIT_MESSAGE_ERROR_MAP = Object.freeze({
   COMMIT_MESSAGE_GENERATION_FAILED: { status: 500, errorCode: 'commit_message_generation_failed' },
 });
 
-function classifyCommitMessageAgentError(error) {
-  const message = String(error?.message || '').toLowerCase();
+type CommitMessageErrorCode = keyof typeof COMMIT_MESSAGE_ERROR_MAP;
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isCommitMessageErrorCode(code: string): code is CommitMessageErrorCode {
+  return Object.prototype.hasOwnProperty.call(COMMIT_MESSAGE_ERROR_MAP, code);
+}
+
+function classifyCommitMessageAgentError(error: unknown): CommitMessageErrorCode {
+  const message = errorMessage(error).toLowerCase();
   if (
     message.includes('401')
     || message.includes('unauthorized')
@@ -214,7 +536,14 @@ function classifyCommitMessageAgentError(error) {
 // Generates a conventional commit message using the configured agent.
 // When customPrompt is non-empty, it is used as the template with
 // {{files}} and {{diff}} placeholders substituted in.
-async function generateCommitMessage(files, diffContext, agentId, projectPath, runSingleQueryFn, options = {}) {
+async function generateCommitMessage(
+  files: string[],
+  diffContext: string,
+  agentId: AgentId,
+  projectPath: string,
+  runSingleQueryFn: (prompt: string, options: RunSingleQueryOptions) => Promise<string>,
+  options: CommitMessageOptions = {},
+): Promise<string> {
   const filesList = files.map((f) => `- ${f}`).join('\n');
   const diffExcerpt = diffContext.substring(0, 4000);
   const { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt } = options;
@@ -231,7 +560,7 @@ async function generateCommitMessage(files, diffContext, agentId, projectPath, r
   }
 
   try {
-    const opts = { agentId, cwd: projectPath };
+    const opts: RunSingleQueryOptions = { agentId, cwd: projectPath };
     if (model) opts.model = model;
     if (apiProviderId) opts.apiProviderId = apiProviderId;
     if (modelEndpointId) opts.modelEndpointId = modelEndpointId;
@@ -257,7 +586,7 @@ async function generateCommitMessage(files, diffContext, agentId, projectPath, r
 
 // Extracts a conventional commit message from AI-generated text by
 // stripping fences, markdown headers, and leading non-commit prose.
-function normalizeCommitMessage(text) {
+function normalizeCommitMessage(text: string): string {
   if (!text?.trim()) return '';
 
   const lines = text.trim().split('\n');
@@ -274,7 +603,7 @@ function normalizeCommitMessage(text) {
     if (foundCommit) cleaned.push(line);
   }
 
-  const result = cleaned.length > 0 ? cleaned : lines.filter(l => !l.startsWith('```'));
+  const result = cleaned.length > 0 ? cleaned : lines.filter((l) => !l.startsWith('```'));
 
   if (result.length > 0) {
     result[0] = result[0].replace(/^["']|["']$/g, '');
@@ -286,10 +615,10 @@ function normalizeCommitMessage(text) {
 // Parses a unified diff string into structured diff ops and hunk metadata.
 // Each op describes a contiguous range of equal/insert/delete/skip lines
 // with before/after line number ranges.
-function parseUnifiedPatchToOps(diffText, contextLines) {
+function parseUnifiedPatchToOps(diffText: string, _contextLines: number): ParsedUnifiedPatch {
   const lines = diffText.split('\n');
-  const diffOps = [];
-  const hunks = [];
+  const diffOps: DiffOp[] = [];
+  const hunks: DiffHunkMetadata[] = [];
   let lineIndex = 0;
 
   for (let i = 0; i < lines.length; i++) {
@@ -362,8 +691,8 @@ function parseUnifiedPatchToOps(diffText, contextLines) {
 }
 
 // Parses bulk `git diff --numstat` output into a map of file -> { additions, deletions }.
-function parseNumstatBulk(numstatOutput) {
-  const map = {};
+function parseNumstatBulk(numstatOutput: string): NumstatMap {
+  const map: NumstatMap = {};
   for (const line of numstatOutput.split('\n')) {
     if (!line.trim()) continue;
     const parts = line.split('\t');
@@ -387,21 +716,21 @@ const CHANGE_KIND_BY_STATUS = Object.freeze({
   '?': 'untracked',
 });
 
-function changeKindForStatus(status) {
-  return CHANGE_KIND_BY_STATUS[status] || 'modified';
+function changeKindForStatus(status: string): GitChangeKind {
+  return CHANGE_KIND_BY_STATUS[status as keyof typeof CHANGE_KIND_BY_STATUS] || 'modified';
 }
 
-function hasIndexChange(status) {
+function hasIndexChange(status: string): boolean {
   return status !== ' ' && status !== '?' && status !== '!' && Boolean(status);
 }
 
-function hasWorkTreeChange(status) {
+function hasWorkTreeChange(status: string): boolean {
   return status !== ' ' && status !== '!' && Boolean(status);
 }
 
-function parsePorcelainV1Z(output) {
+function parsePorcelainV1Z(output: string): PorcelainStatusEntry[] {
   const tokens = output.split('\0').filter(Boolean);
-  const entries = [];
+  const entries: PorcelainStatusEntry[] = [];
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
@@ -425,7 +754,7 @@ function parsePorcelainV1Z(output) {
   return entries;
 }
 
-function buildFacet(status, stats, originalPath) {
+function buildFacet(status: string, stats?: DiffStats, originalPath?: string): ChangeFacet | undefined {
   if (!status || status === ' ' || status === '!') return undefined;
   return {
     status,
@@ -435,7 +764,7 @@ function buildFacet(status, stats, originalPath) {
   };
 }
 
-function compatibleTreeFields(stagedFacet, unstagedFacet) {
+function compatibleTreeFields(stagedFacet?: ChangeFacet, unstagedFacet?: ChangeFacet): CompatibleTreeFields {
   const primaryFacet = unstagedFacet ?? stagedFacet;
   const stats = unstagedFacet?.stats ?? stagedFacet?.stats ?? { additions: 0, deletions: 0 };
   return {
@@ -447,7 +776,11 @@ function compatibleTreeFields(stagedFacet, unstagedFacet) {
   };
 }
 
-function buildChangeEntry(statusEntry, workingStats, cachedStats) {
+function buildChangeEntry(
+  statusEntry: PorcelainStatusEntry,
+  workingStats: NumstatMap,
+  cachedStats: NumstatMap,
+): ChangeEntry {
   const filePath = statusEntry.path.replace(/\/+$/g, '');
   const stagedFacet = hasIndexChange(statusEntry.indexStatus)
     ? buildFacet(statusEntry.indexStatus, cachedStats[filePath], statusEntry.originalPath)
@@ -466,17 +799,17 @@ function buildChangeEntry(statusEntry, workingStats, cachedStats) {
   };
 }
 
-function buildFullFileAddedPatch(contentAfter) {
+function buildFullFileAddedPatch(contentAfter: string): string {
   const lines = contentAfter.split('\n');
   return `@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join('\n')}`;
 }
 
-function buildFullFileDeletedPatch(contentBefore) {
+function buildFullFileDeletedPatch(contentBefore: string | null): string {
   const lines = (contentBefore || '').split('\n');
   return `@@ -1,${lines.length} +0,0 @@\n${lines.map((line) => `-${line}`).join('\n')}`;
 }
 
-function maybeTruncateReviewContent(contentBefore, contentAfter) {
+function maybeTruncateReviewContent(contentBefore: string | null, contentAfter: string | null): ReviewTruncation {
   const MAX_CONTENT_SIZE = 500_000;
   if (
     (contentBefore && contentBefore.length > MAX_CONTENT_SIZE) ||
@@ -519,7 +852,7 @@ function maybeTruncateReviewContent(contentBefore, contentAfter) {
 // Replaces full diff header with minimal a/b paths, matching lazygit's
 // FileNameOverride approach. Prevents failures when partially staging
 // deleted files or files with mode changes.
-function simplifyDiffHeader(filePath) {
+function simplifyDiffHeader(filePath: string): string[] {
   return [
     `--- a/${filePath}`,
     `+++ b/${filePath}`,
@@ -529,16 +862,16 @@ function simplifyDiffHeader(filePath) {
 // Strips the trailing empty element that `split('\n')` produces from a
 // newline-terminated diff -- without this, the last hunk would contain a
 // spurious empty line that corrupts line counts in buildHunkHeader.
-function parsePatch(patchText) {
+function parsePatch(patchText: string): ParsedPatch {
   const allLines = patchText.split('\n');
   // Remove trailing empty string artifact from split (diff always ends with \n)
   if (allLines.length > 0 && allLines[allLines.length - 1] === '') {
     allLines.pop();
   }
 
-  const header = [];
-  const hunks = [];
-  let current = null;
+  const header: string[] = [];
+  const hunks: PatchHunk[] = [];
+  let current: PatchHunk | null = null;
 
   for (const line of allLines) {
     if (line.startsWith('diff --git') || line.startsWith('index ') ||
@@ -582,8 +915,13 @@ function parsePatch(patchText) {
 //
 // `\ No newline at end of file` markers are dropped when their preceding
 // change line was dropped, preserving patch validity.
-function transformHunkLines(bodyLines, selectedSet, startIndex, reverse) {
-  const result = [];
+function transformHunkLines(
+  bodyLines: string[],
+  selectedSet: Set<number>,
+  startIndex: number,
+  reverse: boolean,
+): TransformedHunk {
+  const result: string[] = [];
   let idx = startIndex;
   let lastLineDropped = false;
 
@@ -627,15 +965,15 @@ function transformHunkLines(bodyLines, selectedSet, startIndex, reverse) {
 }
 
 // Returns true when a transformed hunk body contains real changes.
-function hunkHasChanges(bodyLines) {
-  return bodyLines.some(l => l.startsWith('+') || l.startsWith('-'));
+function hunkHasChanges(bodyLines: string[]): boolean {
+  return bodyLines.some((l) => l.startsWith('+') || l.startsWith('-'));
 }
 
 // Counts old-side and new-side lines in a hunk body. Context lines count
 // toward both sides. `\` markers are ignored. This always recomputes from
 // the actual body content rather than trusting the original @@ header,
 // because transformHunkLines may have changed the line composition.
-function countHunkLines(bodyLines) {
+function countHunkLines(bodyLines: string[]): HunkLineCounts {
   let oldCount = 0;
   let newCount = 0;
   for (const l of bodyLines) {
@@ -651,7 +989,7 @@ function countHunkLines(bodyLines) {
 // delta (newCount - oldCount) from all prior hunks. newStart is computed
 // as oldStart + startOffset, with an additional adjustment when a side
 // transitions to/from zero length (matching lazygit's hunk header logic).
-function buildHunkHeader(rawHeader, bodyLines, startOffset) {
+function buildHunkHeader(rawHeader: string, bodyLines: string[], startOffset: number): HunkHeaderResult {
   const match = rawHeader.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/);
   if (!match) return { header: rawHeader, nextOffset: startOffset };
 
@@ -678,7 +1016,7 @@ function buildHunkHeader(rawHeader, bodyLines, startOffset) {
 // Unstaged tab: `git diff` (index vs working tree).
 // Staged tab: `git diff --cached` (HEAD vs index).
 // The same diff is used for both display and `git apply --cached`.
-function tabDiffArgs(contextLines, file, isUnstage) {
+function tabDiffArgs(contextLines: number, file: string, isUnstage: boolean): string[] {
   const ctx = `-U${contextLines}`;
   if (isUnstage) {
     return ['diff', '--cached', ctx, '--', file];
@@ -690,9 +1028,9 @@ function tabDiffArgs(contextLines, file, isUnstage) {
 // exposes methods that correspond 1:1 with route handlers, plus a
 // toHttpError() helper for mapping errors to Response objects at the
 // route boundary.
-export function createGitService({ agents, classifyGitError }) {
+export function createGitService({ agents, classifyGitError }: CreateGitServiceOptions): GitService {
 
-  async function getStatus({ projectPath }) {
+  async function getStatus({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     let branch = 'main';
@@ -701,7 +1039,8 @@ export function createGitService({ agents, classifyGitError }) {
       const { stdout: branchOutput } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
       branch = branchOutput.trim();
     } catch (error) {
-      if (error.message.includes('unknown revision') || error.message.includes('ambiguous argument')) {
+      const message = errorMessage(error);
+      if (message.includes('unknown revision') || message.includes('ambiguous argument')) {
         hasCommits = false;
         branch = 'main';
       } else {
@@ -711,10 +1050,10 @@ export function createGitService({ agents, classifyGitError }) {
 
     const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '-uall']);
 
-    const modified = [];
-    const added = [];
-    const deleted = [];
-    const untracked = [];
+    const modified: string[] = [];
+    const added: string[] = [];
+    const deleted: string[] = [];
+    const untracked: string[] = [];
     statusOutput.split('\n').forEach((line) => {
       if (!line.trim()) return;
       const status = line.substring(0, 2);
@@ -734,7 +1073,7 @@ export function createGitService({ agents, classifyGitError }) {
     return { branch, hasCommits, modified, added, deleted, untracked };
   }
 
-  async function getDiff({ projectPath, file }) {
+  async function getDiff({ projectPath, file }: FileOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
@@ -769,7 +1108,7 @@ export function createGitService({ agents, classifyGitError }) {
     return { diff };
   }
 
-  async function getFileWithDiff({ projectPath, file }) {
+  async function getFileWithDiff({ projectPath, file }: FileOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
@@ -803,7 +1142,7 @@ export function createGitService({ agents, classifyGitError }) {
     return { currentContent, oldContent, isDeleted, isUntracked };
   }
 
-  async function initialCommit({ projectPath }) {
+  async function initialCommit({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     try {
@@ -819,7 +1158,7 @@ export function createGitService({ agents, classifyGitError }) {
     return { success: true, output: stdout, message: 'Initial commit created successfully' };
   }
 
-  async function commit({ projectPath, message, files }) {
+  async function commit({ projectPath, message, files }: CommitOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
     for (const file of files) {
       await runGit(projectPath, ['add', '--', file]);
@@ -828,7 +1167,7 @@ export function createGitService({ agents, classifyGitError }) {
     return { success: true, output: stdout };
   }
 
-  async function getBranches({ projectPath }) {
+  async function getBranches({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
     const { stdout } = await runGit(projectPath, ['branch', '-a']);
     const branches = stdout
@@ -844,17 +1183,17 @@ export function createGitService({ agents, classifyGitError }) {
     return { branches };
   }
 
-  async function checkout({ projectPath, branch }) {
+  async function checkout({ projectPath, branch }: BranchOptions): Promise<unknown> {
     const { stdout } = await runGit(projectPath, ['checkout', branch]);
     return { success: true, output: stdout };
   }
 
-  async function createBranch({ projectPath, branch }) {
+  async function createBranch({ projectPath, branch }: BranchOptions): Promise<unknown> {
     const { stdout } = await runGit(projectPath, ['checkout', '-b', branch]);
     return { success: true, output: stdout };
   }
 
-  async function getCommits({ projectPath, limit }) {
+  async function getCommits({ projectPath, limit }: CommitListOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
     const parsedLimit = Number.parseInt(String(limit), 10);
     const safeLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
@@ -865,7 +1204,7 @@ export function createGitService({ agents, classifyGitError }) {
       'log', '--pretty=format:%H|%an|%ae|%ad|%s', '--date=relative', '-n', String(safeLimit),
     ]);
 
-    const commits = stdout
+    const commits: CommitSummary[] = stdout
       .split('\n')
       .filter((line) => line.trim())
       .map((line) => {
@@ -891,7 +1230,7 @@ export function createGitService({ agents, classifyGitError }) {
     return { commits };
   }
 
-  async function getCommitDiff({ projectPath, commit: commitHash }) {
+  async function getCommitDiff({ projectPath, commit: commitHash }: CommitDiffOptions): Promise<unknown> {
     const { stdout } = await runGit(projectPath, ['show', String(commitHash)]);
     return { diff: stdout };
   }
@@ -905,7 +1244,7 @@ export function createGitService({ agents, classifyGitError }) {
     modelEndpointId,
     modelProtocol,
     customPrompt,
-  }) {
+  }: CommitMessageFileOptions): Promise<unknown> {
     if (!Array.isArray(files) || files.length === 0) {
       throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged files to generate a commit message.');
     }
@@ -933,27 +1272,27 @@ export function createGitService({ agents, classifyGitError }) {
       diffContext,
       agentId,
       projectPath,
-      (prompt, opts) => agents.runSingleQuery(prompt, opts),
+      (prompt: string, opts: RunSingleQueryOptions) => agents.runSingleQuery(prompt, opts),
       { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt },
     );
     return { message };
   }
 
-  async function getRemoteStatus({ projectPath }) {
+  async function getRemoteStatus({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const { stdout: currentBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const branch = currentBranch.trim();
 
-    let trackingBranch;
-    let remoteName;
+    let trackingBranch: string;
+    let remoteName: string;
     try {
       const { stdout } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`]);
       trackingBranch = stdout.trim();
       remoteName = trackingBranch.split('/')[0];
     } catch {
       let hasRemote = false;
-      let foundRemoteName = null;
+      let foundRemoteName: string | null = null;
       try {
         const { stdout } = await runGit(projectPath, ['remote']);
         const remotes = stdout.trim().split('\n').filter((r) => r.trim());
@@ -987,7 +1326,7 @@ export function createGitService({ agents, classifyGitError }) {
     };
   }
 
-  async function fetch({ projectPath }) {
+  async function fetch({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const { stdout: fetchBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -1005,7 +1344,7 @@ export function createGitService({ agents, classifyGitError }) {
     return { success: true, output: stdout || 'Fetch completed successfully', remoteName };
   }
 
-  async function pull({ projectPath }) {
+  async function pull({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const { stdout: pullBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -1032,11 +1371,11 @@ export function createGitService({ agents, classifyGitError }) {
   }
 
   // Returns list of configured remotes with their fetch URLs.
-  async function getRemotes({ projectPath }) {
+  async function getRemotes({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const { stdout } = await runGit(projectPath, ['remote', '-v']);
-    const seen = new Map();
+    const seen = new Map<string, RemoteInfo>();
     for (const line of stdout.trim().split('\n')) {
       if (!line.trim()) continue;
       const parts = line.split(/\s+/);
@@ -1048,7 +1387,7 @@ export function createGitService({ agents, classifyGitError }) {
   }
 
   // Pushes to a specific remote. Never sets upstream tracking.
-  async function push({ projectPath, remote, remoteBranch }) {
+  async function push({ projectPath, remote, remoteBranch }: PushOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const { stdout: headBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -1065,7 +1404,7 @@ export function createGitService({ agents, classifyGitError }) {
     };
   }
 
-  async function discard({ projectPath, file }) {
+  async function discard({ projectPath, file }: FileOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
@@ -1091,7 +1430,7 @@ export function createGitService({ agents, classifyGitError }) {
     return { success: true, message: `Changes discarded for ${file}` };
   }
 
-  async function deleteUntracked({ projectPath, file }) {
+  async function deleteUntracked({ projectPath, file }: FileOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
@@ -1115,13 +1454,13 @@ export function createGitService({ agents, classifyGitError }) {
     return { success: true, message: `Untracked file ${file} deleted successfully` };
   }
 
-  async function getSingleFileStatus(projectPath, file) {
+  async function getSingleFileStatus(projectPath: string, file: string): Promise<PorcelainStatusEntry> {
     const { stdout } = await runGit(projectPath, ['status', '--porcelain=v1', '-z', '--', file]);
     const [entry] = parsePorcelainV1Z(stdout);
     return entry || { path: file, indexStatus: ' ', workTreeStatus: ' ' };
   }
 
-  async function readHeadBlob(projectPath, file) {
+  async function readHeadBlob(projectPath: string, file: string): Promise<string> {
     try {
       const { stdout } = await runGit(projectPath, ['show', `HEAD:${file}`]);
       return stdout;
@@ -1130,7 +1469,7 @@ export function createGitService({ agents, classifyGitError }) {
     }
   }
 
-  async function readIndexBlob(projectPath, file) {
+  async function readIndexBlob(projectPath: string, file: string): Promise<string | null> {
     try {
       const { stdout } = await runGit(projectPath, ['show', `:${file}`]);
       return stdout;
@@ -1139,7 +1478,7 @@ export function createGitService({ agents, classifyGitError }) {
     }
   }
 
-  async function getFileReviewData({ projectPath, file, mode = 'working', context }) {
+  async function getFileReviewData({ projectPath, file, mode = 'working', context = 5 }: FileReviewOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const effectiveMode = mode === 'staged' ? 'staged' : 'working';
@@ -1150,7 +1489,7 @@ export function createGitService({ agents, classifyGitError }) {
       ? statusEntry.indexStatus === 'D'
       : statusEntry.workTreeStatus === 'D';
 
-    let filePath = null;
+    let filePath: string | null = null;
     if (!isDeleted) {
       try {
         filePath = resolvePathWithinProject(projectPath, file);
@@ -1189,8 +1528,8 @@ export function createGitService({ agents, classifyGitError }) {
       }
     }
 
-    let contentBefore = null;
-    let contentAfter = null;
+    let contentBefore: string | null = null;
+    let contentAfter: string | null = null;
     let diffText = '';
 
     if (effectiveMode === 'staged') {
@@ -1249,7 +1588,7 @@ export function createGitService({ agents, classifyGitError }) {
     };
   }
 
-  async function getChangesTree({ projectPath }) {
+  async function getChangesTree({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     let hasCommits = true;
@@ -1264,8 +1603,8 @@ export function createGitService({ agents, classifyGitError }) {
       return { root: [], hasCommits };
     }
 
-    let workingStats = {};
-    let cachedStats = {};
+    let workingStats: NumstatMap = {};
+    let cachedStats: NumstatMap = {};
     try {
       const { stdout } = await runGit(projectPath, ['diff', '--numstat']);
       workingStats = parseNumstatBulk(stdout);
@@ -1278,7 +1617,7 @@ export function createGitService({ agents, classifyGitError }) {
     const entries = parsePorcelainV1Z(statusOutput)
       .map((entry) => buildChangeEntry(entry, workingStats, cachedStats))
       .filter((entry) => entry.path);
-    const rootMap = new Map();
+    const rootMap: TreeMap = new Map();
 
     for (const entry of entries) {
       const segments = entry.path.split('/').filter(Boolean);
@@ -1317,7 +1656,8 @@ export function createGitService({ agents, classifyGitError }) {
         }
 
         const node = currentLevel.get(segment);
-        if (!isLastSegment && node.kind === 'directory') {
+        if (!node) continue;
+        if (!isLastSegment && node.kind === 'directory' && node.children instanceof Map) {
           if (entry.stagedFacet) {
             node.staged = true;
             node.stagedFacet = node.stagedFacet || entry.stagedFacet;
@@ -1337,10 +1677,10 @@ export function createGitService({ agents, classifyGitError }) {
       }
     }
 
-    function mapToArray(map) {
-      const result = [];
+    function mapToArray(map: TreeMap): TreeNode[] {
+      const result: TreeNode[] = [];
       for (const [, node] of map) {
-        const entry = { ...node };
+        const entry: TreeNode = { ...node };
         if (entry.children instanceof Map) {
           entry.children = mapToArray(entry.children);
         }
@@ -1373,7 +1713,13 @@ export function createGitService({ agents, classifyGitError }) {
   // For untracked files, intent-to-add (`git add -N`) creates an empty
   // index entry first so `git diff` can produce a usable patch. On
   // failure, the intent-to-add is rolled back.
-  async function stageSelection({ projectPath, file, mode, selection, contextLines = 5 }) {
+  async function stageSelection({
+    projectPath,
+    file,
+    mode,
+    selection,
+    contextLines = 5,
+  }: StageSelectionOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const reverse = mode === 'unstage';
@@ -1442,7 +1788,13 @@ export function createGitService({ agents, classifyGitError }) {
   // Stages or unstages a single hunk by its index. The hunk index refers
   // to the diff the frontend tab displayed (unstaged tab = `git diff`,
   // staged tab = `git diff --cached`).
-  async function stageHunk({ projectPath, file, mode, hunkIndex, contextLines = 5 }) {
+  async function stageHunk({
+    projectPath,
+    file,
+    mode,
+    hunkIndex,
+    contextLines = 5,
+  }: StageHunkOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const isUnstage = mode === 'unstage';
@@ -1484,7 +1836,7 @@ export function createGitService({ agents, classifyGitError }) {
 
   // Lightweight git capability probe. Reports whether a path is inside a
   // git repository and, if so, the repository root and current worktree path.
-  async function getRepoInfo({ projectPath }) {
+  async function getRepoInfo({ projectPath }: ProjectOptions): Promise<RepoInfo> {
     try {
       await fs.access(projectPath);
     } catch {
@@ -1507,12 +1859,12 @@ export function createGitService({ agents, classifyGitError }) {
     }
   }
 
-  async function getWorktrees({ projectPath }) {
+  async function getWorktrees({ projectPath }: ProjectOptions): Promise<{ worktrees: WorktreeInfo[] }> {
     await assertGitRepository(projectPath);
 
     const { stdout } = await runGit(projectPath, ['worktree', 'list', '--porcelain']);
-    const worktrees = [];
-    let current = null;
+    const worktrees: WorktreeInfo[] = [];
+    let current: WorktreeInfo | null = null;
 
     for (const line of stdout.split('\n')) {
       if (line.startsWith('worktree ')) {
@@ -1550,15 +1902,15 @@ export function createGitService({ agents, classifyGitError }) {
     return { worktrees };
   }
 
-  async function getTargetCandidates({ projectPath }) {
+  async function getTargetCandidates({ projectPath }: ProjectOptions): Promise<{ targets: TargetCandidate[] }> {
     await assertGitRepository(projectPath);
 
     const repoInfo = await getRepoInfo({ projectPath });
     const { worktrees } = await getWorktrees({ projectPath });
-    const targets = [];
-    const seen = new Set();
+    const targets: TargetCandidate[] = [];
+    const seen = new Set<string>();
 
-    function addTarget(target) {
+    function addTarget(target: TargetCandidate): void {
       if (!target.worktreePath || seen.has(target.worktreePath)) return;
       seen.add(target.worktreePath);
       targets.push(target);
@@ -1591,8 +1943,8 @@ export function createGitService({ agents, classifyGitError }) {
     return { targets };
   }
 
-  async function mapWithConcurrency(items, limit, worker) {
-    const executing = new Set();
+  async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+    const executing = new Set<Promise<void>>();
     for (const item of items) {
       const promise = Promise.resolve().then(() => worker(item));
       executing.add(promise);
@@ -1602,8 +1954,13 @@ export function createGitService({ agents, classifyGitError }) {
     await Promise.all(executing);
   }
 
-  async function getFileReviewDataBatch({ projectPath, files, mode, context }) {
-    const result = { files: {}, errors: {} };
+  async function getFileReviewDataBatch({
+    projectPath,
+    files,
+    mode,
+    context,
+  }: BatchFileReviewOptions): Promise<BatchReviewResult> {
+    const result: BatchReviewResult = { files: {}, errors: {} };
     await mapWithConcurrency(files, 4, async (file) => {
       try {
         result.files[file] = await getFileReviewData({ projectPath, file, mode, context });
@@ -1614,10 +1971,16 @@ export function createGitService({ agents, classifyGitError }) {
     return result;
   }
 
-  async function createWorktree({ projectPath, baseRef, worktreePath, branch, detach }) {
+  async function createWorktree({
+    projectPath,
+    baseRef,
+    worktreePath,
+    branch,
+    detach,
+  }: CreateWorktreeOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const args = ['worktree', 'add'];
+    const args: string[] = ['worktree', 'add'];
     if (detach) {
       args.push('--detach', worktreePath);
       if (baseRef) args.push(baseRef);
@@ -1643,10 +2006,10 @@ export function createGitService({ agents, classifyGitError }) {
     return { success: true, output: stdout || 'Worktree created', worktreePath: resolvedPath };
   }
 
-  async function removeWorktree({ projectPath, worktreePath, force }) {
+  async function removeWorktree({ projectPath, worktreePath, force }: RemoveWorktreeOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const args = ['worktree', 'remove'];
+    const args: string[] = ['worktree', 'remove'];
     if (force) args.push('--force');
     args.push(worktreePath);
 
@@ -1654,13 +2017,13 @@ export function createGitService({ agents, classifyGitError }) {
     return { success: true, output: stdout || 'Worktree removed' };
   }
 
-  async function commitIndex({ projectPath, message }) {
+  async function commitIndex({ projectPath, message }: CommitIndexOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
     const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
     return { success: true, output: stdout };
   }
 
-  async function stageFile({ projectPath, file, mode }) {
+  async function stageFile({ projectPath, file, mode }: StageFileOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
     resolvePathWithinProject(projectPath, file);
 
@@ -1672,7 +2035,7 @@ export function createGitService({ agents, classifyGitError }) {
     return { success: true };
   }
 
-  async function revertLastCommit({ projectPath, strategy }) {
+  async function revertLastCommit({ projectPath, strategy }: RevertLastCommitOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     try {
@@ -1694,12 +2057,12 @@ export function createGitService({ agents, classifyGitError }) {
   // Maps a thrown error to an HTTP Response. GitDomainError instances
   // use their code for status selection; all other errors pass through
   // the classifier. Logs the error so route handlers stay minimal.
-  function toHttpError(error) {
+  function toHttpError(error: unknown): Response {
     console.error('[git]', error);
 
     if (error instanceof GitDomainError) {
       const code = error.code;
-      if (COMMIT_MESSAGE_ERROR_MAP[code]) {
+      if (isCommitMessageErrorCode(code)) {
         const entry = COMMIT_MESSAGE_ERROR_MAP[code];
         return Response.json(
           { error: error.message, errorCode: entry.errorCode },
@@ -1713,7 +2076,7 @@ export function createGitService({ agents, classifyGitError }) {
     }
 
     const classified = classifyGitError(error);
-    const body = { error: classified.message };
+    const body: { error: string; details?: unknown } = { error: classified.message };
     if (classified.details) body.details = classified.details;
     return Response.json(body, { status: classified.status });
   }
