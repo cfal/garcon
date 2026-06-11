@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { promises as fs } from 'fs';
 import {
+  normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
@@ -120,6 +121,7 @@ export async function forkChatFileCopy({
     permissionMode: normalizePermissionMode(sourceSession.permissionMode),
     thinkingMode: normalizeThinkingMode(sourceSession.thinkingMode),
     claudeThinkingMode: normalizeClaudeThinkingMode(sourceSession.claudeThinkingMode),
+    ampAgentMode: normalizeAmpAgentMode(sourceSession.ampAgentMode),
   });
 
   if (!created) {
