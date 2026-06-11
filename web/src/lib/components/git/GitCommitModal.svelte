@@ -42,25 +42,35 @@
 
 	let totalAdditions = $derived(stagedFiles.reduce((sum, f) => sum + (f.additions ?? 0), 0));
 	let totalDeletions = $derived(stagedFiles.reduce((sum, f) => sum + (f.deletions ?? 0), 0));
-	let canCommit = $derived(commitMessage.trim().length > 0 && stagedFiles.length > 0 && !isCommitting);
+	let canCommit = $derived(
+		commitMessage.trim().length > 0 && stagedFiles.length > 0 && !isCommitting,
+	);
 
 	function changeIcon(kind: GitTreeNode['changeKind']) {
 		switch (kind) {
 			case 'added':
-			case 'untracked': return FilePlus;
-			case 'deleted': return FileMinus;
-			case 'modified': return FileEdit;
-			default: return FileQuestion;
+			case 'untracked':
+				return FilePlus;
+			case 'deleted':
+				return FileMinus;
+			case 'modified':
+				return FileEdit;
+			default:
+				return FileQuestion;
 		}
 	}
 
 	function changeColor(kind: GitTreeNode['changeKind']): string {
 		switch (kind) {
 			case 'added':
-			case 'untracked': return 'text-git-added';
-			case 'deleted': return 'text-git-deleted';
-			case 'modified': return 'text-git-modified';
-			default: return 'text-muted-foreground';
+			case 'untracked':
+				return 'text-git-added';
+			case 'deleted':
+				return 'text-git-deleted';
+			case 'modified':
+				return 'text-git-modified';
+			default:
+				return 'text-muted-foreground';
 		}
 	}
 
@@ -93,8 +103,10 @@
 	onclick={handleBackdropClick}
 	onkeydown={handleKeydown}
 >
-	<div class="bg-background border border-border rounded-lg shadow-xl flex flex-col
-		{isMobile ? 'w-full h-full rounded-none' : 'w-[480px] max-h-[80vh]'}">
+	<div
+		class="bg-background border border-border rounded-lg shadow-xl flex flex-col
+		{isMobile ? 'w-full h-full rounded-none' : 'w-[480px] max-h-[80vh]'}"
+	>
 		<!-- Header -->
 		<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
 			<div class="flex items-center gap-2">
@@ -154,8 +166,8 @@
 					disabled={!canCommit}
 					class="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors
 						{canCommit
-							? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
-							: 'bg-muted text-muted-foreground cursor-not-allowed'}"
+						? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
+						: 'bg-muted text-muted-foreground cursor-not-allowed'}"
 				>
 					{#if isCommitting}
 						<LoaderCircle class="w-3.5 h-3.5 animate-spin" />
@@ -178,7 +190,10 @@
 					</button>
 				{/if}
 			</div>
-			<p class="text-[10px] text-muted-foreground">{isMobile ? 'Tap' : 'Press'} {isMobile ? 'Commit' : '\u2318/Ctrl+Enter'} to commit</p>
+			<p class="text-[10px] text-muted-foreground">
+				{isMobile ? 'Tap' : 'Press'}
+				{isMobile ? 'Commit' : '\u2318/Ctrl+Enter'} to commit
+			</p>
 		</div>
 	</div>
 </div>

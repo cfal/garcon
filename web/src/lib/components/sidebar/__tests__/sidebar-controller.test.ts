@@ -31,7 +31,11 @@ describe('SidebarController', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		quietRefresh = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
-		deps = { get onQuietRefresh() { return quietRefresh; } };
+		deps = {
+			get onQuietRefresh() {
+				return quietRefresh;
+			},
+		};
 		controller = new SidebarController(deps);
 	});
 
@@ -64,30 +68,30 @@ describe('SidebarController', () => {
 	});
 
 	describe('quickMove', () => {
-			it('passes an above neighbor and refreshes', async () => {
-				mockReorderQuick.mockResolvedValue({ success: true });
+		it('passes an above neighbor and refreshes', async () => {
+			mockReorderQuick.mockResolvedValue({ success: true });
 
-				await controller.quickMove('c-2', { chatIdAbove: 'c-1' });
+			await controller.quickMove('c-2', { chatIdAbove: 'c-1' });
 
-				expect(mockReorderQuick).toHaveBeenCalledWith({
-					chatId: 'c-2',
-					chatIdAbove: 'c-1',
-				});
-				expect(quietRefresh).toHaveBeenCalledOnce();
+			expect(mockReorderQuick).toHaveBeenCalledWith({
+				chatId: 'c-2',
+				chatIdAbove: 'c-1',
 			});
-
-			it('passes a below neighbor and refreshes', async () => {
-				mockReorderQuick.mockResolvedValue({ success: true });
-
-				await controller.quickMove('c-2', { chatIdBelow: 'c-3' });
-
-				expect(mockReorderQuick).toHaveBeenCalledWith({
-					chatId: 'c-2',
-					chatIdBelow: 'c-3',
-				});
-				expect(quietRefresh).toHaveBeenCalledOnce();
-			});
+			expect(quietRefresh).toHaveBeenCalledOnce();
 		});
+
+		it('passes a below neighbor and refreshes', async () => {
+			mockReorderQuick.mockResolvedValue({ success: true });
+
+			await controller.quickMove('c-2', { chatIdBelow: 'c-3' });
+
+			expect(mockReorderQuick).toHaveBeenCalledWith({
+				chatId: 'c-2',
+				chatIdBelow: 'c-3',
+			});
+			expect(quietRefresh).toHaveBeenCalledOnce();
+		});
+	});
 
 	describe('loadDetails', () => {
 		it('returns chat details from API', async () => {
@@ -118,9 +122,7 @@ describe('SidebarController', () => {
 
 			const result = await controller.forkChat('c-1');
 
-			expect(mockForkChat).toHaveBeenCalledWith(
-				expect.objectContaining({ sourceChatId: 'c-1' }),
-			);
+			expect(mockForkChat).toHaveBeenCalledWith(expect.objectContaining({ sourceChatId: 'c-1' }));
 			expect(quietRefresh).toHaveBeenCalledOnce();
 			expect(result).toBe('c-fork');
 		});

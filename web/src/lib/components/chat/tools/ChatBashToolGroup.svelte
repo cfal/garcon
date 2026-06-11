@@ -1,29 +1,29 @@
 <script lang="ts">
-	import type { BashToolUseMessage } from '$shared/chat-types'
-	import ChatEventCard from '../rows/ChatEventCard.svelte'
-	import { copyToClipboard } from '$lib/utils/clipboard'
-	import Copy from '@lucide/svelte/icons/copy'
-	import Check from '@lucide/svelte/icons/check'
+	import type { BashToolUseMessage } from '$shared/chat-types';
+	import ChatEventCard from '../rows/ChatEventCard.svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
+	import Copy from '@lucide/svelte/icons/copy';
+	import Check from '@lucide/svelte/icons/check';
 
 	interface Props {
-		messages: BashToolUseMessage[]
+		messages: BashToolUseMessage[];
 	}
 
-	let { messages }: Props = $props()
+	let { messages }: Props = $props();
 
-	let copied = $state(false)
-	const commandCount = $derived(messages.length)
-	const commandLabel = $derived(`${commandCount} ${commandCount === 1 ? 'command' : 'commands'}`)
-	const combinedCommands = $derived(messages.map((message) => message.command).join('\n'))
+	let copied = $state(false);
+	const commandCount = $derived(messages.length);
+	const commandLabel = $derived(`${commandCount} ${commandCount === 1 ? 'command' : 'commands'}`);
+	const combinedCommands = $derived(messages.map((message) => message.command).join('\n'));
 
 	async function copyCommands() {
-		if (!combinedCommands) return
-		const didCopy = await copyToClipboard(combinedCommands)
-		if (!didCopy) return
-		copied = true
+		if (!combinedCommands) return;
+		const didCopy = await copyToClipboard(combinedCommands);
+		if (!didCopy) return;
+		copied = true;
 		setTimeout(() => {
-			copied = false
-		}, 2000)
+			copied = false;
+		}, 2000);
 	}
 </script>
 

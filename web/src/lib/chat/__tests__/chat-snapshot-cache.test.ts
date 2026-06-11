@@ -42,7 +42,18 @@ describe('LocalChatSnapshotCache', () => {
 
 	it('removes snapshot on invalid envelope JSON', () => {
 		localStorage.setItem(snapshotKey('chat-1'), '{not valid json');
-		const index = { version: 1, entries: [{ chatId: 'chat-1', lastAccessedAt: '2024-01-01T00:00:00Z', lastValidatedAt: null, schemaVersion: 1, stale: false }] };
+		const index = {
+			version: 1,
+			entries: [
+				{
+					chatId: 'chat-1',
+					lastAccessedAt: '2024-01-01T00:00:00Z',
+					lastValidatedAt: null,
+					schemaVersion: 1,
+					stale: false,
+				},
+			],
+		};
 		localStorage.setItem(INDEX_KEY, JSON.stringify(index));
 
 		const restored = cache.restore('chat-1');
@@ -51,7 +62,12 @@ describe('LocalChatSnapshotCache', () => {
 	});
 
 	it('removes snapshot on schema version mismatch', () => {
-		const envelope = { version: 99, chatId: 'chat-1', savedAt: '2024-01-01T00:00:00Z', messages: [] };
+		const envelope = {
+			version: 99,
+			chatId: 'chat-1',
+			savedAt: '2024-01-01T00:00:00Z',
+			messages: [],
+		};
 		localStorage.setItem(snapshotKey('chat-1'), JSON.stringify(envelope));
 
 		const restored = cache.restore('chat-1');
@@ -59,7 +75,12 @@ describe('LocalChatSnapshotCache', () => {
 	});
 
 	it('removes snapshot when chatId in envelope does not match', () => {
-		const envelope = { version: 1, chatId: 'chat-wrong', savedAt: '2024-01-01T00:00:00Z', messages: [] };
+		const envelope = {
+			version: 1,
+			chatId: 'chat-wrong',
+			savedAt: '2024-01-01T00:00:00Z',
+			messages: [],
+		};
 		localStorage.setItem(snapshotKey('chat-1'), JSON.stringify(envelope));
 
 		const restored = cache.restore('chat-1');
@@ -70,14 +91,20 @@ describe('LocalChatSnapshotCache', () => {
 		cache.persist('chat-1', [msg('hello')]);
 
 		const indexBefore = JSON.parse(localStorage.getItem(INDEX_KEY)!);
-		const accessBefore = indexBefore.entries.find((e: { chatId: string }) => e.chatId === 'chat-1').lastAccessedAt;
+		const accessBefore = indexBefore.entries.find(
+			(e: { chatId: string }) => e.chatId === 'chat-1',
+		).lastAccessedAt;
 
 		// Small delay so timestamps differ.
 		cache.restore('chat-1');
 
 		const indexAfter = JSON.parse(localStorage.getItem(INDEX_KEY)!);
-		const accessAfter = indexAfter.entries.find((e: { chatId: string }) => e.chatId === 'chat-1').lastAccessedAt;
-		expect(new Date(accessAfter).getTime()).toBeGreaterThanOrEqual(new Date(accessBefore).getTime());
+		const accessAfter = indexAfter.entries.find(
+			(e: { chatId: string }) => e.chatId === 'chat-1',
+		).lastAccessedAt;
+		expect(new Date(accessAfter).getTime()).toBeGreaterThanOrEqual(
+			new Date(accessBefore).getTime(),
+		);
 	});
 
 	it('preserves stale bit on restore', () => {

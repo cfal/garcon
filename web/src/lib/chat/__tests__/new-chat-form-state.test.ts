@@ -4,11 +4,11 @@ import * as chatsApi from '$lib/api/chats';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 vi.mock('$lib/api/files', () => ({
-	browseDirectory: vi.fn()
+	browseDirectory: vi.fn(),
 }));
 
 vi.mock('$lib/api/chats', () => ({
-	validateStart: vi.fn()
+	validateStart: vi.fn(),
 }));
 
 function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSettingsSnapshot {
@@ -26,22 +26,22 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 		lastModelProtocol: null,
 		lastPermissionMode: 'default',
 		lastThinkingMode: 'none',
-			lastClaudeThinkingMode: 'auto',
-			lastAmpAgentMode: 'smart',
-			projectBasePath: '/workspace',
-			telegram: {
-				botTokenAvailable: false,
-				botUsername: null,
-				botFirstName: null,
-				recipientUsername: null,
-				recipientDisplayName: null,
-				recipientLinked: false,
-				pendingLink: false,
-				linkUrl: null,
-			},
-			...overrides,
-		};
-	}
+		lastClaudeThinkingMode: 'auto',
+		lastAmpAgentMode: 'smart',
+		projectBasePath: '/workspace',
+		telegram: {
+			botTokenAvailable: false,
+			botUsername: null,
+			botFirstName: null,
+			recipientUsername: null,
+			recipientDisplayName: null,
+			recipientLinked: false,
+			pendingLink: false,
+			linkUrl: null,
+		},
+		...overrides,
+	};
+}
 
 function makeMockRemoteSettings(snap?: RemoteSettingsSnapshot) {
 	const store = {
@@ -50,7 +50,9 @@ function makeMockRemoteSettings(snap?: RemoteSettingsSnapshot) {
 		error: null,
 		snapshot: snap ?? null,
 		loadedAt: snap ? Date.now() : null,
-		get hasSnapshot() { return this.snapshot !== null; },
+		get hasSnapshot() {
+			return this.snapshot !== null;
+		},
 		ensureLoaded: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		refresh: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		update: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
@@ -59,68 +61,68 @@ function makeMockRemoteSettings(snap?: RemoteSettingsSnapshot) {
 	return store;
 }
 
-const mockAppShell = {
-	onNewChatDialogSeed: vi.fn().mockReturnValue(() => {}),
-	projectBasePath: '/',
-};
 const mockModelCatalog = {
-		agentMetadata: {
-			claude: { label: 'Claude' },
-			codex: { label: 'Codex' },
-			'direct-anthropic-compatible': { label: 'Direct (Anthropic)' },
-			'direct-openai-compatible': { label: 'Direct (Chat Completions)' },
-		},
-		getAgents: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
-		getSelectableAgents: vi.fn(() => [
-			'claude',
-			'codex',
-			'direct-anthropic-compatible',
-			'direct-openai-compatible'
-		]),
-		getDefaultModel: vi.fn((agentId: string) => {
-			if (agentId === 'claude') return 'opus';
-			if (agentId === 'codex') return 'gpt-5.4';
-			if (agentId === 'direct-anthropic-compatible') return 'acme_anthropic:acme-sonnet';
-			if (agentId === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
-			return '';
-		}),
+	agentMetadata: {
+		claude: { label: 'Claude' },
+		codex: { label: 'Codex' },
+		'direct-anthropic-compatible': { label: 'Direct (Anthropic)' },
+		'direct-openai-compatible': { label: 'Direct (Chat Completions)' },
+	},
+	getAgents: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
+	getSelectableAgents: vi.fn(() => [
+		'claude',
+		'codex',
+		'direct-anthropic-compatible',
+		'direct-openai-compatible',
+	]),
+	getDefaultModel: vi.fn((agentId: string) => {
+		if (agentId === 'claude') return 'opus';
+		if (agentId === 'codex') return 'gpt-5.4';
+		if (agentId === 'direct-anthropic-compatible') return 'acme_anthropic:acme-sonnet';
+		if (agentId === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
+		return '';
+	}),
 	getModels: vi.fn((agentId: string) => {
 		if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
-			if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
-			if (agentId === 'direct-anthropic-compatible') {
-				return [{
+		if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
+		if (agentId === 'direct-anthropic-compatible') {
+			return [
+				{
 					value: 'acme_anthropic:acme-sonnet',
 					label: 'Acme: Acme Sonnet',
 					rawModel: 'acme-sonnet',
 					apiProviderId: 'acme',
 					endpointId: 'acme_anthropic',
 					protocol: 'anthropic-messages',
-				}];
-			}
-			if (agentId === 'direct-openai-compatible') {
-				return [{
+				},
+			];
+		}
+		if (agentId === 'direct-openai-compatible') {
+			return [
+				{
 					value: 'zai_openai:glm-5.1',
-				label: 'Z.AI: GLM-5.1',
-				rawModel: 'glm-5.1',
-				apiProviderId: 'zai',
-				endpointId: 'zai_openai',
-				protocol: 'openai-compatible',
-			}];
+					label: 'Z.AI: GLM-5.1',
+					rawModel: 'glm-5.1',
+					apiProviderId: 'zai',
+					endpointId: 'zai_openai',
+					protocol: 'openai-compatible',
+				},
+			];
 		}
 		return [];
-		}),
-		selectionFor: vi.fn((agentId: string, model: string) => {
-			if (agentId === 'direct-anthropic-compatible' && model === 'acme_anthropic:acme-sonnet') {
-				return {
-					model: 'acme-sonnet',
-					apiProviderId: 'acme',
-					modelEndpointId: 'acme_anthropic',
-					modelProtocol: 'anthropic-messages',
-				};
-			}
-			if (agentId === 'direct-openai-compatible' && model === 'zai_openai:glm-5.1') {
-				return {
-					model: 'glm-5.1',
+	}),
+	selectionFor: vi.fn((agentId: string, model: string) => {
+		if (agentId === 'direct-anthropic-compatible' && model === 'acme_anthropic:acme-sonnet') {
+			return {
+				model: 'acme-sonnet',
+				apiProviderId: 'acme',
+				modelEndpointId: 'acme_anthropic',
+				modelProtocol: 'anthropic-messages',
+			};
+		}
+		if (agentId === 'direct-openai-compatible' && model === 'zai_openai:glm-5.1') {
+			return {
+				model: 'glm-5.1',
 				apiProviderId: 'zai',
 				modelEndpointId: 'zai_openai',
 				modelProtocol: 'openai-compatible',
@@ -132,17 +134,25 @@ const mockModelCatalog = {
 			modelEndpointId: null,
 			modelProtocol: null,
 		};
-		}),
-		selectionValueFor: vi.fn((agentId: string, model: string, endpointId?: string | null) => {
-			if (agentId === 'direct-anthropic-compatible' && model === 'acme-sonnet' && endpointId === 'acme_anthropic') {
-				return 'acme_anthropic:acme-sonnet';
-			}
-			if (agentId === 'direct-openai-compatible' && model === 'glm-5.1' && endpointId === 'zai_openai') {
-				return 'zai_openai:glm-5.1';
-			}
+	}),
+	selectionValueFor: vi.fn((agentId: string, model: string, endpointId?: string | null) => {
+		if (
+			agentId === 'direct-anthropic-compatible' &&
+			model === 'acme-sonnet' &&
+			endpointId === 'acme_anthropic'
+		) {
+			return 'acme_anthropic:acme-sonnet';
+		}
+		if (
+			agentId === 'direct-openai-compatible' &&
+			model === 'glm-5.1' &&
+			endpointId === 'zai_openai'
+		) {
+			return 'zai_openai:glm-5.1';
+		}
 		return model;
 	}),
-	refreshIfStale: vi.fn().mockResolvedValue(undefined)
+	refreshIfStale: vi.fn().mockResolvedValue(undefined),
 };
 
 describe('NewChatFormState', () => {
@@ -155,10 +165,10 @@ describe('NewChatFormState', () => {
 			'claude',
 			'codex',
 			'direct-anthropic-compatible',
-			'direct-openai-compatible'
+			'direct-openai-compatible',
 		]);
 		mockRemoteSettings = makeMockRemoteSettings();
-		formState = new NewChatFormState(mockAppShell as any, mockModelCatalog as any, mockRemoteSettings as any);
+		formState = new NewChatFormState(mockModelCatalog as any, mockRemoteSettings as any);
 	});
 
 	it('initializes with default values', () => {
@@ -168,14 +178,16 @@ describe('NewChatFormState', () => {
 	});
 
 	it('loads startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
-			lastAgentId: 'codex',
-			lastProjectPath: '/workspace/project',
-			lastModel: 'gpt-5.4',
-			lastPermissionMode: 'acceptEdits',
-			lastThinkingMode: 'think-hard',
-			lastClaudeThinkingMode: 'off',
-		}));
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				lastAgentId: 'codex',
+				lastProjectPath: '/workspace/project',
+				lastModel: 'gpt-5.4',
+				lastPermissionMode: 'acceptEdits',
+				lastThinkingMode: 'think-hard',
+				lastClaudeThinkingMode: 'off',
+			}),
+		);
 
 		await formState.loadSettingsAndModels();
 
@@ -189,14 +201,16 @@ describe('NewChatFormState', () => {
 	});
 
 	it('loads API provider startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
-			lastAgentId: 'direct-openai-compatible',
-			lastProjectPath: '/workspace/project',
-			lastModel: 'glm-5.1',
-			lastApiProviderId: 'zai',
-			lastModelEndpointId: 'zai_openai',
-			lastModelProtocol: 'openai-compatible',
-		}));
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				lastAgentId: 'direct-openai-compatible',
+				lastProjectPath: '/workspace/project',
+				lastModel: 'glm-5.1',
+				lastApiProviderId: 'zai',
+				lastModelEndpointId: 'zai_openai',
+				lastModelProtocol: 'openai-compatible',
+			}),
+		);
 
 		await formState.loadSettingsAndModels();
 
@@ -205,14 +219,16 @@ describe('NewChatFormState', () => {
 	});
 
 	it('loads Direct Anthropic startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
-			lastAgentId: 'direct-anthropic-compatible',
-			lastProjectPath: '/workspace/project',
-			lastModel: 'acme-sonnet',
-			lastApiProviderId: 'acme',
-			lastModelEndpointId: 'acme_anthropic',
-			lastModelProtocol: 'anthropic-messages',
-		}));
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				lastAgentId: 'direct-anthropic-compatible',
+				lastProjectPath: '/workspace/project',
+				lastModel: 'acme-sonnet',
+				lastApiProviderId: 'acme',
+				lastModelEndpointId: 'acme_anthropic',
+				lastModelProtocol: 'anthropic-messages',
+			}),
+		);
 
 		await formState.loadSettingsAndModels();
 
@@ -222,14 +238,16 @@ describe('NewChatFormState', () => {
 
 	it('falls back when Direct Anthropic has no endpoint models', async () => {
 		mockModelCatalog.getSelectableAgents.mockReturnValue(['claude', 'codex']);
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
-			lastAgentId: 'direct-anthropic-compatible',
-			lastProjectPath: '/workspace/project',
-			lastModel: 'acme-sonnet',
-			lastApiProviderId: 'acme',
-			lastModelEndpointId: 'acme_anthropic',
-			lastModelProtocol: 'anthropic-messages',
-		}));
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				lastAgentId: 'direct-anthropic-compatible',
+				lastProjectPath: '/workspace/project',
+				lastModel: 'acme-sonnet',
+				lastApiProviderId: 'acme',
+				lastModelEndpointId: 'acme_anthropic',
+				lastModelProtocol: 'anthropic-messages',
+			}),
+		);
 
 		await formState.loadSettingsAndModels();
 
@@ -238,11 +256,13 @@ describe('NewChatFormState', () => {
 	});
 
 	it('falls back when startup defaults reference a non-agent API provider id', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
-			lastAgentId: 'zai' as RemoteSettingsSnapshot['lastAgentId'],
-			lastProjectPath: '/workspace/project',
-			lastModel: 'glm-5.1',
-		}));
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				lastAgentId: 'zai' as RemoteSettingsSnapshot['lastAgentId'],
+				lastProjectPath: '/workspace/project',
+				lastModel: 'glm-5.1',
+			}),
+		);
 
 		await formState.loadSettingsAndModels();
 
@@ -251,12 +271,14 @@ describe('NewChatFormState', () => {
 	});
 
 	it('normalizes invalid startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({
-			lastPermissionMode: 'bogus' as any,
-			lastThinkingMode: 'very-hard' as any,
-			lastClaudeThinkingMode: 'sometimes' as any,
-			lastProjectPath: '/workspace/project',
-		}));
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				lastPermissionMode: 'bogus' as any,
+				lastThinkingMode: 'very-hard' as any,
+				lastClaudeThinkingMode: 'sometimes' as any,
+				lastProjectPath: '/workspace/project',
+			}),
+		);
 
 		await formState.loadSettingsAndModels();
 
@@ -284,7 +306,7 @@ describe('NewChatFormState', () => {
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({
 			valid: false,
 			error: 'Path is outside the allowed base directory',
-			errorCode: 'outside_base_dir'
+			errorCode: 'outside_base_dir',
 		});
 
 		formState.projectPath = '/outside';

@@ -10,13 +10,13 @@
 		searchFilter?: string;
 		selectedChatId?: string | null;
 		isMobile?: boolean;
-	onQuickMove?: (
-		list: ChatOrderList,
-		chatId: string,
-		target: ReorderQuickTarget,
-		onSuccess?: () => void,
-		onFailure?: () => void,
-	) => void;
+		onQuickMove?: (
+			list: ChatOrderList,
+			chatId: string,
+			target: ReorderQuickTarget,
+			onSuccess?: () => void,
+			onFailure?: () => void,
+		) => void;
 	}
 
 	let {
@@ -69,8 +69,8 @@
 		onShowDetails={() => {}}
 		onForkChat={() => {}}
 		onShareChat={() => {}}
-			onTogglePinned={() => {}}
-			onToggleArchive={() => {}}
-			{onQuickMove}
-		/>
+		onTogglePinned={() => {}}
+		onToggleArchive={() => {}}
+		{onQuickMove}
+	/>
 </div>

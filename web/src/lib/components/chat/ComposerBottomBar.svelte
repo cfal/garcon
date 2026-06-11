@@ -51,10 +51,10 @@
 	}: Props = $props();
 
 	const activePermission = $derived(
-		permissionOptions.find((option) => option.value === selectedPermission) ?? permissionOptions[0]
+		permissionOptions.find((option) => option.value === selectedPermission) ?? permissionOptions[0],
 	);
 	const activeThinking = $derived(
-		thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0]
+		thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0],
 	);
 </script>
 
@@ -74,7 +74,9 @@
 						<ImagePlus class="mt-0.5 size-4" />
 						<div class="min-w-0">
 							<div class="font-medium">{m.chat_composer_add_image()}</div>
-							<div class="text-xs text-muted-foreground">{m.chat_composer_attach_image_files()}</div>
+							<div class="text-xs text-muted-foreground">
+								{m.chat_composer_attach_image_files()}
+							</div>
 						</div>
 					</DropdownMenuItem>
 				</DropdownMenuContent>
@@ -124,34 +126,36 @@
 				</DropdownMenuContent>
 			</DropdownMenu>
 
-				{#if selectorsSide === 'left' && modelSelector}
-					{@render modelSelector()}
-				{/if}
-			</div>
+			{#if selectorsSide === 'left' && modelSelector}
+				{@render modelSelector()}
+			{/if}
+		</div>
 
-			<div
-				class="flex min-w-0 items-center justify-between gap-2 sm:ml-auto sm:basis-auto sm:justify-end {mobileRightGroupFullRow ? 'order-first sm:order-none' : ''}"
-				class:basis-full={mobileRightGroupFullRow}
+		<div
+			class="flex min-w-0 items-center justify-between gap-2 sm:ml-auto sm:basis-auto sm:justify-end {mobileRightGroupFullRow
+				? 'order-first sm:order-none'
+				: ''}"
+			class:basis-full={mobileRightGroupFullRow}
+		>
+			{#if mobileRightGroupFullRow}
+				<div class="min-w-0 flex-1 sm:flex-none">
+					{#if selectorsSide === 'right' && modelSelector}
+						{@render modelSelector()}
+					{/if}
+				</div>
+			{:else if selectorsSide === 'right' && modelSelector}
+				{@render modelSelector()}
+			{/if}
+
+			<button
+				type="button"
+				onclick={onSend}
+				disabled={!canSend}
+				class="inline-flex size-9 items-center justify-center rounded-full border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed {sendButtonClass}"
+				title={sendTitle}
 			>
-				{#if mobileRightGroupFullRow}
-					<div class="min-w-0 flex-1 sm:flex-none">
-						{#if selectorsSide === 'right' && modelSelector}
-							{@render modelSelector()}
-						{/if}
-					</div>
-				{:else if selectorsSide === 'right' && modelSelector}
-					{@render modelSelector()}
-				{/if}
-
-				<button
-					type="button"
-					onclick={onSend}
-					disabled={!canSend}
-					class="inline-flex size-9 items-center justify-center rounded-full border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed {sendButtonClass}"
-					title={sendTitle}
-				>
-					<Send class="size-4" />
-				</button>
+				<Send class="size-4" />
+			</button>
 		</div>
 	</div>
 </div>

@@ -23,9 +23,7 @@ function withTimeout(options: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Requ
 	const callerSignal = options.signal;
 	return {
 		...options,
-		signal: callerSignal
-			? AbortSignal.any([callerSignal, timeoutSignal])
-			: timeoutSignal,
+		signal: callerSignal ? AbortSignal.any([callerSignal, timeoutSignal]) : timeoutSignal,
 	};
 }
 
@@ -43,13 +41,19 @@ export function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Re
 		defaultHeaders['Authorization'] = `Bearer ${token}`;
 	}
 
-	return fetch(url, withTimeout({
-		...fetchOptions,
-		headers: {
-			...defaultHeaders,
-			...(fetchOptions.headers as Record<string, string>)
-		}
-	}, timeoutMs));
+	return fetch(
+		url,
+		withTimeout(
+			{
+				...fetchOptions,
+				headers: {
+					...defaultHeaders,
+					...(fetchOptions.headers as Record<string, string>),
+				},
+			},
+			timeoutMs,
+		),
+	);
 }
 
 export class ApiError extends Error {
@@ -90,11 +94,15 @@ export async function apiGet<T>(url: string, options?: ApiFetchOptions): Promise
 	return parseResponse<T>(response);
 }
 
-export async function apiPost<T>(url: string, body?: unknown, options?: ApiFetchOptions): Promise<T> {
+export async function apiPost<T>(
+	url: string,
+	body?: unknown,
+	options?: ApiFetchOptions,
+): Promise<T> {
 	const response = await apiFetch(url, {
 		...options,
 		method: 'POST',
-		body: body !== undefined ? JSON.stringify(body) : undefined
+		body: body !== undefined ? JSON.stringify(body) : undefined,
 	});
 	return parseResponse<T>(response);
 }
@@ -103,16 +111,20 @@ export async function apiPut<T>(url: string, body?: unknown, options?: RequestIn
 	const response = await apiFetch(url, {
 		...options,
 		method: 'PUT',
-		body: body !== undefined ? JSON.stringify(body) : undefined
+		body: body !== undefined ? JSON.stringify(body) : undefined,
 	});
 	return parseResponse<T>(response);
 }
 
-export async function apiPatch<T>(url: string, body?: unknown, options?: ApiFetchOptions): Promise<T> {
+export async function apiPatch<T>(
+	url: string,
+	body?: unknown,
+	options?: ApiFetchOptions,
+): Promise<T> {
 	const response = await apiFetch(url, {
 		...options,
 		method: 'PATCH',
-		body: body !== undefined ? JSON.stringify(body) : undefined
+		body: body !== undefined ? JSON.stringify(body) : undefined,
 	});
 	return parseResponse<T>(response);
 }
@@ -121,13 +133,17 @@ export async function apiDelete<T>(url: string, body?: unknown, options?: Reques
 	const response = await apiFetch(url, {
 		...options,
 		method: 'DELETE',
-		body: body !== undefined ? JSON.stringify(body) : undefined
+		body: body !== undefined ? JSON.stringify(body) : undefined,
 	});
 	return parseResponse<T>(response);
 }
 
 /** Sends a POST with FormData body (no JSON.stringify). */
-export async function apiPostForm<T>(url: string, body: FormData, options?: RequestInit): Promise<T> {
+export async function apiPostForm<T>(
+	url: string,
+	body: FormData,
+	options?: RequestInit,
+): Promise<T> {
 	const response = await apiFetch(url, {
 		...options,
 		method: 'POST',

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { handleChatStatus } from '../handlers/chat';
 import { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ChatEventContext } from '../handlers/chat';
@@ -74,7 +74,9 @@ describe('handleChatStatus', () => {
 		// Simulate: start reload for chat-a, then switch to chat-b before resolve.
 		let activeChatId: string | null = 'chat-a';
 		let resolveReload!: (msgs: unknown[]) => void;
-		const loadPromise = new Promise<unknown[]>((resolve) => { resolveReload = resolve; });
+		const loadPromise = new Promise<unknown[]>((resolve) => {
+			resolveReload = resolve;
+		});
 
 		const ctx = makeCtx({
 			getCurrentChatId: () => activeChatId,
@@ -100,7 +102,9 @@ describe('handleChatStatus', () => {
 
 	it('applies reloaded messages when the active chat is still the same', async () => {
 		let resolveReload!: (msgs: unknown[]) => void;
-		const loadPromise = new Promise<unknown[]>((resolve) => { resolveReload = resolve; });
+		const loadPromise = new Promise<unknown[]>((resolve) => {
+			resolveReload = resolve;
+		});
 
 		const ctx = makeCtx({
 			getCurrentChatId: () => 'chat-a',

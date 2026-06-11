@@ -98,31 +98,81 @@
 	</div>
 
 	<!-- Visual feedback layer (pointer-events-none, purely decorative) -->
-	<div class={cn('absolute inset-0 pointer-events-none transition-all duration-200', hoveredZone !== null ? 'bg-background/60 backdrop-blur-[1px]' : 'bg-background/30')}>
+	<div
+		class={cn(
+			'absolute inset-0 pointer-events-none transition-all duration-200',
+			hoveredZone !== null ? 'bg-background/60 backdrop-blur-[1px]' : 'bg-background/30',
+		)}
+	>
 		<!-- Split preview: highlighted half showing where the new pane goes -->
-		<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-all duration-200', previewClass('top'), 'inset-x-3 top-3 bottom-[52%]')}>
+		<div
+			class={cn(
+				'absolute bg-primary/12 border border-primary/30 rounded-lg transition-all duration-200',
+				previewClass('top'),
+				'inset-x-3 top-3 bottom-[52%]',
+			)}
+		>
 			<div class="flex items-center justify-center h-full">
-				<span class="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-md shadow-sm">Top</span>
+				<span
+					class="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-md shadow-sm"
+					>Top</span
+				>
 			</div>
 		</div>
-		<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-all duration-200', previewClass('bottom'), 'inset-x-3 top-[52%] bottom-3')}>
+		<div
+			class={cn(
+				'absolute bg-primary/12 border border-primary/30 rounded-lg transition-all duration-200',
+				previewClass('bottom'),
+				'inset-x-3 top-[52%] bottom-3',
+			)}
+		>
 			<div class="flex items-center justify-center h-full">
-				<span class="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-md shadow-sm">Bottom</span>
+				<span
+					class="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-md shadow-sm"
+					>Bottom</span
+				>
 			</div>
 		</div>
-		<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-all duration-200', previewClass('left'), 'inset-y-3 left-3 right-[52%]')}>
+		<div
+			class={cn(
+				'absolute bg-primary/12 border border-primary/30 rounded-lg transition-all duration-200',
+				previewClass('left'),
+				'inset-y-3 left-3 right-[52%]',
+			)}
+		>
 			<div class="flex items-center justify-center h-full">
-				<span class="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-md shadow-sm">Left</span>
+				<span
+					class="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-md shadow-sm"
+					>Left</span
+				>
 			</div>
 		</div>
-		<div class={cn('absolute bg-primary/12 border border-primary/30 rounded-lg transition-all duration-200', previewClass('right'), 'inset-y-3 left-[52%] right-3')}>
+		<div
+			class={cn(
+				'absolute bg-primary/12 border border-primary/30 rounded-lg transition-all duration-200',
+				previewClass('right'),
+				'inset-y-3 left-[52%] right-3',
+			)}
+		>
 			<div class="flex items-center justify-center h-full">
-				<span class="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-md shadow-sm">Right</span>
+				<span
+					class="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-md shadow-sm"
+					>Right</span
+				>
 			</div>
 		</div>
-		<div class={cn('absolute bg-accent/15 border border-accent/40 rounded-lg transition-all duration-200', previewClass('center'), 'inset-3')}>
+		<div
+			class={cn(
+				'absolute bg-accent/15 border border-accent/40 rounded-lg transition-all duration-200',
+				previewClass('center'),
+				'inset-3',
+			)}
+		>
 			<div class="flex items-center justify-center h-full">
-				<span class="text-[10px] font-medium text-accent-foreground bg-accent/15 px-2 py-0.5 rounded-md shadow-sm">Replace</span>
+				<span
+					class="text-[10px] font-medium text-accent-foreground bg-accent/15 px-2 py-0.5 rounded-md shadow-sm"
+					>Replace</span
+				>
 			</div>
 		</div>
 	</div>

@@ -33,8 +33,18 @@
 		isHeader: boolean;
 		headerText?: string;
 		hunkIndex?: number;
-		left: { kind: 'context' | 'del' | 'empty'; line: number | null; text: string; diffLineIndex: number } | null;
-		right: { kind: 'context' | 'add' | 'empty'; line: number | null; text: string; diffLineIndex: number } | null;
+		left: {
+			kind: 'context' | 'del' | 'empty';
+			line: number | null;
+			text: string;
+			diffLineIndex: number;
+		} | null;
+		right: {
+			kind: 'context' | 'add' | 'empty';
+			line: number | null;
+			text: string;
+			diffLineIndex: number;
+		} | null;
 	}
 
 	interface GitDiffViewerProps {
@@ -55,7 +65,14 @@
 		onUnstageLine?: (target: GitDiffActionTarget, diffLineIndex: number) => void;
 		onAddComment: (side: 'before' | 'after', line: number) => void;
 		comments?: GitReviewCommentDraft[];
-		composerState?: { open: boolean; filePath: string; side: 'before' | 'after'; line: number; body: string; severity: 'note' | 'warning' | 'blocker' } | null;
+		composerState?: {
+			open: boolean;
+			filePath: string;
+			side: 'before' | 'after';
+			line: number;
+			body: string;
+			severity: 'note' | 'warning' | 'blocker';
+		} | null;
 		onComposerBodyChange?: (body: string) => void;
 		onComposerSeverityChange?: (severity: 'note' | 'warning' | 'blocker') => void;
 		onComposerSubmit?: () => void;
@@ -135,30 +152,49 @@
 				diffLineIndex: -1,
 			});
 
-			for (let i = hunk.lineStartIndex; i <= hunk.lineEndIndex && i < reviewData.diffOps.length; i++) {
+			for (
+				let i = hunk.lineStartIndex;
+				i <= hunk.lineEndIndex && i < reviewData.diffOps.length;
+				i++
+			) {
 				const op = reviewData.diffOps[i];
 
 				if (op.type === 'equal') {
 					const bLine = op.before[0];
 					const aLine = op.after[0];
 					result.push({
-						kind: 'context', beforeLine: bLine, afterLine: aLine,
-						beforeText: beforeLines[bLine - 1] ?? '', afterText: afterLines[aLine - 1] ?? '',
-						hunkId: hunk.id, hunkIndex: h, diffLineIndex: diffLineIdx++,
+						kind: 'context',
+						beforeLine: bLine,
+						afterLine: aLine,
+						beforeText: beforeLines[bLine - 1] ?? '',
+						afterText: afterLines[aLine - 1] ?? '',
+						hunkId: hunk.id,
+						hunkIndex: h,
+						diffLineIndex: diffLineIdx++,
 					});
 				} else if (op.type === 'delete') {
 					const bLine = op.before[0];
 					result.push({
-						kind: 'del', beforeLine: bLine, afterLine: null,
-						beforeText: beforeLines[bLine - 1] ?? '', afterText: '',
-						hunkId: hunk.id, hunkIndex: h, diffLineIndex: diffLineIdx++,
+						kind: 'del',
+						beforeLine: bLine,
+						afterLine: null,
+						beforeText: beforeLines[bLine - 1] ?? '',
+						afterText: '',
+						hunkId: hunk.id,
+						hunkIndex: h,
+						diffLineIndex: diffLineIdx++,
 					});
 				} else if (op.type === 'insert') {
 					const aLine = op.after[0];
 					result.push({
-						kind: 'add', beforeLine: null, afterLine: aLine,
-						beforeText: '', afterText: afterLines[aLine - 1] ?? '',
-						hunkId: hunk.id, hunkIndex: h, diffLineIndex: diffLineIdx++,
+						kind: 'add',
+						beforeLine: null,
+						afterLine: aLine,
+						beforeText: '',
+						afterText: afterLines[aLine - 1] ?? '',
+						hunkId: hunk.id,
+						hunkIndex: h,
+						diffLineIndex: diffLineIdx++,
 					});
 				}
 			}
@@ -179,7 +215,13 @@
 
 			if (row.kind === 'hunk-header') {
 				currentHunkIndex = row.hunkIndex;
-				result.push({ isHeader: true, headerText: row.beforeText, hunkIndex: row.hunkIndex, left: null, right: null });
+				result.push({
+					isHeader: true,
+					headerText: row.beforeText,
+					hunkIndex: row.hunkIndex,
+					left: null,
+					right: null,
+				});
 				i++;
 				continue;
 			}
@@ -188,8 +230,18 @@
 				result.push({
 					isHeader: false,
 					hunkIndex: currentHunkIndex,
-					left: { kind: 'context', line: row.beforeLine, text: row.beforeText, diffLineIndex: row.diffLineIndex },
-					right: { kind: 'context', line: row.afterLine, text: row.afterText || row.beforeText, diffLineIndex: row.diffLineIndex },
+					left: {
+						kind: 'context',
+						line: row.beforeLine,
+						text: row.beforeText,
+						diffLineIndex: row.diffLineIndex,
+					},
+					right: {
+						kind: 'context',
+						line: row.afterLine,
+						text: row.afterText || row.beforeText,
+						diffLineIndex: row.diffLineIndex,
+					},
 				});
 				i++;
 				continue;
@@ -216,7 +268,12 @@
 					isHeader: false,
 					hunkIndex: currentHunkIndex,
 					left: d
-						? { kind: 'del', line: d.beforeLine, text: d.beforeText, diffLineIndex: d.diffLineIndex }
+						? {
+								kind: 'del',
+								line: d.beforeLine,
+								text: d.beforeText,
+								diffLineIndex: d.diffLineIndex,
+							}
 						: { kind: 'empty', line: null, text: '', diffLineIndex: -1 },
 					right: a
 						? { kind: 'add', line: a.afterLine, text: a.afterText, diffLineIndex: a.diffLineIndex }
@@ -232,12 +289,24 @@
 		readOnly
 			? []
 			: rows
-				.filter((r) => r.kind === 'add' || r.kind === 'del')
-				.map((r) => makeLineSelectionKey(filePath, activeTab, r.kind === 'del' ? 'before' : 'after', r.diffLineIndex)),
+					.filter((r) => r.kind === 'add' || r.kind === 'del')
+					.map((r) =>
+						makeLineSelectionKey(
+							filePath,
+							activeTab,
+							r.kind === 'del' ? 'before' : 'after',
+							r.diffLineIndex,
+						),
+					),
 	);
 
 	function lineKey(row: RenderedDiffRow): string {
-		return makeLineSelectionKey(filePath, activeTab, row.kind === 'del' ? 'before' : 'after', row.diffLineIndex);
+		return makeLineSelectionKey(
+			filePath,
+			activeTab,
+			row.kind === 'del' ? 'before' : 'after',
+			row.diffLineIndex,
+		);
 	}
 
 	function handleLineClick(e: MouseEvent | KeyboardEvent, row: RenderedDiffRow): void {
@@ -260,10 +329,15 @@
 		}
 	}
 
-	function handleSplitCellClick(e: MouseEvent | KeyboardEvent, side: 'before' | 'after', diffLineIndex: number, kind: string): void {
+	function handleSplitCellClick(
+		e: MouseEvent | KeyboardEvent,
+		side: 'before' | 'after',
+		diffLineIndex: number,
+		kind: string,
+	): void {
 		if (readOnly) return;
 		if (kind !== 'del' && kind !== 'add') return;
-			const key = makeLineSelectionKey(filePath, activeTab, side, diffLineIndex);
+		const key = makeLineSelectionKey(filePath, activeTab, side, diffLineIndex);
 
 		if (e.shiftKey && lastClickedKey) {
 			onSelectLineRange(lastClickedKey, key, allLineKeys);
@@ -273,7 +347,12 @@
 		lastClickedKey = key;
 	}
 
-	function handleSplitCellKeyDown(e: KeyboardEvent, side: 'before' | 'after', diffLineIndex: number, kind: string): void {
+	function handleSplitCellKeyDown(
+		e: KeyboardEvent,
+		side: 'before' | 'after',
+		diffLineIndex: number,
+		kind: string,
+	): void {
 		if (e.key === 'Enter' || e.key === ' ') {
 			e.preventDefault();
 			handleSplitCellClick(e, side, diffLineIndex, kind);
@@ -286,7 +365,11 @@
 		return selectedLineKeys.has(lineKey(row));
 	}
 
-	function isSplitCellSelected(side: 'before' | 'after', diffLineIndex: number, kind: string): boolean {
+	function isSplitCellSelected(
+		side: 'before' | 'after',
+		diffLineIndex: number,
+		kind: string,
+	): boolean {
 		if (readOnly) return false;
 		if (kind !== 'del' && kind !== 'add') return false;
 		return selectedLineKeys.has(makeLineSelectionKey(filePath, activeTab, side, diffLineIndex));
@@ -320,7 +403,9 @@
 		if (row.kind === 'del') return isComposerForCell('before', row.beforeLine);
 		if (row.kind === 'add') return isComposerForCell('after', row.afterLine);
 		if (row.kind === 'context') {
-			return isComposerForCell('before', row.beforeLine) || isComposerForCell('after', row.afterLine);
+			return (
+				isComposerForCell('before', row.beforeLine) || isComposerForCell('after', row.afterLine)
+			);
 		}
 		return false;
 	}
@@ -340,16 +425,21 @@
 	// Collects comments for a split-mode row (both sides)
 	function getSplitRowComments(srow: SplitRow): GitReviewCommentDraft[] {
 		const result: GitReviewCommentDraft[] = [];
-		if (srow.left?.line != null) result.push(...(commentsByLineKey.get(`before:${srow.left.line}`) ?? []));
-		if (srow.right?.line != null) result.push(...(commentsByLineKey.get(`after:${srow.right.line}`) ?? []));
+		if (srow.left?.line != null)
+			result.push(...(commentsByLineKey.get(`before:${srow.left.line}`) ?? []));
+		if (srow.right?.line != null)
+			result.push(...(commentsByLineKey.get(`after:${srow.right.line}`) ?? []));
 		return result;
 	}
 
 	function severityColor(severity: string): string {
 		switch (severity) {
-			case 'blocker': return 'text-status-error-foreground bg-status-error/10';
-			case 'warning': return 'text-status-warning-foreground bg-status-warning/10';
-			default: return 'text-status-info-foreground bg-status-info/10';
+			case 'blocker':
+				return 'text-status-error-foreground bg-status-error/10';
+			case 'warning':
+				return 'text-status-warning-foreground bg-status-warning/10';
+			default:
+				return 'text-status-info-foreground bg-status-info/10';
 		}
 	}
 
@@ -380,36 +470,54 @@
 		if (isLineSelected(row)) return 'bg-interactive-accent/20';
 		if (isComposerForRow(row)) return 'bg-interactive-accent/10';
 		switch (row.kind) {
-			case 'add': return 'bg-diff-add';
-			case 'del': return 'bg-diff-del';
-			case 'hunk-header': return 'bg-diff-hunk-header';
-			default: return '';
+			case 'add':
+				return 'bg-diff-add';
+			case 'del':
+				return 'bg-diff-del';
+			case 'hunk-header':
+				return 'bg-diff-hunk-header';
+			default:
+				return '';
 		}
 	}
 
-	function splitCellBg(kind: string, side: 'before' | 'after', diffLineIndex: number, line: number | null = null): string {
+	function splitCellBg(
+		kind: string,
+		side: 'before' | 'after',
+		diffLineIndex: number,
+		line: number | null = null,
+	): string {
 		if (isSplitCellSelected(side, diffLineIndex, kind)) return 'bg-interactive-accent/20';
 		if (line != null && isComposerForCell(side, line)) return 'bg-interactive-accent/10';
 		switch (kind) {
-			case 'add': return 'bg-diff-add';
-			case 'del': return 'bg-diff-del';
-			default: return '';
+			case 'add':
+				return 'bg-diff-add';
+			case 'del':
+				return 'bg-diff-del';
+			default:
+				return '';
 		}
 	}
 
 	function lineNumClass(row: RenderedDiffRow): string {
 		switch (row.kind) {
-			case 'add': return 'text-diff-add-line-num';
-			case 'del': return 'text-diff-del-line-num';
-			default: return 'text-muted-foreground/50';
+			case 'add':
+				return 'text-diff-add-line-num';
+			case 'del':
+				return 'text-diff-del-line-num';
+			default:
+				return 'text-muted-foreground/50';
 		}
 	}
 
 	function splitLineNumClass(kind: string): string {
 		switch (kind) {
-			case 'add': return 'text-diff-add-line-num';
-			case 'del': return 'text-diff-del-line-num';
-			default: return 'text-muted-foreground/50';
+			case 'add':
+				return 'text-diff-add-line-num';
+			case 'del':
+				return 'text-diff-del-line-num';
+			default:
+				return 'text-muted-foreground/50';
 		}
 	}
 
@@ -423,7 +531,16 @@
 		hunkIndex: number;
 		diffLineIndex: number;
 		rowKind: 'add' | 'del' | 'context';
-	}>({ open: false, x: 0, y: 0, side: 'before', line: null, hunkIndex: -1, diffLineIndex: -1, rowKind: 'context' });
+	}>({
+		open: false,
+		x: 0,
+		y: 0,
+		side: 'before',
+		line: null,
+		hunkIndex: -1,
+		diffLineIndex: -1,
+		rowKind: 'context',
+	});
 
 	function openCtxMenu(
 		e: MouseEvent,
@@ -458,9 +575,15 @@
 		if (row.kind === 'hunk-header') return;
 		const side: 'before' | 'after' = row.kind === 'del' ? 'before' : 'after';
 		const line = row.kind === 'del' ? row.beforeLine : (row.afterLine ?? row.beforeLine);
-		openCtxMenu(e, side, line, row.hunkIndex, row.diffLineIndex, row.kind as 'add' | 'del' | 'context');
+		openCtxMenu(
+			e,
+			side,
+			line,
+			row.hunkIndex,
+			row.diffLineIndex,
+			row.kind as 'add' | 'del' | 'context',
+		);
 	}
-
 </script>
 
 <div class="flex-1 flex flex-col h-full overflow-hidden">
@@ -487,15 +610,21 @@
 		</div>
 	{:else if rows.length === 0}
 		<div class="flex-1 flex items-center justify-center text-muted-foreground">
-			<p class="text-sm">{readOnly ? 'No changed lines to review in this file' : 'No changes in this file'}</p>
+			<p class="text-sm">
+				{readOnly ? 'No changed lines to review in this file' : 'No changes in this file'}
+			</p>
 		</div>
 	{:else}
 		<!-- File path header -->
 		<div class="px-3 py-1.5 border-b border-border bg-muted/30 flex items-center gap-2">
-			<span class="font-mono text-foreground truncate" style:font-size={`${fontSize}px`}>{reviewData.path}</span>
+			<span class="font-mono text-foreground truncate" style:font-size={`${fontSize}px`}
+				>{reviewData.path}</span
+			>
 			<button
 				onclick={handleCopyPath}
-				class="p-0.5 rounded transition-colors shrink-0 {pathCopied ? 'text-status-success-foreground' : 'text-muted-foreground/60 hover:text-foreground hover:bg-accent'}"
+				class="p-0.5 rounded transition-colors shrink-0 {pathCopied
+					? 'text-status-success-foreground'
+					: 'text-muted-foreground/60 hover:text-foreground hover:bg-accent'}"
 				title={pathCopied ? 'Copied!' : 'Copy file path'}
 				aria-label={pathCopied ? 'Path copied' : 'Copy file path'}
 			>
@@ -520,7 +649,11 @@
 						{#each splitRows as srow, idx (idx)}
 							{#if srow.isHeader}
 								<tr class="bg-diff-hunk-header">
-									<td colspan={onStageLine ? 6 : 4} class="px-2 py-1 text-muted-foreground" style:font-size={`${headerFontSize}px`}>
+									<td
+										colspan={onStageLine ? 6 : 4}
+										class="px-2 py-1 text-muted-foreground"
+										style:font-size={`${headerFontSize}px`}
+									>
 										<div class="flex items-center gap-2">
 											<span class="flex-1 truncate">{srow.headerText}</span>
 											{#if !readOnly}
@@ -555,18 +688,36 @@
 										const cell = isRight ? srow.right : srow.left;
 										if (!cell || cell.kind === 'empty') return;
 										const side: 'before' | 'after' = isRight ? 'after' : 'before';
-										const rowKind = cell.kind === 'del' ? 'del' : cell.kind === 'add' ? 'add' : 'context';
-										openCtxMenu(e, side, cell.line, srow.hunkIndex ?? -1, cell.diffLineIndex, rowKind);
+										const rowKind =
+											cell.kind === 'del' ? 'del' : cell.kind === 'add' ? 'add' : 'context';
+										openCtxMenu(
+											e,
+											side,
+											cell.line,
+											srow.hunkIndex ?? -1,
+											cell.diffLineIndex,
+											rowKind,
+										);
 									}}
 								>
 									<!-- Left gutter: stage/unstage -->
 									{#if onStageLine}
-										<td class="w-7 select-none border-r border-border/30 p-0 {splitCellBg(srow.left?.kind ?? '', 'before', srow.left?.diffLineIndex ?? -1, srow.left?.line ?? null)}">
+										<td
+											class="w-7 select-none border-r border-border/30 p-0 {splitCellBg(
+												srow.left?.kind ?? '',
+												'before',
+												srow.left?.diffLineIndex ?? -1,
+												srow.left?.line ?? null,
+											)}"
+										>
 											<div class="flex items-center justify-center leading-5">
 												{#if srow.left?.kind === 'del'}
 													{#if activeTab === 'unstaged'}
 														<button
-															onclick={(e) => { e.stopPropagation(); onStageLine?.(actionTarget, srow.left!.diffLineIndex); }}
+															onclick={(e) => {
+																e.stopPropagation();
+																onStageLine?.(actionTarget, srow.left!.diffLineIndex);
+															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
 															title="Stage line"
 														>
@@ -574,7 +725,10 @@
 														</button>
 													{:else}
 														<button
-															onclick={(e) => { e.stopPropagation(); onUnstageLine?.(actionTarget, srow.left!.diffLineIndex); }}
+															onclick={(e) => {
+																e.stopPropagation();
+																onUnstageLine?.(actionTarget, srow.left!.diffLineIndex);
+															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
 															title="Unstage line"
 														>
@@ -587,12 +741,29 @@
 									{/if}
 									<!-- Left line number (tap to open context menu) -->
 									<td
-										class="w-10 text-right pr-1.5 select-none {splitLineNumClass(srow.left?.kind ?? '')} border-r border-border/30 {splitCellBg(srow.left?.kind ?? '', 'before', srow.left?.diffLineIndex ?? -1, srow.left?.line ?? null)} {srow.left?.line != null ? 'cursor-pointer hover:bg-interactive-accent/10' : ''}"
+										class="w-10 text-right pr-1.5 select-none {splitLineNumClass(
+											srow.left?.kind ?? '',
+										)} border-r border-border/30 {splitCellBg(
+											srow.left?.kind ?? '',
+											'before',
+											srow.left?.diffLineIndex ?? -1,
+											srow.left?.line ?? null,
+										)} {srow.left?.line != null
+											? 'cursor-pointer hover:bg-interactive-accent/10'
+											: ''}"
 										onclick={(e) => {
 											if (!srow.left || srow.left.line == null) return;
 											e.stopPropagation();
-											const rowKind = srow.left.kind === 'del' ? 'del' as const : 'context' as const;
-											openCtxMenu(e, 'before', srow.left.line, srow.hunkIndex ?? -1, srow.left.diffLineIndex, rowKind);
+											const rowKind =
+												srow.left.kind === 'del' ? ('del' as const) : ('context' as const);
+											openCtxMenu(
+												e,
+												'before',
+												srow.left.line,
+												srow.hunkIndex ?? -1,
+												srow.left.diffLineIndex,
+												rowKind,
+											);
 										}}
 									>
 										{srow.left?.line ?? ''}
@@ -600,11 +771,22 @@
 									<td
 										class="w-1/2 pl-2 pr-1 whitespace-pre-wrap break-all
 											{srow.left?.kind === 'del' && !readOnly ? 'cursor-pointer' : ''}
-											{splitCellBg(srow.left?.kind ?? '', 'before', srow.left?.diffLineIndex ?? -1, srow.left?.line ?? null)}"
+											{splitCellBg(
+											srow.left?.kind ?? '',
+											'before',
+											srow.left?.diffLineIndex ?? -1,
+											srow.left?.line ?? null,
+										)}"
 										tabindex={srow.left?.kind === 'del' && !readOnly ? 0 : -1}
 										role={srow.left?.kind === 'del' && !readOnly ? 'button' : undefined}
-										onclick={(e) => { if (srow.left?.kind === 'del') handleSplitCellClick(e, 'before', srow.left.diffLineIndex, 'del'); }}
-										onkeydown={(e) => { if (srow.left?.kind === 'del') handleSplitCellKeyDown(e, 'before', srow.left!.diffLineIndex, 'del'); }}
+										onclick={(e) => {
+											if (srow.left?.kind === 'del')
+												handleSplitCellClick(e, 'before', srow.left.diffLineIndex, 'del');
+										}}
+										onkeydown={(e) => {
+											if (srow.left?.kind === 'del')
+												handleSplitCellKeyDown(e, 'before', srow.left!.diffLineIndex, 'del');
+										}}
 									>
 										{#if srow.left?.kind === 'del'}
 											<span class="text-diff-del-fg select-text">-{srow.left.text}</span>
@@ -617,12 +799,22 @@
 
 									<!-- Right gutter: stage/unstage -->
 									{#if onStageLine}
-										<td class="w-7 select-none border-l border-r border-border/30 p-0 {splitCellBg(srow.right?.kind ?? '', 'after', srow.right?.diffLineIndex ?? -1, srow.right?.line ?? null)}">
+										<td
+											class="w-7 select-none border-l border-r border-border/30 p-0 {splitCellBg(
+												srow.right?.kind ?? '',
+												'after',
+												srow.right?.diffLineIndex ?? -1,
+												srow.right?.line ?? null,
+											)}"
+										>
 											<div class="flex items-center justify-center leading-5">
 												{#if srow.right?.kind === 'add'}
 													{#if activeTab === 'unstaged'}
 														<button
-															onclick={(e) => { e.stopPropagation(); onStageLine?.(actionTarget, srow.right!.diffLineIndex); }}
+															onclick={(e) => {
+																e.stopPropagation();
+																onStageLine?.(actionTarget, srow.right!.diffLineIndex);
+															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
 															title="Stage line"
 														>
@@ -630,7 +822,10 @@
 														</button>
 													{:else}
 														<button
-															onclick={(e) => { e.stopPropagation(); onUnstageLine?.(actionTarget, srow.right!.diffLineIndex); }}
+															onclick={(e) => {
+																e.stopPropagation();
+																onUnstageLine?.(actionTarget, srow.right!.diffLineIndex);
+															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
 															title="Unstage line"
 														>
@@ -643,12 +838,29 @@
 									{/if}
 									<!-- Right line number (tap to open context menu) -->
 									<td
-										class="w-10 text-right pr-1.5 select-none {splitLineNumClass(srow.right?.kind ?? '')} border-l border-r border-border/30 {splitCellBg(srow.right?.kind ?? '', 'after', srow.right?.diffLineIndex ?? -1, srow.right?.line ?? null)} {srow.right?.line != null ? 'cursor-pointer hover:bg-interactive-accent/10' : ''}"
+										class="w-10 text-right pr-1.5 select-none {splitLineNumClass(
+											srow.right?.kind ?? '',
+										)} border-l border-r border-border/30 {splitCellBg(
+											srow.right?.kind ?? '',
+											'after',
+											srow.right?.diffLineIndex ?? -1,
+											srow.right?.line ?? null,
+										)} {srow.right?.line != null
+											? 'cursor-pointer hover:bg-interactive-accent/10'
+											: ''}"
 										onclick={(e) => {
 											if (!srow.right || srow.right.line == null) return;
 											e.stopPropagation();
-											const rowKind = srow.right.kind === 'add' ? 'add' as const : 'context' as const;
-											openCtxMenu(e, 'after', srow.right.line, srow.hunkIndex ?? -1, srow.right.diffLineIndex, rowKind);
+											const rowKind =
+												srow.right.kind === 'add' ? ('add' as const) : ('context' as const);
+											openCtxMenu(
+												e,
+												'after',
+												srow.right.line,
+												srow.hunkIndex ?? -1,
+												srow.right.diffLineIndex,
+												rowKind,
+											);
 										}}
 									>
 										{srow.right?.line ?? ''}
@@ -656,11 +868,22 @@
 									<td
 										class="w-1/2 pl-2 pr-1 whitespace-pre-wrap break-all
 											{srow.right?.kind === 'add' && !readOnly ? 'cursor-pointer' : ''}
-											{splitCellBg(srow.right?.kind ?? '', 'after', srow.right?.diffLineIndex ?? -1, srow.right?.line ?? null)}"
+											{splitCellBg(
+											srow.right?.kind ?? '',
+											'after',
+											srow.right?.diffLineIndex ?? -1,
+											srow.right?.line ?? null,
+										)}"
 										tabindex={srow.right?.kind === 'add' && !readOnly ? 0 : -1}
 										role={srow.right?.kind === 'add' && !readOnly ? 'button' : undefined}
-										onclick={(e) => { if (srow.right?.kind === 'add') handleSplitCellClick(e, 'after', srow.right.diffLineIndex, 'add'); }}
-										onkeydown={(e) => { if (srow.right?.kind === 'add') handleSplitCellKeyDown(e, 'after', srow.right!.diffLineIndex, 'add'); }}
+										onclick={(e) => {
+											if (srow.right?.kind === 'add')
+												handleSplitCellClick(e, 'after', srow.right.diffLineIndex, 'add');
+										}}
+										onkeydown={(e) => {
+											if (srow.right?.kind === 'add')
+												handleSplitCellKeyDown(e, 'after', srow.right!.diffLineIndex, 'add');
+										}}
 									>
 										{#if srow.right?.kind === 'add'}
 											<span class="text-diff-add-fg select-text">+{srow.right.text}</span>
@@ -678,31 +901,65 @@
 											{#each lineComments as comment (comment.id)}
 												<div class="px-4 py-2 bg-muted/20 border-l-2 border-interactive-accent">
 													{#if editingCommentId === comment.id}
-													<div class="space-y-2">
-														<textarea
-															value={editBody}
-															oninput={(e) => { editBody = e.currentTarget.value; }}
-															class="w-full text-xs p-2 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-															rows="2"
-														></textarea>
-														<div class="flex gap-1.5 justify-end">
-															<button onclick={() => { editingCommentId = null; }} class="px-2 py-0.5 text-[10px] rounded bg-muted text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
-															<button onclick={() => { onEditComment?.(comment.id, { body: editBody }); editingCommentId = null; }} class="px-2 py-0.5 text-[10px] rounded bg-interactive-accent text-interactive-accent-foreground hover:brightness-110">Save</button>
+														<div class="space-y-2">
+															<textarea
+																value={editBody}
+																oninput={(e) => {
+																	editBody = e.currentTarget.value;
+																}}
+																class="w-full text-xs p-2 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+																rows="2"
+															></textarea>
+															<div class="flex gap-1.5 justify-end">
+																<button
+																	onclick={() => {
+																		editingCommentId = null;
+																	}}
+																	class="px-2 py-0.5 text-[10px] rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
+																	>Cancel</button
+																>
+																<button
+																	onclick={() => {
+																		onEditComment?.(comment.id, { body: editBody });
+																		editingCommentId = null;
+																	}}
+																	class="px-2 py-0.5 text-[10px] rounded bg-interactive-accent text-interactive-accent-foreground hover:brightness-110"
+																	>Save</button
+																>
+															</div>
 														</div>
-													</div>
 													{:else}
-													<div class="flex items-center gap-2 group/comment">
-														<span class="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded {severityColor(comment.severity)}">{comment.severity}</span>
-														<span class="flex-1 text-xs text-foreground whitespace-pre-wrap">{comment.body}</span>
-														<div class="flex gap-1 opacity-0 group-hover/comment:opacity-100 transition-opacity">
-															<button onclick={() => { editingCommentId = comment.id; editBody = comment.body; }} class="p-0.5 rounded hover:bg-muted" title="Edit">
-																<Pencil class="w-3 h-3 text-muted-foreground" />
-															</button>
-															<button onclick={() => onRemoveComment?.(comment.id)} class="p-0.5 rounded hover:bg-muted" title="Remove">
-																<Trash2 class="w-3 h-3 text-muted-foreground" />
-															</button>
+														<div class="flex items-center gap-2 group/comment">
+															<span
+																class="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded {severityColor(
+																	comment.severity,
+																)}">{comment.severity}</span
+															>
+															<span class="flex-1 text-xs text-foreground whitespace-pre-wrap"
+																>{comment.body}</span
+															>
+															<div
+																class="flex gap-1 opacity-0 group-hover/comment:opacity-100 transition-opacity"
+															>
+																<button
+																	onclick={() => {
+																		editingCommentId = comment.id;
+																		editBody = comment.body;
+																	}}
+																	class="p-0.5 rounded hover:bg-muted"
+																	title="Edit"
+																>
+																	<Pencil class="w-3 h-3 text-muted-foreground" />
+																</button>
+																<button
+																	onclick={() => onRemoveComment?.(comment.id)}
+																	class="p-0.5 rounded hover:bg-muted"
+																	title="Remove"
+																>
+																	<Trash2 class="w-3 h-3 text-muted-foreground" />
+																</button>
+															</div>
 														</div>
-													</div>
 													{/if}
 												</div>
 											{/each}
@@ -712,11 +969,18 @@
 								{#if isComposerForCell('before', srow.left?.line ?? null) || isComposerForCell('after', srow.right?.line ?? null)}
 									<tr bind:this={composerRowEl}>
 										<td colspan={splitColCount} class="p-0">
-											<div class="border border-interactive-accent/50 rounded m-1 bg-background shadow-sm p-3 space-y-2">
+											<div
+												class="border border-interactive-accent/50 rounded m-1 bg-background shadow-sm p-3 space-y-2"
+											>
 												<div class="flex gap-2">
-													{#each (['note', 'warning', 'blocker'] as const) as sev}
+													{#each ['note', 'warning', 'blocker'] as const as sev}
 														<label class="flex items-center gap-1 text-[11px] cursor-pointer">
-															<input type="radio" checked={composerState?.severity === sev} onchange={() => onComposerSeverityChange?.(sev)} class="accent-interactive-accent" />
+															<input
+																type="radio"
+																checked={composerState?.severity === sev}
+																onchange={() => onComposerSeverityChange?.(sev)}
+																class="accent-interactive-accent"
+															/>
 															{sev}
 														</label>
 													{/each}
@@ -730,12 +994,19 @@
 													rows="3"
 												></textarea>
 												<div class="flex gap-1.5 justify-end">
-													<button onclick={() => onComposerClose?.()} class="px-2.5 py-1 text-[11px] rounded bg-muted text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+													<button
+														onclick={() => onComposerClose?.()}
+														class="px-2.5 py-1 text-[11px] rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
+														>Cancel</button
+													>
 													<button
 														onclick={() => onComposerSubmit?.()}
 														disabled={!composerState?.body?.trim()}
-														class="px-2.5 py-1 text-[11px] rounded transition-all {composerState?.body?.trim() ? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110' : 'bg-muted text-muted-foreground cursor-not-allowed'}"
-													>Add comment</button>
+														class="px-2.5 py-1 text-[11px] rounded transition-all {composerState?.body?.trim()
+															? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
+															: 'bg-muted text-muted-foreground cursor-not-allowed'}"
+														>Add comment</button
+													>
 												</div>
 											</div>
 										</td>
@@ -752,7 +1023,11 @@
 						{#each rows as row, idx (idx)}
 							{#if row.kind === 'hunk-header'}
 								<tr class={rowBgClass(row)}>
-									<td colspan={onStageLine ? 4 : 3} class="px-2 py-1 text-muted-foreground" style:font-size={`${headerFontSize}px`}>
+									<td
+										colspan={onStageLine ? 4 : 3}
+										class="px-2 py-1 text-muted-foreground"
+										style:font-size={`${headerFontSize}px`}
+									>
 										<div class="flex items-center gap-2">
 											<span class="flex-1 truncate">{row.beforeText}</span>
 											{#if !readOnly}
@@ -779,9 +1054,17 @@
 								</tr>
 							{:else}
 								<tr
-									class="select-none {rowBgClass(row)} {row.kind === 'add' || row.kind === 'del' ? !readOnly ? 'cursor-pointer hover:brightness-95' : '' : ''}"
-									tabindex={row.kind === 'add' || row.kind === 'del' ? !readOnly ? 0 : -1 : -1}
-									role={row.kind === 'add' || row.kind === 'del' ? !readOnly ? 'button' : undefined : undefined}
+									class="select-none {rowBgClass(row)} {row.kind === 'add' || row.kind === 'del'
+										? !readOnly
+											? 'cursor-pointer hover:brightness-95'
+											: ''
+										: ''}"
+									tabindex={row.kind === 'add' || row.kind === 'del' ? (!readOnly ? 0 : -1) : -1}
+									role={row.kind === 'add' || row.kind === 'del'
+										? !readOnly
+											? 'button'
+											: undefined
+										: undefined}
 									onclick={(e) => handleLineClick(e, row)}
 									onkeydown={(e) => handleLineKeyDown(e, row)}
 									oncontextmenu={(e) => handleUnifiedCtxMenu(e, row)}
@@ -793,7 +1076,10 @@
 												{#if row.kind === 'add' || row.kind === 'del'}
 													{#if activeTab === 'unstaged'}
 														<button
-															onclick={(e) => { e.stopPropagation(); onStageLine(actionTarget, row.diffLineIndex); }}
+															onclick={(e) => {
+																e.stopPropagation();
+																onStageLine(actionTarget, row.diffLineIndex);
+															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
 															title="Stage line"
 														>
@@ -801,7 +1087,10 @@
 														</button>
 													{:else}
 														<button
-															onclick={(e) => { e.stopPropagation(); onUnstageLine?.(actionTarget, row.diffLineIndex); }}
+															onclick={(e) => {
+																e.stopPropagation();
+																onUnstageLine?.(actionTarget, row.diffLineIndex);
+															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
 															title="Unstage line"
 														>
@@ -814,24 +1103,46 @@
 									{/if}
 									<!-- Before line number (tap to open context menu) -->
 									<td
-										class="w-12 text-right pr-2 select-none {lineNumClass(row)} border-r border-border/30 {row.beforeLine != null ? 'cursor-pointer hover:bg-interactive-accent/10' : ''}"
+										class="w-12 text-right pr-2 select-none {lineNumClass(
+											row,
+										)} border-r border-border/30 {row.beforeLine != null
+											? 'cursor-pointer hover:bg-interactive-accent/10'
+											: ''}"
 										onclick={(e) => {
 											if (row.beforeLine == null) return;
 											e.stopPropagation();
 											const side: 'before' | 'after' = row.kind === 'del' ? 'before' : 'after';
-											openCtxMenu(e, side, row.kind === 'del' ? row.beforeLine : (row.afterLine ?? row.beforeLine), row.hunkIndex, row.diffLineIndex, row.kind as 'add' | 'del' | 'context');
+											openCtxMenu(
+												e,
+												side,
+												row.kind === 'del' ? row.beforeLine : (row.afterLine ?? row.beforeLine),
+												row.hunkIndex,
+												row.diffLineIndex,
+												row.kind as 'add' | 'del' | 'context',
+											);
 										}}
 									>
 										{row.beforeLine ?? ''}
 									</td>
 									<!-- After line number (tap to open context menu) -->
 									<td
-										class="w-12 text-right pr-2 select-none {lineNumClass(row)} border-r border-border/30 {row.afterLine != null ? 'cursor-pointer hover:bg-interactive-accent/10' : ''}"
+										class="w-12 text-right pr-2 select-none {lineNumClass(
+											row,
+										)} border-r border-border/30 {row.afterLine != null
+											? 'cursor-pointer hover:bg-interactive-accent/10'
+											: ''}"
 										onclick={(e) => {
 											if (row.afterLine == null) return;
 											e.stopPropagation();
 											const side: 'before' | 'after' = row.kind === 'del' ? 'before' : 'after';
-											openCtxMenu(e, side, row.kind === 'del' ? row.beforeLine : (row.afterLine ?? row.beforeLine), row.hunkIndex, row.diffLineIndex, row.kind as 'add' | 'del' | 'context');
+											openCtxMenu(
+												e,
+												side,
+												row.kind === 'del' ? row.beforeLine : (row.afterLine ?? row.beforeLine),
+												row.hunkIndex,
+												row.diffLineIndex,
+												row.kind as 'add' | 'del' | 'context',
+											);
 										}}
 									>
 										{row.afterLine ?? ''}
@@ -843,7 +1154,9 @@
 										{:else if row.kind === 'del'}
 											<span class="text-diff-del-fg select-text">-{row.beforeText}</span>
 										{:else}
-											<span class="text-foreground select-text">&nbsp;{row.beforeText || row.afterText}</span>
+											<span class="text-foreground select-text"
+												>&nbsp;{row.beforeText || row.afterText}</span
+											>
 										{/if}
 									</td>
 								</tr>
@@ -854,31 +1167,65 @@
 											{#each lineComments as comment (comment.id)}
 												<div class="px-4 py-2 bg-muted/20 border-l-2 border-interactive-accent">
 													{#if editingCommentId === comment.id}
-													<div class="space-y-2">
-														<textarea
-															value={editBody}
-															oninput={(e) => { editBody = e.currentTarget.value; }}
-															class="w-full text-xs p-2 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-															rows="2"
-														></textarea>
-														<div class="flex gap-1.5 justify-end">
-															<button onclick={() => { editingCommentId = null; }} class="px-2 py-0.5 text-[10px] rounded bg-muted text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
-															<button onclick={() => { onEditComment?.(comment.id, { body: editBody }); editingCommentId = null; }} class="px-2 py-0.5 text-[10px] rounded bg-interactive-accent text-interactive-accent-foreground hover:brightness-110">Save</button>
+														<div class="space-y-2">
+															<textarea
+																value={editBody}
+																oninput={(e) => {
+																	editBody = e.currentTarget.value;
+																}}
+																class="w-full text-xs p-2 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+																rows="2"
+															></textarea>
+															<div class="flex gap-1.5 justify-end">
+																<button
+																	onclick={() => {
+																		editingCommentId = null;
+																	}}
+																	class="px-2 py-0.5 text-[10px] rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
+																	>Cancel</button
+																>
+																<button
+																	onclick={() => {
+																		onEditComment?.(comment.id, { body: editBody });
+																		editingCommentId = null;
+																	}}
+																	class="px-2 py-0.5 text-[10px] rounded bg-interactive-accent text-interactive-accent-foreground hover:brightness-110"
+																	>Save</button
+																>
+															</div>
 														</div>
-													</div>
 													{:else}
-													<div class="flex items-center gap-2 group/comment">
-														<span class="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded {severityColor(comment.severity)}">{comment.severity}</span>
-														<span class="flex-1 text-xs text-foreground whitespace-pre-wrap">{comment.body}</span>
-														<div class="flex gap-1 opacity-0 group-hover/comment:opacity-100 transition-opacity">
-															<button onclick={() => { editingCommentId = comment.id; editBody = comment.body; }} class="p-0.5 rounded hover:bg-muted" title="Edit">
-																<Pencil class="w-3 h-3 text-muted-foreground" />
-															</button>
-															<button onclick={() => onRemoveComment?.(comment.id)} class="p-0.5 rounded hover:bg-muted" title="Remove">
-																<Trash2 class="w-3 h-3 text-muted-foreground" />
-															</button>
+														<div class="flex items-center gap-2 group/comment">
+															<span
+																class="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded {severityColor(
+																	comment.severity,
+																)}">{comment.severity}</span
+															>
+															<span class="flex-1 text-xs text-foreground whitespace-pre-wrap"
+																>{comment.body}</span
+															>
+															<div
+																class="flex gap-1 opacity-0 group-hover/comment:opacity-100 transition-opacity"
+															>
+																<button
+																	onclick={() => {
+																		editingCommentId = comment.id;
+																		editBody = comment.body;
+																	}}
+																	class="p-0.5 rounded hover:bg-muted"
+																	title="Edit"
+																>
+																	<Pencil class="w-3 h-3 text-muted-foreground" />
+																</button>
+																<button
+																	onclick={() => onRemoveComment?.(comment.id)}
+																	class="p-0.5 rounded hover:bg-muted"
+																	title="Remove"
+																>
+																	<Trash2 class="w-3 h-3 text-muted-foreground" />
+																</button>
+															</div>
 														</div>
-													</div>
 													{/if}
 												</div>
 											{/each}
@@ -888,11 +1235,18 @@
 								{#if isComposerForRow(row)}
 									<tr bind:this={composerRowEl}>
 										<td colspan={unifiedColCount} class="p-0">
-											<div class="border border-interactive-accent/50 rounded m-1 bg-background shadow-sm p-3 space-y-2">
+											<div
+												class="border border-interactive-accent/50 rounded m-1 bg-background shadow-sm p-3 space-y-2"
+											>
 												<div class="flex gap-2">
-													{#each (['note', 'warning', 'blocker'] as const) as sev}
+													{#each ['note', 'warning', 'blocker'] as const as sev}
 														<label class="flex items-center gap-1 text-[11px] cursor-pointer">
-															<input type="radio" checked={composerState?.severity === sev} onchange={() => onComposerSeverityChange?.(sev)} class="accent-interactive-accent" />
+															<input
+																type="radio"
+																checked={composerState?.severity === sev}
+																onchange={() => onComposerSeverityChange?.(sev)}
+																class="accent-interactive-accent"
+															/>
 															{sev}
 														</label>
 													{/each}
@@ -906,12 +1260,19 @@
 													rows="3"
 												></textarea>
 												<div class="flex gap-1.5 justify-end">
-													<button onclick={() => onComposerClose?.()} class="px-2.5 py-1 text-[11px] rounded bg-muted text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+													<button
+														onclick={() => onComposerClose?.()}
+														class="px-2.5 py-1 text-[11px] rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
+														>Cancel</button
+													>
 													<button
 														onclick={() => onComposerSubmit?.()}
 														disabled={!composerState?.body?.trim()}
-														class="px-2.5 py-1 text-[11px] rounded transition-all {composerState?.body?.trim() ? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110' : 'bg-muted text-muted-foreground cursor-not-allowed'}"
-													>Add comment</button>
+														class="px-2.5 py-1 text-[11px] rounded transition-all {composerState?.body?.trim()
+															? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
+															: 'bg-muted text-muted-foreground cursor-not-allowed'}"
+														>Add comment</button
+													>
 												</div>
 											</div>
 										</td>
@@ -925,80 +1286,101 @@
 		</div>
 	{/if}
 
-		<!-- Context menu for line-level actions (right-click / long-press) -->
-		{#if ctxMenu.open}
+	<!-- Context menu for line-level actions (right-click / long-press) -->
+	{#if ctxMenu.open}
+		<div
+			role="presentation"
+			class="fixed inset-0 z-50"
+			onclick={closeCtxMenu}
+			oncontextmenu={(e) => {
+				e.preventDefault();
+				closeCtxMenu();
+			}}
+		>
 			<div
-				role="presentation"
-				class="fixed inset-0 z-50"
-				onclick={closeCtxMenu}
-				oncontextmenu={(e) => { e.preventDefault(); closeCtxMenu(); }}
-			>
-				<div
-					role="menu"
-					tabindex="-1"
-					class="fixed z-50 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[160px] text-xs"
-					style="left:{ctxMenu.x}px; top:{ctxMenu.y}px;"
-					onclick={(e) => e.stopPropagation()}
-					onkeydown={(e) => e.stopPropagation()}
+				role="menu"
+				tabindex="-1"
+				class="fixed z-50 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[160px] text-xs"
+				style="left:{ctxMenu.x}px; top:{ctxMenu.y}px;"
+				onclick={(e) => e.stopPropagation()}
+				onkeydown={(e) => e.stopPropagation()}
 			>
 				{#if ctxMenu.line != null}
-						<button
-							type="button"
-							role="menuitem"
-							onclick={() => { onAddComment(ctxMenu.side, ctxMenu.line!); closeCtxMenu(); }}
-							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors"
-						>
+					<button
+						type="button"
+						role="menuitem"
+						onclick={() => {
+							onAddComment(ctxMenu.side, ctxMenu.line!);
+							closeCtxMenu();
+						}}
+						class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors"
+					>
 						Add comment
 					</button>
 					{#if onOpenInEditor}
-							<button
-								type="button"
-								role="menuitem"
-								onclick={() => { onOpenInEditor(ctxMenu.line!); closeCtxMenu(); }}
-								class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors"
-							>
+						<button
+							type="button"
+							role="menuitem"
+							onclick={() => {
+								onOpenInEditor(ctxMenu.line!);
+								closeCtxMenu();
+							}}
+							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors"
+						>
 							Open in Editor
 						</button>
 					{/if}
 				{/if}
 				{#if !readOnly && ctxMenu.hunkIndex >= 0}
 					{#if activeTab === 'unstaged'}
-							<button
-								type="button"
-								role="menuitem"
-								onclick={() => { onStageHunk(actionTarget, ctxMenu.hunkIndex); closeCtxMenu(); }}
-								class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added"
-							>
+						<button
+							type="button"
+							role="menuitem"
+							onclick={() => {
+								onStageHunk(actionTarget, ctxMenu.hunkIndex);
+								closeCtxMenu();
+							}}
+							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added"
+						>
 							Stage hunk
 						</button>
 					{:else}
-							<button
-								type="button"
-								role="menuitem"
-								onclick={() => { onUnstageHunk(actionTarget, ctxMenu.hunkIndex); closeCtxMenu(); }}
-								class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted"
-							>
+						<button
+							type="button"
+							role="menuitem"
+							onclick={() => {
+								onUnstageHunk(actionTarget, ctxMenu.hunkIndex);
+								closeCtxMenu();
+							}}
+							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted"
+						>
 							Unstage hunk
 						</button>
 					{/if}
 				{/if}
 				{#if !readOnly && onStageLine && (ctxMenu.rowKind === 'add' || ctxMenu.rowKind === 'del')}
 					{#if activeTab === 'unstaged'}
-							<button
-								type="button"
-								role="menuitem"
-								onclick={() => { onStageLine!(actionTarget, ctxMenu.diffLineIndex); closeCtxMenu(); }}
-								class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added"
-							>
+						<button
+							type="button"
+							role="menuitem"
+							onclick={() => {
+								onStageLine!(actionTarget, ctxMenu.diffLineIndex);
+								closeCtxMenu();
+							}}
+							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added"
+						>
 							Stage line
 						</button>
 					{:else}
-							<button
-								type="button"
-								role="menuitem"
-								onclick={() => { onUnstageLine?.(actionTarget, ctxMenu.diffLineIndex); closeCtxMenu(); }}
-								class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted"
-							>
+						<button
+							type="button"
+							role="menuitem"
+							onclick={() => {
+								onUnstageLine?.(actionTarget, ctxMenu.diffLineIndex);
+								closeCtxMenu();
+							}}
+							class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted"
+						>
 							Unstage line
 						</button>
 					{/if}

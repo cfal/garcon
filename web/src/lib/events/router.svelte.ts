@@ -26,7 +26,13 @@ import {
 } from '$shared/ws-events';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
-import type { ChatMessage, PendingPermissionRequest, PendingViewChat, PermissionMode, QueueState } from '$lib/types/chat';
+import type {
+	ChatMessage,
+	PendingPermissionRequest,
+	PendingViewChat,
+	PermissionMode,
+	QueueState,
+} from '$lib/types/chat';
 import type { ChatEntry, SessionAgentId } from '$lib/types/app';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 
@@ -35,15 +41,20 @@ import { normalizeEvent } from '$lib/ws/normalize';
 import { filterByChat } from './chat-filter';
 import { applyChatMessages } from './reducer';
 
-import {
-	handleAgentComplete,
-	handleAgentError,
-	type LifecycleContext,
-} from './handlers/lifecycle';
+import { handleAgentComplete, handleAgentError, type LifecycleContext } from './handlers/lifecycle';
 import { handlePlanModeMessages, type PlanModeContext } from './handlers/plan-mode';
-import { handlePermissionLifecycleFromBatch, type PermissionLifecycleContext } from './handlers/permissions';
+import {
+	handlePermissionLifecycleFromBatch,
+	type PermissionLifecycleContext,
+} from './handlers/permissions';
 import { handleQueueUpdated, handleQueueSending, type QueueContext } from './handlers/queue';
-import { handleChatCreated, handleChatAborted, handleChatStatus, handleWsError, type ChatEventContext } from './handlers/chat';
+import {
+	handleChatCreated,
+	handleChatAborted,
+	handleChatStatus,
+	handleWsError,
+	type ChatEventContext,
+} from './handlers/chat';
 import { handleRunningChats, type RunningChatsContext } from './handlers/chat-sessions-running';
 import {
 	handleChatTitle,
@@ -72,14 +83,20 @@ export interface EventRouterStores {
 	loadMessages: (chatId: string, loadMore?: boolean, agentId?: string) => Promise<ChatMessage[]>;
 	setIsLoading: (v: boolean) => void;
 	setCanAbort: (v: boolean) => void;
-	setLoadingStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
-	pushLoadingStatus: (entry: import('$lib/stores/chat-lifecycle.svelte').LoadingStatusEntry) => void;
+	setLoadingStatus: (
+		status: { text: string; tokens: number; can_interrupt: boolean } | null,
+	) => void;
+	pushLoadingStatus: (
+		entry: import('$lib/stores/chat-lifecycle.svelte').LoadingStatusEntry,
+	) => void;
 	popLoadingStatus: (id: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 	setSelectedChatId: (chatId: string | null) => void;
 	pendingPermissionRequests: () => PendingPermissionRequest[];
 	setPendingPermissionRequests: (
-		updater: PendingPermissionRequest[] | ((prev: PendingPermissionRequest[]) => PendingPermissionRequest[]),
+		updater:
+			| PendingPermissionRequest[]
+			| ((prev: PendingPermissionRequest[]) => PendingPermissionRequest[]),
 	) => void;
 	pendingViewChat: () => PendingViewChat | null;
 	setPendingViewChat?: (v: PendingViewChat | null) => void;
@@ -126,7 +143,11 @@ export function selectPreviewFromBatch(
 ): { content: string; timestamp: string } | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
-		if (msg instanceof AssistantMessage || msg instanceof UserMessage || msg instanceof ThinkingMessage) {
+		if (
+			msg instanceof AssistantMessage ||
+			msg instanceof UserMessage ||
+			msg instanceof ThinkingMessage
+		) {
 			return {
 				content: extractFirstLine(String(msg.content || '')).slice(0, 200),
 				timestamp: msg.timestamp,
@@ -165,11 +186,11 @@ function markPendingUserInputDelivery(
 
 // Creates helper functions used by multiple handler contexts.
 function createHelpers(stores: EventRouterStores) {
-	const activateLoadingFor = (chatId?: string | null) => {
+	const activateLoadingFor = (_chatId?: string | null) => {
 		stores.setIsLoading(true);
 	};
 
-	const clearLoadingIndicators = (chatId?: string | null) => {
+	const clearLoadingIndicators = (_chatId?: string | null) => {
 		stores.setIsLoading(false);
 		stores.setCanAbort(false);
 		stores.setLoadingStatus(null);
@@ -192,7 +213,8 @@ function buildDispatch(
 	stores: EventRouterStores,
 	outputAccumulator: ReturnType<typeof createAgentOutputAccumulator>,
 ): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
-	const { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted } = createHelpers(stores);
+	const { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted } =
+		createHelpers(stores);
 
 	const selectedChat = stores.selectedChat();
 	const currentChatId = stores.currentChatId();
@@ -211,16 +233,25 @@ function buildDispatch(
 
 	// Centralized pendingChatId access via sessionStorage.
 	const getPendingChatId = (): string | null => {
-		try { return typeof window !== 'undefined' ? sessionStorage.getItem('pendingChatId') : null; }
-		catch { return null; }
+		try {
+			return typeof window !== 'undefined' ? sessionStorage.getItem('pendingChatId') : null;
+		} catch {
+			return null;
+		}
 	};
 	const setPendingChatId = (id: string) => {
-		try { if (typeof window !== 'undefined') sessionStorage.setItem('pendingChatId', id); }
-		catch { /* storage unavailable */ }
+		try {
+			if (typeof window !== 'undefined') sessionStorage.setItem('pendingChatId', id);
+		} catch {
+			/* storage unavailable */
+		}
 	};
 	const clearPendingChatId = () => {
-		try { if (typeof window !== 'undefined') sessionStorage.removeItem('pendingChatId'); }
-		catch { /* storage unavailable */ }
+		try {
+			if (typeof window !== 'undefined') sessionStorage.removeItem('pendingChatId');
+		} catch {
+			/* storage unavailable */
+		}
 	};
 
 	const lifecycleCtx: LifecycleContext = {
@@ -383,13 +414,16 @@ function buildDispatch(
 				stores.clearPendingUserInput(msg.clientRequestId);
 				return;
 			}
-			void stores.loadMessages(msg.chatId).then((messages) => {
-				if (stores.currentChatId() && stores.currentChatId() !== msg.chatId) return;
-				stores.setChatMessages(messages);
-				stores.clearPendingUserInput(msg.clientRequestId);
-			}).catch(() => {
-				// The local pending overlay remains visible until the next successful reload.
-			});
+			void stores
+				.loadMessages(msg.chatId)
+				.then((messages) => {
+					if (stores.currentChatId() && stores.currentChatId() !== msg.chatId) return;
+					stores.setChatMessages(messages);
+					stores.clearPendingUserInput(msg.clientRequestId);
+				})
+				.catch(() => {
+					// The local pending overlay remains visible until the next successful reload.
+				});
 		},
 		'chat-sessions-running': (msg) => {
 			if (msg instanceof ChatSessionsRunningMessage) handleRunningChats(msg, runningCtx);
@@ -411,7 +445,8 @@ function buildDispatch(
 			if (msg instanceof ChatReadUpdatedV1Message) handleChatReadUpdated(msg, sidebarCtx);
 		},
 		'chat-list-refresh-requested': (msg) => {
-			if (msg instanceof ChatListRefreshRequestedMessage) handleChatListInvalidated(msg, sidebarCtx);
+			if (msg instanceof ChatListRefreshRequestedMessage)
+				handleChatListInvalidated(msg, sidebarCtx);
 		},
 	};
 }
@@ -477,8 +512,8 @@ export function createEventRouter(
 			}
 
 			outputAccumulator.flush();
-			});
 		});
-	}
+	});
+}
 
 export { extractFirstLine as _extractFirstLine };

@@ -4,7 +4,12 @@
 
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { SavedChatSearch } from '$lib/api/settings';
-import { parseChatSearch, isEmptyFilter, matchesChatFilter, type ChatFilterSpec } from './sidebar-search';
+import {
+	parseChatSearch,
+	isEmptyFilter,
+	matchesChatFilter,
+	type ChatFilterSpec,
+} from './sidebar-search';
 
 export class SidebarSearchState {
 	activeQuery = $state('');

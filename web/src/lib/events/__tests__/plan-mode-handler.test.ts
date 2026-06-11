@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import { handlePlanModeMessages, type PlanModeContext } from '../handlers/plan-mode';
 import { AgentRunOutputMessage } from '$shared/ws-events';
-import { BashToolUseMessage, EnterPlanModeToolUseMessage, ExitPlanModeToolUseMessage } from '$shared/chat-types';
+import {
+	BashToolUseMessage,
+	EnterPlanModeToolUseMessage,
+	ExitPlanModeToolUseMessage,
+} from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 
-function makeContext(mode = 'plan'): { ctx: PlanModeContext; read: () => PendingPermissionRequest[] } {
+function makeContext(mode = 'plan'): {
+	ctx: PlanModeContext;
+	read: () => PendingPermissionRequest[];
+} {
 	let pending: PendingPermissionRequest[] = [];
 	const ctx: PlanModeContext = {
 		currentChatId: 'chat-1',

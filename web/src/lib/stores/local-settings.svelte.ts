@@ -3,7 +3,7 @@
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
-export type ChatMaxWidth = typeof CHAT_MAX_WIDTH_VALUES[number];
+export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 
 export interface LocalSettingsSnapshot {
 	theme: ThemeMode;
@@ -94,15 +94,24 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
-		alwaysFullscreenOnGitPanel: parseBoolean(parsed.alwaysFullscreenOnGitPanel, DEFAULTS.alwaysFullscreenOnGitPanel),
+		alwaysFullscreenOnGitPanel: parseBoolean(
+			parsed.alwaysFullscreenOnGitPanel,
+			DEFAULTS.alwaysFullscreenOnGitPanel,
+		),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
 		codeEditorTheme: parseString(parsed.codeEditorTheme, DEFAULTS.codeEditorTheme),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
-		codeEditorLineNumbers: parseBoolean(parsed.codeEditorLineNumbers, DEFAULTS.codeEditorLineNumbers),
+		codeEditorLineNumbers: parseBoolean(
+			parsed.codeEditorLineNumbers,
+			DEFAULTS.codeEditorLineNumbers,
+		),
 		codeEditorFontSize: parseString(parsed.codeEditorFontSize, DEFAULTS.codeEditorFontSize),
 		gitDiffFontSize: parseString(parsed.gitDiffFontSize, DEFAULTS.gitDiffFontSize),
-		markdownViewerFontSize: parseString(parsed.markdownViewerFontSize, DEFAULTS.markdownViewerFontSize),
+		markdownViewerFontSize: parseString(
+			parsed.markdownViewerFontSize,
+			DEFAULTS.markdownViewerFontSize,
+		),
 		language: parseString(parsed.language, DEFAULTS.language),
 	};
 }

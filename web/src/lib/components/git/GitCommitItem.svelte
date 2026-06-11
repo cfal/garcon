@@ -19,14 +19,8 @@
 		onToggleExpanded: (hash: string) => void;
 	}
 
-	let {
-		commit,
-		isExpanded,
-		diff,
-		isMobile,
-		wrapText,
-		onToggleExpanded
-	}: GitCommitItemProps = $props();
+	let { commit, isExpanded, diff, isMobile, wrapText, onToggleExpanded }: GitCommitItemProps =
+		$props();
 
 	let copiedHash = $state(false);
 	let copiedResetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -97,7 +91,10 @@
 				{#if commit.stats}
 					<div class="text-xs font-mono text-muted-foreground mb-2">{commit.stats}</div>
 				{/if}
-				<pre class="text-xs font-mono {wrapText ? 'whitespace-pre-wrap' : 'whitespace-pre overflow-x-auto'}">{@html formatDiff(diff)}</pre>
+				<pre
+					class="text-xs font-mono {wrapText
+						? 'whitespace-pre-wrap'
+						: 'whitespace-pre overflow-x-auto'}">{@html formatDiff(diff)}</pre>
 			</div>
 		</div>
 	{/if}

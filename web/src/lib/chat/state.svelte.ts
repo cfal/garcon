@@ -79,8 +79,8 @@ export class ChatState {
 			const messages = parseChatMessages(data.messages);
 			const pendingUserInputs = Array.isArray(data.pendingUserInputs)
 				? data.pendingUserInputs
-					.map(normalizePendingUserInput)
-					.filter((input): input is PendingUserInput => Boolean(input))
+						.map(normalizePendingUserInput)
+						.filter((input): input is PendingUserInput => Boolean(input))
 				: [];
 
 			if (data.hasMore !== undefined) {
@@ -115,7 +115,11 @@ export class ChatState {
 		this.isLoadingMoreMessages = true;
 
 		try {
-			const data = await getChatMessages({ chatId, limit: MESSAGES_PER_PAGE, offset: this.#messagesOffset });
+			const data = await getChatMessages({
+				chatId,
+				limit: MESSAGES_PER_PAGE,
+				offset: this.#messagesOffset,
+			});
 			const messages = parseChatMessages(data.messages);
 			if (messages.length === 0) return false;
 
@@ -165,7 +169,9 @@ export class ChatState {
 	}
 
 	clearPendingUserInput(clientRequestId: string): void {
-		this.pendingUserInputs = this.pendingUserInputs.filter((input) => input.clientRequestId !== clientRequestId);
+		this.pendingUserInputs = this.pendingUserInputs.filter(
+			(input) => input.clientRequestId !== clientRequestId,
+		);
 	}
 
 	updatePendingUserInputDeliveryStatus(
@@ -173,9 +179,7 @@ export class ChatState {
 		deliveryStatus: 'submitting' | 'accepted' | 'failed',
 	): void {
 		this.pendingUserInputs = this.pendingUserInputs.map((input) =>
-			input.clientRequestId === clientRequestId
-				? { ...input, deliveryStatus }
-				: input,
+			input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
 		);
 	}
 

@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { enqueueChatMessage, forkChat, forkRunChat, getChatQueue, runChat } from '$lib/api/chats.js';
+import {
+	enqueueChatMessage,
+	forkChat,
+	forkRunChat,
+	getChatQueue,
+	runChat,
+} from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 import { AssistantMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
@@ -80,7 +86,9 @@ function createDeps(chat = createRunningChat()) {
 			chatState.pendingUserInputs = inputs;
 		}),
 		upsertPendingUserInput: vi.fn((input: PendingUserInput) => {
-			const index = chatState.pendingUserInputs.findIndex((existing) => existing.clientRequestId === input.clientRequestId);
+			const index = chatState.pendingUserInputs.findIndex(
+				(existing) => existing.clientRequestId === input.clientRequestId,
+			);
 			if (index >= 0) {
 				chatState.pendingUserInputs[index] = input;
 				return;
@@ -90,9 +98,7 @@ function createDeps(chat = createRunningChat()) {
 		updatePendingUserInputDeliveryStatus: vi.fn(
 			(clientRequestId: string, deliveryStatus: 'submitting' | 'accepted' | 'failed') => {
 				chatState.pendingUserInputs = chatState.pendingUserInputs.map((input) =>
-					input.clientRequestId === clientRequestId
-						? { ...input, deliveryStatus }
-						: input,
+					input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
 				);
 			},
 		),
@@ -125,24 +131,24 @@ function createDeps(chat = createRunningChat()) {
 				restoreDraft: vi.fn(),
 			},
 			agentState: {
-					setAgentId: vi.fn(),
-					setModelSelection: vi.fn(),
-					agentId: 'claude',
-					model: '',
-					apiProviderId: null,
-					modelEndpointId: null,
-					modelProtocol: null,
-					permissionMode: 'default',
+				setAgentId: vi.fn(),
+				setModelSelection: vi.fn(),
+				agentId: 'claude',
+				model: '',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
 			},
-				lifecycle: {
-					activateLoading: vi.fn(),
-					clearLoading: vi.fn(),
-					setCanAbort: vi.fn(),
-					setCurrentChatId: vi.fn(),
-					setLoadingStatus: vi.fn(),
-				},
+			lifecycle: {
+				activateLoading: vi.fn(),
+				clearLoading: vi.fn(),
+				setCanAbort: vi.fn(),
+				setCurrentChatId: vi.fn(),
+				setLoadingStatus: vi.fn(),
+			},
 			startupCoordinator: {},
 			ws: {
 				sendMessage: vi.fn(),
@@ -162,10 +168,10 @@ function createDeps(chat = createRunningChat()) {
 				})),
 				selectionValueFor: vi.fn((_provider, model) => model),
 			},
-		readReceiptOutbox: {
-			enqueue: vi.fn(),
-		},
-		navigation: {
+			readReceiptOutbox: {
+				enqueue: vi.fn(),
+			},
+			navigation: {
 				setActiveTab: vi.fn(),
 				navigateToChat: vi.fn(),
 			},
@@ -173,11 +179,11 @@ function createDeps(chat = createRunningChat()) {
 			setPendingPermissionRequests: vi.fn(),
 			getPreviousPermissionMode: vi.fn(() => null),
 			setPreviousPermissionMode: vi.fn(),
-				setNeedsServerLoad: vi.fn(),
-				setIsViewportPinnedToBottom: vi.fn(),
-				setMessageQueue: vi.fn(),
-				scrollToBottom: vi.fn(),
-			},
+			setNeedsServerLoad: vi.fn(),
+			setIsViewportPinnedToBottom: vi.fn(),
+			setMessageQueue: vi.fn(),
+			scrollToBottom: vi.fn(),
+		},
 		waitForConnection,
 	};
 }
@@ -202,8 +208,14 @@ describe('ConversationSessionController', () => {
 
 		controller.handleChatSwitch('chat-1');
 
-		expect(deps.readReceiptOutbox.enqueue).toHaveBeenCalledWith('chat-1', '2026-03-27T08:00:00.000Z');
-		expect(deps.sessions.patchLastReadAt).toHaveBeenCalledWith('chat-1', '2026-03-27T08:00:00.000Z');
+		expect(deps.readReceiptOutbox.enqueue).toHaveBeenCalledWith(
+			'chat-1',
+			'2026-03-27T08:00:00.000Z',
+		);
+		expect(deps.sessions.patchLastReadAt).toHaveBeenCalledWith(
+			'chat-1',
+			'2026-03-27T08:00:00.000Z',
+		);
 	});
 
 	it('does not enqueue a read receipt when the chat is already fully read', () => {
@@ -290,16 +302,18 @@ describe('ConversationSessionController', () => {
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('123');
 
 		expect(deps.ws.sendMessage).not.toHaveBeenCalled();
-		expect(mockForkRunChat).toHaveBeenCalledWith(expect.objectContaining({
-			sourceChatId: '123',
-			command: 'continue from here',
-			permissionMode: 'default',
-			thinkingMode: 'none',
-			model: 'sonnet',
-			chatId: expect.stringMatching(/^\d+$/),
-			clientRequestId: expect.any(String),
-			clientMessageId: expect.any(String),
-		}));
+		expect(mockForkRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sourceChatId: '123',
+				command: 'continue from here',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				model: 'sonnet',
+				chatId: expect.stringMatching(/^\d+$/),
+				clientRequestId: expect.any(String),
+				clientMessageId: expect.any(String),
+			}),
+		);
 	});
 
 	it('submits bare /fork through the fork API without sending fork-run', async () => {
@@ -358,13 +372,15 @@ describe('ConversationSessionController', () => {
 		expect(pending.clientRequestId).toEqual(expect.any(String));
 		expect(pending.clientMessageId).toEqual(expect.any(String));
 		expect(pending.deliveryStatus).toBe('submitting');
-		expect(mockRunChat).toHaveBeenCalledWith(expect.objectContaining({
-			clientRequestId: pending.clientRequestId,
-			clientMessageId: pending.clientMessageId,
-			chatId: 'chat-1',
-			command: 'hello over REST',
-			model: 'opus',
-		}));
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				clientRequestId: pending.clientRequestId,
+				clientMessageId: pending.clientMessageId,
+				chatId: 'chat-1',
+				command: 'hello over REST',
+				model: 'opus',
+			}),
+		);
 		expect(deps.lifecycle.activateLoading).not.toHaveBeenCalled();
 
 		accepted.resolve({
@@ -416,7 +432,17 @@ describe('ConversationSessionController', () => {
 			acceptedAt: '2026-05-14T00:00:00.000Z',
 			entryId: 'entry-1',
 			merged: false,
-			queue: { entries: [{ id: 'entry-1', content: 'queue this', status: 'queued', createdAt: '2026-05-14T00:00:00.000Z' }], paused: false },
+			queue: {
+				entries: [
+					{
+						id: 'entry-1',
+						content: 'queue this',
+						status: 'queued',
+						createdAt: '2026-05-14T00:00:00.000Z',
+					},
+				],
+				paused: false,
+			},
 		});
 		const controller = new ConversationSessionController(deps as never);
 
@@ -429,9 +455,12 @@ describe('ConversationSessionController', () => {
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.chatState.chatMessages).toHaveLength(0);
-		expect(deps.setMessageQueue).toHaveBeenCalledWith('chat-1', expect.objectContaining({
-			entries: expect.arrayContaining([expect.objectContaining({ id: 'entry-1' })]),
-		}));
+		expect(deps.setMessageQueue).toHaveBeenCalledWith(
+			'chat-1',
+			expect.objectContaining({
+				entries: expect.arrayContaining([expect.objectContaining({ id: 'entry-1' })]),
+			}),
+		);
 	});
 
 	it('keeps local pending command messages when a REST history load returns an older snapshot', async () => {
@@ -455,5 +484,4 @@ describe('ConversationSessionController', () => {
 		expect(deps.chatState.setMessages).toHaveBeenCalledWith([loaded[0]]);
 		expect(deps.chatState.pendingUserInputs).toEqual([pending]);
 	});
-
 });

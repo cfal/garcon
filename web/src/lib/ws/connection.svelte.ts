@@ -15,315 +15,316 @@ const RECONNECT_BASE_MS = 3000;
 const RECONNECT_MAX_MS = 30000;
 
 export interface WsMessage {
-  data: Record<string, unknown>;
-  timestamp: number;
+	data: Record<string, unknown>;
+	timestamp: number;
 }
 
 /** Cursor reference registered by each drain consumer. */
 export interface DrainCursor {
-  current: number;
+	current: number;
 }
 
 interface PendingRequest {
-  resolve: (data: Record<string, unknown>) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+	resolve: (data: Record<string, unknown>) => void;
+	reject: (error: Error) => void;
+	timer: ReturnType<typeof setTimeout>;
 }
 
 function buildWebSocketUrl(token: string | null): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  // We append a timestamp to the URL to bust the browser cache.
-  // This is specifically required for mobile Safari, which can otherwise aggressively
-  // cache the 101 Switching Protocols response and refuse to establish a new WebSocket
-  // connection if the tab was suspended or encountered a momentary connection drop.
-  const params = new URLSearchParams({ v: String(Date.now()) });
-  if (token) params.set('token', token);
-  return `${protocol}//${window.location.host}/ws?${params.toString()}`;
+	const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+	// We append a timestamp to the URL to bust the browser cache.
+	// This is specifically required for mobile Safari, which can otherwise aggressively
+	// cache the 101 Switching Protocols response and refuse to establish a new WebSocket
+	// connection if the tab was suspended or encountered a momentary connection drop.
+	const params = new URLSearchParams({ v: String(Date.now()) });
+	if (token) params.set('token', token);
+	return `${protocol}//${window.location.host}/ws?${params.toString()}`;
 }
 
 // crypto.randomUUID() is only available when window.isSecureContext is true,
 // so we generate a random 16-byte hex string instead.
 function generateRequestId() {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+	const bytes = new Uint8Array(16);
+	crypto.getRandomValues(bytes);
+	return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export class WsConnection {
-  #ws: WebSocket | null = $state(null);
-  #activeSocket: WebSocket | null = null;
-  #messageLog: WsMessage[] = $state([]);
-  messageVersion: number = $state(0);
-  isConnected: boolean = $state(false);
+	#ws: WebSocket | null = $state(null);
+	#activeSocket: WebSocket | null = null;
+	#messageLog: WsMessage[] = $state([]);
+	messageVersion: number = $state(0);
+	isConnected: boolean = $state(false);
 
-  #cursors = new Set<DrainCursor>();
-  #trimOffset = 0;
-  #reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-  #reconnectAttempts = 0;
-  #destroyed = false;
-  #pendingRequests = new Map<string, PendingRequest>();
-  #connectionWaiters = new Set<{ resolve: () => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-  #visibilityHandler: (() => void) | null = null;
-  #authDisabled = false;
+	#cursors = new Set<DrainCursor>();
+	#trimOffset = 0;
+	#reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+	#reconnectAttempts = 0;
+	#destroyed = false;
+	#pendingRequests = new Map<string, PendingRequest>();
+	#connectionWaiters = new Set<{
+		resolve: () => void;
+		reject: (err: Error) => void;
+		timer: ReturnType<typeof setTimeout>;
+	}>();
+	#visibilityHandler: (() => void) | null = null;
+	#authDisabled = false;
 
-  constructor() {
-    if (typeof window !== 'undefined') {
-      this.#visibilityHandler = () => {
-        // Reconnect fast when the app resumes on iOS/Safari
-        if (document.visibilityState === 'visible' && !this.isConnected && !this.#destroyed) {
-          this.#reconnectAttempts = 0;
-          this.#clearReconnectTimeout();
-          const token = getAuthToken();
-          this.connect(token, this.#authDisabled);
-        }
-      };
-      window.addEventListener('visibilitychange', this.#visibilityHandler);
-    }
-  }
+	constructor() {
+		if (typeof window !== 'undefined') {
+			this.#visibilityHandler = () => {
+				// Reconnect fast when the app resumes on iOS/Safari
+				if (document.visibilityState === 'visible' && !this.isConnected && !this.#destroyed) {
+					this.#reconnectAttempts = 0;
+					this.#clearReconnectTimeout();
+					const token = getAuthToken();
+					this.connect(token, this.#authDisabled);
+				}
+			};
+			window.addEventListener('visibilitychange', this.#visibilityHandler);
+		}
+	}
 
-  connect(token: string | null, authDisabled = false): void {
-    if (this.#destroyed) return;
-    this.#authDisabled = authDisabled;
+	connect(token: string | null, authDisabled = false): void {
+		if (this.#destroyed) return;
+		this.#authDisabled = authDisabled;
 
-    if (!token && !authDisabled) {
-      console.warn('No authentication token found for WebSocket connection');
-      return;
-    }
+		if (!token && !authDisabled) {
+			console.warn('No authentication token found for WebSocket connection');
+			return;
+		}
 
-    // Close any existing socket before opening a new one.
-    this.#closeExisting();
+		// Close any existing socket before opening a new one.
+		this.#closeExisting();
 
-    try {
-      const wsUrl = buildWebSocketUrl(token);
-      const websocket = new WebSocket(wsUrl);
-      this.#activeSocket = websocket;
+		try {
+			const wsUrl = buildWebSocketUrl(token);
+			const websocket = new WebSocket(wsUrl);
+			this.#activeSocket = websocket;
 
-      websocket.onopen = () => {
-        if (!this.#isCurrentSocket(websocket)) return;
-        this.isConnected = true;
-        this.#ws = websocket;
-        this.#reconnectAttempts = 0;
-        this.#resolveAllWaiters();
-      };
+			websocket.onopen = () => {
+				if (!this.#isCurrentSocket(websocket)) return;
+				this.isConnected = true;
+				this.#ws = websocket;
+				this.#reconnectAttempts = 0;
+				this.#resolveAllWaiters();
+			};
 
-      websocket.onmessage = (event: MessageEvent) => {
-        if (!this.#isCurrentSocket(websocket)) return;
-        try {
-          const data = JSON.parse(event.data as string) as Record<string, unknown>;
+			websocket.onmessage = (event: MessageEvent) => {
+				if (!this.#isCurrentSocket(websocket)) return;
+				try {
+					const data = JSON.parse(event.data as string) as Record<string, unknown>;
 
-          // Resolve pending request-response correlation before
-          // pushing to the shared log. Correlated responses are
-          // consumed here and never dispatched to the event router.
-          const rid = data.clientRequestId as string | undefined;
-          if (rid && this.#pendingRequests.has(rid)) {
-            const pending = this.#pendingRequests.get(rid)!;
-            this.#pendingRequests.delete(rid);
-            clearTimeout(pending.timer);
+					// Resolve pending request-response correlation before
+					// pushing to the shared log. Correlated responses are
+					// consumed here and never dispatched to the event router.
+					const rid = data.clientRequestId as string | undefined;
+					if (rid && this.#pendingRequests.has(rid)) {
+						const pending = this.#pendingRequests.get(rid)!;
+						this.#pendingRequests.delete(rid);
+						clearTimeout(pending.timer);
 
-            if (data.type === 'client-request-error') {
-              pending.reject(new Error(`${String(data.code)}: ${String(data.message)}`));
-            } else {
-              pending.resolve(data);
-            }
-            return;
-          }
+						if (data.type === 'client-request-error') {
+							pending.reject(new Error(`${String(data.code)}: ${String(data.message)}`));
+						} else {
+							pending.resolve(data);
+						}
+						return;
+					}
 
-          this.#messageLog.push({ data, timestamp: Date.now() });
-          this.#tryTrim();
-          this.messageVersion++;
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
-        }
-      };
+					this.#messageLog.push({ data, timestamp: Date.now() });
+					this.#tryTrim();
+					this.messageVersion++;
+				} catch (error) {
+					console.error('Error parsing WebSocket message:', error);
+				}
+			};
 
-      websocket.onclose = () => {
-        if (!this.#isCurrentSocket(websocket)) return;
-        this.isConnected = false;
-        this.#ws = null;
-        this.#activeSocket = null;
-        this.#scheduleReconnect();
-      };
+			websocket.onclose = () => {
+				if (!this.#isCurrentSocket(websocket)) return;
+				this.isConnected = false;
+				this.#ws = null;
+				this.#activeSocket = null;
+				this.#scheduleReconnect();
+			};
 
-      websocket.onerror = (error) => {
-        if (!this.#isCurrentSocket(websocket)) return;
-        console.error('WebSocket error:', error);
-      };
-    } catch (error) {
-      console.error('Error creating WebSocket connection:', error);
-    }
-  }
+			websocket.onerror = (error) => {
+				if (!this.#isCurrentSocket(websocket)) return;
+				console.error('WebSocket error:', error);
+			};
+		} catch (error) {
+			console.error('Error creating WebSocket connection:', error);
+		}
+	}
 
-  disconnect(): void {
-    this.#destroyed = true;
-    this.#clearReconnectTimeout();
-    this.#rejectAllWaiters('WebSocket destroyed');
-    this.#rejectAllPending();
-    this.#closeExisting();
-    if (this.#visibilityHandler) {
-      window.removeEventListener('visibilitychange', this.#visibilityHandler);
-      this.#visibilityHandler = null;
-    }
-  }
+	disconnect(): void {
+		this.#destroyed = true;
+		this.#clearReconnectTimeout();
+		this.#rejectAllWaiters('WebSocket destroyed');
+		this.#rejectAllPending();
+		this.#closeExisting();
+		if (this.#visibilityHandler) {
+			window.removeEventListener('visibilitychange', this.#visibilityHandler);
+			this.#visibilityHandler = null;
+		}
+	}
 
-  /** Returns a promise that resolves when the WebSocket is connected.
-   *  Resolves immediately if already connected. Rejects on timeout or destroy. */
-  waitForConnection(timeoutMs = 10_000): Promise<void> {
-    if (this.isConnected) return Promise.resolve();
-    if (this.#destroyed) return Promise.reject(new Error('WebSocket destroyed'));
+	/** Returns a promise that resolves when the WebSocket is connected.
+	 *  Resolves immediately if already connected. Rejects on timeout or destroy. */
+	waitForConnection(timeoutMs = 10_000): Promise<void> {
+		if (this.isConnected) return Promise.resolve();
+		if (this.#destroyed) return Promise.reject(new Error('WebSocket destroyed'));
 
-    return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#connectionWaiters.delete(waiter);
-        reject(new Error('Timed out waiting for WebSocket connection'));
-      }, timeoutMs);
+		return new Promise<void>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				this.#connectionWaiters.delete(waiter);
+				reject(new Error('Timed out waiting for WebSocket connection'));
+			}, timeoutMs);
 
-      const waiter = { resolve, reject, timer };
-      this.#connectionWaiters.add(waiter);
-    });
-  }
+			const waiter = { resolve, reject, timer };
+			this.#connectionWaiters.add(waiter);
+		});
+	}
 
-  /** Sends a JSON-serializable message. Returns true if sent. */
-  sendMessage(msg: unknown): boolean {
-    const socket = this.#ws;
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(msg));
-      return true;
-    }
-    console.warn('WebSocket not connected');
-    return false;
-  }
+	/** Sends a JSON-serializable message. Returns true if sent. */
+	sendMessage(msg: unknown): boolean {
+		const socket = this.#ws;
+		if (socket && socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify(msg));
+			return true;
+		}
+		console.warn('WebSocket not connected');
+		return false;
+	}
 
-  /** Sends a request and returns a Promise resolved by a matching clientRequestId response. */
-  sendRequest<T = Record<string, unknown>>(
-    msg: object,
-    timeoutMs = 10_000,
-  ): Promise<T> {
-    const clientRequestId = generateRequestId();
-    const payload = { ...(msg as Record<string, unknown>), clientRequestId };
+	/** Sends a request and returns a Promise resolved by a matching clientRequestId response. */
+	sendRequest<T = Record<string, unknown>>(msg: object, timeoutMs = 10_000): Promise<T> {
+		const clientRequestId = generateRequestId();
+		const payload = { ...(msg as Record<string, unknown>), clientRequestId };
 
-    return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pendingRequests.delete(clientRequestId);
-        reject(new Error(`WS request timed out: ${String((msg as Record<string, unknown>).type)}`));
-      }, timeoutMs);
+		return new Promise<T>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				this.#pendingRequests.delete(clientRequestId);
+				reject(new Error(`WS request timed out: ${String((msg as Record<string, unknown>).type)}`));
+			}, timeoutMs);
 
-      this.#pendingRequests.set(clientRequestId, {
-        resolve: resolve as (data: Record<string, unknown>) => void,
-        reject,
-        timer,
-      });
+			this.#pendingRequests.set(clientRequestId, {
+				resolve: resolve as (data: Record<string, unknown>) => void,
+				reject,
+				timer,
+			});
 
-      if (!this.sendMessage(payload)) {
-        this.#pendingRequests.delete(clientRequestId);
-        clearTimeout(timer);
-        reject(new Error('WebSocket not connected'));
-      }
-    });
-  }
+			if (!this.sendMessage(payload)) {
+				this.#pendingRequests.delete(clientRequestId);
+				clearTimeout(timer);
+				reject(new Error('WebSocket not connected'));
+			}
+		});
+	}
 
-  /** Registers a drain cursor for cooperative trimming. Returns a cleanup function. */
-  registerCursor(cursor: DrainCursor): () => void {
-    this.#cursors.add(cursor);
-    return () => {
-      this.#cursors.delete(cursor);
-    };
-  }
+	/** Registers a drain cursor for cooperative trimming. Returns a cleanup function. */
+	registerCursor(cursor: DrainCursor): () => void {
+		this.#cursors.add(cursor);
+		return () => {
+			this.#cursors.delete(cursor);
+		};
+	}
 
-  get messages(): WsMessage[] {
-    return this.#messageLog;
-  }
+	get messages(): WsMessage[] {
+		return this.#messageLog;
+	}
 
-  get trimOffset(): number {
-    return this.#trimOffset;
-  }
+	get trimOffset(): number {
+		return this.#trimOffset;
+	}
 
-  // Trims the front of the message log when all registered consumers
-  // have drained past TRIM_THRESHOLD entries.
-  #tryTrim(): void {
-    const cursors = this.#cursors;
-    if (cursors.size === 0) return;
+	// Trims the front of the message log when all registered consumers
+	// have drained past TRIM_THRESHOLD entries.
+	#tryTrim(): void {
+		const cursors = this.#cursors;
+		if (cursors.size === 0) return;
 
-    const offset = this.#trimOffset;
-    let minCursor = Infinity;
-    for (const c of cursors) {
-      if (c.current < minCursor) minCursor = c.current;
-    }
+		const offset = this.#trimOffset;
+		let minCursor = Infinity;
+		for (const c of cursors) {
+			if (c.current < minCursor) minCursor = c.current;
+		}
 
-    const minLocal = minCursor - offset;
-    if (minLocal >= TRIM_THRESHOLD) {
-      this.#messageLog.splice(0, minLocal);
-      this.#trimOffset += minLocal;
-    }
-  }
+		const minLocal = minCursor - offset;
+		if (minLocal >= TRIM_THRESHOLD) {
+			this.#messageLog.splice(0, minLocal);
+			this.#trimOffset += minLocal;
+		}
+	}
 
-  #closeExisting(): void {
-    this.#clearReconnectTimeout();
-    const socket = this.#activeSocket ?? this.#ws;
-    if (socket) {
-      socket.onopen = null;
-      socket.onmessage = null;
-      socket.onclose = null;
-      socket.onerror = null;
-      if (socket.readyState !== WebSocket.CLOSED) socket.close();
-      this.#activeSocket = null;
-      this.#ws = null;
-      this.isConnected = false;
-    }
-  }
+	#closeExisting(): void {
+		this.#clearReconnectTimeout();
+		const socket = this.#activeSocket ?? this.#ws;
+		if (socket) {
+			socket.onopen = null;
+			socket.onmessage = null;
+			socket.onclose = null;
+			socket.onerror = null;
+			if (socket.readyState !== WebSocket.CLOSED) socket.close();
+			this.#activeSocket = null;
+			this.#ws = null;
+			this.isConnected = false;
+		}
+	}
 
-  #isCurrentSocket(socket: WebSocket): boolean {
-    return this.#activeSocket === socket;
-  }
+	#isCurrentSocket(socket: WebSocket): boolean {
+		return this.#activeSocket === socket;
+	}
 
-  #resolveAllWaiters(): void {
-    for (const waiter of this.#connectionWaiters) {
-      clearTimeout(waiter.timer);
-      waiter.resolve();
-    }
-    this.#connectionWaiters.clear();
-  }
+	#resolveAllWaiters(): void {
+		for (const waiter of this.#connectionWaiters) {
+			clearTimeout(waiter.timer);
+			waiter.resolve();
+		}
+		this.#connectionWaiters.clear();
+	}
 
-  #rejectAllWaiters(reason: string): void {
-    for (const waiter of this.#connectionWaiters) {
-      clearTimeout(waiter.timer);
-      waiter.reject(new Error(reason));
-    }
-    this.#connectionWaiters.clear();
-  }
+	#rejectAllWaiters(reason: string): void {
+		for (const waiter of this.#connectionWaiters) {
+			clearTimeout(waiter.timer);
+			waiter.reject(new Error(reason));
+		}
+		this.#connectionWaiters.clear();
+	}
 
-  #rejectAllPending(): void {
-    for (const [id, pending] of this.#pendingRequests) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error('WebSocket disconnected'));
-    }
-    this.#pendingRequests.clear();
-  }
+	#rejectAllPending(): void {
+		for (const pending of this.#pendingRequests.values()) {
+			clearTimeout(pending.timer);
+			pending.reject(new Error('WebSocket disconnected'));
+		}
+		this.#pendingRequests.clear();
+	}
 
-  #scheduleReconnect(): void {
-    if (this.#destroyed) return;
-    this.#clearReconnectTimeout();
+	#scheduleReconnect(): void {
+		if (this.#destroyed) return;
+		this.#clearReconnectTimeout();
 
-    const delay = Math.min(
-      RECONNECT_BASE_MS * Math.pow(2, this.#reconnectAttempts),
-      RECONNECT_MAX_MS,
-    );
-    this.#reconnectAttempts++;
+		const delay = Math.min(
+			RECONNECT_BASE_MS * Math.pow(2, this.#reconnectAttempts),
+			RECONNECT_MAX_MS,
+		);
+		this.#reconnectAttempts++;
 
-    this.#reconnectTimeout = setTimeout(() => {
-      if (this.#destroyed) return;
-      const token = getAuthToken();
-      this.connect(token, this.#authDisabled);
-    }, delay);
-  }
+		this.#reconnectTimeout = setTimeout(() => {
+			if (this.#destroyed) return;
+			const token = getAuthToken();
+			this.connect(token, this.#authDisabled);
+		}, delay);
+	}
 
-  #clearReconnectTimeout(): void {
-    if (this.#reconnectTimeout !== null) {
-      clearTimeout(this.#reconnectTimeout);
-      this.#reconnectTimeout = null;
-    }
-  }
+	#clearReconnectTimeout(): void {
+		if (this.#reconnectTimeout !== null) {
+			clearTimeout(this.#reconnectTimeout);
+			this.#reconnectTimeout = null;
+		}
+	}
 }
 
 export function createWsConnection(): WsConnection {
-  return new WsConnection();
+	return new WsConnection();
 }

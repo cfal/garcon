@@ -86,12 +86,7 @@ function targetKey(target: GitWorkbenchTarget | null): string {
 }
 
 export function encodeLineSelectionKey(key: GitLineSelectionKey): string {
-	return [
-		encodeURIComponent(key.filePath),
-		key.tab,
-		key.side,
-		String(key.diffLineIndex),
-	].join('|');
+	return [encodeURIComponent(key.filePath), key.tab, key.side, String(key.diffLineIndex)].join('|');
 }
 
 export function decodeLineSelectionKey(raw: string): GitLineSelectionKey | null {
@@ -127,7 +122,10 @@ export interface GitWorkbenchDeps {
 	}>;
 	/** When provided, hydrateCommitSettings reads directly from the
 	 *  shared remote settings snapshot instead of issuing a fetch. */
-	remoteSnapshot?: () => { ui?: Record<string, unknown>; uiEffective?: Record<string, unknown> } | null;
+	remoteSnapshot?: () => {
+		ui?: Record<string, unknown>;
+		uiEffective?: Record<string, unknown>;
+	} | null;
 }
 
 export class GitWorkbenchStore {
@@ -185,13 +183,13 @@ export class GitWorkbenchStore {
 	isCreatingInitialCommit = $state(false);
 
 	// Commit message generation settings (persisted via app settings)
-		commitGenerationEnabled = $state(true);
-		commitAgentId = $state<SessionAgentId>('claude');
-		commitModel = $state('');
-		commitApiProviderId = $state<string | null>(null);
-		commitModelEndpointId = $state<string | null>(null);
-		commitModelProtocol = $state<ApiProtocol | null>(null);
-		commitCustomPrompt = $state('');
+	commitGenerationEnabled = $state(true);
+	commitAgentId = $state<SessionAgentId>('claude');
+	commitModel = $state('');
+	commitApiProviderId = $state<string | null>(null);
+	commitModelEndpointId = $state<string | null>(null);
+	commitModelProtocol = $state<ApiProtocol | null>(null);
+	commitCustomPrompt = $state('');
 	commitUseCommonDirPrefix = $state(false);
 
 	// Pending discard confirmation (file path awaiting user confirmation)
@@ -221,19 +219,35 @@ export class GitWorkbenchStore {
 	// only the affected file rather than the entire cache.
 	private reviewCache = new Map<string, GitFileReviewData>();
 
-	private cacheKey(filePath: string, tab = this.activeTab, contextLines = this.contextLines): string {
+	private cacheKey(
+		filePath: string,
+		tab = this.activeTab,
+		contextLines = this.contextLines,
+	): string {
 		return `${tab}|${contextLines}|${filePath}`;
 	}
 
-	private cacheGet(filePath: string, tab = this.activeTab, contextLines = this.contextLines): GitFileReviewData | null {
+	private cacheGet(
+		filePath: string,
+		tab = this.activeTab,
+		contextLines = this.contextLines,
+	): GitFileReviewData | null {
 		return this.reviewCache.get(this.cacheKey(filePath, tab, contextLines)) ?? null;
 	}
 
-	private cacheSet(filePath: string, data: GitFileReviewData, tab = this.activeTab, contextLines = this.contextLines): void {
+	private cacheSet(
+		filePath: string,
+		data: GitFileReviewData,
+		tab = this.activeTab,
+		contextLines = this.contextLines,
+	): void {
 		this.reviewCache.set(this.cacheKey(filePath, tab, contextLines), data);
 	}
 
-	private createLoadGuard(projectPath: string, generation = this.loadGeneration): GitWorkbenchLoadGuard {
+	private createLoadGuard(
+		projectPath: string,
+		generation = this.loadGeneration,
+	): GitWorkbenchLoadGuard {
 		return {
 			generation,
 			targetKey: targetKey(this.target),
@@ -270,7 +284,10 @@ export class GitWorkbenchStore {
 			getSettings: async () => {
 				const { getRemoteSettings } = await import('$lib/api/settings.js');
 				const snap = await getRemoteSettings();
-				return { ui: snap.ui as Record<string, unknown>, uiEffective: snap.uiEffective as Record<string, unknown> };
+				return {
+					ui: snap.ui as Record<string, unknown>,
+					uiEffective: snap.uiEffective as Record<string, unknown>,
+				};
 			},
 		};
 		this.loadTreePaneWidth();
@@ -330,7 +347,7 @@ export class GitWorkbenchStore {
 
 	// Returns comments for a single file path.
 	commentsForFile(filePath: string): GitReviewCommentDraft[] {
-		return this.reviewComments.filter(c => c.filePath === filePath);
+		return this.reviewComments.filter((c) => c.filePath === filePath);
 	}
 
 	// Derived: count of all changed files (flattened)
@@ -342,15 +359,19 @@ export class GitWorkbenchStore {
 	// Unstaged tab shows files with unstaged or untracked changes;
 	// staged tab shows files with staged changes.
 	get visibleFilePaths(): string[] {
-		const predicate = this.activeTab === 'staged'
-			? (n: GitTreeNode) => n.staged
-			: (n: GitTreeNode) => n.hasUnstaged || n.changeKind === 'untracked';
+		const predicate =
+			this.activeTab === 'staged'
+				? (n: GitTreeNode) => n.staged
+				: (n: GitTreeNode) => n.hasUnstaged || n.changeKind === 'untracked';
 		return this.collectFilePathsByPredicate(this.filteredTree, predicate);
 	}
 
 	// Derived: file counts per tab (for badge display)
 	get unstagedFileCount(): number {
-		return this.countFilesByPredicate(this.tree, (n) => n.hasUnstaged || n.changeKind === 'untracked');
+		return this.countFilesByPredicate(
+			this.tree,
+			(n) => n.hasUnstaged || n.changeKind === 'untracked',
+		);
 	}
 
 	get stagedFileCount(): number {
@@ -408,7 +429,10 @@ export class GitWorkbenchStore {
 		return count;
 	}
 
-	private countFilesByPredicate(nodes: GitTreeNode[], predicate: (n: GitTreeNode) => boolean): number {
+	private countFilesByPredicate(
+		nodes: GitTreeNode[],
+		predicate: (n: GitTreeNode) => boolean,
+	): number {
 		let count = 0;
 		for (const node of nodes) {
 			if (node.kind === 'file' && predicate(node)) count++;
@@ -454,7 +478,10 @@ export class GitWorkbenchStore {
 		);
 	}
 
-	private collectFilePathsByPredicate(nodes: GitTreeNode[], predicate: (n: GitTreeNode) => boolean): string[] {
+	private collectFilePathsByPredicate(
+		nodes: GitTreeNode[],
+		predicate: (n: GitTreeNode) => boolean,
+	): string[] {
 		const result: string[] = [];
 		for (const node of nodes) {
 			if (node.kind === 'file' && predicate(node)) {
@@ -473,11 +500,7 @@ export class GitWorkbenchStore {
 			if (node.kind !== 'directory' || !node.children) return node;
 			let children = this.compactTree(node.children);
 			let { name, path, staged, hasUnstaged } = node;
-			while (
-				children.length === 1 &&
-				children[0].kind === 'directory' &&
-				children[0].children
-			) {
+			while (children.length === 1 && children[0].kind === 'directory' && children[0].children) {
 				const child = children[0];
 				name = name + '/' + child.name;
 				path = child.path;
@@ -579,7 +602,9 @@ export class GitWorkbenchStore {
 			return true;
 		} catch (err) {
 			if (!this.isCurrentLoadGuard(guard)) return false;
-			this.surfaceError(`Failed to load changes: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(
+				`Failed to load changes: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			this.tree = [];
 			return true;
 		} finally {
@@ -613,7 +638,12 @@ export class GitWorkbenchStore {
 		const previousSelectedFile = this.selectedFile;
 
 		const loadedTree = await this.loadTree(target.projectPath);
-		if (!loadedTree || generation !== this.refreshGeneration || targetKey(this.target) !== targetKey(target)) return;
+		if (
+			!loadedTree ||
+			generation !== this.refreshGeneration ||
+			targetKey(this.target) !== targetKey(target)
+		)
+			return;
 
 		this.pruneReviewDataToCurrentTree();
 		this.pruneLineSelectionToCurrentTree();
@@ -671,7 +701,8 @@ export class GitWorkbenchStore {
 	preferredTabForFile(filePath: string): GitDiffTab | null {
 		const node = this.findTreeNode(filePath);
 		if (!node) return null;
-		if (this.activeTab === 'unstaged' && (node.hasUnstaged || node.changeKind === 'untracked')) return 'unstaged';
+		if (this.activeTab === 'unstaged' && (node.hasUnstaged || node.changeKind === 'untracked'))
+			return 'unstaged';
 		if (this.activeTab === 'staged' && node.staged) return 'staged';
 		if (node.hasUnstaged || node.changeKind === 'untracked') return 'unstaged';
 		if (node.staged) return 'staged';
@@ -819,11 +850,17 @@ export class GitWorkbenchStore {
 		this.reviewDataByPath = Object.fromEntries(
 			Object.entries(this.reviewDataByPath).filter(([filePath]) => filePath !== file),
 		);
-		await this.refreshAfterGitAction(projectPath, { reason: 'git-action', preferSelectedFile: true });
+		await this.refreshAfterGitAction(projectPath, {
+			reason: 'git-action',
+			preferSelectedFile: true,
+		});
 		if (this.hasFile(file)) await this.loadFileReviewData(projectPath, file);
 	}
 
-	private async refreshAfterGitAction(projectPath: string, options: GitWorkbenchRefreshOptions): Promise<void> {
+	private async refreshAfterGitAction(
+		projectPath: string,
+		options: GitWorkbenchRefreshOptions,
+	): Promise<void> {
 		if (this.target) await this.refresh(options);
 		else await this.loadTree(projectPath);
 	}
@@ -887,23 +924,42 @@ export class GitWorkbenchStore {
 	}
 
 	// Stage/unstage a single diff line by its diffLineIndex.
-	async stageLine(projectPath: string, target: GitDiffActionTarget, diffLineIndex: number): Promise<boolean> {
+	async stageLine(
+		projectPath: string,
+		target: GitDiffActionTarget,
+		diffLineIndex: number,
+	): Promise<boolean> {
 		return this.stageSelectionForTarget(projectPath, { ...target, mode: 'stage' }, [diffLineIndex]);
 	}
 
-	async unstageLine(projectPath: string, target: GitDiffActionTarget, diffLineIndex: number): Promise<boolean> {
-		return this.stageSelectionForTarget(projectPath, { ...target, mode: 'unstage' }, [diffLineIndex]);
+	async unstageLine(
+		projectPath: string,
+		target: GitDiffActionTarget,
+		diffLineIndex: number,
+	): Promise<boolean> {
+		return this.stageSelectionForTarget(projectPath, { ...target, mode: 'unstage' }, [
+			diffLineIndex,
+		]);
 	}
 
-	async stageHunk(projectPath: string, targetOrHunkIndex: GitDiffActionTarget | number, maybeHunkIndex?: number): Promise<boolean> {
-		const target = typeof targetOrHunkIndex === 'number'
-			? this.targetForSelectedFile('stage')
-			: { ...targetOrHunkIndex, mode: 'stage' as const };
+	async stageHunk(
+		projectPath: string,
+		targetOrHunkIndex: GitDiffActionTarget | number,
+		maybeHunkIndex?: number,
+	): Promise<boolean> {
+		const target =
+			typeof targetOrHunkIndex === 'number'
+				? this.targetForSelectedFile('stage')
+				: { ...targetOrHunkIndex, mode: 'stage' as const };
 		const hunkIndex = typeof targetOrHunkIndex === 'number' ? targetOrHunkIndex : maybeHunkIndex;
 		if (!target || hunkIndex === undefined) return false;
 		try {
 			const result = await gitStageHunk(
-				projectPath, target.filePath, 'stage', hunkIndex, target.contextLines,
+				projectPath,
+				target.filePath,
+				'stage',
+				hunkIndex,
+				target.contextLines,
 			);
 			if (result.success) {
 				await this.refreshFileAfterStage(projectPath, target.filePath);
@@ -915,15 +971,24 @@ export class GitWorkbenchStore {
 		}
 	}
 
-	async unstageHunk(projectPath: string, targetOrHunkIndex: GitDiffActionTarget | number, maybeHunkIndex?: number): Promise<boolean> {
-		const target = typeof targetOrHunkIndex === 'number'
-			? this.targetForSelectedFile('unstage')
-			: { ...targetOrHunkIndex, mode: 'unstage' as const };
+	async unstageHunk(
+		projectPath: string,
+		targetOrHunkIndex: GitDiffActionTarget | number,
+		maybeHunkIndex?: number,
+	): Promise<boolean> {
+		const target =
+			typeof targetOrHunkIndex === 'number'
+				? this.targetForSelectedFile('unstage')
+				: { ...targetOrHunkIndex, mode: 'unstage' as const };
 		const hunkIndex = typeof targetOrHunkIndex === 'number' ? targetOrHunkIndex : maybeHunkIndex;
 		if (!target || hunkIndex === undefined) return false;
 		try {
 			const result = await gitStageHunk(
-				projectPath, target.filePath, 'unstage', hunkIndex, target.contextLines,
+				projectPath,
+				target.filePath,
+				'unstage',
+				hunkIndex,
+				target.contextLines,
 			);
 			if (result.success) {
 				await this.refreshFileAfterStage(projectPath, target.filePath);
@@ -935,12 +1000,17 @@ export class GitWorkbenchStore {
 		}
 	}
 
-	private async stageGroupedSelectedLines(projectPath: string, mode: GitDiffActionMode): Promise<boolean> {
+	private async stageGroupedSelectedLines(
+		projectPath: string,
+		mode: GitDiffActionMode,
+	): Promise<boolean> {
 		const groups = this.groupSelectedLineIndicesByTarget(mode);
 		if (groups.length === 0) return false;
 		const results = [];
 		for (const group of groups) {
-			results.push(await this.stageSelectionForTarget(projectPath, group.target, group.lineIndices));
+			results.push(
+				await this.stageSelectionForTarget(projectPath, group.target, group.lineIndices),
+			);
 		}
 		return results.every(Boolean);
 	}
@@ -952,7 +1022,11 @@ export class GitWorkbenchStore {
 	): Promise<boolean> {
 		try {
 			const result = await gitStageSelection(
-				projectPath, target.filePath, target.mode, lineIndices, target.contextLines,
+				projectPath,
+				target.filePath,
+				target.mode,
+				lineIndices,
+				target.contextLines,
 			);
 			if (result.success) {
 				this.clearSelectionForFile(target.filePath, target.tab);
@@ -960,7 +1034,9 @@ export class GitWorkbenchStore {
 			}
 			return result.success ?? false;
 		} catch (err) {
-			this.surfaceError(`${target.mode === 'stage' ? 'Stage' : 'Unstage'} failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(
+				`${target.mode === 'stage' ? 'Stage' : 'Unstage'} failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			return false;
 		}
 	}
@@ -1046,7 +1122,9 @@ export class GitWorkbenchStore {
 			}
 			return result.success ?? false;
 		} catch (err) {
-			this.surfaceError(`Stage directory failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(
+				`Stage directory failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			return false;
 		}
 	}
@@ -1060,7 +1138,9 @@ export class GitWorkbenchStore {
 			}
 			return result.success ?? false;
 		} catch (err) {
-			this.surfaceError(`Unstage directory failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(
+				`Unstage directory failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			return false;
 		}
 	}
@@ -1082,16 +1162,16 @@ export class GitWorkbenchStore {
 		try {
 			const node = this.findTreeNode(filePath);
 			const isUntracked = node?.changeKind === 'untracked';
-				const result = isUntracked
-					? await gitDeleteUntracked(projectPath, filePath)
-					: await gitDiscard(projectPath, filePath);
-				if (result.success) {
-					this.refreshAllData();
-					await this.refreshAfterGitAction(projectPath, { reason: 'git-action' });
-					if (this.selectedFile === filePath && !this.visibleFilePaths.includes(filePath)) {
-						const first = this.visibleFilePaths[0];
-						this.selectedFile = first ?? null;
-					}
+			const result = isUntracked
+				? await gitDeleteUntracked(projectPath, filePath)
+				: await gitDiscard(projectPath, filePath);
+			if (result.success) {
+				this.refreshAllData();
+				await this.refreshAfterGitAction(projectPath, { reason: 'git-action' });
+				if (this.selectedFile === filePath && !this.visibleFilePaths.includes(filePath)) {
+					const first = this.visibleFilePaths[0];
+					this.selectedFile = first ?? null;
+				}
 			}
 			return result.success ?? false;
 		} catch (err) {
@@ -1122,11 +1202,14 @@ export class GitWorkbenchStore {
 		try {
 			const result = await gitCommitIndex(projectPath, this.commitMessage.trim());
 			if (result.success) {
-					this.commitMessage = '';
-					this.refreshAllData();
-					await this.refreshAfterGitAction(projectPath, { reason: 'git-action', preserveSelection: false });
-					// After commit, the previously selected file may no longer
-					// have changes. Re-select if still present, otherwise pick
+				this.commitMessage = '';
+				this.refreshAllData();
+				await this.refreshAfterGitAction(projectPath, {
+					reason: 'git-action',
+					preserveSelection: false,
+				});
+				// After commit, the previously selected file may no longer
+				// have changes. Re-select if still present, otherwise pick
 				// the first remaining file or clear selection.
 				if (!this.selectedFile || !this.visibleFilePaths.includes(this.selectedFile)) {
 					const first = this.visibleFilePaths[0];
@@ -1151,16 +1234,21 @@ export class GitWorkbenchStore {
 	async createInitialCommit(projectPath: string): Promise<boolean> {
 		this.isCreatingInitialCommit = true;
 		try {
-				const result = await gitInitialCommit(projectPath);
-				if (result.success) {
-					this.hasCommits = true;
-					await this.refreshAfterGitAction(projectPath, { reason: 'git-action', preserveSelection: false });
-				} else {
+			const result = await gitInitialCommit(projectPath);
+			if (result.success) {
+				this.hasCommits = true;
+				await this.refreshAfterGitAction(projectPath, {
+					reason: 'git-action',
+					preserveSelection: false,
+				});
+			} else {
 				this.surfaceError(result.error ?? 'Initial commit failed');
 			}
 			return result.success ?? false;
 		} catch (err) {
-			this.surfaceError(`Initial commit failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(
+				`Initial commit failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			return false;
 		} finally {
 			this.isCreatingInitialCommit = false;
@@ -1176,27 +1264,27 @@ export class GitWorkbenchStore {
 		this.isGeneratingMessage = true;
 		try {
 			// Hydrate agent/model from persisted settings before generating.
-				await this.hydrateCommitSettings();
-				const data = await generateCommitMessageApi(
-					projectPath,
-					files,
-					this.commitAgentId,
-					this.commitModel,
-					this.commitCustomPrompt,
-					this.commitApiProviderId,
-					this.commitModelEndpointId,
-					this.commitModelProtocol,
-				);
-				if (data.message) {
-					let msg = data.message;
-					if (this.commitUseCommonDirPrefix) {
-						const prefix = computeCommonDirPrefixSync(files);
-						if (prefix) {
-							msg = applyDirPrefix(msg, prefix);
-						}
+			await this.hydrateCommitSettings();
+			const data = await generateCommitMessageApi(
+				projectPath,
+				files,
+				this.commitAgentId,
+				this.commitModel,
+				this.commitCustomPrompt,
+				this.commitApiProviderId,
+				this.commitModelEndpointId,
+				this.commitModelProtocol,
+			);
+			if (data.message) {
+				let msg = data.message;
+				if (this.commitUseCommonDirPrefix) {
+					const prefix = computeCommonDirPrefixSync(files);
+					if (prefix) {
+						msg = applyDirPrefix(msg, prefix);
 					}
-					this.commitMessage = msg;
-				} else {
+				}
+				this.commitMessage = msg;
+			} else {
 				this.surfaceError(data.error ?? 'Failed to generate commit message');
 			}
 		} catch (err) {
@@ -1210,23 +1298,28 @@ export class GitWorkbenchStore {
 	private async hydrateCommitSettings(): Promise<void> {
 		try {
 			const snap = this.deps.remoteSnapshot?.();
-			const settings = snap ?? await this.deps.getSettings();
+			const settings = snap ?? (await this.deps.getSettings());
 			const ui = (settings.ui ?? {}) as Record<string, unknown>;
 			const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
 			const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;
 			const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
-				const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
-				this.commitGenerationEnabled = cm.enabled !== false;
-				const agentId = cm.agentId as string;
-				if (typeof agentId === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(agentId)) {
-					this.commitAgentId = agentId as SessionAgentId;
-				}
-				if (typeof cm.model === 'string' && cm.model) {
-					this.commitModel = cm.model;
-				}
-				this.commitApiProviderId = typeof cm.apiProviderId === 'string' ? cm.apiProviderId : null;
-				this.commitModelEndpointId = typeof cm.modelEndpointId === 'string' ? cm.modelEndpointId : null;
-				this.commitModelProtocol = cm.modelProtocol === 'openai-compatible' || cm.modelProtocol === 'anthropic-messages'
+			const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<
+				string,
+				unknown
+			>;
+			this.commitGenerationEnabled = cm.enabled !== false;
+			const agentId = cm.agentId as string;
+			if (typeof agentId === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(agentId)) {
+				this.commitAgentId = agentId as SessionAgentId;
+			}
+			if (typeof cm.model === 'string' && cm.model) {
+				this.commitModel = cm.model;
+			}
+			this.commitApiProviderId = typeof cm.apiProviderId === 'string' ? cm.apiProviderId : null;
+			this.commitModelEndpointId =
+				typeof cm.modelEndpointId === 'string' ? cm.modelEndpointId : null;
+			this.commitModelProtocol =
+				cm.modelProtocol === 'openai-compatible' || cm.modelProtocol === 'anthropic-messages'
 					? cm.modelProtocol
 					: null;
 			if (typeof cm.customPrompt === 'string') {
@@ -1235,7 +1328,9 @@ export class GitWorkbenchStore {
 			if (typeof cm.useCommonDirPrefix === 'boolean') {
 				this.commitUseCommonDirPrefix = cm.useCommonDirPrefix;
 			}
-		} catch { /* settings may not be available */ }
+		} catch {
+			/* settings may not be available */
+		}
 	}
 
 	// Review comments
@@ -1254,11 +1349,25 @@ export class GitWorkbenchStore {
 			body: c.body.trim(),
 			severity: c.severity,
 		});
-		this.commentComposer = { open: false, filePath: '', side: 'after', line: 0, body: '', severity: 'note' };
+		this.commentComposer = {
+			open: false,
+			filePath: '',
+			side: 'after',
+			line: 0,
+			body: '',
+			severity: 'note',
+		};
 	}
 
 	closeCommentComposer(): void {
-		this.commentComposer = { open: false, filePath: '', side: 'after', line: 0, body: '', severity: 'note' };
+		this.commentComposer = {
+			open: false,
+			filePath: '',
+			side: 'after',
+			line: 0,
+			body: '',
+			severity: 'note',
+		};
 	}
 
 	addDraftComment(input: Omit<GitReviewCommentDraft, 'id' | 'createdAt'>): void {
@@ -1271,9 +1380,7 @@ export class GitWorkbenchStore {
 	}
 
 	updateDraftComment(id: string, patch: Partial<GitReviewCommentDraft>): void {
-		this.reviewComments = this.reviewComments.map((c) =>
-			c.id === id ? { ...c, ...patch } : c,
-		);
+		this.reviewComments = this.reviewComments.map((c) => (c.id === id ? { ...c, ...patch } : c));
 	}
 
 	removeDraftComment(id: string): void {
@@ -1299,9 +1406,7 @@ export class GitWorkbenchStore {
 		return lines.join('\n');
 	}
 
-	async finalizeReviewToAgent(
-		send: (message: string) => Promise<boolean>,
-	): Promise<boolean> {
+	async finalizeReviewToAgent(send: (message: string) => Promise<boolean>): Promise<boolean> {
 		if (this.reviewComments.length === 0 && !this.reviewSummary.trim()) {
 			return false;
 		}
@@ -1322,7 +1427,9 @@ export class GitWorkbenchStore {
 			const data = await getGitWorktrees(projectPath);
 			this.worktrees = data.worktrees;
 		} catch (err) {
-			this.surfaceError(`Failed to load worktrees: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(
+				`Failed to load worktrees: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			this.worktrees = [];
 		} finally {
 			this.isLoadingWorktrees = false;
@@ -1339,22 +1446,22 @@ export class GitWorkbenchStore {
 			if (result.success) await this.loadWorktrees(projectPath);
 			return result.success ?? false;
 		} catch (err) {
-			this.surfaceError(`Create worktree failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(
+				`Create worktree failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			return false;
 		}
 	}
 
-	async removeWorktree(
-		projectPath: string,
-		worktreePath: string,
-		force = false,
-	): Promise<boolean> {
+	async removeWorktree(projectPath: string, worktreePath: string, force = false): Promise<boolean> {
 		try {
 			const result = await gitRemoveWorktree(projectPath, worktreePath, force);
 			if (result.success) await this.loadWorktrees(projectPath);
 			return result.success ?? false;
 		} catch (err) {
-			this.surfaceError(`Remove worktree failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(
+				`Remove worktree failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			return false;
 		}
 	}
@@ -1366,11 +1473,14 @@ export class GitWorkbenchStore {
 		strategy: 'revert' | 'reset-soft' = 'revert',
 	): Promise<boolean> {
 		try {
-				const result = await gitRevertLastCommit(projectPath, strategy);
-				if (result.success) {
-					this.refreshAllData();
-					await this.refreshAfterGitAction(projectPath, { reason: 'git-action', preserveSelection: false });
-				}
+			const result = await gitRevertLastCommit(projectPath, strategy);
+			if (result.success) {
+				this.refreshAllData();
+				await this.refreshAfterGitAction(projectPath, {
+					reason: 'git-action',
+					preserveSelection: false,
+				});
+			}
 			return result.success ?? false;
 		} catch (err) {
 			this.surfaceError(`Revert failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1411,7 +1521,14 @@ export class GitWorkbenchStore {
 		this.loadGeneration++;
 		this.reviewCache.clear();
 		this.reviewModalOpen = false;
-		this.commentComposer = { open: false, filePath: '', side: 'after', line: 0, body: '', severity: 'note' };
+		this.commentComposer = {
+			open: false,
+			filePath: '',
+			side: 'after',
+			line: 0,
+			body: '',
+			severity: 'note',
+		};
 	}
 
 	// Full reset when project changes or the panel is disposed.

@@ -1,12 +1,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiGet, apiPost, apiPut, apiDelete, apiPostForm, ApiError, getAuthToken, setAuthToken, clearAuthToken } from '../client';
+import {
+	apiGet,
+	apiPost,
+	apiPut,
+	apiDelete,
+	apiPostForm,
+	ApiError,
+	getAuthToken,
+	setAuthToken,
+	clearAuthToken,
+} from '../client';
 
 // Stub localStorage for token management.
 const store: Record<string, string> = {};
 vi.stubGlobal('localStorage', {
 	getItem: (k: string) => store[k] ?? null,
-	setItem: (k: string, v: string) => { store[k] = v; },
-	removeItem: (k: string) => { delete store[k]; },
+	setItem: (k: string, v: string) => {
+		store[k] = v;
+	},
+	removeItem: (k: string) => {
+		delete store[k];
+	},
 });
 
 describe('token management', () => {
@@ -145,7 +159,7 @@ describe('API client helpers', () => {
 
 	it('throws ApiError with statusText when body has no error field', async () => {
 		fetchMock.mockResolvedValue(
-			new Response('not json', { status: 500, statusText: 'Internal Server Error' })
+			new Response('not json', { status: 500, statusText: 'Internal Server Error' }),
 		);
 
 		await expect(apiGet('/api/broken')).rejects.toThrow('Internal Server Error');

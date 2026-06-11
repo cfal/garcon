@@ -169,10 +169,10 @@
 {#if isMobile}
 	<!-- Fullscreen mobile browser -->
 	<div class="fixed inset-0 z-50 flex flex-col bg-background">
-		<div
-			class="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0"
-		>
-			<h3 class="text-sm font-medium text-foreground">{m.chat_directory_browser_select_directory()}</h3>
+		<div class="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+			<h3 class="text-sm font-medium text-foreground">
+				{m.chat_directory_browser_select_directory()}
+			</h3>
 			<button
 				type="button"
 				onclick={onClose}
@@ -216,20 +216,13 @@
 
 		<!-- Directory list -->
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -- listbox div needs focus for arrow key navigation -->
-		<div
-			class="overflow-y-auto flex-1"
-			tabindex="0"
-			onkeydown={handleListKeyDown}
-			role="listbox"
-		>
+		<div class="overflow-y-auto flex-1" tabindex="0" onkeydown={handleListKeyDown} role="listbox">
 			{#if loading}
 				<div class="flex items-center justify-center py-8">
 					<Loader2 class="w-5 h-5 animate-spin text-muted-foreground" />
 				</div>
-				{:else if error}
-					<div
-						class="flex items-center gap-2 px-3 py-4 text-sm text-status-error-foreground"
-					>
+			{:else if error}
+				<div class="flex items-center gap-2 px-3 py-4 text-sm text-status-error-foreground">
 					<CircleAlert class="w-4 h-4 flex-shrink-0" />
 					{error}
 				</div>
@@ -253,7 +246,7 @@
 							? 'bg-muted/70 text-foreground'
 							: 'hover:bg-muted/50 active:bg-muted/70 text-foreground'}"
 					>
-							<Folder class="w-4 h-4 text-primary flex-shrink-0" />
+						<Folder class="w-4 h-4 text-primary flex-shrink-0" />
 						<span class="truncate">{entry.name}</span>
 					</button>
 				{/each}
@@ -265,13 +258,13 @@
 			{/if}
 		</div>
 
-			<div class="border-t border-border p-3 flex-shrink-0 space-y-1.5">
-				<p class="text-xs text-muted-foreground truncate px-1">{browsePath}</p>
-				<button
-					type="button"
-					onclick={() => handleConfirm(browsePath)}
-					class="w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 active:bg-primary/80 transition-colors"
-				>
+		<div class="border-t border-border p-3 flex-shrink-0 space-y-1.5">
+			<p class="text-xs text-muted-foreground truncate px-1">{browsePath}</p>
+			<button
+				type="button"
+				onclick={() => handleConfirm(browsePath)}
+				class="w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 active:bg-primary/80 transition-colors"
+			>
 				{m.chat_directory_browser_select_this()}
 			</button>
 		</div>
@@ -305,20 +298,13 @@
 
 		<!-- Directory list -->
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -- listbox div needs focus for arrow key navigation -->
-		<div
-			class="overflow-y-auto flex-1"
-			tabindex="0"
-			onkeydown={handleListKeyDown}
-			role="listbox"
-		>
+		<div class="overflow-y-auto flex-1" tabindex="0" onkeydown={handleListKeyDown} role="listbox">
 			{#if loading}
 				<div class="flex items-center justify-center py-8">
 					<Loader2 class="w-5 h-5 animate-spin text-muted-foreground" />
 				</div>
-				{:else if error}
-					<div
-						class="flex items-center gap-2 px-3 py-4 text-sm text-status-error-foreground"
-					>
+			{:else if error}
+				<div class="flex items-center gap-2 px-3 py-4 text-sm text-status-error-foreground">
 					<CircleAlert class="w-4 h-4 flex-shrink-0" />
 					{error}
 				</div>
@@ -342,7 +328,7 @@
 							? 'bg-muted/70 text-foreground'
 							: 'hover:bg-muted/50 text-foreground'}"
 					>
-							<Folder class="w-4 h-4 text-primary flex-shrink-0" />
+						<Folder class="w-4 h-4 text-primary flex-shrink-0" />
 						<span class="truncate">{entry.name}</span>
 					</button>
 				{/each}

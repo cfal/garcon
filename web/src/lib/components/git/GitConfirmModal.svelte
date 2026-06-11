@@ -49,12 +49,27 @@
 	let confirmButtonRef = $state<HTMLButtonElement | null>(null);
 </script>
 
-<Dialog.Root open={true} onOpenChange={(open) => { if (!open) onCancel(); }}>
-	<Dialog.Content showCloseButton={false} onOpenAutoFocus={(e) => { e.preventDefault(); confirmButtonRef?.focus(); }}>
+<Dialog.Root
+	open={true}
+	onOpenChange={(open) => {
+		if (!open) onCancel();
+	}}
+>
+	<Dialog.Content
+		showCloseButton={false}
+		onOpenAutoFocus={(e) => {
+			e.preventDefault();
+			confirmButtonRef?.focus();
+		}}
+	>
 		<Dialog.Header>
 			<div class="flex items-center">
 				<div class="p-2 rounded-full mr-3 {isDestructive ? 'bg-status-error' : 'bg-diff-modified'}">
-					<AlertTriangle class="w-5 h-5 {isDestructive ? 'text-status-error-foreground' : 'text-diff-modified-foreground'}" />
+					<AlertTriangle
+						class="w-5 h-5 {isDestructive
+							? 'text-status-error-foreground'
+							: 'text-diff-modified-foreground'}"
+					/>
 				</div>
 				<Dialog.Title>{titleByAction[confirmAction.type]()}</Dialog.Title>
 			</div>
@@ -66,11 +81,14 @@
 			<button
 				onclick={onCancel}
 				class="px-4 py-2 text-sm text-muted-foreground hover:bg-accent rounded-md"
-			>{m.git_confirm_cancel()}</button>
+				>{m.git_confirm_cancel()}</button
+			>
 			<button
 				bind:this={confirmButtonRef}
 				onclick={onConfirm}
-				class="px-4 py-2 text-sm rounded-md flex items-center space-x-2 {isDestructive ? 'text-destructive-foreground' : 'text-git-action-foreground'} {buttonClasses[confirmAction.type]}"
+				class="px-4 py-2 text-sm rounded-md flex items-center space-x-2 {isDestructive
+					? 'text-destructive-foreground'
+					: 'text-git-action-foreground'} {buttonClasses[confirmAction.type]}"
 			>
 				{#if confirmAction.type === 'discard' || confirmAction.type === 'delete'}
 					<Trash2 class="w-4 h-4" />

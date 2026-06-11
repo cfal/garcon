@@ -97,14 +97,18 @@
 	});
 
 	const reorder = new SidebarChatReorderState({
-		get visibleOrders() { return visibleOrders; },
+		get visibleOrders() {
+			return visibleOrders;
+		},
 	});
 
-	let virtualRows = $derived.by(() => toVirtualRows(
-		reorder.orderFor('pinned'),
-		reorder.orderFor('normal'),
-		reorder.orderFor('archived'),
-	));
+	let virtualRows = $derived.by(() =>
+		toVirtualRows(
+			reorder.orderFor('pinned'),
+			reorder.orderFor('normal'),
+			reorder.orderFor('archived'),
+		),
+	);
 
 	$effect(() => {
 		reorder.reconcile();
@@ -175,19 +179,29 @@
 {#if isLoading}
 	<div class="flex h-full items-center justify-center px-4">
 		<div class="w-full max-w-xs text-center">
-			<div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted md:mb-3">
-				<div class="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent"></div>
+			<div
+				class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted md:mb-3"
+			>
+				<div
+					class="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent"
+				></div>
 			</div>
-			<h3 class="mb-2 text-base font-medium text-foreground md:mb-1">{m.sidebar_chats_loading_chats()}</h3>
+			<h3 class="mb-2 text-base font-medium text-foreground md:mb-1">
+				{m.sidebar_chats_loading_chats()}
+			</h3>
 			<p class="text-sm text-muted-foreground">{m.sidebar_chats_fetching_chats()}</p>
 		</div>
 	</div>
 {:else if !showChats}
 	<div class="px-4 py-12 text-center md:py-8">
-		<div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted md:mb-3">
+		<div
+			class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted md:mb-3"
+		>
 			<Search class="h-6 w-6 text-muted-foreground" />
 		</div>
-		<h3 class="mb-2 text-base font-medium text-foreground md:mb-1">{m.sidebar_chats_no_matching_chats()}</h3>
+		<h3 class="mb-2 text-base font-medium text-foreground md:mb-1">
+			{m.sidebar_chats_no_matching_chats()}
+		</h3>
 		<p class="text-sm text-muted-foreground">{m.sidebar_chats_try_different_search()}</p>
 	</div>
 {:else}

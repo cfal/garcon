@@ -177,7 +177,18 @@ describe('chats API contract', () => {
 	});
 
 	it('forkRunChat sends POST /api/v1/chats/fork-run', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true, commandType: 'fork-run', clientRequestId: 'req-1', status: 'accepted', acceptedAt: 't' }, 202));
+		fetchMock.mockResolvedValue(
+			jsonResponse(
+				{
+					success: true,
+					commandType: 'fork-run',
+					clientRequestId: 'req-1',
+					status: 'accepted',
+					acceptedAt: 't',
+				},
+				202,
+			),
+		);
 
 		await forkRunChat({
 			clientRequestId: 'req-1',
@@ -205,7 +216,16 @@ describe('chats API contract', () => {
 	});
 
 	it('stopChat and permission decision send command identity payloads', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true, commandType: 'agent-stop', clientRequestId: 'req-stop', status: 'accepted', acceptedAt: 't', stopped: true }));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				success: true,
+				commandType: 'agent-stop',
+				clientRequestId: 'req-stop',
+				status: 'accepted',
+				acceptedAt: 't',
+				stopped: true,
+			}),
+		);
 
 		await stopChat({ clientRequestId: 'req-stop', chatId: 'c-1', agentId: 'claude' });
 
@@ -216,7 +236,15 @@ describe('chats API contract', () => {
 			agentId: 'claude',
 		});
 
-		fetchMock.mockResolvedValueOnce(jsonResponse({ success: true, commandType: 'permission-decision', clientRequestId: 'req-perm', status: 'accepted', acceptedAt: 't' }));
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({
+				success: true,
+				commandType: 'permission-decision',
+				clientRequestId: 'req-perm',
+				status: 'accepted',
+				acceptedAt: 't',
+			}),
+		);
 
 		await sendPermissionDecision({
 			clientRequestId: 'req-perm',
@@ -237,7 +265,11 @@ describe('chats API contract', () => {
 	});
 
 	it('queue helpers use REST endpoints and encode identifiers', async () => {
-		fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ success: true, chatId: 'c/1', queue: { entries: [], paused: false } })));
+		fetchMock.mockImplementation(() =>
+			Promise.resolve(
+				jsonResponse({ success: true, chatId: 'c/1', queue: { entries: [], paused: false } }),
+			),
+		);
 
 		await getChatQueue('c/1');
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/queue?chatId=c%2F1');
@@ -257,7 +289,10 @@ describe('chats API contract', () => {
 		await resumeChatQueue('c/1');
 
 		expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/chats/queue/dequeue');
-		expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ chatId: 'c/1', entryId: 'entry/1' });
+		expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
+			chatId: 'c/1',
+			entryId: 'entry/1',
+		});
 		expect(fetchMock.mock.calls[3][0]).toBe('/api/v1/chats/queue/clear');
 		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/queue/pause');
 		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/queue/resume');
@@ -289,7 +324,9 @@ describe('chats API contract', () => {
 		expect(fetchMock.mock.calls[2][1].method ?? 'GET').toBe('GET');
 
 		await getChatMessages({ chatId: 'c/1', limit: 50, offset: 20 });
-		expect(fetchMock.mock.calls[3][0]).toBe('/api/v1/chats/messages?chatId=c%2F1&limit=50&offset=20');
+		expect(fetchMock.mock.calls[3][0]).toBe(
+			'/api/v1/chats/messages?chatId=c%2F1&limit=50&offset=20',
+		);
 		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
 	});
 
@@ -379,7 +416,9 @@ describe('chats API contract', () => {
 	});
 
 	it('forkChat sends POST with sourceChatId and chatId', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'claude' }));
+		fetchMock.mockResolvedValue(
+			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'claude' }),
+		);
 
 		const result = await forkChat({ sourceChatId: '1', chatId: '2' });
 
@@ -403,7 +442,7 @@ describe('chats API contract', () => {
 
 	it('validateStart returns structured invalid payloads on 200', async () => {
 		fetchMock.mockResolvedValue(
-			jsonResponse({ valid: false, error: 'Path does not exist', errorCode: 'path_not_found' })
+			jsonResponse({ valid: false, error: 'Path does not exist', errorCode: 'path_not_found' }),
 		);
 
 		const result = await validateStart('/missing');
@@ -411,7 +450,7 @@ describe('chats API contract', () => {
 		expect(result).toEqual({
 			valid: false,
 			error: 'Path does not exist',
-			errorCode: 'path_not_found'
+			errorCode: 'path_not_found',
 		});
 	});
 });

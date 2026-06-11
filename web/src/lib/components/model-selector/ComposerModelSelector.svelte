@@ -15,14 +15,7 @@
 		side?: 'top' | 'right' | 'bottom' | 'left';
 	}
 
-	let {
-		value,
-		mode,
-		onChange,
-		disabled = false,
-		align = 'end',
-		side = 'bottom',
-	}: Props = $props();
+	let { value, mode, onChange, disabled = false, align = 'end', side = 'bottom' }: Props = $props();
 </script>
 
 <ModelSelectorPopover
@@ -33,4 +26,3 @@
 	{align}
 	{side}
 />
-

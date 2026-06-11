@@ -107,27 +107,43 @@ export async function runChat(params: AgentRunCommandRequest): Promise<CommandAc
 	return apiPost<CommandAcceptedResponse>('/api/v1/chats/run', params);
 }
 
-export async function forkRunChat(params: ForkRunCommandRequest): Promise<CommandAcceptedResponse & { sourceChatId?: string }> {
-	return apiPost<CommandAcceptedResponse & { sourceChatId?: string }>('/api/v1/chats/fork-run', params);
+export async function forkRunChat(
+	params: ForkRunCommandRequest,
+): Promise<CommandAcceptedResponse & { sourceChatId?: string }> {
+	return apiPost<CommandAcceptedResponse & { sourceChatId?: string }>(
+		'/api/v1/chats/fork-run',
+		params,
+	);
 }
 
 export async function stopChat(params: AgentStopCommandRequest): Promise<AgentStopResponse> {
 	return apiPost<AgentStopResponse>('/api/v1/chats/stop', params);
 }
 
-export async function sendPermissionDecision(params: PermissionDecisionCommandRequest): Promise<CommandAcceptedResponse> {
+export async function sendPermissionDecision(
+	params: PermissionDecisionCommandRequest,
+): Promise<CommandAcceptedResponse> {
 	return apiPost<CommandAcceptedResponse>('/api/v1/chats/permissions/decision', params);
 }
 
-export async function enqueueChatMessage(params: QueueEnqueueCommandRequest): Promise<QueueEnqueueResponse> {
+export async function enqueueChatMessage(
+	params: QueueEnqueueCommandRequest,
+): Promise<QueueEnqueueResponse> {
 	return apiPost<QueueEnqueueResponse>('/api/v1/chats/queue/enqueue', params);
 }
 
-export async function getChatQueue(chatId: string): Promise<{ success: true; chatId: string; queue: QueueState }> {
-	return apiGet<{ success: true; chatId: string; queue: QueueState }>(`/api/v1/chats/queue?chatId=${encodeURIComponent(chatId)}`);
+export async function getChatQueue(
+	chatId: string,
+): Promise<{ success: true; chatId: string; queue: QueueState }> {
+	return apiGet<{ success: true; chatId: string; queue: QueueState }>(
+		`/api/v1/chats/queue?chatId=${encodeURIComponent(chatId)}`,
+	);
 }
 
-export async function dequeueChatMessage(chatId: string, entryId: string): Promise<QueueMutationResponse> {
+export async function dequeueChatMessage(
+	chatId: string,
+	entryId: string,
+): Promise<QueueMutationResponse> {
 	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/dequeue', { chatId, entryId });
 }
 
@@ -143,7 +159,9 @@ export async function resumeChatQueue(chatId: string): Promise<QueueMutationResp
 	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', { chatId });
 }
 
-export async function updateExecutionSettings(params: ExecutionSettingsPatchRequest): Promise<ExecutionSettingsPatchResponse> {
+export async function updateExecutionSettings(
+	params: ExecutionSettingsPatchRequest,
+): Promise<ExecutionSettingsPatchResponse> {
 	return apiPatch<ExecutionSettingsPatchResponse>('/api/v1/chats/execution-settings', params);
 }
 
@@ -155,7 +173,11 @@ export async function getRunningChats(): Promise<RunningChatsResponse> {
 	return apiGet<RunningChatsResponse>('/api/v1/chats/running');
 }
 
-export async function getChatMessages(params: { chatId: string; limit?: number; offset?: number }): Promise<{
+export async function getChatMessages(params: {
+	chatId: string;
+	limit?: number;
+	offset?: number;
+}): Promise<{
 	messages: ChatMessage[];
 	pendingUserInputs: PendingUserInput[];
 	total: number;
@@ -186,7 +208,9 @@ export async function getChatDetails(chatId: string): Promise<ChatDetailsRespons
 }
 
 /** Toggles the pinned state of a chat session. */
-export async function togglePinned(chatId: string): Promise<{ success: boolean; isPinned: boolean }> {
+export async function togglePinned(
+	chatId: string,
+): Promise<{ success: boolean; isPinned: boolean }> {
 	return apiPost('/api/v1/chats/pin', { chatId });
 }
 
@@ -229,7 +253,9 @@ export interface ValidateStartResponse {
 }
 
 export async function validateStart(path: string): Promise<ValidateStartResponse> {
-	return apiGet<ValidateStartResponse>(`/api/v1/chats/validate-start?path=${encodeURIComponent(path)}`);
+	return apiGet<ValidateStartResponse>(
+		`/api/v1/chats/validate-start?path=${encodeURIComponent(path)}`,
+	);
 }
 
 export interface ForkChatParams {

@@ -66,7 +66,11 @@ export class ConversationScrollController {
 		}
 	}
 
-	async loadMoreMessagesPreservingAnchor(chatId: string, prevHeight: number, prevTop: number): Promise<void> {
+	async loadMoreMessagesPreservingAnchor(
+		chatId: string,
+		prevHeight: number,
+		prevTop: number,
+	): Promise<void> {
 		const loaded = await this.deps.chatState.loadMoreMessages(chatId);
 		if (!loaded) return;
 		if (this.deps.sessions.selectedChatId !== chatId) return;

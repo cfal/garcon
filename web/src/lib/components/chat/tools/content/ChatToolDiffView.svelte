@@ -28,7 +28,7 @@
 		badge = 'Diff',
 		badgeColor = 'gray',
 		onFileClick,
-		showHeader = true
+		showHeader = true,
 	}: DiffViewerProps = $props();
 
 	// Computes an LCS-based diff between old and new content strings.
@@ -81,7 +81,7 @@
 	let badgeClasses = $derived(
 		badgeColor === 'green'
 			? 'bg-status-success/30 text-status-success-foreground border border-status-success-border'
-			: 'bg-status-neutral/30 text-status-neutral-foreground border border-status-neutral-border'
+			: 'bg-status-neutral/30 text-status-neutral-foreground border border-status-neutral-border',
 	);
 
 	let diffLines = $derived(computeDiff(oldContent ?? '', newContent ?? ''));
@@ -98,9 +98,7 @@
 <div class="border border-border rounded overflow-hidden">
 	{#if showHeader}
 		<!-- Header -->
-		<div
-			class="flex items-center justify-between px-2.5 py-1 bg-muted/40 border-b border-border"
-		>
+		<div class="flex items-center justify-between px-2.5 py-1 bg-muted/40 border-b border-border">
 			<div class="flex items-center gap-1.5 min-w-0">
 				{#if onFileClick}
 					<button
@@ -116,7 +114,9 @@
 				{/if}
 				<button
 					onclick={handleCopyPath}
-					class="p-0.5 rounded transition-colors shrink-0 {pathCopied ? 'text-status-success-foreground' : 'text-muted-foreground/60 hover:text-foreground hover:bg-accent'}"
+					class="p-0.5 rounded transition-colors shrink-0 {pathCopied
+						? 'text-status-success-foreground'
+						: 'text-muted-foreground/60 hover:text-foreground hover:bg-accent'}"
 					title={pathCopied ? 'Copied!' : 'Copy file path'}
 					aria-label={pathCopied ? 'Path copied' : 'Copy file path'}
 				>
@@ -127,9 +127,7 @@
 					{/if}
 				</button>
 			</div>
-			<span
-				class="text-[10px] font-medium px-1.5 py-px rounded {badgeClasses} flex-shrink-0 ml-2"
-			>
+			<span class="text-[10px] font-medium px-1.5 py-px rounded {badgeClasses} flex-shrink-0 ml-2">
 				{badge}
 			</span>
 		</div>
@@ -139,20 +137,20 @@
 	<div class="text-[11px] font-mono leading-[18px]">
 		{#each diffLines as line, i (i)}
 			<div class="flex">
-					<span
-						class="w-6 text-center select-none flex-shrink-0 {line.type === 'removed'
-							? 'bg-status-error/25 text-status-error-foreground'
-							: 'bg-status-success/25 text-status-success-foreground'}"
-					>
-						{line.type === 'removed' ? '-' : '+'}
-					</span>
-					<span
-						class="px-2 flex-1 whitespace-pre-wrap {line.type === 'removed'
-							? 'bg-status-error/12 text-status-error-foreground'
-							: 'bg-status-success/12 text-status-success-foreground'}"
-					>
-						{line.content}
-					</span>
+				<span
+					class="w-6 text-center select-none flex-shrink-0 {line.type === 'removed'
+						? 'bg-status-error/25 text-status-error-foreground'
+						: 'bg-status-success/25 text-status-success-foreground'}"
+				>
+					{line.type === 'removed' ? '-' : '+'}
+				</span>
+				<span
+					class="px-2 flex-1 whitespace-pre-wrap {line.type === 'removed'
+						? 'bg-status-error/12 text-status-error-foreground'
+						: 'bg-status-success/12 text-status-success-foreground'}"
+				>
+					{line.content}
+				</span>
 			</div>
 		{/each}
 	</div>

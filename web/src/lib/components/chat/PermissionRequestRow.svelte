@@ -23,7 +23,10 @@
 	interface Props {
 		request: PermissionRequestMessage;
 		terminal?: PermissionTerminal;
-		onDecision: (permissionRequestId: string, decision: { allow: boolean; message?: string }) => void;
+		onDecision: (
+			permissionRequestId: string,
+			decision: { allow: boolean; message?: string },
+		) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: PlanExitChoice, plan: string) => void;
 	}
 
@@ -77,23 +80,15 @@
 		return true;
 	}
 
-	const isExitPlanMode = $derived(
-		request.requestedTool.type === 'exit-plan-mode-tool-use',
-	);
+	const isExitPlanMode = $derived(request.requestedTool.type === 'exit-plan-mode-tool-use');
 
 	const exitPlanRequest = $derived(
-		request.requestedTool.type === 'exit-plan-mode-tool-use'
-			? request.requestedTool
-			: null,
+		request.requestedTool.type === 'exit-plan-mode-tool-use' ? request.requestedTool : null,
 	);
 
-	const plan = $derived(
-		exitPlanRequest ? exitPlanRequest.plan.replace(/\\n/g, '\n') : '',
-	);
+	const plan = $derived(exitPlanRequest ? exitPlanRequest.plan.replace(/\\n/g, '\n') : '');
 
-	const prompts = $derived(
-		exitPlanRequest?.allowedPrompts ?? [],
-	);
+	const prompts = $derived(exitPlanRequest?.allowedPrompts ?? []);
 
 	const toolLabel = $derived(getToolDisplayLabel(request.requestedTool));
 	const rawInput = $derived(JSON.stringify(getToolDisplayDetails(request.requestedTool), null, 2));
@@ -117,7 +112,9 @@
 	<ChatEventCard variant={planCardVariant} class={resolvedOpacity}>
 		{#snippet header()}
 			<div class="flex items-center gap-2">
-				<div class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-current/25">
+				<div
+					class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-current/25"
+				>
 					<ShieldAlert class="w-4 h-4" />
 				</div>
 				<span class="text-sm font-semibold">
@@ -129,7 +126,9 @@
 		{#snippet body()}
 			{#if plan}
 				<div class="rounded-lg border border-border/60 overflow-hidden mb-2">
-					<div class="px-2.5 py-1 bg-muted/50 border-b border-border/60 text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
+					<div
+						class="px-2.5 py-1 bg-muted/50 border-b border-border/60 text-[10px] text-muted-foreground font-mono uppercase tracking-wider"
+					>
 						{m.chat_permission_plan()}
 					</div>
 					<div class="px-3 py-2.5 text-xs text-foreground leading-relaxed">
@@ -145,7 +144,9 @@
 					</div>
 					<div class="space-y-1">
 						{#each prompts as prompt, i (i)}
-							<div class="flex items-center gap-2 text-[11px] font-mono bg-background/60 rounded-lg px-2.5 py-1.5 border border-border/40">
+							<div
+								class="flex items-center gap-2 text-[11px] font-mono bg-background/60 rounded-lg px-2.5 py-1.5 border border-border/40"
+							>
 								<span class="text-muted-foreground shrink-0">
 									{String(prompt.tool || '')}
 								</span>
@@ -194,7 +195,11 @@
 					</button>
 					<button
 						type="button"
-						onclick={() => onDecision(request.permissionRequestId, { allow: false, message: 'Keep in plan mode -- revise the plan based on feedback' })}
+						onclick={() =>
+							onDecision(request.permissionRequestId, {
+								allow: false,
+								message: 'Keep in plan mode -- revise the plan based on feedback',
+							})}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-info-border text-status-info hover:bg-status-info/15"
 						title="Stay in plan mode -- type feedback to revise the plan"
 					>
@@ -212,12 +217,13 @@
 			{/if}
 		{/snippet}
 	</ChatEventCard>
-
 {:else}
 	<ChatEventCard variant={permCardVariant} class={resolvedOpacity}>
 		{#snippet header()}
 			<div class="flex items-center gap-2">
-				<div class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-current/25">
+				<div
+					class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-current/25"
+				>
 					<FileCode class="w-4 h-4" />
 				</div>
 				<div>
@@ -238,7 +244,8 @@
 						<ChevronDown class="w-3.5 h-3.5" />
 						{m.chat_permission_view_tool_input()}
 					</summary>
-					<pre class="mt-2 max-h-40 overflow-auto rounded-md border border-current/20 bg-background/50 p-2 text-xs font-mono whitespace-pre-wrap">{rawInput}</pre>
+					<pre
+						class="mt-2 max-h-40 overflow-auto rounded-md border border-current/20 bg-background/50 p-2 text-xs font-mono whitespace-pre-wrap">{rawInput}</pre>
 				</details>
 			{/if}
 		{/snippet}
@@ -256,7 +263,11 @@
 					</button>
 					<button
 						type="button"
-						onclick={() => onDecision(request.permissionRequestId, { allow: false, message: 'User denied tool use' })}
+						onclick={() =>
+							onDecision(request.permissionRequestId, {
+								allow: false,
+								message: 'User denied tool use',
+							})}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 border border-status-error-border text-status-error-foreground hover:bg-status-error/20 transition-colors"
 					>
 						<X class="w-3.5 h-3.5" />

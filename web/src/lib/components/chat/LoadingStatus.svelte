@@ -14,18 +14,23 @@
 		spinnerSelectionKey?: string | null;
 	}
 
-	let {
-		isLoading,
-		status,
-		agentId,
-		onAbort,
-		spinnerSelectionKey = null
-	}: Props = $props();
+	let { isLoading, status, agentId, onAbort, spinnerSelectionKey = null }: Props = $props();
 
 	const SPINNER_SETS = [
 		['\u25D0', '\u25D3', '\u25D1', '\u25D2'],
-		['\u280B', '\u2819', '\u2839', '\u2838', '\u283C', '\u2834', '\u2826', '\u2827', '\u2807', '\u280F'],
-		['\u2736', '\u2737', '\u2738', '\u2739']
+		[
+			'\u280B',
+			'\u2819',
+			'\u2839',
+			'\u2838',
+			'\u283C',
+			'\u2834',
+			'\u2826',
+			'\u2827',
+			'\u2807',
+			'\u280F',
+		],
+		['\u2736', '\u2737', '\u2738', '\u2739'],
 	] as const;
 
 	let animationPhase = $state(0);
@@ -41,10 +46,17 @@
 
 	// Animates the spinner while the tray is visible.
 	$effect(() => {
-		if (animTimer) { clearInterval(animTimer); animTimer = null; }
+		if (animTimer) {
+			clearInterval(animTimer);
+			animTimer = null;
+		}
 		if (!isLoading) return;
-		animTimer = setInterval(() => { animationPhase = (animationPhase + 1) % activeSpinners.length; }, 500);
-		return () => { if (animTimer) clearInterval(animTimer); };
+		animTimer = setInterval(() => {
+			animationPhase = (animationPhase + 1) % activeSpinners.length;
+		}, 500);
+		return () => {
+			if (animTimer) clearInterval(animTimer);
+		};
 	});
 
 	// Spinner set selection is randomized once per load and reset whenever
@@ -69,13 +81,15 @@
 		if (animTimer) clearInterval(animTimer);
 	});
 
-	const statusText = $derived(agentId === 'codex' ? m.chat_loading_thinking() : (status?.text || m.chat_loading_thinking()));
+	const statusText = $derived(
+		agentId === 'codex' ? m.chat_loading_thinking() : status?.text || m.chat_loading_thinking(),
+	);
 	const canInterrupt = $derived(status?.can_interrupt !== false);
 	const statusTrayClass = cn(
-		'absolute bottom-full left-[13px] right-[13px] z-10 md:left-3 md:right-3'
+		'absolute bottom-full left-[13px] right-[13px] z-10 md:left-3 md:right-3',
 	);
 	const statusPanelClass = cn(
-		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-chat-thinking px-3 py-2 shadow-sm sm:px-4'
+		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-chat-thinking px-3 py-2 shadow-sm sm:px-4',
 	);
 </script>
 
@@ -84,7 +98,11 @@
 		<div class={statusPanelClass} role="status" aria-live="polite">
 			<div class="flex min-w-0 items-center gap-1.5">
 				<span
-					class="flex-shrink-0 text-sm text-status-processing transition-all duration-500 {animationPhase % 2 === 0 ? 'scale-110' : ''}"
+					class="flex-shrink-0 text-sm text-status-processing transition-all duration-500 {animationPhase %
+						2 ===
+					0
+						? 'scale-110'
+						: ''}"
 				>
 					{activeSpinners[animationPhase]}
 				</span>

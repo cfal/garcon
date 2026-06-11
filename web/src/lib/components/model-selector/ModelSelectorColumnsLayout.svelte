@@ -52,15 +52,19 @@
 
 <div data-slot="model-selector-columns" class="flex h-full min-h-0">
 	{#if showAgent}
-		<section class="min-h-0 touch-pan-y overflow-y-auto overscroll-contain border-r border-border p-1 [-webkit-overflow-scrolling:touch] sm:w-56">
-			<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{m.model_selector_agent()}</div>
+		<section
+			class="min-h-0 touch-pan-y overflow-y-auto overscroll-contain border-r border-border p-1 [-webkit-overflow-scrolling:touch] sm:w-56"
+		>
+			<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+				{m.model_selector_agent()}
+			</div>
 			<div class="space-y-1">
 				{#each selector.agentOptions as option (option.value)}
 					<button
 						type="button"
 						class={cn(
 							'flex w-full touch-pan-y items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-							option.value === selector.agentId && 'bg-accent text-accent-foreground'
+							option.value === selector.agentId && 'bg-accent text-accent-foreground',
 						)}
 						aria-pressed={option.value === selector.agentId}
 						onclick={() => selector.selectAgent(option.value)}
@@ -68,7 +72,9 @@
 						<span class="min-w-0 flex-1">
 							<span class="block truncate font-medium">{option.label}</span>
 							{#if option.description}
-								<span class="block truncate text-xs text-muted-foreground">{option.description}</span>
+								<span class="block truncate text-xs text-muted-foreground"
+									>{option.description}</span
+								>
 							{/if}
 						</span>
 						{#if option.value === selector.agentId}
@@ -81,8 +87,12 @@
 	{/if}
 
 	{#if showSource}
-		<section class="min-h-0 touch-pan-y overflow-y-auto overscroll-contain border-r border-border p-1 [-webkit-overflow-scrolling:touch] sm:w-48">
-			<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{m.model_selector_provider()}</div>
+		<section
+			class="min-h-0 touch-pan-y overflow-y-auto overscroll-contain border-r border-border p-1 [-webkit-overflow-scrolling:touch] sm:w-48"
+		>
+			<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+				{m.model_selector_provider()}
+			</div>
 			<div class="space-y-1">
 				{#each selector.sources as source (source.key)}
 					<button
@@ -90,7 +100,7 @@
 						title={source.description ? `${source.label} - ${source.description}` : source.label}
 						class={cn(
 							'flex w-full touch-pan-y items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-							source.key === selector.sourceKey && 'bg-accent text-accent-foreground'
+							source.key === selector.sourceKey && 'bg-accent text-accent-foreground',
 						)}
 						aria-pressed={source.key === selector.sourceKey}
 						onclick={() => selector.selectSource(source.key)}

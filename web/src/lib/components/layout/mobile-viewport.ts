@@ -22,18 +22,22 @@ function finitePositive(value: number | null | undefined): number | null {
 	return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }
 
-export function computeMobileViewportMetrics(snapshot: MobileViewportSnapshot): MobileViewportMetrics {
+export function computeMobileViewportMetrics(
+	snapshot: MobileViewportSnapshot,
+): MobileViewportMetrics {
 	const minAppHeight = snapshot.minAppHeight ?? DEFAULT_MIN_APP_HEIGHT;
-	const keyboardVisibleThreshold = snapshot.keyboardVisibleThreshold ?? DEFAULT_KEYBOARD_VISIBLE_THRESHOLD;
+	const keyboardVisibleThreshold =
+		snapshot.keyboardVisibleThreshold ?? DEFAULT_KEYBOARD_VISIBLE_THRESHOLD;
 	const baselineAppHeight = finitePositive(snapshot.baselineAppHeight);
 	const previousAppHeight = finitePositive(snapshot.previousAppHeight);
 	const windowInnerHeight = finitePositive(snapshot.windowInnerHeight);
 	const visualViewportHeight = finitePositive(snapshot.visualViewportHeight);
 	const visualViewportOffsetTop = finitePositive(snapshot.visualViewportOffsetTop) ?? 0;
 	const fallbackHeight = previousAppHeight ?? windowInnerHeight ?? minAppHeight;
-	const stableVisualHeight = visualViewportHeight && visualViewportHeight >= minAppHeight
-		? visualViewportHeight
-		: fallbackHeight;
+	const stableVisualHeight =
+		visualViewportHeight && visualViewportHeight >= minAppHeight
+			? visualViewportHeight
+			: fallbackHeight;
 	const appHeight = Math.round(Math.max(minAppHeight, stableVisualHeight));
 	const keyboardReferenceHeight = visualViewportHeight ?? appHeight;
 	const keyboardHeight = Math.max(

@@ -5,7 +5,11 @@
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
-	import { isChatMaxWidth, type ChatMaxWidth, type ThemeMode } from '$lib/stores/local-settings.svelte.js';
+	import {
+		isChatMaxWidth,
+		type ChatMaxWidth,
+		type ThemeMode,
+	} from '$lib/stores/local-settings.svelte.js';
 	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -31,11 +35,7 @@
 {#snippet settingRow(label: string, checked: boolean, onToggle: () => void)}
 	<div class="flex items-center justify-between py-2">
 		<div class="text-sm font-medium text-foreground">{label}</div>
-		<Switch
-			{checked}
-			onCheckedChange={() => onToggle()}
-			aria-label={label}
-		/>
+		<Switch {checked} onCheckedChange={() => onToggle()} aria-label={label} />
 	</div>
 {/snippet}
 
@@ -43,7 +43,9 @@
 	<div class="bg-muted/50 border border-border rounded-lg">
 		<!-- Theme -->
 		<div class="flex items-center justify-between px-4 py-3">
-			<div class="text-sm font-medium text-foreground">{m.settings_appearance_settings_dark_mode_label()}</div>
+			<div class="text-sm font-medium text-foreground">
+				{m.settings_appearance_settings_dark_mode_label()}
+			</div>
 			<div class="flex gap-1 bg-muted rounded-lg p-1">
 				<Button
 					variant={ls.theme === 'light' ? 'default' : 'ghost'}
@@ -86,35 +88,25 @@
 					{/each}
 				</select>
 			</div>
-			{@render settingRow(
-				m.settings_accessibility_colorblind_mode(),
-				ls.colorblindMode,
-				() => ls.toggle('colorblindMode')
+			{@render settingRow(m.settings_accessibility_colorblind_mode(), ls.colorblindMode, () =>
+				ls.toggle('colorblindMode'),
 			)}
 			{@render settingRow(
 				m.settings_display_show_fullscreen_button(),
 				ls.alwaysFullscreenOnGitPanel,
-				() => ls.toggle('alwaysFullscreenOnGitPanel')
+				() => ls.toggle('alwaysFullscreenOnGitPanel'),
 			)}
-			{@render settingRow(
-				m.settings_chat_auto_expand_tools(),
-				ls.autoExpandTools,
-				() => ls.toggle('autoExpandTools')
+			{@render settingRow(m.settings_chat_auto_expand_tools(), ls.autoExpandTools, () =>
+				ls.toggle('autoExpandTools'),
 			)}
-			{@render settingRow(
-				m.settings_chat_show_thinking(),
-				ls.showThinking,
-				() => ls.toggle('showThinking')
+			{@render settingRow(m.settings_chat_show_thinking(), ls.showThinking, () =>
+				ls.toggle('showThinking'),
 			)}
-			{@render settingRow(
-				m.settings_chat_auto_scroll_to_bottom(),
-				ls.autoScrollToBottom,
-				() => ls.toggle('autoScrollToBottom')
+			{@render settingRow(m.settings_chat_auto_scroll_to_bottom(), ls.autoScrollToBottom, () =>
+				ls.toggle('autoScrollToBottom'),
 			)}
-			{@render settingRow(
-				m.settings_chat_send_by_shift_enter(),
-				ls.sendByShiftEnter,
-				() => ls.toggle('sendByShiftEnter')
+			{@render settingRow(m.settings_chat_send_by_shift_enter(), ls.sendByShiftEnter, () =>
+				ls.toggle('sendByShiftEnter'),
 			)}
 		</div>
 	</div>

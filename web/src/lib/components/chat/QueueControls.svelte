@@ -17,7 +17,9 @@
 	const PREVIEW_CHAR_LIMIT = 180;
 
 	const queueEntries = $derived(queue?.entries ?? []);
-	const queuedEntryCount = $derived(queueEntries.filter((entry) => entry.status === 'queued').length);
+	const queuedEntryCount = $derived(
+		queueEntries.filter((entry) => entry.status === 'queued').length,
+	);
 	const visibleEntries = $derived(queueEntries.slice(0, VISIBLE_ENTRY_LIMIT));
 	const hiddenEntryCount = $derived(Math.max(0, queueEntries.length - visibleEntries.length));
 	const hasEntries = $derived(queueEntries.length > 0);
@@ -52,13 +54,17 @@
 			{#each visibleEntries as entry (entry.id)}
 				<div class="flex items-start gap-2 border-l-2 border-queue-entry-border pl-2">
 					<div class="min-w-0 flex-1">
-						<div class="mb-0.5 text-[11px] font-medium uppercase tracking-normal text-queue-foreground/75">
+						<div
+							class="mb-0.5 text-[11px] font-medium uppercase tracking-normal text-queue-foreground/75"
+						>
 							{entryStatusLabel(entry.status)}
 						</div>
-						<span class={cn(
-							'block text-sm leading-5 text-queue-foreground whitespace-pre-wrap break-words',
-							entry.content.length > PREVIEW_CHAR_LIMIT && 'max-h-[4.75rem] overflow-hidden'
-						)}>
+						<span
+							class={cn(
+								'block text-sm leading-5 text-queue-foreground whitespace-pre-wrap break-words',
+								entry.content.length > PREVIEW_CHAR_LIMIT && 'max-h-[4.75rem] overflow-hidden',
+							)}
+						>
 							{previewContent(entry.content)}
 						</span>
 					</div>

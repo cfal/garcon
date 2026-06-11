@@ -11,12 +11,19 @@ import {
 import type { ChatSession } from '$lib/types/session';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 
-function normalizeModeFields<T extends {
-	permissionMode?: unknown;
-	thinkingMode?: unknown;
-	claudeThinkingMode?: unknown;
-	ampAgentMode?: unknown;
-}>(value: T): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'claudeThinkingMode' | 'ampAgentMode'> {
+function normalizeModeFields<
+	T extends {
+		permissionMode?: unknown;
+		thinkingMode?: unknown;
+		claudeThinkingMode?: unknown;
+		ampAgentMode?: unknown;
+	},
+>(
+	value: T,
+): Pick<
+	ChatSessionRecord,
+	'permissionMode' | 'thinkingMode' | 'claudeThinkingMode' | 'ampAgentMode'
+> {
 	return {
 		permissionMode: normalizePermissionMode(value.permissionMode),
 		thinkingMode: normalizeThinkingMode(value.thinkingMode),
@@ -29,13 +36,13 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 	return {
 		id: session.id,
 		projectPath: session.projectPath,
-			title: session.title,
-			agentId: session.agentId,
-			model: session.model,
-			apiProviderId: session.apiProviderId ?? null,
-			modelEndpointId: session.modelEndpointId ?? null,
-			modelProtocol: session.modelProtocol ?? null,
-			...normalizeModeFields(session),
+		title: session.title,
+		agentId: session.agentId,
+		model: session.model,
+		apiProviderId: session.apiProviderId ?? null,
+		modelEndpointId: session.modelEndpointId ?? null,
+		modelProtocol: session.modelProtocol ?? null,
+		...normalizeModeFields(session),
 		createdAt: session.activity?.createdAt ?? null,
 		lastActivityAt: session.activity?.lastActivityAt ?? null,
 		lastReadAt: session.activity?.lastReadAt ?? null,
@@ -63,12 +70,12 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.id === b.id &&
 		a.projectPath === b.projectPath &&
 		a.title === b.title &&
-			a.agentId === b.agentId &&
-			a.model === b.model &&
-			a.apiProviderId === b.apiProviderId &&
-			a.modelEndpointId === b.modelEndpointId &&
-			a.modelProtocol === b.modelProtocol &&
-			a.permissionMode === b.permissionMode &&
+		a.agentId === b.agentId &&
+		a.model === b.model &&
+		a.apiProviderId === b.apiProviderId &&
+		a.modelEndpointId === b.modelEndpointId &&
+		a.modelProtocol === b.modelProtocol &&
+		a.permissionMode === b.permissionMode &&
 		a.thinkingMode === b.thinkingMode &&
 		a.claudeThinkingMode === b.claudeThinkingMode &&
 		a.createdAt === b.createdAt &&
@@ -135,13 +142,13 @@ export class ChatSessionsStore {
 			}
 		}
 
-			for (const session of sessions) {
-				const next = toRecord(session);
-				const prev = this.byId[next.id];
-				preserveLocalPreview(prev, next);
-				if (prev && sameRecord(prev, next)) {
-					nextById[next.id] = prev;
-				} else {
+		for (const session of sessions) {
+			const next = toRecord(session);
+			const prev = this.byId[next.id];
+			preserveLocalPreview(prev, next);
+			if (prev && sameRecord(prev, next)) {
+				nextById[next.id] = prev;
+			} else {
 				// Preserve WS-authoritative isProcessing flag; the REST
 				// isActive snapshot can lag behind real-time WS events.
 				if (prev?.isProcessing && !next.isProcessing) {
@@ -172,11 +179,7 @@ export class ChatSessionsStore {
 		this.order = [...draftOrder, ...nextOrder];
 	}
 
-	createDraft(params: {
-		id: string;
-		projectPath: string;
-		startup: ChatStartupConfig;
-	}): void {
+	createDraft(params: { id: string; projectPath: string; startup: ChatStartupConfig }): void {
 		const { id, projectPath, startup } = params;
 		const normalizedStartup = {
 			...startup,
@@ -186,12 +189,12 @@ export class ChatSessionsStore {
 		const draft: ChatSessionRecord = {
 			id,
 			projectPath,
-				title: normalizedStartup.firstMessage.trim() || 'New Session',
-				agentId: normalizedStartup.agentId,
-				model: normalizedStartup.model,
-				apiProviderId: normalizedStartup.apiProviderId ?? null,
-				modelEndpointId: normalizedStartup.modelEndpointId ?? null,
-				modelProtocol: normalizedStartup.modelProtocol ?? null,
+			title: normalizedStartup.firstMessage.trim() || 'New Session',
+			agentId: normalizedStartup.agentId,
+			model: normalizedStartup.model,
+			apiProviderId: normalizedStartup.apiProviderId ?? null,
+			modelEndpointId: normalizedStartup.modelEndpointId ?? null,
+			modelProtocol: normalizedStartup.modelProtocol ?? null,
 			...normalizeModeFields(normalizedStartup),
 			createdAt: null,
 			lastActivityAt: null,

@@ -30,14 +30,19 @@ describe('LocalSettingsStore', () => {
 		const firstStore = createLocalSettingsStore();
 		const secondStore = createLocalSettingsStore();
 
-		localStorage.setItem('pref_local_settings', JSON.stringify({
-			...firstStore.snapshot(),
-			chatMaxWidth: 'small',
-		}));
-		window.dispatchEvent(new StorageEvent('storage', {
-			key: 'pref_local_settings',
-			newValue: localStorage.getItem('pref_local_settings'),
-		}));
+		localStorage.setItem(
+			'pref_local_settings',
+			JSON.stringify({
+				...firstStore.snapshot(),
+				chatMaxWidth: 'small',
+			}),
+		);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: 'pref_local_settings',
+				newValue: localStorage.getItem('pref_local_settings'),
+			}),
+		);
 
 		expect(secondStore.chatMaxWidth).toBe('small');
 

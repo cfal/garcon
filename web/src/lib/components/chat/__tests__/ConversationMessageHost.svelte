@@ -24,9 +24,4 @@
 	} as never);
 </script>
 
-<ConversationMessage
-	{message}
-	index={0}
-	prevMessage={null}
-	agentId="claude"
-/>
+<ConversationMessage {message} index={0} prevMessage={null} agentId="claude" />

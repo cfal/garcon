@@ -5,11 +5,11 @@ import ConversationWorkspaceStub from './ConversationWorkspaceStub.svelte';
 import SplitContainerStub from './SplitContainerStub.svelte';
 
 vi.mock('$lib/components/chat/ConversationWorkspace.svelte', () => ({
-	default: ConversationWorkspaceStub
+	default: ConversationWorkspaceStub,
 }));
 
 vi.mock('$lib/components/split/SplitContainer.svelte', () => ({
-	default: SplitContainerStub
+	default: SplitContainerStub,
 }));
 
 import WorkspaceViewTestHost from './WorkspaceViewTestHost.svelte';
@@ -31,7 +31,7 @@ describe('WorkspaceView header visibility', () => {
 		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
 			alwaysFullscreenOnGitPanel: true,
-			isMobile: false
+			isMobile: false,
 		});
 
 		expect(screen.queryByRole('heading', { name: 'Header Test Chat' })).toBeNull();
@@ -40,14 +40,16 @@ describe('WorkspaceView header visibility', () => {
 		expect(toolbar).toBeTruthy();
 		expect(toolbar?.className).toContain('right-6');
 		expect(toolbar?.className).toContain('md:right-8');
-			expect(screen.getByTestId('conversation-workspace-stub').dataset.reserveTopFloatingToolbar).toBe('true');
-			expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeTruthy();
+		expect(
+			screen.getByTestId('conversation-workspace-stub').dataset.reserveTopFloatingToolbar,
+		).toBe('true');
+		expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeTruthy();
 	});
 
 	it('keeps the top header visible on desktop for non-chat tabs', () => {
 		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'preview',
-			isMobile: false
+			isMobile: false,
 		});
 
 		expect(screen.getByRole('heading', { name: 'Header Test Chat' })).toBeTruthy();
@@ -57,62 +59,62 @@ describe('WorkspaceView header visibility', () => {
 	it('hides the top header on mobile chat tab', () => {
 		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
-			isMobile: true
+			isMobile: true,
 		});
 
 		expect(screen.queryByRole('heading', { name: 'Header Test Chat' })).toBeNull();
 		expect(screen.queryByLabelText('Open menu')).toBeNull();
-			expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeNull();
-			expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
-		});
+		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
+	});
 
-		it('shows exit fullscreen label when desktop fullscreen is active', () => {
-			render(WorkspaceViewTestHost, {
-				activeTab: 'chat',
-				alwaysFullscreenOnGitPanel: true,
+	it('shows exit fullscreen label when desktop fullscreen is active', () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			alwaysFullscreenOnGitPanel: true,
 			isMobile: false,
-			isDesktopFullscreen: true
+			isDesktopFullscreen: true,
 		});
 
-			expect(screen.getByRole('button', { name: 'Exit fullscreen' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Exit fullscreen' })).toBeTruthy();
 	});
 
 	it('hides fullscreen control on git tab when always-fullscreen-on-git is enabled', () => {
 		render(WorkspaceViewTestHost, {
 			activeTab: 'git',
 			alwaysFullscreenOnGitPanel: true,
-			isMobile: false
+			isMobile: false,
 		});
 
-			expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
 	});
 
 	it('shows fullscreen control on git tab when always-fullscreen-on-git is disabled', () => {
 		render(WorkspaceViewTestHost, {
 			activeTab: 'git',
 			alwaysFullscreenOnGitPanel: false,
-			isMobile: false
+			isMobile: false,
 		});
 
-			expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeTruthy();
+	});
+
+	it('exposes short labels on every desktop toolbar action', () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
 		});
 
-		it('exposes short labels on every desktop toolbar action', () => {
-			render(WorkspaceViewTestHost, {
-				activeTab: 'chat',
-				alwaysFullscreenOnGitPanel: true,
-				isMobile: false
-			});
-
-			for (const label of ['Chat', 'Git', 'Files', 'Terminal', 'Split view', 'Share', 'Fullscreen']) {
-				expect(screen.getByRole('button', { name: label })).toBeTruthy();
-			}
-		});
+		for (const label of ['Chat', 'Git', 'Files', 'Terminal', 'Split view', 'Share', 'Fullscreen']) {
+			expect(screen.getByRole('button', { name: label })).toBeTruthy();
+		}
+	});
 
 	it('uses semantic token classes for header and active tabs', () => {
 		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'files',
-			isMobile: false
+			isMobile: false,
 		});
 
 		expect(container.querySelector('.bg-chat-header')).toBeTruthy();

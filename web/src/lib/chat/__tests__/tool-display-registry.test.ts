@@ -99,8 +99,12 @@ describe('tool display helpers', () => {
 	});
 
 	it('returns structured external and MCP labels from typed fields', () => {
-		expect(getToolDisplayLabel(new ExternalToolUseMessage('', 'tool-1', 'search', {}, 'app'))).toBe('app.search');
-		expect(getToolDisplayLabel(new McpToolUseMessage('', 'tool-2', 'github', 'list_prs', {}))).toBe('github.list_prs');
+		expect(getToolDisplayLabel(new ExternalToolUseMessage('', 'tool-1', 'search', {}, 'app'))).toBe(
+			'app.search',
+		);
+		expect(getToolDisplayLabel(new McpToolUseMessage('', 'tool-2', 'github', 'list_prs', {}))).toBe(
+			'github.list_prs',
+		);
 	});
 
 	it('returns the display label for Amp-specific tool-use messages', () => {
@@ -110,7 +114,9 @@ describe('tool display helpers', () => {
 
 	it('strips transport metadata from display details', () => {
 		const details = getToolDisplayDetails(
-			new AmpOracleToolUseMessage('', 'tool-3', 'Review auth', 'Focus on session invalidation', ['src/auth.ts']),
+			new AmpOracleToolUseMessage('', 'tool-3', 'Review auth', 'Focus on session invalidation', [
+				'src/auth.ts',
+			]),
 		);
 		expect(details).toEqual({
 			task: 'Review auth',
@@ -129,7 +135,14 @@ describe('tool display helpers', () => {
 	});
 
 	it('shows patch-only ApplyPatch messages as diffs', () => {
-		const message = new ApplyPatchToolUseMessage('', 'tool-5', undefined, undefined, undefined, '*** Begin Patch');
+		const message = new ApplyPatchToolUseMessage(
+			'',
+			'tool-5',
+			undefined,
+			undefined,
+			undefined,
+			'*** Begin Patch',
+		);
 		const props = TOOL_DISPLAY_REGISTRY['apply-patch-tool-use'].input.getContentProps?.(
 			message as unknown as Record<string, unknown>,
 		);

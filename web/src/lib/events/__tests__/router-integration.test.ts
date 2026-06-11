@@ -10,7 +10,7 @@ import type { ChatMessage } from '$shared/chat-types';
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
 	return {
 		agentId: () => 'claude',
-		selectedChat: () => ({ id: 'chat-a', projectPath: '/repo' } as never),
+		selectedChat: () => ({ id: 'chat-a', projectPath: '/repo' }) as never,
 		currentChatId: () => 'chat-a',
 		setCurrentChatId: vi.fn(),
 		chatMessages: () => [],
@@ -76,18 +76,20 @@ function renderRouterWithRawMessages(
 describe('event router integration', () => {
 	it('routes a global event from raw payload through normalize + filter + handler', () => {
 		const stores = createStores();
-		renderRouterWithRawMessages([
-			{ type: 'chat-list-refresh-requested', reason: 'archive-toggled', chatId: 'chat-b' },
-		], stores);
+		renderRouterWithRawMessages(
+			[{ type: 'chat-list-refresh-requested', reason: 'archive-toggled', chatId: 'chat-b' }],
+			stores,
+		);
 
 		expect(stores.refreshChats).toHaveBeenCalledTimes(1);
 	});
 
 	it('routes fork-created events to the fork chat', () => {
 		const stores = createStores();
-		renderRouterWithRawMessages([
-			{ type: 'chat-fork-created', sourceChatId: 'chat-a', chatId: 'chat-b' },
-		], stores);
+		renderRouterWithRawMessages(
+			[{ type: 'chat-fork-created', sourceChatId: 'chat-a', chatId: 'chat-b' }],
+			stores,
+		);
 
 		expect(stores.setCurrentChatId).toHaveBeenCalledWith('chat-b');
 		expect(stores.setSelectedChatId).toHaveBeenCalledWith('chat-b');
@@ -97,84 +99,94 @@ describe('event router integration', () => {
 
 	it('drops malformed payloads before reaching handlers', () => {
 		const stores = createStores();
-		renderRouterWithRawMessages([
-			{ type: 'chat-list-refresh-requested', reason: 'archive-toggled' },
-		], stores);
+		renderRouterWithRawMessages(
+			[{ type: 'chat-list-refresh-requested', reason: 'archive-toggled' }],
+			stores,
+		);
 
 		expect(stores.refreshChats).not.toHaveBeenCalled();
 	});
 
 	it('skips scoped lifecycle events for non-active chats', () => {
 		const stores = createStores();
-		renderRouterWithRawMessages([
-			{ type: 'agent-run-finished', chatId: 'chat-b', exitCode: 0 },
-		], stores);
+		renderRouterWithRawMessages(
+			[{ type: 'agent-run-finished', chatId: 'chat-b', exitCode: 0 }],
+			stores,
+		);
 
 		expect(stores.setIsLoading).not.toHaveBeenCalled();
 		expect(stores.setCanAbort).not.toHaveBeenCalled();
 	});
 
 	it('marks pending user messages accepted when correlated output arrives before REST response', () => {
-		let pendingUserInputs: PendingUserInput[] = [{
-			chatId: 'chat-a',
-			clientRequestId: 'req-1',
-			clientMessageId: 'msg-1',
-			content: 'hello',
-			createdAt: '2026-05-14T00:00:00.000Z',
-			deliveryStatus: 'submitting',
-		}];
+		let pendingUserInputs: PendingUserInput[] = [
+			{
+				chatId: 'chat-a',
+				clientRequestId: 'req-1',
+				clientMessageId: 'msg-1',
+				content: 'hello',
+				createdAt: '2026-05-14T00:00:00.000Z',
+				deliveryStatus: 'submitting',
+			},
+		];
 		const stores = createStores({
 			pendingUserInputs: () => pendingUserInputs,
 			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) => {
 				pendingUserInputs = pendingUserInputs.map((input) =>
-					input.clientRequestId === clientRequestId
-						? { ...input, deliveryStatus }
-						: input,
+					input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
 				);
 			},
 		});
 
-		renderRouterWithRawMessages([
-			{
-				type: 'agent-run-output',
-				chatId: 'chat-a',
-				clientRequestId: 'req-1',
-				upstreamRequestId: 'cursor-req-1',
-				messages: [{ type: 'assistant-message', timestamp: '2026-05-14T00:00:01.000Z', content: 'hi' }],
-			},
-		], stores);
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'agent-run-output',
+					chatId: 'chat-a',
+					clientRequestId: 'req-1',
+					upstreamRequestId: 'cursor-req-1',
+					messages: [
+						{ type: 'assistant-message', timestamp: '2026-05-14T00:00:01.000Z', content: 'hi' },
+					],
+				},
+			],
+			stores,
+		);
 
 		expect(pendingUserInputs[0]?.deliveryStatus).toBe('accepted');
 	});
 
 	it('marks pending user messages failed on correlated execution failure', () => {
-		let pendingUserInputs: PendingUserInput[] = [{
-			chatId: 'chat-a',
-			clientRequestId: 'req-1',
-			clientMessageId: 'msg-1',
-			content: 'hello',
-			createdAt: '2026-05-14T00:00:00.000Z',
-			deliveryStatus: 'submitting',
-		}];
+		let pendingUserInputs: PendingUserInput[] = [
+			{
+				chatId: 'chat-a',
+				clientRequestId: 'req-1',
+				clientMessageId: 'msg-1',
+				content: 'hello',
+				createdAt: '2026-05-14T00:00:00.000Z',
+				deliveryStatus: 'submitting',
+			},
+		];
 		const stores = createStores({
 			pendingUserInputs: () => pendingUserInputs,
 			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) => {
 				pendingUserInputs = pendingUserInputs.map((input) =>
-					input.clientRequestId === clientRequestId
-						? { ...input, deliveryStatus }
-						: input,
+					input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
 				);
 			},
 		});
 
-		renderRouterWithRawMessages([
-			{
-				type: 'agent-run-failed',
-				chatId: 'chat-a',
-				clientRequestId: 'req-1',
-				error: 'provider failed',
-			},
-		], stores);
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'agent-run-failed',
+					chatId: 'chat-a',
+					clientRequestId: 'req-1',
+					error: 'provider failed',
+				},
+			],
+			stores,
+		);
 
 		expect(pendingUserInputs[0]?.deliveryStatus).toBe('failed');
 	});
@@ -188,22 +200,30 @@ describe('event router integration', () => {
 			},
 		});
 
-		renderRouterWithRawMessages([
-			{
-				type: 'agent-run-output',
-				chatId: 'chat-a',
-				messages: [{ type: 'assistant-message', timestamp: '2026-05-14T00:00:01.000Z', content: 'streamed' }],
-			},
-			{
-				type: 'chat-session-stopped',
-				chatId: 'chat-a',
-				success: true,
-			},
-		], stores);
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'agent-run-output',
+					chatId: 'chat-a',
+					messages: [
+						{
+							type: 'assistant-message',
+							timestamp: '2026-05-14T00:00:01.000Z',
+							content: 'streamed',
+						},
+					],
+				},
+				{
+					type: 'chat-session-stopped',
+					chatId: 'chat-a',
+					success: true,
+				},
+			],
+			stores,
+		);
 
-		expect(currentMessages.map((message) => 'content' in message ? String(message.content) : '')).toEqual([
-			'streamed',
-			'Chat interrupted by user.',
-		]);
+		expect(
+			currentMessages.map((message) => ('content' in message ? String(message.content) : '')),
+		).toEqual(['streamed', 'Chat interrupted by user.']);
 	});
 });

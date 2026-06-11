@@ -90,8 +90,8 @@
 		{onShareChat}
 		{onTagClick}
 		{onManageTags}
-			{onTogglePinned}
-			{onToggleArchive}
-			{onQuickMove}
-		/>
+		{onTogglePinned}
+		{onToggleArchive}
+		{onQuickMove}
+	/>
 </ScrollArea>

@@ -2,7 +2,13 @@
 // current turn's execution state: loading indicators, abort capability,
 // and status text.
 
-export type TurnStatus = 'idle' | 'running' | 'waiting-permission' | 'completed' | 'failed' | 'aborted';
+export type TurnStatus =
+	| 'idle'
+	| 'running'
+	| 'waiting-permission'
+	| 'completed'
+	| 'failed'
+	| 'aborted';
 
 export interface LoadingStatus {
 	text: string;

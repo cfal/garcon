@@ -20,12 +20,7 @@
 		onSave: (chatId: string, tags: string[]) => Promise<void> | void;
 	}
 
-	let {
-		tagDialog,
-		allKnownTags,
-		onClose,
-		onSave,
-	}: SidebarTagDialogProps = $props();
+	let { tagDialog, allKnownTags, onClose, onSave }: SidebarTagDialogProps = $props();
 
 	let isOpen = $derived(tagDialog !== null);
 	let editingTags = $state<string[]>([]);
@@ -147,7 +142,9 @@
 					{#each editingTags as tag (tag)}
 						<button
 							type="button"
-							class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity {getTagColorClasses(tag)}"
+							class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity {getTagColorClasses(
+								tag,
+							)}"
 							aria-label={m.sidebar_tags_remove({ tag })}
 							disabled={isSaving}
 							onclick={() => removeTag(tag)}
@@ -171,7 +168,9 @@
 					class="text-sm"
 				/>
 				{#if suggestions.length > 0}
-					<div class="absolute z-10 mt-1 w-full rounded-md border border-border bg-popover shadow-md">
+					<div
+						class="absolute z-10 mt-1 w-full rounded-md border border-border bg-popover shadow-md"
+					>
 						{#each suggestions as suggestion (suggestion)}
 							<button
 								type="button"
@@ -188,7 +187,9 @@
 
 			{#if unassignedTags.length > 0 && !inputValue.trim()}
 				<div class="space-y-1.5">
-					<span class="text-xs font-medium text-muted-foreground">{m.sidebar_tags_quick_assign()}</span>
+					<span class="text-xs font-medium text-muted-foreground"
+						>{m.sidebar_tags_quick_assign()}</span
+					>
 					<div class="flex flex-wrap gap-1.5">
 						{#each unassignedTags as tag (tag)}
 							<ColoredTag
@@ -212,8 +213,15 @@
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="outline" onclick={requestClose} disabled={isSaving}>{m.sidebar_actions_cancel()}</Button>
-			<Button onclick={() => { void handleSave(); }} disabled={isSaving}>{m.sidebar_actions_save()}</Button>
+			<Button variant="outline" onclick={requestClose} disabled={isSaving}
+				>{m.sidebar_actions_cancel()}</Button
+			>
+			<Button
+				onclick={() => {
+					void handleSave();
+				}}
+				disabled={isSaving}>{m.sidebar_actions_save()}</Button
+			>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

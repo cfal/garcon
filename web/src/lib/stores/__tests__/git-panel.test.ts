@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitPanelStore } from '../git-panel.svelte';
 
 vi.stubGlobal('localStorage', {
-	getItem: () => null, setItem: () => {}, removeItem: () => {},
+	getItem: () => null,
+	setItem: () => {},
+	removeItem: () => {},
 });
 
 vi.mock('$lib/api/git.js', () => ({
@@ -10,7 +12,9 @@ vi.mock('$lib/api/git.js', () => ({
 	getGitDiff: vi.fn().mockResolvedValue({}),
 	getBranches: vi.fn().mockResolvedValue({ branches: [] }),
 	getRemoteStatus: vi.fn().mockResolvedValue({}),
-	getGitRemotes: vi.fn().mockResolvedValue({ remotes: [{ name: 'origin', url: 'git@github.com:user/repo.git' }] }),
+	getGitRemotes: vi
+		.fn()
+		.mockResolvedValue({ remotes: [{ name: 'origin', url: 'git@github.com:user/repo.git' }] }),
 	getCommitHistory: vi.fn().mockResolvedValue({ commits: [] }),
 	getCommitDiff: vi.fn().mockResolvedValue({}),
 	generateCommitMessage: vi.fn(),
@@ -32,11 +36,7 @@ vi.mock('$lib/paraglide/messages.js', () => ({
 	git_changes_untracked: () => 'Untracked',
 }));
 
-import {
-	getGitStatus,
-	gitCommit,
-	gitCheckout,
-} from '$lib/api/git.js';
+import { getGitStatus, gitCommit, gitCheckout } from '$lib/api/git.js';
 
 describe('GitPanelStore', () => {
 	let store: GitPanelStore;
@@ -52,7 +52,9 @@ describe('GitPanelStore', () => {
 				branch: 'main',
 				hasCommits: true,
 				modified: ['a.txt', 'b.txt'],
-				added: [], deleted: [], untracked: [],
+				added: [],
+				deleted: [],
+				untracked: [],
 			});
 			await store.fetchGitStatus('/project');
 			expect(store.currentBranch).toBe('main');
@@ -62,9 +64,14 @@ describe('GitPanelStore', () => {
 
 		it('sets error status on API error', async () => {
 			vi.mocked(getGitStatus).mockResolvedValue({
-				branch: '', hasCommits: false,
-				modified: [], added: [], deleted: [], untracked: [],
-				error: 'Not a git repo', details: 'fatal: not a git repository',
+				branch: '',
+				hasCommits: false,
+				modified: [],
+				added: [],
+				deleted: [],
+				untracked: [],
+				error: 'Not a git repo',
+				details: 'fatal: not a git repository',
 			});
 			await store.fetchGitStatus('/bad-path');
 			expect(store.gitStatus?.error).toBe('Not a git repo');
@@ -82,9 +89,12 @@ describe('GitPanelStore', () => {
 
 		it('selectAllFiles selects all file types', () => {
 			store.gitStatus = {
-				branch: 'main', hasCommits: true,
-				modified: ['a.txt'], added: ['b.txt'],
-				deleted: ['c.txt'], untracked: ['d.txt'],
+				branch: 'main',
+				hasCommits: true,
+				modified: ['a.txt'],
+				added: ['b.txt'],
+				deleted: ['c.txt'],
+				untracked: ['d.txt'],
 			};
 			store.selectAllFiles();
 			expect(store.selectedFiles.size).toBe(4);
@@ -101,8 +111,12 @@ describe('GitPanelStore', () => {
 		it('commits selected files and resets on success', async () => {
 			vi.mocked(gitCommit).mockResolvedValue({ success: true });
 			vi.mocked(getGitStatus).mockResolvedValue({
-				branch: 'main', hasCommits: true,
-				modified: [], added: [], deleted: [], untracked: [],
+				branch: 'main',
+				hasCommits: true,
+				modified: [],
+				added: [],
+				deleted: [],
+				untracked: [],
 			});
 			store.commitMessage = 'test commit';
 			store.selectedFiles = new Set(['a.txt']);
@@ -133,8 +147,12 @@ describe('GitPanelStore', () => {
 		it('updates currentBranch on success', async () => {
 			vi.mocked(gitCheckout).mockResolvedValue({ success: true });
 			vi.mocked(getGitStatus).mockResolvedValue({
-				branch: 'feature', hasCommits: true,
-				modified: [], added: [], deleted: [], untracked: [],
+				branch: 'feature',
+				hasCommits: true,
+				modified: [],
+				added: [],
+				deleted: [],
+				untracked: [],
 			});
 			await store.handleSwitchBranch('/project', 'feature');
 			expect(store.currentBranch).toBe('feature');

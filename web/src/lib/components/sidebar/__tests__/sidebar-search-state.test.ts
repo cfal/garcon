@@ -44,52 +44,56 @@ function makeSavedSearch(overrides: Partial<SavedChatSearch>): SavedChatSearch {
 
 function createState(chats: ChatSessionRecord[] = [], selectedChatId: string | null = null) {
 	return new SidebarSearchState({
-		get chats() { return chats; },
-		get selectedChatId() { return selectedChatId; },
+		get chats() {
+			return chats;
+		},
+		get selectedChatId() {
+			return selectedChatId;
+		},
 	});
 }
 
 describe('SidebarSearchState', () => {
 	describe('dialog lifecycle', () => {
-			it('opens search dialog, seeds the draft query, and highlights the selected chat when present', () => {
-				const chats = [
-					makeChat({ id: 'c1', title: 'First chat' }),
-					makeChat({ id: 'c2', title: 'Second chat' }),
-				];
-				const searchState = createState(chats, 'c2');
-				searchState.activeQuery = '';
-				searchState.highlightedResultIndex = 5;
-				searchState.openSearchDialog();
+		it('opens search dialog, seeds the draft query, and highlights the selected chat when present', () => {
+			const chats = [
+				makeChat({ id: 'c1', title: 'First chat' }),
+				makeChat({ id: 'c2', title: 'Second chat' }),
+			];
+			const searchState = createState(chats, 'c2');
+			searchState.activeQuery = '';
+			searchState.highlightedResultIndex = 5;
+			searchState.openSearchDialog();
 
-				expect(searchState.searchDialogOpen).toBe(true);
-				expect(searchState.draftQuery).toBe('');
-				expect(searchState.highlightedResultIndex).toBe(1);
-			});
+			expect(searchState.searchDialogOpen).toBe(true);
+			expect(searchState.draftQuery).toBe('');
+			expect(searchState.highlightedResultIndex).toBe(1);
+		});
 
-			it('falls back to the first result when the selected chat is not in the filtered dialog results', () => {
-				const searchState = createState();
-				searchState.activeQuery = 'status:unread';
-				searchState.highlightedResultIndex = 5;
-				searchState.openSearchDialog();
+		it('falls back to the first result when the selected chat is not in the filtered dialog results', () => {
+			const searchState = createState();
+			searchState.activeQuery = 'status:unread';
+			searchState.highlightedResultIndex = 5;
+			searchState.openSearchDialog();
 
-				expect(searchState.searchDialogOpen).toBe(true);
-				expect(searchState.draftQuery).toBe('status:unread');
-				expect(searchState.highlightedResultIndex).toBe(0);
-			});
+			expect(searchState.searchDialogOpen).toBe(true);
+			expect(searchState.draftQuery).toBe('status:unread');
+			expect(searchState.highlightedResultIndex).toBe(0);
+		});
 
-			it('closes search dialog as cancel and restores the applied query into draft state', () => {
-				const searchState = createState();
-				searchState.activeQuery = 'status:active';
-				searchState.openSearchDialog();
-				searchState.updateDraftQuery('tag:ops');
-				searchState.highlightedResultIndex = 3;
-				searchState.closeSearchDialog();
+		it('closes search dialog as cancel and restores the applied query into draft state', () => {
+			const searchState = createState();
+			searchState.activeQuery = 'status:active';
+			searchState.openSearchDialog();
+			searchState.updateDraftQuery('tag:ops');
+			searchState.highlightedResultIndex = 3;
+			searchState.closeSearchDialog();
 
-				expect(searchState.searchDialogOpen).toBe(false);
-				expect(searchState.activeQuery).toBe('status:active');
-				expect(searchState.draftQuery).toBe('status:active');
-				expect(searchState.highlightedResultIndex).toBe(0);
-			});
+			expect(searchState.searchDialogOpen).toBe(false);
+			expect(searchState.activeQuery).toBe('status:active');
+			expect(searchState.draftQuery).toBe('status:active');
+			expect(searchState.highlightedResultIndex).toBe(0);
+		});
 
 		it('openSearchDialog does not affect manager dialog state', () => {
 			const searchState = createState();
@@ -97,53 +101,53 @@ describe('SidebarSearchState', () => {
 			searchState.openSearchDialog();
 
 			expect(searchState.searchDialogOpen).toBe(true);
-				expect(searchState.manageSavedSearchesOpen).toBe(true);
-			});
-
-			it('suspends search dialog without discarding the draft query', () => {
-				const searchState = createState();
-				searchState.openSearchDialog();
-				searchState.updateDraftQuery('tag:ops');
-
-				searchState.suspendSearchDialog();
-
-				expect(searchState.searchDialogOpen).toBe(false);
-				expect(searchState.draftQuery).toBe('tag:ops');
-			});
-
-			it('resumes search dialog without discarding the suspended draft query', () => {
-				const chats = [
-					makeChat({ id: 'c1', title: 'First chat' }),
-					makeChat({ id: 'c2', title: 'Second chat' }),
-				];
-				const searchState = createState(chats, 'c2');
-				searchState.openSearchDialog();
-				searchState.updateDraftQuery('tag:ops');
-
-				searchState.suspendSearchDialog();
-				searchState.resumeSearchDialog();
-
-				expect(searchState.searchDialogOpen).toBe(true);
-				expect(searchState.draftQuery).toBe('tag:ops');
-				expect(searchState.highlightedResultIndex).toBe(0);
-			});
-
-			it('toggleSearchDialog closes when open and reopens from the applied query when closed', () => {
-				const searchState = createState();
-				searchState.activeQuery = 'status:unread';
-
-				searchState.toggleSearchDialog();
-				expect(searchState.searchDialogOpen).toBe(true);
-				expect(searchState.draftQuery).toBe('status:unread');
-
-				searchState.updateDraftQuery('tag:ops');
-				searchState.toggleSearchDialog();
-				expect(searchState.searchDialogOpen).toBe(false);
-				expect(searchState.draftQuery).toBe('status:unread');
-			});
+			expect(searchState.manageSavedSearchesOpen).toBe(true);
 		});
 
-		describe('applyQuery', () => {
+		it('suspends search dialog without discarding the draft query', () => {
+			const searchState = createState();
+			searchState.openSearchDialog();
+			searchState.updateDraftQuery('tag:ops');
+
+			searchState.suspendSearchDialog();
+
+			expect(searchState.searchDialogOpen).toBe(false);
+			expect(searchState.draftQuery).toBe('tag:ops');
+		});
+
+		it('resumes search dialog without discarding the suspended draft query', () => {
+			const chats = [
+				makeChat({ id: 'c1', title: 'First chat' }),
+				makeChat({ id: 'c2', title: 'Second chat' }),
+			];
+			const searchState = createState(chats, 'c2');
+			searchState.openSearchDialog();
+			searchState.updateDraftQuery('tag:ops');
+
+			searchState.suspendSearchDialog();
+			searchState.resumeSearchDialog();
+
+			expect(searchState.searchDialogOpen).toBe(true);
+			expect(searchState.draftQuery).toBe('tag:ops');
+			expect(searchState.highlightedResultIndex).toBe(0);
+		});
+
+		it('toggleSearchDialog closes when open and reopens from the applied query when closed', () => {
+			const searchState = createState();
+			searchState.activeQuery = 'status:unread';
+
+			searchState.toggleSearchDialog();
+			expect(searchState.searchDialogOpen).toBe(true);
+			expect(searchState.draftQuery).toBe('status:unread');
+
+			searchState.updateDraftQuery('tag:ops');
+			searchState.toggleSearchDialog();
+			expect(searchState.searchDialogOpen).toBe(false);
+			expect(searchState.draftQuery).toBe('status:unread');
+		});
+	});
+
+	describe('applyQuery', () => {
 		it('sets activeQuery and resets highlight', () => {
 			const searchState = createState();
 			searchState.highlightedResultIndex = 2;
@@ -164,55 +168,52 @@ describe('SidebarSearchState', () => {
 			expect(searchState.filteredChats.map((c) => c.id)).toEqual(['c1']);
 		});
 
-			it('returns all chats when query is empty', () => {
-			const chats = [
-				makeChat({ id: 'c1' }),
-				makeChat({ id: 'c2' }),
-			];
+		it('returns all chats when query is empty', () => {
+			const chats = [makeChat({ id: 'c1' }), makeChat({ id: 'c2' })];
 			const searchState = createState(chats);
 
 			searchState.applyQuery('');
 			expect(searchState.filteredChats).toHaveLength(2);
-			});
-
-			it('does not change the applied query when only the draft query changes', () => {
-				const searchState = createState();
-				searchState.applyQuery('status:active');
-
-				searchState.openSearchDialog();
-				searchState.updateDraftQuery('tag:ops');
-
-				expect(searchState.activeQuery).toBe('status:active');
-			});
-
-			it('confirms the draft query into the applied query', () => {
-				const searchState = createState();
-				searchState.applyQuery('status:active');
-				searchState.openSearchDialog();
-				searchState.updateDraftQuery('tag:ops');
-
-				searchState.confirmSearchDialog();
-
-				expect(searchState.searchDialogOpen).toBe(false);
-				expect(searchState.activeQuery).toBe('tag:ops');
-			});
 		});
 
-		describe('dialogFilteredChats', () => {
-			it('filters chats using the draft query instead of the applied query', () => {
-				const chats = [
-					makeChat({ id: 'c1', isUnread: true, tags: ['ops'] }),
-					makeChat({ id: 'c2', isUnread: false, tags: ['dev'] }),
-				];
-				const searchState = createState(chats);
-				searchState.applyQuery('status:unread');
-				searchState.openSearchDialog();
-				searchState.updateDraftQuery('tag:dev');
+		it('does not change the applied query when only the draft query changes', () => {
+			const searchState = createState();
+			searchState.applyQuery('status:active');
 
-				expect(searchState.filteredChats.map((c) => c.id)).toEqual(['c1']);
-				expect(searchState.dialogFilteredChats.map((c) => c.id)).toEqual(['c2']);
-			});
+			searchState.openSearchDialog();
+			searchState.updateDraftQuery('tag:ops');
+
+			expect(searchState.activeQuery).toBe('status:active');
 		});
+
+		it('confirms the draft query into the applied query', () => {
+			const searchState = createState();
+			searchState.applyQuery('status:active');
+			searchState.openSearchDialog();
+			searchState.updateDraftQuery('tag:ops');
+
+			searchState.confirmSearchDialog();
+
+			expect(searchState.searchDialogOpen).toBe(false);
+			expect(searchState.activeQuery).toBe('tag:ops');
+		});
+	});
+
+	describe('dialogFilteredChats', () => {
+		it('filters chats using the draft query instead of the applied query', () => {
+			const chats = [
+				makeChat({ id: 'c1', isUnread: true, tags: ['ops'] }),
+				makeChat({ id: 'c2', isUnread: false, tags: ['dev'] }),
+			];
+			const searchState = createState(chats);
+			searchState.applyQuery('status:unread');
+			searchState.openSearchDialog();
+			searchState.updateDraftQuery('tag:dev');
+
+			expect(searchState.filteredChats.map((c) => c.id)).toEqual(['c1']);
+			expect(searchState.dialogFilteredChats.map((c) => c.id)).toEqual(['c2']);
+		});
+	});
 
 	describe('isFiltered', () => {
 		it('returns false when query is empty', () => {
@@ -247,9 +248,7 @@ describe('SidebarSearchState', () => {
 
 		it('returns empty array when no searches are marked for sidebar pills', () => {
 			const searchState = createState();
-			searchState.setSavedSearches([
-				makeSavedSearch({ id: 's1', showAsSidebarPill: false }),
-			]);
+			searchState.setSavedSearches([makeSavedSearch({ id: 's1', showAsSidebarPill: false })]);
 
 			expect(searchState.sidebarPillSearches).toEqual([]);
 		});
@@ -309,10 +308,7 @@ describe('SidebarSearchState', () => {
 	describe('setSavedSearches', () => {
 		it('replaces the full saved searches list', () => {
 			const searchState = createState();
-			const searches = [
-				makeSavedSearch({ id: 's1' }),
-				makeSavedSearch({ id: 's2' }),
-			];
+			const searches = [makeSavedSearch({ id: 's1' }), makeSavedSearch({ id: 's2' })];
 			searchState.setSavedSearches(searches);
 
 			expect(searchState.savedSearches).toHaveLength(2);

@@ -23,7 +23,7 @@ import {
 	gitPull,
 	gitPush,
 	gitDiscard,
-	gitDeleteUntracked
+	gitDeleteUntracked,
 } from '$lib/api/git.js';
 
 const EMPTY_STATUS: GitStatus = {
@@ -32,7 +32,7 @@ const EMPTY_STATUS: GitStatus = {
 	modified: [],
 	added: [],
 	deleted: [],
-	untracked: []
+	untracked: [],
 };
 
 export class GitPanelStore {
@@ -88,17 +88,17 @@ export class GitPanelStore {
 				this.gitStatus = { ...EMPTY_STATUS, error: data.error, details: data.details };
 				this.currentBranch = '';
 				this.selectedFiles = new Set();
-				} else {
-					this.gitStatus = data;
-					this.currentBranch = data.branch || 'main';
-					this.selectedFiles = new Set();
-				}
-			} catch (err) {
-				this.surfaceError(`Git status failed: ${err instanceof Error ? err.message : String(err)}`);
-				this.gitStatus = {
+			} else {
+				this.gitStatus = data;
+				this.currentBranch = data.branch || 'main';
+				this.selectedFiles = new Set();
+			}
+		} catch (err) {
+			this.surfaceError(`Git status failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.gitStatus = {
 				...EMPTY_STATUS,
 				error: 'Git operation failed',
-				details: String(err)
+				details: String(err),
 			};
 			this.currentBranch = '';
 			this.selectedFiles = new Set();
@@ -167,16 +167,13 @@ export class GitPanelStore {
 	private async postGitAction(
 		projectPath: string,
 		action: () => Promise<{ success?: boolean; error?: string }>,
-		setLoading: (v: boolean) => void
+		setLoading: (v: boolean) => void,
 	): Promise<boolean> {
 		setLoading(true);
 		try {
 			const data = await action();
 			if (data.success) {
-				await Promise.all([
-					this.fetchGitStatus(projectPath),
-					this.fetchRemoteStatus(projectPath),
-				]);
+				await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
 				return true;
 			}
 			this.surfaceError(data.error ?? 'Git action failed');
@@ -195,7 +192,7 @@ export class GitPanelStore {
 		return this.postGitAction(
 			projectPath,
 			() => gitFetch(projectPath),
-			(v) => (this.isFetching = v)
+			(v) => (this.isFetching = v),
 		);
 	}
 
@@ -203,7 +200,7 @@ export class GitPanelStore {
 		return this.postGitAction(
 			projectPath,
 			() => gitPull(projectPath),
-			(v) => (this.isPulling = v)
+			(v) => (this.isPulling = v),
 		);
 	}
 
@@ -212,7 +209,7 @@ export class GitPanelStore {
 		return this.postGitAction(
 			projectPath,
 			() => gitPush(projectPath, remote, remoteBranch),
-			(v) => (this.isPushing = v)
+			(v) => (this.isPushing = v),
 		);
 	}
 
@@ -247,7 +244,9 @@ export class GitPanelStore {
 			this.surfaceError(data.error ?? 'Switch branch failed');
 			return false;
 		} catch (err) {
-			this.surfaceError(`Switch branch failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(
+				`Switch branch failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			return false;
 		}
 	}
@@ -272,7 +271,9 @@ export class GitPanelStore {
 			this.surfaceError(data.error ?? 'Create branch failed');
 			return false;
 		} catch (err) {
-			this.surfaceError(`Create branch failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(
+				`Create branch failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			return false;
 		} finally {
 			this.isCreatingBranch = false;
@@ -405,7 +406,7 @@ export class GitPanelStore {
 			...(this.gitStatus.modified ?? []),
 			...(this.gitStatus.added ?? []),
 			...(this.gitStatus.deleted ?? []),
-			...(this.gitStatus.untracked ?? [])
+			...(this.gitStatus.untracked ?? []),
 		]);
 	}
 
@@ -416,11 +417,16 @@ export class GitPanelStore {
 	// Presentation helper passed down to child components.
 	getStatusLabel(status: string): string {
 		switch (status) {
-			case 'M': return m.git_changes_modified();
-			case 'A': return m.git_changes_added();
-			case 'D': return m.git_changes_deleted();
-			case 'U': return m.git_changes_untracked();
-			default: return status;
+			case 'M':
+				return m.git_changes_modified();
+			case 'A':
+				return m.git_changes_added();
+			case 'D':
+				return m.git_changes_deleted();
+			case 'U':
+				return m.git_changes_untracked();
+			default:
+				return status;
 		}
 	}
 }

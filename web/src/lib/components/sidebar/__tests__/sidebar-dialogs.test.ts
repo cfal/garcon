@@ -186,9 +186,10 @@ describe('Sidebar dialogs', () => {
 		const onClose = vi.fn();
 		let resolveSave: (() => void) | null = null;
 		const onSave = vi.fn(
-			() => new Promise<void>((resolve) => {
-				resolveSave = resolve;
-			})
+			() =>
+				new Promise<void>((resolve) => {
+					resolveSave = resolve;
+				}),
 		);
 
 		const rendered = render(SidebarSaveFolderDialog, {
@@ -199,8 +200,8 @@ describe('Sidebar dialogs', () => {
 					tags: [],
 					agents: [],
 					models: [],
-				project: [],
-},
+					project: [],
+				},
 				suggestedName: 'Follow-up',
 			},
 			onClose,

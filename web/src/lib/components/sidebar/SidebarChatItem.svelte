@@ -21,7 +21,7 @@
 		DropdownMenuTrigger,
 		DropdownMenuContent,
 		DropdownMenuItem,
-		DropdownMenuSeparator
+		DropdownMenuSeparator,
 	} from '$lib/components/ui/dropdown-menu';
 	import SidebarChatSummary from './SidebarChatSummary.svelte';
 	import type { SessionAgentId } from '$lib/types/app';
@@ -182,13 +182,15 @@
 	}
 
 	// Scroll-to-selected on explicit recenter requests (chat focus).
-	onMount(() => appShell.onSidebarRecenterRequested(() => {
-		if (!enableRecenterOnRequest) return;
-		if (!isSelected || !itemEl) return;
-		requestAnimationFrame(() => {
-			if (itemEl) scrollIntoViewport(itemEl);
-		});
-	}));
+	onMount(() =>
+		appShell.onSidebarRecenterRequested(() => {
+			if (!enableRecenterOnRequest) return;
+			if (!isSelected || !itemEl) return;
+			requestAnimationFrame(() => {
+				if (itemEl) scrollIntoViewport(itemEl);
+			});
+		}),
+	);
 </script>
 
 {#snippet stateBadge()}
@@ -226,7 +228,15 @@
 				)}
 			>
 				{#if isMultiSelected}
-					<svg class="size-3 text-primary-foreground" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<svg
+						class="size-3 text-primary-foreground"
+						viewBox="0 0 12 12"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
 						<polyline points="2.5 6 5 8.5 9.5 3.5" />
 					</svg>
 				{/if}
@@ -256,7 +266,9 @@
 		<div
 			class={cn(
 				'flex items-stretch border-b border-border/30 bg-sidebar-chat-item-bg',
-				!isMultiSelectMode && isSelected && 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
+				!isMultiSelectMode &&
+					isSelected &&
+					'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 				isMultiSelectMode && isMultiSelected && 'bg-primary/8',
 				!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
 			)}
@@ -272,11 +284,11 @@
 				{@render chatSummary()}
 			</button>
 			{#if !isMultiSelectMode}
-					<button
-						type="button"
-						data-sidebar-touch-drag-ignore
-						class="shrink-0 flex items-center justify-center px-3 text-muted-foreground hover:text-foreground active:bg-accent border-l border-border/30 transition-colors"
-						onclick={handleMobileMenuClick}
+				<button
+					type="button"
+					data-sidebar-touch-drag-ignore
+					class="shrink-0 flex items-center justify-center px-3 text-muted-foreground hover:text-foreground active:bg-accent border-l border-border/30 transition-colors"
+					onclick={handleMobileMenuClick}
 					aria-label={m.sidebar_chat_more_actions()}
 				>
 					<EllipsisVertical class="size-5" />
@@ -293,8 +305,12 @@
 				oncontextmenu={handleRightClick}
 				class={cn(
 					'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30',
-					isMultiSelectMode ? 'py-[5px] pl-1 border-l-0' : 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
-					!isMultiSelectMode && isSelected && 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
+					isMultiSelectMode
+						? 'py-[5px] pl-1 border-l-0'
+						: 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
+					!isMultiSelectMode &&
+						isSelected &&
+						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 					!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
 					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
 				)}
@@ -310,17 +326,18 @@
 	{#if !isMultiSelectMode && (!isMobile || isAtCursor)}
 		<div
 			class={cn(
-				"absolute z-20",
-				!isAtCursor && "sidebar-item-menu-anchor right-1 top-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
+				'absolute z-20',
+				!isAtCursor &&
+					'sidebar-item-menu-anchor right-1 top-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100',
 			)}
 			style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
 		>
 			<DropdownMenu bind:open={menuOpen}>
-					<DropdownMenuTrigger
-						data-sidebar-touch-drag-ignore
-						class={isAtCursor
-						? "block w-px h-px opacity-0 pointer-events-none"
-						: "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground"}
+				<DropdownMenuTrigger
+					data-sidebar-touch-drag-ignore
+					class={isAtCursor
+						? 'block w-px h-px opacity-0 pointer-events-none'
+						: 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground'}
 					aria-label={m.sidebar_chat_more_actions()}
 					tabindex={isAtCursor ? -1 : 0}
 				>
@@ -328,7 +345,7 @@
 						<EllipsisVertical class="h-3.5 w-3.5" />
 					{/if}
 				</DropdownMenuTrigger>
-				<DropdownMenuContent align={isAtCursor ? "start" : "end"}>
+				<DropdownMenuContent align={isAtCursor ? 'start' : 'end'}>
 					{#if onMoveToTop || onMoveToBottom}
 						{#if onMoveToTop}
 							<DropdownMenuItem onclick={onMoveToTop}>
@@ -389,6 +406,6 @@
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
-			</div>
-		{/if}
+		</div>
+	{/if}
 </div>

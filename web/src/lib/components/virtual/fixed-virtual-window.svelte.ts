@@ -39,7 +39,10 @@ export class FixedVirtualWindow {
 	}
 
 	get startIndex(): number {
-		return Math.min(this.itemCount, Math.max(0, Math.floor(this.scrollTop / this.rowHeight) - this.overscan));
+		return Math.min(
+			this.itemCount,
+			Math.max(0, Math.floor(this.scrollTop / this.rowHeight) - this.overscan),
+		);
 	}
 
 	get endIndex(): number {

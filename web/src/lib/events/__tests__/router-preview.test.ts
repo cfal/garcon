@@ -47,20 +47,27 @@ describe('createAgentOutputAccumulator', () => {
 			},
 		});
 
-		accumulator.enqueue(new AgentRunOutputMessage(
-			'chat-a',
-			[new AssistantMessage('2024-01-01T00:00:00Z', 'first')],
-			'req-1',
-		));
-		accumulator.enqueue(new AgentRunOutputMessage(
-			'chat-a',
-			[new AssistantMessage('2024-01-01T00:00:01Z', 'second')],
-			'req-1',
-		));
+		accumulator.enqueue(
+			new AgentRunOutputMessage(
+				'chat-a',
+				[new AssistantMessage('2024-01-01T00:00:00Z', 'first')],
+				'req-1',
+			),
+		);
+		accumulator.enqueue(
+			new AgentRunOutputMessage(
+				'chat-a',
+				[new AssistantMessage('2024-01-01T00:00:01Z', 'second')],
+				'req-1',
+			),
+		);
 		accumulator.flush();
 
 		expect(writes).toBe(1);
-		expect(current.map((message) => (message as AssistantMessage).content)).toEqual(['first', 'second']);
+		expect(current.map((message) => (message as AssistantMessage).content)).toEqual([
+			'first',
+			'second',
+		]);
 	});
 
 	it('does not write when no output was queued', () => {
@@ -119,9 +126,7 @@ describe('selectPreviewFromBatch', () => {
 
 	it('truncates content to 200 characters', () => {
 		const longContent = 'a'.repeat(300);
-		const messages: ChatMessage[] = [
-			new AssistantMessage('2024-01-01T00:00:00Z', longContent),
-		];
+		const messages: ChatMessage[] = [new AssistantMessage('2024-01-01T00:00:00Z', longContent)];
 
 		const preview = selectPreviewFromBatch(messages);
 		expect(preview?.content.length).toBe(200);

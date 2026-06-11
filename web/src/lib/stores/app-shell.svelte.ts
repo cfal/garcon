@@ -83,32 +83,44 @@ export class AppShellStore {
 
 	onNewChatRequested(cb: () => void): () => void {
 		this.#newChatCallbacks.add(cb);
-		return () => { this.#newChatCallbacks.delete(cb); };
+		return () => {
+			this.#newChatCallbacks.delete(cb);
+		};
 	}
 
 	onSidebarRecenterRequested(cb: () => void): () => void {
 		this.#recenterCallbacks.add(cb);
-		return () => { this.#recenterCallbacks.delete(cb); };
+		return () => {
+			this.#recenterCallbacks.delete(cb);
+		};
 	}
 
 	onComposerFocusRequested(cb: () => void): () => void {
 		this.#composerFocusCallbacks.add(cb);
-		return () => { this.#composerFocusCallbacks.delete(cb); };
+		return () => {
+			this.#composerFocusCallbacks.delete(cb);
+		};
 	}
 
 	onRenameSelectedChatRequested(cb: () => void): () => void {
 		this.#renameSelectedCallbacks.add(cb);
-		return () => { this.#renameSelectedCallbacks.delete(cb); };
+		return () => {
+			this.#renameSelectedCallbacks.delete(cb);
+		};
 	}
 
 	onDeleteSelectedChatRequested(cb: () => void): () => void {
 		this.#deleteSelectedCallbacks.add(cb);
-		return () => { this.#deleteSelectedCallbacks.delete(cb); };
+		return () => {
+			this.#deleteSelectedCallbacks.delete(cb);
+		};
 	}
 
 	onNewChatDialogSeed(cb: () => void): () => void {
 		this.#newChatDialogSeedCallbacks.add(cb);
-		return () => { this.#newChatDialogSeedCallbacks.delete(cb); };
+		return () => {
+			this.#newChatDialogSeedCallbacks.delete(cb);
+		};
 	}
 
 	/** Requests sidebar to scroll the selected chat into view. */
@@ -150,7 +162,9 @@ export class AppShellStore {
 
 	onSidebarSearchRequested(cb: () => void): () => void {
 		this.#sidebarSearchCallbacks.add(cb);
-		return () => { this.#sidebarSearchCallbacks.delete(cb); };
+		return () => {
+			this.#sidebarSearchCallbacks.delete(cb);
+		};
 	}
 
 	/** Toggles the sidebar search dialog via registered callbacks. */
@@ -160,12 +174,16 @@ export class AppShellStore {
 
 	onNavigateChatAboveRequested(cb: () => void): () => void {
 		this.#navigateChatAboveCallbacks.add(cb);
-		return () => { this.#navigateChatAboveCallbacks.delete(cb); };
+		return () => {
+			this.#navigateChatAboveCallbacks.delete(cb);
+		};
 	}
 
 	onNavigateChatBelowRequested(cb: () => void): () => void {
 		this.#navigateChatBelowCallbacks.add(cb);
-		return () => { this.#navigateChatBelowCallbacks.delete(cb); };
+		return () => {
+			this.#navigateChatBelowCallbacks.delete(cb);
+		};
 	}
 
 	/** Requests navigation to the chat above the currently selected one. */

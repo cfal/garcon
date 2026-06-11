@@ -43,16 +43,16 @@ export type {
 	AmpFindThreadToolUseMessage,
 	AmpReadThreadToolUseMessage,
 	AmpTaskListToolUseMessage,
-		ExternalToolUseMessage,
-		McpToolUseMessage,
-		RequestPermissionsToolUseMessage,
+	ExternalToolUseMessage,
+	McpToolUseMessage,
+	RequestPermissionsToolUseMessage,
 	UnknownToolUseMessage,
 	ToolResultMessage,
 	ErrorMessage,
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
 	PermissionCancelledMessage,
-	ChatMessage
+	ChatMessage,
 } from '$shared/chat-types';
 export type { QueueEntry, QueueState } from '$shared/queue-state';
 

@@ -140,9 +140,8 @@ export class ReadReceiptOutboxStore {
 				this.sessions.patchLastReadAt(result.chatId, result.lastReadAt);
 			}
 			this.retryIndex = 0;
-			this.firstPendingAt = Object.keys(this.pendingByChatId).length > 0
-				? this.firstPendingAt
-				: null;
+			this.firstPendingAt =
+				Object.keys(this.pendingByChatId).length > 0 ? this.firstPendingAt : null;
 			return false;
 		} catch {
 			// Retry with backoff; pending entries remain.

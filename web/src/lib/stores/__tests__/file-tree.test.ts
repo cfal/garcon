@@ -15,7 +15,11 @@ vi.stubGlobal('localStorage', {
 	clear: () => mockStorage.clear(),
 });
 
-function node(name: string, type: 'file' | 'directory', extra?: Partial<FileTreeNode>): FileTreeNode {
+function node(
+	name: string,
+	type: 'file' | 'directory',
+	extra?: Partial<FileTreeNode>,
+): FileTreeNode {
 	return { name, path: `/${name}`, type, ...extra } as FileTreeNode;
 }
 
@@ -189,10 +193,7 @@ describe('FileTreeStore', () => {
 	});
 
 	describe('hidden files', () => {
-		const items: FileTreeNode[] = [
-			node('.gitignore', 'file'),
-			node('README.md', 'file'),
-		];
+		const items: FileTreeNode[] = [node('.gitignore', 'file'), node('README.md', 'file')];
 
 		it('filters dotfiles when showHiddenFiles is false', () => {
 			store.childrenCache.set('/root', items);
@@ -283,13 +284,17 @@ describe('FileTreeStore', () => {
 		});
 
 		it('includes directories with matching children', () => {
-			const tree: FileTreeNode[] = [{
-				name: 'src', path: '/src', type: 'directory',
-				children: [
-					node('App.svelte', 'file', { path: '/src/App.svelte' }),
-					node('utils.ts', 'file', { path: '/src/utils.ts' }),
-				],
-			} as FileTreeNode];
+			const tree: FileTreeNode[] = [
+				{
+					name: 'src',
+					path: '/src',
+					type: 'directory',
+					children: [
+						node('App.svelte', 'file', { path: '/src/App.svelte' }),
+						node('utils.ts', 'file', { path: '/src/utils.ts' }),
+					],
+				} as FileTreeNode,
+			];
 
 			const result = store.filterTree(tree, 'utils');
 			expect(result).toHaveLength(1);
@@ -317,9 +322,7 @@ describe('FileTreeStore', () => {
 		});
 
 		it('silently ignores AbortError', async () => {
-			vi.mocked(filesApi.getTree).mockRejectedValue(
-				new DOMException('aborted', 'AbortError'),
-			);
+			vi.mocked(filesApi.getTree).mockRejectedValue(new DOMException('aborted', 'AbortError'));
 			const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 			store.init('/project', 'chat1');
@@ -337,7 +340,9 @@ describe('FileTreeStore', () => {
 
 		it('returns inline children if present on node', () => {
 			const n: FileTreeNode = {
-				name: 'src', path: '/src', type: 'directory',
+				name: 'src',
+				path: '/src',
+				type: 'directory',
 				children: [node('a.ts', 'file')],
 			};
 			expect(store.getChildren(n)).toEqual(n.children);

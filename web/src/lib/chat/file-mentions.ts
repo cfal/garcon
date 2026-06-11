@@ -28,7 +28,11 @@ export function formatFileMentionPath(path: string): string {
 	return /\s/.test(path) ? JSON.stringify(path) : path;
 }
 
-export function applyFileMention(value: string, trigger: FileMentionTrigger, path: string): FileMentionReplacement {
+export function applyFileMention(
+	value: string,
+	trigger: FileMentionTrigger,
+	path: string,
+): FileMentionReplacement {
 	const token = `@${formatFileMentionPath(path)}`;
 	const before = value.slice(0, trigger.start);
 	const after = value.slice(trigger.end);

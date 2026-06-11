@@ -20,12 +20,14 @@ describe('QueueControls', () => {
 		render(QueueControls, {
 			queue: {
 				paused: true,
-				entries: [{
-					id: 'q1',
-					content: 'queued message',
-					status: 'queued',
-					createdAt: '2026-02-27T00:00:00.000Z',
-				}],
+				entries: [
+					{
+						id: 'q1',
+						content: 'queued message',
+						status: 'queued',
+						createdAt: '2026-02-27T00:00:00.000Z',
+					},
+				],
 			},
 			onResume: vi.fn(),
 			onPause: vi.fn(),
@@ -39,12 +41,14 @@ describe('QueueControls', () => {
 		render(QueueControls, {
 			queue: {
 				paused: false,
-				entries: [{
-					id: 'q1',
-					content: 'queued message',
-					status: 'queued',
-					createdAt: '2026-02-27T00:00:00.000Z',
-				}],
+				entries: [
+					{
+						id: 'q1',
+						content: 'queued message',
+						status: 'queued',
+						createdAt: '2026-02-27T00:00:00.000Z',
+					},
+				],
 			},
 			onResume: vi.fn(),
 			onPause: vi.fn(),
@@ -59,12 +63,14 @@ describe('QueueControls', () => {
 		const { container } = render(QueueControls, {
 			queue: {
 				paused: false,
-				entries: [{
-					id: 'q1',
-					content: multiline,
-					status: 'queued',
-					createdAt: '2026-02-27T00:00:00.000Z',
-				}],
+				entries: [
+					{
+						id: 'q1',
+						content: multiline,
+						status: 'queued',
+						createdAt: '2026-02-27T00:00:00.000Z',
+					},
+				],
 			},
 			onResume: vi.fn(),
 			onPause: vi.fn(),
@@ -103,12 +109,14 @@ describe('QueueControls', () => {
 		const { container } = render(QueueControls, {
 			queue: {
 				paused: false,
-				entries: [{
-					id: 'q1',
-					content: longText,
-					status: 'queued',
-					createdAt: '2026-02-27T00:00:00.000Z',
-				}],
+				entries: [
+					{
+						id: 'q1',
+						content: longText,
+						status: 'queued',
+						createdAt: '2026-02-27T00:00:00.000Z',
+					},
+				],
 			},
 			onResume: vi.fn(),
 			onPause: vi.fn(),
@@ -123,12 +131,14 @@ describe('QueueControls', () => {
 		render(QueueControls, {
 			queue: {
 				paused: false,
-				entries: [{
-					id: 'q1',
-					content: 'dispatching now',
-					status: 'sending',
-					createdAt: '2026-02-27T00:00:00.000Z',
-				}],
+				entries: [
+					{
+						id: 'q1',
+						content: 'dispatching now',
+						status: 'sending',
+						createdAt: '2026-02-27T00:00:00.000Z',
+					},
+				],
 			},
 			onResume: vi.fn(),
 			onPause: vi.fn(),

@@ -42,7 +42,7 @@ describe('KeyboardShortcuts', () => {
 		input.focus();
 
 		try {
-				input.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }));
+			input.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }));
 			expect(appShell.openSidebarSearch).toHaveBeenCalledTimes(1);
 		} finally {
 			input.remove();
@@ -123,10 +123,14 @@ describe('KeyboardShortcuts', () => {
 		input.focus();
 
 		try {
-			input.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, shiftKey: true, bubbles: true }));
+			input.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, shiftKey: true, bubbles: true }),
+			);
 			expect(appShell.requestNavigateChatAbove).toHaveBeenCalledTimes(1);
 
-			input.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, shiftKey: true, bubbles: true }));
+			input.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, shiftKey: true, bubbles: true }),
+			);
 			expect(appShell.requestNavigateChatBelow).toHaveBeenCalledTimes(1);
 		} finally {
 			input.remove();

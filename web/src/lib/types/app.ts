@@ -1,6 +1,11 @@
 // Application-level types shared across the Svelte frontend.
 
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$shared/chat-modes';
+import type {
+	AmpAgentMode,
+	ClaudeThinkingMode,
+	PermissionMode,
+	ThinkingMode,
+} from '$shared/chat-modes';
 import type { ApiProtocol } from '$shared/api-providers';
 
 export type SessionAgentId = string;
@@ -47,6 +52,4 @@ export interface NewChatConfig {
 	tags?: string[];
 }
 
-export type AppSocketMessage =
-	| LoadingProgressMessage
-	| { type?: string; [key: string]: unknown };
+export type AppSocketMessage = LoadingProgressMessage | { type?: string; [key: string]: unknown };

@@ -9,7 +9,14 @@
 	import type { AppTab } from '$lib/types/app';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
-	import { getNavigation, getChatRuntime, getChatSessions, getAppShell, getWs, getLocalSettings } from '$lib/context';
+	import {
+		getNavigation,
+		getChatRuntime,
+		getChatSessions,
+		getAppShell,
+		getWs,
+		getLocalSettings,
+	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getRunningChats } from '$lib/api/chats.js';
 	import { AppShellController } from './app-shell-controller.svelte';
@@ -26,7 +33,9 @@
 	const localSettings = getLocalSettings();
 	const shellController = new AppShellController({
 		upsertFromServer: (s) => sessions.upsertFromServer(s),
-		setLoadingChats: (v) => { chatRuntime.isLoadingChats = v; },
+		setLoadingChats: (v) => {
+			chatRuntime.isLoadingChats = v;
+		},
 	});
 
 	let isMobile = $state(false);
@@ -35,9 +44,7 @@
 	let mobileViewportBaselineHeight = $state<number | null>(null);
 	let mobileKeyboardVisible = $state(false);
 	const isAutoFullscreenOnGitTab = $derived(
-		!isMobile &&
-		navigation.activeTab === 'git' &&
-		localSettings.alwaysFullscreenOnGitPanel
+		!isMobile && navigation.activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel,
 	);
 	const effectiveWorkspaceFullscreen = $derived(isWorkspaceFullscreen || isAutoFullscreenOnGitTab);
 
@@ -86,10 +93,7 @@
 				mobileViewportBaselineHeight = metrics.appHeight;
 			}
 			appShell.keyboardHeight = metrics.keyboardHeight;
-			document.documentElement.style.setProperty(
-				'--app-height',
-				`${metrics.appHeight}px`,
-			);
+			document.documentElement.style.setProperty('--app-height', `${metrics.appHeight}px`);
 			document.documentElement.style.setProperty(
 				'--app-viewport-offset-top',
 				`${metrics.viewportOffsetTop}px`,
@@ -141,7 +145,10 @@
 	$effect(() => {
 		if (!ws.isConnected) return;
 		fetchChatsAndReconcile().catch((error) => {
-			console.warn('app-shell: failed to reconcile running chats:', error instanceof Error ? error.message : String(error));
+			console.warn(
+				'app-shell: failed to reconcile running chats:',
+				error instanceof Error ? error.message : String(error),
+			);
 		});
 	});
 
@@ -224,45 +231,44 @@
 	});
 </script>
 
-	{#if !isMobile}
-		<div class="flex h-dvh w-screen overflow-hidden bg-background text-foreground">
-			<div
-				class={`relative h-full overflow-hidden ${effectiveWorkspaceFullscreen ? 'w-0 border-r-0 pointer-events-none' : 'flex-shrink-0 border-r border-border'}`}
-				style:width={effectiveWorkspaceFullscreen ? '0px' : `${localSettings.sidebarWidth}px`}
-				aria-hidden={effectiveWorkspaceFullscreen}
-				inert={effectiveWorkspaceFullscreen}
-			>
-				<Sidebar
-					chats={sessions.orderedChats}
-					selectedChatId={sessions.selectedChatId}
-					isLoading={chatRuntime.isLoadingChats}
-					isMobile={false}
-					onChatSelect={handleChatSelect}
-					onNewChat={handleNewChat}
-					onChatDelete={handleChatDelete}
-					onLocallyDeleteChat={locallyDeleteChat}
-					onQuietRefresh={quietRefresh}
-					onChatRenamed={handleChatRenamed}
-					onShowSettings={() => appShell.openSettings()}
+{#if !isMobile}
+	<div class="flex h-dvh w-screen overflow-hidden bg-background text-foreground">
+		<div
+			class={`relative h-full overflow-hidden ${effectiveWorkspaceFullscreen ? 'w-0 border-r-0 pointer-events-none' : 'flex-shrink-0 border-r border-border'}`}
+			style:width={effectiveWorkspaceFullscreen ? '0px' : `${localSettings.sidebarWidth}px`}
+			aria-hidden={effectiveWorkspaceFullscreen}
+			inert={effectiveWorkspaceFullscreen}
+		>
+			<Sidebar
+				chats={sessions.orderedChats}
+				selectedChatId={sessions.selectedChatId}
+				isLoading={chatRuntime.isLoadingChats}
+				isMobile={false}
+				onChatSelect={handleChatSelect}
+				onNewChat={handleNewChat}
+				onChatDelete={handleChatDelete}
+				onLocallyDeleteChat={locallyDeleteChat}
+				onQuietRefresh={quietRefresh}
+				onChatRenamed={handleChatRenamed}
+				onShowSettings={() => appShell.openSettings()}
+			/>
+			{#if !effectiveWorkspaceFullscreen}
+				<ResizeHandle
+					width={localSettings.sidebarWidth}
+					onResize={(w) => localSettings.set('sidebarWidth', w)}
 				/>
-				{#if !effectiveWorkspaceFullscreen}
-					<ResizeHandle
-						width={localSettings.sidebarWidth}
-						onResize={(w) => localSettings.set('sidebarWidth', w)}
-					/>
-				{/if}
-			</div>
-
-			<div class="flex-1 min-w-0 h-full overflow-hidden">
-				<WorkspaceView
-					activeTab={navigation.activeTab}
-					onTabChange={handleTabChange}
-					isDesktopFullscreen={effectiveWorkspaceFullscreen}
-					onToggleDesktopFullscreen={() => isWorkspaceFullscreen = !isWorkspaceFullscreen}
-				/>
-			</div>
+			{/if}
 		</div>
 
+		<div class="flex-1 min-w-0 h-full overflow-hidden">
+			<WorkspaceView
+				activeTab={navigation.activeTab}
+				onTabChange={handleTabChange}
+				isDesktopFullscreen={effectiveWorkspaceFullscreen}
+				onToggleDesktopFullscreen={() => (isWorkspaceFullscreen = !isWorkspaceFullscreen)}
+			/>
+		</div>
+	</div>
 {:else}
 	<div class="mobile-shell flex flex-col w-screen overflow-hidden bg-background text-foreground">
 		{#if appShell.sidebarOpen}

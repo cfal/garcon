@@ -36,7 +36,7 @@
 		onSelect,
 		onCreate,
 		onRefresh,
-		onClose
+		onClose,
 	}: Props = $props();
 
 	let showCreateForm = $state(false);
@@ -99,11 +99,7 @@
 
 	function handleCreate(): void {
 		if (!canCreate) return;
-		onCreate(
-			effectivePath,
-			branchName.trim() || undefined,
-			baseRefOverride.trim() || undefined
-		);
+		onCreate(effectivePath, branchName.trim() || undefined, baseRefOverride.trim() || undefined);
 	}
 
 	function resetCreateForm(): void {
@@ -121,7 +117,12 @@
 	}
 </script>
 
-<Dialog.Root open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
+<Dialog.Root
+	open={true}
+	onOpenChange={(open) => {
+		if (!open) onClose();
+	}}
+>
 	<Dialog.Content
 		showCloseButton={false}
 		aria-label="Select worktree"
@@ -155,7 +156,9 @@
 			</div>
 
 			{#if errorMessage}
-				<div class="flex items-center gap-2 border-b border-border bg-destructive/10 px-4 py-2.5 text-xs">
+				<div
+					class="flex items-center gap-2 border-b border-border bg-destructive/10 px-4 py-2.5 text-xs"
+				>
 					<AlertTriangle class="h-3.5 w-3.5 shrink-0 text-destructive" />
 					<span class="flex-1 text-destructive">{errorMessage}</span>
 					<button
@@ -188,7 +191,9 @@
 							onclick={() => {
 								if (!wt.isPathMissing) onSelect(wt.path);
 							}}
-							onmouseenter={() => { if (!wt.isPathMissing) selectedIndex = i; }}
+							onmouseenter={() => {
+								if (!wt.isPathMissing) selectedIndex = i;
+							}}
 							disabled={wt.isPathMissing}
 							class="w-full rounded-lg px-3 py-2.5 text-left transition-colors
 								{i === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}
@@ -207,13 +212,21 @@
 									<div class="flex items-center gap-2">
 										<span class="truncate text-sm font-medium">{wt.branch || wt.name}</span>
 										{#if wt.isMain}
-											<span class="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">main</span>
+											<span
+												class="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
+												>main</span
+											>
 										{/if}
 										{#if wt.isPathMissing}
-											<span class="rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive">missing</span>
+											<span
+												class="rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive"
+												>missing</span
+											>
 										{/if}
 									</div>
-									<div class="mt-0.5 truncate font-mono text-xs text-muted-foreground">{wt.path}</div>
+									<div class="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+										{wt.path}
+									</div>
 								</div>
 							</div>
 						</button>
@@ -234,7 +247,9 @@
 						bind:value={branchName}
 						placeholder="Branch name (e.g. fix/login-bug)"
 						class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
-						onkeydown={(e) => { if (e.key === 'Enter') handleCreate(); }}
+						onkeydown={(e) => {
+							if (e.key === 'Enter') handleCreate();
+						}}
 					/>
 
 					{#if derivedPath}
@@ -242,7 +257,9 @@
 							<span class="truncate font-mono text-[11px]">{effectivePath}</span>
 							<button
 								type="button"
-								onclick={() => { showAdvanced = !showAdvanced; }}
+								onclick={() => {
+									showAdvanced = !showAdvanced;
+								}}
 								class="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 							>
 								<span class="flex items-center gap-0.5">
@@ -288,8 +305,8 @@
 							disabled={!canCreate || isCreating}
 							class="rounded-lg px-4 py-1.5 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50
 								{canCreate && !isCreating
-									? 'bg-interactive-accent text-interactive-accent-foreground shadow-sm hover:brightness-110'
-									: 'bg-muted text-muted-foreground'}"
+								? 'bg-interactive-accent text-interactive-accent-foreground shadow-sm hover:brightness-110'
+								: 'bg-muted text-muted-foreground'}"
 						>
 							{#if isCreating}
 								<span class="flex items-center gap-1.5">
@@ -304,7 +321,9 @@
 				</div>
 			{/if}
 
-			<div class="flex items-center justify-between border-t border-border bg-popover px-4 py-2.5 shrink-0">
+			<div
+				class="flex items-center justify-between border-t border-border bg-popover px-4 py-2.5 shrink-0"
+			>
 				{#if !showCreateForm}
 					<button
 						type="button"
@@ -319,10 +338,17 @@
 				{/if}
 				<div class="flex items-center gap-2 text-[10px] text-muted-foreground">
 					{#if selectableWorktrees.length > 0}
-						<span>{selectableWorktrees.length} worktree{selectableWorktrees.length === 1 ? '' : 's'}</span>
+						<span
+							>{selectableWorktrees.length} worktree{selectableWorktrees.length === 1
+								? ''
+								: 's'}</span
+						>
 						<span class="text-border">|</span>
 					{/if}
-					<kbd class="hidden items-center rounded border border-border bg-muted px-1.5 py-0.5 font-mono leading-none sm:inline-flex">ESC</kbd>
+					<kbd
+						class="hidden items-center rounded border border-border bg-muted px-1.5 py-0.5 font-mono leading-none sm:inline-flex"
+						>ESC</kbd
+					>
 				</div>
 			</div>
 		</div>

@@ -17,7 +17,20 @@
 	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
-	import { setAuth, setNavigation, setChatRuntime, setChatSessions, setAppShell, setWs, setFileViewer, setReadReceiptOutbox, setModelCatalog, setLocalSettings, setRemoteSettings, setSplitLayout } from '$lib/context';
+	import {
+		setAuth,
+		setNavigation,
+		setChatRuntime,
+		setChatSessions,
+		setAppShell,
+		setWs,
+		setFileViewer,
+		setReadReceiptOutbox,
+		setModelCatalog,
+		setLocalSettings,
+		setRemoteSettings,
+		setSplitLayout,
+	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
@@ -54,8 +67,7 @@
 
 	const publicRoutes = ['/login', '/setup'];
 	let isPublicRoute = $derived(
-		publicRoutes.includes(page.url.pathname) ||
-		page.url.pathname.startsWith('/shared/')
+		publicRoutes.includes(page.url.pathname) || page.url.pathname.startsWith('/shared/'),
 	);
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
@@ -66,7 +78,9 @@
 		document.documentElement.classList.toggle('dark', isDark);
 		document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
 
-		const statusBarMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+		const statusBarMeta = document.querySelector(
+			'meta[name="apple-mobile-web-app-status-bar-style"]',
+		);
 		statusBarMeta?.setAttribute('content', isDark ? 'black-translucent' : 'default');
 
 		const themeColor = isDark ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
@@ -228,8 +242,14 @@
 			<h1 class="text-2xl font-bold text-foreground mb-2">{m.sidebar_app_title()}</h1>
 			<div class="flex items-center justify-center space-x-2">
 				<div class="w-2 h-2 bg-status-processing rounded-full animate-bounce"></div>
-				<div class="w-2 h-2 bg-status-processing rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
-				<div class="w-2 h-2 bg-status-processing rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+				<div
+					class="w-2 h-2 bg-status-processing rounded-full animate-bounce"
+					style="animation-delay: 0.1s"
+				></div>
+				<div
+					class="w-2 h-2 bg-status-processing rounded-full animate-bounce"
+					style="animation-delay: 0.2s"
+				></div>
 			</div>
 			<p class="text-muted-foreground mt-2">{m.status_loading()}</p>
 		</div>

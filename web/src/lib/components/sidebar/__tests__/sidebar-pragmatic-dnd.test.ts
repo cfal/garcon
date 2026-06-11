@@ -1,23 +1,23 @@
 import { describe, expect, it } from 'vitest';
-	import {
-		getSidebarChatDragData,
-		getSidebarChatDropTargetData,
-		isSidebarChatDragData,
-		isSidebarChatDropTargetData,
-		resolveSidebarDropInstruction,
-		sidebarDragCanReorder,
-	} from '../sidebar-pragmatic-dnd';
-	import type { DropTargetRecord } from '@atlaskit/pragmatic-drag-and-drop/types';
-	import type { SidebarChatDropTargetData } from '../sidebar-pragmatic-dnd';
+import {
+	getSidebarChatDragData,
+	getSidebarChatDropTargetData,
+	isSidebarChatDragData,
+	isSidebarChatDropTargetData,
+	resolveSidebarDropInstruction,
+	sidebarDragCanReorder,
+} from '../sidebar-pragmatic-dnd';
+import type { DropTargetRecord } from '@atlaskit/pragmatic-drag-and-drop/types';
+import type { SidebarChatDropTargetData } from '../sidebar-pragmatic-dnd';
 
-	function makeDropTarget(data: SidebarChatDropTargetData): DropTargetRecord {
-		return {
-			element: {} as Element,
-			data: data as unknown as Record<string | symbol, unknown>,
-			dropEffect: 'move',
-			isActiveDueToStickiness: false,
-		};
-	}
+function makeDropTarget(data: SidebarChatDropTargetData): DropTargetRecord {
+	return {
+		element: {} as Element,
+		data: data as unknown as Record<string | symbol, unknown>,
+		dropEffect: 'move',
+		isActiveDueToStickiness: false,
+	};
+}
 
 describe('sidebar pragmatic drag data', () => {
 	it('accepts generated sidebar chat drag data', () => {
@@ -35,14 +35,16 @@ describe('sidebar pragmatic drag data', () => {
 	it('accepts public string-keyed sidebar chat drag data records', () => {
 		const instanceId = Symbol('instance');
 
-		expect(isSidebarChatDragData({
-			kind: 'sidebar-chat',
-			splitPaneDragKind: 'split-pane-chat',
-			chatId: 'chat-1',
-			list: 'normal',
-			index: 0,
-			instanceId,
-		})).toBe(true);
+		expect(
+			isSidebarChatDragData({
+				kind: 'sidebar-chat',
+				splitPaneDragKind: 'split-pane-chat',
+				chatId: 'chat-1',
+				list: 'normal',
+				index: 0,
+				instanceId,
+			}),
+		).toBe(true);
 	});
 
 	it('accepts generated sidebar row drop target data', () => {
@@ -60,24 +62,28 @@ describe('sidebar pragmatic drag data', () => {
 	it('accepts public string-keyed sidebar row drop target data records', () => {
 		const instanceId = Symbol('instance');
 
-		expect(isSidebarChatDropTargetData({
-			kind: 'sidebar-chat-row-target',
-			chatId: 'chat-2',
-			list: 'normal',
-			index: 1,
-			instanceId,
-		})).toBe(true);
+		expect(
+			isSidebarChatDropTargetData({
+				kind: 'sidebar-chat-row-target',
+				chatId: 'chat-2',
+				list: 'normal',
+				index: 1,
+				instanceId,
+			}),
+		).toBe(true);
 	});
 
 	it('rejects malformed values', () => {
 		expect(isSidebarChatDragData(null)).toBe(false);
-		expect(isSidebarChatDragData({
-			kind: 'sidebar-chat',
-			chatId: 'chat-1',
-			list: 'normal',
-			index: 0,
-			instanceId: Symbol('instance'),
-		})).toBe(false);
+		expect(
+			isSidebarChatDragData({
+				kind: 'sidebar-chat',
+				chatId: 'chat-1',
+				list: 'normal',
+				index: 0,
+				instanceId: Symbol('instance'),
+			}),
+		).toBe(false);
 		expect(isSidebarChatDropTargetData({ kind: 'sidebar-chat-row-target' })).toBe(false);
 	});
 
@@ -90,26 +96,41 @@ describe('sidebar pragmatic drag data', () => {
 			instanceId,
 		});
 
-		expect(sidebarDragCanReorder(source, getSidebarChatDropTargetData({
-			chatId: 'chat-2',
-			list: 'normal',
-			index: 1,
-			instanceId,
-		}))).toBe(true);
+		expect(
+			sidebarDragCanReorder(
+				source,
+				getSidebarChatDropTargetData({
+					chatId: 'chat-2',
+					list: 'normal',
+					index: 1,
+					instanceId,
+				}),
+			),
+		).toBe(true);
 
-		expect(sidebarDragCanReorder(source, getSidebarChatDropTargetData({
-			chatId: 'chat-2',
-			list: 'pinned',
-			index: 0,
-			instanceId,
-		}))).toBe(false);
+		expect(
+			sidebarDragCanReorder(
+				source,
+				getSidebarChatDropTargetData({
+					chatId: 'chat-2',
+					list: 'pinned',
+					index: 0,
+					instanceId,
+				}),
+			),
+		).toBe(false);
 
-		expect(sidebarDragCanReorder(source, getSidebarChatDropTargetData({
-			chatId: 'chat-1',
-			list: 'normal',
-			index: 0,
-			instanceId,
-		}))).toBe(false);
+		expect(
+			sidebarDragCanReorder(
+				source,
+				getSidebarChatDropTargetData({
+					chatId: 'chat-1',
+					list: 'normal',
+					index: 0,
+					instanceId,
+				}),
+			),
+		).toBe(false);
 	});
 
 	it('resolves a same-list row drop instruction', () => {
@@ -147,23 +168,41 @@ describe('sidebar pragmatic drag data', () => {
 		});
 
 		expect(resolveSidebarDropInstruction(source, [])).toBeNull();
-		expect(resolveSidebarDropInstruction(source, [makeDropTarget(getSidebarChatDropTargetData({
-			chatId: 'chat-1',
-			list: 'normal',
-			index: 0,
-			instanceId,
-		}))])).toBeNull();
-		expect(resolveSidebarDropInstruction(source, [makeDropTarget(getSidebarChatDropTargetData({
-			chatId: 'chat-2',
-			list: 'pinned',
-			index: 0,
-			instanceId,
-		}))])).toBeNull();
-		expect(resolveSidebarDropInstruction(source, [makeDropTarget(getSidebarChatDropTargetData({
-			chatId: 'chat-2',
-			list: 'normal',
-			index: 1,
-			instanceId: otherInstanceId,
-		}))])).toBeNull();
+		expect(
+			resolveSidebarDropInstruction(source, [
+				makeDropTarget(
+					getSidebarChatDropTargetData({
+						chatId: 'chat-1',
+						list: 'normal',
+						index: 0,
+						instanceId,
+					}),
+				),
+			]),
+		).toBeNull();
+		expect(
+			resolveSidebarDropInstruction(source, [
+				makeDropTarget(
+					getSidebarChatDropTargetData({
+						chatId: 'chat-2',
+						list: 'pinned',
+						index: 0,
+						instanceId,
+					}),
+				),
+			]),
+		).toBeNull();
+		expect(
+			resolveSidebarDropInstruction(source, [
+				makeDropTarget(
+					getSidebarChatDropTargetData({
+						chatId: 'chat-2',
+						list: 'normal',
+						index: 1,
+						instanceId: otherInstanceId,
+					}),
+				),
+			]),
+		).toBeNull();
 	});
 });

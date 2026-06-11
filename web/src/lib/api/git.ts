@@ -171,21 +171,32 @@ export async function getGitStatus(project: string): Promise<GitStatus> {
 	return apiGet<GitStatus>(`/api/v1/git/status?${projectParam(project)}`);
 }
 
-export async function getGitDiff(project: string, file: string): Promise<{ diff?: string; error?: string }> {
+export async function getGitDiff(
+	project: string,
+	file: string,
+): Promise<{ diff?: string; error?: string }> {
 	return apiGet(`/api/v1/git/diff?${projectParam(project)}&file=${encodeURIComponent(file)}`);
 }
 
 export async function getFileWithDiff(
 	project: string,
-	file: string
-): Promise<{ currentContent?: string; oldContent?: string; isDeleted?: boolean; isUntracked?: boolean; error?: string }> {
-	return apiGet(`/api/v1/git/file-with-diff?${projectParam(project)}&file=${encodeURIComponent(file)}`);
+	file: string,
+): Promise<{
+	currentContent?: string;
+	oldContent?: string;
+	isDeleted?: boolean;
+	isUntracked?: boolean;
+	error?: string;
+}> {
+	return apiGet(
+		`/api/v1/git/file-with-diff?${projectParam(project)}&file=${encodeURIComponent(file)}`,
+	);
 }
 
 export async function gitCommit(
 	project: string,
 	message: string,
-	files: string[]
+	files: string[],
 ): Promise<SuccessResponse> {
 	return apiPost<SuccessResponse>('/api/v1/git/commit', { project, message, files });
 }
@@ -194,7 +205,9 @@ export async function gitInitialCommit(project: string): Promise<SuccessResponse
 	return apiPost<SuccessResponse>('/api/v1/git/initial-commit', { project });
 }
 
-export async function getBranches(project: string): Promise<{ branches?: string[]; error?: string }> {
+export async function getBranches(
+	project: string,
+): Promise<{ branches?: string[]; error?: string }> {
 	return apiGet(`/api/v1/git/branches?${projectParam(project)}`);
 }
 
@@ -208,16 +221,18 @@ export async function gitCreateBranch(project: string, branch: string): Promise<
 
 export async function getCommitHistory(
 	project: string,
-	limit = 10
+	limit = 10,
 ): Promise<{ commits?: GitCommit[]; error?: string }> {
 	return apiGet(`/api/v1/git/commits?${projectParam(project)}&limit=${limit}`);
 }
 
 export async function getCommitDiff(
 	project: string,
-	commit: string
+	commit: string,
 ): Promise<{ diff?: string; error?: string }> {
-	return apiGet(`/api/v1/git/commit-diff?${projectParam(project)}&commit=${encodeURIComponent(commit)}`);
+	return apiGet(
+		`/api/v1/git/commit-diff?${projectParam(project)}&commit=${encodeURIComponent(commit)}`,
+	);
 }
 
 export async function generateCommitMessage(
@@ -230,7 +245,8 @@ export async function generateCommitMessage(
 	modelEndpointId?: string | null,
 	modelProtocol?: ApiProtocol | null,
 ): Promise<{ message?: string; error?: string }> {
-	return apiPost('/api/v1/git/generate-commit-message',
+	return apiPost(
+		'/api/v1/git/generate-commit-message',
 		{ project, files, agentId, model, customPrompt, apiProviderId, modelEndpointId, modelProtocol },
 		{ timeoutMs: 120_000 },
 	);
@@ -304,11 +320,17 @@ export async function getGitFileReviewDataBatch(
 	);
 }
 
-export async function getGitChangesTree(project: string): Promise<{ root: GitTreeNode[]; hasCommits: boolean }> {
-	return apiGet<{ root: GitTreeNode[]; hasCommits: boolean }>(`/api/v1/git/changes-tree?${projectParam(project)}`);
+export async function getGitChangesTree(
+	project: string,
+): Promise<{ root: GitTreeNode[]; hasCommits: boolean }> {
+	return apiGet<{ root: GitTreeNode[]; hasCommits: boolean }>(
+		`/api/v1/git/changes-tree?${projectParam(project)}`,
+	);
 }
 
-export async function getGitTargetCandidates(project: string): Promise<{ targets: GitTargetCandidate[] }> {
+export async function getGitTargetCandidates(
+	project: string,
+): Promise<{ targets: GitTargetCandidate[] }> {
 	return apiGet<{ targets: GitTargetCandidate[] }>(`/api/v1/git/targets?${projectParam(project)}`);
 }
 
@@ -344,9 +366,7 @@ export async function gitStageHunk(
 	});
 }
 
-export async function getGitWorktrees(
-	project: string,
-): Promise<{ worktrees: GitWorktreeItem[] }> {
+export async function getGitWorktrees(project: string): Promise<{ worktrees: GitWorktreeItem[] }> {
 	return apiGet<{ worktrees: GitWorktreeItem[] }>(`/api/v1/git/worktrees?${projectParam(project)}`);
 }
 
@@ -384,10 +404,7 @@ export async function gitRevertLastCommit(
 	});
 }
 
-export async function gitCommitIndex(
-	project: string,
-	message: string,
-): Promise<SuccessResponse> {
+export async function gitCommitIndex(project: string, message: string): Promise<SuccessResponse> {
 	return apiPost<SuccessResponse>('/api/v1/git/commit-index', {
 		project,
 		message,

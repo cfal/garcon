@@ -228,9 +228,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 					? (input.changes as Array<{ path?: unknown }>)
 					: [];
 				if (!input.filePath && !input.oldString && !input.newString && changes.length > 0) {
-					const files = changes
-						.map((change) => String(change?.path ?? '').trim())
-						.filter(Boolean);
+					const files = changes.map((change) => String(change?.path ?? '').trim()).filter(Boolean);
 					return { diffUnavailable: true, files };
 				}
 				return diffProps(input, 'Edit', 'gray');
@@ -279,7 +277,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 						filePath: input.filePath,
 						showHeader: false,
 						badge: 'Patch',
-						badgeColor: 'gray'
+						badgeColor: 'gray',
 					};
 				}
 				return diffProps(input, 'Patch', 'gray');
@@ -533,7 +531,9 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				if (input.task) parts.push(`**Task:** ${input.task}`);
 				if (input.context) parts.push(`**Context:** ${input.context}`);
 				if (Array.isArray(input.files) && input.files.length > 0) {
-					parts.push(`**Files:**\n${(input.files as string[]).map((file) => `- ${file}`).join('\n')}`);
+					parts.push(
+						`**Files:**\n${(input.files as string[]).map((file) => `- ${file}`).join('\n')}`,
+					);
 				}
 				return { content: parts.join('\n\n') };
 			},
@@ -625,7 +625,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'inline',
 			label: 'Analyze',
-			getValue: (input) => String(input.path ?? '').split('/').pop() || String(input.path ?? ''),
+			getValue: (input) =>
+				String(input.path ?? '')
+					.split('/')
+					.pop() || String(input.path ?? ''),
 			getSecondary: (input) => truncate(String(input.objective ?? ''), 60),
 			action: 'none',
 			colorScheme: {
@@ -709,12 +712,12 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
-		'external-tool-use': {
-			input: {
-				mode: 'collapsible',
-				label: 'Tool',
-				title: 'Parameters',
-				defaultOpen: false,
+	'external-tool-use': {
+		input: {
+			mode: 'collapsible',
+			label: 'Tool',
+			title: 'Parameters',
+			defaultOpen: false,
 			contentKind: 'text',
 			getContentProps: (input) => ({
 				content: JSON.stringify(input, null, 2),
@@ -732,9 +735,9 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
-		'mcp-tool-use': {
-			input: {
-				mode: 'collapsible',
+	'mcp-tool-use': {
+		input: {
+			mode: 'collapsible',
 			label: 'MCP',
 			title: 'Parameters',
 			defaultOpen: false,
@@ -755,9 +758,9 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
-		'request-permissions-tool-use': {
-			input: {
-				mode: 'collapsible',
+	'request-permissions-tool-use': {
+		input: {
+			mode: 'collapsible',
 			label: 'Permissions',
 			title: 'Requested permissions',
 			defaultOpen: true,
@@ -822,7 +825,9 @@ export function getToolDisplayLabel(toolMessage: ToolUseChatMessage): string {
 		return toolMessage.rawName || 'Tool';
 	}
 	if (toolMessage.type === 'external-tool-use') {
-		return toolMessage.namespace ? `${toolMessage.namespace}.${toolMessage.name}` : toolMessage.name;
+		return toolMessage.namespace
+			? `${toolMessage.namespace}.${toolMessage.name}`
+			: toolMessage.name;
 	}
 	if (toolMessage.type === 'mcp-tool-use') {
 		return `${toolMessage.server}.${toolMessage.tool}`;
@@ -832,8 +837,8 @@ export function getToolDisplayLabel(toolMessage: ToolUseChatMessage): string {
 
 export function getToolDisplayDetails(toolMessage: ToolUseChatMessage): Record<string, unknown> {
 	return Object.fromEntries(
-		Object.entries(toolMessage as unknown as Record<string, unknown>).filter(([key]) =>
-			key !== 'timestamp' && key !== 'toolId' && key !== 'type',
+		Object.entries(toolMessage as unknown as Record<string, unknown>).filter(
+			([key]) => key !== 'timestamp' && key !== 'toolId' && key !== 'type',
 		),
 	);
 }

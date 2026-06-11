@@ -4,7 +4,9 @@ import type { QueueState } from '$lib/types/chat';
 import { filterByChat } from '../chat-filter';
 import { handleQueueUpdated, type QueueContext } from '../handlers/queue';
 
-function makeContext(setMessageQueue: (chatId: string, queue: QueueState | null) => void): QueueContext {
+function makeContext(
+	setMessageQueue: (chatId: string, queue: QueueState | null) => void,
+): QueueContext {
 	return {
 		currentChatId: 'chat-a',
 		selectedChatId: 'chat-a',

@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import { getTagColorVariant, getTagColorClasses, type TagColorVariant } from '../tag-colors';
 
-const VALID_VARIANTS: TagColorVariant[] = ['blue', 'green', 'amber', 'purple', 'rose', 'teal', 'indigo', 'orange'];
+const VALID_VARIANTS: TagColorVariant[] = [
+	'blue',
+	'green',
+	'amber',
+	'purple',
+	'rose',
+	'teal',
+	'indigo',
+	'orange',
+];
 
 describe('getTagColorVariant', () => {
 	it('returns the same variant for the same tag (deterministic)', () => {
@@ -12,7 +21,9 @@ describe('getTagColorVariant', () => {
 	});
 
 	it('can return different variants for different tags', () => {
-		const variants = new Set(['ops', 'bugs', 'deploy', 'infra', 'test', 'ci', 'docs', 'perf'].map(getTagColorVariant));
+		const variants = new Set(
+			['ops', 'bugs', 'deploy', 'infra', 'test', 'ci', 'docs', 'perf'].map(getTagColorVariant),
+		);
 		expect(variants.size).toBeGreaterThan(1);
 	});
 

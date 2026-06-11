@@ -10,9 +10,7 @@ export interface ChatFilterContext {
 	pendingViewChatId: string | null;
 }
 
-export type ChatFilterResult =
-	| { action: 'process' }
-	| { action: 'skip' };
+export type ChatFilterResult = { action: 'process' } | { action: 'skip' };
 
 const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 	'chat-sessions-running',
@@ -43,8 +41,7 @@ export function filterByChat(
 		return { action: 'process' };
 	}
 
-	const activeViewChatId =
-		ctx.selectedChatId || ctx.currentChatId || ctx.pendingViewChatId;
+	const activeViewChatId = ctx.selectedChatId || ctx.currentChatId || ctx.pendingViewChatId;
 
 	const messageChatId = getChatId(message);
 

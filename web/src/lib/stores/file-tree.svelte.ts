@@ -206,7 +206,7 @@ export class FileTreeStore {
 			return a.type === 'directory' ? -1 : 1;
 		}
 
-		let cmp = 0;
+		let cmp: number;
 		switch (this.sortKey) {
 			case 'size': {
 				const av = a.type === 'file' ? (a.size ?? 0) : 0;
@@ -221,22 +221,24 @@ export class FileTreeStore {
 				break;
 			}
 			case 'permissions':
-				cmp = (a.permissionsRwx ?? '').toLowerCase().localeCompare(
-					(b.permissionsRwx ?? '').toLowerCase(), undefined, { sensitivity: 'base' },
-				);
+				cmp = (a.permissionsRwx ?? '')
+					.toLowerCase()
+					.localeCompare((b.permissionsRwx ?? '').toLowerCase(), undefined, {
+						sensitivity: 'base',
+					});
 				break;
 			case 'name':
 			default:
-				cmp = a.name.toLowerCase().localeCompare(
-					b.name.toLowerCase(), undefined, { sensitivity: 'base' },
-				);
+				cmp = a.name
+					.toLowerCase()
+					.localeCompare(b.name.toLowerCase(), undefined, { sensitivity: 'base' });
 				break;
 		}
 
 		if (cmp === 0) {
-			cmp = a.name.toLowerCase().localeCompare(
-				b.name.toLowerCase(), undefined, { sensitivity: 'base' },
-			);
+			cmp = a.name
+				.toLowerCase()
+				.localeCompare(b.name.toLowerCase(), undefined, { sensitivity: 'base' });
 		}
 		return this.sortDirection === 'asc' ? cmp : -cmp;
 	}
@@ -280,10 +282,16 @@ export class FileTreeStore {
 			if (ff === 'true' || ff === 'false') this.foldersFirst = ff === 'true';
 			const sh = localStorage.getItem(STORAGE_SHOW_HIDDEN_KEY);
 			if (sh === 'true' || sh === 'false') this.showHiddenFiles = sh === 'true';
-		} catch { /* localStorage unavailable */ }
+		} catch {
+			/* localStorage unavailable */
+		}
 	}
 
 	#persist(key: string, value: string): void {
-		try { localStorage.setItem(key, value); } catch { /* ignore */ }
+		try {
+			localStorage.setItem(key, value);
+		} catch {
+			/* ignore */
+		}
 	}
 }

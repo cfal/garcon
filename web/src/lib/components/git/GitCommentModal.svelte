@@ -46,7 +46,7 @@
 
 		<!-- Severity -->
 		<div class="flex gap-3">
-			{#each (['note', 'warning', 'blocker'] as const) as sev}
+			{#each ['note', 'warning', 'blocker'] as const as sev}
 				<label class="flex items-center gap-1.5 text-xs cursor-pointer">
 					<input
 						type="radio"
@@ -82,8 +82,8 @@
 			disabled={!composer.body.trim()}
 			class="flex-1 px-3 py-2 text-xs rounded transition-all
 				{composer.body.trim()
-					? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
-					: 'bg-muted text-muted-foreground cursor-not-allowed'}"
+				? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
+				: 'bg-muted text-muted-foreground cursor-not-allowed'}"
 		>
 			Add comment
 		</button>

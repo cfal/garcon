@@ -60,7 +60,11 @@ export interface UploadImagesResponse {
 }
 
 /** Builds query string from chatId/projectPath/filePath. */
-function buildFileQuery(params: { chatId?: string | null; projectPath?: string | null; filePath?: string }): string {
+function buildFileQuery(params: {
+	chatId?: string | null;
+	projectPath?: string | null;
+	filePath?: string;
+}): string {
 	const query = new URLSearchParams();
 	if (params.filePath !== undefined) {
 		query.append('path', String(params.filePath || ''));
@@ -71,7 +75,11 @@ function buildFileQuery(params: { chatId?: string | null; projectPath?: string |
 }
 
 /** Builds query string from chatId/projectPath/dirPath. */
-function buildDirQuery(params: { chatId?: string | null; projectPath?: string | null; dirPath?: string | null }): string {
+function buildDirQuery(params: {
+	chatId?: string | null;
+	projectPath?: string | null;
+	dirPath?: string | null;
+}): string {
 	const query = new URLSearchParams();
 	if (params.dirPath) query.append('path', params.dirPath);
 	if (params.chatId) query.append('chatId', params.chatId);
@@ -80,7 +88,10 @@ function buildDirQuery(params: { chatId?: string | null; projectPath?: string | 
 }
 
 /** Builds query string from chatId/projectPath only. */
-function buildProjectQuery(params: { chatId?: string | null; projectPath?: string | null }): string {
+function buildProjectQuery(params: {
+	chatId?: string | null;
+	projectPath?: string | null;
+}): string {
 	const query = new URLSearchParams();
 	if (params.chatId) query.append('chatId', params.chatId);
 	else if (params.projectPath) query.append('projectPath', params.projectPath);
@@ -88,7 +99,10 @@ function buildProjectQuery(params: { chatId?: string | null; projectPath?: strin
 }
 
 /** Reads file content as text. */
-export async function readText(params: FilePathParams, options?: RequestInit): Promise<ReadTextResponse> {
+export async function readText(
+	params: FilePathParams,
+	options?: RequestInit,
+): Promise<ReadTextResponse> {
 	const qs = buildFileQuery(params);
 	return apiGet<ReadTextResponse>(`/api/v1/files/text?${qs}`, options);
 }
@@ -101,14 +115,20 @@ export async function saveText(params: SaveTextParams): Promise<{ success: boole
 }
 
 /** Fetches the file tree for a project directory. */
-export async function getTree(params: DirParams = {}, options?: RequestInit): Promise<FileTreeNode[]> {
+export async function getTree(
+	params: DirParams = {},
+	options?: RequestInit,
+): Promise<FileTreeNode[]> {
 	const qs = buildDirQuery(params);
 	const url = `/api/v1/files/tree${qs ? `?${qs}` : ''}`;
 	return apiGet<FileTreeNode[]>(url, options);
 }
 
 /** Fetches a flat file list for a project. */
-export async function getFileList(params: ProjectParams = {}, options?: RequestInit): Promise<FileEntry[]> {
+export async function getFileList(
+	params: ProjectParams = {},
+	options?: RequestInit,
+): Promise<FileEntry[]> {
 	const qs = buildProjectQuery(params);
 	const url = `/api/v1/files/list${qs ? `?${qs}` : ''}`;
 	return apiGet<FileEntry[]>(url, options);
@@ -135,8 +155,13 @@ export interface DirectoryEntry {
 
 /** Fetches directory entries for the directory browser. Returns the raw
  *  array the server sends, validated to be an Array. */
-export async function browseDirectory(path: string, signal?: AbortSignal): Promise<DirectoryEntry[]> {
-	const response = await apiFetch(`/api/v1/files/browse?path=${encodeURIComponent(path)}`, { signal });
+export async function browseDirectory(
+	path: string,
+	signal?: AbortSignal,
+): Promise<DirectoryEntry[]> {
+	const response = await apiFetch(`/api/v1/files/browse?path=${encodeURIComponent(path)}`, {
+		signal,
+	});
 	const payload = await response.json();
 	if (!Array.isArray(payload)) {
 		throw new Error('Invalid directory browse payload');

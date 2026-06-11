@@ -21,12 +21,7 @@ function touchAt(identifier: number, clientX: number, clientY: number) {
 	};
 }
 
-function rect(input: {
-	left: number;
-	top: number;
-	width: number;
-	height: number;
-}): DOMRect {
+function rect(input: { left: number; top: number; width: number; height: number }): DOMRect {
 	return {
 		x: input.left,
 		y: input.top,
@@ -88,27 +83,33 @@ function installTouchGeometry() {
 	const row1 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-1"]');
 	if (!row0 || !row1) throw new Error('expected test rows to be rendered');
 
-	vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({
-		left: 0,
-		top: 0,
-		width: 320,
-		height: 640,
-	}));
-	vi.spyOn(row0, 'getBoundingClientRect').mockReturnValue(rect({
-		left: 0,
-		top: 0,
-		width: 320,
-		height: rowHeight,
-	}));
-	vi.spyOn(row1, 'getBoundingClientRect').mockReturnValue(rect({
-		left: 0,
-		top: rowHeight,
-		width: 320,
-		height: rowHeight,
-	}));
-	vi.spyOn(document, 'elementFromPoint').mockImplementation((_, y) => (
-		y >= rowHeight ? row1 : row0
-	));
+	vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(
+		rect({
+			left: 0,
+			top: 0,
+			width: 320,
+			height: 640,
+		}),
+	);
+	vi.spyOn(row0, 'getBoundingClientRect').mockReturnValue(
+		rect({
+			left: 0,
+			top: 0,
+			width: 320,
+			height: rowHeight,
+		}),
+	);
+	vi.spyOn(row1, 'getBoundingClientRect').mockReturnValue(
+		rect({
+			left: 0,
+			top: rowHeight,
+			width: 320,
+			height: rowHeight,
+		}),
+	);
+	vi.spyOn(document, 'elementFromPoint').mockImplementation((_, y) =>
+		y >= rowHeight ? row1 : row0,
+	);
 
 	return { row0, row1, viewport };
 }
@@ -218,7 +219,11 @@ describe('SidebarVirtualSortableChatList', () => {
 			list: 'normal',
 			chatId: 'chat-0',
 			target: { chatIdAbove: 'chat-1' },
-			visibleOrder: ['chat-1', 'chat-0', ...Array.from({ length: 18 }, (_, index) => `chat-${index + 2}`)],
+			visibleOrder: [
+				'chat-1',
+				'chat-0',
+				...Array.from({ length: 18 }, (_, index) => `chat-${index + 2}`),
+			],
 			sequence: 1,
 		});
 	});
@@ -411,7 +416,9 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 
 		expect(document.querySelector('[data-sidebar-virtual-list]')).toBeTruthy();
-		expect(document.querySelector('[data-sidebar-virtual-list]')?.getAttribute('data-sidebar-filtered')).toBe('true');
+		expect(
+			document.querySelector('[data-sidebar-virtual-list]')?.getAttribute('data-sidebar-filtered'),
+		).toBe('true');
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
 		expect(screen.getByText('Chat 0')).toBeTruthy();
 		expect(screen.queryByText('Chat 119')).toBeNull();

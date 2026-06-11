@@ -115,7 +115,10 @@
 				{#if showQuickSearchSeparator}
 					<DropdownMenuSeparator />
 				{/if}
-				<DropdownMenuItem onclick={handleMarkAllRead} disabled={!showMarkAllRead || isMarkAllReadDisabled}>
+				<DropdownMenuItem
+					onclick={handleMarkAllRead}
+					disabled={!showMarkAllRead || isMarkAllReadDisabled}
+				>
 					<SquareCheck class="h-3.5 w-3.5" />
 					{m.sidebar_chats_mark_all_read()}
 				</DropdownMenuItem>

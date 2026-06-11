@@ -100,7 +100,10 @@ export interface ParseFileLinkOptions {
  * also accepted and converted to relative paths.
  * URL schemes and empty paths are always ignored.
  */
-export function parseFileLink(rawHref: string | undefined | null, options?: ParseFileLinkOptions): ParsedFileLink {
+export function parseFileLink(
+	rawHref: string | undefined | null,
+	options?: ParseFileLinkOptions,
+): ParsedFileLink {
 	const ignored = (raw: string): ParsedFileLink => ({
 		kind: 'ignored',
 		relativePath: '',
@@ -166,6 +169,9 @@ export function parseFileLink(rawHref: string | undefined | null, options?: Pars
 }
 
 /** Returns true when the href looks like a file link. */
-export function isFileLink(rawHref: string | undefined | null, options?: ParseFileLinkOptions): boolean {
+export function isFileLink(
+	rawHref: string | undefined | null,
+	options?: ParseFileLinkOptions,
+): boolean {
 	return parseFileLink(rawHref, options).kind === 'file';
 }

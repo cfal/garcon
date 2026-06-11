@@ -17,30 +17,22 @@ describe('ChatState', () => {
 
 	it('setMessages replaces the message array', () => {
 		const state = new ChatState();
-		const msgs = [
-			new UserMessage('2024-01-01T00:00:00Z', 'hello'),
-		];
+		const msgs = [new UserMessage('2024-01-01T00:00:00Z', 'hello')];
 		state.setMessages(msgs);
 		expect(state.chatMessages).toEqual(msgs);
 	});
 
 	it('appendMessages adds to the end', () => {
 		const state = new ChatState();
-		state.setMessages([
-			new UserMessage('2024-01-01T00:00:00Z', 'first'),
-		]);
-		state.appendMessages([
-			new AssistantMessage('2024-01-01T00:00:01Z', 'second'),
-		]);
+		state.setMessages([new UserMessage('2024-01-01T00:00:00Z', 'first')]);
+		state.appendMessages([new AssistantMessage('2024-01-01T00:00:01Z', 'second')]);
 		expect(state.chatMessages).toHaveLength(2);
 		expect((state.chatMessages[1] as AssistantMessage).content).toBe('second');
 	});
 
 	it('clearMessages resets all state', () => {
 		const state = new ChatState();
-		state.setMessages([
-			new UserMessage('2024-01-01T00:00:00Z', 'test'),
-		]);
+		state.setMessages([new UserMessage('2024-01-01T00:00:00Z', 'test')]);
 		state.hasMoreMessages = true;
 		state.totalMessages = 5;
 
@@ -53,9 +45,7 @@ describe('ChatState', () => {
 
 	it('resetForNewChat clears messages and resets selection state', () => {
 		const state = new ChatState();
-		state.setMessages([
-			new UserMessage('2024-01-01T00:00:00Z', 'old'),
-		]);
+		state.setMessages([new UserMessage('2024-01-01T00:00:00Z', 'old')]);
 		state.isUserScrolledUp = true;
 		state.hasMoreMessages = true;
 		state.totalMessages = 50;
@@ -101,14 +91,10 @@ describe('ChatState', () => {
 		const chatId = 'persist-chat';
 		localStorage.clear();
 		const chatState = new ChatState();
-		chatState.setMessages([
-			new UserMessage('2024-01-01T00:00:00Z', 'first'),
-		]);
+		chatState.setMessages([new UserMessage('2024-01-01T00:00:00Z', 'first')]);
 		chatState.persistMessages(chatId);
 
-		chatState.setMessages([
-			new UserMessage('2024-01-01T00:00:01Z', 'second'),
-		]);
+		chatState.setMessages([new UserMessage('2024-01-01T00:00:01Z', 'second')]);
 		chatState.persistMessages(chatId);
 
 		const restored = new ChatState();
@@ -123,9 +109,7 @@ describe('ChatState', () => {
 		const chatId = 'remove-chat';
 		localStorage.clear();
 		const chatState = new ChatState();
-		chatState.setMessages([
-			new UserMessage('2024-01-01T00:00:00Z', 'hello'),
-		]);
+		chatState.setMessages([new UserMessage('2024-01-01T00:00:00Z', 'hello')]);
 		chatState.persistMessages(chatId);
 
 		chatState.removeCachedMessages(chatId);

@@ -9,7 +9,9 @@
 
 	const viewer = getFileViewer();
 	const host = new FileViewerHostState({
-		get request() { return viewer.pending; },
+		get request() {
+			return viewer.pending;
+		},
 		consumeRequest: () => viewer.consumePending(),
 	});
 
@@ -25,11 +27,7 @@
 
 {#if host.session && host.file}
 	{#if host.session.mode === 'image'}
-		<ImageViewer
-			src={host.getImageUrl()}
-			alt={host.file.name}
-			onClose={() => host.closeViewer()}
-		/>
+		<ImageViewer src={host.getImageUrl()} alt={host.file.name} onClose={() => host.closeViewer()} />
 	{:else if host.session.mode === 'markdown'}
 		<MarkdownViewer
 			filePath={host.file.path}
@@ -41,7 +39,10 @@
 		<FileEditorDialog
 			file={host.toEditorFile()}
 			onRequestClose={() => host.closeViewer()}
-			onSave={(content) => { host.setEditorContent(content); return host.saveCurrentFile(); }}
+			onSave={(content) => {
+				host.setEditorContent(content);
+				return host.saveCurrentFile();
+			}}
 			onContentChange={(value) => host.setEditorContent(value)}
 			onDirtyChange={(dirty) => host.setDirty(dirty)}
 			showMarkdownViewButton={host.isCurrentFileMarkdownInCodeMode}
@@ -54,9 +55,7 @@
 	<Dialog.Content class="sm:max-w-md">
 		<Dialog.Header>
 			<Dialog.Title>Unsaved changes</Dialog.Title>
-			<Dialog.Description>
-				Save changes before continuing?
-			</Dialog.Description>
+			<Dialog.Description>Save changes before continuing?</Dialog.Description>
 		</Dialog.Header>
 		{#if host.switchError}
 			<p class="text-sm text-destructive">{host.switchError}</p>

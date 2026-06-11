@@ -65,7 +65,8 @@ describe('SidebarSearchResults', () => {
 		});
 
 		const viewport = document.querySelector('[data-slot="search-dialog-results"]');
-		if (!(viewport instanceof HTMLElement)) throw new Error('Expected search dialog results viewport');
+		if (!(viewport instanceof HTMLElement))
+			throw new Error('Expected search dialog results viewport');
 
 		viewport.scrollTop = rowHeight * 120;
 		await fireEvent.scroll(viewport);
@@ -85,7 +86,8 @@ describe('SidebarSearchResults', () => {
 		});
 
 		const viewport = document.querySelector('[data-slot="search-dialog-results"]');
-		if (!(viewport instanceof HTMLElement)) throw new Error('Expected search dialog results viewport');
+		if (!(viewport instanceof HTMLElement))
+			throw new Error('Expected search dialog results viewport');
 
 		await waitFor(() => {
 			expect(viewport.scrollTop).toBeGreaterThan(rowHeight * 350);
@@ -106,7 +108,8 @@ describe('SidebarSearchResults', () => {
 		});
 
 		const viewport = document.querySelector('[data-slot="search-dialog-results"]');
-		if (!(viewport instanceof HTMLElement)) throw new Error('Expected search dialog results viewport');
+		if (!(viewport instanceof HTMLElement))
+			throw new Error('Expected search dialog results viewport');
 
 		await waitFor(() => {
 			expect(viewport.scrollTop).toBeGreaterThan(rowHeight * 250);

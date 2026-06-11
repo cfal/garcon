@@ -1,6 +1,6 @@
-	<script lang="ts">
-		import ChatPane from '../ChatPane.svelte';
-		import { setChatSessions, setSplitLayout } from '$lib/context';
+<script lang="ts">
+	import ChatPane from '../ChatPane.svelte';
+	import { setChatSessions, setSplitLayout } from '$lib/context';
 
 	interface Props {
 		isFocused?: boolean;
@@ -20,7 +20,7 @@
 		},
 	} as never);
 
-		setSplitLayout({
+	setSplitLayout({
 		draggedPaneId: null,
 		startPaneDrag() {},
 		endDrag() {},

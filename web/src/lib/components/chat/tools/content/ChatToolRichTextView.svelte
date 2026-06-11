@@ -14,12 +14,15 @@
 		content,
 		projectPath = null,
 		onFileOpen,
-		class: className = ''
+		class: className = '',
 	}: MarkdownContentProps = $props();
 
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file' || !onFileOpen) return;
-		const parsed = parseFileLink(link.rawHref, projectPath ? { projectBasePath: projectPath } : undefined);
+		const parsed = parseFileLink(
+			link.rawHref,
+			projectPath ? { projectBasePath: projectPath } : undefined,
+		);
 		if (parsed.kind !== 'file') return;
 		onFileOpen(parsed.relativePath);
 		return true;

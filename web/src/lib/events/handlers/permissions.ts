@@ -3,7 +3,11 @@
 // and permission-cancelled types.
 
 import type { AgentRunOutputMessage } from '$shared/ws-events';
-import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '$shared/chat-types';
+import {
+	PermissionRequestMessage,
+	PermissionResolvedMessage,
+	PermissionCancelledMessage,
+} from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import type { LoadingStatusEntry } from '$lib/stores/chat-lifecycle.svelte';
 import * as m from '$lib/paraglide/messages.js';
@@ -32,7 +36,8 @@ export function handlePermissionLifecycleFromBatch(
 	for (const entry of msg.messages) {
 		if (entry instanceof PermissionRequestMessage) {
 			ctx.setPendingPermissionRequests((previous) => {
-				if (previous.some((r) => r.permissionRequestId === entry.permissionRequestId)) return previous;
+				if (previous.some((r) => r.permissionRequestId === entry.permissionRequestId))
+					return previous;
 				return [
 					...previous,
 					{

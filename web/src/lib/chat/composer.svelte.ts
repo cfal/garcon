@@ -118,7 +118,6 @@ export class ComposerState {
 		this.images = [];
 		this.clearDraft(chatId);
 	}
-
 }
 
 export function createComposerState(): ComposerState {

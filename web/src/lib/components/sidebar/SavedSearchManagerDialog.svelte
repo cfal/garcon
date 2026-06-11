@@ -99,7 +99,9 @@
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
-	<Dialog.Content class="h-dvh w-full max-w-full rounded-none border-0 p-6 sm:h-auto sm:max-w-md sm:rounded-lg sm:border">
+	<Dialog.Content
+		class="h-dvh w-full max-w-full rounded-none border-0 p-6 sm:h-auto sm:max-w-md sm:rounded-lg sm:border"
+	>
 		<Dialog.Header>
 			<Dialog.Title>{m.sidebar_saved_searches_manage_title()}</Dialog.Title>
 		</Dialog.Header>
@@ -111,9 +113,9 @@
 				</div>
 			{:else}
 				{#each searches as search, i (search.id)}
-						<div
-							class={cn(
-								'group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors',
+					<div
+						class={cn(
+							'group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors',
 							dragOverId === search.id ? 'bg-accent/50' : 'hover:bg-accent/30',
 						)}
 						draggable="true"
@@ -125,45 +127,56 @@
 						role="listitem"
 					>
 						<GripVertical class="w-3.5 h-3.5 text-muted-foreground/50 shrink-0 cursor-grab" />
-							<div class="flex-1 min-w-0">
-								<div class="text-sm font-medium truncate">{search.title || search.query}</div>
-								{#if search.title}
-									<div class="text-xs text-muted-foreground truncate">{search.query}</div>
+						<div class="flex-1 min-w-0">
+							<div class="text-sm font-medium truncate">{search.title || search.query}</div>
+							{#if search.title}
+								<div class="text-xs text-muted-foreground truncate">{search.query}</div>
+							{/if}
+							<div class="flex flex-wrap gap-1 pt-1">
+								{#if search.showAsSidebarPill}
+									<span
+										class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
+										>Pill</span
+									>
 								{/if}
-								<div class="flex flex-wrap gap-1 pt-1">
-									{#if search.showAsSidebarPill}
-										<span class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">Pill</span>
-									{/if}
-									{#if search.showInSidebarMenu}
-										<span class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">Menu</span>
-									{/if}
-									{#if search.showInSearchDialog}
-										<span class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">Dialog</span>
-									{/if}
-								</div>
+								{#if search.showInSidebarMenu}
+									<span
+										class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
+										>Menu</span
+									>
+								{/if}
+								{#if search.showInSearchDialog}
+									<span
+										class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
+										>Dialog</span
+									>
+								{/if}
 							</div>
-							<div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity shrink-0">
-								<button
-									type="button"
-									class="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-									onclick={() => moveSearch(search.id, -1)}
-									aria-label={`Move ${search.title || search.query} up`}
-									disabled={i === 0}
-								>
-									<ChevronUp class="w-3.5 h-3.5" />
-								</button>
-								<button
-									type="button"
-									class="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-									onclick={() => moveSearch(search.id, 1)}
-									aria-label={`Move ${search.title || search.query} down`}
-									disabled={i === searches.length - 1}
-								>
-									<ChevronDown class="w-3.5 h-3.5" />
-								</button>
-								<button
-									type="button"
-									class="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+						</div>
+						<div
+							class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity shrink-0"
+						>
+							<button
+								type="button"
+								class="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+								onclick={() => moveSearch(search.id, -1)}
+								aria-label={`Move ${search.title || search.query} up`}
+								disabled={i === 0}
+							>
+								<ChevronUp class="w-3.5 h-3.5" />
+							</button>
+							<button
+								type="button"
+								class="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+								onclick={() => moveSearch(search.id, 1)}
+								aria-label={`Move ${search.title || search.query} down`}
+								disabled={i === searches.length - 1}
+							>
+								<ChevronDown class="w-3.5 h-3.5" />
+							</button>
+							<button
+								type="button"
+								class="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
 								onclick={() => onEdit(search)}
 								aria-label={m.sidebar_saved_searches_edit()}
 							>

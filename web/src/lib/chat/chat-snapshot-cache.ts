@@ -99,8 +99,7 @@ function removeEntry(index: ChatSnapshotIndex, chatId: string): ChatSnapshotInde
 
 function pruneIndex(index: ChatSnapshotIndex): ChatSnapshotIndex {
 	const sorted = [...index.entries].sort(
-		(a, b) =>
-			new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime(),
+		(a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime(),
 	);
 
 	const keep = sorted.slice(0, MAX_ENTRIES);

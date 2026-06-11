@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import { handleChatTitle, handleChatDeleted, handleChatReadUpdated, handleChatListInvalidated } from '../handlers/sidebar';
-import { ChatTitleUpdatedMessage, ChatSessionDeletedWsMessage, ChatReadUpdatedV1Message, ChatListRefreshRequestedMessage } from '$shared/ws-events';
+import {
+	handleChatTitle,
+	handleChatDeleted,
+	handleChatReadUpdated,
+	handleChatListInvalidated,
+} from '../handlers/sidebar';
+import {
+	ChatTitleUpdatedMessage,
+	ChatSessionDeletedWsMessage,
+	ChatReadUpdatedV1Message,
+	ChatListRefreshRequestedMessage,
+} from '$shared/ws-events';
 
 describe('handleChatTitle', () => {
 	it('patches the title for a valid message', () => {
@@ -12,10 +22,7 @@ describe('handleChatTitle', () => {
 			refreshChats: vi.fn(),
 		};
 
-		handleChatTitle(
-			new ChatTitleUpdatedMessage('chat-1', 'New Title'),
-			ctx,
-		);
+		handleChatTitle(new ChatTitleUpdatedMessage('chat-1', 'New Title'), ctx);
 
 		expect(ctx.patchChatTitle).toHaveBeenCalledWith('chat-1', 'New Title');
 	});
@@ -29,10 +36,7 @@ describe('handleChatTitle', () => {
 			refreshChats: vi.fn(),
 		};
 
-		handleChatTitle(
-			new ChatTitleUpdatedMessage('', 'New Title'),
-			ctx,
-		);
+		handleChatTitle(new ChatTitleUpdatedMessage('', 'New Title'), ctx);
 
 		expect(ctx.patchChatTitle).not.toHaveBeenCalled();
 	});
@@ -46,10 +50,7 @@ describe('handleChatTitle', () => {
 			refreshChats: vi.fn(),
 		};
 
-		handleChatTitle(
-			new ChatTitleUpdatedMessage('chat-1', ''),
-			ctx,
-		);
+		handleChatTitle(new ChatTitleUpdatedMessage('chat-1', ''), ctx);
 
 		expect(ctx.patchChatTitle).not.toHaveBeenCalled();
 	});
@@ -66,10 +67,7 @@ describe('handleChatDeleted', () => {
 			removeChatSnapshot: vi.fn(),
 		};
 
-		handleChatDeleted(
-			new ChatSessionDeletedWsMessage('chat-1'),
-			ctx,
-		);
+		handleChatDeleted(new ChatSessionDeletedWsMessage('chat-1'), ctx);
 
 		expect(ctx.navigateAwayFromChat).toHaveBeenCalledWith('chat-1');
 		expect(ctx.removeChat).toHaveBeenCalledWith('chat-1');
@@ -90,10 +88,7 @@ describe('handleChatDeleted', () => {
 			removeChatSnapshot: vi.fn(),
 		};
 
-		handleChatDeleted(
-			new ChatSessionDeletedWsMessage(''),
-			ctx,
-		);
+		handleChatDeleted(new ChatSessionDeletedWsMessage(''), ctx);
 
 		expect(ctx.navigateAwayFromChat).not.toHaveBeenCalled();
 		expect(ctx.removeChat).not.toHaveBeenCalled();
@@ -111,10 +106,7 @@ describe('handleChatReadUpdated', () => {
 			refreshChats: vi.fn(),
 		};
 
-		handleChatReadUpdated(
-			new ChatReadUpdatedV1Message('chat-1', '2026-02-25T12:00:00.000Z'),
-			ctx,
-		);
+		handleChatReadUpdated(new ChatReadUpdatedV1Message('chat-1', '2026-02-25T12:00:00.000Z'), ctx);
 
 		expect(ctx.patchLastReadAt).toHaveBeenCalledWith('chat-1', '2026-02-25T12:00:00.000Z');
 	});
@@ -128,10 +120,7 @@ describe('handleChatReadUpdated', () => {
 			refreshChats: vi.fn(),
 		};
 
-		handleChatReadUpdated(
-			new ChatReadUpdatedV1Message('', '2026-02-25T12:00:00.000Z'),
-			ctx,
-		);
+		handleChatReadUpdated(new ChatReadUpdatedV1Message('', '2026-02-25T12:00:00.000Z'), ctx);
 
 		expect(ctx.patchLastReadAt).not.toHaveBeenCalled();
 	});
@@ -147,10 +136,7 @@ describe('handleChatListInvalidated', () => {
 			refreshChats: vi.fn(),
 		};
 
-		handleChatListInvalidated(
-			new ChatListRefreshRequestedMessage('pinned-toggled', 'chat-1'),
-			ctx,
-		);
+		handleChatListInvalidated(new ChatListRefreshRequestedMessage('pinned-toggled', 'chat-1'), ctx);
 
 		expect(ctx.refreshChats).toHaveBeenCalledTimes(1);
 	});
@@ -164,10 +150,7 @@ describe('handleChatListInvalidated', () => {
 			refreshChats: vi.fn(),
 		};
 
-		handleChatListInvalidated(
-			new ChatListRefreshRequestedMessage('archive-toggled', ''),
-			ctx,
-		);
+		handleChatListInvalidated(new ChatListRefreshRequestedMessage('archive-toggled', ''), ctx);
 
 		expect(ctx.refreshChats).not.toHaveBeenCalled();
 	});

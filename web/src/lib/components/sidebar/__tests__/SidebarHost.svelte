@@ -27,7 +27,7 @@
 		requestComposerFocus() {},
 	} as never);
 
-setReadReceiptOutbox({
+	setReadReceiptOutbox({
 		markChatsReadNow() {
 			return Promise.resolve();
 		},

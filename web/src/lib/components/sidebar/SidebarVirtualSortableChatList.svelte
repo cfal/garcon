@@ -118,7 +118,7 @@
 		documentElement: Record<string, string>;
 	} | null = null;
 	let effectiveRowHeight = $derived(
-		rowHeight ?? (isMobile ? MOBILE_CHAT_ROW_HEIGHT : DESKTOP_CHAT_ROW_HEIGHT)
+		rowHeight ?? (isMobile ? MOBILE_CHAT_ROW_HEIGHT : DESKTOP_CHAT_ROW_HEIGHT),
 	);
 	let bottomPadding = $derived(isMobile ? mobileBottomPadding : desktopBottomPadding);
 	let dragEnabled = $derived(!isMultiSelectMode);
@@ -173,9 +173,15 @@
 		let disposed = false;
 		let cleanup: (() => void) | undefined;
 		const frame = requestAnimationFrame(() => {
-			if (!viewportRef || rowCount === 0 || viewportRef.scrollHeight <= viewportRef.clientHeight) return;
+			if (!viewportRef || rowCount === 0 || viewportRef.scrollHeight <= viewportRef.clientHeight)
+				return;
 			void import('@atlaskit/pragmatic-drag-and-drop-auto-scroll/element').then((module) => {
-				if (disposed || !viewportRef || rowCount === 0 || viewportRef.scrollHeight <= viewportRef.clientHeight) {
+				if (
+					disposed ||
+					!viewportRef ||
+					rowCount === 0 ||
+					viewportRef.scrollHeight <= viewportRef.clientHeight
+				) {
 					return;
 				}
 				cleanup = module.autoScrollForElements({
@@ -205,10 +211,7 @@
 		if (!viewportRef) return false;
 		const rect = viewportRef.getBoundingClientRect();
 		return (
-			clientX >= rect.left &&
-			clientX <= rect.right &&
-			clientY >= rect.top &&
-			clientY <= rect.bottom
+			clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
 		);
 	}
 
@@ -290,7 +293,9 @@
 			sourceList: sourceData.list,
 			clientX: input.clientX,
 			clientY: input.clientY,
-		}) ? lastValidDrop : null;
+		})
+			? lastValidDrop
+			: null;
 		// Uses the last valid row target when virtualization removes the current target at drop time.
 		const instruction = currentInstruction ?? fallbackInstruction;
 
@@ -331,7 +336,10 @@
 		return null;
 	}
 
-	function resolveTouchInstruction(clientX: number, clientY: number): SidebarDropInstruction | null {
+	function resolveTouchInstruction(
+		clientX: number,
+		clientY: number,
+	): SidebarDropInstruction | null {
 		const current = touchDrag;
 		if (!current || !pointIsInsideViewport(clientX, clientY)) return null;
 		const rowEl = mountedRowAtPoint(clientX, clientY);
@@ -552,14 +560,16 @@
 		event.preventDefault();
 		clearDocumentSelection();
 		suppressTouchClickUntil = performance.now() + 500;
-		const instruction = resolveTouchInstruction(clientX, clientY) ?? (
-			canUseLastValidDrop({
+		const instruction =
+			resolveTouchInstruction(clientX, clientY) ??
+			(canUseLastValidDrop({
 				sourceChatId: current.sourceChatId,
 				sourceList: current.sourceList,
 				clientX,
 				clientY,
-			}) ? lastValidDrop : null
-		);
+			})
+				? lastValidDrop
+				: null);
 
 		if (instruction) {
 			applySidebarDropInstruction(instruction);
@@ -604,12 +614,13 @@
 		let mountedRowIsVisible = false;
 		if (viewportRef) {
 			const rowEl = Array.from(
-				viewportRef.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]')
+				viewportRef.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]'),
 			).find((element) => element.dataset.sidebarVirtualRow === chatId);
 			if (rowEl) {
 				const viewportRect = viewportRef.getBoundingClientRect();
 				const rowRect = rowEl.getBoundingClientRect();
-				mountedRowIsVisible = rowRect.top >= viewportRect.top && rowRect.bottom <= viewportRect.bottom;
+				mountedRowIsVisible =
+					rowRect.top >= viewportRect.top && rowRect.bottom <= viewportRect.bottom;
 				if (mountedRowIsVisible) return;
 			}
 		}
@@ -618,19 +629,18 @@
 		});
 		if (viewportRef && !mountedRowIsVisible) {
 			const viewportHeight = viewportRef.clientHeight || fallbackViewportHeight;
-			viewportRef.scrollTop = Math.max(
-				0,
-				index * effectiveRowHeight - viewportHeight * 0.5,
-			);
+			viewportRef.scrollTop = Math.max(0, index * effectiveRowHeight - viewportHeight * 0.5);
 		}
 	}
 
 	function moveToBoundary(row: SidebarVirtualChatRow, boundary: 'start' | 'end'): void {
-		persistReorderRequest(reorder.moveToBoundary({
-			list: row.list,
-			chatId: row.chat.id,
-			boundary,
-		}));
+		persistReorderRequest(
+			reorder.moveToBoundary({
+				list: row.list,
+				chatId: row.chat.id,
+				boundary,
+			}),
+		);
 	}
 
 	function getMoveToTop(row: SidebarVirtualChatRow): (() => void) | undefined {
@@ -649,24 +659,27 @@
 		return () => moveToBoundary(row, 'end');
 	}
 
-	onMount(() => appShell.onSidebarRecenterRequested(() => {
-		scrollChatIntoView(selectedChatId);
-	}));
+	onMount(() =>
+		appShell.onSidebarRecenterRequested(() => {
+			scrollChatIntoView(selectedChatId);
+		}),
+	);
 
-	onMount(() => monitorForElements({
-		canMonitor: ({ source }) => (
-			isSidebarChatDragData(source.data) && source.data.instanceId === instanceId
-		),
-		onDrag: ({ source, location }) => {
-			previewSidebarDrop(source.data, location.current.dropTargets, location.current.input);
-		},
-		onDropTargetChange: ({ source, location }) => {
-			previewSidebarDrop(source.data, location.current.dropTargets, location.current.input);
-		},
-		onDrop: ({ source, location }) => {
-			finishSidebarDrop(source.data, location.current.dropTargets, location.current.input);
-		},
-	}));
+	onMount(() =>
+		monitorForElements({
+			canMonitor: ({ source }) =>
+				isSidebarChatDragData(source.data) && source.data.instanceId === instanceId,
+			onDrag: ({ source, location }) => {
+				previewSidebarDrop(source.data, location.current.dropTargets, location.current.input);
+			},
+			onDropTargetChange: ({ source, location }) => {
+				previewSidebarDrop(source.data, location.current.dropTargets, location.current.input);
+			},
+			onDrop: ({ source, location }) => {
+				finishSidebarDrop(source.data, location.current.dropTargets, location.current.input);
+			},
+		}),
+	);
 
 	onMount(() => {
 		const element = listEl;
@@ -704,7 +717,7 @@
 					{isMobile}
 					{isMultiSelectMode}
 					isMultiSelected={isMultiSelected?.(row.chat.id) ?? false}
-					dragEnabled={dragEnabled}
+					{dragEnabled}
 					isDragging={draggingChatId === row.chat.id}
 					dropIndicatorEdge={activeDrop?.chatId === row.chat.id ? activeDrop.edge : null}
 					onDragStart={startSidebarDrag}

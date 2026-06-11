@@ -10,7 +10,13 @@
 		class?: string;
 	}
 
-	let { label, variant = '', autoColor = false, onclick, class: className }: ColoredTagProps = $props();
+	let {
+		label,
+		variant = '',
+		autoColor = false,
+		onclick,
+		class: className,
+	}: ColoredTagProps = $props();
 
 	let resolvedVariant = $derived(variant || (autoColor ? getTagColorClasses(label) : ''));
 </script>

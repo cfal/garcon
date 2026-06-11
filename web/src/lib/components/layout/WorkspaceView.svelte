@@ -48,7 +48,7 @@
 		onTabChange,
 		onMenuClick,
 		isDesktopFullscreen = false,
-		onToggleDesktopFullscreen
+		onToggleDesktopFullscreen,
 	}: MainContentProps = $props();
 
 	const sessions = getChatSessions();
@@ -63,17 +63,17 @@
 	const showTopHeader = $derived(!isChatTab);
 	const showInlineDesktopTabs = $derived(showTopHeader);
 	const showFloatingDesktopTabs = $derived(isChatTab && !isMobileLayout);
-	const hideFullscreenButtonOnGitTab = $derived(activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel);
+	const hideFullscreenButtonOnGitTab = $derived(
+		activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel,
+	);
 	const canToggleDesktopFullscreen = $derived(
-		!isMobileLayout &&
-		!!onToggleDesktopFullscreen &&
-		!hideFullscreenButtonOnGitTab
+		!isMobileLayout && !!onToggleDesktopFullscreen && !hideFullscreenButtonOnGitTab,
 	);
 
 	const tabs = CHAT_TOOLBAR_TABS;
 	const splitViewTooltip = $derived(splitLayout.isEnabled ? 'Exit split view' : 'Split view');
 	const fullscreenTooltip = $derived(
-		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen()
+		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen(),
 	);
 
 	// Holds the chat submit function registered by ConversationWorkspace.
@@ -95,7 +95,9 @@
 	}
 
 	// Delete confirmation state for split-pane delete action.
-	let deleteConfirmation = $state<{ paneId: string; chatId: string; chatTitle: string } | null>(null);
+	let deleteConfirmation = $state<{ paneId: string; chatId: string; chatTitle: string } | null>(
+		null,
+	);
 
 	function handleSplitDeleteChat(paneId: string) {
 		const pane = splitLayout.panes.find((p) => p.id === paneId);
@@ -146,14 +148,14 @@
 			'relative px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium rounded-md transition-colors duration-150',
 			tabId === activeTab
 				? 'bg-chat-tabs-active text-chat-tabs-active-foreground shadow-sm border border-chat-tabs-active-border'
-				: 'text-muted-foreground hover:text-foreground hover:bg-accent'
+				: 'text-muted-foreground hover:text-foreground hover:bg-accent',
 		);
 	}
 
 	function getUtilityButtonClasses(): string {
 		return cn(
 			'relative inline-flex items-center justify-center h-6 sm:h-7 w-6 sm:w-7 px-0 py-0 rounded-md transition-colors duration-150',
-			'text-muted-foreground hover:text-foreground hover:bg-accent'
+			'text-muted-foreground hover:text-foreground hover:bg-accent',
 		);
 	}
 
@@ -312,11 +314,7 @@
 				e.clientY >= rect.top &&
 				e.clientY <= rect.bottom;
 			if (containsPointer) {
-				return toActiveSplitDropTarget(
-					pane.id,
-					resolveDropZone(rect, e.clientX, e.clientY),
-					rect,
-				);
+				return toActiveSplitDropTarget(pane.id, resolveDropZone(rect, e.clientX, e.clientY), rect);
 			}
 
 			const centerX = rect.left + rect.width / 2;
@@ -387,9 +385,7 @@
 				? 'bg-destructive/10 border-destructive/40'
 				: 'bg-accent/15 border-accent/40';
 		}
-		return zone === 'center'
-			? 'bg-accent/15 border-accent/40'
-			: 'bg-primary/12 border-primary/30';
+		return zone === 'center' ? 'bg-accent/15 border-accent/40' : 'bg-primary/12 border-primary/30';
 	}
 
 	function getActiveSplitPreviewLabel(zone: SplitDropZone, fallback: string): string {
@@ -421,9 +417,7 @@
 		) {
 			return 'bg-accent/15 text-accent-foreground';
 		}
-		return zone === 'center'
-			? 'bg-accent/15 text-accent-foreground'
-			: 'bg-primary/10 text-primary';
+		return zone === 'center' ? 'bg-accent/15 text-accent-foreground' : 'bg-primary/10 text-primary';
 	}
 
 	function getActiveSplitTargetStyle(): string {
@@ -465,7 +459,12 @@
 	// pane's body via an absolute overlay. Focus changes only reposition
 	// the overlay rect; ConversationWorkspace is never remounted.
 	let splitRootEl: HTMLDivElement | undefined = $state();
-	let focusedOverlayRect = $state<{ top: number; left: number; width: number; height: number } | null>(null);
+	let focusedOverlayRect = $state<{
+		top: number;
+		left: number;
+		width: number;
+		height: number;
+	} | null>(null);
 
 	$effect(() => {
 		const focusedId = splitLayout.focusedPaneId;
@@ -482,9 +481,7 @@
 		let paneEl: HTMLElement | null = null;
 		const update = () => {
 			if (!root) return;
-			paneEl = root.querySelector<HTMLElement>(
-				`[data-pane-id="${focusedId}"] [data-pane-body]`,
-			);
+			paneEl = root.querySelector<HTMLElement>(`[data-pane-id="${focusedId}"] [data-pane-body]`);
 			if (!paneEl) {
 				focusedOverlayRect = null;
 				return;
@@ -525,7 +522,9 @@
 	{:else}
 		<!-- Header with tabs (only shown when a chat is active) -->
 		{#if showTopHeader}
-			<div class="bg-chat-header border-b border-chat-header-border p-2 flex-shrink-0 text-foreground">
+			<div
+				class="bg-chat-header border-b border-chat-header-border p-2 flex-shrink-0 text-foreground"
+			>
 				<div class="flex items-center justify-between relative">
 					<div class="flex items-center space-x-2 min-w-0 flex-1">
 						{#if onMenuClick}
@@ -550,7 +549,9 @@
 					{#if showInlineDesktopTabs}
 						<div class="flex-shrink-0 hidden sm:block">
 							<div class="flex items-center gap-1.5">
-								<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-0.5 border border-chat-tabs-rail-border">
+								<div
+									class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-0.5 border border-chat-tabs-rail-border"
+								>
 									{#each tabs as tab (tab.id)}
 										<WorkspaceToolbarButton
 											label={tab.label()}
@@ -565,11 +566,16 @@
 										</WorkspaceToolbarButton>
 									{/each}
 								</div>
-								<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border">
+								<div
+									class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border"
+								>
 									<WorkspaceToolbarButton
 										label={splitViewTooltip}
 										onclick={toggleSplitMode}
-										class={cn(getUtilityButtonClasses(), splitLayout.isEnabled && 'text-primary bg-primary/10')}
+										class={cn(
+											getUtilityButtonClasses(),
+											splitLayout.isEnabled && 'text-primary bg-primary/10',
+										)}
 									>
 										<span class="flex items-center justify-center">
 											<PanelLeft class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
@@ -624,7 +630,9 @@
 				class="absolute right-6 top-3 z-20 hidden sm:block md:right-8"
 			>
 				<div class="flex items-center gap-1.5">
-					<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-0.5 border border-chat-tabs-rail-border shadow-sm">
+					<div
+						class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-0.5 border border-chat-tabs-rail-border shadow-sm"
+					>
 						{#each tabs as tab (tab.id)}
 							<WorkspaceToolbarButton
 								label={tab.label()}
@@ -639,11 +647,16 @@
 							</WorkspaceToolbarButton>
 						{/each}
 					</div>
-					<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border shadow-sm">
+					<div
+						class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border shadow-sm"
+					>
 						<WorkspaceToolbarButton
 							label={splitViewTooltip}
 							onclick={toggleSplitMode}
-							class={cn(getUtilityButtonClasses(), splitLayout.isEnabled && 'text-primary bg-primary/10')}
+							class={cn(
+								getUtilityButtonClasses(),
+								splitLayout.isEnabled && 'text-primary bg-primary/10',
+							)}
 						>
 							<span class="flex items-center justify-center">
 								<PanelLeft class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
@@ -737,38 +750,102 @@
 							role="region"
 							aria-label="Split view drop target"
 						>
-							<div class={cn(
-								'absolute inset-0 pointer-events-none transition-colors duration-150',
-								activeSplitDropTarget ? 'bg-background/45 backdrop-blur-[1px]' : 'bg-background/20',
-							)}></div>
+							<div
+								class={cn(
+									'absolute inset-0 pointer-events-none transition-colors duration-150',
+									activeSplitDropTarget
+										? 'bg-background/45 backdrop-blur-[1px]'
+										: 'bg-background/20',
+								)}
+							></div>
 							{#if activeSplitDropTarget}
 								<div
 									class="absolute pointer-events-none transition-all duration-150"
 									style={getActiveSplitTargetStyle()}
 								>
-									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('top'), getActiveSplitPreviewClass('top'), 'inset-x-3 top-3 bottom-[52%]')}>
+									<div
+										class={cn(
+											'absolute border rounded-lg transition-opacity duration-150',
+											getActiveSplitPreviewTone('top'),
+											getActiveSplitPreviewClass('top'),
+											'inset-x-3 top-3 bottom-[52%]',
+										)}
+									>
 										<div class="flex h-full items-center justify-center">
-											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('top'))}>{getActiveSplitPreviewLabel('top', 'Top')}</span>
+											<span
+												class={cn(
+													'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
+													getActiveSplitPreviewLabelClass('top'),
+												)}>{getActiveSplitPreviewLabel('top', 'Top')}</span
+											>
 										</div>
 									</div>
-									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('bottom'), getActiveSplitPreviewClass('bottom'), 'inset-x-3 top-[52%] bottom-3')}>
+									<div
+										class={cn(
+											'absolute border rounded-lg transition-opacity duration-150',
+											getActiveSplitPreviewTone('bottom'),
+											getActiveSplitPreviewClass('bottom'),
+											'inset-x-3 top-[52%] bottom-3',
+										)}
+									>
 										<div class="flex h-full items-center justify-center">
-											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('bottom'))}>{getActiveSplitPreviewLabel('bottom', 'Bottom')}</span>
+											<span
+												class={cn(
+													'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
+													getActiveSplitPreviewLabelClass('bottom'),
+												)}>{getActiveSplitPreviewLabel('bottom', 'Bottom')}</span
+											>
 										</div>
 									</div>
-									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('left'), getActiveSplitPreviewClass('left'), 'inset-y-3 left-3 right-[52%]')}>
+									<div
+										class={cn(
+											'absolute border rounded-lg transition-opacity duration-150',
+											getActiveSplitPreviewTone('left'),
+											getActiveSplitPreviewClass('left'),
+											'inset-y-3 left-3 right-[52%]',
+										)}
+									>
 										<div class="flex h-full items-center justify-center">
-											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('left'))}>{getActiveSplitPreviewLabel('left', 'Left')}</span>
+											<span
+												class={cn(
+													'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
+													getActiveSplitPreviewLabelClass('left'),
+												)}>{getActiveSplitPreviewLabel('left', 'Left')}</span
+											>
 										</div>
 									</div>
-									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('right'), getActiveSplitPreviewClass('right'), 'inset-y-3 left-[52%] right-3')}>
+									<div
+										class={cn(
+											'absolute border rounded-lg transition-opacity duration-150',
+											getActiveSplitPreviewTone('right'),
+											getActiveSplitPreviewClass('right'),
+											'inset-y-3 left-[52%] right-3',
+										)}
+									>
 										<div class="flex h-full items-center justify-center">
-											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('right'))}>{getActiveSplitPreviewLabel('right', 'Right')}</span>
+											<span
+												class={cn(
+													'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
+													getActiveSplitPreviewLabelClass('right'),
+												)}>{getActiveSplitPreviewLabel('right', 'Right')}</span
+											>
 										</div>
 									</div>
-									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('center'), getActiveSplitPreviewClass('center'), 'inset-3')}>
+									<div
+										class={cn(
+											'absolute border rounded-lg transition-opacity duration-150',
+											getActiveSplitPreviewTone('center'),
+											getActiveSplitPreviewClass('center'),
+											'inset-3',
+										)}
+									>
 										<div class="flex h-full items-center justify-center">
-											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('center'))}>Replace</span>
+											<span
+												class={cn(
+													'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
+													getActiveSplitPreviewLabelClass('center'),
+												)}>Replace</span
+											>
 										</div>
 									</div>
 								</div>
@@ -790,8 +867,12 @@
 						reserveTopFloatingToolbar={showFloatingDesktopTabs}
 					/>
 					{#if workspaceDragOver}
-						<div class="absolute inset-0 z-30 flex items-center justify-center bg-primary/5 border-2 border-dashed border-primary/30 rounded-lg pointer-events-none">
-							<span class="text-sm font-medium text-primary bg-primary/10 px-3 py-1.5 rounded-md">Drop to split view</span>
+						<div
+							class="absolute inset-0 z-30 flex items-center justify-center bg-primary/5 border-2 border-dashed border-primary/30 rounded-lg pointer-events-none"
+						>
+							<span class="text-sm font-medium text-primary bg-primary/10 px-3 py-1.5 rounded-md"
+								>Drop to split view</span
+							>
 						</div>
 					{/if}
 				</div>
@@ -820,7 +901,12 @@
 	<ShareChatDialog chatId={shareChatId} chatTitle={shareChatTitle} onClose={closeShareDialog} />
 
 	<!-- Delete confirmation dialog for split-pane delete action -->
-	<Dialog.Root open={deleteConfirmation !== null} onOpenChange={(open) => { if (!open) cancelSplitDelete(); }}>
+	<Dialog.Root
+		open={deleteConfirmation !== null}
+		onOpenChange={(open) => {
+			if (!open) cancelSplitDelete();
+		}}
+	>
 		<Dialog.Content>
 			<Dialog.Header class="min-w-0">
 				<Dialog.Title>{m.sidebar_delete_confirmation_delete_chat()}</Dialog.Title>
@@ -833,7 +919,12 @@
 			</Dialog.Header>
 			<Dialog.Footer>
 				<Button variant="outline" onclick={cancelSplitDelete}>{m.sidebar_actions_cancel()}</Button>
-				<Button variant="destructive" onclick={() => { void confirmSplitDelete(); }}>{m.sidebar_actions_delete()}</Button>
+				<Button
+					variant="destructive"
+					onclick={() => {
+						void confirmSplitDelete();
+					}}>{m.sidebar_actions_delete()}</Button
+				>
 			</Dialog.Footer>
 		</Dialog.Content>
 	</Dialog.Root>

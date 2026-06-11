@@ -50,7 +50,9 @@
 		alwaysShowActions = false,
 	}: GitFileTreeProps = $props();
 
-	const actionVisibility = $derived(alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100');
+	const actionVisibility = $derived(
+		alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+	);
 	const treeGuideIndentPx = 12;
 	const treeGuideStartPx = 8;
 	const treeGuideToggleCenterOffsetPx = 10;
@@ -61,23 +63,35 @@
 
 	function changeKindColor(kind?: GitChangeKind): string {
 		switch (kind) {
-			case 'modified': return 'text-git-modified';
-			case 'added': return 'text-git-added';
-			case 'deleted': return 'text-git-deleted';
-			case 'untracked': return 'text-git-untracked';
-			case 'renamed': return 'text-git-renamed';
-			default: return 'text-muted-foreground';
+			case 'modified':
+				return 'text-git-modified';
+			case 'added':
+				return 'text-git-added';
+			case 'deleted':
+				return 'text-git-deleted';
+			case 'untracked':
+				return 'text-git-untracked';
+			case 'renamed':
+				return 'text-git-renamed';
+			default:
+				return 'text-muted-foreground';
 		}
 	}
 
 	function changeKindBadge(kind?: GitChangeKind): string {
 		switch (kind) {
-			case 'modified': return 'M';
-			case 'added': return 'A';
-			case 'deleted': return 'D';
-			case 'untracked': return 'U';
-			case 'renamed': return 'R';
-			default: return '';
+			case 'modified':
+				return 'M';
+			case 'added':
+				return 'A';
+			case 'deleted':
+				return 'D';
+			case 'untracked':
+				return 'U';
+			case 'renamed':
+				return 'R';
+			default:
+				return '';
 		}
 	}
 
@@ -115,9 +129,7 @@
 	<!-- Tree content -->
 	<div class="flex-1 overflow-y-auto py-1">
 		{#if tree.length === 0}
-			<div class="px-3 py-4 text-xs text-muted-foreground text-center">
-				No changed files
-			</div>
+			<div class="px-3 py-4 text-xs text-muted-foreground text-center">No changed files</div>
 		{:else}
 			{#each tree as node}
 				{@render treeNode(node, 0)}
@@ -170,26 +182,32 @@
 				</span>
 				<span class="truncate text-foreground">{node.name}</span>
 			</button>
-				{#if (node.hasUnstaged || node.changeKind === 'untracked') && onStageDir}
-					<button
-						type="button"
-						onclick={(e) => { e.stopPropagation(); onStageDir(node.path); }}
-						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-						title="Stage directory"
-					>
-						<Plus class="w-3 h-3 text-git-added" />
-					</button>
-				{/if}
-				{#if node.staged && onUnstageDir}
-					<button
-						type="button"
-						onclick={(e) => { e.stopPropagation(); onUnstageDir(node.path); }}
-						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-						title="Unstage directory"
-					>
-						<Minus class="w-3 h-3 text-git-deleted" />
-					</button>
-				{/if}
+			{#if (node.hasUnstaged || node.changeKind === 'untracked') && onStageDir}
+				<button
+					type="button"
+					onclick={(e) => {
+						e.stopPropagation();
+						onStageDir(node.path);
+					}}
+					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+					title="Stage directory"
+				>
+					<Plus class="w-3 h-3 text-git-added" />
+				</button>
+			{/if}
+			{#if node.staged && onUnstageDir}
+				<button
+					type="button"
+					onclick={(e) => {
+						e.stopPropagation();
+						onUnstageDir(node.path);
+					}}
+					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+					title="Unstage directory"
+				>
+					<Minus class="w-3 h-3 text-git-deleted" />
+				</button>
+			{/if}
 		</div>
 
 		{#if !isCollapsed && node.children}
@@ -201,7 +219,9 @@
 		{@const isSelected = selectedFile === node.path}
 		<div
 			class="relative flex items-center w-full px-2 py-1 text-xs transition-colors group
-				{isSelected ? 'bg-interactive-accent/10 text-interactive-accent' : 'hover:bg-muted/50 text-foreground'}"
+				{isSelected
+				? 'bg-interactive-accent/10 text-interactive-accent'
+				: 'hover:bg-muted/50 text-foreground'}"
 			style="padding-left: {depth * 12 + 8}px"
 		>
 			{#if depth > 0}
@@ -243,36 +263,45 @@
 					{changeKindBadge(node.changeKind)}
 				</span>
 			{/if}
-				{#if (node.hasUnstaged || node.changeKind === 'untracked') && onStageFile}
-					{#if onDiscardFile}
-						<button
-							type="button"
-							onclick={(e) => { e.stopPropagation(); onDiscardFile(node.path); }}
-							class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-status-error/20 transition-opacity shrink-0"
-							title={node.changeKind === 'untracked' ? 'Delete untracked file' : 'Discard changes'}
-						>
-							<Undo2 class="w-3 h-3 text-muted-foreground hover:text-status-error-foreground" />
-						</button>
-					{/if}
+			{#if (node.hasUnstaged || node.changeKind === 'untracked') && onStageFile}
+				{#if onDiscardFile}
 					<button
 						type="button"
-						onclick={(e) => { e.stopPropagation(); onStageFile(node.path); }}
-						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-						title="Stage file"
+						onclick={(e) => {
+							e.stopPropagation();
+							onDiscardFile(node.path);
+						}}
+						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-status-error/20 transition-opacity shrink-0"
+						title={node.changeKind === 'untracked' ? 'Delete untracked file' : 'Discard changes'}
 					>
-						<Plus class="w-3 h-3 text-git-added" />
+						<Undo2 class="w-3 h-3 text-muted-foreground hover:text-status-error-foreground" />
 					</button>
 				{/if}
-				{#if node.staged && onUnstageFile}
-					<button
-						type="button"
-						onclick={(e) => { e.stopPropagation(); onUnstageFile(node.path); }}
-						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-						title="Unstage file"
-					>
-						<Minus class="w-3 h-3 text-git-deleted" />
-					</button>
-				{/if}
+				<button
+					type="button"
+					onclick={(e) => {
+						e.stopPropagation();
+						onStageFile(node.path);
+					}}
+					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+					title="Stage file"
+				>
+					<Plus class="w-3 h-3 text-git-added" />
+				</button>
+			{/if}
+			{#if node.staged && onUnstageFile}
+				<button
+					type="button"
+					onclick={(e) => {
+						e.stopPropagation();
+						onUnstageFile(node.path);
+					}}
+					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+					title="Unstage file"
+				>
+					<Minus class="w-3 h-3 text-git-deleted" />
+				</button>
+			{/if}
 			{#if node.staged}
 				<span class="ml-1 w-1.5 h-1.5 rounded-full bg-git-added shrink-0" title="Staged"></span>
 			{/if}

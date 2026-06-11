@@ -13,7 +13,10 @@
 		overscan?: number;
 		onActiveIndexChange: (index: number) => void;
 		onSelect: (value: string) => void;
-		onMetricsChange?: (metrics: { activeOptionId: string | undefined; visiblePageSize: number }) => void;
+		onMetricsChange?: (metrics: {
+			activeOptionId: string | undefined;
+			visiblePageSize: number;
+		}) => void;
 	}
 
 	let {
@@ -34,7 +37,9 @@
 	let viewportHeight = $state(320);
 
 	let totalHeight = $derived(rows.length * rowHeight);
-	let startIndex = $derived(Math.min(rows.length, Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)));
+	let startIndex = $derived(
+		Math.min(rows.length, Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)),
+	);
 	let endIndex = $derived.by(() => {
 		const visibleEnd = Math.ceil((scrollTop + viewportHeight) / rowHeight);
 		return Math.min(rows.length, visibleEnd + overscan);
@@ -43,7 +48,7 @@
 	let activeOptionId = $derived(
 		activeIndex >= startIndex && activeIndex < endIndex && rows[activeIndex]
 			? optionId(activeIndex)
-			: undefined
+			: undefined,
 	);
 	let visiblePageSize = $derived(Math.max(1, Math.floor(viewportHeight / rowHeight)));
 
@@ -119,7 +124,7 @@
 					'absolute left-0 right-0 top-0 flex w-full touch-pan-y items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
 					index === activeIndex
 						? 'bg-accent text-accent-foreground'
-						: 'text-foreground hover:bg-accent/50 hover:text-accent-foreground'
+						: 'text-foreground hover:bg-accent/50 hover:text-accent-foreground',
 				)}
 				onmouseenter={() => onActiveIndexChange(index)}
 				onclick={() => onSelect(row.value)}

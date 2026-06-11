@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { SidebarChatReorderState, type SidebarChatOrderMap } from '../sidebar-chat-reorder-state.svelte';
+import {
+	SidebarChatReorderState,
+	type SidebarChatOrderMap,
+} from '../sidebar-chat-reorder-state.svelte';
 
 function buildOrders(normal: string[]): SidebarChatOrderMap {
 	return {
@@ -13,7 +16,9 @@ describe('SidebarChatReorderState', () => {
 	it('returns a relative reorder request for unfiltered drags', () => {
 		let visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
 		reorder.begin('normal', 'a');
@@ -25,14 +30,14 @@ describe('SidebarChatReorderState', () => {
 		});
 
 		expect(reorder.orderFor('normal')).toEqual(['b', 'c', 'a']);
-			expect(reorder.finish('normal')).toEqual({
-				kind: 'relative',
-				list: 'normal',
-				chatId: 'a',
-				target: { chatIdAbove: 'c' },
-				visibleOrder: ['b', 'c', 'a'],
-				sequence: 1,
-			});
+		expect(reorder.finish('normal')).toEqual({
+			kind: 'relative',
+			list: 'normal',
+			chatId: 'a',
+			target: { chatIdAbove: 'c' },
+			visibleOrder: ['b', 'c', 'a'],
+			sequence: 1,
+		});
 
 		visibleOrders = buildOrders(['b', 'c', 'a']);
 		reorder.reconcile();
@@ -42,7 +47,9 @@ describe('SidebarChatReorderState', () => {
 	it('returns a relative target for filtered top drops', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
 		reorder.begin('normal', 'c');
@@ -53,20 +60,22 @@ describe('SidebarChatReorderState', () => {
 			closestEdge: 'top',
 		});
 
-			expect(reorder.finish('normal')).toEqual({
-				kind: 'relative',
-				list: 'normal',
-				chatId: 'c',
-				target: { chatIdBelow: 'a' },
-				visibleOrder: ['c', 'a', 'b'],
-				sequence: 1,
-			});
+		expect(reorder.finish('normal')).toEqual({
+			kind: 'relative',
+			list: 'normal',
+			chatId: 'c',
+			target: { chatIdBelow: 'a' },
+			visibleOrder: ['c', 'a', 'b'],
+			sequence: 1,
+		});
 	});
 
 	it('returns a relative target for filtered middle drops', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
 		reorder.begin('normal', 'c');
@@ -77,20 +86,22 @@ describe('SidebarChatReorderState', () => {
 			closestEdge: 'top',
 		});
 
-			expect(reorder.finish('normal')).toEqual({
-				kind: 'relative',
-				list: 'normal',
-				chatId: 'c',
-				target: { chatIdAbove: 'a' },
-				visibleOrder: ['a', 'c', 'b'],
-				sequence: 1,
-				});
+		expect(reorder.finish('normal')).toEqual({
+			kind: 'relative',
+			list: 'normal',
+			chatId: 'c',
+			target: { chatIdAbove: 'a' },
+			visibleOrder: ['a', 'c', 'b'],
+			sequence: 1,
+		});
 	});
 
 	it('keeps repeated drag previews idempotent for adjacent swaps', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
 		reorder.begin('normal', 'a');
@@ -123,7 +134,9 @@ describe('SidebarChatReorderState', () => {
 	it('restores the drag-start order when an adjacent drag returns to its original edge', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
 		reorder.begin('normal', 'a');
@@ -149,7 +162,9 @@ describe('SidebarChatReorderState', () => {
 	it('restores visible order when a drag is canceled', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
 		reorder.begin('normal', 'a');
@@ -168,7 +183,9 @@ describe('SidebarChatReorderState', () => {
 	it('keeps the active drag alive when initial order reconciliation runs', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
 		reorder.begin('normal', 'a');
@@ -180,20 +197,22 @@ describe('SidebarChatReorderState', () => {
 			closestEdge: 'bottom',
 		});
 
-			expect(reorder.finish('normal')).toEqual({
-				kind: 'relative',
-				list: 'normal',
-				chatId: 'a',
-				target: { chatIdAbove: 'c' },
-				visibleOrder: ['b', 'c', 'a'],
-				sequence: 1,
-			});
+		expect(reorder.finish('normal')).toEqual({
+			kind: 'relative',
+			list: 'normal',
+			chatId: 'a',
+			target: { chatIdAbove: 'c' },
+			visibleOrder: ['b', 'c', 'a'],
+			sequence: 1,
+		});
 	});
 
 	it('starts a second drag from the current optimistic order', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c', 'd']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
 		reorder.begin('normal', 'a');
@@ -202,15 +221,15 @@ describe('SidebarChatReorderState', () => {
 			sourceChatId: 'a',
 			targetChatId: 'c',
 			closestEdge: 'bottom',
-			});
-				expect(reorder.finish('normal')).toEqual({
-					kind: 'relative',
-					list: 'normal',
-					chatId: 'a',
-					target: { chatIdAbove: 'c' },
-					visibleOrder: ['b', 'c', 'a', 'd'],
-					sequence: 1,
-				});
+		});
+		expect(reorder.finish('normal')).toEqual({
+			kind: 'relative',
+			list: 'normal',
+			chatId: 'a',
+			target: { chatIdAbove: 'c' },
+			visibleOrder: ['b', 'c', 'a', 'd'],
+			sequence: 1,
+		});
 
 		reorder.begin('normal', 'b');
 		reorder.preview({
@@ -220,20 +239,22 @@ describe('SidebarChatReorderState', () => {
 			closestEdge: 'bottom',
 		});
 
-				expect(reorder.finish('normal')).toEqual({
-					kind: 'relative',
-					list: 'normal',
-					chatId: 'b',
-					target: { chatIdAbove: 'a' },
-					visibleOrder: ['c', 'a', 'b', 'd'],
-					sequence: 2,
-				});
+		expect(reorder.finish('normal')).toEqual({
+			kind: 'relative',
+			list: 'normal',
+			chatId: 'b',
+			target: { chatIdAbove: 'a' },
+			visibleOrder: ['c', 'a', 'b', 'd'],
+			sequence: 2,
+		});
 	});
 
 	it('rolls back only the matching optimistic order', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
 		reorder.begin('normal', 'a');
@@ -258,7 +279,9 @@ describe('SidebarChatReorderState', () => {
 	it('keeps pending optimistic order through stale refreshes', () => {
 		let visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
 		reorder.begin('normal', 'a');
@@ -295,7 +318,9 @@ describe('SidebarChatReorderState', () => {
 	it('uses the dragged chat id for filtered first-to-last moves', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
 		reorder.begin('normal', 'a');
@@ -319,20 +344,24 @@ describe('SidebarChatReorderState', () => {
 	it('returns a request for menu boundary moves', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({
-			get visibleOrders() { return visibleOrders; },
+			get visibleOrders() {
+				return visibleOrders;
+			},
 		});
 
-		expect(reorder.moveToBoundary({
+		expect(
+			reorder.moveToBoundary({
+				list: 'normal',
+				chatId: 'c',
+				boundary: 'start',
+			}),
+		).toEqual({
+			kind: 'relative',
 			list: 'normal',
 			chatId: 'c',
-			boundary: 'start',
-			})).toEqual({
-				kind: 'relative',
-				list: 'normal',
-					chatId: 'c',
-					target: { chatIdBelow: 'a' },
-					visibleOrder: ['c', 'a', 'b'],
-					sequence: 1,
-				});
+			target: { chatIdBelow: 'a' },
+			visibleOrder: ['c', 'a', 'b'],
+			sequence: 1,
+		});
 	});
 });

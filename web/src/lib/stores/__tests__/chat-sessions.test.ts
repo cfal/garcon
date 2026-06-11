@@ -201,9 +201,7 @@ describe('ChatSessionsStore', () => {
 		]);
 		const ref = store.byId['a'];
 
-		store.upsertFromServer([
-			makeServerSession({ id: 'a', preview: { lastMessage: '' } }),
-		]);
+		store.upsertFromServer([makeServerSession({ id: 'a', preview: { lastMessage: '' } })]);
 
 		expect(store.byId['a']).toBe(ref);
 		expect(store.byId['a']?.lastMessage).toBe('Persisted preview');
@@ -480,10 +478,12 @@ describe('ChatSessionsStore', () => {
 	it('patchLastReadAt derives isUnread true when lastActivityAt is newer', () => {
 		const store = new ChatSessionsStore();
 
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			activity: { createdAt: null, lastActivityAt: '2026-02-25T14:00:00.000Z', lastReadAt: null },
-		} as any)]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				activity: { createdAt: null, lastActivityAt: '2026-02-25T14:00:00.000Z', lastReadAt: null },
+			} as any),
+		]);
 
 		store.patchLastReadAt('a', '2026-02-25T12:00:00.000Z');
 
@@ -515,11 +515,17 @@ describe('ChatSessionsStore', () => {
 	it('toRecord maps lastReadAt and isUnread from server session', () => {
 		const store = new ChatSessionsStore();
 
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			activity: { createdAt: null, lastActivityAt: '2026-02-25T13:00:00.000Z', lastReadAt: '2026-02-25T10:00:00.000Z' },
-			isUnread: true,
-		} as any)]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T13:00:00.000Z',
+					lastReadAt: '2026-02-25T10:00:00.000Z',
+				},
+				isUnread: true,
+			} as any),
+		]);
 
 		expect(store.byId['a']?.lastReadAt).toBe('2026-02-25T10:00:00.000Z');
 		expect(store.byId['a']?.isUnread).toBe(true);
@@ -532,10 +538,12 @@ describe('ChatSessionsStore', () => {
 		const ref = store.byId['a'];
 
 		// Upsert with isUnread change.
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			isUnread: true,
-		} as any)]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				isUnread: true,
+			} as any),
+		]);
 
 		expect(store.byId['a']).not.toBe(ref);
 		expect(store.byId['a']?.isUnread).toBe(true);
@@ -558,10 +566,12 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		const ref = store.byId['a'];
 
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			isArchived: true,
-		})]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				isArchived: true,
+			}),
+		]);
 
 		expect(store.byId['a']).not.toBe(ref);
 		expect(store.byId['a']?.isArchived).toBe(true);
@@ -611,12 +621,14 @@ describe('ChatSessionsStore', () => {
 	it('toRecord maps permissionMode, thinkingMode, and claudeThinkingMode from server session', () => {
 		const store = new ChatSessionsStore();
 
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			permissionMode: 'acceptEdits',
-			thinkingMode: 'think-hard',
-			claudeThinkingMode: 'off',
-		} as any)]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				permissionMode: 'acceptEdits',
+				thinkingMode: 'think-hard',
+				claudeThinkingMode: 'off',
+			} as any),
+		]);
 
 		expect(store.byId['a']?.permissionMode).toBe('acceptEdits');
 		expect(store.byId['a']?.thinkingMode).toBe('think-hard');
@@ -626,7 +638,9 @@ describe('ChatSessionsStore', () => {
 	it('toRecord defaults permissionMode, thinkingMode, and claudeThinkingMode for partial persisted sessions', () => {
 		const store = new ChatSessionsStore();
 
-		const partial = makeServerSession({ id: 'a' }) as Partial<ChatSession> & { claudeThinkingMode?: string };
+		const partial = makeServerSession({ id: 'a' }) as Partial<ChatSession> & {
+			claudeThinkingMode?: string;
+		};
 		delete partial.claudeThinkingMode;
 		store.upsertFromServer([partial as ChatSession]);
 
@@ -638,12 +652,14 @@ describe('ChatSessionsStore', () => {
 	it('toRecord normalizes invalid permissionMode, thinkingMode, and claudeThinkingMode values', () => {
 		const store = new ChatSessionsStore();
 
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			permissionMode: 'bogus' as any,
-			thinkingMode: 'very-hard' as any,
-			claudeThinkingMode: 'sometimes' as any,
-		} as any)]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				permissionMode: 'bogus' as any,
+				thinkingMode: 'very-hard' as any,
+				claudeThinkingMode: 'sometimes' as any,
+			} as any),
+		]);
 
 		expect(store.byId['a']?.permissionMode).toBe('default');
 		expect(store.byId['a']?.thinkingMode).toBe('none');
@@ -656,10 +672,12 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		const ref = store.byId['a'];
 
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			permissionMode: 'bypassPermissions',
-		} as any)]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				permissionMode: 'bypassPermissions',
+			} as any),
+		]);
 
 		expect(store.byId['a']).not.toBe(ref);
 		expect(store.byId['a']?.permissionMode).toBe('bypassPermissions');
@@ -671,12 +689,14 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		const ref = store.byId['a'];
 
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			thinkingMode: 'ultrathink',
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				thinkingMode: 'ultrathink',
 				claudeThinkingMode: 'auto',
 				ampAgentMode: 'smart',
-		} as any)]);
+			} as any),
+		]);
 
 		expect(store.byId['a']).not.toBe(ref);
 		expect(store.byId['a']?.thinkingMode).toBe('ultrathink');
@@ -707,7 +727,11 @@ describe('ChatSessionsStore', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
-		store.patchChat('a', { permissionMode: 'bypassPermissions', thinkingMode: 'think', claudeThinkingMode: 'on' });
+		store.patchChat('a', {
+			permissionMode: 'bypassPermissions',
+			thinkingMode: 'think',
+			claudeThinkingMode: 'on',
+		});
 
 		expect(store.byId['a']?.permissionMode).toBe('bypassPermissions');
 		expect(store.byId['a']?.thinkingMode).toBe('think');
@@ -754,5 +778,4 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.startupByChatId).toBe(startupRef);
 	});
-
 });

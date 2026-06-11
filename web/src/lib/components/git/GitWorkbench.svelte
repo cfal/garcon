@@ -15,7 +15,11 @@
 	import GitReviewChangesModal from './GitReviewChangesModal.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
-	import { GitWorkbenchStore, type GitWorkbenchTarget, type GitDiffActionTarget } from '$lib/stores/git-workbench.svelte.js';
+	import {
+		GitWorkbenchStore,
+		type GitWorkbenchTarget,
+		type GitDiffActionTarget,
+	} from '$lib/stores/git-workbench.svelte.js';
 	import type { GitFileReviewData, ConfirmAction } from '$lib/api/git.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 
@@ -29,16 +33,24 @@
 		onOpenInEditor?: (relativePath: string, line: number) => void;
 	}
 
-	let { projectPath = null, target = null, isMobile, wb, diffFontSize, onSendToChat, onOpenInEditor }: GitWorkbenchProps = $props();
+	let {
+		projectPath = null,
+		target = null,
+		isMobile,
+		wb,
+		diffFontSize,
+		onSendToChat,
+		onOpenInEditor,
+	}: GitWorkbenchProps = $props();
 	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
 		projectPath
 			? {
-				projectPath,
-				repoRoot: projectPath,
-				worktreePath: projectPath,
-				label: projectPath.split('/').pop() || projectPath,
-				source: 'chat-project',
-			}
+					projectPath,
+					repoRoot: projectPath,
+					worktreePath: projectPath,
+					label: projectPath.split('/').pop() || projectPath,
+					source: 'chat-project',
+				}
 			: null,
 	);
 	let activeTarget = $derived(target ?? fallbackTarget);
@@ -48,10 +60,15 @@
 	type MobilePane = 'files' | 'diff';
 	let mobilePane = $state<MobilePane>('files');
 
-	let allScopeReviewItems = $derived.by((): Array<{ filePath: string; reviewData: GitFileReviewData | null }> => {
-		const paths = wb.visibleFilePaths;
-		return paths.map((filePath) => ({ filePath, reviewData: wb.reviewDataByPath[filePath] ?? null }));
-	});
+	let allScopeReviewItems = $derived.by(
+		(): Array<{ filePath: string; reviewData: GitFileReviewData | null }> => {
+			const paths = wb.visibleFilePaths;
+			return paths.map((filePath) => ({
+				filePath,
+				reviewData: wb.reviewDataByPath[filePath] ?? null,
+			}));
+		},
+	);
 
 	$effect(() => {
 		const nextTarget = activeTarget;
@@ -175,7 +192,7 @@
 	});
 </script>
 
-	{#if !activeProjectPath}
+{#if !activeProjectPath}
 	<div class="h-full flex items-center justify-center text-muted-foreground">
 		<p class="text-sm">Select a project to view changes</p>
 	</div>
@@ -183,7 +200,9 @@
 	<div class="h-full flex flex-col">
 		<!-- Error banner -->
 		{#if wb.lastError}
-			<div class="px-3 py-1.5 border-b border-status-error-border bg-status-error/10 flex items-center gap-2">
+			<div
+				class="px-3 py-1.5 border-b border-status-error-border bg-status-error/10 flex items-center gap-2"
+			>
 				<AlertTriangle class="w-3.5 h-3.5 text-status-error-foreground shrink-0" />
 				<span class="text-xs text-status-error-foreground flex-1 truncate">{wb.lastError}</span>
 				<button
@@ -198,7 +217,9 @@
 		<!-- Initial commit prompt -->
 		{#if !wb.hasCommits}
 			<div class="px-3 py-2 border-b border-border bg-status-info/10">
-				<div class="text-xs text-status-info-foreground mb-1.5">No commits yet. Create an initial commit to get started.</div>
+				<div class="text-xs text-status-info-foreground mb-1.5">
+					No commits yet. Create an initial commit to get started.
+				</div>
 				<button
 					onclick={handleInitialCommit}
 					disabled={wb.isCreatingInitialCommit}
@@ -216,11 +237,15 @@
 		{#if isMobile}
 			<!-- Mobile: segmented nav (files + diff only) -->
 			<div class="flex border-b border-border">
-				{#each (['files', 'diff'] as const) as pane}
+				{#each ['files', 'diff'] as const as pane}
 					<button
-						onclick={() => { mobilePane = pane; }}
+						onclick={() => {
+							mobilePane = pane;
+						}}
 						class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors
-							{mobilePane === pane ? 'text-interactive-accent border-b-2 border-interactive-accent' : 'text-muted-foreground hover:text-foreground'}"
+							{mobilePane === pane
+							? 'text-interactive-accent border-b-2 border-interactive-accent'
+							: 'text-muted-foreground hover:text-foreground'}"
 					>
 						{pane === 'files' ? 'Files' : 'Diff'}
 					</button>
@@ -238,7 +263,9 @@
 						onSelectFile={handleSelectFile}
 						onSelectDirectory={handleSelectDirectory}
 						onToggleDir={(p) => wb.toggleDirCollapsed(p)}
-						onSearchChange={(q) => { wb.treeSearchQuery = q; }}
+						onSearchChange={(q) => {
+							wb.treeSearchQuery = q;
+						}}
 						onStageFile={handleStageFile}
 						onUnstageFile={handleUnstageFile}
 						onStageDir={handleStageDir}
@@ -249,32 +276,36 @@
 				{:else}
 					<!-- Mobile diff tab bar (Unstaged / Staged) -->
 					<div class="flex border-b border-border shrink-0">
-						{#each (['unstaged', 'staged'] as const) as tab}
+						{#each ['unstaged', 'staged'] as const as tab}
 							<button
 								onclick={() => wb.setActiveTab(tab)}
 								class="flex-1 px-2 py-1 text-[11px] font-medium transition-colors
-									{wb.activeTab === tab ? 'text-interactive-accent border-b-2 border-interactive-accent' : 'text-muted-foreground hover:text-foreground'}"
+									{wb.activeTab === tab
+									? 'text-interactive-accent border-b-2 border-interactive-accent'
+									: 'text-muted-foreground hover:text-foreground'}"
 							>
 								{tab === 'unstaged' ? 'Unstaged' : 'Staged'}
-								<span class="ml-1 text-[10px] opacity-70">({tab === 'unstaged' ? wb.unstagedFileCount : wb.stagedFileCount})</span>
+								<span class="ml-1 text-[10px] opacity-70"
+									>({tab === 'unstaged' ? wb.unstagedFileCount : wb.stagedFileCount})</span
+								>
 							</button>
 						{/each}
 					</div>
 					<GitAllFilesVirtualList
-							items={allScopeReviewItems}
-							activeTab={wb.activeTab}
-							diffMode={wb.diffMode}
-							contextLines={wb.contextLines}
-							fontSize={diffFontSize}
+						items={allScopeReviewItems}
+						activeTab={wb.activeTab}
+						diffMode={wb.diffMode}
+						contextLines={wb.contextLines}
+						fontSize={diffFontSize}
 						selectedLineKeys={wb.selectedLineKeys}
 						overscan={3}
 						onRequestLoad={handleRequestLoad}
 						onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 						onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
-							onStageHunk={handleStageHunk}
-							onUnstageHunk={handleUnstageHunk}
-							onStageLine={handleStageLine}
-							onUnstageLine={handleUnstageLine}
+						onStageHunk={handleStageHunk}
+						onUnstageHunk={handleUnstageHunk}
+						onStageLine={handleStageLine}
+						onUnstageLine={handleUnstageLine}
 						onAddCommentForFile={handleAddCommentForFile}
 						commentsForFile={(fp) => wb.commentsForFile(fp)}
 						onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
@@ -290,14 +321,18 @@
 				<div class="flex gap-2 px-3 py-2 border-t border-border bg-background">
 					{#if wb.activeTab === 'unstaged'}
 						<button
-								onclick={() => { if (activeProjectPath) wb.stageSelectedLines(activeProjectPath); }}
+							onclick={() => {
+								if (activeProjectPath) wb.stageSelectedLines(activeProjectPath);
+							}}
 							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-added/20 text-git-added"
 						>
 							Stage ({wb.selectedLineKeys.size})
 						</button>
 					{:else}
 						<button
-								onclick={() => { if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath); }}
+							onclick={() => {
+								if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath);
+							}}
 							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-deleted/20 text-git-deleted"
 						>
 							Unstage ({wb.selectedLineKeys.size})
@@ -313,24 +348,29 @@
 			{/if}
 		{:else}
 			<!-- Desktop: two-pane layout (tree + separator + diff) -->
-			<div class="flex-1 grid overflow-hidden" style="grid-template-columns: {wb.treePaneWidthPx}px 6px minmax(0,1fr); grid-template-rows: minmax(0,1fr);">
+			<div
+				class="flex-1 grid overflow-hidden"
+				style="grid-template-columns: {wb.treePaneWidthPx}px 6px minmax(0,1fr); grid-template-rows: minmax(0,1fr);"
+			>
 				<div class="min-h-0 overflow-hidden border-r border-border">
-						<GitFileTree
-							tree={wb.filteredTree}
-							selectedFile={wb.selectedFile}
-							collapsedDirs={wb.collapsedDirs}
-							treeSearchQuery={wb.treeSearchQuery}
-							totalChangedFiles={wb.totalChangedFiles}
-							onSelectFile={handleSelectFile}
-							onSelectDirectory={handleSelectDirectory}
-							onToggleDir={(p) => wb.toggleDirCollapsed(p)}
-							onSearchChange={(q) => { wb.treeSearchQuery = q; }}
-							onStageFile={handleStageFile}
-							onUnstageFile={handleUnstageFile}
-							onStageDir={handleStageDir}
-							onUnstageDir={handleUnstageDir}
-							onDiscardFile={handleDiscardFile}
-						/>
+					<GitFileTree
+						tree={wb.filteredTree}
+						selectedFile={wb.selectedFile}
+						collapsedDirs={wb.collapsedDirs}
+						treeSearchQuery={wb.treeSearchQuery}
+						totalChangedFiles={wb.totalChangedFiles}
+						onSelectFile={handleSelectFile}
+						onSelectDirectory={handleSelectDirectory}
+						onToggleDir={(p) => wb.toggleDirCollapsed(p)}
+						onSearchChange={(q) => {
+							wb.treeSearchQuery = q;
+						}}
+						onStageFile={handleStageFile}
+						onUnstageFile={handleUnstageFile}
+						onStageDir={handleStageDir}
+						onUnstageDir={handleUnstageDir}
+						onDiscardFile={handleDiscardFile}
+					/>
 				</div>
 				<button
 					type="button"
@@ -345,37 +385,45 @@
 				<div class="flex flex-col min-h-0 overflow-hidden">
 					<!-- Desktop diff tab bar (Unstaged / Staged) -->
 					<div class="flex border-b border-border shrink-0">
-						{#each (['unstaged', 'staged'] as const) as tab}
+						{#each ['unstaged', 'staged'] as const as tab}
 							<button
 								onclick={() => wb.setActiveTab(tab)}
 								class="px-3 py-1.5 text-xs font-medium transition-colors
-									{wb.activeTab === tab ? 'text-interactive-accent border-b-2 border-interactive-accent' : 'text-muted-foreground hover:text-foreground'}"
+									{wb.activeTab === tab
+									? 'text-interactive-accent border-b-2 border-interactive-accent'
+									: 'text-muted-foreground hover:text-foreground'}"
 							>
 								{tab === 'unstaged' ? 'Unstaged' : 'Staged'}
-								<span class="ml-1 text-[10px] opacity-70">({tab === 'unstaged' ? wb.unstagedFileCount : wb.stagedFileCount})</span>
+								<span class="ml-1 text-[10px] opacity-70"
+									>({tab === 'unstaged' ? wb.unstagedFileCount : wb.stagedFileCount})</span
+								>
 							</button>
 						{/each}
 					</div>
 					<GitAllFilesVirtualList
-							items={allScopeReviewItems}
-							activeTab={wb.activeTab}
-							diffMode={wb.diffMode}
-							contextLines={wb.contextLines}
-							fontSize={diffFontSize}
+						items={allScopeReviewItems}
+						activeTab={wb.activeTab}
+						diffMode={wb.diffMode}
+						contextLines={wb.contextLines}
+						fontSize={diffFontSize}
 						selectedLineKeys={wb.selectedLineKeys}
 						overscan={5}
 						onRequestLoad={handleRequestLoad}
 						onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 						onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
-							onStageHunk={handleStageHunk}
-							onUnstageHunk={handleUnstageHunk}
-							onStageLine={handleStageLine}
-							onUnstageLine={handleUnstageLine}
+						onStageHunk={handleStageHunk}
+						onUnstageHunk={handleUnstageHunk}
+						onStageLine={handleStageLine}
+						onUnstageLine={handleUnstageLine}
 						onAddCommentForFile={handleAddCommentForFile}
 						commentsForFile={(fp) => wb.commentsForFile(fp)}
 						composerState={wb.commentComposer}
-						onComposerBodyChange={(b) => { wb.commentComposer = { ...wb.commentComposer, body: b }; }}
-						onComposerSeverityChange={(s) => { wb.commentComposer = { ...wb.commentComposer, severity: s }; }}
+						onComposerBodyChange={(b) => {
+							wb.commentComposer = { ...wb.commentComposer, body: b };
+						}}
+						onComposerSeverityChange={(s) => {
+							wb.commentComposer = { ...wb.commentComposer, severity: s };
+						}}
 						onComposerSubmit={() => wb.commitCommentComposer()}
 						onComposerClose={() => wb.closeCommentComposer()}
 						onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
@@ -384,22 +432,30 @@
 						{onOpenInEditor}
 					/>
 					{#if wb.hasSelection}
-						<div class="flex items-center gap-2 px-3 py-2 border-t border-border bg-background shrink-0">
+						<div
+							class="flex items-center gap-2 px-3 py-2 border-t border-border bg-background shrink-0"
+						>
 							{#if wb.activeTab === 'unstaged'}
 								<button
-										onclick={() => { if (activeProjectPath) wb.stageSelectedLines(activeProjectPath); }}
+									onclick={() => {
+										if (activeProjectPath) wb.stageSelectedLines(activeProjectPath);
+									}}
 									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors"
 								>
 									<Plus class="w-4 h-4" />
-									Stage {wb.selectedLineKeys.size} {wb.selectedLineKeys.size === 1 ? 'line' : 'lines'}
+									Stage {wb.selectedLineKeys.size}
+									{wb.selectedLineKeys.size === 1 ? 'line' : 'lines'}
 								</button>
 							{:else}
 								<button
-										onclick={() => { if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath); }}
+									onclick={() => {
+										if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath);
+									}}
 									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors"
 								>
 									<Minus class="w-4 h-4" />
-									Unstage {wb.selectedLineKeys.size} {wb.selectedLineKeys.size === 1 ? 'line' : 'lines'}
+									Unstage {wb.selectedLineKeys.size}
+									{wb.selectedLineKeys.size === 1 ? 'line' : 'lines'}
 								</button>
 							{/if}
 							<button
@@ -422,11 +478,15 @@
 			commentCount={wb.reviewComments.length}
 			reviewSummary={wb.reviewSummary}
 			{isMobile}
-			onSummaryChange={(s) => { wb.reviewSummary = s; }}
+			onSummaryChange={(s) => {
+				wb.reviewSummary = s;
+			}}
 			onUpdateComment={(id, patch) => wb.updateDraftComment(id, patch)}
 			onRemoveComment={(id) => wb.removeDraftComment(id)}
 			onSend={handleFinalizeReview}
-			onClose={() => { wb.reviewModalOpen = false; }}
+			onClose={() => {
+				wb.reviewModalOpen = false;
+			}}
 		/>
 	{/if}
 
@@ -434,8 +494,12 @@
 	{#if wb.commentComposer.open && isMobile}
 		<GitCommentModal
 			composer={wb.commentComposer}
-			onBodyChange={(b) => { wb.commentComposer = { ...wb.commentComposer, body: b }; }}
-			onSeverityChange={(s) => { wb.commentComposer = { ...wb.commentComposer, severity: s }; }}
+			onBodyChange={(b) => {
+				wb.commentComposer = { ...wb.commentComposer, body: b };
+			}}
+			onSeverityChange={(s) => {
+				wb.commentComposer = { ...wb.commentComposer, severity: s };
+			}}
 			onSubmit={() => wb.commitCommentComposer()}
 			onClose={() => wb.closeCommentComposer()}
 		/>
@@ -445,7 +509,9 @@
 	{#if discardConfirmAction}
 		<GitConfirmModal
 			confirmAction={discardConfirmAction}
-				onConfirm={() => { if (activeProjectPath) wb.confirmDiscard(activeProjectPath); }}
+			onConfirm={() => {
+				if (activeProjectPath) wb.confirmDiscard(activeProjectPath);
+			}}
 			onCancel={() => wb.cancelDiscard()}
 		/>
 	{/if}

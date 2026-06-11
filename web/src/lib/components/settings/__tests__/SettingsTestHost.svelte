@@ -156,55 +156,55 @@
 		toggle() {},
 	} as never);
 	setModelCatalog({
-			version: 0,
-			apiProviderCatalog: [],
-			getModels() {
-				return [{ value: 'opus', label: 'Opus' }];
-			},
-			getAgent(agentId: string) {
-				return agentMetadataById[agentId] ?? null;
-			},
-			getAgentLabel(agentId: string) {
-				return agentLabels[agentId] ?? agentId;
-			},
-			getAgents() {
-				return agentIds;
-			},
-			getSelectableAgents() {
-				return agentIds;
-			},
-			getAgentMetadataList() {
-				return agentIds
-					.map((agentId) => agentMetadataById[agentId] ?? null)
-					.filter((metadata): metadata is MockAgentMetadata => metadata !== null);
-			},
-			getDefaultModel() {
-				return 'opus';
-			},
-			getModelForSelection(_provider: string, model: string) {
-				return model === 'opus' ? { value: 'opus', label: 'Opus' } : null;
-			},
-			selectionFor(_provider: string, model: string) {
-				return {
-					model,
-					apiProviderId: null,
-					modelEndpointId: null,
-					modelProtocol: null,
-				};
-			},
-			selectionValueFor(_provider: string, model: string) {
-				return model;
-			},
-			refreshIfStale() {
-				return Promise.resolve();
-			},
-			forceRefresh() {
-				return Promise.resolve();
-			},
-			findEndpoint() {
-				return null;
-			},
-		} as never);
-		</script>
+		version: 0,
+		apiProviderCatalog: [],
+		getModels() {
+			return [{ value: 'opus', label: 'Opus' }];
+		},
+		getAgent(agentId: string) {
+			return agentMetadataById[agentId] ?? null;
+		},
+		getAgentLabel(agentId: string) {
+			return agentLabels[agentId] ?? agentId;
+		},
+		getAgents() {
+			return agentIds;
+		},
+		getSelectableAgents() {
+			return agentIds;
+		},
+		getAgentMetadataList() {
+			return agentIds
+				.map((agentId) => agentMetadataById[agentId] ?? null)
+				.filter((metadata): metadata is MockAgentMetadata => metadata !== null);
+		},
+		getDefaultModel() {
+			return 'opus';
+		},
+		getModelForSelection(_provider: string, model: string) {
+			return model === 'opus' ? { value: 'opus', label: 'Opus' } : null;
+		},
+		selectionFor(_provider: string, model: string) {
+			return {
+				model,
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			};
+		},
+		selectionValueFor(_provider: string, model: string) {
+			return model;
+		},
+		refreshIfStale() {
+			return Promise.resolve();
+		},
+		forceRefresh() {
+			return Promise.resolve();
+		},
+		findEndpoint() {
+			return null;
+		},
+	} as never);
+</script>
 
 <Settings />

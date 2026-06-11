@@ -98,8 +98,7 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 	const statusChatId = msg.chatId;
 	const currentChatId = ctx.getCurrentChatId();
 	const isCurrentChat =
-		statusChatId === currentChatId ||
-		(ctx.selectedChat && statusChatId === ctx.selectedChat.id);
+		statusChatId === currentChatId || (ctx.selectedChat && statusChatId === ctx.selectedChat.id);
 
 	if (statusChatId) {
 		if (msg.isProcessing) {
@@ -121,16 +120,19 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 		const reloadId = statusChatId || ctx.selectedChat?.id;
 		if (reloadId) {
 			const chatProvider = ctx.selectedChat?.agentId || ctx.agentId;
-			ctx.loadMessages(reloadId, false, chatProvider).then((messages) => {
-				// Guard: active chat may have changed while the reload was in flight.
-				if (ctx.getCurrentChatId() !== reloadId) return;
-				if (messages.length > 0) {
-					ctx.setChatMessages(messages);
-				}
-			}).catch((err) => {
-				// Transport failure; the reconnect effect in ConversationWorkspace retries.
-				console.debug('[chat] reload failed for', reloadId, err);
-			});
+			ctx
+				.loadMessages(reloadId, false, chatProvider)
+				.then((messages) => {
+					// Guard: active chat may have changed while the reload was in flight.
+					if (ctx.getCurrentChatId() !== reloadId) return;
+					if (messages.length > 0) {
+						ctx.setChatMessages(messages);
+					}
+				})
+				.catch((err) => {
+					// Transport failure; the reconnect effect in ConversationWorkspace retries.
+					console.debug('[chat] reload failed for', reloadId, err);
+				});
 		}
 	}
 }

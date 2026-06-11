@@ -2,7 +2,12 @@
 // ad-hoc ChatEntry snapshots with a single authoritative record shape.
 
 import type { SessionAgentId } from '$lib/types/app';
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type {
+	AmpAgentMode,
+	ClaudeThinkingMode,
+	PermissionMode,
+	ThinkingMode,
+} from '$lib/types/chat';
 import type { ApiProtocol } from '$shared/api-providers';
 
 export type ChatStatus = 'draft' | 'running';

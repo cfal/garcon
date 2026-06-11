@@ -19,14 +19,7 @@
 		onDone: () => void;
 	}
 
-	let {
-		selector,
-		showAgent,
-		showSource,
-		modelListId,
-		onCancel,
-		onDone,
-	}: Props = $props();
+	let { selector, showAgent, showSource, modelListId, onCancel, onDone }: Props = $props();
 
 	let pane = $state<CompactPane>(firstPane());
 	let inputRef = $state<HTMLInputElement | null>(null);
@@ -143,22 +136,34 @@
 			</button>
 		{/if}
 		<div class="min-w-0 flex-1">
-			<div data-slot="model-selector-compact-title" class="truncate text-sm font-medium text-foreground">{headerTitle}</div>
+			<div
+				data-slot="model-selector-compact-title"
+				class="truncate text-sm font-medium text-foreground"
+			>
+				{headerTitle}
+			</div>
 			{#if headerSubtitle}
-				<div data-slot="model-selector-compact-subtitle" class="truncate text-xs text-muted-foreground">{headerSubtitle}</div>
+				<div
+					data-slot="model-selector-compact-subtitle"
+					class="truncate text-xs text-muted-foreground"
+				>
+					{headerSubtitle}
+				</div>
 			{/if}
 		</div>
 	</header>
 
 	<div data-slot="model-selector-compact-pane" class="flex min-h-0 flex-1 flex-col">
 		{#if pane === 'agent'}
-			<div class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]">
+			<div
+				class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
+			>
 				{#each selector.agentOptions as option (option.value)}
 					<button
 						type="button"
 						class={cn(
 							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-							option.value === selector.agentId && 'bg-accent text-accent-foreground'
+							option.value === selector.agentId && 'bg-accent text-accent-foreground',
 						)}
 						aria-pressed={option.value === selector.agentId}
 						onclick={() => handleAgentSelect(option.value)}
@@ -166,7 +171,9 @@
 						<span class="min-w-0 flex-1">
 							<span class="block truncate font-medium">{option.label}</span>
 							{#if option.description}
-								<span class="block truncate text-xs text-muted-foreground">{option.description}</span>
+								<span class="block truncate text-xs text-muted-foreground"
+									>{option.description}</span
+								>
 							{/if}
 						</span>
 						{#if option.value === selector.agentId}
@@ -176,14 +183,16 @@
 				{/each}
 			</div>
 		{:else if pane === 'source'}
-			<div class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]">
+			<div
+				class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
+			>
 				{#each selector.sources as source (source.key)}
 					<button
 						type="button"
 						title={source.description ? `${source.label} - ${source.description}` : source.label}
 						class={cn(
 							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-							source.key === selector.sourceKey && 'bg-accent text-accent-foreground'
+							source.key === selector.sourceKey && 'bg-accent text-accent-foreground',
 						)}
 						aria-pressed={source.key === selector.sourceKey}
 						onclick={() => handleSourceSelect(source.key)}

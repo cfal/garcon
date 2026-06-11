@@ -21,9 +21,7 @@
 		const element = target as HTMLElement | null;
 		if (!element) return false;
 		return (
-			element.tagName === 'INPUT' ||
-			element.tagName === 'TEXTAREA' ||
-			element.isContentEditable
+			element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.isContentEditable
 		);
 	}
 
@@ -48,30 +46,30 @@
 			appShell.requestNewChat();
 			return;
 		}
-			if (e.ctrlKey && key === 'r') {
-				e.preventDefault();
-				appShell.requestRenameSelectedChat();
-				return;
-			}
-			if (e.ctrlKey && key === 'd') {
-				e.preventDefault();
-				appShell.requestDeleteSelectedChat();
-				return;
-			}
-			if (e.ctrlKey && e.shiftKey && key === 'j') {
-				e.preventDefault();
-				appShell.requestNavigateChatAbove();
-				return;
-			}
-			if (e.ctrlKey && e.shiftKey && key === 'l') {
-				e.preventDefault();
-				appShell.requestNavigateChatBelow();
-				return;
-			}
-			if (inEditable) return;
+		if (e.ctrlKey && key === 'r') {
+			e.preventDefault();
+			appShell.requestRenameSelectedChat();
+			return;
+		}
+		if (e.ctrlKey && key === 'd') {
+			e.preventDefault();
+			appShell.requestDeleteSelectedChat();
+			return;
+		}
+		if (e.ctrlKey && e.shiftKey && key === 'j') {
+			e.preventDefault();
+			appShell.requestNavigateChatAbove();
+			return;
+		}
+		if (e.ctrlKey && e.shiftKey && key === 'l') {
+			e.preventDefault();
+			appShell.requestNavigateChatBelow();
+			return;
+		}
+		if (inEditable) return;
 
-			// Ctrl+, -- open settings
-			if (e.ctrlKey && key === ',') {
+		// Ctrl+, -- open settings
+		if (e.ctrlKey && key === ',') {
 			e.preventDefault();
 			appShell.openSettings();
 			return;

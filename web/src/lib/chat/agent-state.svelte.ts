@@ -18,29 +18,27 @@ export type { AmpAgentModeOption, ThinkingModeOption };
 
 export const MODE_STYLES: Record<string, { button: string; dot: string }> = {
 	default: {
-		button:
-			'bg-muted text-foreground border-border hover:bg-accent hover:text-accent-foreground',
-		dot: 'bg-muted-foreground'
+		button: 'bg-muted text-foreground border-border hover:bg-accent hover:text-accent-foreground',
+		dot: 'bg-muted-foreground',
 	},
 	acceptEdits: {
-		button:
-			'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80',
-		dot: 'bg-primary'
+		button: 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80',
+		dot: 'bg-primary',
 	},
 	bypassPermissions: {
 		button:
 			'bg-status-warning text-status-warning-foreground border-status-warning-border hover:bg-status-warning/90',
-		dot: 'bg-status-warning-foreground'
+		dot: 'bg-status-warning-foreground',
 	},
 	plan: {
 		button: 'bg-card text-card-foreground border-border hover:bg-muted',
-		dot: 'bg-foreground'
-	}
+		dot: 'bg-foreground',
+	},
 };
 
 export const DEFAULT_MODE_STYLE = {
 	button: 'bg-primary text-primary-foreground border-primary/20 hover:bg-primary/90',
-	dot: 'bg-primary-foreground'
+	dot: 'bg-primary-foreground',
 };
 
 export interface ModelSelectionPayload {

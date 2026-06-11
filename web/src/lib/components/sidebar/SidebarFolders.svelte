@@ -38,12 +38,14 @@
 		onEditFolder,
 	}: SidebarFoldersProps = $props();
 
-	let userFolderCount = $derived(folders.filter(f => !f.isSystem).length);
+	let userFolderCount = $derived(folders.filter((f) => !f.isSystem).length);
 </script>
 
 <div class="border-b border-border/40 pb-1">
 	<div class="px-3 pt-2 pb-1 flex items-center justify-between">
-		<span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{m.sidebar_folders_title()}</span>
+		<span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+			>{m.sidebar_folders_title()}</span
+		>
 		{#if onCreateFolder}
 			<button
 				type="button"
@@ -105,7 +107,10 @@
 								</DropdownMenuItem>
 							{/if}
 							{#if onDeleteFolder}
-								<DropdownMenuItem class="text-destructive" onclick={() => onDeleteFolder?.(folder.id)}>
+								<DropdownMenuItem
+									class="text-destructive"
+									onclick={() => onDeleteFolder?.(folder.id)}
+								>
 									<Trash2 class="w-3.5 h-3.5 mr-2" />
 									{m.sidebar_folders_delete()}
 								</DropdownMenuItem>

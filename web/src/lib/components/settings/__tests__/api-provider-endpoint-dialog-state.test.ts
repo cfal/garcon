@@ -7,14 +7,14 @@ vi.mock('$lib/api/api-providers.js', () => ({
 	deleteApiProvider: vi.fn(),
 	discoverApiProviderModels: vi.fn(),
 	testApiProvider: vi.fn(),
-	updateApiProvider: vi.fn()
+	updateApiProvider: vi.fn(),
 }));
 
 function makeModelCatalog(endpoint: unknown = null) {
 	return {
 		findEndpoint: vi.fn(() => endpoint),
 		forceRefresh: vi.fn().mockResolvedValue(undefined),
-		refreshApiProviders: vi.fn().mockResolvedValue(undefined)
+		refreshApiProviders: vi.fn().mockResolvedValue(undefined),
 	};
 }
 
@@ -28,7 +28,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'anthropic-messages',
 			getEndpointId: () => null,
-			getTemplateId: () => 'custom'
+			getTemplateId: () => 'custom',
 		});
 
 		dialog.beginCreate();
@@ -45,7 +45,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
-			getTemplateId: () => 'custom'
+			getTemplateId: () => 'custom',
 		});
 
 		dialog.beginCreate();
@@ -55,7 +55,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.supportsResponsesApi).toBe(false);
 		expect(dialog.payload().endpoint.capabilities).toEqual({
 			chatCompletions: true,
-			responses: false
+			responses: false,
 		});
 
 		dialog.setSupportsResponsesApi(true);
@@ -63,7 +63,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.supportsResponsesApi).toBe(true);
 		expect(dialog.payload().endpoint.capabilities).toEqual({
 			chatCompletions: true,
-			responses: true
+			responses: true,
 		});
 
 		dialog.setSupportsChatCompletionsApi(false);
@@ -71,7 +71,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.supportsChatCompletionsApi).toBe(false);
 		expect(dialog.payload().endpoint.capabilities).toEqual({
 			chatCompletions: false,
-			responses: true
+			responses: true,
 		});
 	});
 
@@ -80,7 +80,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			apiProvider: {
 				id: 'zai',
 				label: 'Z.AI',
-				templateId: 'zai'
+				templateId: 'zai',
 			},
 			endpoint: {
 				id: 'zai_openai',
@@ -91,14 +91,14 @@ describe('ApiProviderEndpointDialogState', () => {
 				models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
 				supportsImages: false,
 				hasApiKey: true,
-				modelDiscovery: 'none'
-			}
+				modelDiscovery: 'none',
+			},
 		};
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog(endpoint) as never,
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => 'zai_openai',
-			getTemplateId: () => 'custom'
+			getTemplateId: () => 'custom',
 		});
 
 		await dialog.load();
@@ -115,7 +115,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
-			getTemplateId: () => 'openrouter'
+			getTemplateId: () => 'openrouter',
 		});
 
 		dialog.beginCreate();
@@ -134,13 +134,13 @@ describe('ApiProviderEndpointDialogState', () => {
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'anthropic-messages',
 			getEndpointId: () => null,
-			getTemplateId: () => 'alibaba-cloud'
+			getTemplateId: () => 'alibaba-cloud',
 		});
 		const openAiDialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
-			getTemplateId: () => 'alibaba-cloud'
+			getTemplateId: () => 'alibaba-cloud',
 		});
 
 		anthropicDialog.beginCreate();
@@ -162,25 +162,25 @@ describe('ApiProviderEndpointDialogState', () => {
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'anthropic-messages',
 			getEndpointId: () => null,
-			getTemplateId: () => 'fireworks'
+			getTemplateId: () => 'fireworks',
 		});
 		const fireworksOpenAiDialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
-			getTemplateId: () => 'fireworks'
+			getTemplateId: () => 'fireworks',
 		});
 		const geminiDialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
-			getTemplateId: () => 'gemini'
+			getTemplateId: () => 'gemini',
 		});
 		const togetherDialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
-			getTemplateId: () => 'together'
+			getTemplateId: () => 'together',
 		});
 
 		fireworksAnthropicDialog.beginCreate();
@@ -214,7 +214,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
-			getTemplateId: () => 'ollama'
+			getTemplateId: () => 'ollama',
 		});
 
 		dialog.beginCreate();
@@ -233,7 +233,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
-			getTemplateId: () => 'custom'
+			getTemplateId: () => 'custom',
 		});
 
 		dialog.beginCreate();
@@ -265,14 +265,14 @@ describe('ApiProviderEndpointDialogState', () => {
 			success: true,
 			models: [
 				{ value: 'acme-fast', label: 'Acme Fast' },
-				{ value: 'acme-code', label: 'Acme Code' }
-			]
+				{ value: 'acme-code', label: 'Acme Code' },
+			],
 		});
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
-			getTemplateId: () => 'custom'
+			getTemplateId: () => 'custom',
 		});
 
 		dialog.beginCreate();
@@ -286,7 +286,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			apiKey: undefined,
 			apiProviderId: null,
 			endpointId: null,
-			modelDiscovery: 'openai-models'
+			modelDiscovery: 'openai-models',
 		});
 		expect(dialog.modelsText).toBe('acme-code|Acme Code\nacme-fast|Acme Fast');
 		expect(dialog.defaultModel).toBe('acme-code');
@@ -296,13 +296,13 @@ describe('ApiProviderEndpointDialogState', () => {
 	it('uses Anthropic model discovery for custom Anthropic-compatible providers', async () => {
 		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
 			success: true,
-			models: [{ value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' }]
+			models: [{ value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' }],
 		});
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'anthropic-messages',
 			getEndpointId: () => null,
-			getTemplateId: () => 'custom'
+			getTemplateId: () => 'custom',
 		});
 
 		dialog.beginCreate();
@@ -316,7 +316,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			apiKey: undefined,
 			apiProviderId: null,
 			endpointId: null,
-			modelDiscovery: 'anthropic-models'
+			modelDiscovery: 'anthropic-models',
 		});
 		expect(dialog.modelDiscovery).toBe('anthropic-models');
 		expect(dialog.defaultModel).toBe('claude-sonnet-4-20250514');
@@ -325,13 +325,13 @@ describe('ApiProviderEndpointDialogState', () => {
 	it('keeps Anthropic payload free of OpenAI capabilities when fetching Anthropic models', async () => {
 		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
 			success: true,
-			models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }]
+			models: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
 		});
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog() as never,
 			getProtocol: () => 'anthropic-messages',
 			getEndpointId: () => null,
-			getTemplateId: () => 'custom'
+			getTemplateId: () => 'custom',
 		});
 
 		dialog.beginCreate();
@@ -345,7 +345,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			apiKey: undefined,
 			apiProviderId: null,
 			endpointId: null,
-			modelDiscovery: 'anthropic-models'
+			modelDiscovery: 'anthropic-models',
 		});
 		expect(dialog.payload().endpoint.capabilities).toBeUndefined();
 		expect(dialog.defaultModel).toBe('acme-sonnet');
@@ -354,13 +354,13 @@ describe('ApiProviderEndpointDialogState', () => {
 	it('allows model fetching on edit when the stored key is redacted from the dialog', async () => {
 		vi.mocked(discoverApiProviderModels).mockResolvedValueOnce({
 			success: true,
-			models: [{ value: 'glm-5.1', label: 'GLM-5.1' }]
+			models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
 		});
 		const endpoint = {
 			apiProvider: {
 				id: 'zai',
 				label: 'Z.AI',
-				templateId: 'zai'
+				templateId: 'zai',
 			},
 			endpoint: {
 				id: 'zai_openai',
@@ -371,14 +371,14 @@ describe('ApiProviderEndpointDialogState', () => {
 				models: [{ value: 'glm-5.1', label: 'GLM-5.1' }],
 				supportsImages: false,
 				hasApiKey: true,
-				modelDiscovery: 'none'
-			}
+				modelDiscovery: 'none',
+			},
 		};
 		const dialog = new ApiProviderEndpointDialogState({
 			modelCatalog: makeModelCatalog(endpoint) as never,
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => 'zai_openai',
-			getTemplateId: () => 'custom'
+			getTemplateId: () => 'custom',
 		});
 
 		await dialog.load();
@@ -394,7 +394,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			apiKey: undefined,
 			apiProviderId: 'zai',
 			endpointId: 'zai_openai',
-			modelDiscovery: 'openai-models'
+			modelDiscovery: 'openai-models',
 		});
 	});
 
@@ -406,7 +406,7 @@ describe('ApiProviderEndpointDialogState', () => {
 			getProtocol: () => 'openai-compatible',
 			getEndpointId: () => null,
 			getTemplateId: () => 'custom',
-			onSaved: vi.fn()
+			onSaved: vi.fn(),
 		});
 
 		dialog.beginCreate();
@@ -421,5 +421,4 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(catalog.refreshApiProviders).toHaveBeenCalledOnce();
 		expect(catalog.forceRefresh).not.toHaveBeenCalled();
 	});
-
 });

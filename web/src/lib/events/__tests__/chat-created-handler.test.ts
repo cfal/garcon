@@ -99,8 +99,16 @@ describe('handleChatCreated', () => {
 		expect(typeof updater).toBe('function');
 
 		const result = updater([
-			{ permissionRequestId: 'r1', requestedTool: { type: 'bash-tool-use', toolId: 't1' }, chatId: '' },
-			{ permissionRequestId: 'r2', requestedTool: { type: 'read-tool-use', toolId: 't2' }, chatId: 'existing' },
+			{
+				permissionRequestId: 'r1',
+				requestedTool: { type: 'bash-tool-use', toolId: 't1' },
+				chatId: '',
+			},
+			{
+				permissionRequestId: 'r2',
+				requestedTool: { type: 'read-tool-use', toolId: 't2' },
+				chatId: 'existing',
+			},
 		]);
 		expect(result[0].chatId).toBe('chat-1');
 		expect(result[1].chatId).toBe('existing');

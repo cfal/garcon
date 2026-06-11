@@ -38,10 +38,7 @@
 		<span class="text-[11px] text-muted-foreground truncate flex-1">
 			{composer.filePath}:{composer.line} ({composer.side})
 		</span>
-		<button
-			onclick={onClose}
-			class="p-0.5 rounded hover:bg-muted transition-colors shrink-0 ml-2"
-		>
+		<button onclick={onClose} class="p-0.5 rounded hover:bg-muted transition-colors shrink-0 ml-2">
 			<X class="w-3.5 h-3.5 text-muted-foreground" />
 		</button>
 	</div>
@@ -49,7 +46,7 @@
 	<div class="p-3 space-y-2">
 		<!-- Severity radio group -->
 		<div class="flex gap-2">
-			{#each (['note', 'warning', 'blocker'] as const) as sev}
+			{#each ['note', 'warning', 'blocker'] as const as sev}
 				<label class="flex items-center gap-1 text-[11px] cursor-pointer">
 					<input
 						type="radio"
@@ -85,8 +82,8 @@
 				disabled={!composer.body.trim()}
 				class="px-2.5 py-1 text-[11px] rounded transition-all
 					{composer.body.trim()
-						? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
-						: 'bg-muted text-muted-foreground cursor-not-allowed'}"
+					? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
+					: 'bg-muted text-muted-foreground cursor-not-allowed'}"
 			>
 				Add comment
 			</button>
