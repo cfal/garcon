@@ -17,6 +17,7 @@ import {
 } from './config.js';
 import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/http-route.js';
+import { MalformedJsonError } from './lib/http-request.js';
 import { verifyAuthToken } from './auth/token.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
@@ -182,7 +183,7 @@ export async function startServer() {
       maxRequestBodySize: getMaxRequestBodySize(),
       routes: wrapRoutes(routes),
       error(error) {
-        if (error.message === 'Malformed JSON') {
+        if (error instanceof MalformedJsonError) {
           return Response.json({ error: 'Malformed JSON' }, { status: 400 });
         }
         console.error('server: route error:', error);

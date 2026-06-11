@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
+
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => undefined),
+  MalformedJsonError,
 }));
 
 mock.module('../../agents/claude/history-loader.js', () => ({
@@ -204,7 +209,7 @@ describe('POST /api/chats/reorder (window-based)', () => {
   });
 
   it('handles malformed JSON', async () => {
-    parseJsonBody.mockRejectedValue(new Error('Malformed JSON'));
+    parseJsonBody.mockRejectedValue(new MalformedJsonError());
 
     const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
     const response = await handler(request);
@@ -309,7 +314,7 @@ describe('POST /api/chats/reorder-quick', () => {
   });
 
   it('handles malformed JSON', async () => {
-    parseJsonBody.mockRejectedValue(new Error('Malformed JSON'));
+    parseJsonBody.mockRejectedValue(new MalformedJsonError());
 
     const request = new Request('http://localhost/api/chats/reorder-quick', { method: 'POST' });
     const response = await handler(request);

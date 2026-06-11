@@ -1,6 +1,6 @@
 import { needsSetup, getUserByUsername, createUser, getUser } from '../auth/store.js';
 import { generateAuthToken } from '../auth/token.js';
-import { parseJsonBody } from '../lib/http-request.js';
+import { MalformedJsonError, parseJsonBody } from '../lib/http-request.js';
 import { createRateLimiter } from '../lib/rate-limit.js';
 import { markRouteNoAuth } from '../lib/http-route.js';
 import { isAuthDisabled } from '../config.js';
@@ -68,7 +68,7 @@ async function noauthPostRegister(request) {
       token,
     });
   } catch (error) {
-    if (error.message === 'Malformed JSON') {
+    if (error instanceof MalformedJsonError) {
       return Response.json({ error: 'Malformed JSON' }, { status: 400 });
     }
     console.error('Registration error:', error);
@@ -106,7 +106,7 @@ async function noauthPostLogin(request, _url, server) {
       token,
     });
   } catch (error) {
-    if (error.message === 'Malformed JSON') {
+    if (error instanceof MalformedJsonError) {
       return Response.json({ error: 'Malformed JSON' }, { status: 400 });
     }
     console.error('Login error:', error);

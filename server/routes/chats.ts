@@ -3,7 +3,7 @@
 
 import { promises as fs } from 'fs';
 import crypto from 'crypto';
-import { parseJsonBody } from '../lib/http-request.js';
+import { MalformedJsonError, parseJsonBody } from '../lib/http-request.js';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { isArtificialNativePath } from '../chats/artificial-native-path.js';
@@ -506,7 +506,7 @@ export default function createChatRoutes(
       const accepted = await commandLedger.updateUnlessStatus(ledger.record.key, ['failed'], { status: 'running', turnId });
       return Response.json(acceptedResponse(accepted ?? ledger.record), { status: 202 });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
@@ -662,7 +662,7 @@ export default function createChatRoutes(
 
       return Response.json({ success: true, results });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
@@ -690,7 +690,7 @@ export default function createChatRoutes(
 
       return Response.json({ success: true });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
@@ -728,7 +728,7 @@ export default function createChatRoutes(
 
       return Response.json({ success: true });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
@@ -754,7 +754,7 @@ export default function createChatRoutes(
       registry.updateChat(chatId, { tags });
       return Response.json({ success: true, chatId, tags });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
@@ -804,7 +804,7 @@ export default function createChatRoutes(
 
       return Response.json({ success: true, ...result });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
@@ -854,7 +854,7 @@ export default function createChatRoutes(
 
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return jsonError('Malformed JSON', 400);
       }
       if (error instanceof CommandValidationError) {
@@ -930,7 +930,7 @@ export default function createChatRoutes(
         sourceChatId,
       }, { status: 202 });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return jsonError('Malformed JSON', 400);
       }
       if (error instanceof CommandValidationError) {
@@ -996,7 +996,7 @@ export default function createChatRoutes(
         queue: state,
       }, { status: 202 });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') return jsonError('Malformed JSON', 400);
+      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }
   }
@@ -1022,7 +1022,7 @@ export default function createChatRoutes(
       }
       return Response.json({ success: true, chatId, queue: normalizeQueueState(state) });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') return jsonError('Malformed JSON', 400);
+      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }
   }
@@ -1051,7 +1051,7 @@ export default function createChatRoutes(
       }
       return Response.json(acceptedResponse(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted'));
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') return jsonError('Malformed JSON', 400);
+      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }
   }
@@ -1079,7 +1079,7 @@ export default function createChatRoutes(
         stopped: ledger.kind === 'duplicate' ? ledger.record.status === 'finished' : stopped,
       });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') return jsonError('Malformed JSON', 400);
+      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }
   }
@@ -1105,7 +1105,7 @@ export default function createChatRoutes(
       if (Object.keys(patch).length > 0) await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') return jsonError('Malformed JSON', 400);
+      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }
   }
@@ -1126,7 +1126,7 @@ export default function createChatRoutes(
       await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') return jsonError('Malformed JSON', 400);
+      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }
   }

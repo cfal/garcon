@@ -1,4 +1,4 @@
-import { parseJsonBody } from '../lib/http-request.js';
+import { MalformedJsonError, parseJsonBody } from '../lib/http-request.js';
 import { getProjectBasePath } from '../config.js';
 import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
@@ -227,7 +227,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      if (error.message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: error.message }, { status: 500 });
@@ -249,7 +249,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       }
       return Response.json({ success: true });
     } catch (error) {
-      if (error.message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       const status = error.message.startsWith('Telegram ') || error.message.includes('bot token') ? 400 : 500;
@@ -283,7 +283,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      if (error.message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: error.message }, { status: 500 });
@@ -315,7 +315,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
         const body = await parseJsonBody(request) ?? {};
         botToken = typeof body.botToken === 'string' ? body.botToken.trim() : '';
       } catch (error) {
-        if (error.message !== 'Malformed JSON') throw error;
+        if (!(error instanceof MalformedJsonError)) throw error;
       }
       const tokenToTest = botToken || telegramSettings.getBotToken();
       const identity = await telegramNotifier.getBotIdentity(tokenToTest);
@@ -425,7 +425,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const result = await settings.addSavedSearch(savedSearch);
       return Response.json({ success: true, savedSearch: result });
     } catch (error) {
-      if (error.message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: error.message }, { status: 500 });
@@ -476,7 +476,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const result = await settings.updateSavedSearch(id, patch);
       return Response.json({ success: true, savedSearch: result });
     } catch (error) {
-      if (error.message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: error.message }, { status: 500 });
@@ -510,7 +510,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       }
       return Response.json({ success: true });
     } catch (error) {
-      if (error.message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: error.message }, { status: 500 });
@@ -542,7 +542,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const result = await settings.addFolder(folder);
       return Response.json({ success: true, folder: result });
     } catch (error) {
-      if (error.message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: error.message }, { status: 500 });
@@ -568,7 +568,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const result = await settings.updateFolder(folderId, patch);
       return Response.json({ success: true, folder: result });
     } catch (error) {
-      if (error.message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: error.message }, { status: 500 });

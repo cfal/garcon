@@ -5,8 +5,13 @@ import os from 'os';
 
 const testBasePath = path.join(os.tmpdir(), 'garcon-chats-start-test');
 
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
+
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => Promise.resolve({})),
+  MalformedJsonError,
 }));
 
 mock.module('../../chats/title-generator.js', () => ({

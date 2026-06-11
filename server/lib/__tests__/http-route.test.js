@@ -2,9 +2,13 @@ import { describe, it, expect, mock, beforeEach } from 'bun:test';
 
 const authenticateHttpRequest = mock(() => Promise.resolve({ errorResponse: null }));
 const isAuthDisabled = mock(() => false);
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
 
 mock.module('../http-request.js', () => ({
   authenticateHttpRequest,
+  MalformedJsonError,
 }));
 mock.module('../../config.js', () => ({
   isAuthDisabled,
@@ -38,6 +42,24 @@ describe('http route wrapping', () => {
 
     expect(payload.hasServer).toBe(true);
     expect(handler).toHaveBeenCalledWith(expect.any(Request), expect.any(URL), server);
+  });
+
+  it('returns 400 for typed malformed JSON errors', async () => {
+    const handler = mock(() => { throw new MalformedJsonError(); });
+    const wrapped = wrapRoute(handler, '/api/private', 'POST');
+    const response = await wrapped(new Request('http://localhost/api/private', { method: 'POST' }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe('Malformed JSON');
+  });
+
+  it('does not classify same-message errors as malformed JSON', async () => {
+    const handler = mock(() => { throw new Error('Malformed JSON'); });
+    const wrapped = wrapRoute(handler, '/api/private', 'POST');
+
+    await expect(wrapped(new Request('http://localhost/api/private', { method: 'POST' })))
+      .rejects.toThrow('Malformed JSON');
   });
 
   it('bypasses auth for marked handlers', async () => {

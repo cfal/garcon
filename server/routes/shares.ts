@@ -1,7 +1,7 @@
 // Share routes. Provides endpoints to create, query, revoke, and
 // publicly access shared chat snapshots.
 
-import { parseJsonBody } from '../lib/http-request.js';
+import { MalformedJsonError, parseJsonBody } from '../lib/http-request.js';
 import { markRouteNoAuth } from '../lib/http-route.js';
 import type { IShareStore } from '../chats/share-store.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -98,7 +98,7 @@ export default function createShareRoutes(
       };
       return Response.json(resp);
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
       }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });

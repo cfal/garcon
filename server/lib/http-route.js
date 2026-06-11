@@ -1,4 +1,4 @@
-import { authenticateHttpRequest } from './http-request.js';
+import { authenticateHttpRequest, MalformedJsonError } from './http-request.js';
 import { isAuthDisabled } from '../config.js';
 
 const noAuthRouteMarker = Symbol('no-auth-route');
@@ -21,28 +21,37 @@ export function isNoAuthHandler(handler) {
   return Boolean(handler?.[noAuthRouteMarker]);
 }
 
+async function invokeRouteHandler(handler, req, server) {
+  const url = new URL(req.url);
+  try {
+    return (await handler(req, url, server)) || new Response('Not found', { status: 404 });
+  } catch (error) {
+    if (error instanceof MalformedJsonError) {
+      return Response.json({ error: 'Malformed JSON' }, { status: 400 });
+    }
+    throw error;
+  }
+}
+
 // Wraps one route handler with URL parsing and JWT auth enforcement.
 export function wrapRoute(handler, routePath, method) {
   if (isAuthDisabled()) {
     return async (req, server) => {
-      const url = new URL(req.url);
-      return (await handler(req, url, server)) || new Response('Not found', { status: 404 });
+      return invokeRouteHandler(handler, req, server);
     };
   }
 
   if (isNoAuthHandler(handler)) {
     console.debug(`Skipping auth wrapping for ${method} ${routePath}`);
     return async (req, server) => {
-      const url = new URL(req.url);
-      return (await handler(req, url, server)) || new Response('Not found', { status: 404 });
+      return invokeRouteHandler(handler, req, server);
     };
   }
 
   return async (req, server) => {
-    const url = new URL(req.url);
     const { errorResponse } = await authenticateHttpRequest(req);
     if (errorResponse) return errorResponse;
-    return (await handler(req, url, server)) || new Response('Not found', { status: 404 });
+    return invokeRouteHandler(handler, req, server);
   };
 }
 

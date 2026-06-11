@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import mime from 'mime-types';
-import { parseJsonBody } from '../lib/http-request.js';
+import { MalformedJsonError, parseJsonBody } from '../lib/http-request.js';
 import { listDirectory, listDirectoryNames } from './projects.utils.js';
 import { getProjectBasePath } from '../config.js';
 import {
@@ -178,7 +178,7 @@ export default function createFilesRoutes(registry) {
       await fs.writeFile(resolvedFile, content, 'utf8');
       return Response.json({ success: true, path: resolvedFile, message: 'File saved successfully' });
     } catch (error) {
-      if (error.message === 'Malformed JSON') {
+      if (error instanceof MalformedJsonError) {
         return Response.json({ error: 'Malformed JSON' }, { status: 400 });
       }
       if (error.code === 'ENOENT') return Response.json({ error: 'File or directory not found' }, { status: 404 });

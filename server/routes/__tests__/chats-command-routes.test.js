@@ -7,8 +7,13 @@ import { randomUUID } from 'crypto';
 let testBasePath;
 let workspaceDir;
 
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
+
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => Promise.resolve({})),
+  MalformedJsonError,
 }));
 
 mock.module('../../config.js', () => ({
