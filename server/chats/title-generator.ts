@@ -3,6 +3,44 @@
 // via setSessionName (which emits 'session-name-changed' for broadcast).
 import { resolveGenerationContext } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
+import type { ApiProtocol } from '../../common/api-providers.js';
+import type { AgentCatalogEntry } from '../../common/agents.js';
+
+interface TitleGenerationAgents {
+  getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
+  getAgentReadinessMap(): Promise<Record<string, unknown>>;
+  getAgentCatalogEntries?(): Promise<AgentCatalogEntry[]>;
+  getAgentCatalog?(): Promise<{ agents?: AgentCatalogEntry[] }>;
+  runSingleQuery(prompt: string, options: {
+    agentId: string;
+    model: string;
+    cwd: string;
+    projectPath: string;
+    permissionMode: 'default';
+    thinkingMode: 'none';
+    apiProviderId?: string | null;
+    modelEndpointId?: string | null;
+    modelProtocol?: ApiProtocol | null;
+  }): Promise<string>;
+}
+
+interface TitleGenerationSettings {
+  getUiSettings(): Promise<{ chatTitle?: unknown } | null | undefined>;
+  getChatName(chatId: string): string | null | undefined;
+  setSessionName(chatId: string, title: string): Promise<unknown>;
+}
+
+interface MaybeGenerateChatTitleInput {
+  chatId: string;
+  projectPath: string;
+  firstPrompt: string;
+  agents: TitleGenerationAgents;
+  settings: TitleGenerationSettings;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 // Modified from Open WebUI
 const TITLE_GENERATION_PROMPT = `### Task:
@@ -29,14 +67,18 @@ Video Game Development Insights
 {USER_PROMPT}
 </chat_history>`;
 
-function normalizeTitle(text) {
+function normalizeTitle(text: unknown): string {
   if (!text || typeof text !== 'string') return '';
   return text.replace(/^["'`]+|["'`]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-// agents: AgentRegistry (for runSingleQuery)
-// settings: SettingsStore (for getUiSettings, getChatName, setSessionName)
-export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt, agents, settings }) {
+export async function maybeGenerateChatTitle({
+  chatId,
+  projectPath,
+  firstPrompt,
+  agents,
+  settings,
+}: MaybeGenerateChatTitleInput): Promise<void> {
   if (!firstPrompt?.trim()) return;
 
   const ui = await settings.getUiSettings();
@@ -72,6 +114,6 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
 
     await settings.setSessionName(chatId, title);
   } catch (error) {
-    console.warn('chat-title: generation failed:', error.message);
+    console.warn('chat-title: generation failed:', errorMessage(error));
   }
 }

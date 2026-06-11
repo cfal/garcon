@@ -6,17 +6,27 @@ import { promises as fs } from 'fs';
 const DEFAULT_STALE_MS = 15 * 60 * 1000;
 const DEFAULT_MAX_SIZE = 1024;
 
-export class PathCache {
-  #cache = new Map();
-  #ttlMs;
-  #maxSize;
+interface PathCacheOptions {
+  ttlMs?: number;
+  maxSize?: number;
+}
 
-  constructor({ ttlMs = DEFAULT_STALE_MS, maxSize = DEFAULT_MAX_SIZE } = {}) {
+interface PathCacheEntry {
+  available: boolean;
+  checkedAt: number;
+}
+
+export class PathCache {
+  #cache = new Map<string, PathCacheEntry>();
+  #ttlMs: number;
+  #maxSize: number;
+
+  constructor({ ttlMs = DEFAULT_STALE_MS, maxSize = DEFAULT_MAX_SIZE }: PathCacheOptions = {}) {
     this.#ttlMs = ttlMs;
     this.#maxSize = maxSize;
   }
 
-  async isProjectPathAvailable(projectPath) {
+  async isProjectPathAvailable(projectPath: string | null | undefined): Promise<boolean> {
     if (!projectPath) return false;
 
     const entry = this.#cache.get(projectPath);
@@ -44,7 +54,7 @@ export class PathCache {
     }
   }
 
-  static async #checkPath(p) {
+  static async #checkPath(p: string): Promise<boolean> {
     try {
       const stat = await fs.stat(p);
       return stat.isDirectory();

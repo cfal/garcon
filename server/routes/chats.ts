@@ -47,7 +47,9 @@ interface SettingsDep {
   getPinnedChatIds(): Promise<string[]>;
   getNormalChatIds(): Promise<string[]>;
   getArchivedChatIds(): Promise<string[]>;
+  getUiSettings(): Promise<{ chatTitle?: unknown } | null | undefined>;
   getChatName(chatId: string): string | null;
+  setSessionName(chatId: string, title: string): Promise<unknown>;
   setLastChatDefaults(defaults: Record<string, unknown>): Promise<void>;
   ensureInNormal(chatId: string): Promise<void>;
   removeFromAllOrderLists(chatId: string): Promise<void>;

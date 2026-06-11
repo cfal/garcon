@@ -53,6 +53,9 @@ export interface AgentRegistryServiceContract {
     sourceChatId: string;
     targetChatId: string;
   }): Promise<StartedAgentSession | null>;
+  getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
+  getAgentReadinessMap(): Promise<Record<string, unknown>>;
+  getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
   modelSupportsImages(input: {
     agentId: string;
     model: string;

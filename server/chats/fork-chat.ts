@@ -7,18 +7,58 @@ import {
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../common/chat-modes.ts';
+import type { ChatRegistryEntry, IChatRegistry } from './store.js';
+import type { StartedAgentSession } from '../agents/session-types.js';
 import { extractFirstLine } from '../lib/text.js';
 
-function escapeRegExp(input) {
+interface ForkChatSettings {
+  getChatName(chatId: string): string | null | undefined;
+  ensureInNormal(chatId: string): Promise<unknown>;
+  setSessionName(chatId: string, title: string): Promise<unknown>;
+}
+
+interface ForkChatMetadata {
+  getChatMetadata(chatId: string): { firstMessage?: string | null } | null;
+  addNewChatMetadata(chatId: string, firstMessage: string): void;
+}
+
+interface ForkChatFileCopyInput {
+  sourceSession: ChatRegistryEntry;
+  sourceChatId: string;
+  targetChatId: string;
+  registry: IChatRegistry;
+  settings: ForkChatSettings;
+  metadata: ForkChatMetadata;
+  forkAgentSession?: (args: {
+    sourceSession: ChatRegistryEntry;
+    sourceChatId: string;
+    targetChatId: string;
+  }) => Promise<StartedAgentSession | null>;
+  supportsFork?: (agentId: string) => boolean;
+}
+
+export interface ForkChatFileCopyResult {
+  sourceChatId: string;
+  chatId: string;
+  agentId: string;
+  agentSessionId: string;
+  nativePath: string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function escapeRegExp(input: string): string {
   return String(input).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function replaceUuidBounded(line, oldUuid, newUuid) {
+export function replaceUuidBounded(line: string, oldUuid: string, newUuid: string): string {
   const pattern = new RegExp(`\\b${escapeRegExp(oldUuid)}\\b`, 'g');
   return line.replace(pattern, newUuid);
 }
 
-export function assertJsonlValid(content, targetPath) {
+export function assertJsonlValid(content: string, targetPath: string): void {
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -26,22 +66,30 @@ export function assertJsonlValid(content, targetPath) {
     try {
       JSON.parse(line);
     } catch (error) {
-      throw new Error(`Invalid JSONL at ${targetPath}:${i + 1}: ${error.message}`);
+      throw new Error(`Invalid JSONL at ${targetPath}:${i + 1}: ${errorMessage(error)}`);
     }
   }
 }
 
-function buildForkDestination(sourcePath, newAgentSessionId) {
+function buildForkDestination(sourcePath: string, newAgentSessionId: string): string {
   const dir = path.dirname(sourcePath);
   return path.join(dir, `${newAgentSessionId}.jsonl`);
 }
 
-function normalizeNextForkOrdinal(value) {
-  const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : value;
+function normalizeNextForkOrdinal(value: unknown): number | null {
+  const parsed = typeof value === 'string'
+    ? Number.parseInt(value, 10)
+    : typeof value === 'number'
+      ? value
+      : Number.NaN;
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-function resolveVisibleChatTitle(chatId, settings, metadata) {
+function resolveVisibleChatTitle(
+  chatId: string,
+  settings: ForkChatSettings,
+  metadata: ForkChatMetadata,
+): string {
   const overrideTitle = settings.getChatName(chatId);
   const fallbackTitle = metadata.getChatMetadata(chatId)?.firstMessage;
   return extractFirstLine(overrideTitle || fallbackTitle || 'New Session') || 'New Session';
@@ -56,7 +104,7 @@ export async function forkChatFileCopy({
   metadata,
   forkAgentSession,
   supportsFork,
-}) {
+}: ForkChatFileCopyInput): Promise<ForkChatFileCopyResult> {
   const sourceAgentId = sourceSession.agentId;
   if (supportsFork && !supportsFork(sourceAgentId)) {
     throw new Error(`Agent does not support fork: ${sourceAgentId}`);
@@ -85,13 +133,14 @@ export async function forkChatFileCopy({
       throw new Error(`Source native path unavailable for chat ${sourceChatId}`);
     }
 
-    newAgentSessionId = crypto.randomUUID();
-    destinationNativePath = buildForkDestination(sourceNativePath, newAgentSessionId);
+    const generatedAgentSessionId = crypto.randomUUID();
+    newAgentSessionId = generatedAgentSessionId;
+    destinationNativePath = buildForkDestination(sourceNativePath, generatedAgentSessionId);
 
     const raw = await fs.readFile(sourceNativePath, 'utf8');
     const rewritten = raw
       .split('\n')
-      .map((line) => replaceUuidBounded(line, sourceAgentSessionId, newAgentSessionId))
+      .map((line) => replaceUuidBounded(line, sourceAgentSessionId, generatedAgentSessionId))
       .join('\n');
 
     assertJsonlValid(rewritten, destinationNativePath);
@@ -100,10 +149,14 @@ export async function forkChatFileCopy({
     ownsDestinationFile = true;
   }
 
+  if (!newAgentSessionId || !destinationNativePath) {
+    throw new Error(`Failed to create fork target for chat ${targetChatId}`);
+  }
+
   const created = registry.addChat({
     id: targetChatId,
     agentId: sourceAgentId,
-    model: sourceSession.model || null,
+    model: sourceSession.model || '',
     apiProviderId: sourceSession.apiProviderId ?? null,
     modelEndpointId: sourceSession.modelEndpointId ?? null,
     modelProtocol: sourceSession.modelProtocol ?? null,

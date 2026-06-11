@@ -2,27 +2,69 @@
 // full history loads or live tails captured before the user opens a chat.
 
 import { mergeChatMessagesByIdentity, chatMessageIdentityTokens } from '../../common/chat-message-identity.js';
+import type { ChatMessage } from '../../common/chat-types.js';
+import type { ChatRegistryEntry, IChatRegistry } from './store.js';
+import type { PaginatedChatMessages } from './history-cache-contract.js';
 
 const CACHE_LIMIT = 100;
 const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 5 * 60 * 1000;
 
-export class HistoryCache {
-  #cacheByChatId = new Map();
-  #inFlightLoads = new Map();
-  #pruneTimer = null;
-  #initialized = false;
-  #registry;
-  #metadata;
-  #agents;
-  #cacheLimit;
-  #staleNonActiveMs;
-  #now;
+type CacheCompleteness = 'tail' | 'full';
 
-  // registry: ChatRegistry
-  // metadata: MetadataIndex
-  // agents: AgentRegistry
-  constructor(registry, metadata, agents, options = {}) {
+interface HistoryCacheEntry {
+  chatId: string;
+  messages: ChatMessage[];
+  completeness: CacheCompleteness;
+  lastAccessAt: number;
+}
+
+interface HistoryCacheInitialEntry {
+  chatId: string;
+  messages?: ChatMessage[];
+  completeness?: CacheCompleteness;
+  lastAccessAt?: number;
+}
+
+interface HistoryCacheOptions {
+  cacheLimit?: number;
+  staleNonActiveMs?: number;
+  now?: () => number;
+  initialEntries?: HistoryCacheInitialEntry[];
+}
+
+interface HistoryCacheMetadata {
+  updateFromAppendedMessages(chatId: string, appendedMessages: ChatMessage[]): void;
+}
+
+interface HistoryCacheAgents {
+  onMessages(cb: (chatId: string, messages: ChatMessage[]) => void): void;
+  isChatRunning(chatId: string): boolean;
+  loadMessages(session: ChatRegistryEntry, chatId: string): Promise<ChatMessage[]>;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export class HistoryCache {
+  #cacheByChatId = new Map<string, HistoryCacheEntry>();
+  #inFlightLoads = new Map<string, Promise<ChatMessage[]>>();
+  #pruneTimer: ReturnType<typeof setInterval> | null = null;
+  #initialized = false;
+  #registry: IChatRegistry;
+  #metadata: HistoryCacheMetadata;
+  #agents: HistoryCacheAgents;
+  #cacheLimit: number;
+  #staleNonActiveMs: number;
+  #now: () => number;
+
+  constructor(
+    registry: IChatRegistry,
+    metadata: HistoryCacheMetadata,
+    agents: HistoryCacheAgents,
+    options: HistoryCacheOptions = {},
+  ) {
     this.#registry = registry;
     this.#metadata = metadata;
     this.#agents = agents;
@@ -41,7 +83,7 @@ export class HistoryCache {
     }
   }
 
-  init() {
+  init(): void {
     if (!this.#initialized) {
       this.#initialized = true;
 
@@ -51,7 +93,7 @@ export class HistoryCache {
       // Self-wire: append agent messages to cache as they arrive.
       this.#agents.onMessages((chatId, messages) => {
         this.appendMessages(chatId, messages).catch((err) => {
-          console.warn('history-cache: appendMessages failed:', err.message);
+          console.warn('history-cache: appendMessages failed:', errorMessage(err));
         });
       });
     }
@@ -61,19 +103,19 @@ export class HistoryCache {
       try {
         this.prune();
       } catch (err) {
-        console.warn('history-cache: prune failed:', err.message);
+        console.warn('history-cache: prune failed:', errorMessage(err));
       }
     }, PRUNE_INTERVAL_MS);
   }
 
-  destroy() {
-    clearInterval(this.#pruneTimer);
+  destroy(): void {
+    if (this.#pruneTimer) clearInterval(this.#pruneTimer);
     this.#pruneTimer = null;
     this.#cacheByChatId.clear();
     this.#inFlightLoads.clear();
   }
 
-  getMessages(chatId) {
+  getMessages(chatId: string): ChatMessage[] | null {
     const key = String(chatId);
     const entry = this.#cacheByChatId.get(key);
     if (!entry) return null;
@@ -81,7 +123,7 @@ export class HistoryCache {
     return entry.messages;
   }
 
-  async ensureLoaded(chatId) {
+  async ensureLoaded(chatId: string): Promise<ChatMessage[]> {
     const key = String(chatId);
     const existing = this.#cacheByChatId.get(key);
     if (existing?.completeness === 'full') {
@@ -121,7 +163,7 @@ export class HistoryCache {
     }
   }
 
-  async appendMessages(chatId, appendedMessages) {
+  async appendMessages(chatId: string, appendedMessages: ChatMessage[]): Promise<void> {
     const key = String(chatId);
     let entry = this.#cacheByChatId.get(key);
 
@@ -138,7 +180,7 @@ export class HistoryCache {
     try {
       this.#metadata.updateFromAppendedMessages(key, appendedMessages);
     } catch (err) {
-      console.warn(`history-cache: metadata update failed for ${key}:`, err.message);
+      console.warn(`history-cache: metadata update failed for ${key}:`, errorMessage(err));
     }
 
     if (this.#cacheByChatId.size > this.#cacheLimit) {
@@ -146,7 +188,7 @@ export class HistoryCache {
     }
   }
 
-  getPaginatedMessages(chatId, limit, offset) {
+  getPaginatedMessages(chatId: string, limit: number, offset: number): PaginatedChatMessages {
     const key = String(chatId);
     const entry = this.#cacheByChatId.get(key);
     if (!entry) {
@@ -169,11 +211,11 @@ export class HistoryCache {
     };
   }
 
-  evictChat(chatId) {
+  evictChat(chatId: string): void {
     this.#cacheByChatId.delete(String(chatId));
   }
 
-  prune() {
+  prune(): void {
     const now = this.#now();
     const entries = Array.from(this.#cacheByChatId.values())
       .sort((a, b) => a.lastAccessAt - b.lastAccessAt);
@@ -191,7 +233,7 @@ export class HistoryCache {
     }
   }
 
-  async #loadFromAgent(chatId) {
+  async #loadFromAgent(chatId: string): Promise<ChatMessage[]> {
     const session = this.#registry.getChat(chatId);
     if (!session) return [];
     return this.#agents.loadMessages(session, chatId);
@@ -199,24 +241,29 @@ export class HistoryCache {
 
 }
 
-function mergeChatMessages(base, incoming, options = {}) {
+function mergeChatMessages(
+  base: ChatMessage[],
+  incoming: ChatMessage[] | null | undefined,
+  options = {},
+): ChatMessage[] {
   return mergeChatMessagesByIdentity(base, incoming ?? [], options);
 }
 
 // Removes duplicate messages from a sorted array. Uses identity tokens
 // (including content tokens) for dedup. Messages with no identity tokens
 // (e.g. user messages without metadata) fall back to type+content+timestamp.
-function deduplicateMessages(messages) {
+function deduplicateMessages(messages: ChatMessage[]): ChatMessage[] {
   if (messages.length <= 1) return messages;
-  const seen = new Set();
-  const result = [];
+  const seen = new Set<string>();
+  const result: ChatMessage[] = [];
   for (const message of messages) {
     const tokens = chatMessageIdentityTokens(message, { includeContentToken: true });
     if (tokens.length === 0) {
       // Fallback for messages with no identity tokens (user messages
       // without metadata). Dedup by type + content + timestamp.
+      const rawMessage = message as unknown as Record<string, unknown>;
       const type = message.type || '';
-      const content = typeof message.content === 'string' ? message.content.trim() : '';
+      const content = typeof rawMessage.content === 'string' ? rawMessage.content.trim() : '';
       const ts = message.timestamp || '';
       tokens.push(`${type}:fallback:${content}:${ts}`);
     }

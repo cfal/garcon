@@ -3,25 +3,65 @@
 
 import { promises as fs } from 'fs';
 import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
+import type { ChatMessage } from '../../common/chat-types.js';
+import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 
 const DEFAULT_PREVIEW_TIMEOUT_MS = 5_000;
 const DEFAULT_SAVE_DELAY_MS = 100;
 const METADATA_VERSION = 1;
 
-export class MetadataIndex {
-  #metadataByChatId = new Map();
-  #registry;
-  #agents;
-  #initialized = false;
-  #previewTimeoutMs;
-  #metadataPath;
-  #saveDelayMs;
-  #pendingSaveTimer = null;
-  #savePromise = Promise.resolve();
+type MetadataSource = 'live' | 'agent-preview' | 'startup';
 
-  // registry: ChatRegistry
-  // agents: AgentRegistry
-  constructor(registry, agents, options = {}) {
+export interface ChatMetadata {
+  chatId: string;
+  createdAt: string | null;
+  lastActivity: string | null;
+  lastMessage: string;
+  firstMessage: string;
+  source: MetadataSource;
+}
+
+interface AgentPreviewMetadata {
+  createdAt?: string | null;
+  lastActivity?: string | null;
+  lastMessage?: string | null;
+  firstMessage: string;
+}
+
+interface MetadataIndexOptions {
+  previewTimeoutMs?: number;
+  metadataPath?: string | null;
+  saveDelayMs?: number;
+}
+
+interface MetadataAgentSource {
+  getPreview(session: ChatRegistryEntry): Promise<unknown>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export class MetadataIndex {
+  #metadataByChatId = new Map<string, ChatMetadata>();
+  #registry: IChatRegistry;
+  #agents: MetadataAgentSource;
+  #initialized = false;
+  #previewTimeoutMs: number;
+  #metadataPath: string | null;
+  #saveDelayMs: number;
+  #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  #savePromise: Promise<void> = Promise.resolve();
+
+  constructor(registry: IChatRegistry, agents: MetadataAgentSource, options: MetadataIndexOptions = {}) {
     this.#registry = registry;
     this.#agents = agents;
     this.#previewTimeoutMs = options.previewTimeoutMs ?? DEFAULT_PREVIEW_TIMEOUT_MS;
@@ -29,7 +69,7 @@ export class MetadataIndex {
     this.#saveDelayMs = options.saveDelayMs ?? DEFAULT_SAVE_DELAY_MS;
   }
 
-  async init() {
+  async init(): Promise<void> {
     if (!this.#initialized) {
       this.#initialized = true;
       this.#registry.onChatRemoved((chatId) => {
@@ -45,15 +85,15 @@ export class MetadataIndex {
     this.#scheduleSave();
   }
 
-  getChatMetadata(chatId) {
+  getChatMetadata(chatId: string): ChatMetadata | null {
     return this.#metadataByChatId.get(String(chatId)) || null;
   }
 
-  listAllChatMetadata() {
+  listAllChatMetadata(): Map<string, ChatMetadata> {
     return new Map(this.#metadataByChatId);
   }
 
-  updateFromAppendedMessages(chatId, appendedMessages) {
+  updateFromAppendedMessages(chatId: string, appendedMessages: ChatMessage[]): void {
     const key = String(chatId);
     const current = this.#metadataByChatId.get(key);
     const createdAt = current?.createdAt ?? firstTimestamp(appendedMessages) ?? new Date().toISOString();
@@ -72,7 +112,7 @@ export class MetadataIndex {
     this.#scheduleSave();
   }
 
-  addNewChatMetadata(chatId, firstMessage) {
+  addNewChatMetadata(chatId: string, firstMessage: string): void {
     const key = String(chatId);
     if (this.#metadataByChatId.has(key)) {
       throw new Error(`Chat with ID ${chatId} already exists`);
@@ -89,7 +129,7 @@ export class MetadataIndex {
     this.#scheduleSave();
   }
 
-  async flush() {
+  async flush(): Promise<void> {
     if (this.#pendingSaveTimer) {
       clearTimeout(this.#pendingSaveTimer);
       this.#pendingSaveTimer = null;
@@ -100,7 +140,7 @@ export class MetadataIndex {
     await this.#savePromise;
   }
 
-  async #repairMissingMetadataFromAgentPreviews() {
+  async #repairMissingMetadataFromAgentPreviews(): Promise<void> {
     const sessions = this.#registry.listAllChats();
     const missingEntries = Object.entries(sessions)
       .filter(([chatId]) => !this.#metadataByChatId.has(String(chatId)));
@@ -111,15 +151,19 @@ export class MetadataIndex {
 
     for (let i = 0; i < results.length; i++) {
       const [chatId] = missingEntries[i];
-      if (results[i].status === 'fulfilled') {
-        this.#metadataByChatId.set(String(chatId), results[i].value);
+      const result = results[i];
+      if (result.status === 'fulfilled') {
+        this.#metadataByChatId.set(String(chatId), result.value);
       } else {
-        console.warn(`metadata: failed to build metadata for ${chatId}:`, results[i].reason?.message);
+        console.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.reason));
       }
     }
   }
 
-  async #buildMetadataFromPreviewWithTimeout(chatId, session) {
+  async #buildMetadataFromPreviewWithTimeout(
+    chatId: string,
+    session: ChatRegistryEntry,
+  ): Promise<ChatMetadata> {
     return withTimeout(
       this.#buildMetadataFromPreview(chatId, session),
       this.#previewTimeoutMs,
@@ -127,9 +171,9 @@ export class MetadataIndex {
     );
   }
 
-  async #buildMetadataFromPreview(chatId, session) {
+  async #buildMetadataFromPreview(chatId: string, session: ChatRegistryEntry): Promise<ChatMetadata> {
     const preview = await this.#agents.getPreview(session);
-    if (!preview) {
+    if (!isAgentPreviewMetadata(preview)) {
       throw new Error(`Failed to build preview for chat: ${chatId}`);
     }
     if (!preview.firstMessage) {
@@ -145,7 +189,7 @@ export class MetadataIndex {
     };
   }
 
-  #pruneMissingRegistryEntries() {
+  #pruneMissingRegistryEntries(): void {
     const sessions = this.#registry.listAllChats();
     const validIds = new Set(Object.keys(sessions).map(String));
     let dirty = false;
@@ -157,27 +201,27 @@ export class MetadataIndex {
     if (dirty) this.#scheduleSave();
   }
 
-  async #loadPersistedMetadata() {
-    const result = new Map();
+  async #loadPersistedMetadata(): Promise<Map<string, ChatMetadata>> {
+    const result = new Map<string, ChatMetadata>();
     if (!this.#metadataPath) return result;
     try {
       const raw = await fs.readFile(this.#metadataPath, 'utf8');
       const parsed = JSON.parse(raw);
-      const chats = parsed && typeof parsed === 'object' ? parsed.chats : null;
+      const chats = isRecord(parsed) ? parsed.chats : null;
       if (!chats || typeof chats !== 'object' || Array.isArray(chats)) return result;
       for (const [chatId, value] of Object.entries(chats)) {
         const normalized = normalizePersistedMetadata(chatId, value);
         if (normalized) result.set(chatId, normalized);
       }
     } catch (error) {
-      if (error?.code !== 'ENOENT') {
-        console.warn('metadata: failed to load chat metadata:', error.message);
+      if (!isErrnoException(error) || error.code !== 'ENOENT') {
+        console.warn('metadata: failed to load chat metadata:', errorMessage(error));
       }
     }
     return result;
   }
 
-  #scheduleSave() {
+  #scheduleSave(): void {
     if (!this.#metadataPath) return;
     if (this.#pendingSaveTimer) clearTimeout(this.#pendingSaveTimer);
     this.#pendingSaveTimer = setTimeout(() => {
@@ -188,7 +232,7 @@ export class MetadataIndex {
     }, this.#saveDelayMs);
   }
 
-  async #saveNow() {
+  async #saveNow(): Promise<void> {
     if (!this.#metadataPath) return;
     const snapshot = {
       version: METADATA_VERSION,
@@ -198,8 +242,12 @@ export class MetadataIndex {
   }
 }
 
-function normalizePersistedMetadata(chatId, value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+function isAgentPreviewMetadata(value: unknown): value is AgentPreviewMetadata {
+  return isRecord(value) && typeof value.firstMessage === 'string';
+}
+
+function normalizePersistedMetadata(chatId: string, value: unknown): ChatMetadata | null {
+  if (!isRecord(value)) return null;
   const firstMessage = typeof value.firstMessage === 'string' ? value.firstMessage : '';
   if (!firstMessage) return null;
   return {
@@ -208,24 +256,28 @@ function normalizePersistedMetadata(chatId, value) {
     lastActivity: typeof value.lastActivity === 'string' ? value.lastActivity : null,
     lastMessage: typeof value.lastMessage === 'string' ? value.lastMessage : firstMessage,
     firstMessage,
-    source: value.source === 'live' || value.source === 'agent-preview' || value.source === 'startup'
+    source: isMetadataSource(value.source)
       ? value.source
       : 'startup',
   };
 }
 
-function withTimeout(promise, timeoutMs, createTimeoutError) {
-  let timeoutId;
+function isMetadataSource(value: unknown): value is MetadataSource {
+  return value === 'live' || value === 'agent-preview' || value === 'startup';
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, createTimeoutError: () => Error): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>;
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(() => reject(createTimeoutError()), timeoutMs);
   });
   return Promise.race([
     promise.finally(() => clearTimeout(timeoutId)),
     timeout,
-  ]);
+  ]) as Promise<T>;
 }
 
-function extractPreviewText(msg) {
+function extractPreviewText(msg: ChatMessage | null | undefined): string {
   if (!msg) return '';
   if (msg.type === 'user-message' || msg.type === 'assistant-message') {
     const content = typeof msg.content === 'string' ? msg.content : '';
@@ -234,15 +286,15 @@ function extractPreviewText(msg) {
   return '';
 }
 
-function firstTimestamp(messages) {
+function firstTimestamp(messages: ChatMessage[]): string | null {
   for (const msg of messages ?? []) {
     if (typeof msg?.timestamp === 'string') return msg.timestamp;
   }
   return null;
 }
 
-function latestTimestamp(messages) {
-  let latest = null;
+function latestTimestamp(messages: ChatMessage[]): string | null {
+  let latest: string | null = null;
   for (const msg of messages ?? []) {
     if (typeof msg?.timestamp === 'string' && (!latest || msg.timestamp > latest)) {
       latest = msg.timestamp;
@@ -251,7 +303,7 @@ function latestTimestamp(messages) {
   return latest;
 }
 
-function firstUserText(messages) {
+function firstUserText(messages: ChatMessage[]): string | null {
   for (const msg of messages ?? []) {
     if (msg?.type !== 'user-message') continue;
     const text = extractPreviewText(msg);
@@ -260,8 +312,8 @@ function firstUserText(messages) {
   return null;
 }
 
-function latestPreviewText(messages) {
-  let latest = null;
+function latestPreviewText(messages: ChatMessage[]): string | null {
+  let latest: string | null = null;
   for (const msg of messages ?? []) {
     const text = extractPreviewText(msg);
     if (text) latest = text;

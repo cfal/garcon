@@ -7,10 +7,16 @@ export interface GenerationContext {
 }
 
 interface GenerationContextAgentSource {
-  getAgentAuthStatusMap(): Promise<Record<string, { authenticated?: boolean }>>;
-  getAgentReadinessMap(): Promise<Record<string, { ready?: boolean }>>;
+  getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
+  getAgentReadinessMap(): Promise<Record<string, unknown>>;
   getAgentCatalogEntries?(): Promise<AgentCatalogEntry[]>;
   getAgentCatalog?(): Promise<{ agents?: AgentCatalogEntry[] }>;
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 async function getAgentCatalogEntries(source: GenerationContextAgentSource): Promise<AgentCatalogEntry[]> {
@@ -33,16 +39,34 @@ function modelsByAgentFromCatalog(entries: AgentCatalogEntry[]): Record<string, 
   );
 }
 
+function authByAgentFromRaw(raw: Record<string, unknown>): Record<string, { authenticated?: boolean }> {
+  return Object.fromEntries(
+    Object.entries(raw).map(([agentId, value]) => {
+      const entry = asObject(value);
+      return [agentId, { authenticated: entry.authenticated === true }];
+    }),
+  );
+}
+
+function readinessByAgentFromRaw(raw: Record<string, unknown>): Record<string, { ready?: boolean }> {
+  return Object.fromEntries(
+    Object.entries(raw).map(([agentId, value]) => {
+      const entry = asObject(value);
+      return [agentId, { ready: entry.ready === true }];
+    }),
+  );
+}
+
 export async function resolveGenerationContext(source: GenerationContextAgentSource): Promise<GenerationContext> {
-  const [authByAgent, readinessByAgent, catalogEntries] = await Promise.all([
+  const [rawAuthByAgent, rawReadinessByAgent, catalogEntries] = await Promise.all([
     source.getAgentAuthStatusMap(),
     source.getAgentReadinessMap(),
     getAgentCatalogEntries(source),
   ]);
 
   return {
-    authByAgent,
-    readinessByAgent,
+    authByAgent: authByAgentFromRaw(rawAuthByAgent),
+    readinessByAgent: readinessByAgentFromRaw(rawReadinessByAgent),
     modelsByAgent: modelsByAgentFromCatalog(catalogEntries),
   };
 }
