@@ -1,6 +1,22 @@
 import { getAnthropicApiKey, getAnthropicBaseUrl, getClaudeBinary } from "../../config.js";
 
-async function runClaudeAuthStatus() {
+interface AgentAuthStatus {
+  authenticated: boolean;
+  canReauth: boolean;
+  label: string;
+}
+
+interface ClaudeAuthStatusPayload {
+  loggedIn?: unknown;
+  authMethod?: unknown;
+  email?: unknown;
+}
+
+async function responseText(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+  return stream ? new Response(stream).text() : '';
+}
+
+async function runClaudeAuthStatus(): Promise<{ exitCode: number; output: string }> {
   // Uses the CLI itself so Garcon follows CLAUDE_CONFIG_DIR and other auth storage rules.
   const proc = Bun.spawn([getClaudeBinary(), 'auth', 'status'], {
     stdin: 'ignore',
@@ -9,8 +25,8 @@ async function runClaudeAuthStatus() {
   });
 
   const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
+    responseText(proc.stdout),
+    responseText(proc.stderr),
     proc.exited,
   ]);
 
@@ -20,7 +36,7 @@ async function runClaudeAuthStatus() {
   };
 }
 
-function parseClaudeAuthStatus(output) {
+function parseClaudeAuthStatus(output: string): ClaudeAuthStatusPayload | null {
   const jsonStart = output.indexOf('{');
   const jsonEnd = output.lastIndexOf('}');
   if (jsonStart === -1 || jsonEnd === -1 || jsonEnd < jsonStart) {
@@ -28,13 +44,16 @@ function parseClaudeAuthStatus(output) {
   }
 
   try {
-    return JSON.parse(output.slice(jsonStart, jsonEnd + 1));
+    const parsed: unknown = JSON.parse(output.slice(jsonStart, jsonEnd + 1));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as ClaudeAuthStatusPayload
+      : null;
   } catch {
     return null;
   }
 }
 
-export async function getClaudeAuthStatus() {
+export async function getClaudeAuthStatus(): Promise<AgentAuthStatus> {
   // bypass claude auth check if custom ANTHROPIC_BASE_URL is set
   if (getAnthropicBaseUrl()) {
     return { authenticated: true, canReauth: false, label: '' };

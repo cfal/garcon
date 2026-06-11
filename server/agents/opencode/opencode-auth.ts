@@ -1,4 +1,19 @@
-export async function getOpenCodeAuthStatus(opencode) {
+interface OpenCodeAuthRuntime {
+  isAvailable?(): boolean;
+  isTemporarilyUnavailable?(): boolean;
+  getUnavailableRetryAfterMs?(): number;
+  getUnavailableReason?(): string;
+}
+
+interface OpenCodeAuthStatus {
+  authenticated: boolean;
+  canReauth: false;
+  label: string;
+  source: 'none' | 'cli';
+  detail?: string;
+}
+
+export async function getOpenCodeAuthStatus(opencode: OpenCodeAuthRuntime | null | undefined): Promise<OpenCodeAuthStatus> {
   if (!opencode?.isAvailable?.()) {
     return {
       authenticated: false,

@@ -2,7 +2,28 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { getCodexHome, getOpenAiApiKey, getOpenAiBaseUrl } from '../../config.js';
 
-async function runCodexLoginStatus() {
+interface AgentAuthStatus {
+  authenticated: boolean;
+  canReauth: boolean;
+  label: string;
+}
+
+interface CodexAuthFile {
+  tokens?: {
+    id_token?: unknown;
+  };
+}
+
+interface CodexIdTokenPayload {
+  email?: unknown;
+  user?: unknown;
+}
+
+async function responseText(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+  return stream ? new Response(stream).text() : '';
+}
+
+async function runCodexLoginStatus(): Promise<{ exitCode: number; output: string }> {
   // Uses the CLI itself so Garcon follows CODEX_HOME and keyring-backed auth storage.
   const proc = Bun.spawn(['codex', 'login', 'status'], {
     stdin: 'ignore',
@@ -11,8 +32,8 @@ async function runCodexLoginStatus() {
   });
 
   const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
+    responseText(proc.stdout),
+    responseText(proc.stderr),
     proc.exited,
   ]);
 
@@ -22,29 +43,42 @@ async function runCodexLoginStatus() {
   };
 }
 
-async function readCodexAuthLabel() {
+function parseAuthFile(raw: string): CodexAuthFile {
+  const parsed: unknown = JSON.parse(raw);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as CodexAuthFile
+    : {};
+}
+
+function parseIdTokenPayload(token: string): CodexIdTokenPayload {
+  const parts = token.split('.');
+  if (parts.length < 2 || !parts[1]) return {};
+  const parsed: unknown = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as CodexIdTokenPayload
+    : {};
+}
+
+async function readCodexAuthLabel(): Promise<string> {
   try {
     const authPath = path.join(getCodexHome(), 'auth.json');
     const content = await fs.readFile(authPath, 'utf8');
-    const auth = JSON.parse(content);
-    const tokens = auth.tokens || {};
-    if (!tokens.id_token) {
+    const auth = parseAuthFile(content);
+    const token = auth.tokens?.id_token;
+    if (typeof token !== 'string' || !token) {
       return '';
     }
 
-    const parts = tokens.id_token.split('.');
-    if (parts.length < 2) {
-      return '';
-    }
-
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-    return payload.email || payload.user || '';
+    const payload = parseIdTokenPayload(token);
+    if (typeof payload.email === 'string') return payload.email;
+    if (typeof payload.user === 'string') return payload.user;
+    return '';
   } catch {
     return '';
   }
 }
 
-export async function getCodexAuthStatus() {
+export async function getCodexAuthStatus(): Promise<AgentAuthStatus> {
   if (getOpenAiBaseUrl()) {
     return { authenticated: true, canReauth: false, label: '' };
   }

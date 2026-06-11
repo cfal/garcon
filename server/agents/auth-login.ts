@@ -1,6 +1,20 @@
 import os from 'os';
 import { spawn as ptySpawn } from 'bun-pty';
+import type { IPty, IExitEvent } from 'bun-pty';
 import { getClaudeBinary, getCursorBinary } from "../config.js";
+
+type LoginCommand = [string, ...string[]];
+
+interface DeviceAuthInfo {
+  url: string;
+  code: string;
+}
+
+interface AuthLoginLaunchResult {
+  launched: boolean;
+  alreadyRunning: boolean;
+  deviceAuth?: DeviceAuthInfo;
+}
 
 const CLAUDE_LOGIN_WRAPPER = `
 delete process.env.CLAUDECODE;
@@ -16,12 +30,12 @@ const child = Bun.spawn({
 process.exit(await child.exited);
 `.trim();
 
-function getClaudeLoginCommand() {
+function getClaudeLoginCommand(): LoginCommand {
   // Removes CLAUDECODE inside the spawned process because bun-pty merges its env with the parent env.
   return [process.execPath, '-e', CLAUDE_LOGIN_WRAPPER, getClaudeBinary(), 'auth', 'login'];
 }
 
-function getLoginCommand(agentId) {
+function getLoginCommand(agentId: string): LoginCommand | null {
   if (agentId === 'claude') return getClaudeLoginCommand();
   if (agentId === 'codex') return ['codex', 'login', '--device-auth'];
   if (agentId === 'cursor') return [getCursorBinary(), 'login'];
@@ -34,12 +48,12 @@ const DEVICE_AUTH_AGENTS = new Set(['codex']);
 const DEVICE_AUTH_TIMEOUT_MS = 10_000;
 
 // Strip ANSI escape sequences so the regex can match clean text.
-function stripAnsi(str) {
+function stripAnsi(str: string): string {
   return str.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 }
 
 // Parses device auth URL and one-time code from CLI output.
-export function parseDeviceAuth(raw) {
+export function parseDeviceAuth(raw: string): DeviceAuthInfo | null {
   const output = stripAnsi(raw);
   const urlMatch = output.match(/https:\/\/\S+/);
   const codeMatch = output.match(/^\s+([A-Z0-9]+-[A-Z0-9]+)\s*$/m);
@@ -50,7 +64,7 @@ export function parseDeviceAuth(raw) {
 }
 
 // Reads PTY output via onData until device auth info is found or timeout.
-function readDeviceAuthFromPty(proc) {
+function readDeviceAuthFromPty(proc: IPty): Promise<DeviceAuthInfo | null> {
   return new Promise((resolve) => {
     let output = '';
     const timeout = setTimeout(() => resolve(null), DEVICE_AUTH_TIMEOUT_MS);
@@ -66,13 +80,17 @@ function readDeviceAuthFromPty(proc) {
   });
 }
 
-function buildLoginEnv(agentId) {
-  const env = {
-    ...process.env,
+function buildLoginEnv(agentId: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value;
+  }
+
+  Object.assign(env, {
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
     FORCE_COLOR: '3',
-  };
+  });
 
   // Claude refuses to launch inside another Claude Code session.
   if (agentId === 'claude') {
@@ -83,9 +101,9 @@ function buildLoginEnv(agentId) {
 }
 
 export class AgentAuthLoginManager {
-  #sessions = new Map();
+  #sessions = new Map<string, IPty>();
 
-  async launch(agentId) {
+  async launch(agentId: string): Promise<AuthLoginLaunchResult> {
     const command = getLoginCommand(agentId);
     if (!command) {
       throw new Error(`Agent does not support UI login: ${agentId}`);
@@ -101,7 +119,7 @@ export class AgentAuthLoginManager {
     return { launched: true, alreadyRunning: false, deviceAuth };
   }
 
-  #spawnPty(agentId, command) {
+  #spawnPty(agentId: string, command: LoginCommand): IPty {
     const [binary, ...args] = command;
     const proc = ptySpawn(binary, args, {
       name: 'xterm-256color',
@@ -112,7 +130,7 @@ export class AgentAuthLoginManager {
     });
 
     this.#sessions.set(agentId, proc);
-    proc.onExit((exit) => {
+    proc.onExit((exit: IExitEvent) => {
       this.#sessions.delete(agentId);
       if (exit.exitCode !== 0) {
         console.warn(`agents: ${agentId} auth login exited with code ${exit.exitCode}${exit.signal ? ` (${exit.signal})` : ''}`);
@@ -125,6 +143,6 @@ export class AgentAuthLoginManager {
 
 const agentAuthLogin = new AgentAuthLoginManager();
 
-export function launchAgentAuthLogin(agentId) {
+export function launchAgentAuthLogin(agentId: string): Promise<AuthLoginLaunchResult> {
   return agentAuthLogin.launch(agentId);
 }
