@@ -7,9 +7,11 @@ import path from 'path';
 import { randomBytes } from 'crypto';
 import { getConfigDir } from '../config.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { TelegramBotIdentity, TelegramResolvedRecipient } from './telegram.js';
 
 const TELEGRAM_LINK_TTL_MS = 10 * 60 * 1000;
+const TELEGRAM_SETTINGS_WRITE_LOCK_KEY = 'telegram-settings';
 
 interface TelegramSecrets {
   botToken: string;
@@ -112,7 +114,7 @@ function defaultStorePath(): string {
 export class TelegramSettingsStore extends EventEmitter {
   #filePath: string;
   #snapshot: NotificationSecretsSnapshot = emptySnapshot();
-  #writeLock = Promise.resolve();
+  #writeLock = new KeyedPromiseLock();
 
   constructor(filePath = defaultStorePath()) {
     super();
@@ -253,16 +255,7 @@ export class TelegramSettingsStore extends EventEmitter {
   }
 
   async #withLock<T>(fn: () => Promise<T>): Promise<T> {
-    let release!: () => void;
-    const next = new Promise<void>((resolve) => { release = resolve; });
-    const prev = this.#writeLock;
-    this.#writeLock = next;
-    await prev;
-    try {
-      return await fn();
-    } finally {
-      release();
-    }
+    return this.#writeLock.runExclusive(TELEGRAM_SETTINGS_WRITE_LOCK_KEY, fn);
   }
 
   async #read(): Promise<NotificationSecretsSnapshot> {

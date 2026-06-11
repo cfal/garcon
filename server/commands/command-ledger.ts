@@ -1,6 +1,7 @@
 import path from 'path';
 import crypto from 'crypto';
 import { JsonFileStore } from '../lib/json-file-store.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 
 export type CommandLedgerStatus =
   | 'accepted'
@@ -84,7 +85,7 @@ export class CommandLedger {
   #store: JsonFileStore<LedgerFile>;
   #loaded = false;
   #records = new Map<string, CommandLedgerRecord>();
-  #locks = new Map<string, Promise<void>>();
+  #locks = new KeyedPromiseLock();
 
   constructor(workspaceDir: string) {
     const filePath = path.join(workspaceDir, 'command-ledger.json');
@@ -188,17 +189,6 @@ export class CommandLedger {
   }
 
   async #withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.#locks.get(key) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => { release = resolve; });
-    const chain = previous.then(() => current);
-    this.#locks.set(key, chain);
-    await previous;
-    try {
-      return await fn();
-    } finally {
-      release();
-      if (this.#locks.get(key) === chain) this.#locks.delete(key);
-    }
+    return this.#locks.runExclusive(key, fn);
   }
 }

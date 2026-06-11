@@ -7,6 +7,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
 import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
+import { KeyedPromiseLock } from '../lib/keyed-lock.ts';
 import {
   ChatNameStore,
   ChatOrderStore,
@@ -31,6 +32,8 @@ import {
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../common/chat-modes.ts';
+
+const SETTINGS_WRITE_LOCK_KEY = 'project-settings';
 
 function createEmpty() {
   return {
@@ -136,7 +139,7 @@ function sanitize(parsed) {
 export class SettingsStore extends EventEmitter {
   #cache = null;
   #workspaceDir;
-  #writeLock = Promise.resolve();
+  #writeLock = new KeyedPromiseLock();
   #chatNames;
   #uiSettings;
   #lastChatDefaults;
@@ -168,16 +171,7 @@ export class SettingsStore extends EventEmitter {
   // Serializes read-modify-write cycles so concurrent mutations cannot
   // clobber each other's changes to project-settings.json.
   async #withLock(fn) {
-    let release;
-    const next = new Promise((resolve) => { release = resolve; });
-    const prev = this.#writeLock;
-    this.#writeLock = next;
-    await prev;
-    try {
-      return await fn();
-    } finally {
-      release();
-    }
+    return this.#writeLock.runExclusive(SETTINGS_WRITE_LOCK_KEY, fn);
   }
 
   emitSessionNameChanged(chatId, title) { this.emit('session-name-changed', chatId, title); }
