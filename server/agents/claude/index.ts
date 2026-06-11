@@ -11,7 +11,8 @@ import type {
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { launchAgentAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
-import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
+import { loadClaudeChatMessages, getClaudePreviewFromNativePath } from './history-loader.js';
+import type { ChatMessage } from '../../../common/chat-types.js';
 import type { Agent, AgentRuntime } from '../types.js';
 import { buildClaudeEndpointRuntime } from './endpoint-runtime.js';
 
@@ -67,7 +68,22 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
     label: 'Claude',
     runtime: createClaudeRuntime(claude),
     transcript: {
-      ...EMPTY_TRANSCRIPT_SOURCE,
+      async loadMessages(session): Promise<ChatMessage[]> {
+        const nativePath = session.nativePath
+          ?? (session.agentSessionId
+            ? await createClaudeNativePath(session.projectPath, session.agentSessionId)
+            : null);
+        if (!nativePath) return [];
+        return loadClaudeChatMessages(nativePath) as Promise<ChatMessage[]>;
+      },
+      async getPreview(session) {
+        const nativePath = session.nativePath
+          ?? (session.agentSessionId
+            ? await createClaudeNativePath(session.projectPath, session.agentSessionId)
+            : null);
+        if (!nativePath) return null;
+        return getClaudePreviewFromNativePath(nativePath);
+      },
       async resolveNativePath(session) {
         if (!session.agentSessionId) return null;
         const candidate = await createClaudeNativePath(session.projectPath, session.agentSessionId);
