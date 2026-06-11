@@ -27,4 +27,25 @@ describe('getPort', () => {
 
     expect(getPort()).toBe(0);
   });
+
+  it('rejects missing CLI port values', () => {
+    delete process.env.GARCON_PORT;
+    process.argv = [...originalArgv, '--port'];
+
+    expect(() => getPort()).toThrow('--port requires a value');
+  });
+
+  it('rejects empty CLI port values', () => {
+    delete process.env.GARCON_PORT;
+    process.argv = [...originalArgv, '--port', ''];
+
+    expect(() => getPort()).toThrow('Invalid --port value');
+  });
+
+  it('rejects non-integer ports', () => {
+    process.env.GARCON_PORT = '3000.5';
+    process.argv = [...originalArgv];
+
+    expect(() => getPort()).toThrow('Invalid GARCON_PORT value');
+  });
 });
