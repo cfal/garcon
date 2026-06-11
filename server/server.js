@@ -135,6 +135,10 @@ export async function startServer() {
       chats: chatRegistry,
       queue,
       ledger: commandLedger,
+      settings,
+      metadata,
+      agents: agentRegistry,
+      pendingInputs,
     });
 
     // Telegram notifications wire themselves to agent and queue events.

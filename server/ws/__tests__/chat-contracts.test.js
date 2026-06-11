@@ -797,6 +797,7 @@ describe('chat WebSocket handler', () => {
 
   describe('dequeue-enqueue', () => {
     it('calls dequeueChat with chatId and entryId', async () => {
+      mockRegistry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/repo', model: 'opus' });
       await chatHandler.message(ws, {
         type: 'dequeue-enqueue',
         chatId: '123',
@@ -819,6 +820,7 @@ describe('chat WebSocket handler', () => {
 
   describe('queue-clear', () => {
     it('calls clearChatQueue', async () => {
+      mockRegistry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/repo', model: 'opus' });
       await chatHandler.message(ws, {
         type: 'queue-clear',
         chatId: '123',
@@ -829,6 +831,7 @@ describe('chat WebSocket handler', () => {
 
   describe('queue-pause', () => {
     it('calls pauseChatQueue', async () => {
+      mockRegistry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/repo', model: 'opus' });
       await chatHandler.message(ws, {
         type: 'queue-pause',
         chatId: '123',

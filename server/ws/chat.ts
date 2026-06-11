@@ -407,28 +407,22 @@ export class ChatHandler {
         if (typeof data.content !== 'string' || !data.content.trim()) {
           return writer.send(new WsFaultMessage('queue-enqueue requires non-empty string content'));
         }
-        await this.#queue.enqueueChat(chatId, data.content);
-        this.#queue.triggerDrain(chatId).catch((err: Error) => {
-          console.error('queue: enqueue drain error:', err.message);
-        });
+        await this.#commands.enqueueQueue({ chatId, content: data.content });
       } else if (data instanceof QueueDropRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         if (!data.entryId) {
           return writer.send(new WsFaultMessage('queue-dequeue requires entryId'));
         }
-        await this.#queue.dequeueChat(chatId, data.entryId);
+        await this.#commands.mutateQueue({ chatId, action: 'dequeue', entryId: data.entryId });
       } else if (data instanceof QueueClearRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
-        await this.#queue.clearChatQueue(chatId);
+        await this.#commands.mutateQueue({ chatId, action: 'clear' });
       } else if (data instanceof QueuePauseRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
-        await this.#queue.pauseChatQueue(chatId);
+        await this.#commands.mutateQueue({ chatId, action: 'pause' });
       } else if (data instanceof QueueResumeRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
-        await this.#queue.resumeChatQueue(chatId);
-        this.#queue.triggerDrain(chatId).catch((err: Error) => {
-          console.error('queue: resume drain error:', err.message);
-        });
+        await this.#commands.mutateQueue({ chatId, action: 'resume' });
       } else if (data instanceof QueueQueryRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         const queue = await this.#queue.readChatQueue(chatId);
