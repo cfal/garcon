@@ -26,6 +26,7 @@ describe('AppShellController', () => {
 		deps = {
 			upsertFromServer: vi.fn(),
 			setLoadingChats: vi.fn(),
+			notifyError: vi.fn(),
 		};
 		controller = new AppShellController(deps);
 	});
@@ -42,7 +43,7 @@ describe('AppShellController', () => {
 			expect(deps.setLoadingChats).toHaveBeenCalledWith(false);
 		});
 
-		it('sets loading false even on failure', async () => {
+		it('sets loading false and notifies on failure', async () => {
 			mockListChats.mockRejectedValue(new Error('network'));
 
 			await controller.fetchChats();
@@ -50,6 +51,7 @@ describe('AppShellController', () => {
 			expect(deps.setLoadingChats).toHaveBeenCalledWith(true);
 			expect(deps.setLoadingChats).toHaveBeenCalledWith(false);
 			expect(deps.upsertFromServer).not.toHaveBeenCalled();
+			expect(deps.notifyError).toHaveBeenCalledWith('Failed to refresh chats.');
 		});
 
 		it('upserts empty array when sessions field is missing', async () => {
@@ -72,11 +74,12 @@ describe('AppShellController', () => {
 			expect(deps.upsertFromServer).toHaveBeenCalledWith(sessions);
 		});
 
-		it('silently catches errors', async () => {
+		it('notifies when refresh fails', async () => {
 			mockListChats.mockRejectedValue(new Error('network'));
 
 			await expect(controller.quietRefresh()).resolves.toBeUndefined();
 			expect(deps.upsertFromServer).not.toHaveBeenCalled();
+			expect(deps.notifyError).toHaveBeenCalledWith('Failed to refresh chats.');
 		});
 
 		it('runs a follow-up fetch when refresh is requested during an in-flight fetch', async () => {
@@ -110,10 +113,12 @@ describe('AppShellController', () => {
 			expect(mockDeleteChat).toHaveBeenCalledWith('c-1');
 		});
 
-		it('silently catches errors', async () => {
+		it('notifies and refetches on failure', async () => {
 			mockDeleteChat.mockRejectedValue(new Error('fail'));
+			mockListChats.mockResolvedValue({ sessions: [], total: 0 });
 
 			await expect(controller.deleteChat('c-1')).resolves.toBeUndefined();
+			expect(deps.notifyError).toHaveBeenCalledWith('Failed to delete chat.');
 		});
 	});
 
@@ -126,10 +131,11 @@ describe('AppShellController', () => {
 			expect(mockUpdateSessionName).toHaveBeenCalledWith('c-1', 'New Title');
 		});
 
-		it('silently catches errors', async () => {
+		it('notifies on failure', async () => {
 			mockUpdateSessionName.mockRejectedValue(new Error('fail'));
 
 			await expect(controller.renameChat('c-1', 'Title')).resolves.toBeUndefined();
+			expect(deps.notifyError).toHaveBeenCalledWith('Failed to rename chat.');
 		});
 	});
 });

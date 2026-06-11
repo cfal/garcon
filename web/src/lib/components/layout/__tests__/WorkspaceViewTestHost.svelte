@@ -7,6 +7,7 @@
 		setSplitLayout,
 		setAppShell,
 		setWs,
+		setNotifications,
 	} from '$lib/context';
 	import type { AppTab } from '$lib/types/app';
 
@@ -92,6 +93,11 @@
 
 	setWs({
 		isConnected: false,
+	} as never);
+
+	setNotifications({
+		error() {},
+		info() {},
 	} as never);
 
 	function handleTabChange(_tab: AppTab): void {

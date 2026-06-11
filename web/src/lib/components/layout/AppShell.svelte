@@ -39,6 +39,7 @@
 		setLoadingChats: (v) => {
 			chatRuntime.isLoadingChats = v;
 		},
+		notifyError: (message) => notifications.error(message),
 	});
 
 	let isMobile = $state(false);

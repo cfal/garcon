@@ -49,6 +49,7 @@
 		initialColumn?: number;
 		showMarkdownViewButton?: boolean;
 		onRequestMarkdownView?: () => void;
+		onSaveError?: (error: unknown) => void;
 	}
 
 	let {
@@ -72,6 +73,7 @@
 		initialColumn,
 		showMarkdownViewButton = false,
 		onRequestMarkdownView,
+		onSaveError,
 	}: CodeEditorProps = $props();
 
 	let editorContainer: HTMLDivElement | undefined = $state();
@@ -272,6 +274,7 @@
 			setTimeout(() => (saveSuccess = false), 2000);
 		} catch (err) {
 			console.error('[CodeEditor] Save failed:', err);
+			onSaveError?.(err);
 			saveSuccess = false;
 		} finally {
 			saving = false;

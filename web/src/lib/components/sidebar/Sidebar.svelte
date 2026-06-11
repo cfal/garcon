@@ -9,7 +9,7 @@
 	import SavedSearchManagerDialog from './SavedSearchManagerDialog.svelte';
 	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
-	import { getAppShell, getReadReceiptOutbox } from '$lib/context';
+	import { getAppShell, getNotifications, getReadReceiptOutbox } from '$lib/context';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
@@ -94,6 +94,7 @@
 		onShowSettings,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
+	const notifications = getNotifications();
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const controller = new SidebarController({
 		get onQuietRefresh() {
@@ -172,6 +173,11 @@
 		onChatSelect(chatId);
 	}
 
+	function reportActionFailure(logMessage: string, userMessage: string, error: unknown): void {
+		console.error(logMessage, error);
+		notifications.error(userMessage);
+	}
+
 	async function handleTogglePinned(chatId: string) {
 		const chat = chats.find((s) => s.id === chatId);
 		const wasPinned = chat?.isPinned === true;
@@ -181,7 +187,7 @@
 				appShell.requestSidebarRecenterToSelected();
 			}
 		} catch (error) {
-			console.error('Failed to toggle pinned:', error);
+			reportActionFailure('Failed to toggle pinned:', m.notifications_pin_chat_failed(), error);
 		}
 	}
 
@@ -209,7 +215,11 @@
 				appShell.requestSidebarRecenterToSelected();
 			}
 		} catch (error) {
-			console.error('Failed to toggle archive:', error);
+			reportActionFailure(
+				'Failed to toggle archive:',
+				m.notifications_archive_chat_failed(),
+				error,
+			);
 		}
 	}
 
@@ -307,7 +317,11 @@
 			await controller.quickMove(chatId, target);
 		},
 		(error, task) => {
-			console.error(`Failed to quick reorder ${task.list} chat order:`, error);
+			reportActionFailure(
+				`Failed to quick reorder ${task.list} chat order:`,
+				m.notifications_reorder_chats_failed(),
+				error,
+			);
 		},
 	);
 
@@ -375,7 +389,7 @@
 		try {
 			await controller.bulkTogglePin(ids);
 		} catch (error) {
-			console.error('Failed to bulk pin:', error);
+			reportActionFailure('Failed to bulk pin:', m.notifications_bulk_pin_failed(), error);
 		} finally {
 			isBulkOperating = false;
 			selection.exit();
@@ -389,7 +403,7 @@
 		try {
 			await controller.bulkTogglePin(ids);
 		} catch (error) {
-			console.error('Failed to bulk unpin:', error);
+			reportActionFailure('Failed to bulk unpin:', m.notifications_bulk_unpin_failed(), error);
 		} finally {
 			isBulkOperating = false;
 			selection.exit();
@@ -409,7 +423,7 @@
 				else onNewChat();
 			}
 		} catch (error) {
-			console.error('Failed to bulk archive:', error);
+			reportActionFailure('Failed to bulk archive:', m.notifications_bulk_archive_failed(), error);
 		} finally {
 			isBulkOperating = false;
 			selection.exit();
@@ -423,7 +437,11 @@
 		try {
 			await controller.bulkToggleArchive(ids);
 		} catch (error) {
-			console.error('Failed to bulk unarchive:', error);
+			reportActionFailure(
+				'Failed to bulk unarchive:',
+				m.notifications_bulk_unarchive_failed(),
+				error,
+			);
 		} finally {
 			isBulkOperating = false;
 			selection.exit();
@@ -458,7 +476,7 @@
 			}
 			await controller.bulkDelete(ids);
 		} catch (error) {
-			console.error('Failed to bulk delete:', error);
+			reportActionFailure('Failed to bulk delete:', m.notifications_bulk_delete_failed(), error);
 		} finally {
 			isBulkOperating = false;
 			selection.exit();
@@ -478,7 +496,7 @@
 			const resultChatId = await controller.forkChat(sourceChatId);
 			onChatSelect(resultChatId);
 		} catch (error) {
-			console.error('Failed to fork chat:', error);
+			reportActionFailure('Failed to fork chat:', m.notifications_fork_chat_failed(), error);
 		}
 	}
 
@@ -488,7 +506,11 @@
 		try {
 			await readReceiptOutbox.markChatsReadNow(visibleUnreadChatIds);
 		} catch (error) {
-			console.error('Failed to mark chats read:', error);
+			reportActionFailure(
+				'Failed to mark chats read:',
+				m.notifications_mark_all_read_failed(),
+				error,
+			);
 		} finally {
 			isMarkingAllRead = false;
 		}
@@ -618,7 +640,11 @@
 			await deleteSavedSearchApi(id);
 			searchState.setSavedSearches(searchState.savedSearches.filter((s) => s.id !== id));
 		} catch (error) {
-			console.error('Failed to delete saved search:', error);
+			reportActionFailure(
+				'Failed to delete saved search:',
+				m.notifications_delete_saved_search_failed(),
+				error,
+			);
 		}
 	}
 
@@ -629,7 +655,11 @@
 		try {
 			await reorderSavedSearchesApi(oldOrder, newOrder);
 		} catch (error) {
-			console.error('Failed to reorder saved searches:', error);
+			reportActionFailure(
+				'Failed to reorder saved searches:',
+				m.notifications_reorder_saved_searches_failed(),
+				error,
+			);
 			// Rollback on failure.
 			searchState.setSavedSearches(oldOrder.map((id) => byId.get(id)!).filter(Boolean));
 		}
@@ -642,7 +672,11 @@
 			const res = await getSavedSearches();
 			searchState.setSavedSearches(res.savedSearches);
 		} catch (err) {
-			console.error('Failed to load saved searches:', err);
+			reportActionFailure(
+				'Failed to load saved searches:',
+				m.notifications_load_saved_searches_failed(),
+				err,
+			);
 		}
 	});
 

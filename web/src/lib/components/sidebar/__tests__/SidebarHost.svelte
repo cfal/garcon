@@ -1,14 +1,21 @@
 <script lang="ts">
 	import Sidebar from '../Sidebar.svelte';
-	import { setAppShell, setModelCatalog, setReadReceiptOutbox, setSplitLayout } from '$lib/context';
+	import {
+		setAppShell,
+		setModelCatalog,
+		setNotifications,
+		setReadReceiptOutbox,
+		setSplitLayout,
+	} from '$lib/context';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarHostProps {
 		chats?: ChatSessionRecord[];
 		isMobile?: boolean;
+		notifications?: unknown;
 	}
 
-	let { chats = [], isMobile = false }: SidebarHostProps = $props();
+	let { chats = [], isMobile = false, notifications }: SidebarHostProps = $props();
 
 	setAppShell({
 		onSidebarRecenterRequested() {
@@ -32,6 +39,17 @@
 			return Promise.resolve();
 		},
 	} as never);
+
+	function getNotificationsContext(): unknown {
+		return (
+			notifications ?? {
+				error() {},
+				info() {},
+			}
+		);
+	}
+
+	setNotifications(getNotificationsContext() as never);
 
 	setModelCatalog({
 		supportsFork() {

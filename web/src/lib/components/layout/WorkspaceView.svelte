@@ -1,7 +1,13 @@
 <script lang="ts">
 	import type { AppTab } from '$lib/types/app';
 	import { untrack } from 'svelte';
-	import { getChatSessions, getLocalSettings, getSplitLayout, getAppShell } from '$lib/context';
+	import {
+		getChatSessions,
+		getLocalSettings,
+		getSplitLayout,
+		getAppShell,
+		getNotifications,
+	} from '$lib/context';
 	import { deleteChat } from '$lib/api/chats';
 	import Menu from '@lucide/svelte/icons/menu';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
@@ -55,6 +61,7 @@
 	const localSettings = getLocalSettings();
 	const splitLayout = getSplitLayout();
 	const appShell = getAppShell();
+	const notifications = getNotifications();
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
@@ -121,6 +128,7 @@
 			appShell.quietRefreshChats();
 		} catch (err) {
 			console.error('[WorkspaceView] Failed to delete chat:', err);
+			notifications.error(m.notifications_delete_chat_failed());
 		}
 	}
 

@@ -5,10 +5,12 @@
 import { listChats, deleteChat } from '$lib/api/chats.js';
 import { updateSessionName } from '$lib/api/settings.js';
 import type { ChatSession } from '$lib/types/session.js';
+import * as m from '$lib/paraglide/messages.js';
 
 export interface AppShellControllerDeps {
 	upsertFromServer: (sessions: ChatSession[]) => void;
 	setLoadingChats: (loading: boolean) => void;
+	notifyError?: (message: string) => void;
 }
 
 export class AppShellController {
@@ -28,6 +30,7 @@ export class AppShellController {
 		} catch (err) {
 			const prefix = showLoading ? 'Failed to fetch chats' : 'Quiet refresh failed';
 			console.error(`[AppShellController] ${prefix}:`, err);
+			this.deps.notifyError?.(m.notifications_refresh_chats_failed());
 		} finally {
 			if (showLoading) this.deps.setLoadingChats(false);
 		}
@@ -72,6 +75,7 @@ export class AppShellController {
 			await deleteChat(chatId);
 		} catch (err) {
 			console.error('[AppShellController] Delete failed:', err);
+			this.deps.notifyError?.(m.notifications_delete_chat_failed());
 			// Rehydrate so the chat that failed to delete reappears.
 			void this.quietRefresh();
 		}
@@ -82,6 +86,7 @@ export class AppShellController {
 			await updateSessionName(chatId, newTitle);
 		} catch (err) {
 			console.error('[AppShellController] Rename failed:', err);
+			this.deps.notifyError?.(m.notifications_rename_chat_failed());
 		}
 	}
 }

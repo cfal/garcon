@@ -1,9 +1,11 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import CodeEditor from './CodeEditor.svelte';
-	import { getLocalSettings } from '$lib/context';
+	import { getLocalSettings, getNotifications } from '$lib/context';
+	import * as m from '$lib/paraglide/messages.js';
 
 	const localSettings = getLocalSettings();
+	const notifications = getNotifications();
 
 	interface SelectedFile {
 		name: string;
@@ -75,6 +77,7 @@
 				onToggleExpand={toggleMaximize}
 				{showMarkdownViewButton}
 				{onRequestMarkdownView}
+				onSaveError={() => notifications.error(m.notifications_save_file_failed())}
 			/>
 		{/if}
 	</Dialog.Content>
