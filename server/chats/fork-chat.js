@@ -7,6 +7,7 @@ import {
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../common/chat-modes.ts';
+import { extractFirstLine } from '../lib/text.js';
 
 function escapeRegExp(input) {
   return String(input).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -33,13 +34,6 @@ export function assertJsonlValid(content, targetPath) {
 function buildForkDestination(sourcePath, newAgentSessionId) {
   const dir = path.dirname(sourcePath);
   return path.join(dir, `${newAgentSessionId}.jsonl`);
-}
-
-function extractFirstLine(text) {
-  if (!text) return '';
-  const nl = text.indexOf('\n');
-  if (nl < 0) return text.trim();
-  return text.slice(0, nl).trim();
 }
 
 function normalizeNextForkOrdinal(value) {

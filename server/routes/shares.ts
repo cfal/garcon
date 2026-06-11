@@ -7,6 +7,7 @@ import type { IShareStore } from '../chats/share-store.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ShareChatResponse, ShareStatusResponse, GetSharedChatResponse, RevokeShareResponse } from '../../common/share-types.ts';
 import { renderSharedChatText } from '../chats/share-transcript.ts';
+import { extractFirstLine } from '../lib/text.js';
 
 type RouteHandler = (request: Request, url: URL) => Promise<Response> | Response;
 type RouteMap = Record<string, Record<string, RouteHandler>>;
@@ -22,13 +23,6 @@ interface MetadataDep {
 interface HistoryCacheDep {
   ensureLoaded(chatId: string): Promise<void>;
   getPaginatedMessages(chatId: string, limit: number, offset: number): unknown;
-}
-
-function extractFirstLine(text: string | null | undefined): string {
-  if (!text) return '';
-  const nl = text.indexOf('\n');
-  if (nl < 0) return text.trim();
-  return text.slice(0, nl).trim();
 }
 
 function extractLlmTokenFromPath(pathname: string): string | null {

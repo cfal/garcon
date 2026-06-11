@@ -24,6 +24,7 @@ import { normalizeQueueState } from '../../common/queue-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { isWithinProjectBase } from '../lib/path-boundary.js';
+import { extractFirstLine } from '../lib/text.js';
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
@@ -135,13 +136,6 @@ function createdAtFromId(id: string): string | null {
   const ts = parseInt(msString, 10);
   if (!Number.isFinite(ts) || ts <= 0) return null;
   return new Date(ts).toISOString();
-}
-
-function extractFirstLine(text: string | null | undefined): string {
-  if (!text) return '';
-  const nl = text.indexOf('\n');
-  if (nl < 0) return text.trim();
-  return text.slice(0, nl).trim();
 }
 
 function jsonError(error: string, status: number, errorCode: CommandErrorCode = 'VALIDATION_FAILED', retryable = false, details?: string): Response {
