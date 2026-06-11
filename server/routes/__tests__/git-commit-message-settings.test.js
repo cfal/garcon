@@ -32,6 +32,8 @@ const agents = {
     'direct-openai-compatible': { authenticated: false },
     'direct-openai-responses-compatible': { authenticated: false },
   })),
+  getAgentReadinessMap: mock(() => Promise.resolve({})),
+  getAgentCatalogEntries: mock(() => Promise.resolve([])),
   getModels: mock(() => Promise.resolve([])),
   hasAgent: mock((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId)),
 };
@@ -70,6 +72,8 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     parseJsonBody.mockClear();
     generateCommitMessageForFiles.mockClear();
     agents.getAgentAuthStatusMap.mockClear();
+    agents.getAgentReadinessMap.mockClear();
+    agents.getAgentCatalogEntries.mockClear();
     agents.getModels.mockClear();
     agents.hasAgent.mockClear();
     agents.hasAgent.mockImplementation((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId));

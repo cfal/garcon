@@ -15,6 +15,9 @@ import { parseJsonBody } from '../../lib/http-request.js';
 const ctx = {
   agents: {
     runSingleQuery: mock(() => Promise.resolve('feat: auto commit')),
+    getAgentAuthStatusMap: mock(() => Promise.resolve({})),
+    getAgentReadinessMap: mock(() => Promise.resolve({})),
+    getAgentCatalogEntries: mock(() => Promise.resolve([])),
   },
   settings: {
     getUiSettings: mock(() => Promise.resolve({})),

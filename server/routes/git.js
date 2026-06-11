@@ -1,7 +1,7 @@
 import { createGitService } from '../git/git-service.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
+import { resolveGenerationContext } from '../settings/generation-config-source.ts';
 import { isAgentId } from '../../common/agents.ts';
 import { withJsonBody } from '../lib/json-route.js';
 import {
@@ -30,44 +30,12 @@ function isAllowedGenerationAgent(agents, value) {
   return true;
 }
 
-async function getAgentCatalog(agents) {
-  try {
-    return { agents: await agents?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
-  } catch {
-    return null;
-  }
-}
-
 async function resolveCommitMessageConfig(settings, agents) {
   const ui = await settings?.getUiSettings?.() ?? {};
-  const authByAgent = await agents?.getAgentAuthStatusMap?.() ?? {
-    claude: { authenticated: false },
-    codex: { authenticated: false },
-    opencode: { authenticated: false },
-    amp: { authenticated: false },
-    factory: { authenticated: false },
-  };
-  const [readinessByAgent, catalog, opencodeModels, factoryModels] = await Promise.all([
-    agents?.getAgentReadinessMap?.() ?? {},
-    getAgentCatalog(agents),
-    agents?.getModels?.('opencode') ?? [],
-    agents?.getModels?.('factory') ?? [],
-  ]);
-  const catalogModels = Object.fromEntries(
-    (catalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
-  );
+  const generationContext = await resolveGenerationContext(agents);
   return resolveEffectiveGenerationUiConfig({
     persisted: ui?.commitMessage,
-    authByAgent,
-    modelsByAgent: {
-      claude: CLAUDE_MODELS.OPTIONS,
-      codex: CODEX_MODELS.OPTIONS,
-      opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
-      amp: AMP_MODELS.OPTIONS,
-      factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
-      ...catalogModels,
-    },
-    readinessByAgent,
+    ...generationContext,
   });
 }
 

@@ -1,5 +1,5 @@
 import { getProjectBasePath } from '../config.js';
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
+import { resolveGenerationContext } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { withJsonBody } from '../lib/json-route.js';
 
@@ -33,27 +33,7 @@ function asPlainObject(value) {
 
 export async function buildRemoteSettingsSnapshot({ settings, agents, telegramSettings }) {
   const settingsSource = await settings.getRemoteSettingsSnapshotSource();
-
-  const getAgentCatalog = async () => {
-    try {
-      return { agents: await agents.getAgentCatalogEntries(), apiProviders: [] };
-    } catch {
-      return null;
-    }
-  };
-
-  const [
-    authByAgent, readinessByAgent, agentCatalog, opencodeModels, factoryModels,
-  ] = await Promise.all([
-    agents.getAgentAuthStatusMap(),
-    agents.getAgentReadinessMap(),
-    getAgentCatalog(),
-    agents.getModels('opencode'),
-    agents.getModels('factory'),
-  ]);
-  const catalogModels = Object.fromEntries(
-    (agentCatalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
-  );
+  const generationContext = await resolveGenerationContext(agents);
 
   const [
     version, ui, paths, pinnedChatIds, lastAgentId, lastProjectPath, lastModel,
@@ -93,27 +73,14 @@ export async function buildRemoteSettingsSnapshot({ settings, agents, telegramSe
       settings.getLastModelProtocol(),
     ]);
 
-  const modelsByAgent = {
-    claude: CLAUDE_MODELS.OPTIONS,
-    codex: CODEX_MODELS.OPTIONS,
-    opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
-    amp: AMP_MODELS.OPTIONS,
-    factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
-    ...catalogModels,
-  };
-
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.chatTitle),
-      authByAgent,
-      modelsByAgent,
-      readinessByAgent,
+      ...generationContext,
     }),
     commitMessage: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.commitMessage),
-      authByAgent,
-      modelsByAgent,
-      readinessByAgent,
+      ...generationContext,
     }),
   };
 

@@ -1,7 +1,7 @@
 // Automatic chat title generation. Runs a one-shot LLM query to
 // produce a concise title from the first user prompt, then persists
 // via setSessionName (which emits 'session-name-changed' for broadcast).
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
+import { resolveGenerationContext } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 
 // Modified from Open WebUI
@@ -40,41 +40,10 @@ export async function maybeGenerateChatTitle({ chatId, projectPath, firstPrompt,
   if (!firstPrompt?.trim()) return;
 
   const ui = await settings.getUiSettings();
-  const getAgentCatalog = async () => {
-    try {
-      return { agents: await agents?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
-    } catch {
-      return null;
-    }
-  };
-  const [authByAgent, readinessByAgent, catalog, opencodeModels, factoryModels] = await Promise.all([
-    agents?.getAgentAuthStatusMap?.() ?? Promise.resolve({
-      claude: { authenticated: false },
-      codex: { authenticated: false },
-      opencode: { authenticated: false },
-      amp: { authenticated: false },
-      factory: { authenticated: false },
-    }),
-    agents?.getAgentReadinessMap?.() ?? Promise.resolve({}),
-    getAgentCatalog(),
-    agents?.getModels?.('opencode') ?? Promise.resolve([]),
-    agents?.getModels?.('factory') ?? Promise.resolve([]),
-  ]);
-  const catalogModels = Object.fromEntries(
-    (catalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
-  );
+  const generationContext = await resolveGenerationContext(agents);
   const cfg = resolveEffectiveGenerationConfig({
     persisted: ui?.chatTitle,
-    authByAgent,
-    modelsByAgent: {
-      claude: CLAUDE_MODELS.OPTIONS,
-      codex: CODEX_MODELS.OPTIONS,
-      opencode: Array.isArray(opencodeModels) ? opencodeModels : [],
-      amp: AMP_MODELS.OPTIONS,
-      factory: Array.isArray(factoryModels) ? factoryModels : FACTORY_MODELS.OPTIONS,
-      ...catalogModels,
-    },
-    readinessByAgent,
+    ...generationContext,
   });
   if (!cfg.enabled) return;
 
