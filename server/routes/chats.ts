@@ -21,6 +21,7 @@ import {
   runOptionsFromCommandRequest,
 } from '../commands/chat-command-service.js';
 import { normalizeQueueState } from '../../common/queue-state.ts';
+import { normalizeTags } from '../../common/tags.ts';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { isWithinProjectBase } from '../lib/path-boundary.js';
 import type {
@@ -111,29 +112,6 @@ interface PendingInputsDep {
   reconcile(chatId: string): Promise<void>;
   listForChat(chatId: string): unknown[];
   clearChat(chatId: string, reason?: 'persisted' | 'chat-removed'): void;
-}
-
-function normalizeTagSlug(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-]/g, '')
-    .replace(/-{2,}/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
-function normalizeTags(raw: unknown[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const item of raw) {
-    if (typeof item !== 'string') continue;
-    const tag = normalizeTagSlug(item);
-    if (!tag || seen.has(tag)) continue;
-    seen.add(tag);
-    result.push(tag);
-  }
-  return result.sort();
 }
 
 async function isGitRepository(projectPath: string): Promise<boolean> {
