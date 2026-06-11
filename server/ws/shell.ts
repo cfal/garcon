@@ -1,8 +1,17 @@
 import os from 'os';
 import { spawn as ptySpawn } from 'bun-pty';
+import type { IPty } from 'bun-pty';
 import { sendWebSocketJson } from './utils.js';
 import { getUserShell } from '../config.js';
-import { parseShellClientMessage, shellError, shellExit, shellOutput } from '../../common/shell-ws.ts';
+import {
+  parseShellClientMessage,
+  shellError,
+  shellExit,
+  shellOutput,
+  type ShellInitRequest,
+  type ShellInputRequest,
+  type ShellResizeRequest,
+} from '../../common/shell-ws.ts';
 import {
   assertWithinProjectBase,
   isProjectBoundaryError,
@@ -12,20 +21,71 @@ import {
 
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 
-class PtySessionStore {
-  #sessions = new Map();
+interface ShellSocketState {
+  shellProcess: IPty | null;
+  ptySessionKey: string | null;
+}
 
-  get(key) { return this.#sessions.get(key) ?? null; }
-  set(key, session) { this.#sessions.set(key, session); }
-  delete(key) { this.#sessions.delete(key); }
-  clear() { this.#sessions.clear(); }
-  entries() { return this.#sessions.entries(); }
+interface ShellWebSocketData {
+  pathname?: string;
+  shellState?: ShellSocketState;
+}
+
+type ShellWebSocket = import('bun').ServerWebSocket<ShellWebSocketData>;
+
+interface PtySession {
+  pty: IPty;
+  ws: ShellWebSocket | null;
+  buffer: string[];
+  timeoutId: ReturnType<typeof setTimeout> | null;
+  projectPath: string;
+}
+
+interface ShellHandler {
+  open(ws: ShellWebSocket): void;
+  message(ws: ShellWebSocket, data: unknown): Promise<void>;
+  close(ws: ShellWebSocket, code?: number, reason?: string): void;
+}
+
+interface StartSessionOptions {
+  ptySessionKey: string;
+  projectPath: string;
+  initialCommand?: string;
+  cols: number;
+  rows: number;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function buildPtyEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value;
+  }
+  return {
+    ...env,
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    FORCE_COLOR: '3',
+  };
+}
+
+class PtySessionStore {
+  #sessions = new Map<string, PtySession>();
+
+  get(key: string): PtySession | null { return this.#sessions.get(key) ?? null; }
+  set(key: string, session: PtySession): void { this.#sessions.set(key, session); }
+  delete(key: string): void { this.#sessions.delete(key); }
+  clear(): void { this.#sessions.clear(); }
+  entries(): IterableIterator<[string, PtySession]> { return this.#sessions.entries(); }
 }
 
 export class ShellManager {
   #sessions = new PtySessionStore();
 
-  #getShellState(ws) {
+  #getShellState(ws: ShellWebSocket): ShellSocketState {
     if (!ws.data.shellState) {
       ws.data.shellState = {
         shellProcess: null,
@@ -35,7 +95,7 @@ export class ShellManager {
     return ws.data.shellState;
   }
 
-  createHandler() {
+  createHandler(): ShellHandler {
     return {
       open: (ws) => this.#handleOpen(ws),
       message: (ws, data) => this.#handleMessage(ws, data),
@@ -43,14 +103,14 @@ export class ShellManager {
     };
   }
 
-  shutdown() {
+  shutdown(): void {
     for (const [ptySessionKey, session] of this.#sessions.entries()) {
       this.#killSession(ptySessionKey, session);
     }
     this.#sessions.clear();
   }
 
-  #killSession(ptySessionKey, session) {
+  #killSession(ptySessionKey: string, session: PtySession): void {
     if (session.timeoutId) {
       clearTimeout(session.timeoutId);
       session.timeoutId = null;
@@ -59,18 +119,17 @@ export class ShellManager {
       try {
         session.pty.kill();
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn('shell: failed to kill PTY session:', ptySessionKey, message);
+        console.warn('shell: failed to kill PTY session:', ptySessionKey, errorMessage(error));
       }
     }
   }
 
-  #handleOpen(ws) {
+  #handleOpen(ws: ShellWebSocket): void {
     console.log('shell: client connected');
     this.#getShellState(ws);
   }
 
-  async #handleMessage(ws, data) {
+  async #handleMessage(ws: ShellWebSocket, data: unknown): Promise<void> {
     const message = parseShellClientMessage(data);
     if (!message) {
       sendWebSocketJson(ws, shellError('Invalid shell message'));
@@ -87,14 +146,15 @@ export class ShellManager {
         this.#handleResize(ws, message);
       }
     } catch (error) {
-      console.error('shell: websocket error:', error.message);
-      sendWebSocketJson(ws, shellOutput(`\r\n\x1b[31mError: ${error.message}\x1b[0m\r\n`));
+      const message = errorMessage(error);
+      console.error('shell: websocket error:', message);
+      sendWebSocketJson(ws, shellOutput(`\r\n\x1b[31mError: ${message}\x1b[0m\r\n`));
     }
   }
 
-  async #handleInit(ws, message) {
+  async #handleInit(ws: ShellWebSocket, message: ShellInitRequest): Promise<void> {
     const shellState = this.#getShellState(ws);
-    let projectPath;
+    let projectPath: string;
     try {
       projectPath = assertWithinProjectBase(message.projectPath || process.cwd());
     } catch (error) {
@@ -137,11 +197,19 @@ export class ShellManager {
     });
   }
 
-  #attachExistingSession(ws, shellState, ptySessionKey, existingSession) {
+  #attachExistingSession(
+    ws: ShellWebSocket,
+    shellState: ShellSocketState,
+    ptySessionKey: string,
+    existingSession: PtySession,
+  ): void {
     console.log('shell: reconnecting to existing PTY session:', ptySessionKey);
     shellState.shellProcess = existingSession.pty;
 
-    clearTimeout(existingSession.timeoutId);
+    if (existingSession.timeoutId) {
+      clearTimeout(existingSession.timeoutId);
+      existingSession.timeoutId = null;
+    }
 
     sendWebSocketJson(ws, shellOutput('\x1b[36m[Reconnected to existing session]\x1b[0m\r\n'));
 
@@ -155,7 +223,11 @@ export class ShellManager {
     existingSession.ws = ws;
   }
 
-  #startSession(ws, shellState, { ptySessionKey, projectPath, initialCommand, cols, rows }) {
+  #startSession(
+    ws: ShellWebSocket,
+    shellState: ShellSocketState,
+    { ptySessionKey, projectPath, initialCommand, cols, rows }: StartSessionOptions,
+  ): void {
     console.log('shell: starting in:', projectPath);
     if (initialCommand) {
       console.log('shell: initial command:', initialCommand);
@@ -164,16 +236,11 @@ export class ShellManager {
     sendWebSocketJson(ws, shellOutput(`\x1b[36mStarting terminal in: ${projectPath}\x1b[0m\r\n`));
 
     try {
-      const ptyEnv = {
-        ...process.env,
-        TERM: 'xterm-256color',
-        COLORTERM: 'truecolor',
-        FORCE_COLOR: '3',
-      };
+      const ptyEnv = buildPtyEnv();
 
-      let shell;
-      let shellArgs;
-      let shellCwd;
+      let shell: string;
+      let shellArgs: string[];
+      let shellCwd: string;
       if (initialCommand) {
         if (os.platform() === 'win32') {
           shell = 'powershell.exe';
@@ -211,11 +278,11 @@ export class ShellManager {
       this.#wirePtySession(shellState, ptySessionKey, shellProcess);
     } catch (spawnError) {
       console.error('shell: error spawning process:', spawnError);
-      sendWebSocketJson(ws, shellOutput(`\r\n\x1b[31mError: ${spawnError.message}\x1b[0m\r\n`));
+      sendWebSocketJson(ws, shellOutput(`\r\n\x1b[31mError: ${errorMessage(spawnError)}\x1b[0m\r\n`));
     }
   }
 
-  #wirePtySession(shellState, ptySessionKey, shellProcess) {
+  #wirePtySession(shellState: ShellSocketState, ptySessionKey: string, shellProcess: IPty): void {
     shellProcess.onData((chunk) => {
       const session = this.#sessions.get(ptySessionKey);
       if (!session) return;
@@ -234,10 +301,11 @@ export class ShellManager {
 
     shellProcess.onExit((exitCode) => {
       console.log('shell: process exited with code:', exitCode.exitCode, 'signal:', exitCode.signal);
+      const signal = typeof exitCode.signal === 'string' ? exitCode.signal : undefined;
       const session = this.#sessions.get(ptySessionKey);
       if (session && session.ws) {
-        sendWebSocketJson(session.ws, shellOutput(`\r\n\x1b[33mProcess exited with code ${exitCode.exitCode}${exitCode.signal ? ` (${exitCode.signal})` : ''}\x1b[0m\r\n`));
-        sendWebSocketJson(session.ws, shellExit(exitCode.exitCode, exitCode.signal));
+        sendWebSocketJson(session.ws, shellOutput(`\r\n\x1b[33mProcess exited with code ${exitCode.exitCode}${signal ? ` (${signal})` : ''}\x1b[0m\r\n`));
+        sendWebSocketJson(session.ws, shellExit(exitCode.exitCode, signal));
       }
       if (session && session.timeoutId) {
         clearTimeout(session.timeoutId);
@@ -250,7 +318,7 @@ export class ShellManager {
     });
   }
 
-  #handleInput(ws, message) {
+  #handleInput(ws: ShellWebSocket, message: ShellInputRequest): void {
     const shellState = this.#getShellState(ws);
     if (shellState.shellProcess && shellState.shellProcess.write) {
       try {
@@ -263,7 +331,7 @@ export class ShellManager {
     }
   }
 
-  #handleResize(ws, message) {
+  #handleResize(ws: ShellWebSocket, message: ShellResizeRequest): void {
     const shellState = this.#getShellState(ws);
     if (shellState.shellProcess && shellState.shellProcess.resize) {
       console.log('Terminal resize requested:', message.cols, 'x', message.rows);
@@ -271,7 +339,7 @@ export class ShellManager {
     }
   }
 
-  #handleClose(ws, code, reason) {
+  #handleClose(ws: ShellWebSocket, code?: number, reason?: string): void {
     console.log('shell: client disconnected', code ?? '', reason ? `(${reason})` : '');
     const shellState = this.#getShellState(ws);
     const { ptySessionKey } = shellState;
