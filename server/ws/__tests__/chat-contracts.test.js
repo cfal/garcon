@@ -711,7 +711,7 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('queue-enqueue', () => {
-    it('calls enqueueChat and drains with persisted chat settings', async () => {
+    it('calls enqueueChat and asks the queue to drain', async () => {
       mockRegistry.getChat.mockReturnValue({
         projectPath: '/repo',
         permissionMode: 'default',
@@ -724,16 +724,10 @@ describe('chat WebSocket handler', () => {
         content: 'queued text',
       });
       expect(mockQueue.enqueueChat).toHaveBeenCalledWith('123', 'queued text');
-      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123', {
-        permissionMode: 'default',
-        thinkingMode: 'none',
-        claudeThinkingMode: 'auto',
-        ampAgentMode: 'smart',
-        model: 'opus',
-      });
+      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123');
     });
 
-    it('normalizes invalid persisted drain settings before triggering the next turn', async () => {
+    it('delegates persisted drain settings to QueueManager', async () => {
       mockRegistry.getChat.mockReturnValue({
         projectPath: '/repo',
         permissionMode: 'bogus',
@@ -748,13 +742,7 @@ describe('chat WebSocket handler', () => {
         content: 'queued text',
       });
 
-      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123', {
-        permissionMode: 'default',
-        thinkingMode: 'none',
-        claudeThinkingMode: 'auto',
-        ampAgentMode: 'smart',
-        model: 'opus',
-      });
+      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123');
     });
 
     it('rejects empty content', async () => {
@@ -768,7 +756,7 @@ describe('chat WebSocket handler', () => {
       expect(payload).toMatchObject({ type: 'ws-fault' });
     });
 
-    it('fails fast when persisted drain settings are missing', async () => {
+    it('does not validate persisted settings in the websocket transport', async () => {
       mockRegistry.getChat.mockReturnValue({
         projectPath: '/repo',
         permissionMode: 'default',
@@ -779,10 +767,8 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
         content: 'queued text',
       });
-      const payload = lastSentPayload();
-      expect(mockQueue.triggerDrain).not.toHaveBeenCalled();
-      expect(payload).toMatchObject({ type: 'ws-fault' });
-      expect(payload.error).toContain('missing model');
+      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123');
+      expect(sendWebSocketJson).not.toHaveBeenCalled();
     });
   });
 
@@ -829,7 +815,7 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('queue-resume', () => {
-    it('calls resumeChatQueue and triggerDrain with persisted chat settings', async () => {
+    it('calls resumeChatQueue and asks the queue to drain', async () => {
       mockRegistry.getChat.mockReturnValue({
         projectPath: '/repo',
         permissionMode: 'default',
@@ -841,13 +827,7 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
       });
       expect(mockQueue.resumeChatQueue).toHaveBeenCalledWith('123');
-      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123', {
-        permissionMode: 'default',
-        thinkingMode: 'none',
-        claudeThinkingMode: 'auto',
-        ampAgentMode: 'smart',
-        model: 'opus',
-      });
+      expect(mockQueue.triggerDrain).toHaveBeenCalledWith('123');
     });
   });
 

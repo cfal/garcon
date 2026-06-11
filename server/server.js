@@ -25,7 +25,7 @@ import { forkChatFileCopy } from './chats/fork-chat.js';
 import { ChatRegistry } from './chats/store.js';
 import { ShareStore } from './chats/share-store.js';
 import { SettingsStore } from './settings/store.js';
-import { QueueManager } from './queue.js';
+import { QueueManager, queueDrainOptions } from './queue.js';
 import { PathCache } from './chats/path-cache.js';
 import { ShellManager } from './ws/shell.js';
 import { MetadataIndex } from './chats/metadata-store.js';
@@ -123,7 +123,12 @@ export async function startServer() {
     const shareStore = new ShareStore(workspaceDir);
     await shareStore.init();
 
-    const queue = new QueueManager(workspaceDir, agentRegistry, pendingInputs);
+    const queue = new QueueManager(
+      workspaceDir,
+      agentRegistry,
+      pendingInputs,
+      (chatId) => queueDrainOptions(chatId, chatRegistry),
+    );
     const commandLedger = new CommandLedger(workspaceDir);
     const chatCommands = new ChatCommandService({
       chats: chatRegistry,

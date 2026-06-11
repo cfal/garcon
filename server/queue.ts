@@ -8,7 +8,8 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
-import type { RunAgentTurnOptions } from "./agents/session-types.js";
+import { requireChatExecutionConfig, type RunAgentTurnOptions } from "./agents/session-types.js";
+import type { IChatRegistry } from './chats/store.js';
 import { writeJsonFileAtomic } from './lib/json-file-store.js';
 import { KeyedPromiseLock } from './lib/keyed-lock.js';
 
@@ -37,6 +38,21 @@ function optionsForQueuedTurn(options: RunAgentTurnOptions): RunAgentTurnOptions
   };
 }
 
+export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunAgentTurnOptions {
+  const entry = requireChatExecutionConfig(chatId, registry.getChat(chatId));
+  const chat = registry.getChat(chatId);
+  return {
+    permissionMode: entry.permissionMode,
+    thinkingMode: entry.thinkingMode,
+    claudeThinkingMode: entry.claudeThinkingMode,
+    ampAgentMode: entry.ampAgentMode,
+    model: entry.model,
+    apiProviderId: chat?.apiProviderId,
+    modelEndpointId: chat?.modelEndpointId,
+    modelProtocol: chat?.modelProtocol,
+  };
+}
+
 interface AgentTurnRunnerDep {
   runAgentTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   abortSession(chatId: string): Promise<boolean>;
@@ -59,6 +75,7 @@ type DispatchingCallback = (chatId: string, entryId: string, content: string) =>
 type SessionStoppedCallback = (chatId: string, success: boolean) => void;
 type ChatIdleCallback = (chatId: string) => void;
 type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunAgentTurnOptions) => void;
+type QueueDrainOptionsResolver = (chatId: string) => RunAgentTurnOptions;
 
 function requireTurnRunner(runner: AgentTurnRunnerDep | null): AgentTurnRunnerDep {
   if (!runner) {
@@ -73,14 +90,21 @@ export class QueueManager extends EventEmitter {
   #workspaceDir: string;
   #turnRunner: AgentTurnRunnerDep | null;
   #pendingInputs: PendingInputsDep | null;
+  #getDrainOptions: QueueDrainOptionsResolver;
 
   // turnRunner and pendingInputs are optional for backward compat in tests
   // that only exercise state management methods.
-  constructor(workspaceDir: string, turnRunner?: AgentTurnRunnerDep | null, pendingInputs?: PendingInputsDep | null) {
+  constructor(
+    workspaceDir: string,
+    turnRunner?: AgentTurnRunnerDep | null,
+    pendingInputs?: PendingInputsDep | null,
+    getDrainOptions: QueueDrainOptionsResolver = () => ({}),
+  ) {
     super();
     this.#workspaceDir = workspaceDir;
     this.#turnRunner = turnRunner || null;
     this.#pendingInputs = pendingInputs || null;
+    this.#getDrainOptions = getDrainOptions;
   }
 
   onQueueUpdated(cb: QueueUpdatedCallback): void { this.on('queue-updated', cb); }
@@ -283,7 +307,7 @@ export class QueueManager extends EventEmitter {
       this.emit('turn-failed', chatId, message, options);
       throw error;
     }
-    await this.#drain(chatId, options);
+    await this.#drain(chatId);
   }
 
   // Aborts the running agent session and pauses the queue if entries remain.
@@ -303,14 +327,14 @@ export class QueueManager extends EventEmitter {
   }
 
   // Triggers drain if the agent is not currently running.
-  async triggerDrain(chatId: string, options: RunAgentTurnOptions): Promise<void> {
+  async triggerDrain(chatId: string): Promise<void> {
     const turnRunner = requireTurnRunner(this.#turnRunner);
     if (turnRunner.isChatRunning(chatId)) return;
-    await this.#drain(chatId, options);
+    await this.#drain(chatId);
   }
 
   // Pops queued entries one at a time, registers a pending overlay, and runs agent turns.
-  async #drain(chatId: string, options: RunAgentTurnOptions): Promise<void> {
+  async #drain(chatId: string): Promise<void> {
     const turnRunner = requireTurnRunner(this.#turnRunner);
     this.#draining.add(chatId);
     try {
@@ -324,7 +348,7 @@ export class QueueManager extends EventEmitter {
         }
 
         const { entry } = result;
-        const queuedTurnOptions = optionsForQueuedTurn(options);
+        const queuedTurnOptions = optionsForQueuedTurn(this.#getDrainOptions(chatId));
         await this.registerPendingUserInput(chatId, entry.content, queuedTurnOptions);
         this.emit('dispatching', chatId, entry.id, entry.content);
 

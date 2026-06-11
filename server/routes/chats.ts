@@ -22,7 +22,6 @@ import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/s
 import {
   ChatCommandService,
   CommandValidationError,
-  queueDrainOptions,
   runOptionsFromCommandRequest,
 } from '../commands/chat-command-service.js';
 import { normalizeQueueState } from '../../common/queue-state.ts';
@@ -65,7 +64,7 @@ interface QueueDep {
   appendUserMessage?(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   abort(chatId: string): Promise<boolean>;
-  triggerDrain(chatId: string, options: RunAgentTurnOptions): Promise<void>;
+  triggerDrain(chatId: string): Promise<void>;
   readChatQueue(chatId: string): Promise<unknown>;
   enqueueChat(chatId: string, content: string): Promise<{ entry: { id: string }; queue: unknown }>;
   dequeueChat(chatId: string, entryId: string): Promise<unknown>;
@@ -995,7 +994,7 @@ export default function createChatRoutes(
         status: 'scheduled',
         entryId: result.entry.id,
       });
-      queue.triggerDrain(chatId, queueDrainOptions(chatId, registry)).catch((err: Error) => {
+      queue.triggerDrain(chatId).catch((err: Error) => {
         console.error('queue: enqueue drain error:', err.message);
       });
       return Response.json({
@@ -1025,7 +1024,7 @@ export default function createChatRoutes(
         state = await queue.pauseChatQueue(chatId);
       } else {
         state = await queue.resumeChatQueue(chatId);
-        queue.triggerDrain(chatId, queueDrainOptions(chatId, registry)).catch((err: Error) => {
+        queue.triggerDrain(chatId).catch((err: Error) => {
           console.error('queue: resume drain error:', err.message);
         });
       }

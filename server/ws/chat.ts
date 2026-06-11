@@ -37,7 +37,6 @@ import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
 import {
   ChatCommandService,
-  queueDrainOptions,
   runOptionsFromCommandRequest,
 } from '../commands/chat-command-service.js';
 
@@ -58,7 +57,7 @@ interface AgentRegistryDep {
 interface QueueManagerDep {
   submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   abort(chatId: string): Promise<boolean>;
-  triggerDrain(chatId: string, options: RunAgentTurnOptions): Promise<void>;
+  triggerDrain(chatId: string): Promise<void>;
   readChatQueue(chatId: string): Promise<QueueState>;
   enqueueChat(chatId: string, content: string): Promise<unknown>;
   dequeueChat(chatId: string, entryId: string): Promise<unknown>;
@@ -402,7 +401,7 @@ export class ChatHandler {
           return writer.send(new WsFaultMessage('queue-enqueue requires non-empty string content'));
         }
         await this.#queue.enqueueChat(chatId, data.content);
-        this.#queue.triggerDrain(chatId, queueDrainOptions(chatId, this.#registry)).catch((err: Error) => {
+        this.#queue.triggerDrain(chatId).catch((err: Error) => {
           console.error('queue: enqueue drain error:', err.message);
         });
       } else if (data instanceof QueueDropRequest) {
@@ -420,7 +419,7 @@ export class ChatHandler {
       } else if (data instanceof QueueResumeRequest) {
         if (!chatId) return this.#sendMissingSessionError(writer, data.type);
         await this.#queue.resumeChatQueue(chatId);
-        this.#queue.triggerDrain(chatId, queueDrainOptions(chatId, this.#registry)).catch((err: Error) => {
+        this.#queue.triggerDrain(chatId).catch((err: Error) => {
           console.error('queue: resume drain error:', err.message);
         });
       } else if (data instanceof QueueQueryRequest) {

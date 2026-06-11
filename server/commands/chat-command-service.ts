@@ -9,7 +9,7 @@ import {
 import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common/chat-command-contracts.js';
 import type { AgentRunRequest, ForkRunRequest } from '../../common/ws-requests.js';
 import type { IChatRegistry } from '../chats/store.js';
-import { requireChatExecutionConfig, type RunAgentTurnOptions } from '../agents/session-types.js';
+import type { RunAgentTurnOptions } from '../agents/session-types.js';
 import type { CommandLedger, CommandLedgerRecord } from './command-ledger.js';
 
 type CommandTransport = 'http' | 'websocket';
@@ -78,21 +78,6 @@ export function runOptionsFromCommandRequest(
   if (body.modelEndpointId !== undefined) options.modelEndpointId = body.modelEndpointId;
   if (body.modelProtocol !== undefined) options.modelProtocol = body.modelProtocol;
   return options;
-}
-
-export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunAgentTurnOptions {
-  const entry = requireChatExecutionConfig(chatId, registry.getChat(chatId));
-  const chat = registry.getChat(chatId);
-  return {
-    permissionMode: entry.permissionMode,
-    thinkingMode: entry.thinkingMode,
-    claudeThinkingMode: entry.claudeThinkingMode,
-    ampAgentMode: entry.ampAgentMode,
-    model: entry.model,
-    apiProviderId: chat?.apiProviderId,
-    modelEndpointId: chat?.modelEndpointId,
-    modelProtocol: chat?.modelProtocol,
-  };
 }
 
 export class ChatCommandService {
