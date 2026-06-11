@@ -117,6 +117,10 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
   return typeof value === 'string' ? value : null;
 }
 
+function stringArrayOrNull(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : null;
+}
+
 interface ChatRouteDeps {
   registry: IChatRegistry;
   settings: SettingsDep;
@@ -205,7 +209,7 @@ export default function createChatRoutes({
         Object.entries(sessions).map(async ([chatId, session]) => ({
           chatId,
           session,
-          isAvailable: await pathCache.isProjectPathAvailable(session.projectPath as string),
+          isAvailable: await pathCache.isProjectPathAvailable(session.projectPath),
         })),
       );
 
@@ -217,12 +221,12 @@ export default function createChatRoutes({
         const overrideTitle = settings.getChatName(chatId);
         const isPinned = pinnedIds.has(chatId);
         const isArchived = !isPinned && archivedIds.has(chatId);
-        const lastReadAt = (session.lastReadAt as string) || null;
-        const lastActivityAt = (meta?.lastActivity as string) || null;
+        const lastReadAt = session.lastReadAt ?? null;
+        const lastActivityAt = meta?.lastActivity ?? null;
         const isUnread = Boolean(lastActivityAt && (!lastReadAt || lastActivityAt > lastReadAt));
-        const title = extractFirstLine((overrideTitle || meta?.firstMessage || 'New Session') as string);
-        const firstPreview = extractFirstLine((meta?.firstMessage || title) as string);
-        const lastPreview = extractFirstLine((meta?.lastMessage || meta?.firstMessage || title) as string);
+        const title = extractFirstLine(overrideTitle || meta?.firstMessage || 'New Session');
+        const firstPreview = extractFirstLine(meta?.firstMessage || title);
+        const lastPreview = extractFirstLine(meta?.lastMessage || meta?.firstMessage || title);
 
         entryMap.set(chatId, {
           id: chatId,
@@ -238,12 +242,12 @@ export default function createChatRoutes({
           title,
           projectPath: session.projectPath,
           tags: session.tags || [],
-          activity: { createdAt: (meta?.createdAt as string) || inferredCreatedAt, lastActivityAt, lastReadAt },
+          activity: { createdAt: meta?.createdAt || inferredCreatedAt, lastActivityAt, lastReadAt },
           preview: {
             lastMessage: lastPreview,
             firstMessage: firstPreview,
           },
-          isActive: agents.isAgentSessionRunning(session.agentId as string, session.agentSessionId as string | null),
+          isActive: agents.isAgentSessionRunning(session.agentId, session.agentSessionId),
           isPinned,
           isArchived,
           isUnread,
@@ -447,7 +451,7 @@ export default function createChatRoutes({
         if (!session) continue;
 
         const incoming = entry.lastReadAt || now;
-        const existing = (session.lastReadAt as string) || null;
+        const existing = session.lastReadAt || null;
         const merged = existing && existing > incoming ? existing : incoming;
 
         registry.updateChat(chatId, { lastReadAt: merged });
@@ -463,8 +467,8 @@ export default function createChatRoutes({
   async function postReorderChats(body: Record<string, unknown>): Promise<Response> {
     try {
       const list = typeof body?.list === 'string' ? body.list : '';
-      const oldOrder = Array.isArray(body?.oldOrder) ? body.oldOrder as string[] : null;
-      const newOrder = Array.isArray(body?.newOrder) ? body.newOrder as string[] : null;
+      const oldOrder = stringArrayOrNull(body?.oldOrder);
+      const newOrder = stringArrayOrNull(body?.newOrder);
 
       if (!['pinned', 'normal', 'archived'].includes(list)) {
         return Response.json({ success: false, error: 'list must be "pinned", "normal", or "archived"' }, { status: 400 });
