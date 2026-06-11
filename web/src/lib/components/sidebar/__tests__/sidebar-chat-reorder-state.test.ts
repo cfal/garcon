@@ -120,6 +120,32 @@ describe('SidebarChatReorderState', () => {
 		});
 	});
 
+	it('restores the drag-start order when an adjacent drag returns to its original edge', () => {
+		const visibleOrders = buildOrders(['a', 'b', 'c']);
+		const reorder = new SidebarChatReorderState({
+			get visibleOrders() { return visibleOrders; },
+		});
+
+		reorder.begin('normal', 'a');
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'a',
+			targetChatId: 'b',
+			closestEdge: 'bottom',
+		});
+		expect(reorder.orderFor('normal')).toEqual(['b', 'a', 'c']);
+
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'a',
+			targetChatId: 'b',
+			closestEdge: 'top',
+		});
+
+		expect(reorder.orderFor('normal')).toEqual(['a', 'b', 'c']);
+		expect(reorder.finish('normal')).toBeNull();
+	});
+
 	it('restores visible order when a drag is canceled', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({

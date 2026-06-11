@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { tick } from 'svelte';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import SidebarChatListHost from './SidebarChatListHost.svelte';
 import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatListHost.svelte';
@@ -8,6 +8,39 @@ import type { SidebarVirtualChatRow } from '../sidebar-virtual-chat-list';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 const rowHeight = 88;
+
+function touchAt(identifier: number, clientX: number, clientY: number) {
+	return {
+		identifier,
+		clientX,
+		clientY,
+		pageX: clientX,
+		pageY: clientY,
+		screenX: clientX,
+		screenY: clientY,
+	};
+}
+
+function rect(input: {
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+}): DOMRect {
+	return {
+		x: input.left,
+		y: input.top,
+		left: input.left,
+		top: input.top,
+		width: input.width,
+		height: input.height,
+		right: input.left + input.width,
+		bottom: input.top + input.height,
+		toJSON() {
+			return this;
+		},
+	} as DOMRect;
+}
 
 function makeChat(index: number, overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
@@ -48,6 +81,42 @@ function makeRows(count: number): SidebarVirtualChatRow[] {
 		};
 	});
 }
+
+function installTouchGeometry() {
+	const viewport = screen.getByTestId('virtual-sidebar-viewport');
+	const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+	const row1 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-1"]');
+	if (!row0 || !row1) throw new Error('expected test rows to be rendered');
+
+	vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({
+		left: 0,
+		top: 0,
+		width: 320,
+		height: 640,
+	}));
+	vi.spyOn(row0, 'getBoundingClientRect').mockReturnValue(rect({
+		left: 0,
+		top: 0,
+		width: 320,
+		height: rowHeight,
+	}));
+	vi.spyOn(row1, 'getBoundingClientRect').mockReturnValue(rect({
+		left: 0,
+		top: rowHeight,
+		width: 320,
+		height: rowHeight,
+	}));
+	vi.spyOn(document, 'elementFromPoint').mockImplementation((_, y) => (
+		y >= rowHeight ? row1 : row0
+	));
+
+	return { row0, row1, viewport };
+}
+
+afterEach(() => {
+	vi.useRealTimers();
+	vi.restoreAllMocks();
+});
 
 describe('SidebarVirtualSortableChatList', () => {
 	it('renders a bounded visible slice for large chat arrays', () => {
@@ -112,6 +181,214 @@ describe('SidebarVirtualSortableChatList', () => {
 		await tick();
 
 		expect(viewport.scrollTop).toBe(0);
+	});
+
+	it('persists adjacent reorder after a touch long press drag', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			isMobile: true,
+			rowHeight,
+			onPersistReorder: persist,
+		});
+		await tick();
+		const { row0 } = installTouchGeometry();
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 150)],
+			changedTouches: [touchAt(1, 20, 150)],
+		});
+		await tick();
+		await fireEvent.touchEnd(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, 150)],
+		});
+		await tick();
+
+		expect(persist).toHaveBeenCalledWith({
+			kind: 'relative',
+			list: 'normal',
+			chatId: 'chat-0',
+			target: { chatIdAbove: 'chat-1' },
+			visibleOrder: ['chat-1', 'chat-0', ...Array.from({ length: 18 }, (_, index) => `chat-${index + 2}`)],
+			sequence: 1,
+		});
+	});
+
+	it('does not persist when a touch drag returns to the original adjacent slot', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			isMobile: true,
+			rowHeight,
+			onPersistReorder: persist,
+		});
+		await tick();
+		const { row0 } = installTouchGeometry();
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 150)],
+			changedTouches: [touchAt(1, 20, 150)],
+		});
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 100)],
+			changedTouches: [touchAt(1, 20, 100)],
+		});
+		await tick();
+		await fireEvent.touchEnd(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, 100)],
+		});
+		await tick();
+
+		expect(persist).not.toHaveBeenCalled();
+	});
+
+	it('does not reuse the last touch drop target when dropping over the dragged row', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			isMobile: true,
+			rowHeight,
+			onPersistReorder: persist,
+		});
+		await tick();
+		const { row0 } = installTouchGeometry();
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 150)],
+			changedTouches: [touchAt(1, 20, 150)],
+		});
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		await tick();
+		await fireEvent.touchEnd(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		await tick();
+
+		expect(persist).not.toHaveBeenCalled();
+	});
+
+	it('suppresses document text selection while a touch long press is pending', async () => {
+		vi.useFakeTimers();
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			isMobile: true,
+			rowHeight,
+		});
+		await tick();
+		const { row0 } = installTouchGeometry();
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		expect(document.body.style.getPropertyValue('user-select')).toBe('none');
+		expect(document.body.style.getPropertyValue('-webkit-user-select')).toBe('none');
+		expect(document.body.style.getPropertyValue('-webkit-touch-callout')).toBe('none');
+		expect(document.documentElement.style.getPropertyValue('user-select')).toBe('none');
+		expect(row0.className).toContain('select-none');
+
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 61)],
+			changedTouches: [touchAt(1, 20, 61)],
+		});
+		await tick();
+
+		expect(document.body.style.getPropertyValue('user-select')).toBe('');
+		expect(document.body.style.getPropertyValue('-webkit-user-select')).toBe('');
+		expect(document.body.style.getPropertyValue('-webkit-touch-callout')).toBe('');
+		expect(document.documentElement.style.getPropertyValue('user-select')).toBe('');
+	});
+
+	it('clears existing text selection when a touch long press drag activates', async () => {
+		vi.useFakeTimers();
+		const selection = window.getSelection();
+		if (!selection) throw new Error('expected selection API');
+		const clearSelection = vi.spyOn(selection, 'removeAllRanges');
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			isMobile: true,
+			rowHeight,
+		});
+		await tick();
+		const { row0 } = installTouchGeometry();
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+
+		expect(clearSelection).toHaveBeenCalled();
+		await fireEvent.touchCancel(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+	});
+
+	it('allows normal scroll gestures before the touch long press threshold', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			isMobile: true,
+			rowHeight,
+			onPersistReorder: persist,
+		});
+		await tick();
+		const { row0 } = installTouchGeometry();
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 61)],
+			changedTouches: [touchAt(1, 20, 61)],
+		});
+		vi.advanceTimersByTime(400);
+		await fireEvent.touchEnd(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, 61)],
+		});
+		await tick();
+
+		expect(persist).not.toHaveBeenCalled();
 	});
 
 	it('uses virtual rendering for large normal chat lists', () => {

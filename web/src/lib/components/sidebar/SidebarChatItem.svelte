@@ -272,10 +272,11 @@
 				{@render chatSummary()}
 			</button>
 			{#if !isMultiSelectMode}
-				<button
-					type="button"
-					class="shrink-0 flex items-center justify-center px-3 text-muted-foreground hover:text-foreground active:bg-accent border-l border-border/30 transition-colors"
-					onclick={handleMobileMenuClick}
+					<button
+						type="button"
+						data-sidebar-touch-drag-ignore
+						class="shrink-0 flex items-center justify-center px-3 text-muted-foreground hover:text-foreground active:bg-accent border-l border-border/30 transition-colors"
+						onclick={handleMobileMenuClick}
 					aria-label={m.sidebar_chat_more_actions()}
 				>
 					<EllipsisVertical class="size-5" />
@@ -315,8 +316,9 @@
 			style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
 		>
 			<DropdownMenu bind:open={menuOpen}>
-				<DropdownMenuTrigger
-					class={isAtCursor
+					<DropdownMenuTrigger
+						data-sidebar-touch-drag-ignore
+						class={isAtCursor
 						? "block w-px h-px opacity-0 pointer-events-none"
 						: "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground"}
 					aria-label={m.sidebar_chat_more_actions()}
