@@ -54,7 +54,7 @@ describe('json file store', () => {
 
   it('keeps JSON persistence modules on the shared atomic writer', () => {
     for (const file of [
-      'server/auth/store.js',
+      'server/auth/store.ts',
       'server/chats/store.ts',
       'server/settings/store.js',
       'server/chats/share-store.ts',
