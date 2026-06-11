@@ -156,7 +156,7 @@ export function getCursorBinary(): string {
     ?? 'cursor-agent';
 }
 
-// JWT token expiry (secret is managed by auth/store.js).
+// JWT token expiry (secret is managed by auth/store).
 export function getJwtTokenExpiry(): string {
   return envValue('GARCON_JWT_TOKEN_EXPIRY') ?? '30d';
 }

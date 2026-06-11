@@ -8,39 +8,70 @@ import crypto from 'crypto';
 import { getConfigDir } from '../config.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
 
-function authPath() {
+interface AuthData {
+  jwtSecret?: unknown;
+  username?: unknown;
+  passwordHash?: unknown;
+  createdAt?: unknown;
+}
+
+export interface AuthUser {
+  username: string;
+  passwordHash: string;
+  createdAt: string | null;
+}
+
+export interface CreatedAuthUser {
+  username: string;
+  createdAt: string;
+}
+
+function authPath(): string {
   return path.join(getConfigDir(), 'auth.json');
 }
 
-const cachedJwtSecrets = new Map();
-const inflightJwtSecrets = new Map();
+const cachedJwtSecrets = new Map<string, string>();
+const inflightJwtSecrets = new Map<string, Promise<string>>();
+
+function hasNodeErrorCode(error: unknown, code: string): boolean {
+  return Boolean(
+    error
+      && typeof error === 'object'
+      && 'code' in error
+      && (error as { code?: unknown }).code === code,
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 // Ensures the auth config directory exists.
-export async function init() {
+export async function init(): Promise<void> {
   await fs.mkdir(getConfigDir(), { recursive: true });
   await getJwtSecret();
 }
 
-async function readFromDisk(filePath = authPath()) {
+async function readFromDisk(filePath = authPath()): Promise<AuthData> {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed;
+      return parsed as AuthData;
     }
     return {};
   } catch (error) {
-    if (error.code === 'ENOENT') return {};
-    console.warn('auth: invalid auth.json, treating as empty:', error.message);
+    if (hasNodeErrorCode(error, 'ENOENT')) return {};
+    console.warn('auth: invalid auth.json, treating as empty:', errorMessage(error));
     return {};
   }
 }
 
-async function writeToDisk(data, filePath = authPath()) {
+async function writeToDisk(data: AuthData, filePath = authPath()): Promise<void> {
   await writeJsonFileAtomic(filePath, data, { mode: 0o600 });
 }
 
-async function ensureJwtSecret(filePath) {
+async function ensureJwtSecret(filePath: string): Promise<string> {
   const data = await readFromDisk(filePath);
   if (typeof data.jwtSecret === 'string' && data.jwtSecret) {
     return data.jwtSecret;
@@ -52,7 +83,7 @@ async function ensureJwtSecret(filePath) {
 }
 
 // Returns the JWT secret owned by auth store initialization.
-export async function getJwtSecret() {
+export async function getJwtSecret(): Promise<string> {
   const filePath = authPath();
   const cachedJwtSecret = cachedJwtSecrets.get(filePath);
   if (cachedJwtSecret) {
@@ -77,38 +108,39 @@ export async function getJwtSecret() {
 }
 
 // Returns the user object or null if no user has been created.
-export async function getUser() {
+export async function getUser(): Promise<AuthUser | null> {
   const data = await readFromDisk();
-  if (!data.username || !data.passwordHash) return null;
+  if (typeof data.username !== 'string' || typeof data.passwordHash !== 'string') return null;
   return {
     username: data.username,
     passwordHash: data.passwordHash,
-    createdAt: data.createdAt || null,
+    createdAt: typeof data.createdAt === 'string' ? data.createdAt : null,
   };
 }
 
 // Returns the user by username, or null if credentials don't match.
-export async function getUserByUsername(username) {
+export async function getUserByUsername(username: string): Promise<AuthUser | null> {
   const user = await getUser();
   if (!user || user.username !== username) return null;
   return user;
 }
 
 // Creates the single user. Throws if a user already exists.
-export async function createUser(username, passwordHash) {
+export async function createUser(username: string, passwordHash: string): Promise<CreatedAuthUser> {
   const data = await readFromDisk();
   if (data.username && data.passwordHash) {
     throw new Error('Account already configured');
   }
   data.username = username;
   data.passwordHash = passwordHash;
-  data.createdAt = new Date().toISOString();
+  const createdAt = new Date().toISOString();
+  data.createdAt = createdAt;
   await writeToDisk(data);
-  return { username: data.username, createdAt: data.createdAt };
+  return { username, createdAt };
 }
 
 // Returns true if no user account has been set up yet.
-export async function needsSetup() {
+export async function needsSetup(): Promise<boolean> {
   const data = await readFromDisk();
   return !data.username || !data.passwordHash;
 }
