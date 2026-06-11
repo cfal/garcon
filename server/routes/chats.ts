@@ -107,6 +107,17 @@ function requireStringField(body: Record<string, unknown>, field: string): strin
   return value.trim();
 }
 
+function bodyRecord(body: unknown): Record<string, unknown> {
+  return body && typeof body === 'object' ? body as Record<string, unknown> : {};
+}
+
+function chatIdFromBodyOrQuery(body: unknown, url: URL): string {
+  const input = bodyRecord(body);
+  const bodyChatId = typeof input.chatId === 'string' ? input.chatId.trim() : '';
+  if (bodyChatId) return bodyChatId;
+  return url.searchParams.get('chatId')?.trim() || '';
+}
+
 function optionalStringOrNull(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
@@ -311,9 +322,9 @@ export default function createChatRoutes({
     }
   }
 
-  async function deleteSessionHandler(_request: Request, url: URL): Promise<Response> {
-    const chatId = url.searchParams.get('chatId');
-    if (!chatId) return jsonError('chatId query parameter is required', 400);
+  async function deleteSessionHandler(body: unknown, _request: Request, url: URL): Promise<Response> {
+    const chatId = chatIdFromBodyOrQuery(body, url);
+    if (!chatId) return jsonError('chatId is required', 400);
 
     try {
       const session = registry.getChat(chatId);
@@ -399,9 +410,9 @@ export default function createChatRoutes({
     }
   }
 
-  async function postTogglePin(_request: Request, url: URL): Promise<Response> {
-    const chatId = url.searchParams.get('chatId');
-    if (!chatId) return jsonError('chatId query parameter is required', 400);
+  async function postTogglePin(body: unknown, _request: Request, url: URL): Promise<Response> {
+    const chatId = chatIdFromBodyOrQuery(body, url);
+    if (!chatId) return jsonError('chatId is required', 400);
 
     try {
       const session = registry.getChat(chatId);
@@ -416,9 +427,9 @@ export default function createChatRoutes({
     }
   }
 
-  async function postToggleArchive(_request: Request, url: URL): Promise<Response> {
-    const chatId = url.searchParams.get('chatId');
-    if (!chatId) return jsonError('chatId query parameter is required', 400);
+  async function postToggleArchive(body: unknown, _request: Request, url: URL): Promise<Response> {
+    const chatId = chatIdFromBodyOrQuery(body, url);
+    if (!chatId) return jsonError('chatId is required', 400);
 
     try {
       const session = registry.getChat(chatId);
@@ -837,7 +848,7 @@ export default function createChatRoutes({
   }
 
   return {
-    '/api/v1/chats': { GET: getChats, DELETE: deleteSessionHandler },
+    '/api/v1/chats': { GET: getChats, DELETE: withJsonBody(deleteSessionHandler) },
     '/api/v1/chats/start': { POST: withJsonBody(postStartSession) },
     '/api/v1/chats/run': { POST: withJsonBody(postRunChat) },
     '/api/v1/chats/validate-start': { GET: validateStartPath },
@@ -856,8 +867,8 @@ export default function createChatRoutes({
     '/api/v1/chats/execution-settings': { PATCH: withJsonBody(patchExecutionSettings) },
     '/api/v1/chats/model': { PATCH: withJsonBody(patchModel) },
     '/api/v1/chats/details': { GET: getChatDetails },
-    '/api/v1/chats/pin': { POST: postTogglePin },
-    '/api/v1/chats/archive': { POST: postToggleArchive },
+    '/api/v1/chats/pin': { POST: withJsonBody(postTogglePin) },
+    '/api/v1/chats/archive': { POST: withJsonBody(postToggleArchive) },
     '/api/v1/chats/read': { POST: withJsonBody(postMarkRead) },
     '/api/v1/chats/reorder': { POST: withJsonBody(postReorderChats) },
     '/api/v1/chats/reorder-quick': { POST: withJsonBody(postReorderQuick) },

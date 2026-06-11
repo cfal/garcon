@@ -4,8 +4,10 @@ class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
 }
 
+const parseJsonBody = mock(() => undefined);
+
 mock.module('../../lib/http-request.js', () => ({
-  parseJsonBody: mock(() => undefined),
+  parseJsonBody,
   MalformedJsonError,
 }));
 
@@ -198,9 +200,10 @@ describe('DELETE /api/chats session name cleanup', () => {
 
   it('removes session name when deleting a chat', async () => {
     registry.getChat.mockImplementation(() => Promise.resolve({ agentId: 'claude', projectPath: '/proj' }));
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
 
-    const url = new URL('http://localhost/api/chats?chatId=500');
-    const request = new Request(url, { method: 'DELETE' });
+    const url = new URL('http://localhost/api/chats');
+    const request = new Request(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
 
     const response = await handler(request, url);
     const body = await response.json();
@@ -210,7 +213,7 @@ describe('DELETE /api/chats session name cleanup', () => {
     expect(registry.removeChat).toHaveBeenCalledWith('500');
   });
 
-  it('cleans up all order list references when deleting a chat', async () => {
+  it('keeps query chatId compatibility when deleting a chat', async () => {
     registry.getChat.mockImplementation(() => Promise.resolve({ agentId: 'claude', projectPath: '/proj' }));
 
     const url = new URL('http://localhost/api/chats?chatId=500');
