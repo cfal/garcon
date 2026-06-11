@@ -31,6 +31,13 @@ function envValue(name: string): string | null {
   return value === undefined || value === '' ? null : value;
 }
 
+function trimmedEnvValue(name: string): string | null {
+  const value = envValue(name);
+  if (value === null) return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
 function cliValue(flag: CliValueFlag): string | null {
   const index = process.argv.indexOf(flag);
   if (index === -1) return null;
@@ -152,6 +159,50 @@ export function getCursorBinary(): string {
 // JWT token expiry (secret is managed by auth/store.js).
 export function getJwtTokenExpiry(): string {
   return envValue('GARCON_JWT_TOKEN_EXPIRY') ?? '30d';
+}
+
+export function getAnthropicApiKey(): string | null {
+  return trimmedEnvValue('ANTHROPIC_API_KEY');
+}
+
+export function getAnthropicBaseUrl(): string | null {
+  return trimmedEnvValue('ANTHROPIC_BASE_URL');
+}
+
+export function getOpenAiApiKey(): string | null {
+  return trimmedEnvValue('OPENAI_API_KEY');
+}
+
+export function getOpenAiBaseUrl(): string | null {
+  return trimmedEnvValue('OPENAI_BASE_URL');
+}
+
+export function getCodexHome(): string {
+  return envValue('CODEX_HOME') ?? path.join(os.homedir(), '.codex');
+}
+
+export function getCursorApiKey(): string | null {
+  return trimmedEnvValue('CURSOR_API_KEY');
+}
+
+export function getFactoryApiKey(): string | null {
+  return trimmedEnvValue('FACTORY_API_KEY');
+}
+
+export function getPiSessionDirOverride(): string | null {
+  return trimmedEnvValue('PI_CODING_AGENT_SESSION_DIR');
+}
+
+export function getHomeDir(): string {
+  return envValue('HOME') ?? os.homedir();
+}
+
+export function getPackageVersion(): string {
+  return envValue('npm_package_version') ?? '0.1.0';
+}
+
+export function isTestEnvironment(): boolean {
+  return envValue('NODE_ENV') === 'test';
 }
 
 // File access boundary

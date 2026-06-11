@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 const getClaudeBinary = mock(() => 'claude');
+const getAnthropicApiKey = mock(() => process.env.ANTHROPIC_API_KEY?.trim() || null);
+const getAnthropicBaseUrl = mock(() => process.env.ANTHROPIC_BASE_URL?.trim() || null);
 
 mock.module('../../config.js', () => ({
+  getAnthropicApiKey,
+  getAnthropicBaseUrl,
   getClaudeBinary,
 }));
 
@@ -26,7 +30,11 @@ describe('getClaudeAuthStatus', () => {
     originalSpawn = Bun.spawn;
     spawnMock = mock();
     Bun.spawn = spawnMock;
+    getAnthropicApiKey.mockReset();
+    getAnthropicBaseUrl.mockReset();
     getClaudeBinary.mockReset();
+    getAnthropicApiKey.mockImplementation(() => process.env.ANTHROPIC_API_KEY?.trim() || null);
+    getAnthropicBaseUrl.mockImplementation(() => process.env.ANTHROPIC_BASE_URL?.trim() || null);
     getClaudeBinary.mockReturnValue('/tmp/custom-claude');
 
     delete process.env.ANTHROPIC_API_KEY;

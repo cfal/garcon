@@ -6,18 +6,17 @@ import {
   SettingsManager,
   type SessionHeader,
 } from '@earendil-works/pi-coding-agent';
-
-const PI_SESSION_DIR_ENV = 'PI_CODING_AGENT_SESSION_DIR';
+import { getHomeDir, getPiSessionDirOverride } from '../../config.js';
 
 function expandTilde(value: string): string {
-  if (value === '~') return process.env.HOME || value;
-  if (value.startsWith('~/')) return path.join(process.env.HOME || '', value.slice(2));
+  if (value === '~') return getHomeDir();
+  if (value.startsWith('~/')) return path.join(getHomeDir(), value.slice(2));
   return value;
 }
 
 export function resolvePiConfiguredSessionDir(projectPath: string): string | undefined {
-  const envSessionDir = process.env[PI_SESSION_DIR_ENV];
-  if (envSessionDir?.trim()) return expandTilde(envSessionDir.trim());
+  const sessionDirOverride = getPiSessionDirOverride();
+  if (sessionDirOverride) return expandTilde(sessionDirOverride);
 
   try {
     const settings = SettingsManager.create(projectPath, getAgentDir());

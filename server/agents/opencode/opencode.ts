@@ -8,6 +8,7 @@ import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, Per
 import { convertOpencodePermissionTool } from "./permission-tool-converter.js";
 import { convertOpenCodeToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
+import { isTestEnvironment } from '../../config.js';
 import type { PermissionMode } from "../../../common/chat-modes.js";
 import type { StartSessionRequest, ResumeTurnRequest } from "../session-types.js";
 
@@ -418,7 +419,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   // Returns true if the opencode binary is on $PATH, without spawning a server.
   isAvailable(): boolean {
     if (this.#available !== null) return this.#available;
-    if (process.env.NODE_ENV === 'test') {
+    if (isTestEnvironment()) {
       this.#available = true;
       return true;
     }
@@ -541,7 +542,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     startup = (async () => {
       try {
         if (typeof Bun !== 'undefined' && typeof Bun.which === 'function'
-            && process.env.NODE_ENV !== 'test' && !Bun.which('opencode')) {
+            && !isTestEnvironment() && !Bun.which('opencode')) {
           throw new Error('opencode executable not found in $PATH');
         }
 

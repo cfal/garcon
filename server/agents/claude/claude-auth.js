@@ -1,4 +1,4 @@
-import { getClaudeBinary } from "../../config.js";
+import { getAnthropicApiKey, getAnthropicBaseUrl, getClaudeBinary } from "../../config.js";
 
 async function runClaudeAuthStatus() {
   // Uses the CLI itself so Garcon follows CLAUDE_CONFIG_DIR and other auth storage rules.
@@ -36,10 +36,10 @@ function parseClaudeAuthStatus(output) {
 
 export async function getClaudeAuthStatus() {
   // bypass claude auth check if custom ANTHROPIC_BASE_URL is set
-  if (typeof process.env.ANTHROPIC_BASE_URL === 'string' && process.env.ANTHROPIC_BASE_URL.trim()) {
+  if (getAnthropicBaseUrl()) {
     return { authenticated: true, canReauth: false, label: '' };
   }
-  if (typeof process.env.ANTHROPIC_API_KEY === 'string' && process.env.ANTHROPIC_API_KEY.trim()) {
+  if (getAnthropicApiKey()) {
     return { authenticated: true, canReauth: false, label: '' };
   }
 

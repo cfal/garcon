@@ -1,4 +1,4 @@
-import { getCursorBinary } from "../../config.js";
+import { getCursorApiKey, getCursorBinary } from "../../config.js";
 
 async function runCursorStatus(): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   const proc = Bun.spawn([getCursorBinary(), 'status', '--format', 'json'], {
@@ -18,7 +18,7 @@ async function runCursorStatus(): Promise<{ stdout: string; stderr: string; exit
 }
 
 export async function getCursorAuthStatus() {
-  if (typeof process.env.CURSOR_API_KEY === 'string' && process.env.CURSOR_API_KEY.trim()) {
+  if (getCursorApiKey()) {
     return {
       authenticated: true,
       canReauth: false as const,

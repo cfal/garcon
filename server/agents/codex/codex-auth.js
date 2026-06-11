@@ -1,10 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import os from 'os';
-
-function getCodexHome() {
-  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
-}
+import { getCodexHome, getOpenAiApiKey, getOpenAiBaseUrl } from '../../config.js';
 
 async function runCodexLoginStatus() {
   // Uses the CLI itself so Garcon follows CODEX_HOME and keyring-backed auth storage.
@@ -49,10 +45,10 @@ async function readCodexAuthLabel() {
 }
 
 export async function getCodexAuthStatus() {
-  if (typeof process.env.OPENAI_BASE_URL === 'string' && process.env.OPENAI_BASE_URL.trim()) {
+  if (getOpenAiBaseUrl()) {
     return { authenticated: true, canReauth: false, label: '' };
   }
-  if (typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.trim()) {
+  if (getOpenAiApiKey()) {
     return { authenticated: true, canReauth: false, label: '' };
   }
 
