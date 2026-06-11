@@ -171,6 +171,15 @@ function sameOrderedStringArray(left, right) {
   return true;
 }
 
+function bumpRemoteSettingsVersionForPinnedChange(settings, beforePinned) {
+  const afterPinned = dedup(settings.pinnedChatIds || []);
+  const changed = !sameOrderedStringArray(beforePinned, afterPinned);
+  if (changed) {
+    bumpRemoteSettingsVersion(settings);
+  }
+  return changed;
+}
+
 // Deduplicates an array of string IDs, preserving first occurrence.
 function dedup(ids) {
   const out = [];
@@ -203,6 +212,25 @@ function applyWindowReorder(full, oldOrder, newOrder) {
   const at = findWindowIndex(full, oldOrder);
   if (at < 0) return null;
   return [...full.slice(0, at), ...newOrder, ...full.slice(at + oldOrder.length)];
+}
+
+function validateWindowReorder(rawOldOrder, rawNewOrder) {
+  const oldOrder = dedup(rawOldOrder);
+  const newOrder = dedup(rawNewOrder);
+
+  if (oldOrder.length === 0) return { success: false, error: 'oldOrder must not be empty' };
+  if (oldOrder.length !== newOrder.length) return { success: false, error: 'oldOrder and newOrder must have the same length' };
+
+  const oldSet = new Set(oldOrder);
+  const newSet = new Set(newOrder);
+  if (oldOrder.length !== oldSet.size || newOrder.length !== newSet.size) {
+    return { success: false, error: 'oldOrder and newOrder must contain unique IDs' };
+  }
+  for (const id of newOrder) {
+    if (!oldSet.has(id)) return { success: false, error: 'oldOrder and newOrder must contain the same IDs' };
+  }
+
+  return { success: true, oldOrder, newOrder };
 }
 
 // Moves chatId relative to refId within the same list.
@@ -308,6 +336,13 @@ export class SettingsStore extends EventEmitter {
     this.#cache = validated;
   }
 
+  async #saveSettingsAndMaybeEmitRemote(settings, remoteSettingsChanged) {
+    await this.saveSettings(settings);
+    if (remoteSettingsChanged) {
+      this.emitRemoteSettingsChanged();
+    }
+  }
+
   // Reconciles ordering lists against the chat registry on startup.
   // Ensures pinnedChatIds + normalChatIds + archivedChatIds cover all
   // chat IDs with no duplicates or unknown entries.
@@ -382,9 +417,7 @@ export class SettingsStore extends EventEmitter {
         currentSettings.pinnedChatIds = pinned;
         currentSettings.normalChatIds = normal;
         currentSettings.archivedChatIds = archived;
-        if (!sameOrderedStringArray(beforePinned, pinned)) {
-          bumpRemoteSettingsVersion(currentSettings);
-        }
+        bumpRemoteSettingsVersionForPinnedChange(currentSettings, beforePinned);
         await this.saveSettings(currentSettings);
       }
     });
@@ -431,8 +464,7 @@ export class SettingsStore extends EventEmitter {
       const settings = this.#getCachedSettings();
       settings.ui = normalizeUiSettings({ ...(settings.ui || {}), ...patch });
       bumpRemoteSettingsVersion(settings);
-      await this.saveSettings(settings);
-      this.emitRemoteSettingsChanged();
+      await this.#saveSettingsAndMaybeEmitRemote(settings, true);
       return settings.ui;
     });
   }
@@ -447,8 +479,7 @@ export class SettingsStore extends EventEmitter {
       const settings = this.#getCachedSettings();
       settings.paths = { ...(settings.paths || {}), ...patch };
       bumpRemoteSettingsVersion(settings);
-      await this.saveSettings(settings);
-      this.emitRemoteSettingsChanged();
+      await this.#saveSettingsAndMaybeEmitRemote(settings, true);
       return settings.paths;
     });
   }
@@ -563,8 +594,7 @@ export class SettingsStore extends EventEmitter {
         normalizeAmpAgentMode(settings.lastAmpAgentMode),
       );
       bumpRemoteSettingsVersion(settings);
-      await this.saveSettings(settings);
-      this.emitRemoteSettingsChanged();
+      await this.#saveSettingsAndMaybeEmitRemote(settings, true);
     });
   }
 
@@ -617,15 +647,8 @@ export class SettingsStore extends EventEmitter {
         }
       }
       settings.normalChatIds = [chatId, ...(settings.normalChatIds || [])];
-      const afterPinned = dedup(settings.pinnedChatIds || []);
-      const pinnedChanged = !sameOrderedStringArray(beforePinned, afterPinned);
-      if (pinnedChanged) {
-        bumpRemoteSettingsVersion(settings);
-      }
-      await this.saveSettings(settings);
-      if (pinnedChanged) {
-        this.emitRemoteSettingsChanged();
-      }
+      const pinnedChanged = bumpRemoteSettingsVersionForPinnedChange(settings, beforePinned);
+      await this.#saveSettingsAndMaybeEmitRemote(settings, pinnedChanged);
       this.emitListChanged('chat-added', chatId);
     });
   }
@@ -653,15 +676,8 @@ export class SettingsStore extends EventEmitter {
       }
       if (!dirty) return;
 
-      const afterPinned = dedup(settings.pinnedChatIds || []);
-      const pinnedChanged = !sameOrderedStringArray(beforePinned, afterPinned);
-      if (pinnedChanged) {
-        bumpRemoteSettingsVersion(settings);
-      }
-      await this.saveSettings(settings);
-      if (pinnedChanged) {
-        this.emitRemoteSettingsChanged();
-      }
+      const pinnedChanged = bumpRemoteSettingsVersionForPinnedChange(settings, beforePinned);
+      await this.#saveSettingsAndMaybeEmitRemote(settings, pinnedChanged);
     });
   }
 
@@ -683,8 +699,7 @@ export class SettingsStore extends EventEmitter {
       }
 
       bumpRemoteSettingsVersion(s);
-      await this.saveSettings(s);
-      this.emitRemoteSettingsChanged();
+      await this.#saveSettingsAndMaybeEmitRemote(s, true);
       this.emitListChanged('pinned-toggled', chatId);
       return { isPinned: !isPinned };
     });
@@ -707,15 +722,8 @@ export class SettingsStore extends EventEmitter {
         s.archivedChatIds = [chatId, ...archived.filter((id) => id !== chatId)];
       }
 
-      const afterPinned = dedup(s.pinnedChatIds || []);
-      const pinnedChanged = !sameOrderedStringArray(beforePinned, afterPinned);
-      if (pinnedChanged) {
-        bumpRemoteSettingsVersion(s);
-      }
-      await this.saveSettings(s);
-      if (pinnedChanged) {
-        this.emitRemoteSettingsChanged();
-      }
+      const pinnedChanged = bumpRemoteSettingsVersionForPinnedChange(s, beforePinned);
+      await this.#saveSettingsAndMaybeEmitRemote(s, pinnedChanged);
       this.emitListChanged('archive-toggled', chatId);
       return { isArchived: !isArchived };
     });
@@ -723,20 +731,9 @@ export class SettingsStore extends EventEmitter {
 
   // Validates and applies a window reorder within a group.
   async reorderWindow(list, rawOldOrder, rawNewOrder) {
-    const normOld = dedup(rawOldOrder);
-    const normNew = dedup(rawNewOrder);
-
-    if (normOld.length === 0) return { success: false, error: 'oldOrder must not be empty' };
-    if (normOld.length !== normNew.length) return { success: false, error: 'oldOrder and newOrder must have the same length' };
-
-    const oldSet = new Set(normOld);
-    const newSet = new Set(normNew);
-    if (normOld.length !== oldSet.size || normNew.length !== newSet.size) {
-      return { success: false, error: 'oldOrder and newOrder must contain unique IDs' };
-    }
-    for (const id of normNew) {
-      if (!oldSet.has(id)) return { success: false, error: 'oldOrder and newOrder must contain the same IDs' };
-    }
+    const validation = validateWindowReorder(rawOldOrder, rawNewOrder);
+    if (!validation.success) return validation;
+    const { oldOrder, newOrder } = validation;
 
     return this.#withLock(async () => {
       const s = this.#getCachedSettings();
@@ -744,23 +741,21 @@ export class SettingsStore extends EventEmitter {
       const current = dedup(s[key] || []);
 
       const currentSet = new Set(current);
-      for (const id of normOld) {
+      for (const id of oldOrder) {
         if (!currentSet.has(id)) return { success: false, error: `ID "${id}" is not in the ${list} list` };
       }
 
-      const result = applyWindowReorder(current, normOld, normNew);
+      const result = applyWindowReorder(current, oldOrder, newOrder);
       if (!result) return { success: false, error: 'oldOrder is not a contiguous subsequence of the current list' };
 
       s[key] = result;
-      if (list === 'pinned') {
+      const remoteSettingsChanged = list === 'pinned';
+      if (remoteSettingsChanged) {
         bumpRemoteSettingsVersion(s);
       }
-      await this.saveSettings(s);
+      await this.#saveSettingsAndMaybeEmitRemote(s, remoteSettingsChanged);
 
-      const anchorChatId = normNew[0] || list;
-      if (list === 'pinned') {
-        this.emitRemoteSettingsChanged();
-      }
+      const anchorChatId = newOrder[0] || list;
       this.emitListChanged('chats-reordered', anchorChatId);
       return { success: true };
     });
@@ -812,27 +807,15 @@ export class SettingsStore extends EventEmitter {
   }
 
   async reorderSavedSearches(oldOrder, newOrder) {
-    const normOld = dedup(oldOrder);
-    const normNew = dedup(newOrder);
-
-    if (normOld.length === 0) return { success: false, error: 'oldOrder must not be empty' };
-    if (normOld.length !== normNew.length) return { success: false, error: 'oldOrder and newOrder must have the same length' };
-
-    const oldSet = new Set(normOld);
-    const newSet = new Set(normNew);
-    if (normOld.length !== oldSet.size || normNew.length !== newSet.size) {
-      return { success: false, error: 'oldOrder and newOrder must contain unique IDs' };
-    }
-    for (const id of normNew) {
-      if (!oldSet.has(id)) return { success: false, error: 'oldOrder and newOrder must contain the same IDs' };
-    }
+    const validation = validateWindowReorder(oldOrder, newOrder);
+    if (!validation.success) return validation;
 
     return this.#withLock(async () => {
       const s = this.#getCachedSettings();
       const searches = s.savedChatSearches || [];
       const currentIds = searches.map((entry) => entry.id);
 
-      const result = applyWindowReorder(currentIds, normOld, normNew);
+      const result = applyWindowReorder(currentIds, validation.oldOrder, validation.newOrder);
       if (!result) return { success: false, error: 'oldOrder is not a contiguous subsequence of the current list' };
 
       const byId = new Map(searches.map((entry) => [entry.id, entry]));
@@ -901,13 +884,11 @@ export class SettingsStore extends EventEmitter {
       if (!result) return { success: false, error: 'Chat positions could not be resolved' };
 
       s[chatGroup.key] = result;
-      if (chatGroup.group === 'pinned') {
+      const remoteSettingsChanged = chatGroup.group === 'pinned';
+      if (remoteSettingsChanged) {
         bumpRemoteSettingsVersion(s);
       }
-      await this.saveSettings(s);
-      if (chatGroup.group === 'pinned') {
-        this.emitRemoteSettingsChanged();
-      }
+      await this.#saveSettingsAndMaybeEmitRemote(s, remoteSettingsChanged);
       this.emitListChanged('chats-reordered-quick', chatId);
       return { success: true };
     });
