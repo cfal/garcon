@@ -17,10 +17,6 @@ function emptyQueue(): QueueState {
   return { entries: [], paused: false, version: 0 };
 }
 
-function normalizeForPersist(queue: unknown): QueueState {
-  return normalizeQueueState(queue);
-}
-
 function bumpQueue(queue: QueueState): QueueState {
   return {
     ...queue,
@@ -146,7 +142,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async #writeChatQueue(chatId: string, queue: unknown): Promise<void> {
     const filePath = this.#chatQueueFilePath(chatId);
-    const normalized = normalizeForPersist(queue);
+    const normalized = normalizeQueueState(queue);
     await writeJsonFileAtomic(filePath, normalized);
   }
 
@@ -168,7 +164,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         existing.content += '\n' + content;
         const bumped = bumpQueue(queue);
         await this.#writeChatQueue(chatId, bumped);
-        const result = normalizeForPersist(bumped);
+        const result = normalizeQueueState(bumped);
         this.emit('queue-updated', chatId, result);
         return { entry: existing, queue: result };
       }
@@ -181,7 +177,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       queue.entries.push(entry);
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return { entry, queue: result };
     });
@@ -193,7 +189,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       queue.entries = queue.entries.filter(e => e.id !== entryId);
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -206,7 +202,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       queue.paused = false;
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -218,7 +214,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       queue.paused = queue.entries.length > 0;
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -230,7 +226,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       queue.paused = false;
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -243,7 +239,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         queue.paused = false;
         const bumped = bumpQueue(queue);
         await this.#writeChatQueue(chatId, bumped);
-        this.emit('queue-updated', chatId, normalizeForPersist(bumped));
+        this.emit('queue-updated', chatId, normalizeQueueState(bumped));
         return null;
       }
       if (queue.paused) return null;
@@ -252,7 +248,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       next.status = 'sending';
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return { entry: next, queue: result };
     });
@@ -264,7 +260,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       queue.entries = queue.entries.filter(e => e.id !== entryId);
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -278,7 +274,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       queue.paused = true;
       const bumped = bumpQueue(queue);
       await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeForPersist(bumped);
+      const result = normalizeQueueState(bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -399,7 +395,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         }
         if (modified) {
           data.paused = true;
-          await writeJsonFileAtomic(filePath, normalizeForPersist(data));
+          await writeJsonFileAtomic(filePath, normalizeQueueState(data));
           console.log(`queue: recovered stale chat queue: ${qf}`);
         }
       } catch (error: unknown) {
