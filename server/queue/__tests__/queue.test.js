@@ -8,10 +8,29 @@ import { QueueManager } from '../../queue.js';
 let workspaceDir = '';
 let queue;
 
+function createStateOnlyAgents() {
+  return {
+    runAgentTurn: mock(() => Promise.reject(new Error('state-only queue cannot run turns'))),
+    abortSession: mock(() => Promise.resolve(false)),
+    isChatRunning: mock(() => false),
+  };
+}
+
+function createPendingInputs() {
+  return {
+    register: mock(() => Promise.resolve()),
+    updateDeliveryStatus: mock(() => undefined),
+  };
+}
+
+function emptyDrainOptions() {
+  return {};
+}
+
 beforeEach(async () => {
   workspaceDir = path.join(os.tmpdir(), `garcon-queue-test-${randomUUID()}`);
   await fs.mkdir(workspaceDir, { recursive: true });
-  queue = new QueueManager(workspaceDir);
+  queue = new QueueManager(workspaceDir, createStateOnlyAgents(), createPendingInputs(), emptyDrainOptions);
 });
 
 afterEach(async () => {
@@ -61,9 +80,9 @@ describe('queue invariants', () => {
     expect(typeof resumed.updatedAt).toBe('string');
   });
 
-  it('throws a clear error when execution is requested without an agent turn runner', async () => {
-    await expect(queue.runAcceptedTurn('c1', 'hello', {})).rejects.toThrow(
-      'QueueManager execution requires an agent turn runner',
+  it('requires execution dependencies at construction', () => {
+    expect(() => new QueueManager(workspaceDir)).toThrow(
+      'QueueManager requires an agent turn runner',
     );
   });
 });

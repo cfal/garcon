@@ -24,7 +24,7 @@ mock.module('../../config.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
-import { createRouteCommandLedger } from './chat-routes-test-utils.js';
+import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 const registry = {
   getChat: mock(() => undefined),
@@ -80,6 +80,7 @@ const routes = createChatRoutes({
   historyCache,
   agents,
   commandLedger: createRouteCommandLedger('chats-start'),
+  pendingInputs: createRoutePendingInputs(),
 });
 const handler = routes['/api/v1/chats/start'].POST;
 

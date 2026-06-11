@@ -18,7 +18,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteCommandLedger } from './chat-routes-test-utils.js';
+import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
 const registry = {
@@ -71,6 +71,7 @@ const chatsRoutes = createChatRoutes({
   historyCache,
   agents,
   commandLedger: createRouteCommandLedger('tag-normalization'),
+  pendingInputs: createRoutePendingInputs(),
 });
 const handler = chatsRoutes['/api/v1/chats/tags'].PATCH;
 

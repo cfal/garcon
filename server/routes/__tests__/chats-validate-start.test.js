@@ -4,7 +4,7 @@ import path from 'path';
 import os from 'os';
 
 import createChatRoutes from '../chats.js';
-import { createRouteCommandLedger } from './chat-routes-test-utils.js';
+import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 const testBasePath = path.join(os.homedir(), 'garcon-chats-validate-start-test');
 const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
@@ -55,6 +55,7 @@ const routes = createChatRoutes({
   historyCache,
   agents,
   commandLedger: createRouteCommandLedger('chats-validate-start'),
+  pendingInputs: createRoutePendingInputs(),
 });
 const handler = routes['/api/v1/chats/validate-start'].GET;
 

@@ -19,6 +19,7 @@ import { parseJsonBody } from '../../lib/http-request.js';
 function createMockCtx() {
   return {
     settings: {
+      getRemoteSettingsSnapshotSource: mock(() => Promise.resolve(null)),
       setSessionName: mock(() => Promise.resolve(undefined)),
       getRemoteSettingsVersion: mock(() => Promise.resolve(0)),
       getUiSettings: mock(() => Promise.resolve({})),
@@ -33,6 +34,9 @@ function createMockCtx() {
       getLastThinkingMode: mock(() => Promise.resolve('none')),
       getLastClaudeThinkingMode: mock(() => Promise.resolve('auto')),
       getLastAmpAgentMode: mock(() => Promise.resolve('smart')),
+      getLastApiProviderId: mock(() => Promise.resolve(null)),
+      getLastModelEndpointId: mock(() => Promise.resolve(null)),
+      getLastModelProtocol: mock(() => Promise.resolve(null)),
       getFolders: mock(() => Promise.resolve([])),
       addFolder: mock(() => Promise.resolve(undefined)),
       updateFolder: mock(() => Promise.resolve(undefined)),
@@ -49,6 +53,8 @@ function createMockCtx() {
         codex: { authenticated: false },
         opencode: { authenticated: false },
       })),
+      getAgentReadinessMap: mock(() => Promise.resolve({})),
+      getAgentCatalogEntries: mock(() => Promise.resolve([])),
       getModels: mock(() => Promise.resolve([])),
     },
   };

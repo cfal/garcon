@@ -12,6 +12,7 @@ mock.module('../utils.js', () => ({
 
 import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
+import { ChatCommandService } from '../../commands/chat-command-service.js';
 
 const mockAgents = {
   getRunningSessions: mock(() => ({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [], 'direct-openai-responses-compatible': [] })),
@@ -82,9 +83,15 @@ const injectedMocks = [
 
 const moduleMocks = [sendWebSocketJson];
 
-const chatHandlerInstance = new ChatHandler(
-  mockAgents, mockQueue, mockHistoryCache, mockRegistry, mockPendingInputs, mockForkDeps,
-);
+const chatHandlerInstance = new ChatHandler({
+  agents: mockAgents,
+  queue: mockQueue,
+  historyCache: mockHistoryCache,
+  registry: mockRegistry,
+  pendingInputs: mockPendingInputs,
+  forkDeps: mockForkDeps,
+  commands: new ChatCommandService({ chats: mockRegistry, queue: mockQueue }),
+});
 const chatHandler = chatHandlerInstance.createHandler();
 
 function createMockWs() {

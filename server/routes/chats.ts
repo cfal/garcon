@@ -208,7 +208,7 @@ interface ChatRouteDeps {
   historyCache: HistoryCacheDep;
   agents: AgentRegistryDep;
   commandLedger: CommandLedger;
-  pendingInputs?: PendingInputsDep;
+  pendingInputs: PendingInputsDep;
   commandService?: ChatCommandService;
 }
 
@@ -221,12 +221,7 @@ export default function createChatRoutes({
   historyCache,
   agents,
   commandLedger,
-  pendingInputs = {
-    register: () => Promise.resolve(undefined),
-    reconcile: () => Promise.resolve(undefined),
-    listForChat: () => [],
-    clearChat: () => undefined,
-  },
+  pendingInputs,
   commandService,
 }: ChatRouteDeps): RouteMap {
   const commands = commandService ?? new ChatCommandService({

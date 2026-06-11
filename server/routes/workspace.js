@@ -32,13 +32,11 @@ function asPlainObject(value) {
 }
 
 export async function buildRemoteSettingsSnapshot({ settings, agents, telegramSettings }) {
-  const settingsSource = typeof settings.getRemoteSettingsSnapshotSource === 'function'
-    ? await settings.getRemoteSettingsSnapshotSource()
-    : null;
+  const settingsSource = await settings.getRemoteSettingsSnapshotSource();
 
   const getAgentCatalog = async () => {
     try {
-      return { agents: await agents?.getAgentCatalogEntries?.() ?? [], apiProviders: [] };
+      return { agents: await agents.getAgentCatalogEntries(), apiProviders: [] };
     } catch {
       return null;
     }
@@ -47,17 +45,11 @@ export async function buildRemoteSettingsSnapshot({ settings, agents, telegramSe
   const [
     authByAgent, readinessByAgent, agentCatalog, opencodeModels, factoryModels,
   ] = await Promise.all([
-    agents?.getAgentAuthStatusMap?.() ?? Promise.resolve({
-      claude: { authenticated: false },
-      codex: { authenticated: false },
-      opencode: { authenticated: false },
-      amp: { authenticated: false },
-      factory: { authenticated: false },
-    }),
-    agents?.getAgentReadinessMap?.() ?? Promise.resolve({}),
+    agents.getAgentAuthStatusMap(),
+    agents.getAgentReadinessMap(),
     getAgentCatalog(),
-    agents?.getModels?.('opencode') ?? Promise.resolve([]),
-    agents?.getModels?.('factory') ?? Promise.resolve([]),
+    agents.getModels('opencode'),
+    agents.getModels('factory'),
   ]);
   const catalogModels = Object.fromEntries(
     (agentCatalog?.agents ?? []).map((entry) => [entry.id, Array.isArray(entry.models) ? entry.models : []]),
@@ -96,9 +88,9 @@ export async function buildRemoteSettingsSnapshot({ settings, agents, telegramSe
       settings.getLastThinkingMode(),
       settings.getLastClaudeThinkingMode(),
       settings.getLastAmpAgentMode(),
-      settings.getLastApiProviderId?.() ?? Promise.resolve(null),
-      settings.getLastModelEndpointId?.() ?? Promise.resolve(null),
-      settings.getLastModelProtocol?.() ?? Promise.resolve(null),
+      settings.getLastApiProviderId(),
+      settings.getLastModelEndpointId(),
+      settings.getLastModelProtocol(),
     ]);
 
   const modelsByAgent = {

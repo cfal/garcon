@@ -117,6 +117,16 @@ interface PendingInputsDep {
   listForChat(chatId: string): unknown[];
 }
 
+interface ChatHandlerDeps {
+  agents: AgentRegistryDep;
+  queue: QueueManagerDep;
+  historyCache: HistoryCacheDep;
+  registry: IChatRegistry;
+  pendingInputs: PendingInputsDep;
+  forkDeps?: ForkDeps | null;
+  commands: ChatCommandService;
+}
+
 class WebSocketWriter {
   #ws: WS;
   constructor(ws: WS) {
@@ -146,25 +156,22 @@ export class ChatHandler {
   #forkDeps: ForkDeps | null;
   #recentPermissionDecisions = new Map<string, number>();
 
-  constructor(
-    agents: AgentRegistryDep,
-    queue: QueueManagerDep,
-    historyCache: HistoryCacheDep,
-    registry: IChatRegistry,
-    pendingInputs: PendingInputsDep = {
-      reconcile: () => Promise.resolve(),
-      listForChat: () => [],
-    },
-    forkDeps?: ForkDeps | null,
-    commands?: ChatCommandService | null,
-  ) {
+  constructor({
+    agents,
+    queue,
+    historyCache,
+    registry,
+    pendingInputs,
+    forkDeps = null,
+    commands,
+  }: ChatHandlerDeps) {
     this.#agents = agents;
     this.#queue = queue;
     this.#historyCache = historyCache;
     this.#pendingInputs = pendingInputs;
     this.#registry = registry;
-    this.#commands = commands ?? new ChatCommandService({ chats: registry, queue });
-    this.#forkDeps = forkDeps ?? null;
+    this.#commands = commands;
+    this.#forkDeps = forkDeps;
   }
 
   createHandler(): {

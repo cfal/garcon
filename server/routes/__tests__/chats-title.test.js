@@ -18,7 +18,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteCommandLedger } from './chat-routes-test-utils.js';
+import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 const registry = {
   getChat: mock(() => undefined),
@@ -68,6 +68,7 @@ const chatsRoutes = createChatRoutes({
   historyCache,
   agents,
   commandLedger: createRouteCommandLedger('chats-title'),
+  pendingInputs: createRoutePendingInputs(),
 });
 
 const allMocks = [

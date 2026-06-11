@@ -172,12 +172,20 @@ export async function startServer() {
       chatCommands,
     });
 
-    const chatHandler = new ChatHandler(agentRegistry, queue, historyCache, chatRegistry, pendingInputs, {
-      settings,
-      metadata,
-      forkChatFileCopy,
-      forkAgentSession: agentRegistry.forkAgentSession.bind(agentRegistry),
-    }, chatCommands);
+    const chatHandler = new ChatHandler({
+      agents: agentRegistry,
+      queue,
+      historyCache,
+      registry: chatRegistry,
+      pendingInputs,
+      forkDeps: {
+        settings,
+        metadata,
+        forkChatFileCopy,
+        forkAgentSession: agentRegistry.forkAgentSession.bind(agentRegistry),
+      },
+      commands: chatCommands,
+    });
     const wsHandlers = {
       '/shell': shellManager.createHandler(),
       '/ws': chatHandler.createHandler(),

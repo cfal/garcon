@@ -22,7 +22,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteCommandLedger } from './chat-routes-test-utils.js';
+import { createRouteCommandLedger, createRoutePendingInputs } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 
@@ -75,6 +75,7 @@ const chatsRoutes = createChatRoutes({
   historyCache,
   agents,
   commandLedger: createRouteCommandLedger('chats-fork'),
+  pendingInputs: createRoutePendingInputs(),
 });
 
 const allMocks = [
