@@ -31,41 +31,41 @@ import {
   QueueResumeRequest,
   QueueQueryRequest,
 } from '../../common/ws-requests.ts';
-import type { QueueState } from '../../common/queue-state.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
-import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
+import type { AgentSessionSettingsPatch } from "../agents/session-types.js";
 import {
   ChatCommandService,
   runOptionsFromCommandRequest,
 } from '../commands/chat-command-service.js';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
+import type { ChatQueueService } from '../queue.js';
+import type { HistoryCachePageReader } from '../chats/history-cache-contract.js';
+import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
+import type { AgentRegistryServiceContract } from '../agents/registry.js';
 
 const PERMISSION_DEDUP_TTL = 30_000;
 
 // Bun's ServerWebSocket parameterized over the per-socket data bag.
 type WS = import('bun').ServerWebSocket<unknown>;
 
-interface AgentRegistryDep {
-  getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
-  resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
-  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<unknown>;
-  hasAgent(agentId: string): boolean;
-  supportsFork(agentId: string): boolean;
-  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
-}
+type AgentRegistryDep = Pick<
+  AgentRegistryServiceContract,
+  'getRunningSessions' | 'resolvePermission' | 'updateSessionSettings' | 'supportsFork' | 'isAgentSessionRunning'
+>;
 
-interface QueueManagerDep {
-  submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  abort(chatId: string): Promise<boolean>;
-  triggerDrain(chatId: string): Promise<void>;
-  readChatQueue(chatId: string): Promise<QueueState>;
-  enqueueChat(chatId: string, content: string): Promise<unknown>;
-  dequeueChat(chatId: string, entryId: string): Promise<unknown>;
-  clearChatQueue(chatId: string): Promise<unknown>;
-  pauseChatQueue(chatId: string): Promise<unknown>;
-  resumeChatQueue(chatId: string): Promise<unknown>;
-}
+type QueueManagerDep = Pick<
+  ChatQueueService,
+  | 'submit'
+  | 'abort'
+  | 'triggerDrain'
+  | 'readChatQueue'
+  | 'enqueueChat'
+  | 'dequeueChat'
+  | 'clearChatQueue'
+  | 'pauseChatQueue'
+  | 'resumeChatQueue'
+>;
 
 interface ForkSettingsDep {
   getChatName(chatId: string): string | null;
@@ -101,21 +101,9 @@ interface ForkDeps {
   }): Promise<{ agentSessionId: string; nativePath: string | null } | null>;
 }
 
-interface HistoryCacheDep {
-  ensureLoaded(chatId: string): Promise<void>;
-  getPaginatedMessages(chatId: string, limit: number, offset: number): {
-    messages: ChatMessage[];
-    total: number;
-    hasMore: boolean;
-    offset: number;
-    limit: number;
-  };
-}
+type HistoryCacheDep = HistoryCachePageReader;
 
-interface PendingInputsDep {
-  reconcile(chatId: string): Promise<void>;
-  listForChat(chatId: string): unknown[];
-}
+type PendingInputsDep = Pick<PendingUserInputServiceContract, 'reconcile' | 'listForChat'>;
 
 interface ChatHandlerDeps {
   agents: AgentRegistryDep;

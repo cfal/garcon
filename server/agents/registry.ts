@@ -31,7 +31,40 @@ import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import { AgentRuntimeRouter } from './runtime-router.js';
 import { AgentSessionSettingsService } from './session-settings-service.js';
 
-export class AgentRegistry {
+export interface AgentRegistryServiceContract {
+  hasAgent(agentId: string): boolean;
+  supportsFork(agentId: string): boolean;
+  supportsImages(agentId: string): boolean;
+  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
+  getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
+  startSession(chatId: string, command: string, opts?: {
+    images?: AgentCommandImage[];
+    model?: string;
+    permissionMode?: PermissionMode;
+    thinkingMode?: ThinkingMode;
+    claudeThinkingMode?: ClaudeThinkingMode;
+    ampAgentMode?: AmpAgentMode;
+    projectPath?: string;
+    clientRequestId?: string;
+    turnId?: string;
+  }): Promise<void>;
+  forkAgentSession?(args: {
+    sourceSession: AgentChatEntry;
+    sourceChatId: string;
+    targetChatId: string;
+  }): Promise<StartedAgentSession | null>;
+  modelSupportsImages(input: {
+    agentId: string;
+    model: string;
+    apiProviderId?: string | null;
+    modelEndpointId?: string | null;
+  }): Promise<boolean>;
+  runSingleQuery(prompt: string, options?: { agentId?: string; [key: string]: unknown }): Promise<string>;
+  resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void;
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
+}
+
+export class AgentRegistry implements AgentRegistryServiceContract {
   #registry: IChatRegistry;
   #directory: AgentDirectory;
   #endpointResolver: ApiProviderEndpointResolver;

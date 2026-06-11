@@ -77,7 +77,22 @@ type ChatIdleCallback = (chatId: string) => void;
 type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunAgentTurnOptions) => void;
 type QueueDrainOptionsResolver = (chatId: string) => RunAgentTurnOptions;
 
-export class QueueManager extends EventEmitter {
+export interface ChatQueueService {
+  deleteChatQueueFile(chatId: string): Promise<void>;
+  submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  registerPendingUserInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  abort(chatId: string): Promise<boolean>;
+  triggerDrain(chatId: string): Promise<void>;
+  readChatQueue(chatId: string): Promise<QueueState>;
+  enqueueChat(chatId: string, content: string): Promise<{ entry: QueueEntry; queue: QueueState }>;
+  dequeueChat(chatId: string, entryId: string): Promise<QueueState>;
+  clearChatQueue(chatId: string): Promise<QueueState>;
+  pauseChatQueue(chatId: string): Promise<QueueState>;
+  resumeChatQueue(chatId: string): Promise<QueueState>;
+}
+
+export class QueueManager extends EventEmitter implements ChatQueueService {
   #locks = new KeyedPromiseLock();
   #draining = new Set<string>();
   #workspaceDir: string;

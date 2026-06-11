@@ -22,23 +22,26 @@ import type { QueueState } from '../../common/queue-state.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { RunAgentTurnOptions } from '../agents/session-types.js';
 import type { CommandLedger, CommandLedgerRecord } from './command-ledger.js';
+import type { ChatQueueService } from '../queue.js';
+import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
+import type { AgentRegistryServiceContract } from '../agents/registry.js';
 
 type CommandTransport = 'http' | 'websocket';
 
-interface QueueDep {
-  submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  registerPendingUserInput?(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  appendUserMessage?(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  runAcceptedTurn?(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  abort(chatId: string): Promise<boolean>;
-  triggerDrain(chatId: string): Promise<void>;
-  readChatQueue(chatId: string): Promise<QueueState | unknown>;
-  enqueueChat(chatId: string, content: string): Promise<{ entry: { id: string }; queue: QueueState | unknown }>;
-  dequeueChat(chatId: string, entryId: string): Promise<QueueState | unknown>;
-  clearChatQueue(chatId: string): Promise<QueueState | unknown>;
-  pauseChatQueue(chatId: string): Promise<QueueState | unknown>;
-  resumeChatQueue(chatId: string): Promise<QueueState | unknown>;
-}
+type QueueDep = Pick<
+  ChatQueueService,
+  | 'submit'
+  | 'registerPendingUserInput'
+  | 'runAcceptedTurn'
+  | 'abort'
+  | 'triggerDrain'
+  | 'readChatQueue'
+  | 'enqueueChat'
+  | 'dequeueChat'
+  | 'clearChatQueue'
+  | 'pauseChatQueue'
+  | 'resumeChatQueue'
+>;
 
 interface SettingsDep {
   setLastChatDefaults(defaults: Record<string, unknown>): Promise<void>;
@@ -50,29 +53,12 @@ interface MetadataDep {
   addNewChatMetadata(chatId: string, command: string): void;
 }
 
-interface PendingInputsDep {
-  register(chatId: string, content: string, options?: {
-    clientRequestId?: string;
-    clientMessageId?: string;
-    turnId?: string;
-    images?: RunAgentTurnOptions['images'];
-    deliveryStatus?: 'submitting' | 'accepted' | 'failed';
-  }): Promise<unknown>;
-  clearChat(chatId: string, reason?: 'persisted' | 'chat-removed'): void;
-}
+type PendingInputsDep = Pick<PendingUserInputServiceContract, 'register' | 'clearChat'>;
 
-interface AgentRegistryDep {
-  hasAgent(agentId: string): boolean;
-  supportsImages(agentId: string): boolean;
-  modelSupportsImages(input: {
-    agentId: string;
-    model: string;
-    apiProviderId?: string | null;
-    modelEndpointId?: string | null;
-  }): Promise<boolean>;
-  startSession(chatId: string, command: string, opts: Record<string, unknown>): Promise<void>;
-  resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
-}
+type AgentRegistryDep = Pick<
+  AgentRegistryServiceContract,
+  'hasAgent' | 'supportsImages' | 'modelSupportsImages' | 'startSession' | 'resolvePermission'
+>;
 
 interface SubmitRunInput {
   transport: CommandTransport;
@@ -559,19 +545,11 @@ export class ChatCommandService {
   }
 
   async #registerPendingInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
-    if (typeof this.deps.queue.registerPendingUserInput === 'function') {
-      await this.deps.queue.registerPendingUserInput(chatId, command, options);
-      return;
-    }
-    await this.deps.queue.appendUserMessage?.(chatId, command, options);
+    await this.deps.queue.registerPendingUserInput(chatId, command, options);
   }
 
   #runAcceptedTurn(ledgerKey: string, chatId: string, command: string, options: RunAgentTurnOptions): void {
-    const runAcceptedTurn = this.deps.queue.runAcceptedTurn;
-    if (!runAcceptedTurn) {
-      throw new CommandValidationError('INTERNAL_ERROR', 'Queue turn runner is not configured', 500, true);
-    }
-    void runAcceptedTurn.call(this.deps.queue, chatId, command, options)
+    void this.deps.queue.runAcceptedTurn(chatId, command, options)
       .then(() => this.#requireLedger().update(ledgerKey, { status: 'finished' }))
       .catch((error: Error) => {
         console.error('commands: run failed:', error.message);

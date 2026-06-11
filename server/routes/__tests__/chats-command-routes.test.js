@@ -87,7 +87,7 @@ function createRouteAgent(sessionOverrides = {}) {
   const queue = {
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     submit: mock(() => Promise.resolve(undefined)),
-    appendUserMessage: mock(() => Promise.resolve(undefined)),
+    registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
     abort: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
@@ -184,8 +184,8 @@ describe('REST chat command routes', () => {
     const order = [];
     let resolveRun;
     const runPromise = new Promise((resolve) => { resolveRun = resolve; });
-    agent.queue.appendUserMessage.mockImplementation(() => {
-      order.push('append');
+    agent.queue.registerPendingUserInput.mockImplementation(() => {
+      order.push('pending');
       return Promise.resolve();
     });
     agent.queue.runAcceptedTurn.mockImplementation(() => {
@@ -204,8 +204,8 @@ describe('REST chat command routes', () => {
       status: 'accepted',
     });
     expect(typeof body.turnId).toBe('string');
-    expect(order).toEqual(['append', 'run']);
-    expect(agent.queue.appendUserMessage).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
+    expect(order).toEqual(['pending', 'run']);
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
       clientRequestId: 'req-run-1',
       clientMessageId: 'msg-run-1',
       turnId: body.turnId,
@@ -224,7 +224,7 @@ describe('REST chat command routes', () => {
 
     expect(retry.response.status).toBe(202);
     expect(retry.body.status).toBe('duplicate');
-    expect(agent.queue.appendUserMessage).toHaveBeenCalledTimes(1);
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
     expect(agent.queue.runAcceptedTurn).toHaveBeenCalledTimes(1);
   });
 
@@ -237,7 +237,7 @@ describe('REST chat command routes', () => {
 
     expect(conflict.response.status).toBe(409);
     expect(conflict.body.errorCode).toBe('IDEMPOTENCY_CONFLICT');
-    expect(agent.queue.appendUserMessage).toHaveBeenCalledTimes(1);
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
   });
 
   it('POST /run validates content and session existence', async () => {
@@ -270,7 +270,7 @@ describe('REST chat command routes', () => {
     expect(body.sourceChatId).toBe('123');
     expect(body.chatId).toBe('456');
     expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
-    expect(agent.queue.appendUserMessage).toHaveBeenCalledWith('456', 'continue here', expect.objectContaining({
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith('456', 'continue here', expect.objectContaining({
       clientRequestId: 'req-fork-run-1',
       clientMessageId: 'msg-fork-run-1',
     }));
@@ -293,7 +293,7 @@ describe('REST chat command routes', () => {
     expect(response.status).toBe(409);
     expect(body.errorCode).toBe('SESSION_BUSY');
     expect(forkChatFileCopy).not.toHaveBeenCalled();
-    expect(agent.queue.appendUserMessage).not.toHaveBeenCalled();
+    expect(agent.queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
 
   it('POST /queue/enqueue accepts, deduplicates, and preserves queue state', async () => {

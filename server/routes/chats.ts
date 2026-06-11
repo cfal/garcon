@@ -25,6 +25,11 @@ import { normalizeTags } from '../../common/tags.ts';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { isWithinProjectBase } from '../lib/path-boundary.js';
 import { extractFirstLine } from '../lib/text.js';
+import type { RouteMap } from '../lib/http-route-types.js';
+import type { ChatQueueService } from '../queue.js';
+import type { HistoryCachePageReader } from '../chats/history-cache-contract.js';
+import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
+import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
@@ -37,9 +42,6 @@ import type {
   QueueMutationRequest,
   StartChatCommandRequest,
 } from '../../common/chat-command-contracts.ts';
-
-type RouteHandler = (request: Request, url: URL) => Promise<Response> | Response;
-type RouteMap = Record<string, Record<string, RouteHandler>>;
 
 interface SettingsDep {
   getPinnedChatIds(): Promise<string[]>;
@@ -56,22 +58,6 @@ interface SettingsDep {
   reorderRelative(chatId: string, refId: string, mode: string): Promise<{ success: boolean; error?: string }>;
 }
 
-interface QueueDep {
-  deleteChatQueueFile(chatId: string): Promise<void>;
-  submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  registerPendingUserInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  appendUserMessage?(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  abort(chatId: string): Promise<boolean>;
-  triggerDrain(chatId: string): Promise<void>;
-  readChatQueue(chatId: string): Promise<unknown>;
-  enqueueChat(chatId: string, content: string): Promise<{ entry: { id: string }; queue: unknown }>;
-  dequeueChat(chatId: string, entryId: string): Promise<unknown>;
-  clearChatQueue(chatId: string): Promise<unknown>;
-  pauseChatQueue(chatId: string): Promise<unknown>;
-  resumeChatQueue(chatId: string): Promise<unknown>;
-}
-
 interface PathCacheDep {
   isProjectPathAvailable(projectPath: string): Promise<boolean>;
 }
@@ -82,38 +68,10 @@ interface MetadataDep {
   addNewChatMetadata(chatId: string, command: string): void;
 }
 
-interface HistoryCacheDep {
-  ensureLoaded(chatId: string): Promise<void>;
-  getPaginatedMessages(chatId: string, limit: number, offset: number): unknown;
-  appendMessages(chatId: string, messages: unknown[]): Promise<void>;
-}
-
-interface AgentRegistryDep {
-  hasAgent(agentId: string): boolean;
-  supportsFork(agentId: string): boolean;
-  supportsImages(agentId: string): boolean;
-  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
-  getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
-  startSession(chatId: string, command: string, opts: Record<string, unknown>): Promise<void>;
-  forkAgentSession?(args: { sourceSession: unknown; sourceChatId: string; targetChatId: string }): Promise<{ agentSessionId: string; nativePath: string | null } | null>;
-  modelSupportsImages(input: { agentId: string; model: string; apiProviderId?: string | null; modelEndpointId?: string | null }): Promise<boolean>;
-  runSingleQuery(prompt: string, opts?: Record<string, unknown>): Promise<string>;
-  resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow: boolean }): void;
-  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<unknown>;
-}
-
-interface PendingInputsDep {
-  register(chatId: string, content: string, options?: {
-    clientRequestId?: string;
-    clientMessageId?: string;
-    turnId?: string;
-    images?: RunAgentTurnOptions['images'];
-    deliveryStatus?: 'submitting' | 'accepted' | 'failed';
-  }): Promise<unknown>;
-  reconcile(chatId: string): Promise<void>;
-  listForChat(chatId: string): unknown[];
-  clearChat(chatId: string, reason?: 'persisted' | 'chat-removed'): void;
-}
+type QueueDep = ChatQueueService;
+type HistoryCacheDep = HistoryCachePageReader;
+type AgentRegistryDep = AgentRegistryServiceContract;
+type PendingInputsDep = PendingUserInputServiceContract;
 
 async function isGitRepository(projectPath: string): Promise<boolean> {
   try {
@@ -401,7 +359,7 @@ export default function createChatRoutes({
 
       await historyCache.ensureLoaded(chatId);
       await pendingInputs.reconcile(chatId);
-      const page = historyCache.getPaginatedMessages(chatId, limit, offset) as Record<string, unknown>;
+      const page = historyCache.getPaginatedMessages(chatId, limit, offset);
       return Response.json({
         ...page,
         pendingUserInputs: pendingInputs.listForChat(chatId),
@@ -501,9 +459,9 @@ export default function createChatRoutes({
 
   async function postReorderChats(body: Record<string, unknown>): Promise<Response> {
     try {
-      const list = body?.list;
-      const oldOrder = Array.isArray(body?.oldOrder) ? body.oldOrder : null;
-      const newOrder = Array.isArray(body?.newOrder) ? body.newOrder : null;
+      const list = typeof body?.list === 'string' ? body.list : '';
+      const oldOrder = Array.isArray(body?.oldOrder) ? body.oldOrder as string[] : null;
+      const newOrder = Array.isArray(body?.newOrder) ? body.newOrder as string[] : null;
 
       if (!['pinned', 'normal', 'archived'].includes(list)) {
         return Response.json({ success: false, error: 'list must be "pinned", "normal", or "archived"' }, { status: 400 });
@@ -883,10 +841,10 @@ export default function createChatRoutes({
     '/api/v1/chats/running': { GET: getRunningChats },
     '/api/v1/chats/queue': { GET: getQueue },
     '/api/v1/chats/queue/enqueue': { POST: withJsonBody(postQueueEnqueue) },
-    '/api/v1/chats/queue/dequeue': { POST: withJsonBody((body) => postQueueMutation(body, 'dequeue')) },
-    '/api/v1/chats/queue/clear': { POST: withJsonBody((body) => postQueueMutation(body, 'clear')) },
-    '/api/v1/chats/queue/pause': { POST: withJsonBody((body) => postQueueMutation(body, 'pause')) },
-    '/api/v1/chats/queue/resume': { POST: withJsonBody((body) => postQueueMutation(body, 'resume')) },
+    '/api/v1/chats/queue/dequeue': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'dequeue')) },
+    '/api/v1/chats/queue/clear': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'clear')) },
+    '/api/v1/chats/queue/pause': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'pause')) },
+    '/api/v1/chats/queue/resume': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'resume')) },
     '/api/v1/chats/permissions/decision': { POST: withJsonBody(postPermissionDecision) },
     '/api/v1/chats/stop': { POST: withJsonBody(postStopChat) },
     '/api/v1/chats/execution-settings': { PATCH: withJsonBody(patchExecutionSettings) },

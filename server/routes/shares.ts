@@ -8,9 +8,8 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { ShareChatResponse, ShareStatusResponse, GetSharedChatResponse, RevokeShareResponse } from '../../common/share-types.ts';
 import { renderSharedChatText } from '../chats/share-transcript.ts';
 import { extractFirstLine } from '../lib/text.js';
-
-type RouteHandler = (request: Request, url: URL) => Promise<Response> | Response;
-type RouteMap = Record<string, Record<string, RouteHandler>>;
+import type { RouteMap } from '../lib/http-route-types.js';
+import type { HistoryCachePageReader } from '../chats/history-cache-contract.js';
 
 interface SettingsDep {
   getChatName(chatId: string): string | null;
@@ -20,10 +19,7 @@ interface MetadataDep {
   getChatMetadata(chatId: string): Record<string, unknown> | null;
 }
 
-interface HistoryCacheDep {
-  ensureLoaded(chatId: string): Promise<void>;
-  getPaginatedMessages(chatId: string, limit: number, offset: number): unknown;
-}
+type HistoryCacheDep = HistoryCachePageReader;
 
 function extractLlmTokenFromPath(pathname: string): string | null {
   const match = pathname.match(/^\/shared\/llm\/([^/]+)$/);
