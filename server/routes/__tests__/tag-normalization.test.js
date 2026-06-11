@@ -13,6 +13,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
+import { createRouteCommandLedger } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
 const registry = {
@@ -56,7 +57,7 @@ const agents = {
   runSingleQuery: mock(() => Promise.resolve('')),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents, createRouteCommandLedger('tag-normalization'));
 const handler = chatsRoutes['/api/v1/chats/tags'].PATCH;
 
 describe('PATCH /api/v1/chats/tags – tag normalization', () => {

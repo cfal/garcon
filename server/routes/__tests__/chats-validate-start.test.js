@@ -4,6 +4,7 @@ import path from 'path';
 import os from 'os';
 
 import createChatRoutes from '../chats.js';
+import { createRouteCommandLedger } from './chat-routes-test-utils.js';
 
 const testBasePath = path.join(os.homedir(), 'garcon-chats-validate-start-test');
 const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
@@ -45,7 +46,7 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
-const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents, createRouteCommandLedger('chats-validate-start'));
 const handler = routes['/api/v1/chats/validate-start'].GET;
 
 async function ensureCleanBase() {

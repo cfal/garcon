@@ -15,7 +15,7 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import { forkChatFileCopy } from '../chats/fork-chat.js';
-import { getProjectBasePath, getWorkspaceDir } from '../config.js';
+import { getProjectBasePath } from '../config.js';
 import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
 import { CommandLedger, type CommandLedgerRecord } from '../commands/command-ledger.js';
 import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
@@ -215,6 +215,7 @@ export default function createChatRoutes(
   metadata: MetadataDep,
   historyCache: HistoryCacheDep,
   agents: AgentRegistryDep,
+  commandLedger: CommandLedger,
   pendingInputs: PendingInputsDep = {
     register: () => Promise.resolve(undefined),
     reconcile: () => Promise.resolve(undefined),
@@ -223,7 +224,6 @@ export default function createChatRoutes(
   },
   commandService?: ChatCommandService,
 ): RouteMap {
-  const commandLedger = new CommandLedger(getWorkspaceDir());
   const commands = commandService ?? new ChatCommandService({
     chats: registry,
     queue,

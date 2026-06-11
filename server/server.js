@@ -151,7 +151,7 @@ export async function startServer() {
     // Build route and WS handler tables
     const routes = createAllRoutes(
       chatRegistry, settings, queue, pathCache, metadata, historyCache,
-      agentRegistry, pendingInputs, telegramNotifier, telegramSettings, shareStore, apiProviders, chatCommands,
+      agentRegistry, commandLedger, pendingInputs, telegramNotifier, telegramSettings, shareStore, apiProviders, chatCommands,
     );
 
     const chatHandler = new ChatHandler(agentRegistry, queue, historyCache, chatRegistry, pendingInputs, {

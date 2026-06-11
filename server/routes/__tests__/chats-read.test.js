@@ -13,6 +13,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
+import { createRouteCommandLedger } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
 const registry = {
@@ -54,7 +55,7 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents, createRouteCommandLedger('chats-read'));
 
 const allMocks = [
   registry.getChat, registry.updateChat, metadata.getChatMetadata,

@@ -17,6 +17,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
+import { createRouteCommandLedger } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 
@@ -60,7 +61,7 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents, createRouteCommandLedger('chats-fork'));
 
 const allMocks = [
   registry.getChat, parseJsonBody, forkChatFileCopy,

@@ -27,6 +27,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
+import { createRouteCommandLedger } from './chat-routes-test-utils.js';
 
 function createSession(overrides = {}) {
   return {
@@ -123,7 +124,7 @@ function createRouteAgent(sessionOverrides = {}) {
     resolvePermission: mock(() => undefined),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
-  const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+  const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents, createRouteCommandLedger('chats-command-routes'));
   return { sessions, registry, settings, queue, pathCache, metadata, historyCache, agents, routes };
 }
 
