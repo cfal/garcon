@@ -3,7 +3,6 @@
 
 import {
   catalogResponseFromSnapshot,
-  getCatalogResponseSnapshot,
 } from './model-catalog-cache.js';
 
 function staleModelsFromDiscoveryError(error) {
@@ -34,7 +33,7 @@ function modelDiscoveryUnavailableResponse(error, catalog, entry) {
   return Response.json(body, { status: 503 });
 }
 
-export default function createModelsRoutes(modelCatalog) {
+export default function createModelsRoutes({ modelCatalog, responseCache }) {
   const catalog = async () => ({
     agents: await modelCatalog.agents.getAgentCatalogEntries(),
     apiProviders: modelCatalog.apiProviders.getCatalog(),
@@ -65,7 +64,7 @@ export default function createModelsRoutes(modelCatalog) {
       });
     }
 
-    const snapshot = await getCatalogResponseSnapshot(modelCatalog);
+    const snapshot = await responseCache.getSnapshot(modelCatalog);
     return catalogResponseFromSnapshot(request, snapshot);
   }
 

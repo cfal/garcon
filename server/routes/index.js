@@ -24,6 +24,7 @@ export default function createAllRoutes({
   shareStore,
   apiProviders,
   chatCommands,
+  modelCatalogResponseCache,
 }) {
   return {
     ...staticRoutes,
@@ -45,7 +46,10 @@ export default function createAllRoutes({
     ...createShareRoutes(shareStore, registry, settings, metadata, historyCache),
     ...createFilesRoutes(registry),
     ...createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings),
-    ...createModelsRoutes({ agents, apiProviders }),
+    ...createModelsRoutes({
+      modelCatalog: { agents, apiProviders },
+      responseCache: modelCatalogResponseCache,
+    }),
     ...createGitRoutes(agents, settings),
   };
 }

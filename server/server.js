@@ -64,6 +64,7 @@ import {
 // Route factory
 import createAllRoutes from './routes/index.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
+import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
 
 export async function startServer() {
   process.on('unhandledRejection', (err) => {
@@ -100,6 +101,7 @@ export async function startServer() {
         return Object.values(chatRegistry.listAllChats()).some((entry) => entry.apiProviderId === apiProviderId);
       },
     });
+    const modelCatalogResponseCache = new ModelCatalogResponseCache();
 
     // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
     const agentRegistry = new AgentRegistry({
@@ -174,6 +176,7 @@ export async function startServer() {
       shareStore,
       apiProviders,
       chatCommands,
+      modelCatalogResponseCache,
     });
 
     const chatHandler = new ChatHandler({

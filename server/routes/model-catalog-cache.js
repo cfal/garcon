@@ -5,9 +5,6 @@ const CATALOG_RESPONSE_HEADERS = {
   'Cache-Control': 'private, no-cache',
 };
 
-let cachedCatalogResponse = null;
-let inflightCatalogResponse = null;
-
 function stableObject(value) {
   if (Array.isArray(value)) {
     return value.map(stableObject);
@@ -94,24 +91,34 @@ async function buildCatalogResponse(modelCatalog) {
   };
 }
 
-export async function getCatalogResponseSnapshot(modelCatalog) {
-  if (cachedCatalogResponse && isFresh(cachedCatalogResponse)) {
-    return cachedCatalogResponse;
-  }
-  if (inflightCatalogResponse) {
-    return inflightCatalogResponse;
+export class ModelCatalogResponseCache {
+  #cachedCatalogResponse = null;
+  #inflightCatalogResponse = null;
+
+  async getSnapshot(modelCatalog) {
+    if (this.#cachedCatalogResponse && isFresh(this.#cachedCatalogResponse)) {
+      return this.#cachedCatalogResponse;
+    }
+    if (this.#inflightCatalogResponse) {
+      return this.#inflightCatalogResponse;
+    }
+
+    this.#inflightCatalogResponse = buildCatalogResponse(modelCatalog)
+      .then((snapshot) => {
+        this.#cachedCatalogResponse = snapshot;
+        return snapshot;
+      })
+      .finally(() => {
+        this.#inflightCatalogResponse = null;
+      });
+
+    return this.#inflightCatalogResponse;
   }
 
-  inflightCatalogResponse = buildCatalogResponse(modelCatalog)
-    .then((snapshot) => {
-      cachedCatalogResponse = snapshot;
-      return snapshot;
-    })
-    .finally(() => {
-      inflightCatalogResponse = null;
-    });
-
-  return inflightCatalogResponse;
+  clear() {
+    this.#cachedCatalogResponse = null;
+    this.#inflightCatalogResponse = null;
+  }
 }
 
 export function catalogResponseFromSnapshot(request, snapshot) {
@@ -125,9 +132,4 @@ export function catalogResponseFromSnapshot(request, snapshot) {
   }
 
   return Response.json(snapshot.body, { headers });
-}
-
-export function clearCatalogResponseCacheForTests() {
-  cachedCatalogResponse = null;
-  inflightCatalogResponse = null;
 }
