@@ -142,6 +142,36 @@ export class CommandLedger {
     });
   }
 
+  async updateCommand(
+    commandType: string,
+    chatId: string,
+    clientRequestId: string,
+    patch: Partial<Omit<CommandLedgerRecord, 'key'>>,
+  ): Promise<CommandLedgerRecord | null> {
+    return this.update(ledgerKey(commandType, chatId, clientRequestId), patch);
+  }
+
+  async updateUnlessStatus(
+    key: string,
+    blockedStatuses: CommandLedgerStatus[],
+    patch: Partial<Omit<CommandLedgerRecord, 'key'>>,
+  ): Promise<CommandLedgerRecord | null> {
+    return this.#withLock(key, async () => {
+      await this.#load();
+      const existing = this.#records.get(key);
+      if (!existing) return null;
+      if (blockedStatuses.includes(existing.status)) return existing;
+      const next = {
+        ...existing,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      this.#records.set(key, next);
+      await this.#persist();
+      return next;
+    });
+  }
+
   async #load(): Promise<void> {
     if (this.#loaded) return;
     const parsed = await this.#store.read();

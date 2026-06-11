@@ -285,6 +285,14 @@ export async function startServer() {
       });
     });
     agentRegistry.onFailed((chatId, errorMessage, metadata) => {
+      if (metadata?.commandType === 'chat-start' && metadata.clientRequestId) {
+        commandLedger.updateCommand('chat-start', chatId, metadata.clientRequestId, {
+          status: 'failed',
+          error: errorMessage,
+        }).catch((err) => {
+          console.warn('commands: failed to mark chat-start command failed:', err.message);
+        });
+      }
       broadcast(new AgentRunFailedMessage(chatId, errorMessage, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         console.warn('pending-inputs: reconcile after failure failed:', err.message);

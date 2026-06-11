@@ -830,6 +830,21 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     return true;
   }
 
+  failClaudeInternalSession(agentSessionId: string, chatId: string, errorMessage: string): void {
+    const session = this.#runningSessions.get(agentSessionId);
+    if (session) {
+      session.isRunning = false;
+      session.process = null;
+      if (session.turnResolve) {
+        const resolve = session.turnResolve;
+        session.turnResolve = null;
+        resolve();
+      }
+    }
+    this.emitProcessing(chatId, false);
+    this.emitFailed(chatId, errorMessage);
+  }
+
   isClaudeInternalSessionRunning(agentSessionId: string): boolean {
     const session = this.#runningSessions.get(agentSessionId);
     return session?.isRunning === true;

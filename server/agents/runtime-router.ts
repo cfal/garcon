@@ -98,7 +98,7 @@ export class AgentRuntimeRouter {
       ...selectionRequestFields(selection),
     };
 
-    this.#events.trackTurn(chatId, opts);
+    this.#events.trackTurn(chatId, { ...opts, commandType: 'chat-start' });
     let started: StartedAgentSession;
     try {
       started = await agent.runtime.startSession(request);

@@ -511,7 +511,7 @@ export default function createChatRoutes(
 
       void maybeGenerateChatTitle({ chatId, projectPath, firstPrompt: command, agents, settings });
 
-      const accepted = await commandLedger.update(ledger.record.key, { status: 'running', turnId });
+      const accepted = await commandLedger.updateUnlessStatus(ledger.record.key, ['failed'], { status: 'running', turnId });
       return Response.json(acceptedResponse(accepted ?? ledger.record), { status: 202 });
     } catch (error: unknown) {
       if ((error as Error).message === 'Malformed JSON') {
