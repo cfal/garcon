@@ -13,6 +13,25 @@ export function sanitizeStringArray(value) {
     : [];
 }
 
+const FOLDER_FILTER_KEYS = ['textTokens', 'tags', 'agents', 'models'];
+const VALID_FOLDER_FILTER_STATUS = new Set(['active', 'unread']);
+
+export function sanitizeFolderFilter(raw) {
+  const filter = { textTokens: [], tags: [], agents: [], models: [] };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return filter;
+
+  for (const key of FOLDER_FILTER_KEYS) {
+    filter[key] = sanitizeStringArray(raw[key]);
+  }
+
+  if (typeof raw.status === 'string') {
+    const status = raw.status.trim();
+    if (VALID_FOLDER_FILTER_STATUS.has(status)) filter.status = status;
+  }
+
+  return filter;
+}
+
 export function normalizeRemoteSettingsVersion(value) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
     ? value

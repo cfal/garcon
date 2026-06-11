@@ -18,6 +18,7 @@ import {
 import {
   normalizeRemoteSettingsVersion,
   normalizeUiSettings,
+  sanitizeFolderFilter,
   sanitizeStringArray,
 } from './settings-shared.js';
 import {
@@ -53,25 +54,6 @@ function createEmpty() {
     chatFolders: [],
     savedChatSearches: [],
   };
-}
-
-const FILTER_KEYS = ['textTokens', 'tags', 'agents', 'models'];
-const VALID_FILTER_STATUS = new Set(['active', 'unread']);
-
-function sanitizeFolderFilter(raw) {
-  const filter = { textTokens: [], tags: [], agents: [], models: [] };
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return filter;
-
-  for (const key of FILTER_KEYS) {
-    filter[key] = sanitizeStringArray(raw[key]);
-  }
-
-  if (typeof raw.status === 'string') {
-    const status = raw.status.trim();
-    if (VALID_FILTER_STATUS.has(status)) filter.status = status;
-  }
-
-  return filter;
 }
 
 function sanitizeFolder(raw) {

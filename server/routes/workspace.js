@@ -1,6 +1,7 @@
 import { getProjectBasePath } from '../config.js';
 import { resolveGenerationContext } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
+import { sanitizeFolderFilter } from '../settings/settings-shared.js';
 import { withJsonBody } from '../lib/json-route.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
@@ -112,8 +113,6 @@ export async function buildRemoteSettingsSnapshot({ settings, agents, telegramSe
 
 export default function createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings) {
 
-  const FILTER_KEYS = ['textTokens', 'tags', 'agents', 'models'];
-  const VALID_FILTER_STATUS = new Set(['active', 'unread']);
   function sanitizeRemoteUiPatch(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const patch = { ...raw };
@@ -127,21 +126,6 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
     }
     return Object.keys(patch).length > 0 ? patch : null;
   }
-	function sanitizeFilter(raw) {
-    const empty = { textTokens: [], tags: [], agents: [], models: [] };
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return empty;
-    const out = {};
-		for (const key of FILTER_KEYS) {
-			out[key] = Array.isArray(raw[key])
-        ? raw[key].filter((v) => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
-				: [];
-    }
-		if (typeof raw.status === 'string') {
-			const status = raw.status.trim();
-			if (VALID_FILTER_STATUS.has(status)) out.status = status;
-		}
-		return out;
-	}
 
   async function putSessionNameHandler(body) {
     try {
@@ -464,7 +448,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const folder = {
         id: crypto.randomUUID(),
         name,
-        filter: sanitizeFilter(body.filter),
+        filter: sanitizeFolderFilter(body.filter),
         createdAt: new Date().toISOString(),
       };
       const result = await settings.addFolder(folder);
@@ -488,7 +472,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
         }
         patch.name = name;
       }
-      if (body.filter && typeof body.filter === 'object') patch.filter = sanitizeFilter(body.filter);
+      if (body.filter && typeof body.filter === 'object') patch.filter = sanitizeFolderFilter(body.filter);
       const result = await settings.updateFolder(folderId, patch);
       return Response.json({ success: true, folder: result });
     } catch (error) {
