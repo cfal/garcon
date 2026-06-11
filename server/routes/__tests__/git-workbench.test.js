@@ -345,15 +345,13 @@ describe('malformed JSON body', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('Request body is not valid JSON.');
+    expect(body.error).toBe('Malformed JSON');
   });
 
-  it('propagates non-JSON parse errors to toHttpError', async () => {
+  it('propagates non-JSON parse errors to the caller', async () => {
     parseJsonBody.mockImplementation(() => { throw new Error('Stream aborted'); });
-    const response = await handler(makeRequest({}));
 
-    // Non-malformed-JSON errors fall through to git.toHttpError which returns 500.
-    expect(response.status).toBe(500);
+    await expect(handler(makeRequest({}))).rejects.toThrow('Stream aborted');
   });
 });
 

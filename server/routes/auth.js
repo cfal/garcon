@@ -1,8 +1,8 @@
 import { needsSetup, getUserByUsername, createUser, getUser } from '../auth/store.js';
 import { generateAuthToken } from '../auth/token.js';
-import { MalformedJsonError, parseJsonBody } from '../lib/http-request.js';
 import { createRateLimiter } from '../lib/rate-limit.js';
 import { markRouteNoAuth } from '../lib/http-route.js';
+import { withJsonBody } from '../lib/json-route.js';
 import { isAuthDisabled } from '../config.js';
 
 const loginLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
@@ -29,12 +29,12 @@ async function noauthGetStatus() {
   }
 }
 
-async function noauthPostRegister(request) {
+async function noauthPostRegister(body) {
   try {
     if (isAuthDisabled()) {
       return Response.json({ error: 'Authentication is disabled by server configuration' }, { status: 403 });
     }
-    const { username, password } = await parseJsonBody(request);
+    const { username, password } = body;
 
     if (!username || !password) {
       return Response.json({ error: 'Both username and password are required' }, { status: 400 });
@@ -68,23 +68,17 @@ async function noauthPostRegister(request) {
       token,
     });
   } catch (error) {
-    if (error instanceof MalformedJsonError) {
-      return Response.json({ error: 'Malformed JSON' }, { status: 400 });
-    }
     console.error('Registration error:', error);
     return Response.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-async function noauthPostLogin(request, _url, server) {
-  const limited = loginLimiter.check(request, server);
-  if (limited) return limited;
-
+async function noauthPostLogin(body) {
   try {
     if (isAuthDisabled()) {
       return Response.json({ error: 'Authentication is disabled by server configuration' }, { status: 403 });
     }
-    const { username, password } = await parseJsonBody(request);
+    const { username, password } = body;
     if (!username || !password) {
       return Response.json({ error: 'Both username and password are required' }, { status: 400 });
     }
@@ -106,12 +100,17 @@ async function noauthPostLogin(request, _url, server) {
       token,
     });
   } catch (error) {
-    if (error instanceof MalformedJsonError) {
-      return Response.json({ error: 'Malformed JSON' }, { status: 400 });
-    }
     console.error('Login error:', error);
     return Response.json({ error: 'Internal server error' }, { status: 500 });
   }
+}
+
+const noauthPostLoginWithBody = withJsonBody(noauthPostLogin);
+
+async function noauthPostLoginRateLimited(request, url, server) {
+  const limited = loginLimiter.check(request, server);
+  if (limited) return limited;
+  return noauthPostLoginWithBody(request, url, server);
 }
 
 async function getAuthUser() {
@@ -134,8 +133,8 @@ async function postLogout() {
 
 export default {
   '/api/v1/auth/status': { GET: markRouteNoAuth(noauthGetStatus) },
-  '/api/v1/auth/register': { POST: markRouteNoAuth(noauthPostRegister) },
-  '/api/v1/auth/login': { POST: markRouteNoAuth(noauthPostLogin) },
+  '/api/v1/auth/register': { POST: markRouteNoAuth(withJsonBody(noauthPostRegister)) },
+  '/api/v1/auth/login': { POST: markRouteNoAuth(noauthPostLoginRateLimited) },
   '/api/v1/auth/user': { GET: getAuthUser },
   '/api/v1/auth/logout': { POST: postLogout },
 };

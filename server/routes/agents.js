@@ -1,6 +1,6 @@
 // Agent routes expose runtime catalog, auth, and readiness state.
 
-import { parseJsonBody } from '../lib/http-request.js';
+import { withJsonBody } from '../lib/json-route.js';
 
 export default function createAgentRoutes({ agents, apiProviders }) {
   async function getAgents() {
@@ -38,9 +38,8 @@ export default function createAgentRoutes({ agents, apiProviders }) {
     }
   }
 
-  async function postAgentAuthLogin(request) {
+  async function postAgentAuthLogin(body) {
     try {
-      const body = await parseJsonBody(request);
       const agentId = typeof body?.agentId === 'string' ? body.agentId : '';
       if (!agentId) {
         return Response.json({ error: 'agentId is required' }, { status: 400 });
@@ -55,6 +54,6 @@ export default function createAgentRoutes({ agents, apiProviders }) {
     '/api/v1/agents': { GET: getAgents },
     '/api/v1/agents/auth': { GET: getAgentAuth },
     '/api/v1/agents/readiness': { GET: getAgentReadiness },
-    '/api/v1/agents/auth/login': { POST: postAgentAuthLogin },
+    '/api/v1/agents/auth/login': { POST: withJsonBody(postAgentAuthLogin) },
   };
 }

@@ -1,5 +1,6 @@
 import { authenticateHttpRequest, MalformedJsonError } from './http-request.js';
 import { isAuthDisabled } from '../config.js';
+import { malformedJsonResponse } from './json-route.js';
 
 const noAuthRouteMarker = Symbol('no-auth-route');
 
@@ -27,7 +28,7 @@ async function invokeRouteHandler(handler, req, server) {
     return (await handler(req, url, server)) || new Response('Not found', { status: 404 });
   } catch (error) {
     if (error instanceof MalformedJsonError) {
-      return Response.json({ error: 'Malformed JSON' }, { status: 400 });
+      return malformedJsonResponse();
     }
     throw error;
   }

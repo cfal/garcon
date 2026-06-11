@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import mime from 'mime-types';
-import { MalformedJsonError, parseJsonBody } from '../lib/http-request.js';
+import { withJsonBody } from '../lib/json-route.js';
 import { listDirectory, listDirectoryNames } from './projects.utils.js';
 import { getProjectBasePath } from '../config.js';
 import {
@@ -157,7 +157,7 @@ export default function createFilesRoutes(registry) {
     }
   }
 
-  async function putText(request, url) {
+  async function putText(body, _request, url) {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
     const { projectPath } = resolved;
@@ -170,7 +170,7 @@ export default function createFilesRoutes(registry) {
 
     try {
       const filePath = url.searchParams.get('path');
-      const { content } = await parseJsonBody(request);
+      const { content } = body;
       if (!filePath) return Response.json({ error: 'Invalid file path' }, { status: 400 });
       if (content === undefined) return Response.json({ error: 'Content is required' }, { status: 400 });
       const resolvedFile = resolvePathWithinProject(projectPath, filePath);
@@ -178,9 +178,6 @@ export default function createFilesRoutes(registry) {
       await fs.writeFile(resolvedFile, content, 'utf8');
       return Response.json({ success: true, path: resolvedFile, message: 'File saved successfully' });
     } catch (error) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ error: 'Malformed JSON' }, { status: 400 });
-      }
       if (error.code === 'ENOENT') return Response.json({ error: 'File or directory not found' }, { status: 404 });
       if (error.code === 'EACCES') return Response.json({ error: 'Permission denied' }, { status: 403 });
       return Response.json({ error: error.message }, { status: 500 });
@@ -282,7 +279,7 @@ export default function createFilesRoutes(registry) {
   return {
     '/api/v1/files/tree': { GET: handleTree },
     '/api/v1/files/list': { GET: handleList },
-    '/api/v1/files/text': { GET: getText, PUT: putText },
+    '/api/v1/files/text': { GET: getText, PUT: withJsonBody(putText) },
     '/api/v1/files/content': { GET: handleContent },
     '/api/v1/files/upload-images': { POST: handleUploadImages },
     '/api/v1/files/browse': { GET: handleBrowse },

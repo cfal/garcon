@@ -1,28 +1,14 @@
 import { createGitService } from '../git/git-service.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
-import { parseJsonBody, MalformedJsonError } from '../lib/http-request.js';
 import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { isAgentId } from '../../common/agents.ts';
+import { withJsonBody } from '../lib/json-route.js';
 import {
   assertWithinProjectBase,
   isProjectBoundaryError,
   projectBoundaryErrorResponse,
 } from '../lib/path-boundary.ts';
-
-const MALFORMED_BODY = () =>
-  Response.json({ error: 'Request body is not valid JSON.' }, { status: 400 });
-
-// Wraps parseJsonBody, returning null on malformed JSON so callers
-// can return a typed 400 instead of letting the error escape.
-async function readJsonBody(request) {
-  try {
-    return await parseJsonBody(request);
-  } catch (err) {
-    if (err instanceof MalformedJsonError) return null;
-    throw err;
-  }
-}
 
 function hasOwn(source, key) {
   return Boolean(source) && Object.prototype.hasOwnProperty.call(source, key);
@@ -171,10 +157,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postInitialCommit(request, url) {
+  async function postInitialCommit(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const project = body.project;
       if (!project) {
         return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -187,10 +171,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postCommit(request, url) {
+  async function postCommit(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, message, files } = body;
       if (!project || !message || !files || files.length === 0) {
         return Response.json({ error: 'Missing required parameters: project, message, and files.' }, { status: 400 });
@@ -217,10 +199,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postCheckout(request, url) {
+  async function postCheckout(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, branch } = body;
       if (!project || !branch) {
         return Response.json({ error: 'Missing required parameters: project and branch.' }, { status: 400 });
@@ -233,10 +213,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postCreateBranch(request, url) {
+  async function postCreateBranch(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, branch } = body;
       if (!project || !branch) {
         return Response.json({ error: 'Missing required parameters: project and branchName.' }, { status: 400 });
@@ -279,10 +257,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postGenerateCommitMessage(request, url) {
+  async function postGenerateCommitMessage(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, files } = body;
       if (!project || !files || files.length === 0) {
         return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
@@ -339,10 +315,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postFetch(request, url) {
+  async function postFetch(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const project = body.project;
       if (!project) {
         return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -355,10 +329,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postPull(request, url) {
+  async function postPull(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const project = body.project;
       if (!project) {
         return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -371,10 +343,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postPush(request, url) {
+  async function postPush(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, remote, remoteBranch } = body;
       if (!project) {
         return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -401,10 +371,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postDiscard(request, url) {
+  async function postDiscard(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, file } = body;
       if (!project || !file) {
         return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
@@ -417,10 +385,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postDeleteUntracked(request, url) {
+  async function postDeleteUntracked(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, file } = body;
       if (!project || !file) {
         return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
@@ -468,10 +434,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postFileReviewDataBatch(request, url) {
+  async function postFileReviewDataBatch(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, files, mode, context } = body;
 
       if (!project || !Array.isArray(files) || files.length === 0) {
@@ -496,10 +460,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postStageSelection(request, url) {
+  async function postStageSelection(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, file, mode, selection, contextLines } = body;
 
       if (!project || !file || !mode || !selection?.lineIndices) {
@@ -522,10 +484,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postStageHunk(request, url) {
+  async function postStageHunk(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, file, mode, hunkIndex, contextLines } = body;
 
       if (!project || !file || !mode || hunkIndex === undefined) {
@@ -590,10 +550,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postCreateWorktree(request, url) {
+  async function postCreateWorktree(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, baseRef, worktreePath, branch, detach } = body;
 
       if (!project || !worktreePath) {
@@ -607,10 +565,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postRemoveWorktree(request, url) {
+  async function postRemoveWorktree(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, worktreePath, force } = body;
 
       if (!project || !worktreePath) {
@@ -624,10 +580,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postCommitIndex(request, url) {
+  async function postCommitIndex(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, message } = body;
 
       if (!project || !message) {
@@ -641,10 +595,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postStageFile(request, url) {
+  async function postStageFile(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, file, mode } = body;
 
       if (!project || !file || !mode) {
@@ -661,10 +613,8 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postRevertLastCommit(request, url) {
+  async function postRevertLastCommit(body) {
     try {
-      const body = await readJsonBody(request);
-      if (body === null) return MALFORMED_BODY();
       const { project, strategy } = body;
 
       if (!project) {
@@ -687,33 +637,33 @@ export default function createGitRoutes(agents, settings) {
     '/api/v1/git/status': { GET: getStatus },
     '/api/v1/git/diff': { GET: getDiff },
     '/api/v1/git/file-with-diff': { GET: getFileWithDiff },
-    '/api/v1/git/initial-commit': { POST: postInitialCommit },
-    '/api/v1/git/commit': { POST: postCommit },
+    '/api/v1/git/initial-commit': { POST: withJsonBody(postInitialCommit) },
+    '/api/v1/git/commit': { POST: withJsonBody(postCommit) },
     '/api/v1/git/branches': { GET: getBranches },
-    '/api/v1/git/checkout': { POST: postCheckout },
-    '/api/v1/git/create-branch': { POST: postCreateBranch },
+    '/api/v1/git/checkout': { POST: withJsonBody(postCheckout) },
+    '/api/v1/git/create-branch': { POST: withJsonBody(postCreateBranch) },
     '/api/v1/git/commits': { GET: getCommits },
     '/api/v1/git/commit-diff': { GET: getCommitDiff },
-    '/api/v1/git/generate-commit-message': { POST: postGenerateCommitMessage },
+    '/api/v1/git/generate-commit-message': { POST: withJsonBody(postGenerateCommitMessage) },
     '/api/v1/git/remote-status': { GET: getRemoteStatus },
-    '/api/v1/git/fetch': { POST: postFetch },
-    '/api/v1/git/pull': { POST: postPull },
-    '/api/v1/git/push': { POST: postPush },
+    '/api/v1/git/fetch': { POST: withJsonBody(postFetch) },
+    '/api/v1/git/pull': { POST: withJsonBody(postPull) },
+    '/api/v1/git/push': { POST: withJsonBody(postPush) },
     '/api/v1/git/remotes': { GET: getRemotes },
-    '/api/v1/git/discard': { POST: postDiscard },
-    '/api/v1/git/delete-untracked': { POST: postDeleteUntracked },
+    '/api/v1/git/discard': { POST: withJsonBody(postDiscard) },
+    '/api/v1/git/delete-untracked': { POST: withJsonBody(postDeleteUntracked) },
     '/api/v1/git/file-review-data': { GET: getFileReviewData },
-    '/api/v1/git/file-review-data/batch': { POST: postFileReviewDataBatch },
+    '/api/v1/git/file-review-data/batch': { POST: withJsonBody(postFileReviewDataBatch) },
     '/api/v1/git/changes-tree': { GET: getChangesTree },
-    '/api/v1/git/stage-selection': { POST: postStageSelection },
-    '/api/v1/git/stage-hunk': { POST: postStageHunk },
+    '/api/v1/git/stage-selection': { POST: withJsonBody(postStageSelection) },
+    '/api/v1/git/stage-hunk': { POST: withJsonBody(postStageHunk) },
     '/api/v1/git/repo-info': { GET: getRepoInfo },
     '/api/v1/git/worktrees': { GET: getWorktrees },
     '/api/v1/git/targets': { GET: getTargets },
-    '/api/v1/git/worktrees/create': { POST: postCreateWorktree },
-    '/api/v1/git/worktrees/remove': { POST: postRemoveWorktree },
-    '/api/v1/git/revert-last-commit': { POST: postRevertLastCommit },
-    '/api/v1/git/commit-index': { POST: postCommitIndex },
-    '/api/v1/git/stage-file': { POST: postStageFile },
+    '/api/v1/git/worktrees/create': { POST: withJsonBody(postCreateWorktree) },
+    '/api/v1/git/worktrees/remove': { POST: withJsonBody(postRemoveWorktree) },
+    '/api/v1/git/revert-last-commit': { POST: withJsonBody(postRevertLastCommit) },
+    '/api/v1/git/commit-index': { POST: withJsonBody(postCommitIndex) },
+    '/api/v1/git/stage-file': { POST: withJsonBody(postStageFile) },
   };
 }

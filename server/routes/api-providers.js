@@ -1,6 +1,6 @@
 // API provider routes manage persisted compatible endpoint configuration.
 
-import { parseJsonBody } from '../lib/http-request.js';
+import { withJsonBody } from '../lib/json-route.js';
 
 export default function createApiProviderRoutes(apiProviders) {
   async function getApiProviders() {
@@ -11,9 +11,8 @@ export default function createApiProviderRoutes(apiProviders) {
     }
   }
 
-  async function postApiProvider(request) {
+  async function postApiProvider(body) {
     try {
-      const body = await parseJsonBody(request);
       const result = await apiProviders.create(body);
       return Response.json(result, { status: 201 });
     } catch (error) {
@@ -21,13 +20,12 @@ export default function createApiProviderRoutes(apiProviders) {
     }
   }
 
-  async function putApiProvider(request, url) {
+  async function putApiProvider(body, _request, url) {
     const id = url.searchParams.get('id');
     if (!id) {
       return Response.json({ error: 'id query parameter is required' }, { status: 400 });
     }
     try {
-      const body = await parseJsonBody(request);
       return Response.json(await apiProviders.update(id, body));
     } catch (error) {
       return Response.json({ error: error.message }, { status: 400 });
@@ -47,18 +45,16 @@ export default function createApiProviderRoutes(apiProviders) {
     }
   }
 
-  async function testApiProvider(request) {
+  async function testApiProvider(body) {
     try {
-      const body = await parseJsonBody(request);
       return Response.json(await apiProviders.test(body));
     } catch (error) {
       return Response.json({ error: error.message }, { status: 400 });
     }
   }
 
-  async function discoverApiProviderModels(request) {
+  async function discoverApiProviderModels(body) {
     try {
-      const body = await parseJsonBody(request);
       return Response.json(await apiProviders.discoverModels(body));
     } catch (error) {
       return Response.json({ success: false, error: error.message }, { status: 400 });
@@ -68,11 +64,11 @@ export default function createApiProviderRoutes(apiProviders) {
   return {
     '/api/v1/api-providers': {
       GET: getApiProviders,
-      POST: postApiProvider,
-      PUT: putApiProvider,
+      POST: withJsonBody(postApiProvider),
+      PUT: withJsonBody(putApiProvider),
       DELETE: deleteApiProvider,
     },
-    '/api/v1/api-providers/test': { POST: testApiProvider },
-    '/api/v1/api-providers/models': { POST: discoverApiProviderModels },
+    '/api/v1/api-providers/test': { POST: withJsonBody(testApiProvider) },
+    '/api/v1/api-providers/models': { POST: withJsonBody(discoverApiProviderModels) },
   };
 }

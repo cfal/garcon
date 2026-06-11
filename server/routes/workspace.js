@@ -1,7 +1,7 @@
-import { MalformedJsonError, parseJsonBody } from '../lib/http-request.js';
 import { getProjectBasePath } from '../config.js';
 import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS } from '../../common/models.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
+import { withJsonBody } from '../lib/json-route.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
@@ -176,9 +176,9 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
 		return out;
 	}
 
-  async function putSessionNameHandler(request) {
+  async function putSessionNameHandler(body) {
     try {
-      const { chatId, title } = await parseJsonBody(request);
+      const { chatId, title } = body;
       if (!chatId || typeof chatId !== 'string') {
         return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
       }
@@ -203,10 +203,8 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
     }
   }
 
-  async function putAppSettings(request) {
+  async function putAppSettings(body) {
     try {
-      const body = await parseJsonBody(request);
-
       const uiPatch = sanitizeRemoteUiPatch(body.ui);
       if (uiPatch) {
         await settings.setUiSettings(uiPatch);
@@ -219,9 +217,6 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
   }
@@ -241,20 +236,16 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       }
       return Response.json({ success: true });
     } catch (error) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       const status = error.message.startsWith('Telegram ') || error.message.includes('bot token') ? 400 : 500;
       return Response.json({ success: false, error: error.message }, { status });
     }
   }
 
-  async function putTelegramToken(request) {
+  async function putTelegramToken(body) {
     try {
       if (!telegramSettings) {
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
       }
-      const body = await parseJsonBody(request);
       const botToken = typeof body.botToken === 'string' ? body.botToken.trim() : '';
       if (!botToken) {
         return Response.json({
@@ -275,9 +266,6 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
   }
@@ -297,18 +285,12 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
     }
   }
 
-  async function postTelegramTokenTest(request) {
+  async function postTelegramTokenTest(body) {
     try {
       if (!telegramSettings) {
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
       }
-      let botToken = '';
-      try {
-        const body = await parseJsonBody(request) ?? {};
-        botToken = typeof body.botToken === 'string' ? body.botToken.trim() : '';
-      } catch (error) {
-        if (!(error instanceof MalformedJsonError)) throw error;
-      }
+      const botToken = typeof body.botToken === 'string' ? body.botToken.trim() : '';
       const tokenToTest = botToken || telegramSettings.getBotToken();
       const identity = await telegramNotifier.getBotIdentity(tokenToTest);
       return Response.json({ success: true, bot: identity });
@@ -393,9 +375,8 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
     }
   }
 
-  async function postSavedSearch(request) {
+  async function postSavedSearch(body) {
     try {
-      const body = await parseJsonBody(request);
       const input = sanitizeSavedSearchInput(body);
       if (!input || !input.query) {
         return Response.json({ success: false, error: 'query is required' }, { status: 400 });
@@ -417,16 +398,12 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const result = await settings.addSavedSearch(savedSearch);
       return Response.json({ success: true, savedSearch: result });
     } catch (error) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
   }
 
-  async function putSavedSearch(request) {
+  async function putSavedSearch(body) {
     try {
-      const body = await parseJsonBody(request);
       const id = String(body.id || '').trim();
       if (!id) {
         return Response.json({ success: false, error: 'id is required' }, { status: 400 });
@@ -468,9 +445,6 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const result = await settings.updateSavedSearch(id, patch);
       return Response.json({ success: true, savedSearch: result });
     } catch (error) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
   }
@@ -491,9 +465,8 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
     }
   }
 
-  async function putSavedSearchReorder(request) {
+  async function putSavedSearchReorder(body) {
     try {
-      const body = await parseJsonBody(request);
       const oldOrder = Array.isArray(body.oldOrder) ? body.oldOrder : [];
       const newOrder = Array.isArray(body.newOrder) ? body.newOrder : [];
       const result = await settings.reorderSavedSearches(oldOrder, newOrder);
@@ -502,9 +475,6 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       }
       return Response.json({ success: true });
     } catch (error) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
   }
@@ -518,9 +488,8 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
     }
   }
 
-  async function postFolder(request) {
+  async function postFolder(body) {
     try {
-      const body = await parseJsonBody(request);
       const name = String(body.name || '').trim();
       if (!name) {
         return Response.json({ success: false, error: 'name is required' }, { status: 400 });
@@ -534,16 +503,12 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const result = await settings.addFolder(folder);
       return Response.json({ success: true, folder: result });
     } catch (error) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
   }
 
-  async function putFolder(request) {
+  async function putFolder(body) {
     try {
-      const body = await parseJsonBody(request);
       const folderId = String(body.id || '').trim();
       if (!folderId) {
         return Response.json({ success: false, error: 'id is required' }, { status: 400 });
@@ -560,9 +525,6 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const result = await settings.updateFolder(folderId, patch);
       return Response.json({ success: true, folder: result });
     } catch (error) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
   }
@@ -584,16 +546,16 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
   }
 
   return {
-    '/api/v1/app/session-name': { PUT: putSessionNameHandler },
-    '/api/v1/app/settings': { GET: getAppSettings, PUT: putAppSettings },
+    '/api/v1/app/session-name': { PUT: withJsonBody(putSessionNameHandler) },
+    '/api/v1/app/settings': { GET: getAppSettings, PUT: withJsonBody(putAppSettings) },
     '/api/v1/app/telegram/test': { POST: postTelegramTest },
-    '/api/v1/app/telegram/token/test': { POST: postTelegramTokenTest },
-    '/api/v1/app/telegram/token': { PUT: putTelegramToken, DELETE: deleteTelegramToken },
+    '/api/v1/app/telegram/token/test': { POST: withJsonBody(postTelegramTokenTest) },
+    '/api/v1/app/telegram/token': { PUT: withJsonBody(putTelegramToken), DELETE: deleteTelegramToken },
     '/api/v1/app/telegram/recipient/link': { POST: postTelegramRecipientLink },
     '/api/v1/app/telegram/recipient/resolve': { POST: postTelegramRecipientResolve },
     '/api/v1/app/telegram/recipient': { DELETE: deleteTelegramRecipient },
-    '/api/v1/app/folders': { GET: getFolders, POST: postFolder, PUT: putFolder, DELETE: deleteFolder },
-    '/api/v1/app/saved-searches': { GET: getSavedSearches, POST: postSavedSearch, PUT: putSavedSearch, DELETE: deleteSavedSearch },
-    '/api/v1/app/saved-searches/reorder': { PUT: putSavedSearchReorder },
+    '/api/v1/app/folders': { GET: getFolders, POST: withJsonBody(postFolder), PUT: withJsonBody(putFolder), DELETE: deleteFolder },
+    '/api/v1/app/saved-searches': { GET: getSavedSearches, POST: withJsonBody(postSavedSearch), PUT: withJsonBody(putSavedSearch), DELETE: deleteSavedSearch },
+    '/api/v1/app/saved-searches/reorder': { PUT: withJsonBody(putSavedSearchReorder) },
   };
 }

@@ -1,8 +1,8 @@
 // Share routes. Provides endpoints to create, query, revoke, and
 // publicly access shared chat snapshots.
 
-import { MalformedJsonError, parseJsonBody } from '../lib/http-request.js';
 import { markRouteNoAuth } from '../lib/http-route.js';
+import { withJsonBody } from '../lib/json-route.js';
 import type { IShareStore } from '../chats/share-store.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ShareChatResponse, ShareStatusResponse, GetSharedChatResponse, RevokeShareResponse } from '../../common/share-types.ts';
@@ -51,9 +51,8 @@ export default function createShareRoutes(
 ): RouteMap {
 
   // POST /api/v1/chats/share - Creates or returns existing share.
-  async function postShareChat(request: Request): Promise<Response> {
+  async function postShareChat(body: Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request);
       const chatId = String(body.chatId || '').trim();
       if (!chatId) {
         return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
@@ -98,9 +97,6 @@ export default function createShareRoutes(
       };
       return Response.json(resp);
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
@@ -172,7 +168,7 @@ export default function createShareRoutes(
   });
 
   return {
-    '/api/v1/chats/share': { POST: postShareChat, DELETE: deleteShareChat },
+    '/api/v1/chats/share': { POST: withJsonBody(postShareChat), DELETE: deleteShareChat },
     '/api/v1/chats/share/status': { GET: getShareStatus },
     '/api/v1/shared': { GET: getSharedChat },
     '/shared/llm/:token': { GET: getLlmTranscript },

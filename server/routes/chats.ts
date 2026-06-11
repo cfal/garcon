@@ -2,7 +2,7 @@
 // and dispatches message reads to the appropriate agent parser.
 
 import { promises as fs } from 'fs';
-import { MalformedJsonError, parseJsonBody } from '../lib/http-request.js';
+import { withJsonBody } from '../lib/json-route.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import {
@@ -340,9 +340,8 @@ export default function createChatRoutes({
     }
   }
 
-  async function postStartSession(request: Request): Promise<Response> {
+  async function postStartSession(body: Partial<StartChatCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request) as Partial<StartChatCommandRequest> & Record<string, unknown>;
       const requestOptions = body.options && typeof body.options === 'object' ? body.options : {};
       const initialImages = Array.isArray((requestOptions as Record<string, unknown>).images) ? (requestOptions as Record<string, unknown>).images as unknown[] : [];
       const result = await commands.submitStart({
@@ -366,9 +365,6 @@ export default function createChatRoutes({
       });
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
@@ -501,9 +497,8 @@ export default function createChatRoutes({
     }
   }
 
-  async function postMarkRead(request: Request): Promise<Response> {
+  async function postMarkRead(body: Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request);
       const entries = Array.isArray(body.entries) ? body.entries : [];
       if (entries.length === 0) {
         return Response.json({ success: true, results: [] });
@@ -528,16 +523,12 @@ export default function createChatRoutes({
 
       return Response.json({ success: true, results });
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function postReorderChats(request: Request): Promise<Response> {
+  async function postReorderChats(body: Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request);
       const list = body?.list;
       const oldOrder = Array.isArray(body?.oldOrder) ? body.oldOrder : null;
       const newOrder = Array.isArray(body?.newOrder) ? body.newOrder : null;
@@ -556,16 +547,12 @@ export default function createChatRoutes({
 
       return Response.json({ success: true });
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function postReorderQuick(request: Request): Promise<Response> {
+  async function postReorderQuick(body: Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request);
       const chatId = typeof body?.chatId === 'string' ? body.chatId.trim() : '';
       const chatIdAbove = typeof body?.chatIdAbove === 'string' ? body.chatIdAbove.trim() : '';
       const chatIdBelow = typeof body?.chatIdBelow === 'string' ? body.chatIdBelow.trim() : '';
@@ -594,16 +581,12 @@ export default function createChatRoutes({
 
       return Response.json({ success: true });
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function patchChatTags(request: Request): Promise<Response> {
+  async function patchChatTags(body: Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request);
       const chatId = String(body.chatId || '').trim();
       if (!chatId) {
         return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
@@ -620,16 +603,12 @@ export default function createChatRoutes({
       registry.updateChat(chatId, { tags });
       return Response.json({ success: true, chatId, tags });
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function postForkChat(request: Request): Promise<Response> {
+  async function postForkChat(body: Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request);
       const sourceChatId = String(body.sourceChatId || '').trim();
       const chatId = String(body.chatId || '').trim();
 
@@ -670,16 +649,12 @@ export default function createChatRoutes({
 
       return Response.json({ success: true, ...result });
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
 
-  async function postRunChat(request: Request): Promise<Response> {
+  async function postRunChat(body: Partial<AgentRunCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request) as Partial<AgentRunCommandRequest> & Record<string, unknown>;
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const clientMessageId = requireStringField(body, 'clientMessageId');
       const chatId = requireStringField(body, 'chatId');
@@ -720,9 +695,6 @@ export default function createChatRoutes({
 
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) {
-        return jsonError('Malformed JSON', 400);
-      }
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
@@ -730,9 +702,8 @@ export default function createChatRoutes({
     }
   }
 
-  async function postForkRunChat(request: Request): Promise<Response> {
+  async function postForkRunChat(body: Partial<ForkRunCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request) as Partial<ForkRunCommandRequest> & Record<string, unknown>;
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const clientMessageId = requireStringField(body, 'clientMessageId');
       const sourceChatId = requireStringField(body, 'sourceChatId');
@@ -796,9 +767,6 @@ export default function createChatRoutes({
         sourceChatId,
       }, { status: 202 });
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) {
-        return jsonError('Malformed JSON', 400);
-      }
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
@@ -818,16 +786,14 @@ export default function createChatRoutes({
     return Response.json({ success: true, chatId, queue: state });
   }
 
-  async function postQueueEnqueue(request: Request): Promise<Response> {
+  async function postQueueEnqueue(body: Partial<QueueEnqueueCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request) as Partial<QueueEnqueueCommandRequest> & Record<string, unknown>;
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
       const content = requireStringField(body, 'content');
       const result = await commands.submitQueueEnqueue({ chatId, content, clientRequestId });
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
@@ -835,9 +801,8 @@ export default function createChatRoutes({
     }
   }
 
-  async function postQueueMutation(request: Request, action: 'dequeue' | 'clear' | 'pause' | 'resume'): Promise<Response> {
+  async function postQueueMutation(body: QueueMutationRequest & Record<string, unknown>, action: 'dequeue' | 'clear' | 'pause' | 'resume'): Promise<Response> {
     try {
-      const body = await parseJsonBody(request) as QueueMutationRequest & Record<string, unknown>;
       const chatId = requireStringField(body, 'chatId');
       const result = await commands.mutateQueue({
         chatId,
@@ -846,7 +811,6 @@ export default function createChatRoutes({
       });
       return Response.json(result);
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
@@ -854,9 +818,8 @@ export default function createChatRoutes({
     }
   }
 
-  async function postPermissionDecision(request: Request): Promise<Response> {
+  async function postPermissionDecision(body: Partial<PermissionDecisionCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request) as Partial<PermissionDecisionCommandRequest> & Record<string, unknown>;
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
       const permissionRequestId = requireStringField(body, 'permissionRequestId');
@@ -869,7 +832,6 @@ export default function createChatRoutes({
       });
       return Response.json(result);
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
@@ -877,9 +839,8 @@ export default function createChatRoutes({
     }
   }
 
-  async function postStopChat(request: Request): Promise<Response> {
+  async function postStopChat(body: Partial<AgentStopCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request) as Partial<AgentStopCommandRequest> & Record<string, unknown>;
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
       const result = await commands.submitStop({
@@ -889,7 +850,6 @@ export default function createChatRoutes({
       });
       return Response.json(result);
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
@@ -897,9 +857,8 @@ export default function createChatRoutes({
     }
   }
 
-  async function patchExecutionSettings(request: Request): Promise<Response> {
+  async function patchExecutionSettings(body: ExecutionSettingsPatchRequest & Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request) as ExecutionSettingsPatchRequest & Record<string, unknown>;
       const chatId = requireStringField(body, 'chatId');
       if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       const patch: AgentSessionSettingsPatch = {};
@@ -918,14 +877,12 @@ export default function createChatRoutes({
       if (Object.keys(patch).length > 0) await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }
   }
 
-  async function patchModel(request: Request): Promise<Response> {
+  async function patchModel(body: ModelPatchRequest & Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request) as ModelPatchRequest & Record<string, unknown>;
       const chatId = requireStringField(body, 'chatId');
       const model = requireStringField(body, 'model');
       if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
@@ -939,36 +896,35 @@ export default function createChatRoutes({
       await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
-      if (error instanceof MalformedJsonError) return jsonError('Malformed JSON', 400);
       return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
     }
   }
 
   return {
     '/api/v1/chats': { GET: getChats, DELETE: deleteSessionHandler },
-    '/api/v1/chats/start': { POST: postStartSession },
-    '/api/v1/chats/run': { POST: postRunChat },
+    '/api/v1/chats/start': { POST: withJsonBody(postStartSession) },
+    '/api/v1/chats/run': { POST: withJsonBody(postRunChat) },
     '/api/v1/chats/validate-start': { GET: validateStartPath },
-    '/api/v1/chats/fork': { POST: postForkChat },
-    '/api/v1/chats/fork-run': { POST: postForkRunChat },
+    '/api/v1/chats/fork': { POST: withJsonBody(postForkChat) },
+    '/api/v1/chats/fork-run': { POST: withJsonBody(postForkRunChat) },
     '/api/v1/chats/messages': { GET: getMessages },
     '/api/v1/chats/running': { GET: getRunningChats },
     '/api/v1/chats/queue': { GET: getQueue },
-    '/api/v1/chats/queue/enqueue': { POST: postQueueEnqueue },
-    '/api/v1/chats/queue/dequeue': { POST: (request) => postQueueMutation(request, 'dequeue') },
-    '/api/v1/chats/queue/clear': { POST: (request) => postQueueMutation(request, 'clear') },
-    '/api/v1/chats/queue/pause': { POST: (request) => postQueueMutation(request, 'pause') },
-    '/api/v1/chats/queue/resume': { POST: (request) => postQueueMutation(request, 'resume') },
-    '/api/v1/chats/permissions/decision': { POST: postPermissionDecision },
-    '/api/v1/chats/stop': { POST: postStopChat },
-    '/api/v1/chats/execution-settings': { PATCH: patchExecutionSettings },
-    '/api/v1/chats/model': { PATCH: patchModel },
+    '/api/v1/chats/queue/enqueue': { POST: withJsonBody(postQueueEnqueue) },
+    '/api/v1/chats/queue/dequeue': { POST: withJsonBody((body) => postQueueMutation(body, 'dequeue')) },
+    '/api/v1/chats/queue/clear': { POST: withJsonBody((body) => postQueueMutation(body, 'clear')) },
+    '/api/v1/chats/queue/pause': { POST: withJsonBody((body) => postQueueMutation(body, 'pause')) },
+    '/api/v1/chats/queue/resume': { POST: withJsonBody((body) => postQueueMutation(body, 'resume')) },
+    '/api/v1/chats/permissions/decision': { POST: withJsonBody(postPermissionDecision) },
+    '/api/v1/chats/stop': { POST: withJsonBody(postStopChat) },
+    '/api/v1/chats/execution-settings': { PATCH: withJsonBody(patchExecutionSettings) },
+    '/api/v1/chats/model': { PATCH: withJsonBody(patchModel) },
     '/api/v1/chats/details': { GET: getChatDetails },
     '/api/v1/chats/pin': { POST: postTogglePin },
     '/api/v1/chats/archive': { POST: postToggleArchive },
-    '/api/v1/chats/read': { POST: postMarkRead },
-    '/api/v1/chats/reorder': { POST: postReorderChats },
-    '/api/v1/chats/reorder-quick': { POST: postReorderQuick },
-    '/api/v1/chats/tags': { PATCH: patchChatTags },
+    '/api/v1/chats/read': { POST: withJsonBody(postMarkRead) },
+    '/api/v1/chats/reorder': { POST: withJsonBody(postReorderChats) },
+    '/api/v1/chats/reorder-quick': { POST: withJsonBody(postReorderQuick) },
+    '/api/v1/chats/tags': { PATCH: withJsonBody(patchChatTags) },
   };
 }
