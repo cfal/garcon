@@ -1,26 +1,30 @@
 // API provider routes manage persisted compatible endpoint configuration.
 
 import { withJsonBody } from '../lib/json-route.js';
+import type { RouteMap } from '../lib/http-route-types.js';
+import type { ApiProviderInput, ApiProviderService } from '../api-providers/service.js';
+import type { ApiProviderModelDiscoveryRequest } from '../../common/api-providers.js';
+import { errorMessage } from './route-helpers.js';
 
-export default function createApiProviderRoutes(apiProviders) {
-  async function getApiProviders() {
+export default function createApiProviderRoutes(apiProviders: ApiProviderService): RouteMap {
+  async function getApiProviders(): Promise<Response> {
     try {
       return Response.json({ apiProviders: apiProviders.getCatalog() });
     } catch (error) {
-      return Response.json({ error: error.message }, { status: 500 });
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function postApiProvider(body) {
+  async function postApiProvider(body: ApiProviderInput): Promise<Response> {
     try {
       const result = await apiProviders.create(body);
       return Response.json(result, { status: 201 });
     } catch (error) {
-      return Response.json({ error: error.message }, { status: 400 });
+      return Response.json({ error: errorMessage(error) }, { status: 400 });
     }
   }
 
-  async function putApiProvider(body, _request, url) {
+  async function putApiProvider(body: Partial<ApiProviderInput>, _request: Request, url: URL): Promise<Response> {
     const id = url.searchParams.get('id');
     if (!id) {
       return Response.json({ error: 'id query parameter is required' }, { status: 400 });
@@ -28,11 +32,11 @@ export default function createApiProviderRoutes(apiProviders) {
     try {
       return Response.json(await apiProviders.update(id, body));
     } catch (error) {
-      return Response.json({ error: error.message }, { status: 400 });
+      return Response.json({ error: errorMessage(error) }, { status: 400 });
     }
   }
 
-  async function deleteApiProvider(_request, url) {
+  async function deleteApiProvider(_request: Request, url: URL): Promise<Response> {
     const id = url.searchParams.get('id');
     if (!id) {
       return Response.json({ error: 'id query parameter is required' }, { status: 400 });
@@ -41,23 +45,23 @@ export default function createApiProviderRoutes(apiProviders) {
       await apiProviders.delete(id);
       return Response.json({ success: true });
     } catch (error) {
-      return Response.json({ error: error.message }, { status: 400 });
+      return Response.json({ error: errorMessage(error) }, { status: 400 });
     }
   }
 
-  async function testApiProvider(body) {
+  async function testApiProvider(body: ApiProviderInput): Promise<Response> {
     try {
       return Response.json(await apiProviders.test(body));
     } catch (error) {
-      return Response.json({ error: error.message }, { status: 400 });
+      return Response.json({ error: errorMessage(error) }, { status: 400 });
     }
   }
 
-  async function discoverApiProviderModels(body) {
+  async function discoverApiProviderModels(body: ApiProviderModelDiscoveryRequest): Promise<Response> {
     try {
       return Response.json(await apiProviders.discoverModels(body));
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 400 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
     }
   }
 

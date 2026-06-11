@@ -3,12 +3,19 @@ import { resolveGenerationContext } from '../settings/generation-config-source.t
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { sanitizeFolderFilter } from '../settings/settings-shared.js';
 import { withJsonBody } from '../lib/json-route.js';
+import type { RouteMap } from '../lib/http-route-types.js';
+import type { SettingsStore } from '../settings/store.js';
+import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { TelegramNotifier } from '../notifications/telegram.js';
+import type { TelegramSettingsStore, TelegramPublicStatus } from '../notifications/telegram-settings-store.js';
+import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
+import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
 const TELEGRAM_LINK_POLL_SECONDS = 20;
 
-const emptyTelegramStatus = {
+const emptyTelegramStatus: TelegramPublicStatus = {
   botTokenAvailable: false,
   botUsername: null,
   botFirstName: null,
@@ -19,7 +26,7 @@ const emptyTelegramStatus = {
   linkUrl: null,
 };
 
-function telegramTokenTestFailedResponse(error) {
+function telegramTokenTestFailedResponse(error: unknown): Response {
   return Response.json({
     success: false,
     error: 'Telegram token test failed',
@@ -28,11 +35,19 @@ function telegramTokenTestFailedResponse(error) {
   }, { status: 400 });
 }
 
-function asPlainObject(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+function asPlainObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-export async function buildRemoteSettingsSnapshot({ settings, agents, telegramSettings }) {
+export async function buildRemoteSettingsSnapshot({
+  settings,
+  agents,
+  telegramSettings,
+}: {
+  settings: SettingsStore;
+  agents: AgentRegistryServiceContract;
+  telegramSettings?: TelegramSettingsStore | null;
+}) {
   const settingsSource = await settings.getRemoteSettingsSnapshotSource();
   const generationContext = await resolveGenerationContext(agents);
 
@@ -91,7 +106,7 @@ export async function buildRemoteSettingsSnapshot({ settings, agents, telegramSe
     uiEffective,
     paths: {
       pinnedProjectPaths: Array.isArray(paths?.pinnedProjectPaths)
-        ? paths.pinnedProjectPaths.filter((entry) => typeof entry === 'string')
+        ? paths.pinnedProjectPaths.filter((entry): entry is string => typeof entry === 'string')
         : [],
       browseStartPath: typeof paths?.browseStartPath === 'string' ? paths.browseStartPath : '',
     },
@@ -111,25 +126,40 @@ export async function buildRemoteSettingsSnapshot({ settings, agents, telegramSe
   };
 }
 
-export default function createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings) {
+interface SavedSearchInput {
+  title: string | null;
+  query: string;
+  showAsSidebarPill: boolean;
+  showInSidebarMenu: boolean;
+  showInSearchDialog: boolean;
+}
 
-  function sanitizeRemoteUiPatch(raw) {
+export default function createWorkspaceRoutes(
+  settings: SettingsStore,
+  agents: AgentRegistryServiceContract,
+  telegramNotifier: TelegramNotifier,
+  telegramSettings: TelegramSettingsStore,
+): RouteMap {
+
+  function sanitizeRemoteUiPatch(raw: unknown): Record<string, unknown> | null {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const patch = { ...raw };
+    const patch = { ...asPlainObject(raw) };
     const notifications = asPlainObject(patch.notifications);
-    if (notifications.telegram && typeof notifications.telegram === 'object' && !Array.isArray(notifications.telegram)) {
-      const telegram = {};
-      if (typeof notifications.telegram.enabled === 'boolean') {
-        telegram.enabled = notifications.telegram.enabled;
+    const rawTelegram = notifications.telegram;
+    if (rawTelegram && typeof rawTelegram === 'object' && !Array.isArray(rawTelegram)) {
+      const notificationTelegram = asPlainObject(rawTelegram);
+      const telegram: Record<string, boolean> = {};
+      if (typeof notificationTelegram.enabled === 'boolean') {
+        telegram.enabled = notificationTelegram.enabled;
       }
       patch.notifications = Object.keys(telegram).length > 0 ? { telegram } : {};
     }
     return Object.keys(patch).length > 0 ? patch : null;
   }
 
-  async function putSessionNameHandler(body) {
+  async function putSessionNameHandler(body: JsonBody): Promise<Response> {
     try {
-      const { chatId, title } = body;
+      const { chatId, title } = asJsonBody(body);
       if (!chatId || typeof chatId !== 'string') {
         return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
       }
@@ -141,38 +171,39 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       await settings.setSessionName(chatId, trimmed);
       return Response.json({ success: true });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function getAppSettings() {
+  async function getAppSettings(): Promise<Response> {
     try {
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json(snapshot);
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function putAppSettings(body) {
+  async function putAppSettings(body: JsonBody): Promise<Response> {
     try {
-      const uiPatch = sanitizeRemoteUiPatch(body.ui);
+      const input = asJsonBody(body);
+      const uiPatch = sanitizeRemoteUiPatch(input.ui);
       if (uiPatch) {
         await settings.setUiSettings(uiPatch);
       }
 
-      if (body.paths && typeof body.paths === 'object') {
-        await settings.setPathSettings(body.paths);
+      if (input.paths && typeof input.paths === 'object' && !Array.isArray(input.paths)) {
+        await settings.setPathSettings(input.paths as Record<string, unknown>);
       }
 
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function postTelegramTest(request) {
+  async function postTelegramTest(_request: Request): Promise<Response> {
     try {
       if (!telegramNotifier?.isConfigured) {
         return Response.json({ success: false, error: 'Telegram bot token is not configured' }, { status: 400 });
@@ -187,17 +218,19 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       }
       return Response.json({ success: true });
     } catch (error) {
-      const status = error.message.startsWith('Telegram ') || error.message.includes('bot token') ? 400 : 500;
-      return Response.json({ success: false, error: error.message }, { status });
+      const message = errorMessage(error);
+      const status = message.startsWith('Telegram ') || message.includes('bot token') ? 400 : 500;
+      return Response.json({ success: false, error: message }, { status });
     }
   }
 
-  async function putTelegramToken(body) {
+  async function putTelegramToken(body: JsonBody): Promise<Response> {
     try {
       if (!telegramSettings) {
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
       }
-      const botToken = typeof body.botToken === 'string' ? body.botToken.trim() : '';
+      const input = asJsonBody(body);
+      const botToken = typeof input.botToken === 'string' ? input.botToken.trim() : '';
       if (!botToken) {
         return Response.json({
           success: false,
@@ -217,11 +250,11 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function deleteTelegramToken() {
+  async function deleteTelegramToken(): Promise<Response> {
     try {
       if (!telegramSettings) {
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
@@ -232,16 +265,17 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function postTelegramTokenTest(body) {
+  async function postTelegramTokenTest(body: JsonBody): Promise<Response> {
     try {
       if (!telegramSettings) {
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
       }
-      const botToken = typeof body.botToken === 'string' ? body.botToken.trim() : '';
+      const input = asJsonBody(body);
+      const botToken = typeof input.botToken === 'string' ? input.botToken.trim() : '';
       const tokenToTest = botToken || telegramSettings.getBotToken();
       const identity = await telegramNotifier.getBotIdentity(tokenToTest);
       return Response.json({ success: true, bot: identity });
@@ -250,7 +284,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
     }
   }
 
-  async function postTelegramRecipientLink() {
+  async function postTelegramRecipientLink(): Promise<Response> {
     try {
       if (!telegramSettings) {
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
@@ -259,11 +293,11 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, linkUrl, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 400 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
     }
   }
 
-  async function postTelegramRecipientResolve() {
+  async function postTelegramRecipientResolve(): Promise<Response> {
     try {
       if (!telegramSettings) {
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
@@ -286,11 +320,11 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 400 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
     }
   }
 
-  async function deleteTelegramRecipient() {
+  async function deleteTelegramRecipient(): Promise<Response> {
     try {
       if (!telegramSettings) {
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
@@ -299,34 +333,35 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  function sanitizeSavedSearchInput(raw) {
+  function sanitizeSavedSearchInput(raw: unknown): SavedSearchInput | null {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const titleRaw = typeof raw.title === 'string' ? raw.title.trim() : '';
-    const query = typeof raw.query === 'string' ? raw.query.trim() : '';
-    const showAsSidebarPill = raw.showAsSidebarPill === true;
-    const showInSidebarMenu = raw.showInSidebarMenu === true;
-    const showInSearchDialog = raw.showInSearchDialog === true;
+    const source = asPlainObject(raw);
+    const titleRaw = typeof source.title === 'string' ? source.title.trim() : '';
+    const query = typeof source.query === 'string' ? source.query.trim() : '';
+    const showAsSidebarPill = source.showAsSidebarPill === true;
+    const showInSidebarMenu = source.showInSidebarMenu === true;
+    const showInSearchDialog = source.showInSearchDialog === true;
     return { title: titleRaw || null, query, showAsSidebarPill, showInSidebarMenu, showInSearchDialog };
   }
 
-  function hasAnySavedSearchVisibility(input) {
+  function hasAnySavedSearchVisibility(input: Pick<SavedSearchInput, 'showAsSidebarPill' | 'showInSidebarMenu' | 'showInSearchDialog'>): boolean {
     return input.showAsSidebarPill || input.showInSidebarMenu || input.showInSearchDialog;
   }
 
-  async function getSavedSearches() {
+  async function getSavedSearches(): Promise<Response> {
     try {
       const savedSearches = await settings.getSavedSearches();
       return Response.json({ savedSearches });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function postSavedSearch(body) {
+  async function postSavedSearch(body: JsonBody): Promise<Response> {
     try {
       const input = sanitizeSavedSearchInput(body);
       if (!input || !input.query) {
@@ -349,36 +384,37 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const result = await settings.addSavedSearch(savedSearch);
       return Response.json({ success: true, savedSearch: result });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function putSavedSearch(body) {
+  async function putSavedSearch(body: JsonBody): Promise<Response> {
     try {
-      const id = String(body.id || '').trim();
+      const input = asJsonBody(body);
+      const id = String(input.id || '').trim();
       if (!id) {
         return Response.json({ success: false, error: 'id is required' }, { status: 400 });
       }
-      const patch = {};
-      if (typeof body.title === 'string') {
-        const title = body.title.trim();
+      const patch: Partial<SavedChatSearch> = {};
+      if (typeof input.title === 'string') {
+        const title = input.title.trim();
         patch.title = title || null;
       }
-      if (typeof body.query === 'string') {
-        const query = body.query.trim();
+      if (typeof input.query === 'string') {
+        const query = input.query.trim();
         if (!query) {
           return Response.json({ success: false, error: 'query must not be empty' }, { status: 400 });
         }
         patch.query = query;
       }
-      if (typeof body.showAsSidebarPill === 'boolean') {
-        patch.showAsSidebarPill = body.showAsSidebarPill;
+      if (typeof input.showAsSidebarPill === 'boolean') {
+        patch.showAsSidebarPill = input.showAsSidebarPill;
       }
-      if (typeof body.showInSidebarMenu === 'boolean') {
-        patch.showInSidebarMenu = body.showInSidebarMenu;
+      if (typeof input.showInSidebarMenu === 'boolean') {
+        patch.showInSidebarMenu = input.showInSidebarMenu;
       }
-      if (typeof body.showInSearchDialog === 'boolean') {
-        patch.showInSearchDialog = body.showInSearchDialog;
+      if (typeof input.showInSearchDialog === 'boolean') {
+        patch.showInSearchDialog = input.showInSearchDialog;
       }
       const existing = (await settings.getSavedSearches()).find((s) => s.id === id);
       if (!existing) {
@@ -396,11 +432,11 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       const result = await settings.updateSavedSearch(id, patch);
       return Response.json({ success: true, savedSearch: result });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function deleteSavedSearch(_request, url) {
+  async function deleteSavedSearch(_request: Request, url: URL): Promise<Response> {
     const id = url.searchParams.get('id');
     if (!id) {
       return Response.json({ success: false, error: 'id query parameter is required' }, { status: 400 });
@@ -412,11 +448,11 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       }
       return Response.json({ success: true });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function putSavedSearchReorder(body) {
+  async function putSavedSearchReorder(body: JsonBody): Promise<Response> {
     try {
       const oldOrder = Array.isArray(body.oldOrder) ? body.oldOrder : [];
       const newOrder = Array.isArray(body.newOrder) ? body.newOrder : [];
@@ -426,61 +462,63 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       }
       return Response.json({ success: true });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function getFolders() {
+  async function getFolders(): Promise<Response> {
     try {
       const folders = await settings.getFolders();
       return Response.json({ folders });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function postFolder(body) {
+  async function postFolder(body: JsonBody): Promise<Response> {
     try {
-      const name = String(body.name || '').trim();
+      const input = asJsonBody(body);
+      const name = String(input.name || '').trim();
       if (!name) {
         return Response.json({ success: false, error: 'name is required' }, { status: 400 });
       }
       const folder = {
         id: crypto.randomUUID(),
         name,
-        filter: sanitizeFolderFilter(body.filter),
+        filter: sanitizeFolderFilter(input.filter),
         createdAt: new Date().toISOString(),
       };
       const result = await settings.addFolder(folder);
       return Response.json({ success: true, folder: result });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function putFolder(body) {
+  async function putFolder(body: JsonBody): Promise<Response> {
     try {
-      const folderId = String(body.id || '').trim();
+      const input = asJsonBody(body);
+      const folderId = String(input.id || '').trim();
       if (!folderId) {
         return Response.json({ success: false, error: 'id is required' }, { status: 400 });
       }
-      const patch = {};
-      if (typeof body.name === 'string') {
-        const name = body.name.trim();
+      const patch: Partial<ChatFolder> = {};
+      if (typeof input.name === 'string') {
+        const name = input.name.trim();
         if (!name) {
           return Response.json({ success: false, error: 'name is required' }, { status: 400 });
         }
         patch.name = name;
       }
-      if (body.filter && typeof body.filter === 'object') patch.filter = sanitizeFolderFilter(body.filter);
+      if (input.filter && typeof input.filter === 'object') patch.filter = sanitizeFolderFilter(input.filter);
       const result = await settings.updateFolder(folderId, patch);
       return Response.json({ success: true, folder: result });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function deleteFolder(_request, url) {
+  async function deleteFolder(_request: Request, url: URL): Promise<Response> {
     const folderId = url.searchParams.get('id');
     if (!folderId) {
       return Response.json({ success: false, error: 'id query parameter is required' }, { status: 400 });
@@ -492,7 +530,7 @@ export default function createWorkspaceRoutes(settings, agents, telegramNotifier
       }
       return Response.json({ success: true });
     } catch (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 

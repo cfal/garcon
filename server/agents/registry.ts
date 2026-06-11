@@ -55,7 +55,14 @@ export interface AgentRegistryServiceContract {
   }): Promise<StartedAgentSession | null>;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
   getAgentReadinessMap(): Promise<Record<string, unknown>>;
+  getAgentAuthStatus(agentId: string): Promise<unknown | null>;
   getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
+  getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
+  launchAgentAuthLogin(agentId: string): Promise<{
+    launched: boolean;
+    alreadyRunning: boolean;
+    deviceAuth?: { url: string; code: string };
+  }>;
   modelSupportsImages(input: {
     agentId: string;
     model: string;

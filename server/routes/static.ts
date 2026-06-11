@@ -1,12 +1,17 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { markRouteNoAuth } from '../lib/http-route.js';
+import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const serverRoot = path.resolve(__dirname, '../..');
 
-export function cacheHeaders(requestPath) {
+type NamedBlob = Blob & { name?: unknown };
+type StaticAssetMap = Record<string, Blob>;
+type StaticPathHandler = (pathname: string) => Response | Promise<Response>;
+
+export function cacheHeaders(requestPath: string): HeadersInit {
   if (requestPath.endsWith('.html')) {
     return { 'Cache-Control': 'no-cache, no-store, must-revalidate' };
   }
@@ -20,22 +25,23 @@ export function cacheHeaders(requestPath) {
   return {};
 }
 
-function notFoundResponse() {
+function notFoundResponse(): Response {
   return Response.json({ success: false, error: 'Not found' }, { status: 404 });
 }
 
-const noauthServePathname = (function() {
+const noauthServePathname: StaticPathHandler = (function() {
   const isEmbedded = Bun.embeddedFiles.length > 0;
   if (isEmbedded) {
     console.log('Static assets source: embedded');
 
     const embeddedAssets = (function generateEmbeddedStaticAssets() {
-      const embeddedStaticAssetPaths = {};
+      const embeddedStaticAssetPaths: StaticAssetMap = {};
       const embeddedRoot = 'web/build/';
 
       for (const blob of Bun.embeddedFiles) {
-        if (!(blob instanceof Blob) || typeof blob.name !== 'string') continue;
-        const normalizedName = blob.name.replaceAll('\\', '/');
+        const namedBlob = blob as NamedBlob;
+        if (!(blob instanceof Blob) || typeof namedBlob.name !== 'string') continue;
+        const normalizedName = namedBlob.name.replaceAll('\\', '/');
         if (!normalizedName.startsWith(embeddedRoot)) continue;
         const relativePath = normalizedName.slice(embeddedRoot.length);
         if (!relativePath || relativePath.endsWith('/')) continue;
@@ -44,7 +50,7 @@ const noauthServePathname = (function() {
       return Object.freeze(embeddedStaticAssetPaths);
     })();
 
-    return function noauthServePathnameEmbedded(pathname) {
+    return function noauthServePathnameEmbedded(pathname: string): Response {
       if (typeof pathname !== 'string' || pathname.length === 0) {
         return notFoundResponse();
       }
@@ -60,7 +66,7 @@ const noauthServePathname = (function() {
     // Serves from web/build/ (SvelteKit adapter-static output).
     const filesystemDistDir = path.join(serverRoot, 'web', 'build') + path.sep;
 
-    function getDistPathForRequest(pathname, distDirectory = filesystemDistDir) {
+    function getDistPathForRequest(pathname: string, distDirectory = filesystemDistDir): string | null {
       const normalizedDistDir = distDirectory.endsWith(path.sep) ? distDirectory : `${distDirectory}${path.sep}`;
       const strippedPath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
       const resolvedPath = path.resolve(path.join(distDirectory, strippedPath));
@@ -70,7 +76,7 @@ const noauthServePathname = (function() {
       return resolvedPath;
     }
 
-    return async function noauthServePathnameFilesystem(pathname) {
+    return async function noauthServePathnameFilesystem(pathname: string): Promise<Response> {
       if (typeof pathname !== 'string' || pathname.length === 0) {
         return notFoundResponse();
       }
@@ -84,18 +90,18 @@ const noauthServePathname = (function() {
   }
 })();
 
-function noauthServeStatic(filename) {
+function noauthServeStatic(filename: string): RouteHandler {
   const pathname = `/${filename}`;
   return markRouteNoAuth(async function noauthServeStaticWrapper() {
     return noauthServePathname(pathname);
   });
 }
 
-const noauthServeFile = markRouteNoAuth(async function noauthServeFile(req, url) {
+const noauthServeFile = markRouteNoAuth(async function noauthServeFile(_req: Request, url: URL): Promise<Response> {
   return noauthServePathname(url.pathname);
 });
 
-const routes = {};
+const routes: RouteMap = {};
 routes['/'] = { GET: noauthServeStatic('index.html') };
 routes['/index.html'] = { GET: noauthServeStatic('index.html') };
 routes['/favicon.ico'] = { GET: noauthServeStatic('favicon.ico') };

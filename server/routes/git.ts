@@ -4,25 +4,86 @@ import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effec
 import { resolveGenerationContext } from '../settings/generation-config-source.ts';
 import { isAgentId } from '../../common/agents.ts';
 import { withJsonBody } from '../lib/json-route.js';
+import type { RouteMap } from '../lib/http-route-types.js';
+import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { SettingsStore } from '../settings/store.js';
+import type { ApiProtocol } from '../../common/api-providers.js';
 import {
   assertWithinProjectBase,
   isProjectBoundaryError,
   projectBoundaryErrorResponse,
 } from '../lib/path-boundary.ts';
+import { asJsonBody, type JsonBody } from './route-helpers.js';
 
-function hasOwn(source, key) {
+type GitMode = 'working' | 'staged';
+type StageMode = 'stage' | 'unstage';
+type RevertStrategy = 'revert' | 'reset-soft';
+
+interface GitRouteOptions {
+  projectPath: string;
+  [key: string]: unknown;
+}
+
+interface GitRouteService {
+  toHttpError(error: unknown): Response;
+  getStatus(options: GitRouteOptions): Promise<unknown>;
+  getDiff(options: GitRouteOptions): Promise<unknown>;
+  getFileWithDiff(options: GitRouteOptions): Promise<unknown>;
+  initialCommit(options: GitRouteOptions): Promise<unknown>;
+  commit(options: GitRouteOptions): Promise<unknown>;
+  getBranches(options: GitRouteOptions): Promise<unknown>;
+  checkout(options: GitRouteOptions): Promise<unknown>;
+  createBranch(options: GitRouteOptions): Promise<unknown>;
+  getCommits(options: GitRouteOptions): Promise<unknown>;
+  getCommitDiff(options: GitRouteOptions): Promise<unknown>;
+  generateCommitMessageForFiles(options: GitRouteOptions): Promise<unknown>;
+  getRemoteStatus(options: GitRouteOptions): Promise<unknown>;
+  fetch(options: GitRouteOptions): Promise<unknown>;
+  pull(options: GitRouteOptions): Promise<unknown>;
+  push(options: GitRouteOptions): Promise<unknown>;
+  getRemotes(options: GitRouteOptions): Promise<unknown>;
+  discard(options: GitRouteOptions): Promise<unknown>;
+  deleteUntracked(options: GitRouteOptions): Promise<unknown>;
+  getFileReviewData(options: GitRouteOptions): Promise<unknown>;
+  getChangesTree(options: GitRouteOptions): Promise<unknown>;
+  getFileReviewDataBatch(options: GitRouteOptions): Promise<unknown>;
+  stageSelection(options: GitRouteOptions): Promise<unknown>;
+  stageHunk(options: GitRouteOptions): Promise<unknown>;
+  getRepoInfo(options: GitRouteOptions): Promise<unknown>;
+  getWorktrees(options: GitRouteOptions): Promise<unknown>;
+  getTargetCandidates(options: GitRouteOptions): Promise<unknown>;
+  createWorktree(options: GitRouteOptions): Promise<unknown>;
+  removeWorktree(options: GitRouteOptions): Promise<unknown>;
+  commitIndex(options: GitRouteOptions): Promise<unknown>;
+  stageFile(options: GitRouteOptions): Promise<unknown>;
+  revertLastCommit(options: GitRouteOptions): Promise<unknown>;
+}
+
+interface ProxiedGitRouteService extends GitRouteService {
+  [key: string]: unknown;
+}
+
+interface GitServiceFactoryResult {
+  [key: string]: unknown;
+}
+
+interface StageSelectionInput {
+  lineIndices: number[];
+}
+
+function hasOwn(source: unknown, key: string): source is Record<string, unknown> {
   return Boolean(source) && Object.prototype.hasOwnProperty.call(source, key);
 }
 
-function optionalId(value) {
+function optionalId(value: unknown): string | null {
   return typeof value === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(value) ? value : null;
 }
 
-function optionalProtocol(value) {
+function optionalProtocol(value: unknown): ApiProtocol | null {
   return value === 'openai-compatible' || value === 'anthropic-messages' ? value : null;
 }
 
-function isAllowedGenerationAgent(agents, value) {
+function isAllowedGenerationAgent(agents: AgentRegistryServiceContract, value: unknown): boolean {
   if (!isAgentId(value)) return false;
   if (typeof agents?.hasAgent === 'function') {
     return agents.hasAgent(value);
@@ -30,7 +91,7 @@ function isAllowedGenerationAgent(agents, value) {
   return true;
 }
 
-async function resolveCommitMessageConfig(settings, agents) {
+async function resolveCommitMessageConfig(settings: SettingsStore, agents: AgentRegistryServiceContract) {
   const ui = await settings?.getUiSettings?.() ?? {};
   const generationContext = await resolveGenerationContext(agents);
   return resolveEffectiveGenerationUiConfig({
@@ -39,21 +100,25 @@ async function resolveCommitMessageConfig(settings, agents) {
   });
 }
 
-function isNonEmptyString(value) {
+function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
-function isNonNegativeInteger(value) {
-  return Number.isInteger(value) && value >= 0;
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
-function isValidLineIndices(value) {
+function isValidLineIndices(value: unknown): value is number[] {
   return Array.isArray(value) && value.every(isNonNegativeInteger);
 }
 
-function boundaryCheckedOptions(options) {
+function isGitRouteOptions(value: unknown): value is GitRouteOptions {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function boundaryCheckedOptions(options: unknown): unknown {
   if (!options || typeof options !== 'object') return options;
-  const next = { ...options };
+  const next = { ...options as Record<string, unknown> };
   if (typeof next.projectPath === 'string') {
     next.projectPath = assertWithinProjectBase(next.projectPath);
   }
@@ -63,25 +128,49 @@ function boundaryCheckedOptions(options) {
   return next;
 }
 
-function createBoundaryCheckedGitService(git) {
+function createBoundaryCheckedGitService(git: GitServiceFactoryResult): GitRouteService {
   return new Proxy(git, {
-    get(target, prop, receiver) {
+    get(target: GitServiceFactoryResult, prop: string | symbol, receiver: unknown): unknown {
       const value = Reflect.get(target, prop, receiver);
       if (prop === 'toHttpError' && typeof value === 'function') {
-        return (error) => isProjectBoundaryError(error)
+        return (error: unknown) => isProjectBoundaryError(error)
           ? projectBoundaryErrorResponse()
           : value.call(target, error);
       }
       if (typeof value !== 'function') return value;
-      return (options, ...args) => value.call(target, boundaryCheckedOptions(options), ...args);
+      return (options: unknown, ...args: unknown[]) => value.call(target, boundaryCheckedOptions(options), ...args);
     },
-  });
+  }) as ProxiedGitRouteService;
 }
 
-export default function createGitRoutes(agents, settings) {
+function requiredString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function stringArray(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every(isNonEmptyString) ? value : null;
+}
+
+function validMode(value: unknown): GitMode | null {
+  return value === 'working' || value === 'staged' ? value : null;
+}
+
+function validStageMode(value: unknown): StageMode | null {
+  return value === 'stage' || value === 'unstage' ? value : null;
+}
+
+function validSelection(value: unknown): StageSelectionInput | null {
+  if (!isGitRouteOptions(value) || !isValidLineIndices(value.lineIndices)) return null;
+  return { lineIndices: value.lineIndices };
+}
+
+export default function createGitRoutes(
+  agents: AgentRegistryServiceContract,
+  settings: SettingsStore,
+): RouteMap {
   const git = createBoundaryCheckedGitService(createGitService({ agents, classifyGitError }));
 
-  async function getStatus(request, url) {
+  async function getStatus(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     if (!project) {
       return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -95,7 +184,7 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getDiff(request, url) {
+  async function getDiff(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     const file = url.searchParams.get('file');
     if (!project || !file) {
@@ -110,7 +199,7 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getFileWithDiff(request, url) {
+  async function getFileWithDiff(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     const file = url.searchParams.get('file');
     if (!project || !file) {
@@ -125,9 +214,10 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postInitialCommit(body) {
+  async function postInitialCommit(body: JsonBody): Promise<Response> {
     try {
-      const project = body.project;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
       if (!project) {
         return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
       }
@@ -139,9 +229,12 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postCommit(body) {
+  async function postCommit(body: JsonBody): Promise<Response> {
     try {
-      const { project, message, files } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const message = requiredString(input.message);
+      const files = stringArray(input.files);
       if (!project || !message || !files || files.length === 0) {
         return Response.json({ error: 'Missing required parameters: project, message, and files.' }, { status: 400 });
       }
@@ -153,7 +246,7 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getBranches(request, url) {
+  async function getBranches(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     if (!project) {
       return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -167,9 +260,11 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postCheckout(body) {
+  async function postCheckout(body: JsonBody): Promise<Response> {
     try {
-      const { project, branch } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const branch = requiredString(input.branch);
       if (!project || !branch) {
         return Response.json({ error: 'Missing required parameters: project and branch.' }, { status: 400 });
       }
@@ -181,9 +276,11 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postCreateBranch(body) {
+  async function postCreateBranch(body: JsonBody): Promise<Response> {
     try {
-      const { project, branch } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const branch = requiredString(input.branch);
       if (!project || !branch) {
         return Response.json({ error: 'Missing required parameters: project and branchName.' }, { status: 400 });
       }
@@ -195,7 +292,7 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getCommits(request, url) {
+  async function getCommits(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     const limit = url.searchParams.get('limit') || '10';
     if (!project) {
@@ -210,7 +307,7 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getCommitDiff(request, url) {
+  async function getCommitDiff(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     const commit = url.searchParams.get('commit');
     if (!project || !commit) {
@@ -225,32 +322,34 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postGenerateCommitMessage(body) {
+  async function postGenerateCommitMessage(body: JsonBody): Promise<Response> {
     try {
-      const { project, files } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const files = stringArray(input.files);
       if (!project || !files || files.length === 0) {
         return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
       }
-      if (hasOwn(body, 'agentId') && !isAllowedGenerationAgent(agents, body.agentId)) {
+      if (hasOwn(input, 'agentId') && !isAllowedGenerationAgent(agents, input.agentId)) {
         return Response.json({ error: 'Invalid agent.' }, { status: 400 });
       }
 
       const persistedConfig = await resolveCommitMessageConfig(settings, agents);
-      const agentId = hasOwn(body, 'agentId') ? body.agentId : persistedConfig.agentId;
-      const model = hasOwn(body, 'model')
-        ? (typeof body.model === 'string' ? body.model : '')
+      const agentId = hasOwn(input, 'agentId') && isAgentId(input.agentId) ? input.agentId : persistedConfig.agentId;
+      const model = hasOwn(input, 'model')
+        ? (typeof input.model === 'string' ? input.model : '')
         : (typeof persistedConfig.model === 'string' ? persistedConfig.model : '');
-      const apiProviderId = hasOwn(body, 'apiProviderId')
-        ? optionalId(body.apiProviderId)
+      const apiProviderId = hasOwn(input, 'apiProviderId')
+        ? optionalId(input.apiProviderId)
         : (persistedConfig.apiProviderId ?? null);
-      const modelEndpointId = hasOwn(body, 'modelEndpointId')
-        ? optionalId(body.modelEndpointId)
+      const modelEndpointId = hasOwn(input, 'modelEndpointId')
+        ? optionalId(input.modelEndpointId)
         : (persistedConfig.modelEndpointId ?? null);
-      const modelProtocol = hasOwn(body, 'modelProtocol')
-        ? optionalProtocol(body.modelProtocol)
+      const modelProtocol = hasOwn(input, 'modelProtocol')
+        ? optionalProtocol(input.modelProtocol)
         : (persistedConfig.modelProtocol ?? null);
-      const customPrompt = hasOwn(body, 'customPrompt')
-        ? (typeof body.customPrompt === 'string' ? body.customPrompt : '')
+      const customPrompt = hasOwn(input, 'customPrompt')
+        ? (typeof input.customPrompt === 'string' ? input.customPrompt : '')
         : (typeof persistedConfig.customPrompt === 'string' ? persistedConfig.customPrompt : '');
 
       const result = await git.generateCommitMessageForFiles({
@@ -269,7 +368,7 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getRemoteStatus(request, url) {
+  async function getRemoteStatus(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     if (!project) {
       return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -283,9 +382,10 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postFetch(body) {
+  async function postFetch(body: JsonBody): Promise<Response> {
     try {
-      const project = body.project;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
       if (!project) {
         return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
       }
@@ -297,9 +397,10 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postPull(body) {
+  async function postPull(body: JsonBody): Promise<Response> {
     try {
-      const project = body.project;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
       if (!project) {
         return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
       }
@@ -311,9 +412,12 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postPush(body) {
+  async function postPush(body: JsonBody): Promise<Response> {
     try {
-      const { project, remote, remoteBranch } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const remote = typeof input.remote === 'string' ? input.remote : undefined;
+      const remoteBranch = typeof input.remoteBranch === 'string' ? input.remoteBranch : undefined;
       if (!project) {
         return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
       }
@@ -325,7 +429,7 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getRemotes(request, url) {
+  async function getRemotes(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     if (!project) {
       return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -339,9 +443,11 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postDiscard(body) {
+  async function postDiscard(body: JsonBody): Promise<Response> {
     try {
-      const { project, file } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const file = requiredString(input.file);
       if (!project || !file) {
         return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
       }
@@ -353,9 +459,11 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postDeleteUntracked(body) {
+  async function postDeleteUntracked(body: JsonBody): Promise<Response> {
     try {
-      const { project, file } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const file = requiredString(input.file);
       if (!project || !file) {
         return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
       }
@@ -367,16 +475,16 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getFileReviewData(request, url) {
+  async function getFileReviewData(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     const file = url.searchParams.get('file');
-    const mode = url.searchParams.get('mode') || 'working';
+    const mode = validMode(url.searchParams.get('mode') || 'working');
     const context = Number(url.searchParams.get('context') || 5);
 
     if (!project || !file) {
       return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
     }
-    if (mode !== 'working' && mode !== 'staged') {
+    if (!mode) {
       return Response.json({ error: 'Invalid mode. Expected one of: working, staged.' }, { status: 400 });
     }
 
@@ -388,7 +496,7 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getChangesTree(request, url) {
+  async function getChangesTree(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     if (!project) {
       return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -402,17 +510,18 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postFileReviewDataBatch(body) {
+  async function postFileReviewDataBatch(body: JsonBody): Promise<Response> {
     try {
-      const { project, files, mode, context } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const files = stringArray(input.files);
+      const mode = validMode(input.mode);
+      const context = input.context;
 
-      if (!project || !Array.isArray(files) || files.length === 0) {
+      if (!project || !files || files.length === 0) {
         return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
       }
-      if (!files.every(isNonEmptyString)) {
-        return Response.json({ error: 'files must be a non-empty array of file paths.' }, { status: 400 });
-      }
-      if (mode !== 'working' && mode !== 'staged') {
+      if (!mode) {
         return Response.json({ error: 'Invalid mode. Expected one of: working, staged.' }, { status: 400 });
       }
 
@@ -428,18 +537,21 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postStageSelection(body) {
+  async function postStageSelection(body: JsonBody): Promise<Response> {
     try {
-      const { project, file, mode, selection, contextLines } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const file = requiredString(input.file);
+      const modeRaw = input.mode;
+      const mode = validStageMode(modeRaw);
+      const selection = validSelection(input.selection);
+      const contextLines = input.contextLines;
 
-      if (!project || !file || !mode || !selection?.lineIndices) {
+      if (!project || !file || !modeRaw || !selection?.lineIndices) {
         return Response.json({ error: 'Missing required parameters: project, file, mode, and selection.lineIndices.' }, { status: 400 });
       }
-      if (mode !== 'stage' && mode !== 'unstage') {
+      if (!mode) {
         return Response.json({ error: 'Invalid mode. Expected one of: stage, unstage.' }, { status: 400 });
-      }
-      if (!isValidLineIndices(selection.lineIndices)) {
-        return Response.json({ error: 'selection.lineIndices must be an array of non-negative integers.' }, { status: 400 });
       }
 
       const result = await git.stageSelection({
@@ -452,14 +564,20 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postStageHunk(body) {
+  async function postStageHunk(body: JsonBody): Promise<Response> {
     try {
-      const { project, file, mode, hunkIndex, contextLines } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const file = requiredString(input.file);
+      const modeRaw = input.mode;
+      const mode = validStageMode(modeRaw);
+      const hunkIndex = input.hunkIndex;
+      const contextLines = input.contextLines;
 
-      if (!project || !file || !mode || hunkIndex === undefined) {
+      if (!project || !file || !modeRaw || hunkIndex === undefined) {
         return Response.json({ error: 'Missing required parameters: project, file, mode, and hunkIndex.' }, { status: 400 });
       }
-      if (mode !== 'stage' && mode !== 'unstage') {
+      if (!mode) {
         return Response.json({ error: 'Invalid mode. Expected one of: stage, unstage.' }, { status: 400 });
       }
       if (!isNonNegativeInteger(hunkIndex)) {
@@ -476,7 +594,7 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getRepoInfo(request, url) {
+  async function getRepoInfo(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     if (!project) {
       return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -490,7 +608,7 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getWorktrees(request, url) {
+  async function getWorktrees(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     if (!project) {
       return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -504,7 +622,7 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function getTargets(request, url) {
+  async function getTargets(_request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     if (!project) {
       return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -518,9 +636,14 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postCreateWorktree(body) {
+  async function postCreateWorktree(body: JsonBody): Promise<Response> {
     try {
-      const { project, baseRef, worktreePath, branch, detach } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const baseRef = typeof input.baseRef === 'string' ? input.baseRef : undefined;
+      const worktreePath = requiredString(input.worktreePath);
+      const branch = typeof input.branch === 'string' ? input.branch : undefined;
+      const detach = input.detach === true;
 
       if (!project || !worktreePath) {
         return Response.json({ error: 'Missing required parameters: project and worktreePath.' }, { status: 400 });
@@ -533,9 +656,12 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postRemoveWorktree(body) {
+  async function postRemoveWorktree(body: JsonBody): Promise<Response> {
     try {
-      const { project, worktreePath, force } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const worktreePath = requiredString(input.worktreePath);
+      const force = input.force === true;
 
       if (!project || !worktreePath) {
         return Response.json({ error: 'Missing required parameters: project and worktreePath.' }, { status: 400 });
@@ -548,9 +674,11 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postCommitIndex(body) {
+  async function postCommitIndex(body: JsonBody): Promise<Response> {
     try {
-      const { project, message } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const message = requiredString(input.message);
 
       if (!project || !message) {
         return Response.json({ error: 'Missing required parameters: project and message.' }, { status: 400 });
@@ -563,14 +691,18 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postStageFile(body) {
+  async function postStageFile(body: JsonBody): Promise<Response> {
     try {
-      const { project, file, mode } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const file = requiredString(input.file);
+      const modeRaw = input.mode;
+      const mode = validStageMode(modeRaw);
 
-      if (!project || !file || !mode) {
+      if (!project || !file || !modeRaw) {
         return Response.json({ error: 'Missing required parameters: project, file, and mode.' }, { status: 400 });
       }
-      if (mode !== 'stage' && mode !== 'unstage') {
+      if (!mode) {
         return Response.json({ error: 'Invalid mode. Expected one of: stage, unstage.' }, { status: 400 });
       }
 
@@ -581,9 +713,11 @@ export default function createGitRoutes(agents, settings) {
     }
   }
 
-  async function postRevertLastCommit(body) {
+  async function postRevertLastCommit(body: JsonBody): Promise<Response> {
     try {
-      const { project, strategy } = body;
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const strategy = input.strategy;
 
       if (!project) {
         return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -594,7 +728,7 @@ export default function createGitRoutes(agents, settings) {
         return Response.json({ error: 'Invalid strategy. Expected one of: revert, reset-soft.' }, { status: 400 });
       }
 
-      const result = await git.revertLastCommit({ projectPath: project, strategy: effectiveStrategy });
+      const result = await git.revertLastCommit({ projectPath: project, strategy: effectiveStrategy as RevertStrategy });
       return Response.json(result);
     } catch (error) {
       return git.toHttpError(error);

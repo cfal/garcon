@@ -1,20 +1,29 @@
 // Agent routes expose runtime catalog, auth, and readiness state.
 
 import { withJsonBody } from '../lib/json-route.js';
+import type { RouteMap } from '../lib/http-route-types.js';
+import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { ApiProviderService } from '../api-providers/service.js';
+import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 
-export default function createAgentRoutes({ agents, apiProviders }) {
-  async function getAgents() {
+interface AgentRouteDeps {
+  agents: AgentRegistryServiceContract;
+  apiProviders: ApiProviderService;
+}
+
+export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDeps): RouteMap {
+  async function getAgents(): Promise<Response> {
     try {
       return Response.json({
         agents: await agents.getAgentCatalogEntries(),
         apiProviders: apiProviders.getCatalog(),
       });
     } catch (error) {
-      return Response.json({ error: error.message }, { status: 500 });
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function getAgentAuth(_request, url) {
+  async function getAgentAuth(_request: Request, url: URL): Promise<Response> {
     const agentId = url.searchParams.get('agent');
     try {
       if (agentId) {
@@ -26,27 +35,28 @@ export default function createAgentRoutes({ agents, apiProviders }) {
       }
       return Response.json(await agents.getAgentAuthStatusMap());
     } catch (error) {
-      return Response.json({ error: error.message }, { status: 500 });
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function getAgentReadiness() {
+  async function getAgentReadiness(): Promise<Response> {
     try {
       return Response.json(await agents.getAgentReadinessMap());
     } catch (error) {
-      return Response.json({ error: error.message }, { status: 500 });
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function postAgentAuthLogin(body) {
+  async function postAgentAuthLogin(body: JsonBody): Promise<Response> {
     try {
-      const agentId = typeof body?.agentId === 'string' ? body.agentId : '';
+      const input = asJsonBody(body);
+      const agentId = typeof input.agentId === 'string' ? input.agentId : '';
       if (!agentId) {
         return Response.json({ error: 'agentId is required' }, { status: 400 });
       }
       return Response.json(await agents.launchAgentAuthLogin(agentId));
     } catch (error) {
-      return Response.json({ error: error.message }, { status: 500 });
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 

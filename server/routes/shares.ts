@@ -10,13 +10,14 @@ import { renderSharedChatText } from '../chats/share-transcript.ts';
 import { extractFirstLine } from '../lib/text.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { HistoryCachePageReader } from '../chats/history-cache-contract.js';
+import type { ChatMetadata } from '../chats/metadata-store.js';
 
 interface SettingsDep {
   getChatName(chatId: string): string | null;
 }
 
 interface MetadataDep {
-  getChatMetadata(chatId: string): Record<string, unknown> | null;
+  getChatMetadata(chatId: string): ChatMetadata | null;
 }
 
 type HistoryCacheDep = HistoryCachePageReader;

@@ -1,0 +1,87 @@
+import authRoutes from './auth.js';
+import staticRoutes from './static.js';
+import createFilesRoutes from './files.js';
+import createAgentRoutes from './agents.js';
+import createApiProviderRoutes from './api-providers.js';
+import createModelsRoutes from './models.js';
+import createGitRoutes from './git.js';
+import createChatRoutes from './chats.js';
+import createShareRoutes from './shares.js';
+import createWorkspaceRoutes from './workspace.js';
+import type { RouteMap } from '../lib/http-route-types.js';
+import type { IChatRegistry } from '../chats/store.js';
+import type { SettingsStore } from '../settings/store.js';
+import type { ChatQueueService } from '../queue.js';
+import type { PathCache } from '../chats/path-cache.js';
+import type { MetadataIndex } from '../chats/metadata-store.js';
+import type { HistoryCache } from '../chats/history-cache.js';
+import type { AgentRegistry } from '../agents/registry.js';
+import type { CommandLedger } from '../commands/command-ledger.js';
+import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
+import type { TelegramNotifier } from '../notifications/telegram.js';
+import type { TelegramSettingsStore } from '../notifications/telegram-settings-store.js';
+import type { IShareStore } from '../chats/share-store.js';
+import type { ApiProviderService } from '../api-providers/service.js';
+import type { ChatCommandService } from '../commands/chat-command-service.js';
+import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
+
+export default function createAllRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  commandLedger,
+  pendingInputs,
+  telegramNotifier,
+  telegramSettings,
+  shareStore,
+  apiProviders,
+  chatCommands,
+  modelCatalogResponseCache,
+}: {
+  registry: IChatRegistry;
+  settings: SettingsStore;
+  queue: ChatQueueService;
+  pathCache: PathCache;
+  metadata: MetadataIndex;
+  historyCache: HistoryCache;
+  agents: AgentRegistry;
+  commandLedger: CommandLedger;
+  pendingInputs: PendingUserInputServiceContract;
+  telegramNotifier: TelegramNotifier;
+  telegramSettings: TelegramSettingsStore;
+  shareStore: IShareStore;
+  apiProviders: ApiProviderService;
+  chatCommands: ChatCommandService;
+  modelCatalogResponseCache: ModelCatalogResponseCache;
+}): RouteMap {
+  return {
+    ...staticRoutes,
+    ...authRoutes,
+    ...createAgentRoutes({ agents, apiProviders }),
+    ...createApiProviderRoutes(apiProviders),
+    ...createChatRoutes({
+      registry,
+      settings,
+      queue,
+      pathCache,
+      metadata,
+      historyCache,
+      agents,
+      commandLedger,
+      pendingInputs,
+      commandService: chatCommands,
+    }),
+    ...createShareRoutes(shareStore, registry, settings, metadata, historyCache),
+    ...createFilesRoutes(registry),
+    ...createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings),
+    ...createModelsRoutes({
+      modelCatalog: { agents, apiProviders },
+      responseCache: modelCatalogResponseCache,
+    }),
+    ...createGitRoutes(agents, settings),
+  };
+}

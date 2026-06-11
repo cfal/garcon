@@ -9,7 +9,7 @@ interface RateLimiterOptions {
   maxRequests?: number;
 }
 
-interface RequestIpServer {
+export interface RequestIpServer {
   requestIP?: (request: Request) => { address?: string | null } | null;
 }
 

@@ -28,6 +28,7 @@ import { extractFirstLine } from '../lib/text.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ChatQueueService } from '../queue.js';
 import type { HistoryCachePageReader } from '../chats/history-cache-contract.js';
+import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type {
@@ -65,8 +66,8 @@ interface PathCacheDep {
 }
 
 interface MetadataDep {
-  listAllChatMetadata(): Map<string, Record<string, unknown>>;
-  getChatMetadata(chatId: string): Record<string, unknown> | null;
+  listAllChatMetadata(): Map<string, ChatMetadata>;
+  getChatMetadata(chatId: string): ChatMetadata | null;
   addNewChatMetadata(chatId: string, command: string): void;
 }
 

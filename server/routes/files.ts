@@ -10,11 +10,34 @@ import {
   isWithinProjectBase,
   projectBoundaryErrorResponse,
 } from '../lib/path-boundary.ts';
+import type { RouteMap } from '../lib/http-route-types.js';
+import type { IChatRegistry } from '../chats/store.js';
+import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 
 const MAX_IMAGE_UPLOAD_BODY_BYTES = 30 * 1024 * 1024;
 const MAX_IMAGE_TOTAL_BYTES = 25 * 1024 * 1024;
 
-async function listAllFiles(dirPath, maxDepth = 10, currentDepth = 0, rootPath = dirPath) {
+interface FileListItem {
+  name: string;
+  path: string;
+  relativePath: string;
+  type: 'file';
+}
+
+type ProjectPathResolution =
+  | { projectPath: string; error?: undefined }
+  | { error: Response; projectPath?: undefined };
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error;
+}
+
+async function listAllFiles(
+  dirPath: string,
+  maxDepth = 10,
+  currentDepth = 0,
+  rootPath = dirPath,
+): Promise<FileListItem[]> {
   const skipNames = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
   let entries;
   try {
@@ -22,7 +45,7 @@ async function listAllFiles(dirPath, maxDepth = 10, currentDepth = 0, rootPath =
   } catch {
     return [];
   }
-  const results = [];
+  const results: FileListItem[] = [];
   for (const entry of entries) {
     if (skipNames.has(entry.name)) continue;
     const itemPath = path.join(dirPath, entry.name);
@@ -42,7 +65,7 @@ async function listAllFiles(dirPath, maxDepth = 10, currentDepth = 0, rootPath =
   return results;
 }
 
-function resolvePathWithinProject(projectRoot, inputPath) {
+function resolvePathWithinProject(projectRoot: string, inputPath: string): string | null {
   const resolvedRoot = path.resolve(projectRoot);
   const resolvedPath = path.isAbsolute(inputPath)
     ? path.resolve(inputPath)
@@ -54,10 +77,10 @@ function resolvePathWithinProject(projectRoot, inputPath) {
   return resolvedPath;
 }
 
-export default function createFilesRoutes(registry) {
+export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
 
   // Resolves the project path from either a chatId or projectPath query param.
-  async function resolveProjectPath(url) {
+  async function resolveProjectPath(url: URL): Promise<ProjectPathResolution> {
     const chatId = url.searchParams.get('chatId');
     if (chatId) {
       const chat = registry.getChat(chatId);
@@ -84,7 +107,7 @@ export default function createFilesRoutes(registry) {
     }
   }
 
-  async function handleTree(request, url) {
+  async function handleTree(_request: Request, url: URL): Promise<Response> {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
     const { projectPath } = resolved;
@@ -108,12 +131,12 @@ export default function createFilesRoutes(registry) {
       const files = await listDirectory(targetDir, true);
       return Response.json(files);
     } catch (error) {
-      console.error('files: file tree error:', error.message);
-      return Response.json({ error: error.message }, { status: 500 });
+      console.error('files: file tree error:', errorMessage(error));
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function handleList(request, url) {
+  async function handleList(_request: Request, url: URL): Promise<Response> {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
     const { projectPath } = resolved;
@@ -128,11 +151,11 @@ export default function createFilesRoutes(registry) {
       const files = await listAllFiles(projectPath);
       return Response.json(files);
     } catch (error) {
-      return Response.json({ error: error.message }, { status: 500 });
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function getText(request, url) {
+  async function getText(_request: Request, url: URL): Promise<Response> {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
     const { projectPath } = resolved;
@@ -151,13 +174,13 @@ export default function createFilesRoutes(registry) {
       const content = await fs.readFile(resolvedFile, 'utf8');
       return Response.json({ content, path: resolvedFile });
     } catch (error) {
-      if (error.code === 'ENOENT') return Response.json({ error: 'File not found' }, { status: 404 });
-      if (error.code === 'EACCES') return Response.json({ error: 'Permission denied' }, { status: 403 });
-      return Response.json({ error: error.message }, { status: 500 });
+      if (isErrnoException(error) && error.code === 'ENOENT') return Response.json({ error: 'File not found' }, { status: 404 });
+      if (isErrnoException(error) && error.code === 'EACCES') return Response.json({ error: 'Permission denied' }, { status: 403 });
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function putText(body, _request, url) {
+  async function putText(body: JsonBody, _request: Request, url: URL): Promise<Response> {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
     const { projectPath } = resolved;
@@ -170,21 +193,21 @@ export default function createFilesRoutes(registry) {
 
     try {
       const filePath = url.searchParams.get('path');
-      const { content } = body;
+      const { content } = asJsonBody(body);
       if (!filePath) return Response.json({ error: 'Invalid file path' }, { status: 400 });
       if (content === undefined) return Response.json({ error: 'Content is required' }, { status: 400 });
       const resolvedFile = resolvePathWithinProject(projectPath, filePath);
       if (!resolvedFile) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
-      await fs.writeFile(resolvedFile, content, 'utf8');
+      await fs.writeFile(resolvedFile, String(content), 'utf8');
       return Response.json({ success: true, path: resolvedFile, message: 'File saved successfully' });
     } catch (error) {
-      if (error.code === 'ENOENT') return Response.json({ error: 'File or directory not found' }, { status: 404 });
-      if (error.code === 'EACCES') return Response.json({ error: 'Permission denied' }, { status: 403 });
-      return Response.json({ error: error.message }, { status: 500 });
+      if (isErrnoException(error) && error.code === 'ENOENT') return Response.json({ error: 'File or directory not found' }, { status: 404 });
+      if (isErrnoException(error) && error.code === 'EACCES') return Response.json({ error: 'Permission denied' }, { status: 403 });
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function handleContent(request, url) {
+  async function handleContent(_request: Request, url: URL): Promise<Response> {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
     const { projectPath } = resolved;
@@ -205,12 +228,12 @@ export default function createFilesRoutes(registry) {
       const fileBuffer = await fs.readFile(resolvedFile);
       return new Response(fileBuffer, { headers: { 'Content-Type': mimeType } });
     } catch (error) {
-      if (error.code === 'ENOENT') return Response.json({ error: 'File not found' }, { status: 404 });
-      return Response.json({ error: error.message }, { status: 500 });
+      if (isErrnoException(error) && error.code === 'ENOENT') return Response.json({ error: 'File not found' }, { status: 404 });
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function handleUploadImages(request, url) {
+  async function handleUploadImages(request: Request, url: URL): Promise<Response> {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
 
@@ -222,7 +245,7 @@ export default function createFilesRoutes(registry) {
 
       const allowedMimes = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml']);
       const formData = await request.formData();
-      const files = formData.getAll('images').filter((entry) => entry instanceof File);
+      const files = formData.getAll('images').filter((entry): entry is File => entry instanceof File);
       if (files.length === 0) return Response.json({ error: 'No image files provided' }, { status: 400 });
       if (files.length > 5) return Response.json({ error: 'Maximum 5 images allowed' }, { status: 400 });
 
@@ -249,11 +272,11 @@ export default function createFilesRoutes(registry) {
 
       return Response.json({ images: processedImages });
     } catch (error) {
-      return Response.json({ error: error.message || 'Internal server error' }, { status: 400 });
+      return Response.json({ error: errorMessage(error) || 'Internal server error' }, { status: 400 });
     }
   }
 
-  async function handleBrowse(request, url) {
+  async function handleBrowse(_request: Request, url: URL): Promise<Response> {
     const dirPath = url.searchParams.get('path') || getProjectBasePath();
 
     if (!isWithinProjectBase(dirPath)) {
