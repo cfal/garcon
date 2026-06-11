@@ -29,6 +29,17 @@ describe('http route wrapping', () => {
     expect(payload.ok).toBe(true);
   });
 
+  it('passes the Bun server object through to handlers', async () => {
+    const server = { requestIP: mock(() => ({ address: '127.0.0.1', family: 'IPv4', port: 1234 })) };
+    const handler = mock((_request, _url, bunServer) => Response.json({ hasServer: bunServer === server }));
+    const wrapped = wrapRoute(handler, '/api/private', 'GET');
+    const response = await wrapped(new Request('http://localhost/api/private'), server);
+    const payload = await response.json();
+
+    expect(payload.hasServer).toBe(true);
+    expect(handler).toHaveBeenCalledWith(expect.any(Request), expect.any(URL), server);
+  });
+
   it('bypasses auth for marked handlers', async () => {
     const handler = markRouteNoAuth(mock(() => Response.json({ ok: true })));
     const wrapped = wrapRoute(handler, '/api/public', 'GET');

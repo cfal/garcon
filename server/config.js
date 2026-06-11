@@ -216,6 +216,10 @@ export function isAuthDisabled() {
   return process.argv.includes('--disable-auth');
 }
 
+export function isTrustProxyEnabled() {
+  return envBool('TRUST_PROXY', false);
+}
+
 // Parses an integer from an environment variable, returning the fallback when
 // absent or invalid.
 function envInt(name, fallback) {

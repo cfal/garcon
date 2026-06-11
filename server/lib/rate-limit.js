@@ -2,13 +2,27 @@
 // Each limiter tracks request timestamps per IP and rejects requests
 // that exceed the configured threshold within the window.
 
+import { isTrustProxyEnabled } from '../config.js';
 
-function getClientIp(request) {
-  return (
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip') ||
-    'unknown'
-  );
+function getForwardedClientIp(request) {
+  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    || request.headers.get('x-real-ip')
+    || null;
+}
+
+function getSocketClientIp(request, server) {
+  try {
+    return server?.requestIP?.(request)?.address || null;
+  } catch {
+    return null;
+  }
+}
+
+function getClientIp(request, server) {
+  if (isTrustProxyEnabled()) {
+    return getForwardedClientIp(request) || getSocketClientIp(request, server) || 'unknown';
+  }
+  return getSocketClientIp(request, server) || 'unknown';
 }
 
 export function createRateLimiter({ windowMs = 60_000, maxRequests = 10 } = {}) {
@@ -30,8 +44,8 @@ export function createRateLimiter({ windowMs = 60_000, maxRequests = 10 } = {}) 
 
   return {
     // Returns a 429 Response if the limit is exceeded, or null if allowed.
-    check(request) {
-      const ip = getClientIp(request);
+    check(request, server) {
+      const ip = getClientIp(request, server);
       const now = Date.now();
       const cutoff = now - windowMs;
       const timestamps = (hits.get(ip) || []).filter((t) => t > cutoff);

@@ -24,25 +24,25 @@ export function isNoAuthHandler(handler) {
 // Wraps one route handler with URL parsing and JWT auth enforcement.
 export function wrapRoute(handler, routePath, method) {
   if (isAuthDisabled()) {
-    return async (req) => {
+    return async (req, server) => {
       const url = new URL(req.url);
-      return (await handler(req, url)) || new Response('Not found', { status: 404 });
+      return (await handler(req, url, server)) || new Response('Not found', { status: 404 });
     };
   }
 
   if (isNoAuthHandler(handler)) {
     console.debug(`Skipping auth wrapping for ${method} ${routePath}`);
-    return async (req) => {
+    return async (req, server) => {
       const url = new URL(req.url);
-      return (await handler(req, url)) || new Response('Not found', { status: 404 });
+      return (await handler(req, url, server)) || new Response('Not found', { status: 404 });
     };
   }
 
-  return async (req) => {
+  return async (req, server) => {
     const url = new URL(req.url);
     const { errorResponse } = await authenticateHttpRequest(req);
     if (errorResponse) return errorResponse;
-    return (await handler(req, url)) || new Response('Not found', { status: 404 });
+    return (await handler(req, url, server)) || new Response('Not found', { status: 404 });
   };
 }
 

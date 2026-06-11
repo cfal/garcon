@@ -76,8 +76,8 @@ async function noauthPostRegister(request) {
   }
 }
 
-async function noauthPostLogin(request) {
-  const limited = loginLimiter.check(request);
+async function noauthPostLogin(request, _url, server) {
+  const limited = loginLimiter.check(request, server);
   if (limited) return limited;
 
   try {
