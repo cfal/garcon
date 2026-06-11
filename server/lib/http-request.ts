@@ -9,7 +9,7 @@ export class MalformedJsonError extends Error {
   }
 }
 
-export async function parseJsonBody(request) {
+export async function parseJsonBody(request: Request): Promise<unknown> {
   const contentType = (request.headers.get('content-type') || '').toLowerCase();
   if (!contentType.includes('application/json')) {
     return {};
@@ -25,7 +25,7 @@ export async function parseJsonBody(request) {
   }
 }
 
-export function getTokenFromRequest(request) {
+export function getTokenFromRequest(request: Request): string | null {
   const authHeader = request.headers.get('authorization');
   if (authHeader?.startsWith('Bearer ')) {
     return authHeader.slice('Bearer '.length);
@@ -34,7 +34,7 @@ export function getTokenFromRequest(request) {
 }
 
 // Verifies JWT token presence/validity for protected HTTP routes.
-export async function authenticateHttpRequest(request) {
+export async function authenticateHttpRequest(request: Request): Promise<{ errorResponse: Response | null }> {
   const token = getTokenFromRequest(request);
   if (!token) {
     return { errorResponse: Response.json({ error: 'Access denied. No token provided.' }, { status: 401 }) };

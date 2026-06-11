@@ -1,24 +1,50 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 
-function permToRwx(perm) {
+export interface DirectoryListItem {
+  name: string;
+  path: string;
+  type: 'directory' | 'file';
+  size?: number;
+  modified?: string | null;
+  permissions?: string;
+  permissionsRwx?: string;
+}
+
+export interface DirectoryNameItem {
+  name: string;
+  path: string;
+  type: 'directory';
+}
+
+const SKIPPED_DIRECTORY_NAMES = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
+
+function permToRwx(perm: number): string {
   return `${perm & 4 ? 'r' : '-'}${perm & 2 ? 'w' : '-'}${perm & 1 ? 'x' : '-'}`;
 }
 
-export async function listDirectory(dirPath, showHidden = true) {
-  const skipNames = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
-  let entries;
+function isAccessDeniedError(error: unknown): boolean {
+  return Boolean(
+    error
+      && typeof error === 'object'
+      && 'code' in error
+      && ((error as { code?: unknown }).code === 'EACCES' || (error as { code?: unknown }).code === 'EPERM'),
+  );
+}
+
+export async function listDirectory(dirPath: string, showHidden = true): Promise<DirectoryListItem[]> {
+  let entries: import('fs').Dirent[];
   try {
     entries = await fs.readdir(dirPath, { withFileTypes: true });
   } catch (error) {
-    if (error.code !== 'EACCES' && error.code !== 'EPERM') {
+    if (!isAccessDeniedError(error)) {
       console.error('Error reading directory:', error);
     }
     return [];
   }
 
   const filtered = entries.filter((entry) => {
-    if (skipNames.has(entry.name)) return false;
+    if (SKIPPED_DIRECTORY_NAMES.has(entry.name)) return false;
     if (!showHidden && entry.name.startsWith('.')) return false;
     return true;
   });
@@ -26,7 +52,7 @@ export async function listDirectory(dirPath, showHidden = true) {
   const items = await Promise.all(filtered.map(async (entry) => {
     const itemPath = path.join(dirPath, entry.name);
     const isDir = entry.isDirectory();
-    const item = {
+    const item: DirectoryListItem = {
       name: entry.name,
       path: itemPath,
       type: isDir ? 'directory' : 'file',
@@ -57,21 +83,20 @@ export async function listDirectory(dirPath, showHidden = true) {
   });
 }
 
-export async function listDirectoryNames(dirPath, showHidden = true) {
-  const skipNames = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
-  let entries;
+export async function listDirectoryNames(dirPath: string, showHidden = true): Promise<DirectoryNameItem[]> {
+  let entries: import('fs').Dirent[];
   try {
     entries = await fs.readdir(dirPath, { withFileTypes: true });
   } catch (error) {
-    if (error.code !== 'EACCES' && error.code !== 'EPERM') {
+    if (!isAccessDeniedError(error)) {
       console.error('Error reading directory:', error);
     }
     return [];
   }
 
-  const items = [];
+  const items: DirectoryNameItem[] = [];
   for (const entry of entries) {
-    if (skipNames.has(entry.name)) continue;
+    if (SKIPPED_DIRECTORY_NAMES.has(entry.name)) continue;
     if (!showHidden && entry.name.startsWith('.')) continue;
     if (!entry.isDirectory()) continue;
     items.push({

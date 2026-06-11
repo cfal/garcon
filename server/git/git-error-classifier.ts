@@ -2,8 +2,40 @@
 // status codes and user-facing messages. Used by the route layer when
 // an error is not already a GitDomainError.
 
-export function classifyGitError(error) {
-  const text = String(error?.message || '').toLowerCase();
+export type ClassifiedGitErrorCode =
+  | 'NOT_REPO'
+  | 'NO_REMOTE'
+  | 'AUTH_FAILED'
+  | 'HOST_KEY'
+  | 'NETWORK'
+  | 'UNCOMMITTED_CHANGES'
+  | 'DIVERGED'
+  | 'CONFLICT'
+  | 'NOTHING_TO_COMMIT'
+  | 'REJECTED'
+  | 'NO_UPSTREAM'
+  | 'GIT_LOCKED'
+  | 'SSH_MISSING'
+  | 'UNKNOWN';
+
+export interface ClassifiedGitError {
+  code: ClassifiedGitErrorCode;
+  status: number;
+  message: string;
+  details?: string;
+}
+
+function errorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+  }
+  return 'Git operation failed.';
+}
+
+export function classifyGitError(error: unknown): ClassifiedGitError {
+  const message = errorMessage(error);
+  const text = message.toLowerCase();
 
   if (text.includes('not a git repository') || text.includes('git is not initialized')) {
     return { code: 'NOT_REPO', status: 400, message: 'Path is not a Git repository.' };
@@ -101,5 +133,5 @@ export function classifyGitError(error) {
     };
   }
 
-  return { code: 'UNKNOWN', status: 500, message: String(error?.message || 'Git operation failed.') };
+  return { code: 'UNKNOWN', status: 500, message };
 }
