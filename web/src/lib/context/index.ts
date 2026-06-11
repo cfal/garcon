@@ -18,6 +18,7 @@ import type { FileViewerStore } from '$lib/stores/file-viewer.svelte';
 import type { ReadReceiptOutboxStore } from '$lib/stores/read-receipt-outbox.svelte';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
 import type { SplitLayoutStore } from '$lib/stores/split-layout.svelte';
+import type { NotificationsStore } from '$lib/stores/notifications.svelte';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -30,6 +31,7 @@ export const [getFileViewer, setFileViewer] = createContext<FileViewerStore>();
 export const [getReadReceiptOutbox, setReadReceiptOutbox] = createContext<ReadReceiptOutboxStore>();
 export const [getModelCatalog, setModelCatalog] = createContext<ModelCatalogStore>();
 export const [getSplitLayout, setSplitLayout] = createContext<SplitLayoutStore>();
+export const [getNotifications, setNotifications] = createContext<NotificationsStore>();
 
 export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsStore>();
 export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();

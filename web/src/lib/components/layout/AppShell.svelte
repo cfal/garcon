@@ -6,6 +6,7 @@
 	import ResizeHandle from './ResizeHandle.svelte';
 	import BottomTabBar from './BottomTabBar.svelte';
 	import WorkspaceView from './WorkspaceView.svelte';
+	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
 	import type { AppTab } from '$lib/types/app';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
@@ -16,6 +17,7 @@
 		getAppShell,
 		getWs,
 		getLocalSettings,
+		getNotifications,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getRunningChats } from '$lib/api/chats.js';
@@ -31,6 +33,7 @@
 	const appShell = getAppShell();
 	const ws = getWs();
 	const localSettings = getLocalSettings();
+	const notifications = getNotifications();
 	const shellController = new AppShellController({
 		upsertFromServer: (s) => sessions.upsertFromServer(s),
 		setLoadingChats: (v) => {
@@ -319,6 +322,7 @@
 
 <NewChatDialog />
 <FileViewerHost />
+<NotificationHost {notifications} />
 
 {#if appShell.showSettings}
 	{#await lazySettings() then { default: Settings }}

@@ -295,6 +295,8 @@
 	"model_selector_provider": "Provider",
 	"model_selector_provider_title": "{agent} Providers",
 	"model_selector_unavailable": "Model unavailable",
+	"notifications_dismiss": "Dismiss notification",
+	"notifications_region": "Notifications",
 	"agent_amp": "Amp",
 	"agent_claude": "Claude",
 	"agent_claude_oauth": "Claude OAuth",

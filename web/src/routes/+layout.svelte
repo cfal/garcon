@@ -17,6 +17,7 @@
 	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import {
 		setAuth,
 		setNavigation,
@@ -30,6 +31,7 @@
 		setLocalSettings,
 		setRemoteSettings,
 		setSplitLayout,
+		setNotifications,
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
@@ -51,6 +53,7 @@
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
 	const splitLayout = createSplitLayoutStore();
+	const notifications = createNotificationsStore();
 
 	setAuth(auth);
 	setLocalSettings(localSettings);
@@ -64,6 +67,7 @@
 	setReadReceiptOutbox(readReceiptOutbox);
 	setModelCatalog(modelCatalog);
 	setSplitLayout(splitLayout);
+	setNotifications(notifications);
 
 	const publicRoutes = ['/login', '/setup'];
 	let isPublicRoute = $derived(
