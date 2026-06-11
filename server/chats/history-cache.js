@@ -15,14 +15,30 @@ export class HistoryCache {
   #registry;
   #metadata;
   #agents;
+  #cacheLimit;
+  #staleNonActiveMs;
+  #now;
 
   // registry: ChatRegistry
   // metadata: MetadataIndex
   // agents: AgentRegistry
-  constructor(registry, metadata, agents) {
+  constructor(registry, metadata, agents, options = {}) {
     this.#registry = registry;
     this.#metadata = metadata;
     this.#agents = agents;
+    this.#cacheLimit = options.cacheLimit ?? CACHE_LIMIT;
+    this.#staleNonActiveMs = options.staleNonActiveMs ?? STALE_NON_ACTIVE_MS;
+    this.#now = options.now ?? (() => Date.now());
+
+    for (const entry of options.initialEntries ?? []) {
+      const chatId = String(entry.chatId);
+      this.#cacheByChatId.set(chatId, {
+        chatId,
+        messages: Array.isArray(entry.messages) ? [...entry.messages] : [],
+        completeness: entry.completeness ?? 'tail',
+        lastAccessAt: typeof entry.lastAccessAt === 'number' ? entry.lastAccessAt : this.#now(),
+      });
+    }
   }
 
   init() {
@@ -61,7 +77,7 @@ export class HistoryCache {
     const key = String(chatId);
     const entry = this.#cacheByChatId.get(key);
     if (!entry) return null;
-    entry.lastAccessAt = Date.now();
+    entry.lastAccessAt = this.#now();
     return entry.messages;
   }
 
@@ -69,7 +85,7 @@ export class HistoryCache {
     const key = String(chatId);
     const existing = this.#cacheByChatId.get(key);
     if (existing?.completeness === 'full') {
-      existing.lastAccessAt = Date.now();
+      existing.lastAccessAt = this.#now();
       return existing.messages;
     }
 
@@ -91,7 +107,7 @@ export class HistoryCache {
         chatId: key,
         messages: deduped,
         completeness: 'full',
-        lastAccessAt: Date.now(),
+        lastAccessAt: this.#now(),
       });
       return deduped;
     })();
@@ -110,14 +126,14 @@ export class HistoryCache {
     let entry = this.#cacheByChatId.get(key);
 
     if (!entry) {
-      entry = { chatId: key, messages: [], completeness: 'tail', lastAccessAt: Date.now() };
+      entry = { chatId: key, messages: [], completeness: 'tail', lastAccessAt: this.#now() };
       this.#cacheByChatId.set(key, entry);
     }
 
     entry.messages = deduplicateMessages(
       mergeChatMessages(entry.messages, appendedMessages),
     );
-    entry.lastAccessAt = Date.now();
+    entry.lastAccessAt = this.#now();
 
     try {
       this.#metadata.updateFromAppendedMessages(key, appendedMessages);
@@ -125,7 +141,7 @@ export class HistoryCache {
       console.warn(`history-cache: metadata update failed for ${key}:`, err.message);
     }
 
-    if (this.#cacheByChatId.size > CACHE_LIMIT) {
+    if (this.#cacheByChatId.size > this.#cacheLimit) {
       this.prune();
     }
   }
@@ -137,7 +153,7 @@ export class HistoryCache {
       return { messages: [], total: 0, hasMore: false, offset, limit };
     }
 
-    entry.lastAccessAt = Date.now();
+    entry.lastAccessAt = this.#now();
 
     const total = entry.messages.length;
     const start = Math.max(0, total - offset - limit);
@@ -158,7 +174,7 @@ export class HistoryCache {
   }
 
   prune() {
-    const now = Date.now();
+    const now = this.#now();
     const entries = Array.from(this.#cacheByChatId.values())
       .sort((a, b) => a.lastAccessAt - b.lastAccessAt);
 
@@ -166,8 +182,8 @@ export class HistoryCache {
       const active = this.#agents.isChatRunning(entry.chatId);
       if (active) continue;
 
-      const isStale = now - entry.lastAccessAt > STALE_NON_ACTIVE_MS;
-      const isOverLimit = this.#cacheByChatId.size > CACHE_LIMIT;
+      const isStale = now - entry.lastAccessAt > this.#staleNonActiveMs;
+      const isOverLimit = this.#cacheByChatId.size > this.#cacheLimit;
 
       if (isStale || isOverLimit) {
         this.#cacheByChatId.delete(entry.chatId);
@@ -181,11 +197,7 @@ export class HistoryCache {
     return this.#agents.loadMessages(session, chatId);
   }
 
-  // Exposed for tests that need to inspect/populate cache directly.
-  get _cacheByChatId() { return this.#cacheByChatId; }
 }
-
-export { CACHE_LIMIT as _CACHE_LIMIT, STALE_NON_ACTIVE_MS as _STALE_NON_ACTIVE_MS };
 
 function mergeChatMessages(base, incoming, options = {}) {
   return mergeChatMessagesByIdentity(base, incoming ?? [], options);

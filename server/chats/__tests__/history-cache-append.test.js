@@ -19,11 +19,6 @@ describe('appendMessages', () => {
     };
 
     cache = new HistoryCache(mockRegistry, mockMetadata, mockAgents);
-    cache._cacheByChatId.set(chatId, {
-      chatId,
-      messages: [],
-      lastAccessAt: Date.now(),
-    });
   });
 
   it('appends finalized messages directly', async () => {
@@ -31,10 +26,10 @@ describe('appendMessages', () => {
       { type: 'assistant-message', timestamp: ts, content: 'Hello world' },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
-    expect(entry.messages).toHaveLength(1);
-    expect(entry.messages[0].type).toBe('assistant-message');
-    expect(entry.messages[0].content).toBe('Hello world');
+    const messages = cache.getMessages(chatId);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].type).toBe('assistant-message');
+    expect(messages[0].content).toBe('Hello world');
   });
 
   it('appends tool-use and tool-result messages', async () => {
@@ -43,10 +38,10 @@ describe('appendMessages', () => {
       { type: 'tool-result', timestamp: ts, toolId: 't1', content: 'ok', isError: false },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
-    expect(entry.messages).toHaveLength(2);
-    expect(entry.messages[0].type).toBe('read-tool-use');
-    expect(entry.messages[1].type).toBe('tool-result');
+    const messages = cache.getMessages(chatId);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].type).toBe('read-tool-use');
+    expect(messages[1].type).toBe('tool-result');
   });
 
   it('appends thinking messages', async () => {
@@ -54,10 +49,10 @@ describe('appendMessages', () => {
       { type: 'thinking', timestamp: ts, content: 'Reasoning here' },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
-    expect(entry.messages).toHaveLength(1);
-    expect(entry.messages[0].type).toBe('thinking');
-    expect(entry.messages[0].content).toBe('Reasoning here');
+    const messages = cache.getMessages(chatId);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].type).toBe('thinking');
+    expect(messages[0].content).toBe('Reasoning here');
   });
 
   it('appends multiple messages in a batch', async () => {
@@ -67,11 +62,11 @@ describe('appendMessages', () => {
       { type: 'bash-tool-use', timestamp: ts, toolId: 't1', command: 'ls' },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
-    expect(entry.messages).toHaveLength(3);
-    expect(entry.messages[0].type).toBe('thinking');
-    expect(entry.messages[1].type).toBe('assistant-message');
-    expect(entry.messages[2].type).toBe('bash-tool-use');
+    const messages = cache.getMessages(chatId);
+    expect(messages).toHaveLength(3);
+    expect(messages[0].type).toBe('thinking');
+    expect(messages[1].type).toBe('assistant-message');
+    expect(messages[2].type).toBe('bash-tool-use');
   });
 
   it('calls updateFromAppendedMessages with all messages', async () => {
@@ -88,11 +83,6 @@ describe('appendMessages', () => {
 
   it('handles multiple chats independently', async () => {
     const chatId2 = 'test-chat-2';
-    cache._cacheByChatId.set(chatId2, {
-      chatId: chatId2,
-      messages: [],
-      lastAccessAt: Date.now(),
-    });
 
     await cache.appendMessages(chatId, [
       { type: 'assistant-message', timestamp: ts, content: 'Chat 1' },
@@ -101,23 +91,22 @@ describe('appendMessages', () => {
       { type: 'assistant-message', timestamp: ts, content: 'Chat 2' },
     ]);
 
-    expect(cache._cacheByChatId.get(chatId).messages).toHaveLength(1);
-    expect(cache._cacheByChatId.get(chatId).messages[0].content).toBe('Chat 1');
-    expect(cache._cacheByChatId.get(chatId2).messages).toHaveLength(1);
-    expect(cache._cacheByChatId.get(chatId2).messages[0].content).toBe('Chat 2');
+    const chatOneMessages = cache.getMessages(chatId);
+    const chatTwoMessages = cache.getMessages(chatId2);
+    expect(chatOneMessages).toHaveLength(1);
+    expect(chatOneMessages[0].content).toBe('Chat 1');
+    expect(chatTwoMessages).toHaveLength(1);
+    expect(chatTwoMessages[0].content).toBe('Chat 2');
   });
 
   it('appends to an uncached chat without loading agent history', async () => {
-    cache._cacheByChatId.delete(chatId);
-
     await cache.appendMessages(chatId, [
       { type: 'assistant-message', timestamp: ts, content: 'Background update' },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
+    const messages = cache.getMessages(chatId);
     expect(mockAgents.loadMessages).toHaveBeenCalledTimes(0);
-    expect(entry.completeness).toBe('tail');
-    expect(entry.messages.map((message) => message.content)).toEqual(['Background update']);
+    expect(messages.map((message) => message.content)).toEqual(['Background update']);
   });
 
   it('loads agent history once and merges a live tail without duplicate assistant text', async () => {
@@ -135,9 +124,9 @@ describe('appendMessages', () => {
       { type: 'assistant-message', timestamp: ts, content: 'Live tail' },
     ]);
     const messages = await cache.ensureLoaded(selectedChatId);
+    await cache.ensureLoaded(selectedChatId);
 
     expect(mockAgents.loadMessages).toHaveBeenCalledTimes(1);
-    expect(cache._cacheByChatId.get(selectedChatId).completeness).toBe('full');
     expect(messages.map((message) => message.content)).toEqual([
       'Prompt',
       'Already present',
@@ -233,8 +222,7 @@ describe('appendMessages', () => {
       },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
-    expect(entry.messages).toHaveLength(2);
+    expect(cache.getMessages(chatId)).toHaveLength(2);
   });
 
   it('deduplicates tool-use messages by toolId when merging history and tail', async () => {
