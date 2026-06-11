@@ -9,13 +9,39 @@ import createChatRoutes from './chats.js';
 import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 
-export default function createAllRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents, commandLedger, pendingInputs, telegramNotifier, telegramSettings, shareStore, apiProviders, chatCommands) {
+export default function createAllRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  commandLedger,
+  pendingInputs,
+  telegramNotifier,
+  telegramSettings,
+  shareStore,
+  apiProviders,
+  chatCommands,
+}) {
   return {
     ...staticRoutes,
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),
     ...createApiProviderRoutes(apiProviders),
-    ...createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents, commandLedger, pendingInputs, chatCommands),
+    ...createChatRoutes({
+      registry,
+      settings,
+      queue,
+      pathCache,
+      metadata,
+      historyCache,
+      agents,
+      commandLedger,
+      pendingInputs,
+      commandService: chatCommands,
+    }),
     ...createShareRoutes(shareStore, registry, settings, metadata, historyCache),
     ...createFilesRoutes(registry),
     ...createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings),

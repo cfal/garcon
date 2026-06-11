@@ -62,7 +62,16 @@ const agents = {
   runSingleQuery: mock(() => Promise.resolve('')),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents, createRouteCommandLedger('tag-normalization'));
+const chatsRoutes = createChatRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  commandLedger: createRouteCommandLedger('tag-normalization'),
+});
 const handler = chatsRoutes['/api/v1/chats/tags'].PATCH;
 
 describe('PATCH /api/v1/chats/tags – tag normalization', () => {

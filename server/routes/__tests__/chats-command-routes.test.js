@@ -129,7 +129,16 @@ function createRouteAgent(sessionOverrides = {}) {
     resolvePermission: mock(() => undefined),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
-  const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents, createRouteCommandLedger('chats-command-routes'));
+  const routes = createChatRoutes({
+    registry,
+    settings,
+    queue,
+    pathCache,
+    metadata,
+    historyCache,
+    agents,
+    commandLedger: createRouteCommandLedger('chats-command-routes'),
+  });
   return { sessions, registry, settings, queue, pathCache, metadata, historyCache, agents, routes };
 }
 

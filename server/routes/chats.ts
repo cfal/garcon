@@ -199,23 +199,36 @@ function acceptedResponse(record: CommandLedgerRecord, status: 'accepted' | 'dup
   };
 }
 
-export default function createChatRoutes(
-  registry: IChatRegistry,
-  settings: SettingsDep,
-  queue: QueueDep,
-  pathCache: PathCacheDep,
-  metadata: MetadataDep,
-  historyCache: HistoryCacheDep,
-  agents: AgentRegistryDep,
-  commandLedger: CommandLedger,
-  pendingInputs: PendingInputsDep = {
+interface ChatRouteDeps {
+  registry: IChatRegistry;
+  settings: SettingsDep;
+  queue: QueueDep;
+  pathCache: PathCacheDep;
+  metadata: MetadataDep;
+  historyCache: HistoryCacheDep;
+  agents: AgentRegistryDep;
+  commandLedger: CommandLedger;
+  pendingInputs?: PendingInputsDep;
+  commandService?: ChatCommandService;
+}
+
+export default function createChatRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  commandLedger,
+  pendingInputs = {
     register: () => Promise.resolve(undefined),
     reconcile: () => Promise.resolve(undefined),
     listForChat: () => [],
     clearChat: () => undefined,
   },
-  commandService?: ChatCommandService,
-): RouteMap {
+  commandService,
+}: ChatRouteDeps): RouteMap {
   const commands = commandService ?? new ChatCommandService({
     chats: registry,
     queue,

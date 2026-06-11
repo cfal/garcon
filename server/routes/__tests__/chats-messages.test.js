@@ -82,7 +82,7 @@ function createRoutesFixture() {
     listForChat: mock(() => []),
     clearChat: mock(() => undefined),
   };
-  const routes = createChatRoutes(
+  const routes = createChatRoutes({
     registry,
     settings,
     queue,
@@ -90,9 +90,9 @@ function createRoutesFixture() {
     metadata,
     historyCache,
     agents,
-    createRouteCommandLedger('chats-messages'),
+    commandLedger: createRouteCommandLedger('chats-messages'),
     pendingInputs,
-  );
+  });
 
   return { historyCache, pendingInputs, routes };
 }

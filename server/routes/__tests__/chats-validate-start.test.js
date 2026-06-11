@@ -46,7 +46,16 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
-const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents, createRouteCommandLedger('chats-validate-start'));
+const routes = createChatRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  commandLedger: createRouteCommandLedger('chats-validate-start'),
+});
 const handler = routes['/api/v1/chats/validate-start'].GET;
 
 async function ensureCleanBase() {

@@ -71,7 +71,16 @@ const agents = {
   modelSupportsImages: mock(() => Promise.resolve(false)),
 };
 
-const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents, createRouteCommandLedger('chats-start'));
+const routes = createChatRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  commandLedger: createRouteCommandLedger('chats-start'),
+});
 const handler = routes['/api/v1/chats/start'].POST;
 
 describe('POST /api/v1/chats/start', () => {
