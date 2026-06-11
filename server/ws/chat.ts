@@ -39,6 +39,7 @@ import {
   ChatCommandService,
   runOptionsFromCommandRequest,
 } from '../commands/chat-command-service.js';
+import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 
 const PERMISSION_DEDUP_TTL = 30_000;
 
@@ -313,8 +314,7 @@ export class ChatHandler {
         return;
       }
 
-      const limit = parseInt(String(data.limit || '20'), 10);
-      const offset = parseInt(String(data.offset || '0'), 10);
+      const { limit, offset } = parsePagination(data.limit, data.offset, { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
 
       await this.#historyCache.ensureLoaded(chatId);
       await this.#pendingInputs.reconcile(chatId);

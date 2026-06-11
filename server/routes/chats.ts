@@ -25,6 +25,7 @@ import {
   runOptionsFromCommandRequest,
 } from '../commands/chat-command-service.js';
 import { normalizeQueueState } from '../../common/queue-state.ts';
+import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
@@ -570,8 +571,7 @@ export default function createChatRoutes(
         return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
       }
 
-      const limit = parseInt(url.searchParams.get('limit') || '20', 10);
-      const offset = parseInt(url.searchParams.get('offset') || '0', 10);
+      const { limit, offset } = parsePagination(url.searchParams.get('limit'), url.searchParams.get('offset'), { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
 
       await historyCache.ensureLoaded(chatId);
       await pendingInputs.reconcile(chatId);

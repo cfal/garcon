@@ -679,6 +679,22 @@ describe('chat WebSocket handler', () => {
       expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 50, 10);
     });
 
+    it('clamps invalid pagination params', async () => {
+      mockRegistry.getChat.mockReturnValue({
+        agentId: 'claude',
+        nativePath: '/tmp/session.jsonl',
+        agentSessionId: 'abc',
+      });
+      await chatHandler.message(ws, {
+        type: 'chat-log-query',
+        chatId: '123',
+        clientRequestId: 'req-msg-4b',
+        limit: '999999',
+        offset: -10,
+      });
+      expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 200, 0);
+    });
+
     it('includes clientRequestId in response', async () => {
       mockRegistry.getChat.mockReturnValue({
         agentId: 'claude',
