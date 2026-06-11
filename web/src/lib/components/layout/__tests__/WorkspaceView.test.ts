@@ -48,7 +48,7 @@ describe('WorkspaceView header visibility', () => {
 
 	it('keeps the top header visible on desktop for non-chat tabs', () => {
 		const { container } = render(WorkspaceViewTestHost, {
-			activeTab: 'preview',
+			activeTab: 'files',
 			isMobile: false,
 		});
 

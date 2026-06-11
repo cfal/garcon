@@ -67,9 +67,3 @@ export interface PendingPermissionRequest {
 	chatId?: string | null;
 	receivedAt?: Date;
 }
-
-export interface ConversationWorkspaceProps {
-	ws: WebSocket | null;
-	sendMessage: (message: unknown) => boolean;
-	onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
-}

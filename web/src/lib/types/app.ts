@@ -10,7 +10,7 @@ import type { ApiProtocol } from '$shared/api-providers';
 
 export type SessionAgentId = string;
 
-export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'preview';
+export type AppTab = 'chat' | 'files' | 'shell' | 'git';
 
 export { type ChatSession } from './session';
 
@@ -23,17 +23,6 @@ export interface ChatEntry {
 	createdAt?: string;
 	lastActivityAt?: string;
 	agentId?: SessionAgentId;
-}
-
-export interface LoadingProgress {
-	phase?: string;
-	current: number;
-	total: number;
-	currentProject?: string;
-}
-
-export interface LoadingProgressMessage extends LoadingProgress {
-	type: 'loading_progress';
 }
 
 export interface NewChatConfig {
@@ -51,5 +40,3 @@ export interface NewChatConfig {
 	initialImages?: File[];
 	tags?: string[];
 }
-
-export type AppSocketMessage = LoadingProgressMessage | { type?: string; [key: string]: unknown };
