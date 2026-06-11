@@ -27,14 +27,9 @@ import type { ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
+import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
-import type {
-	AmpAgentMode,
-	PendingPermissionRequest,
-	PermissionMode,
-	QueueState,
-	ThinkingMode,
-} from '$lib/types/chat';
+import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { AppTab, SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
@@ -73,6 +68,7 @@ export interface SessionControllerDeps {
 	composerState: ComposerState;
 	agentState: AgentState;
 	lifecycle: ChatLifecycleStore;
+	conversationUi: ConversationUiStore;
 	startupCoordinator: StartupCoordinator;
 	modelCatalog: {
 		isLocalModel: (
@@ -102,14 +98,7 @@ export interface SessionControllerDeps {
 	};
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
 	navigation: { setActiveTab: (tab: AppTab) => void; navigateToChat?: (chatId: string) => void };
-	// Mutable binding accessors for per-chat UI state.
-	getPendingPermissionRequests: () => PendingPermissionRequest[];
-	setPendingPermissionRequests: (v: PendingPermissionRequest[]) => void;
-	getPreviousPermissionMode: () => PermissionMode | null;
-	setPreviousPermissionMode: (v: PermissionMode | null) => void;
-	setNeedsServerLoad: (v: boolean) => void;
 	setIsViewportPinnedToBottom: (v: boolean) => void;
-	setMessageQueue: (chatId: string, queue: QueueState | null) => void;
 	scrollToBottom: () => void;
 }
 
@@ -161,7 +150,6 @@ export class ConversationSessionController {
 	// Resets per-chat state and loads messages when the selected chat changes.
 	handleChatSwitch(chatId: string | null): void {
 		const { deps } = this;
-		deps.setNeedsServerLoad(false);
 		deps.navigation.setActiveTab('chat');
 
 		if (!chatId) {
@@ -169,7 +157,7 @@ export class ConversationSessionController {
 			deps.composerState.inputText = '';
 			deps.lifecycle.clearLoading();
 			deps.lifecycle.setCurrentChatId(null);
-			deps.setPendingPermissionRequests([]);
+			deps.conversationUi.clearPendingPermissionRequests();
 			deps.setIsViewportPinnedToBottom(true);
 			return;
 		}
@@ -189,7 +177,7 @@ export class ConversationSessionController {
 		deps.composerState.inputText = '';
 		deps.composerState.clearImages();
 		deps.lifecycle.clearLoading();
-		deps.setPendingPermissionRequests([]);
+		deps.conversationUi.clearPendingPermissionRequests();
 		deps.setIsViewportPinnedToBottom(true);
 
 		if (selected.agentId) {
@@ -254,7 +242,7 @@ export class ConversationSessionController {
 		getChatQueue(chatId)
 			.then((result) => {
 				if (deps.sessions.selectedChatId === chatId) {
-					deps.setMessageQueue(chatId, result.queue);
+					deps.conversationUi.setMessageQueue(chatId, result.queue);
 				}
 			})
 			.catch(() => {
@@ -295,7 +283,6 @@ export class ConversationSessionController {
 
 			deps.chatState.setMessages(messages);
 			deps.chatState.snapshotCache.markValidated(chatId);
-			deps.setNeedsServerLoad(false);
 			requestAnimationFrame(() => deps.scrollToBottom());
 
 			const record = deps.sessions.byId[chatId];
@@ -307,8 +294,7 @@ export class ConversationSessionController {
 				deps.sessions.patchLastReadAt(chatId, record.lastActivityAt);
 			}
 		} catch {
-			if (deps.sessions.selectedChatId !== chatId) return;
-			deps.setNeedsServerLoad(true);
+			// Leaves restored messages visible until reconnect or manual retry reloads them.
 		}
 	}
 
@@ -382,7 +368,7 @@ export class ConversationSessionController {
 					chatId,
 					content: text,
 				});
-				deps.setMessageQueue(chatId, result.queue);
+				deps.conversationUi.setMessageQueue(chatId, result.queue);
 				deps.composerState.clearAfterSubmit(chatId);
 			} catch (err) {
 				deps.chatState.chatMessages = [
@@ -700,10 +686,10 @@ export class ConversationSessionController {
 			alwaysAllow: Boolean(decision.alwaysAllow),
 		})
 			.then(() => {
-				deps.setPendingPermissionRequests(
-					deps
-						.getPendingPermissionRequests()
-						.filter((r) => r.permissionRequestId !== permissionRequestId),
+				deps.conversationUi.setPendingPermissionRequests(
+					deps.conversationUi.pendingPermissionRequests.filter(
+						(r) => r.permissionRequestId !== permissionRequestId,
+					),
 				);
 			})
 			.catch((error) => {
@@ -719,10 +705,10 @@ export class ConversationSessionController {
 
 	handleExitPlanMode(permissionRequestId: string, choice: string, plan: string): void {
 		const { deps } = this;
-		deps.setPendingPermissionRequests(
-			deps
-				.getPendingPermissionRequests()
-				.filter((r) => r.permissionRequestId !== permissionRequestId),
+		deps.conversationUi.setPendingPermissionRequests(
+			deps.conversationUi.pendingPermissionRequests.filter(
+				(r) => r.permissionRequestId !== permissionRequestId,
+			),
 		);
 
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
@@ -732,7 +718,7 @@ export class ConversationSessionController {
 			`User has approved your plan. You can now start coding. Start with updating your todo list if applicable\n\n## Approved Plan:\n${plan}`;
 
 		const resumeWithApproval = (mode: PermissionMode) => {
-			deps.setPreviousPermissionMode(null);
+			deps.conversationUi.setPreviousPermissionMode(null);
 			deps.agentState.permissionMode = mode;
 			if (!chatId || !path) return;
 			const selection = deps.modelCatalog.selectionFor(
@@ -774,8 +760,8 @@ export class ConversationSessionController {
 
 		switch (choice) {
 			case 'bypass-new': {
-				const restoreMode = deps.getPreviousPermissionMode() || 'default';
-				deps.setPreviousPermissionMode(null);
+				const restoreMode = deps.conversationUi.previousPermissionMode || 'default';
+				deps.conversationUi.setPreviousPermissionMode(null);
 				deps.agentState.permissionMode = restoreMode;
 
 				const planMessage = `Implement the following plan:\n\n${plan}`;
@@ -817,7 +803,7 @@ export class ConversationSessionController {
 		if (!chatId) return;
 		void resumeChatQueue(chatId)
 			.then((result) => {
-				deps.setMessageQueue(chatId, result.queue);
+				deps.conversationUi.setMessageQueue(chatId, result.queue);
 			})
 			.catch((error) => {
 				deps.chatState.chatMessages = [
@@ -836,7 +822,7 @@ export class ConversationSessionController {
 		if (!chatId) return;
 		void pauseChatQueue(chatId)
 			.then((result) => {
-				deps.setMessageQueue(chatId, result.queue);
+				deps.conversationUi.setMessageQueue(chatId, result.queue);
 			})
 			.catch((error) => {
 				deps.chatState.chatMessages = [
@@ -855,7 +841,7 @@ export class ConversationSessionController {
 		if (!chatId) return;
 		void dequeueChatMessage(chatId, entryId)
 			.then((result) => {
-				deps.setMessageQueue(chatId, result.queue);
+				deps.conversationUi.setMessageQueue(chatId, result.queue);
 			})
 			.catch((error) => {
 				deps.chatState.chatMessages = [

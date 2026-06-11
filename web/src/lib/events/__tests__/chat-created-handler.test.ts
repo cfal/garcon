@@ -4,19 +4,28 @@ import { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ChatEventContext } from '../handlers/chat';
 import { ChatSessionCreatedMessage } from '$shared/ws-events';
 
+function makeConversationUi(
+	overrides: Partial<ChatEventContext['conversationUi']> = {},
+): ChatEventContext['conversationUi'] {
+	return {
+		pendingViewChat: null,
+		setPendingViewChat: vi.fn(),
+		setPendingPermissionRequests: vi.fn(),
+		clearPendingPermissionRequests: vi.fn(),
+		...overrides,
+	};
+}
+
 function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 	return {
-		agentId: 'claude',
-		projectPath: '/project',
-		selectedChat: null,
+		getAgentId: () => 'claude',
+		getSelectedChat: () => null,
 		getCurrentChatId: () => null,
 		setCurrentChatId: vi.fn(),
 		setChatMessages: vi.fn(),
 		loadMessages: vi.fn().mockResolvedValue([]),
 		setIsSystemChatChange: vi.fn(),
-		setPendingPermissionRequests: vi.fn(),
-		pendingViewChat: null,
-		setPendingViewChat: vi.fn(),
+		conversationUi: makeConversationUi(),
 		activateLoadingFor: vi.fn(),
 		clearLoadingIndicators: vi.fn(),
 		markChatsAsCompleted: vi.fn(),
@@ -89,7 +98,7 @@ describe('handleChatCreated', () => {
 		const setPending = vi.fn();
 		const ctx = makeCtx({
 			startupCoordinator: coordinator,
-			setPendingPermissionRequests: setPending,
+			conversationUi: makeConversationUi({ setPendingPermissionRequests: setPending }),
 		});
 
 		handleChatCreated(makeMsg('chat-1'), ctx);
@@ -119,8 +128,10 @@ describe('handleChatCreated', () => {
 		const setPendingViewChat = vi.fn();
 		const ctx = makeCtx({
 			startupCoordinator: coordinator,
-			pendingViewChat: { chatId: '' } as never,
-			setPendingViewChat,
+			conversationUi: makeConversationUi({
+				pendingViewChat: { chatId: '' } as never,
+				setPendingViewChat,
+			}),
 		});
 
 		handleChatCreated(makeMsg('chat-1'), ctx);
@@ -133,8 +144,10 @@ describe('handleChatCreated', () => {
 		const setPendingViewChat = vi.fn();
 		const ctx = makeCtx({
 			startupCoordinator: coordinator,
-			pendingViewChat: { chatId: 'existing' } as never,
-			setPendingViewChat,
+			conversationUi: makeConversationUi({
+				pendingViewChat: { chatId: 'existing' } as never,
+				setPendingViewChat,
+			}),
 		});
 
 		handleChatCreated(makeMsg('chat-1'), ctx);

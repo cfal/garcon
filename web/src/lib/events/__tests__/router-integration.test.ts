@@ -6,6 +6,7 @@ import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage } from '$shared/chat-types';
+import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
 	return {
@@ -28,15 +29,9 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		popLoadingStatus: vi.fn(),
 		setIsSystemChatChange: vi.fn(),
 		setSelectedChatId: vi.fn(),
-		pendingPermissionRequests: () => [],
-		setPendingPermissionRequests: vi.fn(),
-		pendingViewChat: () => null,
-		setPendingViewChat: vi.fn(),
-		setMessageQueue: vi.fn(),
+		conversationUi: new ConversationUiStore(),
 		permissionMode: () => 'default',
-		previousPermissionMode: () => null,
 		setPermissionMode: vi.fn(),
-		setPreviousPermissionMode: vi.fn(),
 		patchChatPreview: vi.fn(),
 		refreshChats: vi.fn(),
 		hasChat: () => true,
@@ -95,6 +90,34 @@ describe('event router integration', () => {
 		expect(stores.setSelectedChatId).toHaveBeenCalledWith('chat-b');
 		expect(stores.navigateToChat).toHaveBeenCalledWith('chat-b');
 		expect(stores.refreshChats).toHaveBeenCalledTimes(1);
+	});
+
+	it('uses updated active chat values for later events in the same drain', () => {
+		let currentChatId: string | null = 'chat-a';
+		let selectedChatId: string | null = 'chat-a';
+		const setIsLoading = vi.fn();
+		const stores = createStores({
+			selectedChat: () =>
+				selectedChatId ? ({ id: selectedChatId, projectPath: '/repo' } as never) : null,
+			currentChatId: () => currentChatId,
+			setCurrentChatId: (id) => {
+				currentChatId = id;
+			},
+			setSelectedChatId: (id) => {
+				selectedChatId = id;
+			},
+			setIsLoading,
+		});
+
+		renderRouterWithRawMessages(
+			[
+				{ type: 'chat-fork-created', sourceChatId: 'chat-a', chatId: 'chat-b' },
+				{ type: 'chat-processing-updated', chatId: 'chat-b', isProcessing: true },
+			],
+			stores,
+		);
+
+		expect(setIsLoading).toHaveBeenCalledWith(true);
 	});
 
 	it('drops malformed payloads before reaching handlers', () => {

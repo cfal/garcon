@@ -26,15 +26,10 @@ import {
 } from '$shared/ws-events';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
-import type {
-	ChatMessage,
-	PendingPermissionRequest,
-	PendingViewChat,
-	PermissionMode,
-	QueueState,
-} from '$lib/types/chat';
+import type { ChatMessage, PermissionMode } from '$lib/types/chat';
 import type { ChatEntry, SessionAgentId } from '$lib/types/app';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
+import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 import { untrack } from 'svelte';
 import { normalizeEvent } from '$lib/ws/normalize';
@@ -92,19 +87,9 @@ export interface EventRouterStores {
 	popLoadingStatus: (id: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 	setSelectedChatId: (chatId: string | null) => void;
-	pendingPermissionRequests: () => PendingPermissionRequest[];
-	setPendingPermissionRequests: (
-		updater:
-			| PendingPermissionRequest[]
-			| ((prev: PendingPermissionRequest[]) => PendingPermissionRequest[]),
-	) => void;
-	pendingViewChat: () => PendingViewChat | null;
-	setPendingViewChat?: (v: PendingViewChat | null) => void;
-	setMessageQueue: (chatId: string, queue: QueueState | null) => void;
+	conversationUi: ConversationUiStore;
 	permissionMode: () => PermissionMode;
-	previousPermissionMode: () => PermissionMode | null;
 	setPermissionMode: (mode: PermissionMode) => void;
-	setPreviousPermissionMode: (mode: PermissionMode | null) => void;
 	patchChatPreview: (chatId: string, content: string, timestamp: string) => void;
 	refreshChats: () => void;
 	hasChat: (chatId: string) => boolean;
@@ -216,11 +201,6 @@ function buildDispatch(
 	const { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted } =
 		createHelpers(stores);
 
-	const selectedChat = stores.selectedChat();
-	const currentChatId = stores.currentChatId();
-	const agentId = stores.agentId();
-	const projectPath = selectedChat?.projectPath || null;
-
 	const onNavigateToChat = stores.navigateToChat
 		? (chatId: string) => stores.navigateToChat!(chatId)
 		: undefined;
@@ -255,11 +235,11 @@ function buildDispatch(
 	};
 
 	const lifecycleCtx: LifecycleContext = {
-		currentChatId,
+		getCurrentChatId: stores.currentChatId,
 		setCurrentChatId: stores.setCurrentChatId,
 		setChatMessages: stores.setChatMessages,
 		setIsSystemChatChange: stores.setIsSystemChatChange,
-		setPendingPermissionRequests: stores.setPendingPermissionRequests,
+		conversationUi: stores.conversationUi,
 		clearLoadingIndicators,
 		markChatsAsCompleted,
 		onNavigateToChat,
@@ -269,17 +249,14 @@ function buildDispatch(
 	};
 
 	const chatEventCtx: ChatEventContext = {
-		agentId,
-		projectPath,
-		selectedChat,
+		getAgentId: stores.agentId,
+		getSelectedChat: stores.selectedChat,
 		getCurrentChatId: stores.currentChatId,
 		setCurrentChatId: stores.setCurrentChatId,
 		setChatMessages: stores.setChatMessages,
 		loadMessages: stores.loadMessages,
 		setIsSystemChatChange: stores.setIsSystemChatChange,
-		setPendingPermissionRequests: stores.setPendingPermissionRequests,
-		pendingViewChat: stores.pendingViewChat(),
-		setPendingViewChat: stores.setPendingViewChat,
+		conversationUi: stores.conversationUi,
 		activateLoadingFor,
 		clearLoadingIndicators,
 		markChatsAsCompleted,
@@ -295,12 +272,8 @@ function buildDispatch(
 	};
 
 	const permLifecycleCtx: PermissionLifecycleContext = {
-		currentChatId,
-		setPendingPermissionRequests: (updater) => {
-			if (typeof updater === 'function') {
-				stores.setPendingPermissionRequests(updater);
-			}
-		},
+		getCurrentChatId: stores.currentChatId,
+		conversationUi: stores.conversationUi,
 		activateLoadingFor,
 		setCanAbort: stores.setCanAbort,
 		pushLoadingStatus: stores.pushLoadingStatus,
@@ -308,24 +281,19 @@ function buildDispatch(
 	};
 
 	const queueCtx: QueueContext = {
-		currentChatId,
-		selectedChatId: selectedChat?.id || null,
-		setMessageQueue: stores.setMessageQueue,
+		getCurrentChatId: stores.currentChatId,
+		getSelectedChatId: () => stores.selectedChat()?.id || null,
+		conversationUi: stores.conversationUi,
 		activateLoadingFor,
 		setCanAbort: stores.setCanAbort,
 		onChatProcessing,
 	};
 
 	const planModeCtx: PlanModeContext = {
-		currentChatId,
-		permissionMode: stores.permissionMode(),
+		getCurrentChatId: stores.currentChatId,
+		getPermissionMode: stores.permissionMode,
 		setPermissionMode: stores.setPermissionMode,
-		setPreviousPermissionMode: stores.setPreviousPermissionMode,
-		setPendingPermissionRequests: (updater) => {
-			if (typeof updater === 'function') {
-				stores.setPendingPermissionRequests(updater);
-			}
-		},
+		conversationUi: stores.conversationUi,
 	};
 
 	const runningCtx: RunningChatsContext = {
@@ -394,7 +362,7 @@ function buildDispatch(
 		'queue-dispatching': (msg) => {
 			if (!(msg instanceof QueueDispatchingMessage)) return;
 			handleQueueSending(msg, queueCtx);
-			const sendChatId = msg.chatId || currentChatId;
+			const sendChatId = msg.chatId || stores.currentChatId();
 			if (sendChatId && msg.content) {
 				stores.patchChatPreview(
 					sendChatId,
@@ -459,6 +427,9 @@ export function createEventRouter(
 	drainHandle: DrainHandle,
 	stores: EventRouterStores,
 ): void {
+	const outputAccumulator = createAgentOutputAccumulator(stores);
+	const dispatch = buildDispatch(stores, outputAccumulator);
+
 	$effect(() => {
 		// Sole tracked dependency: re-run whenever a new WS message arrives.
 		// All store reads and handler dispatches are untracked so that
@@ -470,16 +441,13 @@ export function createEventRouter(
 			const newMessages = drainHandle.drain();
 			if (newMessages.length === 0) return;
 
-			const outputAccumulator = createAgentOutputAccumulator(stores);
-			const dispatch = buildDispatch(stores, outputAccumulator);
-
-			const selectedChat = stores.selectedChat();
-			const currentChatId = stores.currentChatId();
-			const pendingViewChatId = stores.pendingViewChat()?.chatId || null;
-
 			for (const wsMsg of newMessages) {
 				const event = normalizeEvent(wsMsg.data);
 				if (!event) continue;
+
+				const selectedChat = stores.selectedChat();
+				const currentChatId = stores.currentChatId();
+				const pendingViewChatId = stores.conversationUi.pendingViewChat?.chatId || null;
 
 				// Pre-filter: patch sidebar preview for any chat so background
 				// chats update even when the filter skips full dispatch.

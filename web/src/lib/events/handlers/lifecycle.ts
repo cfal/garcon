@@ -3,18 +3,18 @@
 
 import type { AgentRunFinishedMessage, AgentRunFailedMessage } from '$shared/ws-events';
 import { ErrorMessage } from '$shared/chat-types';
-import type { ChatMessage, PendingPermissionRequest } from '$lib/types/chat';
+import type { ChatMessage } from '$lib/types/chat';
+import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 export interface LifecycleContext {
-	currentChatId: string | null;
+	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
 	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
 	setIsSystemChatChange: (v: boolean) => void;
-	setPendingPermissionRequests: (
-		updater:
-			| PendingPermissionRequest[]
-			| ((prev: PendingPermissionRequest[]) => PendingPermissionRequest[]),
-	) => void;
+	conversationUi: Pick<
+		ConversationUiStore,
+		'setPendingPermissionRequests' | 'clearPendingPermissionRequests'
+	>;
 	clearLoadingIndicators: (chatId?: string | null) => void;
 	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
 	onNavigateToChat?: (chatId: string) => void;
@@ -25,13 +25,14 @@ export interface LifecycleContext {
 
 export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: LifecycleContext) {
 	const pendingChatId = ctx.getPendingChatId();
-	const completedChatId = msg.chatId || ctx.currentChatId || pendingChatId;
+	const currentChatId = ctx.getCurrentChatId();
+	const completedChatId = msg.chatId || currentChatId || pendingChatId;
 
 	ctx.clearLoadingIndicators(completedChatId);
 	ctx.markChatsAsCompleted(completedChatId);
 
 	// Navigate to completed chat if it was pending and didn't error
-	if (pendingChatId && !ctx.currentChatId && msg.exitCode !== 1) {
+	if (pendingChatId && !currentChatId && msg.exitCode !== 1) {
 		ctx.setCurrentChatId(completedChatId);
 		ctx.setIsSystemChatChange(true);
 		if (completedChatId) {
@@ -45,13 +46,13 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	}
 
 	// Preserve plan-exit permission requests across turn boundaries
-	ctx.setPendingPermissionRequests((prev) =>
+	ctx.conversationUi.setPendingPermissionRequests((prev) =>
 		prev.filter((r) => r.permissionRequestId.startsWith('plan-exit-')),
 	);
 }
 
 export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleContext) {
-	const errorChatId = msg.chatId || ctx.currentChatId;
+	const errorChatId = msg.chatId || ctx.getCurrentChatId();
 
 	ctx.clearLoadingIndicators(errorChatId);
 	ctx.markChatsAsCompleted(errorChatId);
@@ -60,5 +61,5 @@ export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleConte
 		...prev,
 		new ErrorMessage(new Date().toISOString(), msg.error || 'An error occurred'),
 	]);
-	ctx.setPendingPermissionRequests([]);
+	ctx.conversationUi.clearPendingPermissionRequests();
 }

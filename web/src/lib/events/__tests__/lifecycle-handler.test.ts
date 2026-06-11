@@ -8,11 +8,14 @@ import { AgentRunFinishedMessage, AgentRunFailedMessage } from '$shared/ws-event
 
 function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext {
 	return {
-		currentChatId: 'chat-1',
+		getCurrentChatId: () => 'chat-1',
 		setCurrentChatId: vi.fn(),
 		setChatMessages: vi.fn(),
 		setIsSystemChatChange: vi.fn(),
-		setPendingPermissionRequests: vi.fn(),
+		conversationUi: {
+			setPendingPermissionRequests: vi.fn(),
+			clearPendingPermissionRequests: vi.fn(),
+		},
 		clearLoadingIndicators: vi.fn(),
 		markChatsAsCompleted: vi.fn(),
 		getPendingChatId: () => null,
@@ -45,7 +48,7 @@ describe('handleAgentComplete', () => {
 	it('navigates to pending chat on success', () => {
 		const onNavigateToChat = vi.fn();
 		const ctx = createCtx({
-			currentChatId: null,
+			getCurrentChatId: () => null,
 			getPendingChatId: () => 'pending-chat',
 			onNavigateToChat,
 		});
@@ -60,7 +63,12 @@ describe('handleAgentComplete', () => {
 
 	it('preserves plan-exit permission requests', () => {
 		const setPendingPermissionRequests = vi.fn();
-		const ctx = createCtx({ setPendingPermissionRequests });
+		const ctx = createCtx({
+			conversationUi: {
+				setPendingPermissionRequests,
+				clearPendingPermissionRequests: vi.fn(),
+			},
+		});
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
 
 		expect(setPendingPermissionRequests).toHaveBeenCalledWith(expect.any(Function));
@@ -86,6 +94,6 @@ describe('handleAgentError', () => {
 		expect(ctx.clearLoadingIndicators).toHaveBeenCalledWith('chat-1');
 		expect(ctx.markChatsAsCompleted).toHaveBeenCalledWith('chat-1');
 		expect(ctx.setChatMessages).toHaveBeenCalledWith(expect.any(Function));
-		expect(ctx.setPendingPermissionRequests).toHaveBeenCalledWith([]);
+		expect(ctx.conversationUi.clearPendingPermissionRequests).toHaveBeenCalled();
 	});
 });

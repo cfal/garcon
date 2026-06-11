@@ -26,9 +26,11 @@ function makeContext(initial: PendingPermissionRequest[] = []): {
 	const pushLoadingStatus = vi.fn();
 	const popLoadingStatus = vi.fn();
 	const ctx: PermissionLifecycleContext = {
-		currentChatId: 'chat-1',
-		setPendingPermissionRequests: (updater) => {
-			pending = updater(pending);
+		getCurrentChatId: () => 'chat-1',
+		conversationUi: {
+			setPendingPermissionRequests: (updater) => {
+				pending = typeof updater === 'function' ? updater(pending) : updater;
+			},
 		},
 		activateLoadingFor: () => {},
 		setCanAbort: () => {},

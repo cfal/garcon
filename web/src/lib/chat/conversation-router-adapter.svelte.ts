@@ -10,13 +10,8 @@ import type { ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
+import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
-import type {
-	PendingPermissionRequest,
-	QueueState,
-	PermissionMode,
-	PendingViewChat,
-} from '$lib/types/chat';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 export interface ConversationRouterDeps {
@@ -40,21 +35,10 @@ export interface ConversationRouterDeps {
 	composerState: ComposerState;
 	agentState: AgentState;
 	lifecycle: ChatLifecycleStore;
+	conversationUi: ConversationUiStore;
 	startupCoordinator: StartupCoordinator;
 	appShell: { quietRefreshChats: () => void };
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
-	// Mutable binding references for per-chat reactive state.
-	getPendingPermissionRequests: () => PendingPermissionRequest[];
-	setPendingPermissionRequests: (
-		updater:
-			| PendingPermissionRequest[]
-			| ((prev: PendingPermissionRequest[]) => PendingPermissionRequest[]),
-	) => void;
-	getPendingViewChat: () => PendingViewChat | null;
-	setPendingViewChat: (v: PendingViewChat | null) => void;
-	setMessageQueue: (chatId: string, q: QueueState | null) => void;
-	getPreviousPermissionMode: () => PermissionMode | null;
-	setPreviousPermissionMode: (mode: PermissionMode | null) => void;
 }
 
 // Builds a ChatEntry-compatible object from the session store for the
@@ -101,17 +85,11 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 		pushLoadingStatus: (e) => deps.lifecycle.pushLoadingStatus(e),
 		popLoadingStatus: (id) => deps.lifecycle.popLoadingStatus(id),
 		setIsSystemChatChange: (v) => deps.lifecycle.setIsSystemChatChange(v),
-		pendingPermissionRequests: deps.getPendingPermissionRequests,
-		setPendingPermissionRequests: deps.setPendingPermissionRequests,
-		pendingViewChat: deps.getPendingViewChat,
-		setPendingViewChat: deps.setPendingViewChat,
-		setMessageQueue: deps.setMessageQueue,
+		conversationUi: deps.conversationUi,
 		permissionMode: () => deps.agentState.permissionMode,
-		previousPermissionMode: deps.getPreviousPermissionMode,
 		setPermissionMode: (mode) => {
 			deps.agentState.permissionMode = mode;
 		},
-		setPreviousPermissionMode: deps.setPreviousPermissionMode,
 		reconcileProcessing: (activeChatIds) => deps.sessions.reconcileProcessing(activeChatIds),
 		setChatProcessing: (chatId, isProcessing) =>
 			deps.sessions.setChatProcessing(chatId, isProcessing),

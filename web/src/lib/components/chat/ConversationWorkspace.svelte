@@ -19,6 +19,7 @@
 	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
+	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 	import {
 		getChatSessions,
 		getLocalSettings,
@@ -32,12 +33,6 @@
 		getReadReceiptOutbox,
 		getModelCatalog,
 	} from '$lib/context';
-	import type {
-		PendingPermissionRequest,
-		QueueState,
-		PermissionMode,
-		PendingViewChat,
-	} from '$lib/types/chat';
 	import { ArrowDown, ArrowUp, Loader2 } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
@@ -63,6 +58,7 @@
 	const composerState = new ComposerState();
 	const agentState = new AgentState();
 	const lifecycle = new ChatLifecycleStore();
+	const conversationUi = new ConversationUiStore();
 	const startupCoordinator = new StartupCoordinator();
 
 	setChatState(chatState);
@@ -70,20 +66,10 @@
 	setAgentState(agentState);
 	setChatLifecycle(lifecycle);
 
-	// Per-chat reactive state for permissions and queue.
-	let pendingPermissionRequests = $state<PendingPermissionRequest[]>([]);
-	let queueByChatId = $state<Record<string, QueueState | null>>({});
-	let pendingViewChat = $state<PendingViewChat | null>(null);
-	let previousPermissionMode = $state<PermissionMode | null>(null);
-	let needsServerLoad = $state(false);
 	const activeQueue = $derived.by(() => {
 		const chatId = sessions.selectedChatId;
-		if (!chatId) return null;
-		return queueByChatId[chatId] ?? null;
+		return conversationUi.getQueue(chatId);
 	});
-	function setMessageQueue(chatId: string, q: QueueState | null): void {
-		queueByChatId = { ...queueByChatId, [chatId]: q };
-	}
 	const scrollToTopButtonClass = $derived(
 		cn(
 			'absolute right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg',
@@ -106,26 +92,14 @@
 		composerState,
 		agentState,
 		lifecycle,
+		conversationUi,
 		startupCoordinator,
 		appShell,
 		readReceiptOutbox,
-		getPendingPermissionRequests: () => pendingPermissionRequests,
-		setPendingPermissionRequests: (updater) => {
-			if (typeof updater === 'function') {
-				pendingPermissionRequests = updater(pendingPermissionRequests);
-			} else {
-				pendingPermissionRequests = updater;
-			}
-		},
-		getPendingViewChat: () => pendingViewChat,
-		setPendingViewChat: (v) => {
-			pendingViewChat = v;
-		},
-		setMessageQueue,
-		getPreviousPermissionMode: () => previousPermissionMode,
-		setPreviousPermissionMode: (mode) => {
-			previousPermissionMode = mode;
-		},
+	});
+
+	conversationUi.mountQueuePruning({
+		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
 	});
 
 	// Scroll controller.
@@ -143,6 +117,7 @@
 		composerState,
 		agentState,
 		lifecycle,
+		conversationUi,
 		startupCoordinator,
 		modelCatalog,
 		appShell,
@@ -154,21 +129,9 @@
 				goto(`/chat/${chatId}`);
 			},
 		},
-		getPendingPermissionRequests: () => pendingPermissionRequests,
-		setPendingPermissionRequests: (v) => {
-			pendingPermissionRequests = v;
-		},
-		getPreviousPermissionMode: () => previousPermissionMode,
-		setPreviousPermissionMode: (v) => {
-			previousPermissionMode = v;
-		},
-		setNeedsServerLoad: (v) => {
-			needsServerLoad = v;
-		},
 		setIsViewportPinnedToBottom: (v) => {
 			scroll.isPinnedToBottom = v;
 		},
-		setMessageQueue,
 		scrollToBottom: () => scroll.scrollToBottom(),
 	});
 
@@ -201,7 +164,7 @@
 			if (selected && selected.status === 'running') {
 				void getChatQueue(selected.id)
 					.then((result) => {
-						setMessageQueue(selected.id, result.queue);
+						conversationUi.setMessageQueue(selected.id, result.queue);
 					})
 					.catch(() => {
 						// Queue state will converge through later broadcasts.
@@ -231,18 +194,6 @@
 			}
 			if (lifecycle.isLoading) lifecycle.setIsLoading(false);
 		});
-	});
-
-	// Prunes queue cache entries for chats no longer present in session state.
-	$effect(() => {
-		const activeChatIds = new Set(Object.keys(sessions.byId));
-		const staleIds = Object.keys(queueByChatId).filter((chatId) => !activeChatIds.has(chatId));
-		if (staleIds.length === 0) return;
-		const nextQueueByChatId = { ...queueByChatId };
-		for (const chatId of staleIds) {
-			delete nextQueueByChatId[chatId];
-		}
-		queueByChatId = nextQueueByChatId;
 	});
 
 	// Debounced persistence to avoid main-thread JSON.stringify per token during streaming.
@@ -346,7 +297,7 @@
 				onscroll={() => scroll.handleScroll()}
 				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
 				onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
-				{pendingPermissionRequests}
+				pendingPermissionRequests={conversationUi.pendingPermissionRequests}
 				onRetry={() => {
 					const chatId = sessions.selectedChatId;
 					if (chatId) controller.loadChat(chatId);

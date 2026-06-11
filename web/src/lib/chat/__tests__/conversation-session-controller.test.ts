@@ -10,6 +10,7 @@ import {
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 import { AssistantMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
+import type { PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
 
 vi.mock('$lib/api/chats.js', () => ({
 	dequeueChatMessage: vi.fn(),
@@ -106,6 +107,27 @@ function createDeps(chat = createRunningChat()) {
 			markValidated: vi.fn(),
 		},
 	};
+	const conversationUi = {
+		pendingPermissionRequests: [] as PendingPermissionRequest[],
+		previousPermissionMode: null as PermissionMode | null,
+		clearPendingPermissionRequests: vi.fn(() => {
+			conversationUi.pendingPermissionRequests = [];
+		}),
+		setPendingPermissionRequests: vi.fn(
+			(
+				update:
+					| PendingPermissionRequest[]
+					| ((previous: PendingPermissionRequest[]) => PendingPermissionRequest[]),
+			) => {
+				conversationUi.pendingPermissionRequests =
+					typeof update === 'function' ? update(conversationUi.pendingPermissionRequests) : update;
+			},
+		),
+		setPreviousPermissionMode: vi.fn((mode: PermissionMode | null) => {
+			conversationUi.previousPermissionMode = mode;
+		}),
+		setMessageQueue: vi.fn(),
+	};
 	return {
 		deps: {
 			sessions: {
@@ -149,6 +171,7 @@ function createDeps(chat = createRunningChat()) {
 				setCurrentChatId: vi.fn(),
 				setLoadingStatus: vi.fn(),
 			},
+			conversationUi,
 			startupCoordinator: {},
 			ws: {
 				sendMessage: vi.fn(),
@@ -175,13 +198,7 @@ function createDeps(chat = createRunningChat()) {
 				setActiveTab: vi.fn(),
 				navigateToChat: vi.fn(),
 			},
-			getPendingPermissionRequests: vi.fn(() => []),
-			setPendingPermissionRequests: vi.fn(),
-			getPreviousPermissionMode: vi.fn(() => null),
-			setPreviousPermissionMode: vi.fn(),
-			setNeedsServerLoad: vi.fn(),
 			setIsViewportPinnedToBottom: vi.fn(),
-			setMessageQueue: vi.fn(),
 			scrollToBottom: vi.fn(),
 		},
 		waitForConnection,
@@ -455,7 +472,7 @@ describe('ConversationSessionController', () => {
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.chatState.chatMessages).toHaveLength(0);
-		expect(deps.setMessageQueue).toHaveBeenCalledWith(
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith(
 			'chat-1',
 			expect.objectContaining({
 				entries: expect.arrayContaining([expect.objectContaining({ id: 'entry-1' })]),
