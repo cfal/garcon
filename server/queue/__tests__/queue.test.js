@@ -188,7 +188,7 @@ describe('orchestration', () => {
     });
 
     it('registers provided metadata for accepted REST turns', async () => {
-      await orchQueue.appendUserMessage('c1', 'hello', {
+      await orchQueue.registerPendingUserInput('c1', 'hello', {
         clientRequestId: 'req-1',
         clientMessageId: 'msg-1',
         turnId: 'turn-1',

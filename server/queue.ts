@@ -303,10 +303,6 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     });
   }
 
-  async appendUserMessage(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
-    await this.registerPendingUserInput(chatId, command, options);
-  }
-
   async runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
     try {
       await this.#turnRunner.runAgentTurn(chatId, command, options);
