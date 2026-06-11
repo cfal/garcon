@@ -161,8 +161,7 @@
 		return rows;
 	}
 
-	function persistReorderRequest(request: SidebarChatReorderRequest | null): void {
-		if (!request) return;
+	function persistReorderRequest(request: SidebarChatReorderRequest): void {
 		onQuickMove(
 			request.list,
 			request.chatId,

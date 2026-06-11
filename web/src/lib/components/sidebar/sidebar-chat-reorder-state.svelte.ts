@@ -85,6 +85,12 @@ export class SidebarChatReorderState {
 			targetChatId: input.targetChatId,
 			closestEdge: input.closestEdge,
 		});
+		if (!next) {
+			if (baseOrder.includes(input.sourceChatId) && baseOrder.includes(input.targetChatId)) {
+				this.setOverrideIfChanged(input.list, current, [...baseOrder]);
+			}
+			return;
+		}
 		this.setOverrideIfChanged(input.list, current, next);
 	}
 

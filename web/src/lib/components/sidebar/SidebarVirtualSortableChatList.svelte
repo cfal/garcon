@@ -41,7 +41,7 @@
 		rowHeight?: number;
 		overscan?: number;
 		reorder: SidebarChatReorderState;
-		onPersistReorder: (request: SidebarChatReorderRequest | null) => void;
+		onPersistReorder: (request: SidebarChatReorderRequest) => void;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
@@ -216,6 +216,26 @@
 		return pointIsInsideViewport(input.clientX, input.clientY);
 	}
 
+	function mountedRowAtPoint(clientX: number, clientY: number): HTMLElement | null {
+		const target = document.elementFromPoint(clientX, clientY);
+		if (!(target instanceof Element)) return null;
+		return target.closest<HTMLElement>('[data-sidebar-virtual-row]');
+	}
+
+	function canUseLastValidDrop(input: {
+		sourceChatId: string;
+		sourceList: ChatOrderList;
+		clientX: number;
+		clientY: number;
+	}): boolean {
+		return (
+			pointIsInsideViewport(input.clientX, input.clientY) &&
+			mountedRowAtPoint(input.clientX, input.clientY) === null &&
+			lastValidDrop?.sourceChatId === input.sourceChatId &&
+			lastValidDrop.sourceList === input.sourceList
+		);
+	}
+
 	function applySidebarDropInstruction(instruction: SidebarDropInstruction): void {
 		activeDrop = { chatId: instruction.targetChatId, edge: instruction.closestEdge };
 		reorder.preview({
@@ -224,6 +244,11 @@
 			targetChatId: instruction.targetChatId,
 			closestEdge: instruction.closestEdge,
 		});
+	}
+
+	function persistReorderRequest(request: SidebarChatReorderRequest | null): void {
+		if (!request) return;
+		onPersistReorder(request);
 	}
 
 	function previewSidebarDrop(
@@ -241,6 +266,7 @@
 		const instruction = resolveSidebarDropInstruction(sourceData, dropTargets);
 		if (!instruction) {
 			activeDrop = null;
+			if (mountedRowAtPoint(input.clientX, input.clientY)) lastValidDrop = null;
 			return;
 		}
 
@@ -259,19 +285,18 @@
 		const currentInstruction = isInsideViewport
 			? resolveSidebarDropInstruction(sourceData, dropTargets)
 			: null;
-		const fallbackInstruction = (
-			isInsideViewport &&
-			lastValidDrop?.sourceChatId === sourceData.chatId &&
-			lastValidDrop.sourceList === sourceData.list
-				? lastValidDrop
-				: null
-		);
+		const fallbackInstruction = canUseLastValidDrop({
+			sourceChatId: sourceData.chatId,
+			sourceList: sourceData.list,
+			clientX: input.clientX,
+			clientY: input.clientY,
+		}) ? lastValidDrop : null;
 		// Uses the last valid row target when virtualization removes the current target at drop time.
 		const instruction = currentInstruction ?? fallbackInstruction;
 
 		if (instruction) {
 			applySidebarDropInstruction(instruction);
-			onPersistReorder(reorder.finish(sourceData.list));
+			persistReorderRequest(reorder.finish(sourceData.list));
 		} else {
 			reorder.cancel(sourceData.list);
 		}
@@ -309,9 +334,7 @@
 	function resolveTouchInstruction(clientX: number, clientY: number): SidebarDropInstruction | null {
 		const current = touchDrag;
 		if (!current || !pointIsInsideViewport(clientX, clientY)) return null;
-		const target = document.elementFromPoint(clientX, clientY);
-		if (!(target instanceof Element)) return null;
-		const rowEl = target.closest<HTMLElement>('[data-sidebar-virtual-row]');
+		const rowEl = mountedRowAtPoint(clientX, clientY);
 		if (!rowEl) return null;
 		const targetChatId = rowEl.dataset.sidebarVirtualRow;
 		const targetList = rowListFromElement(rowEl);
@@ -333,7 +356,9 @@
 		const instruction = resolveTouchInstruction(clientX, clientY);
 		if (!instruction) {
 			activeDrop = null;
-			if (!pointIsInsideViewport(clientX, clientY)) lastValidDrop = null;
+			if (!pointIsInsideViewport(clientX, clientY) || mountedRowAtPoint(clientX, clientY)) {
+				lastValidDrop = null;
+			}
 			return;
 		}
 		lastValidDrop = instruction;
@@ -528,16 +553,17 @@
 		clearDocumentSelection();
 		suppressTouchClickUntil = performance.now() + 500;
 		const instruction = resolveTouchInstruction(clientX, clientY) ?? (
-			pointIsInsideViewport(clientX, clientY) &&
-			lastValidDrop?.sourceChatId === current.sourceChatId &&
-			lastValidDrop.sourceList === current.sourceList
-				? lastValidDrop
-				: null
+			canUseLastValidDrop({
+				sourceChatId: current.sourceChatId,
+				sourceList: current.sourceList,
+				clientX,
+				clientY,
+			}) ? lastValidDrop : null
 		);
 
 		if (instruction) {
 			applySidebarDropInstruction(instruction);
-			onPersistReorder(reorder.finish(current.sourceList));
+			persistReorderRequest(reorder.finish(current.sourceList));
 		} else {
 			reorder.cancel(current.sourceList);
 		}
@@ -600,7 +626,7 @@
 	}
 
 	function moveToBoundary(row: SidebarVirtualChatRow, boundary: 'start' | 'end'): void {
-		onPersistReorder(reorder.moveToBoundary({
+		persistReorderRequest(reorder.moveToBoundary({
 			list: row.list,
 			chatId: row.chat.id,
 			boundary,

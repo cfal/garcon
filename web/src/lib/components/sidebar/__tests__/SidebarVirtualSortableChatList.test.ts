@@ -223,6 +223,82 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 	});
 
+	it('does not persist when a touch drag returns to the original adjacent slot', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			isMobile: true,
+			rowHeight,
+			onPersistReorder: persist,
+		});
+		await tick();
+		const { row0 } = installTouchGeometry();
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 150)],
+			changedTouches: [touchAt(1, 20, 150)],
+		});
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 100)],
+			changedTouches: [touchAt(1, 20, 100)],
+		});
+		await tick();
+		await fireEvent.touchEnd(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, 100)],
+		});
+		await tick();
+
+		expect(persist).not.toHaveBeenCalled();
+	});
+
+	it('does not reuse the last touch drop target when dropping over the dragged row', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			isMobile: true,
+			rowHeight,
+			onPersistReorder: persist,
+		});
+		await tick();
+		const { row0 } = installTouchGeometry();
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 150)],
+			changedTouches: [touchAt(1, 20, 150)],
+		});
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		await tick();
+		await fireEvent.touchEnd(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		await tick();
+
+		expect(persist).not.toHaveBeenCalled();
+	});
+
 	it('suppresses document text selection while a touch long press is pending', async () => {
 		vi.useFakeTimers();
 

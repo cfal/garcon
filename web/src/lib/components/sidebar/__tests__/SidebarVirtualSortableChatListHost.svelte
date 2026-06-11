@@ -12,7 +12,7 @@
 		isFiltered?: boolean;
 		rowHeight?: number;
 		onRegisterRecenter?: (callback: () => void) => void;
-		onPersistReorder?: (request: SidebarChatReorderRequest | null) => void;
+		onPersistReorder?: (request: SidebarChatReorderRequest) => void;
 	}
 
 	let {
