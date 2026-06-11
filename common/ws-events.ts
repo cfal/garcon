@@ -201,29 +201,8 @@ export type ServerWsMessage =
   | ChatLogResponseMessage
   | ClientRequestErrorMessage;
 
-// Dispatch key used by the client event router. One entry per server
-// message type -- no provider suffixes.
-export type EventKey =
-  | 'agent-run-output'
-  | 'agent-run-finished'
-  | 'agent-run-failed'
-  | 'chat-session-created'
-  | 'chat-fork-created'
-  | 'chat-session-stopped'
-  | 'chat-processing-updated'
-  | 'queue-state-updated'
-  | 'queue-dispatching'
-  | 'pending-user-input-updated'
-  | 'pending-user-input-cleared'
-  | 'chat-sessions-running'
-  | 'ws-fault'
-  | 'chat-title-updated'
-  | 'chat-session-deleted'
-  | 'chat-read-updated-v1'
-  | 'chat-list-refresh-requested'
-  | 'settings-changed'
-  | 'chat-log-response'
-  | 'client-request-error';
+// Uses the message union as the single source of truth for dispatch keys.
+export type EventKey = ServerWsMessage['type'];
 
 // Narrows an unknown value to string, defaulting to ''.
 function str(v: unknown): string {
