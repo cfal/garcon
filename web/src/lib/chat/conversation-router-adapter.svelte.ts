@@ -24,7 +24,7 @@ export interface ConversationRouterDeps {
 		order: string[];
 		hasChat: (chatId: string) => boolean;
 		patchPreview: (chatId: string, content: string) => void;
-		patchChat: (chatId: string, patch: Record<string, unknown>) => void;
+		patchChat: (chatId: string, patch: Partial<ChatSessionRecord>) => void;
 		patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 		removeChat: (chatId: string) => void;
 		setSelectedChatId: (id: string | null) => void;
@@ -44,83 +44,91 @@ export interface ConversationRouterDeps {
 // Assembles the EventRouterStores contract from workspace dependencies.
 export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStores {
 	return {
-		agentId: () => deps.agentState.agentId,
-		selectedChat: () => deps.sessions.selectedChat,
-		currentChatId: () => deps.lifecycle.currentChatId,
-		setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),
-		setSelectedChatId: (id) => deps.sessions.setSelectedChatId(id),
-		chatMessages: () => deps.chatState.chatMessages,
-		setChatMessages: (updater) => {
-			const nextMessages =
-				typeof updater === 'function' ? updater(deps.chatState.chatMessages) : updater;
-			deps.chatState.setMessages(nextMessages);
+		agentSettings: {
+			permissionMode: () => deps.agentState.permissionMode,
+			setPermissionMode: (mode) => {
+				deps.agentState.permissionMode = mode;
+			},
 		},
-		appendChatMessagesByIdentity: (messages) => deps.chatState.appendMessagesByIdentity(messages),
-		pendingUserInputs: () => deps.chatState.pendingUserInputs,
-		setPendingUserInputs: (inputs) => deps.chatState.setPendingUserInputs(inputs),
-		upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
-		clearPendingUserInput: (clientRequestId) =>
-			deps.chatState.clearPendingUserInput(clientRequestId),
-		updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
-			deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
-		loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
-		setIsLoading: (v) => deps.lifecycle.setIsLoading(v),
-		setCanAbort: (v) => deps.lifecycle.setCanAbort(v),
-		setLoadingStatus: (s) => deps.lifecycle.setLoadingStatus(s),
-		pushLoadingStatus: (e) => deps.lifecycle.pushLoadingStatus(e),
-		popLoadingStatus: (id) => deps.lifecycle.popLoadingStatus(id),
-		setIsSystemChatChange: (v) => deps.lifecycle.setIsSystemChatChange(v),
+		chatState: {
+			setChatMessages: (updater) => {
+				const nextMessages =
+					typeof updater === 'function' ? updater(deps.chatState.chatMessages) : updater;
+				deps.chatState.setMessages(nextMessages);
+			},
+			appendChatMessagesByIdentity: (messages) =>
+				deps.chatState.appendMessagesByIdentity(messages),
+			upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
+			clearPendingUserInput: (clientRequestId) =>
+				deps.chatState.clearPendingUserInput(clientRequestId),
+			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
+				deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
+			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
+			removeChatSnapshot: (chatId) => deps.chatState.snapshotCache.remove(chatId),
+			markChatSnapshotValidated: (chatId) => deps.chatState.snapshotCache.markValidated(chatId),
+		},
+		lifecycle: {
+			currentChatId: () => deps.lifecycle.currentChatId,
+			setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),
+			setIsLoading: (v) => deps.lifecycle.setIsLoading(v),
+			setCanAbort: (v) => deps.lifecycle.setCanAbort(v),
+			setLoadingStatus: (s) => deps.lifecycle.setLoadingStatus(s),
+			pushLoadingStatus: (e) => deps.lifecycle.pushLoadingStatus(e),
+			popLoadingStatus: (id) => deps.lifecycle.popLoadingStatus(id),
+			setIsSystemChatChange: (v) => deps.lifecycle.setIsSystemChatChange(v),
+		},
 		conversationUi: deps.conversationUi,
-		permissionMode: () => deps.agentState.permissionMode,
-		setPermissionMode: (mode) => {
-			deps.agentState.permissionMode = mode;
-		},
-		reconcileProcessing: (activeChatIds) => deps.sessions.reconcileProcessing(activeChatIds),
-		setChatProcessing: (chatId, isProcessing) =>
-			deps.sessions.setChatProcessing(chatId, isProcessing),
-		startupCoordinator: deps.startupCoordinator,
-		onLocalStartupConfirmed: (chatId) => {
-			deps.sessions.setChatProcessing(chatId, true);
-			deps.lifecycle.setCurrentChatId(chatId);
-			deps.sessions.setSelectedChatId(chatId);
-			goto(`/chat/${chatId}`);
-			deps.appShell.quietRefreshChats();
-		},
-		onExternalChatCreated: (chatId) => {
-			if (!deps.sessions.hasChat(chatId)) {
+		sessions: {
+			selectedChat: () => deps.sessions.selectedChat,
+			setSelectedChatId: (id) => deps.sessions.setSelectedChatId(id),
+			reconcileProcessing: (activeChatIds) => deps.sessions.reconcileProcessing(activeChatIds),
+			setChatProcessing: (chatId, isProcessing) =>
+				deps.sessions.setChatProcessing(chatId, isProcessing),
+			patchChatPreview: (chatId, content, _timestamp) => {
+				deps.sessions.patchPreview(chatId, content);
+			},
+			refreshChats: () => deps.appShell.quietRefreshChats(),
+			navigateToChat: (chatId) => {
+				goto(`/chat/${chatId}`);
 				deps.appShell.quietRefreshChats();
-			}
+			},
+			removeChat: (chatId) => deps.sessions.removeChat(chatId),
+			patchChatTitle: (chatId, title) => deps.sessions.patchChat(chatId, { title }),
+			navigateAwayFromChat: (chatId) => {
+				if (deps.sessions.selectedChatId !== chatId) return;
+				const idx = deps.sessions.order.indexOf(chatId);
+				const neighborId = deps.sessions.order[idx - 1] ?? deps.sessions.order[idx + 1] ?? null;
+				if (neighborId) {
+					deps.sessions.setSelectedChatId(neighborId);
+					goto(`/chat/${neighborId}`);
+				} else {
+					deps.sessions.setSelectedChatId(null);
+					goto('/');
+				}
+			},
+			patchLastReadAt: (chatId, lastReadAt) => deps.sessions.patchLastReadAt(chatId, lastReadAt),
 		},
-		patchChatPreview: (chatId, content, _timestamp) => {
-			deps.sessions.patchPreview(chatId, content);
+		startup: {
+			startupCoordinator: deps.startupCoordinator,
+			onLocalStartupConfirmed: (chatId) => {
+				deps.sessions.setChatProcessing(chatId, true);
+				deps.lifecycle.setCurrentChatId(chatId);
+				deps.sessions.setSelectedChatId(chatId);
+				goto(`/chat/${chatId}`);
+				deps.appShell.quietRefreshChats();
+			},
+			onExternalChatCreated: (chatId) => {
+				if (!deps.sessions.hasChat(chatId)) {
+					deps.appShell.quietRefreshChats();
+				}
+			},
 		},
-		refreshChats: () => deps.appShell.quietRefreshChats(),
-		hasChat: (chatId) => deps.sessions.hasChat(chatId),
-		navigateToChat: (chatId) => {
-			goto(`/chat/${chatId}`);
-			deps.appShell.quietRefreshChats();
+		readState: {
+			enqueueReadReceipt: (chatId, readAt) => {
+				deps.readReceiptOutbox.enqueue(chatId, readAt);
+				deps.sessions.patchLastReadAt(chatId, readAt);
+			},
 		},
-		removeChat: (chatId) => deps.sessions.removeChat(chatId),
-		patchChatTitle: (chatId, title) => deps.sessions.patchChat(chatId, { title }),
-		navigateAwayFromChat: (chatId) => {
-			if (deps.sessions.selectedChatId !== chatId) return;
-			const idx = deps.sessions.order.indexOf(chatId);
-			const neighborId = deps.sessions.order[idx - 1] ?? deps.sessions.order[idx + 1] ?? null;
-			if (neighborId) {
-				deps.sessions.setSelectedChatId(neighborId);
-				goto(`/chat/${neighborId}`);
-			} else {
-				deps.sessions.setSelectedChatId(null);
-				goto('/');
-			}
-		},
-		patchLastReadAt: (chatId, lastReadAt) => deps.sessions.patchLastReadAt(chatId, lastReadAt),
-		enqueueReadReceipt: (chatId, readAt) => {
-			deps.readReceiptOutbox.enqueue(chatId, readAt);
-			deps.sessions.patchLastReadAt(chatId, readAt);
-		},
-		removeChatSnapshot: (chatId) => deps.chatState.snapshotCache.remove(chatId),
-		markChatSnapshotValidated: (chatId) => deps.chatState.snapshotCache.markValidated(chatId),
 	};
 }
 

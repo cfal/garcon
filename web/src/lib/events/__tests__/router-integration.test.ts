@@ -10,43 +10,50 @@ import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
 	return {
-		agentId: () => 'claude',
-		selectedChat: () => ({ id: 'chat-a', projectPath: '/repo' }) as never,
-		currentChatId: () => 'chat-a',
-		setCurrentChatId: vi.fn(),
-		chatMessages: () => [],
-		setChatMessages: vi.fn(),
-		appendChatMessagesByIdentity: vi.fn(),
-		pendingUserInputs: () => [],
-		setPendingUserInputs: vi.fn(),
-		upsertPendingUserInput: vi.fn(),
-		clearPendingUserInput: vi.fn(),
-		updatePendingUserInputDeliveryStatus: vi.fn(),
-		loadMessages: vi.fn().mockResolvedValue([]),
-		setIsLoading: vi.fn(),
-		setCanAbort: vi.fn(),
-		setLoadingStatus: vi.fn(),
-		pushLoadingStatus: vi.fn(),
-		popLoadingStatus: vi.fn(),
-		setIsSystemChatChange: vi.fn(),
-		setSelectedChatId: vi.fn(),
+		agentSettings: {
+			permissionMode: () => 'default',
+			setPermissionMode: vi.fn(),
+		},
+		chatState: {
+			setChatMessages: vi.fn(),
+			appendChatMessagesByIdentity: vi.fn(),
+			upsertPendingUserInput: vi.fn(),
+			clearPendingUserInput: vi.fn(),
+			updatePendingUserInputDeliveryStatus: vi.fn(),
+			loadMessages: vi.fn().mockResolvedValue([]),
+		},
+		lifecycle: {
+			currentChatId: () => 'chat-a',
+			setCurrentChatId: vi.fn(),
+			setIsLoading: vi.fn(),
+			setCanAbort: vi.fn(),
+			setLoadingStatus: vi.fn(),
+			pushLoadingStatus: vi.fn(),
+			popLoadingStatus: vi.fn(),
+			setIsSystemChatChange: vi.fn(),
+		},
 		conversationUi: new ConversationUiStore(),
-		permissionMode: () => 'default',
-		setPermissionMode: vi.fn(),
-		patchChatPreview: vi.fn(),
-		refreshChats: vi.fn(),
-		hasChat: () => true,
-		navigateToChat: vi.fn(),
-		removeChat: vi.fn(),
-		patchChatTitle: vi.fn(),
-		navigateAwayFromChat: vi.fn(),
-		startupCoordinator: {} as never,
-		onLocalStartupConfirmed: vi.fn(),
-		onExternalChatCreated: vi.fn(),
-		reconcileProcessing: vi.fn(),
-		setChatProcessing: vi.fn(),
-		patchLastReadAt: vi.fn(),
-		enqueueReadReceipt: vi.fn(),
+		sessions: {
+			selectedChat: () => ({ id: 'chat-a', projectPath: '/repo' }) as never,
+			setSelectedChatId: vi.fn(),
+			patchChatPreview: vi.fn(),
+			refreshChats: vi.fn(),
+			navigateToChat: vi.fn(),
+			removeChat: vi.fn(),
+			patchChatTitle: vi.fn(),
+			navigateAwayFromChat: vi.fn(),
+			reconcileProcessing: vi.fn(),
+			setChatProcessing: vi.fn(),
+			patchLastReadAt: vi.fn(),
+		},
+		startup: {
+			startupCoordinator: {} as never,
+			onLocalStartupConfirmed: vi.fn(),
+			onExternalChatCreated: vi.fn(),
+		},
+		readState: {
+			enqueueReadReceipt: vi.fn(),
+		},
 		...overrides,
 	};
 }
@@ -77,7 +84,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.refreshChats).toHaveBeenCalledTimes(1);
+		expect(stores.sessions.refreshChats).toHaveBeenCalledTimes(1);
 	});
 
 	it('routes fork-created events to the fork chat', () => {
@@ -87,27 +94,34 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.setCurrentChatId).toHaveBeenCalledWith('chat-b');
-		expect(stores.setSelectedChatId).toHaveBeenCalledWith('chat-b');
-		expect(stores.navigateToChat).toHaveBeenCalledWith('chat-b');
-		expect(stores.refreshChats).toHaveBeenCalledTimes(1);
+		expect(stores.lifecycle.setCurrentChatId).toHaveBeenCalledWith('chat-b');
+		expect(stores.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-b');
+		expect(stores.sessions.navigateToChat).toHaveBeenCalledWith('chat-b');
+		expect(stores.sessions.refreshChats).toHaveBeenCalledTimes(1);
 	});
 
 	it('uses updated active chat values for later events in the same drain', () => {
 		let currentChatId: string | null = 'chat-a';
 		let selectedChatId: string | null = 'chat-a';
 		const setIsLoading = vi.fn();
+		const defaults = createStores();
 		const stores = createStores({
-			selectedChat: () =>
-				selectedChatId ? ({ id: selectedChatId, projectPath: '/repo' } as never) : null,
-			currentChatId: () => currentChatId,
-			setCurrentChatId: (id) => {
-				currentChatId = id;
+			sessions: {
+				...defaults.sessions,
+				selectedChat: () =>
+					selectedChatId ? ({ id: selectedChatId, projectPath: '/repo' } as never) : null,
+				setSelectedChatId: (id) => {
+					selectedChatId = id;
+				},
 			},
-			setSelectedChatId: (id) => {
-				selectedChatId = id;
+			lifecycle: {
+				...defaults.lifecycle,
+				currentChatId: () => currentChatId,
+				setCurrentChatId: (id) => {
+					currentChatId = id;
+				},
+				setIsLoading,
 			},
-			setIsLoading,
 		});
 
 		renderRouterWithRawMessages(
@@ -128,7 +142,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.refreshChats).not.toHaveBeenCalled();
+		expect(stores.sessions.refreshChats).not.toHaveBeenCalled();
 	});
 
 	it('skips scoped lifecycle events for non-active chats', () => {
@@ -138,8 +152,8 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.setIsLoading).not.toHaveBeenCalled();
-		expect(stores.setCanAbort).not.toHaveBeenCalled();
+		expect(stores.lifecycle.setIsLoading).not.toHaveBeenCalled();
+		expect(stores.lifecycle.setCanAbort).not.toHaveBeenCalled();
 	});
 
 	it('marks pending user messages accepted when correlated output arrives before REST response', () => {
@@ -153,12 +167,15 @@ describe('event router integration', () => {
 				deliveryStatus: 'submitting',
 			},
 		];
+		const defaults = createStores();
 		const stores = createStores({
-			pendingUserInputs: () => pendingUserInputs,
-			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) => {
-				pendingUserInputs = pendingUserInputs.map((input) =>
-					input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
-				);
+			chatState: {
+				...defaults.chatState,
+				updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) => {
+					pendingUserInputs = pendingUserInputs.map((input) =>
+						input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
+					);
+				},
 			},
 		});
 
@@ -191,12 +208,15 @@ describe('event router integration', () => {
 				deliveryStatus: 'submitting',
 			},
 		];
+		const defaults = createStores();
 		const stores = createStores({
-			pendingUserInputs: () => pendingUserInputs,
-			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) => {
-				pendingUserInputs = pendingUserInputs.map((input) =>
-					input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
-				);
+			chatState: {
+				...defaults.chatState,
+				updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) => {
+					pendingUserInputs = pendingUserInputs.map((input) =>
+						input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
+					);
+				},
 			},
 		});
 
@@ -217,13 +237,16 @@ describe('event router integration', () => {
 
 	it('preserves streamed output order before same-drain stop messages', () => {
 		let currentMessages: ChatMessage[] = [];
+		const defaults = createStores();
 		const stores = createStores({
-			chatMessages: () => currentMessages,
-			appendChatMessagesByIdentity: (messages) => {
-				currentMessages = [...currentMessages, ...messages];
-			},
-			setChatMessages: (updater) => {
-				currentMessages = typeof updater === 'function' ? updater(currentMessages) : updater;
+			chatState: {
+				...defaults.chatState,
+				appendChatMessagesByIdentity: (messages) => {
+					currentMessages = [...currentMessages, ...messages];
+				},
+				setChatMessages: (updater) => {
+					currentMessages = typeof updater === 'function' ? updater(currentMessages) : updater;
+				},
 			},
 		});
 

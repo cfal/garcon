@@ -70,6 +70,6 @@ describe('buildRouterStores', () => {
 		const selectedChat = chatRecord();
 		const stores = buildRouterStores(depsFor(selectedChat));
 
-		expect(stores.selectedChat()).toBe(selectedChat);
+		expect(stores.sessions.selectedChat()).toBe(selectedChat);
 	});
 });
