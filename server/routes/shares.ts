@@ -74,7 +74,7 @@ export default function createShareRoutes(
       };
 
       // Update existing share with latest messages, or create a new one.
-      const existing = shareStore.getShareByChatId(chatId);
+      const existing = await shareStore.getShareByChatId(chatId);
       const snapshot = existing
         ? await shareStore.updateShare(chatId, partial)
         : await shareStore.createShare(chatId, partial);
@@ -107,13 +107,13 @@ export default function createShareRoutes(
   }
 
   // GET /api/v1/chats/share/status?chatId=X - Checks share status.
-  function getShareStatus(_request: Request, url: URL): Response {
+  async function getShareStatus(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) {
       return Response.json({ success: false, error: 'chatId query parameter is required' }, { status: 400 });
     }
 
-    const existing = shareStore.getShareByChatId(chatId);
+    const existing = await shareStore.getShareByChatId(chatId);
     const resp: ShareStatusResponse = existing
       ? { isShared: true, shareToken: existing.shareToken, shareUrl: `/shared/${existing.shareToken}`, sharedAt: existing.sharedAt }
       : { isShared: false };
@@ -121,13 +121,13 @@ export default function createShareRoutes(
   }
 
   // GET /api/v1/shared - Public endpoint, returns snapshot by token.
-  const getSharedChat = markRouteNoAuth(function getSharedChat(_request: Request, url: URL): Response {
+  const getSharedChat = markRouteNoAuth(async function getSharedChat(_request: Request, url: URL): Promise<Response> {
     const token = url.searchParams.get('token');
     if (!token) {
       return Response.json({ error: 'token query parameter is required' }, { status: 400 });
     }
 
-    const snapshot = shareStore.getShare(token);
+    const snapshot = await shareStore.getShare(token);
     if (!snapshot) {
       return Response.json({ error: 'Share not found' }, { status: 404 });
     }
@@ -137,13 +137,13 @@ export default function createShareRoutes(
   });
 
   // Serves a plain text transcript at /shared/llm/:token for LLM consumption.
-  const getLlmTranscript = markRouteNoAuth(function getLlmTranscript(_request: Request, url: URL): Response {
+  const getLlmTranscript = markRouteNoAuth(async function getLlmTranscript(_request: Request, url: URL): Promise<Response> {
     const token = extractLlmTokenFromPath(url.pathname);
     if (!token) {
       return Response.json({ error: 'Share token is required' }, { status: 400 });
     }
 
-    const snapshot = shareStore.getShare(token);
+    const snapshot = await shareStore.getShare(token);
     if (!snapshot) {
       return Response.json({ error: 'Share not found' }, { status: 404 });
     }
