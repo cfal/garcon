@@ -3,6 +3,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { CommandLedger } from '../../commands/command-ledger.js';
 import { ChatCommandService } from '../../commands/chat-command-service.js';
+import { forkChatFileCopy } from '../../chats/fork-chat.js';
 
 export function createRouteCommandLedger(label = 'chat-routes') {
   return new CommandLedger(path.join(os.tmpdir(), `garcon-${label}-ledger-${randomUUID()}`));
@@ -25,6 +26,7 @@ export function createRouteCommandService({
   agents,
   commandLedger,
   pendingInputs,
+  forkChatFileCopy: forkChatFileCopyOverride,
 }) {
   return new ChatCommandService({
     chats: registry,
@@ -34,5 +36,6 @@ export function createRouteCommandService({
     agents,
     ledger: commandLedger,
     pendingInputs,
+    forkChatFileCopy: forkChatFileCopyOverride ?? forkChatFileCopy,
   });
 }

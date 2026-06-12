@@ -173,6 +173,7 @@ export async function startServer(): Promise<void> {
       metadata,
       agents: agentRegistry,
       pendingInputs,
+      forkChatFileCopy,
     });
 
     // Telegram notifications wire themselves to agent and queue events.
@@ -216,12 +217,6 @@ export async function startServer(): Promise<void> {
       historyCache,
       registry: chatRegistry,
       pendingInputs,
-      forkDeps: {
-        settings,
-        metadata,
-        forkChatFileCopy,
-        forkAgentSession: agentRegistry.forkAgentSession.bind(agentRegistry),
-      },
       commands: chatCommands,
     });
     const wsHandlers = {

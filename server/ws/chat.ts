@@ -33,11 +33,11 @@ import {
 } from '../../common/ws-requests.ts';
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
-import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
-import type { ChatMetadata } from '../chats/metadata-store.js';
+import type { IChatRegistry } from '../chats/store.js';
 import type { AgentSessionSettingsPatch } from "../agents/session-types.js";
 import {
   ChatCommandService,
+  CommandValidationError,
   runOptionsFromCommandRequest,
 } from '../commands/chat-command-service.js';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
@@ -53,7 +53,7 @@ type WS = import('bun').ServerWebSocket<unknown>;
 
 type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
-  'getRunningSessions' | 'resolvePermission' | 'updateSessionSettings' | 'supportsFork' | 'isAgentSessionRunning'
+  'getRunningSessions' | 'resolvePermission' | 'updateSessionSettings'
 >;
 
 type QueueManagerDep = Pick<
@@ -68,40 +68,6 @@ type QueueManagerDep = Pick<
   | 'pauseChatQueue'
   | 'resumeChatQueue'
 >;
-
-interface ForkSettingsDep {
-  getChatName(chatId: string): string | null;
-  ensureInNormal(chatId: string): Promise<void>;
-  setSessionName(chatId: string, title: string): Promise<void>;
-}
-
-interface ForkMetadataDep {
-  getChatMetadata(chatId: string): ChatMetadata | null;
-  addNewChatMetadata(chatId: string, command: string): void;
-}
-
-interface ForkDeps {
-  settings: ForkSettingsDep;
-  metadata: ForkMetadataDep;
-  forkChatFileCopy(args: {
-    sourceSession: ChatRegistryEntry;
-    sourceChatId: string;
-    targetChatId: string;
-    registry: IChatRegistry;
-    settings: ForkSettingsDep;
-    metadata: ForkMetadataDep;
-    forkAgentSession?: (args: {
-      sourceSession: ChatRegistryEntry;
-      sourceChatId: string;
-      targetChatId: string;
-    }) => Promise<{ agentSessionId: string; nativePath: string | null } | null>;
-  }): Promise<{ sourceChatId: string; chatId: string; agentId?: string }>;
-  forkAgentSession?(args: {
-    sourceSession: ChatRegistryEntry;
-    sourceChatId: string;
-    targetChatId: string;
-  }): Promise<{ agentSessionId: string; nativePath: string | null } | null>;
-}
 
 type HistoryCacheDep = HistoryCachePageReader;
 
@@ -123,7 +89,6 @@ interface ChatHandlerDeps {
   historyCache: HistoryCacheDep;
   registry: IChatRegistry;
   pendingInputs: PendingInputsDep;
-  forkDeps?: ForkDeps | null;
   commands: ChatCommandService;
 }
 
@@ -153,7 +118,6 @@ export class ChatHandler {
   #pendingInputs: PendingInputsDep;
   #registry: IChatRegistry;
   #commands: ChatCommandService;
-  #forkDeps: ForkDeps | null;
   #recentPermissionDecisions = new Map<string, number>();
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
@@ -163,7 +127,6 @@ export class ChatHandler {
     historyCache,
     registry,
     pendingInputs,
-    forkDeps = null,
     commands,
   }: ChatHandlerDeps) {
     this.#agents = agents;
@@ -172,7 +135,6 @@ export class ChatHandler {
     this.#pendingInputs = pendingInputs;
     this.#registry = registry;
     this.#commands = commands;
-    this.#forkDeps = forkDeps;
     this.#requestHandlers = this.#createRequestHandlers();
   }
 
@@ -213,41 +175,6 @@ export class ChatHandler {
     const sourceChatId = data.sourceChatId;
     const targetChatId = data.chatId;
 
-    if (!/^\d+$/.test(String(sourceChatId))) {
-      writer.send(new WsFaultMessage('Invalid sourceChatId format'));
-      return;
-    }
-    if (!/^\d+$/.test(String(targetChatId))) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, 'Invalid fork target session ID format'));
-      return;
-    }
-    if (sourceChatId === targetChatId) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, 'sourceChatId and chatId must differ'));
-      return;
-    }
-    if (!this.#forkDeps) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, 'Forking is not configured on this server'));
-      return;
-    }
-
-    const sourceSession = this.#registry.getChat(sourceChatId);
-    if (!sourceSession) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, 'Source session not found'));
-      return;
-    }
-    if (!this.#agents.supportsFork(sourceSession.agentId)) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, `Fork unsupported for agent: ${sourceSession.agentId}`));
-      return;
-    }
-    if (this.#agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, 'Cannot fork a chat while it is processing'));
-      return;
-    }
-    if (this.#registry.getChat(targetChatId)) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, `Session already exists: ${targetChatId}`));
-      return;
-    }
-
     try {
       await this.#commands.submitForkRun({
         transport: 'websocket',
@@ -256,21 +183,16 @@ export class ChatHandler {
         command: data.command,
         images: data.images,
         options: runOptionsFromCommandRequest(data),
-        ensureForked: async () => {
-          const result = await this.#forkDeps!.forkChatFileCopy({
-            sourceSession,
-            sourceChatId,
-            targetChatId,
-            registry: this.#registry,
-            settings: this.#forkDeps!.settings,
-            metadata: this.#forkDeps!.metadata,
-            forkAgentSession: this.#forkDeps!.forkAgentSession,
-          });
+        onForked: (result) => {
           writer.send(new ChatForkCreatedMessage(result.sourceChatId, result.chatId));
         },
       });
     } catch (error: unknown) {
       const chatId = this.#registry.getChat(targetChatId) ? targetChatId : sourceChatId;
+      if (error instanceof CommandValidationError && error.code === 'VALIDATION_FAILED' && error.message.includes('sourceChatId')) {
+        writer.send(new WsFaultMessage(error.message));
+        return;
+      }
       writer.send(new AgentRunFailedMessage(chatId, (error as Error).message));
     }
   }

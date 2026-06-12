@@ -11,7 +11,6 @@ import {
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
-import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
 import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
 import { CommandValidationError, runOptionsFromCommandRequest } from '../commands/chat-command-service.js';
@@ -552,43 +551,13 @@ export default function createChatRoutes({
       const sourceChatId = String(body.sourceChatId || '').trim();
       const chatId = String(body.chatId || '').trim();
 
-      if (!sourceChatId || !/^\d+$/.test(sourceChatId)) {
-        return jsonError('Valid numeric sourceChatId is required', 400);
-      }
-      if (!chatId || !/^\d+$/.test(chatId)) {
-        return jsonError('Valid numeric chatId is required', 400);
-      }
-      if (sourceChatId === chatId) {
-        return jsonError('sourceChatId and chatId must differ', 400);
-      }
-
-      const sourceSession = registry.getChat(sourceChatId);
-      if (!sourceSession) {
-        return jsonError('Source session not found', 404, 'SESSION_NOT_FOUND');
-      }
-
-      if (!agents.supportsFork(sourceSession.agentId)) {
-        return jsonError(`Fork unsupported for agent: ${sourceSession.agentId}`, 422, 'UNSUPPORTED_AGENT');
-      }
-
-      const existingTarget = registry.getChat(chatId);
-      if (existingTarget) {
-        return jsonError(`Session already exists: ${chatId}`, 409, 'IDEMPOTENCY_CONFLICT');
-      }
-
-      const result = await forkChatFileCopy({
-        sourceSession,
-        sourceChatId,
-        targetChatId: chatId,
-        registry,
-        settings,
-        metadata,
-        forkAgentSession: agents.forkAgentSession?.bind(agents),
-        supportsFork: agents.supportsFork.bind(agents),
-      });
+      const result = await commands.forkChat({ sourceChatId, chatId });
 
       return Response.json({ success: true, ...result });
     } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -649,16 +618,6 @@ export default function createChatRoutes({
       const sourceChatId = requireStringField(body, 'sourceChatId');
       const chatId = requireStringField(body, 'chatId');
       const command = requireStringField(body, 'command');
-      if (sourceChatId === chatId) return jsonError('sourceChatId and chatId must differ', 400);
-
-      const sourceSession = registry.getChat(sourceChatId);
-      if (!sourceSession) return jsonError('Source session not found', 404, 'SESSION_NOT_FOUND');
-      if (!agents.supportsFork(sourceSession.agentId)) {
-        return jsonError(`Fork unsupported for agent: ${sourceSession.agentId}`, 422, 'UNSUPPORTED_AGENT');
-      }
-      if (agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)) {
-        return jsonError('Cannot fork a chat while it is processing', 409, 'SESSION_BUSY', true);
-      }
 
       const payload = {
         sourceChatId,
@@ -687,19 +646,6 @@ export default function createChatRoutes({
         clientMessageId,
         options,
         payload,
-        ensureForked: async () => {
-          if (registry.getChat(chatId)) return;
-          await forkChatFileCopy({
-            sourceSession,
-            sourceChatId,
-            targetChatId: chatId,
-            registry,
-            settings,
-            metadata,
-            forkAgentSession: agents.forkAgentSession?.bind(agents),
-            supportsFork: agents.supportsFork.bind(agents),
-          });
-        },
       });
 
       return Response.json({
