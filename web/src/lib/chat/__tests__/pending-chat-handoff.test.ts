@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-	clearPendingChatId,
-	getPendingChatId,
-	PENDING_CHAT_ID_STORAGE_KEY,
-	setPendingChatId,
-} from '../pending-chat-handoff';
+import { clearPendingChatId, getPendingChatId, setPendingChatId } from '../pending-chat-handoff';
+import { SESSION_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 describe('pending chat handoff', () => {
 	afterEach(() => {
@@ -15,7 +11,7 @@ describe('pending chat handoff', () => {
 	it('persists and clears the pending chat id in sessionStorage', () => {
 		setPendingChatId('chat-1');
 
-		expect(sessionStorage.getItem(PENDING_CHAT_ID_STORAGE_KEY)).toBe('chat-1');
+		expect(sessionStorage.getItem(SESSION_STORAGE_KEYS.pendingChatId)).toBe('chat-1');
 		expect(getPendingChatId()).toBe('chat-1');
 
 		clearPendingChatId();

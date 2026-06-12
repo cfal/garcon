@@ -1,6 +1,11 @@
 import { apiFetch } from '$lib/api/client.js';
 import { getApiProviders } from '$lib/api/api-providers.js';
 import { agentLabelFor } from '$lib/i18n/agent-labels';
+import {
+	getLocalStorageItem,
+	LOCAL_STORAGE_KEYS,
+	setLocalStorageItem,
+} from '$lib/utils/local-persistence';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogResponse } from '$shared/model-catalog';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS, PI_MODELS } from '$shared/models';
@@ -61,8 +66,6 @@ interface ModelCatalogSnapshot {
 	lastValidatedAt: number | null;
 }
 
-const STORAGE_KEY = 'pref_model_catalog_v3';
-const LEGACY_STORAGE_KEY = 'pref_model_catalog_v2';
 const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000;
 const VALIDATION_RETRY_MS = 30_000;
 
@@ -404,10 +407,10 @@ function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapsho
 }
 
 function readPersisted(): ModelCatalogSnapshot {
-	if (typeof window === 'undefined') return emptySnapshot();
-
 	try {
-		const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+		const raw =
+			getLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog) ??
+			getLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
 		if (!raw) return emptySnapshot();
 		return normalizeSnapshot(JSON.parse(raw) as Record<string, unknown>);
 	} catch {
@@ -416,11 +419,7 @@ function readPersisted(): ModelCatalogSnapshot {
 }
 
 function persist(snapshot: ModelCatalogSnapshot): void {
-	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-	} catch {
-		// Ignores unavailable storage; the live catalog remains authoritative.
-	}
+	setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog, JSON.stringify(snapshot));
 }
 
 function hasNonEmptyPiModels(snapshot: ModelCatalogSnapshot): boolean {

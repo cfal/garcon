@@ -1,20 +1,25 @@
 // Core HTTP client with auth token injection and typed request helpers.
 
 import type { HttpErrorResponse } from '$shared/http-error';
+import {
+	getLocalStorageItem,
+	LOCAL_STORAGE_KEYS,
+	removeLocalStorageItem,
+	setLocalStorageItem,
+} from '$lib/utils/local-persistence';
 
-const AUTH_TOKEN_KEY = 'bearer-token';
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export function getAuthToken(): string | null {
-	return localStorage.getItem(AUTH_TOKEN_KEY);
+	return getLocalStorageItem(LOCAL_STORAGE_KEYS.authToken);
 }
 
 export function setAuthToken(token: string): void {
-	localStorage.setItem(AUTH_TOKEN_KEY, token);
+	setLocalStorageItem(LOCAL_STORAGE_KEYS.authToken, token);
 }
 
 export function clearAuthToken(): void {
-	localStorage.removeItem(AUTH_TOKEN_KEY);
+	removeLocalStorageItem(LOCAL_STORAGE_KEYS.authToken);
 }
 
 export type ApiFetchOptions = RequestInit & { timeoutMs?: number };

@@ -1,4 +1,9 @@
 import { getGitChangesTree, type GitDiffTab, type GitTreeNode } from '$lib/api/git.js';
+import {
+	getLocalStorageItem,
+	LOCAL_STORAGE_KEYS,
+	setLocalStorageItem,
+} from '$lib/utils/local-persistence';
 
 export interface GitTreeLoadOptions {
 	isCurrent: () => boolean;
@@ -70,11 +75,11 @@ export class GitTreeState {
 	setTreePaneWidth(next: number): void {
 		const clamped = Math.max(220, Math.min(560, Math.round(next)));
 		this.treePaneWidthPx = clamped;
-		localStorage.setItem('git.treePaneWidthPx', String(clamped));
+		setLocalStorageItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx, String(clamped));
 	}
 
 	loadTreePaneWidth(): void {
-		const raw = localStorage.getItem('git.treePaneWidthPx');
+		const raw = getLocalStorageItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx);
 		const width = raw ? Number(raw) : NaN;
 		if (Number.isFinite(width)) this.setTreePaneWidth(width);
 	}

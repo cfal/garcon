@@ -3,6 +3,7 @@
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { ComposerState } from '../composer.svelte';
+import { chatDraftStorageKey } from '$lib/utils/local-persistence';
 
 describe('ComposerState', () => {
 	afterEach(() => {
@@ -70,10 +71,10 @@ describe('ComposerState', () => {
 		composer.inputText = 'second';
 		composer.queueDraftSave('chat-1');
 
-		expect(localStorage.getItem('chat_draft_chat-1')).toBeNull();
+		expect(localStorage.getItem(chatDraftStorageKey('chat-1'))).toBeNull();
 		vi.advanceTimersByTime(250);
 
-		expect(localStorage.getItem('chat_draft_chat-1')).toBe('second');
+		expect(localStorage.getItem(chatDraftStorageKey('chat-1'))).toBe('second');
 	});
 
 	it('does not let an old chat draft save after restore changes the input', () => {
@@ -86,7 +87,7 @@ describe('ComposerState', () => {
 		composer.inputText = 'new chat text';
 		vi.runAllTimers();
 
-		expect(localStorage.getItem('chat_draft_old-chat')).toBeNull();
+		expect(localStorage.getItem(chatDraftStorageKey('old-chat'))).toBeNull();
 	});
 
 	it('flushes a pending draft immediately', () => {
@@ -97,6 +98,6 @@ describe('ComposerState', () => {
 
 		composer.flushDraftSave();
 
-		expect(localStorage.getItem('chat_draft_chat-2')).toBe('draft body');
+		expect(localStorage.getItem(chatDraftStorageKey('chat-2'))).toBe('draft body');
 	});
 });

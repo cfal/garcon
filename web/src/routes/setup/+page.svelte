@@ -4,6 +4,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { getAuth } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
+	import { LOCAL_STORAGE_KEYS, setLocalStorageItem } from '$lib/utils/local-persistence';
 	import Shield from '@lucide/svelte/icons/shield';
 	import Eye from '@lucide/svelte/icons/eye';
 	import EyeOff from '@lucide/svelte/icons/eye-off';
@@ -53,11 +54,7 @@
 		if (!result.success) {
 			error = result.error || m.auth_setup_errors_registration_failed();
 		} else {
-			try {
-				localStorage.setItem('just-registered', '1');
-			} catch {
-				// localStorage unavailable; settings onboarding will be skipped
-			}
+			setLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered, '1');
 			goto('/');
 		}
 		isSubmitting = false;

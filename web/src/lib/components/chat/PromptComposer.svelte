@@ -27,6 +27,11 @@
 	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/file-mentions';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
+	import {
+		getLocalStorageItem,
+		LOCAL_STORAGE_KEYS,
+		setLocalStorageItem,
+	} from '$lib/utils/local-persistence';
 	import { ImagePlus, X } from '@lucide/svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
@@ -273,9 +278,8 @@
 		),
 	);
 
-	// Composer resize via drag handle. Persists height to localStorage and
+	// Composer resize via drag handle. Persists height to browser storage and
 	// mutates the DOM directly during drag to avoid render latency.
-	const COMPOSER_STORAGE_KEY = 'composerHeight';
 	const COMPOSER_DEFAULT_HEIGHT = 140;
 	const COMPOSER_MIN_HEIGHT = 52;
 	const COMPOSER_MAX_HEIGHT = 500;
@@ -287,10 +291,10 @@
 	let composerHeight = $state(COMPOSER_DEFAULT_HEIGHT);
 	let dragCleanup: (() => void) | null = null;
 
-	// Initialise from localStorage on mount.
+	// Initialise from persisted browser storage on mount.
 	$effect(() => {
 		if (typeof window === 'undefined') return;
-		const stored = Number(window.localStorage.getItem(COMPOSER_STORAGE_KEY));
+		const stored = Number(getLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight));
 		if (Number.isFinite(stored)) composerHeight = clampHeight(stored);
 	});
 
@@ -318,7 +322,7 @@
 			dragCleanup = null;
 			const finalHeight = clampHeight(startHeight + startY - e.clientY);
 			composerHeight = finalHeight;
-			window.localStorage.setItem(COMPOSER_STORAGE_KEY, String(Math.round(finalHeight)));
+			setLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight, String(Math.round(finalHeight)));
 		}
 
 		document.addEventListener('pointermove', onPointerMove);

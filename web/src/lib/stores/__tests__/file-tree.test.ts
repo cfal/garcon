@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FileTreeStore } from '../file-tree.svelte';
 import * as filesApi from '$lib/api/files';
 import type { FileTreeNode } from '$lib/api/files';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 vi.mock('$lib/api/files', () => ({
 	getTree: vi.fn(),
@@ -214,29 +215,29 @@ describe('FileTreeStore', () => {
 	describe('localStorage persistence', () => {
 		it('persists sort key', () => {
 			store.setSortKey('size');
-			expect(mockStorage.get('file-tree-sort-key')).toBe('size');
+			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeSortKey)).toBe('size');
 		});
 
 		it('persists sort direction', () => {
 			store.setSortDirection('desc');
-			expect(mockStorage.get('file-tree-sort-direction')).toBe('desc');
+			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeSortDirection)).toBe('desc');
 		});
 
 		it('persists foldersFirst', () => {
 			store.setFoldersFirst(false);
-			expect(mockStorage.get('file-tree-folders-first')).toBe('false');
+			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeFoldersFirst)).toBe('false');
 		});
 
 		it('persists showHiddenFiles', () => {
 			store.setShowHiddenFiles(false);
-			expect(mockStorage.get('file-tree-show-hidden-files')).toBe('false');
+			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles)).toBe('false');
 		});
 
 		it('loads preferences from localStorage on construction', () => {
-			mockStorage.set('file-tree-sort-key', 'modified');
-			mockStorage.set('file-tree-sort-direction', 'desc');
-			mockStorage.set('file-tree-folders-first', 'false');
-			mockStorage.set('file-tree-show-hidden-files', 'false');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortKey, 'modified');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortDirection, 'desc');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeFoldersFirst, 'false');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles, 'false');
 
 			const s = new FileTreeStore();
 			expect(s.sortKey).toBe('modified');
@@ -246,8 +247,8 @@ describe('FileTreeStore', () => {
 		});
 
 		it('ignores invalid localStorage values', () => {
-			mockStorage.set('file-tree-sort-key', 'invalid');
-			mockStorage.set('file-tree-sort-direction', 'sideways');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortKey, 'invalid');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortDirection, 'sideways');
 
 			const s = new FileTreeStore();
 			expect(s.sortKey).toBe('name');

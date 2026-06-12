@@ -5,6 +5,7 @@ import {
 	type GitWorkbenchDeps,
 } from '../git-workbench.svelte';
 import { ApiError } from '$lib/api/client.js';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 const mockDeps: GitWorkbenchDeps = {
 	getSettings: vi.fn().mockResolvedValue({ ui: {} }),
@@ -793,7 +794,7 @@ describe('GitWorkbenchStore', () => {
 		it('persists to localStorage', () => {
 			const spy = vi.spyOn(localStorage, 'setItem');
 			wb.setTreePaneWidth(400);
-			expect(spy).toHaveBeenCalledWith('git.treePaneWidthPx', '400');
+			expect(spy).toHaveBeenCalledWith(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx, '400');
 		});
 
 		it('loads from localStorage', () => {

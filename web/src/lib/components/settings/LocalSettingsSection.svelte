@@ -1,4 +1,4 @@
-<!-- Browser-stored settings. All values render immediately from localStorage. -->
+<!-- Browser-stored settings. All values render immediately from persisted storage. -->
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';

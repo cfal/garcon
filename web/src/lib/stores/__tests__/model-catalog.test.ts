@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createModelCatalogStore } from '../model-catalog.svelte';
 import * as clientApi from '$lib/api/client';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 vi.mock('$lib/api/client', () => ({
 	apiFetch: vi.fn(),
 }));
 
-const STORAGE_KEY = 'pref_model_catalog_v3';
-const LEGACY_STORAGE_KEY = 'pref_model_catalog_v2';
+const STORAGE_KEY = LOCAL_STORAGE_KEYS.modelCatalog;
+const LEGACY_STORAGE_KEY = LOCAL_STORAGE_KEYS.modelCatalogLegacy;
 const PI_MODEL = {
 	value: 'github-copilot/gpt-5.4',
 	label: 'github-copilot: gpt-5.4',

@@ -1,33 +1,18 @@
-export const PENDING_CHAT_ID_STORAGE_KEY = 'pendingChatId';
-
-function getSessionStorage(): Storage | null {
-	try {
-		return typeof window === 'undefined' ? null : window.sessionStorage;
-	} catch {
-		return null;
-	}
-}
+import {
+	getSessionStorageItem,
+	removeSessionStorageItem,
+	SESSION_STORAGE_KEYS,
+	setSessionStorageItem,
+} from '$lib/utils/local-persistence';
 
 export function getPendingChatId(): string | null {
-	try {
-		return getSessionStorage()?.getItem(PENDING_CHAT_ID_STORAGE_KEY) ?? null;
-	} catch {
-		return null;
-	}
+	return getSessionStorageItem(SESSION_STORAGE_KEYS.pendingChatId);
 }
 
 export function setPendingChatId(chatId: string): void {
-	try {
-		getSessionStorage()?.setItem(PENDING_CHAT_ID_STORAGE_KEY, chatId);
-	} catch {
-		/* sessionStorage unavailable */
-	}
+	setSessionStorageItem(SESSION_STORAGE_KEYS.pendingChatId, chatId);
 }
 
 export function clearPendingChatId(): void {
-	try {
-		getSessionStorage()?.removeItem(PENDING_CHAT_ID_STORAGE_KEY);
-	} catch {
-		/* sessionStorage unavailable */
-	}
+	removeSessionStorageItem(SESSION_STORAGE_KEYS.pendingChatId);
 }

@@ -3,14 +3,15 @@
 // component remains a thin rendering shell.
 
 import { getTree, type FileTreeNode } from '$lib/api/files.js';
+import {
+	getLocalStorageItem,
+	LOCAL_STORAGE_KEYS,
+	setLocalStorageItem,
+	type LocalStorageKey,
+} from '$lib/utils/local-persistence';
 
 export type SortKey = 'name' | 'size' | 'modified' | 'permissions';
 export type SortDirection = 'asc' | 'desc';
-
-const STORAGE_SORT_KEY = 'file-tree-sort-key';
-const STORAGE_SORT_DIR_KEY = 'file-tree-sort-direction';
-const STORAGE_FOLDERS_FIRST_KEY = 'file-tree-folders-first';
-const STORAGE_SHOW_HIDDEN_KEY = 'file-tree-show-hidden-files';
 
 export class FileTreeStore {
 	rootFiles = $state<FileTreeNode[]>([]);
@@ -161,26 +162,26 @@ export class FileTreeStore {
 		return this.#sortNodes(cached);
 	}
 
-	// Sort/filter preference setters that also persist to localStorage.
+	// Sort/filter preference setters that also persist to browser storage.
 
 	setSortKey(key: SortKey): void {
 		this.sortKey = key;
-		this.#persist(STORAGE_SORT_KEY, key);
+		this.#persist(LOCAL_STORAGE_KEYS.fileTreeSortKey, key);
 	}
 
 	setSortDirection(dir: SortDirection): void {
 		this.sortDirection = dir;
-		this.#persist(STORAGE_SORT_DIR_KEY, dir);
+		this.#persist(LOCAL_STORAGE_KEYS.fileTreeSortDirection, dir);
 	}
 
 	setFoldersFirst(value: boolean): void {
 		this.foldersFirst = value;
-		this.#persist(STORAGE_FOLDERS_FIRST_KEY, String(value));
+		this.#persist(LOCAL_STORAGE_KEYS.fileTreeFoldersFirst, String(value));
 	}
 
 	setShowHiddenFiles(value: boolean): void {
 		this.showHiddenFiles = value;
-		this.#persist(STORAGE_SHOW_HIDDEN_KEY, String(value));
+		this.#persist(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles, String(value));
 	}
 
 	toggleSort(key: SortKey): void {
@@ -269,29 +270,21 @@ export class FileTreeStore {
 	}
 
 	#loadPreferences(): void {
-		try {
-			const sk = localStorage.getItem(STORAGE_SORT_KEY);
-			if (sk && ['name', 'size', 'modified', 'permissions'].includes(sk)) {
-				this.sortKey = sk as SortKey;
-			}
-			const sd = localStorage.getItem(STORAGE_SORT_DIR_KEY);
-			if (sd && ['asc', 'desc'].includes(sd)) {
-				this.sortDirection = sd as SortDirection;
-			}
-			const ff = localStorage.getItem(STORAGE_FOLDERS_FIRST_KEY);
-			if (ff === 'true' || ff === 'false') this.foldersFirst = ff === 'true';
-			const sh = localStorage.getItem(STORAGE_SHOW_HIDDEN_KEY);
-			if (sh === 'true' || sh === 'false') this.showHiddenFiles = sh === 'true';
-		} catch {
-			/* localStorage unavailable */
+		const sk = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeSortKey);
+		if (sk && ['name', 'size', 'modified', 'permissions'].includes(sk)) {
+			this.sortKey = sk as SortKey;
 		}
+		const sd = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeSortDirection);
+		if (sd && ['asc', 'desc'].includes(sd)) {
+			this.sortDirection = sd as SortDirection;
+		}
+		const ff = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeFoldersFirst);
+		if (ff === 'true' || ff === 'false') this.foldersFirst = ff === 'true';
+		const sh = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles);
+		if (sh === 'true' || sh === 'false') this.showHiddenFiles = sh === 'true';
 	}
 
-	#persist(key: string, value: string): void {
-		try {
-			localStorage.setItem(key, value);
-		} catch {
-			/* ignore */
-		}
+	#persist(key: LocalStorageKey, value: string): void {
+		setLocalStorageItem(key, value);
 	}
 }

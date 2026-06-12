@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AuthStore } from '../auth.svelte';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 const store: Record<string, string> = {};
 vi.stubGlobal('localStorage', {
@@ -21,7 +22,7 @@ vi.mock('$lib/api/auth.js', () => ({
 }));
 
 vi.mock('$lib/api/client.js', () => ({
-	getAuthToken: () => localStorage.getItem('bearer-token'),
+	getAuthToken: () => localStorage.getItem(LOCAL_STORAGE_KEYS.authToken),
 	setAuthToken: vi.fn(),
 	clearAuthToken: vi.fn(),
 	ApiError: class extends Error {
@@ -50,7 +51,7 @@ describe('AuthStore', () => {
 
 	describe('constructor', () => {
 		it('reads token from localStorage', () => {
-			store['bearer-token'] = 'saved-token';
+			store[LOCAL_STORAGE_KEYS.authToken] = 'saved-token';
 			const auth = new AuthStore();
 			expect(auth.token).toBe('saved-token');
 		});
@@ -76,7 +77,7 @@ describe('AuthStore', () => {
 		});
 
 		it('validates stored token by fetching user', async () => {
-			store['bearer-token'] = 'valid-token';
+			store[LOCAL_STORAGE_KEYS.authToken] = 'valid-token';
 			vi.mocked(getAuthStatus).mockResolvedValue({
 				needsSetup: false,
 				isAuthenticated: true,
@@ -91,7 +92,7 @@ describe('AuthStore', () => {
 		});
 
 		it('clears invalid token when getUser fails', async () => {
-			store['bearer-token'] = 'expired-token';
+			store[LOCAL_STORAGE_KEYS.authToken] = 'expired-token';
 			vi.mocked(getAuthStatus).mockResolvedValue({
 				needsSetup: false,
 				isAuthenticated: false,
@@ -105,7 +106,7 @@ describe('AuthStore', () => {
 		});
 
 		it('enters app mode without token when auth is disabled by server config', async () => {
-			store['bearer-token'] = 'stale-token';
+			store[LOCAL_STORAGE_KEYS.authToken] = 'stale-token';
 			vi.mocked(getAuthStatus).mockResolvedValue({
 				needsSetup: false,
 				isAuthenticated: true,

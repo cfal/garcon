@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createLocalSettingsStore } from '../local-settings.svelte';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 describe('LocalSettingsStore', () => {
 	beforeEach(() => {
@@ -19,7 +20,7 @@ describe('LocalSettingsStore', () => {
 
 		store.set('chatMaxWidth', 'medium');
 
-		expect(JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}')).toMatchObject({
+		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}')).toMatchObject({
 			chatMaxWidth: 'medium',
 		});
 
@@ -31,7 +32,7 @@ describe('LocalSettingsStore', () => {
 		const secondStore = createLocalSettingsStore();
 
 		localStorage.setItem(
-			'pref_local_settings',
+			LOCAL_STORAGE_KEYS.localSettings,
 			JSON.stringify({
 				...firstStore.snapshot(),
 				chatMaxWidth: 'small',
@@ -39,8 +40,8 @@ describe('LocalSettingsStore', () => {
 		);
 		window.dispatchEvent(
 			new StorageEvent('storage', {
-				key: 'pref_local_settings',
-				newValue: localStorage.getItem('pref_local_settings'),
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings),
 			}),
 		);
 

@@ -1,6 +1,5 @@
 // Agent, model, and permission mode state for the active chat session.
-// Manages cycling through permission modes and models, and persists
-// selections to localStorage.
+// Manages cycling through permission modes and models.
 
 import type { SessionAgentId } from '$lib/types/app';
 import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';

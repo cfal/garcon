@@ -38,6 +38,11 @@
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import {
+		getLocalStorageItem,
+		LOCAL_STORAGE_KEYS,
+		removeLocalStorageItem,
+	} from '$lib/utils/local-persistence';
 
 	let { children } = $props();
 
@@ -213,7 +218,7 @@
 	});
 
 	// Opens the settings dialog to the Providers tab on the first authenticated
-	// load right after a successful registration. Gated on a localStorage
+	// load right after a successful registration. Gated on a persisted
 	// flag set during the registration flow so cold loads for existing users
 	// or auth-disabled sessions do not receive a blocking onboarding modal.
 	let settingsAutoOpened = $state(false);
@@ -224,13 +229,9 @@
 			return;
 		}
 		settingsAutoOpened = true;
-		try {
-			if (localStorage.getItem('just-registered') === '1') {
-				localStorage.removeItem('just-registered');
-				appShell.openSettings('providers');
-			}
-		} catch {
-			// localStorage unavailable
+		if (getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1') {
+			removeLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered);
+			appShell.openSettings('providers');
 		}
 	});
 </script>
