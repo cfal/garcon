@@ -46,6 +46,7 @@ import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
+import { abortRunningSessionsWithTimeout } from './lib/shutdown.js';
 import {
   AgentRunOutputMessage,
   AgentRunFinishedMessage,
@@ -439,22 +440,27 @@ export async function startServer(): Promise<void> {
       shuttingDown = true;
       console.log('server: shutting down...');
       try {
-        const running = agentRegistry.getRunningSessions();
-        for (const [, sessions] of Object.entries(running)) {
-          for (const session of sessions) {
-            if (session.id) {
-              agentRegistry.abortSession(session.id).catch(() => {});
-            }
-          }
+        const abortResult = await abortRunningSessionsWithTimeout({
+          runningSessions: agentRegistry.getRunningSessions(),
+          abortSession: (chatId) => agentRegistry.abortSession(chatId),
+          onAbortError: (chatId, abortError) => {
+            console.warn(
+              `server: abort during shutdown failed for ${chatId}:`,
+              errorMessage(abortError),
+            );
+          },
+        });
+        if (abortResult.timedOut) {
+          console.warn(`server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`);
         }
         agentRegistry.shutdown();
         shellManager.shutdown();
         historyCache.destroy();
         await metadata.flush();
         await chatRegistry.flush();
-    } catch (err) {
+      } catch (err) {
         console.warn('server: shutdown cleanup error:', errorMessage(err));
-    }
+      }
       process.exit(0);
     };
     process.on('SIGTERM', shutdown);
