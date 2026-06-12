@@ -17,6 +17,7 @@ interface HistoryCacheEntry {
   messages: ChatMessage[];
   completeness: CacheCompleteness;
   lastAccessAt: number;
+  identityTokens: Set<string>;
 }
 
 interface HistoryCacheInitialEntry {
@@ -47,6 +48,43 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function historyCacheIdentityTokens(message: ChatMessage): string[] {
+  const tokens = chatMessageIdentityTokens(message, { includeContentToken: true });
+  if (tokens.length > 0) return tokens;
+
+  const rawMessage = message as unknown as Record<string, unknown>;
+  const type = message.type || '';
+  const content = typeof rawMessage.content === 'string' ? rawMessage.content.trim() : '';
+  const ts = message.timestamp || '';
+  return [`${type}:fallback:${content}:${ts}`];
+}
+
+function buildIdentityTokenSet(messages: ChatMessage[]): Set<string> {
+  const identityTokens = new Set<string>();
+  for (const message of messages) {
+    for (const token of historyCacheIdentityTokens(message)) {
+      identityTokens.add(token);
+    }
+  }
+  return identityTokens;
+}
+
+function createHistoryCacheEntry(args: {
+  chatId: string;
+  messages?: ChatMessage[];
+  completeness?: CacheCompleteness;
+  lastAccessAt: number;
+}): HistoryCacheEntry {
+  const messages = [...(args.messages ?? [])];
+  return {
+    chatId: args.chatId,
+    messages,
+    completeness: args.completeness ?? 'tail',
+    lastAccessAt: args.lastAccessAt,
+    identityTokens: buildIdentityTokenSet(messages),
+  };
+}
+
 export class HistoryCache {
   #cacheByChatId = new Map<string, HistoryCacheEntry>();
   #inFlightLoads = new Map<string, Promise<ChatMessage[]>>();
@@ -74,12 +112,12 @@ export class HistoryCache {
 
     for (const entry of options.initialEntries ?? []) {
       const chatId = String(entry.chatId);
-      this.#cacheByChatId.set(chatId, {
+      this.#cacheByChatId.set(chatId, createHistoryCacheEntry({
         chatId,
         messages: Array.isArray(entry.messages) ? [...entry.messages] : [],
         completeness: entry.completeness ?? 'tail',
         lastAccessAt: typeof entry.lastAccessAt === 'number' ? entry.lastAccessAt : this.#now(),
-      });
+      }));
     }
   }
 
@@ -146,12 +184,12 @@ export class HistoryCache {
       // history (user + agent) is merged as incoming.
       messages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
       const deduped = deduplicateMessages(messages);
-      this.#cacheByChatId.set(key, {
+      this.#cacheByChatId.set(key, createHistoryCacheEntry({
         chatId: key,
         messages: deduped,
         completeness: 'full',
         lastAccessAt: this.#now(),
-      });
+      }));
       return deduped;
     })();
 
@@ -169,13 +207,19 @@ export class HistoryCache {
     let entry = this.#cacheByChatId.get(key);
 
     if (!entry) {
-      entry = { chatId: key, messages: [], completeness: 'tail', lastAccessAt: this.#now() };
+      entry = createHistoryCacheEntry({
+        chatId: key,
+        messages: [],
+        completeness: 'tail',
+        lastAccessAt: this.#now(),
+      });
       this.#cacheByChatId.set(key, entry);
     }
 
-    entry.messages = deduplicateMessages(
-      mergeChatMessages(entry.messages, appendedMessages),
-    );
+    const newMessages = takeNewMessages(entry.identityTokens, appendedMessages);
+    if (newMessages.length > 0) {
+      entry.messages.push(...newMessages);
+    }
     entry.lastAccessAt = this.#now();
 
     try {
@@ -256,19 +300,21 @@ function deduplicateMessages(messages: ChatMessage[]): ChatMessage[] {
   const seen = new Set<string>();
   const result: ChatMessage[] = [];
   for (const message of messages) {
-    const tokens = chatMessageIdentityTokens(message, { includeContentToken: true });
-    if (tokens.length === 0) {
-      // Fallback for messages with no identity tokens (user messages
-      // without metadata). Dedup by type + content + timestamp.
-      const rawMessage = message as unknown as Record<string, unknown>;
-      const type = message.type || '';
-      const content = typeof rawMessage.content === 'string' ? rawMessage.content.trim() : '';
-      const ts = message.timestamp || '';
-      tokens.push(`${type}:fallback:${content}:${ts}`);
-    }
+    const tokens = historyCacheIdentityTokens(message);
     if (tokens.some((token) => seen.has(token))) continue;
     for (const token of tokens) seen.add(token);
     result.push(message);
   }
   return result;
+}
+
+function takeNewMessages(identityTokens: Set<string>, messages: ChatMessage[]): ChatMessage[] {
+  const next: ChatMessage[] = [];
+  for (const message of messages) {
+    const tokens = historyCacheIdentityTokens(message);
+    if (tokens.some((token) => identityTokens.has(token))) continue;
+    for (const token of tokens) identityTokens.add(token);
+    next.push(message);
+  }
+  return next;
 }

@@ -69,6 +69,26 @@ describe('appendMessages', () => {
     expect(messages[2].type).toBe('bash-tool-use');
   });
 
+  it('deduplicates repeated live appends incrementally', async () => {
+    await cache.appendMessages(chatId, [
+      { type: 'assistant-message', timestamp: ts, content: 'Already seen' },
+      { type: 'bash-tool-use', timestamp: ts, toolId: 'tool-1', command: 'pwd' },
+    ]);
+
+    await cache.appendMessages(chatId, [
+      { type: 'assistant-message', timestamp: ts, content: 'Already seen' },
+      { type: 'bash-tool-use', timestamp: ts, toolId: 'tool-1', command: 'pwd' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'New reply' },
+    ]);
+
+    const messages = cache.getMessages(chatId);
+    expect(messages.map((message) => message.content ?? message.command)).toEqual([
+      'Already seen',
+      'pwd',
+      'New reply',
+    ]);
+  });
+
   it('calls updateFromAppendedMessages with all messages', async () => {
     mockMetadata.updateFromAppendedMessages.mockClear();
 
