@@ -11,6 +11,7 @@ import { createLogger } from '../lib/log.js';
 const logger = createLogger('routes:auth');
 
 const loginLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
+const registerLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
 
 async function noauthGetStatus(): Promise<Response> {
   try {
@@ -115,6 +116,7 @@ async function noauthPostLogin(body: JsonBody): Promise<Response> {
 }
 
 const noauthPostLoginWithBody = withJsonBody(noauthPostLogin);
+const noauthPostRegisterWithBody = withJsonBody(noauthPostRegister);
 
 function asRequestIpServer(server: unknown): RequestIpServer | null {
   return server && typeof server === 'object' ? server as RequestIpServer : null;
@@ -124,6 +126,12 @@ async function noauthPostLoginRateLimited(request: Request, url: URL, server?: u
   const limited = loginLimiter.check(request, asRequestIpServer(server));
   if (limited) return limited;
   return noauthPostLoginWithBody(request, url, server);
+}
+
+async function noauthPostRegisterRateLimited(request: Request, url: URL, server?: unknown): Promise<Response> {
+  const limited = registerLimiter.check(request, asRequestIpServer(server));
+  if (limited) return limited;
+  return noauthPostRegisterWithBody(request, url, server);
 }
 
 async function getAuthUser(): Promise<Response> {
@@ -146,7 +154,7 @@ async function postLogout(): Promise<Response> {
 
 const routes: RouteMap = {
   '/api/v1/auth/status': { GET: markRouteNoAuth(noauthGetStatus) },
-  '/api/v1/auth/register': { POST: markRouteNoAuth(withJsonBody(noauthPostRegister)) },
+  '/api/v1/auth/register': { POST: markRouteNoAuth(noauthPostRegisterRateLimited) },
   '/api/v1/auth/login': { POST: markRouteNoAuth(noauthPostLoginRateLimited) },
   '/api/v1/auth/user': { GET: getAuthUser },
   '/api/v1/auth/logout': { POST: postLogout },

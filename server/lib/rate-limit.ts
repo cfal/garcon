@@ -16,6 +16,7 @@ export interface RequestIpServer {
 
 export interface RateLimiter {
   check(request: Request, server?: RequestIpServer | null): Response | null;
+  dispose(): void;
 }
 
 function getForwardedClientIp(request: Request): string | null {
@@ -70,6 +71,10 @@ export function createRateLimiter({ windowMs = 60_000, maxRequests = 10 }: RateL
         return jsonError('Too many requests. Please try again later.', 429, 'RATE_LIMITED', true);
       }
       return null;
+    },
+    dispose(): void {
+      clearInterval(sweepInterval);
+      hits.clear();
     },
   };
 }
