@@ -14,6 +14,9 @@ import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AgentCommandImage, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession, ThinkingMode } from "../session-types.js";
 import { getFactoryModelMetadata, getFactoryModels } from './factory-models.js';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:factory:factory-cli');
 
 interface FactorySession {
   aborted: boolean;
@@ -341,7 +344,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n')) {
           if (line.trim()) {
-            console.log(`factory(${sessionId.slice(0, 8)}): stderr: ${line}`);
+            logger.info(`factory(${sessionId.slice(0, 8)}): stderr: ${line}`);
           }
         }
       }
@@ -441,7 +444,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
           try {
             this.#routeEvent(session, JSON.parse(line) as FactoryCliEvent);
           } catch {
-            console.warn(`factory(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
+            logger.warn(`factory(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
           }
         }
       }

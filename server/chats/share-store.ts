@@ -6,6 +6,9 @@ import path from 'path';
 import crypto from 'crypto';
 import type { SharedChatSnapshot } from '../../common/share-types.ts';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('chats:share-store');
 
 const SHARE_INDEX_VERSION = 2;
 const SHARE_SNAPSHOT_CACHE_LIMIT = 50;
@@ -138,7 +141,7 @@ export class ShareStore implements IShareStore {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         this.#index = createEmptyIndex();
       } else {
-        console.warn('share-store: failed to read shared-chats.json:', (err as Error).message);
+        logger.warn('share-store: failed to read shared-chats.json:', (err as Error).message);
         this.#index = createEmptyIndex();
       }
     }

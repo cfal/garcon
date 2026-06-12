@@ -15,6 +15,9 @@ import {
 import { convertOpenCodeToolUse } from './tool-use-converter.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
 import { normalizeToolResultContent } from '../shared/normalize-util.js';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:opencode:history-loader');
 
 const PREVIEW_TAIL_MESSAGE_LIMIT = 20;
 
@@ -74,7 +77,7 @@ export async function getOpenCodePreviewFromSessionId(
   getClient: OpenCodeClientGetter,
 ): Promise<OpenCodePreview | null> {
   if (!sessionId) {
-    console.error('opencode: preview fetch failed, sessionId is required');
+    logger.error('opencode: preview fetch failed, sessionId is required');
     return null;
   }
   try {
@@ -82,7 +85,7 @@ export async function getOpenCodePreviewFromSessionId(
     const result = await client.session.get({ sessionID: sessionId });
     const session = result.data;
     if (!session) {
-      console.error(`opencode: preview fetch failed, no data:`, result);
+      logger.error(`opencode: preview fetch failed, no data:`, result);
       return null;
     }
     const messageResult = await client.session.messages({
@@ -119,7 +122,7 @@ export async function getOpenCodePreviewFromSessionId(
       createdAt: dateToIso(session.time?.created),
     };
   } catch (err) {
-    console.error(`opencode: preview fetch failed for ${sessionId}:`, err);
+    logger.error(`opencode: preview fetch failed for ${sessionId}:`, err);
     return null;
   }
 }
@@ -203,7 +206,7 @@ export async function loadOpenCodeChatMessages(
 
     return messages;
   } catch (err) {
-    console.error(`opencode: failed to load chat messages for session ${sessionId}:`, errorMessage(err));
+    logger.error(`opencode: failed to load chat messages for session ${sessionId}:`, errorMessage(err));
     return [];
   }
 }

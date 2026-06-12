@@ -18,6 +18,9 @@ import type {
 } from './session-types.js';
 import type { AgentDirectory } from './directory.js';
 import type { AgentEventBus } from './event-bus.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('agents:runtime-router');
 import {
   endpointRuntimeConfig,
   mergeRuntimeConfig,
@@ -118,7 +121,7 @@ export class AgentRuntimeRouter {
         try {
           await agent.runtime.abort(started.agentSessionId);
         } catch (abortError) {
-          console.warn(
+          logger.warn(
             `agents: failed to abort ${entry.agentId} session after registry bind failure:`,
             abortError instanceof Error ? abortError.message : String(abortError),
           );
@@ -240,19 +243,19 @@ export class AgentRuntimeRouter {
 
     const chat = this.#registry.getChat(chatId);
     if (!chat) {
-      console.warn('agents: resolvePermission, unknown chatId:', chatId);
+      logger.warn('agents: resolvePermission, unknown chatId:', chatId);
       return;
     }
 
     const agent = this.#directory.get(chat.agentId);
     if (agent?.runtime.resolvePermission) {
       Promise.resolve(agent.runtime.resolvePermission(permissionRequestId, decision)).catch((err: Error) => {
-        console.warn(`agents: ${chat.agentId} permission reply failed:`, err.message);
+        logger.warn(`agents: ${chat.agentId} permission reply failed:`, err.message);
       });
       return;
     }
 
-    console.warn('agents: no permission handler for agent:', chat.agentId);
+    logger.warn('agents: no permission handler for agent:', chat.agentId);
   }
 
   async forkAgentSession(args: {

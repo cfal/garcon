@@ -15,6 +15,9 @@ import { loadClaudeChatMessages, getClaudePreviewFromNativePath } from './histor
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { Agent, AgentRuntime } from '../types.js';
 import { buildClaudeEndpointRuntime } from './endpoint-runtime.js';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:claude');
 
 interface ClaudeAgentRuntime extends AgentRuntime {
   updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void;
@@ -27,7 +30,7 @@ function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
       const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId);
       const claudeRequest: ClaudeStartSessionRequest = { ...request, agentSessionId };
       claude.startClaudeCliSession(claudeRequest).catch((error: Error) => {
-        console.error(`agents: claude start failed for chat ${request.chatId}:`, error.message);
+        logger.error(`agents: claude start failed for chat ${request.chatId}:`, error.message);
         claude.failClaudeInternalSession(agentSessionId, request.chatId, error.message);
       });
       return { agentSessionId, nativePath };

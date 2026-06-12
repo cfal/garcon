@@ -1,3 +1,6 @@
+import { createLogger } from '../lib/log.js';
+const logger = createLogger('notifications:telegram');
+
 // Telegram Bot API client. Route-level operations throw useful errors, while
 // runtime notification sends log failures and return false so chat execution
 // is never interrupted.
@@ -171,12 +174,12 @@ export class TelegramNotifier {
       });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
-        console.warn(`telegram: sendMessage failed (${res.status}): ${body}`);
+        logger.warn(`telegram: sendMessage failed (${res.status}): ${body}`);
         return false;
       }
       return true;
     } catch (err: unknown) {
-      console.warn('telegram: send error:', (err as Error).message);
+      logger.warn('telegram: send error:', (err as Error).message);
       return false;
     }
   }

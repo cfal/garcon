@@ -9,6 +9,9 @@ import type {
   StartedAgentSession,
 } from '../session-types.js';
 import { AgentEventEmitterRuntime } from '../shared/event-emitter-runtime.js';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:direct:direct-chat-runtime-base');
 import {
   DirectSessionStore,
   type DirectConversationMessage,
@@ -198,7 +201,7 @@ export abstract class DirectChatRuntimeBase<
     try {
       await this.#sessionStore.append(sessionId, role, content);
     } catch (error: unknown) {
-      console.warn(
+      logger.warn(
         `${this.config.runtimeId}(${sessionId.slice(0, 8)}): persist failed:`,
         error instanceof Error ? error.message : String(error),
       );

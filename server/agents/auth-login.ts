@@ -2,6 +2,9 @@ import os from 'os';
 import { spawn as ptySpawn } from 'bun-pty';
 import type { IPty, IExitEvent } from 'bun-pty';
 import { getClaudeBinary, getCursorBinary } from "../config.js";
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('agents:auth-login');
 
 type LoginCommand = [string, ...string[]];
 
@@ -133,7 +136,7 @@ export class AgentAuthLoginManager {
     proc.onExit((exit: IExitEvent) => {
       this.#sessions.delete(agentId);
       if (exit.exitCode !== 0) {
-        console.warn(`agents: ${agentId} auth login exited with code ${exit.exitCode}${exit.signal ? ` (${exit.signal})` : ''}`);
+        logger.warn(`agents: ${agentId} auth login exited with code ${exit.exitCode}${exit.signal ? ` (${exit.signal})` : ''}`);
       }
     });
 

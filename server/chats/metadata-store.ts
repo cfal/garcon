@@ -5,6 +5,9 @@ import { promises as fs } from 'fs';
 import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('chats:metadata-store');
 
 const DEFAULT_PREVIEW_TIMEOUT_MS = 5_000;
 const DEFAULT_SAVE_DELAY_MS = 100;
@@ -155,7 +158,7 @@ export class MetadataIndex {
       if (result.status === 'fulfilled') {
         this.#metadataByChatId.set(String(chatId), result.value);
       } else {
-        console.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.reason));
+        logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.reason));
       }
     }
   }
@@ -215,7 +218,7 @@ export class MetadataIndex {
       }
     } catch (error) {
       if (!isErrnoException(error) || error.code !== 'ENOENT') {
-        console.warn('metadata: failed to load chat metadata:', errorMessage(error));
+        logger.warn('metadata: failed to load chat metadata:', errorMessage(error));
       }
     }
     return result;

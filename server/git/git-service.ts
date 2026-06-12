@@ -7,6 +7,9 @@ import { createDiffEngine } from './diff-engine.js';
 import { createStatusOperations } from './status.js';
 import { createWorktreeOperations } from './worktrees.js';
 import type { ClassifiedGitError, CreateGitServiceOptions, GitService } from './types.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('git:git-service');
 
 export type { GitService } from './types.js';
 
@@ -41,7 +44,7 @@ export function createGitService({ agents, classifyGitError }: CreateGitServiceO
     ...diff,
     ...worktrees,
     toHttpError(error: unknown): Response {
-      console.error('[git]', error);
+      logger.error('[git]', error);
       if (error instanceof GitDomainError) {
         return gitDomainErrorToResponse(error);
       }

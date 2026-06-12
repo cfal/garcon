@@ -18,6 +18,9 @@ import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentName } from "../agents/session-types.js";
 import { isArtificialNativePath, parseArtificialNativePath } from './artificial-native-path.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('chats:store');
 
 const CHAT_REGISTRY_VERSION = 2;
 const LEGACY_AGENT_ID_FIELD = 'provider';
@@ -294,7 +297,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
 
     for (const [chatId, session] of Object.entries(sessions)) {
       if (!session?.agentSessionId) {
-        console.warn(`sessions: discarding chat ${chatId} with missing agentSessionId`);
+        logger.warn(`sessions: discarding chat ${chatId} with missing agentSessionId`);
         if (session?.nativePath) this.#nativePathCache.delete(session.nativePath);
         delete sessions[chatId];
         dirty = true;
@@ -315,15 +318,15 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       try {
         resolvedPath = await resolveNativePath(session);
       } catch (error) {
-        console.warn(`sessions: nativePath reconciliation aborted at ${chatId}:`, (error as Error).message);
+        logger.warn(`sessions: nativePath reconciliation aborted at ${chatId}:`, (error as Error).message);
         break;
       }
       if (!resolvedPath) {
         if (session.agentId === 'codex' && session.nativePath) {
-          console.warn(`sessions: preserving Codex chat ${chatId} with unresolved nativePath`);
+          logger.warn(`sessions: preserving Codex chat ${chatId} with unresolved nativePath`);
           continue;
         }
-        console.warn(`sessions: discarding chat ${chatId} with unresolved nativePath`);
+        logger.warn(`sessions: discarding chat ${chatId} with unresolved nativePath`);
         delete sessions[chatId];
         dirty = true;
         continue;
@@ -518,7 +521,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     this.#pendingSaveTimer = setTimeout(() => {
       this.#pendingSaveTimer = null;
       this.saveRegistry(this.#registry || createEmptyRegistry()).catch((error: Error) => {
-        console.warn('sessions: failed to persist registry:', error.message);
+        logger.warn('sessions: failed to persist registry:', error.message);
       });
     }, REGISTRY_SAVE_DEBOUNCE_MS);
   }

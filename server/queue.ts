@@ -12,6 +12,9 @@ import { requireChatExecutionConfig, type RunAgentTurnOptions } from "./agents/s
 import type { IChatRegistry } from './chats/store.js';
 import { writeJsonFileAtomic } from './lib/json-file-store.js';
 import { KeyedPromiseLock } from './lib/keyed-lock.js';
+import { createLogger } from './lib/log.js';
+
+const logger = createLogger('queue');
 
 function emptyQueue(): QueueState {
   return { entries: [], paused: false, version: 0 };
@@ -334,7 +337,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.warn(`queue: failed to pause queue after abort for ${chatId}:`, message);
+        logger.warn(`queue: failed to pause queue after abort for ${chatId}:`, message);
       }
     }
     this.emit('session-stopped', chatId, success);
@@ -369,7 +372,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           await this.#turnRunner.runAgentTurn(chatId, entry.content, queuedTurnOptions);
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
-          console.error('queue: error processing queued message:', (error as Error).message);
+          logger.error('queue: error processing queued message:', (error as Error).message);
           await this.resetAndPauseChat(chatId, entry.id);
           break;
         }
@@ -418,12 +421,12 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           const normalized = normalizeQueueState(data);
           await writeJsonFileAtomic(filePath, normalized);
           this.#queuesByChatId.set(chatId, normalized);
-          console.log(`queue: recovered stale chat queue: ${qf}`);
+          logger.info(`queue: recovered stale chat queue: ${qf}`);
         } else {
           this.#queuesByChatId.set(chatId, data);
         }
       } catch (error: unknown) {
-        console.warn(`queue: could not recover chat queue ${qf}:`, (error as Error).message);
+        logger.warn(`queue: could not recover chat queue ${qf}:`, (error as Error).message);
       }
     }
   }

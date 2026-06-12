@@ -38,6 +38,9 @@ import {
 } from '../../common/chat-modes.ts';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { IChatRegistry } from '../chats/store.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('settings:store');
 import type {
   ChatFolder,
   ProjectSettings,
@@ -231,7 +234,7 @@ export class SettingsStore extends EventEmitter {
       return sanitize(parsed);
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return createEmpty();
-      console.warn('settings: invalid project-settings.json, using empty settings:', errorMessage(error));
+      logger.warn('settings: invalid project-settings.json, using empty settings:', errorMessage(error));
       return createEmpty();
     }
   }

@@ -14,6 +14,9 @@ import {
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('routes:files');
 
 const MAX_IMAGE_UPLOAD_BODY_BYTES = 30 * 1024 * 1024;
 const MAX_IMAGE_TOTAL_BYTES = 25 * 1024 * 1024;
@@ -117,7 +120,7 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
       return Response.json(files);
     } catch (error) {
       if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
-      console.error('files: file tree error:', errorMessage(error));
+      logger.error('files: file tree error:', errorMessage(error));
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }

@@ -45,6 +45,9 @@ import type { ChatQueueService } from '../queue.js';
 import type { HistoryCachePageReader } from '../chats/history-cache-contract.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('ws:chat');
 
 const PERMISSION_DEDUP_TTL_MS = 30_000;
 
@@ -151,7 +154,11 @@ export class ChatHandler {
   }
 
   async #handleAgentCommand(data: AgentRunRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
-    console.log('chat: message:', data.command || '[continue/resume]');
+    logger.debug('agent-run request received', {
+      chatId,
+      hasCommand: Boolean(data.command?.trim()),
+      imageCount: Array.isArray(data.images) ? data.images.length : 0,
+    });
 
     if (!/^\d+$/.test(String(chatId))) {
       writer.send(new AgentRunFailedMessage(chatId, 'Invalid session ID format'));
@@ -198,7 +205,7 @@ export class ChatHandler {
   }
 
   async #handleAbortSession(_data: AgentStopRequest, chatId: string): Promise<void> {
-    console.log('chat: abort session request:', chatId);
+    logger.info('chat: abort session request:', chatId);
     await this.#queue.abort(chatId);
   }
 
@@ -206,7 +213,7 @@ export class ChatHandler {
     if (!data.permissionRequestId || !data.chatId) return;
 
     if (this.#isDuplicatePermissionDecision(data.permissionRequestId)) {
-      console.warn('ws: duplicate permission-decision for', data.permissionRequestId, '- ignoring');
+      logger.warn('ws: duplicate permission-decision for', data.permissionRequestId, '- ignoring');
       return;
     }
 
@@ -269,7 +276,7 @@ export class ChatHandler {
         result.hasMore, result.offset, result.limit,
       ));
     } catch (error: unknown) {
-      console.error(`ws: error reading messages for ${chatId}:`, (error as Error).message);
+      logger.error(`ws: error reading messages for ${chatId}:`, (error as Error).message);
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
         code: 'HISTORY_LOAD_FAILED',
@@ -378,7 +385,7 @@ export class ChatHandler {
   }
 
   #handleOpen(ws: WS): void {
-    console.log('ws: chat client connected');
+    logger.info('ws: chat client connected');
     ws.subscribe('chat');
   }
 
@@ -389,7 +396,7 @@ export class ChatHandler {
       if (!data) return;
       await this.#requestHandlers[data.type](data, writer);
     } catch (error: unknown) {
-      console.error('ws: chat error:', (error as Error).message);
+      logger.error('ws: chat error:', (error as Error).message);
       writer.send(new WsFaultMessage((error as Error).message));
     }
   }
@@ -399,6 +406,6 @@ export class ChatHandler {
   }
 
   #handleClose(_ws: WS, code?: number, reason?: string): void {
-    console.log('ws: chat client disconnected', code ?? '', reason ? `(${reason})` : '');
+    logger.info('ws: chat client disconnected', code ?? '', reason ? `(${reason})` : '');
   }
 }

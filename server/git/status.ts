@@ -1,6 +1,9 @@
 import { promises as fs } from 'fs';
 import { GitDomainError } from './git-types.js';
 import { generateCommitMessage } from './commit-message.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('git:status');
 import type {
   BranchOptions,
   CommitDiffOptions,
@@ -259,7 +262,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
           diffContext += `\n--- ${file} ---\n${stdout}`;
         }
       } catch (error) {
-        console.error(`Error getting diff for ${file}:`, error);
+        logger.error(`Error getting diff for ${file}:`, error);
       }
     }
 
@@ -337,7 +340,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
       const { stdout } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`]);
       remoteName = stdout.trim().split('/')[0];
     } catch {
-      console.log('No upstream configured, using origin as fallback');
+      logger.info('No upstream configured, using origin as fallback');
     }
 
     const { stdout } = await runGit(projectPath, ['fetch', remoteName]);
@@ -358,7 +361,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
       remoteName = tracking.split('/')[0];
       remoteBranch = tracking.split('/').slice(1).join('/');
     } catch {
-      console.log('No upstream configured, using origin/branch as fallback');
+      logger.info('No upstream configured, using origin/branch as fallback');
     }
 
     const { stdout } = await runGit(projectPath, ['pull', remoteName, remoteBranch]);

@@ -2,6 +2,9 @@ import { authenticateHttpRequest, MalformedJsonError } from './http-request.js';
 import { isAuthDisabled } from '../config.js';
 import { malformedJsonResponse } from './json-route.js';
 import type { RouteHandler, RouteMap } from './http-route-types.js';
+import { createLogger } from './log.js';
+
+const logger = createLogger('lib:http-route');
 
 const noAuthRouteMarker: unique symbol = Symbol('no-auth-route');
 
@@ -49,7 +52,7 @@ export function wrapRoute(handler: RouteHandler, routePath: string, method: stri
   }
 
   if (isNoAuthHandler(handler)) {
-    console.debug(`Skipping auth wrapping for ${method} ${routePath}`);
+    logger.debug(`Skipping auth wrapping for ${method} ${routePath}`);
     return async (req: Request, server?: unknown): Promise<Response> => {
       return invokeRouteHandler(handler, req, server);
     };

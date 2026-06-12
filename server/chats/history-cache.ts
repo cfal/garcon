@@ -5,6 +5,9 @@ import { mergeChatMessagesByIdentity, chatMessageIdentityTokens } from '../../co
 import { parseChatMessages, type ChatMessage } from '../../common/chat-types.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { PaginatedChatMessages } from './history-cache-contract.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('chats:history-cache');
 
 const CACHE_LIMIT = 100;
 const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
@@ -132,7 +135,7 @@ export class HistoryCache {
       this.#agents.onMessages((chatId, messages) => {
         if (!this.#registry.getChat(chatId)) return;
         this.appendMessages(chatId, parseChatMessages(messages)).catch((err) => {
-          console.warn('history-cache: appendMessages failed:', errorMessage(err));
+          logger.warn('history-cache: appendMessages failed:', errorMessage(err));
         });
       });
     }
@@ -142,7 +145,7 @@ export class HistoryCache {
       try {
         this.prune();
       } catch (err) {
-        console.warn('history-cache: prune failed:', errorMessage(err));
+        logger.warn('history-cache: prune failed:', errorMessage(err));
       }
     }, PRUNE_INTERVAL_MS);
   }
@@ -225,7 +228,7 @@ export class HistoryCache {
     try {
       this.#metadata.updateFromAppendedMessages(key, appendedMessages);
     } catch (err) {
-      console.warn(`history-cache: metadata update failed for ${key}:`, errorMessage(err));
+      logger.warn(`history-cache: metadata update failed for ${key}:`, errorMessage(err));
     }
 
     if (this.#cacheByChatId.size > this.#cacheLimit) {

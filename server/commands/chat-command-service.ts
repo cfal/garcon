@@ -26,6 +26,9 @@ import type { ChatQueueService } from '../queue.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('commands:chat-command-service');
 
 type CommandTransport = 'http' | 'websocket';
 
@@ -358,7 +361,7 @@ export class ChatCommandService {
       try {
         await this.deps.settings.removeFromAllOrderLists(chatId);
       } catch (cleanupError: unknown) {
-        console.warn(`sessions: failed to remove ${chatId} from order lists after startup failure:`, (cleanupError as Error).message);
+        logger.warn(`sessions: failed to remove ${chatId} from order lists after startup failure:`, (cleanupError as Error).message);
       }
       throw error;
     }
@@ -423,7 +426,7 @@ export class ChatCommandService {
       entryId: result.entry.id,
     });
     this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
-      console.error('queue: enqueue drain error:', err.message);
+      logger.error('queue: enqueue drain error:', err.message);
     });
     return {
       ...commandResultFromRecord(updated ?? ledger.record),
@@ -437,7 +440,7 @@ export class ChatCommandService {
     this.#requireChat(input.chatId);
     const result = await this.deps.queue.enqueueChat(input.chatId, input.content);
     this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
-      console.error('queue: enqueue drain error:', err.message);
+      logger.error('queue: enqueue drain error:', err.message);
     });
     return {
       success: true,
@@ -462,7 +465,7 @@ export class ChatCommandService {
     } else {
       state = await this.deps.queue.resumeChatQueue(input.chatId);
       this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
-        console.error('queue: resume drain error:', err.message);
+        logger.error('queue: resume drain error:', err.message);
       });
     }
     return { success: true, chatId: input.chatId, queue: normalizeQueueState(state) };
@@ -610,7 +613,7 @@ export class ChatCommandService {
     void this.deps.queue.runAcceptedTurn(chatId, command, options)
       .then(() => this.deps.ledger.update(ledgerKey, { status: 'finished' }))
       .catch((error: Error) => {
-        console.error('commands: run failed:', error.message);
+        logger.error('commands: run failed:', error.message);
         this.deps.ledger.update(ledgerKey, { status: 'failed', error: error.message }).catch(() => {});
       });
   }

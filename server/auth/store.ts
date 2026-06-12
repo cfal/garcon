@@ -7,6 +7,9 @@ import path from 'path';
 import crypto from 'crypto';
 import { getConfigDir } from '../config.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('auth:store');
 
 interface AuthData {
   jwtSecret?: unknown;
@@ -62,7 +65,7 @@ async function readFromDisk(filePath = authPath()): Promise<AuthData> {
     return {};
   } catch (error) {
     if (hasNodeErrorCode(error, 'ENOENT')) return {};
-    console.warn('auth: invalid auth.json, treating as empty:', errorMessage(error));
+    logger.warn('auth: invalid auth.json, treating as empty:', errorMessage(error));
     return {};
   }
 }

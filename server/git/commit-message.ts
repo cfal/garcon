@@ -1,6 +1,9 @@
 import { GitDomainError } from './git-types.js';
 import type { AgentId } from '../../common/agents.ts';
 import type { CommitMessageOptions, RunSingleQueryOptions } from './types.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('git:commit-message');
 
 const DEFAULT_COMMIT_PROMPT = `Write a high-quality Conventional Commit message based on the staged changes.
 
@@ -130,7 +133,7 @@ export async function generateCommitMessage(
     return cleaned;
   } catch (error) {
     if (error instanceof GitDomainError) throw error;
-    console.error('Error generating commit message:', error);
+    logger.error('Error generating commit message:', error);
     throw new GitDomainError(
       classifyCommitMessageAgentError(error),
       'Failed to generate commit message.',

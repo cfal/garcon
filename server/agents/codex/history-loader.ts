@@ -7,6 +7,9 @@ import readline from 'readline';
 import { readJsonlTailLines } from '../shared/history-loader-utils.ts';
 import { normalizeCodexJsonlEntry, extractTextContent } from './history-normalizer.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:codex:history-loader');
 
 // Reads a Codex JSONL file and returns ChatMessage[].
 // Uses per-content-class dedup. event_msg user messages are treated as
@@ -52,7 +55,7 @@ export async function loadCodexChatMessages(nativePath: string | null | undefine
     messages.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
     return messages;
   } catch (error) {
-    console.error(`Error loading Codex ChatMessages from ${nativePath}:`, error);
+    logger.error(`Error loading Codex ChatMessages from ${nativePath}:`, error);
     return [];
   }
 }
@@ -162,7 +165,7 @@ export async function getCodexPreviewFromNativePath(nativePath: string | null | 
       createdAt: firstMessageTimestamp || null,
     };
   } catch (err) {
-    console.warn(`Could not build Codex preview from ${nativePath}:`, err);
+    logger.warn(`Could not build Codex preview from ${nativePath}:`, err);
     return null;
   } finally {
     await fh?.close();

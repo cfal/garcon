@@ -9,6 +9,9 @@
 import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, AssistantMessage } from '../../common/chat-types.js';
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { TelegramNotifier } from './telegram.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('notifications:attention-tracker');
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -298,10 +301,10 @@ export class AttentionTracker {
       if (!config.enabled || !recipientChatId) return;
       const ok = await this.#telegram.send(recipientChatId, html, 'HTML');
       if (!ok) {
-        console.warn(`attention: telegram delivery failed for chat ${chatId}`);
+        logger.warn(`attention: telegram delivery failed for chat ${chatId}`);
       }
     } catch (err: unknown) {
-      console.warn('attention: settings read error:', (err as Error).message);
+      logger.warn('attention: settings read error:', (err as Error).message);
     }
   }
 

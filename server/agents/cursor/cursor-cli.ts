@@ -15,6 +15,9 @@ import { convertCursorToolUse } from "./tool-use-converter.js";
 import { getCursorModels } from './cursor-models.js';
 import { CursorRequestIdentityStore } from './cursor-request-identities.js';
 import { loadCursorChatMessagesBySessionId } from "./history-loader.js";
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:cursor:cursor-cli');
 import type {
   PermissionMode,
   AgentChatEntry,
@@ -511,7 +514,7 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
       this.#parseStdoutLine(session, buffer);
     } catch (error) {
       if (!proc.killed) {
-        console.error(`cursor(${session.id.slice(0, 8)}): stdout read error:`, (error as Error).message);
+        logger.error(`cursor(${session.id.slice(0, 8)}): stdout read error:`, (error as Error).message);
       }
     } finally {
       const exitCode = await proc.exited;

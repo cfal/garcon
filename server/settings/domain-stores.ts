@@ -14,6 +14,9 @@ import {
 } from '../../common/chat-modes.ts';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { IChatRegistry } from '../chats/store.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('settings:domain-stores');
 import {
   normalizeRemoteSettingsVersion,
   normalizeUiSettings,
@@ -391,7 +394,7 @@ export class ChatOrderStore {
       const filterUnknown = (list: string[], name: string): string[] => {
         const unknown = list.filter((id) => !allChatIds.has(id));
         if (unknown.length > 0) {
-          console.log(`chat-order: removed unknown chat IDs from ${name}: ${JSON.stringify(unknown)}`);
+          logger.info(`chat-order: removed unknown chat IDs from ${name}: ${JSON.stringify(unknown)}`);
           dirty = true;
           return list.filter((id) => allChatIds.has(id));
         }
@@ -415,7 +418,7 @@ export class ChatOrderStore {
           }
         }
         if (dupes.length > 0) {
-          console.log(`chat-order: removed duplicate chat IDs from ${name}: ${JSON.stringify(dupes)}`);
+          logger.info(`chat-order: removed duplicate chat IDs from ${name}: ${JSON.stringify(dupes)}`);
           dirty = true;
         }
         return kept;
@@ -436,7 +439,7 @@ export class ChatOrderStore {
           return b.localeCompare(a);
         });
         normal = [...missing, ...normal];
-        console.log(`chat-order: added missing chat IDs to normalChatIds: ${JSON.stringify(missing)}`);
+        logger.info(`chat-order: added missing chat IDs to normalChatIds: ${JSON.stringify(missing)}`);
         dirty = true;
       }
 

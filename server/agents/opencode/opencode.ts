@@ -11,6 +11,9 @@ import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { isTestEnvironment } from '../../config.js';
 import type { PermissionMode } from "../../../common/chat-modes.js";
 import type { StartSessionRequest, ResumeTurnRequest } from "../session-types.js";
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:opencode:opencode');
 
 const DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS = 5_000;
 const DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
@@ -563,7 +566,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       } catch (err) {
         const reason = errorMessage(err);
         if (this.#markTemporarilyUnavailable(reason)) {
-          console.warn('opencode: marked unavailable after startup failure:', reason);
+          logger.warn('opencode: marked unavailable after startup failure:', reason);
         }
         throw err;
       } finally {
@@ -601,7 +604,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         const info = props.info || {};
         const messageId = info.id;
         if (!messageId) {
-          console.warn(`opencode: missing messageID for ${event.type}:`, event);
+          logger.warn(`opencode: missing messageID for ${event.type}:`, event);
           return;
         }
         if (info.finish !== 'stop') {
@@ -617,13 +620,13 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       case 'message.part.updated': {
         const part = props.part || {};
         if (!part.id) {
-          console.warn(`opencode: missing partID for ${event.type}`);
+          logger.warn(`opencode: missing partID for ${event.type}`);
           return;
         }
 
         const messageId = part.messageID;
         if (!messageId) {
-          console.warn(`opencode: missing messageID for ${event.type}:`, event);
+          logger.warn(`opencode: missing messageID for ${event.type}:`, event);
           return;
         }
 
@@ -649,7 +652,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         if (part.text) {
           const partType = assistantPartTypes.get(part.id);
           if (!partType) {
-            console.warn(`opencode: final text part not seen earlier:`, event);
+            logger.warn(`opencode: final text part not seen earlier:`, event);
             return;
           }
           assistantPartTypes.delete(part.id);
@@ -715,20 +718,20 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
           const sessionId = extractSessionId(event);
           if (!sessionId) {
             if (event.type !== 'server.heartbeat') {
-              console.debug('opencode: SSE event with no sessionId, type:', event.type);
+              logger.debug('opencode: SSE event with no sessionId, type:', event.type);
             }
             continue;
           }
 
           const session = this.#sessions.get(sessionId);
           if (!session || session.status === 'aborted') {
-            console.debug('opencode: SSE event for unknown/aborted session:', event.type, 'sid:', sessionId, 'known:', [...this.#sessions.keys()]);
+            logger.debug('opencode: SSE event for unknown/aborted session:', event.type, 'sid:', sessionId, 'known:', [...this.#sessions.keys()]);
             continue;
           }
 
           const chatId = session.chatId;
           if (!chatId) {
-            console.debug('opencode: SSE event before chatId assigned:', event.type, 'sid:', sessionId);
+            logger.debug('opencode: SSE event before chatId assigned:', event.type, 'sid:', sessionId);
             continue;
           }
 
@@ -774,7 +777,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         const retryMs = this.isTemporarilyUnavailable()
           ? Math.max(3000, Math.min(this.getUnavailableRetryAfterMs(), 30_000))
           : 3000;
-        console.error(`opencode: SSE listener error, reconnecting in ${Math.round(retryMs / 1000)}s:`, err.message);
+        logger.error(`opencode: SSE listener error, reconnecting in ${Math.round(retryMs / 1000)}s:`, err.message);
         this.#sseListenerStarted = false;
         setTimeout(() => this.#startGlobalSSEListener(), retryMs);
       }
@@ -827,7 +830,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     } catch (err) {
       const reason = errorMessage(err);
       if (this.#markTemporarilyUnavailable(reason)) {
-        console.warn('opencode: model discovery unavailable:', reason);
+        logger.warn('opencode: model discovery unavailable:', reason);
       }
       return this.#cachedModels();
     }
@@ -858,7 +861,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       if (err instanceof OpenCodeTimeoutError) {
         const reason = errorMessage(err);
         if (this.#markTemporarilyUnavailable(reason)) {
-          console.warn('opencode: request timed out:', reason);
+          logger.warn('opencode: request timed out:', reason);
         }
       }
       throw err;
@@ -898,7 +901,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     });
     this.emitProcessing(chatId, true);
     this.emitSessionCreated(chatId);
-    console.log('opencode: session created and registered:', agentSessionId);
+    logger.info('opencode: session created and registered:', agentSessionId);
 
     const promptBody = buildPromptBody(command, model);
 
@@ -909,7 +912,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         ...promptBody,
       }, { signal }),
     ).catch((err: Error) => {
-      console.error(`opencode: prompt failed for session ${agentSessionId}:`, err.message);
+      logger.error(`opencode: prompt failed for session ${agentSessionId}:`, err.message);
       const sess = this.#sessions.get(agentSessionId);
       if (sess) sess.status = 'completed';
       this.emitProcessing(chatId, false);
@@ -964,7 +967,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         }, { signal }),
       );
     } catch (err: any) {
-      console.error(`opencode: query failed for session ${agentSessionId}:`, err.message);
+      logger.error(`opencode: query failed for session ${agentSessionId}:`, err.message);
       const sess = this.#sessions.get(agentSessionId);
       if (sess) sess.status = 'completed';
       this.#rejectTurnWaiter(agentSessionId, err);
@@ -988,10 +991,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         'OpenCode session abort',
         (signal) => client.session.abort({ sessionID: agentSessionId }, { signal }),
       ).catch((err: Error) => {
-        console.warn(`opencode: failed to abort session ${agentSessionId}:`, err.message);
+        logger.warn(`opencode: failed to abort session ${agentSessionId}:`, err.message);
       });
     }).catch((err: Error) => {
-      console.warn(`opencode: failed to get client for abort ${agentSessionId}:`, err.message);
+      logger.warn(`opencode: failed to get client for abort ${agentSessionId}:`, err.message);
     });
     return true;
   }
@@ -1012,7 +1015,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const pending = this.#pendingPermissions.get(permissionRequestId);
     this.#pendingPermissions.delete(permissionRequestId);
     if (!pending) {
-      console.warn('opencode: resolvePermission, no pending entry for', permissionRequestId, '(already resolved or cancelled)');
+      logger.warn('opencode: resolvePermission, no pending entry for', permissionRequestId, '(already resolved or cancelled)');
       return;
     }
 

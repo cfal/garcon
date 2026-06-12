@@ -15,6 +15,9 @@ import {
 } from '../../../common/chat-types.js';
 import { convertClaudeToolUse } from './tool-use-converter.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:claude:history-loader');
 
 const HEAD_READ_BYTES = 32 * 1024;
 
@@ -208,7 +211,7 @@ export async function loadClaudeChatMessages(nativePath: string | null | undefin
 
     return messages;
   } catch (error) {
-    console.error(`claude: error loading chat messages from ${nativePath}:`, error);
+    logger.error(`claude: error loading chat messages from ${nativePath}:`, error);
     return [];
   }
 }
@@ -259,7 +262,7 @@ export async function getClaudeSessionMessagesFromNativePath(
       limit,
     };
   } catch (error) {
-    console.error(`claude: error reading messages from ${nativePath}:`, error);
+    logger.error(`claude: error reading messages from ${nativePath}:`, error);
     return limit === null ? [] : { messages: [], total: 0, hasMore: false, offset, limit };
   }
 }
@@ -304,7 +307,7 @@ async function readFirstUserMessage(filePath: string): Promise<{
         if (firstTimestamp) {
           break;
         }
-        console.error(`claude: got first user message without timestamp: ${firstMessage}`);
+        logger.error(`claude: got first user message without timestamp: ${firstMessage}`);
       }
     }
   } catch { } finally {
@@ -320,13 +323,13 @@ export async function getClaudePreviewFromNativePath(nativePath: string): Promis
   try {
     await fs.access(nativePath);
   } catch (err) {
-    console.error(`claude: preview fetch failed for ${nativePath}:`, err);
+    logger.error(`claude: preview fetch failed for ${nativePath}:`, err);
     return null;
   }
 
   const { lines, fullyRead } = await readJsonlTailLines(nativePath);
   if (fullyRead) {
-    console.warn(`claude: fully read ${nativePath}`);
+    logger.warn(`claude: fully read ${nativePath}`);
   }
 
   let lastActivity: string | null = null;
@@ -342,7 +345,7 @@ export async function getClaudePreviewFromNativePath(nativePath: string): Promis
 
     if (!entry.sessionId) continue;
     if (entry.sessionId !== agentSessionId) {
-      console.warn(`claude: skipping non-matching session ID in ${nativePath}, expected ${agentSessionId}: ${String(entry.sessionId)}`);
+      logger.warn(`claude: skipping non-matching session ID in ${nativePath}, expected ${agentSessionId}: ${String(entry.sessionId)}`);
       continue;
     }
 
@@ -380,7 +383,7 @@ export async function getClaudePreviewFromNativePath(nativePath: string): Promis
   // in which case we could have handled it in the loop above.
   const { firstMessage, firstTimestamp } = await readFirstUserMessage(nativePath);
   if (!firstMessage || !firstTimestamp) {
-    console.warn(`claude: failed to read first user message from ${nativePath}`);
+    logger.warn(`claude: failed to read first user message from ${nativePath}`);
   }
 
   return {

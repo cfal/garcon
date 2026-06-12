@@ -5,6 +5,9 @@ import { resolveGenerationContext } from '../settings/generation-config-source.t
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentCatalogEntry } from '../../common/agents.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('chats:title-generator');
 
 interface TitleGenerationAgents {
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
@@ -114,6 +117,6 @@ export async function maybeGenerateChatTitle({
 
     await settings.setSessionName(chatId, title);
   } catch (error) {
-    console.warn('chat-title: generation failed:', errorMessage(error));
+    logger.warn('chat-title: generation failed:', errorMessage(error));
   }
 }

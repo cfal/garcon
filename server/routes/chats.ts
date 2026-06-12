@@ -27,6 +27,9 @@ import type { HistoryCachePageReader } from '../chats/history-cache-contract.js'
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('routes:chats');
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
@@ -267,7 +270,7 @@ export default function createChatRoutes({
       const all = [...pinned, ...orphans, ...normal, ...archived];
       return Response.json({ sessions: all, total: all.length });
     } catch (error: unknown) {
-      console.error('sessions: error listing sessions:', (error as Error).message);
+      logger.error('sessions: error listing sessions:', (error as Error).message);
       return jsonErrorFromUnknown(error);
     }
   }
@@ -320,7 +323,7 @@ export default function createChatRoutes({
       try {
         await queue.abort(chatId);
       } catch (error) {
-        console.warn(
+        logger.warn(
           `sessions: abort before deleting ${chatId} failed:`,
           error instanceof Error ? error.message : String(error),
         );
@@ -338,7 +341,7 @@ export default function createChatRoutes({
         nativePath
           ? fs.unlink(nativePath).catch((error: NodeJS.ErrnoException) => {
               if (error.code !== 'ENOENT') {
-                console.warn(`sessions: could not delete native file ${nativePath}:`, error.message);
+                logger.warn(`sessions: could not delete native file ${nativePath}:`, error.message);
               }
             })
           : Promise.resolve(),
@@ -374,7 +377,7 @@ export default function createChatRoutes({
         pendingUserInputs: pendingInputs.listForChat(chatId),
       });
     } catch (error: unknown) {
-      console.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
+      logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
       return jsonErrorFromUnknown(error);
     }
   }

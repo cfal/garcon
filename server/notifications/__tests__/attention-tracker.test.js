@@ -309,7 +309,10 @@ describe('AttentionTracker', () => {
         queue.emitChatIdle('garcon-chat-1');
 
         await new Promise(r => setTimeout(r, 10));
-        expect(console.warn).toHaveBeenCalledWith('attention: telegram delivery failed for chat garcon-chat-1');
+        expect(console.warn).toHaveBeenCalledWith(
+          '[notifications:attention-tracker]',
+          'attention: telegram delivery failed for chat garcon-chat-1',
+        );
       } finally {
         console.warn = warn;
       }

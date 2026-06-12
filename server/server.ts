@@ -71,6 +71,9 @@ import createAllRoutes from './routes/index.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
 import type { ShellWebSocketData } from './ws/shell.js';
+import { createLogger } from './lib/log.js';
+
+const logger = createLogger('server');
 
 type WsPath = '/shell' | '/ws';
 
@@ -100,7 +103,7 @@ function isChatListInvalidationReason(value: string): value is ChatListInvalidat
 
 export async function startServer(): Promise<void> {
   process.on('unhandledRejection', (err: unknown) => {
-    console.error('unhandled rejection (non-fatal):', errorMessage(err));
+    logger.error('unhandled rejection (non-fatal):', errorMessage(err));
   });
 
   try {
@@ -190,7 +193,7 @@ export async function startServer(): Promise<void> {
     try {
       await queue.recoverStaleChatQueues();
     } catch (err) {
-      console.warn('queue: recovery error:', errorMessage(err));
+      logger.warn('queue: recovery error:', errorMessage(err));
     }
 
     // Build route and WS handler tables
@@ -239,7 +242,7 @@ export async function startServer(): Promise<void> {
         if (error instanceof MalformedJsonError) {
           return malformedJsonResponse();
         }
-        console.error('server: route error:', error);
+        logger.error('server: route error:', error);
         return jsonError('Internal server error', 500);
       },
       async fetch(request, server) {
@@ -325,7 +328,7 @@ export async function startServer(): Promise<void> {
       if (!chatExists(chatId)) return;
       broadcast(new AgentRunOutputMessage(chatId, parseChatMessages(messages), metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
-        console.warn('pending-inputs: reconcile after messages failed:', errorMessage(err));
+        logger.warn('pending-inputs: reconcile after messages failed:', errorMessage(err));
       });
     });
     agentRegistry.onProcessing((chatId, isProcessing) => {
@@ -340,13 +343,13 @@ export async function startServer(): Promise<void> {
       if (!chatExists(chatId)) return;
       broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
-        console.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
+        logger.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
       });
       // Defer idle check to next microtask so the runtime has time to
       // clear its isRunning flag (emitFinished fires before the flag flip).
       queueMicrotask(() => {
         queue.checkChatIdle(chatId).catch((err) => {
-          console.warn('queue: checkChatIdle error:', errorMessage(err));
+          logger.warn('queue: checkChatIdle error:', errorMessage(err));
         });
       });
     });
@@ -357,16 +360,16 @@ export async function startServer(): Promise<void> {
           status: 'failed',
           error: agentErrorMessage,
         }).catch((err) => {
-          console.warn('commands: failed to mark chat-start command failed:', errorMessage(err));
+          logger.warn('commands: failed to mark chat-start command failed:', errorMessage(err));
         });
       }
       broadcast(new AgentRunFailedMessage(chatId, agentErrorMessage, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
-        console.warn('pending-inputs: reconcile after failure failed:', errorMessage(err));
+        logger.warn('pending-inputs: reconcile after failure failed:', errorMessage(err));
       });
       queueMicrotask(() => {
         queue.checkChatIdle(chatId).catch((err) => {
-          console.warn('queue: checkChatIdle error:', errorMessage(err));
+          logger.warn('queue: checkChatIdle error:', errorMessage(err));
         });
       });
     });
@@ -378,7 +381,7 @@ export async function startServer(): Promise<void> {
     });
     settings.onListChanged((reason, chatId) => {
       if (!isChatListInvalidationReason(reason)) {
-        console.warn('server: skipped unknown chat list invalidation reason:', reason);
+        logger.warn('server: skipped unknown chat list invalidation reason:', reason);
         return;
       }
       broadcast(new ChatListRefreshRequestedMessage(reason, chatId));
@@ -388,7 +391,7 @@ export async function startServer(): Promise<void> {
         const snapshot = await buildRemoteSettingsSnapshot({ settings, agents: agentRegistry, telegramSettings });
         broadcast(new SettingsChangedMessage(snapshot));
       } catch (err) {
-        console.warn('server: failed to broadcast settings-changed:', errorMessage(err));
+        logger.warn('server: failed to broadcast settings-changed:', errorMessage(err));
       }
     };
     settings.onRemoteSettingsChanged(broadcastRemoteSettings);
@@ -400,7 +403,7 @@ export async function startServer(): Promise<void> {
       pendingInputs.clearChat(chatId, 'chat-removed');
       broadcast(new ChatSessionDeletedWsMessage(chatId));
       shareStore.revokeShareByChatId(chatId).catch((err) => {
-        console.warn('share-store: failed to revoke share on chat removal:', errorMessage(err));
+        logger.warn('share-store: failed to revoke share on chat removal:', errorMessage(err));
       });
     });
     chatRegistry.onChatReadUpdated((chatId, lastReadAt) => {
@@ -433,20 +436,20 @@ export async function startServer(): Promise<void> {
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
-      console.log('server: shutting down...');
+      logger.info('server: shutting down...');
       try {
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
           abortSession: (chatId) => agentRegistry.abortSession(chatId),
           onAbortError: (chatId, abortError) => {
-            console.warn(
+            logger.warn(
               `server: abort during shutdown failed for ${chatId}:`,
               errorMessage(abortError),
             );
           },
         });
         if (abortResult.timedOut) {
-          console.warn(`server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`);
+          logger.warn(`server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`);
         }
         agentRegistry.shutdown();
         shellManager.shutdown();
@@ -454,22 +457,20 @@ export async function startServer(): Promise<void> {
         await metadata.flush();
         await chatRegistry.flush();
       } catch (err) {
-        console.warn('server: shutdown cleanup error:', errorMessage(err));
+        logger.warn('server: shutdown cleanup error:', errorMessage(err));
       }
       process.exit(0);
     };
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
-    console.log('');
-    console.log(`Started at http://${bindAddress}:${server.port ?? listenPort}`);
-    console.log(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
+    logger.info(`Started at http://${bindAddress}:${server.port ?? listenPort}`);
+    logger.info(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
     if (authDisabled && bindAddress !== '127.0.0.1' && bindAddress !== 'localhost') {
-      console.warn('WARNING: authentication is disabled while bound to a non-localhost address.');
+      logger.warn('WARNING: authentication is disabled while bound to a non-localhost address.');
     }
-    console.log('');
   } catch (error) {
-    console.error('Failed to start server:', error);
+    logger.error('Failed to start server:', error);
     process.exit(1);
   }
 }

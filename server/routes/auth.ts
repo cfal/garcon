@@ -6,6 +6,9 @@ import { withJsonBody } from '../lib/json-route.js';
 import { isAuthDisabled } from '../config.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('routes:auth');
 
 const loginLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
 
@@ -26,7 +29,7 @@ async function noauthGetStatus(): Promise<Response> {
       authDisabled: false,
     });
   } catch (error) {
-    console.error('Auth status error:', error);
+    logger.error('Auth status error:', error);
     return Response.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -72,7 +75,7 @@ async function noauthPostRegister(body: JsonBody): Promise<Response> {
       token,
     });
   } catch (error) {
-    console.error('Registration error:', error);
+    logger.error('Registration error:', error);
     return Response.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -106,7 +109,7 @@ async function noauthPostLogin(body: JsonBody): Promise<Response> {
       token,
     });
   } catch (error) {
-    console.error('Login error:', error);
+    logger.error('Login error:', error);
     return Response.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
