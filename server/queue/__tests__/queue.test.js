@@ -67,6 +67,55 @@ describe('queue invariants', () => {
     expect(result.paused).toBe(false);
   });
 
+  it('returns defensive queue copies from reads', async () => {
+    await queue.enqueueChat('123', 'hello');
+
+    const firstRead = await queue.readChatQueue('123');
+    firstRead.entries[0].content = 'mutated externally';
+
+    const secondRead = await queue.readChatQueue('123');
+    expect(secondRead.entries[0].content).toBe('hello');
+  });
+
+  it('uses cached queue state for later mutations', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    await fs.mkdir(queuesDir, { recursive: true });
+    await fs.writeFile(
+      path.join(queuesDir, 'cached.queue.json'),
+      JSON.stringify({
+        entries: [{
+          id: 'entry-1',
+          content: 'persisted',
+          status: 'queued',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        }],
+        paused: false,
+      }),
+      'utf8',
+    );
+
+    await queue.readChatQueue('cached');
+    await fs.writeFile(
+      path.join(queuesDir, 'cached.queue.json'),
+      JSON.stringify({ entries: [], paused: false }),
+      'utf8',
+    );
+
+    const result = await queue.pauseChatQueue('cached');
+    expect(result.entries.map((entry) => entry.content)).toEqual(['persisted']);
+    expect(result.paused).toBe(true);
+  });
+
+  it('clears cached state when deleting a queue file', async () => {
+    await queue.enqueueChat('123', 'hello');
+
+    await queue.deleteChatQueueFile('123');
+    const result = await queue.readChatQueue('123');
+
+    expect(result.entries).toEqual([]);
+    expect(result.paused).toBe(false);
+  });
+
   it('bumps version and updatedAt across queue mutations', async () => {
     const first = await queue.enqueueChat('123', 'hello');
     const paused = await queue.pauseChatQueue('123');
