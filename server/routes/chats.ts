@@ -17,6 +17,7 @@ import { CommandValidationError, runOptionsFromCommandRequest } from '../command
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import { normalizeQueueState } from '../../common/queue-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
+import type { ChatListEntry, ChatListResponse } from '../../common/chat-list.js';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { extractFirstLine } from '../lib/text.js';
@@ -211,7 +212,7 @@ export default function createChatRoutes({
         })),
       );
 
-      const entryMap = new Map<string, Record<string, unknown>>();
+      const entryMap = new Map<string, ChatListEntry>();
       for (const { chatId, session, isAvailable } of availableSessions) {
         if (!isAvailable) continue;
         const meta = metadataMap.get(chatId) || null;
@@ -252,23 +253,25 @@ export default function createChatRoutes({
         });
       }
 
-      const orderedFromList = (list: string[]) => list.map((id: string) => entryMap.get(id)).filter(Boolean);
+      const orderedFromList = (list: string[]): ChatListEntry[] =>
+        list.map((id: string) => entryMap.get(id)).filter((entry): entry is ChatListEntry => Boolean(entry));
 
       const pinned = orderedFromList(pinnedList);
       const normal = orderedFromList(normalList);
       const archived = orderedFromList(archivedList);
 
       const listed = new Set([...pinnedList, ...normalList, ...archivedList]);
-      const orphans: Record<string, unknown>[] = [];
+      const orphans: ChatListEntry[] = [];
       for (const [id, entry] of entryMap) {
         if (!listed.has(id)) orphans.push(entry);
       }
       if (orphans.length > 0) {
-        orphans.sort((a, b) => ((b.activity as Record<string, string>).createdAt || '').localeCompare((a.activity as Record<string, string>).createdAt || ''));
+        orphans.sort((a, b) => (b.activity.createdAt || '').localeCompare(a.activity.createdAt || ''));
       }
 
       const all = [...pinned, ...orphans, ...normal, ...archived];
-      return Response.json({ sessions: all, total: all.length });
+      const body: ChatListResponse = { sessions: all, total: all.length };
+      return Response.json(body);
     } catch (error: unknown) {
       logger.error('sessions: error listing sessions:', (error as Error).message);
       return jsonErrorFromUnknown(error);

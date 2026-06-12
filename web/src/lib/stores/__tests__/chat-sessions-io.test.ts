@@ -38,7 +38,8 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		title: 'Chat 1',
 		projectPath: '/repo',
 		tags: [],
-		native: { path: null },
+		permissionMode: 'default',
+		thinkingMode: 'none',
 		activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
 		preview: { lastMessage: '' },
 		isPinned: false,
@@ -46,6 +47,7 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		isActive: false,
 		isUnread: false,
 		claudeThinkingMode: 'auto',
+		ampAgentMode: 'smart',
 		...overrides,
 	};
 }

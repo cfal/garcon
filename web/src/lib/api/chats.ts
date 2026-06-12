@@ -1,7 +1,6 @@
 // Chat session API for listing, starting, messaging, and managing chats.
 
 import { apiGet, apiPost, apiPatch, apiDelete } from './client.js';
-import type { ChatSession } from '$lib/types/session.js';
 import type { SessionAgentId } from '$lib/types/app.js';
 import {
 	normalizeAmpAgentMode,
@@ -15,6 +14,7 @@ import {
 } from '$shared/chat-modes';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { ChatMessage } from '$shared/chat-types';
+import type { ChatListResponse } from '$shared/chat-list';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type {
 	AgentRunCommandRequest,
@@ -61,10 +61,7 @@ export interface ChatDetailsResponse {
 	nativePath: string | null;
 }
 
-export interface ListChatsResponse {
-	sessions: ChatSession[];
-	total: number;
-}
+export type ListChatsResponse = ChatListResponse;
 
 /** Lists all chat sessions. */
 export async function listChats(): Promise<ListChatsResponse> {
