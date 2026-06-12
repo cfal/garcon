@@ -152,4 +152,24 @@ describe('tool display helpers', () => {
 			badge: 'Patch',
 		});
 	});
+
+	it('coerces todo-read results through the shared todo normalizer', () => {
+		const props = TOOL_DISPLAY_REGISTRY['todo-read-tool-use'].result.getContentProps?.({
+			content: {
+				items: [
+					{ text: 'review code', status: 'in-progress' },
+					{ step: 'ship fix', completed: true },
+					{ note: 'ignored' },
+				],
+			},
+		});
+
+		expect(props).toEqual({
+			isResult: true,
+			todos: [
+				{ content: 'review code', status: 'in_progress' },
+				{ content: 'ship fix', status: 'completed' },
+			],
+		});
+	});
 });

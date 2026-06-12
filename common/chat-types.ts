@@ -28,7 +28,7 @@ export interface TodoItem {
 
 // Lightweight coercion for already-serialized TodoItem arrays.
 // Agent-specific normalization lives in server/agents/shared/normalize-util.
-function asTodoItems(raw: unknown): TodoItem[] | undefined {
+export function coerceTodoItems(raw: unknown): TodoItem[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const items: TodoItem[] = [];
   for (const entry of raw) {
@@ -659,7 +659,7 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
     case 'todo-write-tool-use':
       return new TodoWriteToolUseMessage(
         str(data.timestamp), str(data.toolId),
-        asTodoItems(data.todos));
+        coerceTodoItems(data.todos));
 
     case 'todo-read-tool-use':
       return new TodoReadToolUseMessage(str(data.timestamp), str(data.toolId));
@@ -676,7 +676,7 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
     case 'update-plan-tool-use':
       return new UpdatePlanToolUseMessage(
         str(data.timestamp), str(data.toolId),
-        asTodoItems(data.todos));
+        coerceTodoItems(data.todos));
 
     case 'write-stdin-tool-use':
       return new WriteStdinToolUseMessage(

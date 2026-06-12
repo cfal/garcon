@@ -1,9 +1,8 @@
 // Registry mapping explicit tool-use message types to display rules.
 // Known provider-specific tools must arrive here as typed messages.
 
-import type { ToolUseChatMessage, TodoStatus } from '$shared/chat-types';
+import { coerceTodoItems, type ToolUseChatMessage } from '$shared/chat-types';
 import * as m from '$lib/paraglide/messages.js';
-import type { TodoItem } from '$lib/types/chat';
 import type { ToolDisplayRule } from './tool-display-contract';
 import {
 	diffProps,
@@ -14,27 +13,6 @@ import {
 } from './tool-display-presenters';
 
 type ToolDisplayRegistry = Record<string, ToolDisplayRule>;
-
-function coerceTodoResult(raw: unknown): TodoItem[] | undefined {
-	if (!Array.isArray(raw)) return undefined;
-	const items: TodoItem[] = [];
-	for (const entry of raw) {
-		if (entry == null || typeof entry !== 'object') continue;
-		const obj = entry as Record<string, unknown>;
-		const content = (obj.content ?? obj.text ?? obj.step) as string | undefined;
-		if (typeof content !== 'string') continue;
-		const s = obj.status;
-		const completed = obj.completed;
-		const status: TodoStatus =
-			completed === true || s === 'completed' || s === 'done'
-				? 'completed'
-				: s === 'in_progress' || s === 'in-progress'
-					? 'in_progress'
-					: 'pending';
-		items.push({ content, status });
-	}
-	return items.length > 0 ? items : undefined;
-}
 
 const truncate = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '...' : s);
 
@@ -403,7 +381,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			contentKind: 'todoList',
 			getContentProps: (result) => {
 				const content = (result?.content || {}) as Record<string, unknown>;
-				const todos = coerceTodoResult(content.items || content.todos);
+				const todos = coerceTodoItems(content.items || content.todos);
 				return { todos, isResult: true };
 			},
 		},
