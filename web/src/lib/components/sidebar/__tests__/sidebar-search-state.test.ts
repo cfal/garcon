@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { SidebarSearchState } from '../sidebar-search-state.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import type { SavedChatSearch } from '$lib/api/settings';
 
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
@@ -24,20 +23,6 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		isUnread: false,
 		status: 'running',
 		tags: [],
-		...overrides,
-	};
-}
-
-function makeSavedSearch(overrides: Partial<SavedChatSearch>): SavedChatSearch {
-	return {
-		id: 'search-1',
-		title: null,
-		query: 'status:active',
-		showAsSidebarPill: false,
-		showInSidebarMenu: false,
-		showInSearchDialog: true,
-		createdAt: '2026-03-27T00:00:00.000Z',
-		updatedAt: '2026-03-27T00:00:00.000Z',
 		...overrides,
 	};
 }
@@ -93,15 +78,6 @@ describe('SidebarSearchState', () => {
 			expect(searchState.activeQuery).toBe('status:active');
 			expect(searchState.draftQuery).toBe('status:active');
 			expect(searchState.highlightedResultIndex).toBe(0);
-		});
-
-		it('openSearchDialog does not affect manager dialog state', () => {
-			const searchState = createState();
-			searchState.manageSavedSearchesOpen = true;
-			searchState.openSearchDialog();
-
-			expect(searchState.searchDialogOpen).toBe(true);
-			expect(searchState.manageSavedSearchesOpen).toBe(true);
 		});
 
 		it('suspends search dialog without discarding the draft query', () => {
@@ -234,52 +210,6 @@ describe('SidebarSearchState', () => {
 		});
 	});
 
-	describe('sidebarPillSearches', () => {
-		it('returns only searches with showAsSidebarPill true', () => {
-			const searchState = createState();
-			searchState.setSavedSearches([
-				makeSavedSearch({ id: 's1', showAsSidebarPill: true, title: 'Quick' }),
-				makeSavedSearch({ id: 's2', showAsSidebarPill: false }),
-				makeSavedSearch({ id: 's3', showAsSidebarPill: true, title: 'Also Quick' }),
-			]);
-
-			expect(searchState.sidebarPillSearches.map((s) => s.id)).toEqual(['s1', 's3']);
-		});
-
-		it('returns empty array when no searches are marked for sidebar pills', () => {
-			const searchState = createState();
-			searchState.setSavedSearches([makeSavedSearch({ id: 's1', showAsSidebarPill: false })]);
-
-			expect(searchState.sidebarPillSearches).toEqual([]);
-		});
-	});
-
-	describe('sidebarMenuSearches', () => {
-		it('returns only searches with showInSidebarMenu true', () => {
-			const searchState = createState();
-			searchState.setSavedSearches([
-				makeSavedSearch({ id: 's1', showInSidebarMenu: true }),
-				makeSavedSearch({ id: 's2', showInSidebarMenu: false }),
-				makeSavedSearch({ id: 's3', showInSidebarMenu: true }),
-			]);
-
-			expect(searchState.sidebarMenuSearches.map((s) => s.id)).toEqual(['s1', 's3']);
-		});
-	});
-
-	describe('searchDialogSavedSearches', () => {
-		it('returns only searches with showInSearchDialog true', () => {
-			const searchState = createState();
-			searchState.setSavedSearches([
-				makeSavedSearch({ id: 's1', showInSearchDialog: true }),
-				makeSavedSearch({ id: 's2', showInSearchDialog: false }),
-				makeSavedSearch({ id: 's3', showInSearchDialog: true }),
-			]);
-
-			expect(searchState.searchDialogSavedSearches.map((s) => s.id)).toEqual(['s1', 's3']);
-		});
-	});
-
 	describe('hasActiveQuery', () => {
 		it('returns true when activeQuery is non-empty', () => {
 			const searchState = createState();
@@ -302,17 +232,6 @@ describe('SidebarSearchState', () => {
 			const searchState = createState(chats);
 
 			expect(searchState.allKnownTags).toEqual(['bugs', 'dev', 'ops']);
-		});
-	});
-
-	describe('setSavedSearches', () => {
-		it('replaces the full saved searches list', () => {
-			const searchState = createState();
-			const searches = [makeSavedSearch({ id: 's1' }), makeSavedSearch({ id: 's2' })];
-			searchState.setSavedSearches(searches);
-
-			expect(searchState.savedSearches).toHaveLength(2);
-			expect(searchState.savedSearches[0].id).toBe('s1');
 		});
 	});
 
