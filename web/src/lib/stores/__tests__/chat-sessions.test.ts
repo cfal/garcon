@@ -89,6 +89,8 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.selectedChat?.id).toBe('x');
 		expect(store.selectedChat?.title).toBe('X');
+		const selected = store.selectedChat;
+		expect(store.selectedChat).toBe(selected);
 	});
 
 	it('orderedChats returns records in order', () => {
@@ -102,6 +104,18 @@ describe('ChatSessionsStore', () => {
 
 		const ids = store.orderedChats.map((c) => c.id);
 		expect(ids).toEqual(['a', 'b', 'c']);
+	});
+
+	it('orderedChats reuses its array identity between unchanged reads', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			makeServerSession({ id: 'a', title: 'A' }),
+			makeServerSession({ id: 'b', title: 'B' }),
+		]);
+
+		const first = store.orderedChats;
+
+		expect(store.orderedChats).toBe(first);
 	});
 
 	it('removeChat clears byId, order, startup, and deselects', () => {

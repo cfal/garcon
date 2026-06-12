@@ -103,15 +103,23 @@ export class ChatSessionsStore {
 	selectedChatId = $state<string | null>(null);
 	startupByChatId = $state<Record<string, ChatStartupConfig>>({});
 
-	get selectedChat(): ChatSessionRecord | null {
+	#selectedChat = $derived.by(() => {
 		if (!this.selectedChatId) return null;
 		return this.byId[this.selectedChatId] ?? null;
+	});
+
+	#orderedChats = $derived.by(() =>
+		this.order
+			.map((id) => this.byId[id])
+			.filter((chat): chat is ChatSessionRecord => Boolean(chat)),
+	);
+
+	get selectedChat(): ChatSessionRecord | null {
+		return this.#selectedChat;
 	}
 
 	get orderedChats(): ChatSessionRecord[] {
-		return this.order
-			.map((id) => this.byId[id])
-			.filter((chat): chat is ChatSessionRecord => Boolean(chat));
+		return this.#orderedChats;
 	}
 
 	setSelectedChatId(chatId: string | null): void {
