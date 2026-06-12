@@ -252,6 +252,41 @@ describe('ChatRegistry', () => {
       expect(result[0]).toBe('c1');
     });
 
+    it('updates the agent session ID index when chats change', () => {
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
+
+      registry.updateChat('c1', { agentSessionId: 'ps1' });
+      expect(registry.getChatByAgentSessionId('ps1')?.[0]).toBe('c1');
+
+      registry.updateChat('c1', { agentSessionId: 'ps2' });
+      expect(registry.getChatByAgentSessionId('ps1')).toBeNull();
+      expect(registry.getChatByAgentSessionId('ps2')?.[0]).toBe('c1');
+
+      registry.removeChat('c1');
+      expect(registry.getChatByAgentSessionId('ps2')).toBeNull();
+    });
+
+    it('builds the agent session ID index from persisted sessions', async () => {
+      const filePath = path.join(tmpDir, 'chats.json');
+      await fs.writeFile(filePath, JSON.stringify({
+        version: 2,
+        sessions: {
+          c1: {
+            agentId: 'claude',
+            agentSessionId: 'ps1',
+            nativePath: '/tmp/ps1.jsonl',
+            projectPath: '/p',
+            model: 'opus',
+          },
+        },
+      }));
+
+      const fresh = new ChatRegistry(tmpDir);
+      await fresh.init();
+
+      expect(fresh.getChatByAgentSessionId('ps1')?.[0]).toBe('c1');
+    });
+
     it('returns null for unknown session ID', () => {
       expect(registry.getChatByAgentSessionId('unknown')).toBeNull();
     });

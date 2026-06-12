@@ -219,6 +219,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
   #registry: ChatRegistrySnapshot | null = null;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #nativePathCache = new Map<string, string>();
+  #agentSessionIdIndex = new Map<string, string>();
   #workspaceDir: string;
 
   constructor(workspaceDir: string) {
@@ -263,6 +264,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         version: CHAT_REGISTRY_VERSION,
         sessions,
       };
+      this.#rebuildAgentSessionIdIndex();
       if (migrated) {
         await this.saveRegistry(this.#registry);
       }
@@ -271,6 +273,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       const errno = error as NodeJS.ErrnoException;
       if (errno.code === 'ENOENT') {
         this.#registry = createEmptyRegistry();
+        this.#rebuildAgentSessionIdIndex();
         return this.#registry;
       }
       throw error;
@@ -389,6 +392,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       modelProtocol,
       ...normalizedModes,
     };
+    this.#setAgentSessionIdIndex(id, agentSessionId);
     this.#scheduleRegistrySave();
     return true;
   }
@@ -419,10 +423,15 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     if ('nextForkOrdinal' in normalizedPatch) {
       normalizedPatch.nextForkOrdinal = normalizeNextForkOrdinal(normalizedPatch.nextForkOrdinal);
     }
+    const previousAgentSessionId = existing.agentSessionId;
     for (const key of ALLOWED_PATCH_FIELDS) {
       if (key in normalizedPatch) {
         existing[key] = normalizedPatch[key] as never;
       }
+    }
+    if ('agentSessionId' in normalizedPatch && existing.agentSessionId !== previousAgentSessionId) {
+      this.#unsetAgentSessionIdIndex(id, previousAgentSessionId);
+      this.#setAgentSessionIdIndex(id, existing.agentSessionId);
     }
     if ('lastReadAt' in normalizedPatch) {
       this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
@@ -440,6 +449,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     const entry = registry.sessions[id];
     if (!entry) return false;
     if (entry.nativePath) this.#nativePathCache.delete(entry.nativePath);
+    this.#unsetAgentSessionIdIndex(id, entry.agentSessionId);
     delete registry.sessions[id];
     this.#emitChatRemoved(id);
     this.#scheduleRegistrySave();
@@ -470,18 +480,21 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       throw new Error('Registry cache not initialized. Call init() during startup.');
     }
     if (!agentSessionId) return null;
-    for (const [id, entry] of Object.entries(registry.sessions)) {
-      if (entry.agentSessionId === agentSessionId) {
-        return [id, entry];
-      }
+    const chatId = this.#agentSessionIdIndex.get(agentSessionId);
+    if (!chatId) return null;
+    const entry = registry.sessions[chatId];
+    if (!entry || entry.agentSessionId !== agentSessionId) {
+      this.#agentSessionIdIndex.delete(agentSessionId);
+      return null;
     }
-    return null;
+    return [chatId, entry];
   }
 
   async saveRegistry(registry: ChatRegistrySnapshot): Promise<void> {
     const target = this.#sessionsFilePath();
     await writeJsonFileAtomic(target, registry);
     this.#registry = registry;
+    this.#rebuildAgentSessionIdIndex();
   }
 
   // Flushes any pending registry save immediately. Called during shutdown.
@@ -534,5 +547,34 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     this.#nativePathCache.delete(nativePath);
     this.#nativePathCache.set(nativePath, cachedChatId);
     return [cachedChatId, cachedEntry];
+  }
+
+  #rebuildAgentSessionIdIndex(): void {
+    this.#agentSessionIdIndex.clear();
+    const sessions = this.#registry?.sessions;
+    if (!sessions) return;
+    for (const [chatId, entry] of Object.entries(sessions)) {
+      this.#setAgentSessionIdIndex(chatId, entry.agentSessionId);
+    }
+  }
+
+  #setAgentSessionIdIndex(chatId: string, agentSessionId: string | null | undefined): void {
+    if (!agentSessionId) return;
+    if (!this.#agentSessionIdIndex.has(agentSessionId)) {
+      this.#agentSessionIdIndex.set(agentSessionId, chatId);
+    }
+  }
+
+  #unsetAgentSessionIdIndex(chatId: string, agentSessionId: string | null | undefined): void {
+    if (!agentSessionId) return;
+    if (this.#agentSessionIdIndex.get(agentSessionId) === chatId) {
+      this.#agentSessionIdIndex.delete(agentSessionId);
+      for (const [candidateChatId, entry] of Object.entries(this.#registry?.sessions ?? {})) {
+        if (candidateChatId !== chatId && entry.agentSessionId === agentSessionId) {
+          this.#agentSessionIdIndex.set(agentSessionId, candidateChatId);
+          break;
+        }
+      }
+    }
   }
 }
