@@ -212,7 +212,7 @@ export class ChatHandler {
   #handlePermissionResponse(data: PermissionDecisionRequest): void {
     if (!data.permissionRequestId || !data.chatId) return;
 
-    if (this.#isDuplicatePermissionDecision(data.permissionRequestId)) {
+    if (this.#isDuplicatePermissionDecision(data.chatId, data.permissionRequestId)) {
       logger.warn('ws: duplicate permission-decision for', data.permissionRequestId, '- ignoring');
       return;
     }
@@ -225,11 +225,12 @@ export class ChatHandler {
     this.#agents.resolvePermission(data.chatId, data.permissionRequestId, decision);
   }
 
-  #isDuplicatePermissionDecision(permissionRequestId: string): boolean {
+  #isDuplicatePermissionDecision(chatId: string, permissionRequestId: string): boolean {
     const now = Date.now();
     this.#prunePermissionDecisionDedup(now);
-    if (this.#recentPermissionDecisions.has(permissionRequestId)) return true;
-    this.#recentPermissionDecisions.set(permissionRequestId, now);
+    const key = `${chatId}:${permissionRequestId}`;
+    if (this.#recentPermissionDecisions.has(key)) return true;
+    this.#recentPermissionDecisions.set(key, now);
     return false;
   }
 

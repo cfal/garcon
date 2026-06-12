@@ -45,8 +45,8 @@ function optionsForQueuedTurn(options: RunAgentTurnOptions): RunAgentTurnOptions
 }
 
 export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunAgentTurnOptions {
-  const entry = requireChatExecutionConfig(chatId, registry.getChat(chatId));
   const chat = registry.getChat(chatId);
+  const entry = requireChatExecutionConfig(chatId, chat);
   return {
     permissionMode: entry.permissionMode,
     thinkingMode: entry.thinkingMode,

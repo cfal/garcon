@@ -521,6 +521,24 @@ describe('chat WebSocket handler', () => {
       expect(mockAgents.resolvePermission).toHaveBeenCalledTimes(2);
     });
 
+    it('forwards the same permissionRequestId for different chats independently', async () => {
+      await chatHandler.message(ws, {
+        type: 'permission-decision',
+        chatId: '123',
+        permissionRequestId: 'dedup-cross-chat',
+        allow: true,
+        alwaysAllow: false,
+      });
+      await chatHandler.message(ws, {
+        type: 'permission-decision',
+        chatId: '456',
+        permissionRequestId: 'dedup-cross-chat',
+        allow: false,
+        alwaysAllow: false,
+      });
+      expect(mockAgents.resolvePermission).toHaveBeenCalledTimes(2);
+    });
+
     it('accepts the same permissionRequestId after the dedup window expires', async () => {
       const originalDateNow = Date.now;
       let now = 1_700_000_000_000;

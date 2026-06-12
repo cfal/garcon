@@ -121,12 +121,20 @@ export class ChatReadUpdatedV1Message {
   ) { }
 }
 
-export type ChatListInvalidationReason =
-  | 'chat-added'
-  | 'pinned-toggled'
-  | 'archive-toggled'
-  | 'chats-reordered'
-  | 'chats-reordered-quick';
+export const CHAT_LIST_INVALIDATION_REASONS = [
+  'chat-added',
+  'pinned-toggled',
+  'archive-toggled',
+  'chats-reordered',
+  'chats-reordered-quick',
+] as const;
+
+export type ChatListInvalidationReason = typeof CHAT_LIST_INVALIDATION_REASONS[number];
+
+export function isChatListInvalidationReason(value: unknown): value is ChatListInvalidationReason {
+  return typeof value === 'string'
+    && (CHAT_LIST_INVALIDATION_REASONS as readonly string[]).includes(value);
+}
 
 // Broadcast when a sidebar list mutation (add/pin/archive/reorder) occurs.
 // Receivers trigger a full chat list refresh for server-authoritative convergence.
@@ -218,16 +226,7 @@ function requiredStr(v: unknown): string | null {
 }
 
 function parseChatListInvalidationReason(v: unknown): ChatListInvalidationReason | null {
-  switch (v) {
-    case 'chat-added':
-    case 'pinned-toggled':
-    case 'archive-toggled':
-    case 'chats-reordered':
-    case 'chats-reordered-quick':
-      return v;
-    default:
-      return null;
-  }
+  return isChatListInvalidationReason(v) ? v : null;
 }
 
 // Constructs a typed ServerWsMessage class instance from raw data.

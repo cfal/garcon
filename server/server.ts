@@ -12,7 +12,7 @@ import { verifyAuthToken } from './auth/token.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { parseChatMessages } from '../common/chat-types.js';
-import type { ChatListInvalidationReason } from '../common/ws-events.ts';
+import { isChatListInvalidationReason } from '../common/ws-events.ts';
 
 // Classes
 import { ChatRegistry } from './chats/store.js';
@@ -76,14 +76,6 @@ type ServeOptionsWithConnectionLimit = Parameters<typeof Bun.serve<WsConnectionD
 
 function isWsPath(value: unknown): value is WsPath {
   return value === '/shell' || value === '/ws';
-}
-
-function isChatListInvalidationReason(value: string): value is ChatListInvalidationReason {
-  return value === 'chat-added'
-    || value === 'pinned-toggled'
-    || value === 'archive-toggled'
-    || value === 'chats-reordered'
-    || value === 'chats-reordered-quick';
 }
 
 export async function startServer(): Promise<void> {
