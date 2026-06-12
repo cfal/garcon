@@ -24,7 +24,7 @@ export class ChatState {
 	loadStatus = $state<ChatLoadStatus>('idle');
 	loadError = $state<string | null>(null);
 
-	get displayMessages(): ChatMessage[] {
+	#displayMessages = $derived.by(() => {
 		const combined = [
 			...this.chatMessages.map((message) => ({ message, pending: false })),
 			...this.pendingUserInputs.map((input) => ({
@@ -39,19 +39,28 @@ export class ChatState {
 			return 0;
 		});
 		return combined.map((entry) => entry.message);
+	});
+
+	#displayMessageCount = $derived.by(() => this.#displayMessages.length);
+
+	#visibleMessages = $derived.by(() => {
+		if (this.#displayMessages.length <= this.visibleMessageCount) {
+			return this.#displayMessages;
+		}
+		return this.#displayMessages.slice(-this.visibleMessageCount);
+	});
+
+	get displayMessages(): ChatMessage[] {
+		return this.#displayMessages;
 	}
 
 	get displayMessageCount(): number {
-		return this.displayMessages.length;
+		return this.#displayMessageCount;
 	}
 
 	// Visible slice of messages, capped by visibleMessageCount.
 	get visibleMessages(): ChatMessage[] {
-		const displayMessages = this.displayMessages;
-		if (displayMessages.length <= this.visibleMessageCount) {
-			return displayMessages;
-		}
-		return displayMessages.slice(-this.visibleMessageCount);
+		return this.#visibleMessages;
 	}
 
 	// Tracks offset for paginated fetches from the server.

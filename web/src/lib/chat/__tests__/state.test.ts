@@ -75,6 +75,25 @@ describe('ChatState', () => {
 		expect(state.visibleMessages).toEqual(msgs);
 	});
 
+	it('memoizes display and visible messages between state writes', () => {
+		const state = new ChatState();
+		state.setMessages([
+			new UserMessage('2024-01-01T00:00:00Z', 'a'),
+			new AssistantMessage('2024-01-01T00:00:01Z', 'b'),
+		]);
+
+		const displayBefore = state.displayMessages;
+		const visibleBefore = state.visibleMessages;
+
+		expect(state.displayMessages).toBe(displayBefore);
+		expect(state.visibleMessages).toBe(visibleBefore);
+
+		state.appendMessages([new AssistantMessage('2024-01-01T00:00:02Z', 'c')]);
+
+		expect(state.displayMessages).not.toBe(displayBefore);
+		expect(state.visibleMessages).not.toBe(visibleBefore);
+	});
+
 	it('visibleMessages slices to tail when over limit', () => {
 		const state = new ChatState();
 		state.visibleMessageCount = 1;

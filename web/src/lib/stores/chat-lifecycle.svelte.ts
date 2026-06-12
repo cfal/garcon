@@ -42,6 +42,11 @@ export class ChatLifecycleStore {
 		this.isLoading = loading;
 	}
 
+	/** Mirrors authoritative per-chat processing state into local loading UI. */
+	syncFromProcessing(isProcessing: boolean): void {
+		this.isLoading = isProcessing;
+	}
+
 	setCanAbort(canAbort: boolean): void {
 		this.canAbort = canAbort;
 	}

@@ -4,7 +4,7 @@
 	// pane, queue controls, and composer. All business logic lives in
 	// the controller modules.
 
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
@@ -136,10 +136,8 @@
 	});
 
 	// Expose the submit function to sibling components (runs once on mount).
-	$effect(() => {
-		untrack(() => {
-			if (onRegisterSubmit) onRegisterSubmit(submitToActiveChat);
-		});
+	onMount(() => {
+		onRegisterSubmit?.(submitToActiveChat);
 	});
 
 	// Chat switch effect (dedup handled inside the controller).
@@ -180,19 +178,6 @@
 				chatState.snapshotCache.markStale(chatId);
 				controller.loadChat(chatId);
 			}
-		});
-	});
-
-	// Syncs lifecycle.isLoading from the selected chat's isProcessing flag.
-	$effect(() => {
-		const selected = sessions.selectedChat;
-		const isProcessing = Boolean(selected?.isProcessing);
-		untrack(() => {
-			if (isProcessing) {
-				if (!lifecycle.isLoading) lifecycle.setIsLoading(true);
-				return;
-			}
-			if (lifecycle.isLoading) lifecycle.setIsLoading(false);
 		});
 	});
 

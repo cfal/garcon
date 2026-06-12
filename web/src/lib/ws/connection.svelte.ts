@@ -50,9 +50,9 @@ function generateRequestId() {
 }
 
 export class WsConnection {
-	#ws: WebSocket | null = $state(null);
+	#ws: WebSocket | null = null;
 	#activeSocket: WebSocket | null = null;
-	#messageLog: WsMessage[] = $state([]);
+	#messageLog: WsMessage[] = [];
 	messageVersion: number = $state(0);
 	isConnected: boolean = $state(false);
 

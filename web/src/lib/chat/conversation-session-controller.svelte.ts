@@ -238,6 +238,7 @@ export class ConversationSessionController {
 		}
 
 		deps.lifecycle.setCurrentChatId(chatId);
+		deps.lifecycle.syncFromProcessing(selected.isProcessing);
 		deps.composerState.restoreDraft(chatId);
 		getChatQueue(chatId)
 			.then((result) => {
