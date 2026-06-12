@@ -96,7 +96,7 @@
 			checked={isSelected}
 			onchange={() => onToggleSelected(filePath)}
 			onclick={(e) => e.stopPropagation()}
-			class="rounded border-border text-interactive-accent focus:ring-interactive-accent dark:bg-muted dark:checked:bg-interactive-accent {isMobile
+			class="rounded border-border text-interactive-accent focus-visible:ring-interactive-accent dark:bg-muted dark:checked:bg-interactive-accent {isMobile
 				? 'mr-1.5'
 				: 'mr-2'}"
 		/>

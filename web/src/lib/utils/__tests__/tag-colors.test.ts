@@ -37,7 +37,8 @@ describe('getTagColorClasses', () => {
 	it('returns a non-empty CSS class string', () => {
 		const classes = getTagColorClasses('ops');
 		expect(classes.length).toBeGreaterThan(0);
-		expect(classes).toContain('bg-');
-		expect(classes).toContain('text-');
+		expect(classes).toContain('bg-tag-');
+		expect(classes).toContain('text-tag-');
+		expect(classes).toContain('border-tag-');
 	});
 });
