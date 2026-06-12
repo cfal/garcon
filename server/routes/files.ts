@@ -15,6 +15,7 @@ import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { createLogger } from '../lib/log.js';
+import { hasNodeErrorCode } from '../lib/errors.js';
 
 const logger = createLogger('routes:files');
 
@@ -31,10 +32,6 @@ interface FileListItem {
 type ProjectPathResolution =
   | { projectPath: string; error?: undefined }
   | { error: Response; projectPath?: undefined };
-
-function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error;
-}
 
 async function listAllFiles(
   dirPath: string,
@@ -70,6 +67,22 @@ async function listAllFiles(
 }
 
 export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
+  async function resolveAccessibleProjectPath(projectPath: string): Promise<ProjectPathResolution> {
+    let resolvedProjectPath = projectPath;
+    try {
+      resolvedProjectPath = await assertRealWithinProjectBase(projectPath);
+    } catch (error) {
+      if (isProjectBoundaryError(error)) return { error: projectBoundaryErrorResponse() };
+      throw error;
+    }
+
+    try {
+      await fs.access(resolvedProjectPath);
+      return { projectPath: resolvedProjectPath };
+    } catch {
+      return { error: Response.json({ error: `Project path not found: ${resolvedProjectPath}` }, { status: 404 }) };
+    }
+  }
 
   // Resolves the project path from either a chatId or projectPath query param.
   async function resolveProjectPath(url: URL): Promise<ProjectPathResolution> {
@@ -79,36 +92,20 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
       if (!chat?.projectPath) {
         return { error: Response.json({ error: 'Chat not found or missing projectPath' }, { status: 404 }) };
       }
-      try {
-        return { projectPath: await assertRealWithinProjectBase(chat.projectPath) };
-      } catch (error) {
-        if (isProjectBoundaryError(error)) return { error: projectBoundaryErrorResponse() };
-        throw error;
-      }
+      return resolveAccessibleProjectPath(chat.projectPath);
     }
 
     const projectPath = url.searchParams.get('projectPath');
     if (!projectPath) {
       return { error: Response.json({ error: 'chatId or projectPath is required' }, { status: 400 }) };
     }
-    try {
-      return { projectPath: await assertRealWithinProjectBase(projectPath) };
-    } catch (error) {
-      if (isProjectBoundaryError(error)) return { error: projectBoundaryErrorResponse() };
-      throw error;
-    }
+    return resolveAccessibleProjectPath(projectPath);
   }
 
   async function handleTree(_request: Request, url: URL): Promise<Response> {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
     const { projectPath } = resolved;
-
-    try {
-      await fs.access(projectPath);
-    } catch {
-      return Response.json({ error: `Project path not found: ${projectPath}` }, { status: 404 });
-    }
 
     try {
       let targetDir = projectPath;
@@ -131,12 +128,6 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     const { projectPath } = resolved;
 
     try {
-      await fs.access(projectPath);
-    } catch {
-      return Response.json({ error: `Project path not found: ${projectPath}` }, { status: 404 });
-    }
-
-    try {
       const files = await listAllFiles(projectPath);
       return Response.json(files);
     } catch (error) {
@@ -150,12 +141,6 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     const { projectPath } = resolved;
 
     try {
-      await fs.access(projectPath);
-    } catch {
-      return Response.json({ error: `Project path not found: ${projectPath}` }, { status: 404 });
-    }
-
-    try {
       const filePath = url.searchParams.get('path');
       if (!filePath) return Response.json({ error: 'Invalid file path' }, { status: 400 });
       const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
@@ -163,8 +148,8 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
       return Response.json({ content, path: resolvedFile });
     } catch (error) {
       if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
-      if (isErrnoException(error) && error.code === 'ENOENT') return Response.json({ error: 'File not found' }, { status: 404 });
-      if (isErrnoException(error) && error.code === 'EACCES') return Response.json({ error: 'Permission denied' }, { status: 403 });
+      if (hasNodeErrorCode(error, 'ENOENT')) return Response.json({ error: 'File not found' }, { status: 404 });
+      if (hasNodeErrorCode(error, 'EACCES')) return Response.json({ error: 'Permission denied' }, { status: 403 });
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
@@ -173,12 +158,6 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
     const { projectPath } = resolved;
-
-    try {
-      await fs.access(projectPath);
-    } catch {
-      return Response.json({ error: `Project path not found: ${projectPath}` }, { status: 404 });
-    }
 
     try {
       const filePath = url.searchParams.get('path');
@@ -190,8 +169,8 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
       return Response.json({ success: true, path: resolvedFile, message: 'File saved successfully' });
     } catch (error) {
       if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
-      if (isErrnoException(error) && error.code === 'ENOENT') return Response.json({ error: 'File or directory not found' }, { status: 404 });
-      if (isErrnoException(error) && error.code === 'EACCES') return Response.json({ error: 'Permission denied' }, { status: 403 });
+      if (hasNodeErrorCode(error, 'ENOENT')) return Response.json({ error: 'File or directory not found' }, { status: 404 });
+      if (hasNodeErrorCode(error, 'EACCES')) return Response.json({ error: 'Permission denied' }, { status: 403 });
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
@@ -200,12 +179,6 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
     const { projectPath } = resolved;
-
-    try {
-      await fs.access(projectPath);
-    } catch {
-      return Response.json({ error: `Project path not found: ${projectPath}` }, { status: 404 });
-    }
 
     try {
       const filePath = url.searchParams.get('path');
@@ -217,15 +190,12 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
       return new Response(fileBuffer, { headers: { 'Content-Type': mimeType } });
     } catch (error) {
       if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
-      if (isErrnoException(error) && error.code === 'ENOENT') return Response.json({ error: 'File not found' }, { status: 404 });
+      if (hasNodeErrorCode(error, 'ENOENT')) return Response.json({ error: 'File not found' }, { status: 404 });
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function handleUploadImages(request: Request, url: URL): Promise<Response> {
-    const resolved = await resolveProjectPath(url);
-    if (resolved.error) return resolved.error;
-
+  async function handleUploadImages(request: Request): Promise<Response> {
     try {
       const contentLength = Number.parseInt(request.headers.get('content-length') || '', 10);
       if (Number.isFinite(contentLength) && contentLength > MAX_IMAGE_UPLOAD_BODY_BYTES) {

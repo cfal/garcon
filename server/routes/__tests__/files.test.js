@@ -57,6 +57,17 @@ describe('files route', () => {
     expect(body.errorCode).toBe('outside_project_base');
   });
 
+  it('returns 404 for missing project roots during path resolution', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const missingPath = path.join(projectPath, 'missing-project');
+    const url = new URL(`http://localhost/api/v1/files/list?projectPath=${encodeURIComponent(missingPath)}`);
+    const response = await routes['/api/v1/files/list'].GET(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.error).toBe(`Project path not found: ${missingPath}`);
+  });
+
   it('rejects chat project paths outside the configured base', async () => {
     const routes = createFilesRoutes({ getChat: () => ({ projectPath: outsidePath }) });
     const url = new URL('http://localhost/api/v1/files/list?chatId=chat-1');
@@ -116,5 +127,30 @@ describe('files route', () => {
     expect(response.status).toBe(403);
     expect(body.error).toBe('Path must be under project root');
     await expect(fs.readFile(path.join(outsidePath, 'new.txt'), 'utf8')).rejects.toThrow();
+  });
+
+  it('uploads images without requiring chat or project context', async () => {
+    const routes = createFilesRoutes({
+      getChat: () => {
+        throw new Error('upload should not resolve chats');
+      },
+    });
+    const formData = new FormData();
+    formData.append('images', new File(['image-bytes'], 'sample.png', { type: 'image/png' }));
+    const url = new URL('http://localhost/api/v1/files/upload-images');
+    const response = await routes['/api/v1/files/upload-images'].POST(
+      new Request(url, { method: 'POST', body: formData }),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.images).toHaveLength(1);
+    expect(body.images[0]).toMatchObject({
+      name: 'sample.png',
+      mimeType: 'image/png',
+      size: 'image-bytes'.length,
+    });
+    expect(body.images[0].data).toStartWith('data:image/png;base64,');
   });
 });
