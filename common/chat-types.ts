@@ -476,47 +476,6 @@ export type ChatMessage =
   | PermissionResolvedMessage
   | PermissionCancelledMessage;
 
-// Runtime guard for tool-use messages. Replaces the former base-class
-// instanceof check.
-export function isToolUseMessage(message: ChatMessage): message is ToolUseChatMessage {
-  switch (message.type) {
-    case 'bash-tool-use':
-    case 'read-tool-use':
-    case 'list-tool-use':
-    case 'edit-tool-use':
-    case 'write-tool-use':
-    case 'apply-patch-tool-use':
-    case 'grep-tool-use':
-    case 'glob-tool-use':
-    case 'web-search-tool-use':
-    case 'web-fetch-tool-use':
-    case 'todo-write-tool-use':
-    case 'todo-read-tool-use':
-    case 'task-tool-use':
-    case 'update-plan-tool-use':
-    case 'write-stdin-tool-use':
-    case 'enter-plan-mode-tool-use':
-    case 'exit-plan-mode-tool-use':
-    case 'amp-finder-tool-use':
-    case 'amp-oracle-tool-use':
-    case 'amp-librarian-tool-use':
-    case 'amp-skill-tool-use':
-    case 'amp-mermaid-tool-use':
-    case 'amp-handoff-tool-use':
-    case 'amp-look-at-tool-use':
-    case 'amp-find-thread-tool-use':
-    case 'amp-read-thread-tool-use':
-    case 'amp-task-list-tool-use':
-    case 'external-tool-use':
-    case 'mcp-tool-use':
-    case 'request-permissions-tool-use':
-    case 'unknown-tool-use':
-      return true;
-    default:
-      return false;
-  }
-}
-
 // Narrows an unknown value to string, defaulting to ''.
 function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
@@ -568,9 +527,226 @@ function asOptionalChanges(v: unknown): Array<{ path?: string; kind?: string }> 
   return v as Array<{ path?: string; kind?: string }>;
 }
 
+type ToolUseMessageType = ToolUseChatMessage['type'];
+type ToolUseMessageParser = (data: Record<string, unknown>) => ToolUseChatMessage | null;
+
+const TOOL_USE_MESSAGE_PARSERS = {
+  'bash-tool-use': (data) => {
+    const command = asOptionalString(data.command);
+    if (command === undefined) return null;
+    return new BashToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      command, asOptionalString(data.description));
+  },
+
+  'read-tool-use': (data) => {
+    const filePath = asOptionalString(data.filePath);
+    if (filePath === undefined) return null;
+    return new ReadToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      filePath,
+      asOptionalNumber(data.offset), asOptionalNumber(data.limit),
+      asOptionalNumber(data.endLine));
+  },
+
+  'list-tool-use': (data) =>
+    new ListToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.path)),
+
+  'edit-tool-use': (data) =>
+    new EditToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.filePath),
+      asOptionalString(data.oldString),
+      asOptionalString(data.newString),
+      asOptionalChanges(data.changes)),
+
+  'write-tool-use': (data) => {
+    const filePath = asOptionalString(data.filePath);
+    if (filePath === undefined) return null;
+    return new WriteToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      filePath, asOptionalString(data.content));
+  },
+
+  'apply-patch-tool-use': (data) =>
+    new ApplyPatchToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.filePath),
+      asOptionalString(data.oldString),
+      asOptionalString(data.newString),
+      asOptionalString(data.patch)),
+
+  'grep-tool-use': (data) =>
+    new GrepToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.pattern), asOptionalString(data.path)),
+
+  'glob-tool-use': (data) =>
+    new GlobToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.pattern), asOptionalString(data.path)),
+
+  'web-search-tool-use': (data) => {
+    const query = asOptionalString(data.query);
+    if (query === undefined) return null;
+    return new WebSearchToolUseMessage(
+      str(data.timestamp), str(data.toolId), query);
+  },
+
+  'web-fetch-tool-use': (data) => {
+    const url = asOptionalString(data.url);
+    if (url === undefined) return null;
+    return new WebFetchToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      url, asOptionalString(data.prompt));
+  },
+
+  'todo-write-tool-use': (data) =>
+    new TodoWriteToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      coerceTodoItems(data.todos)),
+
+  'todo-read-tool-use': (data) =>
+    new TodoReadToolUseMessage(str(data.timestamp), str(data.toolId)),
+
+  'task-tool-use': (data) =>
+    new TaskToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.subagentType),
+      asOptionalString(data.description),
+      asOptionalString(data.prompt),
+      asOptionalString(data.model),
+      asOptionalString(data.resume)),
+
+  'update-plan-tool-use': (data) =>
+    new UpdatePlanToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      coerceTodoItems(data.todos)),
+
+  'write-stdin-tool-use': (data) =>
+    new WriteStdinToolUseMessage(
+      str(data.timestamp), str(data.toolId), asRecord(data.input)),
+
+  'enter-plan-mode-tool-use': (data) =>
+    new EnterPlanModeToolUseMessage(str(data.timestamp), str(data.toolId)),
+
+  'exit-plan-mode-tool-use': (data) => {
+    const plan = asOptionalString(data.plan);
+    if (plan === undefined) return null;
+    return new ExitPlanModeToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      plan,
+      data.allowedPrompts as Array<{ tool: string; prompt: string }> | undefined);
+  },
+
+  'amp-finder-tool-use': (data) =>
+    new AmpFinderToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.query)),
+
+  'amp-oracle-tool-use': (data) =>
+    new AmpOracleToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.task),
+      asOptionalString(data.context),
+      asStringArray(data.files)),
+
+  'amp-librarian-tool-use': (data) =>
+    new AmpLibrarianToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.query),
+      asOptionalString(data.context)),
+
+  'amp-skill-tool-use': (data) =>
+    new AmpSkillToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.name)),
+
+  'amp-mermaid-tool-use': (data) =>
+    new AmpMermaidToolUseMessage(
+      str(data.timestamp), str(data.toolId)),
+
+  'amp-handoff-tool-use': (data) =>
+    new AmpHandoffToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.goal)),
+
+  'amp-look-at-tool-use': (data) =>
+    new AmpLookAtToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.path),
+      asOptionalString(data.objective)),
+
+  'amp-find-thread-tool-use': (data) =>
+    new AmpFindThreadToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.query)),
+
+  'amp-read-thread-tool-use': (data) =>
+    new AmpReadThreadToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.threadId),
+      asOptionalString(data.goal)),
+
+  'amp-task-list-tool-use': (data) =>
+    new AmpTaskListToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.action),
+      asOptionalString(data.taskId),
+      asOptionalString(data.title),
+      asOptionalString(data.status)),
+
+  'external-tool-use': (data) =>
+    new ExternalToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      str(data.name),
+      asRecord(data.input),
+      data.namespace === null ? null : asOptionalString(data.namespace)),
+
+  'mcp-tool-use': (data) =>
+    new McpToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      str(data.server),
+      str(data.tool),
+      asRecord(data.input)),
+
+  'request-permissions-tool-use': (data) =>
+    new RequestPermissionsToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asRecord(data.permissions),
+      asOptionalString(data.reason)),
+
+  'unknown-tool-use': (data) =>
+    new UnknownToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      str(data.rawName), asRecord(data.input)),
+} satisfies Record<ToolUseMessageType, ToolUseMessageParser>;
+
+const TOOL_USE_MESSAGE_TYPES = new Set<ToolUseMessageType>(
+  Object.keys(TOOL_USE_MESSAGE_PARSERS) as ToolUseMessageType[],
+);
+
+function parseToolUseMessage(data: Record<string, unknown>): ToolUseChatMessage | null {
+  const type = data.type;
+  if (typeof type !== 'string') return null;
+  const parser = TOOL_USE_MESSAGE_PARSERS[type as ToolUseMessageType];
+  return parser?.(data) ?? null;
+}
+
+// Runtime guard for tool-use messages. The parser table is the source of
+// truth so parser support and guard behavior cannot drift.
+export function isToolUseMessage(message: ChatMessage): message is ToolUseChatMessage {
+  return TOOL_USE_MESSAGE_TYPES.has(message.type as ToolUseMessageType);
+}
+
 // Constructs a typed ChatMessage class instance from raw data.
 // Returns null for unrecognized message types.
 export function parseChatMessage(data: Record<string, unknown>): ChatMessage | null {
+  const toolUseMessage = parseToolUseMessage(data);
+  if (toolUseMessage) return toolUseMessage;
+
   switch (data.type) {
 	    case 'user-message':
 	      return new UserMessage(
@@ -583,198 +759,6 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
       return new AssistantMessage(str(data.timestamp), str(data.content));
     case 'thinking':
       return new ThinkingMessage(str(data.timestamp), str(data.content));
-
-    case 'bash-tool-use': {
-      const command = asOptionalString(data.command);
-      if (command === undefined) return null;
-      return new BashToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        command, asOptionalString(data.description));
-    }
-
-    case 'read-tool-use': {
-      const filePath = asOptionalString(data.filePath);
-      if (filePath === undefined) return null;
-      return new ReadToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        filePath,
-        asOptionalNumber(data.offset), asOptionalNumber(data.limit),
-        asOptionalNumber(data.endLine));
-    }
-
-    case 'list-tool-use':
-      return new ListToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.path));
-
-    case 'edit-tool-use':
-      return new EditToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.filePath),
-        asOptionalString(data.oldString),
-        asOptionalString(data.newString),
-        asOptionalChanges(data.changes));
-
-    case 'write-tool-use': {
-      const filePath = asOptionalString(data.filePath);
-      if (filePath === undefined) return null;
-      return new WriteToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        filePath, asOptionalString(data.content));
-    }
-
-    case 'apply-patch-tool-use':
-      return new ApplyPatchToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.filePath),
-        asOptionalString(data.oldString),
-        asOptionalString(data.newString),
-        asOptionalString(data.patch));
-
-    case 'grep-tool-use':
-      return new GrepToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.pattern), asOptionalString(data.path));
-
-    case 'glob-tool-use':
-      return new GlobToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.pattern), asOptionalString(data.path));
-
-    case 'web-search-tool-use': {
-      const query = asOptionalString(data.query);
-      if (query === undefined) return null;
-      return new WebSearchToolUseMessage(
-        str(data.timestamp), str(data.toolId), query);
-    }
-
-    case 'web-fetch-tool-use': {
-      const url = asOptionalString(data.url);
-      if (url === undefined) return null;
-      return new WebFetchToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        url, asOptionalString(data.prompt));
-    }
-
-    case 'todo-write-tool-use':
-      return new TodoWriteToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        coerceTodoItems(data.todos));
-
-    case 'todo-read-tool-use':
-      return new TodoReadToolUseMessage(str(data.timestamp), str(data.toolId));
-
-    case 'task-tool-use':
-      return new TaskToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.subagentType),
-        asOptionalString(data.description),
-        asOptionalString(data.prompt),
-        asOptionalString(data.model),
-        asOptionalString(data.resume));
-
-    case 'update-plan-tool-use':
-      return new UpdatePlanToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        coerceTodoItems(data.todos));
-
-    case 'write-stdin-tool-use':
-      return new WriteStdinToolUseMessage(
-        str(data.timestamp), str(data.toolId), asRecord(data.input));
-
-    case 'enter-plan-mode-tool-use':
-      return new EnterPlanModeToolUseMessage(str(data.timestamp), str(data.toolId));
-
-    case 'exit-plan-mode-tool-use': {
-      const plan = asOptionalString(data.plan);
-      if (plan === undefined) return null;
-      return new ExitPlanModeToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        plan,
-        data.allowedPrompts as Array<{ tool: string; prompt: string }> | undefined);
-    }
-
-    case 'amp-finder-tool-use':
-      return new AmpFinderToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.query));
-
-    case 'amp-oracle-tool-use':
-      return new AmpOracleToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.task),
-        asOptionalString(data.context),
-        asStringArray(data.files));
-
-    case 'amp-librarian-tool-use':
-      return new AmpLibrarianToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.query),
-        asOptionalString(data.context));
-
-    case 'amp-skill-tool-use':
-      return new AmpSkillToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.name));
-
-    case 'amp-mermaid-tool-use':
-      return new AmpMermaidToolUseMessage(
-        str(data.timestamp), str(data.toolId));
-
-    case 'amp-handoff-tool-use':
-      return new AmpHandoffToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.goal));
-
-    case 'amp-look-at-tool-use':
-      return new AmpLookAtToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.path),
-        asOptionalString(data.objective));
-
-    case 'amp-find-thread-tool-use':
-      return new AmpFindThreadToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.query));
-
-    case 'amp-read-thread-tool-use':
-      return new AmpReadThreadToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.threadId),
-        asOptionalString(data.goal));
-
-    case 'amp-task-list-tool-use':
-      return new AmpTaskListToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asOptionalString(data.action),
-        asOptionalString(data.taskId),
-        asOptionalString(data.title),
-        asOptionalString(data.status));
-
-    case 'external-tool-use':
-      return new ExternalToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        str(data.name),
-        asRecord(data.input),
-        data.namespace === null ? null : asOptionalString(data.namespace));
-
-    case 'mcp-tool-use':
-      return new McpToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        str(data.server),
-        str(data.tool),
-        asRecord(data.input));
-
-    case 'request-permissions-tool-use':
-      return new RequestPermissionsToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        asRecord(data.permissions),
-        asOptionalString(data.reason));
-
-    case 'unknown-tool-use':
-      return new UnknownToolUseMessage(
-        str(data.timestamp), str(data.toolId),
-        str(data.rawName), asRecord(data.input));
 
     case 'tool-result':
       return new ToolResultMessage(str(data.timestamp), str(data.toolId), (data.content ?? {}) as Record<string, unknown>, Boolean(data.isError));
