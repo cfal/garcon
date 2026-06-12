@@ -318,9 +318,17 @@ export default function createChatRoutes({
         return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
-      // Remove from the in-memory registry first so the WS broadcast fires
-      // immediately; disk cleanup then happens in parallel. Clients see the
-      // chat disappear before the HTTP call resolves.
+      try {
+        await queue.abort(chatId);
+      } catch (error) {
+        console.warn(
+          `sessions: abort before deleting ${chatId} failed:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+
+      // Removes registry state after abort because abortSession resolves the
+      // owning agent through the chat entry.
       registry.removeChat(chatId);
 
       const nativePath = session.nativePath && !isArtificialNativePath(session.nativePath)

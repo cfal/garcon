@@ -44,7 +44,10 @@ const settings = {
   reorderWindow: mock(() => Promise.resolve({ success: true })),
   reorderRelative: mock(() => Promise.resolve({ success: true })),
 };
-const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
+const queue = {
+  abort: mock(() => Promise.resolve(false)),
+  deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
+};
 const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
@@ -86,6 +89,7 @@ const chatsRoutes = createChatRoutes({
 
 const allMocks = [
   registry.listAllChats, metadata.listAllChatMetadata, registry.getChat, registry.removeChat,
+  queue.abort, queue.deleteChatQueueFile,
   settings.getChatName, settings.ensureInNormal, settings.removeSessionName, settings.removeFromAllOrderLists, settings.getNormalChatIds,
   pathCache.isProjectPathAvailable,
 ];
@@ -207,6 +211,8 @@ describe('DELETE /api/chats session name cleanup', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
+    queue.abort.mockImplementation(() => Promise.resolve(false));
+    registry.removeChat.mockImplementation(() => undefined);
   });
 
   it('removes session name when deleting a chat', async () => {
@@ -221,7 +227,31 @@ describe('DELETE /api/chats session name cleanup', () => {
 
     expect(body.success).toBe(true);
     expect(settings.removeSessionName).toHaveBeenCalledWith('500');
+    expect(queue.abort).toHaveBeenCalledWith('500');
     expect(registry.removeChat).toHaveBeenCalledWith('500');
+  });
+
+  it('aborts the running session before removing the chat from the registry', async () => {
+    const calls = [];
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
+    queue.abort.mockImplementation(async () => {
+      calls.push('abort');
+      return true;
+    });
+    registry.removeChat.mockImplementation(() => {
+      calls.push('remove');
+      return true;
+    });
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
+
+    const url = new URL('http://localhost/api/chats');
+    const request = new Request(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
+
+    const response = await handler(request, url);
+    const body = await response.json();
+
+    expect(body.success).toBe(true);
+    expect(calls).toEqual(['abort', 'remove']);
   });
 
   it('keeps query chatId compatibility when deleting a chat', async () => {

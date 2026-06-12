@@ -50,6 +50,9 @@ describe('HistoryCache init wiring', () => {
 
   it('appends messages to cache when onMessages fires', async () => {
     cache.init();
+    mockRegistry.getChat.mockImplementation((chatId) => (
+      chatId === 'c1' ? { agentId: 'claude', agentSessionId: 'session-1' } : null
+    ));
 
     const msgs = [{ type: 'user-message', content: 'hi', timestamp: '2026-01-01T00:00:00Z' }];
     messageCallbacks[0]('c1', msgs);
@@ -59,6 +62,19 @@ describe('HistoryCache init wiring', () => {
     const messages = cache.getMessages('c1');
     expect(messages.length).toBe(1);
     expect(messages[0].content).toBe('hi');
+  });
+
+  it('ignores agent messages for removed or unknown chats', async () => {
+    cache.init();
+
+    messageCallbacks[0]('missing-chat', [
+      { type: 'assistant-message', content: 'late message', timestamp: '2026-01-01T00:00:00Z' },
+    ]);
+
+    await Promise.resolve();
+
+    expect(cache.getMessages('missing-chat')).toBeNull();
+    expect(mockMetadata.updateFromAppendedMessages).not.toHaveBeenCalled();
   });
 
   it('does not register duplicate listeners on repeated init calls', () => {

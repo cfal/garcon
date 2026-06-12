@@ -92,6 +92,7 @@ export class HistoryCache {
 
       // Self-wire: append agent messages to cache as they arrive.
       this.#agents.onMessages((chatId, messages) => {
+        if (!this.#registry.getChat(chatId)) return;
         this.appendMessages(chatId, parseChatMessages(messages)).catch((err) => {
           console.warn('history-cache: appendMessages failed:', errorMessage(err));
         });

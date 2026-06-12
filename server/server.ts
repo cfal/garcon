@@ -324,19 +324,24 @@ export async function startServer(): Promise<void> {
     // Wire agent events to broadcast via AgentRegistry fan-out.
     // HistoryCache's init() already self-wired appendMessages via
     // agentRegistry.onMessages(), so only broadcast wiring is needed here.
+    const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
     agentRegistry.onMessages((chatId, messages, metadata) => {
+      if (!chatExists(chatId)) return;
       broadcast(new AgentRunOutputMessage(chatId, parseChatMessages(messages), metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         console.warn('pending-inputs: reconcile after messages failed:', errorMessage(err));
       });
     });
     agentRegistry.onProcessing((chatId, isProcessing) => {
+      if (!chatExists(chatId)) return;
       broadcast(new ChatProcessingUpdatedMessage(chatId, isProcessing));
     });
     agentRegistry.onSessionCreated((chatId) => {
+      if (!chatExists(chatId)) return;
       broadcast(new ChatSessionCreatedMessage(chatId));
     });
     agentRegistry.onFinished((chatId, exitCode, metadata) => {
+      if (!chatExists(chatId)) return;
       broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         console.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
@@ -350,6 +355,7 @@ export async function startServer(): Promise<void> {
       });
     });
     agentRegistry.onFailed((chatId, agentErrorMessage, metadata) => {
+      if (!chatExists(chatId)) return;
       if (metadata?.commandType === 'chat-start' && metadata.clientRequestId) {
         commandLedger.updateCommand('chat-start', chatId, metadata.clientRequestId, {
           status: 'failed',
