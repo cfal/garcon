@@ -107,6 +107,11 @@
 	const asPermissionRequest = $derived(
 		message instanceof PermissionRequestMessage ? message : null,
 	);
+	const exitPlanPermissionRequest = $derived(
+		asToolUse?.type === 'exit-plan-mode-tool-use'
+			? new PermissionRequestMessage(message.timestamp, `plan-exit-${asToolUse.toolId}`, asToolUse)
+			: null,
+	);
 	const userDeliveryStatus = $derived(asUser?.metadata?.deliveryStatus ?? null);
 	const userDeliveryTitle = $derived(
 		userDeliveryStatus === 'submitting'
@@ -304,14 +309,9 @@
 								</span>
 							{/snippet}
 						</ChatEventCard>
-					{:else if asToolUse && asToolUse.type === 'exit-plan-mode-tool-use'}
-						{@const exitPlanMsg = asToolUse}
+					{:else if exitPlanPermissionRequest}
 						<PermissionRequestRow
-							request={new PermissionRequestMessage(
-								message.timestamp,
-								`plan-exit-${exitPlanMsg.toolId}`,
-								exitPlanMsg,
-							)}
+							request={exitPlanPermissionRequest}
 							terminal={permissionTerminal}
 							onDecision={onPermissionDecision ?? (() => {})}
 							{onExitPlanMode}
