@@ -8,6 +8,7 @@ import {
 	runChat,
 } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
+import type { ChatRestoreResult } from '../state.svelte';
 import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
@@ -78,7 +79,7 @@ function createDeps(chat = createRunningChat()) {
 				chatState.chatMessages = [];
 				chatState.pendingUserInputs = [];
 			}),
-			restoreMessages: vi.fn(() => null),
+			restoreMessages: vi.fn<() => ChatRestoreResult | null>(() => null),
 		loadMessages: vi.fn(() => new Promise<never>(() => {})),
 		setMessages: vi.fn((messages: ChatMessage[]) => {
 			chatState.chatMessages = messages;
@@ -153,9 +154,9 @@ function createDeps(chat = createRunningChat()) {
 				setSelectedChatId: vi.fn(),
 			},
 			chatState,
-			composerState: {
-				inputText: '',
-				images: [],
+				composerState: {
+					inputText: '',
+					images: [] as File[],
 				clearImages: vi.fn(),
 				clearAfterSubmit: vi.fn(),
 				saveDraft: vi.fn(),
@@ -453,6 +454,31 @@ describe('ConversationSessionController', () => {
 		expect(delivered.deliveryStatus).toBe('accepted');
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-1', true);
+	});
+
+	it('submits image attachments as native data URLs', async () => {
+		mockRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-1',
+			chatId: 'chat-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+		});
+		const { deps } = createDeps();
+		deps.agentState.model = 'opus';
+		deps.composerState.inputText = 'describe this';
+		deps.composerState.images = [new File(['hello'], 'hello.txt', { type: 'text/plain' })];
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('chat-1');
+
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				images: [{ data: 'data:text/plain;base64,aGVsbG8=', name: 'hello.txt' }],
+			}),
+		);
 	});
 
 	it('marks the pending user message failed and restores composer input on REST rejection', async () => {

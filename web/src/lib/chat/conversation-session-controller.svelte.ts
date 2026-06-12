@@ -87,11 +87,20 @@ export interface SessionControllerDeps {
 }
 
 async function fileToChatImage(file: File): Promise<ChatImage> {
-	const buffer = await file.arrayBuffer();
-	const base64 = btoa(
-		new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ''),
-	);
-	return { data: `data:${file.type};base64,${base64}`, name: file.name };
+	const data = await new Promise<string>((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onload = () => {
+			if (typeof reader.result === 'string') {
+				resolve(reader.result);
+			} else {
+				reject(new Error('Failed to read image data URL'));
+			}
+		};
+		reader.onerror = () => reject(reader.error ?? new Error('Failed to read image'));
+		reader.onabort = () => reject(new Error('Image read aborted'));
+		reader.readAsDataURL(file);
+	});
+	return { data, name: file.name };
 }
 
 function pendingUserInput(
