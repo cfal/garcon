@@ -74,11 +74,11 @@ function createDeps(chat = createRunningChat()) {
 		pendingUserInputs: [] as PendingUserInput[],
 		isUserScrolledUp: false,
 		clearMessages: vi.fn(),
-		resetForNewChat: vi.fn(() => {
-			chatState.chatMessages = [];
-			chatState.pendingUserInputs = [];
-		}),
-		restoreMessages: vi.fn(() => false),
+			resetForNewChat: vi.fn(() => {
+				chatState.chatMessages = [];
+				chatState.pendingUserInputs = [];
+			}),
+			restoreMessages: vi.fn(() => null),
 		loadMessages: vi.fn(() => new Promise<never>(() => {})),
 		setMessages: vi.fn((messages: ChatMessage[]) => {
 			chatState.chatMessages = messages;
@@ -284,6 +284,23 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
+	});
+
+	it('validates restored snapshots with a matching message limit on chat switch', () => {
+		const { deps } = createDeps();
+		deps.chatState.restoreMessages = vi.fn(() => {
+			deps.chatState.chatMessages = Array.from(
+				{ length: 75 },
+				(_, index) => new AssistantMessage('2026-05-14T00:00:00.000Z', `cached ${index}`),
+			);
+			return { count: 75, stale: false };
+		});
+		deps.chatState.loadMessages = vi.fn(() => new Promise<never>(() => {}));
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleChatSwitch('chat-1');
+
+		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', { minimumLimit: 75 });
 	});
 
 	it('merges loaded Cursor user echoes with local pending messages by request identity', async () => {
@@ -513,7 +530,7 @@ describe('ConversationSessionController', () => {
 		const loaded = [new AssistantMessage('2026-05-14T00:00:00.000Z', 'older server snapshot')];
 		const { deps } = createDeps();
 		deps.chatState.pendingUserInputs = [pending];
-		deps.chatState.restoreMessages = vi.fn(() => false);
+		deps.chatState.restoreMessages = vi.fn(() => null);
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue(loaded);
 		const controller = new ConversationSessionController(deps as never);
 

@@ -8,9 +8,18 @@ import { LocalChatSnapshotCache } from './chat-snapshot-cache';
 import { getChatMessages } from '$lib/api/chats.js';
 
 const MESSAGES_PER_PAGE = 20;
-const INITIAL_VISIBLE_MESSAGES = 100;
+export const INITIAL_VISIBLE_MESSAGES = 100;
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
+
+export interface ChatLoadMessagesOptions {
+	minimumLimit?: number;
+}
+
+export interface ChatRestoreResult {
+	count: number;
+	stale: boolean;
+}
 
 export class ChatState {
 	readonly snapshotCache = new LocalChatSnapshotCache();
@@ -64,8 +73,9 @@ export class ChatState {
 	#loadGeneration = 0;
 
 	/** Loads messages for a chat through the REST history endpoint. */
-	async loadMessages(chatId: string): Promise<ChatMessage[]> {
+	async loadMessages(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<ChatMessage[]> {
 		if (!chatId) return [];
+		const limit = Math.max(MESSAGES_PER_PAGE, Math.floor(options.minimumLimit ?? MESSAGES_PER_PAGE));
 
 		const generation = ++this.#loadGeneration;
 		this.isLoadingMessages = true;
@@ -74,7 +84,7 @@ export class ChatState {
 		this.#messagesOffset = 0;
 
 		try {
-			const data = await getChatMessages({ chatId, limit: MESSAGES_PER_PAGE, offset: 0 });
+			const data = await getChatMessages({ chatId, limit, offset: 0 });
 			const messages = parseChatMessages(data.messages);
 			const pendingUserInputs = Array.isArray(data.pendingUserInputs)
 				? data.pendingUserInputs
@@ -241,15 +251,15 @@ export class ChatState {
 
 	/** Persists current durable messages via the snapshot cache. */
 	persistMessages(chatId: string): void {
-		this.snapshotCache.persist(chatId, this.chatMessages);
+		this.snapshotCache.persist(chatId, this.chatMessages, { limit: INITIAL_VISIBLE_MESSAGES });
 	}
 
 	/** Restores durable messages from the snapshot cache. */
-	restoreMessages(chatId: string): boolean {
-		const restored = this.snapshotCache.restore(chatId);
-		if (!restored) return false;
+	restoreMessages(chatId: string): ChatRestoreResult | null {
+		const restored = this.snapshotCache.restore(chatId, { limit: INITIAL_VISIBLE_MESSAGES });
+		if (!restored) return null;
 		this.setMessages(restored.messages);
-		return true;
+		return { count: restored.messages.length, stale: restored.stale };
 	}
 
 	/** Removes cached messages for the given chat ID. */

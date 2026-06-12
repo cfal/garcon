@@ -246,10 +246,30 @@ describe('ChatState', () => {
 		chatState.persistMessages(chatId);
 
 		const restored = new ChatState();
-		const ok = restored.restoreMessages(chatId);
-		expect(ok).toBe(true);
+		const result = restored.restoreMessages(chatId);
+		expect(result).toEqual({ count: 1, stale: false });
 		expect(restored.chatMessages).toHaveLength(1);
 		expect((restored.chatMessages[0] as UserMessage).content).toBe('second');
+		localStorage.clear();
+	});
+
+	it('persistMessages stores only the initial visible message window', () => {
+		const chatId = 'window-chat';
+		localStorage.clear();
+		const chatState = new ChatState();
+		chatState.setMessages(
+			Array.from(
+				{ length: 105 },
+				(_, index) => new UserMessage('2024-01-01T00:00:00Z', `message-${index}`),
+			),
+		);
+
+		chatState.persistMessages(chatId);
+
+		const restored = new ChatState();
+		const result = restored.restoreMessages(chatId);
+		expect(result?.count).toBe(100);
+		expect((restored.chatMessages[0] as UserMessage).content).toBe('message-5');
 		localStorage.clear();
 	});
 
@@ -263,7 +283,7 @@ describe('ChatState', () => {
 		chatState.removeCachedMessages(chatId);
 
 		const restored = new ChatState();
-		expect(restored.restoreMessages(chatId)).toBe(false);
+		expect(restored.restoreMessages(chatId)).toBeNull();
 		localStorage.clear();
 	});
 });

@@ -33,6 +33,22 @@ describe('LocalChatSnapshotCache', () => {
 		expect(restored!.stale).toBe(false);
 	});
 
+	it('persists only the trailing message window when a limit is provided', () => {
+		cache.persist('chat-1', [msg('a'), msg('b'), msg('c')], { limit: 2 });
+
+		const restored = cache.restore('chat-1');
+
+		expect(restored?.messages.map((message) => (message as UserMessage).content)).toEqual(['b', 'c']);
+	});
+
+	it('restores only the trailing message window from oversized snapshots', () => {
+		cache.persist('chat-1', [msg('a'), msg('b'), msg('c')]);
+
+		const restored = cache.restore('chat-1', { limit: 2 });
+
+		expect(restored?.messages.map((message) => (message as UserMessage).content)).toEqual(['b', 'c']);
+	});
+
 	it('removes snapshot when messages array is empty', () => {
 		cache.persist('chat-1', [msg('hello')]);
 		cache.persist('chat-1', []);

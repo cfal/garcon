@@ -8,18 +8,16 @@ import type {
 } from '$shared/ws-events';
 import { AssistantMessage, ErrorMessage } from '$shared/chat-types';
 import type { ChatMessage } from '$lib/types/chat';
-import type { SessionAgentId } from '$lib/types/app';
 import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 export interface ChatEventContext {
-	getAgentId: () => SessionAgentId;
 	getSelectedChat: () => ChatSessionRouterView | null;
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
 	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
-	loadMessages: (chatId: string, loadMore?: boolean, agentId?: string) => Promise<ChatMessage[]>;
+	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
 	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
 		ConversationUiStore,
@@ -122,9 +120,8 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 		// the authoritative reload never happened. Reload now.
 		const reloadId = statusChatId || selectedChat?.id;
 		if (reloadId) {
-			const chatProvider = selectedChat?.agentId || ctx.getAgentId();
 			ctx
-				.loadMessages(reloadId, false, chatProvider)
+				.loadMessages(reloadId)
 				.then((messages) => {
 					// Guard: active chat may have changed while the reload was in flight.
 					if (ctx.getCurrentChatId() !== reloadId) return;

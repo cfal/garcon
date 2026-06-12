@@ -77,7 +77,7 @@ export interface EventRouterStores {
 		clientRequestId: string,
 		deliveryStatus: 'submitting' | 'accepted' | 'failed',
 	) => void;
-	loadMessages: (chatId: string, loadMore?: boolean, agentId?: string) => Promise<ChatMessage[]>;
+	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
 	setIsLoading: (v: boolean) => void;
 	setCanAbort: (v: boolean) => void;
 	setLoadingStatus: (
@@ -230,7 +230,6 @@ function buildDispatch(
 	};
 
 	const chatEventCtx: ChatEventContext = {
-		getAgentId: stores.agentId,
 		getSelectedChat: stores.selectedChat,
 		getCurrentChatId: stores.currentChatId,
 		setCurrentChatId: stores.setCurrentChatId,

@@ -63,7 +63,7 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			deps.chatState.clearPendingUserInput(clientRequestId),
 		updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
 			deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
-		loadMessages: (chatId) => deps.chatState.loadMessages(chatId),
+		loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
 		setIsLoading: (v) => deps.lifecycle.setIsLoading(v),
 		setCanAbort: (v) => deps.lifecycle.setCanAbort(v),
 		setLoadingStatus: (s) => deps.lifecycle.setLoadingStatus(s),

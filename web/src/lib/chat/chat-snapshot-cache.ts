@@ -34,6 +34,10 @@ export interface RestoredChatSnapshot {
 	stale: boolean;
 }
 
+export interface ChatSnapshotWindowOptions {
+	limit?: number;
+}
+
 function snapshotKey(chatId: string): string {
 	return `${SNAPSHOT_PREFIX}${chatId}`;
 }
@@ -68,6 +72,12 @@ function readIndex(): ChatSnapshotIndex {
 
 function writeIndex(index: ChatSnapshotIndex): void {
 	localStorage.setItem(INDEX_KEY, JSON.stringify(index));
+}
+
+function windowMessages(messages: ChatMessage[], options: ChatSnapshotWindowOptions = {}): ChatMessage[] {
+	const limit = Number.isFinite(options.limit) ? Math.floor(options.limit ?? 0) : 0;
+	if (limit <= 0 || messages.length <= limit) return messages;
+	return messages.slice(-limit);
 }
 
 function upsertEntry(
@@ -118,7 +128,7 @@ function pruneIndex(index: ChatSnapshotIndex): ChatSnapshotIndex {
 
 export class LocalChatSnapshotCache {
 	/** Restores a snapshot, bumps recency, and returns stale status. */
-	restore(chatId: string): RestoredChatSnapshot | null {
+	restore(chatId: string, options: ChatSnapshotWindowOptions = {}): RestoredChatSnapshot | null {
 		if (!chatId) return null;
 
 		try {
@@ -134,7 +144,7 @@ export class LocalChatSnapshotCache {
 				return null;
 			}
 
-			const messages = parseChatMessages(parsed.messages);
+			const messages = windowMessages(parseChatMessages(parsed.messages), options);
 			const index = readIndex();
 			const entry = index.entries.find((candidate) => candidate.chatId === chatId);
 			const nextIndex = upsertEntry(index, chatId, { lastAccessedAt: nowIso() });
@@ -151,7 +161,7 @@ export class LocalChatSnapshotCache {
 	}
 
 	/** Writes envelope, updates index, prunes to 25 entries. */
-	persist(chatId: string, messages: ChatMessage[]): void {
+	persist(chatId: string, messages: ChatMessage[], options: ChatSnapshotWindowOptions = {}): void {
 		if (!chatId) return;
 
 		if (messages.length === 0) {
@@ -163,7 +173,7 @@ export class LocalChatSnapshotCache {
 			version: 1,
 			chatId,
 			savedAt: nowIso(),
-			messages,
+			messages: windowMessages(messages, options),
 		};
 
 		try {

@@ -23,7 +23,7 @@ import type { PendingUserInput } from '$shared/pending-user-input';
 import { createClientChatId } from '$lib/chat/client-id';
 import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
-import type { ChatState } from '$lib/chat/state.svelte';
+import { INITIAL_VISIBLE_MESSAGES, type ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
@@ -246,16 +246,23 @@ export class ConversationSessionController {
 		deps.agentState.thinkingMode = selected.thinkingMode ?? 'none';
 		deps.agentState.ampAgentMode = selected.ampAgentMode ?? 'smart';
 
-		this.loadChat(chatId);
+		this.loadChat(chatId, { minimumMessageLimit: restored?.count ?? 0 });
 	}
 
-	async loadChat(chatId: string): Promise<void> {
+	async loadChat(
+		chatId: string,
+		options: { minimumMessageLimit?: number } = {},
+	): Promise<void> {
 		const { deps } = this;
+		let minimumMessageLimit =
+			options.minimumMessageLimit ??
+			Math.min(deps.chatState.chatMessages.length, INITIAL_VISIBLE_MESSAGES);
 
 		// Restore from cache if no messages are loaded yet (e.g., WS reconnect path).
 		// The primary restore happens earlier in handleChatSwitch.
 		if (deps.chatState.chatMessages.length === 0) {
-			deps.chatState.restoreMessages(chatId);
+			const restored = deps.chatState.restoreMessages(chatId);
+			minimumMessageLimit = Math.max(minimumMessageLimit, restored?.count ?? 0);
 		}
 
 		if (deps.chatState.chatMessages.length > 0) {
@@ -263,7 +270,9 @@ export class ConversationSessionController {
 		}
 
 		try {
-			const messages = await deps.chatState.loadMessages(chatId);
+			const messages = await deps.chatState.loadMessages(chatId, {
+				minimumLimit: minimumMessageLimit,
+			});
 			if (deps.sessions.selectedChatId !== chatId) return;
 
 			deps.chatState.setMessages(messages);

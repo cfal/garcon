@@ -18,7 +18,6 @@ function makeConversationUi(
 
 function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 	return {
-		getAgentId: () => 'claude',
 		getSelectedChat: () => null,
 		getCurrentChatId: () => null,
 		setCurrentChatId: vi.fn(),

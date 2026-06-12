@@ -15,7 +15,6 @@ function makeConversationUi(): ChatEventContext['conversationUi'] {
 
 function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 	return {
-		getAgentId: () => 'claude',
 		getSelectedChat: () => null,
 		getCurrentChatId: () => null,
 		setCurrentChatId: vi.fn(),
@@ -63,7 +62,7 @@ describe('handleChatStatus', () => {
 		handleChatStatus(makeMsg('chat-a', false), ctx);
 
 		expect(ctx.clearLoadingIndicators).toHaveBeenCalledWith('chat-a');
-		expect(ctx.loadMessages).toHaveBeenCalledWith('chat-a', false, 'claude');
+		expect(ctx.loadMessages).toHaveBeenCalledWith('chat-a');
 	});
 
 	it('fires onChatProcessing/onChatNotProcessing callbacks', () => {
@@ -90,7 +89,7 @@ describe('handleChatStatus', () => {
 		});
 
 		handleChatStatus(makeMsg('chat-a', false), ctx);
-		expect(ctx.loadMessages).toHaveBeenCalledWith('chat-a', false, 'claude');
+		expect(ctx.loadMessages).toHaveBeenCalledWith('chat-a');
 
 		// User switches to a different chat while the reload is in flight.
 		activeChatId = 'chat-b';
