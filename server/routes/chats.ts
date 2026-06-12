@@ -123,6 +123,16 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
   return typeof value === 'string' ? value : null;
 }
 
+function chatSettingsPatchErrorResponse(error: unknown): Response {
+  if (error instanceof ModelSelectionError) {
+    return jsonError(error.message, 422, 'MODEL_SELECTION_ERROR');
+  }
+  if (error instanceof Error && error.message.endsWith(' is required')) {
+    return jsonError(error.message, 400, 'VALIDATION_FAILED');
+  }
+  return jsonErrorFromUnknown(error);
+}
+
 function pathValidationError(error: string, errorCode: string, status = 200): Response {
   return Response.json({
     success: false,
@@ -770,7 +780,7 @@ export default function createChatRoutes({
       if (Object.keys(patch).length > 0) await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
-      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+      return chatSettingsPatchErrorResponse(error);
     }
   }
 
@@ -789,7 +799,7 @@ export default function createChatRoutes({
       await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
-      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+      return chatSettingsPatchErrorResponse(error);
     }
   }
 

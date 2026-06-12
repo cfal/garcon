@@ -628,6 +628,25 @@ describe('saved searches API', () => {
     }));
   });
 
+  it('returns 409 when creating a duplicate saved search', async () => {
+    ctx.settings.addSavedSearch.mockImplementation(() => Promise.reject(
+      new Error('Saved search with ID duplicate already exists'),
+    ));
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      title: 'Duplicate',
+      query: 'status:unread',
+      showAsSidebarPill: true,
+      showInSidebarMenu: false,
+      showInSearchDialog: false,
+    }));
+
+    const response = await postHandler(makeRequest('http://localhost/api/v1/app/saved-searches', 'POST', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.errorCode).toBe('SAVED_SEARCH_ALREADY_EXISTS');
+  });
+
   it('rejects create when query is empty', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ query: '' }));
 
@@ -712,6 +731,28 @@ describe('saved searches API', () => {
 
     expect(response.status).toBe(404);
     expect(body.error).toBe('Saved search not found');
+    expect(body.errorCode).toBe('SAVED_SEARCH_NOT_FOUND');
+  });
+
+  it('returns 404 when saved search disappears during update', async () => {
+    ctx.settings.getSavedSearches.mockImplementation(() => [{
+      id: 'gone',
+      title: null,
+      query: 'old',
+      showAsSidebarPill: true,
+      showInSidebarMenu: false,
+      showInSearchDialog: false,
+      createdAt: 't',
+      updatedAt: 't',
+    }]);
+    ctx.settings.updateSavedSearch.mockImplementation(() => Promise.reject(new Error('Saved search not found: gone')));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ id: 'gone', query: 'new' }));
+
+    const response = await putHandler(makeRequest('http://localhost/api/v1/app/saved-searches', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.errorCode).toBe('SAVED_SEARCH_NOT_FOUND');
   });
 
   it('reorders saved searches', async () => {
@@ -787,6 +828,17 @@ describe('folders API', () => {
 			}));
 		});
 
+  it('returns 409 when creating a duplicate folder', async () => {
+    ctx.settings.addFolder.mockImplementation(() => Promise.reject(new Error('Folder with ID duplicate already exists')));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ name: 'Duplicate' }));
+
+    const response = await postHandler(makeRequest('http://localhost/api/app/folders', 'POST', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.errorCode).toBe('FOLDER_ALREADY_EXISTS');
+  });
+
   it('sanitizes folder filters when updating a folder', async () => {
     ctx.settings.updateFolder.mockImplementation(async (_id, patch) => ({ id: 'folder-1', name: 'Saved', createdAt: '2026-03-27T00:00:00.000Z', ...patch }));
     parseJsonBody.mockImplementation(() => Promise.resolve({
@@ -829,6 +881,20 @@ describe('folders API', () => {
     expect(ctx.settings.updateFolder).not.toHaveBeenCalled();
   });
 
+  it('returns 404 when updating a missing folder', async () => {
+    ctx.settings.updateFolder.mockImplementation(() => Promise.reject(new Error('Folder not found: folder-404')));
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      id: 'folder-404',
+      name: 'Missing',
+    }));
+
+    const response = await putHandler(makeRequest('http://localhost/api/app/folders', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.errorCode).toBe('FOLDER_NOT_FOUND');
+  });
+
   it('deletes a folder by id', async () => {
     ctx.settings.removeFolder.mockImplementation(() => Promise.resolve(true));
 
@@ -838,5 +904,15 @@ describe('folders API', () => {
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
     expect(ctx.settings.removeFolder).toHaveBeenCalledWith('folder-1');
+  });
+
+  it('returns 404 when deleting a missing folder', async () => {
+    ctx.settings.removeFolder.mockImplementation(() => Promise.resolve(false));
+
+    const response = await deleteHandler(undefined, new URL('http://localhost/api/app/folders?id=missing'));
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.errorCode).toBe('FOLDER_NOT_FOUND');
   });
 });

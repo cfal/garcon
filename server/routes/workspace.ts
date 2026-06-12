@@ -39,6 +39,23 @@ function asPlainObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function workspaceDomainErrorResponse(error: unknown): Response | null {
+  const message = errorMessage(error);
+  if (/^Saved search with ID .+ already exists$/.test(message)) {
+    return Response.json({ success: false, error: message, errorCode: 'SAVED_SEARCH_ALREADY_EXISTS' }, { status: 409 });
+  }
+  if (message.startsWith('Saved search not found')) {
+    return Response.json({ success: false, error: message, errorCode: 'SAVED_SEARCH_NOT_FOUND' }, { status: 404 });
+  }
+  if (/^Folder with ID .+ already exists$/.test(message)) {
+    return Response.json({ success: false, error: message, errorCode: 'FOLDER_ALREADY_EXISTS' }, { status: 409 });
+  }
+  if (message.startsWith('Folder not found')) {
+    return Response.json({ success: false, error: message, errorCode: 'FOLDER_NOT_FOUND' }, { status: 404 });
+  }
+  return null;
+}
+
 export async function buildRemoteSettingsSnapshot({
   settings,
   agents,
@@ -361,6 +378,8 @@ export default function createWorkspaceRoutes(
       const result = await settings.addSavedSearch(savedSearch);
       return Response.json({ success: true, savedSearch: result });
     } catch (error) {
+      const domainError = workspaceDomainErrorResponse(error);
+      if (domainError) return domainError;
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
@@ -395,7 +414,7 @@ export default function createWorkspaceRoutes(
       }
       const existing = (await settings.getSavedSearches()).find((s) => s.id === id);
       if (!existing) {
-        return Response.json({ success: false, error: 'Saved search not found' }, { status: 404 });
+        return Response.json({ success: false, error: 'Saved search not found', errorCode: 'SAVED_SEARCH_NOT_FOUND' }, { status: 404 });
       }
       const mergedVisibility = {
         showAsSidebarPill: patch.showAsSidebarPill !== undefined ? patch.showAsSidebarPill : existing.showAsSidebarPill,
@@ -409,6 +428,8 @@ export default function createWorkspaceRoutes(
       const result = await settings.updateSavedSearch(id, patch);
       return Response.json({ success: true, savedSearch: result });
     } catch (error) {
+      const domainError = workspaceDomainErrorResponse(error);
+      if (domainError) return domainError;
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
@@ -421,7 +442,7 @@ export default function createWorkspaceRoutes(
     try {
       const removed = await settings.removeSavedSearch(id);
       if (!removed) {
-        return Response.json({ success: false, error: 'Saved search not found' }, { status: 404 });
+        return Response.json({ success: false, error: 'Saved search not found', errorCode: 'SAVED_SEARCH_NOT_FOUND' }, { status: 404 });
       }
       return Response.json({ success: true });
     } catch (error) {
@@ -468,6 +489,8 @@ export default function createWorkspaceRoutes(
       const result = await settings.addFolder(folder);
       return Response.json({ success: true, folder: result });
     } catch (error) {
+      const domainError = workspaceDomainErrorResponse(error);
+      if (domainError) return domainError;
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
@@ -491,6 +514,8 @@ export default function createWorkspaceRoutes(
       const result = await settings.updateFolder(folderId, patch);
       return Response.json({ success: true, folder: result });
     } catch (error) {
+      const domainError = workspaceDomainErrorResponse(error);
+      if (domainError) return domainError;
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
@@ -503,7 +528,7 @@ export default function createWorkspaceRoutes(
     try {
       const removed = await settings.removeFolder(folderId);
       if (!removed) {
-        return Response.json({ success: false, error: 'Folder not found' }, { status: 404 });
+        return Response.json({ success: false, error: 'Folder not found', errorCode: 'FOLDER_NOT_FOUND' }, { status: 404 });
       }
       return Response.json({ success: true });
     } catch (error) {

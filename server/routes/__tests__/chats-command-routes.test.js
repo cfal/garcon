@@ -32,6 +32,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
+import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
 import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 function createSession(overrides = {}) {
@@ -420,6 +421,20 @@ describe('REST chat command routes', () => {
     }));
   });
 
+  it('PATCH /execution-settings returns 400 when chatId is missing', async () => {
+    const agent = createRouteAgent();
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/execution-settings'].PATCH,
+      { permissionMode: 'default' },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(400);
+    expect(body.errorCode).toBe('VALIDATION_FAILED');
+    expect(body.error).toBe('chatId is required');
+  });
+
   it('PATCH /model patches model selection metadata', async () => {
     const agent = createRouteAgent();
 
@@ -455,5 +470,36 @@ describe('REST chat command routes', () => {
       modelEndpointId: 'endpoint',
       modelProtocol: 'openai-compatible',
     }));
+  });
+
+  it('PATCH /model returns 400 when model is missing', async () => {
+    const agent = createRouteAgent();
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/model'].PATCH,
+      { chatId: '123' },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(400);
+    expect(body.errorCode).toBe('VALIDATION_FAILED');
+    expect(body.error).toBe('model is required');
+  });
+
+  it('PATCH /model maps model selection failures to 422', async () => {
+    const agent = createRouteAgent();
+    agent.agents.updateSessionSettings.mockRejectedValueOnce(
+      new ModelSelectionError('Endpoint not found', 'ENDPOINT_NOT_FOUND'),
+    );
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/model'].PATCH,
+      { chatId: '123', model: 'missing:model' },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(422);
+    expect(body.errorCode).toBe('MODEL_SELECTION_ERROR');
+    expect(body.error).toBe('Endpoint not found');
   });
 });
