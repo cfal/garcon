@@ -44,7 +44,7 @@
 
 <Popover.Root bind:open={popoverOpen}>
 	<Popover.Trigger>
-		<Button variant="ghost" size="icon-sm" aria-label="Diff settings" title="Diff settings">
+		<Button variant="ghost" size="icon-sm" aria-label={m.git_diff_settings()} title={m.git_diff_settings()}>
 			<Settings class="w-4 h-4" />
 		</Button>
 	</Popover.Trigger>

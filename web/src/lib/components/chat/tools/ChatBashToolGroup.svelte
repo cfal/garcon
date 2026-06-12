@@ -4,6 +4,7 @@
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Check from '@lucide/svelte/icons/check';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		messages: BashToolUseMessage[];
@@ -37,8 +38,8 @@
 					type="button"
 					onclick={copyCommands}
 					class="ml-auto inline-flex size-5 flex-shrink-0 items-center justify-center text-muted-foreground hover:text-foreground opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100"
-					title="Copy commands"
-					aria-label="Copy commands"
+					title={m.chat_tool_copy_commands()}
+					aria-label={m.chat_tool_copy_commands()}
 				>
 					{#if copied}
 						<Check class="size-3 text-status-success-foreground" />

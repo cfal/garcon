@@ -9,6 +9,7 @@
 	import type { GitCommit } from '$lib/api/git';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { formatDiff } from './GitFileItem.svelte';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitCommitItemProps {
 		commit: GitCommit;
@@ -50,7 +51,7 @@
 			type="button"
 			class="flex min-w-0 flex-1 items-start text-left"
 			onclick={() => onToggleExpanded(commit.hash)}
-			aria-label="Toggle commit details"
+			aria-label={m.git_commit_toggle_details()}
 		>
 			<div class="mr-2 mt-1 p-0.5 hover:bg-accent rounded">
 				{#if isExpanded}
@@ -69,10 +70,10 @@
 		<button
 			type="button"
 			class="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground flex-shrink-0 cursor-pointer select-none hover:text-foreground transition-colors"
-			title={copiedHash ? 'Copied' : 'Copy commit hash'}
+			title={copiedHash ? m.git_commit_copied() : m.git_commit_copy_hash()}
 			onclick={handleHashCopy}
 			data-copy-hash
-			aria-label={copiedHash ? 'Copied commit hash' : 'Copy commit hash'}
+			aria-label={copiedHash ? m.git_commit_copied_hash() : m.git_commit_copy_hash()}
 		>
 			<span>{shortHash}</span>
 			<span class="inline-flex h-3.5 w-3.5 items-center justify-center" aria-hidden="true">

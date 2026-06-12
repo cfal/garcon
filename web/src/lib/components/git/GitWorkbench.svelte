@@ -22,6 +22,7 @@
 	} from '$lib/stores/git-workbench.svelte.js';
 	import type { GitFileReviewData, ConfirmAction } from '$lib/api/git.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitWorkbenchProps {
 		projectPath?: string | null;
@@ -374,7 +375,7 @@
 				</div>
 				<button
 					type="button"
-					aria-label="Resize file tree"
+					aria-label={m.git_resize_file_tree()}
 					class="cursor-col-resize bg-border/60 hover:bg-interactive-accent/40 transition-colors border-none p-0 m-0 rounded-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 					onpointerdown={startTreeResize}
 					onkeydown={(e) => {

@@ -199,7 +199,7 @@
 								class="ml-0.5 rounded-full p-0 hover:text-foreground transition-colors"
 								onclick={() => removeChip(chip)}
 								disabled={isSaving}
-								aria-label="Remove {chip.label}"
+								aria-label={m.sidebar_remove_item({ name: chip.label })}
 							>
 								<X class="w-3 h-3" />
 							</button>

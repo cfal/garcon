@@ -12,6 +12,7 @@
 	import Minus from '@lucide/svelte/icons/minus';
 	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import type { GitTreeNode, GitChangeKind } from '$lib/api/git.js';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitFileTreeProps {
 		tree: GitTreeNode[];
@@ -115,10 +116,10 @@
 
 		<!-- Search -->
 		<div class="relative">
-			<Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+				<Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
 			<input
 				type="text"
-				placeholder="Filter files..."
+				placeholder={m.git_filter_files_placeholder()}
 				value={treeSearchQuery}
 				oninput={(e) => onSearchChange(e.currentTarget.value)}
 				class="w-full pl-7 pr-2 py-1 text-xs bg-muted border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
@@ -160,7 +161,7 @@
 				onclick={() => onToggleDir(node.path)}
 				onkeydown={(e) => handleKeyDown(e, node.path, true)}
 				class="w-5 h-5 flex items-center justify-center rounded hover:bg-muted shrink-0"
-				aria-label={isCollapsed ? 'Expand directory' : 'Collapse directory'}
+				aria-label={isCollapsed ? m.editor_actions_expand() : m.editor_actions_collapse()}
 			>
 				{#if isCollapsed}
 					<ChevronRight class="w-3.5 h-3.5 text-muted-foreground" />
@@ -190,7 +191,7 @@
 						onStageDir(node.path);
 					}}
 					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-					title="Stage directory"
+					title={m.git_action_stage_directory()}
 				>
 					<Plus class="w-3 h-3 text-git-added" />
 				</button>
@@ -203,7 +204,7 @@
 						onUnstageDir(node.path);
 					}}
 					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-					title="Unstage directory"
+					title={m.git_action_unstage_directory()}
 				>
 					<Minus class="w-3 h-3 text-git-deleted" />
 				</button>
@@ -272,7 +273,9 @@
 							onDiscardFile(node.path);
 						}}
 						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-status-error/20 transition-opacity shrink-0"
-						title={node.changeKind === 'untracked' ? 'Delete untracked file' : 'Discard changes'}
+						title={node.changeKind === 'untracked'
+							? m.git_file_item_delete_untracked()
+							: m.git_file_item_discard_changes()}
 					>
 						<Undo2 class="w-3 h-3 text-muted-foreground hover:text-status-error-foreground" />
 					</button>
@@ -284,7 +287,7 @@
 						onStageFile(node.path);
 					}}
 					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-					title="Stage file"
+					title={m.git_action_stage_file()}
 				>
 					<Plus class="w-3 h-3 text-git-added" />
 				</button>
@@ -297,13 +300,13 @@
 						onUnstageFile(node.path);
 					}}
 					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
-					title="Unstage file"
+					title={m.git_action_unstage_file()}
 				>
 					<Minus class="w-3 h-3 text-git-deleted" />
 				</button>
 			{/if}
 			{#if node.staged}
-				<span class="ml-1 w-1.5 h-1.5 rounded-full bg-git-added shrink-0" title="Staged"></span>
+				<span class="ml-1 w-1.5 h-1.5 rounded-full bg-git-added shrink-0" title={m.git_action_staged()}></span>
 			{/if}
 		</div>
 	{/if}

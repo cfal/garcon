@@ -254,7 +254,7 @@
 					variant="ghost"
 					size="icon-sm"
 					onclick={() => store.refresh()}
-					title="Refresh files"
+					title={m.filetree_refresh_files()}
 				>
 					<RefreshCw class="w-4 h-4" />
 				</Button>
@@ -275,7 +275,7 @@
 							type="button"
 							class={headerButtonClass(store.sortKey === 'name')}
 							onclick={() => store.toggleSort('name')}
-							aria-label="Sort by name"
+							aria-label={m.filetree_sort_by_name()}
 						>
 							{m.filetree_name()}
 							{@render sortIcon('name')}
@@ -286,7 +286,7 @@
 							type="button"
 							class={headerButtonClass(store.sortKey === 'size')}
 							onclick={() => store.toggleSort('size')}
-							aria-label="Sort by size"
+							aria-label={m.filetree_sort_by_size()}
 						>
 							{m.filetree_size()}
 							{@render sortIcon('size')}
@@ -297,7 +297,7 @@
 							type="button"
 							class={headerButtonClass(store.sortKey === 'modified')}
 							onclick={() => store.toggleSort('modified')}
-							aria-label="Sort by modified time"
+							aria-label={m.filetree_sort_by_modified()}
 						>
 							{m.filetree_modified()}
 							{@render sortIcon('modified')}
@@ -308,7 +308,7 @@
 							type="button"
 							class={headerButtonClass(store.sortKey === 'permissions')}
 							onclick={() => store.toggleSort('permissions')}
-							aria-label="Sort by permissions"
+							aria-label={m.filetree_sort_by_permissions()}
 						>
 							{m.filetree_permissions()}
 							{@render sortIcon('permissions')}
@@ -341,7 +341,7 @@
 					</div>
 				</div>
 			{:else}
-				<div role="tree" aria-label="Project files">
+				<div role="tree" aria-label={m.filetree_project_files()}>
 					{#each displayFiles as item (item.path)}
 						{@render detailedTreeItem(item, 0)}
 					{/each}

@@ -16,6 +16,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import type { GitWorktreeItem } from '$lib/api/git.js';
 	import { deriveWorktreePath } from '$lib/utils/worktree-path.js';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		worktrees: GitWorktreeItem[];
@@ -125,7 +126,7 @@
 >
 	<Dialog.Content
 		showCloseButton={false}
-		aria-label="Select worktree"
+		aria-label={m.workspace_worktree_select()}
 		onkeydown={handleKeydown}
 		class="w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-xl border border-border bg-popover p-0 shadow-2xl max-h-[80dvh]"
 	>
@@ -139,8 +140,8 @@
 						onclick={onRefresh}
 						disabled={isLoading}
 						class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-						title="Refresh worktrees"
-						aria-label="Refresh worktrees"
+						title={m.workspace_worktree_refresh()}
+						aria-label={m.workspace_worktree_refresh()}
 					>
 						<RefreshCw class="h-3.5 w-3.5 {isLoading ? 'animate-spin' : ''}" />
 					</button>
@@ -148,7 +149,7 @@
 						type="button"
 						onclick={onClose}
 						class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-						aria-label="Close"
+						aria-label={m.share_dialog_close()}
 					>
 						<X class="h-3.5 w-3.5" />
 					</button>
@@ -245,7 +246,7 @@
 						bind:this={branchInputRef}
 						type="text"
 						bind:value={branchName}
-						placeholder="Branch name (e.g. fix/login-bug)"
+						placeholder={m.workspace_worktree_branch_name_placeholder()}
 						class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
 						onkeydown={(e) => {
 							if (e.key === 'Enter') handleCreate();
@@ -279,13 +280,13 @@
 							<input
 								type="text"
 								bind:value={pathOverride}
-								placeholder="Path override"
+								placeholder={m.workspace_worktree_path_override_placeholder()}
 								class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
 							/>
 							<input
 								type="text"
 								bind:value={baseRefOverride}
-								placeholder="Base ref (HEAD)"
+								placeholder={m.workspace_worktree_base_ref_placeholder()}
 								class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
 							/>
 						</div>

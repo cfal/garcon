@@ -219,7 +219,7 @@
 			<div
 				role="checkbox"
 				aria-checked={isMultiSelected}
-				aria-label="Select {chatName}"
+				aria-label={m.sidebar_select_chat({ name: chatName })}
 				class={cn(
 					'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
 					isMultiSelected

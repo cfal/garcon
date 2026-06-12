@@ -297,7 +297,7 @@
 					class={scrollToTopButtonClass}
 					onclick={() => scroll.scrollToTop()}
 					disabled={scroll.isScrollingToTop}
-					title="Scroll to initial prompt"
+					title={m.workspace_scroll_to_initial_prompt()}
 				>
 					{#if scroll.isScrollingToTop}
 						<Loader2 class="w-5 h-5 animate-spin" />
@@ -310,7 +310,7 @@
 					size="icon"
 					class="absolute bottom-14 right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg"
 					onclick={() => scroll.scrollToBottom()}
-					title="Scroll to bottom"
+					title={m.workspace_scroll_to_bottom()}
 				>
 					<ArrowDown class="w-5 h-5" />
 				</Button>

@@ -11,6 +11,7 @@
 	import Check from '@lucide/svelte/icons/check';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import type { GitFileReviewData, GitReviewCommentDraft, GitDiffTab } from '$lib/api/git.js';
+	import * as m from '$lib/paraglide/messages.js';
 	import {
 		makeLineSelectionKey,
 		type DiffMode,
@@ -661,7 +662,7 @@
 													<button
 														onclick={() => onStageHunk(actionTarget, srow.hunkIndex!)}
 														class="px-1.5 py-0.5 text-[10px] rounded bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors"
-														title="Stage hunk"
+														title={m.git_action_stage_hunk()}
 													>
 														<Plus class="w-3 h-3 inline" /> Stage
 													</button>
@@ -669,7 +670,7 @@
 													<button
 														onclick={() => onUnstageHunk(actionTarget, srow.hunkIndex!)}
 														class="px-1.5 py-0.5 text-[10px] rounded bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors"
-														title="Unstage hunk"
+														title={m.git_action_unstage_hunk()}
 													>
 														<Minus class="w-3 h-3 inline" /> Unstage
 													</button>
@@ -719,7 +720,7 @@
 																onStageLine?.(actionTarget, srow.left!.diffLineIndex);
 															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
-															title="Stage line"
+															title={m.git_action_stage_line()}
 														>
 															<Plus class="w-2.5 h-2.5" />
 														</button>
@@ -730,7 +731,7 @@
 																onUnstageLine?.(actionTarget, srow.left!.diffLineIndex);
 															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
-															title="Unstage line"
+															title={m.git_action_unstage_line()}
 														>
 															<Minus class="w-2.5 h-2.5" />
 														</button>
@@ -816,7 +817,7 @@
 																onStageLine?.(actionTarget, srow.right!.diffLineIndex);
 															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
-															title="Stage line"
+															title={m.git_action_stage_line()}
 														>
 															<Plus class="w-2.5 h-2.5" />
 														</button>
@@ -827,7 +828,7 @@
 																onUnstageLine?.(actionTarget, srow.right!.diffLineIndex);
 															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
-															title="Unstage line"
+															title={m.git_action_unstage_line()}
 														>
 															<Minus class="w-2.5 h-2.5" />
 														</button>
@@ -947,14 +948,14 @@
 																		editBody = comment.body;
 																	}}
 																	class="p-0.5 rounded hover:bg-muted"
-																	title="Edit"
+																	title={m.git_action_edit()}
 																>
 																	<Pencil class="w-3 h-3 text-muted-foreground" />
 																</button>
 																<button
 																	onclick={() => onRemoveComment?.(comment.id)}
 																	class="p-0.5 rounded hover:bg-muted"
-																	title="Remove"
+																	title={m.git_action_remove()}
 																>
 																	<Trash2 class="w-3 h-3 text-muted-foreground" />
 																</button>
@@ -989,7 +990,7 @@
 													value={composerState?.body ?? ''}
 													oninput={(e) => onComposerBodyChange?.(e.currentTarget.value)}
 													onkeydown={handleComposerKeydown}
-													placeholder="Comment..."
+													placeholder={m.git_comment_placeholder()}
 													class="w-full text-xs p-2 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 													rows="3"
 												></textarea>
@@ -1035,7 +1036,7 @@
 													<button
 														onclick={() => onStageHunk(actionTarget, row.hunkIndex!)}
 														class="px-1.5 py-0.5 text-[10px] rounded bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors"
-														title="Stage hunk"
+														title={m.git_action_stage_hunk()}
 													>
 														<Plus class="w-3 h-3 inline" /> Stage
 													</button>
@@ -1043,7 +1044,7 @@
 													<button
 														onclick={() => onUnstageHunk(actionTarget, row.hunkIndex!)}
 														class="px-1.5 py-0.5 text-[10px] rounded bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors"
-														title="Unstage hunk"
+														title={m.git_action_unstage_hunk()}
 													>
 														<Minus class="w-3 h-3 inline" /> Unstage
 													</button>
@@ -1081,7 +1082,7 @@
 																onStageLine(actionTarget, row.diffLineIndex);
 															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
-															title="Stage line"
+															title={m.git_action_stage_line()}
 														>
 															<Plus class="w-3 h-3" />
 														</button>
@@ -1092,7 +1093,7 @@
 																onUnstageLine?.(actionTarget, row.diffLineIndex);
 															}}
 															class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
-															title="Unstage line"
+															title={m.git_action_unstage_line()}
 														>
 															<Minus class="w-3 h-3" />
 														</button>
@@ -1213,14 +1214,14 @@
 																		editBody = comment.body;
 																	}}
 																	class="p-0.5 rounded hover:bg-muted"
-																	title="Edit"
+																	title={m.git_action_edit()}
 																>
 																	<Pencil class="w-3 h-3 text-muted-foreground" />
 																</button>
 																<button
 																	onclick={() => onRemoveComment?.(comment.id)}
 																	class="p-0.5 rounded hover:bg-muted"
-																	title="Remove"
+																	title={m.git_action_remove()}
 																>
 																	<Trash2 class="w-3 h-3 text-muted-foreground" />
 																</button>
@@ -1255,7 +1256,7 @@
 													value={composerState?.body ?? ''}
 													oninput={(e) => onComposerBodyChange?.(e.currentTarget.value)}
 													onkeydown={handleComposerKeydown}
-													placeholder="Comment..."
+													placeholder={m.git_comment_placeholder()}
 													class="w-full text-xs p-2 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 													rows="3"
 												></textarea>

@@ -7,6 +7,7 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import type { GitReviewCommentDraft } from '$lib/api/git.js';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		commentsByFile: Record<string, GitReviewCommentDraft[]>;
@@ -135,7 +136,7 @@
 										class="p-0.5 rounded hover:bg-muted transition-colors {isMobile
 											? ''
 											: 'opacity-0 group-hover:opacity-100'}"
-										title="Edit"
+										title={m.git_action_edit()}
 									>
 										<Pencil class="w-3.5 h-3.5 text-muted-foreground" />
 									</button>
@@ -144,7 +145,7 @@
 										class="p-0.5 rounded hover:bg-muted transition-colors {isMobile
 											? ''
 											: 'opacity-0 group-hover:opacity-100'}"
-										title="Delete"
+										title={m.git_confirm_delete()}
 									>
 										<Trash2 class="w-3.5 h-3.5 text-muted-foreground" />
 									</button>
@@ -189,7 +190,7 @@
 			<textarea
 				value={reviewSummary}
 				oninput={(e) => onSummaryChange(e.currentTarget.value)}
-				placeholder="Review summary (optional)..."
+				placeholder={m.git_review_summary_placeholder()}
 				class="w-full text-xs p-2 bg-muted border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 				rows="3"
 			></textarea>

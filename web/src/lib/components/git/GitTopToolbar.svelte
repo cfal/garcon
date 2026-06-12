@@ -186,14 +186,14 @@
 		</div>
 
 		{#if targets.length > 0}
-			<label class="sr-only" for="git-target-select">Git target</label>
+			<label class="sr-only" for="git-target-select">{m.git_target()}</label>
 			<select
 				id="git-target-select"
 				disabled={isLoadingTargets}
 				value={activeWorktreePath ?? ''}
 				onchange={(event) => onSelectTarget?.(event.currentTarget.value)}
 				class="h-7 max-w-52 rounded border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-				title="Git target"
+				title={m.git_target()}
 			>
 				{#each targets as target (target.worktreePath)}
 					<option value={target.worktreePath} disabled={target.isMissing}>
@@ -207,8 +207,8 @@
 			type="button"
 			onclick={() => onOpenWorktrees?.()}
 			class="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-			title="Manage worktrees"
-			aria-label="Manage worktrees"
+			title={m.git_manage_worktrees()}
+			aria-label={m.git_manage_worktrees()}
 		>
 			<FolderOpen class="w-4 h-4" />
 		</button>
@@ -221,7 +221,7 @@
 			<button
 				onclick={onViewCommits}
 				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-150"
-				title="View commit history"
+				title={m.git_view_commit_history()}
 			>
 				<History class="w-4 h-4" />
 				{#if !isMobile}History{/if}
@@ -234,7 +234,7 @@
 					{reviewCount > 0
 					? 'bg-interactive-accent/10 text-interactive-accent border-interactive-accent/30 hover:bg-interactive-accent/20'
 					: 'border-border bg-background text-muted-foreground hover:text-foreground'}"
-				title="Review changes"
+				title={m.git_review_changes()}
 			>
 				<MessageSquare class="w-4 h-4" />
 				{#if !isMobile}Review{/if}
@@ -255,7 +255,7 @@
 					{canCommit && !isCommitting
 					? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
 					: 'bg-muted text-muted-foreground cursor-not-allowed'}"
-				title="Commit staged changes"
+				title={m.git_changes_commit_staged()}
 			>
 				Commit
 			</button>
@@ -268,8 +268,8 @@
 					{canPush && !isPushing
 					? 'bg-git-action-push text-git-action-foreground hover:bg-git-action-push-hover'
 					: 'bg-muted text-muted-foreground cursor-not-allowed'}"
-				title="Push to remote"
-				aria-label="Push"
+				title={m.git_header_push_to_remote()}
+				aria-label={m.git_header_push()}
 			>
 				<Upload class="w-4 h-4 {isPushing ? 'animate-pulse' : ''}" />
 				{#if !isMobile}Push{/if}
@@ -302,7 +302,7 @@
 			<button
 				onclick={onViewChanges}
 				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-150"
-				title="View changes"
+				title={m.git_view_changes()}
 			>
 				<ArrowLeft class="w-4 h-4" />
 				{#if !isMobile}Changes{/if}
@@ -312,7 +312,7 @@
 			<button
 				onclick={onRevert}
 				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-status-warning hover:bg-status-warning/10 transition-all duration-200"
-				title="Revert last commit"
+				title={m.git_revert_last_commit()}
 			>
 				<Undo2 class="w-4 h-4" />
 				{#if !isMobile}Revert{/if}

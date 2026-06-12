@@ -287,7 +287,7 @@
 		onfocusin={handleMessagePaneFocusIntent}
 		tabindex={-1}
 		role="log"
-		aria-label="Chat messages"
+		aria-label={m.chat_messages_region()}
 		class={feedViewportClass}
 	>
 		<div class={feedContentClass}>

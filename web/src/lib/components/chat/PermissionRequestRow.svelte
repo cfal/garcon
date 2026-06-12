@@ -173,7 +173,7 @@
 						type="button"
 						onclick={() => onExitPlanMode?.(request.permissionRequestId, 'bypass-new', plan)}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-warning-border bg-status-warning text-status-warning-foreground hover:bg-status-warning/90"
-						title="Creates a new session with a clean context to implement the plan"
+						title={m.chat_permission_tooltip_new_session_bypass()}
 					>
 						{m.chat_permission_yes_new_session_bypass()}
 					</button>
@@ -181,7 +181,7 @@
 						type="button"
 						onclick={() => onExitPlanMode?.(request.permissionRequestId, 'bypass', plan)}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-warning-border text-status-warning hover:bg-status-warning/15"
-						title="Continue in this session with bypass permissions"
+						title={m.chat_permission_tooltip_bypass()}
 					>
 						{m.chat_permission_yes_bypass()}
 					</button>
@@ -189,7 +189,7 @@
 						type="button"
 						onclick={() => onExitPlanMode?.(request.permissionRequestId, 'approve-edits', plan)}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-info-border text-status-info hover:bg-status-info/15"
-						title="Continue in this session, manually approve edits"
+						title={m.chat_permission_tooltip_approve_edits()}
 					>
 						{m.chat_permission_yes_approve_edits()}
 					</button>
@@ -198,10 +198,10 @@
 						onclick={() =>
 							onDecision(request.permissionRequestId, {
 								allow: false,
-								message: 'Keep in plan mode -- revise the plan based on feedback',
+								message: m.chat_permission_revise_plan_message(),
 							})}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-info-border text-status-info hover:bg-status-info/15"
-						title="Stay in plan mode -- type feedback to revise the plan"
+						title={m.chat_permission_tooltip_revise_plan()}
 					>
 						{m.chat_permission_revise_plan()}
 					</button>

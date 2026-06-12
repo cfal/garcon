@@ -13,6 +13,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import type { GitWorktreeItem } from '$lib/api/git.js';
 	import { deriveWorktreePath } from '$lib/utils/worktree-path.js';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitWorktreePanelProps {
 		worktrees: GitWorktreeItem[];
@@ -86,7 +87,7 @@
 				showCreateForm = !showCreateForm;
 			}}
 			class="p-1 rounded hover:bg-muted transition-colors"
-			title="New worktree"
+			title={m.git_new_worktree()}
 		>
 			<Plus class="w-4 h-4 text-muted-foreground" />
 		</button>
@@ -97,7 +98,7 @@
 		<div class="border border-border rounded p-2 space-y-2 bg-muted/20">
 			<input
 				bind:value={branchName}
-				placeholder="Branch name (e.g. fix/login-bug)"
+				placeholder={m.workspace_worktree_branch_name_placeholder()}
 				class="w-full text-xs p-1.5 bg-background border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 				onkeydown={(e) => {
 					if (e.key === 'Enter') handleCreate();
@@ -124,12 +125,12 @@
 			{#if showAdvanced}
 				<input
 					bind:value={pathOverride}
-					placeholder="Path override ({derivedPath})"
+					placeholder={m.git_path_override_with_default_placeholder({ path: derivedPath })}
 					class="w-full text-xs p-1.5 bg-background border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 				/>
 				<input
 					bind:value={baseRefOverride}
-					placeholder="Base ref (HEAD)"
+					placeholder={m.git_base_ref_placeholder()}
 					class="w-full text-xs p-1.5 bg-background border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 				/>
 			{/if}
@@ -199,7 +200,7 @@
 								confirmRemovePath = wt.path;
 							}}
 							class="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-muted transition-opacity"
-							title="Remove worktree"
+							title={m.git_action_remove_worktree()}
 						>
 							<Trash2 class="w-3.5 h-3.5 text-muted-foreground" />
 						</button>

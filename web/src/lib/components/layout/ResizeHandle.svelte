@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { cn } from '$lib/utils/cn';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface ResizeHandleProps {
 		width: number;
@@ -55,7 +56,7 @@
 		onpointerdown={handlePointerDown}
 		role="separator"
 		aria-orientation="vertical"
-		aria-label="Resize sidebar"
+		aria-label={m.layout_resize_sidebar()}
 		tabindex="-1"
 	>
 		<div class={indicatorClass}></div>

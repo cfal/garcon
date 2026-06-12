@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { cn } from '$lib/utils/cn';
+	import * as m from '$lib/paraglide/messages.js';
 
 	type DropZone = 'left' | 'right' | 'top' | 'bottom' | 'center';
 
@@ -56,7 +57,7 @@
 	class="absolute inset-0 z-30 pointer-events-auto"
 	ondragleave={handleDragLeave}
 	role="region"
-	aria-label="Drop zone overlay"
+	aria-label={m.layout_drop_zone_overlay()}
 >
 	<!-- svelte-ignore a11y_no_static_element_interactions -- invisible drag hit targets, not interactive elements -->
 	<div class="absolute inset-0 z-10">

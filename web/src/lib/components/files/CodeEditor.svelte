@@ -324,7 +324,7 @@
 						variant="ghost"
 						size="sm"
 						onclick={onRequestMarkdownView}
-						title="Switch to markdown view"
+						title={m.editor_switch_to_markdown_view()}
 					>
 						View
 					</Button>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { cn } from '$lib/utils/cn';
 	import type { SplitDirection } from '$lib/stores/split-layout.svelte';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface SplitResizerProps {
 		direction: SplitDirection;
@@ -51,7 +52,7 @@
 	onpointerdown={handlePointerDown}
 	role="separator"
 	aria-orientation={isHorizontal ? 'vertical' : 'horizontal'}
-	aria-label="Resize panes"
+	aria-label={m.layout_resize_panes()}
 	tabindex="-1"
 >
 	<!-- Wide invisible hit area for easy grabbing -->

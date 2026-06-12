@@ -2,6 +2,7 @@
 	// Full-screen modal for composing an inline review comment on mobile.
 
 	import X from '@lucide/svelte/icons/x';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface ComposerState {
 		open: boolean;
@@ -63,7 +64,7 @@
 		<textarea
 			value={composer.body}
 			oninput={(e) => onBodyChange(e.currentTarget.value)}
-			placeholder="Comment..."
+			placeholder={m.git_comment_placeholder()}
 			class="w-full text-sm p-3 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 			rows="6"
 		></textarea>

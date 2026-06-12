@@ -115,7 +115,7 @@
 			<a
 				href="/"
 				class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0 hover:opacity-90 transition-opacity"
-				title="Garcon"
+				title={m.sidebar_app_title()}
 			>
 				<MessageSquare class="w-4 h-4 text-primary-foreground" />
 			</a>

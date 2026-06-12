@@ -3,6 +3,7 @@
 	// Used on desktop near the diff line where the user clicked.
 
 	import X from '@lucide/svelte/icons/x';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface ComposerState {
 		open: boolean;
@@ -64,7 +65,7 @@
 			value={composer.body}
 			oninput={(e) => onBodyChange(e.currentTarget.value)}
 			onkeydown={handleKeydown}
-			placeholder="Comment..."
+			placeholder={m.git_comment_placeholder()}
 			class="w-full text-xs p-2 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 			rows="3"
 		></textarea>

@@ -168,7 +168,7 @@
 			: 'border-border/40 hover:border-border/70',
 	)}
 	role="region"
-	aria-label="Chat pane: {chatTitle}"
+	aria-label={m.chat_pane_label({ title: chatTitle })}
 	data-pane-id={paneId}
 >
 	<!-- Pane Header: draggable for rearranging, drop target for swap/replace -->
@@ -217,14 +217,14 @@
 			</span>
 		{/if}
 		{#if isProcessing}
-			<span class="relative flex h-1.5 w-1.5 flex-shrink-0" aria-label="Chat is processing">
+			<span class="relative flex h-1.5 w-1.5 flex-shrink-0" aria-label={m.chat_pane_processing()}>
 				<span
 					class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/50 opacity-75"
 				></span>
 				<span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span>
 			</span>
 		{:else if needsAttention}
-			<span class="relative flex h-2 w-2 flex-shrink-0" aria-label="Chat finished, new activity">
+			<span class="relative flex h-2 w-2 flex-shrink-0" aria-label={m.chat_pane_activity()}>
 				<span
 					class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indicator-attention/60 opacity-60"
 				></span>
@@ -243,7 +243,7 @@
 					e.stopPropagation();
 					onDelete();
 				}}
-				aria-label="Delete chat"
+				aria-label={m.sidebar_delete_confirmation_delete_chat()}
 			>
 				<Trash2 class="w-2.5 h-2.5" />
 			</button>
@@ -253,7 +253,7 @@
 					e.stopPropagation();
 					onClose();
 				}}
-				aria-label="Close pane"
+				aria-label={m.chat_pane_close()}
 			>
 				<X class="w-2.5 h-2.5" />
 			</button>
@@ -279,13 +279,13 @@
 			}}
 			role="button"
 			tabindex="0"
-			aria-label="Focus chat composer for {chatTitle}"
+			aria-label={m.chat_pane_focus_composer({ title: chatTitle })}
 		>
 			<div
 				bind:this={previewScrollContainer}
 				class="min-h-0 flex-1 overflow-y-auto space-y-1.5 scrollbar-hide"
 				role="log"
-				aria-label="Chat preview for {chatTitle}"
+				aria-label={m.chat_pane_preview({ title: chatTitle })}
 			>
 				{#if isPreviewLoading && previewMessages.length === 0}
 					<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">

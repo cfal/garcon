@@ -11,6 +11,7 @@
 	import FileEdit from '@lucide/svelte/icons/file-pen-line';
 	import FileQuestion from '@lucide/svelte/icons/file-question';
 	import type { GitTreeNode } from '$lib/api/git.js';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		stagedFiles: GitTreeNode[];
@@ -156,7 +157,7 @@
 				value={commitMessage}
 				oninput={(e) => onMessageChange(e.currentTarget.value)}
 				onfocus={handleTextareaFocus}
-				placeholder="Commit message..."
+				placeholder={m.git_commit_message_placeholder()}
 				class="w-full text-sm p-2.5 bg-muted/30 border border-border rounded-md resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 				rows="3"
 			></textarea>
@@ -179,7 +180,7 @@
 						onclick={onGenerate}
 						disabled={stagedFiles.length === 0 || isGeneratingMessage}
 						class="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
-						title="Generate commit message"
+						title={m.git_changes_generate_message()}
 					>
 						{#if isGeneratingMessage}
 							<LoaderCircle class="w-3.5 h-3.5 animate-spin" />

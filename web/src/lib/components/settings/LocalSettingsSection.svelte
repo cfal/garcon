@@ -51,7 +51,7 @@
 					variant={ls.theme === 'light' ? 'default' : 'ghost'}
 					size="icon-sm"
 					onclick={() => setTheme('light')}
-					title="Light"
+					title={m.settings_theme_light()}
 				>
 					<SunIcon class="size-3.5" />
 				</Button>
@@ -59,7 +59,7 @@
 					variant={ls.theme === 'dark' ? 'default' : 'ghost'}
 					size="icon-sm"
 					onclick={() => setTheme('dark')}
-					title="Dark"
+					title={m.settings_theme_dark()}
 				>
 					<MoonIcon class="size-3.5" />
 				</Button>
@@ -67,7 +67,7 @@
 					variant={ls.theme === 'system' ? 'default' : 'ghost'}
 					size="icon-sm"
 					onclick={() => setTheme('system')}
-					title="System"
+					title={m.settings_theme_system()}
 				>
 					<MonitorIcon class="size-3.5" />
 				</Button>
