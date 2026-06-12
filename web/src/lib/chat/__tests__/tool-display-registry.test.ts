@@ -154,7 +154,11 @@ describe('tool display helpers', () => {
 	});
 
 	it('coerces todo-read results through the shared todo normalizer', () => {
-		const props = TOOL_DISPLAY_REGISTRY['todo-read-tool-use'].result.getContentProps?.({
+		const getContentProps = TOOL_DISPLAY_REGISTRY['todo-read-tool-use'].result?.getContentProps;
+		expect(getContentProps).toBeDefined();
+		if (!getContentProps) throw new Error('todo-read result renderer missing');
+
+		const props = getContentProps({
 			content: {
 				items: [
 					{ text: 'review code', status: 'in-progress' },
