@@ -1,0 +1,135 @@
+<script lang="ts">
+	import type { AppTab } from '$lib/types/app';
+	import Maximize2 from '@lucide/svelte/icons/maximize-2';
+	import Minimize2 from '@lucide/svelte/icons/minimize-2';
+	import Share2 from '@lucide/svelte/icons/share-2';
+	import PanelLeft from '@lucide/svelte/icons/panel-left';
+	import Grid2x2 from '@lucide/svelte/icons/grid-2x2';
+	import * as m from '$lib/paraglide/messages.js';
+	import { cn } from '$lib/utils/cn';
+	import { CHAT_TOOLBAR_TABS } from './chat-toolbar-tabs';
+	import WorkspaceToolbarButton from './WorkspaceToolbarButton.svelte';
+
+	interface WorkspaceToolbarProps {
+		activeTab: AppTab;
+		splitEnabled: boolean;
+		splitViewTooltip: string;
+		fullscreenTooltip: string;
+		showFullscreenButton: boolean;
+		isDesktopFullscreen: boolean;
+		shadow?: boolean;
+		onTabChange: (tab: AppTab) => void;
+		onToggleSplitMode: () => void;
+		onSetupGrid: () => void;
+		onShare: () => void;
+		onToggleDesktopFullscreen?: () => void;
+	}
+
+	let {
+		activeTab,
+		splitEnabled,
+		splitViewTooltip,
+		fullscreenTooltip,
+		showFullscreenButton,
+		isDesktopFullscreen,
+		shadow = false,
+		onTabChange,
+		onToggleSplitMode,
+		onSetupGrid,
+		onShare,
+		onToggleDesktopFullscreen,
+	}: WorkspaceToolbarProps = $props();
+
+	const tabs = CHAT_TOOLBAR_TABS;
+	const railShadow = $derived(shadow ? 'shadow-sm' : '');
+
+	function getTabButtonClasses(tabId: AppTab): string {
+		return cn(
+			'relative px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium rounded-md transition-colors duration-150',
+			tabId === activeTab
+				? 'bg-chat-tabs-active text-chat-tabs-active-foreground shadow-sm border border-chat-tabs-active-border'
+				: 'text-muted-foreground hover:text-foreground hover:bg-accent',
+		);
+	}
+
+	function getUtilityButtonClasses(): string {
+		return cn(
+			'relative inline-flex items-center justify-center h-6 sm:h-7 w-6 sm:w-7 px-0 py-0 rounded-md transition-colors duration-150',
+			'text-muted-foreground hover:text-foreground hover:bg-accent',
+		);
+	}
+</script>
+
+<div class="flex items-center gap-1.5">
+	<div
+		class={cn(
+			'relative flex bg-chat-tabs-rail text-foreground rounded-lg p-0.5 border border-chat-tabs-rail-border',
+			railShadow,
+		)}
+	>
+		{#each tabs as tab (tab.id)}
+			<WorkspaceToolbarButton
+				label={tab.label()}
+				onclick={() => onTabChange(tab.id)}
+				class={getTabButtonClasses(tab.id)}
+				pressed={tab.id === activeTab}
+			>
+				<span class="flex items-center gap-1 sm:gap-1.5">
+					<tab.icon class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+					<span class="hidden lg:inline">{tab.label()}</span>
+				</span>
+			</WorkspaceToolbarButton>
+		{/each}
+	</div>
+	<div
+		class={cn(
+			'relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border',
+			railShadow,
+		)}
+	>
+		<WorkspaceToolbarButton
+			label={splitViewTooltip}
+			onclick={onToggleSplitMode}
+			class={cn(getUtilityButtonClasses(), splitEnabled && 'text-primary bg-primary/10')}
+		>
+			<span class="flex items-center justify-center">
+				<PanelLeft class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+			</span>
+		</WorkspaceToolbarButton>
+		{#if splitEnabled}
+			<WorkspaceToolbarButton
+				label={m.workspace_grid_view()}
+				onclick={onSetupGrid}
+				class={getUtilityButtonClasses()}
+			>
+				<span class="flex items-center justify-center">
+					<Grid2x2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+				</span>
+			</WorkspaceToolbarButton>
+		{/if}
+		<WorkspaceToolbarButton
+			label={m.share_button()}
+			onclick={onShare}
+			class={getUtilityButtonClasses()}
+		>
+			<span class="flex items-center justify-center">
+				<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+			</span>
+		</WorkspaceToolbarButton>
+		{#if showFullscreenButton}
+			<WorkspaceToolbarButton
+				label={fullscreenTooltip}
+				onclick={onToggleDesktopFullscreen}
+				class={getUtilityButtonClasses()}
+			>
+				<span class="flex items-center justify-center">
+					{#if isDesktopFullscreen}
+						<Minimize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+					{:else}
+						<Maximize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+					{/if}
+				</span>
+			</WorkspaceToolbarButton>
+		{/if}
+	</div>
+</div>
