@@ -138,6 +138,72 @@ describe('ChatState', () => {
 		expect(state.visibleMessages).toEqual(msgs);
 	});
 
+	it('displayMessages reuses chatMessages when there are no pending inputs', () => {
+		const state = new ChatState();
+		const msgs = [
+			new UserMessage('2024-01-01T00:00:00Z', 'a'),
+			new AssistantMessage('2024-01-01T00:00:01Z', 'b'),
+		];
+
+		state.setMessages(msgs);
+
+		expect(state.displayMessages).toBe(state.chatMessages);
+	});
+
+	it('displayMessages merges sorted pending inputs without resorting durable messages', () => {
+		const state = new ChatState();
+		state.setMessages([
+			new AssistantMessage('2024-01-01T00:00:01Z', 'server 1'),
+			new AssistantMessage('2024-01-01T00:00:03Z', 'server 3'),
+		]);
+
+		state.setPendingUserInputs([
+			{
+				chatId: 'chat-1',
+				clientRequestId: 'req-2',
+				clientMessageId: 'msg-2',
+				content: 'pending 2',
+				createdAt: '2024-01-01T00:00:02Z',
+				deliveryStatus: 'submitting',
+			},
+			{
+				chatId: 'chat-1',
+				clientRequestId: 'req-0',
+				clientMessageId: 'msg-0',
+				content: 'pending 0',
+				createdAt: '2024-01-01T00:00:00Z',
+				deliveryStatus: 'submitting',
+			},
+		]);
+
+		expect(state.displayMessages.map((message) => ('content' in message ? message.content : ''))).toEqual([
+			'pending 0',
+			'server 1',
+			'pending 2',
+			'server 3',
+		]);
+	});
+
+	it('displayMessages places pending inputs before durable messages with matching timestamps', () => {
+		const state = new ChatState();
+		state.setMessages([new AssistantMessage('2024-01-01T00:00:01Z', 'server')]);
+		state.setPendingUserInputs([
+			{
+				chatId: 'chat-1',
+				clientRequestId: 'req-1',
+				clientMessageId: 'msg-1',
+				content: 'pending',
+				createdAt: '2024-01-01T00:00:01Z',
+				deliveryStatus: 'submitting',
+			},
+		]);
+
+		expect(state.displayMessages.map((message) => ('content' in message ? message.content : ''))).toEqual([
+			'pending',
+			'server',
+		]);
+	});
+
 	it('memoizes display and visible messages between state writes', () => {
 		const state = new ChatState();
 		state.setMessages([

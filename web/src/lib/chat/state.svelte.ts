@@ -27,20 +27,8 @@ export class ChatState {
 	#messageIdentityIndex = new ChatMessageIdentityIndex();
 
 	#displayMessages = $derived.by(() => {
-		const combined = [
-			...this.chatMessages.map((message) => ({ message, pending: false })),
-			...this.pendingUserInputs.map((input) => ({
-				message: pendingInputToMessage(input),
-				pending: true,
-			})),
-		];
-		combined.sort((left, right) => {
-			const timestampOrder = left.message.timestamp.localeCompare(right.message.timestamp);
-			if (timestampOrder !== 0) return timestampOrder;
-			if (left.pending !== right.pending) return left.pending ? -1 : 1;
-			return 0;
-		});
-		return combined.map((entry) => entry.message);
+		if (this.pendingUserInputs.length === 0) return this.chatMessages;
+		return mergeMessagesWithPendingInputs(this.chatMessages, this.pendingUserInputs);
 	});
 
 	#displayMessageCount = $derived.by(() => this.#displayMessages.length);
@@ -285,4 +273,37 @@ function pendingInputToMessage(input: PendingUserInput): UserMessage {
 		turnId: input.turnId,
 		deliveryStatus: input.deliveryStatus,
 	});
+}
+
+function mergeMessagesWithPendingInputs(
+	messages: ChatMessage[],
+	pendingInputs: PendingUserInput[],
+): ChatMessage[] {
+	if (messages.length === 0) return pendingInputs.map(pendingInputToMessage);
+
+	const pendingMessages = pendingInputs.map(pendingInputToMessage);
+	const merged: ChatMessage[] = [];
+	let messageIndex = 0;
+	let pendingIndex = 0;
+
+	while (messageIndex < messages.length && pendingIndex < pendingMessages.length) {
+		const message = messages[messageIndex];
+		const pending = pendingMessages[pendingIndex];
+		if (message.timestamp.localeCompare(pending.timestamp) < 0) {
+			merged.push(message);
+			messageIndex += 1;
+		} else {
+			merged.push(pending);
+			pendingIndex += 1;
+		}
+	}
+
+	if (messageIndex < messages.length) {
+		merged.push(...messages.slice(messageIndex));
+	}
+	if (pendingIndex < pendingMessages.length) {
+		merged.push(...pendingMessages.slice(pendingIndex));
+	}
+
+	return merged;
 }
