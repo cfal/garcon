@@ -15,10 +15,10 @@ import type {
 import type { GitLineSelectionState } from './git-line-selection.svelte';
 
 export interface GitStagingActionsDeps {
-	get selectedFile(): string | null;
-	get activeTab(): GitDiffTab;
-	get contextLines(): number;
-	get visibleFilePaths(): string[];
+	selectedFile: () => string | null;
+	activeTab: () => GitDiffTab;
+	contextLines: () => number;
+	visibleFilePaths: () => string[];
 	lineSelection: GitLineSelectionState;
 	findTreeNode: (filePath: string) => GitTreeNode | undefined;
 	setSelectedFile: (filePath: string | null) => void;
@@ -161,8 +161,9 @@ export class GitStagingActions {
 			if (result.success) {
 				this.deps.refreshAllData();
 				await this.deps.refreshAfterGitAction(projectPath, { reason: 'git-action' });
-				if (this.deps.selectedFile === filePath && !this.deps.visibleFilePaths.includes(filePath)) {
-					this.deps.setSelectedFile(this.deps.visibleFilePaths[0] ?? null);
+				const visibleFilePaths = this.deps.visibleFilePaths();
+				if (this.deps.selectedFile() === filePath && !visibleFilePaths.includes(filePath)) {
+					this.deps.setSelectedFile(visibleFilePaths[0] ?? null);
 				}
 			}
 			return result.success ?? false;
@@ -184,7 +185,7 @@ export class GitStagingActions {
 	): Promise<boolean> {
 		const groups = this.deps.lineSelection.groupSelectedLineIndicesByTarget(
 			mode,
-			this.deps.contextLines,
+			this.deps.contextLines(),
 		);
 		if (groups.length === 0) return false;
 		const results = [];
@@ -223,12 +224,13 @@ export class GitStagingActions {
 	}
 
 	private targetForSelectedFile(mode: GitDiffActionMode): GitDiffActionTarget | null {
-		if (!this.deps.selectedFile) return null;
+		const selectedFile = this.deps.selectedFile();
+		if (!selectedFile) return null;
 		return {
-			filePath: this.deps.selectedFile,
-			tab: this.deps.activeTab,
+			filePath: selectedFile,
+			tab: this.deps.activeTab(),
 			mode,
-			contextLines: this.deps.contextLines,
+			contextLines: this.deps.contextLines(),
 		};
 	}
 

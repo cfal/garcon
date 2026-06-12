@@ -176,7 +176,7 @@ export function compactTree(nodes: GitTreeNode[]): GitTreeNode[] {
 			path = child.path;
 			staged = staged || child.staged;
 			hasUnstaged = hasUnstaged || child.hasUnstaged;
-			children = child.children;
+			children = child.children!;
 		}
 		return { ...node, name, path, staged, hasUnstaged, children };
 	});

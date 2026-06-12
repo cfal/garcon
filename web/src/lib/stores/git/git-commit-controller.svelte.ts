@@ -15,9 +15,9 @@ import {
 import type { GitWorkbenchDeps, GitWorkbenchRefreshOptions } from './git-workbench-types';
 
 export interface GitCommitControllerDeps extends GitWorkbenchDeps {
-	get stagedFiles(): string[];
-	get visibleFilePaths(): string[];
-	get selectedFile(): string | null;
+	stagedFiles: () => string[];
+	visibleFilePaths: () => string[];
+	selectedFile: () => string | null;
 	setSelectedFile: (filePath: string | null) => void;
 	openFile: (projectPath: string, filePath: string) => Promise<void>;
 	refreshAllData: () => void;
@@ -46,7 +46,7 @@ export class GitCommitController {
 
 	private commonDirPrefixValue = $derived.by(() => {
 		if (!this.commitUseCommonDirPrefix) return '';
-		const files = this.deps.stagedFiles;
+		const files = this.deps.stagedFiles();
 		if (files.length === 0) return '';
 		return computeCommonDirPrefixSync(files);
 	});
@@ -69,11 +69,10 @@ export class GitCommitController {
 					reason: 'git-action',
 					preserveSelection: false,
 				});
-				if (
-					!this.deps.selectedFile ||
-					!this.deps.visibleFilePaths.includes(this.deps.selectedFile)
-				) {
-					const first = this.deps.visibleFilePaths[0];
+				const selectedFile = this.deps.selectedFile();
+				const visibleFilePaths = this.deps.visibleFilePaths();
+				if (!selectedFile || !visibleFilePaths.includes(selectedFile)) {
+					const first = visibleFilePaths[0];
 					if (first) {
 						await this.deps.openFile(projectPath, first);
 					} else {
@@ -122,7 +121,7 @@ export class GitCommitController {
 		projectPath: string,
 		hydrateCommitSettings: () => Promise<void>,
 	): Promise<void> {
-		const files = this.deps.stagedFiles;
+		const files = this.deps.stagedFiles();
 		if (files.length === 0) {
 			this.deps.surfaceError('No staged files to generate message for');
 			return;

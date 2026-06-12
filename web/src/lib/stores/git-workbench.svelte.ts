@@ -78,94 +78,52 @@ export class GitWorkbenchStore {
 				},
 			} satisfies GitWorkbenchDeps);
 
-		const owner = this;
 		this.treeState = new GitTreeState();
 		this.reviewLoader = new GitReviewDataLoader({
-			get targetKey() {
-				return targetKey(owner.target);
-			},
-			get targetProjectPath() {
-				return owner.target?.projectPath ?? null;
-			},
-			get activeTab() {
-				return owner.activeTab;
-			},
-			get contextLines() {
-				return owner.contextLines;
-			},
-			surfaceError(message) {
-				owner.surfaceError(message);
-			},
+			targetKey: () => targetKey(this.target),
+			targetProjectPath: () => this.target?.projectPath ?? null,
+			activeTab: () => this.activeTab,
+			contextLines: () => this.contextLines,
+			surfaceError: (message) => this.surfaceError(message),
 		});
 		this.lineSelection = new GitLineSelectionState();
 		this.stagingActions = new GitStagingActions({
-			get selectedFile() {
-				return owner.selectedFile;
-			},
-			get activeTab() {
-				return owner.activeTab;
-			},
-			get contextLines() {
-				return owner.contextLines;
-			},
-			get visibleFilePaths() {
-				return owner.visibleFilePaths;
-			},
+			selectedFile: () => this.selectedFile,
+			activeTab: () => this.activeTab,
+			contextLines: () => this.contextLines,
+			visibleFilePaths: () => this.visibleFilePaths,
 			lineSelection: this.lineSelection,
-			findTreeNode(filePath) {
-				return owner.findTreeNode(filePath);
+			findTreeNode: (filePath) => this.findTreeNode(filePath),
+			setSelectedFile: (filePath) => {
+				this.selectedFile = filePath;
 			},
-			setSelectedFile(filePath) {
-				owner.selectedFile = filePath;
-			},
-			refreshAllData() {
-				owner.refreshAllData();
-			},
-			refreshFileAfterStage(projectPath, filePath) {
-				return owner.refreshFileAfterStage(projectPath, filePath);
-			},
-			refreshAfterGitAction(projectPath, options) {
-				return owner.refreshAfterGitAction(projectPath, options);
-			},
-			surfaceError(message) {
-				owner.surfaceError(message);
-			},
+			refreshAllData: () => this.refreshAllData(),
+			refreshFileAfterStage: (projectPath, filePath) =>
+				this.refreshFileAfterStage(projectPath, filePath),
+			refreshAfterGitAction: (projectPath, options) =>
+				this.refreshAfterGitAction(projectPath, options),
+			surfaceError: (message) => this.surfaceError(message),
 		});
 		this.commitController = new GitCommitController({
 			...resolvedDeps,
-			get stagedFiles() {
-				return owner.stagedFiles;
+			stagedFiles: () => this.stagedFiles,
+			visibleFilePaths: () => this.visibleFilePaths,
+			selectedFile: () => this.selectedFile,
+			setSelectedFile: (filePath) => {
+				this.selectedFile = filePath;
 			},
-			get visibleFilePaths() {
-				return owner.visibleFilePaths;
+			openFile: (projectPath, filePath) => this.openFile(projectPath, filePath),
+			refreshAllData: () => this.refreshAllData(),
+			refreshAfterGitAction: (projectPath, options) =>
+				this.refreshAfterGitAction(projectPath, options),
+			setHasCommits: (hasCommits) => {
+				this.hasCommits = hasCommits;
 			},
-			get selectedFile() {
-				return owner.selectedFile;
-			},
-			setSelectedFile(filePath) {
-				owner.selectedFile = filePath;
-			},
-			openFile(projectPath, filePath) {
-				return owner.openFile(projectPath, filePath);
-			},
-			refreshAllData() {
-				owner.refreshAllData();
-			},
-			refreshAfterGitAction(projectPath, options) {
-				return owner.refreshAfterGitAction(projectPath, options);
-			},
-			setHasCommits(hasCommits) {
-				owner.hasCommits = hasCommits;
-			},
-			surfaceError(message) {
-				owner.surfaceError(message);
-			},
+			surfaceError: (message) => this.surfaceError(message),
 		});
 		this.reviewDrafts = new GitReviewDrafts();
 		this.worktreeController = new GitWorktrees({
-			surfaceError(message) {
-				owner.surfaceError(message);
-			},
+			surfaceError: (message) => this.surfaceError(message),
 		});
 
 		this.loadTreePaneWidth();

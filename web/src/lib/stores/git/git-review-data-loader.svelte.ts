@@ -7,10 +7,10 @@ import {
 import type { GitWorkbenchLoadGuard } from './git-workbench-types';
 
 export interface GitReviewDataLoaderDeps {
-	get targetKey(): string;
-	get targetProjectPath(): string | null;
-	get activeTab(): GitDiffTab;
-	get contextLines(): number;
+	targetKey: () => string;
+	targetProjectPath: () => string | null;
+	activeTab: () => GitDiffTab;
+	contextLines: () => number;
 	surfaceError: (message: string) => void;
 }
 
@@ -148,39 +148,40 @@ export class GitReviewDataLoader {
 	): GitWorkbenchLoadGuard {
 		return {
 			generation,
-			targetKey: this.deps.targetKey,
+			targetKey: this.deps.targetKey(),
 			projectPath,
-			tab: this.deps.activeTab,
-			contextLines: this.deps.contextLines,
+			tab: this.deps.activeTab(),
+			contextLines: this.deps.contextLines(),
 		};
 	}
 
 	private isCurrentLoadGuard(guard: GitWorkbenchLoadGuard): boolean {
 		if (guard.generation !== this.loadGeneration) return false;
-		if (guard.targetKey !== this.deps.targetKey) return false;
-		return !this.deps.targetProjectPath || this.deps.targetProjectPath === guard.projectPath;
+		if (guard.targetKey !== this.deps.targetKey()) return false;
+		const targetProjectPath = this.deps.targetProjectPath();
+		return !targetProjectPath || targetProjectPath === guard.projectPath;
 	}
 
 	private isCurrentFileLoadGuard(guard: GitWorkbenchLoadGuard): boolean {
 		return (
 			this.isCurrentLoadGuard(guard) &&
-			this.deps.activeTab === guard.tab &&
-			this.deps.contextLines === guard.contextLines
+			this.deps.activeTab() === guard.tab &&
+			this.deps.contextLines() === guard.contextLines
 		);
 	}
 
 	private cacheKey(
 		filePath: string,
-		tab = this.deps.activeTab,
-		contextLines = this.deps.contextLines,
+		tab = this.deps.activeTab(),
+		contextLines = this.deps.contextLines(),
 	): string {
 		return `${tab}|${contextLines}|${filePath}`;
 	}
 
 	private cacheGet(
 		filePath: string,
-		tab = this.deps.activeTab,
-		contextLines = this.deps.contextLines,
+		tab = this.deps.activeTab(),
+		contextLines = this.deps.contextLines(),
 	): GitFileReviewData | null {
 		return this.reviewCache.get(this.cacheKey(filePath, tab, contextLines)) ?? null;
 	}
@@ -188,8 +189,8 @@ export class GitReviewDataLoader {
 	private cacheSet(
 		filePath: string,
 		data: GitFileReviewData,
-		tab = this.deps.activeTab,
-		contextLines = this.deps.contextLines,
+		tab = this.deps.activeTab(),
+		contextLines = this.deps.contextLines(),
 	): void {
 		this.reviewCache.set(this.cacheKey(filePath, tab, contextLines), data);
 	}
@@ -198,8 +199,8 @@ export class GitReviewDataLoader {
 		const generation = this.loadGeneration;
 		if (this.inFlightFiles.size > 0 || this.pendingLoadQueue.length === 0) return;
 
-		const tab = this.deps.activeTab;
-		const contextLines = this.deps.contextLines;
+		const tab = this.deps.activeTab();
+		const contextLines = this.deps.contextLines();
 		const projectPath = this.loadProjectPath;
 		const batch = this.pendingLoadQueue.splice(0, 8);
 		for (const filePath of batch) this.inFlightFiles.add(filePath);
