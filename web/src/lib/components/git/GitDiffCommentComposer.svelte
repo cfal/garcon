@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { GitReviewCommentDraft } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { gitCommentSeverityLabel } from './git-comment-labels';
 
 	const severityOptions: GitReviewCommentDraft['severity'][] = ['note', 'warning', 'blocker'];
 
@@ -44,7 +45,9 @@
 
 <tr bind:this={composerRowElement}>
 	<td {colspan} class="p-0">
-		<div class="border border-interactive-accent/50 rounded m-1 bg-background shadow-sm p-3 space-y-2">
+		<div
+			class="border border-interactive-accent/50 rounded m-1 bg-background shadow-sm p-3 space-y-2"
+		>
 			<div class="flex gap-2">
 				{#each severityOptions as option (option)}
 					<label class="flex items-center gap-1 text-[11px] cursor-pointer">
@@ -54,7 +57,7 @@
 							onchange={() => onSeverityChange?.(option)}
 							class="accent-interactive-accent"
 						/>
-						{option}
+						{gitCommentSeverityLabel(option)}
 					</label>
 				{/each}
 			</div>
@@ -79,8 +82,7 @@
 					disabled={!body.trim()}
 					class="px-2.5 py-1 text-[11px] rounded transition-all {body.trim()
 						? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
-						: 'bg-muted text-muted-foreground cursor-not-allowed'}"
-					>Add comment</button
+						: 'bg-muted text-muted-foreground cursor-not-allowed'}">{m.git_comment_add()}</button
 				>
 			</div>
 		</div>

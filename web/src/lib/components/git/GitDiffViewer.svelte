@@ -6,10 +6,8 @@
 	import Copy from '@lucide/svelte/icons/copy';
 	import { onDestroy } from 'svelte';
 	import type { GitDiffTab, GitFileReviewData, GitReviewCommentDraft } from '$lib/api/git.js';
-	import {
-		type DiffMode,
-		type GitDiffActionTarget,
-	} from '$lib/stores/git-workbench.svelte.js';
+	import * as m from '$lib/paraglide/messages.js';
+	import { type DiffMode, type GitDiffActionTarget } from '$lib/stores/git-workbench.svelte.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import GitDiffLineContextMenu from './GitDiffLineContextMenu.svelte';
 	import SplitDiffTable from './SplitDiffTable.svelte';
@@ -179,10 +177,7 @@
 		}
 	}
 
-	function handleSplitCellClick(
-		event: MouseEvent | KeyboardEvent,
-		cell: SplitDiffCellView,
-	): void {
+	function handleSplitCellClick(event: MouseEvent | KeyboardEvent, cell: SplitDiffCellView): void {
 		toggleSelectionFromKey(event, cell.selectionKey);
 	}
 
@@ -193,10 +188,7 @@
 		}
 	}
 
-	function openLineContextMenu(
-		event: MouseEvent,
-		target: GitDiffLineContextTarget | null,
-	): void {
+	function openLineContextMenu(event: MouseEvent, target: GitDiffLineContextTarget | null): void {
 		lineContextMenu?.open(event, target);
 	}
 
@@ -220,19 +212,19 @@
 	{#if isLoading}
 		<div class="flex-1 flex items-center justify-center text-muted-foreground">
 			<ArrowUpDown class="w-5 h-5 animate-pulse mr-2" />
-			<span class="text-sm">Loading diff...</span>
+			<span class="text-sm">{m.git_diff_loading()}</span>
 		</div>
 	{:else if !reviewData}
 		<div class="flex-1 flex items-center justify-center text-muted-foreground">
-			<p class="text-sm">Select a file to view changes</p>
+			<p class="text-sm">{m.git_diff_select_file()}</p>
 		</div>
 	{:else if reviewData.isBinary}
 		<div class="flex-1 flex items-center justify-center text-muted-foreground">
-			<p class="text-sm">Binary file -- cannot display diff</p>
+			<p class="text-sm">{m.git_diff_binary_unavailable()}</p>
 		</div>
 	{:else if reviewData.truncated}
 		<div class="flex-1 flex items-center justify-center text-muted-foreground">
-			<p class="text-sm">{reviewData.truncatedReason ?? 'File too large to display'}</p>
+			<p class="text-sm">{reviewData.truncatedReason ?? m.git_diff_file_too_large()}</p>
 		</div>
 	{:else if reviewData.error}
 		<div class="flex-1 flex items-center justify-center text-status-error-foreground">
@@ -241,7 +233,7 @@
 	{:else if rows.length === 0}
 		<div class="flex-1 flex items-center justify-center text-muted-foreground">
 			<p class="text-sm">
-				{readOnly ? 'No changed lines to review in this file' : 'No changes in this file'}
+				{readOnly ? m.git_diff_no_changed_lines_to_review() : m.git_diff_no_changes()}
 			</p>
 		</div>
 	{:else}
@@ -255,8 +247,8 @@
 				class="p-0.5 rounded transition-colors shrink-0 {pathCopied
 					? 'text-status-success-foreground'
 					: 'text-muted-foreground/60 hover:text-foreground hover:bg-accent'}"
-				title={pathCopied ? 'Copied!' : 'Copy file path'}
-				aria-label={pathCopied ? 'Path copied' : 'Copy file path'}
+				title={pathCopied ? m.git_file_path_copied_short() : m.git_file_path_copy()}
+				aria-label={pathCopied ? m.git_file_path_copied() : m.git_file_path_copy()}
 			>
 				{#if pathCopied}
 					<Check class="w-3 h-3" />

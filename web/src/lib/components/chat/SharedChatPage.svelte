@@ -11,6 +11,7 @@
 		isToolUseMessage,
 	} from '$shared/chat-types';
 	import Markdown from '$lib/components/chat/Markdown.svelte';
+	import MessageRenderFallback from '$lib/components/chat/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
 	import { ChevronRight } from '@lucide/svelte';
@@ -166,8 +167,8 @@
 					{@const prevMessage = idx > 0 ? messages[idx - 1] : null}
 					{@const isGrouped = isGroupedWith(prevMessage, message)}
 					<svelte:boundary>
-						{#snippet failed()}
-							<div class="text-xs text-muted-foreground p-2">Failed to render message</div>
+						{#snippet failed(error)}
+							<MessageRenderFallback {error} />
 						{/snippet}
 						<div
 							class="chat-message {message instanceof UserMessage

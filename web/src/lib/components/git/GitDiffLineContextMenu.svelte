@@ -129,7 +129,7 @@
 				class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors flex items-center gap-2"
 			>
 				<MessageSquare class="w-3 h-3" />
-				Add comment
+				{m.git_comment_add()}
 			</button>
 			{#if onOpenInEditor}
 				<button
@@ -139,7 +139,7 @@
 					class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors flex items-center gap-2"
 				>
 					<Code2 class="w-3 h-3" />
-					Open in Editor
+					{m.git_action_open_in_editor()}
 				</button>
 			{/if}
 			{#if !readOnly && menu.target.hunkIndex >= 0}

@@ -115,11 +115,11 @@
 	const userDeliveryStatus = $derived(asUser?.metadata?.deliveryStatus ?? null);
 	const userDeliveryTitle = $derived(
 		userDeliveryStatus === 'submitting'
-			? 'Sending'
+			? m.chat_message_delivery_sending()
 			: userDeliveryStatus === 'accepted'
-				? 'Sent'
+				? m.chat_message_delivery_sent()
 				: userDeliveryStatus === 'failed'
-					? 'Failed to send'
+					? m.chat_message_delivery_failed()
 					: '',
 	);
 
@@ -276,11 +276,11 @@
 					<ContextMenuContent>
 						<ContextMenuItem onclick={copyText}>
 							<Copy />
-							Copy Text
+							{m.chat_message_copy_text()}
 						</ContextMenuItem>
 						<ContextMenuItem onclick={sendToNewSession}>
 							<SquareArrowOutUpRight />
-							Send to New Session
+							{m.chat_message_send_to_new_session()}
 						</ContextMenuItem>
 					</ContextMenuContent>
 				</ContextMenu>
@@ -384,11 +384,11 @@
 							<ContextMenuContent>
 								<ContextMenuItem onclick={copyText}>
 									<Copy />
-									Copy Text
+									{m.chat_message_copy_text()}
 								</ContextMenuItem>
 								<ContextMenuItem onclick={sendToNewSession}>
 									<SquareArrowOutUpRight />
-									Send to New Session
+									{m.chat_message_send_to_new_session()}
 								</ContextMenuItem>
 							</ContextMenuContent>
 						</ContextMenu>

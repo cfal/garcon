@@ -3,6 +3,7 @@
 
 	import Copy from '@lucide/svelte/icons/copy';
 	import Check from '@lucide/svelte/icons/check';
+	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface DiffLine {
@@ -117,8 +118,8 @@
 					class="p-0.5 rounded transition-colors shrink-0 {pathCopied
 						? 'text-status-success-foreground'
 						: 'text-muted-foreground/60 hover:text-foreground hover:bg-accent'}"
-					title={pathCopied ? 'Copied!' : 'Copy file path'}
-					aria-label={pathCopied ? 'Path copied' : 'Copy file path'}
+					title={pathCopied ? m.git_file_path_copied_short() : m.git_file_path_copy()}
+					aria-label={pathCopied ? m.git_file_path_copied() : m.git_file_path_copy()}
 				>
 					{#if pathCopied}
 						<Check class="w-3 h-3" />

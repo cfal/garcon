@@ -3,6 +3,7 @@
 
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
+	import { gitCommentSeverityLabel } from './git-comment-labels';
 
 	interface ComposerState {
 		open: boolean;
@@ -33,7 +34,7 @@
 <div class="fixed inset-0 z-50 flex flex-col bg-background">
 	<!-- Header -->
 	<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-		<h2 class="text-sm font-medium text-foreground">Add comment</h2>
+		<h2 class="text-sm font-medium text-foreground">{m.git_comment_add()}</h2>
 		<button onclick={onClose} class="p-1 rounded hover:bg-muted transition-colors">
 			<X class="w-4 h-4 text-muted-foreground" />
 		</button>
@@ -55,7 +56,7 @@
 						onchange={() => onSeverityChange(sev)}
 						class="accent-interactive-accent"
 					/>
-					{sev}
+					{gitCommentSeverityLabel(sev)}
 				</label>
 			{/each}
 		</div>
@@ -76,7 +77,7 @@
 			onclick={onClose}
 			class="flex-1 px-3 py-2 text-xs rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
 		>
-			Cancel
+			{m.git_confirm_cancel()}
 		</button>
 		<button
 			onclick={onSubmit}
@@ -86,7 +87,7 @@
 				? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
 				: 'bg-muted text-muted-foreground cursor-not-allowed'}"
 		>
-			Add comment
+			{m.git_comment_add()}
 		</button>
 	</div>
 </div>

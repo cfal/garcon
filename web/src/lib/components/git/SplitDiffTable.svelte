@@ -163,200 +163,202 @@
 		{@const diffRow = rows[virtualItem.index]}
 		{#if diffRow}
 			<tbody data-index={virtualItem.index} use:measureVirtualItem>
-			{#if diffRow.isHunkHeader}
-				<tr class="bg-diff-hunk-header">
-					<td colspan={colCount} class="px-2 py-1 text-muted-foreground">
-						<div class="flex items-center gap-2" style:font-size={`${headerFontSize}px`}>
-							<span class="flex-1 truncate">{diffRow.row.headerText}</span>
-							{#if !readOnly}
-								{#if activeTab === 'unstaged'}
-									<button
-										type="button"
-										onclick={() => onStageHunk(actionTarget, diffRow.row.hunkIndex ?? -1)}
-										class="px-1.5 py-0.5 text-[10px] rounded bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors"
-										title={m.git_action_stage_hunk()}
-									>
-										<Plus class="w-3 h-3 inline" /> Stage
-									</button>
-								{:else}
-									<button
-										type="button"
-										onclick={() => onUnstageHunk(actionTarget, diffRow.row.hunkIndex ?? -1)}
-										class="px-1.5 py-0.5 text-[10px] rounded bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors"
-										title={m.git_action_unstage_hunk()}
-									>
-										<Minus class="w-3 h-3 inline" /> Unstage
-									</button>
+				{#if diffRow.isHunkHeader}
+					<tr class="bg-diff-hunk-header">
+						<td colspan={colCount} class="px-2 py-1 text-muted-foreground">
+							<div class="flex items-center gap-2" style:font-size={`${headerFontSize}px`}>
+								<span class="flex-1 truncate">{diffRow.row.headerText}</span>
+								{#if !readOnly}
+									{#if activeTab === 'unstaged'}
+										<button
+											type="button"
+											onclick={() => onStageHunk(actionTarget, diffRow.row.hunkIndex ?? -1)}
+											class="px-1.5 py-0.5 text-[10px] rounded bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors"
+											title={m.git_action_stage_hunk()}
+										>
+											<Plus class="w-3 h-3 inline" />
+											{m.git_action_stage()}
+										</button>
+									{:else}
+										<button
+											type="button"
+											onclick={() => onUnstageHunk(actionTarget, diffRow.row.hunkIndex ?? -1)}
+											class="px-1.5 py-0.5 text-[10px] rounded bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors"
+											title={m.git_action_unstage_hunk()}
+										>
+											<Minus class="w-3 h-3 inline" />
+											{m.git_action_unstage()}
+										</button>
+									{/if}
 								{/if}
+							</div>
+						</td>
+					</tr>
+				{:else}
+					<tr class="select-none" oncontextmenu={(event) => openRowContextMenu(event, diffRow)}>
+						{#if showLineActions}
+							<td
+								class="w-7 select-none border-r border-border/30 p-0 {diffRow.left?.bgClass ?? ''}"
+							>
+								<div class="flex items-center justify-center leading-5">
+									{#if diffRow.left?.cell.kind === 'del'}
+										{#if activeTab === 'unstaged'}
+											<button
+												type="button"
+												onclick={(event) => {
+													event.stopPropagation();
+													onStageLine?.(actionTarget, diffRow.left!.cell.diffLineIndex);
+												}}
+												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
+												title={m.git_action_stage_line()}
+											>
+												<Plus class="w-2.5 h-2.5" />
+											</button>
+										{:else}
+											<button
+												type="button"
+												onclick={(event) => {
+													event.stopPropagation();
+													onUnstageLine?.(actionTarget, diffRow.left!.cell.diffLineIndex);
+												}}
+												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
+												title={m.git_action_unstage_line()}
+											>
+												<Minus class="w-2.5 h-2.5" />
+											</button>
+										{/if}
+									{/if}
+								</div>
+							</td>
+						{/if}
+						<td
+							class="w-10 text-right pr-1.5 select-none {diffRow.left?.lineNumClass ??
+								''} border-r border-border/30 {diffRow.left?.bgClass ?? ''} {diffRow.left
+								?.contextTarget
+								? 'cursor-pointer hover:bg-interactive-accent/10'
+								: ''}"
+							onclick={(event) => {
+								if (!diffRow.left?.contextTarget) return;
+								onOpenContextMenu(event, diffRow.left.contextTarget);
+							}}
+						>
+							{diffRow.left?.cell.line ?? ''}
+						</td>
+						<td
+							class="w-1/2 pl-2 pr-1 whitespace-pre-wrap break-all {diffRow.left?.isSelectable
+								? 'cursor-pointer'
+								: ''} {diffRow.left?.bgClass ?? ''}"
+							tabindex={diffRow.left?.isSelectable ? 0 : -1}
+							role={diffRow.left?.isSelectable ? 'button' : undefined}
+							onclick={(event) => {
+								if (diffRow.left?.isSelectable) onCellClick(event, diffRow.left);
+							}}
+							onkeydown={(event) => {
+								if (diffRow.left?.isSelectable) onCellKeydown(event, diffRow.left);
+							}}
+						>
+							{#if diffRow.left && diffRow.left.cell.kind !== 'empty'}
+								<span class="{diffRow.left.textClass} select-text"
+									>{diffRow.left.textPrefix}{diffRow.left.cell.text}</span
+								>
+							{:else}
+								&nbsp;
 							{/if}
-						</div>
-					</td>
-				</tr>
-			{:else}
-				<tr class="select-none" oncontextmenu={(event) => openRowContextMenu(event, diffRow)}>
-					{#if showLineActions}
-						<td
-							class="w-7 select-none border-r border-border/30 p-0 {diffRow.left?.bgClass ?? ''}"
-						>
-							<div class="flex items-center justify-center leading-5">
-								{#if diffRow.left?.cell.kind === 'del'}
-									{#if activeTab === 'unstaged'}
-										<button
-											type="button"
-											onclick={(event) => {
-												event.stopPropagation();
-												onStageLine?.(actionTarget, diffRow.left!.cell.diffLineIndex);
-											}}
-											class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
-											title={m.git_action_stage_line()}
-										>
-											<Plus class="w-2.5 h-2.5" />
-										</button>
-									{:else}
-										<button
-											type="button"
-											onclick={(event) => {
-												event.stopPropagation();
-												onUnstageLine?.(actionTarget, diffRow.left!.cell.diffLineIndex);
-											}}
-											class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
-											title={m.git_action_unstage_line()}
-										>
-											<Minus class="w-2.5 h-2.5" />
-										</button>
-									{/if}
-								{/if}
-							</div>
 						</td>
-					{/if}
-					<td
-						class="w-10 text-right pr-1.5 select-none {diffRow.left?.lineNumClass ??
-							''} border-r border-border/30 {diffRow.left?.bgClass ?? ''} {diffRow.left
-							?.contextTarget
-							? 'cursor-pointer hover:bg-interactive-accent/10'
-							: ''}"
-						onclick={(event) => {
-							if (!diffRow.left?.contextTarget) return;
-							onOpenContextMenu(event, diffRow.left.contextTarget);
-						}}
-					>
-						{diffRow.left?.cell.line ?? ''}
-					</td>
-					<td
-						class="w-1/2 pl-2 pr-1 whitespace-pre-wrap break-all {diffRow.left?.isSelectable
-							? 'cursor-pointer'
-							: ''} {diffRow.left?.bgClass ?? ''}"
-						tabindex={diffRow.left?.isSelectable ? 0 : -1}
-						role={diffRow.left?.isSelectable ? 'button' : undefined}
-						onclick={(event) => {
-							if (diffRow.left?.isSelectable) onCellClick(event, diffRow.left);
-						}}
-						onkeydown={(event) => {
-							if (diffRow.left?.isSelectable) onCellKeydown(event, diffRow.left);
-						}}
-					>
-						{#if diffRow.left && diffRow.left.cell.kind !== 'empty'}
-							<span class="{diffRow.left.textClass} select-text"
-								>{diffRow.left.textPrefix}{diffRow.left.cell.text}</span
+						{#if showLineActions}
+							<td
+								class="w-7 select-none border-l border-r border-border/30 p-0 {diffRow.right
+									?.bgClass ?? ''}"
 							>
-						{:else}
-							&nbsp;
-						{/if}
-					</td>
-					{#if showLineActions}
-						<td
-							class="w-7 select-none border-l border-r border-border/30 p-0 {diffRow.right?.bgClass ??
-								''}"
-						>
-							<div class="flex items-center justify-center leading-5">
-								{#if diffRow.right?.cell.kind === 'add'}
-									{#if activeTab === 'unstaged'}
-										<button
-											type="button"
-											onclick={(event) => {
-												event.stopPropagation();
-												onStageLine?.(actionTarget, diffRow.right!.cell.diffLineIndex);
-											}}
-											class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
-											title={m.git_action_stage_line()}
-										>
-											<Plus class="w-2.5 h-2.5" />
-										</button>
-									{:else}
-										<button
-											type="button"
-											onclick={(event) => {
-												event.stopPropagation();
-												onUnstageLine?.(actionTarget, diffRow.right!.cell.diffLineIndex);
-											}}
-											class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
-											title={m.git_action_unstage_line()}
-										>
-											<Minus class="w-2.5 h-2.5" />
-										</button>
+								<div class="flex items-center justify-center leading-5">
+									{#if diffRow.right?.cell.kind === 'add'}
+										{#if activeTab === 'unstaged'}
+											<button
+												type="button"
+												onclick={(event) => {
+													event.stopPropagation();
+													onStageLine?.(actionTarget, diffRow.right!.cell.diffLineIndex);
+												}}
+												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
+												title={m.git_action_stage_line()}
+											>
+												<Plus class="w-2.5 h-2.5" />
+											</button>
+										{:else}
+											<button
+												type="button"
+												onclick={(event) => {
+													event.stopPropagation();
+													onUnstageLine?.(actionTarget, diffRow.right!.cell.diffLineIndex);
+												}}
+												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
+												title={m.git_action_unstage_line()}
+											>
+												<Minus class="w-2.5 h-2.5" />
+											</button>
+										{/if}
 									{/if}
-								{/if}
-							</div>
-						</td>
-					{/if}
-					<td
-						class="w-10 text-right pr-1.5 select-none {diffRow.right?.lineNumClass ??
-							''} border-l border-r border-border/30 {diffRow.right?.bgClass ?? ''} {diffRow
-							.right?.contextTarget
-							? 'cursor-pointer hover:bg-interactive-accent/10'
-							: ''}"
-						onclick={(event) => {
-							if (!diffRow.right?.contextTarget) return;
-							onOpenContextMenu(event, diffRow.right.contextTarget);
-						}}
-					>
-						{diffRow.right?.cell.line ?? ''}
-					</td>
-					<td
-						class="w-1/2 pl-2 pr-1 whitespace-pre-wrap break-all {diffRow.right?.isSelectable
-							? 'cursor-pointer'
-							: ''} {diffRow.right?.bgClass ?? ''}"
-						tabindex={diffRow.right?.isSelectable ? 0 : -1}
-						role={diffRow.right?.isSelectable ? 'button' : undefined}
-						onclick={(event) => {
-							if (diffRow.right?.isSelectable) onCellClick(event, diffRow.right);
-						}}
-						onkeydown={(event) => {
-							if (diffRow.right?.isSelectable) onCellKeydown(event, diffRow.right);
-						}}
-					>
-						{#if diffRow.right && diffRow.right.cell.kind !== 'empty'}
-							<span class="{diffRow.right.textClass} select-text"
-								>{diffRow.right.textPrefix}{diffRow.right.cell.text}</span
-							>
-						{:else}
-							&nbsp;
+								</div>
+							</td>
 						{/if}
-					</td>
-				</tr>
-				<GitDiffCommentThread
-					comments={diffRow.comments}
-					colspan={colCount}
-					{editingCommentId}
-					{editBody}
-					onStartEdit={onStartEditComment}
-					onCancelEdit={onCancelEditComment}
-					onEditBodyChange={onEditCommentBodyChange}
-					onSaveEdit={onSaveEditComment}
-					{onRemoveComment}
-				/>
-				{#if diffRow.showComposer && composer}
-					<GitDiffCommentComposer
+						<td
+							class="w-10 text-right pr-1.5 select-none {diffRow.right?.lineNumClass ??
+								''} border-l border-r border-border/30 {diffRow.right?.bgClass ?? ''} {diffRow.right
+								?.contextTarget
+								? 'cursor-pointer hover:bg-interactive-accent/10'
+								: ''}"
+							onclick={(event) => {
+								if (!diffRow.right?.contextTarget) return;
+								onOpenContextMenu(event, diffRow.right.contextTarget);
+							}}
+						>
+							{diffRow.right?.cell.line ?? ''}
+						</td>
+						<td
+							class="w-1/2 pl-2 pr-1 whitespace-pre-wrap break-all {diffRow.right?.isSelectable
+								? 'cursor-pointer'
+								: ''} {diffRow.right?.bgClass ?? ''}"
+							tabindex={diffRow.right?.isSelectable ? 0 : -1}
+							role={diffRow.right?.isSelectable ? 'button' : undefined}
+							onclick={(event) => {
+								if (diffRow.right?.isSelectable) onCellClick(event, diffRow.right);
+							}}
+							onkeydown={(event) => {
+								if (diffRow.right?.isSelectable) onCellKeydown(event, diffRow.right);
+							}}
+						>
+							{#if diffRow.right && diffRow.right.cell.kind !== 'empty'}
+								<span class="{diffRow.right.textClass} select-text"
+									>{diffRow.right.textPrefix}{diffRow.right.cell.text}</span
+								>
+							{:else}
+								&nbsp;
+							{/if}
+						</td>
+					</tr>
+					<GitDiffCommentThread
+						comments={diffRow.comments}
 						colspan={colCount}
-						body={composer.body}
-						severity={composer.severity}
-						onBodyChange={onComposerBodyChange}
-						onSeverityChange={onComposerSeverityChange}
-						onSubmit={onComposerSubmit}
-						onClose={onComposerClose}
+						{editingCommentId}
+						{editBody}
+						onStartEdit={onStartEditComment}
+						onCancelEdit={onCancelEditComment}
+						onEditBodyChange={onEditCommentBodyChange}
+						onSaveEdit={onSaveEditComment}
+						{onRemoveComment}
 					/>
+					{#if diffRow.showComposer && composer}
+						<GitDiffCommentComposer
+							colspan={colCount}
+							body={composer.body}
+							severity={composer.severity}
+							onBodyChange={onComposerBodyChange}
+							onSeverityChange={onComposerSeverityChange}
+							onSubmit={onComposerSubmit}
+							onClose={onComposerClose}
+						/>
+					{/if}
 				{/if}
-			{/if}
 			</tbody>
 		{/if}
 	{/each}

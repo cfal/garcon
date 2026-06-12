@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ConversationMessage from './ConversationMessage.svelte';
 	import ChatBashToolGroup from './tools/ChatBashToolGroup.svelte';
+	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import {
 		isToolUseMessage,
 		ToolResultMessage,
@@ -232,11 +233,7 @@
 				<svelte:boundary>
 					<ChatBashToolGroup messages={item.messages} />
 					{#snippet failed(error)}
-						<div
-							class="px-4 py-2 text-sm text-destructive bg-destructive/10 rounded border border-destructive/20"
-						>
-							Failed to render message{error instanceof Error ? `: ${error.message}` : ''}
-						</div>
+						<MessageRenderFallback {error} />
 					{/snippet}
 				</svelte:boundary>
 			{:else}
@@ -267,11 +264,7 @@
 						showThinking={localSettings.showThinking}
 					/>
 					{#snippet failed(error)}
-						<div
-							class="px-4 py-2 text-sm text-destructive bg-destructive/10 rounded border border-destructive/20"
-						>
-							Failed to render message{error instanceof Error ? `: ${error.message}` : ''}
-						</div>
+						<MessageRenderFallback {error} />
 					{/snippet}
 				</svelte:boundary>
 			{/if}

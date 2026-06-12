@@ -3,6 +3,7 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import type { GitReviewCommentDraft } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { gitCommentSeverityLabel } from './git-comment-labels';
 
 	interface GitDiffCommentThreadProps {
 		comments: GitReviewCommentDraft[];
@@ -73,7 +74,7 @@
 							<span
 								class="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded {severityColor(
 									comment.severity,
-								)}">{comment.severity}</span
+								)}">{gitCommentSeverityLabel(comment.severity)}</span
 							>
 							<span class="flex-1 text-xs text-foreground whitespace-pre-wrap">{comment.body}</span>
 							<div class="flex gap-1 opacity-0 group-hover/comment:opacity-100 transition-opacity">

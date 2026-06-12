@@ -129,8 +129,8 @@
 				class="p-1 rounded text-muted-foreground transition-colors shrink-0 {pathCopied
 					? 'text-status-success-foreground'
 					: 'hover:text-foreground hover:bg-accent opacity-0 group-hover/filerow:opacity-100 focus-visible:opacity-100'}"
-				title={pathCopied ? 'Copied!' : 'Copy file path'}
-				aria-label={pathCopied ? 'Path copied' : 'Copy file path'}
+				title={pathCopied ? m.git_file_path_copied_short() : m.git_file_path_copy()}
+				aria-label={pathCopied ? m.git_file_path_copied() : m.git_file_path_copy()}
 			>
 				{#if pathCopied}
 					<Check class="w-3 h-3" />
