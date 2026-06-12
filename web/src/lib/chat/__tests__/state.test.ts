@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ChatState } from '../state.svelte';
-import { UserMessage, AssistantMessage } from '$shared/chat-types';
+import { UserMessage, AssistantMessage, ErrorMessage } from '$shared/chat-types';
 
 describe('ChatState', () => {
 	it('starts with empty messages', () => {
@@ -28,6 +28,16 @@ describe('ChatState', () => {
 		state.appendMessages([new AssistantMessage('2024-01-01T00:00:01Z', 'second')]);
 		expect(state.chatMessages).toHaveLength(2);
 		expect((state.chatMessages[1] as AssistantMessage).content).toBe('second');
+	});
+
+	it('appendErrorMessage adds an error row', () => {
+		const state = new ChatState();
+
+		state.appendErrorMessage('Failed to send message');
+
+		expect(state.chatMessages).toHaveLength(1);
+		expect(state.chatMessages[0]).toBeInstanceOf(ErrorMessage);
+		expect((state.chatMessages[0] as ErrorMessage).content).toBe('Failed to send message');
 	});
 
 	it('clearMessages resets all state', () => {

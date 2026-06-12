@@ -1,7 +1,7 @@
 // Per-chat message state: message arrays, pagination, scroll management,
 // and message persistence via LocalChatSnapshotCache.
 
-import { parseChatMessages, UserMessage, type ChatMessage } from '$shared/chat-types';
+import { ErrorMessage, parseChatMessages, UserMessage, type ChatMessage } from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import { LocalChatSnapshotCache } from './chat-snapshot-cache';
 import { getChatMessages } from '$lib/api/chats.js';
@@ -155,6 +155,11 @@ export class ChatState {
 	/** Appends new messages to the end of the array. */
 	appendMessages(msgs: ChatMessage[]): void {
 		this.chatMessages = [...this.chatMessages, ...msgs];
+	}
+
+	/** Appends a local error row to the durable message list. */
+	appendErrorMessage(content: string): void {
+		this.appendMessages([new ErrorMessage(new Date().toISOString(), content)]);
 	}
 
 	/** Replaces the entire durable message array. */

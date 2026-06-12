@@ -38,6 +38,21 @@ describe('ChatLifecycleStore', () => {
 			expect(store.turnStatus).toBe('running');
 		});
 
+		it('beginTurn sets running lifecycle metadata for a chat', () => {
+			const store = makeStore();
+			store.beginTurn('chat-1');
+
+			expect(store.isLoading).toBe(true);
+			expect(store.turnStatus).toBe('running');
+			expect(store.canAbort).toBe(true);
+			expect(store.currentChatId).toBe('chat-1');
+			expect(store.loadingStatus).toMatchObject({
+				text: 'Processing',
+				tokens: 0,
+				can_interrupt: true,
+			});
+		});
+
 		it('syncFromProcessing mirrors processing without changing status metadata', () => {
 			const store = makeStore();
 			store.setTurnStatus('completed');

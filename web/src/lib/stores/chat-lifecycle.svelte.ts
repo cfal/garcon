@@ -90,6 +90,14 @@ export class ChatLifecycleStore {
 		this.turnStatus = 'running';
 	}
 
+	/** Starts the UI lifecycle for an accepted assistant turn. */
+	beginTurn(chatId: string): void {
+		this.activateLoading();
+		this.setCanAbort(true);
+		this.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
+		this.setCurrentChatId(chatId);
+	}
+
 	/** Resets all loading-related fields back to idle defaults. */
 	clearLoading(): void {
 		this.isLoading = false;

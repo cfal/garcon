@@ -8,7 +8,7 @@ import {
 	runChat,
 } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
-import { AssistantMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
+import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
 
@@ -85,6 +85,15 @@ function createDeps(chat = createRunningChat()) {
 		}),
 		setPendingUserInputs: vi.fn((inputs: PendingUserInput[]) => {
 			chatState.pendingUserInputs = inputs;
+		}),
+		appendMessages: vi.fn((messages: ChatMessage[]) => {
+			chatState.chatMessages = [...chatState.chatMessages, ...messages];
+		}),
+		appendErrorMessage: vi.fn((content: string) => {
+			chatState.chatMessages = [
+				...chatState.chatMessages,
+				new ErrorMessage(new Date().toISOString(), content),
+			];
 		}),
 		upsertPendingUserInput: vi.fn((input: PendingUserInput) => {
 			const index = chatState.pendingUserInputs.findIndex(
@@ -171,6 +180,7 @@ function createDeps(chat = createRunningChat()) {
 				setCanAbort: vi.fn(),
 				setCurrentChatId: vi.fn(),
 				setLoadingStatus: vi.fn(),
+				beginTurn: vi.fn(),
 			},
 			conversationUi,
 			startupCoordinator: {},
@@ -409,7 +419,7 @@ describe('ConversationSessionController', () => {
 				model: 'opus',
 			}),
 		);
-		expect(deps.lifecycle.activateLoading).not.toHaveBeenCalled();
+		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
 
 		accepted.resolve({
 			success: true,
@@ -424,7 +434,7 @@ describe('ConversationSessionController', () => {
 
 		const delivered = deps.chatState.pendingUserInputs[0];
 		expect(delivered.deliveryStatus).toBe('accepted');
-		expect(deps.lifecycle.activateLoading).toHaveBeenCalled();
+		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-1', true);
 	});
 
