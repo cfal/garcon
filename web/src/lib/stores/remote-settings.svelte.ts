@@ -33,7 +33,7 @@ export class RemoteSettingsStore {
 			this.#runInBackground(() => {
 				if (this.snapshot) return Promise.resolve(this.snapshot);
 				return this.refresh({ initial: true });
-			})
+			}),
 		);
 	}
 

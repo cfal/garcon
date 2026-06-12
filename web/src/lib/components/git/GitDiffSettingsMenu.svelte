@@ -44,24 +44,21 @@
 
 <Popover.Root bind:open={popoverOpen}>
 	<Popover.Trigger>
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			aria-label="Diff settings"
-			title="Diff settings"
-		>
+		<Button variant="ghost" size="icon-sm" aria-label={m.git_diff_settings()} title={m.git_diff_settings()}>
 			<Settings class="w-4 h-4" />
 		</Button>
 	</Popover.Trigger>
 
 	<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
 		<div class="bg-card text-foreground rounded-md border border-border">
-				<div class="flex items-center justify-between px-4 py-2.5">
+			<div class="flex items-center justify-between px-4 py-2.5">
 				<div class="text-sm font-medium text-foreground">Font size</div>
 				<Select.Root
 					type="single"
 					value={diffFontSize}
-					onValueChange={(v) => { if (v) onSetDiffFontSize(v); }}
+					onValueChange={(v) => {
+						if (v) onSetDiffFontSize(v);
+					}}
 				>
 					<Select.Trigger class="w-[80px]" size="sm">
 						{diffFontSize}px
@@ -79,7 +76,9 @@
 				<Select.Root
 					type="single"
 					value={diffMode}
-					onValueChange={(v) => { if (v) onSetDiffMode(v as DiffMode); }}
+					onValueChange={(v) => {
+						if (v) onSetDiffMode(v as DiffMode);
+					}}
 				>
 					<Select.Trigger class="w-[100px]" size="sm">
 						{diffMode === 'unified' ? 'Unified' : 'Split'}
@@ -96,7 +95,9 @@
 				<Select.Root
 					type="single"
 					value={String(contextLines)}
-					onValueChange={(v) => { if (v) onSetContextLines(Number(v)); }}
+					onValueChange={(v) => {
+						if (v) onSetContextLines(Number(v));
+					}}
 				>
 					<Select.Trigger class="w-[80px]" size="sm">
 						{contextLines} lines
@@ -109,17 +110,12 @@
 				</Select.Root>
 			</div>
 
-				<div class="p-2.5">
-					<Button
-						variant="outline"
-						size="sm"
-						class="w-fit gap-2"
-						onclick={handleOpenCommitSettings}
-					>
-						<Sparkles class="w-3.5 h-3.5" />
-						<span>{m.git_changes_configure_messages()}</span>
-					</Button>
-				</div>
+			<div class="p-2.5">
+				<Button variant="outline" size="sm" class="w-fit gap-2" onclick={handleOpenCommitSettings}>
+					<Sparkles class="w-3.5 h-3.5" />
+					<span>{m.git_changes_configure_messages()}</span>
+				</Button>
 			</div>
-		</Popover.Content>
-	</Popover.Root>
+		</div>
+	</Popover.Content>
+</Popover.Root>

@@ -4,15 +4,13 @@
 
 	import { onDestroy, onMount } from 'svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
-	import {
-		NewChatFormState,
-	} from '$lib/chat/new-chat-form-state.svelte.js';
+	import { NewChatFormState } from '$lib/chat/new-chat-form-state.svelte.js';
 	import { shouldSubmitOnEnter } from '$lib/chat/composer-shortcuts';
-		import {
-			buildPermissionOptions,
-			buildThinkingOptions,
-		} from '$lib/chat/composer-controls';
-	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
+	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
+	import {
+		CLAUDE_PERMISSION_MODES,
+		NON_CLAUDE_PERMISSION_MODES,
+	} from '$lib/chat/chat-ui-constants';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import { getLocalSettings, getAppShell, getModelCatalog, getRemoteSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
@@ -24,10 +22,13 @@
 	import Pin from '@lucide/svelte/icons/pin';
 	import PinOff from '@lucide/svelte/icons/pin-off';
 	import Tag from '@lucide/svelte/icons/tag';
-		import { getTagColorClasses } from '$lib/utils/tag-colors';
-		import { getChatSessions } from '$lib/context';
-		import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
-		import type { ModelSelectorChange, ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
+	import { getTagColorClasses } from '$lib/utils/tag-colors';
+	import { getChatSessions } from '$lib/context';
+	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
+	import type {
+		ModelSelectorChange,
+		ModelSelectorMode,
+	} from '$lib/components/model-selector/model-selector-types';
 
 	interface Props {
 		prefill?: string;
@@ -40,17 +41,17 @@
 	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
-		const remoteSettings = getRemoteSettings();
-		const sessions = getChatSessions();
-		const form = new NewChatFormState(appShell, modelCatalog, remoteSettings);
-	
-		let isMobile = $state(false);
+	const remoteSettings = getRemoteSettings();
+	const sessions = getChatSessions();
+	const form = new NewChatFormState(modelCatalog, remoteSettings);
+
+	let isMobile = $state(false);
 	let pendingTextareaFocus = $state(true);
 	let tagInputValue = $state('');
 	let tagInputRef = $state<HTMLInputElement | null>(null);
 
 	const allKnownTags = $derived(
-		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort()
+		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort(),
 	);
 	const tagSuggestions = $derived.by(() => {
 		const q = tagInputValue.trim().toLowerCase();
@@ -117,10 +118,10 @@
 	});
 
 	// Revalidates selected models whenever the shared model catalog updates.
-		$effect(() => {
-			void modelCatalog.version;
-			form.validateAllModelsAgainstLive();
-		});
+	$effect(() => {
+		void modelCatalog.version;
+		form.validateAllModelsAgainstLive();
+	});
 
 	// Focus textarea when path validates successfully, but not while browsing.
 	$effect(() => {
@@ -194,8 +195,8 @@
 
 	function handleKeyDown(e: KeyboardEvent): void {
 		if (
-			e.key === 'Enter'
-			&& shouldSubmitOnEnter({
+			e.key === 'Enter' &&
+			shouldSubmitOnEnter({
 				sendByShiftEnter: localSettings.sendByShiftEnter,
 				shiftKey: e.shiftKey,
 				ctrlKey: e.ctrlKey,
@@ -214,22 +215,29 @@
 		}
 	}
 
-		const permissionOptions = $derived(
-			buildPermissionOptions(form.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES)
-		);
-		const thinkingOptions = $derived(buildThinkingOptions());
-		const modelSelectorMode: ModelSelectorMode = { agent: 'select', source: 'select', surface: 'composer' };
-		const modelSelectorValue = $derived({
-			agentId: form.agentId,
-			model: form.modelValue,
-		});
-		const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
+	const permissionOptions = $derived(
+		buildPermissionOptions(
+			form.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES,
+		),
+	);
+	const thinkingOptions = $derived(buildThinkingOptions());
+	const modelSelectorMode: ModelSelectorMode = {
+		agent: 'select',
+		source: 'select',
+		surface: 'composer',
+	};
+	const modelSelectorValue = $derived({
+		agentId: form.agentId,
+		model: form.modelValue,
+	});
+	const sendButtonClass =
+		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
-		function handleModelSelectorChange(next: ModelSelectorChange): void {
-			form.selectAgent(next.agentId);
-			form.handleModelChange(next.modelValue);
-		}
-	</script>
+	function handleModelSelectorChange(next: ModelSelectorChange): void {
+		form.selectAgent(next.agentId);
+		form.handleModelChange(next.modelValue);
+	}
+</script>
 
 <div class="p-4 sm:p-8">
 	<div class="relative">
@@ -251,12 +259,15 @@
 								type="text"
 								bind:value={form.projectPath}
 								onfocus={(e: FocusEvent & { currentTarget: HTMLInputElement }) => {
-								if (isMobile) {
-									e.currentTarget.blur();
-								}
-								form.handlePathFocus();
-							}}
-								oninput={() => { form.clearError(); form.resetTabCompletions(); }}
+									if (isMobile) {
+										e.currentTarget.blur();
+									}
+									form.handlePathFocus();
+								}}
+								oninput={() => {
+									form.clearError();
+									form.resetTabCompletions();
+								}}
 								onkeydown={(e: KeyboardEvent) => {
 									if (e.key === 'Tab') {
 										e.preventDefault();
@@ -275,7 +286,9 @@
 								{#if !form.trimmedPath}
 									<!-- no indicator -->
 								{:else if form.validationStatus === 'checking'}
-									<Loader2 class="w-4 h-4 animate-spin text-muted-foreground transition-opacity duration-200" />
+									<Loader2
+										class="w-4 h-4 animate-spin text-muted-foreground transition-opacity duration-200"
+									/>
 								{:else if form.validationStatus === 'valid'}
 									<Check class="w-4 h-4 text-primary transition-opacity duration-200" />
 								{:else if form.validationStatus === 'invalid'}
@@ -311,7 +324,11 @@
 							class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 transition-colors"
 							title={m.chat_new_chat_tags_add()}
 						>
-							<Tag class="w-4 h-4 {form.chatTags.length > 0 ? 'text-primary' : 'text-muted-foreground'}" />
+							<Tag
+								class="w-4 h-4 {form.chatTags.length > 0
+									? 'text-primary'
+									: 'text-muted-foreground'}"
+							/>
 						</button>
 					</div>
 
@@ -353,7 +370,7 @@
 							<button
 								type="button"
 								class="text-xs px-2.5 py-1 rounded-md border transition-colors {form.projectPath ===
-									pinnedPath
+								pinnedPath
 									? 'border-border bg-accent text-accent-foreground'
 									: 'border-border/70 bg-muted/40 text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}"
 								onclick={() => {
@@ -366,7 +383,9 @@
 						{/each}
 					</div>
 				{:else}
-					<p class="text-xs px-2.5 py-1 rounded-md bg-muted/30 text-muted-foreground text-center w-full">
+					<p
+						class="text-xs px-2.5 py-1 rounded-md bg-muted/30 text-muted-foreground text-center w-full"
+					>
 						{m.chat_new_chat_star_bookmark()}
 					</p>
 				{/if}
@@ -377,7 +396,9 @@
 							{#each form.chatTags as tag (tag)}
 								<button
 									type="button"
-									class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity {getTagColorClasses(tag)}"
+									class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity {getTagColorClasses(
+										tag,
+									)}"
 									onclick={() => form.removeTag(tag)}
 								>
 									{tag}
@@ -395,7 +416,9 @@
 										class="w-full px-2 py-1 text-xs bg-transparent border-none outline-none placeholder-muted-foreground/60 text-foreground"
 									/>
 									{#if tagSuggestions.length > 0}
-										<div class="absolute z-10 mt-1 w-full rounded-md border border-border bg-popover shadow-md">
+										<div
+											class="absolute z-10 mt-1 w-full rounded-md border border-border bg-popover shadow-md"
+										>
 											{#each tagSuggestions as suggestion (suggestion)}
 												<button
 													type="button"
@@ -442,33 +465,33 @@
 					canAttachImages={modelCatalog.supportsImages(form.agentId, form.modelValue)}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
-					permissionOptions={permissionOptions}
+					{permissionOptions}
 					selectedPermission={form.permissionMode}
 					onPermissionSelect={(mode) => {
 						form.permissionMode = mode;
 					}}
-						thinkingOptions={thinkingOptions}
-						selectedThinking={form.thinkingMode}
-						onThinkingSelect={(mode) => {
-							form.thinkingMode = mode;
-						}}
-						canSend={form.canSubmit}
-						onSend={handleSubmit}
-						sendTitle={m.chat_new_chat_start_session()}
-						sendButtonClass={sendButtonClass}
-						mobileRightGroupFullRow={true}
-					>
-						{#snippet modelSelector()}
-							<ComposerModelSelector
-								value={modelSelectorValue}
-								mode={modelSelectorMode}
-								onChange={handleModelSelectorChange}
-								align="end"
-								side="bottom"
-							/>
-						{/snippet}
-					</ComposerBottomBar>
-				</div>
+					{thinkingOptions}
+					selectedThinking={form.thinkingMode}
+					onThinkingSelect={(mode) => {
+						form.thinkingMode = mode;
+					}}
+					canSend={form.canSubmit}
+					onSend={handleSubmit}
+					sendTitle={m.chat_new_chat_start_session()}
+					{sendButtonClass}
+					mobileRightGroupFullRow={true}
+				>
+					{#snippet modelSelector()}
+						<ComposerModelSelector
+							value={modelSelectorValue}
+							mode={modelSelectorMode}
+							onChange={handleModelSelectorChange}
+							align="end"
+							side="bottom"
+						/>
+					{/snippet}
+				</ComposerBottomBar>
+			</div>
 
 			{#if form.attachedImages.length > 0}
 				<div class="p-2 bg-muted/40 rounded-lg">
@@ -477,7 +500,11 @@
 							<div class="relative group">
 								<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
 									{#if form.imageUrlFor(file, idx)}
-										<img src={form.imageUrlFor(file, idx)} alt={file.name} class="w-full h-full object-cover" />
+										<img
+											src={form.imageUrlFor(file, idx)}
+											alt={file.name}
+											class="w-full h-full object-cover"
+										/>
 									{/if}
 								</div>
 								<button

@@ -9,33 +9,21 @@
 	import SavedSearchManagerDialog from './SavedSearchManagerDialog.svelte';
 	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
-	import { getAppShell, getReadReceiptOutbox } from '$lib/context';
+	import { getAppShell, getNotifications, getReadReceiptOutbox } from '$lib/context';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
 	import { createPerListWriteQueue } from './reorder-write-queue';
-	import { SidebarController } from './sidebar-controller.svelte';
+	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
+	import { SidebarDialogsState } from './sidebar-dialogs-state.svelte';
 	import { SidebarSearchState } from './sidebar-search-state.svelte';
+	import { SavedSearchStore } from './saved-search-store.svelte';
 	import { ChatSelectionStore } from '$lib/stores/chat-selection.svelte';
 	import { addTagToQuery } from './sidebar-search';
-	import {
-		getSavedSearches,
-		createSavedSearch,
-		updateSavedSearch as updateSavedSearchApi,
-		deleteSavedSearch as deleteSavedSearchApi,
-		reorderSavedSearches as reorderSavedSearchesApi,
-		type SavedChatSearch,
-	} from '$lib/api/settings';
-	import type { SavedSearchEditorState } from './SavedSearchEditorDialog.svelte';
+	import type { SavedChatSearch } from '$lib/api/settings';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
-
-	interface ChatDeleteConfirmation {
-		chatId: string;
-		chatTitle: string;
-		agentId: SessionAgentId;
-	}
 
 	interface QuickMoveWrite {
 		list: ChatOrderList;
@@ -44,24 +32,6 @@
 		onSuccess?: () => void;
 		onFailure?: () => void;
 	}
-
-	interface ChatRenameConfirmation {
-		chatId: string;
-		currentName: string;
-	}
-
-interface ChatDetailsDialog {
-	chatId: string;
-		chatTitle: string;
-		firstMessage: string | null;
-		createdAt: string | null;
-		lastActivityAt: string | null;
-		nativePath: string | null;
-		isLoading: boolean;
-	error: string | null;
-}
-
-type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 
 	interface SidebarProps {
 		chats: ChatSessionRecord[];
@@ -94,41 +64,48 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		onShowSettings,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
+	const notifications = getNotifications();
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const controller = new SidebarController({
-		get onQuietRefresh() { return onQuietRefresh; },
+		get onQuietRefresh() {
+			return onQuietRefresh;
+		},
 	});
 
 	const searchState = new SidebarSearchState({
-		get chats() { return chats; },
-		get selectedChatId() { return selectedChatId; },
+		get chats() {
+			return chats;
+		},
+		get selectedChatId() {
+			return selectedChatId;
+		},
 	});
 
 	const selection = new ChatSelectionStore();
+	const dialogs = new SidebarDialogsState();
+	const savedSearches = new SavedSearchStore({
+		get draftQuery() {
+			return searchState.draftQuery;
+		},
+		suspendSearchDialog() {
+			searchState.suspendSearchDialog();
+		},
+		resumeSearchDialog() {
+			searchState.resumeSearchDialog();
+		},
+		reportActionFailure,
+	});
 	const MINUTE_MS = 60_000;
 
 	// Sidebar UI state.
-	let bulkDeleteConfirmation = $state<{ chatIds: string[]; chatTitles: string[] } | null>(null);
 	let isBulkOperating = $state(false);
-	let chatDeleteConfirmation = $state<ChatDeleteConfirmation | null>(null);
-	let chatRenameConfirmation = $state<ChatRenameConfirmation | null>(null);
-	let chatDetailsDialog = $state<ChatDetailsDialog | null>(null);
-	let tagDialog = $state<{ chatId: string; chatTitle: string; tags: string[] } | null>(null);
-	let shareChatDialog = $state<{ chatId: string; chatTitle: string } | null>(null);
 	let currentTime = $state(new Date());
 	let isMarkingAllRead = $state(false);
-
-	// Saved search management state.
-	let editorState = $state<SavedSearchEditorState | null>(null);
-	let savedSearchManagerOrigin = $state<'search-dialog' | null>(null);
-	let savedSearchEditorOrigin = $state<SavedSearchDialogOrigin | null>(null);
-	let savedSearchDeleteConfirmation = $state<{ id: string } | null>(null);
-	let savedSearchDeleteButtonRef = $state<HTMLButtonElement | null>(null);
 
 	let visibleUnreadChatIds = $derived.by(() =>
 		searchState.filteredChats
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
-			.map((chat) => chat.id)
+			.map((chat) => chat.id),
 	);
 
 	function millisecondsUntilNextMinute(nowMs = Date.now()): number {
@@ -166,6 +143,11 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		onChatSelect(chatId);
 	}
 
+	function reportActionFailure(logMessage: string, userMessage: string, error: unknown): void {
+		console.error(logMessage, error);
+		notifications.error(userMessage);
+	}
+
 	async function handleTogglePinned(chatId: string) {
 		const chat = chats.find((s) => s.id === chatId);
 		const wasPinned = chat?.isPinned === true;
@@ -175,7 +157,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 				appShell.requestSidebarRecenterToSelected();
 			}
 		} catch (error) {
-			console.error('Failed to toggle pinned:', error);
+			reportActionFailure('Failed to toggle pinned:', m.notifications_pin_chat_failed(), error);
 		}
 	}
 
@@ -185,9 +167,10 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		const isSelectedChat = selectedChatId === chatId;
 		const isArchivingSelectedChat = !wasArchived && isSelectedChat;
 		const chatIndex = chats.findIndex((s) => s.id === chatId);
-		const neighborId = isArchivingSelectedChat && chatIndex >= 0
-			? (chats[chatIndex + 1]?.id ?? chats[chatIndex - 1]?.id ?? null)
-			: null;
+		const neighborId =
+			isArchivingSelectedChat && chatIndex >= 0
+				? (chats[chatIndex + 1]?.id ?? chats[chatIndex - 1]?.id ?? null)
+				: null;
 		try {
 			await controller.toggleArchive(chatId);
 			if (isArchivingSelectedChat) {
@@ -202,29 +185,33 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 				appShell.requestSidebarRecenterToSelected();
 			}
 		} catch (error) {
-			console.error('Failed to toggle archive:', error);
+			reportActionFailure(
+				'Failed to toggle archive:',
+				m.notifications_archive_chat_failed(),
+				error,
+			);
 		}
 	}
 
 	function showDeleteConfirmation(chatId: string, chatTitle: string, agentId: SessionAgentId) {
-		chatDeleteConfirmation = { chatId, chatTitle, agentId };
+		dialogs.showDeleteConfirmation(chatId, chatTitle, agentId);
 	}
 
 	async function confirmDeleteChat() {
-		if (!chatDeleteConfirmation) return;
-		const { chatId } = chatDeleteConfirmation;
-		chatDeleteConfirmation = null;
+		if (!dialogs.chatDeleteConfirmation) return;
+		const { chatId } = dialogs.chatDeleteConfirmation;
+		dialogs.clearDeleteConfirmation();
 		await onChatDelete?.(chatId);
 	}
 
 	function startRenameChat(chatId: string, currentName: string) {
-		chatRenameConfirmation = { chatId, currentName };
+		dialogs.startRename(chatId, currentName);
 	}
 
 	async function confirmRenameChat(newName: string) {
-		if (!chatRenameConfirmation) return;
-		const { chatId } = chatRenameConfirmation;
-		chatRenameConfirmation = null;
+		if (!dialogs.chatRenameConfirmation) return;
+		const { chatId } = dialogs.chatRenameConfirmation;
+		dialogs.clearRename();
 		await onChatRenamed?.(chatId, newName.trim());
 		if (chatId === selectedChatId) {
 			appShell.requestComposerFocus();
@@ -232,53 +219,31 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 	}
 
 	function closeChatDetails() {
-		chatDetailsDialog = null;
+		dialogs.closeDetails();
 	}
 
 	function showChatDetails(chatId: string, chatTitle: string) {
-		chatDetailsDialog = {
-			chatId,
-			chatTitle,
-			firstMessage: null,
-			createdAt: null,
-			lastActivityAt: null,
-			nativePath: null,
-			isLoading: true,
-			error: null,
-		};
+		dialogs.showDetails(chatId, chatTitle);
 
 		void (async () => {
 			try {
 				const details = await controller.loadDetails(chatId);
-				if (!chatDetailsDialog || chatDetailsDialog.chatId !== chatId) return;
-				chatDetailsDialog = {
-					...chatDetailsDialog,
+				dialogs.completeDetails(chatId, {
 					firstMessage: details.firstMessage,
 					createdAt: details.createdAt,
 					lastActivityAt: details.lastActivityAt,
 					nativePath: details.nativePath,
-					isLoading: false,
-					error: null,
-				};
+				});
 			} catch (error) {
-				if (!chatDetailsDialog || chatDetailsDialog.chatId !== chatId) return;
 				const message = error instanceof Error ? error.message : String(error);
-				chatDetailsDialog = {
-					...chatDetailsDialog,
-					isLoading: false,
-					error: message || m.sidebar_details_error_loading(),
-				};
+				dialogs.failDetails(chatId, message || m.sidebar_details_error_loading());
 			}
 		})();
 	}
 
 	function showTagDialog(chatId: string, currentTags: string[]) {
 		const chat = chats.find((s) => s.id === chatId);
-		tagDialog = {
-			chatId,
-			chatTitle: chat?.title || m.sidebar_chats_unnamed(),
-			tags: currentTags,
-		};
+		dialogs.showTagDialog(chatId, chat?.title || m.sidebar_chats_unnamed(), currentTags);
 	}
 
 	function handleTagClick(tag: string) {
@@ -287,7 +252,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 
 	async function handleSaveTags(chatId: string, tags: string[]) {
 		await controller.updateTags(chatId, tags);
-		tagDialog = null;
+		dialogs.closeTagDialog();
 	}
 
 	function handlePrimaryAction() {
@@ -300,7 +265,11 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			await controller.quickMove(chatId, target);
 		},
 		(error, task) => {
-			console.error(`Failed to quick reorder ${task.list} chat order:`, error);
+			reportActionFailure(
+				`Failed to quick reorder ${task.list} chat order:`,
+				m.notifications_reorder_chats_failed(),
+				error,
+			);
 		},
 	);
 
@@ -361,62 +330,25 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 	let bulkShowArchive = $derived(selectedChats.some((c) => !c.isArchived));
 	let bulkShowUnarchive = $derived(selectedChats.some((c) => c.isArchived));
 
-	async function handleBulkPin() {
-		const ids = selectedChats.filter((c) => !c.isPinned).map((c) => c.id);
-		if (ids.length === 0) return;
+	async function handleBulkOperation(
+		action: SidebarBulkAction,
+		logMessage: string,
+		userMessage: string,
+	) {
 		isBulkOperating = true;
 		try {
-			await controller.bulkTogglePin(ids);
-		} catch (error) {
-			console.error('Failed to bulk pin:', error);
-		} finally {
-			isBulkOperating = false;
-			selection.exit();
-		}
-	}
-
-	async function handleBulkUnpin() {
-		const ids = selectedChats.filter((c) => c.isPinned).map((c) => c.id);
-		if (ids.length === 0) return;
-		isBulkOperating = true;
-		try {
-			await controller.bulkTogglePin(ids);
-		} catch (error) {
-			console.error('Failed to bulk unpin:', error);
-		} finally {
-			isBulkOperating = false;
-			selection.exit();
-		}
-	}
-
-	async function handleBulkArchive() {
-		const ids = selectedChats.filter((c) => !c.isArchived).map((c) => c.id);
-		if (ids.length === 0) return;
-		const isSelectedChatInBulk = selectedChatId && ids.includes(selectedChatId);
-		isBulkOperating = true;
-		try {
-			await controller.bulkToggleArchive(ids);
-			if (isSelectedChatInBulk) {
-				const remaining = chats.find((c) => !ids.includes(c.id) && !c.isArchived);
-				if (remaining) onChatSelect(remaining.id);
-				else onNewChat();
+			const result = await controller.runBulkOperation(action, {
+				selectedChats,
+				allChats: chats,
+				selectedChatId,
+			});
+			if (result.nextSelectedChatId) {
+				onChatSelect(result.nextSelectedChatId);
+			} else if (result.shouldCreateNewChat) {
+				onNewChat();
 			}
 		} catch (error) {
-			console.error('Failed to bulk archive:', error);
-		} finally {
-			isBulkOperating = false;
-			selection.exit();
-		}
-	}
-
-	async function handleBulkUnarchive() {
-		const ids = selectedChats.filter((c) => c.isArchived).map((c) => c.id);
-		if (ids.length === 0) return;
-		isBulkOperating = true;
-		try {
-			await controller.bulkToggleArchive(ids);
-		} catch (error) {
-			console.error('Failed to bulk unarchive:', error);
+			reportActionFailure(logMessage, userMessage, error);
 		} finally {
 			isBulkOperating = false;
 			selection.exit();
@@ -424,19 +356,17 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 	}
 
 	function handleBulkDeleteRequest() {
-		const ids = selectedChats.map((c) => c.id);
-		const titles = selectedChats.map((c) => c.title || m.sidebar_chats_unnamed());
-		bulkDeleteConfirmation = { chatIds: ids, chatTitles: titles };
+		dialogs.requestBulkDelete(selectedChats, m.sidebar_chats_unnamed());
 	}
 
 	async function confirmBulkDelete() {
-		if (!bulkDeleteConfirmation) return;
-		const ids = bulkDeleteConfirmation.chatIds;
-		bulkDeleteConfirmation = null;
+		if (!dialogs.bulkDeleteConfirmation) return;
+		const ids = dialogs.bulkDeleteConfirmation.chatIds;
+		dialogs.clearBulkDelete();
 		const isSelectedChatInBulk = selectedChatId && ids.includes(selectedChatId);
 		// Resolve the surviving neighbor before the optimistic removal runs.
 		const remainingSelection = isSelectedChatInBulk
-			? chats.find((c) => !ids.includes(c.id))?.id ?? null
+			? (chats.find((c) => !ids.includes(c.id))?.id ?? null)
 			: null;
 		isBulkOperating = true;
 		try {
@@ -451,7 +381,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			}
 			await controller.bulkDelete(ids);
 		} catch (error) {
-			console.error('Failed to bulk delete:', error);
+			reportActionFailure('Failed to bulk delete:', m.notifications_bulk_delete_failed(), error);
 		} finally {
 			isBulkOperating = false;
 			selection.exit();
@@ -471,7 +401,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			const resultChatId = await controller.forkChat(sourceChatId);
 			onChatSelect(resultChatId);
 		} catch (error) {
-			console.error('Failed to fork chat:', error);
+			reportActionFailure('Failed to fork chat:', m.notifications_fork_chat_failed(), error);
 		}
 	}
 
@@ -481,7 +411,11 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		try {
 			await readReceiptOutbox.markChatsReadNow(visibleUnreadChatIds);
 		} catch (error) {
-			console.error('Failed to mark chats read:', error);
+			reportActionFailure(
+				'Failed to mark chats read:',
+				m.notifications_mark_all_read_failed(),
+				error,
+			);
 		} finally {
 			isMarkingAllRead = false;
 		}
@@ -510,152 +444,39 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 		searchState.applyQuery('');
 	}
 
-	function openSavedSearchManagerFromSearchDialog() {
-		searchState.suspendSearchDialog();
-		savedSearchManagerOrigin = 'search-dialog';
-		searchState.manageSavedSearchesOpen = true;
-	}
-
-	function closeSavedSearchManager() {
-		searchState.manageSavedSearchesOpen = false;
-		if (savedSearchManagerOrigin === 'search-dialog') {
-			searchState.resumeSearchDialog();
-		}
-		savedSearchManagerOrigin = null;
-	}
-
-	function openEditorForCreate() {
-		searchState.manageSavedSearchesOpen = false;
-		savedSearchEditorOrigin = 'manager';
-		editorState = {
-			mode: 'create',
-			title: '',
-			query: searchState.draftQuery,
-			showAsSidebarPill: false,
-			showInSidebarMenu: false,
-			showInSearchDialog: true,
-		};
-	}
-
-	function openEditorForCreateFromSearchDialog() {
-		searchState.suspendSearchDialog();
-		savedSearchEditorOrigin = 'search-dialog';
-		editorState = {
-			mode: 'create',
-			title: '',
-			query: searchState.draftQuery,
-			showAsSidebarPill: false,
-			showInSidebarMenu: false,
-			showInSearchDialog: true,
-		};
-	}
-
-	function openEditorForEdit(search: SavedChatSearch) {
-		searchState.manageSavedSearchesOpen = false;
-		savedSearchEditorOrigin = 'manager';
-		editorState = {
-			mode: 'edit',
-			searchId: search.id,
-			title: search.title || '',
-			query: search.query,
-			showAsSidebarPill: search.showAsSidebarPill,
-			showInSidebarMenu: search.showInSidebarMenu,
-			showInSearchDialog: search.showInSearchDialog,
-		};
-	}
-
-	function restoreSavedSearchEditorOrigin() {
-		const origin = savedSearchEditorOrigin;
-		savedSearchEditorOrigin = null;
-		if (origin === 'manager') {
-			searchState.manageSavedSearchesOpen = true;
-			return;
-		}
-		if (origin === 'search-dialog') {
-			searchState.resumeSearchDialog();
-		}
-	}
-
-	async function handleSaveSearchEditor(
-		data: {
-			title: string | null;
-			query: string;
-			showAsSidebarPill: boolean;
-			showInSidebarMenu: boolean;
-			showInSearchDialog: boolean;
-		},
-		searchId?: string
-	) {
-		if (searchId) {
-			const res = await updateSavedSearchApi(searchId, data);
-			searchState.setSavedSearches(
-				searchState.savedSearches.map((s) => s.id === searchId ? res.savedSearch : s)
-			);
-		} else {
-			const res = await createSavedSearch(data);
-			searchState.setSavedSearches([...searchState.savedSearches, res.savedSearch]);
-		}
-		editorState = null;
-		restoreSavedSearchEditorOrigin();
-	}
-
-	function requestDeleteSavedSearch(id: string) {
-		savedSearchDeleteConfirmation = { id };
-	}
-
-	async function confirmDeleteSavedSearch() {
-		if (!savedSearchDeleteConfirmation) return;
-		const { id } = savedSearchDeleteConfirmation;
-		savedSearchDeleteConfirmation = null;
-		try {
-			await deleteSavedSearchApi(id);
-			searchState.setSavedSearches(searchState.savedSearches.filter((s) => s.id !== id));
-		} catch (error) {
-			console.error('Failed to delete saved search:', error);
-		}
-	}
-
-	async function handleReorderSavedSearches(oldOrder: string[], newOrder: string[]) {
-		// Optimistically reorder locally.
-		const byId = new Map(searchState.savedSearches.map((s) => [s.id, s]));
-		searchState.setSavedSearches(newOrder.map((id) => byId.get(id)!).filter(Boolean));
-		try {
-			await reorderSavedSearchesApi(oldOrder, newOrder);
-		} catch (error) {
-			console.error('Failed to reorder saved searches:', error);
-			// Rollback on failure.
-			searchState.setSavedSearches(oldOrder.map((id) => byId.get(id)!).filter(Boolean));
-		}
-	}
-
 	// Lifecycle.
 
 	onMount(async () => {
-		try {
-			const res = await getSavedSearches();
-			searchState.setSavedSearches(res.savedSearches);
-		} catch (err) {
-			console.error('Failed to load saved searches:', err);
-		}
+		await savedSearches.load();
 	});
 
-	onMount(() => appShell.onRenameSelectedChatRequested(() => {
-		if (!selectedChatId) return;
-		const selected = chats.find((chat) => chat.id === selectedChatId);
-		if (!selected) return;
-		startRenameChat(selected.id, selected.title || m.sidebar_chats_new_chat());
-	}));
+	onMount(() =>
+		appShell.onRenameSelectedChatRequested(() => {
+			if (!selectedChatId) return;
+			const selected = chats.find((chat) => chat.id === selectedChatId);
+			if (!selected) return;
+			startRenameChat(selected.id, selected.title || m.sidebar_chats_new_chat());
+		}),
+	);
 
-	onMount(() => appShell.onDeleteSelectedChatRequested(() => {
-		if (!selectedChatId) return;
-		const selected = chats.find((chat) => chat.id === selectedChatId);
-		if (!selected) return;
-		showDeleteConfirmation(selected.id, selected.title || m.sidebar_chats_new_chat(), selected.agentId);
-	}));
+	onMount(() =>
+		appShell.onDeleteSelectedChatRequested(() => {
+			if (!selectedChatId) return;
+			const selected = chats.find((chat) => chat.id === selectedChatId);
+			if (!selected) return;
+			showDeleteConfirmation(
+				selected.id,
+				selected.title || m.sidebar_chats_new_chat(),
+				selected.agentId,
+			);
+		}),
+	);
 
-	onMount(() => appShell.onSidebarSearchRequested(() => {
-		searchState.toggleSearchDialog();
-	}));
+	onMount(() =>
+		appShell.onSidebarSearchRequested(() => {
+			searchState.toggleSearchDialog();
+		}),
+	);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -- keydown on container for Escape handling -->
@@ -665,12 +486,14 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			{isLoading}
 			visibleUnreadCount={visibleUnreadChatIds.length}
 			{isMarkingAllRead}
-			sidebarMenuSearches={searchState.sidebarMenuSearches}
-			sidebarPillSearches={searchState.sidebarPillSearches}
+			sidebarMenuSearches={savedSearches.sidebarMenuSearches}
+			sidebarPillSearches={savedSearches.sidebarPillSearches}
 			activeQuery={searchState.activeQuery}
 			onOpenSearchDialog={() => searchState.openSearchDialog()}
 			onCreateChat={handlePrimaryAction}
-			onMarkAllRead={() => { void handleMarkAllRead(); }}
+			onMarkAllRead={() => {
+				void handleMarkAllRead();
+			}}
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			onApplyPillSearch={handleApplySidebarPillSearch}
 			onClearActiveQuery={handleClearActiveQuery}
@@ -694,15 +517,23 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			onChatSelect={handleChatClick}
 			onDeleteChat={showDeleteConfirmation}
 			onStartRenameChat={startRenameChat}
-			onTogglePinned={(id) => { void handleTogglePinned(id); }}
-			onToggleArchive={(id) => { void handleToggleArchive(id); }}
+			onTogglePinned={(id) => {
+				void handleTogglePinned(id);
+			}}
+			onToggleArchive={(id) => {
+				void handleToggleArchive(id);
+			}}
 			onShowDetails={showChatDetails}
-			onForkChat={(id) => { void handleForkChat(id); }}
-			onShareChat={(id, title) => { shareChatDialog = { chatId: id, chatTitle: title }; }}
+			onForkChat={(id) => {
+				void handleForkChat(id);
+			}}
+			onShareChat={(id, title) => {
+				dialogs.showShareDialog(id, title);
+			}}
 			onTagClick={handleTagClick}
-				onManageTags={showTagDialog}
-				onQuickMove={handleQuickMove}
-			/>
+			onManageTags={showTagDialog}
+			onQuickMove={handleQuickMove}
+		/>
 	</div>
 
 	{#if selection.isActive}
@@ -716,10 +547,30 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 			isOperating={isBulkOperating}
 			onSelectAll={handleSelectAll}
 			onDeselectAll={handleDeselectAll}
-			onPin={() => { void handleBulkPin(); }}
-			onUnpin={() => { void handleBulkUnpin(); }}
-			onArchive={() => { void handleBulkArchive(); }}
-			onUnarchive={() => { void handleBulkUnarchive(); }}
+			onPin={() => {
+				void handleBulkOperation('pin', 'Failed to bulk pin:', m.notifications_bulk_pin_failed());
+			}}
+			onUnpin={() => {
+				void handleBulkOperation(
+					'unpin',
+					'Failed to bulk unpin:',
+					m.notifications_bulk_unpin_failed(),
+				);
+			}}
+			onArchive={() => {
+				void handleBulkOperation(
+					'archive',
+					'Failed to bulk archive:',
+					m.notifications_bulk_archive_failed(),
+				);
+			}}
+			onUnarchive={() => {
+				void handleBulkOperation(
+					'unarchive',
+					'Failed to bulk unarchive:',
+					m.notifications_bulk_unarchive_failed(),
+				);
+			}}
 			onDelete={handleBulkDeleteRequest}
 			onDone={exitMultiSelect}
 		/>
@@ -727,99 +578,146 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 </div>
 
 <SidebarChatDialogs
-	{chatDeleteConfirmation}
-	onCancelDelete={() => chatDeleteConfirmation = null}
+	chatDeleteConfirmation={dialogs.chatDeleteConfirmation}
+	onCancelDelete={() => dialogs.clearDeleteConfirmation()}
 	onConfirmDelete={confirmDeleteChat}
-	{chatRenameConfirmation}
-	onCancelRename={() => chatRenameConfirmation = null}
+	chatRenameConfirmation={dialogs.chatRenameConfirmation}
+	onCancelRename={() => dialogs.clearRename()}
 	onConfirmRename={confirmRenameChat}
-	{chatDetailsDialog}
+	chatDetailsDialog={dialogs.chatDetailsDialog}
 	onCloseDetails={closeChatDetails}
 />
 
 <!-- Bulk delete confirmation dialog -->
-<Dialog.Root open={bulkDeleteConfirmation !== null} onOpenChange={(open) => { if (!open) bulkDeleteConfirmation = null; }}>
+<Dialog.Root
+	open={dialogs.bulkDeleteConfirmation !== null}
+	onOpenChange={(open) => {
+		if (!open) dialogs.clearBulkDelete();
+	}}
+>
 	<Dialog.Content>
 		<Dialog.Header class="min-w-0">
-			<Dialog.Title>{m.sidebar_select_delete_confirm_title({ count: bulkDeleteConfirmation?.chatIds.length ?? 0 })}</Dialog.Title>
+			<Dialog.Title
+				>{m.sidebar_select_delete_confirm_title({
+					count: dialogs.bulkDeleteConfirmation?.chatIds.length ?? 0,
+				})}</Dialog.Title
+			>
 			<Dialog.Description class="min-w-0 max-w-full">
-				<span class="block text-sm text-muted-foreground mb-2">{m.sidebar_select_delete_confirm_description()}</span>
-				{#if bulkDeleteConfirmation}
+				<span class="block text-sm text-muted-foreground mb-2"
+					>{m.sidebar_select_delete_confirm_description()}</span
+				>
+				{#if dialogs.bulkDeleteConfirmation}
 					<ul class="list-disc pl-4 space-y-0.5 text-sm text-foreground max-h-32 overflow-y-auto">
-						{#each bulkDeleteConfirmation.chatTitles.slice(0, 5) as title}
+						{#each dialogs.bulkDeleteConfirmation.chatTitles.slice(0, 5) as title}
 							<li class="truncate">{title}</li>
 						{/each}
-						{#if bulkDeleteConfirmation.chatTitles.length > 5}
-							<li class="text-muted-foreground italic">{m.sidebar_select_delete_confirm_and_more({ count: bulkDeleteConfirmation.chatTitles.length - 5 })}</li>
+						{#if dialogs.bulkDeleteConfirmation.chatTitles.length > 5}
+							<li class="text-muted-foreground italic">
+								{m.sidebar_select_delete_confirm_and_more({
+									count: dialogs.bulkDeleteConfirmation.chatTitles.length - 5,
+								})}
+							</li>
 						{/if}
 					</ul>
 				{/if}
 			</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => bulkDeleteConfirmation = null}>{m.sidebar_actions_cancel()}</Button>
-			<Button variant="destructive" onclick={() => { void confirmBulkDelete(); }}>{m.sidebar_actions_delete()}</Button>
+			<Button variant="outline" onclick={() => dialogs.clearBulkDelete()}
+				>{m.sidebar_actions_cancel()}</Button
+			>
+			<Button
+				variant="destructive"
+				onclick={() => {
+					void confirmBulkDelete();
+				}}>{m.sidebar_actions_delete()}</Button
+			>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
 
 <SidebarTagDialog
-	{tagDialog}
+	tagDialog={dialogs.tagDialog}
 	allKnownTags={searchState.allKnownTags}
-	onClose={() => tagDialog = null}
+	onClose={() => dialogs.closeTagDialog()}
 	onSave={handleSaveTags}
 />
 
-	<SidebarSearchDialog
-		open={searchState.searchDialogOpen}
-		query={searchState.draftQuery}
-		filteredChats={searchState.dialogFilteredChats}
-		savedSearches={searchState.searchDialogSavedSearches}
-		{currentTime}
-		highlightedIndex={searchState.highlightedResultIndex}
-		onQueryChange={(q) => searchState.updateDraftQuery(q)}
-		onSelectChat={handleSearchSelectChat}
-		onApplySavedSearch={handleApplySavedSearch}
-		onOpenManager={openSavedSearchManagerFromSearchDialog}
-		onCreateSavedSearch={openEditorForCreateFromSearchDialog}
-		onHighlightChange={(i) => { searchState.highlightedResultIndex = i; }}
-		onClose={() => searchState.closeSearchDialog()}
+<SidebarSearchDialog
+	open={searchState.searchDialogOpen}
+	query={searchState.draftQuery}
+	filteredChats={searchState.dialogFilteredChats}
+	savedSearches={savedSearches.searchDialogSavedSearches}
+	{currentTime}
+	highlightedIndex={searchState.highlightedResultIndex}
+	onQueryChange={(q) => searchState.updateDraftQuery(q)}
+	onSelectChat={handleSearchSelectChat}
+	onApplySavedSearch={handleApplySavedSearch}
+	onOpenManager={() => savedSearches.openManagerFromSearchDialog()}
+	onCreateSavedSearch={() => savedSearches.openEditorForCreateFromSearchDialog()}
+	onHighlightChange={(i) => {
+		searchState.highlightedResultIndex = i;
+	}}
+	onClose={() => searchState.closeSearchDialog()}
 />
 
 <SavedSearchManagerDialog
-	open={searchState.manageSavedSearchesOpen}
-	searches={searchState.savedSearches}
-	onClose={closeSavedSearchManager}
-	onAdd={openEditorForCreate}
-	onEdit={openEditorForEdit}
-	onDelete={requestDeleteSavedSearch}
-	onReorder={handleReorderSavedSearches}
+	open={savedSearches.managerOpen}
+	searches={savedSearches.savedSearches}
+	onClose={() => savedSearches.closeManager()}
+	onAdd={() => savedSearches.openEditorForCreate()}
+	onEdit={(search) => savedSearches.openEditorForEdit(search)}
+	onDelete={(id) => savedSearches.requestDelete(id)}
+	onReorder={(oldOrder, newOrder) => {
+		void savedSearches.reorder(oldOrder, newOrder);
+	}}
 />
 
 <SavedSearchEditorDialog
-	{editorState}
+	editorState={savedSearches.editorState}
 	onClose={() => {
-		editorState = null;
-		restoreSavedSearchEditorOrigin();
+		savedSearches.closeEditor();
 	}}
-	onSave={handleSaveSearchEditor}
+	onSave={(data, searchId) => savedSearches.saveEditor(data, searchId)}
 />
 
 <ShareChatDialog
-	chatId={shareChatDialog?.chatId ?? null}
-	chatTitle={shareChatDialog?.chatTitle ?? ''}
-	onClose={() => { shareChatDialog = null; }}
+	chatId={dialogs.shareChatDialog?.chatId ?? null}
+	chatTitle={dialogs.shareChatDialog?.chatTitle ?? ''}
+	onClose={() => {
+		dialogs.closeShareDialog();
+	}}
 />
 
-<Dialog.Root open={savedSearchDeleteConfirmation !== null} onOpenChange={(open) => { if (!open) savedSearchDeleteConfirmation = null; }}>
-	<Dialog.Content onOpenAutoFocus={(e) => { e.preventDefault(); savedSearchDeleteButtonRef?.focus(); }}>
+<Dialog.Root
+	open={savedSearches.deleteConfirmation !== null}
+	onOpenChange={(open) => {
+		if (!open) savedSearches.clearDeleteConfirmation();
+	}}
+>
+	<Dialog.Content
+		onOpenAutoFocus={(e) => {
+			e.preventDefault();
+			savedSearches.deleteButtonRef?.focus();
+		}}
+	>
 		<Dialog.Header>
 			<Dialog.Title>{m.sidebar_saved_searches_confirm_delete()}</Dialog.Title>
-			<Dialog.Description>{m.sidebar_saved_searches_confirm_delete_description()}</Dialog.Description>
+			<Dialog.Description
+				>{m.sidebar_saved_searches_confirm_delete_description()}</Dialog.Description
+			>
 		</Dialog.Header>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => savedSearchDeleteConfirmation = null}>{m.sidebar_actions_cancel()}</Button>
-			<Button variant="destructive" onclick={() => { void confirmDeleteSavedSearch(); }} bind:ref={savedSearchDeleteButtonRef}>{m.sidebar_actions_delete()}</Button>
+			<Button variant="outline" onclick={() => savedSearches.clearDeleteConfirmation()}
+				>{m.sidebar_actions_cancel()}</Button
+			>
+			<Button
+				variant="destructive"
+				onclick={() => {
+					void savedSearches.confirmDelete();
+				}}
+				bind:ref={savedSearches.deleteButtonRef}>{m.sidebar_actions_delete()}</Button
+			>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

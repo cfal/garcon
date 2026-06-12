@@ -123,7 +123,11 @@ export class ModelSelectorState {
 		modelValue: string,
 		modelEndpointId?: string | null,
 	): string | null {
-		const selectedModel = this.modelCatalog.getModelForSelection(agentId, modelValue, modelEndpointId);
+		const selectedModel = this.modelCatalog.getModelForSelection(
+			agentId,
+			modelValue,
+			modelEndpointId,
+		);
 		if (selectedModel) return modelSourceKeyFor(agentId, selectedModel);
 		return this.sourcesFor(agentId)[0]?.key ?? null;
 	}
@@ -240,16 +244,19 @@ export class ModelSelectorState {
 			committed.agentLabel,
 			this.mode.source === 'select' ? committed.source?.label : '',
 			committed.modelLabel,
-		].filter(Boolean).join(' / ');
+		]
+			.filter(Boolean)
+			.join(' / ');
 	}
 
 	get draftSelection(): SelectionView {
 		const agentId = this.open && this.draftAgentId ? this.draftAgentId : this.value.agentId;
-		const modelValue = this.open && this.draftModelValue !== null
-			? this.draftModelValue
-			: this.open
-				? ''
-				: currentModelValue(this.modelCatalog, this.value);
+		const modelValue =
+			this.open && this.draftModelValue !== null
+				? this.draftModelValue
+				: this.open
+					? ''
+					: currentModelValue(this.modelCatalog, this.value);
 		return this.#selectionView({
 			agentId,
 			modelValue,
@@ -456,11 +463,12 @@ export class ModelSelectorState {
 		const sources = this.sourcesFor(input.agentId);
 		let sourceKey: string | null = null;
 		if (this.mode.source !== 'hidden') {
-			sourceKey = input.sourceKey && sources.some((source) => source.key === input.sourceKey)
-				? input.sourceKey
-				: this.#sourceKeyForModel(input.agentId, input.modelValue, input.modelEndpointId);
+			sourceKey =
+				input.sourceKey && sources.some((source) => source.key === input.sourceKey)
+					? input.sourceKey
+					: this.#sourceKeyForModel(input.agentId, input.modelValue, input.modelEndpointId);
 		}
-		const source = sourceKey ? sources.find((entry) => entry.key === sourceKey) ?? null : null;
+		const source = sourceKey ? (sources.find((entry) => entry.key === sourceKey) ?? null) : null;
 		const selectedModel = this.modelCatalog.getModelForSelection(
 			input.agentId,
 			input.modelValue,

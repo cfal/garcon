@@ -22,7 +22,11 @@ export function shouldSubmitOnEnter(params: EnterSubmissionParams): boolean {
 /** Shared predicate for whether the composer can submit. Used by both
  *  the button disabled state and the keyboard/form submit paths so
  *  they remain identical. */
-export function canSubmitComposer(isDisabled: boolean, inputText: string, imageCount: number): boolean {
+export function canSubmitComposer(
+	isDisabled: boolean,
+	inputText: string,
+	imageCount: number,
+): boolean {
 	void imageCount;
 	if (isDisabled) return false;
 	return inputText.trim().length > 0;

@@ -10,9 +10,9 @@ function makeQueueContext(overrides: Partial<QueueContext> = {}): {
 	const setMessageQueue = vi.fn();
 	const activateLoadingFor = vi.fn();
 	const ctx: QueueContext = {
-		currentChatId: 'chat-a',
-		selectedChatId: 'chat-a',
-		setMessageQueue,
+		getCurrentChatId: () => 'chat-a',
+		getSelectedChatId: () => 'chat-a',
+		conversationUi: { setMessageQueue },
 		activateLoadingFor,
 		setCanAbort: vi.fn(),
 		onChatProcessing: vi.fn(),
@@ -24,8 +24,8 @@ function makeQueueContext(overrides: Partial<QueueContext> = {}): {
 describe('queue handler', () => {
 	it('caches queue updates by chat id regardless of selection', () => {
 		const { ctx, setMessageQueue } = makeQueueContext({
-			currentChatId: 'chat-a',
-			selectedChatId: 'chat-a',
+			getCurrentChatId: () => 'chat-a',
+			getSelectedChatId: () => 'chat-a',
 		});
 		const queueState = { entries: [], paused: false };
 
@@ -36,8 +36,8 @@ describe('queue handler', () => {
 
 	it('activates loading only for current or selected chat', () => {
 		const { ctx, activateLoadingFor } = makeQueueContext({
-			currentChatId: 'chat-a',
-			selectedChatId: 'chat-a',
+			getCurrentChatId: () => 'chat-a',
+			getSelectedChatId: () => 'chat-a',
 		});
 
 		handleQueueSending(new QueueDispatchingMessage('chat-b', 'q1', 'queued text'), ctx);

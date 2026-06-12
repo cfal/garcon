@@ -111,4 +111,20 @@ describe('WsConnection', () => {
 
 		connection.disconnect();
 	});
+
+	it('stores messages behind the reactive version counter', () => {
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		socket.message({ type: 'chat-list-refresh-requested' });
+
+		expect(connection.messageVersion).toBe(1);
+		expect(connection.messages).toHaveLength(1);
+		expect(connection.messages[0].data).toEqual({ type: 'chat-list-refresh-requested' });
+
+		connection.disconnect();
+	});
 });

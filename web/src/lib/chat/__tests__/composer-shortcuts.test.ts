@@ -10,7 +10,7 @@ describe('shouldSubmitOnEnter', () => {
 				ctrlKey: false,
 				metaKey: false,
 				isComposing: false,
-			})
+			}),
 		).toBe(true);
 	});
 
@@ -22,7 +22,7 @@ describe('shouldSubmitOnEnter', () => {
 				ctrlKey: false,
 				metaKey: false,
 				isComposing: false,
-			})
+			}),
 		).toBe(false);
 	});
 
@@ -34,7 +34,7 @@ describe('shouldSubmitOnEnter', () => {
 				ctrlKey: false,
 				metaKey: false,
 				isComposing: false,
-			})
+			}),
 		).toBe(true);
 	});
 
@@ -46,7 +46,7 @@ describe('shouldSubmitOnEnter', () => {
 				ctrlKey: false,
 				metaKey: false,
 				isComposing: false,
-			})
+			}),
 		).toBe(false);
 	});
 
@@ -58,7 +58,7 @@ describe('shouldSubmitOnEnter', () => {
 				ctrlKey: true,
 				metaKey: false,
 				isComposing: false,
-			})
+			}),
 		).toBe(false);
 	});
 
@@ -70,7 +70,7 @@ describe('shouldSubmitOnEnter', () => {
 				ctrlKey: false,
 				metaKey: true,
 				isComposing: false,
-			})
+			}),
 		).toBe(false);
 	});
 
@@ -82,7 +82,7 @@ describe('shouldSubmitOnEnter', () => {
 				ctrlKey: false,
 				metaKey: false,
 				isComposing: true,
-			})
+			}),
 		).toBe(false);
 	});
 
@@ -95,7 +95,7 @@ describe('shouldSubmitOnEnter', () => {
 				metaKey: false,
 				isComposing: false,
 				isMobile: true,
-			})
+			}),
 		).toBe(false);
 	});
 
@@ -108,7 +108,7 @@ describe('shouldSubmitOnEnter', () => {
 				metaKey: false,
 				isComposing: false,
 				isMobile: true,
-			})
+			}),
 		).toBe(false);
 	});
 });

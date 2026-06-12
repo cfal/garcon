@@ -26,20 +26,26 @@
 	}: SidebarSearchResultsProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
-	let useVirtualResults = $derived(
-		filteredChats.length > SEARCH_RESULTS_VIRTUALIZATION_THRESHOLD
-	);
+	let useVirtualResults = $derived(filteredChats.length > SEARCH_RESULTS_VIRTUALIZATION_THRESHOLD);
 	const virtualWindow = new FixedVirtualWindow({
-		get itemCount() { return filteredChats.length; },
-		get rowHeight() { return SEARCH_RESULT_ROW_HEIGHT; },
-		get overscan() { return SEARCH_RESULTS_OVERSCAN; },
-		get viewportRef() { return viewportRef; },
+		get itemCount() {
+			return filteredChats.length;
+		},
+		get rowHeight() {
+			return SEARCH_RESULT_ROW_HEIGHT;
+		},
+		get overscan() {
+			return SEARCH_RESULTS_OVERSCAN;
+		},
+		get viewportRef() {
+			return viewportRef;
+		},
 		defaultViewportHeight: 560,
 	});
 	let visibleResults = $derived.by(() =>
 		virtualWindow.visibleIndexes
 			.map((index) => ({ index, chat: filteredChats[index] }))
-			.filter((entry): entry is { index: number; chat: ChatSessionRecord } => Boolean(entry.chat))
+			.filter((entry): entry is { index: number; chat: ChatSessionRecord } => Boolean(entry.chat)),
 	);
 
 	function scrollHighlightedIntoView(): void {
@@ -49,7 +55,9 @@
 			if (highlightedIndex <= 0 && viewportRef) {
 				viewportRef.scrollTop = 0;
 			}
-			const item = viewportRef?.querySelector<HTMLElement>(`[data-search-index="${highlightedIndex}"]`);
+			const item = viewportRef?.querySelector<HTMLElement>(
+				`[data-search-index="${highlightedIndex}"]`,
+			);
 			item?.scrollIntoView({ block: 'nearest' });
 			return;
 		}
@@ -108,7 +116,9 @@
 							{onHighlightChange}
 						/>
 						{#snippet failed()}
-							<div class="flex h-full items-center border-b border-border/40 px-3 text-sm text-muted-foreground">
+							<div
+								class="flex h-full items-center border-b border-border/40 px-3 text-sm text-muted-foreground"
+							>
 								{entry.chat.title || m.sidebar_chats_unnamed()}
 							</div>
 						{/snippet}

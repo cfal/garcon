@@ -1,29 +1,30 @@
 <script lang="ts">
-	import type { BashToolUseMessage } from '$shared/chat-types'
-	import ChatEventCard from '../rows/ChatEventCard.svelte'
-	import { copyToClipboard } from '$lib/utils/clipboard'
-	import Copy from '@lucide/svelte/icons/copy'
-	import Check from '@lucide/svelte/icons/check'
+	import type { BashToolUseMessage } from '$shared/chat-types';
+	import ChatEventCard from '../rows/ChatEventCard.svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
+	import Copy from '@lucide/svelte/icons/copy';
+	import Check from '@lucide/svelte/icons/check';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
-		messages: BashToolUseMessage[]
+		messages: BashToolUseMessage[];
 	}
 
-	let { messages }: Props = $props()
+	let { messages }: Props = $props();
 
-	let copied = $state(false)
-	const commandCount = $derived(messages.length)
-	const commandLabel = $derived(`${commandCount} ${commandCount === 1 ? 'command' : 'commands'}`)
-	const combinedCommands = $derived(messages.map((message) => message.command).join('\n'))
+	let copied = $state(false);
+	const commandCount = $derived(messages.length);
+	const commandLabel = $derived(`${commandCount} ${commandCount === 1 ? 'command' : 'commands'}`);
+	const combinedCommands = $derived(messages.map((message) => message.command).join('\n'));
 
 	async function copyCommands() {
-		if (!combinedCommands) return
-		const didCopy = await copyToClipboard(combinedCommands)
-		if (!didCopy) return
-		copied = true
+		if (!combinedCommands) return;
+		const didCopy = await copyToClipboard(combinedCommands);
+		if (!didCopy) return;
+		copied = true;
 		setTimeout(() => {
-			copied = false
-		}, 2000)
+			copied = false;
+		}, 2000);
 	}
 </script>
 
@@ -37,8 +38,8 @@
 					type="button"
 					onclick={copyCommands}
 					class="ml-auto inline-flex size-5 flex-shrink-0 items-center justify-center text-muted-foreground hover:text-foreground opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100"
-					title="Copy commands"
-					aria-label="Copy commands"
+					title={m.chat_tool_copy_commands()}
+					aria-label={m.chat_tool_copy_commands()}
 				>
 					{#if copied}
 						<Check class="size-3 text-status-success-foreground" />

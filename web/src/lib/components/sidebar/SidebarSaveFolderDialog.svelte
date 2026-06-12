@@ -20,18 +20,20 @@
 		onSave: (name: string, filter: ChatFolderFilter, folderId?: string) => Promise<void> | void;
 	}
 
-	let {
-		saveFolderDialog,
-		onClose,
-		onSave,
-	}: SidebarSaveFolderDialogProps = $props();
+	let { saveFolderDialog, onClose, onSave }: SidebarSaveFolderDialogProps = $props();
 
 	let isOpen = $derived(saveFolderDialog !== null);
 	let folderName = $state('');
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let isSaving = $state(false);
 	let saveError = $state<string | null>(null);
-	let editableFilter = $state<ChatFolderFilter>({ textTokens: [], tags: [], agents: [], models: [], project: [] });
+	let editableFilter = $state<ChatFolderFilter>({
+		textTokens: [],
+		tags: [],
+		agents: [],
+		models: [],
+		project: [],
+	});
 
 	$effect(() => {
 		if (saveFolderDialog) {
@@ -66,8 +68,10 @@
 
 	let previewChips = $derived.by(() => {
 		const chips: PreviewChip[] = [];
-		if (editableFilter.status === 'active') chips.push({ label: m.sidebar_folders_filter_active(), type: 'status', value: 'active' });
-		if (editableFilter.status === 'unread') chips.push({ label: m.sidebar_chat_unread(), type: 'status', value: 'unread' });
+		if (editableFilter.status === 'active')
+			chips.push({ label: m.sidebar_folders_filter_active(), type: 'status', value: 'active' });
+		if (editableFilter.status === 'unread')
+			chips.push({ label: m.sidebar_chat_unread(), type: 'status', value: 'unread' });
 		for (const token of editableFilter.textTokens) {
 			chips.push({ label: `"${token}"`, type: 'text', value: token });
 		}
@@ -87,13 +91,25 @@
 		if (chip.type === 'status') {
 			editableFilter = { ...editableFilter, status: undefined };
 		} else if (chip.type === 'text') {
-			editableFilter = { ...editableFilter, textTokens: editableFilter.textTokens.filter(t => t !== chip.value) };
+			editableFilter = {
+				...editableFilter,
+				textTokens: editableFilter.textTokens.filter((t) => t !== chip.value),
+			};
 		} else if (chip.type === 'tag') {
-			editableFilter = { ...editableFilter, tags: editableFilter.tags.filter(g => g.join('|') !== chip.value) };
+			editableFilter = {
+				...editableFilter,
+				tags: editableFilter.tags.filter((g) => g.join('|') !== chip.value),
+			};
 		} else if (chip.type === 'agent') {
-			editableFilter = { ...editableFilter, agents: editableFilter.agents.filter(p => p !== chip.value) };
+			editableFilter = {
+				...editableFilter,
+				agents: editableFilter.agents.filter((p) => p !== chip.value),
+			};
 		} else if (chip.type === 'model') {
-			editableFilter = { ...editableFilter, models: editableFilter.models.filter(m => m !== chip.value) };
+			editableFilter = {
+				...editableFilter,
+				models: editableFilter.models.filter((m) => m !== chip.value),
+			};
 		}
 	}
 
@@ -136,7 +152,7 @@
 	let dialogTitle = $derived(
 		saveFolderDialog?.mode === 'edit'
 			? m.sidebar_folders_edit_dialog_title()
-			: m.sidebar_folders_save_dialog_title()
+			: m.sidebar_folders_save_dialog_title(),
 	);
 	let isCreateMode = $derived(saveFolderDialog?.mode !== 'edit');
 </script>
@@ -174,14 +190,16 @@
 				<div class="text-sm font-medium text-foreground">{m.sidebar_folders_filter_preview()}</div>
 				<div class="flex flex-wrap gap-1.5">
 					{#each previewChips as chip (chip.label)}
-						<span class="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+						<span
+							class="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+						>
 							{chip.label}
 							<button
 								type="button"
 								class="ml-0.5 rounded-full p-0 hover:text-foreground transition-colors"
 								onclick={() => removeChip(chip)}
 								disabled={isSaving}
-								aria-label="Remove {chip.label}"
+								aria-label={m.sidebar_remove_item({ name: chip.label })}
 							>
 								<X class="w-3 h-3" />
 							</button>
@@ -196,8 +214,16 @@
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="outline" onclick={requestClose} disabled={isSaving}>{m.sidebar_actions_cancel()}</Button>
-			<Button onclick={() => { void handleSave(); }} disabled={!folderName.trim() || isFilterEmpty || isSaving}>{m.sidebar_actions_save()}</Button>
+			<Button variant="outline" onclick={requestClose} disabled={isSaving}
+				>{m.sidebar_actions_cancel()}</Button
+			>
+			<Button
+				onclick={() => {
+					void handleSave();
+				}}
+				disabled={!folderName.trim() || isFilterEmpty || isSaving}
+				>{m.sidebar_actions_save()}</Button
+			>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

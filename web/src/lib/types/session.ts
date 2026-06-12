@@ -1,6 +1,11 @@
 // Session and settings types used by app.ts and components.
 
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$shared/chat-modes';
+import type {
+	AmpAgentMode,
+	ClaudeThinkingMode,
+	PermissionMode,
+	ThinkingMode,
+} from '$shared/chat-modes';
 import type { ApiProtocol } from '$shared/api-providers';
 
 export type PinnedInsertPosition = 'top' | 'bottom';

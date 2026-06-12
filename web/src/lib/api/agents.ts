@@ -33,7 +33,7 @@ export interface AgentAuthLoginResult {
 
 export async function getAgentAuthStatus(agent: AgentName): Promise<AgentAuthStatus> {
 	const result = await apiGet<Record<string, AgentAuthStatus>>(
-		`/api/v1/agents/auth?agent=${encodeURIComponent(agent)}`
+		`/api/v1/agents/auth?agent=${encodeURIComponent(agent)}`,
 	);
 	return result[agent];
 }

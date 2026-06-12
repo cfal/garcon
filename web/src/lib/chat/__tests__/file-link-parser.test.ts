@@ -85,7 +85,9 @@ describe('parseFileLink', () => {
 		});
 
 		it('handles projectBasePath with trailing slash', () => {
-			const result = parseFileLink('/home/user/project/README.md', { projectBasePath: '/home/user/project/' });
+			const result = parseFileLink('/home/user/project/README.md', {
+				projectBasePath: '/home/user/project/',
+			});
 			expect(result.kind).toBe('file');
 			expect(result.relativePath).toBe('README.md');
 		});

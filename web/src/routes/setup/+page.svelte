@@ -4,6 +4,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { getAuth } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
+	import { LOCAL_STORAGE_KEYS, setLocalStorageItem } from '$lib/utils/local-persistence';
 	import Shield from '@lucide/svelte/icons/shield';
 	import Eye from '@lucide/svelte/icons/eye';
 	import EyeOff from '@lucide/svelte/icons/eye-off';
@@ -53,11 +54,7 @@
 		if (!result.success) {
 			error = result.error || m.auth_setup_errors_registration_failed();
 		} else {
-			try {
-				localStorage.setItem('just-registered', '1');
-			} catch {
-				// localStorage unavailable; settings onboarding will be skipped
-			}
+			setLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered, '1');
 			goto('/');
 		}
 		isSubmitting = false;
@@ -69,9 +66,13 @@
 		class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,hsl(var(--primary)/0.08),transparent_42%)]"
 	></div>
 
-	<div class="relative w-full max-w-lg overflow-hidden rounded-lg border border-border bg-background shadow-lg">
+	<div
+		class="relative w-full max-w-lg overflow-hidden rounded-lg border border-border bg-background shadow-lg"
+	>
 		<div class="border-b border-border px-6 py-4">
-			<div class="inline-flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+			<div
+				class="inline-flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+			>
 				<Shield class="size-3.5" />
 				{m.auth_setup_badge()}
 			</div>
@@ -168,12 +169,12 @@
 					</div>
 				{/if}
 
-					<div class="pt-2">
-						<Button type="submit" class="w-full" disabled={isSubmitting}>
-							{isSubmitting ? m.auth_setup_setting_up() : m.auth_setup_create_account()}
-						</Button>
-					</div>
-				</form>
-			</div>
+				<div class="pt-2">
+					<Button type="submit" class="w-full" disabled={isSubmitting}>
+						{isSubmitting ? m.auth_setup_setting_up() : m.auth_setup_create_account()}
+					</Button>
+				</div>
+			</form>
 		</div>
+	</div>
 </div>

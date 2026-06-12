@@ -120,10 +120,14 @@
 <div
 	class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
 	role="presentation"
-	onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+	onclick={(e) => {
+		if (e.target === e.currentTarget) onClose();
+	}}
 	onwheel={handleWheel}
 >
-	<div class="bg-background rounded-lg shadow-xl max-w-4xl max-h-[90vh] w-full mx-4 overflow-hidden flex flex-col">
+	<div
+		class="bg-background rounded-lg shadow-xl max-w-4xl max-h-[90vh] w-full mx-4 overflow-hidden flex flex-col"
+	>
 		<!-- Header -->
 		<div class="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
 			<h3 class="text-lg font-semibold text-foreground truncate">{alt}</h3>
@@ -137,7 +141,12 @@
 				<Button variant="ghost" size="icon-sm" onclick={zoomIn} title={m.image_zoom_in()}>
 					<ZoomIn class="w-4 h-4" />
 				</Button>
-				<Button variant="ghost" size="icon-sm" onclick={fitToWindow} title={m.image_fit_to_window()}>
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					onclick={fitToWindow}
+					title={m.image_fit_to_window()}
+				>
 					<Maximize class="w-4 h-4" />
 				</Button>
 				<Button variant="ghost" size="icon-sm" onclick={onClose} title={m.image_close()}>
@@ -147,17 +156,22 @@
 		</div>
 
 		<!-- Image area -->
-		<div bind:this={viewportEl} class="flex-1 overflow-auto flex justify-center items-center bg-muted min-h-[400px] p-4">
+		<div
+			bind:this={viewportEl}
+			class="flex-1 overflow-auto flex justify-center items-center bg-muted min-h-[400px] p-4"
+		>
 			{#if loading}
 				<div class="text-center text-muted-foreground">
-					<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-status-info-border mx-auto mb-3"></div>
+					<div
+						class="animate-spin rounded-full h-8 w-8 border-b-2 border-status-info-border mx-auto mb-3"
+					></div>
 					<p>{m.image_loading()}</p>
 				</div>
 			{:else if imageUrl}
 				<img
 					bind:this={imageEl}
 					src={imageUrl}
-					alt={alt}
+					{alt}
 					class="max-w-full object-contain rounded-lg shadow-md transition-transform duration-150"
 					style="transform: scale({zoom}); transform-origin: center center;"
 				/>

@@ -6,11 +6,11 @@ import * as gitApi from '$lib/api/git';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 vi.mock('$lib/api/chats', () => ({
-	validateStart: vi.fn()
+	validateStart: vi.fn(),
 }));
 
 vi.mock('$lib/api/git', () => ({
-	getGitWorktrees: vi.fn()
+	getGitWorktrees: vi.fn(),
 }));
 
 vi.mock('$lib/api/settings', () => ({
@@ -41,22 +41,22 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 		lastModelProtocol: null,
 		lastPermissionMode: 'default',
 		lastThinkingMode: 'none',
-			lastClaudeThinkingMode: 'auto',
-			lastAmpAgentMode: 'smart',
-			projectBasePath: '/workspace',
-			telegram: {
-				botTokenAvailable: false,
-				botUsername: null,
-				botFirstName: null,
-				recipientUsername: null,
-				recipientDisplayName: null,
-				recipientLinked: false,
-				pendingLink: false,
-				linkUrl: null,
-			},
-			...overrides,
-		};
-	}
+		lastClaudeThinkingMode: 'auto',
+		lastAmpAgentMode: 'smart',
+		projectBasePath: '/workspace',
+		telegram: {
+			botTokenAvailable: false,
+			botUsername: null,
+			botFirstName: null,
+			recipientUsername: null,
+			recipientDisplayName: null,
+			recipientLinked: false,
+			pendingLink: false,
+			linkUrl: null,
+		},
+		...overrides,
+	};
+}
 
 function waitForDialogTeardown(): Promise<void> {
 	// Bits UI restores body scroll styles on a delayed timer after dialog close.
@@ -79,26 +79,34 @@ describe('NewChatForm', () => {
 		expect(hiddenFormContainer?.contains(projectPathInput)).toBe(true);
 		expect(hiddenFormContainer?.contains(messageInput)).toBe(true);
 
-		pending.resolve(makeSnapshot({
-			lastProjectPath: '/workspace/project',
-		}));
+		pending.resolve(
+			makeSnapshot({
+				lastProjectPath: '/workspace/project',
+			}),
+		);
 
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
 		expect(container.querySelector('.space-y-6[aria-hidden="true"]')).toBeNull();
-		expect(container.querySelector('.space-y-6[aria-hidden="false"]')?.contains(projectPathInput)).toBe(true);
-		expect(container.querySelector('.space-y-6[aria-hidden="false"]')?.contains(messageInput)).toBe(true);
+		expect(
+			container.querySelector('.space-y-6[aria-hidden="false"]')?.contains(projectPathInput),
+		).toBe(true);
+		expect(container.querySelector('.space-y-6[aria-hidden="false"]')?.contains(messageInput)).toBe(
+			true,
+		);
 	});
 
 	it('opens the worktree picker as a separate dialog when the project is a git repo', async () => {
 		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
-			lastProjectPath: '/workspace/project',
-		}));
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({
+				lastProjectPath: '/workspace/project',
+			}),
+		);
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({
 			valid: true,
-			isGitRepo: true
+			isGitRepo: true,
 		});
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
 			worktrees: [
@@ -108,9 +116,9 @@ describe('NewChatForm', () => {
 					branch: 'main',
 					isCurrent: true,
 					isMain: true,
-					isPathMissing: false
-				}
-			]
+					isPathMissing: false,
+				},
+			],
 		});
 
 		render(NewChatFormTestHost);
@@ -128,5 +136,4 @@ describe('NewChatForm', () => {
 		});
 		await waitForDialogTeardown();
 	});
-
 });

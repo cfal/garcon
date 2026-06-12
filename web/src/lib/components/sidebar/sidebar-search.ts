@@ -9,11 +9,11 @@ type OrGroup = string[];
 
 export interface ChatFilterSpec {
 	textTokens: string[];
-	tags: OrGroup[];        // Each group is OR'd; groups are AND'd together
-	agents: string[];      // OR across all values
-	models: string[];         // OR across all values
+	tags: OrGroup[]; // Each group is OR'd; groups are AND'd together
+	agents: string[]; // OR across all values
+	models: string[]; // OR across all values
 	status?: 'active' | 'unread';
-	project: string[];      // OR across all values
+	project: string[]; // OR across all values
 }
 
 export function emptyFilterSpec(): ChatFilterSpec {
@@ -34,7 +34,8 @@ export function isEmptyFilter(spec: ChatFilterSpec): boolean {
 /** Splits a pipe-delimited value into non-empty, lowercased parts.
  *  Returns null if all parts are empty after splitting. */
 function parsePipeValue(raw: string): string[] | null {
-	const parts = raw.split('|')
+	const parts = raw
+		.split('|')
 		.map((s) => s.trim().toLowerCase())
 		.filter((s) => s.length > 0);
 	return parts.length > 0 ? parts : null;
@@ -221,7 +222,10 @@ export function addTagToQuery(query: string, tag: string): string {
 export function removeTagFromQuery(query: string, tag: string): string {
 	const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 	const pattern = new RegExp(`\\btag:${escaped}\\b`, 'gi');
-	return query.replace(pattern, '').replace(/\s{2,}/g, ' ').trim();
+	return query
+		.replace(pattern, '')
+		.replace(/\s{2,}/g, ' ')
+		.trim();
 }
 
 /** Checks if a query already contains a specific tag filter. */

@@ -17,10 +17,17 @@
 	let confirmLabel = $derived(strategy === 'revert' ? 'Revert' : 'Reset');
 </script>
 
-<Dialog.Root open={true} onOpenChange={(open) => { if (!open) onCancel(); }}>
+<Dialog.Root
+	open={true}
+	onOpenChange={(open) => {
+		if (!open) onCancel();
+	}}
+>
 	<Dialog.Content showCloseButton={false}>
 		<div class="space-y-2">
-			<label class="flex items-start gap-2.5 rounded-md border border-border px-3 py-2 cursor-pointer">
+			<label
+				class="flex items-start gap-2.5 rounded-md border border-border px-3 py-2 cursor-pointer"
+			>
 				<input
 					type="radio"
 					name="revert-strategy"
@@ -30,10 +37,14 @@
 				/>
 				<div class="space-y-0.5">
 					<div class="text-sm font-medium text-foreground">Revert</div>
-					<div class="text-xs text-muted-foreground">Creates a new commit that undoes the latest commit.</div>
+					<div class="text-xs text-muted-foreground">
+						Creates a new commit that undoes the latest commit.
+					</div>
 				</div>
 			</label>
-			<label class="flex items-start gap-2.5 rounded-md border border-border px-3 py-2 cursor-pointer">
+			<label
+				class="flex items-start gap-2.5 rounded-md border border-border px-3 py-2 cursor-pointer"
+			>
 				<input
 					type="radio"
 					name="revert-strategy"
@@ -43,7 +54,9 @@
 				/>
 				<div class="space-y-0.5">
 					<div class="text-sm font-medium text-foreground">Reset soft</div>
-					<div class="text-xs text-muted-foreground">Removes the latest commit and keeps its changes staged.</div>
+					<div class="text-xs text-muted-foreground">
+						Removes the latest commit and keeps its changes staged.
+					</div>
 				</div>
 			</label>
 		</div>

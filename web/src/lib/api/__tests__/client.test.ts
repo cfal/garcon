@@ -1,12 +1,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiGet, apiPost, apiPut, apiDelete, apiPostForm, ApiError, getAuthToken, setAuthToken, clearAuthToken } from '../client';
+import {
+	apiGet,
+	apiPost,
+	apiPut,
+	apiDelete,
+	apiPostForm,
+	ApiError,
+	getAuthToken,
+	setAuthToken,
+	clearAuthToken,
+} from '../client';
 
 // Stub localStorage for token management.
 const store: Record<string, string> = {};
 vi.stubGlobal('localStorage', {
 	getItem: (k: string) => store[k] ?? null,
-	setItem: (k: string, v: string) => { store[k] = v; },
-	removeItem: (k: string) => { delete store[k]; },
+	setItem: (k: string, v: string) => {
+		store[k] = v;
+	},
+	removeItem: (k: string) => {
+		delete store[k];
+	},
 });
 
 describe('token management', () => {
@@ -123,8 +137,10 @@ describe('API client helpers', () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse(
 				{
+					success: false,
 					error: 'Timed out',
 					errorCode: 'commit_message_timeout',
+					retryable: true,
 					details: 'upstream timeout',
 				},
 				504,
@@ -140,12 +156,47 @@ describe('API client helpers', () => {
 			expect(apiErr.status).toBe(504);
 			expect(apiErr.errorCode).toBe('commit_message_timeout');
 			expect(apiErr.details).toBe('upstream timeout');
+			expect(apiErr.retryable).toBe(true);
 		}
+	});
+
+	it('keeps legacy error bodies working without using message fallback', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse(
+				{
+					error: 'Legacy route error',
+					errorCode: 'legacy_error',
+					message: 'Do not use this field',
+				},
+				400,
+			),
+		);
+
+		await expect(apiGet('/api/legacy')).rejects.toMatchObject({
+			status: 400,
+			message: 'Legacy route error',
+			errorCode: 'legacy_error',
+			retryable: false,
+		});
+	});
+
+	it('falls back to statusText for message-only error bodies', async () => {
+		fetchMock.mockResolvedValue(
+			new Response(JSON.stringify({ message: 'Legacy message only' }), {
+				status: 400,
+				statusText: 'Bad Request',
+			}),
+		);
+
+		await expect(apiGet('/api/message-only')).rejects.toMatchObject({
+			status: 400,
+			message: 'Bad Request',
+		});
 	});
 
 	it('throws ApiError with statusText when body has no error field', async () => {
 		fetchMock.mockResolvedValue(
-			new Response('not json', { status: 500, statusText: 'Internal Server Error' })
+			new Response('not json', { status: 500, statusText: 'Internal Server Error' }),
 		);
 
 		await expect(apiGet('/api/broken')).rejects.toThrow('Internal Server Error');
@@ -168,5 +219,22 @@ describe('API client helpers', () => {
 
 		const [, opts] = fetchMock.mock.calls[0];
 		expect(opts.headers['Authorization']).toBeUndefined();
+	});
+
+	it('accepts timeout options for PUT, DELETE, and form POST helpers', async () => {
+		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+		fetchMock
+			.mockResolvedValueOnce(jsonResponse({ ok: true }))
+			.mockResolvedValueOnce(jsonResponse({ ok: true }))
+			.mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+		await apiPut('/api/update', { name: 'updated' }, { timeoutMs: 5_000 });
+		await apiDelete('/api/remove', undefined, { timeoutMs: 6_000 });
+		const formData = new FormData();
+		await apiPostForm('/api/upload', formData, { timeoutMs: 7_000 });
+
+		expect(timeoutSpy).toHaveBeenNthCalledWith(1, 5_000);
+		expect(timeoutSpy).toHaveBeenNthCalledWith(2, 6_000);
+		expect(timeoutSpy).toHaveBeenNthCalledWith(3, 7_000);
 	});
 });

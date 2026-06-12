@@ -1,6 +1,9 @@
 <script lang="ts">
 	import SidebarVirtualSortableChatList from '../SidebarVirtualSortableChatList.svelte';
-	import { SidebarChatReorderState, type SidebarChatOrderMap } from '../sidebar-chat-reorder-state.svelte';
+	import {
+		SidebarChatReorderState,
+		type SidebarChatOrderMap,
+	} from '../sidebar-chat-reorder-state.svelte';
 	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
 	import type { SidebarVirtualChatRow } from '../sidebar-virtual-chat-list';
 	import type { SidebarChatReorderRequest } from '../sidebar-chat-reorder-state.svelte';
@@ -33,7 +36,9 @@
 	}));
 
 	const reorder = new SidebarChatReorderState({
-		get visibleOrders() { return visibleOrders; },
+		get visibleOrders() {
+			return visibleOrders;
+		},
 	});
 
 	setAppShell({
@@ -71,7 +76,7 @@
 		{isFiltered}
 		{rowHeight}
 		{reorder}
-		onPersistReorder={onPersistReorder}
+		{onPersistReorder}
 		onChatSelect={() => {}}
 		onDeleteChat={() => {}}
 		onStartRenameChat={() => {}}

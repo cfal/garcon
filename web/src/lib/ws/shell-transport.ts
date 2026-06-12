@@ -2,7 +2,11 @@
 // serialization and deserialization at the boundary so callers
 // work with typed payloads instead of raw JSON strings.
 
-import { parseShellServerMessage, type ShellServerMessage, type ShellClientMessage } from '$lib/types/shell';
+import {
+	parseShellServerMessage,
+	type ShellServerMessage,
+	type ShellClientMessage,
+} from '$lib/types/shell';
 
 export interface ShellTransportHandlers {
 	onMessage: (msg: ShellServerMessage) => void;

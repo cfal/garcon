@@ -15,7 +15,7 @@
 		class: className,
 		pressed,
 		onclick,
-		children
+		children,
 	}: WorkspaceToolbarButtonProps = $props();
 </script>
 

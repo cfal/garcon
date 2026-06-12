@@ -7,7 +7,7 @@ import {
 	register as apiRegister,
 	getUser,
 	logout as apiLogout,
-	type AuthUser
+	type AuthUser,
 } from '$lib/api/auth.js';
 import { getAuthToken, setAuthToken, clearAuthToken, ApiError } from '$lib/api/client.js';
 
@@ -97,7 +97,7 @@ export class AuthStore {
 			if (this.authDisabled) {
 				return {
 					success: false,
-					error: 'Authentication is disabled by server configuration.'
+					error: 'Authentication is disabled by server configuration.',
 				};
 			}
 			const data = await apiLogin(username, password);
@@ -119,7 +119,7 @@ export class AuthStore {
 			if (this.authDisabled) {
 				return {
 					success: false,
-					error: 'Authentication is disabled by server configuration.'
+					error: 'Authentication is disabled by server configuration.',
 				};
 			}
 			const data = await apiRegister(username, password);

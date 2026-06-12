@@ -14,7 +14,7 @@ import {
 	ThinkingMessage,
 	ErrorMessage,
 } from '$shared/chat-types';
-import type { ChatMessage, ToolUseChatMessage } from '$shared/chat-types';
+import type { ChatMessage } from '$shared/chat-types';
 
 function normalizeString(value: unknown): string {
 	return typeof value === 'string' ? value.trim() : '';

@@ -7,26 +7,25 @@ import type {
 	WsFaultMessage,
 } from '$shared/ws-events';
 import { AssistantMessage, ErrorMessage } from '$shared/chat-types';
-import type { ChatMessage, PendingPermissionRequest, PendingViewChat } from '$lib/types/chat';
-import type { ChatEntry, SessionAgentId } from '$lib/types/app';
+import type { ChatMessage } from '$lib/types/chat';
+import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
+import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 export interface ChatEventContext {
-	agentId: SessionAgentId;
-	projectPath: string | null;
-	selectedChat: ChatEntry | null;
+	getSelectedChat: () => ChatSessionRouterView | null;
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
 	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
-	loadMessages: (chatId: string, loadMore?: boolean, agentId?: string) => Promise<ChatMessage[]>;
+	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
 	setIsSystemChatChange: (v: boolean) => void;
-	setPendingPermissionRequests: (
-		updater:
-			| PendingPermissionRequest[]
-			| ((prev: PendingPermissionRequest[]) => PendingPermissionRequest[]),
-	) => void;
-	pendingViewChat: PendingViewChat | null;
-	setPendingViewChat?: (v: PendingViewChat | null) => void;
+	conversationUi: Pick<
+		ConversationUiStore,
+		| 'pendingViewChat'
+		| 'setPendingViewChat'
+		| 'setPendingPermissionRequests'
+		| 'clearPendingPermissionRequests'
+	>;
 	activateLoadingFor: (chatId?: string | null) => void;
 	clearLoadingIndicators: (chatId?: string | null) => void;
 	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
@@ -53,14 +52,15 @@ export function handleChatCreated(msg: ChatSessionCreatedMessage, ctx: ChatEvent
 		coordinator.completeStartup(chatId);
 
 		ctx.setPendingChatId(chatId);
-		if (ctx.pendingViewChat && !ctx.pendingViewChat.chatId) {
-			ctx.setPendingViewChat?.({ ...ctx.pendingViewChat, chatId });
+		const pendingViewChat = ctx.conversationUi.pendingViewChat;
+		if (pendingViewChat && !pendingViewChat.chatId) {
+			ctx.conversationUi.setPendingViewChat({ ...pendingViewChat, chatId });
 		}
 
 		ctx.setIsSystemChatChange(true);
 		ctx.onLocalStartupConfirmed?.(chatId);
 
-		ctx.setPendingPermissionRequests((previous) =>
+		ctx.conversationUi.setPendingPermissionRequests((previous) =>
 			previous.map((request) => (request.chatId ? request : { ...request, chatId })),
 		);
 		return;
@@ -81,7 +81,7 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 		if (pendingChatId && (!abortedChatId || pendingChatId === abortedChatId)) {
 			ctx.clearPendingChatId();
 		}
-		ctx.setPendingPermissionRequests([]);
+		ctx.conversationUi.clearPendingPermissionRequests();
 		ctx.setChatMessages((previous) => [
 			...previous,
 			new AssistantMessage(new Date().toISOString(), 'Chat interrupted by user.'),
@@ -97,9 +97,9 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEventContext) {
 	const statusChatId = msg.chatId;
 	const currentChatId = ctx.getCurrentChatId();
+	const selectedChat = ctx.getSelectedChat();
 	const isCurrentChat =
-		statusChatId === currentChatId ||
-		(ctx.selectedChat && statusChatId === ctx.selectedChat.id);
+		statusChatId === currentChatId || (selectedChat && statusChatId === selectedChat.id);
 
 	if (statusChatId) {
 		if (msg.isProcessing) {
@@ -118,19 +118,21 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 		ctx.clearLoadingIndicators(statusChatId);
 		// The chat finished while disconnected -- agent-run-finished was lost so
 		// the authoritative reload never happened. Reload now.
-		const reloadId = statusChatId || ctx.selectedChat?.id;
+		const reloadId = statusChatId || selectedChat?.id;
 		if (reloadId) {
-			const chatProvider = ctx.selectedChat?.agentId || ctx.agentId;
-			ctx.loadMessages(reloadId, false, chatProvider).then((messages) => {
-				// Guard: active chat may have changed while the reload was in flight.
-				if (ctx.getCurrentChatId() !== reloadId) return;
-				if (messages.length > 0) {
-					ctx.setChatMessages(messages);
-				}
-			}).catch((err) => {
-				// Transport failure; the reconnect effect in ConversationWorkspace retries.
-				console.debug('[chat] reload failed for', reloadId, err);
-			});
+			ctx
+				.loadMessages(reloadId)
+				.then((messages) => {
+					// Guard: active chat may have changed while the reload was in flight.
+					if (ctx.getCurrentChatId() !== reloadId) return;
+					if (messages.length > 0) {
+						ctx.setChatMessages(messages);
+					}
+				})
+				.catch((err) => {
+					// Transport failure; the reconnect effect in ConversationWorkspace retries.
+					console.debug('[chat] reload failed for', reloadId, err);
+				});
 		}
 	}
 }

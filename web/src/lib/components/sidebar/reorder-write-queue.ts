@@ -8,10 +8,7 @@ export interface PerListWrite<TList extends string> {
  * Serializes writes per list while allowing independent lists to drain concurrently.
  * Reorder writes are relative operations, so each user drop must be preserved.
  */
-export function createPerListWriteQueue<
-	TList extends string,
-	TTask extends PerListWrite<TList>,
->(
+export function createPerListWriteQueue<TList extends string, TTask extends PerListWrite<TList>>(
 	write: (task: TTask) => Promise<void>,
 	onError: (error: unknown, task: TTask) => void,
 ) {
@@ -29,9 +26,9 @@ export function createPerListWriteQueue<
 				try {
 					await write(task);
 					task.onSuccess?.();
-					} catch (error) {
-						onError(error, task);
-						task.onFailure?.();
+				} catch (error) {
+					onError(error, task);
+					task.onFailure?.();
 				}
 			}
 		} finally {

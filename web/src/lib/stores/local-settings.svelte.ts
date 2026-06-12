@@ -1,9 +1,15 @@
 // Reactive local settings store using Svelte 5 runes. Persists
-// browser-only preferences to localStorage.
+// browser-only preferences to persisted storage.
+
+import {
+	getLocalStorageItem,
+	LOCAL_STORAGE_KEYS,
+	setLocalStorageItem,
+} from '$lib/utils/local-persistence';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
-export type ChatMaxWidth = typeof CHAT_MAX_WIDTH_VALUES[number];
+export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 
 export interface LocalSettingsSnapshot {
 	theme: ThemeMode;
@@ -36,7 +42,6 @@ type BooleanLocalSettingKey =
 	| 'codeEditorWordWrap'
 	| 'codeEditorLineNumbers';
 
-const STORAGE_KEY = 'pref_local_settings';
 const DEFAULTS: LocalSettingsSnapshot = {
 	theme: 'system',
 	colorblindMode: false,
@@ -94,24 +99,32 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
-		alwaysFullscreenOnGitPanel: parseBoolean(parsed.alwaysFullscreenOnGitPanel, DEFAULTS.alwaysFullscreenOnGitPanel),
+		alwaysFullscreenOnGitPanel: parseBoolean(
+			parsed.alwaysFullscreenOnGitPanel,
+			DEFAULTS.alwaysFullscreenOnGitPanel,
+		),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
 		codeEditorTheme: parseString(parsed.codeEditorTheme, DEFAULTS.codeEditorTheme),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
-		codeEditorLineNumbers: parseBoolean(parsed.codeEditorLineNumbers, DEFAULTS.codeEditorLineNumbers),
+		codeEditorLineNumbers: parseBoolean(
+			parsed.codeEditorLineNumbers,
+			DEFAULTS.codeEditorLineNumbers,
+		),
 		codeEditorFontSize: parseString(parsed.codeEditorFontSize, DEFAULTS.codeEditorFontSize),
 		gitDiffFontSize: parseString(parsed.gitDiffFontSize, DEFAULTS.gitDiffFontSize),
-		markdownViewerFontSize: parseString(parsed.markdownViewerFontSize, DEFAULTS.markdownViewerFontSize),
+		markdownViewerFontSize: parseString(
+			parsed.markdownViewerFontSize,
+			DEFAULTS.markdownViewerFontSize,
+		),
 		language: parseString(parsed.language, DEFAULTS.language),
 	};
 }
 
-// Reads the persisted snapshot from localStorage.
+// Reads the persisted local settings snapshot.
 function readPersistedLocalSettings(): LocalSettingsSnapshot {
-	if (typeof window === 'undefined') return { ...DEFAULTS };
 	try {
-		const raw = localStorage.getItem(STORAGE_KEY);
+		const raw = getLocalStorageItem(LOCAL_STORAGE_KEYS.localSettings);
 		if (raw) {
 			const parsed = JSON.parse(raw);
 			if (parsed && typeof parsed === 'object') {
@@ -125,11 +138,7 @@ function readPersistedLocalSettings(): LocalSettingsSnapshot {
 }
 
 function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
-	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-	} catch {
-		// Storage full or unavailable
-	}
+	setLocalStorageItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify(snapshot));
 }
 
 export class LocalSettingsStore {
@@ -152,7 +161,7 @@ export class LocalSettingsStore {
 	language = $state(DEFAULTS.language);
 
 	#storageListener = (event: StorageEvent) => {
-		if (event.key !== STORAGE_KEY) return;
+		if (event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
 		this.#apply(readPersistedLocalSettings());
 	};
 

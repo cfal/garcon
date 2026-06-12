@@ -69,7 +69,7 @@ describe('parseShellClientMessage', () => {
 			cols: 120,
 			rows: 40,
 			sessionPolicy: 'fresh',
-			initialCommand: 'echo hi'
+			initialCommand: 'echo hi',
 		});
 
 		expect(msg).toEqual({
@@ -79,7 +79,7 @@ describe('parseShellClientMessage', () => {
 			cols: 120,
 			rows: 40,
 			sessionPolicy: 'fresh',
-			initialCommand: 'echo hi'
+			initialCommand: 'echo hi',
 		});
 	});
 
@@ -91,16 +91,23 @@ describe('parseShellClientMessage', () => {
 			chatId: null,
 			cols: 80,
 			rows: 24,
-			sessionPolicy: 'reuse'
+			sessionPolicy: 'reuse',
 		});
 	});
 
 	it('parses input requests', () => {
-		expect(parseShellClientMessage({ type: 'input', data: 'ls\n' })).toEqual({ type: 'input', data: 'ls\n' });
+		expect(parseShellClientMessage({ type: 'input', data: 'ls\n' })).toEqual({
+			type: 'input',
+			data: 'ls\n',
+		});
 	});
 
 	it('parses valid resize requests', () => {
-		expect(parseShellClientMessage({ type: 'resize', cols: 100, rows: 32 })).toEqual({ type: 'resize', cols: 100, rows: 32 });
+		expect(parseShellClientMessage({ type: 'resize', cols: 100, rows: 32 })).toEqual({
+			type: 'resize',
+			cols: 100,
+			rows: 32,
+		});
 	});
 
 	it('rejects malformed resize requests', () => {

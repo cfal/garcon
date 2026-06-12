@@ -5,7 +5,11 @@
 	import type { ToolUseChatMessage, TodoItem } from '$shared/chat-types';
 	import { TOOL_DISPLAY_REGISTRY, getToolDisplayLabel } from '$lib/chat/tool-display-registry';
 	import { resolveDisplayRule } from '$lib/chat/tool-display-policy';
-	import type { ToolInlineAction, ToolInputDisplayRule, ToolResultDisplayRule } from '$lib/chat/tool-display-contract';
+	import type {
+		ToolInlineAction,
+		ToolInputDisplayRule,
+		ToolResultDisplayRule,
+	} from '$lib/chat/tool-display-contract';
 	import ChatToolInlineEvent from './ChatToolInlineEvent.svelte';
 	import ChatToolExpandableEvent from './ChatToolExpandableEvent.svelte';
 	import ChatToolDiffView from './content/ChatToolDiffView.svelte';
@@ -30,7 +34,7 @@
 		mode,
 		onFileOpen,
 		projectPath,
-		autoExpandTools = false
+		autoExpandTools = false,
 	}: ToolRendererProps = $props();
 
 	const toolName = $derived(getToolDisplayLabel(toolMessage));
@@ -40,7 +44,7 @@
 	let displayConfig = $derived(mode === 'input' ? config.input : config.result);
 
 	let parsedData = $derived(
-		mode === 'input' ? (toolMessage as unknown as Record<string, unknown>) : (toolResult ?? {})
+		mode === 'input' ? (toolMessage as unknown as Record<string, unknown>) : (toolResult ?? {}),
 	);
 
 	function handleAction() {
@@ -70,7 +74,7 @@
 		return (
 			displayConfig.getContentProps?.(parsedData, {
 				projectPath,
-				onFileOpen
+				onFileOpen,
 			}) || {}
 		);
 	});
@@ -99,7 +103,7 @@
 			return () =>
 				onFileOpen!(contentProps.filePath as string, {
 					old_string: contentProps.oldContent,
-					new_string: contentProps.newContent
+					new_string: contentProps.newContent,
 				});
 		}
 		return undefined;
@@ -122,7 +126,10 @@
 	let successMessage = $derived.by(() => {
 		if (!displayConfig || displayConfig.mode !== 'collapsible') return '';
 		if (displayConfig.contentKind !== 'successMessage') return '';
-		return (displayConfig as ToolResultDisplayRule).getMessage?.(parsedData) || m.chat_tool_renderer_success();
+		return (
+			(displayConfig as ToolResultDisplayRule).getMessage?.(parsedData) ||
+			m.chat_tool_renderer_success()
+		);
 	});
 
 	// Result rendering: when toolResult is available and the result config
@@ -177,7 +184,7 @@
 		{@const cfg = displayConfig as ToolInputDisplayRule}
 		<ChatToolInlineEvent
 			{toolName}
-			toolResult={toolResult}
+			{toolResult}
 			{toolId}
 			label={cfg.label}
 			value={inlineValue}
@@ -193,7 +200,7 @@
 		{#if shouldRenderCollapsedAsInline}
 			<ChatToolInlineEvent
 				{toolName}
-				toolResult={toolResult}
+				{toolResult}
 				{toolId}
 				label={toolName}
 				value={collapsedInlineFilePath || collapsibleTitle}
@@ -210,16 +217,16 @@
 				defaultOpen={collapsibleDefaultOpen}
 				onTitleClick={handleTitleClick}
 			>
-					{#snippet children()}
-						{#if displayConfig.contentKind === 'diff'}
-							{#if contentProps.diffUnavailable}
-								<ChatToolFileListView
-									files={(contentProps.files as string[]) || []}
-									onFileClick={onFileOpen}
-									title={contentProps.title as string | undefined}
-								/>
-							{:else}
-								<ChatToolDiffView
+				{#snippet children()}
+					{#if displayConfig.contentKind === 'diff'}
+						{#if contentProps.diffUnavailable}
+							<ChatToolFileListView
+								files={(contentProps.files as string[]) || []}
+								onFileClick={onFileOpen}
+								title={contentProps.title as string | undefined}
+							/>
+						{:else}
+							<ChatToolDiffView
 								oldContent={(contentProps.oldContent as string) || ''}
 								newContent={(contentProps.newContent as string) || ''}
 								filePath={(contentProps.filePath as string) || ''}
@@ -228,15 +235,15 @@
 								badgeColor={contentProps.badgeColor as 'gray' | 'green' | undefined}
 								onFileClick={contentProps.filePath && onFileOpen
 									? () => onFileOpen?.(contentProps.filePath as string)
-										: undefined}
-								/>
-							{/if}
-							{:else if displayConfig.contentKind === 'markdown'}
-							<ChatToolRichTextView
-								content={(contentProps.content as string) || ''}
-								{projectPath}
-								{onFileOpen}
+									: undefined}
 							/>
+						{/if}
+					{:else if displayConfig.contentKind === 'markdown'}
+						<ChatToolRichTextView
+							content={(contentProps.content as string) || ''}
+							{projectPath}
+							{onFileOpen}
+						/>
 					{:else if displayConfig.contentKind === 'fileList'}
 						<ChatToolFileListView
 							files={(contentProps.files as string[]) || []}
@@ -248,16 +255,9 @@
 							content={(contentProps.content as string) || ''}
 							format={(contentProps.format as 'plain' | 'json' | 'code') || 'plain'}
 						/>
-						{:else if displayConfig.contentKind === 'successMessage'}
-							<div
-								class="flex items-center gap-1.5 text-xs text-status-success-foreground"
-							>
-							<svg
-								class="w-3 h-3"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-							>
+					{:else if displayConfig.contentKind === 'successMessage'}
+						<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">
+							<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path
 									stroke-linecap="round"
 									stroke-linejoin="round"
@@ -310,7 +310,12 @@
 				{:else if resultConfig.contentKind === 'successMessage'}
 					<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">
 						<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M5 13l4 4L19 7"
+							/>
 						</svg>
 						{resultSuccessMessage}
 					</div>

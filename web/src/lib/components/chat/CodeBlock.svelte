@@ -78,10 +78,7 @@ does not ship ~100KB of syntax definitions for pages that render no code.
 	}
 
 	function escapeHtml(text: string): string {
-		return text
-			.replace(/&/g, '&amp;')
-			.replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;');
+		return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 	}
 </script>
 
@@ -185,5 +182,7 @@ does not ship ~100KB of syntax definitions for pages that render no code.
 			{/if}
 		</button>
 	</div>
-	<pre class="overflow-x-auto p-3 text-sm leading-relaxed"><code class="hljs">{@html highlighted}</code></pre>
+	<pre class="overflow-x-auto p-3 text-sm leading-relaxed"><code class="hljs"
+			>{@html highlighted}</code
+		></pre>
 </div>

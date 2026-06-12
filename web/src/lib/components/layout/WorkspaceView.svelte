@@ -1,14 +1,12 @@
 <script lang="ts">
 	import type { AppTab } from '$lib/types/app';
 	import { untrack } from 'svelte';
-	import { getChatSessions, getLocalSettings, getSplitLayout, getAppShell } from '$lib/context';
-	import { deleteChat } from '$lib/api/chats';
+	import {
+		getChatSessions,
+		getLocalSettings,
+		getSplitLayout,
+	} from '$lib/context';
 	import Menu from '@lucide/svelte/icons/menu';
-	import Maximize2 from '@lucide/svelte/icons/maximize-2';
-	import Minimize2 from '@lucide/svelte/icons/minimize-2';
-	import Share2 from '@lucide/svelte/icons/share-2';
-	import PanelLeft from '@lucide/svelte/icons/panel-left';
-	import Grid2x2 from '@lucide/svelte/icons/grid-2x2';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
 	import ConversationWorkspace from '$lib/components/chat/ConversationWorkspace.svelte';
@@ -17,17 +15,12 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
-	import { CHAT_TOOLBAR_TABS } from './chat-toolbar-tabs';
-	import WorkspaceToolbarButton from './WorkspaceToolbarButton.svelte';
-
-	type SplitDropZone = 'left' | 'right' | 'top' | 'bottom' | 'center';
-	type ActiveSplitDropTarget = {
-		paneId: string;
-		zone: SplitDropZone;
-		rect: DOMRect;
-		blockedReason?: 'max-panes';
-		focusReason?: 'already-open';
-	};
+	import WorkspaceToolbar from './WorkspaceToolbar.svelte';
+	import {
+		SPLIT_DROP_ZONES,
+		SplitDropController,
+		type SplitDropZone,
+	} from './split-drop-controller.svelte';
 
 	// Lazy-loaded tab panels to keep the main chunk lean. Each panel
 	// pulls in heavy dependencies (CodeMirror, xterm, git logic).
@@ -48,13 +41,12 @@
 		onTabChange,
 		onMenuClick,
 		isDesktopFullscreen = false,
-		onToggleDesktopFullscreen
+		onToggleDesktopFullscreen,
 	}: MainContentProps = $props();
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
 	const splitLayout = getSplitLayout();
-	const appShell = getAppShell();
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
@@ -63,18 +55,20 @@
 	const showTopHeader = $derived(!isChatTab);
 	const showInlineDesktopTabs = $derived(showTopHeader);
 	const showFloatingDesktopTabs = $derived(isChatTab && !isMobileLayout);
-	const hideFullscreenButtonOnGitTab = $derived(activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel);
+	const hideFullscreenButtonOnGitTab = $derived(
+		activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel,
+	);
 	const canToggleDesktopFullscreen = $derived(
-		!isMobileLayout &&
-		!!onToggleDesktopFullscreen &&
-		!hideFullscreenButtonOnGitTab
+		!isMobileLayout && !!onToggleDesktopFullscreen && !hideFullscreenButtonOnGitTab,
 	);
 
-	const tabs = CHAT_TOOLBAR_TABS;
-	const splitViewTooltip = $derived(splitLayout.isEnabled ? 'Exit split view' : 'Split view');
-	const fullscreenTooltip = $derived(
-		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen()
+	const splitViewTooltip = $derived(
+		splitLayout.isEnabled ? m.workspace_exit_split_view() : m.workspace_split_view(),
 	);
+	const fullscreenTooltip = $derived(
+		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen(),
+	);
+	const splitDropZones = SPLIT_DROP_ZONES;
 
 	// Holds the chat submit function registered by ConversationWorkspace.
 	let chatSubmitFn = $state<((message: string) => Promise<boolean>) | null>(null);
@@ -95,7 +89,9 @@
 	}
 
 	// Delete confirmation state for split-pane delete action.
-	let deleteConfirmation = $state<{ paneId: string; chatId: string; chatTitle: string } | null>(null);
+	let deleteConfirmation = $state<{ paneId: string; chatId: string; chatTitle: string } | null>(
+		null,
+	);
 
 	function handleSplitDeleteChat(paneId: string) {
 		const pane = splitLayout.panes.find((p) => p.id === paneId);
@@ -114,12 +110,7 @@
 		deleteConfirmation = null;
 		// Close the pane first, then delete the chat server-side.
 		handleSplitClosePane(paneId);
-		try {
-			await deleteChat(chatId);
-			appShell.quietRefreshChats();
-		} catch (err) {
-			console.error('[WorkspaceView] Failed to delete chat:', err);
-		}
+		await sessions.deleteRemoteChat(chatId);
 	}
 
 	function cancelSplitDelete() {
@@ -139,22 +130,6 @@
 		if (!projectPath) return 'Unknown';
 		const parts = projectPath.split('/').filter(Boolean);
 		return parts[parts.length - 1] || projectPath;
-	}
-
-	function getTabButtonClasses(tabId: AppTab): string {
-		return cn(
-			'relative px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium rounded-md transition-colors duration-150',
-			tabId === activeTab
-				? 'bg-chat-tabs-active text-chat-tabs-active-foreground shadow-sm border border-chat-tabs-active-border'
-				: 'text-muted-foreground hover:text-foreground hover:bg-accent'
-		);
-	}
-
-	function getUtilityButtonClasses(): string {
-		return cn(
-			'relative inline-flex items-center justify-center h-6 sm:h-7 w-6 sm:w-7 px-0 py-0 rounded-md transition-colors duration-150',
-			'text-muted-foreground hover:text-foreground hover:bg-accent'
-		);
 	}
 
 	function toggleSplitMode() {
@@ -223,221 +198,21 @@
 		if (focusedChat) sessions.setSelectedChatId(focusedChat);
 	}
 
-	// Handles dropping a chat on the main workspace when split mode is off.
-	// Auto-enables split with the current chat, then splits in the dropped chat.
-	let workspaceDragOver = $state(false);
-	let activeSplitDropTarget = $state<ActiveSplitDropTarget | null>(null);
-	const showActiveSplitDropLayer = $derived(
-		splitLayout.isEnabled && activeTab === 'chat' && splitLayout.draggedChatId !== null,
-	);
-
-	function handleWorkspaceDragOver(e: DragEvent) {
-		if (splitLayout.isEnabled) return;
-		e.preventDefault();
-		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-		workspaceDragOver = true;
-	}
-
-	function handleWorkspaceDragLeave() {
-		workspaceDragOver = false;
-	}
-
-	function handleWorkspaceDrop(e: DragEvent) {
-		e.preventDefault();
-		workspaceDragOver = false;
-		const draggedChat = splitLayout.draggedChatId;
-		if (!draggedChat || !selectedChat) return;
-		if (draggedChat === selectedChat.id) return;
-		splitLayout.enableWithChat(selectedChat.id);
-		const initialPane = splitLayout.panes[0];
-		if (initialPane) {
-			splitLayout.splitPane(initialPane.id, 'horizontal', draggedChat);
-			// Keep focus on the original chat pane, not the dragged one.
-			splitLayout.focusPane(initialPane.id);
-		}
-		splitLayout.endDrag();
-	}
-
-	function resolveDropZone(rect: DOMRect, clientX: number, clientY: number): SplitDropZone {
-		const x = clientX - rect.left;
-		const y = clientY - rect.top;
-		const edgeX = rect.width * 0.25;
-		const edgeY = rect.height * 0.25;
-
-		if (y < edgeY) return 'top';
-		if (y > rect.height - edgeY) return 'bottom';
-		if (x < edgeX) return 'left';
-		if (x > rect.width - edgeX) return 'right';
-		return 'center';
-	}
-
-	function isSplitEdgeZone(zone: SplitDropZone): boolean {
-		return zone !== 'center';
-	}
-
-	function toActiveSplitDropTarget(
-		paneId: string,
-		zone: SplitDropZone,
-		rect: DOMRect,
-	): ActiveSplitDropTarget {
-		const draggedChat = splitLayout.draggedChatId;
-		const isExistingSidebarChat =
-			!!draggedChat &&
-			!splitLayout.draggedPaneId &&
-			splitLayout.panes.some((p) => p.chatId === draggedChat);
-		return {
-			paneId,
-			zone,
-			rect,
-			focusReason: isExistingSidebarChat ? 'already-open' : undefined,
-			blockedReason:
-				!isExistingSidebarChat && splitLayout.paneCount >= 4 && isSplitEdgeZone(zone)
-					? 'max-panes'
-					: undefined,
-		};
-	}
-
-	function resolveActiveSplitDropTarget(e: DragEvent): ActiveSplitDropTarget | null {
-		if (!splitRootEl) return null;
-
-		let fallback: { paneId: string; rect: DOMRect; distance: number } | null = null;
-		for (const pane of splitLayout.panes) {
-			const paneEl = splitRootEl.querySelector<HTMLElement>(`[data-pane-id="${pane.id}"]`);
-			if (!paneEl) continue;
-
-			const rect = paneEl.getBoundingClientRect();
-			const containsPointer =
-				e.clientX >= rect.left &&
-				e.clientX <= rect.right &&
-				e.clientY >= rect.top &&
-				e.clientY <= rect.bottom;
-			if (containsPointer) {
-				return toActiveSplitDropTarget(
-					pane.id,
-					resolveDropZone(rect, e.clientX, e.clientY),
-					rect,
-				);
-			}
-
-			const centerX = rect.left + rect.width / 2;
-			const centerY = rect.top + rect.height / 2;
-			const distance = Math.hypot(e.clientX - centerX, e.clientY - centerY);
-			if (!fallback || distance < fallback.distance) {
-				fallback = { paneId: pane.id, rect, distance };
-			}
-		}
-
-		if (!fallback) return null;
-		return toActiveSplitDropTarget(
-			fallback.paneId,
-			resolveDropZone(fallback.rect, e.clientX, e.clientY),
-			fallback.rect,
-		);
-	}
-
-	function handleActiveSplitDragOver(e: DragEvent) {
-		if (!showActiveSplitDropLayer) return;
-		const target = resolveActiveSplitDropTarget(e);
-		if (!target) return;
-
-		e.preventDefault();
-		e.stopPropagation();
-		if (e.dataTransfer) e.dataTransfer.dropEffect = target.blockedReason ? 'none' : 'move';
-		activeSplitDropTarget = target;
-	}
-
-	function handleActiveSplitDrop(e: DragEvent) {
-		if (!showActiveSplitDropLayer) return;
-		e.preventDefault();
-		e.stopPropagation();
-
-		const target = activeSplitDropTarget ?? resolveActiveSplitDropTarget(e);
-		activeSplitDropTarget = null;
-		if (!target) {
-			splitLayout.endDrag();
-			return;
-		}
-		if (target.blockedReason) {
-			splitLayout.endDrag();
-			return;
-		}
-
-		handleSplitDropChat(target.paneId, target.zone);
-	}
-
-	function handleActiveSplitDragLeave(e: DragEvent) {
-		const related = e.relatedTarget as HTMLElement | null;
-		if (!related || !(e.currentTarget as HTMLElement).contains(related)) {
-			activeSplitDropTarget = null;
-		}
-	}
-
-	function getActiveSplitPreviewClass(zone: SplitDropZone): string {
-		if (!activeSplitDropTarget || activeSplitDropTarget.zone !== zone) return 'opacity-0';
-		return 'opacity-100';
-	}
-
-	function getActiveSplitPreviewTone(zone: SplitDropZone): string {
-		if (
-			activeSplitDropTarget?.zone === zone &&
-			(activeSplitDropTarget.blockedReason === 'max-panes' ||
-				activeSplitDropTarget.focusReason === 'already-open')
-		) {
-			return activeSplitDropTarget.blockedReason === 'max-panes'
-				? 'bg-destructive/10 border-destructive/40'
-				: 'bg-accent/15 border-accent/40';
-		}
-		return zone === 'center'
-			? 'bg-accent/15 border-accent/40'
-			: 'bg-primary/12 border-primary/30';
-	}
-
-	function getActiveSplitPreviewLabel(zone: SplitDropZone, fallback: string): string {
-		if (
-			activeSplitDropTarget?.zone === zone &&
-			activeSplitDropTarget.blockedReason === 'max-panes'
-		) {
-			return '4 panes max';
-		}
-		if (
-			activeSplitDropTarget?.zone === zone &&
-			activeSplitDropTarget.focusReason === 'already-open'
-		) {
-			return 'Already open';
-		}
-		return fallback;
-	}
-
-	function getActiveSplitPreviewLabelClass(zone: SplitDropZone): string {
-		if (
-			activeSplitDropTarget?.zone === zone &&
-			activeSplitDropTarget.blockedReason === 'max-panes'
-		) {
-			return 'bg-destructive/10 text-destructive';
-		}
-		if (
-			activeSplitDropTarget?.zone === zone &&
-			activeSplitDropTarget.focusReason === 'already-open'
-		) {
-			return 'bg-accent/15 text-accent-foreground';
-		}
-		return zone === 'center'
-			? 'bg-accent/15 text-accent-foreground'
-			: 'bg-primary/10 text-primary';
-	}
-
-	function getActiveSplitTargetStyle(): string {
-		if (!splitRootEl || !activeSplitDropTarget) return '';
-
-		const rootRect = splitRootEl.getBoundingClientRect();
-		const rect = activeSplitDropTarget.rect;
-		return [
-			`top:${rect.top - rootRect.top}px`,
-			`left:${rect.left - rootRect.left}px`,
-			`width:${rect.width}px`,
-			`height:${rect.height}px`,
-		].join(';');
-	}
+	let splitRootEl: HTMLDivElement | undefined = $state();
+	const splitDrop = new SplitDropController({
+		get activeTab() {
+			return activeTab;
+		},
+		get selectedChatId() {
+			return selectedChat?.id ?? null;
+		},
+		get splitLayout() {
+			return splitLayout;
+		},
+		get splitRootEl() {
+			return splitRootEl;
+		},
+	});
 
 	// Keeps sessions.selectedChatId in sync with the split layout's focused pane.
 	// Handles sidebar clicks (which only update sessions) by navigating the focused
@@ -459,62 +234,6 @@
 			}
 		});
 	});
-
-	// Focused-pane overlay tracking. The interactive ConversationWorkspace
-	// lives at a stable DOM location and is positioned over the focused
-	// pane's body via an absolute overlay. Focus changes only reposition
-	// the overlay rect; ConversationWorkspace is never remounted.
-	let splitRootEl: HTMLDivElement | undefined = $state();
-	let focusedOverlayRect = $state<{ top: number; left: number; width: number; height: number } | null>(null);
-
-	$effect(() => {
-		const focusedId = splitLayout.focusedPaneId;
-		const isEnabled = splitLayout.isEnabled;
-		// Also depend on the tree identity so mount/unmount of panes re-runs this.
-		const _rootIdentity = splitLayout.root;
-		const root = splitRootEl;
-
-		if (!isEnabled || !focusedId || !root) {
-			focusedOverlayRect = null;
-			return;
-		}
-
-		let paneEl: HTMLElement | null = null;
-		const update = () => {
-			if (!root) return;
-			paneEl = root.querySelector<HTMLElement>(
-				`[data-pane-id="${focusedId}"] [data-pane-body]`,
-			);
-			if (!paneEl) {
-				focusedOverlayRect = null;
-				return;
-			}
-			const rootRect = root.getBoundingClientRect();
-			const r = paneEl.getBoundingClientRect();
-			focusedOverlayRect = {
-				top: r.top - rootRect.top,
-				left: r.left - rootRect.left,
-				width: r.width,
-				height: r.height,
-			};
-		};
-
-		// Initial + poll on next frame so the just-rendered tree is present.
-		update();
-		const rafId = requestAnimationFrame(update);
-
-		const ro = new ResizeObserver(update);
-		ro.observe(root);
-		if (paneEl) ro.observe(paneEl);
-
-		const onWinResize = () => update();
-		window.addEventListener('resize', onWinResize);
-		return () => {
-			cancelAnimationFrame(rafId);
-			ro.disconnect();
-			window.removeEventListener('resize', onWinResize);
-		};
-	});
 </script>
 
 <div class="h-full flex flex-col relative">
@@ -525,7 +244,9 @@
 	{:else}
 		<!-- Header with tabs (only shown when a chat is active) -->
 		{#if showTopHeader}
-			<div class="bg-chat-header border-b border-chat-header-border p-2 flex-shrink-0 text-foreground">
+			<div
+				class="bg-chat-header border-b border-chat-header-border p-2 flex-shrink-0 text-foreground"
+			>
 				<div class="flex items-center justify-between relative">
 					<div class="flex items-center space-x-2 min-w-0 flex-1">
 						{#if onMenuClick}
@@ -549,69 +270,19 @@
 
 					{#if showInlineDesktopTabs}
 						<div class="flex-shrink-0 hidden sm:block">
-							<div class="flex items-center gap-1.5">
-								<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-0.5 border border-chat-tabs-rail-border">
-									{#each tabs as tab (tab.id)}
-										<WorkspaceToolbarButton
-											label={tab.label()}
-											onclick={() => onTabChange(tab.id)}
-											class={getTabButtonClasses(tab.id)}
-											pressed={tab.id === activeTab}
-										>
-											<span class="flex items-center gap-1 sm:gap-1.5">
-												<tab.icon class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-												<span class="hidden lg:inline">{tab.label()}</span>
-											</span>
-										</WorkspaceToolbarButton>
-									{/each}
-								</div>
-								<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border">
-									<WorkspaceToolbarButton
-										label={splitViewTooltip}
-										onclick={toggleSplitMode}
-										class={cn(getUtilityButtonClasses(), splitLayout.isEnabled && 'text-primary bg-primary/10')}
-									>
-										<span class="flex items-center justify-center">
-											<PanelLeft class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-										</span>
-									</WorkspaceToolbarButton>
-									{#if splitLayout.isEnabled}
-										<WorkspaceToolbarButton
-											label="4-up grid"
-											onclick={setupGrid}
-											class={getUtilityButtonClasses()}
-										>
-											<span class="flex items-center justify-center">
-												<Grid2x2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-											</span>
-										</WorkspaceToolbarButton>
-									{/if}
-									<WorkspaceToolbarButton
-										label={m.share_button()}
-										onclick={openShareDialog}
-										class={getUtilityButtonClasses()}
-									>
-										<span class="flex items-center justify-center">
-											<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-										</span>
-									</WorkspaceToolbarButton>
-									{#if canToggleDesktopFullscreen}
-										<WorkspaceToolbarButton
-											label={fullscreenTooltip}
-											onclick={onToggleDesktopFullscreen}
-											class={getUtilityButtonClasses()}
-										>
-											<span class="flex items-center justify-center">
-												{#if isDesktopFullscreen}
-													<Minimize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-												{:else}
-													<Maximize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-												{/if}
-											</span>
-										</WorkspaceToolbarButton>
-									{/if}
-								</div>
-							</div>
+							<WorkspaceToolbar
+								{activeTab}
+								splitEnabled={splitLayout.isEnabled}
+								{splitViewTooltip}
+								{fullscreenTooltip}
+								showFullscreenButton={canToggleDesktopFullscreen}
+								{isDesktopFullscreen}
+								{onTabChange}
+								onToggleSplitMode={toggleSplitMode}
+								onSetupGrid={setupGrid}
+								onShare={openShareDialog}
+								{onToggleDesktopFullscreen}
+							/>
 						</div>
 					{/if}
 				</div>
@@ -623,69 +294,20 @@
 				data-floating-workspace-toolbar
 				class="absolute right-6 top-3 z-20 hidden sm:block md:right-8"
 			>
-				<div class="flex items-center gap-1.5">
-					<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-0.5 border border-chat-tabs-rail-border shadow-sm">
-						{#each tabs as tab (tab.id)}
-							<WorkspaceToolbarButton
-								label={tab.label()}
-								onclick={() => onTabChange(tab.id)}
-								class={getTabButtonClasses(tab.id)}
-								pressed={tab.id === activeTab}
-							>
-								<span class="flex items-center gap-1 sm:gap-1.5">
-									<tab.icon class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-									<span class="hidden lg:inline">{tab.label()}</span>
-								</span>
-							</WorkspaceToolbarButton>
-						{/each}
-					</div>
-					<div class="relative flex bg-chat-tabs-rail text-foreground rounded-lg p-[3px] border border-chat-tabs-rail-border shadow-sm">
-						<WorkspaceToolbarButton
-							label={splitViewTooltip}
-							onclick={toggleSplitMode}
-							class={cn(getUtilityButtonClasses(), splitLayout.isEnabled && 'text-primary bg-primary/10')}
-						>
-							<span class="flex items-center justify-center">
-								<PanelLeft class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-							</span>
-						</WorkspaceToolbarButton>
-						{#if splitLayout.isEnabled}
-							<WorkspaceToolbarButton
-								label="4-up grid"
-								onclick={setupGrid}
-								class={getUtilityButtonClasses()}
-							>
-								<span class="flex items-center justify-center">
-									<Grid2x2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-								</span>
-							</WorkspaceToolbarButton>
-						{/if}
-						<WorkspaceToolbarButton
-							label={m.share_button()}
-							onclick={openShareDialog}
-							class={getUtilityButtonClasses()}
-						>
-							<span class="flex items-center justify-center">
-								<Share2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-							</span>
-						</WorkspaceToolbarButton>
-						{#if canToggleDesktopFullscreen}
-							<WorkspaceToolbarButton
-								label={fullscreenTooltip}
-								onclick={onToggleDesktopFullscreen}
-								class={getUtilityButtonClasses()}
-							>
-								<span class="flex items-center justify-center">
-									{#if isDesktopFullscreen}
-										<Minimize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-									{:else}
-										<Maximize2 class="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-									{/if}
-								</span>
-							</WorkspaceToolbarButton>
-						{/if}
-					</div>
-				</div>
+				<WorkspaceToolbar
+					{activeTab}
+					splitEnabled={splitLayout.isEnabled}
+					{splitViewTooltip}
+					{fullscreenTooltip}
+					showFullscreenButton={canToggleDesktopFullscreen}
+					{isDesktopFullscreen}
+					shadow
+					{onTabChange}
+					onToggleSplitMode={toggleSplitMode}
+					onSetupGrid={setupGrid}
+					onShare={openShareDialog}
+					{onToggleDesktopFullscreen}
+				/>
 			</div>
 		{/if}
 
@@ -712,13 +334,13 @@
 						render uniformly; switching focus triggers no side
 						effects beyond the chat switch inside the workspace.
 					-->
-					{#if focusedOverlayRect}
+					{#if splitDrop.focusedOverlayRect}
 						<div
 							class="absolute pointer-events-auto rounded-lg overflow-hidden bg-background border border-primary/40 shadow-sm shadow-primary/10"
-							style:top="{focusedOverlayRect.top}px"
-							style:left="{focusedOverlayRect.left}px"
-							style:width="{focusedOverlayRect.width}px"
-							style:height="{focusedOverlayRect.height}px"
+							style:top="{splitDrop.focusedOverlayRect.top}px"
+							style:left="{splitDrop.focusedOverlayRect.left}px"
+							style:width="{splitDrop.focusedOverlayRect.width}px"
+							style:height="{splitDrop.focusedOverlayRect.height}px"
 						>
 							<ConversationWorkspace
 								onRegisterSubmit={handleRegisterSubmit}
@@ -726,51 +348,49 @@
 							/>
 						</div>
 					{/if}
-					{#if showActiveSplitDropLayer}
+					{#if splitDrop.showActiveSplitDropLayer}
 						<!-- svelte-ignore a11y_no_static_element_interactions -- drag target only exists during native drag-and-drop -->
 						<div
 							class="absolute inset-0 z-40 pointer-events-auto"
 							data-split-drag-layer
-							ondragover={handleActiveSplitDragOver}
-							ondragleave={handleActiveSplitDragLeave}
-							ondrop={handleActiveSplitDrop}
+							ondragover={(event) => splitDrop.handleActiveSplitDragOver(event)}
+							ondragleave={(event) => splitDrop.handleActiveSplitDragLeave(event)}
+							ondrop={(event) => splitDrop.handleActiveSplitDrop(event, handleSplitDropChat)}
 							role="region"
-							aria-label="Split view drop target"
+							aria-label={m.workspace_split_drop_target()}
 						>
-							<div class={cn(
-								'absolute inset-0 pointer-events-none transition-colors duration-150',
-								activeSplitDropTarget ? 'bg-background/45 backdrop-blur-[1px]' : 'bg-background/20',
-							)}></div>
-							{#if activeSplitDropTarget}
+							<div
+								class={cn(
+									'absolute inset-0 pointer-events-none transition-colors duration-150',
+									splitDrop.activeSplitDropTarget
+										? 'bg-background/45 backdrop-blur-[1px]'
+										: 'bg-background/20',
+								)}
+							></div>
+							{#if splitDrop.activeSplitDropTarget}
 								<div
 									class="absolute pointer-events-none transition-all duration-150"
-									style={getActiveSplitTargetStyle()}
+									style={splitDrop.activeTargetStyle()}
 								>
-									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('top'), getActiveSplitPreviewClass('top'), 'inset-x-3 top-3 bottom-[52%]')}>
-										<div class="flex h-full items-center justify-center">
-											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('top'))}>{getActiveSplitPreviewLabel('top', 'Top')}</span>
+									{#each splitDropZones as dropZone (dropZone.zone)}
+										<div
+											class={cn(
+												'absolute border rounded-lg transition-opacity duration-150',
+												splitDrop.previewTone(dropZone.zone),
+												splitDrop.previewClass(dropZone.zone),
+												dropZone.insetClass,
+											)}
+										>
+											<div class="flex h-full items-center justify-center">
+												<span
+													class={cn(
+														'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
+														splitDrop.previewLabelClass(dropZone.zone),
+													)}>{splitDrop.previewLabel(dropZone.zone, dropZone.label())}</span
+												>
+											</div>
 										</div>
-									</div>
-									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('bottom'), getActiveSplitPreviewClass('bottom'), 'inset-x-3 top-[52%] bottom-3')}>
-										<div class="flex h-full items-center justify-center">
-											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('bottom'))}>{getActiveSplitPreviewLabel('bottom', 'Bottom')}</span>
-										</div>
-									</div>
-									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('left'), getActiveSplitPreviewClass('left'), 'inset-y-3 left-3 right-[52%]')}>
-										<div class="flex h-full items-center justify-center">
-											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('left'))}>{getActiveSplitPreviewLabel('left', 'Left')}</span>
-										</div>
-									</div>
-									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('right'), getActiveSplitPreviewClass('right'), 'inset-y-3 left-[52%] right-3')}>
-										<div class="flex h-full items-center justify-center">
-											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('right'))}>{getActiveSplitPreviewLabel('right', 'Right')}</span>
-										</div>
-									</div>
-									<div class={cn('absolute border rounded-lg transition-opacity duration-150', getActiveSplitPreviewTone('center'), getActiveSplitPreviewClass('center'), 'inset-3')}>
-										<div class="flex h-full items-center justify-center">
-											<span class={cn('rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm', getActiveSplitPreviewLabelClass('center'))}>Replace</span>
-										</div>
-									</div>
+									{/each}
 								</div>
 							{/if}
 						</div>
@@ -781,17 +401,21 @@
 				<div
 					class="h-full relative"
 					class:hidden={activeTab !== 'chat'}
-					ondragover={handleWorkspaceDragOver}
-					ondragleave={handleWorkspaceDragLeave}
-					ondrop={handleWorkspaceDrop}
+					ondragover={(event) => splitDrop.handleWorkspaceDragOver(event)}
+					ondragleave={() => splitDrop.handleWorkspaceDragLeave()}
+					ondrop={(event) => splitDrop.handleWorkspaceDrop(event)}
 				>
 					<ConversationWorkspace
 						onRegisterSubmit={handleRegisterSubmit}
 						reserveTopFloatingToolbar={showFloatingDesktopTabs}
 					/>
-					{#if workspaceDragOver}
-						<div class="absolute inset-0 z-30 flex items-center justify-center bg-primary/5 border-2 border-dashed border-primary/30 rounded-lg pointer-events-none">
-							<span class="text-sm font-medium text-primary bg-primary/10 px-3 py-1.5 rounded-md">Drop to split view</span>
+					{#if splitDrop.workspaceDragOver}
+						<div
+							class="absolute inset-0 z-30 flex items-center justify-center bg-primary/5 border-2 border-dashed border-primary/30 rounded-lg pointer-events-none"
+						>
+							<span class="text-sm font-medium text-primary bg-primary/10 px-3 py-1.5 rounded-md"
+								>{m.workspace_drop_to_split_view()}</span
+							>
 						</div>
 					{/if}
 				</div>
@@ -820,7 +444,12 @@
 	<ShareChatDialog chatId={shareChatId} chatTitle={shareChatTitle} onClose={closeShareDialog} />
 
 	<!-- Delete confirmation dialog for split-pane delete action -->
-	<Dialog.Root open={deleteConfirmation !== null} onOpenChange={(open) => { if (!open) cancelSplitDelete(); }}>
+	<Dialog.Root
+		open={deleteConfirmation !== null}
+		onOpenChange={(open) => {
+			if (!open) cancelSplitDelete();
+		}}
+	>
 		<Dialog.Content>
 			<Dialog.Header class="min-w-0">
 				<Dialog.Title>{m.sidebar_delete_confirmation_delete_chat()}</Dialog.Title>
@@ -833,7 +462,12 @@
 			</Dialog.Header>
 			<Dialog.Footer>
 				<Button variant="outline" onclick={cancelSplitDelete}>{m.sidebar_actions_cancel()}</Button>
-				<Button variant="destructive" onclick={() => { void confirmSplitDelete(); }}>{m.sidebar_actions_delete()}</Button>
+				<Button
+					variant="destructive"
+					onclick={() => {
+						void confirmSplitDelete();
+					}}>{m.sidebar_actions_delete()}</Button
+				>
 			</Dialog.Footer>
 		</Dialog.Content>
 	</Dialog.Root>

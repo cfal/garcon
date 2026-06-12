@@ -4,19 +4,27 @@ import { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ChatEventContext } from '../handlers/chat';
 import { ChatSessionCreatedMessage } from '$shared/ws-events';
 
+function makeConversationUi(
+	overrides: Partial<ChatEventContext['conversationUi']> = {},
+): ChatEventContext['conversationUi'] {
+	return {
+		pendingViewChat: null,
+		setPendingViewChat: vi.fn(),
+		setPendingPermissionRequests: vi.fn(),
+		clearPendingPermissionRequests: vi.fn(),
+		...overrides,
+	};
+}
+
 function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 	return {
-		agentId: 'claude',
-		projectPath: '/project',
-		selectedChat: null,
+		getSelectedChat: () => null,
 		getCurrentChatId: () => null,
 		setCurrentChatId: vi.fn(),
 		setChatMessages: vi.fn(),
 		loadMessages: vi.fn().mockResolvedValue([]),
 		setIsSystemChatChange: vi.fn(),
-		setPendingPermissionRequests: vi.fn(),
-		pendingViewChat: null,
-		setPendingViewChat: vi.fn(),
+		conversationUi: makeConversationUi(),
 		activateLoadingFor: vi.fn(),
 		clearLoadingIndicators: vi.fn(),
 		markChatsAsCompleted: vi.fn(),
@@ -89,7 +97,7 @@ describe('handleChatCreated', () => {
 		const setPending = vi.fn();
 		const ctx = makeCtx({
 			startupCoordinator: coordinator,
-			setPendingPermissionRequests: setPending,
+			conversationUi: makeConversationUi({ setPendingPermissionRequests: setPending }),
 		});
 
 		handleChatCreated(makeMsg('chat-1'), ctx);
@@ -99,8 +107,16 @@ describe('handleChatCreated', () => {
 		expect(typeof updater).toBe('function');
 
 		const result = updater([
-			{ permissionRequestId: 'r1', requestedTool: { type: 'bash-tool-use', toolId: 't1' }, chatId: '' },
-			{ permissionRequestId: 'r2', requestedTool: { type: 'read-tool-use', toolId: 't2' }, chatId: 'existing' },
+			{
+				permissionRequestId: 'r1',
+				requestedTool: { type: 'bash-tool-use', toolId: 't1' },
+				chatId: '',
+			},
+			{
+				permissionRequestId: 'r2',
+				requestedTool: { type: 'read-tool-use', toolId: 't2' },
+				chatId: 'existing',
+			},
 		]);
 		expect(result[0].chatId).toBe('chat-1');
 		expect(result[1].chatId).toBe('existing');
@@ -111,8 +127,10 @@ describe('handleChatCreated', () => {
 		const setPendingViewChat = vi.fn();
 		const ctx = makeCtx({
 			startupCoordinator: coordinator,
-			pendingViewChat: { chatId: '' } as never,
-			setPendingViewChat,
+			conversationUi: makeConversationUi({
+				pendingViewChat: { chatId: '' } as never,
+				setPendingViewChat,
+			}),
 		});
 
 		handleChatCreated(makeMsg('chat-1'), ctx);
@@ -125,8 +143,10 @@ describe('handleChatCreated', () => {
 		const setPendingViewChat = vi.fn();
 		const ctx = makeCtx({
 			startupCoordinator: coordinator,
-			pendingViewChat: { chatId: 'existing' } as never,
-			setPendingViewChat,
+			conversationUi: makeConversationUi({
+				pendingViewChat: { chatId: 'existing' } as never,
+				setPendingViewChat,
+			}),
 		});
 
 		handleChatCreated(makeMsg('chat-1'), ctx);

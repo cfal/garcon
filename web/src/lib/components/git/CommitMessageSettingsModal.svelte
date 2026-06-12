@@ -12,7 +12,10 @@
 	import type { ApiProtocol } from '$shared/api-providers';
 	import * as m from '$lib/paraglide/messages.js';
 	import SettingsModelSelector from '$lib/components/model-selector/SettingsModelSelector.svelte';
-	import type { ModelSelectorChange, ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
+	import type {
+		ModelSelectorChange,
+		ModelSelectorMode,
+	} from '$lib/components/model-selector/model-selector-types';
 
 	interface Props {
 		onClose: () => void;
@@ -61,7 +64,11 @@ Return only the commit message now.`;
 	let isDefaultPrompt = $derived(!customPrompt || customPrompt === DEFAULT_PROMPT);
 	const modelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
-	const modelSelectorMode: ModelSelectorMode = { agent: 'select', source: 'select', surface: 'settings' };
+	const modelSelectorMode: ModelSelectorMode = {
+		agent: 'select',
+		source: 'select',
+		surface: 'settings',
+	};
 	const modelSelectorValue = $derived({
 		agentId,
 		model,
@@ -87,7 +94,10 @@ Return only the commit message now.`;
 			const uiEffective = (snap.uiEffective ?? {}) as Record<string, unknown>;
 			const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;
 			const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
-			const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<string, unknown>;
+			const cm = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<
+				string,
+				unknown
+			>;
 			enabled = cm.enabled !== false;
 			if (typeof cm.agentId === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(cm.agentId)) {
 				agentId = cm.agentId as SessionAgentId;
@@ -97,19 +107,24 @@ Return only the commit message now.`;
 			if (typeof cm.customPrompt === 'string' && cm.customPrompt) customPrompt = cm.customPrompt;
 			else customPrompt = DEFAULT_PROMPT;
 			if (typeof cm.useCommonDirPrefix === 'boolean') useCommonDirPrefix = cm.useCommonDirPrefix;
-		} catch { /* use defaults */ }
+		} catch {
+			/* use defaults */
+		}
 
 		applyModelDefault(persistedModel, persistedEndpointId);
 
 		loaded = true;
 		const agentIdAtLoad = agentId;
 		const modelAtLoad = model;
-		void modelCatalog.refreshIfStale().then(() => {
-			if (agentId !== agentIdAtLoad || model !== modelAtLoad) return;
-			applyModelDefault(persistedModel, persistedEndpointId);
-		}).catch((err) => {
-			console.warn('[CommitMessageSettingsModal] Failed to refresh models', err);
-		});
+		void modelCatalog
+			.refreshIfStale()
+			.then(() => {
+				if (agentId !== agentIdAtLoad || model !== modelAtLoad) return;
+				applyModelDefault(persistedModel, persistedEndpointId);
+			})
+			.catch((err) => {
+				console.warn('[CommitMessageSettingsModal] Failed to refresh models', err);
+			});
 	});
 
 	async function persist() {
@@ -161,7 +176,9 @@ Return only the commit message now.`;
 	onclick={handleBackdropClick}
 	onkeydown={handleKeydown}
 >
-	<div class="bg-background border border-border rounded-lg shadow-xl w-[440px] max-h-[85vh] overflow-y-auto">
+	<div
+		class="bg-background border border-border rounded-lg shadow-xl w-[440px] max-h-[85vh] overflow-y-auto"
+	>
 		<div class="flex items-center justify-between px-4 py-3 border-b border-border">
 			<h2 class="text-sm font-medium text-foreground">{m.git_commit_settings_title()}</h2>
 			<button
@@ -176,10 +193,15 @@ Return only the commit message now.`;
 		{#if loaded}
 			<div class="px-4 py-3 space-y-3">
 				<div class="flex items-center justify-between">
-					<div class="text-sm font-medium text-foreground">{m.git_commit_settings_directory_prefix()}</div>
+					<div class="text-sm font-medium text-foreground">
+						{m.git_commit_settings_directory_prefix()}
+					</div>
 					<Switch
 						checked={useCommonDirPrefix}
-						onCheckedChange={(next) => { useCommonDirPrefix = next; persist(); }}
+						onCheckedChange={(next) => {
+							useCommonDirPrefix = next;
+							persist();
+						}}
 						aria-label={m.git_commit_settings_directory_prefix_aria()}
 					/>
 				</div>
@@ -206,12 +228,19 @@ Return only the commit message now.`;
 					</div>
 
 					<div class="space-y-1.5 pt-1">
-						<div class="text-sm font-medium text-foreground">{m.git_commit_settings_generation_prompt()}</div>
+						<div class="text-sm font-medium text-foreground">
+							{m.git_commit_settings_generation_prompt()}
+						</div>
 						<textarea
 							value={customPrompt}
-							oninput={(e) => { customPrompt = e.currentTarget.value; }}
+							oninput={(e) => {
+								customPrompt = e.currentTarget.value;
+							}}
 							onblur={() => persist()}
-							placeholder={m.git_commit_settings_prompt_placeholder({ files: '{{files}}', diff: '{{diff}}' })}
+							placeholder={m.git_commit_settings_prompt_placeholder({
+								files: '{{files}}',
+								diff: '{{diff}}',
+							})}
 							class="w-full text-sm p-2.5 bg-muted/30 border border-border rounded-md resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent text-foreground placeholder:text-muted-foreground/60"
 							rows="8"
 						></textarea>
@@ -220,8 +249,14 @@ Return only the commit message now.`;
 								{m.git_commit_settings_prompt_legend_title()}
 							</div>
 							<div class="mt-1 space-y-1 text-xs text-muted-foreground">
-								<div><code class="font-mono text-foreground">{'{{files}}'}</code> {m.git_commit_settings_prompt_legend_files()}</div>
-								<div><code class="font-mono text-foreground">{'{{diff}}'}</code> {m.git_commit_settings_prompt_legend_diff()}</div>
+								<div>
+									<code class="font-mono text-foreground">{'{{files}}'}</code>
+									{m.git_commit_settings_prompt_legend_files()}
+								</div>
+								<div>
+									<code class="font-mono text-foreground">{'{{diff}}'}</code>
+									{m.git_commit_settings_prompt_legend_diff()}
+								</div>
 							</div>
 						</div>
 						{#if !isDefaultPrompt}
@@ -229,7 +264,10 @@ Return only the commit message now.`;
 								<Button
 									variant="outline"
 									size="sm"
-									onclick={() => { customPrompt = DEFAULT_PROMPT; persist(); }}
+									onclick={() => {
+										customPrompt = DEFAULT_PROMPT;
+										persist();
+									}}
 								>
 									{m.git_commit_settings_restore_default_prompt()}
 								</Button>

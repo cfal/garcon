@@ -30,9 +30,7 @@
 			<button
 				class={cn(
 					'flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-md transition-colors',
-					activeTab === tab.id
-						? 'text-primary'
-						: 'text-muted-foreground hover:text-foreground'
+					activeTab === tab.id ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
 				)}
 				onclick={() => onTabChange(tab.id)}
 			>

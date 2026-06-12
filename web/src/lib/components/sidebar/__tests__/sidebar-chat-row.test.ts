@@ -38,7 +38,9 @@ describe('shared sidebar chat row', () => {
 			session: createChat(),
 		});
 
-		expect(screen.getByText('Shared row chat').closest('button')?.getAttribute('draggable')).toBe('true');
+		expect(screen.getByText('Shared row chat').closest('button')?.getAttribute('draggable')).toBe(
+			'true',
+		);
 	});
 
 	it('omits native row dragging for Pragmatic wrappers', () => {
@@ -47,7 +49,9 @@ describe('shared sidebar chat row', () => {
 			enableNativeDrag: false,
 		});
 
-		expect(screen.getByText('Shared row chat').closest('button')?.hasAttribute('draggable')).toBe(false);
+		expect(screen.getByText('Shared row chat').closest('button')?.hasAttribute('draggable')).toBe(
+			false,
+		);
 	});
 
 	it('renders the shared chat summary inside the sidebar item shell', async () => {
@@ -84,7 +88,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('prod')).toBeTruthy();
 		expect(screen.getByRole('button', { name: '+1' })).toBeTruthy();
 		const desktopMenuTrigger = document.querySelector<HTMLElement>(
-			'[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]'
+			'[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]',
 		);
 		expect(desktopMenuTrigger?.className).toContain('border-sidebar-border/70');
 		expect(desktopMenuTrigger?.className).toContain('bg-background');
@@ -111,7 +115,9 @@ describe('shared sidebar chat row', () => {
 
 		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(1);
 		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
-		expect(document.querySelector('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]')).toBeNull();
+		expect(
+			document.querySelector('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]'),
+		).toBeNull();
 	});
 
 	it('renders the same chat summary content inside the search dialog rows', async () => {

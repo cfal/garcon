@@ -68,9 +68,10 @@ describe('ReadReceiptOutboxStore', () => {
 
 	it('flushNow bypasses debounce', async () => {
 		const { outbox } = createTestStore();
-		mockMarkBatch.mockResolvedValue({ success: true, results: [
-			{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' },
-		] });
+		mockMarkBatch.mockResolvedValue({
+			success: true,
+			results: [{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' }],
+		});
 
 		outbox.enqueue('a', '2026-02-25T10:00:00.000Z');
 		await outbox.flushNow();
@@ -81,13 +82,17 @@ describe('ReadReceiptOutboxStore', () => {
 	it('flushes pending receipts that arrive while a batch is already in flight', async () => {
 		const { outbox } = createTestStore();
 		let resolveFirstBatch:
-			| ((value: { success: boolean; results: Array<{ chatId: string; lastReadAt: string }> }) => void)
+			| ((value: {
+					success: boolean;
+					results: Array<{ chatId: string; lastReadAt: string }>;
+			  }) => void)
 			| undefined;
 
 		mockMarkBatch.mockImplementationOnce(
-			() => new Promise((resolve) => {
-				resolveFirstBatch = resolve;
-			}),
+			() =>
+				new Promise((resolve) => {
+					resolveFirstBatch = resolve;
+				}),
 		);
 		mockMarkBatch.mockResolvedValueOnce({
 			success: true,
@@ -126,27 +131,27 @@ describe('ReadReceiptOutboxStore', () => {
 		const { outbox, sessions } = createTestStore();
 
 		// Set up sessions with the chat so patchLastReadAt works.
-		sessions.upsertFromServer([{
-			id: 'a',
-			agentId: 'claude',
-			model: 'opus',
-			title: 'A',
-			projectPath: '/p',
-			tags: [],
-			native: { path: null },
-			activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
-			preview: { lastMessage: '' },
-			isPinned: false,
-			isArchived: false,
-			isActive: false,
-			isUnread: true,
-		}]);
+		sessions.upsertFromServer([
+			{
+				id: 'a',
+				agentId: 'claude',
+				model: 'opus',
+				title: 'A',
+				projectPath: '/p',
+				tags: [],
+				native: { path: null },
+				activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+				preview: { lastMessage: '' },
+				isPinned: false,
+				isArchived: false,
+				isActive: false,
+				isUnread: true,
+			},
+		]);
 
 		mockMarkBatch.mockResolvedValue({
 			success: true,
-			results: [
-				{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' },
-			],
+			results: [{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' }],
 		});
 
 		outbox.enqueue('a', '2026-02-25T10:00:00.000Z');
@@ -227,9 +232,10 @@ describe('ReadReceiptOutboxStore', () => {
 		expect(outbox.retryIndex).toBe(1);
 
 		// Retry timer should be set (2s for first retry).
-		mockMarkBatch.mockResolvedValue({ success: true, results: [
-			{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' },
-		] });
+		mockMarkBatch.mockResolvedValue({
+			success: true,
+			results: [{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' }],
+		});
 
 		await vi.advanceTimersByTimeAsync(2000);
 		expect(mockMarkBatch).toHaveBeenCalledTimes(2);

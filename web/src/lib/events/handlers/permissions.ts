@@ -3,16 +3,18 @@
 // and permission-cancelled types.
 
 import type { AgentRunOutputMessage } from '$shared/ws-events';
-import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '$shared/chat-types';
-import type { PendingPermissionRequest } from '$lib/types/chat';
+import {
+	PermissionRequestMessage,
+	PermissionResolvedMessage,
+	PermissionCancelledMessage,
+} from '$shared/chat-types';
 import type { LoadingStatusEntry } from '$lib/stores/chat-lifecycle.svelte';
+import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import * as m from '$lib/paraglide/messages.js';
 
 export interface PermissionLifecycleContext {
-	currentChatId: string | null;
-	setPendingPermissionRequests: (
-		updater: (prev: PendingPermissionRequest[]) => PendingPermissionRequest[],
-	) => void;
+	getCurrentChatId: () => string | null;
+	conversationUi: Pick<ConversationUiStore, 'setPendingPermissionRequests'>;
 	activateLoadingFor: (chatId?: string | null) => void;
 	setCanAbort: (v: boolean) => void;
 	pushLoadingStatus: (entry: LoadingStatusEntry) => void;
@@ -31,8 +33,9 @@ export function handlePermissionLifecycleFromBatch(
 
 	for (const entry of msg.messages) {
 		if (entry instanceof PermissionRequestMessage) {
-			ctx.setPendingPermissionRequests((previous) => {
-				if (previous.some((r) => r.permissionRequestId === entry.permissionRequestId)) return previous;
+			ctx.conversationUi.setPendingPermissionRequests((previous) => {
+				if (previous.some((r) => r.permissionRequestId === entry.permissionRequestId))
+					return previous;
 				return [
 					...previous,
 					{
@@ -44,7 +47,7 @@ export function handlePermissionLifecycleFromBatch(
 				];
 			});
 
-			ctx.activateLoadingFor(msg.chatId || ctx.currentChatId);
+			ctx.activateLoadingFor(msg.chatId || ctx.getCurrentChatId());
 			ctx.setCanAbort(true);
 			ctx.pushLoadingStatus({
 				id: WAITING_FOR_PERMISSION_ID,
@@ -56,14 +59,14 @@ export function handlePermissionLifecycleFromBatch(
 
 		if (entry instanceof PermissionResolvedMessage) {
 			ctx.popLoadingStatus(WAITING_FOR_PERMISSION_ID);
-			ctx.setPendingPermissionRequests((previous) =>
+			ctx.conversationUi.setPendingPermissionRequests((previous) =>
 				previous.filter((r) => r.permissionRequestId !== entry.permissionRequestId),
 			);
 		}
 
 		if (entry instanceof PermissionCancelledMessage) {
 			ctx.popLoadingStatus(WAITING_FOR_PERMISSION_ID);
-			ctx.setPendingPermissionRequests((previous) =>
+			ctx.conversationUi.setPendingPermissionRequests((previous) =>
 				previous.filter((r) => r.permissionRequestId !== entry.permissionRequestId),
 			);
 		}

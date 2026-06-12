@@ -99,8 +99,12 @@ describe('tool display helpers', () => {
 	});
 
 	it('returns structured external and MCP labels from typed fields', () => {
-		expect(getToolDisplayLabel(new ExternalToolUseMessage('', 'tool-1', 'search', {}, 'app'))).toBe('app.search');
-		expect(getToolDisplayLabel(new McpToolUseMessage('', 'tool-2', 'github', 'list_prs', {}))).toBe('github.list_prs');
+		expect(getToolDisplayLabel(new ExternalToolUseMessage('', 'tool-1', 'search', {}, 'app'))).toBe(
+			'app.search',
+		);
+		expect(getToolDisplayLabel(new McpToolUseMessage('', 'tool-2', 'github', 'list_prs', {}))).toBe(
+			'github.list_prs',
+		);
 	});
 
 	it('returns the display label for Amp-specific tool-use messages', () => {
@@ -110,7 +114,9 @@ describe('tool display helpers', () => {
 
 	it('strips transport metadata from display details', () => {
 		const details = getToolDisplayDetails(
-			new AmpOracleToolUseMessage('', 'tool-3', 'Review auth', 'Focus on session invalidation', ['src/auth.ts']),
+			new AmpOracleToolUseMessage('', 'tool-3', 'Review auth', 'Focus on session invalidation', [
+				'src/auth.ts',
+			]),
 		);
 		expect(details).toEqual({
 			task: 'Review auth',
@@ -129,7 +135,14 @@ describe('tool display helpers', () => {
 	});
 
 	it('shows patch-only ApplyPatch messages as diffs', () => {
-		const message = new ApplyPatchToolUseMessage('', 'tool-5', undefined, undefined, undefined, '*** Begin Patch');
+		const message = new ApplyPatchToolUseMessage(
+			'',
+			'tool-5',
+			undefined,
+			undefined,
+			undefined,
+			'*** Begin Patch',
+		);
 		const props = TOOL_DISPLAY_REGISTRY['apply-patch-tool-use'].input.getContentProps?.(
 			message as unknown as Record<string, unknown>,
 		);
@@ -137,6 +150,30 @@ describe('tool display helpers', () => {
 			oldContent: '',
 			newContent: '*** Begin Patch',
 			badge: 'Patch',
+		});
+	});
+
+	it('coerces todo-read results through the shared todo normalizer', () => {
+		const getContentProps = TOOL_DISPLAY_REGISTRY['todo-read-tool-use'].result?.getContentProps;
+		expect(getContentProps).toBeDefined();
+		if (!getContentProps) throw new Error('todo-read result renderer missing');
+
+		const props = getContentProps({
+			content: {
+				items: [
+					{ text: 'review code', status: 'in-progress' },
+					{ step: 'ship fix', completed: true },
+					{ note: 'ignored' },
+				],
+			},
+		});
+
+		expect(props).toEqual({
+			isResult: true,
+			todos: [
+				{ content: 'review code', status: 'in_progress' },
+				{ content: 'ship fix', status: 'completed' },
+			],
 		});
 	});
 });

@@ -12,7 +12,10 @@ export interface UpdateSessionNameResponse {
 }
 
 /** Renames a chat session. */
-export async function updateSessionName(chatId: string, title: string): Promise<UpdateSessionNameResponse> {
+export async function updateSessionName(
+	chatId: string,
+	title: string,
+): Promise<UpdateSessionNameResponse> {
 	return apiPut<UpdateSessionNameResponse>('/api/v1/app/session-name', { chatId, title });
 }
 
@@ -89,14 +92,20 @@ export async function sendTelegramTest(): Promise<TelegramTestResponse> {
 }
 
 /** Stores a Telegram bot token on the server. */
-export async function saveTelegramBotToken(botToken: string): Promise<TelegramSettingsMutationResponse> {
-	const payload = await apiPut<TelegramSettingsMutationResponse>('/api/v1/app/telegram/token', { botToken });
+export async function saveTelegramBotToken(
+	botToken: string,
+): Promise<TelegramSettingsMutationResponse> {
+	const payload = await apiPut<TelegramSettingsMutationResponse>('/api/v1/app/telegram/token', {
+		botToken,
+	});
 	return normalizeTelegramSettingsMutationResponse(payload);
 }
 
 /** Tests a typed or saved Telegram bot token. */
 export async function testTelegramBotToken(botToken?: string): Promise<TelegramTokenTestResponse> {
-	return apiPost<TelegramTokenTestResponse>('/api/v1/app/telegram/token/test', { botToken: botToken ?? '' });
+	return apiPost<TelegramTokenTestResponse>('/api/v1/app/telegram/token/test', {
+		botToken: botToken ?? '',
+	});
 }
 
 /** Clears the stored Telegram bot token from the server. */
@@ -129,7 +138,9 @@ export async function resolveTelegramRecipientLink(): Promise<TelegramSettingsMu
 
 /** Clears the linked Telegram recipient. */
 export async function clearTelegramRecipient(): Promise<TelegramSettingsMutationResponse> {
-	const payload = await apiDelete<TelegramSettingsMutationResponse>('/api/v1/app/telegram/recipient');
+	const payload = await apiDelete<TelegramSettingsMutationResponse>(
+		'/api/v1/app/telegram/recipient',
+	);
 	return normalizeTelegramSettingsMutationResponse(payload);
 }
 
@@ -152,7 +163,7 @@ export async function createSavedSearch(
 	input: Pick<
 		SavedChatSearch,
 		'title' | 'query' | 'showAsSidebarPill' | 'showInSidebarMenu' | 'showInSearchDialog'
-	>
+	>,
 ): Promise<{ success: boolean; savedSearch: SavedChatSearch }> {
 	return apiPost('/api/v1/app/saved-searches', input);
 }
@@ -164,7 +175,7 @@ export async function updateSavedSearch(
 			SavedChatSearch,
 			'title' | 'query' | 'showAsSidebarPill' | 'showInSidebarMenu' | 'showInSearchDialog'
 		>
-	>
+	>,
 ): Promise<{ success: boolean; savedSearch: SavedChatSearch }> {
 	return apiPut('/api/v1/app/saved-searches', { id, ...patch });
 }
@@ -175,7 +186,7 @@ export async function deleteSavedSearch(id: string): Promise<{ success: boolean 
 
 export async function reorderSavedSearches(
 	oldOrder: string[],
-	newOrder: string[]
+	newOrder: string[],
 ): Promise<{ success: boolean }> {
 	return apiPut('/api/v1/app/saved-searches/reorder', { oldOrder, newOrder });
 }
@@ -206,14 +217,14 @@ export async function getFolders(): Promise<FoldersResponse> {
 
 export async function createFolder(
 	name: string,
-	filter: ChatFolder['filter']
+	filter: ChatFolder['filter'],
 ): Promise<{ success: boolean; folder: ChatFolder }> {
 	return apiPost('/api/v1/app/folders', { name, filter });
 }
 
 export async function updateFolder(
 	id: string,
-	patch: Partial<Pick<ChatFolder, 'name' | 'filter'>>
+	patch: Partial<Pick<ChatFolder, 'name' | 'filter'>>,
 ): Promise<{ success: boolean; folder: ChatFolder }> {
 	return apiPut('/api/v1/app/folders', { id, ...patch });
 }

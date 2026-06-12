@@ -48,6 +48,43 @@ export function chatMessageIdentityTokens(
   return tokens;
 }
 
+export class ChatMessageIdentityIndex {
+  #tokens = new Set<string>();
+
+  constructor(private readonly options: ChatMessageIdentityOptions = {}) {}
+
+  reset(messages: Iterable<ChatMessage> = []): void {
+    this.#tokens.clear();
+    this.addMany(messages);
+  }
+
+  has(message: ChatMessage): boolean {
+    return chatMessageIdentityTokens(message, this.options).some((token) => this.#tokens.has(token));
+  }
+
+  add(message: ChatMessage): void {
+    for (const token of chatMessageIdentityTokens(message, this.options)) {
+      this.#tokens.add(token);
+    }
+  }
+
+  addMany(messages: Iterable<ChatMessage>): void {
+    for (const message of messages) {
+      this.add(message);
+    }
+  }
+
+  takeNew(messages: ChatMessage[]): ChatMessage[] {
+    const next: ChatMessage[] = [];
+    for (const message of messages) {
+      if (this.has(message)) continue;
+      this.add(message);
+      next.push(message);
+    }
+    return next;
+  }
+}
+
 export function mergeChatMessagesByIdentity(
   base: ChatMessage[],
   incoming: ChatMessage[],
@@ -55,20 +92,9 @@ export function mergeChatMessagesByIdentity(
 ): ChatMessage[] {
   if (incoming.length === 0) return base;
 
-  const seen = new Set<string>();
-  for (const message of base) {
-    for (const token of chatMessageIdentityTokens(message, options)) {
-      seen.add(token);
-    }
-  }
-
-  const merged = [...base];
-  for (const message of incoming) {
-    const tokens = chatMessageIdentityTokens(message, options);
-    if (tokens.some((token) => seen.has(token))) continue;
-    for (const token of tokens) seen.add(token);
-    merged.push(message);
-  }
-
-  return merged;
+  const index = new ChatMessageIdentityIndex(options);
+  index.reset(base);
+  const next = index.takeNew(incoming);
+  if (next.length === 0) return base;
+  return [...base, ...next];
 }

@@ -24,7 +24,7 @@
 		ContextMenu,
 		ContextMenuTrigger,
 		ContextMenuContent,
-		ContextMenuItem
+		ContextMenuItem,
 	} from '$lib/components/ui/context-menu';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
@@ -42,7 +42,10 @@
 		prevMessage: ChatMessage | null;
 		toolResult?: ToolResultMessage;
 		permissionTerminal?: PermissionTerminal;
-		onPermissionDecision?: (permissionRequestId: string, decision: { allow: boolean; message?: string }) => void;
+		onPermissionDecision?: (
+			permissionRequestId: string,
+			decision: { allow: boolean; message?: string },
+		) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
 		agentId: SessionAgentId | string;
 		showThinking?: boolean;
@@ -57,7 +60,7 @@
 		onPermissionDecision,
 		onExitPlanMode,
 		agentId,
-		showThinking = true
+		showThinking = true,
 	}: Props = $props();
 
 	const sessions = getChatSessions();
@@ -84,9 +87,12 @@
 	function getCssType(msg: ChatMessage): string {
 		if (isToolUseMessage(msg)) return 'tool';
 		switch (msg.type) {
-			case 'user-message': return 'user';
-			case 'assistant-message': return 'assistant';
-			default: return msg.type;
+			case 'user-message':
+				return 'user';
+			case 'assistant-message':
+				return 'assistant';
+			default:
+				return msg.type;
 		}
 	}
 
@@ -98,35 +104,44 @@
 	const asThinking = $derived(message instanceof ThinkingMessage ? message : null);
 	const asToolUse = $derived(isToolUseMessage(message) ? message : null);
 	const asError = $derived(message instanceof ErrorMessage ? message : null);
-	const asPermissionRequest = $derived(message instanceof PermissionRequestMessage ? message : null);
+	const asPermissionRequest = $derived(
+		message instanceof PermissionRequestMessage ? message : null,
+	);
+	const exitPlanPermissionRequest = $derived(
+		asToolUse?.type === 'exit-plan-mode-tool-use'
+			? new PermissionRequestMessage(message.timestamp, `plan-exit-${asToolUse.toolId}`, asToolUse)
+			: null,
+	);
 	const userDeliveryStatus = $derived(asUser?.metadata?.deliveryStatus ?? null);
 	const userDeliveryTitle = $derived(
 		userDeliveryStatus === 'submitting'
-			? 'Sending'
+			? m.chat_message_delivery_sending()
 			: userDeliveryStatus === 'accepted'
-				? 'Sent'
+				? m.chat_message_delivery_sent()
 				: userDeliveryStatus === 'failed'
-					? 'Failed to send'
+					? m.chat_message_delivery_failed()
 					: '',
 	);
 
 	const showNonAssistantHeader = $derived(!isGrouped && message instanceof ErrorMessage);
 
-		/** Formats assistant or error content for display. */
-		function getFormattedContent(): string {
-			if (message instanceof AssistantMessage || message instanceof ErrorMessage) {
-				return String(message.content || '');
-			}
-			return '';
+	/** Formats assistant or error content for display. */
+	function getFormattedContent(): string {
+		if (message instanceof AssistantMessage || message instanceof ErrorMessage) {
+			return String(message.content || '');
 		}
+		return '';
+	}
 
 	const formattedContent = $derived(getFormattedContent());
-	const messageClass = $derived(cn(
-		'chat-message',
-		cssType,
-		isGrouped && 'grouped',
-		message instanceof UserMessage && 'flex justify-start min-w-0'
-	));
+	const messageClass = $derived(
+		cn(
+			'chat-message',
+			cssType,
+			isGrouped && 'grouped',
+			message instanceof UserMessage && 'flex justify-start min-w-0',
+		),
+	);
 
 	function getMessageMenuText(): string {
 		if (asAssistant) return String(asAssistant.content || '');
@@ -139,10 +154,12 @@
 	function openContextMenuFromButton(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
-		const trigger = (e.currentTarget as HTMLElement | null)?.closest('[data-slot="context-menu-trigger"]');
+		const trigger = (e.currentTarget as HTMLElement | null)?.closest(
+			'[data-slot="context-menu-trigger"]',
+		);
 		if (trigger) {
 			trigger.dispatchEvent(
-				new MouseEvent('contextmenu', { bubbles: true, clientX: e.clientX, clientY: e.clientY })
+				new MouseEvent('contextmenu', { bubbles: true, clientX: e.clientX, clientY: e.clientY }),
 			);
 		}
 	}
@@ -155,7 +172,7 @@
 	function sendToNewSession() {
 		if (!messageMenuText) return;
 		appShell.openNewChatDialog({
-			prefill: messageMenuText
+			prefill: messageMenuText,
 		});
 	}
 
@@ -193,51 +210,167 @@
 </script>
 
 {#if !shouldHideThinking}
-	<div
-		class={messageClass}
-	>
-			{#if asUser}
-				<div class="flex items-end w-full sm:w-auto sm:max-w-[85%] min-w-0">
-					<ContextMenu>
-						<ContextMenuTrigger class="message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-2xl rounded-bl-md px-3 sm:px-4 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full">
-							<div class="group/message">
-								<div class="text-sm">
-									<Markdown source={asUser.content} variant="user" {projectBasePath} onLinkNavigate={handleLinkNavigate} />
+	<div class={messageClass}>
+		{#if asUser}
+			<div class="flex items-end w-full sm:w-auto sm:max-w-[85%] min-w-0">
+				<ContextMenu>
+					<ContextMenuTrigger
+						class="message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-2xl rounded-bl-md px-3 sm:px-4 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
+					>
+						<div class="group/message">
+							<div class="text-sm">
+								<Markdown
+									source={asUser.content}
+									variant="user"
+									{projectBasePath}
+									onLinkNavigate={handleLinkNavigate}
+								/>
+							</div>
+							{#if asUser.images && asUser.images.length > 0}
+								<div class="mt-2 grid grid-cols-2 gap-2">
+									{#each asUser.images as img, idx (img.name || idx)}
+										<img
+											src={img.data}
+											alt={img.name}
+											class="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
+										/>
+									{/each}
 								</div>
-								{#if asUser.images && asUser.images.length > 0}
-									<div class="mt-2 grid grid-cols-2 gap-2">
-										{#each asUser.images as img, idx (img.name || idx)}
-											<img
-												src={img.data}
-												alt={img.name}
-												class="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
-											/>
-										{/each}
+							{/if}
+							<div class="mt-1 flex items-center justify-between gap-2">
+								<div class="flex items-center gap-1 text-xs text-user-bubble-timestamp text-left">
+									<span>{formattedTime}</span>
+									{#if userDeliveryStatus}
+										<span
+											class={cn(
+												'inline-flex size-3.5 items-center justify-center',
+												userDeliveryStatus === 'failed' && 'text-status-error-foreground',
+											)}
+											title={userDeliveryTitle}
+											aria-label={userDeliveryTitle}
+										>
+											{#if userDeliveryStatus === 'submitting'}
+												<LoaderCircle class="size-3 animate-spin" />
+											{:else if userDeliveryStatus === 'accepted'}
+												<Check class="size-3" />
+											{:else}
+												<CircleAlert class="size-3" />
+											{/if}
+										</span>
+									{/if}
+								</div>
+								<div
+									class="message-menu-actions flex justify-end opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100"
+								>
+									<button
+										type="button"
+										class="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+										onclick={openContextMenuFromButton}
+									>
+										<EllipsisVertical class="size-4" />
+									</button>
+								</div>
+							</div>
+						</div>
+					</ContextMenuTrigger>
+					<ContextMenuContent>
+						<ContextMenuItem onclick={copyText}>
+							<Copy />
+							{m.chat_message_copy_text()}
+						</ContextMenuItem>
+						<ContextMenuItem onclick={sendToNewSession}>
+							<SquareArrowOutUpRight />
+							{m.chat_message_send_to_new_session()}
+						</ContextMenuItem>
+					</ContextMenuContent>
+				</ContextMenu>
+			</div>
+		{:else}
+			<div class="w-full">
+				{#if showNonAssistantHeader}
+					<div class="flex items-center space-x-3 mb-2">
+						<div
+							class="w-8 h-8 bg-status-error rounded-full flex items-center justify-center text-status-error-foreground text-sm flex-shrink-0"
+						>
+							!
+						</div>
+						<div class="text-sm font-medium text-foreground">
+							{m.chat_message_error()}
+						</div>
+					</div>
+				{/if}
+
+				<div class="w-full">
+					{#if asToolUse && asToolUse.type === 'enter-plan-mode-tool-use'}
+						<ChatEventCard variant="info" compact>
+							{#snippet body()}
+								<span class="text-xs font-medium">
+									{m.chat_message_entered_plan_mode()}
+								</span>
+							{/snippet}
+						</ChatEventCard>
+					{:else if exitPlanPermissionRequest}
+						<PermissionRequestRow
+							request={exitPlanPermissionRequest}
+							terminal={permissionTerminal}
+							onDecision={onPermissionDecision ?? (() => {})}
+							{onExitPlanMode}
+						/>
+					{:else if asToolUse}
+						<ChatToolEventRenderer
+							toolMessage={asToolUse}
+							toolResult={toolResult
+								? { content: toolResult.content, isError: toolResult.isError }
+								: undefined}
+							mode="input"
+							autoExpandTools={localSettings.autoExpandTools}
+							onFileOpen={handleToolFileOpen}
+						/>
+					{:else if asThinking}
+						<ChatEventCard variant="thinking" compact>
+							{#snippet body()}
+								<button
+									type="button"
+									class="flex w-full items-center gap-2 text-left cursor-pointer"
+									onclick={() => {
+										thinkingOpen = !thinkingOpen;
+									}}
+									aria-expanded={thinkingOpen}
+								>
+									<span class="text-xs font-medium text-muted-foreground"
+										>{m.chat_message_thinking()}</span
+									>
+									<ChevronRight
+										class="ml-auto w-3 h-3 transition-transform {thinkingOpen ? 'rotate-90' : ''}"
+									/>
+								</button>
+								{#if thinkingOpen}
+									<div class="mt-0.5 text-sm text-foreground/90">
+										<Markdown
+											source={asThinking.content}
+											variant="thinking"
+											{projectBasePath}
+											onLinkNavigate={handleLinkNavigate}
+										/>
 									</div>
 								{/if}
-									<div class="mt-1 flex items-center justify-between gap-2">
-										<div class="flex items-center gap-1 text-xs text-user-bubble-timestamp text-left">
-											<span>{formattedTime}</span>
-											{#if userDeliveryStatus}
-												<span
-													class={cn(
-														'inline-flex size-3.5 items-center justify-center',
-														userDeliveryStatus === 'failed' && 'text-status-error-foreground'
-													)}
-													title={userDeliveryTitle}
-													aria-label={userDeliveryTitle}
-												>
-													{#if userDeliveryStatus === 'submitting'}
-														<LoaderCircle class="size-3 animate-spin" />
-													{:else if userDeliveryStatus === 'accepted'}
-														<Check class="size-3" />
-													{:else}
-														<CircleAlert class="size-3" />
-													{/if}
-												</span>
-											{/if}
-										</div>
-									<div class="message-menu-actions flex justify-end opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100">
+							{/snippet}
+						</ChatEventCard>
+					{:else if asAssistant}
+						<ContextMenu>
+							<ContextMenuTrigger class="message-context-menu-trigger relative block">
+								<div class="group/message">
+									<div class="px-px text-sm text-foreground">
+										<Markdown
+											source={formattedContent}
+											variant="assistant"
+											{projectBasePath}
+											onLinkNavigate={handleLinkNavigate}
+										/>
+									</div>
+									<div
+										class="message-menu-actions mt-1 flex justify-end opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100"
+									>
 										<button
 											type="button"
 											class="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -247,116 +380,24 @@
 										</button>
 									</div>
 								</div>
-							</div>
-						</ContextMenuTrigger>
-						<ContextMenuContent>
-							<ContextMenuItem onclick={copyText}>
-								<Copy />
-								Copy Text
-							</ContextMenuItem>
-							<ContextMenuItem onclick={sendToNewSession}>
-								<SquareArrowOutUpRight />
-								Send to New Session
-							</ContextMenuItem>
-						</ContextMenuContent>
-					</ContextMenu>
-				</div>
-		{:else}
-			<div class="w-full">
-						{#if showNonAssistantHeader}
-							<div class="flex items-center space-x-3 mb-2">
-								<div class="w-8 h-8 bg-status-error rounded-full flex items-center justify-center text-status-error-foreground text-sm flex-shrink-0">
-									!
-								</div>
-							<div class="text-sm font-medium text-foreground">
-								{m.chat_message_error()}
-							</div>
-						</div>
-					{/if}
-
-					<div class="w-full">
-						{#if asToolUse && asToolUse.type === 'enter-plan-mode-tool-use'}
-							<ChatEventCard variant="info" compact>
-								{#snippet body()}
-									<span class="text-xs font-medium">
-										{m.chat_message_entered_plan_mode()}
-									</span>
-								{/snippet}
-							</ChatEventCard>
-					{:else if asToolUse && asToolUse.type === 'exit-plan-mode-tool-use'}
-						{@const exitPlanMsg = asToolUse}
-						<PermissionRequestRow
-							request={new PermissionRequestMessage(
-								message.timestamp,
-								`plan-exit-${exitPlanMsg.toolId}`,
-								exitPlanMsg,
-							)}
-							terminal={permissionTerminal}
-							onDecision={onPermissionDecision ?? (() => {})}
-							{onExitPlanMode}
-						/>
-					{:else if asToolUse}
-						<ChatToolEventRenderer
-							toolMessage={asToolUse}
-							toolResult={toolResult ? { content: toolResult.content, isError: toolResult.isError } : undefined}
-							mode="input"
-							autoExpandTools={localSettings.autoExpandTools}
-							onFileOpen={handleToolFileOpen}
-						/>
-						{:else if asThinking}
-							<ChatEventCard variant="thinking" compact>
-								{#snippet body()}
-									<button
-										type="button"
-										class="flex w-full items-center gap-2 text-left cursor-pointer"
-										onclick={() => { thinkingOpen = !thinkingOpen; }}
-										aria-expanded={thinkingOpen}
-									>
-										<span class="text-xs font-medium text-muted-foreground">{m.chat_message_thinking()}</span>
-										<ChevronRight class="ml-auto w-3 h-3 transition-transform {thinkingOpen ? 'rotate-90' : ''}" />
-									</button>
-									{#if thinkingOpen}
-										<div class="mt-0.5 text-sm text-foreground/90">
-											<Markdown source={asThinking.content} variant="thinking" {projectBasePath} onLinkNavigate={handleLinkNavigate} />
-										</div>
-									{/if}
-								{/snippet}
-							</ChatEventCard>
-						{:else if asAssistant}
-							<ContextMenu>
-								<ContextMenuTrigger class="message-context-menu-trigger relative block">
-									<div class="group/message">
-										<div class="px-px text-sm text-foreground">
-											<Markdown source={formattedContent} variant="assistant" {projectBasePath} onLinkNavigate={handleLinkNavigate} />
-										</div>
-										<div class="message-menu-actions mt-1 flex justify-end opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100">
-											<button
-												type="button"
-												class="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-												onclick={openContextMenuFromButton}
-										>
-											<EllipsisVertical class="size-4" />
-										</button>
-										</div>
-									</div>
-								</ContextMenuTrigger>
+							</ContextMenuTrigger>
 							<ContextMenuContent>
 								<ContextMenuItem onclick={copyText}>
 									<Copy />
-									Copy Text
+									{m.chat_message_copy_text()}
 								</ContextMenuItem>
 								<ContextMenuItem onclick={sendToNewSession}>
 									<SquareArrowOutUpRight />
-									Send to New Session
+									{m.chat_message_send_to_new_session()}
 								</ContextMenuItem>
 							</ContextMenuContent>
 						</ContextMenu>
-						{:else if asError}
-							<ChatEventCard variant="error">
-								{#snippet body()}
-									<div class="text-sm whitespace-pre-wrap break-words">{formattedContent}</div>
-								{/snippet}
-							</ChatEventCard>
+					{:else if asError}
+						<ChatEventCard variant="error">
+							{#snippet body()}
+								<div class="text-sm whitespace-pre-wrap break-words">{formattedContent}</div>
+							{/snippet}
+						</ChatEventCard>
 					{:else if asPermissionRequest && onPermissionDecision}
 						<PermissionRequestRow
 							request={asPermissionRequest}

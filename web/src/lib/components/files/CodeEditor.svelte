@@ -1,9 +1,25 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { EditorView, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap } from '@codemirror/view';
+	import {
+		EditorView,
+		lineNumbers,
+		highlightActiveLineGutter,
+		highlightSpecialChars,
+		drawSelection,
+		dropCursor,
+		highlightActiveLine,
+		keymap,
+	} from '@codemirror/view';
 	import { EditorState, Compartment, type Extension } from '@codemirror/state';
 	import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-	import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap } from '@codemirror/language';
+	import {
+		foldGutter,
+		indentOnInput,
+		syntaxHighlighting,
+		defaultHighlightStyle,
+		bracketMatching,
+		foldKeymap,
+	} from '@codemirror/language';
 	import { oneDark } from '@codemirror/theme-one-dark';
 	import { unifiedMergeView } from '@codemirror/merge';
 	import { loadLanguageExtension } from './language-loader';
@@ -33,6 +49,7 @@
 		initialColumn?: number;
 		showMarkdownViewButton?: boolean;
 		onRequestMarkdownView?: () => void;
+		onSaveError?: (error: unknown) => void;
 	}
 
 	let {
@@ -56,6 +73,7 @@
 		initialColumn,
 		showMarkdownViewButton = false,
 		onRequestMarkdownView,
+		onSaveError,
 	}: CodeEditorProps = $props();
 
 	let editorContainer: HTMLDivElement | undefined = $state();
@@ -90,12 +108,7 @@
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 			bracketMatching(),
 			highlightActiveLine(),
-			keymap.of([
-				...defaultKeymap,
-				...historyKeymap,
-				...foldKeymap,
-				indentWithTab,
-			]),
+			keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
 			foldGutter(),
 			EditorView.updateListener.of((update) => {
 				if (update.docChanged) {
@@ -112,8 +125,12 @@
 		const extensions: Extension[] = [
 			EditorView.theme({
 				'&': { fontSize: `${fontSize}px` },
-				'.cm-content': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' },
-				'.cm-gutters': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' },
+				'.cm-content': {
+					fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+				},
+				'.cm-gutters': {
+					fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+				},
 			}),
 		];
 
@@ -129,7 +146,7 @@
 					original: oldContent,
 					gutter: true,
 					highlightChanges: true,
-				})
+				}),
 			);
 		}
 
@@ -257,6 +274,7 @@
 			setTimeout(() => (saveSuccess = false), 2000);
 		} catch (err) {
 			console.error('[CodeEditor] Save failed:', err);
+			onSaveError?.(err);
 			saveSuccess = false;
 		} finally {
 			saving = false;
@@ -286,8 +304,10 @@
 		class={isSidebar
 			? 'bg-background flex flex-col w-full h-full'
 			: `bg-background shadow-2xl flex flex-col w-full h-full md:rounded-lg md:shadow-2xl ${
-				isFullscreen ? 'md:w-full md:h-full md:rounded-none' : 'md:w-full md:max-w-6xl md:h-[80vh] md:max-h-[80vh]'
-			}`}
+					isFullscreen
+						? 'md:w-full md:h-full md:rounded-none'
+						: 'md:w-full md:max-w-6xl md:h-[80vh] md:max-h-[80vh]'
+				}`}
 	>
 		<!-- Header -->
 		<div class="flex items-center justify-between p-4 border-b border-border flex-shrink-0 min-w-0">
@@ -304,7 +324,7 @@
 						variant="ghost"
 						size="sm"
 						onclick={onRequestMarkdownView}
-						title="Switch to markdown view"
+						title={m.editor_switch_to_markdown_view()}
 					>
 						View
 					</Button>
@@ -320,7 +340,13 @@
 							: 'bg-primary hover:bg-primary/90 text-primary-foreground'}
 					>
 						<Save class="w-4 h-4" />
-						<span class="hidden sm:inline">{saving ? m.editor_actions_saving() : saveSuccess ? m.editor_actions_saved() : m.editor_actions_save()}</span>
+						<span class="hidden sm:inline"
+							>{saving
+								? m.editor_actions_saving()
+								: saveSuccess
+									? m.editor_actions_saved()
+									: m.editor_actions_save()}</span
+						>
 					</Button>
 				{/if}
 
@@ -330,7 +356,9 @@
 						size="icon-sm"
 						class="hidden md:flex"
 						onclick={() => (isFullscreen = !isFullscreen)}
-						title={isFullscreen ? m.editor_actions_exit_fullscreen() : m.editor_actions_fullscreen()}
+						title={isFullscreen
+							? m.editor_actions_exit_fullscreen()
+							: m.editor_actions_fullscreen()}
 					>
 						{#if isFullscreen}
 							<Minimize2 class="w-4 h-4" />
@@ -358,12 +386,7 @@
 				<EditorSettingsMenu />
 
 				{#if onClose}
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						onclick={onClose}
-						title={m.editor_actions_close()}
-					>
+					<Button variant="ghost" size="icon-sm" onclick={onClose} title={m.editor_actions_close()}>
 						<X class="w-4 h-4" />
 					</Button>
 				{/if}
@@ -372,11 +395,16 @@
 
 		<!-- Editor container -->
 		<div class="flex-1 overflow-hidden">
-			<div bind:this={editorContainer} class="h-full [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto"></div>
+			<div
+				bind:this={editorContainer}
+				class="h-full [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto"
+			></div>
 		</div>
 
 		<!-- Footer -->
-		<div class="flex items-center justify-between p-3 border-t border-border bg-muted flex-shrink-0">
+		<div
+			class="flex items-center justify-between p-3 border-t border-border bg-muted flex-shrink-0"
+		>
 			<div class="flex items-center gap-4 text-sm text-muted-foreground">
 				<span>{m.editor_footer_lines()} {lineCount}</span>
 			</div>

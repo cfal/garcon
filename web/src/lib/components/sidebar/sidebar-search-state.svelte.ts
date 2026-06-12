@@ -3,15 +3,17 @@
 // searches, dialog state, and CRUD coordination.
 
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import type { SavedChatSearch } from '$lib/api/settings';
-import { parseChatSearch, isEmptyFilter, matchesChatFilter, type ChatFilterSpec } from './sidebar-search';
+import {
+	parseChatSearch,
+	isEmptyFilter,
+	matchesChatFilter,
+	type ChatFilterSpec,
+} from './sidebar-search';
 
 export class SidebarSearchState {
 	activeQuery = $state('');
 	draftQuery = $state('');
-	savedSearches = $state<SavedChatSearch[]>([]);
 	searchDialogOpen = $state(false);
-	manageSavedSearchesOpen = $state(false);
 	highlightedResultIndex = $state(0);
 
 	#getChats: () => ChatSessionRecord[];
@@ -42,18 +44,6 @@ export class SidebarSearchState {
 		const chats = this.#getChats();
 		if (isEmptyFilter(filter)) return chats;
 		return chats.filter((chat) => matchesChatFilter(chat, filter));
-	}
-
-	get sidebarPillSearches(): SavedChatSearch[] {
-		return this.savedSearches.filter((search) => search.showAsSidebarPill);
-	}
-
-	get sidebarMenuSearches(): SavedChatSearch[] {
-		return this.savedSearches.filter((search) => search.showInSidebarMenu);
-	}
-
-	get searchDialogSavedSearches(): SavedChatSearch[] {
-		return this.savedSearches.filter((search) => search.showInSearchDialog);
 	}
 
 	get isFiltered(): boolean {
@@ -121,9 +111,5 @@ export class SidebarSearchState {
 		this.activeQuery = this.draftQuery;
 		this.searchDialogOpen = false;
 		this.highlightedResultIndex = 0;
-	}
-
-	setSavedSearches(searches: SavedChatSearch[]): void {
-		this.savedSearches = searches;
 	}
 }

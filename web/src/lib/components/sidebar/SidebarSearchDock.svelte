@@ -46,7 +46,7 @@
 		{sidebarMenuSearches}
 		hasAdjacentSearchContext={hasSearchContext}
 		{onOpenSearchDialog}
-		onCreateChat={onCreateChat}
+		{onCreateChat}
 		{onMarkAllRead}
 		{onApplySidebarMenuSearch}
 		{onShowSettings}
@@ -56,7 +56,7 @@
 		{sidebarPillSearches}
 		{activeQuery}
 		{onOpenSearchDialog}
-		onApplyPillSearch={onApplyPillSearch}
-		onClearActiveQuery={onClearActiveQuery}
+		{onApplyPillSearch}
+		{onClearActiveQuery}
 	/>
 </div>

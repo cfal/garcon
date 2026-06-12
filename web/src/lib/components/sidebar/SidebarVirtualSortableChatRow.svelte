@@ -94,12 +94,13 @@
 			draggable({
 				element: rowEl,
 				canDrag: () => dragEnabled && !isMobile,
-				getInitialData: () => getSidebarChatDragData({
-					chatId: row.chat.id,
-					list: row.list,
-					index,
-					instanceId,
-				}) as unknown as Record<string, unknown>,
+				getInitialData: () =>
+					getSidebarChatDragData({
+						chatId: row.chat.id,
+						list: row.list,
+						index,
+						instanceId,
+					}) as unknown as Record<string, unknown>,
 				getInitialDataForExternal: () => ({ 'text/plain': row.chat.id }),
 				onDragStart: () => onDragStart(row.list, row.chat.id),
 			}),
@@ -115,15 +116,16 @@
 					});
 					return sidebarDragCanReorder(source.data, target);
 				},
-				getData: ({ input, element }) => attachClosestEdge(
-					getSidebarChatDropTargetData({
-						chatId: row.chat.id,
-						list: row.list,
-						index,
-						instanceId,
-					}) as unknown as Record<string | symbol, unknown>,
-					{ element, input, allowedEdges: ['top', 'bottom'] },
-				),
+				getData: ({ input, element }) =>
+					attachClosestEdge(
+						getSidebarChatDropTargetData({
+							chatId: row.chat.id,
+							list: row.list,
+							index,
+							instanceId,
+						}) as unknown as Record<string | symbol, unknown>,
+						{ element, input, allowedEdges: ['top', 'bottom'] },
+					),
 				getDropEffect: () => 'move',
 				getIsSticky: () => true,
 				onDrag: ({ source, location }) => {
@@ -153,9 +155,13 @@
 	data-sidebar-drag-disabled={!dragEnabled ? 'true' : undefined}
 >
 	{#if dropIndicatorEdge === 'top'}
-		<div class="pointer-events-none absolute left-2 right-2 top-0 z-20 h-0.5 rounded-full bg-primary"></div>
+		<div
+			class="pointer-events-none absolute left-2 right-2 top-0 z-20 h-0.5 rounded-full bg-primary"
+		></div>
 	{:else if dropIndicatorEdge === 'bottom'}
-		<div class="pointer-events-none absolute bottom-0 left-2 right-2 z-20 h-0.5 rounded-full bg-primary"></div>
+		<div
+			class="pointer-events-none absolute bottom-0 left-2 right-2 z-20 h-0.5 rounded-full bg-primary"
+		></div>
 	{/if}
 
 	<svelte:boundary>

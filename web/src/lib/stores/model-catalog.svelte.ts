@@ -1,6 +1,11 @@
 import { apiFetch } from '$lib/api/client.js';
 import { getApiProviders } from '$lib/api/api-providers.js';
 import { agentLabelFor } from '$lib/i18n/agent-labels';
+import {
+	getLocalStorageItem,
+	LOCAL_STORAGE_KEYS,
+	setLocalStorageItem,
+} from '$lib/utils/local-persistence';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogResponse } from '$shared/model-catalog';
 import { CLAUDE_MODELS, CODEX_MODELS, AMP_MODELS, FACTORY_MODELS, PI_MODELS } from '$shared/models';
@@ -61,8 +66,6 @@ interface ModelCatalogSnapshot {
 	lastValidatedAt: number | null;
 }
 
-const STORAGE_KEY = 'pref_model_catalog_v3';
-const LEGACY_STORAGE_KEY = 'pref_model_catalog_v2';
 const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000;
 const VALIDATION_RETRY_MS = 30_000;
 
@@ -87,9 +90,10 @@ const STATIC_AGENT_LABELS: Record<BuiltinAgentId, string> = {
 	amp: 'Amp',
 	factory: 'Factory',
 	pi: 'Pi',
-	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
+	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]:
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
 	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
-	[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL
+	[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
 };
 
 const STATIC_AGENT_DEFAULT_MODELS: Record<BuiltinAgentId, string> = {
@@ -102,7 +106,7 @@ const STATIC_AGENT_DEFAULT_MODELS: Record<BuiltinAgentId, string> = {
 	pi: PI_MODELS.DEFAULT,
 	[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: '',
 	[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: '',
-	[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: ''
+	[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: '',
 };
 
 const STATIC_AGENT_METADATA: AgentMetadataMap = Object.fromEntries(
@@ -112,9 +116,9 @@ const STATIC_AGENT_METADATA: AgentMetadataMap = Object.fromEntries(
 			id,
 			label: STATIC_AGENT_LABELS[id as BuiltinAgentId],
 			...capabilities,
-			defaultModel: STATIC_AGENT_DEFAULT_MODELS[id as BuiltinAgentId]
-		}
-	])
+			defaultModel: STATIC_AGENT_DEFAULT_MODELS[id as BuiltinAgentId],
+		},
+	]),
 ) as AgentMetadataMap;
 
 function normalizeAgentLabel(id: string, label: string): string {
@@ -142,15 +146,18 @@ function normalizeModelOption(value: unknown): ModelOption | null {
 		apiProviderId: typeof maybe.apiProviderId === 'string' ? maybe.apiProviderId : undefined,
 		endpointId: typeof maybe.endpointId === 'string' ? maybe.endpointId : undefined,
 		rawModel: typeof maybe.rawModel === 'string' ? maybe.rawModel : undefined,
-		protocol: maybe.protocol === 'openai-compatible' || maybe.protocol === 'anthropic-messages'
-			? maybe.protocol as ApiProtocol
-			: undefined,
+		protocol:
+			maybe.protocol === 'openai-compatible' || maybe.protocol === 'anthropic-messages'
+				? (maybe.protocol as ApiProtocol)
+				: undefined,
 	};
 }
 
 function normalizeProtocols(value: unknown): ApiProtocol[] {
 	if (!Array.isArray(value)) return [];
-	return value.filter((p): p is ApiProtocol => p === 'openai-compatible' || p === 'anthropic-messages');
+	return value.filter(
+		(p): p is ApiProtocol => p === 'openai-compatible' || p === 'anthropic-messages',
+	);
 }
 
 function normalizeTemplateId(value: unknown): ApiProviderTemplateId | undefined {
@@ -183,9 +190,10 @@ function normalizeOpenAiCapabilities(value: unknown): OpenAiEndpointCapabilities
 function normalizeApiProviderEndpoint(value: unknown): ApiProviderEndpointCatalogEntry | null {
 	if (!value || typeof value !== 'object') return null;
 	const entry = value as Record<string, unknown>;
-	const protocol = entry.protocol === 'openai-compatible' || entry.protocol === 'anthropic-messages'
-		? entry.protocol
-		: null;
+	const protocol =
+		entry.protocol === 'openai-compatible' || entry.protocol === 'anthropic-messages'
+			? entry.protocol
+			: null;
 	if (
 		typeof entry.id !== 'string' ||
 		!protocol ||
@@ -203,7 +211,9 @@ function normalizeApiProviderEndpoint(value: unknown): ApiProviderEndpointCatalo
 		capabilities: normalizeOpenAiCapabilities(entry.capabilities),
 		defaultModel: entry.defaultModel,
 		models: Array.isArray(entry.models)
-			? entry.models.map((model) => normalizeModelOption(model)).filter((model): model is ModelOption => model !== null)
+			? entry.models
+					.map((model) => normalizeModelOption(model))
+					.filter((model): model is ModelOption => model !== null)
 			: [],
 		supportsImages: entry.supportsImages,
 		hasApiKey: entry.hasApiKey,
@@ -241,10 +251,13 @@ function normalizeApiProviders(value: unknown): ApiProviderCatalogEntry[] {
 				endpoints,
 			} satisfies ApiProviderCatalogEntry;
 		})
-	.filter((e): e is ApiProviderCatalogEntry => e !== null);
+		.filter((e): e is ApiProviderCatalogEntry => e !== null);
 }
 
-function mergeStaticModels(remote: ModelOption[] | undefined, fallback: ModelOption[]): ModelOption[] {
+function mergeStaticModels(
+	remote: ModelOption[] | undefined,
+	fallback: ModelOption[],
+): ModelOption[] {
 	if (!remote?.length) return fallback;
 	const seen = new Set(remote.map((m) => m.value));
 	const missing = fallback.filter((m) => !seen.has(m.value));
@@ -260,9 +273,19 @@ function mergeWithFallbacks(models: AgentModels): AgentModels {
 		factory: mergeStaticModels(models.factory, STATIC_FALLBACKS.factory!),
 		pi: mergeStaticModels(models.pi, STATIC_FALLBACKS.pi!),
 		opencode: models.opencode?.length ? models.opencode : [],
-		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]?.length ? models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID] : [],
-		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]?.length ? models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID] : [],
-		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: models[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]?.length ? models[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID] : [],
+		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: models[
+			DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID
+		]?.length
+			? models[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]
+			: [],
+		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: models[
+			DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID
+		]?.length
+			? models[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]
+			: [],
+		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: models[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]?.length
+			? models[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]
+			: [],
 	};
 	for (const [key, value] of Object.entries(models)) {
 		if (!(key in result) && value?.length && isVisibleAgentId(key)) {
@@ -295,8 +318,8 @@ function filterVisibleAgentMetadata(agentMetadata: AgentMetadataMap): AgentMetad
 					...metadata,
 					label: normalizeAgentLabel(id, metadata.label),
 					defaultModel: metadata.defaultModel,
-				}
-			])
+				},
+			]),
 	);
 }
 
@@ -320,17 +343,17 @@ function parseCatalogResponse(data: unknown): {
 
 		const id = entry.id;
 		if (!isVisibleAgentId(id)) continue;
-			agentMetadata[id] = {
-				id,
-				label: typeof entry.label === 'string' ? entry.label : id,
-				description: typeof entry.description === 'string' ? entry.description : undefined,
-				supportsFork: Boolean(entry.supportsFork),
-				supportsImages: Boolean(entry.supportsImages),
-				acceptsApiProviderEndpoints: Boolean(entry.acceptsApiProviderEndpoints),
-				supportedProtocols: normalizeProtocols(entry.supportedProtocols),
-				authLoginSupported: Boolean(entry.authLoginSupported),
-				defaultModel: typeof entry.defaultModel === 'string' ? entry.defaultModel : '',
-			};
+		agentMetadata[id] = {
+			id,
+			label: typeof entry.label === 'string' ? entry.label : id,
+			description: typeof entry.description === 'string' ? entry.description : undefined,
+			supportsFork: Boolean(entry.supportsFork),
+			supportsImages: Boolean(entry.supportsImages),
+			acceptsApiProviderEndpoints: Boolean(entry.acceptsApiProviderEndpoints),
+			supportedProtocols: normalizeProtocols(entry.supportedProtocols),
+			authLoginSupported: Boolean(entry.authLoginSupported),
+			defaultModel: typeof entry.defaultModel === 'string' ? entry.defaultModel : '',
+		};
 
 		if (Array.isArray(entry.models)) {
 			agentModels[id] = entry.models
@@ -360,17 +383,18 @@ function emptySnapshot(): ModelCatalogSnapshot {
 function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapshot {
 	const agentModels = mergeWithFallbacks(
 		typeof parsed.agentModels === 'object' && parsed.agentModels !== null
-			? parsed.agentModels as AgentModels
+			? (parsed.agentModels as AgentModels)
 			: {},
 	);
 	const agentMetadata = filterVisibleAgentMetadata(
 		typeof parsed.agentMetadata === 'object' && parsed.agentMetadata !== null
 			? { ...STATIC_AGENT_METADATA, ...(parsed.agentMetadata as AgentMetadataMap) }
-			: { ...STATIC_AGENT_METADATA }
+			: { ...STATIC_AGENT_METADATA },
 	);
 	const apiProviderCatalog = normalizeApiProviders(parsed.apiProviderCatalog);
 	const lastFetchedAt = typeof parsed.lastFetchedAt === 'number' ? parsed.lastFetchedAt : null;
-	const lastValidatedAt = typeof parsed.lastValidatedAt === 'number' ? parsed.lastValidatedAt : lastFetchedAt;
+	const lastValidatedAt =
+		typeof parsed.lastValidatedAt === 'number' ? parsed.lastValidatedAt : lastFetchedAt;
 
 	return {
 		agentModels,
@@ -383,10 +407,10 @@ function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapsho
 }
 
 function readPersisted(): ModelCatalogSnapshot {
-	if (typeof window === 'undefined') return emptySnapshot();
-
 	try {
-		const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+		const raw =
+			getLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog) ??
+			getLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
 		if (!raw) return emptySnapshot();
 		return normalizeSnapshot(JSON.parse(raw) as Record<string, unknown>);
 	} catch {
@@ -395,10 +419,7 @@ function readPersisted(): ModelCatalogSnapshot {
 }
 
 function persist(snapshot: ModelCatalogSnapshot): void {
-	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-	} catch {
-	}
+	setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog, JSON.stringify(snapshot));
 }
 
 function hasNonEmptyPiModels(snapshot: ModelCatalogSnapshot): boolean {
@@ -414,14 +435,14 @@ interface CatalogApplyResult {
 
 function applyCatalogResult(
 	currentMetadata: AgentMetadataMap,
-	catalogResult: NonNullable<ReturnType<typeof parseCatalogResponse>>
+	catalogResult: NonNullable<ReturnType<typeof parseCatalogResponse>>,
 ): CatalogApplyResult {
 	return {
 		agentModels: mergeWithFallbacks(catalogResult.agentModels),
 		agentMetadata: filterVisibleAgentMetadata({
 			...STATIC_AGENT_METADATA,
 			...currentMetadata,
-			...catalogResult.agentMetadata
+			...catalogResult.agentMetadata,
 		}),
 		apiProviderCatalog: catalogResult.apiProviderCatalog,
 		requiresStrictPiValidation: hasExplicitEmptyPiModels(catalogResult.agentModels),
@@ -457,8 +478,7 @@ export class ModelCatalogStore {
 	}
 
 	getAgentMetadataList(): AgentMetadata[] {
-		return Object.values(this.agentMetadata)
-			.filter((metadata) => isVisibleAgentId(metadata.id));
+		return Object.values(this.agentMetadata).filter((metadata) => isVisibleAgentId(metadata.id));
 	}
 
 	getAgent(id: string): AgentMetadata | null {
@@ -476,15 +496,14 @@ export class ModelCatalogStore {
 	}
 
 	getDefaultModel(agentId: SessionAgentId): string {
-		return this.agentMetadata[agentId]?.defaultModel
-			|| this.getModels(agentId)[0]?.value
-			|| '';
+		return this.agentMetadata[agentId]?.defaultModel || this.getModels(agentId)[0]?.value || '';
 	}
 
 	getModel(agentId: SessionAgentId, model: string): ModelOption | null {
-		return this.getModels(agentId).find((entry) =>
-			entry.value === model || entry.rawModel === model
-		) ?? null;
+		return (
+			this.getModels(agentId).find((entry) => entry.value === model || entry.rawModel === model) ??
+			null
+		);
 	}
 
 	getModelForSelection(
@@ -494,8 +513,10 @@ export class ModelCatalogStore {
 	): ModelOption | null {
 		const models = this.getModels(agentId);
 		if (modelEndpointId) {
-			const matchedEndpointModel = models.find((entry) =>
-				entry.endpointId === modelEndpointId && (entry.value === model || entry.rawModel === model)
+			const matchedEndpointModel = models.find(
+				(entry) =>
+					entry.endpointId === modelEndpointId &&
+					(entry.value === model || entry.rawModel === model),
 			);
 			if (matchedEndpointModel) return matchedEndpointModel;
 		}
@@ -507,7 +528,11 @@ export class ModelCatalogStore {
 		return this.agentMetadata[agentId]?.supportsFork ?? false;
 	}
 
-	supportsImages(agentId: SessionAgentId, model?: string, modelEndpointId?: string | null): boolean {
+	supportsImages(
+		agentId: SessionAgentId,
+		model?: string,
+		modelEndpointId?: string | null,
+	): boolean {
 		if (!isVisibleAgentId(agentId)) return false;
 		if (model) {
 			const selected = this.getModelForSelection(agentId, model, modelEndpointId);
@@ -522,7 +547,11 @@ export class ModelCatalogStore {
 		return this.getModelForSelection(agentId, model, modelEndpointId)?.isLocal === true;
 	}
 
-	selectionFor(agentId: SessionAgentId, model: string, modelEndpointId?: string | null): {
+	selectionFor(
+		agentId: SessionAgentId,
+		model: string,
+		modelEndpointId?: string | null,
+	): {
 		model: string;
 		apiProviderId: string | null;
 		modelEndpointId: string | null;
@@ -537,7 +566,11 @@ export class ModelCatalogStore {
 		};
 	}
 
-	selectionValueFor(agentId: SessionAgentId, model: string, modelEndpointId?: string | null): string {
+	selectionValueFor(
+		agentId: SessionAgentId,
+		model: string,
+		modelEndpointId?: string | null,
+	): string {
 		return this.getModelForSelection(agentId, model, modelEndpointId)?.value ?? model;
 	}
 
@@ -554,7 +587,7 @@ export class ModelCatalogStore {
 
 	async #resolveStrictPiModels(
 		models: AgentModels,
-		metadata: AgentMetadataMap
+		metadata: AgentMetadataMap,
 	): Promise<{ models: AgentModels; metadata: AgentMetadataMap; persistable: boolean }> {
 		const response = await apiFetch('/api/v1/models?agent=pi');
 		const data = (await response.json().catch(() => ({}))) as unknown;
@@ -614,10 +647,9 @@ export class ModelCatalogStore {
 		if (!options.force && now - this.#lastSyncAttemptAt < VALIDATION_RETRY_MS) return;
 
 		this.#lastSyncAttemptAt = now;
-		this.#syncPromise = this.#syncWithServer(options)
-			.finally(() => {
-				this.#syncPromise = null;
-			});
+		this.#syncPromise = this.#syncWithServer(options).finally(() => {
+			this.#syncPromise = null;
+		});
 		return this.#syncPromise;
 	}
 
@@ -646,7 +678,10 @@ export class ModelCatalogStore {
 			if (catalogResult && Object.keys(catalogResult.agentModels).length > 0) {
 				let applied = applyCatalogResult(this.agentMetadata, catalogResult);
 				if (applied.requiresStrictPiValidation) {
-					const strictPi = await this.#resolveStrictPiModels(applied.agentModels, applied.agentMetadata);
+					const strictPi = await this.#resolveStrictPiModels(
+						applied.agentModels,
+						applied.agentMetadata,
+					);
 					applied = {
 						agentModels: strictPi.models,
 						agentMetadata: strictPi.metadata,
@@ -682,8 +717,8 @@ export class ModelCatalogStore {
 		if (!options.force && this.etag) {
 			return apiFetch('/api/v1/models', {
 				headers: {
-					'If-None-Match': this.etag
-				}
+					'If-None-Match': this.etag,
+				},
 			});
 		}
 		return apiFetch('/api/v1/models');
@@ -714,7 +749,6 @@ export class ModelCatalogStore {
 			this.error = error instanceof Error ? error.message : 'Unknown error';
 		}
 	}
-
 }
 
 export function createModelCatalogStore(): ModelCatalogStore {

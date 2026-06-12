@@ -1,0 +1,575 @@
+import type { GitDiffTab, GitFileReviewData, GitReviewCommentDraft } from '$lib/api/git.js';
+import { makeLineSelectionKey } from '$lib/stores/git-workbench.svelte.js';
+
+export type GitDiffSide = GitReviewCommentDraft['side'];
+export type GitDiffSeverity = GitReviewCommentDraft['severity'];
+export type GitDiffContentKind = 'context' | 'add' | 'del';
+export type GitDiffRowKind = GitDiffContentKind | 'hunk-header';
+
+export interface RenderedDiffRow {
+	key: string;
+	kind: GitDiffRowKind;
+	beforeLine: number | null;
+	afterLine: number | null;
+	beforeText: string;
+	afterText: string;
+	hunkId?: string;
+	hunkIndex: number;
+	diffLineIndex: number;
+}
+
+export interface SplitDiffCell {
+	kind: 'context' | 'del' | 'add' | 'empty';
+	line: number | null;
+	text: string;
+	diffLineIndex: number;
+}
+
+export interface SplitDiffRow {
+	key: string;
+	isHeader: boolean;
+	headerText?: string;
+	hunkIndex?: number;
+	left: SplitDiffCell | null;
+	right: SplitDiffCell | null;
+}
+
+export interface GitDiffComposerDraft {
+	open: boolean;
+	filePath: string;
+	side: GitDiffSide;
+	line: number;
+	body: string;
+	severity: GitDiffSeverity;
+}
+
+export interface GitDiffLineContextTarget {
+	side: GitDiffSide;
+	line: number;
+	hunkIndex: number;
+	diffLineIndex: number;
+	rowKind: GitDiffContentKind;
+}
+
+export interface UnifiedDiffRowView {
+	key: string;
+	row: RenderedDiffRow;
+	isHunkHeader: boolean;
+	isSelectable: boolean;
+	selectionKey: string | null;
+	bgClass: string;
+	lineNumClass: string;
+	textClass: string;
+	textPrefix: string;
+	text: string;
+	comments: GitReviewCommentDraft[];
+	showComposer: boolean;
+	beforeContextTarget: GitDiffLineContextTarget | null;
+	afterContextTarget: GitDiffLineContextTarget | null;
+	rowContextTarget: GitDiffLineContextTarget | null;
+}
+
+export interface SplitDiffCellView {
+	side: GitDiffSide;
+	cell: SplitDiffCell;
+	isSelectable: boolean;
+	selectionKey: string | null;
+	bgClass: string;
+	lineNumClass: string;
+	textClass: string;
+	textPrefix: string;
+	contextTarget: GitDiffLineContextTarget | null;
+}
+
+export interface SplitDiffRowView {
+	key: string;
+	row: SplitDiffRow;
+	isHunkHeader: boolean;
+	comments: GitReviewCommentDraft[];
+	showComposer: boolean;
+	left: SplitDiffCellView | null;
+	right: SplitDiffCellView | null;
+}
+
+interface BuildUnifiedRowViewsOptions {
+	rows: RenderedDiffRow[];
+	filePath: string;
+	activeTab: GitDiffTab;
+	readOnly: boolean;
+	selectedLineKeys: Set<string>;
+	commentsByLineKey: Map<string, GitReviewCommentDraft[]>;
+	composerTarget: GitDiffComposerDraft | null;
+}
+
+interface BuildSplitRowViewsOptions {
+	rows: SplitDiffRow[];
+	filePath: string;
+	activeTab: GitDiffTab;
+	readOnly: boolean;
+	selectedLineKeys: Set<string>;
+	commentsByLineKey: Map<string, GitReviewCommentDraft[]>;
+	composerTarget: GitDiffComposerDraft | null;
+}
+
+export function buildUnifiedDiffRows(reviewData: GitFileReviewData | null): RenderedDiffRow[] {
+	if (!reviewData || reviewData.isBinary || reviewData.truncated) return [];
+
+	const result: RenderedDiffRow[] = [];
+	const beforeLines = reviewData.contentBefore?.split('\n') ?? [];
+	const afterLines = reviewData.contentAfter?.split('\n') ?? [];
+	let diffLineIndex = 0;
+
+	for (let hunkIndex = 0; hunkIndex < reviewData.hunks.length; hunkIndex++) {
+		const hunk = reviewData.hunks[hunkIndex];
+		result.push({
+			key: `hunk:${hunkIndex}:${hunk.id}`,
+			kind: 'hunk-header',
+			beforeLine: null,
+			afterLine: null,
+			beforeText: hunk.header,
+			afterText: '',
+			hunkId: hunk.id,
+			hunkIndex,
+			diffLineIndex: -1,
+		});
+
+		for (
+			let opIndex = hunk.lineStartIndex;
+			opIndex <= hunk.lineEndIndex && opIndex < reviewData.diffOps.length;
+			opIndex++
+		) {
+			const op = reviewData.diffOps[opIndex];
+
+			if (op.type === 'equal') {
+				const beforeLine = op.before[0];
+				const afterLine = op.after[0];
+				result.push({
+					key: `line:${diffLineIndex}:context:${beforeLine}:${afterLine}`,
+					kind: 'context',
+					beforeLine,
+					afterLine,
+					beforeText: beforeLines[beforeLine - 1] ?? '',
+					afterText: afterLines[afterLine - 1] ?? '',
+					hunkId: hunk.id,
+					hunkIndex,
+					diffLineIndex: diffLineIndex++,
+				});
+			} else if (op.type === 'delete') {
+				const beforeLine = op.before[0];
+				result.push({
+					key: `line:${diffLineIndex}:del:${beforeLine}`,
+					kind: 'del',
+					beforeLine,
+					afterLine: null,
+					beforeText: beforeLines[beforeLine - 1] ?? '',
+					afterText: '',
+					hunkId: hunk.id,
+					hunkIndex,
+					diffLineIndex: diffLineIndex++,
+				});
+			} else if (op.type === 'insert') {
+				const afterLine = op.after[0];
+				result.push({
+					key: `line:${diffLineIndex}:add:${afterLine}`,
+					kind: 'add',
+					beforeLine: null,
+					afterLine,
+					beforeText: '',
+					afterText: afterLines[afterLine - 1] ?? '',
+					hunkId: hunk.id,
+					hunkIndex,
+					diffLineIndex: diffLineIndex++,
+				});
+			}
+		}
+	}
+
+	return result;
+}
+
+export function buildSplitDiffRows(rows: RenderedDiffRow[]): SplitDiffRow[] {
+	const result: SplitDiffRow[] = [];
+	let rowIndex = 0;
+	let currentHunkIndex = 0;
+	let pairedRowIndex = 0;
+
+	while (rowIndex < rows.length) {
+		const row = rows[rowIndex];
+
+		if (row.kind === 'hunk-header') {
+			currentHunkIndex = row.hunkIndex;
+			result.push({
+				key: `split:${row.key}`,
+				isHeader: true,
+				headerText: row.beforeText,
+				hunkIndex: row.hunkIndex,
+				left: null,
+				right: null,
+			});
+			rowIndex++;
+			continue;
+		}
+
+		if (row.kind === 'context') {
+			result.push({
+				key: `split:${row.key}`,
+				isHeader: false,
+				hunkIndex: currentHunkIndex,
+				left: {
+					kind: 'context',
+					line: row.beforeLine,
+					text: row.beforeText,
+					diffLineIndex: row.diffLineIndex,
+				},
+				right: {
+					kind: 'context',
+					line: row.afterLine,
+					text: row.afterText || row.beforeText,
+					diffLineIndex: row.diffLineIndex,
+				},
+			});
+			rowIndex++;
+			continue;
+		}
+
+		const deletions: RenderedDiffRow[] = [];
+		const additions: RenderedDiffRow[] = [];
+
+		while (rowIndex < rows.length && rows[rowIndex].kind === 'del') {
+			deletions.push(rows[rowIndex]);
+			rowIndex++;
+		}
+		while (rowIndex < rows.length && rows[rowIndex].kind === 'add') {
+			additions.push(rows[rowIndex]);
+			rowIndex++;
+		}
+
+		const maxLength = Math.max(deletions.length, additions.length);
+		for (let pairIndex = 0; pairIndex < maxLength; pairIndex++) {
+			const deletion = deletions[pairIndex];
+			const addition = additions[pairIndex];
+			result.push({
+				key: `split:pair:${pairedRowIndex++}:${deletion?.key ?? 'empty'}:${addition?.key ?? 'empty'}`,
+				isHeader: false,
+				hunkIndex: currentHunkIndex,
+				left: deletion
+					? {
+							kind: 'del',
+							line: deletion.beforeLine,
+							text: deletion.beforeText,
+							diffLineIndex: deletion.diffLineIndex,
+						}
+					: { kind: 'empty', line: null, text: '', diffLineIndex: -1 },
+				right: addition
+					? {
+							kind: 'add',
+							line: addition.afterLine,
+							text: addition.afterText,
+							diffLineIndex: addition.diffLineIndex,
+						}
+					: { kind: 'empty', line: null, text: '', diffLineIndex: -1 },
+			});
+		}
+	}
+
+	return result;
+}
+
+export function buildCommentsByLineKey(
+	comments: GitReviewCommentDraft[],
+): Map<string, GitReviewCommentDraft[]> {
+	const map = new Map<string, GitReviewCommentDraft[]>();
+	for (const comment of comments) {
+		const key = commentLineKey(comment.side, comment.line);
+		const existing = map.get(key) ?? [];
+		existing.push(comment);
+		map.set(key, existing);
+	}
+	return map;
+}
+
+export function getSelectableLineKeys(
+	rows: RenderedDiffRow[],
+	filePath: string,
+	activeTab: GitDiffTab,
+): string[] {
+	return rows
+		.map((row) => getUnifiedSelectionKey(row, filePath, activeTab))
+		.filter((key): key is string => key !== null);
+}
+
+export function buildUnifiedDiffRowViews(options: BuildUnifiedRowViewsOptions): UnifiedDiffRowView[] {
+	return options.rows.map((row) => {
+		const selectionKey = getUnifiedSelectionKey(row, options.filePath, options.activeTab);
+		const isSelectable = !options.readOnly && selectionKey !== null;
+		const isSelected = isSelectable && options.selectedLineKeys.has(selectionKey);
+		const showComposer = isComposerForUnifiedRow(row, options.composerTarget);
+		const comments = getUnifiedRowComments(row, options.commentsByLineKey);
+
+		return {
+			key: row.key,
+			row,
+			isHunkHeader: row.kind === 'hunk-header',
+			isSelectable,
+			selectionKey,
+			bgClass: rowBgClass(row.kind, isSelected, showComposer),
+			lineNumClass: lineNumClass(row.kind),
+			textClass: unifiedTextClass(row.kind),
+			textPrefix: unifiedTextPrefix(row.kind),
+			text: unifiedText(row),
+			comments,
+			showComposer,
+			beforeContextTarget: getUnifiedContextTarget(row, 'before'),
+			afterContextTarget: getUnifiedContextTarget(row, 'after'),
+			rowContextTarget: getUnifiedContextTarget(
+				row,
+				row.kind === 'del' ? 'before' : 'after',
+			),
+		};
+	});
+}
+
+export function buildSplitDiffRowViews(options: BuildSplitRowViewsOptions): SplitDiffRowView[] {
+	return options.rows.map((row) => ({
+		key: row.key,
+		row,
+		isHunkHeader: row.isHeader,
+		comments: getSplitRowComments(row, options.commentsByLineKey),
+		showComposer: isComposerForSplitRow(row, options.composerTarget),
+		left: row.left
+			? buildSplitCellView(row.left, 'before', row.hunkIndex ?? -1, options)
+			: null,
+		right: row.right ? buildSplitCellView(row.right, 'after', row.hunkIndex ?? -1, options) : null,
+	}));
+}
+
+function buildSplitCellView(
+	cell: SplitDiffCell,
+	side: GitDiffSide,
+	hunkIndex: number,
+	options: BuildSplitRowViewsOptions,
+): SplitDiffCellView {
+	const selectionKey = getSplitCellSelectionKey(cell, side, options.filePath, options.activeTab);
+	const isSelectable = !options.readOnly && selectionKey !== null;
+	const isSelected = isSelectable && options.selectedLineKeys.has(selectionKey);
+	const isComposerTarget =
+		cell.line !== null && isComposerForCell(side, cell.line, options.composerTarget);
+
+	return {
+		side,
+		cell,
+		isSelectable,
+		selectionKey,
+		bgClass: splitCellBgClass(cell.kind, isSelected, isComposerTarget),
+		lineNumClass: splitLineNumClass(cell.kind),
+		textClass: splitTextClass(cell.kind),
+		textPrefix: splitTextPrefix(cell.kind),
+		contextTarget: getSplitContextTarget(cell, side, hunkIndex),
+	};
+}
+
+function getUnifiedSelectionKey(
+	row: RenderedDiffRow,
+	filePath: string,
+	activeTab: GitDiffTab,
+): string | null {
+	if (row.kind !== 'add' && row.kind !== 'del') return null;
+	return makeLineSelectionKey(
+		filePath,
+		activeTab,
+		row.kind === 'del' ? 'before' : 'after',
+		row.diffLineIndex,
+	);
+}
+
+function getSplitCellSelectionKey(
+	cell: SplitDiffCell,
+	side: GitDiffSide,
+	filePath: string,
+	activeTab: GitDiffTab,
+): string | null {
+	if (cell.kind !== 'add' && cell.kind !== 'del') return null;
+	return makeLineSelectionKey(filePath, activeTab, side, cell.diffLineIndex);
+}
+
+function getUnifiedContextTarget(
+	row: RenderedDiffRow,
+	side: GitDiffSide,
+): GitDiffLineContextTarget | null {
+	if (row.kind === 'hunk-header') return null;
+	const line = side === 'before' ? row.beforeLine : row.afterLine;
+	if (line === null) return null;
+
+	return {
+		side,
+		line,
+		hunkIndex: row.hunkIndex,
+		diffLineIndex: row.diffLineIndex,
+		rowKind: row.kind,
+	};
+}
+
+function getSplitContextTarget(
+	cell: SplitDiffCell,
+	side: GitDiffSide,
+	hunkIndex: number,
+): GitDiffLineContextTarget | null {
+	if (cell.kind === 'empty' || cell.line === null) return null;
+	return {
+		side,
+		line: cell.line,
+		hunkIndex,
+		diffLineIndex: cell.diffLineIndex,
+		rowKind: cell.kind === 'add' || cell.kind === 'del' ? cell.kind : 'context',
+	};
+}
+
+function getUnifiedRowComments(
+	row: RenderedDiffRow,
+	commentsByLineKey: Map<string, GitReviewCommentDraft[]>,
+): GitReviewCommentDraft[] {
+	const comments: GitReviewCommentDraft[] = [];
+	if ((row.kind === 'del' || row.kind === 'context') && row.beforeLine !== null) {
+		comments.push(...(commentsByLineKey.get(commentLineKey('before', row.beforeLine)) ?? []));
+	}
+	if ((row.kind === 'add' || row.kind === 'context') && row.afterLine !== null) {
+		comments.push(...(commentsByLineKey.get(commentLineKey('after', row.afterLine)) ?? []));
+	}
+	return comments;
+}
+
+function getSplitRowComments(
+	row: SplitDiffRow,
+	commentsByLineKey: Map<string, GitReviewCommentDraft[]>,
+): GitReviewCommentDraft[] {
+	const comments: GitReviewCommentDraft[] = [];
+	if (row.left?.line !== null && row.left?.line !== undefined) {
+		comments.push(...(commentsByLineKey.get(commentLineKey('before', row.left.line)) ?? []));
+	}
+	if (row.right?.line !== null && row.right?.line !== undefined) {
+		comments.push(...(commentsByLineKey.get(commentLineKey('after', row.right.line)) ?? []));
+	}
+	return comments;
+}
+
+function isComposerForUnifiedRow(
+	row: RenderedDiffRow,
+	composerTarget: GitDiffComposerDraft | null,
+): boolean {
+	if (row.kind === 'del') return isComposerForCell('before', row.beforeLine, composerTarget);
+	if (row.kind === 'add') return isComposerForCell('after', row.afterLine, composerTarget);
+	if (row.kind === 'context') {
+		return (
+			isComposerForCell('before', row.beforeLine, composerTarget) ||
+			isComposerForCell('after', row.afterLine, composerTarget)
+		);
+	}
+	return false;
+}
+
+function isComposerForSplitRow(
+	row: SplitDiffRow,
+	composerTarget: GitDiffComposerDraft | null,
+): boolean {
+	return (
+		isComposerForCell('before', row.left?.line ?? null, composerTarget) ||
+		isComposerForCell('after', row.right?.line ?? null, composerTarget)
+	);
+}
+
+function isComposerForCell(
+	side: GitDiffSide,
+	line: number | null,
+	composerTarget: GitDiffComposerDraft | null,
+): boolean {
+	if (!composerTarget?.open || line === null) return false;
+	return composerTarget.side === side && composerTarget.line === line;
+}
+
+function rowBgClass(kind: GitDiffRowKind, isSelected: boolean, isComposerTarget: boolean): string {
+	if (isSelected) return 'bg-interactive-accent/20';
+	if (isComposerTarget) return 'bg-interactive-accent/10';
+	switch (kind) {
+		case 'add':
+			return 'bg-diff-add';
+		case 'del':
+			return 'bg-diff-del';
+		case 'hunk-header':
+			return 'bg-diff-hunk-header';
+		default:
+			return '';
+	}
+}
+
+function splitCellBgClass(
+	kind: SplitDiffCell['kind'],
+	isSelected: boolean,
+	isComposerTarget: boolean,
+): string {
+	if (isSelected) return 'bg-interactive-accent/20';
+	if (isComposerTarget) return 'bg-interactive-accent/10';
+	switch (kind) {
+		case 'add':
+			return 'bg-diff-add';
+		case 'del':
+			return 'bg-diff-del';
+		default:
+			return '';
+	}
+}
+
+function lineNumClass(kind: GitDiffRowKind): string {
+	switch (kind) {
+		case 'add':
+			return 'text-diff-add-line-num';
+		case 'del':
+			return 'text-diff-del-line-num';
+		default:
+			return 'text-muted-foreground/50';
+	}
+}
+
+function splitLineNumClass(kind: SplitDiffCell['kind']): string {
+	switch (kind) {
+		case 'add':
+			return 'text-diff-add-line-num';
+		case 'del':
+			return 'text-diff-del-line-num';
+		default:
+			return 'text-muted-foreground/50';
+	}
+}
+
+function unifiedTextClass(kind: GitDiffRowKind): string {
+	if (kind === 'add') return 'text-diff-add-fg';
+	if (kind === 'del') return 'text-diff-del-fg';
+	return 'text-foreground';
+}
+
+function splitTextClass(kind: SplitDiffCell['kind']): string {
+	if (kind === 'add') return 'text-diff-add-fg';
+	if (kind === 'del') return 'text-diff-del-fg';
+	return 'text-foreground';
+}
+
+function unifiedTextPrefix(kind: GitDiffRowKind): string {
+	if (kind === 'add') return '+';
+	if (kind === 'del') return '-';
+	return '\u00a0';
+}
+
+function splitTextPrefix(kind: SplitDiffCell['kind']): string {
+	if (kind === 'add') return '+';
+	if (kind === 'del') return '-';
+	return '\u00a0';
+}
+
+function unifiedText(row: RenderedDiffRow): string {
+	if (row.kind === 'add') return row.afterText;
+	if (row.kind === 'del') return row.beforeText;
+	return row.beforeText || row.afterText;
+}
+
+function commentLineKey(side: GitDiffSide, line: number): string {
+	return `${side}:${line}`;
+}

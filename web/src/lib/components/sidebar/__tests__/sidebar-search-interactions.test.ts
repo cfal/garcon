@@ -61,10 +61,7 @@ describe('sidebar search interactions', () => {
 		const onSelectChat = vi.fn();
 
 		render(SidebarSearchDialogHost, {
-			filteredChats: [
-				createChat('chat-1', 'First chat'),
-				createChat('chat-2', 'Second chat'),
-			],
+			filteredChats: [createChat('chat-1', 'First chat'), createChat('chat-2', 'Second chat')],
 			onSelectChat,
 		});
 
@@ -86,7 +83,7 @@ describe('sidebar search interactions', () => {
 			open: true,
 			query: '',
 			filteredChats: Array.from({ length: 120 }, (_, index) =>
-				createChat(`chat-${index}`, `Chat ${index}`)
+				createChat(`chat-${index}`, `Chat ${index}`),
 			),
 			savedSearches: [],
 			currentTime: new Date('2025-01-01T03:00:00.000Z'),
@@ -191,10 +188,7 @@ describe('sidebar search interactions', () => {
 
 	it('uses a command-palette shell with a fixed scrollable results pane', async () => {
 		render(SidebarSearchDialogHost, {
-			filteredChats: [
-				createChat('chat-1', 'First chat'),
-				createChat('chat-2', 'Second chat'),
-			],
+			filteredChats: [createChat('chat-1', 'First chat'), createChat('chat-2', 'Second chat')],
 		});
 
 		const dialogContent = document.querySelector('[data-slot="search-dialog-content"]');
@@ -216,8 +210,12 @@ describe('sidebar search interactions', () => {
 		expect(input.className).toContain('outline-none');
 
 		expect(await screen.findByRole('listbox')).toBeTruthy();
-		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain('flex-1');
-		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain('overflow-y-auto');
+		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain(
+			'flex-1',
+		);
+		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain(
+			'overflow-y-auto',
+		);
 	});
 
 	it('disables save for an empty query, enables it for a non-empty query, and opens the add dialog callback', async () => {
@@ -234,7 +232,9 @@ describe('sidebar search interactions', () => {
 		const input = screen.getByRole('textbox');
 		await fireEvent.input(input, { target: { value: 'tag:ops' } });
 
-		expect((screen.getByRole('button', { name: 'Add saved search' }) as HTMLButtonElement).disabled).toBe(false);
+		expect(
+			(screen.getByRole('button', { name: 'Add saved search' }) as HTMLButtonElement).disabled,
+		).toBe(false);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Add saved search' }));
 		expect(onCreateSavedSearch).toHaveBeenCalledTimes(1);
@@ -249,7 +249,9 @@ describe('sidebar search interactions', () => {
 		await fireEvent.input(input, { target: { value: 'tag:ops' } });
 
 		const clearButton = screen.getByRole('button', { name: 'Clear search' });
-		expect(document.querySelector('[data-slot="search-dialog-input-shell"]')?.contains(clearButton)).toBe(true);
+		expect(
+			document.querySelector('[data-slot="search-dialog-input-shell"]')?.contains(clearButton),
+		).toBe(true);
 		await fireEvent.click(clearButton);
 
 		expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('');
@@ -273,7 +275,7 @@ describe('sidebar search interactions', () => {
 			filteredChats: [
 				createChat(
 					'chat-1',
-					'Extremely long chat title that should truncate instead of pushing the row past the modal width'
+					'Extremely long chat title that should truncate instead of pushing the row past the modal width',
 				),
 			],
 		});
@@ -289,20 +291,20 @@ describe('sidebar search interactions', () => {
 		expect(summary.className).toContain('min-w-0');
 
 		const title = screen.getByText(
-			'Extremely long chat title that should truncate instead of pushing the row past the modal width'
+			'Extremely long chat title that should truncate instead of pushing the row past the modal width',
 		);
 		expect(title.className).toContain('truncate');
 
 		const preview = screen.getByText(
-			'Extremely long chat title that should truncate instead of pushing the row past the modal width preview'
+			'Extremely long chat title that should truncate instead of pushing the row past the modal width preview',
 		);
 		expect(preview.className).toContain('truncate');
 	});
 
 	it('renders sidebar menu searches ahead of the row actions and inserts a separator', async () => {
-			render(SidebarControlsRow, {
-				isLoading: false,
-				visibleUnreadCount: 0,
+		render(SidebarControlsRow, {
+			isLoading: false,
+			visibleUnreadCount: 0,
 			sidebarMenuSearches: [
 				createSavedSearch('search-1', 'Unread', 'status:unread'),
 				createSavedSearch('search-2', 'Active', 'status:active'),
@@ -400,7 +402,9 @@ describe('sidebar search interactions', () => {
 		});
 
 		expect(screen.getByRole('button', { name: 'Unread' })).toBeTruthy();
-		expect(document.querySelector('[data-slot="active-search-banner"]')?.textContent).toContain('tag:ops');
+		expect(document.querySelector('[data-slot="active-search-banner"]')?.textContent).toContain(
+			'tag:ops',
+		);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Search chats: tag:ops' }));
 		expect(onOpenSearchDialog).toHaveBeenCalledTimes(1);
@@ -453,7 +457,7 @@ describe('sidebar search interactions', () => {
 		expect(topContext?.className).not.toContain('pt-');
 		expect(topContext?.className).not.toContain('py-2');
 		const topChildSlots = Array.from(topContext?.children ?? []).map((element) =>
-			element.getAttribute('data-slot')
+			element.getAttribute('data-slot'),
 		);
 		expect(topChildSlots).toEqual(['sidebar-search-pills']);
 	});
@@ -489,7 +493,7 @@ describe('sidebar search interactions', () => {
 
 		const topDock = document.querySelector('[data-slot="sidebar-search-dock"]');
 		const topChildSlots = Array.from(topDock?.children ?? []).map((element) =>
-			element.getAttribute('data-slot')
+			element.getAttribute('data-slot'),
 		);
 		expect(topChildSlots).toEqual(['sidebar-controls-row', 'sidebar-search-context']);
 	});
@@ -518,8 +522,12 @@ describe('sidebar search interactions', () => {
 			['search-1', 'search-2', 'search-3'],
 			['search-2', 'search-1', 'search-3'],
 		);
-		expect((screen.getByRole('button', { name: 'Move Unread up' }) as HTMLButtonElement).disabled).toBe(true);
-		expect((screen.getByRole('button', { name: 'Move Tagged down' }) as HTMLButtonElement).disabled).toBe(true);
+		expect(
+			(screen.getByRole('button', { name: 'Move Unread up' }) as HTMLButtonElement).disabled,
+		).toBe(true);
+		expect(
+			(screen.getByRole('button', { name: 'Move Tagged down' }) as HTMLButtonElement).disabled,
+		).toBe(true);
 	});
 
 	it('requires at least one saved-search visibility target in the editor', async () => {

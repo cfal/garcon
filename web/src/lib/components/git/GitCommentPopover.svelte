@@ -3,6 +3,8 @@
 	// Used on desktop near the diff line where the user clicked.
 
 	import X from '@lucide/svelte/icons/x';
+	import * as m from '$lib/paraglide/messages.js';
+	import { gitCommentSeverityLabel } from './git-comment-labels';
 
 	interface ComposerState {
 		open: boolean;
@@ -38,10 +40,7 @@
 		<span class="text-[11px] text-muted-foreground truncate flex-1">
 			{composer.filePath}:{composer.line} ({composer.side})
 		</span>
-		<button
-			onclick={onClose}
-			class="p-0.5 rounded hover:bg-muted transition-colors shrink-0 ml-2"
-		>
+		<button onclick={onClose} class="p-0.5 rounded hover:bg-muted transition-colors shrink-0 ml-2">
 			<X class="w-3.5 h-3.5 text-muted-foreground" />
 		</button>
 	</div>
@@ -49,7 +48,7 @@
 	<div class="p-3 space-y-2">
 		<!-- Severity radio group -->
 		<div class="flex gap-2">
-			{#each (['note', 'warning', 'blocker'] as const) as sev}
+			{#each ['note', 'warning', 'blocker'] as const as sev}
 				<label class="flex items-center gap-1 text-[11px] cursor-pointer">
 					<input
 						type="radio"
@@ -57,7 +56,7 @@
 						onchange={() => onSeverityChange(sev)}
 						class="accent-interactive-accent"
 					/>
-					{sev}
+					{gitCommentSeverityLabel(sev)}
 				</label>
 			{/each}
 		</div>
@@ -67,7 +66,7 @@
 			value={composer.body}
 			oninput={(e) => onBodyChange(e.currentTarget.value)}
 			onkeydown={handleKeydown}
-			placeholder="Comment..."
+			placeholder={m.git_comment_placeholder()}
 			class="w-full text-xs p-2 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 			rows="3"
 		></textarea>
@@ -78,17 +77,17 @@
 				onclick={onClose}
 				class="px-2.5 py-1 text-[11px] rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
 			>
-				Cancel
+				{m.git_confirm_cancel()}
 			</button>
 			<button
 				onclick={onSubmit}
 				disabled={!composer.body.trim()}
 				class="px-2.5 py-1 text-[11px] rounded transition-all
 					{composer.body.trim()
-						? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
-						: 'bg-muted text-muted-foreground cursor-not-allowed'}"
+					? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
+					: 'bg-muted text-muted-foreground cursor-not-allowed'}"
 			>
-				Add comment
+				{m.git_comment_add()}
 			</button>
 		</div>
 	</div>

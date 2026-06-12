@@ -60,7 +60,9 @@ describe('SidebarFilterState', () => {
 			makeChat({ id: 'chat-2', isUnread: true, tags: ['dev'] }),
 		];
 		const state = new SidebarFilterState({
-			get chats() { return chats; },
+			get chats() {
+				return chats;
+			},
 		});
 
 		state.selectFolder('unread');
@@ -122,5 +124,4 @@ describe('SidebarFilterState', () => {
 			status: 'unread',
 		});
 	});
-
 });

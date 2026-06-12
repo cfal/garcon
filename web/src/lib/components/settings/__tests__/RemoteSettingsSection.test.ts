@@ -38,22 +38,22 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 		lastModelProtocol: null,
 		lastPermissionMode: 'default',
 		lastThinkingMode: 'none',
-			lastClaudeThinkingMode: 'auto',
-			lastAmpAgentMode: 'smart',
-			projectBasePath: '/workspace',
-			telegram: {
-				botTokenAvailable: false,
-				botUsername: null,
-				botFirstName: null,
-				recipientUsername: null,
-				recipientDisplayName: null,
-				recipientLinked: false,
-				pendingLink: false,
-				linkUrl: null,
-			},
-			...overrides,
-		};
-	}
+		lastClaudeThinkingMode: 'auto',
+		lastAmpAgentMode: 'smart',
+		projectBasePath: '/workspace',
+		telegram: {
+			botTokenAvailable: false,
+			botUsername: null,
+			botFirstName: null,
+			recipientUsername: null,
+			recipientDisplayName: null,
+			recipientLinked: false,
+			pendingLink: false,
+			linkUrl: null,
+		},
+		...overrides,
+	};
+}
 
 describe('RemoteSettingsSection', () => {
 	beforeEach(() => {
@@ -109,8 +109,8 @@ describe('RemoteSettingsSection', () => {
 					pendingLink: false,
 					linkUrl: null,
 				},
-				}),
-			});
+			}),
+		});
 		vi.mocked(sendTelegramTest).mockResolvedValueOnce({ success: true });
 
 		render(RemoteSettingsSectionTestHost);
@@ -122,9 +122,10 @@ describe('RemoteSettingsSection', () => {
 		await waitFor(() => {
 			expect(beginTelegramRecipientLink).toHaveBeenCalledWith();
 		});
-		const setupLink = await screen.findByRole('link', { name: 'https://t.me/garcon_bot?start=abc' });
-		expect(setupLink.getAttribute('href'))
-			.toBe('https://t.me/garcon_bot?start=abc');
+		const setupLink = await screen.findByRole('link', {
+			name: 'https://t.me/garcon_bot?start=abc',
+		});
+		expect(setupLink.getAttribute('href')).toBe('https://t.me/garcon_bot?start=abc');
 		expect(screen.getByRole('button', { name: /send test/i })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: /create link/i })).toBeNull();
 		expect(screen.queryByRole('button', { name: /open telegram/i })).toBeNull();
@@ -134,14 +135,17 @@ describe('RemoteSettingsSection', () => {
 		expect((await screen.findAllByText('Linked to @alice.')).length).toBeGreaterThan(0);
 		const sendTestButton = screen.getByRole('button', { name: /send test/i });
 		const recipientLinkedLine = await screen.findByText('Recipient linked.');
-		expect(sendTestButton.compareDocumentPosition(recipientLinkedLine) & Node.DOCUMENT_POSITION_FOLLOWING)
-			.toBeTruthy();
+		expect(
+			sendTestButton.compareDocumentPosition(recipientLinkedLine) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 
 		await fireEvent.click(sendTestButton);
 		expect(sendTelegramTest).toHaveBeenCalled();
 		const testSentLine = await screen.findByText('Test message sent.');
-		expect(sendTestButton.compareDocumentPosition(testSentLine) & Node.DOCUMENT_POSITION_FOLLOWING)
-			.toBeTruthy();
+		expect(
+			sendTestButton.compareDocumentPosition(testSentLine) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 	});
 
 	it('saves the Telegram bot token and applies the redacted settings snapshot', async () => {
@@ -167,26 +171,30 @@ describe('RemoteSettingsSection', () => {
 
 		render(RemoteSettingsSectionTestHost);
 
-			const input = await screen.findByLabelText('Bot token');
-			expect(screen.queryByRole('button', { name: /test token/i })).toBeNull();
-			expect((screen.getByRole('button', { name: /clear token/i }) as HTMLButtonElement).disabled)
-				.toBe(true);
-			await fireEvent.input(input, { target: { value: 'secret-token' } });
-			await fireEvent.click(screen.getByRole('button', { name: /save token/i }));
+		const input = await screen.findByLabelText('Bot token');
+		expect(screen.queryByRole('button', { name: /test token/i })).toBeNull();
+		expect(
+			(screen.getByRole('button', { name: /clear token/i }) as HTMLButtonElement).disabled,
+		).toBe(true);
+		await fireEvent.input(input, { target: { value: 'secret-token' } });
+		await fireEvent.click(screen.getByRole('button', { name: /save token/i }));
 
 		expect(saveTelegramBotToken).toHaveBeenCalledWith('secret-token');
 		expect(store.snapshot?.telegram.botTokenAvailable).toBe(true);
-		expect(await screen.findByRole('link', { name: 'https://t.me/garcon_bot?start=abc' })).toBeTruthy();
-			expect(screen.queryByText('Token saved for @garcon_bot.')).toBeNull();
-			expect(screen.queryByText('Connected as @garcon_bot.')).toBeNull();
-			expect(screen.queryByRole('button', { name: /save token/i })).toBeNull();
-			expect(screen.getByRole('button', { name: /test token/i })).toBeTruthy();
-			expect((screen.getByRole('button', { name: /clear token/i }) as HTMLButtonElement).disabled)
-				.toBe(false);
-			expect((input as HTMLInputElement).disabled).toBe(true);
-			expect(beginTelegramRecipientLink).not.toHaveBeenCalled();
-			expect(screen.queryByDisplayValue('secret-token')).toBeNull();
-		});
+		expect(
+			await screen.findByRole('link', { name: 'https://t.me/garcon_bot?start=abc' }),
+		).toBeTruthy();
+		expect(screen.queryByText('Token saved for @garcon_bot.')).toBeNull();
+		expect(screen.queryByText('Connected as @garcon_bot.')).toBeNull();
+		expect(screen.queryByRole('button', { name: /save token/i })).toBeNull();
+		expect(screen.getByRole('button', { name: /test token/i })).toBeTruthy();
+		expect(
+			(screen.getByRole('button', { name: /clear token/i }) as HTMLButtonElement).disabled,
+		).toBe(false);
+		expect((input as HTMLInputElement).disabled).toBe(true);
+		expect(beginTelegramRecipientLink).not.toHaveBeenCalled();
+		expect(screen.queryByDisplayValue('secret-token')).toBeNull();
+	});
 
 	it('clears the Telegram token and returns to the unset token actions', async () => {
 		const store = new RemoteSettingsStore();
@@ -224,8 +232,9 @@ describe('RemoteSettingsSection', () => {
 		expect(store.snapshot?.ui.notifications?.telegram?.enabled).toBe(false);
 		expect(screen.getByRole('button', { name: /save token/i })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: /test token/i })).toBeNull();
-		expect((screen.getByRole('button', { name: /clear token/i }) as HTMLButtonElement).disabled)
-			.toBe(true);
+		expect(
+			(screen.getByRole('button', { name: /clear token/i }) as HTMLButtonElement).disabled,
+		).toBe(true);
 	});
 
 	it('shows the token validation error code when saving fails', async () => {
@@ -243,7 +252,11 @@ describe('RemoteSettingsSection', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /save token/i }));
 
 		expect(saveTelegramBotToken).toHaveBeenCalledWith('bad-token');
-		expect(await screen.findByText('Telegram token test failed: Unauthorized (telegram_token_test_failed)')).toBeTruthy();
+		expect(
+			await screen.findByText(
+				'Telegram token test failed: Unauthorized (telegram_token_test_failed)',
+			),
+		).toBeTruthy();
 		expect(screen.queryByText(/Raw server token failure/)).toBeNull();
 		expect(store.snapshot?.telegram.botTokenAvailable).toBe(false);
 		expect(beginTelegramRecipientLink).not.toHaveBeenCalled();

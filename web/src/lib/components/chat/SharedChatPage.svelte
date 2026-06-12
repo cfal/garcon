@@ -11,6 +11,7 @@
 		isToolUseMessage,
 	} from '$shared/chat-types';
 	import Markdown from '$lib/components/chat/Markdown.svelte';
+	import MessageRenderFallback from '$lib/components/chat/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
 	import { ChevronRight } from '@lucide/svelte';
@@ -115,7 +116,7 @@
 			<a
 				href="/"
 				class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0 hover:opacity-90 transition-opacity"
-				title="Garcon"
+				title={m.sidebar_app_title()}
 			>
 				<MessageSquare class="w-4 h-4 text-primary-foreground" />
 			</a>
@@ -130,7 +131,9 @@
 						<p class="text-xs text-muted-foreground">{formattedSharedDate()}</p>
 					{/if}
 					{#if agentId}
-						<span class="text-[10px] px-1.5 py-0.5 rounded-full border bg-muted text-muted-foreground capitalize flex-shrink-0">
+						<span
+							class="text-[10px] px-1.5 py-0.5 rounded-full border bg-muted text-muted-foreground capitalize flex-shrink-0"
+						>
 							{agentId}
 						</span>
 					{/if}
@@ -151,7 +154,9 @@
 					<AlertTriangle class="w-8 h-8 text-muted-foreground" />
 				</div>
 				<div class="text-center">
-					<h2 class="text-lg font-semibold text-foreground mb-1">{m.shared_view_not_found_title()}</h2>
+					<h2 class="text-lg font-semibold text-foreground mb-1">
+						{m.shared_view_not_found_title()}
+					</h2>
 					<p class="text-sm text-muted-foreground max-w-md">{errorMsg}</p>
 				</div>
 				<a href="/" class="text-sm text-primary hover:underline">{m.shared_view_back_to_app()}</a>
@@ -162,20 +167,30 @@
 					{@const prevMessage = idx > 0 ? messages[idx - 1] : null}
 					{@const isGrouped = isGroupedWith(prevMessage, message)}
 					<svelte:boundary>
-						{#snippet failed()}
-							<div class="text-xs text-muted-foreground p-2">Failed to render message</div>
+						{#snippet failed(error)}
+							<MessageRenderFallback {error} />
 						{/snippet}
-						<div class="chat-message {message instanceof UserMessage ? 'flex justify-start' : ''} {isGrouped ? '' : 'mt-3'}">
+						<div
+							class="chat-message {message instanceof UserMessage
+								? 'flex justify-start'
+								: ''} {isGrouped ? '' : 'mt-3'}"
+						>
 							{#if message instanceof UserMessage}
 								<div class="sm:max-w-[85%] min-w-0">
-									<div class="mt-1 bg-user-bubble text-user-bubble-foreground rounded-2xl rounded-bl-md px-4 py-2 shadow-sm">
+									<div
+										class="mt-1 bg-user-bubble text-user-bubble-foreground rounded-2xl rounded-bl-md px-4 py-2 shadow-sm"
+									>
 										<div class="text-sm">
 											<Markdown source={message.content} variant="user" />
 										</div>
 										{#if message.images && message.images.length > 0}
 											<div class="mt-2 grid grid-cols-2 gap-2">
 												{#each message.images as image, imageIndex (image.name || imageIndex)}
-													<img src={image.data} alt={image.name} class="rounded-lg max-w-full h-auto" />
+													<img
+														src={image.data}
+														alt={image.name}
+														class="rounded-lg max-w-full h-auto"
+													/>
 												{/each}
 											</div>
 										{/if}
@@ -197,8 +212,14 @@
 											onclick={() => toggleThinking(idx)}
 											aria-expanded={thinkingStates[idx] ?? true}
 										>
-											<span class="text-xs font-medium text-muted-foreground">{m.chat_message_thinking()}</span>
-											<ChevronRight class="ml-auto w-3 h-3 transition-transform {(thinkingStates[idx] ?? true) ? 'rotate-90' : ''}" />
+											<span class="text-xs font-medium text-muted-foreground"
+												>{m.chat_message_thinking()}</span
+											>
+											<ChevronRight
+												class="ml-auto w-3 h-3 transition-transform {(thinkingStates[idx] ?? true)
+													? 'rotate-90'
+													: ''}"
+											/>
 										</button>
 										{#if thinkingStates[idx] ?? true}
 											<div class="mt-0.5 text-sm text-foreground/90">
@@ -208,11 +229,7 @@
 									{/snippet}
 								</ChatEventCard>
 							{:else if isToolUseMessage(message)}
-								<ChatToolEventRenderer
-									toolMessage={message}
-									mode="input"
-									autoExpandTools={false}
-								/>
+								<ChatToolEventRenderer toolMessage={message} mode="input" autoExpandTools={false} />
 							{:else if message instanceof ErrorMessage}
 								<ChatEventCard variant="error">
 									{#snippet body()}
@@ -228,7 +245,9 @@
 	</main>
 
 	<footer class="border-t border-border py-4 mt-auto">
-		<div class="max-w-4xl mx-auto px-4 sm:px-6 flex items-center justify-between text-xs text-muted-foreground">
+		<div
+			class="max-w-4xl mx-auto px-4 sm:px-6 flex items-center justify-between text-xs text-muted-foreground"
+		>
 			<span>Shared via Garcon</span>
 			<span>{messages.length} messages</span>
 		</div>

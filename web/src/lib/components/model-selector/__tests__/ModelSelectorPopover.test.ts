@@ -135,11 +135,13 @@ describe('ModelSelectorPopover', () => {
 		await closePopoverByOutsideClick();
 
 		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-			agentId: 'codex',
-			modelValue: 'codex-model-0',
-			model: 'codex-model-0',
-		}));
+		expect(onChange).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentId: 'codex',
+				modelValue: 'codex-model-0',
+				model: 'codex-model-0',
+			}),
+		);
 	});
 
 	it('keeps the trigger display on the committed selection while editing a draft', async () => {
@@ -347,11 +349,13 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Done' }));
 
 		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-			agentId: 'codex',
-			modelValue: 'codex-model-0',
-			model: 'codex-model-0',
-		}));
+		expect(onChange).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentId: 'codex',
+				modelValue: 'codex-model-0',
+				model: 'codex-model-0',
+			}),
+		);
 		await waitFor(() => {
 			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 		});
@@ -442,11 +446,13 @@ describe('ModelSelectorPopover', () => {
 		await closePopoverByOutsideClick();
 
 		await waitFor(() => {
-			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-				agentId: 'claude',
-				modelValue: 'model-599',
-				model: 'model-599',
-			}));
+			expect(onChange).toHaveBeenCalledWith(
+				expect.objectContaining({
+					agentId: 'claude',
+					modelValue: 'model-599',
+					model: 'model-599',
+				}),
+			);
 		});
 	});
 
@@ -472,11 +478,13 @@ describe('ModelSelectorPopover', () => {
 		await closePopoverByOutsideClick();
 
 		await waitFor(() => {
-			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-				agentId: 'claude',
-				modelValue: 'model-599',
-				model: 'model-599',
-			}));
+			expect(onChange).toHaveBeenCalledWith(
+				expect.objectContaining({
+					agentId: 'claude',
+					modelValue: 'model-599',
+					model: 'model-599',
+				}),
+			);
 		});
 	});
 });

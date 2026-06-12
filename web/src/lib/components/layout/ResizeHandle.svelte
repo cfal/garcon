@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { cn } from '$lib/utils/cn';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface ResizeHandleProps {
 		width: number;
@@ -38,15 +39,15 @@
 		target.addEventListener('pointercancel', handlePointerUp);
 	}
 
-let indicatorClass = $derived(cn(
-		'absolute inset-y-0 left-0 w-px transition-colors duration-150',
-		isDragging ? 'bg-primary/30' : 'group-hover:bg-primary/20',
-	));
+	let indicatorClass = $derived(
+		cn(
+			'absolute inset-y-0 left-0 w-px transition-colors duration-150',
+			isDragging ? 'bg-primary/30' : 'group-hover:bg-primary/20',
+		),
+	);
 </script>
 
-<div
-	class="absolute inset-y-0 right-0 w-0 pointer-events-none z-10"
->
+<div class="absolute inset-y-0 right-0 w-0 pointer-events-none z-10">
 	<div
 		class={cn(
 			'absolute inset-y-0 -left-2 w-4 cursor-col-resize group select-none touch-none pointer-events-auto',
@@ -55,7 +56,7 @@ let indicatorClass = $derived(cn(
 		onpointerdown={handlePointerDown}
 		role="separator"
 		aria-orientation="vertical"
-		aria-label="Resize sidebar"
+		aria-label={m.layout_resize_sidebar()}
 		tabindex="-1"
 	>
 		<div class={indicatorClass}></div>

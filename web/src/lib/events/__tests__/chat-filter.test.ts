@@ -29,7 +29,11 @@ describe('filterByChat', () => {
 	it('processes queue-state-updated as a global event regardless of chat ID', () => {
 		const result = filterByChat(
 			'queue-state-updated',
-			{ type: 'queue-state-updated', chatId: 'chat-b', queue: { entries: [], paused: false } } as never,
+			{
+				type: 'queue-state-updated',
+				chatId: 'chat-b',
+				queue: { entries: [], paused: false },
+			} as never,
 			ctx,
 		);
 		expect(result).toEqual({ action: 'process' });
@@ -99,11 +103,7 @@ describe('filterByChat', () => {
 	});
 
 	it('skips scoped events with no chatId and no pending view', () => {
-		const result = filterByChat(
-			'agent-run-output',
-			{ type: 'agent-run-output' } as never,
-			ctx,
-		);
+		const result = filterByChat('agent-run-output', { type: 'agent-run-output' } as never, ctx);
 		expect(result).toEqual({ action: 'skip' });
 	});
 

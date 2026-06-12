@@ -27,32 +27,38 @@
 	}: Props = $props();
 
 	let claudeModels = $derived.by<ModelOption[]>(() => {
-		const generated = Array.from({ length: modelCount }, (_, index): ModelOption => ({
-			value: `model-${index}`,
-			label: `Model ${index}`,
-		}));
+		const generated = Array.from(
+			{ length: modelCount },
+			(_, index): ModelOption => ({
+				value: `model-${index}`,
+				label: `Model ${index}`,
+			}),
+		);
 		const withDuplicate = includeDuplicateModel
 			? [...generated, { value: 'same-model', label: 'same-model' }]
 			: generated;
 		return includeEndpointModel
 			? [
-				...withDuplicate,
-				{
-					value: 'acme-claude:endpoint-model',
-					label: 'Acme: Endpoint Model',
-					rawModel: 'endpoint-model',
-					apiProviderId: 'acme',
-					endpointId: 'acme-claude',
-					protocol: 'anthropic-messages',
-				},
-			]
+					...withDuplicate,
+					{
+						value: 'acme-claude:endpoint-model',
+						label: 'Acme: Endpoint Model',
+						rawModel: 'endpoint-model',
+						apiProviderId: 'acme',
+						endpointId: 'acme-claude',
+						protocol: 'anthropic-messages',
+					},
+				]
 			: withDuplicate;
 	});
 	let codexModels = $derived.by<ModelOption[]>(() =>
-		Array.from({ length: modelCount }, (_, index): ModelOption => ({
-			value: `codex-model-${index}`,
-			label: `Codex Model ${index}`,
-		}))
+		Array.from(
+			{ length: modelCount },
+			(_, index): ModelOption => ({
+				value: `codex-model-${index}`,
+				label: `Codex Model ${index}`,
+			}),
+		),
 	);
 
 	function modelsFor(agentId: string): ModelOption[] {
@@ -71,16 +77,19 @@
 			supportedProtocols: agentId === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
 			defaultModel: agentId === 'codex' ? 'codex-model-0' : 'model-0',
 		}),
-		getAgentLabel: (agentId: string) => agentId === 'codex' ? 'Codex' : 'Claude',
+		getAgentLabel: (agentId: string) => (agentId === 'codex' ? 'Codex' : 'Claude'),
 		getModels: (agentId: string) => modelsFor(agentId),
 		getDefaultModel: (agentId: string) => modelsFor(agentId)[0]?.value ?? '',
 		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) =>
-			modelsFor(agentId).find((entry) =>
-				(endpointId ? entry.endpointId === endpointId : true) &&
-				(entry.value === model || entry.rawModel === model)
+			modelsFor(agentId).find(
+				(entry) =>
+					(endpointId ? entry.endpointId === endpointId : true) &&
+					(entry.value === model || entry.rawModel === model),
 			) ?? null,
 		selectionFor: (agentId: string, model: string) => {
-			const selected = modelsFor(agentId).find((entry) => entry.value === model || entry.rawModel === model);
+			const selected = modelsFor(agentId).find(
+				(entry) => entry.value === model || entry.rawModel === model,
+			);
 			return {
 				model: selected?.rawModel ?? model,
 				apiProviderId: selected?.apiProviderId ?? null,
@@ -89,9 +98,10 @@
 			};
 		},
 		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) => {
-			const selected = modelsFor(agentId).find((entry) =>
-				(endpointId ? entry.endpointId === endpointId : true) &&
-				(entry.value === model || entry.rawModel === model)
+			const selected = modelsFor(agentId).find(
+				(entry) =>
+					(endpointId ? entry.endpointId === endpointId : true) &&
+					(entry.value === model || entry.rawModel === model),
 			);
 			return selected?.value ?? model;
 		},

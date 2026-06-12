@@ -4,7 +4,10 @@ Renders markdown content with syntax-highlighted code blocks.
 Supports visual variants for assistant, user, and thinking contexts.
 -->
 <script lang="ts">
-	import SvelteMarkdown, { defaultRenderers, buildUnsupportedHTML } from '@humanspeak/svelte-markdown';
+	import SvelteMarkdown, {
+		defaultRenderers,
+		buildUnsupportedHTML,
+	} from '@humanspeak/svelte-markdown';
 	import CodeBlock from './CodeBlock.svelte';
 	import MermaidBlock from './MermaidBlock.svelte';
 	import { parseFileLink } from '$lib/chat/file-link-parser';
@@ -26,30 +29,37 @@ Supports visual variants for assistant, user, and thinking contexts.
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
 	}
 
-	const VARIANT_STYLES: Record<MarkdownVariant, {
-		container: string;
-		link: string;
-		code: string;
-		blockquote: string;
-	}> = {
+	const VARIANT_STYLES: Record<
+		MarkdownVariant,
+		{
+			container: string;
+			link: string;
+			code: string;
+			blockquote: string;
+		}
+	> = {
 		assistant: {
-			container: 'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground',
+			container:
+				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground',
 			link: 'text-primary hover:underline',
 			code: 'rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground',
-			blockquote: 'my-2 border-l-4 border-border pl-4 italic text-muted-foreground'
+			blockquote: 'my-2 border-l-4 border-border pl-4 italic text-muted-foreground',
 		},
 		user: {
-			container: 'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-primary-foreground prose-headings:text-primary-foreground prose-p:text-primary-foreground prose-li:text-primary-foreground prose-strong:text-primary-foreground',
+			container:
+				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-primary-foreground prose-headings:text-primary-foreground prose-p:text-primary-foreground prose-li:text-primary-foreground prose-strong:text-primary-foreground',
 			link: 'text-primary-foreground/90 hover:text-primary-foreground underline',
 			code: 'rounded-md border border-primary-foreground/30 bg-primary-foreground/10 px-1.5 py-0.5 font-mono text-[0.9em] text-primary-foreground',
-			blockquote: 'my-2 border-l-4 border-primary-foreground/40 pl-4 italic text-primary-foreground/90'
+			blockquote:
+				'my-2 border-l-4 border-primary-foreground/40 pl-4 italic text-primary-foreground/90',
 		},
 		thinking: {
-			container: 'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground',
+			container:
+				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground',
 			link: 'text-primary hover:underline',
 			code: 'rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground',
-			blockquote: 'my-2 border-l-4 border-border pl-4 italic text-muted-foreground'
-		}
+			blockquote: 'my-2 border-l-4 border-border pl-4 italic text-muted-foreground',
+		},
 	};
 
 	let {
@@ -57,7 +67,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 		variant = 'assistant',
 		class: className = '',
 		projectBasePath,
-		onLinkNavigate
+		onLinkNavigate,
 	}: Props = $props();
 
 	const parserOptions = $derived(projectBasePath ? { projectBasePath } : undefined);
@@ -68,7 +78,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 
 	const safeRenderers = {
 		...defaultRenderers,
-		html: buildUnsupportedHTML()
+		html: buildUnsupportedHTML(),
 	};
 </script>
 
@@ -102,10 +112,12 @@ Supports visual variants for assistant, user, and thinking contexts.
 				class={styles.link}
 				target={isExternal ? '_blank' : undefined}
 				rel={isExternal ? 'noopener noreferrer' : undefined}
-				onclick={(isFile || isAbsPath) ? (e: MouseEvent) => {
-					e.preventDefault();
-					if (isFile) onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
-				} : undefined}
+				onclick={isFile || isAbsPath
+					? (e: MouseEvent) => {
+							e.preventDefault();
+							if (isFile) onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
+						}
+					: undefined}
 			>
 				{@render children?.()}
 			</a>

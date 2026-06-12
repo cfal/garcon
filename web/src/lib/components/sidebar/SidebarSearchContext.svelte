@@ -58,7 +58,10 @@
 
 {#snippet activeSearchBanner()}
 	{#if showActiveSearchBanner}
-		<div data-slot="active-search-banner" class="relative rounded-lg border border-border bg-muted/40">
+		<div
+			data-slot="active-search-banner"
+			class="relative rounded-lg border border-border bg-muted/40"
+		>
 			<button
 				type="button"
 				class="block w-full rounded-[inherit] px-2.5 py-2 pr-10 text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

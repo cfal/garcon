@@ -2,19 +2,32 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-	getAuth, setAuth,
-	getLocalSettings, setLocalSettings,
-	getRemoteSettings, setRemoteSettings,
-	getNavigation, setNavigation,
-	getChatRuntime, setChatRuntime,
-	getChatSessions, setChatSessions,
-	getAppShell, setAppShell,
-	getWs, setWs,
-	getModelCatalog, setModelCatalog,
-	getChatState, setChatState,
-	getComposerState, setComposerState,
-	getAgentState, setAgentState,
-	getChatLifecycle, setChatLifecycle,
+	getAuth,
+	setAuth,
+	getLocalSettings,
+	setLocalSettings,
+	getRemoteSettings,
+	setRemoteSettings,
+	getNavigation,
+	setNavigation,
+	getChatSessions,
+	setChatSessions,
+	getAppShell,
+	setAppShell,
+	getWs,
+	setWs,
+	getModelCatalog,
+	setModelCatalog,
+	getChatState,
+	setChatState,
+	getComposerState,
+	setComposerState,
+	getAgentState,
+	setAgentState,
+	getChatLifecycle,
+	setChatLifecycle,
+	getNotifications,
+	setNotifications,
 } from '../index';
 
 describe('context factories', () => {
@@ -27,8 +40,6 @@ describe('context factories', () => {
 		expect(typeof setRemoteSettings).toBe('function');
 		expect(typeof getNavigation).toBe('function');
 		expect(typeof setNavigation).toBe('function');
-		expect(typeof getChatRuntime).toBe('function');
-		expect(typeof setChatRuntime).toBe('function');
 		expect(typeof getChatSessions).toBe('function');
 		expect(typeof setChatSessions).toBe('function');
 		expect(typeof getAppShell).toBe('function');
@@ -37,6 +48,8 @@ describe('context factories', () => {
 		expect(typeof setWs).toBe('function');
 		expect(typeof getModelCatalog).toBe('function');
 		expect(typeof setModelCatalog).toBe('function');
+		expect(typeof getNotifications).toBe('function');
+		expect(typeof setNotifications).toBe('function');
 	});
 
 	it('exports getter/setter pairs for all chat-level contexts', () => {

@@ -3,7 +3,7 @@ import {
 	getAgentReadiness,
 	launchAgentAuthLogin,
 	type DeviceAuthInfo,
-	type AgentReadiness
+	type AgentReadiness,
 } from '$lib/api/agents.js';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 
@@ -24,7 +24,7 @@ const DEFAULT_AUTH: AuthStatus = {
 	canReauth: true,
 	label: '',
 	loading: true,
-	error: null
+	error: null,
 };
 
 export class SettingsAuthState {
@@ -103,7 +103,7 @@ export class SettingsAuthState {
 			this.#setAuth(agentId, {
 				...this.authFor(agentId),
 				loading: false,
-				error: err instanceof Error ? err.message : String(err)
+				error: err instanceof Error ? err.message : String(err),
 			});
 		}
 	}
@@ -120,7 +120,7 @@ export class SettingsAuthState {
 				canReauth: data.canReauth,
 				label: data.label,
 				loading: false,
-				error: null
+				error: null,
 			});
 		} catch (err) {
 			this.#setAuth(agentId, {
@@ -128,7 +128,7 @@ export class SettingsAuthState {
 				canReauth: true,
 				label: '',
 				loading: false,
-				error: err instanceof Error ? err.message : String(err)
+				error: err instanceof Error ? err.message : String(err),
 			});
 		}
 	}
