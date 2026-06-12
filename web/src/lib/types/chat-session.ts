@@ -1,5 +1,4 @@
-// Canonical chat session types used by the ChatSessionsStore. Replaces
-// ad-hoc ChatEntry snapshots with a single authoritative record shape.
+// Canonical chat session types used by the ChatSessionsStore.
 
 import type { SessionAgentId } from '$lib/types/app';
 import type {
@@ -52,3 +51,7 @@ export interface ChatSessionRecord {
 	tags: string[];
 	firstMessage?: string;
 }
+
+export type ChatSessionRouterView = Readonly<
+	Pick<ChatSessionRecord, 'id' | 'projectPath' | 'agentId' | 'model' | 'title'>
+>;

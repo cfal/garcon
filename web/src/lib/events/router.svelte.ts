@@ -27,7 +27,8 @@ import {
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
-import type { ChatEntry, SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/types/app';
+import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import { clearPendingChatId, getPendingChatId, setPendingChatId } from '$lib/chat/pending-chat-handoff';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
@@ -63,7 +64,7 @@ import {
 // Store references required by the router to build handler contexts.
 export interface EventRouterStores {
 	agentId: () => SessionAgentId;
-	selectedChat: () => ChatEntry | null;
+	selectedChat: () => ChatSessionRouterView | null;
 	currentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
 	chatMessages: () => ChatMessage[];

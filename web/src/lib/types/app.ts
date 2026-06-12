@@ -14,17 +14,6 @@ export type AppTab = 'chat' | 'files' | 'shell' | 'git';
 
 export { type ChatSession } from './session';
 
-export interface ChatEntry {
-	id: string;
-	projectPath: string;
-	title?: string;
-	name?: string;
-	model?: string | null;
-	createdAt?: string;
-	lastActivityAt?: string;
-	agentId?: SessionAgentId;
-}
-
 export interface NewChatConfig {
 	agentId: SessionAgentId;
 	projectPath: string;

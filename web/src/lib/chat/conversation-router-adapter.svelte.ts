@@ -41,25 +41,11 @@ export interface ConversationRouterDeps {
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
 }
 
-// Builds a ChatEntry-compatible object from the session store for the
-// event router, which expects the selectedChat() accessor.
-function selectedChatForRouter(deps: ConversationRouterDeps) {
-	const chat = deps.sessions.selectedChat;
-	if (!chat) return null;
-	return {
-		id: chat.id,
-		projectPath: chat.projectPath,
-		agentId: chat.agentId,
-		model: chat.model,
-		title: chat.title,
-	};
-}
-
 // Assembles the EventRouterStores contract from workspace dependencies.
 export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStores {
 	return {
 		agentId: () => deps.agentState.agentId,
-		selectedChat: () => selectedChatForRouter(deps),
+		selectedChat: () => deps.sessions.selectedChat,
 		currentChatId: () => deps.lifecycle.currentChatId,
 		setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),
 		setSelectedChatId: (id) => deps.sessions.setSelectedChatId(id),

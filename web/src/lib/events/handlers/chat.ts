@@ -8,13 +8,14 @@ import type {
 } from '$shared/ws-events';
 import { AssistantMessage, ErrorMessage } from '$shared/chat-types';
 import type { ChatMessage } from '$lib/types/chat';
-import type { ChatEntry, SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/types/app';
+import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 export interface ChatEventContext {
 	getAgentId: () => SessionAgentId;
-	getSelectedChat: () => ChatEntry | null;
+	getSelectedChat: () => ChatSessionRouterView | null;
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
 	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
