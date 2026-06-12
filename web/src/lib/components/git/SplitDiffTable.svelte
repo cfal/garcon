@@ -1,10 +1,19 @@
 <script lang="ts">
 	import Minus from '@lucide/svelte/icons/minus';
 	import Plus from '@lucide/svelte/icons/plus';
+	import { untrack } from 'svelte';
+	import { createVirtualizer } from '@tanstack/svelte-virtual';
 	import type { GitDiffTab, GitReviewCommentDraft } from '$lib/api/git.js';
 	import type { GitDiffActionTarget } from '$lib/stores/git-workbench.svelte.js';
 	import GitDiffCommentComposer from './GitDiffCommentComposer.svelte';
 	import GitDiffCommentThread from './GitDiffCommentThread.svelte';
+	import {
+		DIFF_TABLE_FALLBACK_VIEWPORT_HEIGHT,
+		DIFF_TABLE_OVERSCAN,
+		estimateDiffVirtualRowSize,
+		measureDiffVirtualRowElement,
+		observeDiffTableElementRect,
+	} from './git-diff-virtual-table';
 	import type {
 		GitDiffComposerDraft,
 		GitDiffLineContextTarget,
@@ -19,9 +28,12 @@
 		actionTarget: GitDiffActionTarget;
 		readOnly: boolean;
 		headerFontSize: number;
+		rowLineHeight: number;
 		colCount: number;
 		composer: GitDiffComposerDraft | null;
 		showLineActions: boolean;
+		viewportRef: HTMLDivElement | null;
+		overscan?: number;
 		onCellClick: (event: MouseEvent | KeyboardEvent, cell: SplitDiffCellView) => void;
 		onCellKeydown: (event: KeyboardEvent, cell: SplitDiffCellView) => void;
 		onOpenContextMenu: (event: MouseEvent, target: GitDiffLineContextTarget | null) => void;
@@ -48,9 +60,12 @@
 		actionTarget,
 		readOnly,
 		headerFontSize,
+		rowLineHeight,
 		colCount,
 		composer,
 		showLineActions,
+		viewportRef,
+		overscan = DIFF_TABLE_OVERSCAN,
 		onCellClick,
 		onCellKeydown,
 		onOpenContextMenu,
@@ -71,6 +86,61 @@
 		onComposerClose,
 	}: SplitDiffTableProps = $props();
 
+	function estimateRowSize(index: number): number {
+		return estimateDiffVirtualRowSize(rows[index], rowLineHeight);
+	}
+
+	function measureRowElement(element: HTMLTableSectionElement): number {
+		return measureDiffVirtualRowElement(element, rows, rowLineHeight);
+	}
+
+	const virtualizer = createVirtualizer<HTMLDivElement, HTMLTableSectionElement>({
+		count: 0,
+		getScrollElement: () => viewportRef,
+		estimateSize: estimateRowSize,
+		measureElement: measureRowElement,
+		observeElementRect: observeDiffTableElementRect,
+		initialRect: { width: 0, height: DIFF_TABLE_FALLBACK_VIEWPORT_HEIGHT },
+		overscan: 0,
+		getItemKey: (index) => rows[index]?.key ?? index,
+	});
+
+	let virtualItems = $derived($virtualizer.getVirtualItems());
+	let totalHeight = $derived($virtualizer.getTotalSize());
+	let firstVirtualItem = $derived(virtualItems[0]);
+	let lastVirtualItem = $derived(virtualItems[virtualItems.length - 1]);
+	let topSpacerHeight = $derived(firstVirtualItem?.start ?? 0);
+	let bottomSpacerHeight = $derived(
+		Math.max(0, totalHeight - ((lastVirtualItem?.start ?? 0) + (lastVirtualItem?.size ?? 0))),
+	);
+
+	$effect(() => {
+		const count = rows.length;
+		const scrollElement = viewportRef;
+		const rowOverscan = overscan;
+		untrack(() => {
+			$virtualizer.setOptions({
+				count,
+				getScrollElement: () => scrollElement,
+				estimateSize: estimateRowSize,
+				measureElement: measureRowElement,
+				observeElementRect: observeDiffTableElementRect,
+				initialRect: { width: 0, height: DIFF_TABLE_FALLBACK_VIEWPORT_HEIGHT },
+				overscan: rowOverscan,
+				getItemKey: (index) => rows[index]?.key ?? index,
+			});
+		});
+	});
+
+	function measureVirtualItem(element: HTMLTableSectionElement): { destroy: () => void } {
+		$virtualizer.measureElement(element);
+		return {
+			destroy() {
+				$virtualizer.measureElement(null);
+			},
+		};
+	}
+
 	function openRowContextMenu(event: MouseEvent, diffRow: SplitDiffRowView): void {
 		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
 		const isRight = event.clientX > rect.left + rect.width / 2;
@@ -82,8 +152,17 @@
 </script>
 
 <table class="w-full border-collapse">
-	<tbody>
-		{#each rows as diffRow (diffRow.key)}
+	{#if topSpacerHeight > 0}
+		<tbody aria-hidden="true">
+			<tr>
+				<td colspan={colCount} class="p-0 border-0" style:height={`${topSpacerHeight}px`}></td>
+			</tr>
+		</tbody>
+	{/if}
+	{#each virtualItems as virtualItem (rows[virtualItem.index]?.key ?? virtualItem.key)}
+		{@const diffRow = rows[virtualItem.index]}
+		{#if diffRow}
+			<tbody data-index={virtualItem.index} use:measureVirtualItem>
 			{#if diffRow.isHunkHeader}
 				<tr class="bg-diff-hunk-header">
 					<td colspan={colCount} class="px-2 py-1 text-muted-foreground">
@@ -278,6 +357,14 @@
 					/>
 				{/if}
 			{/if}
-		{/each}
-	</tbody>
+			</tbody>
+		{/if}
+	{/each}
+	{#if bottomSpacerHeight > 0}
+		<tbody aria-hidden="true">
+			<tr>
+				<td colspan={colCount} class="p-0 border-0" style:height={`${bottomSpacerHeight}px`}></td>
+			</tr>
+		</tbody>
+	{/if}
 </table>

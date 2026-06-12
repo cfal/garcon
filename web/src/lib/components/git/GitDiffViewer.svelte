@@ -89,6 +89,7 @@
 	let lineContextMenu = $state<{
 		open: (event: MouseEvent, target: GitDiffLineContextTarget | null) => void;
 	} | null>(null);
+	let diffViewport = $state<HTMLDivElement | null>(null);
 	let editingCommentId = $state<string | null>(null);
 	let editBody = $state('');
 
@@ -266,6 +267,7 @@
 		</div>
 
 		<div
+			bind:this={diffViewport}
 			class="flex-1 overflow-auto font-mono"
 			style:font-size={`${fontSize}px`}
 			style:line-height={`${rowLineHeight}px`}
@@ -277,9 +279,11 @@
 					{actionTarget}
 					{readOnly}
 					{headerFontSize}
+					{rowLineHeight}
 					colCount={splitColCount}
 					{composer}
 					{showLineActions}
+					viewportRef={diffViewport}
 					onCellClick={handleSplitCellClick}
 					onCellKeydown={handleSplitCellKeydown}
 					onOpenContextMenu={openLineContextMenu}
@@ -308,9 +312,11 @@
 					{actionTarget}
 					{readOnly}
 					{headerFontSize}
+					{rowLineHeight}
 					colCount={unifiedColCount}
 					{composer}
 					{showLineActions}
+					viewportRef={diffViewport}
 					onLineClick={handleUnifiedLineClick}
 					onLineKeydown={handleUnifiedLineKeydown}
 					onOpenContextMenu={openLineContextMenu}
