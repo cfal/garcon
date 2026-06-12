@@ -86,6 +86,9 @@ export interface NewChatRegistryEntry {
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
 export type ChatRegistryResolvedEntry = { id: string } & ChatRegistryEntry;
+export interface ChatRegistryUpdateOptions {
+  flush?: boolean;
+}
 export type ChatRemovedCallback = (chatId: string) => void;
 export type ChatReadUpdatedCallback = (chatId: string, lastReadAt: string | null | undefined) => void;
 export type ResolveNativePath = (session: ChatRegistryEntry) => Promise<string | null>;
@@ -98,6 +101,7 @@ export interface IChatRegistry {
   getChat(id: string): ChatRegistryEntry | null;
   addChat(entry: NewChatRegistryEntry): boolean;
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
+  updateChat(id: string, patch: ChatRegistryPatch, options: ChatRegistryUpdateOptions & { flush: true }): Promise<ChatRegistryResolvedEntry | null>;
   removeChat(id: string): boolean;
   getChatByNativePath(nativePath: string | null | undefined): [string, ChatRegistryEntry] | null;
   getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
@@ -389,10 +393,16 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     return true;
   }
 
-  updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null {
+  updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
+  updateChat(id: string, patch: ChatRegistryPatch, options: ChatRegistryUpdateOptions & { flush: true }): Promise<ChatRegistryResolvedEntry | null>;
+  updateChat(
+    id: string,
+    patch: ChatRegistryPatch,
+    options: ChatRegistryUpdateOptions = {},
+  ): ChatRegistryResolvedEntry | null | Promise<ChatRegistryResolvedEntry | null> {
     const registry = this.getRegistry();
     const existing = registry.sessions[id];
-    if (!existing) return null;
+    if (!existing) return options.flush ? Promise.resolve(null) : null;
     const normalizedPatch: ChatRegistryPatch = { ...patch };
     if ('permissionMode' in normalizedPatch) {
       normalizedPatch.permissionMode = normalizePermissionMode(normalizedPatch.permissionMode);
@@ -414,11 +424,15 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         existing[key] = normalizedPatch[key] as never;
       }
     }
-    this.#scheduleRegistrySave();
     if ('lastReadAt' in normalizedPatch) {
       this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
     }
-    return { id, ...existing };
+    const resolved = { id, ...existing };
+    if (options.flush) {
+      return this.#flushRegistrySave().then(() => resolved);
+    }
+    this.#scheduleRegistrySave();
+    return resolved;
   }
 
   removeChat(id: string): boolean {
@@ -472,11 +486,15 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
 
   // Flushes any pending registry save immediately. Called during shutdown.
   async flush(): Promise<void> {
+    await this.#flushRegistrySave();
+  }
+
+  async #flushRegistrySave(): Promise<void> {
     if (this.#pendingSaveTimer) {
       clearTimeout(this.#pendingSaveTimer);
       this.#pendingSaveTimer = null;
-      await this.saveRegistry(this.#registry || createEmptyRegistry());
     }
+    await this.saveRegistry(this.#registry || createEmptyRegistry());
   }
 
   #scheduleRegistrySave(): void {

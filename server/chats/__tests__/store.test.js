@@ -143,6 +143,11 @@ describe('ChatRegistry', () => {
       expect(result).toBeNull();
     });
 
+    it('resolves null for unknown chat when flush is requested', async () => {
+      const result = await registry.updateChat('unknown', { model: 'opus' }, { flush: true });
+      expect(result).toBeNull();
+    });
+
     it('normalizes invalid mode patches', () => {
       registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
 
@@ -166,6 +171,19 @@ describe('ChatRegistry', () => {
 
       registry.updateChat('c1', { nextForkOrdinal: 0 });
       expect(registry.getChat('c1')?.nextForkOrdinal).toBeUndefined();
+    });
+
+    it('flushes session identity patches immediately when requested', async () => {
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
+
+      await registry.updateChat('c1', {
+        agentSessionId: 'native-1',
+        nativePath: '/tmp/native-1.jsonl',
+      }, { flush: true });
+
+      const persisted = JSON.parse(await fs.readFile(path.join(tmpDir, 'chats.json'), 'utf8'));
+      expect(persisted.sessions.c1.agentSessionId).toBe('native-1');
+      expect(persisted.sessions.c1.nativePath).toBe('/tmp/native-1.jsonl');
     });
   });
 

@@ -163,7 +163,7 @@ function makeRegistry(args = {}) {
     getChat: mock(() => null),
     getChatByAgentSessionId: mock(() => null),
     listAllChats: mock(() => ({})),
-    updateChat: mock(() => undefined),
+    updateChat: mock((chatId, patch) => ({ id: chatId, ...patch })),
     onChatRemoved: mock(() => undefined),
     ...args.registry,
   };
@@ -604,6 +604,33 @@ describe('AgentRegistry session option hydration', () => {
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
       modelProtocol: 'openai-compatible',
+    }, { flush: true });
+  });
+
+  it('aborts a newly started runtime when session binding cannot be flushed', async () => {
+    const bindError = new Error('disk full');
+    const { registry, mockRegistry, codex } = makeRegistry({
+      registry: {
+        getChat: mock(() => ({
+          agentId: 'codex',
+          projectPath: '/proj',
+          model: 'gpt-5',
+          permissionMode: 'default',
+          thinkingMode: 'none',
+        })),
+        updateChat: mock(() => Promise.reject(bindError)),
+      },
     });
+
+    await expect(registry.startSession('123', 'hello', {})).rejects.toThrow('disk full');
+
+    expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+      agentSessionId: 'codex-session',
+      nativePath: null,
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+    }, { flush: true });
+    expect(codex.abort).toHaveBeenCalledWith('codex-session');
   });
 });

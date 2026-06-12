@@ -99,20 +99,33 @@ export class AgentRuntimeRouter {
     };
 
     this.#events.trackTurn(chatId, { ...opts, commandType: 'chat-start' });
-    let started: StartedAgentSession;
+    let started: StartedAgentSession | null = null;
     try {
       started = await agent.runtime.startSession(request);
+      const updated = await this.#registry.updateChat(chatId, {
+        agentSessionId: started.agentSessionId,
+        nativePath: started.nativePath,
+        apiProviderId: selection.apiProviderId,
+        modelEndpointId: selection.endpointId,
+        modelProtocol: selection.protocol,
+      }, { flush: true });
+      if (!updated) {
+        throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
+      }
     } catch (error) {
       this.#events.clearTurn(chatId);
+      if (started) {
+        try {
+          await agent.runtime.abort(started.agentSessionId);
+        } catch (abortError) {
+          console.warn(
+            `agents: failed to abort ${entry.agentId} session after registry bind failure:`,
+            abortError instanceof Error ? abortError.message : String(abortError),
+          );
+        }
+      }
       throw error;
     }
-    this.#registry.updateChat(chatId, {
-      agentSessionId: started.agentSessionId,
-      nativePath: started.nativePath,
-      apiProviderId: selection.apiProviderId,
-      modelEndpointId: selection.endpointId,
-      modelProtocol: selection.protocol,
-    });
   }
 
   async runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
