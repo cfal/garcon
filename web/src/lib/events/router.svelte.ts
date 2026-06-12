@@ -36,7 +36,6 @@ import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import { untrack } from 'svelte';
 import { normalizeEvent } from '$lib/ws/normalize';
 import { filterByChat } from './chat-filter';
-import { applyChatMessages } from './reducer';
 
 import { handleAgentComplete, handleAgentError, type LifecycleContext } from './handlers/lifecycle';
 import { handlePlanModeMessages, type PlanModeContext } from './handlers/plan-mode';
@@ -69,6 +68,7 @@ export interface EventRouterStores {
 	setCurrentChatId: (id: string | null) => void;
 	chatMessages: () => ChatMessage[];
 	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
+	appendChatMessagesByIdentity: (messages: ChatMessage[]) => void;
 	pendingUserInputs: () => PendingUserInput[];
 	setPendingUserInputs: (inputs: PendingUserInput[]) => void;
 	upsertPendingUserInput: (input: PendingUserInput) => void;
@@ -145,7 +145,9 @@ export function selectPreviewFromBatch(
 }
 
 // Coalesces output chunks from one drain pass into one message-array write.
-export function createAgentOutputAccumulator(stores: Pick<EventRouterStores, 'setChatMessages'>) {
+export function createAgentOutputAccumulator(
+	stores: Pick<EventRouterStores, 'appendChatMessagesByIdentity'>,
+) {
 	let pendingMessages: ChatMessage[] = [];
 
 	return {
@@ -157,7 +159,7 @@ export function createAgentOutputAccumulator(stores: Pick<EventRouterStores, 'se
 			if (pendingMessages.length === 0) return;
 			const messages = pendingMessages;
 			pendingMessages = [];
-			stores.setChatMessages((current) => applyChatMessages(current, messages));
+			stores.appendChatMessagesByIdentity(messages);
 		},
 	};
 }

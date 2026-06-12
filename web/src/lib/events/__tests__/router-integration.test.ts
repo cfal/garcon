@@ -16,6 +16,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		setCurrentChatId: vi.fn(),
 		chatMessages: () => [],
 		setChatMessages: vi.fn(),
+		appendChatMessagesByIdentity: vi.fn(),
 		pendingUserInputs: () => [],
 		setPendingUserInputs: vi.fn(),
 		upsertPendingUserInput: vi.fn(),
@@ -218,6 +219,9 @@ describe('event router integration', () => {
 		let currentMessages: ChatMessage[] = [];
 		const stores = createStores({
 			chatMessages: () => currentMessages,
+			appendChatMessagesByIdentity: (messages) => {
+				currentMessages = [...currentMessages, ...messages];
+			},
 			setChatMessages: (updater) => {
 				currentMessages = typeof updater === 'function' ? updater(currentMessages) : updater;
 			},

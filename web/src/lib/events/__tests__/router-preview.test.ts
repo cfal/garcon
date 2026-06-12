@@ -41,9 +41,9 @@ describe('createAgentOutputAccumulator', () => {
 		let current: ChatMessage[] = [];
 		let writes = 0;
 		const accumulator = createAgentOutputAccumulator({
-			setChatMessages: (updater) => {
+			appendChatMessagesByIdentity: (messages) => {
 				writes += 1;
-				current = typeof updater === 'function' ? updater(current) : updater;
+				current = [...current, ...messages];
 			},
 		});
 
@@ -73,7 +73,7 @@ describe('createAgentOutputAccumulator', () => {
 	it('does not write when no output was queued', () => {
 		let writes = 0;
 		const accumulator = createAgentOutputAccumulator({
-			setChatMessages: () => {
+			appendChatMessagesByIdentity: () => {
 				writes += 1;
 			},
 		});

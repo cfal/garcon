@@ -30,6 +30,59 @@ describe('ChatState', () => {
 		expect((state.chatMessages[1] as AssistantMessage).content).toBe('second');
 	});
 
+	it('appendMessagesByIdentity deduplicates across batches', () => {
+		const state = new ChatState();
+		const first = new UserMessage('2024-01-01T00:00:00Z', 'hello', undefined, {
+			clientRequestId: 'req-1',
+		});
+		const duplicate = new UserMessage('2024-01-01T00:00:01Z', 'hello again', undefined, {
+			clientRequestId: 'req-1',
+		});
+		const assistant = new AssistantMessage('2024-01-01T00:00:02Z', 'response');
+
+		state.appendMessagesByIdentity([first]);
+		state.appendMessagesByIdentity([duplicate, assistant]);
+
+		expect(state.chatMessages).toEqual([first, assistant]);
+	});
+
+	it('resetForNewChat clears identity tokens for the next chat', () => {
+		const state = new ChatState();
+		state.appendMessagesByIdentity([
+			new UserMessage('2024-01-01T00:00:00Z', 'old chat', undefined, {
+				clientRequestId: 'req-1',
+			}),
+		]);
+
+		state.resetForNewChat();
+		state.appendMessagesByIdentity([
+			new UserMessage('2024-01-01T00:00:00Z', 'new chat', undefined, {
+				clientRequestId: 'req-1',
+			}),
+		]);
+
+		expect(state.chatMessages).toHaveLength(1);
+		expect((state.chatMessages[0] as UserMessage).content).toBe('new chat');
+	});
+
+	it('setMessages rebuilds identity tokens for replacement transcripts', () => {
+		const state = new ChatState();
+		state.setMessages([
+			new UserMessage('2024-01-01T00:00:00Z', 'loaded', undefined, {
+				clientRequestId: 'req-1',
+			}),
+		]);
+
+		state.appendMessagesByIdentity([
+			new UserMessage('2024-01-01T00:00:01Z', 'duplicate echo', undefined, {
+				clientRequestId: 'req-1',
+			}),
+		]);
+
+		expect(state.chatMessages).toHaveLength(1);
+		expect((state.chatMessages[0] as UserMessage).content).toBe('loaded');
+	});
+
 	it('appendErrorMessage adds an error row', () => {
 		const state = new ChatState();
 

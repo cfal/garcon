@@ -3,6 +3,7 @@
 
 import { ErrorMessage, parseChatMessages, UserMessage, type ChatMessage } from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
+import { ChatMessageIdentityIndex } from '$shared/chat-message-identity';
 import { LocalChatSnapshotCache } from './chat-snapshot-cache';
 import { getChatMessages } from '$lib/api/chats.js';
 
@@ -23,6 +24,7 @@ export class ChatState {
 	isUserScrolledUp = $state(false);
 	loadStatus = $state<ChatLoadStatus>('idle');
 	loadError = $state<string | null>(null);
+	#messageIdentityIndex = new ChatMessageIdentityIndex();
 
 	#displayMessages = $derived.by(() => {
 		const combined = [
@@ -140,6 +142,7 @@ export class ChatState {
 			}
 
 			this.#messagesOffset += messages.length;
+			this.#messageIdentityIndex.addMany(messages);
 			this.chatMessages = [...messages, ...this.chatMessages];
 			this.visibleMessageCount += messages.length;
 			return true;
@@ -154,7 +157,17 @@ export class ChatState {
 
 	/** Appends new messages to the end of the array. */
 	appendMessages(msgs: ChatMessage[]): void {
+		if (msgs.length === 0) return;
+		this.#messageIdentityIndex.addMany(msgs);
 		this.chatMessages = [...this.chatMessages, ...msgs];
+	}
+
+	/** Appends only messages not already represented by the identity index. */
+	appendMessagesByIdentity(msgs: ChatMessage[]): void {
+		if (msgs.length === 0) return;
+		const nextMessages = this.#messageIdentityIndex.takeNew(msgs);
+		if (nextMessages.length === 0) return;
+		this.chatMessages = [...this.chatMessages, ...nextMessages];
 	}
 
 	/** Appends a local error row to the durable message list. */
@@ -164,6 +177,7 @@ export class ChatState {
 
 	/** Replaces the entire durable message array. */
 	setMessages(msgs: ChatMessage[]): void {
+		this.#messageIdentityIndex.reset(msgs);
 		this.chatMessages = msgs;
 	}
 
@@ -199,6 +213,7 @@ export class ChatState {
 
 	/** Clears all messages and resets pagination state. */
 	clearMessages(): void {
+		this.#messageIdentityIndex.reset();
 		this.chatMessages = [];
 		this.pendingUserInputs = [];
 		this.#messagesOffset = 0;
@@ -224,6 +239,7 @@ export class ChatState {
 
 	/** Resets scroll and pagination state for a new chat selection. */
 	resetForNewChat(): void {
+		this.#messageIdentityIndex.reset();
 		this.chatMessages = [];
 		this.pendingUserInputs = [];
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
@@ -244,7 +260,7 @@ export class ChatState {
 	restoreMessages(chatId: string): boolean {
 		const restored = this.snapshotCache.restore(chatId);
 		if (!restored) return false;
-		this.chatMessages = restored.messages;
+		this.setMessages(restored.messages);
 		return true;
 	}
 

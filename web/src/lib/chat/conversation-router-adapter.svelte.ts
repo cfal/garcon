@@ -51,12 +51,11 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 		setSelectedChatId: (id) => deps.sessions.setSelectedChatId(id),
 		chatMessages: () => deps.chatState.chatMessages,
 		setChatMessages: (updater) => {
-			if (typeof updater === 'function') {
-				deps.chatState.chatMessages = updater(deps.chatState.chatMessages);
-			} else {
-				deps.chatState.chatMessages = updater;
-			}
+			const nextMessages =
+				typeof updater === 'function' ? updater(deps.chatState.chatMessages) : updater;
+			deps.chatState.setMessages(nextMessages);
 		},
+		appendChatMessagesByIdentity: (messages) => deps.chatState.appendMessagesByIdentity(messages),
 		pendingUserInputs: () => deps.chatState.pendingUserInputs,
 		setPendingUserInputs: (inputs) => deps.chatState.setPendingUserInputs(inputs),
 		upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
