@@ -48,7 +48,7 @@ type QueueDep = Pick<
 >;
 
 interface SettingsDep {
-  getUiSettings(): Promise<{ chatTitle?: unknown } | null | undefined>;
+  getUiSettings(): { chatTitle?: unknown } | null | undefined;
   getChatName(chatId: string): string | null | undefined;
   setSessionName(chatId: string, title: string): Promise<unknown>;
   setLastChatDefaults(defaults: Record<string, unknown>): Promise<void>;

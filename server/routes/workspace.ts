@@ -48,46 +48,23 @@ export async function buildRemoteSettingsSnapshot({
   agents: AgentRegistryServiceContract;
   telegramSettings?: TelegramSettingsStore | null;
 }) {
-  const settingsSource = await settings.getRemoteSettingsSnapshotSource();
+  const settingsSource = settings.getRemoteSettingsSnapshotSource();
   const generationContext = await resolveGenerationContext(agents);
 
-  const [
-    version, ui, paths, pinnedChatIds, lastAgentId, lastProjectPath, lastModel,
-    lastPermissionMode, lastThinkingMode, lastClaudeThinkingMode, lastAmpAgentMode,
-    lastApiProviderId, lastModelEndpointId, lastModelProtocol,
-  ] = settingsSource
-    ? [
-      settingsSource.version,
-      asPlainObject(settingsSource.ui),
-      settingsSource.paths,
-      settingsSource.pinnedChatIds,
-      settingsSource.lastAgentId,
-      settingsSource.lastProjectPath,
-      settingsSource.lastModel,
-      settingsSource.lastPermissionMode,
-      settingsSource.lastThinkingMode,
-      settingsSource.lastClaudeThinkingMode,
-      settingsSource.lastAmpAgentMode,
-      settingsSource.lastApiProviderId ?? null,
-      settingsSource.lastModelEndpointId ?? null,
-      settingsSource.lastModelProtocol ?? null,
-    ]
-    : await Promise.all([
-      settings.getRemoteSettingsVersion(),
-      settings.getUiSettings(),
-      settings.getPathSettings(),
-      settings.getPinnedChatIds(),
-      settings.getLastAgentId(),
-      settings.getLastProjectPath(),
-      settings.getLastModel(),
-      settings.getLastPermissionMode(),
-      settings.getLastThinkingMode(),
-      settings.getLastClaudeThinkingMode(),
-      settings.getLastAmpAgentMode(),
-      settings.getLastApiProviderId(),
-      settings.getLastModelEndpointId(),
-      settings.getLastModelProtocol(),
-    ]);
+  const version = settingsSource.version;
+  const ui = asPlainObject(settingsSource.ui);
+  const paths = settingsSource.paths;
+  const pinnedChatIds = settingsSource.pinnedChatIds;
+  const lastAgentId = settingsSource.lastAgentId;
+  const lastProjectPath = settingsSource.lastProjectPath;
+  const lastModel = settingsSource.lastModel;
+  const lastPermissionMode = settingsSource.lastPermissionMode;
+  const lastThinkingMode = settingsSource.lastThinkingMode;
+  const lastClaudeThinkingMode = settingsSource.lastClaudeThinkingMode;
+  const lastAmpAgentMode = settingsSource.lastAmpAgentMode;
+  const lastApiProviderId = settingsSource.lastApiProviderId ?? null;
+  const lastModelEndpointId = settingsSource.lastModelEndpointId ?? null;
+  const lastModelProtocol = settingsSource.lastModelProtocol ?? null;
 
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({

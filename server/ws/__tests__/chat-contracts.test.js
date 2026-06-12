@@ -71,7 +71,7 @@ const mockPendingInputs = {
 };
 
 const mockSettings = {
-  getUiSettings: mock(() => Promise.resolve(null)),
+  getUiSettings: mock(() => null),
   getChatName: mock(() => null),
   setSessionName: mock(() => Promise.resolve(undefined)),
   setLastChatDefaults: mock(() => Promise.resolve(undefined)),

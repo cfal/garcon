@@ -33,9 +33,9 @@ const settings = {
   getChatName: mock(() => null),
   setSessionName: mock(() => Promise.resolve(undefined)),
   removeSessionName: mock(() => Promise.resolve(undefined)),
-  getPinnedChatIds: mock(() => Promise.resolve([])),
-  getNormalChatIds: mock(() => Promise.resolve([])),
-  getArchivedChatIds: mock(() => Promise.resolve([])),
+  getPinnedChatIds: mock(() => []),
+  getNormalChatIds: mock(() => []),
+  getArchivedChatIds: mock(() => []),
   removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
   insertNormalChatIdTop: mock(() => Promise.resolve(undefined)),
   ensureInNormal: mock(() => Promise.resolve(undefined)),
@@ -110,7 +110,7 @@ describe('GET /api/chats title resolution', () => {
     metaMap.set('100', { firstMessage: 'fallback message', createdAt: null, lastActivity: null, lastMessage: '' });
     metadata.listAllChatMetadata.mockImplementation(() => metaMap);
     settings.getChatName.mockImplementation(() => 'Custom Title');
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getNormalChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();
@@ -128,7 +128,7 @@ describe('GET /api/chats title resolution', () => {
     metaMap.set('200', { firstMessage: 'Hello world', createdAt: null, lastActivity: null, lastMessage: '' });
     metadata.listAllChatMetadata.mockImplementation(() => metaMap);
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['200']));
+    settings.getNormalChatIds.mockImplementation(() => ['200']);
 
     const response = await handler();
     const body = await response.json();
@@ -143,7 +143,7 @@ describe('GET /api/chats title resolution', () => {
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['300']));
+    settings.getNormalChatIds.mockImplementation(() => ['300']);
 
     const response = await handler();
     const body = await response.json();
@@ -157,9 +157,9 @@ describe('GET /api/chats title resolution', () => {
       '400': { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
-    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve([]));
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve([]));
-    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve([]));
+    settings.getPinnedChatIds.mockImplementation(() => []);
+    settings.getNormalChatIds.mockImplementation(() => []);
+    settings.getArchivedChatIds.mockImplementation(() => []);
 
     const response = await handler();
     const body = await response.json();
@@ -180,9 +180,9 @@ describe('GET /api/chats title resolution', () => {
       '600': { agentId: 'claude', projectPath: '/fast', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
-    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve([]));
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['500', '600']));
-    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve([]));
+    settings.getPinnedChatIds.mockImplementation(() => []);
+    settings.getNormalChatIds.mockImplementation(() => ['500', '600']);
+    settings.getArchivedChatIds.mockImplementation(() => []);
     pathCache.isProjectPathAvailable.mockImplementation((projectPath) => {
       if (projectPath === '/slow') {
         resolveFirstCall();

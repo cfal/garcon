@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, mock } from 'bun:test';
+import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
@@ -6,10 +6,18 @@ class MalformedJsonError extends Error {
 
 const parseJsonBody = mock(() => Promise.resolve({}));
 const generateCommitMessageForFiles = mock(() => Promise.resolve({ message: 'feat: generated' }));
+const assertRealWithinProjectBase = mock((targetPath) => Promise.resolve(targetPath));
+const isProjectBoundaryError = mock(() => false);
 
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody,
   MalformedJsonError,
+}));
+
+mock.module('../../lib/path-boundary.ts', () => ({
+  assertRealWithinProjectBase,
+  isProjectBoundaryError,
+  projectBoundaryErrorResponse: mock(() => Response.json({ error: 'boundary' }, { status: 403 })),
 }));
 
 mock.module('../../git/git-service.js', () => ({
@@ -39,23 +47,10 @@ const agents = {
 };
 
 const settings = {
-  getUiSettings: mock(() => Promise.resolve({})),
+  getUiSettings: mock(() => ({})),
 };
 
 const routes = createGitRoutes(agents, settings);
-const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
-
-beforeEach(() => {
-  process.env.GARCON_PROJECT_BASE_DIR = '/';
-});
-
-afterEach(() => {
-  if (originalProjectBaseDir === undefined) {
-    delete process.env.GARCON_PROJECT_BASE_DIR;
-  } else {
-    process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
-  }
-});
 
 function makeRequest(body) {
   return new Request('http://localhost/api/v1/git/generate-commit-message', {
@@ -78,6 +73,10 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     agents.hasAgent.mockClear();
     agents.hasAgent.mockImplementation((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId));
     settings.getUiSettings.mockClear();
+    assertRealWithinProjectBase.mockClear();
+    assertRealWithinProjectBase.mockImplementation((targetPath) => Promise.resolve(targetPath));
+    isProjectBoundaryError.mockClear();
+    isProjectBoundaryError.mockImplementation(() => false);
   });
 
   it('uses persisted commit message settings when the request omits them', async () => {
@@ -85,7 +84,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       project: '/proj',
       files: ['src/a.ts'],
     }));
-    settings.getUiSettings.mockImplementation(() => Promise.resolve({
+    settings.getUiSettings.mockImplementation(() => ({
       commitMessage: {
         enabled: true,
         agentId: 'amp',
@@ -118,7 +117,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       model: 'gpt-5.4',
       customPrompt: '',
     }));
-    settings.getUiSettings.mockImplementation(() => Promise.resolve({
+    settings.getUiSettings.mockImplementation(() => ({
       commitMessage: {
         enabled: true,
         agentId: 'amp',

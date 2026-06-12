@@ -42,7 +42,7 @@ function makeService() {
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
   };
   const settings = {
-    getUiSettings: mock(() => Promise.resolve(null)),
+    getUiSettings: mock(() => null),
     getChatName: mock(() => null),
     setSessionName: mock(() => Promise.resolve(undefined)),
     setLastChatDefaults: mock(() => Promise.resolve(undefined)),

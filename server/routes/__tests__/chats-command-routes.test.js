@@ -78,9 +78,9 @@ function createRouteAgent(sessionOverrides = {}) {
     removeSessionName: mock(() => Promise.resolve(undefined)),
     togglePin: mock(() => Promise.resolve({ isPinned: true })),
     toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
-    getPinnedChatIds: mock(() => Promise.resolve([])),
-    getNormalChatIds: mock(() => Promise.resolve([])),
-    getArchivedChatIds: mock(() => Promise.resolve([])),
+    getPinnedChatIds: mock(() => []),
+    getNormalChatIds: mock(() => []),
+    getArchivedChatIds: mock(() => []),
     reorderWindow: mock(() => Promise.resolve({ success: true })),
     reorderRelative: mock(() => Promise.resolve({ success: true })),
   };

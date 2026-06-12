@@ -37,9 +37,9 @@ const settings = {
   getChatName: mock(() => null),
   setSessionName: mock(() => Promise.resolve(undefined)),
   removeSessionName: mock(() => Promise.resolve(undefined)),
-  getPinnedChatIds: mock(() => Promise.resolve([])),
-  getNormalChatIds: mock(() => Promise.resolve([])),
-  getArchivedChatIds: mock(() => Promise.resolve([])),
+  getPinnedChatIds: mock(() => []),
+  getNormalChatIds: mock(() => []),
+  getArchivedChatIds: mock(() => []),
   removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
   insertNormalChatIdTop: mock(() => Promise.resolve(undefined)),
   ensureInNormal: mock(() => Promise.resolve(undefined)),
@@ -245,6 +245,6 @@ describe('POST /api/v1/chats/fork', () => {
 
     expect(response.status).toBe(500);
     expect(body.success).toBe(false);
-    expect(body.error).toBe('Disk full');
+    expect(body.error).toBe('Internal server error');
   });
 });

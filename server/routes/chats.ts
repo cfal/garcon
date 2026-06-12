@@ -44,10 +44,10 @@ import type {
 } from '../../common/chat-command-contracts.ts';
 
 interface SettingsDep {
-  getPinnedChatIds(): Promise<string[]>;
-  getNormalChatIds(): Promise<string[]>;
-  getArchivedChatIds(): Promise<string[]>;
-  getUiSettings(): Promise<{ chatTitle?: unknown } | null | undefined>;
+  getPinnedChatIds(): string[];
+  getNormalChatIds(): string[];
+  getArchivedChatIds(): string[];
+  getUiSettings(): { chatTitle?: unknown } | null | undefined;
   getChatName(chatId: string): string | null;
   setSessionName(chatId: string, title: string): Promise<unknown>;
   setLastChatDefaults(defaults: Record<string, unknown>): Promise<void>;
@@ -196,10 +196,9 @@ export default function createChatRoutes({
       const sessions = registry.listAllChats();
       const metadataMap = metadata.listAllChatMetadata();
 
-      let pinnedList: string[], normalList: string[], archivedList: string[];
-      try { pinnedList = await settings.getPinnedChatIds(); } catch { pinnedList = []; }
-      try { normalList = await settings.getNormalChatIds(); } catch { normalList = []; }
-      try { archivedList = await settings.getArchivedChatIds(); } catch { archivedList = []; }
+      const pinnedList = settings.getPinnedChatIds();
+      const normalList = settings.getNormalChatIds();
+      const archivedList = settings.getArchivedChatIds();
 
       const pinnedIds = new Set(pinnedList);
       const archivedIds = new Set(archivedList);

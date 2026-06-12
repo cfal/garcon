@@ -4,10 +4,9 @@ import path from 'path';
 import os from 'os';
 
 const testBasePath = path.join(os.homedir(), 'garcon-chats-validate-start-test');
-const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
 
 mock.module('../../config.js', () => ({
-  getProjectBasePath: mock(() => testBasePath),
+  getProjectBasePath: mock(() => os.homedir()),
 }));
 
 import createChatRoutes from '../chats.js';
@@ -27,9 +26,9 @@ const settings = {
   removeSessionName: mock(() => Promise.resolve(undefined)),
   togglePin: mock(() => Promise.resolve({ isPinned: true })),
   toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
-  getPinnedChatIds: mock(() => Promise.resolve([])),
-  getNormalChatIds: mock(() => Promise.resolve([])),
-  getArchivedChatIds: mock(() => Promise.resolve([])),
+  getPinnedChatIds: mock(() => []),
+  getNormalChatIds: mock(() => []),
+  getArchivedChatIds: mock(() => []),
   reorderWindow: mock(() => Promise.resolve({ success: true })),
   reorderRelative: mock(() => Promise.resolve({ success: true })),
 };
@@ -88,16 +87,10 @@ async function runGit(cwd, args) {
 
 describe('GET /api/v1/chats/validate-start', () => {
   beforeEach(async () => {
-    process.env.GARCON_PROJECT_BASE_DIR = testBasePath;
     await ensureCleanBase();
   });
 
   afterEach(async () => {
-    if (originalProjectBaseDir === undefined) {
-      delete process.env.GARCON_PROJECT_BASE_DIR;
-    } else {
-      process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
-    }
     await fs.rm(testBasePath, { recursive: true, force: true });
   });
 

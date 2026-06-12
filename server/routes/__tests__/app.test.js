@@ -16,32 +16,52 @@ mock.module('../../config.js', () => ({
 import createWorkspaceRoutes from '../workspace.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
+function remoteSettingsSource(overrides = {}) {
+  return {
+    version: 0,
+    ui: {},
+    paths: {},
+    pinnedChatIds: [],
+    lastAgentId: 'claude',
+    lastProjectPath: '',
+    lastModel: '',
+    lastApiProviderId: null,
+    lastModelEndpointId: null,
+    lastModelProtocol: null,
+    lastPermissionMode: 'default',
+    lastThinkingMode: 'none',
+    lastClaudeThinkingMode: 'auto',
+    lastAmpAgentMode: 'smart',
+    ...overrides,
+  };
+}
+
 function createMockCtx() {
   return {
     settings: {
-      getRemoteSettingsSnapshotSource: mock(() => Promise.resolve(null)),
+      getRemoteSettingsSnapshotSource: mock(() => remoteSettingsSource()),
       setSessionName: mock(() => Promise.resolve(undefined)),
-      getRemoteSettingsVersion: mock(() => Promise.resolve(0)),
-      getUiSettings: mock(() => Promise.resolve({})),
+      getRemoteSettingsVersion: mock(() => 0),
+      getUiSettings: mock(() => ({})),
       setUiSettings: mock(() => Promise.resolve({})),
-      getPathSettings: mock(() => Promise.resolve({})),
+      getPathSettings: mock(() => ({})),
       setPathSettings: mock(() => Promise.resolve({})),
-      getPinnedChatIds: mock(() => Promise.resolve([])),
-      getLastAgentId: mock(() => Promise.resolve('claude')),
-      getLastProjectPath: mock(() => Promise.resolve('')),
-      getLastModel: mock(() => Promise.resolve('')),
-      getLastPermissionMode: mock(() => Promise.resolve('default')),
-      getLastThinkingMode: mock(() => Promise.resolve('none')),
-      getLastClaudeThinkingMode: mock(() => Promise.resolve('auto')),
-      getLastAmpAgentMode: mock(() => Promise.resolve('smart')),
-      getLastApiProviderId: mock(() => Promise.resolve(null)),
-      getLastModelEndpointId: mock(() => Promise.resolve(null)),
-      getLastModelProtocol: mock(() => Promise.resolve(null)),
-      getFolders: mock(() => Promise.resolve([])),
+      getPinnedChatIds: mock(() => []),
+      getLastAgentId: mock(() => 'claude'),
+      getLastProjectPath: mock(() => ''),
+      getLastModel: mock(() => ''),
+      getLastPermissionMode: mock(() => 'default'),
+      getLastThinkingMode: mock(() => 'none'),
+      getLastClaudeThinkingMode: mock(() => 'auto'),
+      getLastAmpAgentMode: mock(() => 'smart'),
+      getLastApiProviderId: mock(() => null),
+      getLastModelEndpointId: mock(() => null),
+      getLastModelProtocol: mock(() => null),
+      getFolders: mock(() => []),
       addFolder: mock(() => Promise.resolve(undefined)),
       updateFolder: mock(() => Promise.resolve(undefined)),
       removeFolder: mock(() => Promise.resolve(false)),
-      getSavedSearches: mock(() => Promise.resolve([])),
+      getSavedSearches: mock(() => []),
       addSavedSearch: mock(() => Promise.resolve(undefined)),
       updateSavedSearch: mock(() => Promise.resolve(undefined)),
       removeSavedSearch: mock(() => Promise.resolve(false)),
@@ -62,6 +82,10 @@ function createMockCtx() {
 
 const ctx = createMockCtx();
 const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.agents);
+
+beforeEach(() => {
+  ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource());
+});
 
 function makeRequest(url, method, body) {
   return new Request(url, {
@@ -166,16 +190,18 @@ describe('GET /api/app/settings', () => {
   });
 
   it('returns ui, paths, pinnedChatIds, and recent startup settings', async () => {
-    ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(7));
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({ theme: 'dark' }));
-    ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({ pinnedProjectPaths: ['/home'], browseStartPath: '/workspace' }));
-    ctx.settings.getPinnedChatIds.mockImplementation(() => Promise.resolve(['a', 'b']));
-    ctx.settings.getLastAgentId.mockImplementation(() => Promise.resolve('codex'));
-    ctx.settings.getLastProjectPath.mockImplementation(() => Promise.resolve('/workspace/project'));
-    ctx.settings.getLastModel.mockImplementation(() => Promise.resolve('gpt-5.4'));
-    ctx.settings.getLastPermissionMode.mockImplementation(() => Promise.resolve('acceptEdits'));
-    ctx.settings.getLastThinkingMode.mockImplementation(() => Promise.resolve('think-hard'));
-    ctx.settings.getLastClaudeThinkingMode.mockImplementation(() => Promise.resolve('on'));
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      version: 7,
+      ui: { theme: 'dark' },
+      paths: { pinnedProjectPaths: ['/home'], browseStartPath: '/workspace' },
+      pinnedChatIds: ['a', 'b'],
+      lastAgentId: 'codex',
+      lastProjectPath: '/workspace/project',
+      lastModel: 'gpt-5.4',
+      lastPermissionMode: 'acceptEdits',
+      lastThinkingMode: 'think-hard',
+      lastClaudeThinkingMode: 'on',
+    }));
 
     const response = await handler();
     const body = await response.json();
@@ -203,8 +229,7 @@ describe('GET /api/app/settings', () => {
   });
 
   it('auto-enables generation defaults from authenticated agent priority', async () => {
-    ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(1));
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({ version: 1 }));
     ctx.agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: true },
@@ -228,14 +253,16 @@ describe('GET /api/app/settings', () => {
   });
 
   it('preserves persisted commitMessage extra fields in uiEffective', async () => {
-    ctx.settings.getRemoteSettingsVersion.mockImplementation(() => Promise.resolve(3));
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({
-      commitMessage: {
-        enabled: true,
-        agentId: 'codex',
-        model: 'gpt-5.5',
-        customPrompt: 'Write a short message',
-        useCommonDirPrefix: true,
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      version: 3,
+      ui: {
+        commitMessage: {
+          enabled: true,
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          customPrompt: 'Write a short message',
+          useCommonDirPrefix: true,
+        },
       },
     }));
 
@@ -276,7 +303,7 @@ describe('PUT /api/app/settings', () => {
   it('patches ui settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { fontSize: 14 } }));
     ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({ fontSize: 14 }));
-    ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
+    ctx.settings.getPathSettings.mockImplementation(() => ({}));
 
     const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { ui: { fontSize: 14 } }));
     const body = await response.json();
@@ -287,7 +314,7 @@ describe('PUT /api/app/settings', () => {
 
   it('patches paths settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ paths: { lastDir: '/tmp' } }));
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
+    ctx.settings.getUiSettings.mockImplementation(() => ({}));
     ctx.settings.setPathSettings.mockImplementation(() => Promise.resolve({ lastDir: '/tmp' }));
 
     const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { paths: { lastDir: '/tmp' } }));
@@ -301,7 +328,7 @@ describe('PUT /api/app/settings', () => {
     const chatTitleConfig = { enabled: true, agentId: 'opencode', model: 'anthropic/claude-sonnet-4-5' };
     parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { chatTitle: chatTitleConfig } }));
     ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({ chatTitle: chatTitleConfig }));
-    ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
+    ctx.settings.getPathSettings.mockImplementation(() => ({}));
 
     const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { ui: { chatTitle: chatTitleConfig } }));
     const body = await response.json();
@@ -312,8 +339,8 @@ describe('PUT /api/app/settings', () => {
 
   it('does not patch last startup settings through app settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard', lastClaudeThinkingMode: 'off' }));
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve({}));
-    ctx.settings.getPathSettings.mockImplementation(() => Promise.resolve({}));
+    ctx.settings.getUiSettings.mockImplementation(() => ({}));
+    ctx.settings.getPathSettings.mockImplementation(() => ({}));
 
     const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard', lastClaudeThinkingMode: 'off' }));
     const body = await response.json();
@@ -468,7 +495,8 @@ describe('Telegram token settings API', () => {
     const { routes, telegramNotifier, telegramSettings } = createTelegramRoutes();
     let uiSettings = { notifications: { telegram: { enabled: true } } };
     telegramNotifier.isConfigured = true;
-    ctx.settings.getUiSettings.mockImplementation(() => Promise.resolve(uiSettings));
+    ctx.settings.getUiSettings.mockImplementation(() => uiSettings);
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({ ui: uiSettings }));
     ctx.settings.setUiSettings.mockImplementation((patch) => {
       uiSettings = { ...uiSettings, ...patch };
       return Promise.resolve(uiSettings);

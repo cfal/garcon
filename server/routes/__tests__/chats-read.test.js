@@ -32,9 +32,9 @@ const settings = {
   getChatName: mock(() => null),
   setSessionName: mock(() => Promise.resolve(undefined)),
   removeSessionName: mock(() => Promise.resolve(undefined)),
-  getPinnedChatIds: mock(() => Promise.resolve([])),
-  getNormalChatIds: mock(() => Promise.resolve([])),
-  getArchivedChatIds: mock(() => Promise.resolve([])),
+  getPinnedChatIds: mock(() => []),
+  getNormalChatIds: mock(() => []),
+  getArchivedChatIds: mock(() => []),
   removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
   insertNormalChatIdTop: mock(() => Promise.resolve(undefined)),
   ensureInNormal: mock(() => Promise.resolve(undefined)),
@@ -255,7 +255,7 @@ describe('GET /api/chats includes read state', () => {
     });
     metadata.listAllChatMetadata.mockImplementation(() => metaMap);
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getNormalChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();
@@ -279,7 +279,7 @@ describe('GET /api/chats includes read state', () => {
     });
     metadata.listAllChatMetadata.mockImplementation(() => metaMap);
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getNormalChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();
@@ -293,7 +293,7 @@ describe('GET /api/chats includes read state', () => {
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getNormalChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();
@@ -308,7 +308,7 @@ describe('GET /api/chats includes read state', () => {
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getNormalChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();
@@ -324,7 +324,7 @@ describe('GET /api/chats includes read state', () => {
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getNormalChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();
@@ -347,7 +347,7 @@ describe('GET /api/chats includes read state', () => {
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getNormalChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();

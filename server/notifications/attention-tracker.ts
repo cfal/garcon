@@ -56,7 +56,7 @@ interface QueueManagerDep {
 }
 
 interface SettingsStoreDep {
-  getUiSettings(): Promise<Record<string, unknown>>;
+  getUiSettings(): Record<string, unknown>;
   getChatName(chatId: string): string | null;
 }
 
