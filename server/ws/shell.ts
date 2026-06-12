@@ -24,6 +24,7 @@ import {
 } from '../lib/path-boundary.ts';
 
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
+const MAX_REPLAY_BUFFER_BYTES = 1024 * 1024;
 
 export interface ShellSocketState {
   shellProcess: IPty | null;
@@ -41,8 +42,10 @@ interface PtySession {
   pty: IPty;
   ws: ShellWebSocket | null;
   buffer: string[];
+  bufferBytes: number;
   timeoutId: ReturnType<typeof setTimeout> | null;
   projectPath: string;
+  sessionPolicy: 'reuse' | 'fresh';
 }
 
 interface ShellHandler {
@@ -54,6 +57,7 @@ interface ShellHandler {
 interface StartSessionOptions {
   ptySessionKey: string;
   projectPath: string;
+  sessionPolicy: 'reuse' | 'fresh';
   initialCommand?: string;
   cols: number;
   rows: number;
@@ -191,6 +195,7 @@ export class ShellManager {
     this.#startSession(ws, shellState, {
       ptySessionKey,
       projectPath,
+      sessionPolicy: message.sessionPolicy,
       initialCommand,
       cols: message.cols,
       rows: message.rows,
@@ -213,11 +218,9 @@ export class ShellManager {
 
     sendWebSocketJson(ws, shellOutput('\x1b[36m[Reconnected to existing session]\x1b[0m\r\n'));
 
-    if (existingSession.buffer && existingSession.buffer.length > 0) {
-      logger.info(`shell: sending ${existingSession.buffer.length} buffered messages`);
-      existingSession.buffer.forEach((bufferedData) => {
-        sendWebSocketJson(ws, shellOutput(bufferedData));
-      });
+    if (existingSession.buffer.length > 0) {
+      logger.info(`shell: replaying ${existingSession.bufferBytes} buffered bytes`);
+      sendWebSocketJson(ws, shellOutput(existingSession.buffer.join('')));
     }
 
     existingSession.ws = ws;
@@ -226,7 +229,7 @@ export class ShellManager {
   #startSession(
     ws: ShellWebSocket,
     shellState: ShellSocketState,
-    { ptySessionKey, projectPath, initialCommand, cols, rows }: StartSessionOptions,
+    { ptySessionKey, projectPath, sessionPolicy, initialCommand, cols, rows }: StartSessionOptions,
   ): void {
     logger.info('shell: starting in:', projectPath);
     if (initialCommand) {
@@ -271,8 +274,10 @@ export class ShellManager {
         pty: shellProcess,
         ws,
         buffer: [],
+        bufferBytes: 0,
         timeoutId: null,
         projectPath,
+        sessionPolicy,
       });
 
       this.#wirePtySession(shellState, ptySessionKey, shellProcess);
@@ -287,12 +292,7 @@ export class ShellManager {
       const session = this.#sessions.get(ptySessionKey);
       if (!session) return;
 
-      if (session.buffer.length < 5000) {
-        session.buffer.push(chunk);
-      } else {
-        session.buffer.shift();
-        session.buffer.push(chunk);
-      }
+      this.#appendReplayBuffer(session, chunk);
 
       if (session.ws) {
         sendWebSocketJson(session.ws, shellOutput(chunk));
@@ -318,11 +318,29 @@ export class ShellManager {
     });
   }
 
+  #appendReplayBuffer(session: PtySession, chunk: string): void {
+    let nextChunk = chunk;
+    let chunkBytes = Buffer.byteLength(nextChunk, 'utf8');
+    if (chunkBytes > MAX_REPLAY_BUFFER_BYTES) {
+      const bytes = Buffer.from(nextChunk, 'utf8');
+      nextChunk = bytes.subarray(bytes.length - MAX_REPLAY_BUFFER_BYTES).toString('utf8');
+      chunkBytes = Buffer.byteLength(nextChunk, 'utf8');
+    }
+
+    session.buffer.push(nextChunk);
+    session.bufferBytes += chunkBytes;
+    while (session.bufferBytes > MAX_REPLAY_BUFFER_BYTES && session.buffer.length > 0) {
+      const removed = session.buffer.shift();
+      if (removed) session.bufferBytes -= Buffer.byteLength(removed, 'utf8');
+    }
+  }
+
   #handleInput(ws: ShellWebSocket, message: ShellInputRequest): void {
     const shellState = this.#getShellState(ws);
-    if (shellState.shellProcess && shellState.shellProcess.write) {
+    const session = shellState.ptySessionKey ? this.#sessions.get(shellState.ptySessionKey) : null;
+    if (session?.ws === ws && session.pty.write) {
       try {
-        shellState.shellProcess.write(message.data);
+        session.pty.write(message.data);
       } catch (error) {
         logger.error('Error writing to shell:', error);
       }
@@ -333,9 +351,10 @@ export class ShellManager {
 
   #handleResize(ws: ShellWebSocket, message: ShellResizeRequest): void {
     const shellState = this.#getShellState(ws);
-    if (shellState.shellProcess && shellState.shellProcess.resize) {
+    const session = shellState.ptySessionKey ? this.#sessions.get(shellState.ptySessionKey) : null;
+    if (session?.ws === ws && session.pty.resize) {
       logger.info('Terminal resize requested:', message.cols, 'x', message.rows);
-      shellState.shellProcess.resize(message.cols, message.rows);
+      session.pty.resize(message.cols, message.rows);
     }
   }
 
@@ -347,6 +366,16 @@ export class ShellManager {
 
     const session = this.#sessions.get(ptySessionKey);
     if (session) {
+      if (session.ws !== ws) return;
+      if (session.sessionPolicy === 'fresh') {
+        logger.info('shell: fresh PTY session closed, killing process:', ptySessionKey);
+        this.#killSession(ptySessionKey, session);
+        this.#sessions.delete(ptySessionKey);
+        shellState.shellProcess = null;
+        shellState.ptySessionKey = null;
+        return;
+      }
+
       logger.info('shell: PTY session kept alive, will timeout in 30 minutes:', ptySessionKey);
       session.ws = null;
       if (session.timeoutId) clearTimeout(session.timeoutId);
