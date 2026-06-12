@@ -19,4 +19,18 @@ describe('createActionSignal', () => {
 		expect(second).toHaveBeenCalledOnce();
 		expect(second).toHaveBeenCalledWith('one');
 	});
+
+	it('does not retain unsubscribed callbacks across resubscribe cycles', () => {
+		const signal = createActionSignal();
+		const first = vi.fn();
+		const second = vi.fn();
+
+		const unsubscribeFirst = signal.subscribe(first);
+		unsubscribeFirst();
+		signal.subscribe(second);
+		signal.emit();
+
+		expect(first).not.toHaveBeenCalled();
+		expect(second).toHaveBeenCalledOnce();
+	});
 });

@@ -229,9 +229,14 @@
 	}
 
 	onMount(() => {
-		appShell.onNewChatRequested(() => handleNewChat());
-		appShell.onNavigateChatAboveRequested(() => navigateChatAdjacent(-1));
-		appShell.onNavigateChatBelowRequested(() => navigateChatAdjacent(1));
+		const unsubscribers = [
+			appShell.onNewChatRequested(() => handleNewChat()),
+			appShell.onNavigateChatAboveRequested(() => navigateChatAdjacent(-1)),
+			appShell.onNavigateChatBelowRequested(() => navigateChatAdjacent(1)),
+		];
+		return () => {
+			for (const unsubscribe of unsubscribers) unsubscribe();
+		};
 	});
 </script>
 
