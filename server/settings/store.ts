@@ -39,6 +39,7 @@ import {
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
+import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 
 const logger = createLogger('settings:store');
 import type {
@@ -58,10 +59,6 @@ type RemoteSettingsChangedCallback = () => void;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function stringRecord(raw: Record<string, unknown>): Record<string, string> {
@@ -233,7 +230,7 @@ export class SettingsStore extends EventEmitter {
       const parsed = JSON.parse(raw);
       return sanitize(parsed);
     } catch (error) {
-      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return createEmpty();
+      if (hasNodeErrorCode(error, 'ENOENT')) return createEmpty();
       logger.warn('settings: invalid project-settings.json, using empty settings:', errorMessage(error));
       return createEmpty();
     }

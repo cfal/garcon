@@ -2,14 +2,11 @@ import jwt from 'jsonwebtoken';
 import { type AuthUser, type CreatedAuthUser, getJwtSecret } from './store.js';
 import { getJwtTokenExpiry } from '../config.js';
 import { createLogger } from '../lib/log.js';
+import { errorMessage } from '../lib/errors.js';
 
 const logger = createLogger('auth:token');
 
 type TokenUser = Pick<AuthUser | CreatedAuthUser, 'username'>;
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 export async function generateAuthToken({ username }: TokenUser): Promise<string> {
   const secret = await getJwtSecret();

@@ -74,6 +74,14 @@ export interface AgentRegistryServiceContract {
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
 
+interface AgentAuthStatus {
+  authenticated?: boolean;
+}
+
+function isAgentAuthStatus(value: unknown): value is AgentAuthStatus {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 export class AgentRegistry implements AgentRegistryServiceContract {
   #registry: IChatRegistry;
   #directory: AgentDirectory;
@@ -260,7 +268,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       if (!isVisibleAgentId(agentId)) continue;
       const endpointReady = agent.capabilities.acceptsApiProviderEndpoints
         && this.#catalog.hasEndpointModels(agentId);
-      const nativeReady = Boolean((auth[agentId] as any)?.authenticated);
+      const status = auth[agentId];
+      const nativeReady = isAgentAuthStatus(status) && status.authenticated === true;
       result[agentId] = {
         ready: nativeReady || endpointReady,
         nativeReady,

@@ -16,6 +16,7 @@ import { convertOpenCodeToolUse } from './tool-use-converter.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
 import { normalizeToolResultContent } from '../shared/normalize-util.js';
 import { createLogger } from '../../lib/log.js';
+import { errorMessage } from '../../lib/errors.js';
 
 const logger = createLogger('agents:opencode:history-loader');
 
@@ -59,10 +60,6 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function dateToIso(value: string | number | Date | undefined): string | null {

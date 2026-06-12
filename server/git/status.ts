@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import { GitDomainError } from './git-types.js';
 import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
+import { errorMessage } from '../lib/errors.js';
 
 const logger = createLogger('git:status');
 import type {
@@ -27,10 +28,6 @@ import {
   runGit,
   stripDiffHeaders,
 } from './run.js';
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 export function createStatusOperations(agents: GitAgentRunner) {
   async function getStatus({ projectPath }: ProjectOptions): Promise<unknown> {

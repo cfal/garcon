@@ -2,6 +2,7 @@ import { GitDomainError } from './git-types.js';
 import type { AgentId } from '../../common/agents.ts';
 import type { CommitMessageOptions, RunSingleQueryOptions } from './types.js';
 import { createLogger } from '../lib/log.js';
+import { errorMessage } from '../lib/errors.js';
 
 const logger = createLogger('git:commit-message');
 
@@ -40,10 +41,6 @@ export const COMMIT_MESSAGE_ERROR_MAP = Object.freeze({
 });
 
 type CommitMessageErrorCode = keyof typeof COMMIT_MESSAGE_ERROR_MAP;
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 export function isCommitMessageErrorCode(code: string): code is CommitMessageErrorCode {
   return Object.prototype.hasOwnProperty.call(COMMIT_MESSAGE_ERROR_MAP, code);
@@ -168,4 +165,3 @@ function normalizeCommitMessage(text: string): string {
 
   return result.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
-

@@ -60,6 +60,7 @@ import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
 import type { ShellWebSocketData } from './ws/shell.js';
 import { createLogger } from './lib/log.js';
+import { errorMessage } from './lib/errors.js';
 
 const logger = createLogger('server');
 
@@ -72,10 +73,6 @@ interface WsConnectionData extends ShellWebSocketData {
 type ServeOptionsWithConnectionLimit = Parameters<typeof Bun.serve<WsConnectionData>>[0] & {
   maxConnections?: number;
 };
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function isWsPath(value: unknown): value is WsPath {
   return value === '/shell' || value === '/ws';

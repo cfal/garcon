@@ -4,6 +4,7 @@ import type { IPty } from 'bun-pty';
 import { sendWebSocketJson } from './utils.js';
 import { getUserShell } from '../config.js';
 import { createLogger } from '../lib/log.js';
+import { errorMessage } from '../lib/errors.js';
 
 const logger = createLogger('ws:shell');
 import {
@@ -56,10 +57,6 @@ interface StartSessionOptions {
   initialCommand?: string;
   cols: number;
   rows: number;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function buildPtyEnv(): Record<string, string> {

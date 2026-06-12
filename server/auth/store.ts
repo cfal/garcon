@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { getConfigDir } from '../config.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
 import { createLogger } from '../lib/log.js';
+import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 
 const logger = createLogger('auth:store');
 
@@ -35,19 +36,6 @@ function authPath(): string {
 
 const cachedJwtSecrets = new Map<string, string>();
 const inflightJwtSecrets = new Map<string, Promise<string>>();
-
-function hasNodeErrorCode(error: unknown, code: string): boolean {
-  return Boolean(
-    error
-      && typeof error === 'object'
-      && 'code' in error
-      && (error as { code?: unknown }).code === code,
-  );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 // Ensures the auth config directory exists.
 export async function init(): Promise<void> {

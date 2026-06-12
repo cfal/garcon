@@ -21,6 +21,7 @@ import type { AgentModelOption } from '../../common/agents.js';
 import { getConfigDir } from '../config.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { createLogger } from '../lib/log.js';
+import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 
 const logger = createLogger('api-providers:store');
 
@@ -448,9 +449,9 @@ export class ApiProviderStore {
     try {
       const raw = await fs.readFile(this.filePath, 'utf8');
       return normalizeSnapshot(JSON.parse(raw));
-    } catch (error: any) {
-      if (error?.code === 'ENOENT') return { version: 1, apiProviders: [] };
-      logger.warn('api-providers: invalid api-providers.json, using empty provider list:', error.message);
+    } catch (error: unknown) {
+      if (hasNodeErrorCode(error, 'ENOENT')) return { version: 1, apiProviders: [] };
+      logger.warn('api-providers: invalid api-providers.json, using empty provider list:', errorMessage(error));
       return { version: 1, apiProviders: [] };
     }
   }

@@ -6,6 +6,7 @@ import { parseChatMessages, type ChatMessage } from '../../common/chat-types.js'
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { PaginatedChatMessages } from './history-cache-contract.js';
 import { createLogger } from '../lib/log.js';
+import { errorMessage } from '../lib/errors.js';
 
 const logger = createLogger('chats:history-cache');
 
@@ -45,10 +46,6 @@ interface HistoryCacheAgents {
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   isChatRunning(chatId: string): boolean;
   loadMessages(session: ChatRegistryEntry, chatId: string): Promise<unknown[]>;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function historyCacheIdentityTokens(message: ChatMessage): string[] {

@@ -16,6 +16,7 @@ import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../../
 import type { ClaudeStartSessionRequest, ResumeTurnRequest } from "../session-types.js";
 import type { AgentCommandImage } from "../../../common/ws-requests.js";
 import { createLogger } from '../../lib/log.js';
+import { errorMessage } from '../../lib/errors.js';
 
 const logger = createLogger('agents:claude:claude-cli');
 
@@ -39,6 +40,16 @@ interface CLIMessage {
     error?: string;
     response?: unknown;
   };
+}
+
+interface ClaudeContentPart {
+  type?: string;
+  text?: string;
+  thinking?: string;
+  tool_use_id?: string;
+  content?: unknown;
+  is_error?: boolean;
+  [key: string]: unknown;
 }
 
 interface ClaudeSessionOptions {
@@ -92,6 +103,15 @@ interface ClaudeCLIArgOptions {
   streamJson?: boolean;
 }
 
+interface ClaudeSingleQueryOptions {
+  model?: string;
+  cwd?: string;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
+  envOverrides?: Record<string, string>;
+}
+
 // Builds the permission approval/deny response sent back to the CLI.
 function buildClaudePermissionApprovalResponse(
   pending: Pick<PendingPermission, 'toolName' | 'toolInput'> & { providerToolName?: string; providerToolInput?: Record<string, unknown> },
@@ -138,7 +158,7 @@ function convertCLIMessageToChatMessages(msg: CLIMessage): unknown[] {
 
   const chatMessages: unknown[] = [];
   const now = new Date().toISOString();
-  const content: any[] =
+  const content: ClaudeContentPart[] =
     Array.isArray(msg.content) ? msg.content
       : Array.isArray(msg.message?.content) ? msg.message!.content!
         : [];
@@ -162,7 +182,10 @@ function convertCLIMessageToChatMessages(msg: CLIMessage): unknown[] {
 }
 
 // Runs a one-shot CLI query and returns the plain text output.
-async function runSingleQuery(prompt: string, { model, cwd, permissionMode, thinkingMode, claudeThinkingMode, envOverrides }: Record<string, any> = {}): Promise<string> {
+async function runSingleQuery(
+  prompt: string,
+  { model, cwd, permissionMode, thinkingMode, claudeThinkingMode, envOverrides }: ClaudeSingleQueryOptions = {},
+): Promise<string> {
   const claudeBinary = getClaudeBinary();
   const args = buildClaudeCLIArgs({ model, permissionMode, thinkingMode, claudeThinkingMode, prompt });
 
@@ -183,8 +206,8 @@ async function runSingleQuery(prompt: string, { model, cwd, permissionMode, thin
       if (done) break;
       chunks.push(value);
     }
-  } catch (err: any) {
-    logger.error('cli: one-shot stdout read error:', err.message);
+  } catch (err: unknown) {
+    logger.error('cli: one-shot stdout read error:', errorMessage(err));
   }
 
   await proc.exited;
@@ -300,8 +323,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     try {
       stdin.write(jsonl + '\n');
       stdin.flush();
-    } catch (err: any) {
-      logger.warn(`cli(${sessionId.slice(0, 8)}): stdin write failed:`, err.message);
+    } catch (err: unknown) {
+      logger.warn(`cli(${sessionId.slice(0, 8)}): stdin write failed:`, errorMessage(err));
     }
   }
 
@@ -573,9 +596,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
           this.#routeCLIMessage(session, msg);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (!proc.killed) {
-        logger.error(`cli(${session.id.slice(0, 8)}): stdout read error:`, err.message);
+        logger.error(`cli(${session.id.slice(0, 8)}): stdout read error:`, errorMessage(err));
       }
     } finally {
       this.#handleProcessExit(session, proc);
