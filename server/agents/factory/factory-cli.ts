@@ -415,6 +415,10 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       case 'completion':
       case 'result':
         session.resultSeen = true;
+        if (session.isRunning) {
+          session.isRunning = false;
+          this.emitProcessing(session.chatId, false);
+        }
         this.emitFinished(session.chatId, 0);
         this.#finalizeTurn(session, 0);
         break;

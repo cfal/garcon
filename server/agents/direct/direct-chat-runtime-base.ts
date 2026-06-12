@@ -208,6 +208,12 @@ export abstract class DirectChatRuntimeBase<
     }
   }
 
+  #markSessionIdle(session: DirectRuntimeSession<TMessage>): void {
+    if (!session.isRunning) return;
+    session.isRunning = false;
+    this.emitProcessing(session.chatId, false);
+  }
+
   async #runTurnInternal(session: DirectRuntimeSession<TMessage>): Promise<void> {
     session.isRunning = true;
     session.aborted = false;
@@ -218,6 +224,7 @@ export abstract class DirectChatRuntimeBase<
       if (session.aborted) return;
 
       if (!response.trim()) {
+        this.#markSessionIdle(session);
         this.emitFailed(session.chatId, `Empty response from ${this.config.runtimeLabel}`);
         return;
       }
@@ -227,13 +234,14 @@ export abstract class DirectChatRuntimeBase<
       this.emitMessages(session.chatId, [
         new AssistantMessage(new Date().toISOString(), response),
       ]);
+      this.#markSessionIdle(session);
       this.emitFinished(session.chatId, 0);
     } catch (error: unknown) {
       if (session.aborted) return;
+      this.#markSessionIdle(session);
       this.emitFailed(session.chatId, error instanceof Error ? error.message : String(error));
     } finally {
-      session.isRunning = false;
-      this.emitProcessing(session.chatId, false);
+      this.#markSessionIdle(session);
     }
   }
 }

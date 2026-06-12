@@ -313,6 +313,10 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
 
       case 'result':
         session.resultSeen = true;
+        if (session.isRunning) {
+          session.isRunning = false;
+          this.emitProcessing(session.chatId, false);
+        }
         this.emitFinished(session.chatId, msg.is_error ? 1 : 0);
         this.#finalizeTurn(session);
         break;

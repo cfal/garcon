@@ -380,10 +380,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   }
 
   #handleResultMessage(session: ClaudeRunningSession, msg: CLIMessage): void {
-    this.emitFinished(session.chatId, msg.is_error ? 1 : 0);
-
     session.isRunning = false;
     this.emitProcessing(session.chatId, false);
+    this.emitFinished(session.chatId, msg.is_error ? 1 : 0);
     if (session.turnResolve) {
       const resolve = session.turnResolve;
       session.turnResolve = null;
@@ -538,21 +537,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
     return new Promise<void>(resolve => {
       session.turnResolve = resolve;
-
-      if (session.process) {
-        session.process.exited.then((exitCode: number) => {
-          if (session.isRunning) {
-            session.isRunning = false;
-            this.emitProcessing(session.chatId, false);
-            if (session.turnResolve === resolve) {
-              session.turnResolve = null;
-              resolve();
-            }
-
-            this.emitFailed(session.chatId, `CLI process exited with code ${exitCode}`);
-          }
-        });
-      }
     });
   }
 
@@ -600,12 +584,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       if (!proc.killed) {
         logger.error(`cli(${session.id.slice(0, 8)}): stdout read error:`, errorMessage(err));
       }
-    } finally {
-      this.#handleProcessExit(session, proc);
     }
   }
 
-  #handleProcessExit(session: ClaudeRunningSession, proc: ReturnType<typeof Bun.spawn>): void {
+  #handleProcessExit(session: ClaudeRunningSession, proc: ReturnType<typeof Bun.spawn>, exitCode: number): void {
     if (session.process !== proc) {
       return;
     }
@@ -619,12 +601,16 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       }
     }
 
-    if (session.turnResolve) {
+    if (session.turnResolve || session.isRunning) {
+      const wasRunning = session.isRunning;
       session.isRunning = false;
       this.emitProcessing(session.chatId, false);
       const resolve = session.turnResolve;
       session.turnResolve = null;
-      resolve();
+      resolve?.();
+      if (wasRunning) {
+        this.emitFailed(session.chatId, `CLI process exited with code ${exitCode}`);
+      }
     }
   }
 
@@ -671,6 +657,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
     proc.exited.then((exitCode: number) => {
       logger.info(`cli(${session.id.slice(0, 8)}): process exited (code=${exitCode})`);
+      this.#handleProcessExit(session, proc, exitCode);
     });
 
     return proc;

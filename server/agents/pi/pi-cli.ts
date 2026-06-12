@@ -388,6 +388,10 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
 
     if (event.type === 'agent_end') {
       session.resultSeen = true;
+      if (session.isRunning) {
+        session.isRunning = false;
+        this.emitProcessing(session.chatId, false);
+      }
       this.emitFinished(session.chatId, 0);
       this.#finalizeTurn(session, 0);
     }

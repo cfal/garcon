@@ -469,6 +469,10 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
       }
       session.resultSeen = true;
       const exitCode = cursorExitCodeForResult(event);
+      if (session.isRunning) {
+        session.isRunning = false;
+        this.emitProcessing(session.chatId, false);
+      }
       this.emitFinished(
         session.chatId,
         exitCode,
@@ -481,6 +485,11 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
     if (event.type === 'error') {
       const message = asString(event.message ?? event.error) ?? 'Cursor Agent reported an error.';
       this.emitMessages(session.chatId, [new ErrorMessage(timestamp, message)]);
+      session.resultSeen = true;
+      if (session.isRunning) {
+        session.isRunning = false;
+        this.emitProcessing(session.chatId, false);
+      }
       this.emitFailed(session.chatId, message);
       this.#finalizeTurn(session, 1);
     }

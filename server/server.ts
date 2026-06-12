@@ -323,12 +323,8 @@ export async function startServer(): Promise<void> {
       pendingInputs.reconcile(chatId).catch((err) => {
         logger.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
       });
-      // Defer idle check to next microtask so the runtime has time to
-      // clear its isRunning flag (emitFinished fires before the flag flip).
-      queueMicrotask(() => {
-        queue.checkChatIdle(chatId).catch((err) => {
-          logger.warn('queue: checkChatIdle error:', errorMessage(err));
-        });
+      queue.checkChatIdle(chatId).catch((err) => {
+        logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
     });
     agentRegistry.onFailed((chatId, agentErrorMessage, metadata) => {
@@ -345,10 +341,8 @@ export async function startServer(): Promise<void> {
       pendingInputs.reconcile(chatId).catch((err) => {
         logger.warn('pending-inputs: reconcile after failure failed:', errorMessage(err));
       });
-      queueMicrotask(() => {
-        queue.checkChatIdle(chatId).catch((err) => {
-          logger.warn('queue: checkChatIdle error:', errorMessage(err));
-        });
+      queue.checkChatIdle(chatId).catch((err) => {
+        logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
     });
 
