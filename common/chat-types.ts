@@ -522,9 +522,42 @@ function asStringArray(v: unknown): string[] | undefined {
   return items.length > 0 ? items : undefined;
 }
 
+function asChatImages(v: unknown): ChatImage[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const images: ChatImage[] = [];
+  for (const entry of v) {
+    const raw = asRecord(entry);
+    if (typeof raw.data !== 'string' || typeof raw.name !== 'string') continue;
+    images.push({ data: raw.data, name: raw.name });
+  }
+  if (images.length > 0 || v.length === 0) return images;
+  return undefined;
+}
+
+function asAllowedPrompts(v: unknown): Array<{ tool: string; prompt: string }> | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const prompts: Array<{ tool: string; prompt: string }> = [];
+  for (const entry of v) {
+    const raw = asRecord(entry);
+    if (typeof raw.tool !== 'string' || typeof raw.prompt !== 'string') continue;
+    prompts.push({ tool: raw.tool, prompt: raw.prompt });
+  }
+  if (prompts.length > 0 || v.length === 0) return prompts;
+  return undefined;
+}
+
 function asOptionalChanges(v: unknown): Array<{ path?: string; kind?: string }> | undefined {
   if (!Array.isArray(v)) return undefined;
-  return v as Array<{ path?: string; kind?: string }>;
+  const changes: Array<{ path?: string; kind?: string }> = [];
+  for (const entry of v) {
+    const raw = asRecord(entry);
+    const change: { path?: string; kind?: string } = {};
+    if (typeof raw.path === 'string') change.path = raw.path;
+    if (typeof raw.kind === 'string') change.kind = raw.kind;
+    if (change.path !== undefined || change.kind !== undefined) changes.push(change);
+  }
+  if (changes.length > 0 || v.length === 0) return changes;
+  return undefined;
 }
 
 type ToolUseMessageType = ToolUseChatMessage['type'];
@@ -638,7 +671,7 @@ const TOOL_USE_MESSAGE_PARSERS = {
     return new ExitPlanModeToolUseMessage(
       str(data.timestamp), str(data.toolId),
       plan,
-      data.allowedPrompts as Array<{ tool: string; prompt: string }> | undefined);
+      asAllowedPrompts(data.allowedPrompts));
   },
 
   'amp-finder-tool-use': (data) =>
@@ -752,7 +785,7 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
 	      return new UserMessage(
 	        str(data.timestamp),
 	        str(data.content),
-	        data.images as ChatImage[] | undefined,
+	        asChatImages(data.images),
 	        parseChatMessageMetadata(data.metadata),
 	      );
     case 'assistant-message':

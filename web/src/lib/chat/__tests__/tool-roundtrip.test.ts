@@ -355,6 +355,23 @@ describe('wire format parsing', () => {
 		expect(parsed.metadata).toEqual({ clientRequestId: 'req-1' });
 	});
 
+	it('filters malformed user-message images at parse boundary', () => {
+		const parsed = parseChatMessage({
+			type: 'user-message',
+			timestamp: TS,
+			content: 'hello',
+			images: [
+				{ data: 'data:image/png;base64,abc', name: 'screenshot.png' },
+				{ data: 123, name: 'bad.png' },
+				{ data: 'data:image/png;base64,def' },
+				null,
+			],
+		}) as UserMessage;
+
+		expect(parsed).toBeInstanceOf(UserMessage);
+		expect(parsed.images).toEqual([{ data: 'data:image/png;base64,abc', name: 'screenshot.png' }]);
+	});
+
 	it('parses bash-tool-use from wire data', () => {
 		const data = { type: 'bash-tool-use', timestamp: TS, toolId: 'id-wire', command: 'echo hello' };
 		const parsed = parseChatMessage(data);
@@ -402,6 +419,44 @@ describe('wire format parsing', () => {
 		expect(parsed).toBeInstanceOf(UnknownToolUseMessage);
 		expect(parsed.rawName).toBe('customX');
 		expect(parsed.input).toEqual({ a: 1, b: 'two' });
+	});
+
+	it('filters malformed edit changes at parse boundary', () => {
+		const parsed = parseChatMessage({
+			type: 'edit-tool-use',
+			timestamp: TS,
+			toolId: 'id-edit-wire',
+			changes: [
+				{ path: '/tmp/a.ts', kind: 'update' },
+				{ path: 123, kind: 'create' },
+				{ path: '/tmp/b.ts', kind: false },
+				'bad',
+			],
+		}) as EditToolUseMessage;
+
+		expect(parsed).toBeInstanceOf(EditToolUseMessage);
+		expect(parsed.changes).toEqual([
+			{ path: '/tmp/a.ts', kind: 'update' },
+			{ kind: 'create' },
+			{ path: '/tmp/b.ts' },
+		]);
+	});
+
+	it('filters malformed exit-plan allowed prompts at parse boundary', () => {
+		const parsed = parseChatMessage({
+			type: 'exit-plan-mode-tool-use',
+			timestamp: TS,
+			toolId: 'id-plan-wire',
+			plan: 'Implement it',
+			allowedPrompts: [
+				{ tool: 'Bash', prompt: 'run tests' },
+				{ tool: 'Read', prompt: 123 },
+				{ tool: false, prompt: 'bad' },
+			],
+		}) as ExitPlanModeToolUseMessage;
+
+		expect(parsed).toBeInstanceOf(ExitPlanModeToolUseMessage);
+		expect(parsed.allowedPrompts).toEqual([{ tool: 'Bash', prompt: 'run tests' }]);
 	});
 });
 
