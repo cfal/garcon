@@ -444,51 +444,6 @@
 		searchState.applyQuery('');
 	}
 
-	function openSavedSearchManagerFromSearchDialog() {
-		savedSearches.openManagerFromSearchDialog();
-	}
-
-	function closeSavedSearchManager() {
-		savedSearches.closeManager();
-	}
-
-	function openEditorForCreate() {
-		savedSearches.openEditorForCreate();
-	}
-
-	function openEditorForCreateFromSearchDialog() {
-		savedSearches.openEditorForCreateFromSearchDialog();
-	}
-
-	function openEditorForEdit(search: SavedChatSearch) {
-		savedSearches.openEditorForEdit(search);
-	}
-
-	async function handleSaveSearchEditor(
-		data: {
-			title: string | null;
-			query: string;
-			showAsSidebarPill: boolean;
-			showInSidebarMenu: boolean;
-			showInSearchDialog: boolean;
-		},
-		searchId?: string,
-	) {
-		await savedSearches.saveEditor(data, searchId);
-	}
-
-	function requestDeleteSavedSearch(id: string) {
-		savedSearches.requestDelete(id);
-	}
-
-	async function confirmDeleteSavedSearch() {
-		await savedSearches.confirmDelete();
-	}
-
-	async function handleReorderSavedSearches(oldOrder: string[], newOrder: string[]) {
-		await savedSearches.reorder(oldOrder, newOrder);
-	}
-
 	// Lifecycle.
 
 	onMount(async () => {
@@ -698,8 +653,8 @@
 	onQueryChange={(q) => searchState.updateDraftQuery(q)}
 	onSelectChat={handleSearchSelectChat}
 	onApplySavedSearch={handleApplySavedSearch}
-	onOpenManager={openSavedSearchManagerFromSearchDialog}
-	onCreateSavedSearch={openEditorForCreateFromSearchDialog}
+	onOpenManager={() => savedSearches.openManagerFromSearchDialog()}
+	onCreateSavedSearch={() => savedSearches.openEditorForCreateFromSearchDialog()}
 	onHighlightChange={(i) => {
 		searchState.highlightedResultIndex = i;
 	}}
@@ -709,11 +664,13 @@
 <SavedSearchManagerDialog
 	open={savedSearches.managerOpen}
 	searches={savedSearches.savedSearches}
-	onClose={closeSavedSearchManager}
-	onAdd={openEditorForCreate}
-	onEdit={openEditorForEdit}
-	onDelete={requestDeleteSavedSearch}
-	onReorder={handleReorderSavedSearches}
+	onClose={() => savedSearches.closeManager()}
+	onAdd={() => savedSearches.openEditorForCreate()}
+	onEdit={(search) => savedSearches.openEditorForEdit(search)}
+	onDelete={(id) => savedSearches.requestDelete(id)}
+	onReorder={(oldOrder, newOrder) => {
+		void savedSearches.reorder(oldOrder, newOrder);
+	}}
 />
 
 <SavedSearchEditorDialog
@@ -721,7 +678,7 @@
 	onClose={() => {
 		savedSearches.closeEditor();
 	}}
-	onSave={handleSaveSearchEditor}
+	onSave={(data, searchId) => savedSearches.saveEditor(data, searchId)}
 />
 
 <ShareChatDialog
@@ -757,7 +714,7 @@
 			<Button
 				variant="destructive"
 				onclick={() => {
-					void confirmDeleteSavedSearch();
+					void savedSearches.confirmDelete();
 				}}
 				bind:ref={savedSearches.deleteButtonRef}>{m.sidebar_actions_delete()}</Button
 			>
