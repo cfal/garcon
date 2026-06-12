@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildRouterStores, type ConversationRouterDeps } from '../conversation-router-adapter.svelte';
 import { ChatState } from '../state.svelte';
-import { ComposerState } from '../composer.svelte';
 import { AgentState } from '../agent-state.svelte';
 import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
@@ -53,14 +52,13 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterDeps
 			setSelectedChatId: vi.fn(),
 			setChatProcessing: vi.fn(),
 			reconcileProcessing: vi.fn(),
+			quietRefreshChats: vi.fn(),
 		},
 		chatState: new ChatState(),
-		composerState: new ComposerState(),
 		agentState: new AgentState(),
 		lifecycle: new ChatLifecycleStore(),
 		conversationUi: new ConversationUiStore(),
 		startupCoordinator: new StartupCoordinator(),
-		appShell: { quietRefreshChats: vi.fn() },
 		readReceiptOutbox: { enqueue: vi.fn() },
 	};
 }

@@ -7,7 +7,6 @@ import { createEventRouter, type EventRouterStores } from '$lib/events/router.sv
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { ChatState } from '$lib/chat/state.svelte';
-import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
@@ -30,14 +29,13 @@ export interface ConversationRouterDeps {
 		setSelectedChatId: (id: string | null) => void;
 		setChatProcessing: (chatId: string, isProcessing: boolean) => void;
 		reconcileProcessing: (activeChatIds: Set<string>) => void;
+		quietRefreshChats: () => Promise<void> | void;
 	};
 	chatState: ChatState;
-	composerState: ComposerState;
 	agentState: AgentState;
 	lifecycle: ChatLifecycleStore;
 	conversationUi: ConversationUiStore;
 	startupCoordinator: StartupCoordinator;
-	appShell: { quietRefreshChats: () => void };
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
 }
 
@@ -87,10 +85,12 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			patchChatPreview: (chatId, content, _timestamp) => {
 				deps.sessions.patchPreview(chatId, content);
 			},
-			refreshChats: () => deps.appShell.quietRefreshChats(),
+			refreshChats: () => {
+				void deps.sessions.quietRefreshChats();
+			},
 			navigateToChat: (chatId) => {
 				goto(`/chat/${chatId}`);
-				deps.appShell.quietRefreshChats();
+				void deps.sessions.quietRefreshChats();
 			},
 			removeChat: (chatId) => deps.sessions.removeChat(chatId),
 			patchChatTitle: (chatId, title) => deps.sessions.patchChat(chatId, { title }),
@@ -115,11 +115,11 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				deps.lifecycle.setCurrentChatId(chatId);
 				deps.sessions.setSelectedChatId(chatId);
 				goto(`/chat/${chatId}`);
-				deps.appShell.quietRefreshChats();
+				void deps.sessions.quietRefreshChats();
 			},
 			onExternalChatCreated: (chatId) => {
 				if (!deps.sessions.hasChat(chatId)) {
-					deps.appShell.quietRefreshChats();
+					void deps.sessions.quietRefreshChats();
 				}
 			},
 		},

@@ -9,7 +9,6 @@
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
-	import { createChatRuntimeStore } from '$lib/stores/chat-runtime.svelte.js';
 	import { createChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
@@ -21,7 +20,6 @@
 	import {
 		setAuth,
 		setNavigation,
-		setChatRuntime,
 		setChatSessions,
 		setAppShell,
 		setWs,
@@ -50,21 +48,21 @@
 	const localSettings = createLocalSettingsStore();
 	const remoteSettings = createRemoteSettingsStore();
 	const navigation = createNavigationStore();
-	const chatRuntime = createChatRuntimeStore();
-	const chatSessions = createChatSessionsStore();
+	const notifications = createNotificationsStore();
+	const chatSessions = createChatSessionsStore({
+		notifyError: (message) => notifications.error(message),
+	});
 	const appShell = createAppShellStore();
 	const ws = createWsConnection();
 	const fileViewer = createFileViewerStore();
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
 	const splitLayout = createSplitLayoutStore();
-	const notifications = createNotificationsStore();
 
 	setAuth(auth);
 	setLocalSettings(localSettings);
 	setRemoteSettings(remoteSettings);
 	setNavigation(navigation);
-	setChatRuntime(chatRuntime);
 	setChatSessions(chatSessions);
 	setAppShell(appShell);
 	setWs(ws);

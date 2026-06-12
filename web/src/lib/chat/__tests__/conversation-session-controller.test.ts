@@ -152,6 +152,7 @@ function createDeps(chat = createRunningChat()) {
 				promoteDraft: vi.fn(),
 				setChatProcessing: vi.fn(),
 				setSelectedChatId: vi.fn(),
+				quietRefreshChats: vi.fn(),
 			},
 			chatState,
 				composerState: {
@@ -190,7 +191,6 @@ function createDeps(chat = createRunningChat()) {
 				waitForConnection,
 			},
 			appShell: {
-				quietRefreshChats: vi.fn(),
 				openNewChatDialog: vi.fn(),
 			},
 			modelCatalog: {
@@ -397,7 +397,7 @@ describe('ConversationSessionController', () => {
 			type: 'assistant-message',
 			content: 'Forking chat..',
 		});
-		expect(deps.appShell.quietRefreshChats).toHaveBeenCalled();
+		expect(deps.sessions.quietRefreshChats).toHaveBeenCalled();
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('456');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('456');

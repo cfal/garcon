@@ -5,10 +5,7 @@
 		getChatSessions,
 		getLocalSettings,
 		getSplitLayout,
-		getAppShell,
-		getNotifications,
 	} from '$lib/context';
-	import { deleteChat } from '$lib/api/chats';
 	import Menu from '@lucide/svelte/icons/menu';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
@@ -50,8 +47,6 @@
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
 	const splitLayout = getSplitLayout();
-	const appShell = getAppShell();
-	const notifications = getNotifications();
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
@@ -115,13 +110,7 @@
 		deleteConfirmation = null;
 		// Close the pane first, then delete the chat server-side.
 		handleSplitClosePane(paneId);
-		try {
-			await deleteChat(chatId);
-			appShell.quietRefreshChats();
-		} catch (err) {
-			console.error('[WorkspaceView] Failed to delete chat:', err);
-			notifications.error(m.notifications_delete_chat_failed());
-		}
+		await sessions.deleteRemoteChat(chatId);
 	}
 
 	function cancelSplitDelete() {

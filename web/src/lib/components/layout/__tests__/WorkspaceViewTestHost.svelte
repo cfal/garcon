@@ -5,9 +5,7 @@
 		setModelCatalog,
 		setLocalSettings,
 		setSplitLayout,
-		setAppShell,
 		setWs,
-		setNotifications,
 	} from '$lib/context';
 	import type { AppTab } from '$lib/types/app';
 
@@ -46,6 +44,8 @@
 				},
 				orderedChats: [],
 				setSelectedChatId() {},
+				quietRefreshChats() {},
+				deleteRemoteChat() {},
 			}
 		);
 	}
@@ -87,17 +87,8 @@
 
 	setSplitLayout(getSplitLayoutContext() as never);
 
-	setAppShell({
-		quietRefreshChats() {},
-	} as never);
-
 	setWs({
 		isConnected: false,
-	} as never);
-
-	setNotifications({
-		error() {},
-		info() {},
 	} as never);
 
 	function handleTabChange(_tab: AppTab): void {

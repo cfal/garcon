@@ -10,6 +10,11 @@ function createMockAppShell() {
 		requestRenameSelectedChat: vi.fn(),
 		requestDeleteSelectedChat: vi.fn(),
 		openSettings: vi.fn(),
+	};
+}
+
+function createMockNavigation() {
+	return {
 		requestNavigateChatAbove: vi.fn(),
 		requestNavigateChatBelow: vi.fn(),
 	};
@@ -18,9 +23,11 @@ function createMockAppShell() {
 describe('KeyboardShortcuts', () => {
 	it('opens sidebar search on Ctrl-S with the same global scope as the command palette', async () => {
 		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
 
 		render(KeyboardShortcutsHost, {
 			appShell,
+			navigation,
 			onToggleCommandMenu: vi.fn(),
 		});
 
@@ -31,9 +38,11 @@ describe('KeyboardShortcuts', () => {
 
 	it('opens sidebar search on Ctrl-S even when focus is inside an input', async () => {
 		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
 
 		render(KeyboardShortcutsHost, {
 			appShell,
+			navigation,
 			onToggleCommandMenu: vi.fn(),
 		});
 
@@ -51,9 +60,11 @@ describe('KeyboardShortcuts', () => {
 
 	it('requests delete on Ctrl-D', async () => {
 		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
 
 		render(KeyboardShortcutsHost, {
 			appShell,
+			navigation,
 			onToggleCommandMenu: vi.fn(),
 		});
 
@@ -64,9 +75,11 @@ describe('KeyboardShortcuts', () => {
 
 	it('requests delete on Ctrl-D even when focus is inside an input', async () => {
 		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
 
 		render(KeyboardShortcutsHost, {
 			appShell,
+			navigation,
 			onToggleCommandMenu: vi.fn(),
 		});
 
@@ -84,37 +97,43 @@ describe('KeyboardShortcuts', () => {
 
 	it('navigates to chat above on Ctrl-Shift-J', async () => {
 		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
 
 		render(KeyboardShortcutsHost, {
 			appShell,
+			navigation,
 			onToggleCommandMenu: vi.fn(),
 		});
 
 		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, shiftKey: true }));
 
-		expect(appShell.requestNavigateChatAbove).toHaveBeenCalledTimes(1);
-		expect(appShell.requestNavigateChatBelow).not.toHaveBeenCalled();
+		expect(navigation.requestNavigateChatAbove).toHaveBeenCalledTimes(1);
+		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
 	});
 
 	it('navigates to chat below on Ctrl-Shift-L', async () => {
 		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
 
 		render(KeyboardShortcutsHost, {
 			appShell,
+			navigation,
 			onToggleCommandMenu: vi.fn(),
 		});
 
 		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, shiftKey: true }));
 
-		expect(appShell.requestNavigateChatBelow).toHaveBeenCalledTimes(1);
-		expect(appShell.requestNavigateChatAbove).not.toHaveBeenCalled();
+		expect(navigation.requestNavigateChatBelow).toHaveBeenCalledTimes(1);
+		expect(navigation.requestNavigateChatAbove).not.toHaveBeenCalled();
 	});
 
 	it('navigates chat above/below even when focus is inside an input', async () => {
 		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
 
 		render(KeyboardShortcutsHost, {
 			appShell,
+			navigation,
 			onToggleCommandMenu: vi.fn(),
 		});
 
@@ -126,12 +145,12 @@ describe('KeyboardShortcuts', () => {
 			input.dispatchEvent(
 				new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, shiftKey: true, bubbles: true }),
 			);
-			expect(appShell.requestNavigateChatAbove).toHaveBeenCalledTimes(1);
+			expect(navigation.requestNavigateChatAbove).toHaveBeenCalledTimes(1);
 
 			input.dispatchEvent(
 				new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, shiftKey: true, bubbles: true }),
 			);
-			expect(appShell.requestNavigateChatBelow).toHaveBeenCalledTimes(1);
+			expect(navigation.requestNavigateChatBelow).toHaveBeenCalledTimes(1);
 		} finally {
 			input.remove();
 		}

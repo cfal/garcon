@@ -12,7 +12,6 @@
 	const lazySettings = () => import('../settings/Settings.svelte');
 	import {
 		getNavigation,
-		getChatRuntime,
 		getChatSessions,
 		getAppShell,
 		getWs,
@@ -20,27 +19,17 @@
 		getNotifications,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getRunningChats } from '$lib/api/chats.js';
-	import { AppShellController } from './app-shell-controller.svelte';
 	import { selectedChatIdFromRoute } from './app-shell-route';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileViewerHost from '../files/FileViewerHost.svelte';
 	import { computeMobileViewportMetrics } from './mobile-viewport';
 
 	const navigation = getNavigation();
-	const chatRuntime = getChatRuntime();
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
 	const ws = getWs();
 	const localSettings = getLocalSettings();
 	const notifications = getNotifications();
-	const shellController = new AppShellController({
-		upsertFromServer: (s) => sessions.upsertFromServer(s),
-		setLoadingChats: (v) => {
-			chatRuntime.isLoadingChats = v;
-		},
-		notifyError: (message) => notifications.error(message),
-	});
 
 	let isMobile = $state(false);
 	let isWorkspaceFullscreen = $state(false);
@@ -119,36 +108,15 @@
 		};
 	});
 
-	function fetchChats() {
-		return shellController.fetchChats();
-	}
-
 	function quietRefresh() {
-		return shellController.quietRefresh();
+		return sessions.quietRefreshChats();
 	}
-
-	/** Fetches the chat list, then requests the processing snapshot.
-	 *  Ensures reconcileProcessing runs against a populated byId map. */
-	async function fetchChatsAndReconcile() {
-		await quietRefresh();
-		const running = await getRunningChats();
-		const activeChatIds = new Set<string>();
-		for (const sessionsForProvider of Object.values(running.sessions)) {
-			for (const session of sessionsForProvider) {
-				if (session.id) activeChatIds.add(session.id);
-			}
-		}
-		sessions.reconcileProcessing(activeChatIds);
-	}
-
-	appShell.registerRefreshChats(fetchChats);
-	appShell.registerQuietRefreshChats(quietRefresh);
 
 	// Fetches chat list + processing state whenever the WS connects
 	// (initial page load and reconnect).
 	$effect(() => {
 		if (!ws.isConnected) return;
-		fetchChatsAndReconcile().catch((error) => {
+		sessions.refreshChatsAndReconcileProcessing().catch((error) => {
 			console.warn(
 				'app-shell: failed to reconcile running chats:',
 				error instanceof Error ? error.message : String(error),
@@ -157,9 +125,9 @@
 	});
 
 	onMount(() => {
-		// Kick off fetchChats early so the sidebar populates even
+		// Starts the first chat-list refresh early so the sidebar populates even
 		// before the WS connection opens.
-		fetchChats();
+		void sessions.refreshChats();
 	});
 
 	function handleChatSelect(chatId: string) {
@@ -209,11 +177,11 @@
 
 	function handleChatDelete(chatId: string) {
 		locallyDeleteChat(chatId);
-		return shellController.deleteChat(chatId);
+		return sessions.deleteRemoteChat(chatId);
 	}
 
 	function handleChatRenamed(chatId: string, newTitle: string) {
-		return shellController.renameChat(chatId, newTitle);
+		return sessions.renameChat(chatId, newTitle);
 	}
 
 	function handleTabChange(tab: AppTab) {
@@ -231,8 +199,8 @@
 	onMount(() => {
 		const unsubscribers = [
 			appShell.onNewChatRequested(() => handleNewChat()),
-			appShell.onNavigateChatAboveRequested(() => navigateChatAdjacent(-1)),
-			appShell.onNavigateChatBelowRequested(() => navigateChatAdjacent(1)),
+			navigation.onNavigateChatAboveRequested(() => navigateChatAdjacent(-1)),
+			navigation.onNavigateChatBelowRequested(() => navigateChatAdjacent(1)),
 		];
 		return () => {
 			for (const unsubscribe of unsubscribers) unsubscribe();
@@ -251,7 +219,7 @@
 			<Sidebar
 				chats={sessions.orderedChats}
 				selectedChatId={sessions.selectedChatId}
-				isLoading={chatRuntime.isLoadingChats}
+				isLoading={sessions.isLoadingChats}
 				isMobile={false}
 				onChatSelect={handleChatSelect}
 				onNewChat={handleNewChat}
@@ -291,7 +259,7 @@
 					<Sidebar
 						chats={sessions.orderedChats}
 						selectedChatId={sessions.selectedChatId}
-						isLoading={chatRuntime.isLoadingChats}
+						isLoading={sessions.isLoadingChats}
 						isMobile={true}
 						onChatSelect={(chatId) => {
 							handleChatSelect(chatId);

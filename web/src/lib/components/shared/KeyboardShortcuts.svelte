@@ -7,7 +7,7 @@
 	// Conditional listeners use $effect with a cleanup return.
 
 	import { onMount, onDestroy } from 'svelte';
-	import { getAppShell } from '$lib/context';
+	import { getAppShell, getNavigation } from '$lib/context';
 
 	interface KeyboardShortcutsProps {
 		onToggleCommandMenu?: () => void;
@@ -16,6 +16,7 @@
 	let { onToggleCommandMenu }: KeyboardShortcutsProps = $props();
 
 	const appShell = getAppShell();
+	const navigation = getNavigation();
 
 	function isEditableTarget(target: EventTarget | null): boolean {
 		const element = target as HTMLElement | null;
@@ -58,12 +59,12 @@
 		}
 		if (e.ctrlKey && e.shiftKey && key === 'j') {
 			e.preventDefault();
-			appShell.requestNavigateChatAbove();
+			navigation.requestNavigateChatAbove();
 			return;
 		}
 		if (e.ctrlKey && e.shiftKey && key === 'l') {
 			e.preventDefault();
-			appShell.requestNavigateChatBelow();
+			navigation.requestNavigateChatBelow();
 			return;
 		}
 		if (inEditable) return;

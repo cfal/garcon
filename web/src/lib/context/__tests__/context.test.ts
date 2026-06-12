@@ -10,8 +10,6 @@ import {
 	setRemoteSettings,
 	getNavigation,
 	setNavigation,
-	getChatRuntime,
-	setChatRuntime,
 	getChatSessions,
 	setChatSessions,
 	getAppShell,
@@ -42,8 +40,6 @@ describe('context factories', () => {
 		expect(typeof setRemoteSettings).toBe('function');
 		expect(typeof getNavigation).toBe('function');
 		expect(typeof setNavigation).toBe('function');
-		expect(typeof getChatRuntime).toBe('function');
-		expect(typeof setChatRuntime).toBe('function');
 		expect(typeof getChatSessions).toBe('function');
 		expect(typeof setChatSessions).toBe('function');
 		expect(typeof getAppShell).toBe('function');

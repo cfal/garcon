@@ -12,8 +12,6 @@ function normalizeSettingsTab(value: string): SettingsTab {
 	return 'providers';
 }
 
-export type RefreshChatsCallback = () => Promise<void> | void;
-
 export interface NewChatDialogSeed {
 	prefill?: string;
 }
@@ -33,8 +31,6 @@ export class AppShellStore {
 	/** One-shot seed data (e.g. prefill text) for the dialog form. */
 	newChatDialogSeed = $state<NewChatDialogSeed | null>(null);
 
-	#refreshChatsCallback: RefreshChatsCallback | null = null;
-	#quietRefreshChatsCallback: RefreshChatsCallback | null = null;
 	#newChat = createActionSignal();
 	#recenter = createActionSignal();
 	#composerFocus = createActionSignal();
@@ -42,8 +38,6 @@ export class AppShellStore {
 	#deleteSelected = createActionSignal();
 	#newChatDialogSeed = createActionSignal();
 	#sidebarSearch = createActionSignal();
-	#navigateChatAbove = createActionSignal();
-	#navigateChatBelow = createActionSignal();
 
 	openSettings(section: string = 'providers'): void {
 		this.showSettings = true;
@@ -60,24 +54,6 @@ export class AppShellStore {
 
 	setSidebarOpen(open: boolean): void {
 		this.sidebarOpen = open;
-	}
-
-	registerRefreshChats(cb: RefreshChatsCallback): void {
-		this.#refreshChatsCallback = cb;
-	}
-
-	registerQuietRefreshChats(cb: RefreshChatsCallback): void {
-		this.#quietRefreshChatsCallback = cb;
-	}
-
-	refreshChats(): Promise<void> | void {
-		return this.#refreshChatsCallback?.();
-	}
-
-	/** Refreshes the chat list without showing the loading indicator. */
-	quietRefreshChats(): Promise<void> | void {
-		const cb = this.#quietRefreshChatsCallback ?? this.#refreshChatsCallback;
-		return cb?.();
 	}
 
 	// Callback registration: returns an unsubscribe function.
@@ -150,24 +126,6 @@ export class AppShellStore {
 	/** Toggles the sidebar search dialog via registered callbacks. */
 	openSidebarSearch(): void {
 		this.#sidebarSearch.emit();
-	}
-
-	onNavigateChatAboveRequested(cb: () => void): () => void {
-		return this.#navigateChatAbove.subscribe(cb);
-	}
-
-	onNavigateChatBelowRequested(cb: () => void): () => void {
-		return this.#navigateChatBelow.subscribe(cb);
-	}
-
-	/** Requests navigation to the chat above the currently selected one. */
-	requestNavigateChatAbove(): void {
-		this.#navigateChatAbove.emit();
-	}
-
-	/** Requests navigation to the chat below the currently selected one. */
-	requestNavigateChatBelow(): void {
-		this.#navigateChatBelow.emit();
 	}
 }
 

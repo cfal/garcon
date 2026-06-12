@@ -89,12 +89,10 @@
 		drainHandle,
 		sessions,
 		chatState,
-		composerState,
 		agentState,
 		lifecycle,
 		conversationUi,
 		startupCoordinator,
-		appShell,
 		readReceiptOutbox,
 	});
 

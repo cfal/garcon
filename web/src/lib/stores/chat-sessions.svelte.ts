@@ -8,8 +8,19 @@ import {
 	normalizePermissionMode,
 	normalizeThinkingMode,
 } from '$shared/chat-modes';
+import { deleteChat as deleteChatApi, getRunningChats, listChats } from '$lib/api/chats.js';
+import { updateSessionName } from '$lib/api/settings.js';
 import type { ChatSession } from '$lib/types/session';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
+import * as m from '$lib/paraglide/messages.js';
+
+export interface ChatSessionsStoreDeps {
+	listChats?: typeof listChats;
+	getRunningChats?: typeof getRunningChats;
+	deleteChat?: typeof deleteChatApi;
+	updateSessionName?: typeof updateSessionName;
+	notifyError?: (message: string) => void;
+}
 
 function normalizeModeFields<
 	T extends {
@@ -102,6 +113,11 @@ export class ChatSessionsStore {
 	order = $state<string[]>([]);
 	selectedChatId = $state<string | null>(null);
 	startupByChatId = $state<Record<string, ChatStartupConfig>>({});
+	isLoadingChats = $state(true);
+
+	#deps: ChatSessionsStoreDeps;
+	#inFlightFetch: Promise<void> | null = null;
+	#needsFollowUpFetch = false;
 
 	#selectedChat = $derived.by(() => {
 		if (!this.selectedChatId) return null;
@@ -114,6 +130,10 @@ export class ChatSessionsStore {
 			.filter((chat): chat is ChatSessionRecord => Boolean(chat)),
 	);
 
+	constructor(deps: ChatSessionsStoreDeps = {}) {
+		this.#deps = deps;
+	}
+
 	get selectedChat(): ChatSessionRecord | null {
 		return this.#selectedChat;
 	}
@@ -124,6 +144,88 @@ export class ChatSessionsStore {
 
 	setSelectedChatId(chatId: string | null): void {
 		this.selectedChatId = chatId;
+	}
+
+	async #runFetch(showLoading: boolean): Promise<void> {
+		if (showLoading) this.isLoadingChats = true;
+		try {
+			const fetchChats = this.#deps.listChats ?? listChats;
+			const res = await fetchChats();
+			this.upsertFromServer(res.sessions ?? []);
+		} catch (err) {
+			const prefix = showLoading ? 'Failed to fetch chats' : 'Quiet refresh failed';
+			console.error(`[ChatSessionsStore] ${prefix}:`, err);
+			this.#deps.notifyError?.(m.notifications_refresh_chats_failed());
+		} finally {
+			if (showLoading) this.isLoadingChats = false;
+		}
+	}
+
+	async #refresh(showLoading: boolean): Promise<void> {
+		if (this.#inFlightFetch) {
+			this.#needsFollowUpFetch = true;
+			return this.#inFlightFetch;
+		}
+
+		this.#inFlightFetch = (async () => {
+			let useLoadingState = showLoading;
+			try {
+				do {
+					this.#needsFollowUpFetch = false;
+					await this.#runFetch(useLoadingState);
+					useLoadingState = false;
+				} while (this.#needsFollowUpFetch);
+			} finally {
+				this.#inFlightFetch = null;
+			}
+		})();
+		return this.#inFlightFetch;
+	}
+
+	/** Fetches the chat list with sidebar loading feedback. */
+	async refreshChats(): Promise<void> {
+		return this.#refresh(true);
+	}
+
+	/** Refreshes the chat list without changing sidebar loading state. */
+	async quietRefreshChats(): Promise<void> {
+		return this.#refresh(false);
+	}
+
+	/** Refreshes sessions before reconciling the real-time processing snapshot. */
+	async refreshChatsAndReconcileProcessing(): Promise<void> {
+		await this.quietRefreshChats();
+		const fetchRunningChats = this.#deps.getRunningChats ?? getRunningChats;
+		const running = await fetchRunningChats();
+		const activeChatIds = new Set<string>();
+		for (const sessionsForProvider of Object.values(running.sessions)) {
+			for (const session of sessionsForProvider) {
+				if (session.id) activeChatIds.add(session.id);
+			}
+		}
+		this.reconcileProcessing(activeChatIds);
+	}
+
+	/** Deletes a chat server-side after callers apply any optimistic local removal. */
+	async deleteRemoteChat(chatId: string): Promise<void> {
+		try {
+			const removeRemoteChat = this.#deps.deleteChat ?? deleteChatApi;
+			await removeRemoteChat(chatId);
+		} catch (err) {
+			console.error('[ChatSessionsStore] Delete failed:', err);
+			this.#deps.notifyError?.(m.notifications_delete_chat_failed());
+			await this.quietRefreshChats();
+		}
+	}
+
+	async renameChat(chatId: string, newTitle: string): Promise<void> {
+		try {
+			const renameRemoteChat = this.#deps.updateSessionName ?? updateSessionName;
+			await renameRemoteChat(chatId, newTitle);
+		} catch (err) {
+			console.error('[ChatSessionsStore] Rename failed:', err);
+			this.#deps.notifyError?.(m.notifications_rename_chat_failed());
+		}
 	}
 
 	/** Returns true if the store contains a record for the given chat ID. */
@@ -353,6 +455,6 @@ export class ChatSessionsStore {
 	}
 }
 
-export function createChatSessionsStore(): ChatSessionsStore {
-	return new ChatSessionsStore();
+export function createChatSessionsStore(deps: ChatSessionsStoreDeps = {}): ChatSessionsStore {
+	return new ChatSessionsStore(deps);
 }

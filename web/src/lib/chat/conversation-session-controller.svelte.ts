@@ -47,6 +47,7 @@ export interface SessionControllerDeps {
 		promoteDraft: (chatId: string) => void;
 		setChatProcessing: (chatId: string, isProcessing: boolean) => void;
 		setSelectedChatId: (id: string | null) => void;
+		quietRefreshChats: () => Promise<void> | void;
 	};
 	chatState: ChatState;
 	composerState: ComposerState;
@@ -77,7 +78,6 @@ export interface SessionControllerDeps {
 		) => string;
 	};
 	appShell: {
-		quietRefreshChats: () => Promise<void> | void;
 		openNewChatDialog: (opts: { prefill: string }) => void;
 	};
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
@@ -428,7 +428,7 @@ export class ConversationSessionController {
 				deps.lifecycle.beginTurn(chatId);
 				deps.sessions.setChatProcessing(chatId, true);
 				deps.sessions.promoteDraft(chatId);
-				deps.appShell.quietRefreshChats();
+				deps.sessions.quietRefreshChats();
 			} catch (err) {
 				console.error('[SessionController] Failed to start chat:', err);
 				this.#markPendingUserInputDelivery(clientRequestId, 'failed');
@@ -558,7 +558,7 @@ export class ConversationSessionController {
 				modelEndpointId: selection.modelEndpointId,
 				modelProtocol: selection.modelProtocol,
 			});
-			await deps.appShell.quietRefreshChats();
+			await deps.sessions.quietRefreshChats();
 			deps.lifecycle.beginTurn(forkChatId);
 			deps.sessions.setSelectedChatId(forkChatId);
 			deps.sessions.setChatProcessing(forkChatId, true);
@@ -586,7 +586,7 @@ export class ConversationSessionController {
 
 		try {
 			const result = await forkChat({ sourceChatId, chatId: forkChatId });
-			await deps.appShell.quietRefreshChats();
+			await deps.sessions.quietRefreshChats();
 			deps.lifecycle.setCurrentChatId(result.chatId);
 			deps.sessions.setSelectedChatId(result.chatId);
 			deps.navigation.navigateToChat?.(result.chatId);

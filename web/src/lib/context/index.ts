@@ -6,7 +6,6 @@ import type { AuthStore } from '$lib/stores/auth.svelte';
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { NavigationStore } from '$lib/stores/navigation.svelte';
-import type { ChatRuntimeStore } from '$lib/stores/chat-runtime.svelte';
 import type { ChatSessionsStore } from '$lib/stores/chat-sessions.svelte';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
@@ -23,7 +22,6 @@ import type { NotificationsStore } from '$lib/stores/notifications.svelte';
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
 export const [getNavigation, setNavigation] = createContext<NavigationStore>();
-export const [getChatRuntime, setChatRuntime] = createContext<ChatRuntimeStore>();
 export const [getChatSessions, setChatSessions] = createContext<ChatSessionsStore>();
 export const [getAppShell, setAppShell] = createContext<AppShellStore>();
 export const [getWs, setWs] = createContext<WsConnection>();
