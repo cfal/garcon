@@ -35,8 +35,11 @@ function createMockSettings(telegramConfig = { enabled: true }) {
 }
 
 function createMockRegistry(entry = { agentId: 'claude', projectPath: '/home/user/repo' }) {
+  const emitter = new EventEmitter();
   return {
     getChat: mock(() => entry),
+    onChatRemoved: (cb) => emitter.on('chat-removed', cb),
+    emitChatRemoved: (chatId) => emitter.emit('chat-removed', chatId),
   };
 }
 
@@ -238,6 +241,19 @@ describe('AttentionTracker', () => {
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears pending permission state when a chat is removed', async () => {
+      createTracker();
+      const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
+      const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
+      agents.emitMessages('c1', [msg]);
+      registry.emitChatRemoved('c1');
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+
+      await new Promise(r => setTimeout(r, 10));
+      expect(telegram.send).toHaveBeenCalledTimes(2);
     });
 
     it('shortens home directory path in footer', async () => {

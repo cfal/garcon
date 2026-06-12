@@ -6,6 +6,7 @@ const logger = createLogger('notifications:telegram');
 // is never interrupted.
 
 const TELEGRAM_API = 'https://api.telegram.org';
+const TELEGRAM_SHORT_REQUEST_TIMEOUT_MS = 10_000;
 
 export interface TelegramBotIdentity {
   id: number;
@@ -98,7 +99,12 @@ export class TelegramNotifier {
   }
 
   async getBotIdentity(botToken = this.#botToken): Promise<TelegramBotIdentity> {
-    const result = await this.#request<TelegramUserPayload>('getMe', botToken);
+    const result = await this.#request<TelegramUserPayload>(
+      'getMe',
+      botToken,
+      undefined,
+      { timeoutMs: TELEGRAM_SHORT_REQUEST_TIMEOUT_MS },
+    );
     if (typeof result.id !== 'number') {
       throw new Error('Telegram getMe response did not include a bot id');
     }
@@ -171,6 +177,7 @@ export class TelegramNotifier {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(TELEGRAM_SHORT_REQUEST_TIMEOUT_MS),
       });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
@@ -184,13 +191,19 @@ export class TelegramNotifier {
     }
   }
 
-  async #request<T>(method: string, botToken: string, payload?: Record<string, unknown>): Promise<T> {
+  async #request<T>(
+    method: string,
+    botToken: string,
+    payload?: Record<string, unknown>,
+    options: { timeoutMs?: number } = {},
+  ): Promise<T> {
     const token = botToken.trim();
     if (!token) throw new Error('Telegram bot token is not configured');
     const res = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload ?? {}),
+      signal: options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined,
     });
     let body: TelegramApiResponse<T>;
     try {

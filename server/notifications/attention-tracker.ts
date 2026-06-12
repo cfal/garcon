@@ -62,6 +62,7 @@ interface SettingsStoreDep {
 
 interface ChatRegistryDep {
   getChat(chatId: string): { agentId: string; projectPath: string } | null;
+  onChatRemoved?(cb: (chatId: string) => void): void;
 }
 
 interface HistoryCacheDep {
@@ -128,6 +129,7 @@ export class AttentionTracker {
     this.#agents.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
     this.#queue.onSessionStopped((chatId) => this.#handleSessionStopped(chatId));
+    this.#registry.onChatRemoved?.((chatId) => this.#cleanupChat(chatId));
   }
 
   #handleMessages(chatId: string, messages: unknown[]): void {
@@ -264,6 +266,7 @@ export class AttentionTracker {
   }
 
   #cleanupChat(chatId: string): void {
+    this.#pendingPermissions.delete(chatId);
     this.#lastTurnResult.delete(chatId);
     this.#lastAssistantMessage.delete(chatId);
   }
