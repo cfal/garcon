@@ -19,7 +19,7 @@ import type { ChatCommandService } from '../commands/chat-command-service.js';
 import { normalizeQueueState } from '../../common/queue-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
-import { isWithinProjectBase } from '../lib/path-boundary.js';
+import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { extractFirstLine } from '../lib/text.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
@@ -165,18 +165,18 @@ export default function createChatRoutes({
       return pathValidationError('path is required', 'path_required', 400);
     }
 
-    if (!isWithinProjectBase(dirPath)) {
-      return pathValidationError('Path is outside the allowed base directory', 'outside_base_dir');
-    }
-
     try {
-      const stat = await fs.stat(dirPath);
+      const projectPath = await assertRealWithinProjectBase(dirPath);
+      const stat = await fs.stat(projectPath);
       if (!stat.isDirectory()) {
         return pathValidationError('Not a directory', 'not_directory');
       }
-      const isGitRepo = await isGitRepository(dirPath);
+      const isGitRepo = await isGitRepository(projectPath);
       return Response.json({ valid: true, isGitRepo });
     } catch (error: unknown) {
+      if (isProjectBoundaryError(error)) {
+        return pathValidationError('Path is outside the allowed base directory', 'outside_base_dir');
+      }
       const err = error as NodeJS.ErrnoException;
       if (err.code === 'ENOENT') {
         return pathValidationError('Path does not exist', 'path_not_found');

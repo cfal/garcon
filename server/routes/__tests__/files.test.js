@@ -66,4 +66,55 @@ describe('files route', () => {
     expect(response.status).toBe(403);
     expect(body.errorCode).toBe('outside_project_base');
   });
+
+  it('rejects project roots that resolve outside the configured base through symlinks', async () => {
+    const linkPath = path.join(projectPath, 'outside-link');
+    await fs.symlink(outsidePath, linkPath, 'dir');
+
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(`http://localhost/api/v1/files/list?projectPath=${encodeURIComponent(linkPath)}`);
+    const response = await routes['/api/v1/files/list'].GET(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.errorCode).toBe('outside_project_base');
+  });
+
+  it('rejects reads through project symlinks that resolve outside the project root', async () => {
+    const secretPath = path.join(outsidePath, 'secret.txt');
+    await fs.writeFile(secretPath, 'secret\n', 'utf8');
+    await fs.symlink(secretPath, path.join(projectPath, 'secret-link.txt'));
+
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=secret-link.txt`,
+    );
+    const response = await routes['/api/v1/files/text'].GET(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe('Path must be under project root');
+  });
+
+  it('rejects writes through project symlink directories that resolve outside the project root', async () => {
+    await fs.symlink(outsidePath, path.join(projectPath, 'outside-dir'), 'dir');
+
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=outside-dir/new.txt`,
+    );
+    const response = await routes['/api/v1/files/text'].PUT(
+      new Request(url, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: 'escape' }),
+      }),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe('Path must be under project root');
+    await expect(fs.readFile(path.join(outsidePath, 'new.txt'), 'utf8')).rejects.toThrow();
+  });
 });

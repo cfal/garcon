@@ -5,10 +5,11 @@ import { withJsonBody } from '../lib/json-route.js';
 import { listDirectory, listDirectoryNames } from './projects.utils.js';
 import { getProjectBasePath } from '../config.js';
 import {
-  assertWithinProjectBase,
+  assertRealWithinProjectBase,
   isProjectBoundaryError,
   isWithinProjectBase,
   projectBoundaryErrorResponse,
+  resolveRealWithinBase,
 } from '../lib/path-boundary.ts';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -65,18 +66,6 @@ async function listAllFiles(
   return results;
 }
 
-function resolvePathWithinProject(projectRoot: string, inputPath: string): string | null {
-  const resolvedRoot = path.resolve(projectRoot);
-  const resolvedPath = path.isAbsolute(inputPath)
-    ? path.resolve(inputPath)
-    : path.resolve(resolvedRoot, inputPath);
-  const normalizedRoot = `${resolvedRoot}${path.sep}`;
-  if (!resolvedPath.startsWith(normalizedRoot) && resolvedPath !== resolvedRoot) {
-    return null;
-  }
-  return resolvedPath;
-}
-
 export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
 
   // Resolves the project path from either a chatId or projectPath query param.
@@ -88,7 +77,7 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
         return { error: Response.json({ error: 'Chat not found or missing projectPath' }, { status: 404 }) };
       }
       try {
-        return { projectPath: assertWithinProjectBase(chat.projectPath) };
+        return { projectPath: await assertRealWithinProjectBase(chat.projectPath) };
       } catch (error) {
         if (isProjectBoundaryError(error)) return { error: projectBoundaryErrorResponse() };
         throw error;
@@ -100,7 +89,7 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
       return { error: Response.json({ error: 'chatId or projectPath is required' }, { status: 400 }) };
     }
     try {
-      return { projectPath: assertWithinProjectBase(projectPath) };
+      return { projectPath: await assertRealWithinProjectBase(projectPath) };
     } catch (error) {
       if (isProjectBoundaryError(error)) return { error: projectBoundaryErrorResponse() };
       throw error;
@@ -122,15 +111,12 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
       let targetDir = projectPath;
       const requestedPath = url.searchParams.get('path');
       if (requestedPath) {
-        const resolvedTarget = resolvePathWithinProject(projectPath, requestedPath);
-        if (!resolvedTarget) {
-          return Response.json({ error: 'Path must be under project root' }, { status: 403 });
-        }
-        targetDir = resolvedTarget;
+        targetDir = await resolveRealWithinBase(projectPath, requestedPath);
       }
       const files = await listDirectory(targetDir, true);
       return Response.json(files);
     } catch (error) {
+      if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
       console.error('files: file tree error:', errorMessage(error));
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
@@ -169,11 +155,11 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     try {
       const filePath = url.searchParams.get('path');
       if (!filePath) return Response.json({ error: 'Invalid file path' }, { status: 400 });
-      const resolvedFile = resolvePathWithinProject(projectPath, filePath);
-      if (!resolvedFile) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
+      const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
       const content = await fs.readFile(resolvedFile, 'utf8');
       return Response.json({ content, path: resolvedFile });
     } catch (error) {
+      if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
       if (isErrnoException(error) && error.code === 'ENOENT') return Response.json({ error: 'File not found' }, { status: 404 });
       if (isErrnoException(error) && error.code === 'EACCES') return Response.json({ error: 'Permission denied' }, { status: 403 });
       return Response.json({ error: errorMessage(error) }, { status: 500 });
@@ -196,11 +182,11 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
       const { content } = asJsonBody(body);
       if (!filePath) return Response.json({ error: 'Invalid file path' }, { status: 400 });
       if (content === undefined) return Response.json({ error: 'Content is required' }, { status: 400 });
-      const resolvedFile = resolvePathWithinProject(projectPath, filePath);
-      if (!resolvedFile) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
+      const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
       await fs.writeFile(resolvedFile, String(content), 'utf8');
       return Response.json({ success: true, path: resolvedFile, message: 'File saved successfully' });
     } catch (error) {
+      if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
       if (isErrnoException(error) && error.code === 'ENOENT') return Response.json({ error: 'File or directory not found' }, { status: 404 });
       if (isErrnoException(error) && error.code === 'EACCES') return Response.json({ error: 'Permission denied' }, { status: 403 });
       return Response.json({ error: errorMessage(error) }, { status: 500 });
@@ -221,13 +207,13 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     try {
       const filePath = url.searchParams.get('path');
       if (!filePath) return Response.json({ error: 'Invalid file path' }, { status: 400 });
-      const resolvedFile = resolvePathWithinProject(projectPath, filePath);
-      if (!resolvedFile) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
+      const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
       await fs.access(resolvedFile);
       const mimeType = mime.lookup(resolvedFile) || 'application/octet-stream';
       const fileBuffer = await fs.readFile(resolvedFile);
       return new Response(fileBuffer, { headers: { 'Content-Type': mimeType } });
     } catch (error) {
+      if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
       if (isErrnoException(error) && error.code === 'ENOENT') return Response.json({ error: 'File not found' }, { status: 404 });
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
@@ -283,17 +269,31 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
       return Response.json([]);
     }
 
+    let realDirPath: string;
     try {
-      await fs.access(dirPath);
+      realDirPath = await assertRealWithinProjectBase(dirPath);
     } catch {
       return Response.json([]);
     }
 
     try {
-      const entries = await listDirectoryNames(dirPath, true);
-      return Response.json(
-        entries.filter((e) => e.type === 'directory' && isWithinProjectBase(e.path))
-      );
+      await fs.access(realDirPath);
+    } catch {
+      return Response.json([]);
+    }
+
+    try {
+      const entries = await listDirectoryNames(realDirPath, true);
+      const safeEntries = [];
+      for (const entry of entries) {
+        try {
+          await assertRealWithinProjectBase(entry.path);
+          safeEntries.push(entry);
+        } catch {
+          // Drops symlinked or raced entries that no longer stay under the project base.
+        }
+      }
+      return Response.json(safeEntries);
     } catch {
       return Response.json([]);
     }

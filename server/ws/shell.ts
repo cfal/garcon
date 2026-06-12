@@ -13,7 +13,7 @@ import {
   type ShellResizeRequest,
 } from '../../common/shell-ws.ts';
 import {
-  assertWithinProjectBase,
+  assertRealWithinProjectBase,
   isProjectBoundaryError,
   PROJECT_BOUNDARY_ERROR_CODE,
   PROJECT_BOUNDARY_ERROR_MESSAGE,
@@ -156,7 +156,7 @@ export class ShellManager {
     const shellState = this.#getShellState(ws);
     let projectPath: string;
     try {
-      projectPath = assertWithinProjectBase(message.projectPath || process.cwd());
+      projectPath = await assertRealWithinProjectBase(message.projectPath || process.cwd());
     } catch (error) {
       if (!isProjectBoundaryError(error)) throw error;
       sendWebSocketJson(ws, shellOutput(`\r\n\x1b[31mError: ${PROJECT_BOUNDARY_ERROR_MESSAGE}\x1b[0m\r\n`));
