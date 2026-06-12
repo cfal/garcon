@@ -2,19 +2,7 @@
 // This is the single place where dependencies are resolved.
 
 import path from 'path';
-import {
-  getPort,
-  getBindAddress,
-  getMaxRequestBodySize,
-  getMaxConnections,
-  getMaxWsClients,
-  getWsIdleTimeoutSeconds,
-  getWsBackpressureLimit,
-  getWsMaxPayloadLength,
-  getHttpIdleTimeoutSeconds,
-  getWorkspaceDir,
-  isAuthDisabled,
-} from './config.js';
+import { initializeServerConfig } from './config.js';
 import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/http-route.js';
 import { malformedJsonResponse } from './lib/json-route.js';
@@ -107,7 +95,8 @@ export async function startServer(): Promise<void> {
   });
 
   try {
-    const workspaceDir = getWorkspaceDir();
+    const config = initializeServerConfig();
+    const workspaceDir = config.workspaceDir;
 
     // Leaf modules with no inter-service dependencies.
     const chatRegistry = new ChatRegistry(workspaceDir);
@@ -227,16 +216,16 @@ export async function startServer(): Promise<void> {
       '/ws': chatHandler.createHandler(),
     };
 
-    const listenPort = getPort();
-    const bindAddress = getBindAddress();
-    const authDisabled = isAuthDisabled();
+    const listenPort = config.port;
+    const bindAddress = config.bindAddress;
+    const authDisabled = config.authDisabled;
 
     const serveOptions = {
       port: listenPort,
       hostname: bindAddress,
-      idleTimeout: getHttpIdleTimeoutSeconds(),
-      maxConnections: getMaxConnections(),
-      maxRequestBodySize: getMaxRequestBodySize(),
+      idleTimeout: config.httpIdleTimeoutSeconds,
+      maxConnections: config.maxConnections,
+      maxRequestBodySize: config.maxRequestBodySize,
       routes: wrapRoutes(routes),
       error(error) {
         if (error instanceof MalformedJsonError) {
@@ -275,14 +264,14 @@ export async function startServer(): Promise<void> {
         return new Response('Not found', { status: 404 });
       },
       websocket: {
-        idleTimeout: getWsIdleTimeoutSeconds(),
+        idleTimeout: config.wsIdleTimeoutSeconds,
         sendPings: true,
-        backpressureLimit: getWsBackpressureLimit(),
+        backpressureLimit: config.wsBackpressureLimit,
         closeOnBackpressureLimit: true,
-        maxPayloadLength: getWsMaxPayloadLength(),
+        maxPayloadLength: config.wsMaxPayloadLength,
         perMessageDeflate: true,
         open(ws) {
-          if (server.pendingWebSockets > getMaxWsClients()) {
+          if (server.pendingWebSockets > config.maxWsClients) {
             ws.close(1013, 'Server busy');
             return;
           }
