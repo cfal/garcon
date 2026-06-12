@@ -29,6 +29,7 @@ import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
 import type { ChatEntry, SessionAgentId } from '$lib/types/app';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
+import { clearPendingChatId, getPendingChatId, setPendingChatId } from '$lib/chat/pending-chat-handoff';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 import { untrack } from 'svelte';
@@ -209,29 +210,6 @@ function buildDispatch(
 	};
 	const onChatNotProcessing = (chatId?: string | null) => {
 		if (chatId) stores.setChatProcessing(chatId, false);
-	};
-
-	// Centralized pendingChatId access via sessionStorage.
-	const getPendingChatId = (): string | null => {
-		try {
-			return typeof window !== 'undefined' ? sessionStorage.getItem('pendingChatId') : null;
-		} catch {
-			return null;
-		}
-	};
-	const setPendingChatId = (id: string) => {
-		try {
-			if (typeof window !== 'undefined') sessionStorage.setItem('pendingChatId', id);
-		} catch {
-			/* storage unavailable */
-		}
-	};
-	const clearPendingChatId = () => {
-		try {
-			if (typeof window !== 'undefined') sessionStorage.removeItem('pendingChatId');
-		} catch {
-			/* storage unavailable */
-		}
 	};
 
 	const lifecycleCtx: LifecycleContext = {
