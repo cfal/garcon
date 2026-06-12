@@ -213,6 +213,7 @@ describe('POST /api/chats/read', () => {
     const body = await response.json();
 
     expect(body.results[0].lastReadAt).toBe(existing);
+    expect(registry.updateChat).not.toHaveBeenCalled();
   });
 
   it('does not include isUnread in mark-read response', async () => {

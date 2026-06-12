@@ -461,7 +461,9 @@ export default function createChatRoutes({
         const existing = session.lastReadAt || null;
         const merged = existing && existing > incoming ? existing : incoming;
 
-        registry.updateChat(chatId, { lastReadAt: merged });
+        if (merged !== existing) {
+          registry.updateChat(chatId, { lastReadAt: merged });
+        }
         results.push({ chatId, lastReadAt: merged });
       }
 
