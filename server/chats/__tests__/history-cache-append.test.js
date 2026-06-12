@@ -153,6 +153,25 @@ describe('appendMessages', () => {
     expect(page.messages.map((message) => message.content)).toEqual(['First reply', 'Second reply']);
   });
 
+  it('keeps repeated assistant messages with identical content at different timestamps', async () => {
+    const selectedChatId = 'repeated-content-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
+    ));
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'Done.' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Done.' },
+    ]));
+
+    const messages = await cache.ensureLoaded(selectedChatId);
+
+    expect(messages.map((message) => message.content)).toEqual(['Done.', 'Done.']);
+    expect(messages.map((message) => message.timestamp)).toEqual([
+      '2026-01-01T00:00:01Z',
+      '2026-01-01T00:00:02Z',
+    ]);
+  });
+
   it('deduplicates agent-history user echoes through shared request identity', async () => {
     const selectedChatId = 'cursor-chat';
     mockRegistry.getChat.mockImplementation((id) => (

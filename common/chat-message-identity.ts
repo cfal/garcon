@@ -42,7 +42,12 @@ export function chatMessageIdentityTokens(
   if (options.includeContentToken) {
     const content = nonEmptyString(raw.content);
     const normalized = content?.trim();
-    if (normalized) tokens.push(`${type}:content:${normalized}`);
+    const timestamp = nonEmptyString(raw.timestamp);
+    if (normalized) {
+      tokens.push(timestamp
+        ? `${type}:content:${normalized}:timestamp:${timestamp}`
+        : `${type}:content:${normalized}`);
+    }
   }
 
   return tokens;
