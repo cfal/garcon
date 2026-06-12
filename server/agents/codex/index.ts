@@ -16,6 +16,9 @@ export function createCodexAgent(codex: CodexAppServerRuntime): Agent {
       async loadMessages(session): Promise<ChatMessage[]> {
         return await codex.loadMessages(session) as ChatMessage[];
       },
+      loadMessagePage(session, page) {
+        return codex.loadMessagePage(session, page);
+      },
       getPreview(session) {
         return codex.getPreview(session);
       },

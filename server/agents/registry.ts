@@ -17,7 +17,7 @@ import type {
   StartedAgentSession,
 } from "./session-types.js";
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
-import type { Agent } from './types.js';
+import type { Agent, AgentTranscriptPage } from './types.js';
 import {
   isVisibleAgentId,
   type AgentCatalogEntry,
@@ -207,6 +207,18 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     const agent = this.#directory.get(session.agentId);
     if (!agent) return [];
     return agent.transcript.loadMessages(session, { chatId });
+  }
+
+  async loadMessagePage(
+    session: AgentChatEntry | null,
+    limit: number,
+    offset: number,
+    chatId?: string,
+  ): Promise<AgentTranscriptPage | null> {
+    if (!session?.agentId) return null;
+    const agent = this.#directory.get(session.agentId);
+    if (!agent?.transcript.loadMessagePage) return null;
+    return agent.transcript.loadMessagePage(session, { limit, offset }, { chatId });
   }
 
   async getModels(agentId: string, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {

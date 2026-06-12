@@ -11,7 +11,7 @@ import type {
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { launchAgentAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
-import { loadClaudeChatMessages, getClaudePreviewFromNativePath } from './history-loader.js';
+import { loadClaudeChatMessages, getClaudePreviewFromNativePath, loadClaudeChatMessagePage } from './history-loader.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { Agent, AgentRuntime } from '../types.js';
 import { buildClaudeEndpointRuntime } from './endpoint-runtime.js';
@@ -82,6 +82,14 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
             : null);
         if (!nativePath) return [];
         return loadClaudeChatMessages(nativePath) as Promise<ChatMessage[]>;
+      },
+      async loadMessagePage(session, page) {
+        const nativePath = session.nativePath
+          ?? (session.agentSessionId
+            ? await createClaudeNativePath(session.projectPath, session.agentSessionId)
+            : null);
+        if (!nativePath) return null;
+        return loadClaudeChatMessagePage(nativePath, page.limit, page.offset);
       },
       async getPreview(session) {
         const nativePath = session.nativePath

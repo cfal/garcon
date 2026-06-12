@@ -36,11 +36,13 @@ mock.module('../pi/pi-cli.js', () => ({
 mock.module('../claude/history-loader.js', () => ({
   getClaudePreviewFromNativePath: mock(() => Promise.resolve(null)),
   loadClaudeChatMessages: mock(() => Promise.resolve([])),
+  loadClaudeChatMessagePage: mock(() => Promise.resolve(null)),
 }));
 
 mock.module('../codex/history-loader.js', () => ({
   getCodexPreviewFromNativePath: mock(() => Promise.resolve(null)),
   loadCodexChatMessages: mock(() => Promise.resolve([])),
+  loadCodexChatMessagePage: mock(() => Promise.resolve(null)),
 }));
 
 mock.module('../opencode/history-loader.js', () => ({

@@ -33,8 +33,9 @@ export async function readJsonlTailLines(
     }
 
     const rawLines = content.split('\n').filter((line) => line.trim());
-    const lines = rawLines.length > maxLines ? rawLines.slice(rawLines.length - maxLines) : rawLines;
-    return { lines, fullyRead };
+    const truncatedByLineLimit = rawLines.length > maxLines;
+    const lines = truncatedByLineLimit ? rawLines.slice(rawLines.length - maxLines) : rawLines;
+    return { lines, fullyRead: fullyRead && !truncatedByLineLimit };
   } finally {
     await fh.close();
   }

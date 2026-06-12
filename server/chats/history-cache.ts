@@ -5,6 +5,7 @@ import { mergeChatMessagesByIdentity, chatMessageIdentityTokens } from '../../co
 import { parseChatMessages, type ChatMessage } from '../../common/chat-types.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { PaginatedChatMessages } from './history-cache-contract.js';
+import type { AgentTranscriptPage } from '../agents/types.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
 
@@ -46,6 +47,12 @@ interface HistoryCacheAgents {
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   isChatRunning(chatId: string): boolean;
   loadMessages(session: ChatRegistryEntry, chatId: string): Promise<unknown[]>;
+  loadMessagePage?(
+    session: ChatRegistryEntry,
+    limit: number,
+    offset: number,
+    chatId?: string,
+  ): Promise<AgentTranscriptPage | null>;
 }
 
 function historyCacheIdentityTokens(message: ChatMessage): string[] {
@@ -178,12 +185,7 @@ export class HistoryCache {
       const current = this.#cacheByChatId.get(key);
       const liveTail = current?.completeness === 'tail' ? current.messages : [];
       const messages = mergeChatMessages(loaded, liveTail, { includeContentToken: true });
-      // Sort chronologically after merge. mergeChatMessagesByIdentity
-      // preserves base-then-incoming order, which scrambles timestamps
-      // when the live tail (agent-only) is used as the base and the full
-      // history (user + agent) is merged as incoming.
-      messages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-      const deduped = deduplicateMessages(messages);
+      const deduped = deduplicateMessages(sortMessagesChronologically(messages));
       this.#cacheByChatId.set(key, createHistoryCacheEntry({
         chatId: key,
         messages: deduped,
@@ -235,23 +237,16 @@ export class HistoryCache {
 
   async getPaginatedMessages(chatId: string, limit: number, offset: number): Promise<PaginatedChatMessages> {
     const key = String(chatId);
+    if (offset === 0) {
+      const tailPage = await this.#loadTailPage(key, limit, offset);
+      if (tailPage) return tailPage;
+    }
+
     const messages = await this.ensureLoaded(key);
     const entry = this.#cacheByChatId.get(key);
 
     if (entry) entry.lastAccessAt = this.#now();
-
-    const total = messages.length;
-    const start = Math.max(0, total - offset - limit);
-    const end = total - offset;
-    const pageMessages = messages.slice(start, end);
-
-    return {
-      messages: pageMessages,
-      total,
-      hasMore: start > 0,
-      offset,
-      limit,
-    };
+    return pageFromMessages(messages, limit, offset);
   }
 
   evictChat(chatId: string): void {
@@ -282,6 +277,71 @@ export class HistoryCache {
     return parseChatMessages(await this.#agents.loadMessages(session, chatId));
   }
 
+  async #loadTailPage(chatId: string, limit: number, offset: number): Promise<PaginatedChatMessages | null> {
+    const existing = this.#cacheByChatId.get(chatId);
+    if (existing?.completeness === 'full') {
+      existing.lastAccessAt = this.#now();
+      return pageFromMessages(existing.messages, limit, offset);
+    }
+
+    const session = this.#registry.getChat(chatId);
+    if (!session || !this.#agents.loadMessagePage) return null;
+
+    try {
+      const loadedPage = await this.#agents.loadMessagePage(session, limit, offset, chatId);
+      if (!loadedPage) return null;
+
+      const liveTail = existing?.completeness === 'tail' ? existing.messages : [];
+      const merged = deduplicateMessages(sortMessagesChronologically(
+        mergeChatMessages(loadedPage.messages, liveTail, { includeContentToken: true }),
+      ));
+
+      if (!loadedPage.hasMore) {
+        this.#cacheByChatId.set(chatId, createHistoryCacheEntry({
+          chatId,
+          messages: merged,
+          completeness: 'full',
+          lastAccessAt: this.#now(),
+        }));
+        return pageFromMessages(merged, limit, offset);
+      }
+
+      const messages = merged.slice(Math.max(0, merged.length - limit));
+      const total = Math.max(loadedPage.total, offset + messages.length + 1);
+      this.#cacheByChatId.set(chatId, createHistoryCacheEntry({
+        chatId,
+        messages,
+        completeness: 'tail',
+        lastAccessAt: this.#now(),
+      }));
+      return {
+        messages,
+        total,
+        hasMore: true,
+        offset,
+        limit,
+      };
+    } catch (err) {
+      logger.warn(`history-cache: tail page load failed for ${chatId}:`, errorMessage(err));
+      return null;
+    }
+  }
+
+}
+
+function pageFromMessages(messages: ChatMessage[], limit: number, offset: number): PaginatedChatMessages {
+  const total = messages.length;
+  const start = Math.max(0, total - offset - limit);
+  const end = total - offset;
+  const pageMessages = messages.slice(start, end);
+
+  return {
+    messages: pageMessages,
+    total,
+    hasMore: start > 0,
+    offset,
+    limit,
+  };
 }
 
 function mergeChatMessages(
@@ -306,6 +366,18 @@ function deduplicateMessages(messages: ChatMessage[]): ChatMessage[] {
     result.push(message);
   }
   return result;
+}
+
+function sortMessagesChronologically(messages: ChatMessage[]): ChatMessage[] {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort((a, b) => {
+      const left = typeof a.message.timestamp === 'string' && a.message.timestamp ? a.message.timestamp : null;
+      const right = typeof b.message.timestamp === 'string' && b.message.timestamp ? b.message.timestamp : null;
+      if (left && right) return left.localeCompare(right) || a.index - b.index;
+      return a.index - b.index;
+    })
+    .map(({ message }) => message);
 }
 
 function takeNewMessages(identityTokens: Set<string>, messages: ChatMessage[]): ChatMessage[] {

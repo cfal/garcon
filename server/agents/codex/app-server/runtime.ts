@@ -1,8 +1,9 @@
 import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage } from "../../../../common/chat-types.js";
 import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from "../../shared/event-emitter-runtime.js";
-import { loadCodexChatMessages, getCodexPreviewFromNativePath } from "../history-loader.js";
+import { loadCodexChatMessages, getCodexPreviewFromNativePath, loadCodexChatMessagePage } from "../history-loader.js";
 import type { AgentChatEntry, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../../session-types.js";
+import type { AgentTranscriptPage } from '../../types.js';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
 import {
@@ -219,6 +220,14 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       logger.warn('codex: app-server thread/read failed, falling back to JSONL:', (error as Error).message);
       return this.#loadJsonlMessages(session);
     }
+  }
+
+  async loadMessagePage(
+    session: AgentChatEntry,
+    page: { limit: number; offset: number },
+  ): Promise<AgentTranscriptPage | null> {
+    if (session.agentSessionId) return null;
+    return loadCodexChatMessagePage(session.nativePath, page.limit, page.offset);
   }
 
   async getPreview(session: AgentChatEntry): Promise<unknown> {
