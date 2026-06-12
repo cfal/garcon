@@ -9,6 +9,7 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Check from '@lucide/svelte/icons/check';
+	import { onDestroy } from 'svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import type { GitFileReviewData, GitReviewCommentDraft, GitDiffTab } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -113,6 +114,7 @@
 
 	let lastClickedKey = $state<string | null>(null);
 	let pathCopied = $state(false);
+	let pathCopiedResetTimer: ReturnType<typeof setTimeout> | null = null;
 	let headerFontSize = $derived(Math.max(fontSize - 1, 10));
 	let actionTarget = $derived<GitDiffActionTarget>({
 		filePath,
@@ -121,13 +123,26 @@
 		contextLines,
 	});
 
+	function clearPathCopiedResetTimer() {
+		if (pathCopiedResetTimer === null) return;
+		clearTimeout(pathCopiedResetTimer);
+		pathCopiedResetTimer = null;
+	}
+
 	async function handleCopyPath() {
 		if (!reviewData) return;
 		const didCopy = await copyToClipboard(reviewData.path);
 		if (!didCopy) return;
 		pathCopied = true;
-		setTimeout(() => (pathCopied = false), 2000);
+		clearPathCopiedResetTimer();
+		pathCopiedResetTimer = setTimeout(() => {
+			pathCopied = false;
+			pathCopiedResetTimer = null;
+		}, 2000);
 	}
+
+	onDestroy(clearPathCopiedResetTimer);
+
 	let rowLineHeight = $derived(Math.max(Math.round(fontSize * 1.5), 16));
 
 	// Build renderable rows from review data (unified mode)
