@@ -15,6 +15,10 @@ import {
 } from '../../../common/chat-types.js';
 import { convertClaudeToolUse } from './tool-use-converter.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
+import { createLogger } from '../../lib/log.js';
+import type { AgentTranscriptPage } from '../types.js';
+
+const logger = createLogger('agents:claude:history-loader');
 
 const HEAD_READ_BYTES = 32 * 1024;
 
@@ -97,6 +101,114 @@ function isSystemAssistantMessage(text: string): boolean {
   );
 }
 
+function parseClaudeJsonlEntry(line: string): Record<string, unknown> | null {
+  if (!line.trim()) return null;
+  try {
+    const entry = asRecord(JSON.parse(line));
+    return entry.sessionId ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
+function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, unknown>[] {
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => {
+      const left = timestampMs(a.entry.timestamp);
+      const right = timestampMs(b.entry.timestamp);
+      if (left > 0 && right > 0 && left !== right) return left - right;
+      return a.index - b.index;
+    })
+    .map(({ entry }) => entry);
+}
+
+function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+
+  for (const entry of entries) {
+    const ts = asString(entry.timestamp) || new Date().toISOString();
+    const message = asRecord(entry.message);
+
+    if (entry.type === 'progress' || entry.type === 'queue-operation' ||
+      entry.type === 'file-history-snapshot' || entry.type === 'summary') {
+      continue;
+    }
+
+    if (entry.type === 'system') continue;
+    if (entry.isCompactSummary || entry.isMeta) continue;
+
+    if (entry.isApiErrorMessage) {
+      const errorText = entry.error
+        ? (typeof entry.error === 'string' ? entry.error : JSON.stringify(entry.error))
+        : getMessageText(message.content) || 'API error';
+      messages.push(new ErrorMessage(ts, errorText));
+      continue;
+    }
+
+    if (message.role === 'user') {
+      const content = message.content;
+
+      if (Array.isArray(content)) {
+        for (const rawPart of content) {
+          const part = asRecord(rawPart);
+          if (part.type === 'tool_result') {
+            messages.push(new ToolResultMessage(ts, asString(part.tool_use_id) || '', normalizeToolResultContent(part.content), Boolean(part.is_error)));
+          }
+        }
+      }
+
+      const text = getMessageText(content);
+      if (text && !isSystemUserMessage(text)) {
+        messages.push(new UserMessage(ts, stripResolvedFileMentionContext(decodeHtmlEntities(text))));
+      }
+      continue;
+    }
+
+    if (message.role === 'assistant' && message.content) {
+      const content = message.content;
+
+      if (Array.isArray(content)) {
+        for (const rawPart of content) {
+          const part = asRecord(rawPart);
+          const thinking = asString(part.thinking);
+          const text = asString(part.text);
+          if (part.type === 'thinking' && thinking) {
+            messages.push(new ThinkingMessage(ts, thinking));
+          } else if (part.type === 'text' && text?.trim()) {
+            if (!isSystemAssistantMessage(text)) {
+              messages.push(new AssistantMessage(ts, text));
+            }
+          } else if (part.type === 'tool_use') {
+            messages.push(convertClaudeToolUse(ts, part));
+          }
+        }
+      } else if (typeof content === 'string' && content.trim()) {
+        if (!isSystemAssistantMessage(content)) {
+          messages.push(new AssistantMessage(ts, content));
+        }
+      }
+      continue;
+    }
+
+    if (entry.type === 'thinking' && message.content) {
+      const thinkContent = typeof message.content === 'string'
+        ? message.content : '';
+      if (thinkContent) {
+        messages.push(new ThinkingMessage(ts, thinkContent));
+      }
+    }
+  }
+
+  return messages;
+}
+
+function parseClaudeJsonlLines(lines: string[]): ChatMessage[] {
+  return convertClaudeEntries(sortClaudeEntries(lines
+    .map(parseClaudeJsonlEntry)
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry))));
+}
+
 // Reads a Claude JSONL file and returns ChatMessage[].
 export async function loadClaudeChatMessages(nativePath: string | null | undefined): Promise<ChatMessage[]> {
   if (!nativePath) return [];
@@ -108,108 +220,48 @@ export async function loadClaudeChatMessages(nativePath: string | null | undefin
 
   try {
     const raw = await fs.readFile(nativePath, 'utf8');
-    const entries: Record<string, unknown>[] = [];
-
-    for (const line of raw.split('\n')) {
-      if (!line) continue;
-      try {
-        const entry = asRecord(JSON.parse(line));
-        if (entry.sessionId) entries.push(entry);
-      } catch { }
-    }
-
-    entries.sort((a, b) => timestampMs(a.timestamp) - timestampMs(b.timestamp));
-
-    const messages: ChatMessage[] = [];
-
-    for (const entry of entries) {
-      const ts = asString(entry.timestamp) || new Date().toISOString();
-      const message = asRecord(entry.message);
-
-      // Skip non-message entry types
-      if (entry.type === 'progress' || entry.type === 'queue-operation' ||
-        entry.type === 'file-history-snapshot' || entry.type === 'summary') {
-        continue;
-      }
-
-      // Skip system entries
-      if (entry.type === 'system') continue;
-
-      // Skip compact summary / meta entries
-      if (entry.isCompactSummary || entry.isMeta) continue;
-
-      // API error entries
-      if (entry.isApiErrorMessage) {
-        const errorText = entry.error
-          ? (typeof entry.error === 'string' ? entry.error : JSON.stringify(entry.error))
-          : getMessageText(message.content) || 'API error';
-        messages.push(new ErrorMessage(ts, errorText));
-        continue;
-      }
-
-      // User messages
-      if (message.role === 'user') {
-        const content = message.content;
-
-        // Emit tool-result messages from user entries
-        if (Array.isArray(content)) {
-          for (const rawPart of content) {
-            const part = asRecord(rawPart);
-            if (part.type === 'tool_result') {
-              messages.push(new ToolResultMessage(ts, asString(part.tool_use_id) || '', normalizeToolResultContent(part.content), Boolean(part.is_error)));
-            }
-          }
-        }
-
-        // Extract text and check if it's a system message
-        const text = getMessageText(content);
-        if (text && !isSystemUserMessage(text)) {
-          messages.push(new UserMessage(ts, stripResolvedFileMentionContext(decodeHtmlEntities(text))));
-        }
-        continue;
-      }
-
-      // Assistant messages
-      if (message.role === 'assistant' && message.content) {
-        const content = message.content;
-
-        if (Array.isArray(content)) {
-          for (const rawPart of content) {
-            const part = asRecord(rawPart);
-            const thinking = asString(part.thinking);
-            const text = asString(part.text);
-            if (part.type === 'thinking' && thinking) {
-              messages.push(new ThinkingMessage(ts, thinking));
-            } else if (part.type === 'text' && text?.trim()) {
-              if (!isSystemAssistantMessage(text)) {
-                messages.push(new AssistantMessage(ts, text));
-              }
-            } else if (part.type === 'tool_use') {
-              messages.push(convertClaudeToolUse(ts, part));
-            }
-          }
-        } else if (typeof content === 'string' && content.trim()) {
-          if (!isSystemAssistantMessage(content)) {
-            messages.push(new AssistantMessage(ts, content));
-          }
-        }
-        continue;
-      }
-
-      // Standalone thinking entries (type=thinking at the entry level)
-      if (entry.type === 'thinking' && message.content) {
-        const thinkContent = typeof message.content === 'string'
-          ? message.content : '';
-        if (thinkContent) {
-          messages.push(new ThinkingMessage(ts, thinkContent));
-        }
-      }
-    }
-
-    return messages;
+    return parseClaudeJsonlLines(raw.split('\n'));
   } catch (error) {
-    console.error(`claude: error loading chat messages from ${nativePath}:`, error);
+    logger.error(`claude: error loading chat messages from ${nativePath}:`, error);
     return [];
+  }
+}
+
+export async function loadClaudeChatMessagePage(
+  nativePath: string | null | undefined,
+  limit: number,
+  offset: number,
+): Promise<AgentTranscriptPage | null> {
+  if (!nativePath || offset > 0 || limit <= 0) return null;
+  try {
+    await fs.access(nativePath);
+  } catch {
+    return { messages: [], total: 0, hasMore: false, offset, limit };
+  }
+
+  try {
+    let maxBytes = 256 * 1024;
+    let maxLines = Math.max(500, limit * 40);
+    while (true) {
+      const { lines, fullyRead } = await readJsonlTailLines(nativePath, maxBytes, maxLines);
+      const messages = parseClaudeJsonlLines(lines);
+      if (messages.length >= limit || fullyRead) {
+        const pageMessages = messages.slice(Math.max(0, messages.length - limit));
+        const hasMore = !fullyRead || messages.length > pageMessages.length;
+        return {
+          messages: pageMessages,
+          total: fullyRead ? messages.length : pageMessages.length + 1,
+          hasMore,
+          offset,
+          limit,
+        };
+      }
+      maxBytes *= 2;
+      maxLines *= 2;
+    }
+  } catch (error) {
+    logger.warn(`claude: tail page load failed for ${nativePath}:`, error);
+    return null;
   }
 }
 
@@ -259,7 +311,7 @@ export async function getClaudeSessionMessagesFromNativePath(
       limit,
     };
   } catch (error) {
-    console.error(`claude: error reading messages from ${nativePath}:`, error);
+    logger.error(`claude: error reading messages from ${nativePath}:`, error);
     return limit === null ? [] : { messages: [], total: 0, hasMore: false, offset, limit };
   }
 }
@@ -304,7 +356,7 @@ async function readFirstUserMessage(filePath: string): Promise<{
         if (firstTimestamp) {
           break;
         }
-        console.error(`claude: got first user message without timestamp: ${firstMessage}`);
+        logger.error(`claude: got first user message without timestamp: ${firstMessage}`);
       }
     }
   } catch { } finally {
@@ -320,13 +372,13 @@ export async function getClaudePreviewFromNativePath(nativePath: string): Promis
   try {
     await fs.access(nativePath);
   } catch (err) {
-    console.error(`claude: preview fetch failed for ${nativePath}:`, err);
+    logger.error(`claude: preview fetch failed for ${nativePath}:`, err);
     return null;
   }
 
   const { lines, fullyRead } = await readJsonlTailLines(nativePath);
   if (fullyRead) {
-    console.warn(`claude: fully read ${nativePath}`);
+    logger.warn(`claude: fully read ${nativePath}`);
   }
 
   let lastActivity: string | null = null;
@@ -342,7 +394,7 @@ export async function getClaudePreviewFromNativePath(nativePath: string): Promis
 
     if (!entry.sessionId) continue;
     if (entry.sessionId !== agentSessionId) {
-      console.warn(`claude: skipping non-matching session ID in ${nativePath}, expected ${agentSessionId}: ${String(entry.sessionId)}`);
+      logger.warn(`claude: skipping non-matching session ID in ${nativePath}, expected ${agentSessionId}: ${String(entry.sessionId)}`);
       continue;
     }
 
@@ -380,7 +432,7 @@ export async function getClaudePreviewFromNativePath(nativePath: string): Promis
   // in which case we could have handled it in the loop above.
   const { firstMessage, firstTimestamp } = await readFirstUserMessage(nativePath);
   if (!firstMessage || !firstTimestamp) {
-    console.warn(`claude: failed to read first user message from ${nativePath}`);
+    logger.warn(`claude: failed to read first user message from ${nativePath}`);
   }
 
   return {

@@ -2,6 +2,7 @@ import type { HttpErrorResponse } from '../../common/http-error.ts';
 
 export const DEFAULT_VALIDATION_ERROR_CODE = 'VALIDATION_FAILED';
 export const DEFAULT_INTERNAL_ERROR_CODE = 'INTERNAL_ERROR';
+const DEFAULT_INTERNAL_ERROR_MESSAGE = 'Internal server error';
 
 export function defaultErrorCodeForStatus(status: number): string {
   return status >= 500 ? DEFAULT_INTERNAL_ERROR_CODE : DEFAULT_VALIDATION_ERROR_CODE;
@@ -34,7 +35,8 @@ export function jsonErrorFromUnknown(
   errorCode = defaultErrorCodeForStatus(status),
   retryable = defaultRetryableForStatus(status),
 ): Response {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = status >= 500
+    ? DEFAULT_INTERNAL_ERROR_MESSAGE
+    : error instanceof Error ? error.message : String(error);
   return jsonError(message, status, errorCode, retryable);
 }
-

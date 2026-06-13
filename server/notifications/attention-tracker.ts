@@ -9,6 +9,9 @@
 import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, AssistantMessage } from '../../common/chat-types.js';
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { TelegramNotifier } from './telegram.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('notifications:attention-tracker');
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -53,12 +56,13 @@ interface QueueManagerDep {
 }
 
 interface SettingsStoreDep {
-  getUiSettings(): Promise<Record<string, unknown>>;
+  getUiSettings(): Record<string, unknown>;
   getChatName(chatId: string): string | null;
 }
 
 interface ChatRegistryDep {
   getChat(chatId: string): { agentId: string; projectPath: string } | null;
+  onChatRemoved?(cb: (chatId: string) => void): void;
 }
 
 interface HistoryCacheDep {
@@ -125,6 +129,7 @@ export class AttentionTracker {
     this.#agents.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
     this.#queue.onSessionStopped((chatId) => this.#handleSessionStopped(chatId));
+    this.#registry.onChatRemoved?.((chatId) => this.#cleanupChat(chatId));
   }
 
   #handleMessages(chatId: string, messages: unknown[]): void {
@@ -261,6 +266,7 @@ export class AttentionTracker {
   }
 
   #cleanupChat(chatId: string): void {
+    this.#pendingPermissions.delete(chatId);
     this.#lastTurnResult.delete(chatId);
     this.#lastAssistantMessage.delete(chatId);
   }
@@ -298,10 +304,10 @@ export class AttentionTracker {
       if (!config.enabled || !recipientChatId) return;
       const ok = await this.#telegram.send(recipientChatId, html, 'HTML');
       if (!ok) {
-        console.warn(`attention: telegram delivery failed for chat ${chatId}`);
+        logger.warn(`attention: telegram delivery failed for chat ${chatId}`);
       }
     } catch (err: unknown) {
-      console.warn('attention: settings read error:', (err as Error).message);
+      logger.warn('attention: settings read error:', (err as Error).message);
     }
   }
 

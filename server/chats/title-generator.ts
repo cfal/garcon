@@ -5,6 +5,10 @@ import { resolveGenerationContext } from '../settings/generation-config-source.t
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentCatalogEntry } from '../../common/agents.js';
+import { createLogger } from '../lib/log.js';
+import { errorMessage } from '../lib/errors.js';
+
+const logger = createLogger('chats:title-generator');
 
 interface TitleGenerationAgents {
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
@@ -25,7 +29,7 @@ interface TitleGenerationAgents {
 }
 
 interface TitleGenerationSettings {
-  getUiSettings(): Promise<{ chatTitle?: unknown } | null | undefined>;
+  getUiSettings(): { chatTitle?: unknown } | null | undefined;
   getChatName(chatId: string): string | null | undefined;
   setSessionName(chatId: string, title: string): Promise<unknown>;
 }
@@ -36,10 +40,6 @@ interface MaybeGenerateChatTitleInput {
   firstPrompt: string;
   agents: TitleGenerationAgents;
   settings: TitleGenerationSettings;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 // Modified from Open WebUI
@@ -114,6 +114,6 @@ export async function maybeGenerateChatTitle({
 
     await settings.setSessionName(chatId, title);
   } catch (error) {
-    console.warn('chat-title: generation failed:', errorMessage(error));
+    logger.warn('chat-title: generation failed:', errorMessage(error));
   }
 }

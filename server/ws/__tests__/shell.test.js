@@ -104,6 +104,96 @@ describe('ShellManager shutdown', () => {
     }
   });
 
+  it('kills fresh PTY sessions immediately on close', async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = mock(() => ({ unref: mock(() => undefined) }));
+
+    try {
+      const manager = new ShellManager();
+      const handler = manager.createHandler();
+      const ws = createWs();
+
+      handler.open(ws);
+      await handler.message(ws, {
+        type: 'init',
+        projectPath: '/tmp',
+        chatId: 'chat-1',
+        sessionPolicy: 'fresh',
+      });
+      handler.close(ws, 1000, '');
+
+      expect(spawnedPtys).toHaveLength(1);
+      expect(spawnedPtys[0].kill).toHaveBeenCalledTimes(1);
+      expect(globalThis.setTimeout).not.toHaveBeenCalled();
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
+  it('routes input through the current attached session socket', async () => {
+    const manager = new ShellManager();
+    const handler = manager.createHandler();
+    const firstWs = createWs();
+    const secondWs = createWs();
+
+    handler.open(firstWs);
+    await handler.message(firstWs, {
+      type: 'init',
+      projectPath: '/tmp',
+      chatId: 'chat-1',
+      sessionPolicy: 'reuse',
+    });
+    handler.open(secondWs);
+    await handler.message(secondWs, {
+      type: 'init',
+      projectPath: '/tmp',
+      chatId: 'chat-1',
+      sessionPolicy: 'reuse',
+    });
+
+    spawnedPtys[0].write.mockClear();
+    await handler.message(firstWs, { type: 'input', data: 'old socket\n' });
+    expect(spawnedPtys[0].write).not.toHaveBeenCalled();
+
+    await handler.message(secondWs, { type: 'input', data: 'current socket\n' });
+    expect(spawnedPtys[0].write).toHaveBeenCalledWith('current socket\n');
+  });
+
+  it('replays buffered output as one byte-capped payload on reconnect', async () => {
+    const manager = new ShellManager();
+    const handler = manager.createHandler();
+    const firstWs = createWs();
+    const secondWs = createWs();
+
+    handler.open(firstWs);
+    await handler.message(firstWs, {
+      type: 'init',
+      projectPath: '/tmp',
+      chatId: 'chat-1',
+      sessionPolicy: 'reuse',
+    });
+    spawnedPtys[0].emitData('a'.repeat(700 * 1024));
+    spawnedPtys[0].emitData('b'.repeat(700 * 1024));
+    handler.close(firstWs, 1000, '');
+
+    sendWebSocketJson.mockClear();
+    handler.open(secondWs);
+    await handler.message(secondWs, {
+      type: 'init',
+      projectPath: '/tmp',
+      chatId: 'chat-1',
+      sessionPolicy: 'reuse',
+    });
+
+    const outputPayloads = sendWebSocketJson.mock.calls
+      .map((call) => call[1])
+      .filter((payload) => payload.type === 'output');
+    expect(outputPayloads).toHaveLength(2);
+    expect(outputPayloads[0].data).toContain('Reconnected to existing session');
+    expect(outputPayloads[1].data.length).toBeLessThanOrEqual(1024 * 1024);
+    expect(outputPayloads[1].data).toBe('b'.repeat(700 * 1024));
+  });
+
   it('rejects init requests outside the configured project base', async () => {
     const manager = new ShellManager();
     const handler = manager.createHandler();

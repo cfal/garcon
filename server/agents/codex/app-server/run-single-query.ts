@@ -2,10 +2,21 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import type { CodexConfigObject, CodexConfigValue, CodexProviderConfig } from "../../session-types.js";
+import type { PermissionMode, ThinkingMode } from '../../../../common/chat-modes.js';
 import { resolveCodexCliCommand } from './cli.js';
 import { buildCodexEnv, codexSandboxSettings, mapThinkingModeToCodexEffort } from './request-builders.js';
 
 export { resolveCodexCliCommand } from './cli.js';
+
+interface CodexSingleQueryOptions {
+  cwd?: string;
+  projectPath?: string;
+  model?: string;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  envOverrides?: Record<string, string>;
+  codexConfig?: CodexProviderConfig;
+}
 
 async function runCodexExec(
   args: string[],
@@ -37,7 +48,7 @@ async function runCodexExec(
   return { stdout, stderr };
 }
 
-export async function runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
+export async function runSingleQuery(prompt: string, options: CodexSingleQueryOptions = {}): Promise<string> {
   const {
     cwd,
     projectPath,

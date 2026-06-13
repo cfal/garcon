@@ -10,7 +10,7 @@ import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { SettingsStore } from '../settings/store.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import {
-  assertWithinProjectBase,
+  assertRealWithinProjectBase,
   isProjectBoundaryError,
   projectBoundaryErrorResponse,
 } from '../lib/path-boundary.ts';
@@ -69,14 +69,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function boundaryCheckedOptions(options: unknown): unknown {
+async function boundaryCheckedOptions(options: unknown): Promise<unknown> {
   if (!options || typeof options !== 'object') return options;
   const next = { ...options as Record<string, unknown> };
   if (typeof next.projectPath === 'string') {
-    next.projectPath = assertWithinProjectBase(next.projectPath);
+    next.projectPath = await assertRealWithinProjectBase(next.projectPath);
   }
   if (typeof next.worktreePath === 'string') {
-    next.worktreePath = assertWithinProjectBase(next.worktreePath);
+    next.worktreePath = await assertRealWithinProjectBase(next.worktreePath);
   }
   return next;
 }
@@ -91,7 +91,7 @@ function createBoundaryCheckedGitService(git: GitService): GitService {
           : value.call(target, error);
       }
       if (typeof value !== 'function') return value;
-      return (options: unknown, ...args: unknown[]) => value.call(target, boundaryCheckedOptions(options), ...args);
+      return async (options: unknown, ...args: unknown[]) => value.call(target, await boundaryCheckedOptions(options), ...args);
     },
   }) as unknown as GitService;
 }

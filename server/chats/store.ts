@@ -18,6 +18,9 @@ import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentName } from "../agents/session-types.js";
 import { isArtificialNativePath, parseArtificialNativePath } from './artificial-native-path.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('chats:store');
 
 const CHAT_REGISTRY_VERSION = 2;
 const LEGACY_AGENT_ID_FIELD = 'provider';
@@ -86,6 +89,9 @@ export interface NewChatRegistryEntry {
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
 export type ChatRegistryResolvedEntry = { id: string } & ChatRegistryEntry;
+export interface ChatRegistryUpdateOptions {
+  flush?: boolean;
+}
 export type ChatRemovedCallback = (chatId: string) => void;
 export type ChatReadUpdatedCallback = (chatId: string, lastReadAt: string | null | undefined) => void;
 export type ResolveNativePath = (session: ChatRegistryEntry) => Promise<string | null>;
@@ -98,6 +104,7 @@ export interface IChatRegistry {
   getChat(id: string): ChatRegistryEntry | null;
   addChat(entry: NewChatRegistryEntry): boolean;
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
+  updateChat(id: string, patch: ChatRegistryPatch, options: ChatRegistryUpdateOptions & { flush: true }): Promise<ChatRegistryResolvedEntry | null>;
   removeChat(id: string): boolean;
   getChatByNativePath(nativePath: string | null | undefined): [string, ChatRegistryEntry] | null;
   getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
@@ -215,6 +222,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
   #registry: ChatRegistrySnapshot | null = null;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #nativePathCache = new Map<string, string>();
+  #agentSessionIdIndex = new Map<string, string>();
   #workspaceDir: string;
 
   constructor(workspaceDir: string) {
@@ -259,6 +267,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         version: CHAT_REGISTRY_VERSION,
         sessions,
       };
+      this.#rebuildAgentSessionIdIndex();
       if (migrated) {
         await this.saveRegistry(this.#registry);
       }
@@ -267,6 +276,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       const errno = error as NodeJS.ErrnoException;
       if (errno.code === 'ENOENT') {
         this.#registry = createEmptyRegistry();
+        this.#rebuildAgentSessionIdIndex();
         return this.#registry;
       }
       throw error;
@@ -287,7 +297,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
 
     for (const [chatId, session] of Object.entries(sessions)) {
       if (!session?.agentSessionId) {
-        console.warn(`sessions: discarding chat ${chatId} with missing agentSessionId`);
+        logger.warn(`sessions: discarding chat ${chatId} with missing agentSessionId`);
         if (session?.nativePath) this.#nativePathCache.delete(session.nativePath);
         delete sessions[chatId];
         dirty = true;
@@ -308,15 +318,15 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       try {
         resolvedPath = await resolveNativePath(session);
       } catch (error) {
-        console.warn(`sessions: nativePath reconciliation aborted at ${chatId}:`, (error as Error).message);
+        logger.warn(`sessions: nativePath reconciliation aborted at ${chatId}:`, (error as Error).message);
         break;
       }
       if (!resolvedPath) {
         if (session.agentId === 'codex' && session.nativePath) {
-          console.warn(`sessions: preserving Codex chat ${chatId} with unresolved nativePath`);
+          logger.warn(`sessions: preserving Codex chat ${chatId} with unresolved nativePath`);
           continue;
         }
-        console.warn(`sessions: discarding chat ${chatId} with unresolved nativePath`);
+        logger.warn(`sessions: discarding chat ${chatId} with unresolved nativePath`);
         delete sessions[chatId];
         dirty = true;
         continue;
@@ -385,14 +395,21 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       modelProtocol,
       ...normalizedModes,
     };
+    this.#setAgentSessionIdIndex(id, agentSessionId);
     this.#scheduleRegistrySave();
     return true;
   }
 
-  updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null {
+  updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
+  updateChat(id: string, patch: ChatRegistryPatch, options: ChatRegistryUpdateOptions & { flush: true }): Promise<ChatRegistryResolvedEntry | null>;
+  updateChat(
+    id: string,
+    patch: ChatRegistryPatch,
+    options: ChatRegistryUpdateOptions = {},
+  ): ChatRegistryResolvedEntry | null | Promise<ChatRegistryResolvedEntry | null> {
     const registry = this.getRegistry();
     const existing = registry.sessions[id];
-    if (!existing) return null;
+    if (!existing) return options.flush ? Promise.resolve(null) : null;
     const normalizedPatch: ChatRegistryPatch = { ...patch };
     if ('permissionMode' in normalizedPatch) {
       normalizedPatch.permissionMode = normalizePermissionMode(normalizedPatch.permissionMode);
@@ -409,16 +426,25 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     if ('nextForkOrdinal' in normalizedPatch) {
       normalizedPatch.nextForkOrdinal = normalizeNextForkOrdinal(normalizedPatch.nextForkOrdinal);
     }
+    const previousAgentSessionId = existing.agentSessionId;
     for (const key of ALLOWED_PATCH_FIELDS) {
       if (key in normalizedPatch) {
         existing[key] = normalizedPatch[key] as never;
       }
     }
-    this.#scheduleRegistrySave();
+    if ('agentSessionId' in normalizedPatch && existing.agentSessionId !== previousAgentSessionId) {
+      this.#unsetAgentSessionIdIndex(id, previousAgentSessionId);
+      this.#setAgentSessionIdIndex(id, existing.agentSessionId);
+    }
     if ('lastReadAt' in normalizedPatch) {
       this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
     }
-    return { id, ...existing };
+    const resolved = { id, ...existing };
+    if (options.flush) {
+      return this.#flushRegistrySave().then(() => resolved);
+    }
+    this.#scheduleRegistrySave();
+    return resolved;
   }
 
   removeChat(id: string): boolean {
@@ -426,6 +452,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     const entry = registry.sessions[id];
     if (!entry) return false;
     if (entry.nativePath) this.#nativePathCache.delete(entry.nativePath);
+    this.#unsetAgentSessionIdIndex(id, entry.agentSessionId);
     delete registry.sessions[id];
     this.#emitChatRemoved(id);
     this.#scheduleRegistrySave();
@@ -456,27 +483,34 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       throw new Error('Registry cache not initialized. Call init() during startup.');
     }
     if (!agentSessionId) return null;
-    for (const [id, entry] of Object.entries(registry.sessions)) {
-      if (entry.agentSessionId === agentSessionId) {
-        return [id, entry];
-      }
+    const chatId = this.#agentSessionIdIndex.get(agentSessionId);
+    if (!chatId) return null;
+    const entry = registry.sessions[chatId];
+    if (!entry || entry.agentSessionId !== agentSessionId) {
+      this.#agentSessionIdIndex.delete(agentSessionId);
+      return null;
     }
-    return null;
+    return [chatId, entry];
   }
 
   async saveRegistry(registry: ChatRegistrySnapshot): Promise<void> {
     const target = this.#sessionsFilePath();
     await writeJsonFileAtomic(target, registry);
     this.#registry = registry;
+    this.#rebuildAgentSessionIdIndex();
   }
 
   // Flushes any pending registry save immediately. Called during shutdown.
   async flush(): Promise<void> {
+    await this.#flushRegistrySave();
+  }
+
+  async #flushRegistrySave(): Promise<void> {
     if (this.#pendingSaveTimer) {
       clearTimeout(this.#pendingSaveTimer);
       this.#pendingSaveTimer = null;
-      await this.saveRegistry(this.#registry || createEmptyRegistry());
     }
+    await this.saveRegistry(this.#registry || createEmptyRegistry());
   }
 
   #scheduleRegistrySave(): void {
@@ -487,7 +521,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     this.#pendingSaveTimer = setTimeout(() => {
       this.#pendingSaveTimer = null;
       this.saveRegistry(this.#registry || createEmptyRegistry()).catch((error: Error) => {
-        console.warn('sessions: failed to persist registry:', error.message);
+        logger.warn('sessions: failed to persist registry:', error.message);
       });
     }, REGISTRY_SAVE_DEBOUNCE_MS);
   }
@@ -516,5 +550,34 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     this.#nativePathCache.delete(nativePath);
     this.#nativePathCache.set(nativePath, cachedChatId);
     return [cachedChatId, cachedEntry];
+  }
+
+  #rebuildAgentSessionIdIndex(): void {
+    this.#agentSessionIdIndex.clear();
+    const sessions = this.#registry?.sessions;
+    if (!sessions) return;
+    for (const [chatId, entry] of Object.entries(sessions)) {
+      this.#setAgentSessionIdIndex(chatId, entry.agentSessionId);
+    }
+  }
+
+  #setAgentSessionIdIndex(chatId: string, agentSessionId: string | null | undefined): void {
+    if (!agentSessionId) return;
+    if (!this.#agentSessionIdIndex.has(agentSessionId)) {
+      this.#agentSessionIdIndex.set(agentSessionId, chatId);
+    }
+  }
+
+  #unsetAgentSessionIdIndex(chatId: string, agentSessionId: string | null | undefined): void {
+    if (!agentSessionId) return;
+    if (this.#agentSessionIdIndex.get(agentSessionId) === chatId) {
+      this.#agentSessionIdIndex.delete(agentSessionId);
+      for (const [candidateChatId, entry] of Object.entries(this.#registry?.sessions ?? {})) {
+        if (candidateChatId !== chatId && entry.agentSessionId === agentSessionId) {
+          this.#agentSessionIdIndex.set(agentSessionId, candidateChatId);
+          break;
+        }
+      }
+    }
   }
 }

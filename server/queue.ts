@@ -12,9 +12,19 @@ import { requireChatExecutionConfig, type RunAgentTurnOptions } from "./agents/s
 import type { IChatRegistry } from './chats/store.js';
 import { writeJsonFileAtomic } from './lib/json-file-store.js';
 import { KeyedPromiseLock } from './lib/keyed-lock.js';
+import { createLogger } from './lib/log.js';
+
+const logger = createLogger('queue');
 
 function emptyQueue(): QueueState {
   return { entries: [], paused: false, version: 0 };
+}
+
+function cloneQueue(queue: QueueState): QueueState {
+  return {
+    ...queue,
+    entries: queue.entries.map((entry) => ({ ...entry })),
+  };
 }
 
 function bumpQueue(queue: QueueState): QueueState {
@@ -35,8 +45,8 @@ function optionsForQueuedTurn(options: RunAgentTurnOptions): RunAgentTurnOptions
 }
 
 export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunAgentTurnOptions {
-  const entry = requireChatExecutionConfig(chatId, registry.getChat(chatId));
   const chat = registry.getChat(chatId);
+  const entry = requireChatExecutionConfig(chatId, chat);
   return {
     permissionMode: entry.permissionMode,
     thinkingMode: entry.thinkingMode,
@@ -91,6 +101,7 @@ export interface ChatQueueService {
 export class QueueManager extends EventEmitter implements ChatQueueService {
   #locks = new KeyedPromiseLock();
   #draining = new Set<string>();
+  #queuesByChatId = new Map<string, QueueState>();
   #workspaceDir: string;
   #turnRunner: AgentTurnRunnerDep;
   #pendingInputs: PendingInputsDep;
@@ -140,13 +151,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     return this.#locks.runExclusive(key, fn);
   }
 
-  async #writeChatQueue(chatId: string, queue: unknown): Promise<void> {
-    const filePath = this.#chatQueueFilePath(chatId);
-    const normalized = normalizeQueueState(queue);
-    await writeJsonFileAtomic(filePath, normalized);
-  }
-
-  async readChatQueue(chatId: string): Promise<QueueState> {
+  async #readChatQueueFromDisk(chatId: string): Promise<QueueState> {
     try {
       const data = await fs.readFile(this.#chatQueueFilePath(chatId), 'utf8');
       return normalizeQueueState(JSON.parse(data));
@@ -156,15 +161,34 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     }
   }
 
+  async #loadChatQueue(chatId: string): Promise<QueueState> {
+    const cached = this.#queuesByChatId.get(chatId);
+    if (cached) return cached;
+    const loaded = await this.#readChatQueueFromDisk(chatId);
+    this.#queuesByChatId.set(chatId, loaded);
+    return loaded;
+  }
+
+  async #commitChatQueue(chatId: string, queue: unknown): Promise<QueueState> {
+    const filePath = this.#chatQueueFilePath(chatId);
+    const normalized = normalizeQueueState(queue);
+    await writeJsonFileAtomic(filePath, normalized);
+    this.#queuesByChatId.set(chatId, normalized);
+    return cloneQueue(normalized);
+  }
+
+  async readChatQueue(chatId: string): Promise<QueueState> {
+    return this.#withLock(`chat:${chatId}`, async () => cloneQueue(await this.#loadChatQueue(chatId)));
+  }
+
   async enqueueChat(chatId: string, content: string): Promise<{ entry: QueueEntry; queue: QueueState }> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = await this.readChatQueue(chatId);
+      const queue = cloneQueue(await this.#loadChatQueue(chatId));
       const existing = queue.entries.find(e => e.status === 'queued');
       if (existing) {
         existing.content += '\n' + content;
         const bumped = bumpQueue(queue);
-        await this.#writeChatQueue(chatId, bumped);
-        const result = normalizeQueueState(bumped);
+        const result = await this.#commitChatQueue(chatId, bumped);
         this.emit('queue-updated', chatId, result);
         return { entry: existing, queue: result };
       }
@@ -176,8 +200,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       };
       queue.entries.push(entry);
       const bumped = bumpQueue(queue);
-      await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeQueueState(bumped);
+      const result = await this.#commitChatQueue(chatId, bumped);
       this.emit('queue-updated', chatId, result);
       return { entry, queue: result };
     });
@@ -185,11 +208,10 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async dequeueChat(chatId: string, entryId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = await this.readChatQueue(chatId);
+      const queue = cloneQueue(await this.#loadChatQueue(chatId));
       queue.entries = queue.entries.filter(e => e.id !== entryId);
       const bumped = bumpQueue(queue);
-      await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeQueueState(bumped);
+      const result = await this.#commitChatQueue(chatId, bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -197,12 +219,11 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async clearChatQueue(chatId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = await this.readChatQueue(chatId);
+      const queue = cloneQueue(await this.#loadChatQueue(chatId));
       queue.entries = [];
       queue.paused = false;
       const bumped = bumpQueue(queue);
-      await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeQueueState(bumped);
+      const result = await this.#commitChatQueue(chatId, bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -210,11 +231,10 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async pauseChatQueue(chatId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = await this.readChatQueue(chatId);
+      const queue = cloneQueue(await this.#loadChatQueue(chatId));
       queue.paused = queue.entries.length > 0;
       const bumped = bumpQueue(queue);
-      await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeQueueState(bumped);
+      const result = await this.#commitChatQueue(chatId, bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -222,11 +242,10 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async resumeChatQueue(chatId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = await this.readChatQueue(chatId);
+      const queue = cloneQueue(await this.#loadChatQueue(chatId));
       queue.paused = false;
       const bumped = bumpQueue(queue);
-      await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeQueueState(bumped);
+      const result = await this.#commitChatQueue(chatId, bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -234,12 +253,12 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async popNextChat(chatId: string): Promise<{ entry: QueueEntry; queue: QueueState } | null> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = await this.readChatQueue(chatId);
+      const queue = cloneQueue(await this.#loadChatQueue(chatId));
       if (queue.paused && queue.entries.length === 0) {
         queue.paused = false;
         const bumped = bumpQueue(queue);
-        await this.#writeChatQueue(chatId, bumped);
-        this.emit('queue-updated', chatId, normalizeQueueState(bumped));
+        const result = await this.#commitChatQueue(chatId, bumped);
+        this.emit('queue-updated', chatId, result);
         return null;
       }
       if (queue.paused) return null;
@@ -247,8 +266,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       if (!next) return null;
       next.status = 'sending';
       const bumped = bumpQueue(queue);
-      await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeQueueState(bumped);
+      const result = await this.#commitChatQueue(chatId, bumped);
       this.emit('queue-updated', chatId, result);
       return { entry: next, queue: result };
     });
@@ -256,11 +274,10 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async removeSentChat(chatId: string, entryId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = await this.readChatQueue(chatId);
+      const queue = cloneQueue(await this.#loadChatQueue(chatId));
       queue.entries = queue.entries.filter(e => e.id !== entryId);
       const bumped = bumpQueue(queue);
-      await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeQueueState(bumped);
+      const result = await this.#commitChatQueue(chatId, bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -268,13 +285,12 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async resetAndPauseChat(chatId: string, entryId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = await this.readChatQueue(chatId);
+      const queue = cloneQueue(await this.#loadChatQueue(chatId));
       const entry = queue.entries.find(e => e.id === entryId);
       if (entry) entry.status = 'queued';
       queue.paused = true;
       const bumped = bumpQueue(queue);
-      await this.#writeChatQueue(chatId, bumped);
-      const result = normalizeQueueState(bumped);
+      const result = await this.#commitChatQueue(chatId, bumped);
       this.emit('queue-updated', chatId, result);
       return result;
     });
@@ -319,7 +335,10 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         if (current.entries.length > 0) {
           await this.pauseChatQueue(chatId);
         }
-      } catch { /* ignore */ }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn(`queue: failed to pause queue after abort for ${chatId}:`, message);
+      }
     }
     this.emit('session-stopped', chatId, success);
     return success;
@@ -353,7 +372,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           await this.#turnRunner.runAgentTurn(chatId, entry.content, queuedTurnOptions);
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
-          console.error('queue: error processing queued message:', (error as Error).message);
+          logger.error('queue: error processing queued message:', (error as Error).message);
           await this.resetAndPauseChat(chatId, entry.id);
           break;
         }
@@ -364,11 +383,14 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   }
 
   async deleteChatQueueFile(chatId: string): Promise<void> {
-    try {
-      await fs.unlink(this.#chatQueueFilePath(chatId));
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
+    await this.#withLock(`chat:${chatId}`, async () => {
+      this.#queuesByChatId.delete(chatId);
+      try {
+        await fs.unlink(this.#chatQueueFilePath(chatId));
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    });
   }
 
   async recoverStaleChatQueues(): Promise<void> {
@@ -384,6 +406,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     const queueFiles = files.filter(f => f.endsWith('.queue.json'));
     for (const qf of queueFiles) {
       const filePath = path.join(queuesDir, qf);
+      const chatId = qf.slice(0, -'.queue.json'.length);
       try {
         const data = normalizeQueueState(JSON.parse(await fs.readFile(filePath, 'utf8')));
         let modified = false;
@@ -395,11 +418,15 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         }
         if (modified) {
           data.paused = true;
-          await writeJsonFileAtomic(filePath, normalizeQueueState(data));
-          console.log(`queue: recovered stale chat queue: ${qf}`);
+          const normalized = normalizeQueueState(data);
+          await writeJsonFileAtomic(filePath, normalized);
+          this.#queuesByChatId.set(chatId, normalized);
+          logger.info(`queue: recovered stale chat queue: ${qf}`);
+        } else {
+          this.#queuesByChatId.set(chatId, data);
         }
       } catch (error: unknown) {
-        console.warn(`queue: could not recover chat queue ${qf}:`, (error as Error).message);
+        logger.warn(`queue: could not recover chat queue ${qf}:`, (error as Error).message);
       }
     }
   }

@@ -5,6 +5,11 @@ import { mergeChatMessagesByIdentity, chatMessageIdentityTokens } from '../../co
 import { parseChatMessages, type ChatMessage } from '../../common/chat-types.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { PaginatedChatMessages } from './history-cache-contract.js';
+import type { AgentTranscriptPage } from '../agents/types.js';
+import { createLogger } from '../lib/log.js';
+import { errorMessage } from '../lib/errors.js';
+
+const logger = createLogger('chats:history-cache');
 
 const CACHE_LIMIT = 100;
 const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
@@ -17,6 +22,7 @@ interface HistoryCacheEntry {
   messages: ChatMessage[];
   completeness: CacheCompleteness;
   lastAccessAt: number;
+  identityTokens: Set<string>;
 }
 
 interface HistoryCacheInitialEntry {
@@ -41,10 +47,49 @@ interface HistoryCacheAgents {
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
   isChatRunning(chatId: string): boolean;
   loadMessages(session: ChatRegistryEntry, chatId: string): Promise<unknown[]>;
+  loadMessagePage?(
+    session: ChatRegistryEntry,
+    limit: number,
+    offset: number,
+    chatId?: string,
+  ): Promise<AgentTranscriptPage | null>;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function historyCacheIdentityTokens(message: ChatMessage): string[] {
+  const tokens = chatMessageIdentityTokens(message, { includeContentToken: true });
+  if (tokens.length > 0) return tokens;
+
+  const rawMessage = message as unknown as Record<string, unknown>;
+  const type = message.type || '';
+  const content = typeof rawMessage.content === 'string' ? rawMessage.content.trim() : '';
+  const ts = message.timestamp || '';
+  return [`${type}:fallback:${content}:${ts}`];
+}
+
+function buildIdentityTokenSet(messages: ChatMessage[]): Set<string> {
+  const identityTokens = new Set<string>();
+  for (const message of messages) {
+    for (const token of historyCacheIdentityTokens(message)) {
+      identityTokens.add(token);
+    }
+  }
+  return identityTokens;
+}
+
+function createHistoryCacheEntry(args: {
+  chatId: string;
+  messages?: ChatMessage[];
+  completeness?: CacheCompleteness;
+  lastAccessAt: number;
+}): HistoryCacheEntry {
+  const messages = [...(args.messages ?? [])];
+  return {
+    chatId: args.chatId,
+    messages,
+    completeness: args.completeness ?? 'tail',
+    lastAccessAt: args.lastAccessAt,
+    identityTokens: buildIdentityTokenSet(messages),
+  };
 }
 
 export class HistoryCache {
@@ -74,12 +119,12 @@ export class HistoryCache {
 
     for (const entry of options.initialEntries ?? []) {
       const chatId = String(entry.chatId);
-      this.#cacheByChatId.set(chatId, {
+      this.#cacheByChatId.set(chatId, createHistoryCacheEntry({
         chatId,
         messages: Array.isArray(entry.messages) ? [...entry.messages] : [],
         completeness: entry.completeness ?? 'tail',
         lastAccessAt: typeof entry.lastAccessAt === 'number' ? entry.lastAccessAt : this.#now(),
-      });
+      }));
     }
   }
 
@@ -92,8 +137,9 @@ export class HistoryCache {
 
       // Self-wire: append agent messages to cache as they arrive.
       this.#agents.onMessages((chatId, messages) => {
+        if (!this.#registry.getChat(chatId)) return;
         this.appendMessages(chatId, parseChatMessages(messages)).catch((err) => {
-          console.warn('history-cache: appendMessages failed:', errorMessage(err));
+          logger.warn('history-cache: appendMessages failed:', errorMessage(err));
         });
       });
     }
@@ -103,7 +149,7 @@ export class HistoryCache {
       try {
         this.prune();
       } catch (err) {
-        console.warn('history-cache: prune failed:', errorMessage(err));
+        logger.warn('history-cache: prune failed:', errorMessage(err));
       }
     }, PRUNE_INTERVAL_MS);
   }
@@ -139,18 +185,13 @@ export class HistoryCache {
       const current = this.#cacheByChatId.get(key);
       const liveTail = current?.completeness === 'tail' ? current.messages : [];
       const messages = mergeChatMessages(loaded, liveTail, { includeContentToken: true });
-      // Sort chronologically after merge. mergeChatMessagesByIdentity
-      // preserves base-then-incoming order, which scrambles timestamps
-      // when the live tail (agent-only) is used as the base and the full
-      // history (user + agent) is merged as incoming.
-      messages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-      const deduped = deduplicateMessages(messages);
-      this.#cacheByChatId.set(key, {
+      const deduped = deduplicateMessages(sortMessagesChronologically(messages));
+      this.#cacheByChatId.set(key, createHistoryCacheEntry({
         chatId: key,
         messages: deduped,
         completeness: 'full',
         lastAccessAt: this.#now(),
-      });
+      }));
       return deduped;
     })();
 
@@ -168,19 +209,25 @@ export class HistoryCache {
     let entry = this.#cacheByChatId.get(key);
 
     if (!entry) {
-      entry = { chatId: key, messages: [], completeness: 'tail', lastAccessAt: this.#now() };
+      entry = createHistoryCacheEntry({
+        chatId: key,
+        messages: [],
+        completeness: 'tail',
+        lastAccessAt: this.#now(),
+      });
       this.#cacheByChatId.set(key, entry);
     }
 
-    entry.messages = deduplicateMessages(
-      mergeChatMessages(entry.messages, appendedMessages),
-    );
+    const newMessages = takeNewMessages(entry.identityTokens, appendedMessages);
+    if (newMessages.length > 0) {
+      entry.messages.push(...newMessages);
+    }
     entry.lastAccessAt = this.#now();
 
     try {
       this.#metadata.updateFromAppendedMessages(key, appendedMessages);
     } catch (err) {
-      console.warn(`history-cache: metadata update failed for ${key}:`, errorMessage(err));
+      logger.warn(`history-cache: metadata update failed for ${key}:`, errorMessage(err));
     }
 
     if (this.#cacheByChatId.size > this.#cacheLimit) {
@@ -190,23 +237,16 @@ export class HistoryCache {
 
   async getPaginatedMessages(chatId: string, limit: number, offset: number): Promise<PaginatedChatMessages> {
     const key = String(chatId);
+    if (offset === 0) {
+      const tailPage = await this.#loadTailPage(key, limit, offset);
+      if (tailPage) return tailPage;
+    }
+
     const messages = await this.ensureLoaded(key);
     const entry = this.#cacheByChatId.get(key);
 
     if (entry) entry.lastAccessAt = this.#now();
-
-    const total = messages.length;
-    const start = Math.max(0, total - offset - limit);
-    const end = total - offset;
-    const pageMessages = messages.slice(start, end);
-
-    return {
-      messages: pageMessages,
-      total,
-      hasMore: start > 0,
-      offset,
-      limit,
-    };
+    return pageFromMessages(messages, limit, offset);
   }
 
   evictChat(chatId: string): void {
@@ -237,6 +277,71 @@ export class HistoryCache {
     return parseChatMessages(await this.#agents.loadMessages(session, chatId));
   }
 
+  async #loadTailPage(chatId: string, limit: number, offset: number): Promise<PaginatedChatMessages | null> {
+    const existing = this.#cacheByChatId.get(chatId);
+    if (existing?.completeness === 'full') {
+      existing.lastAccessAt = this.#now();
+      return pageFromMessages(existing.messages, limit, offset);
+    }
+
+    const session = this.#registry.getChat(chatId);
+    if (!session || !this.#agents.loadMessagePage) return null;
+
+    try {
+      const loadedPage = await this.#agents.loadMessagePage(session, limit, offset, chatId);
+      if (!loadedPage) return null;
+
+      const liveTail = existing?.completeness === 'tail' ? existing.messages : [];
+      const merged = deduplicateMessages(sortMessagesChronologically(
+        mergeChatMessages(loadedPage.messages, liveTail, { includeContentToken: true }),
+      ));
+
+      if (!loadedPage.hasMore) {
+        this.#cacheByChatId.set(chatId, createHistoryCacheEntry({
+          chatId,
+          messages: merged,
+          completeness: 'full',
+          lastAccessAt: this.#now(),
+        }));
+        return pageFromMessages(merged, limit, offset);
+      }
+
+      const messages = merged.slice(Math.max(0, merged.length - limit));
+      const total = Math.max(loadedPage.total, offset + messages.length + 1);
+      this.#cacheByChatId.set(chatId, createHistoryCacheEntry({
+        chatId,
+        messages,
+        completeness: 'tail',
+        lastAccessAt: this.#now(),
+      }));
+      return {
+        messages,
+        total,
+        hasMore: true,
+        offset,
+        limit,
+      };
+    } catch (err) {
+      logger.warn(`history-cache: tail page load failed for ${chatId}:`, errorMessage(err));
+      return null;
+    }
+  }
+
+}
+
+function pageFromMessages(messages: ChatMessage[], limit: number, offset: number): PaginatedChatMessages {
+  const total = messages.length;
+  const start = Math.max(0, total - offset - limit);
+  const end = total - offset;
+  const pageMessages = messages.slice(start, end);
+
+  return {
+    messages: pageMessages,
+    total,
+    hasMore: start > 0,
+    offset,
+    limit,
+  };
 }
 
 function mergeChatMessages(
@@ -255,19 +360,33 @@ function deduplicateMessages(messages: ChatMessage[]): ChatMessage[] {
   const seen = new Set<string>();
   const result: ChatMessage[] = [];
   for (const message of messages) {
-    const tokens = chatMessageIdentityTokens(message, { includeContentToken: true });
-    if (tokens.length === 0) {
-      // Fallback for messages with no identity tokens (user messages
-      // without metadata). Dedup by type + content + timestamp.
-      const rawMessage = message as unknown as Record<string, unknown>;
-      const type = message.type || '';
-      const content = typeof rawMessage.content === 'string' ? rawMessage.content.trim() : '';
-      const ts = message.timestamp || '';
-      tokens.push(`${type}:fallback:${content}:${ts}`);
-    }
+    const tokens = historyCacheIdentityTokens(message);
     if (tokens.some((token) => seen.has(token))) continue;
     for (const token of tokens) seen.add(token);
     result.push(message);
   }
   return result;
+}
+
+function sortMessagesChronologically(messages: ChatMessage[]): ChatMessage[] {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort((a, b) => {
+      const left = typeof a.message.timestamp === 'string' && a.message.timestamp ? a.message.timestamp : null;
+      const right = typeof b.message.timestamp === 'string' && b.message.timestamp ? b.message.timestamp : null;
+      if (left && right) return left.localeCompare(right) || a.index - b.index;
+      return a.index - b.index;
+    })
+    .map(({ message }) => message);
+}
+
+function takeNewMessages(identityTokens: Set<string>, messages: ChatMessage[]): ChatMessage[] {
+  const next: ChatMessage[] = [];
+  for (const message of messages) {
+    const tokens = historyCacheIdentityTokens(message);
+    if (tokens.some((token) => identityTokens.has(token))) continue;
+    for (const token of tokens) identityTokens.add(token);
+    next.push(message);
+  }
+  return next;
 }

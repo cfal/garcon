@@ -15,6 +15,7 @@ describe('appendMessages', () => {
     mockMetadata = { updateFromAppendedMessages: mock(() => undefined) };
     mockAgents = {
       loadMessages: mock(() => Promise.resolve([])),
+      loadMessagePage: mock(() => Promise.resolve(null)),
       isChatRunning: mock(() => false),
     };
 
@@ -67,6 +68,26 @@ describe('appendMessages', () => {
     expect(messages[0].type).toBe('thinking');
     expect(messages[1].type).toBe('assistant-message');
     expect(messages[2].type).toBe('bash-tool-use');
+  });
+
+  it('deduplicates repeated live appends incrementally', async () => {
+    await cache.appendMessages(chatId, [
+      { type: 'assistant-message', timestamp: ts, content: 'Already seen' },
+      { type: 'bash-tool-use', timestamp: ts, toolId: 'tool-1', command: 'pwd' },
+    ]);
+
+    await cache.appendMessages(chatId, [
+      { type: 'assistant-message', timestamp: ts, content: 'Already seen' },
+      { type: 'bash-tool-use', timestamp: ts, toolId: 'tool-1', command: 'pwd' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'New reply' },
+    ]);
+
+    const messages = cache.getMessages(chatId);
+    expect(messages.map((message) => message.content ?? message.command)).toEqual([
+      'Already seen',
+      'pwd',
+      'New reply',
+    ]);
   });
 
   it('calls updateFromAppendedMessages with all messages', async () => {
@@ -151,6 +172,95 @@ describe('appendMessages', () => {
     expect(page.total).toBe(3);
     expect(page.hasMore).toBe(true);
     expect(page.messages.map((message) => message.content)).toEqual(['First reply', 'Second reply']);
+  });
+
+  it('uses an agent tail page for the initial paginated page', async () => {
+    const selectedChatId = 'tail-page-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { agentId: 'claude', agentSessionId: 'thread-1' } : null
+    ));
+    mockAgents.loadMessagePage.mockImplementation(() => Promise.resolve({
+      messages: [
+        { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'First tail' },
+        { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Second tail' },
+      ],
+      total: 3,
+      hasMore: true,
+      offset: 0,
+      limit: 2,
+    }));
+
+    const page = await cache.getPaginatedMessages(selectedChatId, 2, 0);
+
+    expect(mockAgents.loadMessagePage).toHaveBeenCalledWith(
+      { agentId: 'claude', agentSessionId: 'thread-1' },
+      2,
+      0,
+      selectedChatId,
+    );
+    expect(mockAgents.loadMessages).not.toHaveBeenCalled();
+    expect(page.hasMore).toBe(true);
+    expect(page.total).toBe(3);
+    expect(page.messages.map((message) => message.content)).toEqual(['First tail', 'Second tail']);
+  });
+
+  it('falls back to a full load for older paginated pages', async () => {
+    const selectedChatId = 'older-page-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { agentId: 'claude', agentSessionId: 'thread-1' } : null
+    ));
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'First' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Second' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:03Z', content: 'Third' },
+    ]));
+
+    const page = await cache.getPaginatedMessages(selectedChatId, 1, 1);
+
+    expect(mockAgents.loadMessagePage).not.toHaveBeenCalled();
+    expect(mockAgents.loadMessages).toHaveBeenCalledTimes(1);
+    expect(page.messages.map((message) => message.content)).toEqual(['Second']);
+  });
+
+  it('keeps repeated assistant messages with identical content at different timestamps', async () => {
+    const selectedChatId = 'repeated-content-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
+    ));
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'Done.' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Done.' },
+    ]));
+
+    const messages = await cache.ensureLoaded(selectedChatId);
+
+    expect(messages.map((message) => message.content)).toEqual(['Done.', 'Done.']);
+    expect(messages.map((message) => message.timestamp)).toEqual([
+      '2026-01-01T00:00:01Z',
+      '2026-01-01T00:00:02Z',
+    ]);
+  });
+
+  it('sorts timestamped messages while preserving timestamp-less fallback order', async () => {
+    const selectedChatId = 'missing-timestamps-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
+    ));
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Second' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'First' },
+      { type: 'assistant-message', content: 'Missing A' },
+      { type: 'assistant-message', content: 'Missing B' },
+    ]));
+
+    const messages = await cache.ensureLoaded(selectedChatId);
+
+    expect(messages.map((message) => message.content)).toEqual([
+      'First',
+      'Second',
+      'Missing A',
+      'Missing B',
+    ]);
   });
 
   it('deduplicates agent-history user echoes through shared request identity', async () => {

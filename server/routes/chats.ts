@@ -11,15 +11,15 @@ import {
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
-import { forkChatFileCopy } from '../chats/fork-chat.js';
 import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
 import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
 import { CommandValidationError, runOptionsFromCommandRequest } from '../commands/chat-command-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import { normalizeQueueState } from '../../common/queue-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
+import type { ChatListEntry, ChatListResponse } from '../../common/chat-list.js';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
-import { isWithinProjectBase } from '../lib/path-boundary.js';
+import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { extractFirstLine } from '../lib/text.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
@@ -28,6 +28,9 @@ import type { HistoryCachePageReader } from '../chats/history-cache-contract.js'
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('routes:chats');
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
@@ -41,10 +44,10 @@ import type {
 } from '../../common/chat-command-contracts.ts';
 
 interface SettingsDep {
-  getPinnedChatIds(): Promise<string[]>;
-  getNormalChatIds(): Promise<string[]>;
-  getArchivedChatIds(): Promise<string[]>;
-  getUiSettings(): Promise<{ chatTitle?: unknown } | null | undefined>;
+  getPinnedChatIds(): string[];
+  getNormalChatIds(): string[];
+  getArchivedChatIds(): string[];
+  getUiSettings(): { chatTitle?: unknown } | null | undefined;
   getChatName(chatId: string): string | null;
   setSessionName(chatId: string, title: string): Promise<unknown>;
   setLastChatDefaults(defaults: Record<string, unknown>): Promise<void>;
@@ -120,6 +123,16 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
   return typeof value === 'string' ? value : null;
 }
 
+function chatSettingsPatchErrorResponse(error: unknown): Response {
+  if (error instanceof ModelSelectionError) {
+    return jsonError(error.message, 422, 'MODEL_SELECTION_ERROR');
+  }
+  if (error instanceof Error && error.message.endsWith(' is required')) {
+    return jsonError(error.message, 400, 'VALIDATION_FAILED');
+  }
+  return jsonErrorFromUnknown(error);
+}
+
 function pathValidationError(error: string, errorCode: string, status = 200): Response {
   return Response.json({
     success: false,
@@ -165,18 +178,18 @@ export default function createChatRoutes({
       return pathValidationError('path is required', 'path_required', 400);
     }
 
-    if (!isWithinProjectBase(dirPath)) {
-      return pathValidationError('Path is outside the allowed base directory', 'outside_base_dir');
-    }
-
     try {
-      const stat = await fs.stat(dirPath);
+      const projectPath = await assertRealWithinProjectBase(dirPath);
+      const stat = await fs.stat(projectPath);
       if (!stat.isDirectory()) {
         return pathValidationError('Not a directory', 'not_directory');
       }
-      const isGitRepo = await isGitRepository(dirPath);
+      const isGitRepo = await isGitRepository(projectPath);
       return Response.json({ valid: true, isGitRepo });
     } catch (error: unknown) {
+      if (isProjectBoundaryError(error)) {
+        return pathValidationError('Path is outside the allowed base directory', 'outside_base_dir');
+      }
       const err = error as NodeJS.ErrnoException;
       if (err.code === 'ENOENT') {
         return pathValidationError('Path does not exist', 'path_not_found');
@@ -193,10 +206,9 @@ export default function createChatRoutes({
       const sessions = registry.listAllChats();
       const metadataMap = metadata.listAllChatMetadata();
 
-      let pinnedList: string[], normalList: string[], archivedList: string[];
-      try { pinnedList = await settings.getPinnedChatIds(); } catch { pinnedList = []; }
-      try { normalList = await settings.getNormalChatIds(); } catch { normalList = []; }
-      try { archivedList = await settings.getArchivedChatIds(); } catch { archivedList = []; }
+      const pinnedList = settings.getPinnedChatIds();
+      const normalList = settings.getNormalChatIds();
+      const archivedList = settings.getArchivedChatIds();
 
       const pinnedIds = new Set(pinnedList);
       const archivedIds = new Set(archivedList);
@@ -209,7 +221,7 @@ export default function createChatRoutes({
         })),
       );
 
-      const entryMap = new Map<string, Record<string, unknown>>();
+      const entryMap = new Map<string, ChatListEntry>();
       for (const { chatId, session, isAvailable } of availableSessions) {
         if (!isAvailable) continue;
         const meta = metadataMap.get(chatId) || null;
@@ -250,25 +262,27 @@ export default function createChatRoutes({
         });
       }
 
-      const orderedFromList = (list: string[]) => list.map((id: string) => entryMap.get(id)).filter(Boolean);
+      const orderedFromList = (list: string[]): ChatListEntry[] =>
+        list.map((id: string) => entryMap.get(id)).filter((entry): entry is ChatListEntry => Boolean(entry));
 
       const pinned = orderedFromList(pinnedList);
       const normal = orderedFromList(normalList);
       const archived = orderedFromList(archivedList);
 
       const listed = new Set([...pinnedList, ...normalList, ...archivedList]);
-      const orphans: Record<string, unknown>[] = [];
+      const orphans: ChatListEntry[] = [];
       for (const [id, entry] of entryMap) {
         if (!listed.has(id)) orphans.push(entry);
       }
       if (orphans.length > 0) {
-        orphans.sort((a, b) => ((b.activity as Record<string, string>).createdAt || '').localeCompare((a.activity as Record<string, string>).createdAt || ''));
+        orphans.sort((a, b) => (b.activity.createdAt || '').localeCompare(a.activity.createdAt || ''));
       }
 
       const all = [...pinned, ...orphans, ...normal, ...archived];
-      return Response.json({ sessions: all, total: all.length });
+      const body: ChatListResponse = { sessions: all, total: all.length };
+      return Response.json(body);
     } catch (error: unknown) {
-      console.error('sessions: error listing sessions:', (error as Error).message);
+      logger.error('sessions: error listing sessions:', (error as Error).message);
       return jsonErrorFromUnknown(error);
     }
   }
@@ -318,9 +332,17 @@ export default function createChatRoutes({
         return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
-      // Remove from the in-memory registry first so the WS broadcast fires
-      // immediately; disk cleanup then happens in parallel. Clients see the
-      // chat disappear before the HTTP call resolves.
+      try {
+        await queue.abort(chatId);
+      } catch (error) {
+        logger.warn(
+          `sessions: abort before deleting ${chatId} failed:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+
+      // Removes registry state after abort because abortSession resolves the
+      // owning agent through the chat entry.
       registry.removeChat(chatId);
 
       const nativePath = session.nativePath && !isArtificialNativePath(session.nativePath)
@@ -331,7 +353,7 @@ export default function createChatRoutes({
         nativePath
           ? fs.unlink(nativePath).catch((error: NodeJS.ErrnoException) => {
               if (error.code !== 'ENOENT') {
-                console.warn(`sessions: could not delete native file ${nativePath}:`, error.message);
+                logger.warn(`sessions: could not delete native file ${nativePath}:`, error.message);
               }
             })
           : Promise.resolve(),
@@ -367,7 +389,7 @@ export default function createChatRoutes({
         pendingUserInputs: pendingInputs.listForChat(chatId),
       });
     } catch (error: unknown) {
-      console.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
+      logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
       return jsonErrorFromUnknown(error);
     }
   }
@@ -449,7 +471,9 @@ export default function createChatRoutes({
         const existing = session.lastReadAt || null;
         const merged = existing && existing > incoming ? existing : incoming;
 
-        registry.updateChat(chatId, { lastReadAt: merged });
+        if (merged !== existing) {
+          registry.updateChat(chatId, { lastReadAt: merged });
+        }
         results.push({ chatId, lastReadAt: merged });
       }
 
@@ -544,43 +568,13 @@ export default function createChatRoutes({
       const sourceChatId = String(body.sourceChatId || '').trim();
       const chatId = String(body.chatId || '').trim();
 
-      if (!sourceChatId || !/^\d+$/.test(sourceChatId)) {
-        return jsonError('Valid numeric sourceChatId is required', 400);
-      }
-      if (!chatId || !/^\d+$/.test(chatId)) {
-        return jsonError('Valid numeric chatId is required', 400);
-      }
-      if (sourceChatId === chatId) {
-        return jsonError('sourceChatId and chatId must differ', 400);
-      }
-
-      const sourceSession = registry.getChat(sourceChatId);
-      if (!sourceSession) {
-        return jsonError('Source session not found', 404, 'SESSION_NOT_FOUND');
-      }
-
-      if (!agents.supportsFork(sourceSession.agentId)) {
-        return jsonError(`Fork unsupported for agent: ${sourceSession.agentId}`, 422, 'UNSUPPORTED_AGENT');
-      }
-
-      const existingTarget = registry.getChat(chatId);
-      if (existingTarget) {
-        return jsonError(`Session already exists: ${chatId}`, 409, 'IDEMPOTENCY_CONFLICT');
-      }
-
-      const result = await forkChatFileCopy({
-        sourceSession,
-        sourceChatId,
-        targetChatId: chatId,
-        registry,
-        settings,
-        metadata,
-        forkAgentSession: agents.forkAgentSession?.bind(agents),
-        supportsFork: agents.supportsFork.bind(agents),
-      });
+      const result = await commands.forkChat({ sourceChatId, chatId });
 
       return Response.json({ success: true, ...result });
     } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -641,16 +635,6 @@ export default function createChatRoutes({
       const sourceChatId = requireStringField(body, 'sourceChatId');
       const chatId = requireStringField(body, 'chatId');
       const command = requireStringField(body, 'command');
-      if (sourceChatId === chatId) return jsonError('sourceChatId and chatId must differ', 400);
-
-      const sourceSession = registry.getChat(sourceChatId);
-      if (!sourceSession) return jsonError('Source session not found', 404, 'SESSION_NOT_FOUND');
-      if (!agents.supportsFork(sourceSession.agentId)) {
-        return jsonError(`Fork unsupported for agent: ${sourceSession.agentId}`, 422, 'UNSUPPORTED_AGENT');
-      }
-      if (agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)) {
-        return jsonError('Cannot fork a chat while it is processing', 409, 'SESSION_BUSY', true);
-      }
 
       const payload = {
         sourceChatId,
@@ -679,19 +663,6 @@ export default function createChatRoutes({
         clientMessageId,
         options,
         payload,
-        ensureForked: async () => {
-          if (registry.getChat(chatId)) return;
-          await forkChatFileCopy({
-            sourceSession,
-            sourceChatId,
-            targetChatId: chatId,
-            registry,
-            settings,
-            metadata,
-            forkAgentSession: agents.forkAgentSession?.bind(agents),
-            supportsFork: agents.supportsFork.bind(agents),
-          });
-        },
       });
 
       return Response.json({
@@ -809,7 +780,7 @@ export default function createChatRoutes({
       if (Object.keys(patch).length > 0) await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
-      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+      return chatSettingsPatchErrorResponse(error);
     }
   }
 
@@ -828,7 +799,7 @@ export default function createChatRoutes({
       await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
-      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+      return chatSettingsPatchErrorResponse(error);
     }
   }
 

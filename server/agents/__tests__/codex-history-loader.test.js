@@ -2,7 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { loadCodexChatMessages } from '../codex/history-loader.js';
+import { loadCodexChatMessages, loadCodexChatMessagePage } from '../codex/history-loader.js';
 
 async function withTempJsonl(lines, fn) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-load-test-'));
@@ -330,5 +330,28 @@ describe('loadCodexChatMessages', () => {
   it('returns empty array for null path', async () => {
     const result = await loadCodexChatMessages(null);
     expect(result).toEqual([]);
+  });
+
+  it('loads the initial page from tail canonical entries', async () => {
+    const lines = Array.from({ length: 12 }, (_, index) => JSON.stringify({
+      type: 'response_item',
+      timestamp: `2026-02-21T10:00:${String(index).padStart(2, '0')}.000Z`,
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: `reply ${index}` }],
+      },
+    }));
+
+    const page = await withTempJsonl(lines, (filePath) => loadCodexChatMessagePage(filePath, 3, 0));
+
+    expect(page).toMatchObject({ hasMore: true, offset: 0, limit: 3 });
+    expect(page.messages.map((message) => message.content)).toEqual(['reply 9', 'reply 10', 'reply 11']);
+  });
+
+  it('returns null for older tail pages so callers use the full loader', async () => {
+    const page = await loadCodexChatMessagePage('/tmp/missing.jsonl', 3, 2);
+
+    expect(page).toBeNull();
   });
 });

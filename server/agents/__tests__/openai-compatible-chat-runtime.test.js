@@ -27,6 +27,19 @@ async function tempDir() {
   return dir;
 }
 
+function runtimeConfig(dir) {
+  return {
+    runtimeId: 'direct-openai-compatible',
+    runtimeLabel: 'Direct (Chat Completions)',
+    defaultModel: 'fallback-model',
+    fallbackModels: [{ value: 'fallback-model', label: 'Fallback' }],
+    getApiKey: () => 'sk-test',
+    getBaseUrl: () => 'https://api.example.test/v1',
+    getSessionDir: () => dir,
+    getSessionFilePath: (id) => path.join(dir, `${id}.jsonl`),
+  };
+}
+
 describe('OpenAiCompatibleChatRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
@@ -50,16 +63,7 @@ describe('OpenAiCompatibleChatRuntime', () => {
       return streamResponse('second response');
     });
 
-    const runtime = new OpenAiCompatibleChatRuntime({
-      runtimeId: 'direct-openai-compatible',
-      runtimeLabel: 'Direct (Chat Completions)',
-      defaultModel: 'fallback-model',
-      fallbackModels: [{ value: 'fallback-model', label: 'Fallback' }],
-      getApiKey: () => 'sk-test',
-      getBaseUrl: () => 'https://api.example.test/v1',
-      getSessionDir: () => dir,
-      getSessionFilePath: (id) => path.join(dir, `${id}.jsonl`),
-    });
+    const runtime = new OpenAiCompatibleChatRuntime(runtimeConfig(dir));
 
     await runtime.runTurn({
       chatId: '123',
@@ -78,5 +82,37 @@ describe('OpenAiCompatibleChatRuntime', () => {
       { role: 'assistant', content: 'first response' },
       { role: 'user', content: 'second message' },
     ]);
+  });
+
+  it('marks direct sessions idle before emitting finished', async () => {
+    const dir = await tempDir();
+    const sessionId = 'known-session';
+    await fs.writeFile(path.join(dir, `${sessionId}.jsonl`), [
+      JSON.stringify({ role: 'user', content: 'first message' }),
+      '',
+    ].join('\n'));
+    globalThis.fetch = mock(async () => streamResponse('done'));
+    const runtime = new OpenAiCompatibleChatRuntime(runtimeConfig(dir));
+    let runningWhenFinished;
+    const finished = new Promise((resolve) => {
+      runtime.onFinished(() => {
+        runningWhenFinished = runtime.isRunning(sessionId);
+        resolve();
+      });
+    });
+
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: sessionId,
+      command: 'hello',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+    await finished;
+
+    expect(runningWhenFinished).toBe(false);
   });
 });

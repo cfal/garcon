@@ -1,12 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import path from 'path';
+import os from 'os';
 
 class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
 }
 
+const projectBasePath = os.homedir();
+const gitFixturePath = path.join(projectBasePath, 'garcon-git-route-project');
+
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => Promise.resolve({})),
   MalformedJsonError,
+}));
+
+mock.module('../../config.js', () => ({
+  getProjectBasePath: mock(() => projectBasePath),
 }));
 
 import createGitRoutes from '../git.js';
@@ -20,24 +29,11 @@ const ctx = {
     getAgentCatalogEntries: mock(() => Promise.resolve([])),
   },
   settings: {
-    getUiSettings: mock(() => Promise.resolve({})),
+    getUiSettings: mock(() => ({})),
   },
 };
 
 const routes = createGitRoutes(ctx.agents, ctx.settings);
-const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
-
-beforeEach(() => {
-  process.env.GARCON_PROJECT_BASE_DIR = '/';
-});
-
-afterEach(() => {
-  if (originalProjectBaseDir === undefined) {
-    delete process.env.GARCON_PROJECT_BASE_DIR;
-  } else {
-    process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
-  }
-});
 
 function makeUrl(path, params = {}) {
   const url = new URL(`http://localhost${path}`);
@@ -167,7 +163,6 @@ describe('GET /api/v1/git/changes-tree validation', () => {
   });
 
   it('returns 403 when project is outside the configured base', async () => {
-    process.env.GARCON_PROJECT_BASE_DIR = '/tmp/garcon-git-route-base';
     const url = makeUrl('/api/v1/git/changes-tree', { project: '/' });
     const request = new Request(url.toString());
     const response = await handler(request, url);
@@ -184,10 +179,9 @@ describe('POST /api/v1/git/worktrees/create boundary validation', () => {
   beforeEach(() => { parseJsonBody.mockClear(); });
 
   it('returns 403 when worktreePath is outside the configured base', async () => {
-    process.env.GARCON_PROJECT_BASE_DIR = '/tmp/garcon-git-route-base';
     parseJsonBody.mockImplementation(() =>
       Promise.resolve({
-        project: '/tmp/garcon-git-route-base/repo',
+        project: gitFixturePath,
         worktreePath: '/',
       }),
     );
@@ -327,7 +321,7 @@ describe('POST /api/v1/git/generate-commit-message contract', () => {
 
   it('returns typed errorCode when no staged changes are found', async () => {
     parseJsonBody.mockImplementation(() =>
-      Promise.resolve({ project: '/definitely-not-a-repo', files: ['a.ts'], agentId: 'claude' }),
+      Promise.resolve({ project: path.join(projectBasePath, 'definitely-not-a-repo'), files: ['a.ts'], agentId: 'claude' }),
     );
     const response = await handler(makeRequest({}));
     const body = await response.json();

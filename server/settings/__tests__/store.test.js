@@ -506,6 +506,16 @@ describe('settings store', () => {
       expect(settings.lastClaudeThinkingMode).toBe('auto');
       expect(settings.lastAmpAgentMode).toBe('smart');
     });
+
+    it('keeps cached settings unchanged when a mutation save fails', async () => {
+      await store.setUiSettings({ theme: 'light' });
+      await fs.rm(settingsFile(), { force: true });
+      await fs.mkdir(settingsFile());
+
+      await expect(store.setUiSettings({ theme: 'dark' })).rejects.toThrow();
+
+      expect(store.getUiSettings()).toEqual({ theme: 'light' });
+    });
   });
 
   describe('reconcileWithRegistry', () => {

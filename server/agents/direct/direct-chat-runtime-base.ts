@@ -9,6 +9,9 @@ import type {
   StartedAgentSession,
 } from '../session-types.js';
 import { AgentEventEmitterRuntime } from '../shared/event-emitter-runtime.js';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:direct:direct-chat-runtime-base');
 import {
   DirectSessionStore,
   type DirectConversationMessage,
@@ -198,11 +201,17 @@ export abstract class DirectChatRuntimeBase<
     try {
       await this.#sessionStore.append(sessionId, role, content);
     } catch (error: unknown) {
-      console.warn(
+      logger.warn(
         `${this.config.runtimeId}(${sessionId.slice(0, 8)}): persist failed:`,
         error instanceof Error ? error.message : String(error),
       );
     }
+  }
+
+  #markSessionIdle(session: DirectRuntimeSession<TMessage>): void {
+    if (!session.isRunning) return;
+    session.isRunning = false;
+    this.emitProcessing(session.chatId, false);
   }
 
   async #runTurnInternal(session: DirectRuntimeSession<TMessage>): Promise<void> {
@@ -215,6 +224,7 @@ export abstract class DirectChatRuntimeBase<
       if (session.aborted) return;
 
       if (!response.trim()) {
+        this.#markSessionIdle(session);
         this.emitFailed(session.chatId, `Empty response from ${this.config.runtimeLabel}`);
         return;
       }
@@ -224,13 +234,14 @@ export abstract class DirectChatRuntimeBase<
       this.emitMessages(session.chatId, [
         new AssistantMessage(new Date().toISOString(), response),
       ]);
+      this.#markSessionIdle(session);
       this.emitFinished(session.chatId, 0);
     } catch (error: unknown) {
       if (session.aborted) return;
+      this.#markSessionIdle(session);
       this.emitFailed(session.chatId, error instanceof Error ? error.message : String(error));
     } finally {
-      session.isRunning = false;
-      this.emitProcessing(session.chatId, false);
+      this.#markSessionIdle(session);
     }
   }
 }

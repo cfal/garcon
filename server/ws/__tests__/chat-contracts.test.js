@@ -71,7 +71,7 @@ const mockPendingInputs = {
 };
 
 const mockSettings = {
-  getUiSettings: mock(() => Promise.resolve(null)),
+  getUiSettings: mock(() => null),
   getChatName: mock(() => null),
   setSessionName: mock(() => Promise.resolve(undefined)),
   setLastChatDefaults: mock(() => Promise.resolve(undefined)),
@@ -81,6 +81,7 @@ const mockSettings = {
 
 const mockMetadata = {
   addNewChatMetadata: mock(() => undefined),
+  getChatMetadata: mock(() => null),
 };
 
 const mockCommandLedger = {
@@ -89,15 +90,11 @@ const mockCommandLedger = {
   updateUnlessStatus: mock(() => { throw new Error('Unexpected command ledger use'); }),
 };
 
-const mockForkDeps = {
-  settings: {},
-  metadata: {},
-  forkChatFileCopy: mock(() => Promise.resolve({
+const mockForkChatFileCopy = mock(() => Promise.resolve({
     sourceChatId: '123',
     chatId: '456',
     agentId: 'claude',
-  })),
-};
+}));
 
 const injectedMocks = [
   mockAgents.getRunningSessions, mockAgents.resolvePermission,
@@ -121,10 +118,10 @@ const injectedMocks = [
   mockSettings.getUiSettings, mockSettings.getChatName,
   mockSettings.setSessionName, mockSettings.setLastChatDefaults,
   mockSettings.ensureInNormal, mockSettings.removeFromAllOrderLists,
-  mockMetadata.addNewChatMetadata,
+  mockMetadata.addNewChatMetadata, mockMetadata.getChatMetadata,
   mockCommandLedger.accept, mockCommandLedger.update,
   mockCommandLedger.updateUnlessStatus,
-  mockForkDeps.forkChatFileCopy,
+  mockForkChatFileCopy,
 ];
 
 const moduleMocks = [sendWebSocketJson];
@@ -135,7 +132,6 @@ const chatHandlerInstance = new ChatHandler({
   historyCache: mockHistoryCache,
   registry: mockRegistry,
   pendingInputs: mockPendingInputs,
-  forkDeps: mockForkDeps,
   commands: new ChatCommandService({
     chats: mockRegistry,
     queue: mockQueue,
@@ -144,6 +140,7 @@ const chatHandlerInstance = new ChatHandler({
     metadata: mockMetadata,
     agents: mockAgents,
     pendingInputs: mockPendingInputs,
+    forkChatFileCopy: mockForkChatFileCopy,
   }),
 });
 const chatHandler = chatHandlerInstance.createHandler();
@@ -168,7 +165,7 @@ describe('chat WebSocket handler', () => {
     moduleMocks.forEach(m => m.mockClear());
     mockAgents.isAgentSessionRunning.mockImplementation(() => false);
     mockAgents.supportsFork.mockImplementation(() => true);
-    mockForkDeps.forkChatFileCopy.mockImplementation(() => Promise.resolve({
+    mockForkChatFileCopy.mockImplementation(() => Promise.resolve({
       sourceChatId: '123',
       chatId: '456',
       agentId: 'claude',
@@ -331,14 +328,15 @@ describe('chat WebSocket handler', () => {
         model: 'opus',
       });
 
-      expect(mockForkDeps.forkChatFileCopy).toHaveBeenCalledWith({
+      expect(mockForkChatFileCopy).toHaveBeenCalledWith({
         sourceSession,
         sourceChatId: '123',
         targetChatId: '456',
         registry: mockRegistry,
-        settings: mockForkDeps.settings,
-        metadata: mockForkDeps.metadata,
+        settings: mockSettings,
+        metadata: mockMetadata,
         forkAgentSession: undefined,
+        supportsFork: expect.any(Function),
       });
       expect(sendWebSocketJson.mock.calls[0][1]).toMatchObject({
         type: 'chat-fork-created',
@@ -366,7 +364,7 @@ describe('chat WebSocket handler', () => {
         command: 'continue in fork',
       });
 
-      expect(mockForkDeps.forkChatFileCopy).not.toHaveBeenCalled();
+      expect(mockForkChatFileCopy).not.toHaveBeenCalled();
       expect(mockQueue.submit).not.toHaveBeenCalled();
       const payload = lastSentPayload();
       expect(payload).toMatchObject({
@@ -390,7 +388,7 @@ describe('chat WebSocket handler', () => {
         command: 'continue in fork',
       });
 
-      expect(mockForkDeps.forkChatFileCopy).not.toHaveBeenCalled();
+      expect(mockForkChatFileCopy).not.toHaveBeenCalled();
       expect(mockQueue.submit).not.toHaveBeenCalled();
       const payload = lastSentPayload();
       expect(payload).toMatchObject({
@@ -407,7 +405,7 @@ describe('chat WebSocket handler', () => {
         if (chatId === '456' && targetCreated) return { agentId: 'claude', agentSessionId: 'fork-session' };
         return null;
       });
-      mockForkDeps.forkChatFileCopy.mockImplementationOnce(async () => {
+      mockForkChatFileCopy.mockImplementationOnce(async () => {
         targetCreated = true;
         return {
           sourceChatId: '123',
@@ -517,6 +515,24 @@ describe('chat WebSocket handler', () => {
         type: 'permission-decision',
         chatId: '123',
         permissionRequestId: 'dedup-test-2b',
+        allow: false,
+        alwaysAllow: false,
+      });
+      expect(mockAgents.resolvePermission).toHaveBeenCalledTimes(2);
+    });
+
+    it('forwards the same permissionRequestId for different chats independently', async () => {
+      await chatHandler.message(ws, {
+        type: 'permission-decision',
+        chatId: '123',
+        permissionRequestId: 'dedup-cross-chat',
+        allow: true,
+        alwaysAllow: false,
+      });
+      await chatHandler.message(ws, {
+        type: 'permission-decision',
+        chatId: '456',
+        permissionRequestId: 'dedup-cross-chat',
         allow: false,
         alwaysAllow: false,
       });

@@ -46,6 +46,9 @@ interface LedgerFile {
   records: CommandLedgerRecord[];
 }
 
+const LEDGER_RECORD_LIMIT = 1000;
+const LEDGER_PERSIST_LOCK_KEY = 'ledger';
+
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
@@ -122,6 +125,7 @@ export class CommandLedger {
         entryId: input.entryId,
       };
       this.#records.set(key, record);
+      this.#trimRecords();
       await this.#persist();
       return { kind: 'accepted', record };
     });
@@ -138,6 +142,7 @@ export class CommandLedger {
         updatedAt: new Date().toISOString(),
       };
       this.#records.set(key, next);
+      this.#trimRecords();
       await this.#persist();
       return next;
     });
@@ -168,6 +173,7 @@ export class CommandLedger {
         updatedAt: new Date().toISOString(),
       };
       this.#records.set(key, next);
+      this.#trimRecords();
       await this.#persist();
       return next;
     });
@@ -175,20 +181,34 @@ export class CommandLedger {
 
   async #load(): Promise<void> {
     if (this.#loaded) return;
-    const parsed = await this.#store.read();
-    this.#records = new Map(parsed.records.map((record) => [record.key, record]));
-    this.#loaded = true;
+    await this.#locks.runExclusive(LEDGER_PERSIST_LOCK_KEY, async () => {
+      if (this.#loaded) return;
+      const parsed = await this.#store.read();
+      this.#records = new Map(parsed.records.map((record) => [record.key, record]));
+      this.#trimRecords();
+      this.#loaded = true;
+    });
   }
 
   async #persist(): Promise<void> {
-    const payload: LedgerFile = {
-      version: 1,
-      records: [...this.#records.values()].slice(-1000),
-    };
-    await this.#store.write(payload);
+    await this.#locks.runExclusive(LEDGER_PERSIST_LOCK_KEY, async () => {
+      const payload: LedgerFile = {
+        version: 1,
+        records: [...this.#records.values()],
+      };
+      await this.#store.write(payload);
+    });
   }
 
   async #withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
     return this.#locks.runExclusive(key, fn);
+  }
+
+  #trimRecords(): void {
+    while (this.#records.size > LEDGER_RECORD_LIMIT) {
+      const oldest = this.#records.keys().next().value;
+      if (!oldest) return;
+      this.#records.delete(oldest);
+    }
   }
 }

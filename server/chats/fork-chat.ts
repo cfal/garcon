@@ -10,6 +10,7 @@ import {
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { StartedAgentSession } from '../agents/session-types.js';
 import { extractFirstLine } from '../lib/text.js';
+import { errorMessage } from '../lib/errors.js';
 
 interface ForkChatSettings {
   getChatName(chatId: string): string | null | undefined;
@@ -43,10 +44,6 @@ export interface ForkChatFileCopyResult {
   agentId: string;
   agentSessionId: string;
   nativePath: string;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function escapeRegExp(input: string): string {

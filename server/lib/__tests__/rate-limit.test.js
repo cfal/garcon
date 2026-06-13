@@ -32,6 +32,7 @@ describe('createRateLimiter', () => {
 
     expect(first).toBeNull();
     expect(second?.status).toBe(429);
+    limiter.dispose();
   });
 
   it('uses forwarded headers only when proxy trust is enabled', async () => {
@@ -44,6 +45,7 @@ describe('createRateLimiter', () => {
 
     expect(first).toBeNull();
     expect(second).toBeNull();
+    limiter.dispose();
   });
 
   it('falls back to the socket address when trusted proxy headers are absent', async () => {
@@ -56,5 +58,26 @@ describe('createRateLimiter', () => {
 
     expect(first).toBeNull();
     expect(second?.status).toBe(429);
+    limiter.dispose();
+  });
+
+  it('clears its sweep interval when disposed', () => {
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    const timer = { unref: mock(() => undefined) };
+    const clearInterval = mock(() => undefined);
+    globalThis.setInterval = mock(() => timer);
+    globalThis.clearInterval = clearInterval;
+
+    try {
+      const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 1 });
+      limiter.dispose();
+
+      expect(timer.unref).toHaveBeenCalledTimes(1);
+      expect(clearInterval).toHaveBeenCalledWith(timer);
+    } finally {
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
   });
 });

@@ -14,6 +14,9 @@ import {
 } from '../../common/chat-modes.ts';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { IChatRegistry } from '../chats/store.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('settings:domain-stores');
 import {
   normalizeRemoteSettingsVersion,
   normalizeUiSettings,
@@ -179,7 +182,7 @@ export class UiSettingsStore {
     this.#context = context;
   }
 
-  async getUiSettings(): Promise<ProjectSettings['ui']> {
+  getUiSettings(): ProjectSettings['ui'] {
     const settings = this.#context.readSettings();
     return settings.ui || {};
   }
@@ -194,7 +197,7 @@ export class UiSettingsStore {
     });
   }
 
-  async getPathSettings(): Promise<ProjectSettings['paths']> {
+  getPathSettings(): ProjectSettings['paths'] {
     const settings = this.#context.readSettings();
     return settings.paths || {};
   }
@@ -209,12 +212,12 @@ export class UiSettingsStore {
     });
   }
 
-  async getRemoteSettingsVersion(): Promise<number> {
+  getRemoteSettingsVersion(): number {
     const settings = this.#context.readSettings();
     return normalizeRemoteSettingsVersion(settings.remoteSettingsVersion);
   }
 
-  async getRemoteSettingsSnapshotSource(): Promise<{
+  getRemoteSettingsSnapshotSource(): {
     version: number;
     ui: ProjectSettings['ui'];
     paths: ProjectSettings['paths'];
@@ -229,7 +232,7 @@ export class UiSettingsStore {
     lastThinkingMode: ThinkingMode;
     lastClaudeThinkingMode: ClaudeThinkingMode;
     lastAmpAgentMode: AmpAgentMode;
-  }> {
+  } {
     const settings = this.#context.readSettings();
     return {
       version: normalizeRemoteSettingsVersion(settings.remoteSettingsVersion),
@@ -257,37 +260,37 @@ export class LastChatDefaultsStore {
     this.#context = context;
   }
 
-  async getLastPermissionMode(): Promise<PermissionMode> {
+  getLastPermissionMode(): PermissionMode {
     const settings = this.#context.readSettings();
     return normalizePermissionMode(settings.lastPermissionMode);
   }
 
-  async getLastAgentId(): Promise<string> {
+  getLastAgentId(): string {
     const settings = this.#context.readSettings();
     return settings.lastAgentId || 'claude';
   }
 
-  async getLastProjectPath(): Promise<string> {
+  getLastProjectPath(): string {
     const settings = this.#context.readSettings();
     return settings.lastProjectPath || '';
   }
 
-  async getLastModel(): Promise<string> {
+  getLastModel(): string {
     const settings = this.#context.readSettings();
     return settings.lastModel || '';
   }
 
-  async getLastApiProviderId(): Promise<string | null> {
+  getLastApiProviderId(): string | null {
     const settings = this.#context.readSettings();
     return settings.lastApiProviderId ?? null;
   }
 
-  async getLastModelEndpointId(): Promise<string | null> {
+  getLastModelEndpointId(): string | null {
     const settings = this.#context.readSettings();
     return settings.lastModelEndpointId ?? null;
   }
 
-  async getLastModelProtocol(): Promise<ApiProtocol | null> {
+  getLastModelProtocol(): ApiProtocol | null {
     const settings = this.#context.readSettings();
     return settings.lastModelProtocol ?? null;
   }
@@ -340,7 +343,7 @@ export class LastChatDefaultsStore {
     return this.setLastChatDefaults({ permissionMode: mode });
   }
 
-  async getLastThinkingMode(): Promise<ThinkingMode> {
+  getLastThinkingMode(): ThinkingMode {
     const settings = this.#context.readSettings();
     return normalizeThinkingMode(settings.lastThinkingMode);
   }
@@ -349,7 +352,7 @@ export class LastChatDefaultsStore {
     return this.setLastChatDefaults({ thinkingMode: mode });
   }
 
-  async getLastClaudeThinkingMode(): Promise<ClaudeThinkingMode> {
+  getLastClaudeThinkingMode(): ClaudeThinkingMode {
     const settings = this.#context.readSettings();
     return normalizeClaudeThinkingMode(settings.lastClaudeThinkingMode);
   }
@@ -358,7 +361,7 @@ export class LastChatDefaultsStore {
     return this.setLastChatDefaults({ claudeThinkingMode: mode });
   }
 
-  async getLastAmpAgentMode(): Promise<AmpAgentMode> {
+  getLastAmpAgentMode(): AmpAgentMode {
     const settings = this.#context.readSettings();
     return normalizeAmpAgentMode(settings.lastAmpAgentMode);
   }
@@ -391,7 +394,7 @@ export class ChatOrderStore {
       const filterUnknown = (list: string[], name: string): string[] => {
         const unknown = list.filter((id) => !allChatIds.has(id));
         if (unknown.length > 0) {
-          console.log(`chat-order: removed unknown chat IDs from ${name}: ${JSON.stringify(unknown)}`);
+          logger.info(`chat-order: removed unknown chat IDs from ${name}: ${JSON.stringify(unknown)}`);
           dirty = true;
           return list.filter((id) => allChatIds.has(id));
         }
@@ -415,7 +418,7 @@ export class ChatOrderStore {
           }
         }
         if (dupes.length > 0) {
-          console.log(`chat-order: removed duplicate chat IDs from ${name}: ${JSON.stringify(dupes)}`);
+          logger.info(`chat-order: removed duplicate chat IDs from ${name}: ${JSON.stringify(dupes)}`);
           dirty = true;
         }
         return kept;
@@ -436,7 +439,7 @@ export class ChatOrderStore {
           return b.localeCompare(a);
         });
         normal = [...missing, ...normal];
-        console.log(`chat-order: added missing chat IDs to normalChatIds: ${JSON.stringify(missing)}`);
+        logger.info(`chat-order: added missing chat IDs to normalChatIds: ${JSON.stringify(missing)}`);
         dirty = true;
       }
 
@@ -450,17 +453,17 @@ export class ChatOrderStore {
     });
   }
 
-  async getPinnedChatIds(): Promise<string[]> {
+  getPinnedChatIds(): string[] {
     const settings = this.#context.readSettings();
     return settings.pinnedChatIds || [];
   }
 
-  async getArchivedChatIds(): Promise<string[]> {
+  getArchivedChatIds(): string[] {
     const settings = this.#context.readSettings();
     return settings.archivedChatIds || [];
   }
 
-  async getNormalChatIds(): Promise<string[]> {
+  getNormalChatIds(): string[] {
     const settings = this.#context.readSettings();
     return settings.normalChatIds || [];
   }
@@ -618,7 +621,7 @@ export class SavedSearchStore {
     this.#context = context;
   }
 
-  async getSavedSearches(): Promise<SavedChatSearch[]> {
+  getSavedSearches(): SavedChatSearch[] {
     const settings = this.#context.readSettings();
     return settings.savedChatSearches || [];
   }
@@ -690,7 +693,7 @@ export class FolderStore {
     this.#context = context;
   }
 
-  async getFolders(): Promise<ChatFolder[]> {
+  getFolders(): ChatFolder[] {
     const settings = this.#context.readSettings();
     return settings.chatFolders || [];
   }

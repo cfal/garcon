@@ -1,4 +1,7 @@
 import { getCursorBinary } from "../../config.js";
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:cursor:cursor-models');
 
 export interface CursorModelOption {
   value: string;
@@ -68,7 +71,7 @@ export async function getCursorModels(): Promise<CursorModelOption[]> {
     const parsed = parseCursorModelsOutput(await runCursorModels());
     if (parsed.length > 0) return parsed;
   } catch (error) {
-    console.warn('cursor: model discovery failed:', error instanceof Error ? error.message : String(error));
+    logger.warn('cursor: model discovery failed:', error instanceof Error ? error.message : String(error));
   }
   return [];
 }

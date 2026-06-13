@@ -1,6 +1,7 @@
 // Persists text-only direct chat history for compatible API providers.
 
 import { promises as fs } from 'fs';
+import { hasNodeErrorCode } from '../../lib/errors.js';
 
 export type DirectConversationRole = 'user' | 'assistant';
 
@@ -35,8 +36,8 @@ export class DirectSessionStore {
     let raw = '';
     try {
       raw = await fs.readFile(this.config.getSessionFilePath(sessionId), 'utf8');
-    } catch (error: any) {
-      if (error?.code === 'ENOENT') return null;
+    } catch (error: unknown) {
+      if (hasNodeErrorCode(error, 'ENOENT')) return null;
       throw error;
     }
 

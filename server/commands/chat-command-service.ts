@@ -19,12 +19,16 @@ import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common
 import type { AgentRunRequest, ForkRunRequest } from '../../common/ws-requests.js';
 import { normalizeQueueState } from '../../common/queue-state.js';
 import type { QueueState } from '../../common/queue-state.js';
-import type { IChatRegistry } from '../chats/store.js';
-import type { RunAgentTurnOptions } from '../agents/session-types.js';
+import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
+import type { RunAgentTurnOptions, StartedAgentSession } from '../agents/session-types.js';
 import type { CommandLedger, CommandLedgerRecord } from './command-ledger.js';
 import type { ChatQueueService } from '../queue.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('commands:chat-command-service');
 
 type CommandTransport = 'http' | 'websocket';
 
@@ -44,7 +48,7 @@ type QueueDep = Pick<
 >;
 
 interface SettingsDep {
-  getUiSettings(): Promise<{ chatTitle?: unknown } | null | undefined>;
+  getUiSettings(): { chatTitle?: unknown } | null | undefined;
   getChatName(chatId: string): string | null | undefined;
   setSessionName(chatId: string, title: string): Promise<unknown>;
   setLastChatDefaults(defaults: Record<string, unknown>): Promise<void>;
@@ -54,6 +58,7 @@ interface SettingsDep {
 
 interface MetadataDep {
   addNewChatMetadata(chatId: string, command: string): void;
+  getChatMetadata(chatId: string): { firstMessage?: string | null } | null;
 }
 
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'register' | 'clearChat'>;
@@ -69,7 +74,36 @@ type AgentRegistryDep = Pick<
   | 'getAgentReadinessMap'
   | 'getAgentCatalogEntries'
   | 'runSingleQuery'
+  | 'supportsFork'
+  | 'isAgentSessionRunning'
+  | 'forkAgentSession'
 >;
+
+interface ForkChatInput {
+  sourceChatId: string;
+  chatId: string;
+}
+
+type ForkChatFileCopyDep = (args: {
+  sourceSession: ChatRegistryEntry;
+  sourceChatId: string;
+  targetChatId: string;
+  registry: IChatRegistry;
+  settings: SettingsDep;
+  metadata: MetadataDep;
+  forkAgentSession?: (args: {
+    sourceSession: ChatRegistryEntry;
+    sourceChatId: string;
+    targetChatId: string;
+  }) => Promise<StartedAgentSession | null>;
+  supportsFork?: (agentId: string) => boolean;
+}) => Promise<ForkChatFileCopyResult>;
+
+interface ForkContext {
+  sourceChatId: string;
+  targetChatId: string;
+  sourceSession: ChatRegistryEntry;
+}
 
 interface SubmitRunInput {
   transport: CommandTransport;
@@ -84,7 +118,7 @@ interface SubmitRunInput {
 
 interface SubmitForkRunInput extends SubmitRunInput {
   sourceChatId: string;
-  ensureForked?: () => Promise<void>;
+  onForked?: (result: ForkChatFileCopyResult) => void;
 }
 
 interface SubmitStartInput {
@@ -182,13 +216,14 @@ export function runOptionsFromCommandRequest(
 }
 
 interface ChatCommandServiceDeps {
-  chats: Pick<IChatRegistry, 'getChat' | 'addChat' | 'removeChat'>;
+  chats: IChatRegistry;
   queue: QueueDep;
   ledger: CommandLedger;
   settings: SettingsDep;
   metadata: MetadataDep;
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
+  forkChatFileCopy?: ForkChatFileCopyDep;
 }
 
 export class ChatCommandService {
@@ -326,7 +361,7 @@ export class ChatCommandService {
       try {
         await this.deps.settings.removeFromAllOrderLists(chatId);
       } catch (cleanupError: unknown) {
-        console.warn(`sessions: failed to remove ${chatId} from order lists after startup failure:`, (cleanupError as Error).message);
+        logger.warn(`sessions: failed to remove ${chatId} from order lists after startup failure:`, (cleanupError as Error).message);
       }
       throw error;
     }
@@ -345,15 +380,18 @@ export class ChatCommandService {
     return this.#submitHttpRun(input);
   }
 
+  async forkChat(input: ForkChatInput): Promise<ForkChatFileCopyResult> {
+    const context = this.#validateFork(input);
+    return this.#forkChatFromContext(context);
+  }
+
   async submitForkRun(input: SubmitForkRunInput): Promise<CommandAcceptedResponse> {
-    if (input.sourceChatId === input.chatId) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'sourceChatId and chatId must differ');
-    }
-    this.#requireChat(input.sourceChatId, 'Source session not found');
+    const context = this.#validateFork(input);
     this.#assertContent(input.command, input.images);
 
     if (input.transport === 'websocket') {
-      await input.ensureForked?.();
+      const result = await this.#forkChatFromContext(context);
+      input.onForked?.(result);
       return this.#submitWebSocketRun(input);
     }
 
@@ -388,7 +426,7 @@ export class ChatCommandService {
       entryId: result.entry.id,
     });
     this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
-      console.error('queue: enqueue drain error:', err.message);
+      logger.error('queue: enqueue drain error:', err.message);
     });
     return {
       ...commandResultFromRecord(updated ?? ledger.record),
@@ -402,7 +440,7 @@ export class ChatCommandService {
     this.#requireChat(input.chatId);
     const result = await this.deps.queue.enqueueChat(input.chatId, input.content);
     this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
-      console.error('queue: enqueue drain error:', err.message);
+      logger.error('queue: enqueue drain error:', err.message);
     });
     return {
       success: true,
@@ -427,7 +465,7 @@ export class ChatCommandService {
     } else {
       state = await this.deps.queue.resumeChatQueue(input.chatId);
       this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
-        console.error('queue: resume drain error:', err.message);
+        logger.error('queue: resume drain error:', err.message);
       });
     }
     return { success: true, chatId: input.chatId, queue: normalizeQueueState(state) };
@@ -527,7 +565,17 @@ export class ChatCommandService {
     }
     if (ledger.kind === 'duplicate') return commandResultFromRecord(ledger.record, 'duplicate');
 
-    await input.ensureForked?.();
+    try {
+      const result = await this.#forkChatFromContext(this.#validateFork(input));
+      input.onForked?.(result);
+    } catch (error: unknown) {
+      await this.deps.ledger.update(ledger.record.key, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+
     return this.#scheduleAcceptedHttpRun(ledger, input, { clientRequestId, clientMessageId, turnId });
   }
 
@@ -565,7 +613,7 @@ export class ChatCommandService {
     void this.deps.queue.runAcceptedTurn(chatId, command, options)
       .then(() => this.deps.ledger.update(ledgerKey, { status: 'finished' }))
       .catch((error: Error) => {
-        console.error('commands: run failed:', error.message);
+        logger.error('commands: run failed:', error.message);
         this.deps.ledger.update(ledgerKey, { status: 'failed', error: error.message }).catch(() => {});
       });
   }
@@ -586,6 +634,57 @@ export class ChatCommandService {
     if (!this.deps.chats.getChat(chatId)) {
       throw new CommandValidationError('SESSION_NOT_FOUND', message, 404);
     }
+  }
+
+  #validateFork(input: ForkChatInput): ForkContext {
+    const sourceChatId = String(input.sourceChatId || '').trim();
+    const targetChatId = String(input.chatId || '').trim();
+
+    if (!sourceChatId || !/^\d+$/.test(sourceChatId)) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'Valid numeric sourceChatId is required');
+    }
+    if (!targetChatId || !/^\d+$/.test(targetChatId)) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'Valid numeric chatId is required');
+    }
+    if (sourceChatId === targetChatId) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'sourceChatId and chatId must differ');
+    }
+    if (!this.deps.forkChatFileCopy) {
+      throw new CommandValidationError('UNSUPPORTED_AGENT', 'Forking is not configured on this server', 503, true);
+    }
+
+    const sourceSession = this.deps.chats.getChat(sourceChatId);
+    if (!sourceSession) {
+      throw new CommandValidationError('SESSION_NOT_FOUND', 'Source session not found', 404);
+    }
+    if (!this.deps.agents.supportsFork(sourceSession.agentId)) {
+      throw new CommandValidationError('UNSUPPORTED_AGENT', `Fork unsupported for agent: ${sourceSession.agentId}`, 422);
+    }
+    if (this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)) {
+      throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is processing', 409, true);
+    }
+    if (this.deps.chats.getChat(targetChatId)) {
+      throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${targetChatId}`, 409);
+    }
+
+    return { sourceChatId, targetChatId, sourceSession };
+  }
+
+  async #forkChatFromContext(context: ForkContext): Promise<ForkChatFileCopyResult> {
+    if (!this.deps.forkChatFileCopy) {
+      throw new CommandValidationError('UNSUPPORTED_AGENT', 'Forking is not configured on this server', 503, true);
+    }
+
+    return this.deps.forkChatFileCopy({
+      sourceSession: context.sourceSession,
+      sourceChatId: context.sourceChatId,
+      targetChatId: context.targetChatId,
+      registry: this.deps.chats,
+      settings: this.deps.settings,
+      metadata: this.deps.metadata,
+      forkAgentSession: this.deps.agents.forkAgentSession?.bind(this.deps.agents),
+      supportsFork: this.deps.agents.supportsFork.bind(this.deps.agents),
+    });
   }
 
   #assertContent(command: string, images?: RunAgentTurnOptions['images']): void {

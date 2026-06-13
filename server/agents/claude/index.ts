@@ -11,10 +11,13 @@ import type {
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { launchAgentAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
-import { loadClaudeChatMessages, getClaudePreviewFromNativePath } from './history-loader.js';
+import { loadClaudeChatMessages, getClaudePreviewFromNativePath, loadClaudeChatMessagePage } from './history-loader.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { Agent, AgentRuntime } from '../types.js';
 import { buildClaudeEndpointRuntime } from './endpoint-runtime.js';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:claude');
 
 interface ClaudeAgentRuntime extends AgentRuntime {
   updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void;
@@ -27,7 +30,7 @@ function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
       const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId);
       const claudeRequest: ClaudeStartSessionRequest = { ...request, agentSessionId };
       claude.startClaudeCliSession(claudeRequest).catch((error: Error) => {
-        console.error(`agents: claude start failed for chat ${request.chatId}:`, error.message);
+        logger.error(`agents: claude start failed for chat ${request.chatId}:`, error.message);
         claude.failClaudeInternalSession(agentSessionId, request.chatId, error.message);
       });
       return { agentSessionId, nativePath };
@@ -79,6 +82,14 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
             : null);
         if (!nativePath) return [];
         return loadClaudeChatMessages(nativePath) as Promise<ChatMessage[]>;
+      },
+      async loadMessagePage(session, page) {
+        const nativePath = session.nativePath
+          ?? (session.agentSessionId
+            ? await createClaudeNativePath(session.projectPath, session.agentSessionId)
+            : null);
+        if (!nativePath) return null;
+        return loadClaudeChatMessagePage(nativePath, page.limit, page.offset);
       },
       async getPreview(session) {
         const nativePath = session.nativePath

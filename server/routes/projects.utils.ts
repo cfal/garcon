@@ -1,5 +1,8 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('routes:projects.utils');
 
 export interface DirectoryListItem {
   name: string;
@@ -38,7 +41,7 @@ export async function listDirectory(dirPath: string, showHidden = true): Promise
     entries = await fs.readdir(dirPath, { withFileTypes: true });
   } catch (error) {
     if (!isAccessDeniedError(error)) {
-      console.error('Error reading directory:', error);
+      logger.error('Error reading directory:', error);
     }
     return [];
   }
@@ -89,7 +92,7 @@ export async function listDirectoryNames(dirPath: string, showHidden = true): Pr
     entries = await fs.readdir(dirPath, { withFileTypes: true });
   } catch (error) {
     if (!isAccessDeniedError(error)) {
-      console.error('Error reading directory:', error);
+      logger.error('Error reading directory:', error);
     }
     return [];
   }

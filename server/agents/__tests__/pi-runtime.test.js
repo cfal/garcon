@@ -147,8 +147,12 @@ describe('PiCliRuntime lifecycle', () => {
     const provider = new PiCliRuntime();
     const messages = mock();
     const finished = mock();
+    let runningWhenFinished;
     provider.onMessages(messages);
-    provider.onFinished(finished);
+    provider.onFinished((chatId, exitCode) => {
+      runningWhenFinished = provider.isRunning('pi-session-2');
+      finished(chatId, exitCode);
+    });
 
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
@@ -174,6 +178,7 @@ describe('PiCliRuntime lifecycle', () => {
       expect.objectContaining({ type: 'assistant-message', content: 'Pi reply' }),
     ]);
     expect(finished).toHaveBeenCalledWith('chat-2', 0);
+    expect(runningWhenFinished).toBe(false);
     expect(provider.isRunning('pi-session-2')).toBe(false);
   });
 

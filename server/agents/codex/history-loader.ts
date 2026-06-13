@@ -7,6 +7,75 @@ import readline from 'readline';
 import { readJsonlTailLines } from '../shared/history-loader-utils.ts';
 import { normalizeCodexJsonlEntry, extractTextContent } from './history-normalizer.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
+import type { AgentTranscriptPage } from '../types.js';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:codex:history-loader');
+
+interface CodexMessageBuckets {
+  canonical: ChatMessage[];
+  fallbackUser: ChatMessage[];
+  fallbackAssistant: ChatMessage[];
+  fallbackThinking: ChatMessage[];
+  hasCanonicalUser: boolean;
+  hasCanonicalAssistant: boolean;
+  hasCanonicalThinking: boolean;
+}
+
+function sortChatMessagesByTimestamp(messages: ChatMessage[]): ChatMessage[] {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort((a, b) => {
+      const left = new Date(a.message.timestamp || 0).getTime();
+      const right = new Date(b.message.timestamp || 0).getTime();
+      if (left > 0 && right > 0 && left !== right) return left - right;
+      return a.index - b.index;
+    })
+    .map(({ message }) => message);
+}
+
+function createCodexMessageBuckets(): CodexMessageBuckets {
+  return {
+    canonical: [],
+    fallbackUser: [],
+    fallbackAssistant: [],
+    fallbackThinking: [],
+    hasCanonicalUser: false,
+    hasCanonicalAssistant: false,
+    hasCanonicalThinking: false,
+  };
+}
+
+function addCodexJsonlLine(buckets: CodexMessageBuckets, line: string): void {
+  if (!line.trim()) return;
+  try {
+    const entry = JSON.parse(line);
+    const result = normalizeCodexJsonlEntry(entry);
+    if (!result) return;
+
+    buckets.canonical.push(...result.canonical);
+    buckets.fallbackUser.push(...result.fallbackUser);
+    buckets.fallbackAssistant.push(...result.fallbackAssistant);
+    buckets.fallbackThinking.push(...result.fallbackThinking);
+    if (result.isCanonicalUser) buckets.hasCanonicalUser = true;
+    if (result.isCanonicalAssistant) buckets.hasCanonicalAssistant = true;
+    if (result.isCanonicalThinking) buckets.hasCanonicalThinking = true;
+  } catch { }
+}
+
+function finishCodexMessages(buckets: CodexMessageBuckets, includeFallback: boolean): ChatMessage[] {
+  const messages = [...buckets.canonical];
+  if (includeFallback && !buckets.hasCanonicalUser) messages.push(...buckets.fallbackUser);
+  if (includeFallback && !buckets.hasCanonicalAssistant) messages.push(...buckets.fallbackAssistant);
+  if (includeFallback && !buckets.hasCanonicalThinking) messages.push(...buckets.fallbackThinking);
+  return sortChatMessagesByTimestamp(messages);
+}
+
+function collectCodexMessagesFromLines(lines: string[], includeFallback: boolean): ChatMessage[] {
+  const buckets = createCodexMessageBuckets();
+  for (const line of lines) addCodexJsonlLine(buckets, line);
+  return finishCodexMessages(buckets, includeFallback);
+}
 
 // Reads a Codex JSONL file and returns ChatMessage[].
 // Uses per-content-class dedup. event_msg user messages are treated as
@@ -16,44 +85,52 @@ export async function loadCodexChatMessages(nativePath: string | null | undefine
   if (!nativePath) return [];
 
   try {
-    const canonical: ChatMessage[] = [];
-    const fallbackUser: ChatMessage[] = [];
-    const fallbackAssistant: ChatMessage[] = [];
-    const fallbackThinking: ChatMessage[] = [];
-    let hasCanonicalUser = false;
-    let hasCanonicalAssistant = false;
-    let hasCanonicalThinking = false;
+    const buckets = createCodexMessageBuckets();
 
     const fileStream = fsSync.createReadStream(nativePath);
     const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
 
     for await (const line of rl) {
-      if (!line.trim()) continue;
-      try {
-        const entry = JSON.parse(line);
-        const result = normalizeCodexJsonlEntry(entry);
-        if (!result) continue;
-
-        canonical.push(...result.canonical);
-        fallbackUser.push(...result.fallbackUser);
-        fallbackAssistant.push(...result.fallbackAssistant);
-        fallbackThinking.push(...result.fallbackThinking);
-        if (result.isCanonicalUser) hasCanonicalUser = true;
-        if (result.isCanonicalAssistant) hasCanonicalAssistant = true;
-        if (result.isCanonicalThinking) hasCanonicalThinking = true;
-      } catch { }
+      addCodexJsonlLine(buckets, line);
     }
 
-    const messages = [...canonical];
-    if (!hasCanonicalUser) messages.push(...fallbackUser);
-    if (!hasCanonicalAssistant) messages.push(...fallbackAssistant);
-    if (!hasCanonicalThinking) messages.push(...fallbackThinking);
-
-    messages.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
-    return messages;
+    return finishCodexMessages(buckets, true);
   } catch (error) {
-    console.error(`Error loading Codex ChatMessages from ${nativePath}:`, error);
+    logger.error(`Error loading Codex ChatMessages from ${nativePath}:`, error);
     return [];
+  }
+}
+
+export async function loadCodexChatMessagePage(
+  nativePath: string | null | undefined,
+  limit: number,
+  offset: number,
+): Promise<AgentTranscriptPage | null> {
+  if (!nativePath || offset > 0 || limit <= 0) return null;
+
+  try {
+    let maxBytes = 256 * 1024;
+    let maxLines = Math.max(500, limit * 40);
+    while (true) {
+      const { lines, fullyRead } = await readJsonlTailLines(nativePath, maxBytes, maxLines);
+      const messages = collectCodexMessagesFromLines(lines, fullyRead);
+      if (messages.length >= limit || fullyRead) {
+        const pageMessages = messages.slice(Math.max(0, messages.length - limit));
+        const hasMore = !fullyRead || messages.length > pageMessages.length;
+        return {
+          messages: pageMessages,
+          total: fullyRead ? messages.length : pageMessages.length + 1,
+          hasMore,
+          offset,
+          limit,
+        };
+      }
+      maxBytes *= 2;
+      maxLines *= 2;
+    }
+  } catch (error) {
+    logger.warn(`codex: tail page load failed for ${nativePath}:`, error);
+    return null;
   }
 }
 
@@ -162,7 +239,7 @@ export async function getCodexPreviewFromNativePath(nativePath: string | null | 
       createdAt: firstMessageTimestamp || null,
     };
   } catch (err) {
-    console.warn(`Could not build Codex preview from ${nativePath}:`, err);
+    logger.warn(`Could not build Codex preview from ${nativePath}:`, err);
     return null;
   } finally {
     await fh?.close();

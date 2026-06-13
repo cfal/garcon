@@ -1,12 +1,12 @@
 import jwt from 'jsonwebtoken';
 import { type AuthUser, type CreatedAuthUser, getJwtSecret } from './store.js';
 import { getJwtTokenExpiry } from '../config.js';
+import { createLogger } from '../lib/log.js';
+import { errorMessage } from '../lib/errors.js';
+
+const logger = createLogger('auth:token');
 
 type TokenUser = Pick<AuthUser | CreatedAuthUser, 'username'>;
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 export async function generateAuthToken({ username }: TokenUser): Promise<string> {
   const secret = await getJwtSecret();
@@ -27,7 +27,7 @@ export async function verifyAuthToken(token: string | null | undefined): Promise
     jwt.verify(token, secret);
     return true;
   } catch (error) {
-    console.warn('Auth token verification failed:', errorMessage(error));
+    logger.warn('Auth token verification failed:', errorMessage(error));
     return false;
   }
 }

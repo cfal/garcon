@@ -120,8 +120,12 @@ describe('CursorRuntime lifecycle', () => {
     const provider = new CursorRuntime();
     const messages = mock();
     const finished = mock();
+    let runningWhenFinished;
     provider.onMessages(messages);
-    provider.onFinished(finished);
+    provider.onFinished((chatId, exitCode, metadata) => {
+      runningWhenFinished = provider.isRunning('cursor-session-2');
+      finished(chatId, exitCode, metadata);
+    });
 
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
@@ -193,6 +197,7 @@ describe('CursorRuntime lifecycle', () => {
       'tool-result',
     ]);
     expect(finished).toHaveBeenCalledWith('chat-2', 0, { upstreamRequestId: 'cursor-req-2' });
+    expect(runningWhenFinished).toBe(false);
     expect(emitted.filter((message) => message.type === 'bash-tool-use')).toHaveLength(1);
     expect(emitted.find((message) => message.type === 'tool-result')?.content).toEqual({ stdout: '/proj' });
   });
@@ -235,6 +240,41 @@ describe('CursorRuntime lifecycle', () => {
       filenames: ['./contracts/a/daml.yaml', './contracts/b/daml.yaml'],
       numFiles: 2,
     });
+  });
+
+  it('marks Cursor sessions idle before emitting failed from error events', async () => {
+    const provider = new CursorRuntime();
+    const failed = mock();
+    let runningWhenFailed;
+    provider.onFailed((chatId, message) => {
+      runningWhenFailed = provider.isRunning('cursor-session-error');
+      failed(chatId, message);
+    });
+
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const turnPromise = provider.runTurn({
+      command: 'continue',
+      agentSessionId: 'cursor-session-error',
+      chatId: 'chat-error',
+      projectPath: '/proj',
+      model: 'gpt-5.3-codex',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    proc.pushJson({
+      type: 'error',
+      session_id: 'cursor-session-error',
+      message: 'cursor failed',
+    });
+    proc.close(1);
+
+    await turnPromise;
+
+    expect(failed).toHaveBeenCalledWith('chat-error', 'cursor failed');
+    expect(runningWhenFailed).toBe(false);
   });
 
   it('runs one-shot prompts with print JSON mode', async () => {

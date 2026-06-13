@@ -38,6 +38,10 @@ import {
 } from '../../common/chat-modes.ts';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { IChatRegistry } from '../chats/store.js';
+import { createLogger } from '../lib/log.js';
+import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+
+const logger = createLogger('settings:store');
 import type {
   ChatFolder,
   ProjectSettings,
@@ -55,10 +59,6 @@ type RemoteSettingsChangedCallback = () => void;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function stringRecord(raw: Record<string, unknown>): Record<string, string> {
@@ -91,6 +91,10 @@ function createEmpty(): ProjectSettings {
     chatFolders: [],
     savedChatSearches: [],
   };
+}
+
+function cloneSettings(settings: ProjectSettings): ProjectSettings {
+  return sanitize(structuredClone(settings));
 }
 
 function sanitizeFolder(raw: unknown): ChatFolder | null {
@@ -173,6 +177,7 @@ function sanitize(parsed: unknown): ProjectSettings {
 
 export class SettingsStore extends EventEmitter {
   #cache: ProjectSettings | null = null;
+  #mutationDraft: ProjectSettings | null = null;
   #workspaceDir: string;
   #writeLock = new KeyedPromiseLock();
   #chatNames: ChatNameStore;
@@ -186,7 +191,7 @@ export class SettingsStore extends EventEmitter {
     super();
     this.#workspaceDir = workspaceDir;
     const context: SettingsStoreContext = {
-      readSettings: () => this.#getCachedSettings(),
+      readSettings: () => this.#readSettings(),
       mutate: (fn) => this.#withLock(fn),
       save: (settings) => this.saveSettings(settings),
       saveAndMaybeEmitRemote: (settings, remoteSettingsChanged) => (
@@ -206,7 +211,15 @@ export class SettingsStore extends EventEmitter {
   // Serializes read-modify-write cycles so concurrent mutations cannot
   // clobber each other's changes to project-settings.json.
   async #withLock<T>(fn: SettingsMutation<T>): Promise<T> {
-    return this.#writeLock.runExclusive(SETTINGS_WRITE_LOCK_KEY, () => Promise.resolve(fn()));
+    return this.#writeLock.runExclusive(SETTINGS_WRITE_LOCK_KEY, async () => {
+      const previousDraft = this.#mutationDraft;
+      this.#mutationDraft = cloneSettings(this.#getCachedSettings());
+      try {
+        return await Promise.resolve(fn());
+      } finally {
+        this.#mutationDraft = previousDraft;
+      }
+    });
   }
 
   emitSessionNameChanged(chatId: string, title: string): void { this.emit('session-name-changed', chatId, title); }
@@ -230,8 +243,8 @@ export class SettingsStore extends EventEmitter {
       const parsed = JSON.parse(raw);
       return sanitize(parsed);
     } catch (error) {
-      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return createEmpty();
-      console.warn('settings: invalid project-settings.json, using empty settings:', errorMessage(error));
+      if (hasNodeErrorCode(error, 'ENOENT')) return createEmpty();
+      logger.warn('settings: invalid project-settings.json, using empty settings:', errorMessage(error));
       return createEmpty();
     }
   }
@@ -253,6 +266,10 @@ export class SettingsStore extends EventEmitter {
       this.#cache = createEmpty();
     }
     return this.#cache;
+  }
+
+  #readSettings(): ProjectSettings {
+    return this.#mutationDraft ?? this.#getCachedSettings();
   }
 
   async saveSettings(settings: unknown): Promise<void> {
@@ -284,7 +301,7 @@ export class SettingsStore extends EventEmitter {
     return this.#chatNames.removeSessionName(chatId);
   }
 
-  async getUiSettings(): Promise<ProjectSettings['ui']> {
+  getUiSettings(): ProjectSettings['ui'] {
     return this.#uiSettings.getUiSettings();
   }
 
@@ -292,7 +309,7 @@ export class SettingsStore extends EventEmitter {
     return this.#uiSettings.setUiSettings(patch);
   }
 
-  async getPathSettings(): Promise<ProjectSettings['paths']> {
+  getPathSettings(): ProjectSettings['paths'] {
     return this.#uiSettings.getPathSettings();
   }
 
@@ -300,15 +317,15 @@ export class SettingsStore extends EventEmitter {
     return this.#uiSettings.setPathSettings(patch);
   }
 
-  async getPinnedChatIds(): Promise<string[]> {
+  getPinnedChatIds(): string[] {
     return this.#chatOrder.getPinnedChatIds();
   }
 
-  async getRemoteSettingsVersion(): Promise<number> {
+  getRemoteSettingsVersion(): number {
     return this.#uiSettings.getRemoteSettingsVersion();
   }
 
-  async getRemoteSettingsSnapshotSource(): Promise<{
+  getRemoteSettingsSnapshotSource(): {
     version: number;
     ui: ProjectSettings['ui'];
     paths: ProjectSettings['paths'];
@@ -323,39 +340,39 @@ export class SettingsStore extends EventEmitter {
     lastThinkingMode: ThinkingMode;
     lastClaudeThinkingMode: ClaudeThinkingMode;
     lastAmpAgentMode: AmpAgentMode;
-  }> {
+  } {
     return this.#uiSettings.getRemoteSettingsSnapshotSource();
   }
 
-  async getArchivedChatIds(): Promise<string[]> {
+  getArchivedChatIds(): string[] {
     return this.#chatOrder.getArchivedChatIds();
   }
 
-  async getLastPermissionMode(): Promise<PermissionMode> {
+  getLastPermissionMode(): PermissionMode {
     return this.#lastChatDefaults.getLastPermissionMode();
   }
 
-  async getLastAgentId(): Promise<string> {
+  getLastAgentId(): string {
     return this.#lastChatDefaults.getLastAgentId();
   }
 
-  async getLastProjectPath(): Promise<string> {
+  getLastProjectPath(): string {
     return this.#lastChatDefaults.getLastProjectPath();
   }
 
-  async getLastModel(): Promise<string> {
+  getLastModel(): string {
     return this.#lastChatDefaults.getLastModel();
   }
 
-  async getLastApiProviderId(): Promise<string | null> {
+  getLastApiProviderId(): string | null {
     return this.#lastChatDefaults.getLastApiProviderId();
   }
 
-  async getLastModelEndpointId(): Promise<string | null> {
+  getLastModelEndpointId(): string | null {
     return this.#lastChatDefaults.getLastModelEndpointId();
   }
 
-  async getLastModelProtocol(): Promise<ApiProtocol | null> {
+  getLastModelProtocol(): ApiProtocol | null {
     return this.#lastChatDefaults.getLastModelProtocol();
   }
 
@@ -367,7 +384,7 @@ export class SettingsStore extends EventEmitter {
     return this.#lastChatDefaults.setLastPermissionMode(mode);
   }
 
-  async getLastThinkingMode(): Promise<ThinkingMode> {
+  getLastThinkingMode(): ThinkingMode {
     return this.#lastChatDefaults.getLastThinkingMode();
   }
 
@@ -375,7 +392,7 @@ export class SettingsStore extends EventEmitter {
     return this.#lastChatDefaults.setLastThinkingMode(mode);
   }
 
-  async getLastClaudeThinkingMode(): Promise<ClaudeThinkingMode> {
+  getLastClaudeThinkingMode(): ClaudeThinkingMode {
     return this.#lastChatDefaults.getLastClaudeThinkingMode();
   }
 
@@ -383,7 +400,7 @@ export class SettingsStore extends EventEmitter {
     return this.#lastChatDefaults.setLastClaudeThinkingMode(mode);
   }
 
-  async getLastAmpAgentMode(): Promise<AmpAgentMode> {
+  getLastAmpAgentMode(): AmpAgentMode {
     return this.#lastChatDefaults.getLastAmpAgentMode();
   }
 
@@ -391,7 +408,7 @@ export class SettingsStore extends EventEmitter {
     return this.#lastChatDefaults.setLastAmpAgentMode(mode);
   }
 
-  async getNormalChatIds(): Promise<string[]> {
+  getNormalChatIds(): string[] {
     return this.#chatOrder.getNormalChatIds();
   }
 
@@ -419,7 +436,7 @@ export class SettingsStore extends EventEmitter {
     return this.#chatOrder.reorderWindow(list, rawOldOrder, rawNewOrder);
   }
 
-  async getSavedSearches(): Promise<SavedChatSearch[]> {
+  getSavedSearches(): SavedChatSearch[] {
     return this.#savedSearches.getSavedSearches();
   }
 
@@ -439,7 +456,7 @@ export class SettingsStore extends EventEmitter {
     return this.#savedSearches.reorderSavedSearches(oldOrder, newOrder);
   }
 
-  async getFolders(): Promise<ChatFolder[]> {
+  getFolders(): ChatFolder[] {
     return this.#folders.getFolders();
   }
 

@@ -25,6 +25,7 @@ import {
 	getRunningChats,
 	getChatMessages,
 } from '../chats';
+import type { ChatListResponse } from '$shared/chat-list';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -52,11 +53,34 @@ describe('chats API contract', () => {
 	});
 
 	it('listChats calls GET /api/v1/chats', async () => {
-		const payload = { sessions: [], total: 0 };
+		const payload: ChatListResponse = {
+			sessions: [
+				{
+					id: 'chat-1',
+					agentId: 'claude',
+					model: 'opus',
+					permissionMode: 'default',
+					thinkingMode: 'none',
+					claudeThinkingMode: 'auto',
+					ampAgentMode: 'smart',
+					title: 'Chat 1',
+					projectPath: '/repo',
+					tags: [],
+					activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+					preview: { lastMessage: '' },
+					isPinned: false,
+					isArchived: false,
+					isActive: false,
+					isUnread: false,
+				},
+			],
+			total: 1,
+		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
 		const result = await listChats();
 		expect(result).toEqual(payload);
+		expect(result.sessions[0]?.permissionMode).toBe('default');
 
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats');

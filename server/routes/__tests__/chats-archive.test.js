@@ -33,9 +33,9 @@ const settings = {
   getChatName: mock(() => null),
   setSessionName: mock(() => Promise.resolve(undefined)),
   removeSessionName: mock(() => Promise.resolve(undefined)),
-  getPinnedChatIds: mock(() => Promise.resolve([])),
-  getNormalChatIds: mock(() => Promise.resolve([])),
-  getArchivedChatIds: mock(() => Promise.resolve([])),
+  getPinnedChatIds: mock(() => []),
+  getNormalChatIds: mock(() => []),
+  getArchivedChatIds: mock(() => []),
   removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
   insertNormalChatIdTop: mock(() => Promise.resolve(undefined)),
   ensureInNormal: mock(() => Promise.resolve(undefined)),
@@ -203,9 +203,9 @@ describe('GET /api/chats archive fields', () => {
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve([]));
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve([]));
-    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getPinnedChatIds.mockImplementation(() => []);
+    settings.getNormalChatIds.mockImplementation(() => []);
+    settings.getArchivedChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();
@@ -222,9 +222,9 @@ describe('GET /api/chats archive fields', () => {
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve(['300']));
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['200']));
-    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getPinnedChatIds.mockImplementation(() => ['300']);
+    settings.getNormalChatIds.mockImplementation(() => ['200']);
+    settings.getArchivedChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();

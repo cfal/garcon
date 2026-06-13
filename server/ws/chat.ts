@@ -33,11 +33,11 @@ import {
 } from '../../common/ws-requests.ts';
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { ChatMessage } from '../../common/chat-types.ts';
-import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
-import type { ChatMetadata } from '../chats/metadata-store.js';
+import type { IChatRegistry } from '../chats/store.js';
 import type { AgentSessionSettingsPatch } from "../agents/session-types.js";
 import {
   ChatCommandService,
+  CommandValidationError,
   runOptionsFromCommandRequest,
 } from '../commands/chat-command-service.js';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
@@ -45,6 +45,9 @@ import type { ChatQueueService } from '../queue.js';
 import type { HistoryCachePageReader } from '../chats/history-cache-contract.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('ws:chat');
 
 const PERMISSION_DEDUP_TTL_MS = 30_000;
 
@@ -53,7 +56,7 @@ type WS = import('bun').ServerWebSocket<unknown>;
 
 type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
-  'getRunningSessions' | 'resolvePermission' | 'updateSessionSettings' | 'supportsFork' | 'isAgentSessionRunning'
+  'getRunningSessions' | 'resolvePermission' | 'updateSessionSettings'
 >;
 
 type QueueManagerDep = Pick<
@@ -68,40 +71,6 @@ type QueueManagerDep = Pick<
   | 'pauseChatQueue'
   | 'resumeChatQueue'
 >;
-
-interface ForkSettingsDep {
-  getChatName(chatId: string): string | null;
-  ensureInNormal(chatId: string): Promise<void>;
-  setSessionName(chatId: string, title: string): Promise<void>;
-}
-
-interface ForkMetadataDep {
-  getChatMetadata(chatId: string): ChatMetadata | null;
-  addNewChatMetadata(chatId: string, command: string): void;
-}
-
-interface ForkDeps {
-  settings: ForkSettingsDep;
-  metadata: ForkMetadataDep;
-  forkChatFileCopy(args: {
-    sourceSession: ChatRegistryEntry;
-    sourceChatId: string;
-    targetChatId: string;
-    registry: IChatRegistry;
-    settings: ForkSettingsDep;
-    metadata: ForkMetadataDep;
-    forkAgentSession?: (args: {
-      sourceSession: ChatRegistryEntry;
-      sourceChatId: string;
-      targetChatId: string;
-    }) => Promise<{ agentSessionId: string; nativePath: string | null } | null>;
-  }): Promise<{ sourceChatId: string; chatId: string; agentId?: string }>;
-  forkAgentSession?(args: {
-    sourceSession: ChatRegistryEntry;
-    sourceChatId: string;
-    targetChatId: string;
-  }): Promise<{ agentSessionId: string; nativePath: string | null } | null>;
-}
 
 type HistoryCacheDep = HistoryCachePageReader;
 
@@ -123,7 +92,6 @@ interface ChatHandlerDeps {
   historyCache: HistoryCacheDep;
   registry: IChatRegistry;
   pendingInputs: PendingInputsDep;
-  forkDeps?: ForkDeps | null;
   commands: ChatCommandService;
 }
 
@@ -153,7 +121,6 @@ export class ChatHandler {
   #pendingInputs: PendingInputsDep;
   #registry: IChatRegistry;
   #commands: ChatCommandService;
-  #forkDeps: ForkDeps | null;
   #recentPermissionDecisions = new Map<string, number>();
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
@@ -163,7 +130,6 @@ export class ChatHandler {
     historyCache,
     registry,
     pendingInputs,
-    forkDeps = null,
     commands,
   }: ChatHandlerDeps) {
     this.#agents = agents;
@@ -172,7 +138,6 @@ export class ChatHandler {
     this.#pendingInputs = pendingInputs;
     this.#registry = registry;
     this.#commands = commands;
-    this.#forkDeps = forkDeps;
     this.#requestHandlers = this.#createRequestHandlers();
   }
 
@@ -189,7 +154,11 @@ export class ChatHandler {
   }
 
   async #handleAgentCommand(data: AgentRunRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
-    console.log('chat: message:', data.command || '[continue/resume]');
+    logger.debug('agent-run request received', {
+      chatId,
+      hasCommand: Boolean(data.command?.trim()),
+      imageCount: Array.isArray(data.images) ? data.images.length : 0,
+    });
 
     if (!/^\d+$/.test(String(chatId))) {
       writer.send(new AgentRunFailedMessage(chatId, 'Invalid session ID format'));
@@ -213,41 +182,6 @@ export class ChatHandler {
     const sourceChatId = data.sourceChatId;
     const targetChatId = data.chatId;
 
-    if (!/^\d+$/.test(String(sourceChatId))) {
-      writer.send(new WsFaultMessage('Invalid sourceChatId format'));
-      return;
-    }
-    if (!/^\d+$/.test(String(targetChatId))) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, 'Invalid fork target session ID format'));
-      return;
-    }
-    if (sourceChatId === targetChatId) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, 'sourceChatId and chatId must differ'));
-      return;
-    }
-    if (!this.#forkDeps) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, 'Forking is not configured on this server'));
-      return;
-    }
-
-    const sourceSession = this.#registry.getChat(sourceChatId);
-    if (!sourceSession) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, 'Source session not found'));
-      return;
-    }
-    if (!this.#agents.supportsFork(sourceSession.agentId)) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, `Fork unsupported for agent: ${sourceSession.agentId}`));
-      return;
-    }
-    if (this.#agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, 'Cannot fork a chat while it is processing'));
-      return;
-    }
-    if (this.#registry.getChat(targetChatId)) {
-      writer.send(new AgentRunFailedMessage(sourceChatId, `Session already exists: ${targetChatId}`));
-      return;
-    }
-
     try {
       await this.#commands.submitForkRun({
         transport: 'websocket',
@@ -256,35 +190,30 @@ export class ChatHandler {
         command: data.command,
         images: data.images,
         options: runOptionsFromCommandRequest(data),
-        ensureForked: async () => {
-          const result = await this.#forkDeps!.forkChatFileCopy({
-            sourceSession,
-            sourceChatId,
-            targetChatId,
-            registry: this.#registry,
-            settings: this.#forkDeps!.settings,
-            metadata: this.#forkDeps!.metadata,
-            forkAgentSession: this.#forkDeps!.forkAgentSession,
-          });
+        onForked: (result) => {
           writer.send(new ChatForkCreatedMessage(result.sourceChatId, result.chatId));
         },
       });
     } catch (error: unknown) {
       const chatId = this.#registry.getChat(targetChatId) ? targetChatId : sourceChatId;
+      if (error instanceof CommandValidationError && error.code === 'VALIDATION_FAILED' && error.message.includes('sourceChatId')) {
+        writer.send(new WsFaultMessage(error.message));
+        return;
+      }
       writer.send(new AgentRunFailedMessage(chatId, (error as Error).message));
     }
   }
 
   async #handleAbortSession(_data: AgentStopRequest, chatId: string): Promise<void> {
-    console.log('chat: abort session request:', chatId);
+    logger.info('chat: abort session request:', chatId);
     await this.#queue.abort(chatId);
   }
 
   #handlePermissionResponse(data: PermissionDecisionRequest): void {
     if (!data.permissionRequestId || !data.chatId) return;
 
-    if (this.#isDuplicatePermissionDecision(data.permissionRequestId)) {
-      console.warn('ws: duplicate permission-decision for', data.permissionRequestId, '- ignoring');
+    if (this.#isDuplicatePermissionDecision(data.chatId, data.permissionRequestId)) {
+      logger.warn('ws: duplicate permission-decision for', data.permissionRequestId, '- ignoring');
       return;
     }
 
@@ -296,11 +225,12 @@ export class ChatHandler {
     this.#agents.resolvePermission(data.chatId, data.permissionRequestId, decision);
   }
 
-  #isDuplicatePermissionDecision(permissionRequestId: string): boolean {
+  #isDuplicatePermissionDecision(chatId: string, permissionRequestId: string): boolean {
     const now = Date.now();
     this.#prunePermissionDecisionDedup(now);
-    if (this.#recentPermissionDecisions.has(permissionRequestId)) return true;
-    this.#recentPermissionDecisions.set(permissionRequestId, now);
+    const key = `${chatId}:${permissionRequestId}`;
+    if (this.#recentPermissionDecisions.has(key)) return true;
+    this.#recentPermissionDecisions.set(key, now);
     return false;
   }
 
@@ -347,7 +277,7 @@ export class ChatHandler {
         result.hasMore, result.offset, result.limit,
       ));
     } catch (error: unknown) {
-      console.error(`ws: error reading messages for ${chatId}:`, (error as Error).message);
+      logger.error(`ws: error reading messages for ${chatId}:`, (error as Error).message);
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
         code: 'HISTORY_LOAD_FAILED',
@@ -456,7 +386,7 @@ export class ChatHandler {
   }
 
   #handleOpen(ws: WS): void {
-    console.log('ws: chat client connected');
+    logger.info('ws: chat client connected');
     ws.subscribe('chat');
   }
 
@@ -467,7 +397,7 @@ export class ChatHandler {
       if (!data) return;
       await this.#requestHandlers[data.type](data, writer);
     } catch (error: unknown) {
-      console.error('ws: chat error:', (error as Error).message);
+      logger.error('ws: chat error:', (error as Error).message);
       writer.send(new WsFaultMessage((error as Error).message));
     }
   }
@@ -477,6 +407,6 @@ export class ChatHandler {
   }
 
   #handleClose(_ws: WS, code?: number, reason?: string): void {
-    console.log('ws: chat client disconnected', code ?? '', reason ? `(${reason})` : '');
+    logger.info('ws: chat client disconnected', code ?? '', reason ? `(${reason})` : '');
   }
 }

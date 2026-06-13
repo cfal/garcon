@@ -3,6 +3,9 @@ import { fileURLToPath } from 'url';
 import { markRouteNoAuth } from '../lib/http-route.js';
 import { jsonError } from '../lib/http-error.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('routes:static');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,7 +36,7 @@ function notFoundResponse(): Response {
 const noauthServePathname: StaticPathHandler = (function() {
   const isEmbedded = Bun.embeddedFiles.length > 0;
   if (isEmbedded) {
-    console.log('Static assets source: embedded');
+    logger.info('Static assets source: embedded');
 
     const embeddedAssets = (function generateEmbeddedStaticAssets() {
       const embeddedStaticAssetPaths: StaticAssetMap = {};
@@ -62,7 +65,7 @@ const noauthServePathname: StaticPathHandler = (function() {
       return new Response(embeddedPath, { headers: cacheHeaders(pathname) });
     };
   } else {
-    console.log('Static assets source: filesystem');
+    logger.info('Static assets source: filesystem');
 
     // Serves from web/build/ (SvelteKit adapter-static output).
     const filesystemDistDir = path.join(serverRoot, 'web', 'build') + path.sep;

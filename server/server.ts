@@ -2,19 +2,7 @@
 // This is the single place where dependencies are resolved.
 
 import path from 'path';
-import {
-  getPort,
-  getBindAddress,
-  getMaxRequestBodySize,
-  getMaxConnections,
-  getMaxWsClients,
-  getWsIdleTimeoutSeconds,
-  getWsBackpressureLimit,
-  getWsMaxPayloadLength,
-  getHttpIdleTimeoutSeconds,
-  getWorkspaceDir,
-  isAuthDisabled,
-} from './config.js';
+import { initializeServerConfig } from './config.js';
 import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/http-route.js';
 import { malformedJsonResponse } from './lib/json-route.js';
@@ -24,7 +12,7 @@ import { verifyAuthToken } from './auth/token.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { parseChatMessages } from '../common/chat-types.js';
-import type { ChatListInvalidationReason } from '../common/ws-events.ts';
+import { isChatListInvalidationReason } from '../common/ws-events.ts';
 
 // Classes
 import { ChatRegistry } from './chats/store.js';
@@ -46,6 +34,7 @@ import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
+import { abortRunningSessionsWithTimeout } from './lib/shutdown.js';
 import {
   AgentRunOutputMessage,
   AgentRunFinishedMessage,
@@ -70,6 +59,10 @@ import createAllRoutes from './routes/index.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
 import type { ShellWebSocketData } from './ws/shell.js';
+import { createLogger } from './lib/log.js';
+import { errorMessage } from './lib/errors.js';
+
+const logger = createLogger('server');
 
 type WsPath = '/shell' | '/ws';
 
@@ -81,29 +74,18 @@ type ServeOptionsWithConnectionLimit = Parameters<typeof Bun.serve<WsConnectionD
   maxConnections?: number;
 };
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function isWsPath(value: unknown): value is WsPath {
   return value === '/shell' || value === '/ws';
 }
 
-function isChatListInvalidationReason(value: string): value is ChatListInvalidationReason {
-  return value === 'chat-added'
-    || value === 'pinned-toggled'
-    || value === 'archive-toggled'
-    || value === 'chats-reordered'
-    || value === 'chats-reordered-quick';
-}
-
 export async function startServer(): Promise<void> {
   process.on('unhandledRejection', (err: unknown) => {
-    console.error('unhandled rejection (non-fatal):', errorMessage(err));
+    logger.error('unhandled rejection (non-fatal):', errorMessage(err));
   });
 
   try {
-    const workspaceDir = getWorkspaceDir();
+    const config = initializeServerConfig();
+    const workspaceDir = config.workspaceDir;
 
     // Leaf modules with no inter-service dependencies.
     const chatRegistry = new ChatRegistry(workspaceDir);
@@ -172,6 +154,7 @@ export async function startServer(): Promise<void> {
       metadata,
       agents: agentRegistry,
       pendingInputs,
+      forkChatFileCopy,
     });
 
     // Telegram notifications wire themselves to agent and queue events.
@@ -188,7 +171,7 @@ export async function startServer(): Promise<void> {
     try {
       await queue.recoverStaleChatQueues();
     } catch (err) {
-      console.warn('queue: recovery error:', errorMessage(err));
+      logger.warn('queue: recovery error:', errorMessage(err));
     }
 
     // Build route and WS handler tables
@@ -215,12 +198,6 @@ export async function startServer(): Promise<void> {
       historyCache,
       registry: chatRegistry,
       pendingInputs,
-      forkDeps: {
-        settings,
-        metadata,
-        forkChatFileCopy,
-        forkAgentSession: agentRegistry.forkAgentSession.bind(agentRegistry),
-      },
       commands: chatCommands,
     });
     const wsHandlers = {
@@ -228,22 +205,22 @@ export async function startServer(): Promise<void> {
       '/ws': chatHandler.createHandler(),
     };
 
-    const listenPort = getPort();
-    const bindAddress = getBindAddress();
-    const authDisabled = isAuthDisabled();
+    const listenPort = config.port;
+    const bindAddress = config.bindAddress;
+    const authDisabled = config.authDisabled;
 
     const serveOptions = {
       port: listenPort,
       hostname: bindAddress,
-      idleTimeout: getHttpIdleTimeoutSeconds(),
-      maxConnections: getMaxConnections(),
-      maxRequestBodySize: getMaxRequestBodySize(),
+      idleTimeout: config.httpIdleTimeoutSeconds,
+      maxConnections: config.maxConnections,
+      maxRequestBodySize: config.maxRequestBodySize,
       routes: wrapRoutes(routes),
       error(error) {
         if (error instanceof MalformedJsonError) {
           return malformedJsonResponse();
         }
-        console.error('server: route error:', error);
+        logger.error('server: route error:', error);
         return jsonError('Internal server error', 500);
       },
       async fetch(request, server) {
@@ -276,14 +253,14 @@ export async function startServer(): Promise<void> {
         return new Response('Not found', { status: 404 });
       },
       websocket: {
-        idleTimeout: getWsIdleTimeoutSeconds(),
+        idleTimeout: config.wsIdleTimeoutSeconds,
         sendPings: true,
-        backpressureLimit: getWsBackpressureLimit(),
+        backpressureLimit: config.wsBackpressureLimit,
         closeOnBackpressureLimit: true,
-        maxPayloadLength: getWsMaxPayloadLength(),
+        maxPayloadLength: config.wsMaxPayloadLength,
         perMessageDeflate: true,
         open(ws) {
-          if (server.pendingWebSockets > getMaxWsClients()) {
+          if (server.pendingWebSockets > config.maxWsClients) {
             ws.close(1013, 'Server busy');
             return;
           }
@@ -324,48 +301,48 @@ export async function startServer(): Promise<void> {
     // Wire agent events to broadcast via AgentRegistry fan-out.
     // HistoryCache's init() already self-wired appendMessages via
     // agentRegistry.onMessages(), so only broadcast wiring is needed here.
+    const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
     agentRegistry.onMessages((chatId, messages, metadata) => {
+      if (!chatExists(chatId)) return;
       broadcast(new AgentRunOutputMessage(chatId, parseChatMessages(messages), metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
-        console.warn('pending-inputs: reconcile after messages failed:', errorMessage(err));
+        logger.warn('pending-inputs: reconcile after messages failed:', errorMessage(err));
       });
     });
     agentRegistry.onProcessing((chatId, isProcessing) => {
+      if (!chatExists(chatId)) return;
       broadcast(new ChatProcessingUpdatedMessage(chatId, isProcessing));
     });
     agentRegistry.onSessionCreated((chatId) => {
+      if (!chatExists(chatId)) return;
       broadcast(new ChatSessionCreatedMessage(chatId));
     });
     agentRegistry.onFinished((chatId, exitCode, metadata) => {
+      if (!chatExists(chatId)) return;
       broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
-        console.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
+        logger.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
       });
-      // Defer idle check to next microtask so the runtime has time to
-      // clear its isRunning flag (emitFinished fires before the flag flip).
-      queueMicrotask(() => {
-        queue.checkChatIdle(chatId).catch((err) => {
-          console.warn('queue: checkChatIdle error:', errorMessage(err));
-        });
+      queue.checkChatIdle(chatId).catch((err) => {
+        logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
     });
     agentRegistry.onFailed((chatId, agentErrorMessage, metadata) => {
+      if (!chatExists(chatId)) return;
       if (metadata?.commandType === 'chat-start' && metadata.clientRequestId) {
         commandLedger.updateCommand('chat-start', chatId, metadata.clientRequestId, {
           status: 'failed',
           error: agentErrorMessage,
         }).catch((err) => {
-          console.warn('commands: failed to mark chat-start command failed:', errorMessage(err));
+          logger.warn('commands: failed to mark chat-start command failed:', errorMessage(err));
         });
       }
       broadcast(new AgentRunFailedMessage(chatId, agentErrorMessage, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
-        console.warn('pending-inputs: reconcile after failure failed:', errorMessage(err));
+        logger.warn('pending-inputs: reconcile after failure failed:', errorMessage(err));
       });
-      queueMicrotask(() => {
-        queue.checkChatIdle(chatId).catch((err) => {
-          console.warn('queue: checkChatIdle error:', errorMessage(err));
-        });
+      queue.checkChatIdle(chatId).catch((err) => {
+        logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
     });
 
@@ -376,7 +353,7 @@ export async function startServer(): Promise<void> {
     });
     settings.onListChanged((reason, chatId) => {
       if (!isChatListInvalidationReason(reason)) {
-        console.warn('server: skipped unknown chat list invalidation reason:', reason);
+        logger.warn('server: skipped unknown chat list invalidation reason:', reason);
         return;
       }
       broadcast(new ChatListRefreshRequestedMessage(reason, chatId));
@@ -386,7 +363,7 @@ export async function startServer(): Promise<void> {
         const snapshot = await buildRemoteSettingsSnapshot({ settings, agents: agentRegistry, telegramSettings });
         broadcast(new SettingsChangedMessage(snapshot));
       } catch (err) {
-        console.warn('server: failed to broadcast settings-changed:', errorMessage(err));
+        logger.warn('server: failed to broadcast settings-changed:', errorMessage(err));
       }
     };
     settings.onRemoteSettingsChanged(broadcastRemoteSettings);
@@ -398,7 +375,7 @@ export async function startServer(): Promise<void> {
       pendingInputs.clearChat(chatId, 'chat-removed');
       broadcast(new ChatSessionDeletedWsMessage(chatId));
       shareStore.revokeShareByChatId(chatId).catch((err) => {
-        console.warn('share-store: failed to revoke share on chat removal:', errorMessage(err));
+        logger.warn('share-store: failed to revoke share on chat removal:', errorMessage(err));
       });
     });
     chatRegistry.onChatReadUpdated((chatId, lastReadAt) => {
@@ -431,38 +408,41 @@ export async function startServer(): Promise<void> {
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
-      console.log('server: shutting down...');
+      logger.info('server: shutting down...');
       try {
-        const running = agentRegistry.getRunningSessions();
-        for (const [, sessions] of Object.entries(running)) {
-          for (const session of sessions) {
-            if (session.id) {
-              agentRegistry.abortSession(session.id).catch(() => {});
-            }
-          }
+        const abortResult = await abortRunningSessionsWithTimeout({
+          runningSessions: agentRegistry.getRunningSessions(),
+          abortSession: (chatId) => agentRegistry.abortSession(chatId),
+          onAbortError: (chatId, abortError) => {
+            logger.warn(
+              `server: abort during shutdown failed for ${chatId}:`,
+              errorMessage(abortError),
+            );
+          },
+        });
+        if (abortResult.timedOut) {
+          logger.warn(`server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`);
         }
         agentRegistry.shutdown();
         shellManager.shutdown();
         historyCache.destroy();
         await metadata.flush();
         await chatRegistry.flush();
-    } catch (err) {
-        console.warn('server: shutdown cleanup error:', errorMessage(err));
-    }
+      } catch (err) {
+        logger.warn('server: shutdown cleanup error:', errorMessage(err));
+      }
       process.exit(0);
     };
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
-    console.log('');
-    console.log(`Started at http://${bindAddress}:${server.port ?? listenPort}`);
-    console.log(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
+    logger.info(`Started at http://${bindAddress}:${server.port ?? listenPort}`);
+    logger.info(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
     if (authDisabled && bindAddress !== '127.0.0.1' && bindAddress !== 'localhost') {
-      console.warn('WARNING: authentication is disabled while bound to a non-localhost address.');
+      logger.warn('WARNING: authentication is disabled while bound to a non-localhost address.');
     }
-    console.log('');
   } catch (error) {
-    console.error('Failed to start server:', error);
+    logger.error('Failed to start server:', error);
     process.exit(1);
   }
 }

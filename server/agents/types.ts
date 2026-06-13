@@ -33,8 +33,21 @@ export interface AgentRuntime {
 
 export interface AgentTranscriptSource {
   loadMessages(session: AgentChatEntry, context?: { chatId?: string }): Promise<ChatMessage[]>;
+  loadMessagePage?(
+    session: AgentChatEntry,
+    page: { limit: number; offset: number },
+    context?: { chatId?: string },
+  ): Promise<AgentTranscriptPage | null>;
   getPreview?(session: AgentChatEntry): Promise<unknown>;
   resolveNativePath?(session: AgentChatEntry): Promise<string | null>;
+}
+
+export interface AgentTranscriptPage {
+  messages: ChatMessage[];
+  total: number;
+  hasMore: boolean;
+  offset: number;
+  limit: number;
 }
 
 export interface AgentAuth {

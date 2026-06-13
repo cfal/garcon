@@ -1,6 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { UserMessage, type ChatMessage } from "../../../common/chat-types.js";
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:cursor:cursor-request-identities');
 
 interface CursorRequestIdentityRecord {
   chatId: string;
@@ -181,7 +184,7 @@ export class CursorRequestIdentityStore {
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.warn('cursor: failed to load request identities:', error instanceof Error ? error.message : String(error));
+        logger.warn('cursor: failed to load request identities:', error instanceof Error ? error.message : String(error));
       }
     }
   }
@@ -196,7 +199,7 @@ export class CursorRequestIdentityStore {
       };
       fs.writeFileSync(this.#filePath, JSON.stringify(payload, null, 2), 'utf8');
     } catch (error) {
-      console.warn('cursor: failed to persist request identities:', error instanceof Error ? error.message : String(error));
+      logger.warn('cursor: failed to persist request identities:', error instanceof Error ? error.message : String(error));
     }
   }
 }

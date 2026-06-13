@@ -7,6 +7,10 @@ import path from 'path';
 import crypto from 'crypto';
 import { getConfigDir } from '../config.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
+import { createLogger } from '../lib/log.js';
+import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+
+const logger = createLogger('auth:store');
 
 interface AuthData {
   jwtSecret?: unknown;
@@ -33,19 +37,6 @@ function authPath(): string {
 const cachedJwtSecrets = new Map<string, string>();
 const inflightJwtSecrets = new Map<string, Promise<string>>();
 
-function hasNodeErrorCode(error: unknown, code: string): boolean {
-  return Boolean(
-    error
-      && typeof error === 'object'
-      && 'code' in error
-      && (error as { code?: unknown }).code === code,
-  );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 // Ensures the auth config directory exists.
 export async function init(): Promise<void> {
   await fs.mkdir(getConfigDir(), { recursive: true });
@@ -62,7 +53,7 @@ async function readFromDisk(filePath = authPath()): Promise<AuthData> {
     return {};
   } catch (error) {
     if (hasNodeErrorCode(error, 'ENOENT')) return {};
-    console.warn('auth: invalid auth.json, treating as empty:', errorMessage(error));
+    logger.warn('auth: invalid auth.json, treating as empty:', errorMessage(error));
     return {};
   }
 }

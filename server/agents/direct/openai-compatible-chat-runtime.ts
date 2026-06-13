@@ -9,6 +9,9 @@ import {
   type DirectUserTurn,
 } from "./direct-chat-runtime-base.js";
 import type { DirectConversationMessage } from "./session-store.js";
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:direct:openai-compatible-chat-runtime');
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -264,7 +267,7 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
         return models;
       }
     } catch (error) {
-      console.warn(`${this.config.runtimeId}: model fetch failed:`, error instanceof Error ? error.message : error);
+      logger.warn(`${this.config.runtimeId}: model fetch failed:`, error instanceof Error ? error.message : error);
     }
 
     return this.config.fallbackModels;

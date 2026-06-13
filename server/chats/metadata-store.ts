@@ -5,6 +5,10 @@ import { promises as fs } from 'fs';
 import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
+import { createLogger } from '../lib/log.js';
+import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+
+const logger = createLogger('chats:metadata-store');
 
 const DEFAULT_PREVIEW_TIMEOUT_MS = 5_000;
 const DEFAULT_SAVE_DELAY_MS = 100;
@@ -40,14 +44,6 @@ interface MetadataAgentSource {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export class MetadataIndex {
@@ -155,7 +151,7 @@ export class MetadataIndex {
       if (result.status === 'fulfilled') {
         this.#metadataByChatId.set(String(chatId), result.value);
       } else {
-        console.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.reason));
+        logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.reason));
       }
     }
   }
@@ -214,8 +210,8 @@ export class MetadataIndex {
         if (normalized) result.set(chatId, normalized);
       }
     } catch (error) {
-      if (!isErrnoException(error) || error.code !== 'ENOENT') {
-        console.warn('metadata: failed to load chat metadata:', errorMessage(error));
+      if (!hasNodeErrorCode(error, 'ENOENT')) {
+        logger.warn('metadata: failed to load chat metadata:', errorMessage(error));
       }
     }
     return result;

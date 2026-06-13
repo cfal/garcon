@@ -10,10 +10,31 @@ import { CommandLedger } from '../command-ledger.ts';
 let workspaceDir;
 
 function makeService() {
+  const sessions = new Map([
+    ['1', {
+      id: '1',
+      agentId: 'claude',
+      agentSessionId: 'agent-1',
+      nativePath: '/tmp/agent-1.jsonl',
+      projectPath: '/repo',
+      model: 'opus',
+      tags: [],
+    }],
+  ]);
   const chats = {
-    getChat: mock((chatId) => (chatId === '1' ? { id: '1', agentId: 'claude' } : null)),
-    addChat: mock(() => true),
-    removeChat: mock(() => true),
+    getChat: mock((chatId) => sessions.get(chatId) ?? null),
+    addChat: mock((entry) => {
+      if (sessions.has(entry.id)) return false;
+      sessions.set(entry.id, entry);
+      return true;
+    }),
+    updateChat: mock((chatId, patch) => {
+      const current = sessions.get(chatId);
+      if (!current) return null;
+      sessions.set(chatId, { ...current, ...patch });
+      return sessions.get(chatId);
+    }),
+    removeChat: mock((chatId) => sessions.delete(chatId)),
   };
   const queue = {
     submit: mock(() => Promise.resolve(undefined)),
@@ -21,7 +42,7 @@ function makeService() {
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
   };
   const settings = {
-    getUiSettings: mock(() => Promise.resolve(null)),
+    getUiSettings: mock(() => null),
     getChatName: mock(() => null),
     setSessionName: mock(() => Promise.resolve(undefined)),
     setLastChatDefaults: mock(() => Promise.resolve(undefined)),
@@ -30,6 +51,7 @@ function makeService() {
   };
   const metadata = {
     addNewChatMetadata: mock(() => undefined),
+    getChatMetadata: mock(() => null),
   };
   const agents = {
     hasAgent: mock(() => true),
@@ -37,6 +59,9 @@ function makeService() {
     modelSupportsImages: mock(() => Promise.resolve(true)),
     startSession: mock(() => Promise.resolve(undefined)),
     resolvePermission: mock(() => undefined),
+    supportsFork: mock(() => true),
+    isAgentSessionRunning: mock(() => false),
+    forkAgentSession: mock(() => Promise.resolve(null)),
     getAgentAuthStatusMap: mock(() => ({})),
     getAgentReadinessMap: mock(() => ({})),
     getAgentCatalogEntries: mock(() => []),
@@ -46,6 +71,13 @@ function makeService() {
     register: mock(() => Promise.resolve(undefined)),
     clearChat: mock(() => undefined),
   };
+  const forkChatFileCopy = mock(() => Promise.resolve({
+    sourceChatId: '1',
+    chatId: '2',
+    agentId: 'claude',
+    agentSessionId: 'agent-2',
+    nativePath: '/tmp/agent-2.jsonl',
+  }));
   const service = new ChatCommandService({
     chats,
     queue,
@@ -54,8 +86,9 @@ function makeService() {
     metadata,
     agents,
     pendingInputs,
+    forkChatFileCopy,
   });
-  return { service, chats, queue };
+  return { service, chats, queue, agents, forkChatFileCopy };
 }
 
 describe('ChatCommandService', () => {
@@ -121,6 +154,45 @@ describe('ChatCommandService', () => {
     expect(result.turnId).toBeTruthy();
     expect(queue.submit).toHaveBeenCalledWith('1', 'hello', expect.objectContaining({
       model: 'opus',
+      clientRequestId: result.clientRequestId,
+      turnId: result.turnId,
+    }));
+  });
+
+  it('applies shared fork validation before copying', async () => {
+    const { service, agents, forkChatFileCopy } = makeService();
+    agents.isAgentSessionRunning.mockReturnValue(true);
+
+    await expect(service.forkChat({
+      sourceChatId: '1',
+      chatId: '2',
+    })).rejects.toMatchObject({
+      code: 'SESSION_BUSY',
+      status: 409,
+    });
+
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
+  });
+
+  it('submits WebSocket fork-runs through the shared fork path', async () => {
+    const { service, queue, forkChatFileCopy } = makeService();
+    const onForked = mock(() => undefined);
+
+    const result = await service.submitForkRun({
+      transport: 'websocket',
+      sourceChatId: '1',
+      chatId: '2',
+      command: 'continue',
+      onForked,
+    });
+
+    expect(result.commandType).toBe('fork-run');
+    expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
+    expect(onForked).toHaveBeenCalledWith(expect.objectContaining({
+      sourceChatId: '1',
+      chatId: '2',
+    }));
+    expect(queue.submit).toHaveBeenCalledWith('2', 'continue', expect.objectContaining({
       clientRequestId: result.clientRequestId,
       turnId: result.turnId,
     }));

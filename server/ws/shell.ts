@@ -3,6 +3,10 @@ import { spawn as ptySpawn } from 'bun-pty';
 import type { IPty } from 'bun-pty';
 import { sendWebSocketJson } from './utils.js';
 import { getUserShell } from '../config.js';
+import { createLogger } from '../lib/log.js';
+import { errorMessage } from '../lib/errors.js';
+
+const logger = createLogger('ws:shell');
 import {
   parseShellClientMessage,
   shellError,
@@ -13,13 +17,14 @@ import {
   type ShellResizeRequest,
 } from '../../common/shell-ws.ts';
 import {
-  assertWithinProjectBase,
+  assertRealWithinProjectBase,
   isProjectBoundaryError,
   PROJECT_BOUNDARY_ERROR_CODE,
   PROJECT_BOUNDARY_ERROR_MESSAGE,
 } from '../lib/path-boundary.ts';
 
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
+const MAX_REPLAY_BUFFER_BYTES = 1024 * 1024;
 
 export interface ShellSocketState {
   shellProcess: IPty | null;
@@ -37,8 +42,10 @@ interface PtySession {
   pty: IPty;
   ws: ShellWebSocket | null;
   buffer: string[];
+  bufferBytes: number;
   timeoutId: ReturnType<typeof setTimeout> | null;
   projectPath: string;
+  sessionPolicy: 'reuse' | 'fresh';
 }
 
 interface ShellHandler {
@@ -50,13 +57,10 @@ interface ShellHandler {
 interface StartSessionOptions {
   ptySessionKey: string;
   projectPath: string;
+  sessionPolicy: 'reuse' | 'fresh';
   initialCommand?: string;
   cols: number;
   rows: number;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function buildPtyEnv(): Record<string, string> {
@@ -119,13 +123,13 @@ export class ShellManager {
       try {
         session.pty.kill();
       } catch (error) {
-        console.warn('shell: failed to kill PTY session:', ptySessionKey, errorMessage(error));
+        logger.warn('shell: failed to kill PTY session:', ptySessionKey, errorMessage(error));
       }
     }
   }
 
   #handleOpen(ws: ShellWebSocket): void {
-    console.log('shell: client connected');
+    logger.info('shell: client connected');
     this.#getShellState(ws);
   }
 
@@ -137,7 +141,7 @@ export class ShellManager {
     }
 
     try {
-      console.log('shell: message received:', message.type);
+      logger.info('shell: message received:', message.type);
       if (message.type === 'init') {
         await this.#handleInit(ws, message);
       } else if (message.type === 'input') {
@@ -147,7 +151,7 @@ export class ShellManager {
       }
     } catch (error) {
       const message = errorMessage(error);
-      console.error('shell: websocket error:', message);
+      logger.error('shell: websocket error:', message);
       sendWebSocketJson(ws, shellOutput(`\r\n\x1b[31mError: ${message}\x1b[0m\r\n`));
     }
   }
@@ -156,7 +160,7 @@ export class ShellManager {
     const shellState = this.#getShellState(ws);
     let projectPath: string;
     try {
-      projectPath = assertWithinProjectBase(message.projectPath || process.cwd());
+      projectPath = await assertRealWithinProjectBase(message.projectPath || process.cwd());
     } catch (error) {
       if (!isProjectBoundaryError(error)) throw error;
       sendWebSocketJson(ws, shellOutput(`\r\n\x1b[31mError: ${PROJECT_BOUNDARY_ERROR_MESSAGE}\x1b[0m\r\n`));
@@ -191,6 +195,7 @@ export class ShellManager {
     this.#startSession(ws, shellState, {
       ptySessionKey,
       projectPath,
+      sessionPolicy: message.sessionPolicy,
       initialCommand,
       cols: message.cols,
       rows: message.rows,
@@ -203,7 +208,7 @@ export class ShellManager {
     ptySessionKey: string,
     existingSession: PtySession,
   ): void {
-    console.log('shell: reconnecting to existing PTY session:', ptySessionKey);
+    logger.info('shell: reconnecting to existing PTY session:', ptySessionKey);
     shellState.shellProcess = existingSession.pty;
 
     if (existingSession.timeoutId) {
@@ -213,11 +218,9 @@ export class ShellManager {
 
     sendWebSocketJson(ws, shellOutput('\x1b[36m[Reconnected to existing session]\x1b[0m\r\n'));
 
-    if (existingSession.buffer && existingSession.buffer.length > 0) {
-      console.log(`shell: sending ${existingSession.buffer.length} buffered messages`);
-      existingSession.buffer.forEach((bufferedData) => {
-        sendWebSocketJson(ws, shellOutput(bufferedData));
-      });
+    if (existingSession.buffer.length > 0) {
+      logger.info(`shell: replaying ${existingSession.bufferBytes} buffered bytes`);
+      sendWebSocketJson(ws, shellOutput(existingSession.buffer.join('')));
     }
 
     existingSession.ws = ws;
@@ -226,11 +229,11 @@ export class ShellManager {
   #startSession(
     ws: ShellWebSocket,
     shellState: ShellSocketState,
-    { ptySessionKey, projectPath, initialCommand, cols, rows }: StartSessionOptions,
+    { ptySessionKey, projectPath, sessionPolicy, initialCommand, cols, rows }: StartSessionOptions,
   ): void {
-    console.log('shell: starting in:', projectPath);
+    logger.info('shell: starting in:', projectPath);
     if (initialCommand) {
-      console.log('shell: initial command:', initialCommand);
+      logger.debug('shell: initial command provided');
     }
 
     sendWebSocketJson(ws, shellOutput(`\x1b[36mStarting terminal in: ${projectPath}\x1b[0m\r\n`));
@@ -265,19 +268,21 @@ export class ShellManager {
       });
       shellState.shellProcess = shellProcess;
 
-      console.log('shell: process started, PID:', shellProcess.pid);
+      logger.info('shell: process started, PID:', shellProcess.pid);
 
       this.#sessions.set(ptySessionKey, {
         pty: shellProcess,
         ws,
         buffer: [],
+        bufferBytes: 0,
         timeoutId: null,
         projectPath,
+        sessionPolicy,
       });
 
       this.#wirePtySession(shellState, ptySessionKey, shellProcess);
     } catch (spawnError) {
-      console.error('shell: error spawning process:', spawnError);
+      logger.error('shell: error spawning process:', spawnError);
       sendWebSocketJson(ws, shellOutput(`\r\n\x1b[31mError: ${errorMessage(spawnError)}\x1b[0m\r\n`));
     }
   }
@@ -287,12 +292,7 @@ export class ShellManager {
       const session = this.#sessions.get(ptySessionKey);
       if (!session) return;
 
-      if (session.buffer.length < 5000) {
-        session.buffer.push(chunk);
-      } else {
-        session.buffer.shift();
-        session.buffer.push(chunk);
-      }
+      this.#appendReplayBuffer(session, chunk);
 
       if (session.ws) {
         sendWebSocketJson(session.ws, shellOutput(chunk));
@@ -300,7 +300,7 @@ export class ShellManager {
     });
 
     shellProcess.onExit((exitCode) => {
-      console.log('shell: process exited with code:', exitCode.exitCode, 'signal:', exitCode.signal);
+      logger.info('shell: process exited with code:', exitCode.exitCode, 'signal:', exitCode.signal);
       const signal = typeof exitCode.signal === 'string' ? exitCode.signal : undefined;
       const session = this.#sessions.get(ptySessionKey);
       if (session && session.ws) {
@@ -318,41 +318,70 @@ export class ShellManager {
     });
   }
 
+  #appendReplayBuffer(session: PtySession, chunk: string): void {
+    let nextChunk = chunk;
+    let chunkBytes = Buffer.byteLength(nextChunk, 'utf8');
+    if (chunkBytes > MAX_REPLAY_BUFFER_BYTES) {
+      const bytes = Buffer.from(nextChunk, 'utf8');
+      nextChunk = bytes.subarray(bytes.length - MAX_REPLAY_BUFFER_BYTES).toString('utf8');
+      chunkBytes = Buffer.byteLength(nextChunk, 'utf8');
+    }
+
+    session.buffer.push(nextChunk);
+    session.bufferBytes += chunkBytes;
+    while (session.bufferBytes > MAX_REPLAY_BUFFER_BYTES && session.buffer.length > 0) {
+      const removed = session.buffer.shift();
+      if (removed) session.bufferBytes -= Buffer.byteLength(removed, 'utf8');
+    }
+  }
+
   #handleInput(ws: ShellWebSocket, message: ShellInputRequest): void {
     const shellState = this.#getShellState(ws);
-    if (shellState.shellProcess && shellState.shellProcess.write) {
+    const session = shellState.ptySessionKey ? this.#sessions.get(shellState.ptySessionKey) : null;
+    if (session?.ws === ws && session.pty.write) {
       try {
-        shellState.shellProcess.write(message.data);
+        session.pty.write(message.data);
       } catch (error) {
-        console.error('Error writing to shell:', error);
+        logger.error('Error writing to shell:', error);
       }
     } else {
-      console.warn('No active shell process to send input to');
+      logger.warn('No active shell process to send input to');
     }
   }
 
   #handleResize(ws: ShellWebSocket, message: ShellResizeRequest): void {
     const shellState = this.#getShellState(ws);
-    if (shellState.shellProcess && shellState.shellProcess.resize) {
-      console.log('Terminal resize requested:', message.cols, 'x', message.rows);
-      shellState.shellProcess.resize(message.cols, message.rows);
+    const session = shellState.ptySessionKey ? this.#sessions.get(shellState.ptySessionKey) : null;
+    if (session?.ws === ws && session.pty.resize) {
+      logger.info('Terminal resize requested:', message.cols, 'x', message.rows);
+      session.pty.resize(message.cols, message.rows);
     }
   }
 
   #handleClose(ws: ShellWebSocket, code?: number, reason?: string): void {
-    console.log('shell: client disconnected', code ?? '', reason ? `(${reason})` : '');
+    logger.info('shell: client disconnected', code ?? '', reason ? `(${reason})` : '');
     const shellState = this.#getShellState(ws);
     const { ptySessionKey } = shellState;
     if (!ptySessionKey) return;
 
     const session = this.#sessions.get(ptySessionKey);
     if (session) {
-      console.log('shell: PTY session kept alive, will timeout in 30 minutes:', ptySessionKey);
+      if (session.ws !== ws) return;
+      if (session.sessionPolicy === 'fresh') {
+        logger.info('shell: fresh PTY session closed, killing process:', ptySessionKey);
+        this.#killSession(ptySessionKey, session);
+        this.#sessions.delete(ptySessionKey);
+        shellState.shellProcess = null;
+        shellState.ptySessionKey = null;
+        return;
+      }
+
+      logger.info('shell: PTY session kept alive, will timeout in 30 minutes:', ptySessionKey);
       session.ws = null;
       if (session.timeoutId) clearTimeout(session.timeoutId);
 
       session.timeoutId = setTimeout(() => {
-        console.log('shell: PTY session timeout, killing process:', ptySessionKey);
+        logger.info('shell: PTY session timeout, killing process:', ptySessionKey);
         this.#killSession(ptySessionKey, session);
         this.#sessions.delete(ptySessionKey);
       }, PTY_SESSION_TIMEOUT);

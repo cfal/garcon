@@ -33,9 +33,9 @@ const settings = {
   getChatName: mock(() => null),
   setSessionName: mock(() => Promise.resolve(undefined)),
   removeSessionName: mock(() => Promise.resolve(undefined)),
-  getPinnedChatIds: mock(() => Promise.resolve([])),
-  getNormalChatIds: mock(() => Promise.resolve([])),
-  getArchivedChatIds: mock(() => Promise.resolve([])),
+  getPinnedChatIds: mock(() => []),
+  getNormalChatIds: mock(() => []),
+  getArchivedChatIds: mock(() => []),
   removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
   insertNormalChatIdTop: mock(() => Promise.resolve(undefined)),
   ensureInNormal: mock(() => Promise.resolve(undefined)),
@@ -44,7 +44,10 @@ const settings = {
   reorderWindow: mock(() => Promise.resolve({ success: true })),
   reorderRelative: mock(() => Promise.resolve({ success: true })),
 };
-const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
+const queue = {
+  abort: mock(() => Promise.resolve(false)),
+  deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
+};
 const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
@@ -86,6 +89,7 @@ const chatsRoutes = createChatRoutes({
 
 const allMocks = [
   registry.listAllChats, metadata.listAllChatMetadata, registry.getChat, registry.removeChat,
+  queue.abort, queue.deleteChatQueueFile,
   settings.getChatName, settings.ensureInNormal, settings.removeSessionName, settings.removeFromAllOrderLists, settings.getNormalChatIds,
   pathCache.isProjectPathAvailable,
 ];
@@ -106,7 +110,7 @@ describe('GET /api/chats title resolution', () => {
     metaMap.set('100', { firstMessage: 'fallback message', createdAt: null, lastActivity: null, lastMessage: '' });
     metadata.listAllChatMetadata.mockImplementation(() => metaMap);
     settings.getChatName.mockImplementation(() => 'Custom Title');
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getNormalChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();
@@ -124,7 +128,7 @@ describe('GET /api/chats title resolution', () => {
     metaMap.set('200', { firstMessage: 'Hello world', createdAt: null, lastActivity: null, lastMessage: '' });
     metadata.listAllChatMetadata.mockImplementation(() => metaMap);
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['200']));
+    settings.getNormalChatIds.mockImplementation(() => ['200']);
 
     const response = await handler();
     const body = await response.json();
@@ -139,7 +143,7 @@ describe('GET /api/chats title resolution', () => {
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['300']));
+    settings.getNormalChatIds.mockImplementation(() => ['300']);
 
     const response = await handler();
     const body = await response.json();
@@ -153,9 +157,9 @@ describe('GET /api/chats title resolution', () => {
       '400': { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
-    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve([]));
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve([]));
-    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve([]));
+    settings.getPinnedChatIds.mockImplementation(() => []);
+    settings.getNormalChatIds.mockImplementation(() => []);
+    settings.getArchivedChatIds.mockImplementation(() => []);
 
     const response = await handler();
     const body = await response.json();
@@ -176,9 +180,9 @@ describe('GET /api/chats title resolution', () => {
       '600': { agentId: 'claude', projectPath: '/fast', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
-    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve([]));
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['500', '600']));
-    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve([]));
+    settings.getPinnedChatIds.mockImplementation(() => []);
+    settings.getNormalChatIds.mockImplementation(() => ['500', '600']);
+    settings.getArchivedChatIds.mockImplementation(() => []);
     pathCache.isProjectPathAvailable.mockImplementation((projectPath) => {
       if (projectPath === '/slow') {
         resolveFirstCall();
@@ -207,6 +211,8 @@ describe('DELETE /api/chats session name cleanup', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
+    queue.abort.mockImplementation(() => Promise.resolve(false));
+    registry.removeChat.mockImplementation(() => undefined);
   });
 
   it('removes session name when deleting a chat', async () => {
@@ -221,7 +227,31 @@ describe('DELETE /api/chats session name cleanup', () => {
 
     expect(body.success).toBe(true);
     expect(settings.removeSessionName).toHaveBeenCalledWith('500');
+    expect(queue.abort).toHaveBeenCalledWith('500');
     expect(registry.removeChat).toHaveBeenCalledWith('500');
+  });
+
+  it('aborts the running session before removing the chat from the registry', async () => {
+    const calls = [];
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
+    queue.abort.mockImplementation(async () => {
+      calls.push('abort');
+      return true;
+    });
+    registry.removeChat.mockImplementation(() => {
+      calls.push('remove');
+      return true;
+    });
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
+
+    const url = new URL('http://localhost/api/chats');
+    const request = new Request(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
+
+    const response = await handler(request, url);
+    const body = await response.json();
+
+    expect(body.success).toBe(true);
+    expect(calls).toEqual(['abort', 'remove']);
   });
 
   it('keeps query chatId compatibility when deleting a chat', async () => {
