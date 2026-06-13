@@ -28,7 +28,7 @@
 	role="option"
 	aria-selected={isHighlighted}
 	class={cn(
-		'min-w-0 w-full border-b border-border/40 border-l-2 border-l-transparent bg-transparent px-3 py-2.5 text-left font-normal transition-colors duration-150 last:border-b-0',
+		'min-w-0 w-full border-b border-border border-l-2 border-l-transparent bg-transparent px-3 py-2.5 text-left font-normal transition-colors duration-150 last:border-b-0',
 		isHighlighted ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/40',
 		chat.isProcessing && 'border-l-[3px] border-l-status-processing',
 	)}

@@ -145,7 +145,7 @@
 <div
 	bind:this={rowEl}
 	class={cn(
-		'relative h-full overflow-hidden bg-sidebar-chat-item-bg transition-opacity',
+		'relative h-full overflow-hidden border-b border-border bg-sidebar-chat-item-bg transition-opacity',
 		dragEnabled && 'cursor-grab active:cursor-grabbing',
 		isMobile && 'select-none [-webkit-touch-callout:none] [-webkit-user-select:none]',
 		isDragging && 'opacity-45',
@@ -194,7 +194,7 @@
 		/>
 		{#snippet failed()}
 			<div
-				class="flex h-full items-center border-b border-border/30 px-3 text-sm text-muted-foreground"
+				class="flex h-full items-center px-3 text-sm text-muted-foreground"
 				data-sidebar-virtual-row-error={row.chat.id}
 			>
 				{row.chat.title || m.sidebar_chats_unnamed()}
