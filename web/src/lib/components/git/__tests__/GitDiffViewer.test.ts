@@ -32,6 +32,18 @@ function makeLargeInsertDiff(lineCount: number): GitFileReviewData {
 	};
 }
 
+function makeBinaryFile(): GitFileReviewData {
+	return {
+		path: 'assets/screenshot.png',
+		isBinary: true,
+		truncated: false,
+		contentBefore: '',
+		contentAfter: '',
+		diffOps: [],
+		hunks: [],
+	};
+}
+
 function renderViewer(diffMode: 'unified' | 'split') {
 	const onToggleLineSelection = vi.fn();
 	render(GitDiffViewer, {
@@ -65,6 +77,31 @@ describe('GitDiffViewer', () => {
 			makeLineSelectionKey('src/generated.ts', 'unstaged', 'after', 0),
 		);
 		expect(screen.queryByText('+line 140')).toBeNull();
+	});
+
+	it('renders binary files as a compact row with path and badge', () => {
+		render(GitDiffViewer, {
+			filePath: 'assets/screenshot.png',
+			reviewData: makeBinaryFile(),
+			activeTab: 'unstaged',
+			diffMode: 'unified',
+			fontSize: 12,
+			contextLines: 5,
+			selectedLineKeys: new Set<string>(),
+			isLoading: false,
+			onToggleLineSelection: vi.fn(),
+			onSelectLineRange: vi.fn(),
+			onStageHunk: vi.fn(),
+			onUnstageHunk: vi.fn(),
+			onStageLine: vi.fn(),
+			onUnstageLine: vi.fn(),
+			onAddComment: vi.fn(),
+		});
+
+		expect(screen.getByText('assets/screenshot.png')).not.toBeNull();
+		expect(screen.getByText('binary')).not.toBeNull();
+		// No tall centered placeholder: the verbose unavailable message is gone.
+		expect(screen.queryByText('Binary file -- cannot display diff')).toBeNull();
 	});
 
 	it('virtualizes split rows while preserving line selection', async () => {
