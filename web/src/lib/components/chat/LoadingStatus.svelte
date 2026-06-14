@@ -16,6 +16,10 @@
 
 	let { isLoading, status, agentId, onAbort, spinnerSelectionKey = null }: Props = $props();
 
+	// Frame cadence for the character spinner. Lower feels snappier; the scale
+	// pulse transition is tied to the same value so the two stay in step.
+	const FRAME_INTERVAL_MS = 120;
+
 	const SPINNER_SETS = [
 		['\u25D0', '\u25D3', '\u25D1', '\u25D2'],
 		[
@@ -53,7 +57,7 @@
 		if (!isLoading) return;
 		animTimer = setInterval(() => {
 			animationPhase = (animationPhase + 1) % activeSpinners.length;
-		}, 500);
+		}, FRAME_INTERVAL_MS);
 		return () => {
 			if (animTimer) clearInterval(animTimer);
 		};
@@ -98,11 +102,12 @@
 		<div class={statusPanelClass} role="status" aria-live="polite">
 			<div class="flex min-w-0 items-center gap-1.5">
 				<span
-					class="flex-shrink-0 text-sm text-status-processing transition-all duration-500 {animationPhase %
+					class="flex-shrink-0 text-sm text-status-processing transition-all {animationPhase %
 						2 ===
 					0
 						? 'scale-110'
 						: ''}"
+					style="transition-duration: {FRAME_INTERVAL_MS}ms"
 				>
 					{activeSpinners[animationPhase]}
 				</span>
