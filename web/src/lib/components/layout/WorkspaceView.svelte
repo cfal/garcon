@@ -53,7 +53,9 @@
 	const isMobileLayout = $derived(!!onMenuClick);
 	const isChatTab = $derived(activeTab === 'chat');
 	const showTopHeader = $derived(!isChatTab);
-	const showInlineDesktopTabs = $derived(showTopHeader);
+	// The inline tab rail is desktop-only; on mobile the BottomTabBar is the sole
+	// navigation, so showing it here would duplicate that bar.
+	const showInlineDesktopTabs = $derived(showTopHeader && !isMobileLayout);
 	const showFloatingDesktopTabs = $derived(isChatTab && !isMobileLayout);
 	const hideFullscreenButtonOnGitTab = $derived(
 		activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel,
@@ -258,13 +260,17 @@
 								<Menu class="w-5 h-5" />
 							</button>
 						{/if}
+						<!-- The top header only renders on non-chat tabs, where the project
+						     context is the high-signal label and the chat title is secondary. -->
 						<div class="min-w-0 flex-1">
 							<h2 class="text-[15px] font-semibold text-foreground truncate">
-								{selectedChat.title || m.main_new_chat()}
-							</h2>
-							<div class="text-xs text-muted-foreground truncate">
 								{projectDisplayName(selectedChat.projectPath)}
-							</div>
+							</h2>
+							{#if selectedChat.title}
+								<div class="text-xs text-muted-foreground/80 truncate">
+									{selectedChat.title}
+								</div>
+							{/if}
 						</div>
 					</div>
 

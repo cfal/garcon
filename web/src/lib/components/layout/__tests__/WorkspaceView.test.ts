@@ -52,8 +52,34 @@ describe('WorkspaceView header visibility', () => {
 			isMobile: false,
 		});
 
-		expect(screen.getByRole('heading', { name: 'Header Test Chat' })).toBeTruthy();
+		// The heading leads with the project context, not the raw chat title.
+		expect(screen.getByRole('heading', { name: 'header-test' })).toBeTruthy();
 		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeNull();
+	});
+
+	it('demotes the chat title to a secondary line on non-chat tabs', () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'files',
+			isMobile: false,
+		});
+
+		// The project name is the heading; the chat title remains as low-emphasis context.
+		expect(screen.getByRole('heading', { name: 'header-test' })).toBeTruthy();
+		expect(screen.getByText('Header Test Chat')).toBeTruthy();
+		expect(screen.queryByRole('heading', { name: 'Header Test Chat' })).toBeNull();
+	});
+
+	it('does not render the inline tab rail on mobile non-chat tabs', () => {
+		const { container } = render(WorkspaceViewTestHost, {
+			activeTab: 'files',
+			isMobile: true,
+		});
+
+		// The top header keeps its contextual project label and menu button on mobile,
+		// but the duplicated tab rail belongs solely to the BottomTabBar.
+		expect(screen.getByRole('heading', { name: 'header-test' })).toBeTruthy();
+		expect(screen.getByLabelText('Open menu')).toBeTruthy();
+		expect(container.querySelector('.bg-chat-tabs-rail')).toBeNull();
 	});
 
 	it('hides the top header on mobile chat tab', () => {
