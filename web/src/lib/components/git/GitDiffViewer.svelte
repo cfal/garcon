@@ -219,8 +219,30 @@
 			<p class="text-sm">{m.git_diff_select_file()}</p>
 		</div>
 	{:else if reviewData.isBinary}
-		<div class="flex-1 flex items-center justify-center text-muted-foreground">
-			<p class="text-sm">{m.git_diff_binary_unavailable()}</p>
+		<div class="px-3 py-1.5 flex items-center gap-2 text-muted-foreground">
+			<span
+				class="px-1.5 py-0.5 rounded bg-muted text-muted-foreground/80 text-[10px] uppercase tracking-wide shrink-0"
+			>
+				{m.git_diff_binary_badge()}
+			</span>
+			<span class="font-mono text-foreground truncate" style:font-size={`${fontSize}px`}
+				>{reviewData.path}</span
+			>
+			<button
+				type="button"
+				onclick={handleCopyPath}
+				class="p-0.5 rounded transition-colors shrink-0 {pathCopied
+					? 'text-status-success-foreground'
+					: 'text-muted-foreground/60 hover:text-foreground hover:bg-accent'}"
+				title={pathCopied ? m.git_file_path_copied_short() : m.git_file_path_copy()}
+				aria-label={pathCopied ? m.git_file_path_copied() : m.git_file_path_copy()}
+			>
+				{#if pathCopied}
+					<Check class="w-3 h-3" />
+				{:else}
+					<Copy class="w-3 h-3" />
+				{/if}
+			</button>
 		</div>
 	{:else if reviewData.truncated}
 		<div class="flex-1 flex items-center justify-center text-muted-foreground">

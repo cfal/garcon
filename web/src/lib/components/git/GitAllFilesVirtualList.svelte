@@ -236,7 +236,11 @@
 					data-file-path={item.filePath}
 					style="position:absolute; top:{offsets[idx]}px; left:0; right:0;"
 				>
-					<div class="border-b border-border min-h-48">
+					<!-- Binary files render as a compact row, so they skip the min-height reserved for text diffs. -->
+					<div
+						class="border-b border-border"
+						class:min-h-48={!item.reviewData?.isBinary}
+					>
 						<GitDiffViewer
 							filePath={item.filePath}
 							reviewData={item.reviewData}
