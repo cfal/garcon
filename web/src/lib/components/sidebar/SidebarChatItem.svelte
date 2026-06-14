@@ -287,7 +287,7 @@
 				<button
 					type="button"
 					data-sidebar-touch-drag-ignore
-					class="shrink-0 flex items-center justify-center px-1 text-muted-foreground hover:text-foreground active:bg-accent transition-colors"
+					class="ml-1 mr-2 flex shrink-0 items-center justify-center py-0 pl-1 pr-3 text-muted-foreground transition-colors hover:text-foreground active:bg-accent"
 					onclick={handleMobileMenuClick}
 					aria-label={m.sidebar_chat_more_actions()}
 				>
