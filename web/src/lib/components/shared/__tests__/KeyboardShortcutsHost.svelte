@@ -1,6 +1,6 @@
 <script lang="ts">
 	import KeyboardShortcuts from '../KeyboardShortcuts.svelte';
-	import { setAppShell } from '$lib/context';
+	import { setAppShell, setNavigation } from '$lib/context';
 
 	interface KeyboardShortcutsHostProps {
 		appShell: {
@@ -10,10 +10,14 @@
 			requestDeleteSelectedChat: () => void;
 			openSettings: () => void;
 		};
+		navigation: {
+			requestNavigateChatAbove: () => void;
+			requestNavigateChatBelow: () => void;
+		};
 		onToggleCommandMenu?: () => void;
 	}
 
-	let { appShell, onToggleCommandMenu }: KeyboardShortcutsHostProps = $props();
+	let { appShell, navigation, onToggleCommandMenu }: KeyboardShortcutsHostProps = $props();
 
 	setAppShell({
 		get openSidebarSearch() {
@@ -30,6 +34,15 @@
 		},
 		get openSettings() {
 			return appShell.openSettings;
+		},
+	} as never);
+
+	setNavigation({
+		get requestNavigateChatAbove() {
+			return navigation.requestNavigateChatAbove;
+		},
+		get requestNavigateChatBelow() {
+			return navigation.requestNavigateChatBelow;
 		},
 	} as never);
 </script>

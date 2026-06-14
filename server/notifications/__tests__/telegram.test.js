@@ -51,6 +51,7 @@ describe('TelegramNotifier', () => {
     const [url, opts] = globalThis.fetch.mock.calls[0];
     expect(url).toBe('https://api.telegram.org/botbot-token/sendMessage');
     expect(JSON.parse(opts.body)).toEqual({ chat_id: '12345', text: 'test message' });
+    expect(opts.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('returns false on HTTP error', async () => {
@@ -84,8 +85,9 @@ describe('TelegramNotifier', () => {
     const identity = await notifier.getBotIdentity();
 
     expect(identity).toEqual({ id: 123, username: 'garcon_bot', firstName: 'Garcon' });
-    const [url] = globalThis.fetch.mock.calls[0];
+    const [url, opts] = globalThis.fetch.mock.calls[0];
     expect(url).toBe('https://api.telegram.org/botbot-token/getMe');
+    expect(opts.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('resolves recipient link by matching /start code in a private chat without requiring a username', async () => {
@@ -132,5 +134,7 @@ describe('TelegramNotifier', () => {
       displayName: 'Alice',
       nextOffset: 13,
     });
+    const [, opts] = globalThis.fetch.mock.calls[0];
+    expect(opts.signal).toBeUndefined();
   });
 });

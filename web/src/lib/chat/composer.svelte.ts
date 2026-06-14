@@ -1,24 +1,27 @@
 // Composer state: input text, image attachments, draft persistence,
 // and message submission. Manages the input area lifecycle for a single chat.
 
-const DRAFT_PREFIX = 'chat_draft_';
+import {
+	chatDraftStorageKey,
+	getLocalStorageItem,
+	removeLocalStorageItem,
+	setLocalStorageItem,
+	type ChatDraftStorageKey,
+} from '$lib/utils/local-persistence';
+
 const DEFAULT_DRAFT_SAVE_DELAY_MS = 250;
 
-function draftKey(chatId: string): string {
-	return `${DRAFT_PREFIX}${chatId}`;
+function draftKey(chatId: string): ChatDraftStorageKey {
+	return chatDraftStorageKey(chatId);
 }
 
 function writeDraft(chatId: string, text: string): void {
 	if (!chatId) return;
 	const key = draftKey(chatId);
-	try {
-		if (text.trim()) {
-			localStorage.setItem(key, text);
-		} else {
-			localStorage.removeItem(key);
-		}
-	} catch {
-		// Storage can be full or unavailable.
+	if (text.trim()) {
+		setLocalStorageItem(key, text);
+	} else {
+		removeLocalStorageItem(key);
 	}
 }
 
@@ -73,13 +76,9 @@ export class ComposerState {
 		this.clearImages();
 		if (!chatId) return;
 		const key = draftKey(chatId);
-		try {
-			const saved = localStorage.getItem(key);
-			if (saved) {
-				this.inputText = saved;
-			}
-		} catch {
-			// Ignore read errors
+		const saved = getLocalStorageItem(key);
+		if (saved) {
+			this.inputText = saved;
 		}
 	}
 
@@ -87,11 +86,7 @@ export class ComposerState {
 	clearDraft(chatId: string): void {
 		if (!chatId) return;
 		const key = draftKey(chatId);
-		try {
-			localStorage.removeItem(key);
-		} catch {
-			// Ignore removal errors
-		}
+		removeLocalStorageItem(key);
 	}
 
 	/** Adds image files, filtering out duplicates by name. */
@@ -118,7 +113,6 @@ export class ComposerState {
 		this.images = [];
 		this.clearDraft(chatId);
 	}
-
 }
 
 export function createComposerState(): ComposerState {

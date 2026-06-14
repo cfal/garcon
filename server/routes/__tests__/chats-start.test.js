@@ -5,8 +5,13 @@ import os from 'os';
 
 const testBasePath = path.join(os.tmpdir(), 'garcon-chats-start-test');
 
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
+
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => Promise.resolve({})),
+  MalformedJsonError,
 }));
 
 mock.module('../../chats/title-generator.js', () => ({
@@ -19,6 +24,7 @@ mock.module('../../config.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
+import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 const registry = {
   getChat: mock(() => undefined),
@@ -36,9 +42,9 @@ const settings = {
   removeSessionName: mock(() => Promise.resolve(undefined)),
   togglePin: mock(() => Promise.resolve({ isPinned: true })),
   toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
-  getPinnedChatIds: mock(() => Promise.resolve([])),
-  getNormalChatIds: mock(() => Promise.resolve([])),
-  getArchivedChatIds: mock(() => Promise.resolve([])),
+  getPinnedChatIds: mock(() => []),
+  getNormalChatIds: mock(() => []),
+  getArchivedChatIds: mock(() => []),
   reorderWindow: mock(() => Promise.resolve({ success: true })),
   reorderRelative: mock(() => Promise.resolve({ success: true })),
 };
@@ -65,7 +71,28 @@ const agents = {
   modelSupportsImages: mock(() => Promise.resolve(false)),
 };
 
-const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+const commandLedger = createRouteCommandLedger('chats-start');
+const pendingInputs = createRoutePendingInputs();
+
+const routes = createChatRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  pendingInputs,
+  commandService: createRouteCommandService({
+    registry,
+    queue,
+    settings,
+    metadata,
+    agents,
+    commandLedger,
+    pendingInputs,
+  }),
+});
 const handler = routes['/api/v1/chats/start'].POST;
 
 describe('POST /api/v1/chats/start', () => {
@@ -155,7 +182,7 @@ describe('POST /api/v1/chats/start', () => {
     const body = await response.json();
 
     expect(response.status).toBe(500);
-    expect(body.error).toBe('boom');
+    expect(body.error).toBe('Internal server error');
     expect(settings.setLastChatDefaults).toHaveBeenCalledWith({
       agentId: 'claude',
       projectPath,

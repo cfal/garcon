@@ -9,6 +9,9 @@ import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, PI_MODELS } fr
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { Agent, AgentModelQuery } from './types.js';
 import type { AgentDirectory } from './directory.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('agents:catalog-service');
 
 const STATIC_AGENT_MODELS: Record<string, { defaultModel: string; models: AgentModelOption[] }> = {
   claude: { defaultModel: CLAUDE_MODELS.DEFAULT, models: CLAUDE_MODELS.OPTIONS },
@@ -37,7 +40,7 @@ async function nativeModelsForAgent(id: string, agent: Agent, query: AgentModelQ
       fetched = await getModels(query);
     } catch (error) {
       if (query.strict) throw error;
-      console.warn(`agents: failed to fetch ${id} models:`, error instanceof Error ? error.message : String(error));
+      logger.warn(`agents: failed to fetch ${id} models:`, error instanceof Error ? error.message : String(error));
     }
   }
   const fallback = STATIC_AGENT_MODELS[id]?.models ?? [];

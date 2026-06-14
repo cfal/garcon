@@ -38,68 +38,66 @@
 				category: 'Chat',
 				action: () => {
 					appShell.openNewChatDialog();
-				}
+				},
 			},
-				{
-					id: 'open-settings',
-					label: m.command_open_settings(),
-					description: m.command_open_settings_desc(),
-					category: 'Navigation',
-					action: () => appShell.openSettings()
-				},
-				{
-					id: 'toggle-colorblind',
-					label: localSettings.colorblindMode
-						? m.command_colorblind_disable()
-						: m.command_colorblind_enable(),
-					description: localSettings.colorblindMode
-						? m.command_colorblind_disable_desc()
-						: m.command_colorblind_enable_desc(),
-					category: 'Accessibility',
-					action: () => localSettings.toggle('colorblindMode')
-				},
-				{
-					id: 'tab-chat',
-					label: m.command_switch_to_chat(),
-					description: m.command_open_panel({ panel: 'Chat' }),
+			{
+				id: 'open-settings',
+				label: m.command_open_settings(),
+				description: m.command_open_settings_desc(),
+				category: 'Navigation',
+				action: () => appShell.openSettings(),
+			},
+			{
+				id: 'toggle-colorblind',
+				label: localSettings.colorblindMode
+					? m.command_colorblind_disable()
+					: m.command_colorblind_enable(),
+				description: localSettings.colorblindMode
+					? m.command_colorblind_disable_desc()
+					: m.command_colorblind_enable_desc(),
+				category: 'Accessibility',
+				action: () => localSettings.toggle('colorblindMode'),
+			},
+			{
+				id: 'tab-chat',
+				label: m.command_switch_to_chat(),
+				description: m.command_open_panel({ panel: 'Chat' }),
 				category: 'Tabs',
-				action: () => navigation.setActiveTab('chat')
+				action: () => navigation.setActiveTab('chat'),
 			},
 			{
 				id: 'tab-files',
 				label: m.command_switch_to_files(),
 				description: m.command_open_panel({ panel: 'Files' }),
 				category: 'Tabs',
-				action: () => navigation.setActiveTab('files')
+				action: () => navigation.setActiveTab('files'),
 			},
 			{
 				id: 'tab-shell',
 				label: m.command_switch_to_shell(),
 				description: m.command_open_panel({ panel: 'Shell' }),
 				category: 'Tabs',
-				action: () => navigation.setActiveTab('shell')
+				action: () => navigation.setActiveTab('shell'),
 			},
-				{
-					id: 'tab-git',
-					label: m.command_switch_to_git(),
-					description: m.command_open_panel({ panel: 'Git' }),
-					category: 'Tabs',
-					action: () => navigation.setActiveTab('git')
-				}
-			];
-		});
+			{
+				id: 'tab-git',
+				label: m.command_switch_to_git(),
+				description: m.command_open_panel({ panel: 'Git' }),
+				category: 'Tabs',
+				action: () => navigation.setActiveTab('git'),
+			},
+		];
+	});
 
-	let fuse = $derived(new Fuse(commands, {
-		keys: ['label', 'description', 'category'],
-		threshold: 0.4,
-		includeScore: true
-	}));
-
-	let filteredCommands = $derived(
-		query.trim()
-			? fuse.search(query).map((r) => r.item)
-			: commands
+	let fuse = $derived(
+		new Fuse(commands, {
+			keys: ['label', 'description', 'category'],
+			threshold: 0.4,
+			includeScore: true,
+		}),
 	);
+
+	let filteredCommands = $derived(query.trim() ? fuse.search(query).map((r) => r.item) : commands);
 
 	function handleQueryInput(e: Event) {
 		query = (e.target as HTMLInputElement).value;
@@ -153,11 +151,16 @@
 
 	function getCategoryIcon(category: string) {
 		switch (category) {
-			case 'Chat': return MessageSquarePlus;
-			case 'Navigation': return Settings;
-			case 'Accessibility': return Eye;
-			case 'Tabs': return FileCode;
-			default: return Search;
+			case 'Chat':
+				return MessageSquarePlus;
+			case 'Navigation':
+				return Settings;
+			case 'Accessibility':
+				return Eye;
+			case 'Tabs':
+				return FileCode;
+			default:
+				return Search;
 		}
 	}
 
@@ -194,7 +197,9 @@
 					class="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
 					type="text"
 				/>
-				<kbd class="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border">
+				<kbd
+					class="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border"
+				>
 					ESC
 				</kbd>
 			</div>
@@ -211,9 +216,14 @@
 							data-cmd-index={i}
 							role="option"
 							aria-selected={i === selectedIndex}
-							class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors {i === selectedIndex ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/50'}"
+							class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors {i ===
+							selectedIndex
+								? 'bg-accent text-accent-foreground'
+								: 'text-foreground hover:bg-accent/50'}"
 							onclick={() => selectItem(item)}
-							onmouseenter={() => { selectedIndex = i; }}
+							onmouseenter={() => {
+								selectedIndex = i;
+							}}
 						>
 							<Icon class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
 							<div class="flex-1 min-w-0">
@@ -222,7 +232,9 @@
 									<div class="text-xs text-muted-foreground truncate">{item.description}</div>
 								{/if}
 							</div>
-							<span class="text-[10px] text-muted-foreground uppercase tracking-wider flex-shrink-0">
+							<span
+								class="text-[10px] text-muted-foreground uppercase tracking-wider flex-shrink-0"
+							>
 								{item.category}
 							</span>
 						</button>

@@ -8,7 +8,12 @@ import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import type { NewChatConfig, SessionAgentId } from '$lib/types/app.js';
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat.js';
+import type {
+	AmpAgentMode,
+	ClaudeThinkingMode,
+	PermissionMode,
+	ThinkingMode,
+} from '$lib/types/chat.js';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import {
 	normalizeAmpAgentMode,
@@ -16,11 +21,16 @@ import {
 	normalizePermissionMode,
 	normalizeThinkingMode,
 } from '$shared/chat-modes';
-import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
-import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants.js';
-import { canSubmitNewChat, type PathValidationStatus } from '$lib/components/chat/new-chat-submit.js';
+import {
+	CLAUDE_PERMISSION_MODES,
+	NON_CLAUDE_PERMISSION_MODES,
+} from '$lib/chat/chat-ui-constants.js';
+import {
+	canSubmitNewChat,
+	type PathValidationStatus,
+} from '$lib/components/chat/new-chat-submit.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -71,12 +81,10 @@ export class NewChatFormState {
 	readonly #images = new ImageAttachmentState();
 
 	// Injected dependencies
-	readonly #appShell: AppShellStore;
 	readonly #modelCatalog: ModelCatalogStore;
 	readonly #remoteSettings: RemoteSettingsStore;
 
-	constructor(appShell: AppShellStore, modelCatalog: ModelCatalogStore, remoteSettings: RemoteSettingsStore) {
-		this.#appShell = appShell;
+	constructor(modelCatalog: ModelCatalogStore, remoteSettings: RemoteSettingsStore) {
 		this.#modelCatalog = modelCatalog;
 		this.#remoteSettings = remoteSettings;
 	}
@@ -96,7 +104,10 @@ export class NewChatFormState {
 	}
 
 	get canSubmit(): boolean {
-		return this.settingsLoaded && canSubmitNewChat(this.trimmedPath, this.validationStatus, this.firstMessage);
+		return (
+			this.settingsLoaded &&
+			canSubmitNewChat(this.trimmedPath, this.validationStatus, this.firstMessage)
+		);
 	}
 
 	get placeholder(): string {
@@ -104,7 +115,9 @@ export class NewChatFormState {
 	}
 
 	get modelValue(): string {
-		return this.selectedModelsByAgent[this.agentId] ?? this.#modelCatalog.getDefaultModel(this.agentId);
+		return (
+			this.selectedModelsByAgent[this.agentId] ?? this.#modelCatalog.getDefaultModel(this.agentId)
+		);
 	}
 
 	// Agent selection
@@ -148,7 +161,11 @@ export class NewChatFormState {
 		return agents[0] ?? 'claude';
 	}
 
-	applyResolvedModel(agentId: SessionAgentId, model: string, modelEndpointId?: string | null): void {
+	applyResolvedModel(
+		agentId: SessionAgentId,
+		model: string,
+		modelEndpointId?: string | null,
+	): void {
 		const liveModels = this.#modelCatalog.getModels(agentId);
 		const selectionValue = this.#modelCatalog.selectionValueFor(agentId, model, modelEndpointId);
 		const resolvedModel = liveModels.some((entry) => entry.value === selectionValue)
@@ -318,8 +335,8 @@ export class NewChatFormState {
 			await this.#remoteSettings.update({
 				paths: {
 					pinnedProjectPaths: next,
-					browseStartPath: this.browseStartPath || this.trimmedPath
-				}
+					browseStartPath: this.browseStartPath || this.trimmedPath,
+				},
 			});
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to persist pinned project paths', err);

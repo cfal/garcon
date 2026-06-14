@@ -43,16 +43,16 @@ export type {
 	AmpFindThreadToolUseMessage,
 	AmpReadThreadToolUseMessage,
 	AmpTaskListToolUseMessage,
-		ExternalToolUseMessage,
-		McpToolUseMessage,
-		RequestPermissionsToolUseMessage,
+	ExternalToolUseMessage,
+	McpToolUseMessage,
+	RequestPermissionsToolUseMessage,
 	UnknownToolUseMessage,
 	ToolResultMessage,
 	ErrorMessage,
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
 	PermissionCancelledMessage,
-	ChatMessage
+	ChatMessage,
 } from '$shared/chat-types';
 export type { QueueEntry, QueueState } from '$shared/queue-state';
 
@@ -66,10 +66,4 @@ export interface PendingPermissionRequest {
 	requestedTool: import('$shared/chat-types').ToolUseChatMessage;
 	chatId?: string | null;
 	receivedAt?: Date;
-}
-
-export interface ConversationWorkspaceProps {
-	ws: WebSocket | null;
-	sendMessage: (message: unknown) => boolean;
-	onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
 }

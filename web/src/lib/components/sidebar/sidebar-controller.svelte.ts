@@ -10,10 +10,26 @@ import {
 	getChatDetails,
 	forkChat,
 	setChatTags,
+	type ReorderQuickTarget,
 } from '$lib/api/chats.js';
+import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 export interface SidebarControllerDeps {
 	get onQuietRefresh(): () => Promise<void> | void;
+}
+
+export type SidebarBulkAction = 'pin' | 'unpin' | 'archive' | 'unarchive';
+
+export interface SidebarBulkOperationInput {
+	selectedChats: ChatSessionRecord[];
+	allChats: ChatSessionRecord[];
+	selectedChatId: string | null;
+}
+
+export interface SidebarBulkOperationResult {
+	affectedIds: string[];
+	nextSelectedChatId: string | null;
+	shouldCreateNewChat: boolean;
 }
 
 export class SidebarController {
@@ -33,8 +49,8 @@ export class SidebarController {
 		await this.deps.onQuietRefresh();
 	}
 
-	async quickMove(chatId: string, chatIdAbove?: string, chatIdBelow?: string): Promise<void> {
-		await reorderChatsQuick({ chatId, chatIdAbove, chatIdBelow });
+	async quickMove(chatId: string, target: ReorderQuickTarget): Promise<void> {
+		await reorderChatsQuick({ chatId, ...target });
 		await this.deps.onQuietRefresh();
 	}
 
@@ -71,5 +87,62 @@ export class SidebarController {
 	async bulkToggleArchive(chatIds: string[]): Promise<void> {
 		await Promise.all(chatIds.map((id) => toggleArchive(id)));
 		await this.deps.onQuietRefresh();
+	}
+
+	async runBulkOperation(
+		action: SidebarBulkAction,
+		input: SidebarBulkOperationInput,
+	): Promise<SidebarBulkOperationResult> {
+		const affectedIds = this.resolveBulkAffectedIds(action, input.selectedChats);
+		const archiveSelection = this.resolveArchiveSelection(action, affectedIds, input);
+		if (affectedIds.length === 0) return archiveSelection;
+
+		if (action === 'pin' || action === 'unpin') {
+			await this.bulkTogglePin(affectedIds);
+		} else {
+			await this.bulkToggleArchive(affectedIds);
+		}
+
+		return archiveSelection;
+	}
+
+	private resolveBulkAffectedIds(
+		action: SidebarBulkAction,
+		selectedChats: ChatSessionRecord[],
+	): string[] {
+		switch (action) {
+			case 'pin':
+				return selectedChats.filter((chat) => !chat.isPinned).map((chat) => chat.id);
+			case 'unpin':
+				return selectedChats.filter((chat) => chat.isPinned).map((chat) => chat.id);
+			case 'archive':
+				return selectedChats.filter((chat) => !chat.isArchived).map((chat) => chat.id);
+			case 'unarchive':
+				return selectedChats.filter((chat) => chat.isArchived).map((chat) => chat.id);
+		}
+		return [];
+	}
+
+	private resolveArchiveSelection(
+		action: SidebarBulkAction,
+		affectedIds: string[],
+		input: SidebarBulkOperationInput,
+	): SidebarBulkOperationResult {
+		if (
+			action !== 'archive' ||
+			!input.selectedChatId ||
+			!affectedIds.includes(input.selectedChatId)
+		) {
+			return { affectedIds, nextSelectedChatId: null, shouldCreateNewChat: false };
+		}
+
+		const remaining = input.allChats.find(
+			(chat) => !affectedIds.includes(chat.id) && !chat.isArchived,
+		);
+		return {
+			affectedIds,
+			nextSelectedChatId: remaining?.id ?? null,
+			shouldCreateNewChat: !remaining,
+		};
 	}
 }

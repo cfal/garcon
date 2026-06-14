@@ -8,7 +8,6 @@
 	import Archive from '@lucide/svelte/icons/archive';
 	import Edit2 from '@lucide/svelte/icons/pencil';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
 	import ArrowUpToLine from '@lucide/svelte/icons/arrow-up-to-line';
 	import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
@@ -22,7 +21,7 @@
 		DropdownMenuTrigger,
 		DropdownMenuContent,
 		DropdownMenuItem,
-		DropdownMenuSeparator
+		DropdownMenuSeparator,
 	} from '$lib/components/ui/dropdown-menu';
 	import SidebarChatSummary from './SidebarChatSummary.svelte';
 	import type { SessionAgentId } from '$lib/types/app';
@@ -34,9 +33,11 @@
 		currentTime: Date;
 		isPinned: boolean;
 		isArchived: boolean;
-		isReorderMode?: boolean;
+		isMobile?: boolean;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
+		enableNativeDrag?: boolean;
+		enableRecenterOnRequest?: boolean;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
@@ -47,7 +48,6 @@
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
-		onEnterReorderMode?: () => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		hasPinnedChats?: boolean;
@@ -61,9 +61,11 @@
 		currentTime,
 		isPinned,
 		isArchived,
-		isReorderMode = false,
+		isMobile = false,
 		isMultiSelectMode = false,
 		isMultiSelected = false,
+		enableNativeDrag = true,
+		enableRecenterOnRequest = true,
 		onChatSelect,
 		onDeleteChat,
 		onStartRenameChat,
@@ -74,7 +76,6 @@
 		onShareChat,
 		onTagClick,
 		onManageTags,
-		onEnterReorderMode,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
 		onMoveToTop,
@@ -85,6 +86,7 @@
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
 	let isSelected = $derived(selectedChatId === session.id);
 	let agentId = $derived(session.agentId || 'claude');
+	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
 
 	function handleItemClick(e: MouseEvent) {
 		if (isMultiSelectMode) {
@@ -180,19 +182,22 @@
 	}
 
 	// Scroll-to-selected on explicit recenter requests (chat focus).
-	onMount(() => appShell.onSidebarRecenterRequested(() => {
-		if (!isSelected || !itemEl) return;
-		requestAnimationFrame(() => {
-			if (itemEl) scrollIntoViewport(itemEl);
-		});
-	}));
+	onMount(() =>
+		appShell.onSidebarRecenterRequested(() => {
+			if (!enableRecenterOnRequest) return;
+			if (!isSelected || !itemEl) return;
+			requestAnimationFrame(() => {
+				if (itemEl) scrollIntoViewport(itemEl);
+			});
+		}),
+	);
 </script>
 
 {#snippet stateBadge()}
 	{#if !isMultiSelectMode && (isPinned || isArchived)}
 		<div
 			class={cn(
-					'pointer-events-none absolute bottom-0 right-0 z-10 flex h-5 w-5 items-center justify-center rounded-full border',
+				'pointer-events-none absolute bottom-0 right-0 z-10 flex h-5 w-5 items-center justify-center rounded-full border',
 				isPinned
 					? 'border-sidebar-badge-pinned-border bg-sidebar-badge-pinned-bg'
 					: 'border-sidebar-badge-archived-border bg-sidebar-badge-archived-bg',
@@ -208,160 +213,154 @@
 	{/if}
 {/snippet}
 
-<div class="chat-item-root group relative" bind:this={itemEl}>
-	<!-- Mobile layout -->
-	<div
-		class={cn(
-			'md:hidden flex items-stretch border-b border-border/30 bg-sidebar-chat-item-bg',
-			!isMultiSelectMode && isSelected && 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
-			isMultiSelectMode && isMultiSelected && 'bg-primary/8',
-			!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
-		)}
-	>
-		<button
-			class={cn(
-				'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
-				isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
-			)}
-			onclick={handleItemClick}
-		>
-			{#if isMultiSelectMode}
-				<div class="flex items-center justify-center w-7 shrink-0" aria-hidden="true">
-					<div
-						role="checkbox"
-						aria-checked={isMultiSelected}
-						aria-label="Select {chatName}"
-						class={cn(
-							'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
-							isMultiSelected
-								? 'bg-primary border-primary'
-								: 'border-muted-foreground/40 bg-background',
-						)}
-					>
-						{#if isMultiSelected}
-							<svg class="size-3 text-primary-foreground" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<polyline points="2.5 6 5 8.5 9.5 3.5" />
-							</svg>
-						{/if}
-					</div>
-				</div>
-			{/if}
-			<div class="relative flex-1 min-w-0">
-				<SidebarChatSummary
-					{session}
-					{isSelected}
-					{isPinned}
-					{isArchived}
-					{currentTime}
-					showTimestamp={true}
-					onTagClick={isMultiSelectMode ? undefined : onTagClick}
-					onManageTags={isMultiSelectMode ? undefined : onManageTags}
-				/>
-				{@render stateBadge()}
-			</div>
-		</button>
-		{#if !isMultiSelectMode}
-			<button
-				type="button"
-				class="shrink-0 flex items-center justify-center px-3 text-muted-foreground hover:text-foreground active:bg-accent border-l border-border/30 transition-colors"
-				onclick={handleMobileMenuClick}
-				aria-label={m.sidebar_chat_more_actions()}
+{#snippet selectionCheckbox()}
+	{#if isMultiSelectMode}
+		<div class="flex items-center justify-center w-7 shrink-0" aria-hidden="true">
+			<div
+				role="checkbox"
+				aria-checked={isMultiSelected}
+				aria-label={m.sidebar_select_chat({ name: chatName })}
+				class={cn(
+					'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
+					isMultiSelected
+						? 'bg-primary border-primary'
+						: 'border-muted-foreground/40 bg-background',
+				)}
 			>
-				<EllipsisVertical class="size-5" />
-			</button>
-		{/if}
-	</div>
-
-	<!-- Desktop layout with right-click support and drag-to-split -->
-	<div class="hidden md:block">
-		<Button
-			variant="ghost"
-			draggable={!isMultiSelectMode}
-			ondragstart={isMultiSelectMode ? undefined : handleDragStart}
-			ondragend={isMultiSelectMode ? undefined : handleDragEnd}
-			oncontextmenu={handleRightClick}
-			class={cn(
-				'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30',
-				isMultiSelectMode ? 'py-[5px] pl-1 border-l-0' : 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
-				!isMultiSelectMode && isSelected && 'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
-				!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
-				isMultiSelectMode && isMultiSelected && 'bg-primary/8',
-			)}
-			onclick={handleItemClick}
-		>
-			{#if isMultiSelectMode}
-				<div class="flex items-center justify-center w-7 shrink-0" aria-hidden="true">
-					<div
-						role="checkbox"
-						aria-checked={isMultiSelected}
-						aria-label="Select {chatName}"
-						class={cn(
-							'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
-							isMultiSelected
-								? 'bg-primary border-primary'
-								: 'border-muted-foreground/40 bg-background',
-						)}
+				{#if isMultiSelected}
+					<svg
+						class="size-3 text-primary-foreground"
+						viewBox="0 0 12 12"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
 					>
-						{#if isMultiSelected}
-							<svg class="size-3 text-primary-foreground" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<polyline points="2.5 6 5 8.5 9.5 3.5" />
-							</svg>
-						{/if}
-					</div>
-				</div>
-			{/if}
-			<div class="relative flex-1 min-w-0">
-				<SidebarChatSummary
-					{session}
-					{isSelected}
-					{isPinned}
-					{isArchived}
-					{currentTime}
-					showTimestamp={true}
-					onTagClick={isMultiSelectMode ? undefined : onTagClick}
-					onManageTags={isMultiSelectMode ? undefined : onManageTags}
-				/>
-				{@render stateBadge()}
+						<polyline points="2.5 6 5 8.5 9.5 3.5" />
+					</svg>
+				{/if}
 			</div>
-		</Button>
-	</div>
+		</div>
+	{/if}
+{/snippet}
 
-	<!-- Dropdown anchor: hidden in multi-select mode -->
-	{#if !isMultiSelectMode}
-	<div
-		class={cn(
-			"absolute z-20",
-			!isAtCursor && "sidebar-item-menu-anchor right-1 top-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
-		)}
-		style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
-	>
-		<DropdownMenu bind:open={menuOpen}>
+{#snippet chatSummary()}
+	<div class="relative flex-1 min-w-0">
+		<SidebarChatSummary
+			{session}
+			{isSelected}
+			{isPinned}
+			{isArchived}
+			{currentTime}
+			showTimestamp={true}
+			onTagClick={isMultiSelectMode ? undefined : onTagClick}
+			onManageTags={isMultiSelectMode ? undefined : onManageTags}
+		/>
+		{@render stateBadge()}
+	</div>
+{/snippet}
+
+<div class="chat-item-root group relative" bind:this={itemEl}>
+	{#if isMobile}
+		<div
+			class={cn(
+				'flex items-stretch border-b border-border/30 bg-sidebar-chat-item-bg',
+				!isMultiSelectMode &&
+					isSelected &&
+					'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
+				isMultiSelectMode && isMultiSelected && 'bg-primary/8',
+				!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
+			)}
+		>
+			<button
+				class={cn(
+					'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
+					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
+				)}
+				onclick={handleItemClick}
+			>
+				{@render selectionCheckbox()}
+				{@render chatSummary()}
+			</button>
+			{#if !isMultiSelectMode}
+				<button
+					type="button"
+					data-sidebar-touch-drag-ignore
+					class="shrink-0 flex items-center justify-center px-3 text-muted-foreground hover:text-foreground active:bg-accent border-l border-border/30 transition-colors"
+					onclick={handleMobileMenuClick}
+					aria-label={m.sidebar_chat_more_actions()}
+				>
+					<EllipsisVertical class="size-5" />
+				</button>
+			{/if}
+		</div>
+	{:else}
+		<div>
+			<Button
+				variant="ghost"
+				draggable={canNativeDrag ? true : undefined}
+				ondragstart={canNativeDrag ? handleDragStart : undefined}
+				ondragend={canNativeDrag ? handleDragEnd : undefined}
+				oncontextmenu={handleRightClick}
+				class={cn(
+					'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30',
+					isMultiSelectMode
+						? 'py-[5px] pl-1 border-l-0'
+						: 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
+					!isMultiSelectMode &&
+						isSelected &&
+						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
+					!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
+					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
+				)}
+				onclick={handleItemClick}
+			>
+				{@render selectionCheckbox()}
+				{@render chatSummary()}
+			</Button>
+		</div>
+	{/if}
+
+	<!-- Mounts the mobile dropdown anchor only after the overflow button is tapped. -->
+	{#if !isMultiSelectMode && (!isMobile || isAtCursor)}
+		<div
+			class={cn(
+				'absolute z-20',
+				!isAtCursor &&
+					'sidebar-item-menu-anchor right-1 top-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100',
+			)}
+			style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
+		>
+			<DropdownMenu bind:open={menuOpen}>
 				<DropdownMenuTrigger
+					data-sidebar-touch-drag-ignore
 					class={isAtCursor
-						? "block w-px h-px opacity-0 pointer-events-none"
-						: "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground"}
+						? 'block w-px h-px opacity-0 pointer-events-none'
+						: 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground'}
 					aria-label={m.sidebar_chat_more_actions()}
 					tabindex={isAtCursor ? -1 : 0}
 				>
-				{#if !isAtCursor}
-					<EllipsisVertical class="h-3.5 w-3.5" />
-				{/if}
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align={isAtCursor ? "start" : "end"}>
-				{#if isReorderMode}
-					{#if onMoveToTop}
-						<DropdownMenuItem onclick={onMoveToTop}>
-							<ArrowUpToLine />
-							{m.sidebar_chats_move_to_top()}
-						</DropdownMenuItem>
+					{#if !isAtCursor}
+						<EllipsisVertical class="h-3.5 w-3.5" />
 					{/if}
-					{#if onMoveToBottom}
-						<DropdownMenuItem onclick={onMoveToBottom}>
-							<ArrowDownToLine />
-							{m.sidebar_chats_move_to_bottom()}
-						</DropdownMenuItem>
+				</DropdownMenuTrigger>
+				<DropdownMenuContent align={isAtCursor ? 'start' : 'end'}>
+					{#if onMoveToTop || onMoveToBottom}
+						{#if onMoveToTop}
+							<DropdownMenuItem onclick={onMoveToTop}>
+								<ArrowUpToLine />
+								{m.sidebar_chats_move_to_top()}
+							</DropdownMenuItem>
+						{/if}
+						{#if onMoveToBottom}
+							<DropdownMenuItem onclick={onMoveToBottom}>
+								<ArrowDownToLine />
+								{m.sidebar_chats_move_to_bottom()}
+							</DropdownMenuItem>
+						{/if}
+						<DropdownMenuSeparator />
 					{/if}
-				{:else}
 					<DropdownMenuItem onclick={() => onTogglePinned(session.id)}>
 						<Pin />
 						{isPinned ? m.sidebar_chats_unpin() : m.sidebar_chats_pin()}
@@ -394,12 +393,6 @@
 							{m.sidebar_chats_fork()}
 						</DropdownMenuItem>
 					{/if}
-					{#if onEnterReorderMode}
-						<DropdownMenuItem onclick={() => onEnterReorderMode?.()}>
-							<ArrowUpDown />
-							{m.sidebar_chats_reorder_chats()}
-						</DropdownMenuItem>
-					{/if}
 					{#if onEnterMultiSelect}
 						<DropdownMenuItem onclick={() => onEnterMultiSelect?.(session.id)}>
 							<CheckSquare />
@@ -411,9 +404,8 @@
 						<Trash2 />
 						{m.sidebar_tooltips_delete_chat()}
 					</DropdownMenuItem>
-				{/if}
-			</DropdownMenuContent>
-		</DropdownMenu>
-	</div>
+				</DropdownMenuContent>
+			</DropdownMenu>
+		</div>
 	{/if}
 </div>

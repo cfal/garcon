@@ -17,7 +17,7 @@ import type {
   StartedAgentSession,
 } from "./session-types.js";
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
-import type { Agent } from './types.js';
+import type { Agent, AgentTranscriptPage } from './types.js';
 import {
   isVisibleAgentId,
   type AgentCatalogEntry,
@@ -31,7 +31,58 @@ import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import { AgentRuntimeRouter } from './runtime-router.js';
 import { AgentSessionSettingsService } from './session-settings-service.js';
 
-export class AgentRegistry {
+export interface AgentRegistryServiceContract {
+  hasAgent(agentId: string): boolean;
+  supportsFork(agentId: string): boolean;
+  supportsImages(agentId: string): boolean;
+  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
+  getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
+  startSession(chatId: string, command: string, opts?: {
+    images?: AgentCommandImage[];
+    model?: string;
+    permissionMode?: PermissionMode;
+    thinkingMode?: ThinkingMode;
+    claudeThinkingMode?: ClaudeThinkingMode;
+    ampAgentMode?: AmpAgentMode;
+    projectPath?: string;
+    clientRequestId?: string;
+    turnId?: string;
+  }): Promise<void>;
+  forkAgentSession?(args: {
+    sourceSession: AgentChatEntry;
+    sourceChatId: string;
+    targetChatId: string;
+  }): Promise<StartedAgentSession | null>;
+  getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
+  getAgentReadinessMap(): Promise<Record<string, unknown>>;
+  getAgentAuthStatus(agentId: string): Promise<unknown | null>;
+  getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
+  getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
+  launchAgentAuthLogin(agentId: string): Promise<{
+    launched: boolean;
+    alreadyRunning: boolean;
+    deviceAuth?: { url: string; code: string };
+  }>;
+  modelSupportsImages(input: {
+    agentId: string;
+    model: string;
+    apiProviderId?: string | null;
+    modelEndpointId?: string | null;
+  }): Promise<boolean>;
+  runSingleQuery(prompt: string, options?: { agentId?: string; [key: string]: unknown }): Promise<string>;
+  resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void;
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
+}
+
+interface AgentAuthStatus {
+  authenticated?: boolean;
+}
+
+function isAgentAuthStatus(value: unknown): value is AgentAuthStatus {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+export class AgentRegistry implements AgentRegistryServiceContract {
   #registry: IChatRegistry;
   #directory: AgentDirectory;
   #endpointResolver: ApiProviderEndpointResolver;
@@ -158,6 +209,18 @@ export class AgentRegistry {
     return agent.transcript.loadMessages(session, { chatId });
   }
 
+  async loadMessagePage(
+    session: AgentChatEntry | null,
+    limit: number,
+    offset: number,
+    chatId?: string,
+  ): Promise<AgentTranscriptPage | null> {
+    if (!session?.agentId) return null;
+    const agent = this.#directory.get(session.agentId);
+    if (!agent?.transcript.loadMessagePage) return null;
+    return agent.transcript.loadMessagePage(session, { limit, offset }, { chatId });
+  }
+
   async getModels(agentId: string, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
     return this.#catalog.getModels(agentId, query);
   }
@@ -217,7 +280,8 @@ export class AgentRegistry {
       if (!isVisibleAgentId(agentId)) continue;
       const endpointReady = agent.capabilities.acceptsApiProviderEndpoints
         && this.#catalog.hasEndpointModels(agentId);
-      const nativeReady = Boolean((auth[agentId] as any)?.authenticated);
+      const status = auth[agentId];
+      const nativeReady = isAgentAuthStatus(status) && status.authenticated === true;
       result[agentId] = {
         ready: nativeReady || endpointReady,
         nativeReady,

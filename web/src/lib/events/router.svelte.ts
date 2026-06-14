@@ -26,24 +26,30 @@ import {
 } from '$shared/ws-events';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
-import type { ChatMessage, PendingPermissionRequest, PendingViewChat, PermissionMode, QueueState } from '$lib/types/chat';
-import type { ChatEntry, SessionAgentId } from '$lib/types/app';
+import type { ChatMessage, PermissionMode } from '$lib/types/chat';
+import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
+import { clearPendingChatId, getPendingChatId, setPendingChatId } from '$lib/chat/pending-chat-handoff';
+import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 import { untrack } from 'svelte';
 import { normalizeEvent } from '$lib/ws/normalize';
 import { filterByChat } from './chat-filter';
-import { applyChatMessages } from './reducer';
 
-import {
-	handleAgentComplete,
-	handleAgentError,
-	type LifecycleContext,
-} from './handlers/lifecycle';
+import { handleAgentComplete, handleAgentError, type LifecycleContext } from './handlers/lifecycle';
 import { handlePlanModeMessages, type PlanModeContext } from './handlers/plan-mode';
-import { handlePermissionLifecycleFromBatch, type PermissionLifecycleContext } from './handlers/permissions';
+import {
+	handlePermissionLifecycleFromBatch,
+	type PermissionLifecycleContext,
+} from './handlers/permissions';
 import { handleQueueUpdated, handleQueueSending, type QueueContext } from './handlers/queue';
-import { handleChatCreated, handleChatAborted, handleChatStatus, handleWsError, type ChatEventContext } from './handlers/chat';
+import {
+	handleChatCreated,
+	handleChatAborted,
+	handleChatStatus,
+	handleWsError,
+	type ChatEventContext,
+} from './handlers/chat';
 import { handleRunningChats, type RunningChatsContext } from './handlers/chat-sessions-running';
 import {
 	handleChatTitle,
@@ -53,61 +59,73 @@ import {
 	type SidebarContext,
 } from './handlers/sidebar';
 
-// Store references required by the router to build handler contexts.
-export interface EventRouterStores {
-	agentId: () => SessionAgentId;
-	selectedChat: () => ChatEntry | null;
-	currentChatId: () => string | null;
-	setCurrentChatId: (id: string | null) => void;
-	chatMessages: () => ChatMessage[];
+export interface EventRouterAgentSettings {
+	permissionMode: () => PermissionMode;
+	setPermissionMode: (mode: PermissionMode) => void;
+}
+
+export interface EventRouterSessionsStore {
+	selectedChat: () => ChatSessionRouterView | null;
+	setSelectedChatId: (chatId: string | null) => void;
+	patchChatPreview: (chatId: string, content: string, timestamp: string) => void;
+	refreshChats: () => void;
+	navigateToChat?: (chatId: string) => void;
+	removeChat: (chatId: string) => void;
+	patchChatTitle: (chatId: string, title: string) => void;
+	navigateAwayFromChat: (chatId: string) => void;
+	reconcileProcessing: (runningChatIds: Set<string>) => void;
+	setChatProcessing: (chatId: string, isProcessing: boolean) => void;
+	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
+}
+
+export interface EventRouterChatStateStore {
 	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
-	pendingUserInputs: () => PendingUserInput[];
-	setPendingUserInputs: (inputs: PendingUserInput[]) => void;
+	appendChatMessagesByIdentity: (messages: ChatMessage[]) => void;
 	upsertPendingUserInput: (input: PendingUserInput) => void;
 	clearPendingUserInput: (clientRequestId: string) => void;
 	updatePendingUserInputDeliveryStatus: (
 		clientRequestId: string,
 		deliveryStatus: 'submitting' | 'accepted' | 'failed',
 	) => void;
-	loadMessages: (chatId: string, loadMore?: boolean, agentId?: string) => Promise<ChatMessage[]>;
+	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
+	removeChatSnapshot?: (chatId: string) => void;
+	markChatSnapshotValidated?: (chatId: string) => void;
+}
+
+export interface EventRouterLifecycleStore {
+	currentChatId: () => string | null;
+	setCurrentChatId: (id: string | null) => void;
 	setIsLoading: (v: boolean) => void;
 	setCanAbort: (v: boolean) => void;
-	setLoadingStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
-	pushLoadingStatus: (entry: import('$lib/stores/chat-lifecycle.svelte').LoadingStatusEntry) => void;
+	setLoadingStatus: (
+		status: { text: string; tokens: number; can_interrupt: boolean } | null,
+	) => void;
+	pushLoadingStatus: (
+		entry: import('$lib/stores/chat-lifecycle.svelte').LoadingStatusEntry,
+	) => void;
 	popLoadingStatus: (id: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
-	setSelectedChatId: (chatId: string | null) => void;
-	pendingPermissionRequests: () => PendingPermissionRequest[];
-	setPendingPermissionRequests: (
-		updater: PendingPermissionRequest[] | ((prev: PendingPermissionRequest[]) => PendingPermissionRequest[]),
-	) => void;
-	pendingViewChat: () => PendingViewChat | null;
-	setPendingViewChat?: (v: PendingViewChat | null) => void;
-	setMessageQueue: (chatId: string, queue: QueueState | null) => void;
-	permissionMode: () => PermissionMode;
-	previousPermissionMode: () => PermissionMode | null;
-	setPermissionMode: (mode: PermissionMode) => void;
-	setPreviousPermissionMode: (mode: PermissionMode | null) => void;
-	patchChatPreview: (chatId: string, content: string, timestamp: string) => void;
-	refreshChats: () => void;
-	hasChat: (chatId: string) => boolean;
-	navigateToChat?: (chatId: string) => void;
-	removeChat: (chatId: string) => void;
-	patchChatTitle: (chatId: string, title: string) => void;
-	navigateAwayFromChat: (chatId: string) => void;
-	// Startup ownership.
+}
+
+export interface EventRouterStartupStore {
 	startupCoordinator: StartupCoordinator;
 	onLocalStartupConfirmed: (chatId: string) => void;
 	onExternalChatCreated: (chatId: string) => void;
-	// Session store reconciliation for chat-sessions-running snapshot
-	reconcileProcessing: (runningChatIds: Set<string>) => void;
-	setChatProcessing: (chatId: string, isProcessing: boolean) => void;
-	// Read state for unread indicators
-	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
+}
+
+export interface EventRouterReadStateStore {
 	enqueueReadReceipt: (chatId: string, readAt: string) => void;
-	// Snapshot cache operations for lifecycle and sidebar handlers.
-	removeChatSnapshot?: (chatId: string) => void;
-	markChatSnapshotValidated?: (chatId: string) => void;
+}
+
+// Store references required by the router to build handler contexts.
+export interface EventRouterStores {
+	agentSettings: EventRouterAgentSettings;
+	sessions: EventRouterSessionsStore;
+	chatState: EventRouterChatStateStore;
+	lifecycle: EventRouterLifecycleStore;
+	conversationUi: ConversationUiStore;
+	startup: EventRouterStartupStore;
+	readState: EventRouterReadStateStore;
 }
 
 function extractFirstLine(text: string): string {
@@ -126,7 +144,11 @@ export function selectPreviewFromBatch(
 ): { content: string; timestamp: string } | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
-		if (msg instanceof AssistantMessage || msg instanceof UserMessage || msg instanceof ThinkingMessage) {
+		if (
+			msg instanceof AssistantMessage ||
+			msg instanceof UserMessage ||
+			msg instanceof ThinkingMessage
+		) {
 			return {
 				content: extractFirstLine(String(msg.content || '')).slice(0, 200),
 				timestamp: msg.timestamp,
@@ -137,7 +159,9 @@ export function selectPreviewFromBatch(
 }
 
 // Coalesces output chunks from one drain pass into one message-array write.
-export function createAgentOutputAccumulator(stores: Pick<EventRouterStores, 'setChatMessages'>) {
+export function createAgentOutputAccumulator(
+	chatState: Pick<EventRouterChatStateStore, 'appendChatMessagesByIdentity'>,
+) {
 	let pendingMessages: ChatMessage[] = [];
 
 	return {
@@ -149,7 +173,7 @@ export function createAgentOutputAccumulator(stores: Pick<EventRouterStores, 'se
 			if (pendingMessages.length === 0) return;
 			const messages = pendingMessages;
 			pendingMessages = [];
-			stores.setChatMessages((current) => applyChatMessages(current, messages));
+			chatState.appendChatMessagesByIdentity(messages);
 		},
 	};
 }
@@ -160,19 +184,19 @@ function markPendingUserInputDelivery(
 	deliveryStatus: 'accepted' | 'failed',
 ) {
 	if (!clientRequestId) return;
-	stores.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus);
+	stores.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus);
 }
 
 // Creates helper functions used by multiple handler contexts.
 function createHelpers(stores: EventRouterStores) {
-	const activateLoadingFor = (chatId?: string | null) => {
-		stores.setIsLoading(true);
+	const activateLoadingFor = (_chatId?: string | null) => {
+		stores.lifecycle.setIsLoading(true);
 	};
 
-	const clearLoadingIndicators = (chatId?: string | null) => {
-		stores.setIsLoading(false);
-		stores.setCanAbort(false);
-		stores.setLoadingStatus(null);
+	const clearLoadingIndicators = (_chatId?: string | null) => {
+		stores.lifecycle.setIsLoading(false);
+		stores.lifecycle.setCanAbort(false);
+		stores.lifecycle.setLoadingStatus(null);
 	};
 
 	const markChatsAsCompleted = (...chatIds: Array<string | null | undefined>) => {
@@ -180,7 +204,7 @@ function createHelpers(stores: EventRouterStores) {
 			chatIds.filter((id): id is string => typeof id === 'string' && id.length > 0),
 		);
 		for (const id of unique) {
-			stores.setChatProcessing(id, false);
+			stores.sessions.setChatProcessing(id, false);
 		}
 	};
 
@@ -192,129 +216,98 @@ function buildDispatch(
 	stores: EventRouterStores,
 	outputAccumulator: ReturnType<typeof createAgentOutputAccumulator>,
 ): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
-	const { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted } = createHelpers(stores);
+	const { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted } =
+		createHelpers(stores);
 
-	const selectedChat = stores.selectedChat();
-	const currentChatId = stores.currentChatId();
-	const agentId = stores.agentId();
-	const projectPath = selectedChat?.projectPath || null;
-
-	const onNavigateToChat = stores.navigateToChat
-		? (chatId: string) => stores.navigateToChat!(chatId)
+	const onNavigateToChat = stores.sessions.navigateToChat
+		? (chatId: string) => stores.sessions.navigateToChat!(chatId)
 		: undefined;
 	const onChatProcessing = (chatId?: string | null) => {
-		if (chatId) stores.setChatProcessing(chatId, true);
+		if (chatId) stores.sessions.setChatProcessing(chatId, true);
 	};
 	const onChatNotProcessing = (chatId?: string | null) => {
-		if (chatId) stores.setChatProcessing(chatId, false);
-	};
-
-	// Centralized pendingChatId access via sessionStorage.
-	const getPendingChatId = (): string | null => {
-		try { return typeof window !== 'undefined' ? sessionStorage.getItem('pendingChatId') : null; }
-		catch { return null; }
-	};
-	const setPendingChatId = (id: string) => {
-		try { if (typeof window !== 'undefined') sessionStorage.setItem('pendingChatId', id); }
-		catch { /* storage unavailable */ }
-	};
-	const clearPendingChatId = () => {
-		try { if (typeof window !== 'undefined') sessionStorage.removeItem('pendingChatId'); }
-		catch { /* storage unavailable */ }
+		if (chatId) stores.sessions.setChatProcessing(chatId, false);
 	};
 
 	const lifecycleCtx: LifecycleContext = {
-		currentChatId,
-		setCurrentChatId: stores.setCurrentChatId,
-		setChatMessages: stores.setChatMessages,
-		setIsSystemChatChange: stores.setIsSystemChatChange,
-		setPendingPermissionRequests: stores.setPendingPermissionRequests,
+		getCurrentChatId: stores.lifecycle.currentChatId,
+		setCurrentChatId: stores.lifecycle.setCurrentChatId,
+		setChatMessages: stores.chatState.setChatMessages,
+		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
+		conversationUi: stores.conversationUi,
 		clearLoadingIndicators,
 		markChatsAsCompleted,
 		onNavigateToChat,
 		getPendingChatId,
 		clearPendingChatId,
-		markChatSnapshotValidated: stores.markChatSnapshotValidated,
+		markChatSnapshotValidated: stores.chatState.markChatSnapshotValidated,
 	};
 
 	const chatEventCtx: ChatEventContext = {
-		agentId,
-		projectPath,
-		selectedChat,
-		getCurrentChatId: stores.currentChatId,
-		setCurrentChatId: stores.setCurrentChatId,
-		setChatMessages: stores.setChatMessages,
-		loadMessages: stores.loadMessages,
-		setIsSystemChatChange: stores.setIsSystemChatChange,
-		setPendingPermissionRequests: stores.setPendingPermissionRequests,
-		pendingViewChat: stores.pendingViewChat(),
-		setPendingViewChat: stores.setPendingViewChat,
+		getSelectedChat: stores.sessions.selectedChat,
+		getCurrentChatId: stores.lifecycle.currentChatId,
+		setCurrentChatId: stores.lifecycle.setCurrentChatId,
+		setChatMessages: stores.chatState.setChatMessages,
+		loadMessages: stores.chatState.loadMessages,
+		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
+		conversationUi: stores.conversationUi,
 		activateLoadingFor,
 		clearLoadingIndicators,
 		markChatsAsCompleted,
-		setCanAbort: stores.setCanAbort,
+		setCanAbort: stores.lifecycle.setCanAbort,
 		onChatProcessing,
 		onChatNotProcessing,
-		startupCoordinator: stores.startupCoordinator,
-		onLocalStartupConfirmed: stores.onLocalStartupConfirmed,
-		onExternalChatCreated: stores.onExternalChatCreated,
+		startupCoordinator: stores.startup.startupCoordinator,
+		onLocalStartupConfirmed: stores.startup.onLocalStartupConfirmed,
+		onExternalChatCreated: stores.startup.onExternalChatCreated,
 		getPendingChatId,
 		setPendingChatId,
 		clearPendingChatId,
 	};
 
 	const permLifecycleCtx: PermissionLifecycleContext = {
-		currentChatId,
-		setPendingPermissionRequests: (updater) => {
-			if (typeof updater === 'function') {
-				stores.setPendingPermissionRequests(updater);
-			}
-		},
+		getCurrentChatId: stores.lifecycle.currentChatId,
+		conversationUi: stores.conversationUi,
 		activateLoadingFor,
-		setCanAbort: stores.setCanAbort,
-		pushLoadingStatus: stores.pushLoadingStatus,
-		popLoadingStatus: stores.popLoadingStatus,
+		setCanAbort: stores.lifecycle.setCanAbort,
+		pushLoadingStatus: stores.lifecycle.pushLoadingStatus,
+		popLoadingStatus: stores.lifecycle.popLoadingStatus,
 	};
 
 	const queueCtx: QueueContext = {
-		currentChatId,
-		selectedChatId: selectedChat?.id || null,
-		setMessageQueue: stores.setMessageQueue,
+		getCurrentChatId: stores.lifecycle.currentChatId,
+		getSelectedChatId: () => stores.sessions.selectedChat()?.id || null,
+		conversationUi: stores.conversationUi,
 		activateLoadingFor,
-		setCanAbort: stores.setCanAbort,
+		setCanAbort: stores.lifecycle.setCanAbort,
 		onChatProcessing,
 	};
 
 	const planModeCtx: PlanModeContext = {
-		currentChatId,
-		permissionMode: stores.permissionMode(),
-		setPermissionMode: stores.setPermissionMode,
-		setPreviousPermissionMode: stores.setPreviousPermissionMode,
-		setPendingPermissionRequests: (updater) => {
-			if (typeof updater === 'function') {
-				stores.setPendingPermissionRequests(updater);
-			}
-		},
+		getCurrentChatId: stores.lifecycle.currentChatId,
+		getPermissionMode: stores.agentSettings.permissionMode,
+		setPermissionMode: stores.agentSettings.setPermissionMode,
+		conversationUi: stores.conversationUi,
 	};
 
 	const runningCtx: RunningChatsContext = {
-		reconcileProcessing: stores.reconcileProcessing,
+		reconcileProcessing: stores.sessions.reconcileProcessing,
 	};
 
 	const sidebarCtx: SidebarContext = {
-		removeChat: stores.removeChat,
-		navigateAwayFromChat: stores.navigateAwayFromChat,
-		patchChatTitle: stores.patchChatTitle,
-		patchLastReadAt: stores.patchLastReadAt,
-		refreshChats: stores.refreshChats,
-		removeChatSnapshot: stores.removeChatSnapshot,
+		removeChat: stores.sessions.removeChat,
+		navigateAwayFromChat: stores.sessions.navigateAwayFromChat,
+		patchChatTitle: stores.sessions.patchChatTitle,
+		patchLastReadAt: stores.sessions.patchLastReadAt,
+		refreshChats: stores.sessions.refreshChats,
+		removeChatSnapshot: stores.chatState.removeChatSnapshot,
 	};
 
 	return {
 		'agent-run-output': (msg) => {
 			if (!(msg instanceof AgentRunOutputMessage)) return;
 			activateLoadingFor(msg.chatId);
-			stores.setCanAbort(true);
+			stores.lifecycle.setCanAbort(true);
 			onChatProcessing(msg.chatId);
 			markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
 			outputAccumulator.enqueue(msg);
@@ -341,11 +334,11 @@ function buildDispatch(
 		},
 		'chat-fork-created': (msg) => {
 			if (!(msg instanceof ChatForkCreatedMessage)) return;
-			stores.setIsSystemChatChange(true);
-			stores.setCurrentChatId(msg.chatId);
-			stores.setSelectedChatId(msg.chatId);
-			stores.refreshChats();
-			stores.navigateToChat?.(msg.chatId);
+			stores.lifecycle.setIsSystemChatChange(true);
+			stores.lifecycle.setCurrentChatId(msg.chatId);
+			stores.sessions.setSelectedChatId(msg.chatId);
+			stores.sessions.refreshChats();
+			stores.sessions.navigateToChat?.(msg.chatId);
 		},
 		'chat-session-stopped': (msg) => {
 			if (msg instanceof ChatSessionStoppedMessage) {
@@ -363,9 +356,9 @@ function buildDispatch(
 		'queue-dispatching': (msg) => {
 			if (!(msg instanceof QueueDispatchingMessage)) return;
 			handleQueueSending(msg, queueCtx);
-			const sendChatId = msg.chatId || currentChatId;
+			const sendChatId = msg.chatId || stores.lifecycle.currentChatId();
 			if (sendChatId && msg.content) {
-				stores.patchChatPreview(
+				stores.sessions.patchChatPreview(
 					sendChatId,
 					String(msg.content).slice(0, 200),
 					new Date().toISOString(),
@@ -374,22 +367,26 @@ function buildDispatch(
 		},
 		'pending-user-input-updated': (msg) => {
 			if (!(msg instanceof PendingUserInputUpdatedMessage)) return;
-			stores.upsertPendingUserInput(msg.input);
+			stores.chatState.upsertPendingUserInput(msg.input);
 		},
 		'pending-user-input-cleared': (msg) => {
 			if (!(msg instanceof PendingUserInputClearedMessage)) return;
 			outputAccumulator.flush();
 			if (msg.reason !== 'persisted') {
-				stores.clearPendingUserInput(msg.clientRequestId);
+				stores.chatState.clearPendingUserInput(msg.clientRequestId);
 				return;
 			}
-			void stores.loadMessages(msg.chatId).then((messages) => {
-				if (stores.currentChatId() && stores.currentChatId() !== msg.chatId) return;
-				stores.setChatMessages(messages);
-				stores.clearPendingUserInput(msg.clientRequestId);
-			}).catch(() => {
-				// The local pending overlay remains visible until the next successful reload.
-			});
+			void stores.chatState
+				.loadMessages(msg.chatId)
+				.then((messages) => {
+					if (stores.lifecycle.currentChatId() && stores.lifecycle.currentChatId() !== msg.chatId)
+						return;
+					stores.chatState.setChatMessages(messages);
+					stores.chatState.clearPendingUserInput(msg.clientRequestId);
+				})
+				.catch(() => {
+					// The local pending overlay remains visible until the next successful reload.
+				});
 		},
 		'chat-sessions-running': (msg) => {
 			if (msg instanceof ChatSessionsRunningMessage) handleRunningChats(msg, runningCtx);
@@ -411,7 +408,8 @@ function buildDispatch(
 			if (msg instanceof ChatReadUpdatedV1Message) handleChatReadUpdated(msg, sidebarCtx);
 		},
 		'chat-list-refresh-requested': (msg) => {
-			if (msg instanceof ChatListRefreshRequestedMessage) handleChatListInvalidated(msg, sidebarCtx);
+			if (msg instanceof ChatListRefreshRequestedMessage)
+				handleChatListInvalidated(msg, sidebarCtx);
 		},
 	};
 }
@@ -424,6 +422,9 @@ export function createEventRouter(
 	drainHandle: DrainHandle,
 	stores: EventRouterStores,
 ): void {
+	const outputAccumulator = createAgentOutputAccumulator(stores.chatState);
+	const dispatch = buildDispatch(stores, outputAccumulator);
+
 	$effect(() => {
 		// Sole tracked dependency: re-run whenever a new WS message arrives.
 		// All store reads and handler dispatches are untracked so that
@@ -435,16 +436,13 @@ export function createEventRouter(
 			const newMessages = drainHandle.drain();
 			if (newMessages.length === 0) return;
 
-			const outputAccumulator = createAgentOutputAccumulator(stores);
-			const dispatch = buildDispatch(stores, outputAccumulator);
-
-			const selectedChat = stores.selectedChat();
-			const currentChatId = stores.currentChatId();
-			const pendingViewChatId = stores.pendingViewChat()?.chatId || null;
-
 			for (const wsMsg of newMessages) {
 				const event = normalizeEvent(wsMsg.data);
 				if (!event) continue;
+
+				const selectedChat = stores.sessions.selectedChat();
+				const currentChatId = stores.lifecycle.currentChatId();
+				const pendingViewChatId = stores.conversationUi.pendingViewChat?.chatId || null;
 
 				// Pre-filter: patch sidebar preview for any chat so background
 				// chats update even when the filter skips full dispatch.
@@ -453,12 +451,16 @@ export function createEventRouter(
 					if (agentMsg.chatId && agentMsg.messages.length > 0) {
 						const preview = selectPreviewFromBatch(agentMsg.messages);
 						if (preview) {
-							stores.patchChatPreview(agentMsg.chatId, preview.content, preview.timestamp);
+							stores.sessions.patchChatPreview(
+								agentMsg.chatId,
+								preview.content,
+								preview.timestamp,
+							);
 
 							// Enqueue read receipt for the active chat when visible.
 							const isActiveChat = agentMsg.chatId === (selectedChat?.id || null);
 							if (isActiveChat && document.visibilityState === 'visible') {
-								stores.enqueueReadReceipt(agentMsg.chatId, preview.timestamp);
+								stores.readState.enqueueReadReceipt(agentMsg.chatId, preview.timestamp);
 							}
 						}
 					}
@@ -477,8 +479,8 @@ export function createEventRouter(
 			}
 
 			outputAccumulator.flush();
-			});
 		});
-	}
+	});
+}
 
 export { extractFirstLine as _extractFirstLine };

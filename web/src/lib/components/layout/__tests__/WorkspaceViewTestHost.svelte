@@ -1,6 +1,12 @@
 <script lang="ts">
 	import WorkspaceView from '../WorkspaceView.svelte';
-	import { setChatSessions, setModelCatalog, setLocalSettings, setSplitLayout, setAppShell, setWs } from '$lib/context';
+	import {
+		setChatSessions,
+		setModelCatalog,
+		setLocalSettings,
+		setSplitLayout,
+		setWs,
+	} from '$lib/context';
 	import type { AppTab } from '$lib/types/app';
 
 	interface WorkspaceViewTestHostProps {
@@ -22,22 +28,26 @@
 	}: WorkspaceViewTestHostProps = $props();
 
 	function getChatSessionsContext(): unknown {
-		return chatSessions ?? {
-			selectedChat: {
-				id: 'chat-1',
-				title: 'Header Test Chat',
-				projectPath: '/tmp/header-test',
-			},
-			byId: {
-				'chat-1': {
+		return (
+			chatSessions ?? {
+				selectedChat: {
 					id: 'chat-1',
 					title: 'Header Test Chat',
 					projectPath: '/tmp/header-test',
 				},
-			},
-			orderedChats: [],
-			setSelectedChatId() {},
-		};
+				byId: {
+					'chat-1': {
+						id: 'chat-1',
+						title: 'Header Test Chat',
+						projectPath: '/tmp/header-test',
+					},
+				},
+				orderedChats: [],
+				setSelectedChatId() {},
+				quietRefreshChats() {},
+				deleteRemoteChat() {},
+			}
+		);
 	}
 
 	setChatSessions(getChatSessionsContext() as never);
@@ -53,31 +63,29 @@
 		getModels() {
 			return [];
 		},
-			getAgents() {
-				return ['claude', 'codex', 'opencode'];
-			},
-			getSelectableAgents() {
-				return ['claude', 'codex', 'opencode'];
-			}
-		} as never);
+		getAgents() {
+			return ['claude', 'codex', 'opencode'];
+		},
+		getSelectableAgents() {
+			return ['claude', 'codex', 'opencode'];
+		},
+	} as never);
 
 	function getSplitLayoutContext(): unknown {
-		return splitLayout ?? {
-			isEnabled: false,
-			root: null,
-			focusedPaneId: null,
-			draggedChatId: null,
-			draggedPaneId: null,
-			panes: [],
-			focusedChatId: null,
-		};
+		return (
+			splitLayout ?? {
+				isEnabled: false,
+				root: null,
+				focusedPaneId: null,
+				draggedChatId: null,
+				draggedPaneId: null,
+				panes: [],
+				focusedChatId: null,
+			}
+		);
 	}
 
 	setSplitLayout(getSplitLayoutContext() as never);
-
-	setAppShell({
-		quietRefreshChats() {},
-	} as never);
 
 	setWs({
 		isConnected: false,

@@ -14,7 +14,7 @@
 		{ id: 'cursor', loginCommand: 'cursor-agent login' },
 		{ id: 'factory', loginCommand: 'droid' },
 		{ id: 'opencode', loginCommand: 'opencode auth login' },
-		{ id: 'pi', loginCommand: 'pi' }
+		{ id: 'pi', loginCommand: 'pi' },
 	];
 
 	let { settingsAuth }: { settingsAuth: SettingsAuthState } = $props();

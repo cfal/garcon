@@ -1,9 +1,8 @@
 // Registry mapping explicit tool-use message types to display rules.
 // Known provider-specific tools must arrive here as typed messages.
 
-import type { ToolUseChatMessage, TodoStatus } from '$shared/chat-types';
+import { coerceTodoItems, type ToolUseChatMessage } from '$shared/chat-types';
 import * as m from '$lib/paraglide/messages.js';
-import type { TodoItem } from '$lib/types/chat';
 import type { ToolDisplayRule } from './tool-display-contract';
 import {
 	diffProps,
@@ -15,28 +14,11 @@ import {
 
 type ToolDisplayRegistry = Record<string, ToolDisplayRule>;
 
-function coerceTodoResult(raw: unknown): TodoItem[] | undefined {
-	if (!Array.isArray(raw)) return undefined;
-	const items: TodoItem[] = [];
-	for (const entry of raw) {
-		if (entry == null || typeof entry !== 'object') continue;
-		const obj = entry as Record<string, unknown>;
-		const content = (obj.content ?? obj.text ?? obj.step) as string | undefined;
-		if (typeof content !== 'string') continue;
-		const s = obj.status;
-		const completed = obj.completed;
-		const status: TodoStatus =
-			completed === true || s === 'completed' || s === 'done'
-				? 'completed'
-				: s === 'in_progress' || s === 'in-progress'
-					? 'in_progress'
-					: 'pending';
-		items.push({ content, status });
-	}
-	return items.length > 0 ? items : undefined;
-}
-
 const truncate = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '...' : s);
+
+function filesFoundTitle(count: number): string {
+	return count === 1 ? m.chat_tool_file_found() : m.chat_tool_files_found({ count });
+}
 
 const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'bash-tool-use': 'Bash',
@@ -82,8 +64,8 @@ function fallbackDisplayName(type: string): string {
 const EXIT_PLAN_MODE_RULE: ToolDisplayRule = {
 	input: {
 		mode: 'collapsible',
-		label: 'Implementation plan',
-		title: 'Implementation plan',
+		label: m.chat_tool_implementation_plan(),
+		title: m.chat_tool_implementation_plan(),
 		defaultOpen: true,
 		contentKind: 'markdown',
 		getContentProps: (input) => ({
@@ -189,7 +171,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'inline',
 			label: 'List',
-			getValue: (input) => String(input.path ?? 'current directory'),
+			getValue: (input) => String(input.path ?? m.chat_tool_current_directory()),
 			action: 'none',
 			colorScheme: {
 				primary: 'text-foreground',
@@ -216,9 +198,9 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 						const onlyPath = String(changes[0]?.path ?? '').trim();
 						if (onlyPath) return onlyPath.split('/').pop() || onlyPath;
 					}
-					return `${changes.length} files`;
+					return m.chat_tool_files_count({ count: changes.length });
 				}
-				return fp?.split('/').pop() || fp || 'file';
+				return fp?.split('/').pop() || fp || m.chat_tool_file();
 			},
 			defaultOpen: false,
 			contentKind: 'diff',
@@ -228,9 +210,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 					? (input.changes as Array<{ path?: unknown }>)
 					: [];
 				if (!input.filePath && !input.oldString && !input.newString && changes.length > 0) {
-					const files = changes
-						.map((change) => String(change?.path ?? '').trim())
-						.filter(Boolean);
+					const files = changes.map((change) => String(change?.path ?? '').trim()).filter(Boolean);
 					return { diffUnavailable: true, files };
 				}
 				return diffProps(input, 'Edit', 'gray');
@@ -253,7 +233,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				oldContent: '',
 				newContent: input.content,
 				filePath: input.filePath,
-				badge: 'New',
+				badge: m.chat_tool_badge_new(),
 				badgeColor: 'green',
 			}),
 		},
@@ -278,11 +258,11 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 						newContent: patch,
 						filePath: input.filePath,
 						showHeader: false,
-						badge: 'Patch',
-						badgeColor: 'gray'
+						badge: m.chat_tool_badge_patch(),
+						badgeColor: 'gray',
 					};
 				}
-				return diffProps(input, 'Patch', 'gray');
+				return diffProps(input, m.chat_tool_badge_patch(), 'gray');
 			},
 		},
 		result: {
@@ -296,12 +276,12 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			label: 'Grep',
 			getValue: (input) => {
 				const rawPath = String(input.path ?? '');
-				if (!rawPath) return 'project files';
+				if (!rawPath) return m.chat_tool_project_files();
 				return rawPath.split(/[\\/]/).pop() || rawPath;
 			},
 			getSecondary: (input) => {
 				const pattern = String(input.pattern ?? '').trim();
-				return pattern ? `Pattern: ${pattern}` : undefined;
+				return pattern ? m.chat_tool_pattern({ pattern }) : undefined;
 			},
 			action: 'none',
 			colorScheme: {
@@ -321,7 +301,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 					(toolData.numFiles as number) ||
 					(toolData.filenames as unknown[] | undefined)?.length ||
 					0;
-				return `Found ${count} ${count === 1 ? 'file' : 'files'}`;
+				return filesFoundTitle(count);
 			},
 			contentKind: 'fileList',
 			getContentProps: (result) => {
@@ -358,7 +338,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 					(toolData.numFiles as number) ||
 					(toolData.filenames as unknown[] | undefined)?.length ||
 					0;
-				return `Found ${count} ${count === 1 ? 'file' : 'files'}`;
+				return filesFoundTitle(count);
 			},
 			contentKind: 'fileList',
 			getContentProps: (result) => {
@@ -375,7 +355,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible',
 			label: 'TodoWrite',
-			title: 'Updating todo list',
+			title: m.chat_tool_updating_todo_list(),
 			defaultOpen: true,
 			contentKind: 'todoList',
 			getContentProps: (input) => ({
@@ -385,7 +365,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		result: {
 			mode: 'collapsible',
 			contentKind: 'successMessage',
-			getMessage: () => 'Todo list updated',
+			getMessage: () => m.chat_tool_todo_list_updated(),
 		},
 	},
 
@@ -393,7 +373,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'inline',
 			label: 'TodoRead',
-			getValue: () => 'reading list',
+			getValue: () => m.chat_tool_reading_list(),
 			action: 'none',
 			colorScheme: {
 				primary: 'text-muted-foreground',
@@ -405,7 +385,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			contentKind: 'todoList',
 			getContentProps: (result) => {
 				const content = (result?.content || {}) as Record<string, unknown>;
-				const todos = coerceTodoResult(content.items || content.todos);
+				const todos = coerceTodoItems(content.items || content.todos);
 				return { todos, isResult: true };
 			},
 		},
@@ -416,9 +396,9 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			mode: 'collapsible',
 			label: 'Task',
 			title: (input) => {
-				const subagentType = input.subagentType || 'Agent';
-				const description = input.description || 'Running task';
-				return `Subagent / ${subagentType}: ${description}`;
+				const agent = String(input.subagentType || m.chat_tool_agent());
+				const description = String(input.description || m.chat_tool_running_task());
+				return m.chat_tool_subagent_title({ agent, description });
 			},
 			defaultOpen: true,
 			contentKind: 'markdown',
@@ -426,9 +406,9 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				const hasOnlyPrompt = input.prompt && !input.model && !input.resume;
 				if (hasOnlyPrompt) return { content: input.prompt || '' };
 				const parts: string[] = [];
-				if (input.model) parts.push(`**Model:** ${input.model}`);
-				if (input.prompt) parts.push(`**Prompt:**\n${input.prompt}`);
-				if (input.resume) parts.push(`**Resuming from:** ${input.resume}`);
+				if (input.model) parts.push(m.chat_tool_task_model({ model: String(input.model) }));
+				if (input.prompt) parts.push(m.chat_tool_task_prompt({ prompt: String(input.prompt) }));
+				if (input.resume) parts.push(m.chat_tool_task_resume({ resume: String(input.resume) }));
 				return { content: parts.join('\n\n') };
 			},
 			colorScheme: {
@@ -439,7 +419,9 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			mode: 'collapsible',
 			title: (result) => {
 				const content = (result?.content || {}) as Record<string, unknown>;
-				return Array.isArray(content.items) ? 'Subagent Response' : 'Subagent Result';
+				return Array.isArray(content.items)
+					? m.chat_tool_subagent_response()
+					: m.chat_tool_subagent_result();
 			},
 			defaultOpen: true,
 			contentKind: 'markdown',
@@ -450,9 +432,9 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 						.filter((item) => item.type === 'text')
 						.map((item) => item.text as string)
 						.join('\n\n');
-					return { content: textContent || 'No response text' };
+					return { content: textContent || m.chat_tool_no_response_text() };
 				}
-				return { content: extractContentString(result?.content) || 'No response' };
+				return { content: extractContentString(result?.content) || m.chat_tool_no_response() };
 			},
 		},
 	},
@@ -487,7 +469,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible',
 			label: 'UpdatePlan',
-			title: 'Updating plan',
+			title: m.chat_tool_updating_plan(),
 			defaultOpen: false,
 			contentKind: 'todoList',
 			getContentProps: (input) => ({
@@ -497,7 +479,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		result: {
 			mode: 'collapsible',
 			contentKind: 'successMessage',
-			getMessage: () => 'Plan updated',
+			getMessage: () => m.chat_tool_plan_updated(),
 		},
 	},
 
@@ -525,15 +507,24 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible',
 			label: 'Oracle',
-			title: (input) => `Oracle: ${truncate(String(input.task || 'analyzing'), 80)}`,
+			title: (input) =>
+				m.chat_tool_oracle_title({
+					task: truncate(String(input.task || m.chat_tool_analyzing()), 80),
+				}),
 			defaultOpen: false,
 			contentKind: 'markdown',
 			getContentProps: (input) => {
 				const parts: string[] = [];
-				if (input.task) parts.push(`**Task:** ${input.task}`);
-				if (input.context) parts.push(`**Context:** ${input.context}`);
+				if (input.task) parts.push(m.chat_tool_field_task({ task: String(input.task) }));
+				if (input.context) {
+					parts.push(m.chat_tool_field_context({ context: String(input.context) }));
+				}
 				if (Array.isArray(input.files) && input.files.length > 0) {
-					parts.push(`**Files:**\n${(input.files as string[]).map((file) => `- ${file}`).join('\n')}`);
+					parts.push(
+						m.chat_tool_field_files({
+							files: (input.files as string[]).map((file) => `- ${file}`).join('\n'),
+						}),
+					);
 				}
 				return { content: parts.join('\n\n') };
 			},
@@ -541,7 +532,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		result: {
 			mode: 'collapsible',
 			defaultOpen: true,
-			title: 'Oracle Response',
+			title: m.chat_tool_oracle_response(),
 			contentKind: 'markdown',
 			getContentProps: (result) => ({
 				content: extractContentString(result?.content),
@@ -553,20 +544,25 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible',
 			label: 'Librarian',
-			title: (input) => `Librarian: ${truncate(String(input.query || 'exploring'), 80)}`,
+			title: (input) =>
+				m.chat_tool_librarian_title({
+					query: truncate(String(input.query || m.chat_tool_exploring()), 80),
+				}),
 			defaultOpen: false,
 			contentKind: 'markdown',
 			getContentProps: (input) => {
 				const parts: string[] = [];
-				if (input.query) parts.push(`**Query:** ${input.query}`);
-				if (input.context) parts.push(`**Context:** ${input.context}`);
+				if (input.query) parts.push(m.chat_tool_field_query({ query: String(input.query) }));
+				if (input.context) {
+					parts.push(m.chat_tool_field_context({ context: String(input.context) }));
+				}
 				return { content: parts.join('\n\n') };
 			},
 		},
 		result: {
 			mode: 'collapsible',
 			defaultOpen: true,
-			title: 'Librarian Response',
+			title: m.chat_tool_librarian_response(),
 			contentKind: 'markdown',
 			getContentProps: (result) => ({
 				content: extractContentString(result?.content),
@@ -593,7 +589,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'inline',
 			label: 'Diagram',
-			getValue: () => 'rendering',
+			getValue: () => m.chat_tool_rendering(),
 			action: 'none',
 			colorScheme: {
 				primary: 'text-muted-foreground',
@@ -625,7 +621,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'inline',
 			label: 'Analyze',
-			getValue: (input) => String(input.path ?? '').split('/').pop() || String(input.path ?? ''),
+			getValue: (input) =>
+				String(input.path ?? '')
+					.split('/')
+					.pop() || String(input.path ?? ''),
 			getSecondary: (input) => truncate(String(input.objective ?? ''), 60),
 			action: 'none',
 			colorScheme: {
@@ -688,11 +687,19 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			label: 'Tasks',
 			getValue: (input) => {
 				const action = String(input.action ?? '');
-				if (action === 'create') return `creating: ${input.title || 'task'}`;
-				if (action === 'update') return `updating #${input.taskId || ''}`;
-				if (action === 'get') return `fetching #${input.taskId || ''}`;
-				if (action === 'delete') return `deleting #${input.taskId || ''}`;
-				return 'listing';
+				if (action === 'create') {
+					return m.chat_tool_task_creating({ title: String(input.title || m.chat_tool_task()) });
+				}
+				if (action === 'update') {
+					return m.chat_tool_task_updating({ taskId: String(input.taskId || '') });
+				}
+				if (action === 'get') {
+					return m.chat_tool_task_fetching({ taskId: String(input.taskId || '') });
+				}
+				if (action === 'delete') {
+					return m.chat_tool_task_deleting({ taskId: String(input.taskId || '') });
+				}
+				return m.chat_tool_task_listing();
 			},
 			action: 'none',
 			colorScheme: {
@@ -709,12 +716,12 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
-		'external-tool-use': {
-			input: {
-				mode: 'collapsible',
-				label: 'Tool',
-				title: 'Parameters',
-				defaultOpen: false,
+	'external-tool-use': {
+		input: {
+			mode: 'collapsible',
+			label: 'Tool',
+			title: m.chat_tool_parameters(),
+			defaultOpen: false,
 			contentKind: 'text',
 			getContentProps: (input) => ({
 				content: JSON.stringify(input, null, 2),
@@ -732,11 +739,11 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
-		'mcp-tool-use': {
-			input: {
-				mode: 'collapsible',
+	'mcp-tool-use': {
+		input: {
+			mode: 'collapsible',
 			label: 'MCP',
-			title: 'Parameters',
+			title: m.chat_tool_parameters(),
 			defaultOpen: false,
 			contentKind: 'text',
 			getContentProps: (input) => ({
@@ -755,11 +762,11 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
-		'request-permissions-tool-use': {
-			input: {
-				mode: 'collapsible',
+	'request-permissions-tool-use': {
+		input: {
+			mode: 'collapsible',
 			label: 'Permissions',
-			title: 'Requested permissions',
+			title: m.chat_tool_requested_permissions(),
 			defaultOpen: true,
 			contentKind: 'text',
 			getContentProps: (input) => ({
@@ -776,7 +783,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible',
 			label: 'Tool',
-			title: 'Parameters',
+			title: m.chat_tool_parameters(),
 			defaultOpen: false,
 			contentKind: 'text',
 			getContentProps: (input) => ({
@@ -798,7 +805,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible',
 			label: 'Tool',
-			title: 'Parameters',
+			title: m.chat_tool_parameters(),
 			defaultOpen: false,
 			contentKind: 'text',
 			getContentProps: (input) => ({
@@ -822,7 +829,9 @@ export function getToolDisplayLabel(toolMessage: ToolUseChatMessage): string {
 		return toolMessage.rawName || 'Tool';
 	}
 	if (toolMessage.type === 'external-tool-use') {
-		return toolMessage.namespace ? `${toolMessage.namespace}.${toolMessage.name}` : toolMessage.name;
+		return toolMessage.namespace
+			? `${toolMessage.namespace}.${toolMessage.name}`
+			: toolMessage.name;
 	}
 	if (toolMessage.type === 'mcp-tool-use') {
 		return `${toolMessage.server}.${toolMessage.tool}`;
@@ -832,8 +841,8 @@ export function getToolDisplayLabel(toolMessage: ToolUseChatMessage): string {
 
 export function getToolDisplayDetails(toolMessage: ToolUseChatMessage): Record<string, unknown> {
 	return Object.fromEntries(
-		Object.entries(toolMessage as unknown as Record<string, unknown>).filter(([key]) =>
-			key !== 'timestamp' && key !== 'toolId' && key !== 'type',
+		Object.entries(toolMessage as unknown as Record<string, unknown>).filter(
+			([key]) => key !== 'timestamp' && key !== 'toolId' && key !== 'type',
 		),
 	);
 }

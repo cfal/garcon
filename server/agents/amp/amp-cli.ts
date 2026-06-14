@@ -13,6 +13,9 @@ import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AmpThreadExport } from "./history-loader.js";
 import type { StartSessionRequest, ResumeTurnRequest, StartedAgentSession } from "../session-types.js";
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:amp:amp-cli');
 
 interface AmpSession {
   id: string;
@@ -225,7 +228,7 @@ async function runSingleQuery(prompt: string, { cwd }: { cwd?: string } = {}): P
   try {
     raw = await runAmpCommand(args, { cwd, input: prompt });
   } catch (err) {
-    console.error('amp: one-shot stdout read error:', (err as Error).message);
+    logger.error('amp: one-shot stdout read error:', (err as Error).message);
     throw err;
   }
 
@@ -282,6 +285,7 @@ function buildContinueArgs(threadId: string, model?: string): string[] {
 
 class AmpCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, AmpSession>();
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -292,7 +296,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       case 'system':
         if (msg.subtype === 'init') {
           const threadId = msg.thread_id || msg.session_id;
-          console.log(`amp(${session.id.slice(0, 8)}): init, thread_id=${threadId}`);
+          logger.info(`amp(${session.id.slice(0, 8)}): init, thread_id=${threadId}`);
           if (threadId) {
             session.threadId = threadId;
           }
@@ -309,6 +313,10 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
 
       case 'result':
         session.resultSeen = true;
+        if (session.isRunning) {
+          session.isRunning = false;
+          this.emitProcessing(session.chatId, false);
+        }
         this.emitFinished(session.chatId, msg.is_error ? 1 : 0);
         this.#finalizeTurn(session);
         break;
@@ -318,7 +326,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
         break;
 
       default:
-        console.info(`amp(${session.id.slice(0, 8)}): unrecognized message type: ${msg.type}`);
+        logger.info(`amp(${session.id.slice(0, 8)}): unrecognized message type: ${msg.type}`);
         break;
     }
   }
@@ -345,7 +353,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
           try {
             msg = JSON.parse(line) as AmpCliMessage;
           } catch {
-            console.warn(`amp(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
+            logger.warn(`amp(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
             continue;
           }
           this.#routeMessage(session, msg);
@@ -353,7 +361,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       }
     } catch (err) {
       if (!proc.killed) {
-        console.error(`amp(${session.id.slice(0, 8)}): stdout read error:`, (err as Error).message);
+        logger.error(`amp(${session.id.slice(0, 8)}): stdout read error:`, (err as Error).message);
       }
     } finally {
       const exitCode = await proc.exited;
@@ -393,7 +401,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n')) {
           if (line.trim()) {
-            console.log(`amp(${sessionId.slice(0, 8)}): stderr: ${line}`);
+            logger.info(`amp(${sessionId.slice(0, 8)}): stderr: ${line}`);
           }
         }
       }
@@ -403,7 +411,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
   #spawnAmp(session: AmpSession, cwd: string, args: string[], prompt?: string): ReturnType<typeof Bun.spawn> {
     const ampBinary = getAmpBinary();
 
-    console.log(`amp: spawning: ${ampBinary} ${args.join(' ')}`);
+    logger.info(`amp: spawning: ${ampBinary} ${args.join(' ')}`);
 
     const proc = Bun.spawn([ampBinary, ...args], {
       cwd: cwd || process.cwd(),
@@ -422,7 +430,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     this.#pipeStderr(session.id, proc);
 
     proc.exited.then(exitCode => {
-      console.log(`amp(${session.id.slice(0, 8)}): process exited (code=${exitCode})`);
+      logger.info(`amp(${session.id.slice(0, 8)}): process exited (code=${exitCode})`);
       if (session.process === proc) {
         session.process = null;
       }
@@ -532,10 +540,11 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       }));
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxAge = 30 * 60 * 1000;
 
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
 
       for (const [id, session] of this.#runningSessions.entries()) {
@@ -546,6 +555,21 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
         }
       }
     }, 5 * 60 * 1000);
+  }
+
+  shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
+    for (const session of this.#runningSessions.values()) {
+      session.aborted = true;
+      if (session.process && !session.process.killed) {
+        session.process.kill();
+      }
+      this.#finalizeTurn(session, 143);
+    }
+    this.#runningSessions.clear();
   }
 }
 

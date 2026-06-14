@@ -5,7 +5,6 @@
 
 	interface SidebarSearchDockProps {
 		isLoading: boolean;
-		isReorderMode: boolean;
 		visibleUnreadCount: number;
 		isMarkingAllRead?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
@@ -17,13 +16,11 @@
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onApplyPillSearch: (search: SavedChatSearch) => void;
 		onClearActiveQuery: () => void;
-		primaryLabel?: string;
 		onShowSettings: () => void;
 	}
 
 	let {
 		isLoading,
-		isReorderMode,
 		visibleUnreadCount,
 		isMarkingAllRead = false,
 		sidebarMenuSearches = [],
@@ -35,7 +32,6 @@
 		onApplySidebarMenuSearch,
 		onApplyPillSearch,
 		onClearActiveQuery,
-		primaryLabel,
 		onShowSettings,
 	}: SidebarSearchDockProps = $props();
 
@@ -45,16 +41,14 @@
 <div data-slot="sidebar-search-dock">
 	<SidebarControlsRow
 		{isLoading}
-		{isReorderMode}
 		{visibleUnreadCount}
 		{isMarkingAllRead}
 		{sidebarMenuSearches}
 		hasAdjacentSearchContext={hasSearchContext}
 		{onOpenSearchDialog}
-		onCreateChat={onCreateChat}
+		{onCreateChat}
 		{onMarkAllRead}
 		{onApplySidebarMenuSearch}
-		{primaryLabel}
 		{onShowSettings}
 	/>
 	<SidebarSearchContext
@@ -62,7 +56,7 @@
 		{sidebarPillSearches}
 		{activeQuery}
 		{onOpenSearchDialog}
-		onApplyPillSearch={onApplyPillSearch}
-		onClearActiveQuery={onClearActiveQuery}
+		{onApplyPillSearch}
+		{onClearActiveQuery}
 	/>
 </div>

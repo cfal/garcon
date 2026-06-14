@@ -97,11 +97,7 @@ export class ShellRuntime {
 	// Initializes the xterm terminal and wires up addons, key handlers, and
 	// the ResizeObserver. Runs once the terminal container is mounted and
 	// projectPath is available.
-	initTerminal(
-		terminalEl: HTMLDivElement,
-		projectPath: string,
-		chatId: string | null
-	): void {
+	initTerminal(terminalEl: HTMLDivElement, projectPath: string, chatId: string | null): void {
 		if (this.isRestarting || this.terminal) return;
 
 		const terminal = new Terminal({
@@ -165,7 +161,7 @@ export class ShellRuntime {
 					sendShellMessage(this.ws, {
 						type: 'resize',
 						cols: this.terminal.cols,
-						rows: this.terminal.rows
+						rows: this.terminal.rows,
 					});
 				}
 			}
@@ -211,7 +207,7 @@ export class ShellRuntime {
 					sendShellMessage(this.ws, {
 						type: 'resize',
 						cols: this.terminal!.cols,
-						rows: this.terminal!.rows
+						rows: this.terminal!.rows,
 					});
 				}, 50);
 			}
@@ -287,7 +283,7 @@ export class ShellRuntime {
 				if (this.ws !== socket) return;
 				this.isConnected = false;
 				this.isConnecting = false;
-			}
+			},
 		});
 	}
 

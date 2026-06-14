@@ -21,8 +21,10 @@
 	let { filePath, content, onClose, onEdit }: MarkdownViewerProps = $props();
 	let maximized = $state(false);
 
-	const BASE_CLASS = 'flex flex-col h-dvh w-full max-w-full sm:max-w-full rounded-none border-0 p-0 gap-0 overflow-hidden';
-	const WINDOWED_CLASS = 'flex flex-col h-dvh w-full max-w-full rounded-none border-0 p-0 gap-0 overflow-hidden sm:h-[85vh] sm:max-w-5xl sm:rounded-lg sm:border';
+	const BASE_CLASS =
+		'flex flex-col h-dvh w-full max-w-full sm:max-w-full rounded-none border-0 p-0 gap-0 overflow-hidden';
+	const WINDOWED_CLASS =
+		'flex flex-col h-dvh w-full max-w-full rounded-none border-0 p-0 gap-0 overflow-hidden sm:h-[85vh] sm:max-w-5xl sm:rounded-lg sm:border';
 
 	let contentClass = $derived(maximized ? BASE_CLASS : WINDOWED_CLASS);
 	let markdownFontSize = $derived(parseInt(localSettings.markdownViewerFontSize, 10) || 12);
@@ -34,7 +36,9 @@
 
 <Dialog.Root open={true} onOpenChange={handleOpenChange}>
 	<Dialog.Content class={contentClass} showCloseButton={false}>
-		<div class="flex items-center justify-between p-3 border-b border-border bg-card text-foreground">
+		<div
+			class="flex items-center justify-between p-3 border-b border-border bg-card text-foreground"
+		>
 			<div class="min-w-0">
 				<h3 class="font-medium truncate">{filePath.split('/').pop() ?? filePath}</h3>
 				<p class="text-xs text-muted-foreground truncate">{filePath}</p>

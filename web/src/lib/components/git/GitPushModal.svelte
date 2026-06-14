@@ -19,9 +19,9 @@
 
 	let { remotes, currentBranch, isPushing, onPush, onClose }: Props = $props();
 
-	let selectedRemote = $state(untrack(() =>
-		remotes.find((r) => r.name === 'origin')?.name ?? remotes[0]?.name ?? '',
-	));
+	let selectedRemote = $state(
+		untrack(() => remotes.find((r) => r.name === 'origin')?.name ?? remotes[0]?.name ?? ''),
+	);
 	let overrideBranch = $state(false);
 	let remoteBranchName = $state(untrack(() => currentBranch));
 
@@ -55,7 +55,9 @@
 	onclick={handleBackdropClick}
 	onkeydown={handleKeydown}
 >
-	<div class="bg-background border border-border rounded-lg shadow-xl w-[400px] max-h-[80vh] flex flex-col">
+	<div
+		class="bg-background border border-border rounded-lg shadow-xl w-[400px] max-h-[80vh] flex flex-col"
+	>
 		<!-- Header -->
 		<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
 			<h2 class="text-sm font-medium text-foreground">Push to remote</h2>
@@ -76,15 +78,17 @@
 						<label
 							class="flex items-center gap-2.5 px-3 py-2 rounded-md border transition-colors cursor-pointer
 								{selectedRemote === remote.name
-									? 'border-interactive-accent bg-interactive-accent/5'
-									: 'border-border hover:bg-muted/50'}"
+								? 'border-interactive-accent bg-interactive-accent/5'
+								: 'border-border hover:bg-muted/50'}"
 						>
 							<input
 								type="radio"
 								name="remote"
 								value={remote.name}
 								checked={selectedRemote === remote.name}
-								onchange={() => { selectedRemote = remote.name; }}
+								onchange={() => {
+									selectedRemote = remote.name;
+								}}
 								class="accent-interactive-accent"
 							/>
 							<div class="flex-1 min-w-0">
@@ -102,7 +106,9 @@
 					<input
 						type="checkbox"
 						checked={overrideBranch}
-						onchange={() => { overrideBranch = !overrideBranch; }}
+						onchange={() => {
+							overrideBranch = !overrideBranch;
+						}}
 						class="accent-interactive-accent"
 					/>
 					<span class="text-xs text-muted-foreground">Override remote branch name</span>
@@ -111,7 +117,9 @@
 					<input
 						type="text"
 						value={remoteBranchName}
-						oninput={(e) => { remoteBranchName = e.currentTarget.value; }}
+						oninput={(e) => {
+							remoteBranchName = e.currentTarget.value;
+						}}
 						placeholder={currentBranch}
 						class="w-full text-sm px-2.5 py-1.5 bg-muted/30 border border-border rounded-md
 							focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
@@ -131,8 +139,8 @@
 				disabled={!canPush}
 				class="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200
 					{canPush
-						? 'bg-git-action-push text-git-action-foreground hover:bg-git-action-push-hover'
-						: 'bg-muted text-muted-foreground cursor-not-allowed'}"
+					? 'bg-git-action-push text-git-action-foreground hover:bg-git-action-push-hover'
+					: 'bg-muted text-muted-foreground cursor-not-allowed'}"
 			>
 				{#if isPushing}
 					<LoaderCircle class="w-4 h-4 animate-spin" />

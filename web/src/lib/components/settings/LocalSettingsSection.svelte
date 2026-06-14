@@ -1,11 +1,15 @@
-<!-- Browser-stored settings. All values render immediately from localStorage. -->
+<!-- Browser-stored settings. All values render immediately from persisted storage. -->
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
-	import { isChatMaxWidth, type ChatMaxWidth, type ThemeMode } from '$lib/stores/local-settings.svelte.js';
+	import {
+		isChatMaxWidth,
+		type ChatMaxWidth,
+		type ThemeMode,
+	} from '$lib/stores/local-settings.svelte.js';
 	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -31,11 +35,7 @@
 {#snippet settingRow(label: string, checked: boolean, onToggle: () => void)}
 	<div class="flex items-center justify-between py-2">
 		<div class="text-sm font-medium text-foreground">{label}</div>
-		<Switch
-			{checked}
-			onCheckedChange={() => onToggle()}
-			aria-label={label}
-		/>
+		<Switch {checked} onCheckedChange={() => onToggle()} aria-label={label} />
 	</div>
 {/snippet}
 
@@ -43,13 +43,15 @@
 	<div class="bg-muted/50 border border-border rounded-lg">
 		<!-- Theme -->
 		<div class="flex items-center justify-between px-4 py-3">
-			<div class="text-sm font-medium text-foreground">{m.settings_appearance_settings_dark_mode_label()}</div>
+			<div class="text-sm font-medium text-foreground">
+				{m.settings_appearance_settings_dark_mode_label()}
+			</div>
 			<div class="flex gap-1 bg-muted rounded-lg p-1">
 				<Button
 					variant={ls.theme === 'light' ? 'default' : 'ghost'}
 					size="icon-sm"
 					onclick={() => setTheme('light')}
-					title="Light"
+					title={m.settings_theme_light()}
 				>
 					<SunIcon class="size-3.5" />
 				</Button>
@@ -57,7 +59,7 @@
 					variant={ls.theme === 'dark' ? 'default' : 'ghost'}
 					size="icon-sm"
 					onclick={() => setTheme('dark')}
-					title="Dark"
+					title={m.settings_theme_dark()}
 				>
 					<MoonIcon class="size-3.5" />
 				</Button>
@@ -65,7 +67,7 @@
 					variant={ls.theme === 'system' ? 'default' : 'ghost'}
 					size="icon-sm"
 					onclick={() => setTheme('system')}
-					title="System"
+					title={m.settings_theme_system()}
 				>
 					<MonitorIcon class="size-3.5" />
 				</Button>
@@ -86,35 +88,25 @@
 					{/each}
 				</select>
 			</div>
-			{@render settingRow(
-				m.settings_accessibility_colorblind_mode(),
-				ls.colorblindMode,
-				() => ls.toggle('colorblindMode')
+			{@render settingRow(m.settings_accessibility_colorblind_mode(), ls.colorblindMode, () =>
+				ls.toggle('colorblindMode'),
 			)}
 			{@render settingRow(
 				m.settings_display_show_fullscreen_button(),
 				ls.alwaysFullscreenOnGitPanel,
-				() => ls.toggle('alwaysFullscreenOnGitPanel')
+				() => ls.toggle('alwaysFullscreenOnGitPanel'),
 			)}
-			{@render settingRow(
-				m.settings_chat_auto_expand_tools(),
-				ls.autoExpandTools,
-				() => ls.toggle('autoExpandTools')
+			{@render settingRow(m.settings_chat_auto_expand_tools(), ls.autoExpandTools, () =>
+				ls.toggle('autoExpandTools'),
 			)}
-			{@render settingRow(
-				m.settings_chat_show_thinking(),
-				ls.showThinking,
-				() => ls.toggle('showThinking')
+			{@render settingRow(m.settings_chat_show_thinking(), ls.showThinking, () =>
+				ls.toggle('showThinking'),
 			)}
-			{@render settingRow(
-				m.settings_chat_auto_scroll_to_bottom(),
-				ls.autoScrollToBottom,
-				() => ls.toggle('autoScrollToBottom')
+			{@render settingRow(m.settings_chat_auto_scroll_to_bottom(), ls.autoScrollToBottom, () =>
+				ls.toggle('autoScrollToBottom'),
 			)}
-			{@render settingRow(
-				m.settings_chat_send_by_shift_enter(),
-				ls.sendByShiftEnter,
-				() => ls.toggle('sendByShiftEnter')
+			{@render settingRow(m.settings_chat_send_by_shift_enter(), ls.sendByShiftEnter, () =>
+				ls.toggle('sendByShiftEnter'),
 			)}
 		</div>
 	</div>

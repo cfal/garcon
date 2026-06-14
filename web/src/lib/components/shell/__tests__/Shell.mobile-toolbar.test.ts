@@ -41,7 +41,7 @@ describe('Shell mobile toolbar', () => {
 				removeEventListener: vi.fn(),
 				addListener: vi.fn(),
 				removeListener: vi.fn(),
-			}))
+			})),
 		);
 	});
 

@@ -38,9 +38,15 @@
 
 	const modelCatalog = getModelCatalog();
 	const selector = new ModelSelectorState({
-		get modelCatalog() { return modelCatalog; },
-		get value() { return value; },
-		get mode() { return mode; },
+		get modelCatalog() {
+			return modelCatalog;
+		},
+		get value() {
+			return value;
+		},
+		get mode() {
+			return mode;
+		},
 		onChange: (next) => onChange(next),
 	});
 
@@ -57,17 +63,15 @@
 	});
 	const contentHeightClass = $derived.by(() => {
 		if (isCompactLayout) return 'h-[min(32rem,calc(100vh-1rem))]';
-		return !showAgent && !showSource
-			? 'h-[18rem]'
-			: 'h-[26rem]';
+		return !showAgent && !showSource ? 'h-[18rem]' : 'h-[26rem]';
 	});
 	const triggerBaseClass = $derived(
 		surfaceIsSettings
 			? 'inline-flex min-h-9 min-w-0 max-w-[18rem] items-center justify-between gap-2 overflow-hidden rounded-md border border-border bg-muted px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
-			: 'inline-flex h-9 min-w-0 max-w-[11rem] items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-[15rem]'
+			: 'inline-flex h-9 min-w-0 max-w-[11rem] items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-[15rem]',
 	);
 	const showTriggerSecondaryLine = $derived(
-		surfaceIsSettings || mode.agent === 'select' || Boolean(selector.triggerSecondary)
+		surfaceIsSettings || mode.agent === 'select' || Boolean(selector.triggerSecondary),
 	);
 	const modelListId = $derived(`model-selector-model-list-${selector.instanceId}`);
 
@@ -103,7 +107,9 @@
 		class={cn(triggerBaseClass, triggerClass)}
 	>
 		<span class="flex min-w-0 flex-1 flex-col overflow-hidden leading-tight">
-			<span class="truncate font-medium">{selector.triggerPrimary || m.model_selector_unavailable()}</span>
+			<span class="truncate font-medium"
+				>{selector.triggerPrimary || m.model_selector_unavailable()}</span
+			>
 			{#if showTriggerSecondaryLine}
 				<span
 					data-slot="model-selector-trigger-secondary"
@@ -124,7 +130,7 @@
 			contentWidthClass,
 			contentHeightClass,
 			'max-h-(--bits-popover-content-available-height) overflow-hidden p-0',
-			contentClass
+			contentClass,
 		)}
 	>
 		{#if isCompactLayout}
@@ -137,12 +143,7 @@
 				onDone={() => selector.commitAndClose()}
 			/>
 		{:else}
-			<ModelSelectorColumnsLayout
-				{selector}
-				{showAgent}
-				{showSource}
-				{modelListId}
-			/>
+			<ModelSelectorColumnsLayout {selector} {showAgent} {showSource} {modelListId} />
 		{/if}
 	</Popover.Content>
 </Popover.Root>

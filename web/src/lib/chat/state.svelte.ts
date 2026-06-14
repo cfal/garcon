@@ -1,15 +1,25 @@
 // Per-chat message state: message arrays, pagination, scroll management,
 // and message persistence via LocalChatSnapshotCache.
 
-import { parseChatMessages, UserMessage, type ChatMessage } from '$shared/chat-types';
+import { ErrorMessage, parseChatMessages, UserMessage, type ChatMessage } from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
+import { ChatMessageIdentityIndex } from '$shared/chat-message-identity';
 import { LocalChatSnapshotCache } from './chat-snapshot-cache';
 import { getChatMessages } from '$lib/api/chats.js';
 
 const MESSAGES_PER_PAGE = 20;
-const INITIAL_VISIBLE_MESSAGES = 100;
+export const INITIAL_VISIBLE_MESSAGES = 100;
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
+
+export interface ChatLoadMessagesOptions {
+	minimumLimit?: number;
+}
+
+export interface ChatRestoreResult {
+	count: number;
+	stale: boolean;
+}
 
 export class ChatState {
 	readonly snapshotCache = new LocalChatSnapshotCache();
@@ -23,35 +33,33 @@ export class ChatState {
 	isUserScrolledUp = $state(false);
 	loadStatus = $state<ChatLoadStatus>('idle');
 	loadError = $state<string | null>(null);
+	#messageIdentityIndex = new ChatMessageIdentityIndex();
+
+	#displayMessages = $derived.by(() => {
+		if (this.pendingUserInputs.length === 0) return this.chatMessages;
+		return mergeMessagesWithPendingInputs(this.chatMessages, this.pendingUserInputs);
+	});
+
+	#displayMessageCount = $derived.by(() => this.#displayMessages.length);
+
+	#visibleMessages = $derived.by(() => {
+		if (this.#displayMessages.length <= this.visibleMessageCount) {
+			return this.#displayMessages;
+		}
+		return this.#displayMessages.slice(-this.visibleMessageCount);
+	});
 
 	get displayMessages(): ChatMessage[] {
-		const combined = [
-			...this.chatMessages.map((message) => ({ message, pending: false })),
-			...this.pendingUserInputs.map((input) => ({
-				message: pendingInputToMessage(input),
-				pending: true,
-			})),
-		];
-		combined.sort((left, right) => {
-			const timestampOrder = left.message.timestamp.localeCompare(right.message.timestamp);
-			if (timestampOrder !== 0) return timestampOrder;
-			if (left.pending !== right.pending) return left.pending ? -1 : 1;
-			return 0;
-		});
-		return combined.map((entry) => entry.message);
+		return this.#displayMessages;
 	}
 
 	get displayMessageCount(): number {
-		return this.displayMessages.length;
+		return this.#displayMessageCount;
 	}
 
 	// Visible slice of messages, capped by visibleMessageCount.
 	get visibleMessages(): ChatMessage[] {
-		const displayMessages = this.displayMessages;
-		if (displayMessages.length <= this.visibleMessageCount) {
-			return displayMessages;
-		}
-		return displayMessages.slice(-this.visibleMessageCount);
+		return this.#visibleMessages;
 	}
 
 	// Tracks offset for paginated fetches from the server.
@@ -65,8 +73,9 @@ export class ChatState {
 	#loadGeneration = 0;
 
 	/** Loads messages for a chat through the REST history endpoint. */
-	async loadMessages(chatId: string): Promise<ChatMessage[]> {
+	async loadMessages(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<ChatMessage[]> {
 		if (!chatId) return [];
+		const limit = Math.max(MESSAGES_PER_PAGE, Math.floor(options.minimumLimit ?? MESSAGES_PER_PAGE));
 
 		const generation = ++this.#loadGeneration;
 		this.isLoadingMessages = true;
@@ -75,12 +84,12 @@ export class ChatState {
 		this.#messagesOffset = 0;
 
 		try {
-			const data = await getChatMessages({ chatId, limit: MESSAGES_PER_PAGE, offset: 0 });
+			const data = await getChatMessages({ chatId, limit, offset: 0 });
 			const messages = parseChatMessages(data.messages);
 			const pendingUserInputs = Array.isArray(data.pendingUserInputs)
 				? data.pendingUserInputs
-					.map(normalizePendingUserInput)
-					.filter((input): input is PendingUserInput => Boolean(input))
+						.map(normalizePendingUserInput)
+						.filter((input): input is PendingUserInput => Boolean(input))
 				: [];
 
 			if (data.hasMore !== undefined) {
@@ -115,7 +124,11 @@ export class ChatState {
 		this.isLoadingMoreMessages = true;
 
 		try {
-			const data = await getChatMessages({ chatId, limit: MESSAGES_PER_PAGE, offset: this.#messagesOffset });
+			const data = await getChatMessages({
+				chatId,
+				limit: MESSAGES_PER_PAGE,
+				offset: this.#messagesOffset,
+			});
 			const messages = parseChatMessages(data.messages);
 			if (messages.length === 0) return false;
 
@@ -127,6 +140,7 @@ export class ChatState {
 			}
 
 			this.#messagesOffset += messages.length;
+			this.#messageIdentityIndex.addMany(messages);
 			this.chatMessages = [...messages, ...this.chatMessages];
 			this.visibleMessageCount += messages.length;
 			return true;
@@ -141,11 +155,27 @@ export class ChatState {
 
 	/** Appends new messages to the end of the array. */
 	appendMessages(msgs: ChatMessage[]): void {
+		if (msgs.length === 0) return;
+		this.#messageIdentityIndex.addMany(msgs);
 		this.chatMessages = [...this.chatMessages, ...msgs];
+	}
+
+	/** Appends only messages not already represented by the identity index. */
+	appendMessagesByIdentity(msgs: ChatMessage[]): void {
+		if (msgs.length === 0) return;
+		const nextMessages = this.#messageIdentityIndex.takeNew(msgs);
+		if (nextMessages.length === 0) return;
+		this.chatMessages = [...this.chatMessages, ...nextMessages];
+	}
+
+	/** Appends a local error row to the durable message list. */
+	appendErrorMessage(content: string): void {
+		this.appendMessages([new ErrorMessage(new Date().toISOString(), content)]);
 	}
 
 	/** Replaces the entire durable message array. */
 	setMessages(msgs: ChatMessage[]): void {
+		this.#messageIdentityIndex.reset(msgs);
 		this.chatMessages = msgs;
 	}
 
@@ -165,7 +195,9 @@ export class ChatState {
 	}
 
 	clearPendingUserInput(clientRequestId: string): void {
-		this.pendingUserInputs = this.pendingUserInputs.filter((input) => input.clientRequestId !== clientRequestId);
+		this.pendingUserInputs = this.pendingUserInputs.filter(
+			(input) => input.clientRequestId !== clientRequestId,
+		);
 	}
 
 	updatePendingUserInputDeliveryStatus(
@@ -173,14 +205,13 @@ export class ChatState {
 		deliveryStatus: 'submitting' | 'accepted' | 'failed',
 	): void {
 		this.pendingUserInputs = this.pendingUserInputs.map((input) =>
-			input.clientRequestId === clientRequestId
-				? { ...input, deliveryStatus }
-				: input,
+			input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
 		);
 	}
 
 	/** Clears all messages and resets pagination state. */
 	clearMessages(): void {
+		this.#messageIdentityIndex.reset();
 		this.chatMessages = [];
 		this.pendingUserInputs = [];
 		this.#messagesOffset = 0;
@@ -206,6 +237,7 @@ export class ChatState {
 
 	/** Resets scroll and pagination state for a new chat selection. */
 	resetForNewChat(): void {
+		this.#messageIdentityIndex.reset();
 		this.chatMessages = [];
 		this.pendingUserInputs = [];
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
@@ -219,15 +251,15 @@ export class ChatState {
 
 	/** Persists current durable messages via the snapshot cache. */
 	persistMessages(chatId: string): void {
-		this.snapshotCache.persist(chatId, this.chatMessages);
+		this.snapshotCache.persist(chatId, this.chatMessages, { limit: INITIAL_VISIBLE_MESSAGES });
 	}
 
 	/** Restores durable messages from the snapshot cache. */
-	restoreMessages(chatId: string): boolean {
-		const restored = this.snapshotCache.restore(chatId);
-		if (!restored) return false;
-		this.chatMessages = restored.messages;
-		return true;
+	restoreMessages(chatId: string): ChatRestoreResult | null {
+		const restored = this.snapshotCache.restore(chatId, { limit: INITIAL_VISIBLE_MESSAGES });
+		if (!restored) return null;
+		this.setMessages(restored.messages);
+		return { count: restored.messages.length, stale: restored.stale };
 	}
 
 	/** Removes cached messages for the given chat ID. */
@@ -251,4 +283,37 @@ function pendingInputToMessage(input: PendingUserInput): UserMessage {
 		turnId: input.turnId,
 		deliveryStatus: input.deliveryStatus,
 	});
+}
+
+function mergeMessagesWithPendingInputs(
+	messages: ChatMessage[],
+	pendingInputs: PendingUserInput[],
+): ChatMessage[] {
+	if (messages.length === 0) return pendingInputs.map(pendingInputToMessage);
+
+	const pendingMessages = pendingInputs.map(pendingInputToMessage);
+	const merged: ChatMessage[] = [];
+	let messageIndex = 0;
+	let pendingIndex = 0;
+
+	while (messageIndex < messages.length && pendingIndex < pendingMessages.length) {
+		const message = messages[messageIndex];
+		const pending = pendingMessages[pendingIndex];
+		if (message.timestamp.localeCompare(pending.timestamp) < 0) {
+			merged.push(message);
+			messageIndex += 1;
+		} else {
+			merged.push(pending);
+			pendingIndex += 1;
+		}
+	}
+
+	if (messageIndex < messages.length) {
+		merged.push(...messages.slice(messageIndex));
+	}
+	if (pendingIndex < pendingMessages.length) {
+		merged.push(...pendingMessages.slice(pendingIndex));
+	}
+
+	return merged;
 }

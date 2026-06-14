@@ -23,16 +23,16 @@ import {
 	AmpSkillToolUseMessage,
 	AmpMermaidToolUseMessage,
 	AmpHandoffToolUseMessage,
-		AmpLookAtToolUseMessage,
-		AmpFindThreadToolUseMessage,
-		AmpReadThreadToolUseMessage,
-		AmpTaskListToolUseMessage,
-		ExternalToolUseMessage,
-		McpToolUseMessage,
-		RequestPermissionsToolUseMessage,
-		UnknownToolUseMessage,
-		PermissionRequestMessage,
-		UserMessage,
+	AmpLookAtToolUseMessage,
+	AmpFindThreadToolUseMessage,
+	AmpReadThreadToolUseMessage,
+	AmpTaskListToolUseMessage,
+	ExternalToolUseMessage,
+	McpToolUseMessage,
+	RequestPermissionsToolUseMessage,
+	UnknownToolUseMessage,
+	PermissionRequestMessage,
+	UserMessage,
 	parseChatMessage,
 } from '$shared/chat-types';
 
@@ -97,7 +97,14 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('ApplyPatchToolUseMessage preserves diff fields', () => {
-		const msg = new ApplyPatchToolUseMessage(TS, 'id-6', '/tmp/p.ts', 'before', 'after', 'patch text');
+		const msg = new ApplyPatchToolUseMessage(
+			TS,
+			'id-6',
+			'/tmp/p.ts',
+			'before',
+			'after',
+			'patch text',
+		);
 		const parsed = roundTrip(msg);
 		expect(parsed.filePath).toBe('/tmp/p.ts');
 		expect(parsed.oldString).toBe('before');
@@ -146,7 +153,14 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('TaskToolUseMessage preserves all fields', () => {
-		const msg = new TaskToolUseMessage(TS, 'id-13', 'Explore', 'Find files', 'search for X', 'sonnet');
+		const msg = new TaskToolUseMessage(
+			TS,
+			'id-13',
+			'Explore',
+			'Find files',
+			'search for X',
+			'sonnet',
+		);
 		const parsed = roundTrip(msg);
 		expect(parsed.subagentType).toBe('Explore');
 		expect(parsed.description).toBe('Find files');
@@ -155,7 +169,9 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('UpdatePlanToolUseMessage preserves todos', () => {
-		const msg = new UpdatePlanToolUseMessage(TS, 'id-14', [{ content: 'step 1', status: 'pending' as const }]);
+		const msg = new UpdatePlanToolUseMessage(TS, 'id-14', [
+			{ content: 'step 1', status: 'pending' as const },
+		]);
 		const parsed = roundTrip(msg);
 		expect(parsed.todos).toEqual([{ content: 'step 1', status: 'pending' }]);
 	});
@@ -187,7 +203,13 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('AmpOracleToolUseMessage preserves structured fields', () => {
-		const msg = new AmpOracleToolUseMessage(TS, 'id-amp-2', 'Review auth', 'Focus on websocket flow', ['src/auth.ts']);
+		const msg = new AmpOracleToolUseMessage(
+			TS,
+			'id-amp-2',
+			'Review auth',
+			'Focus on websocket flow',
+			['src/auth.ts'],
+		);
 		const parsed = roundTrip(msg);
 		expect(parsed.task).toBe('Review auth');
 		expect(parsed.context).toBe('Focus on websocket flow');
@@ -233,14 +255,26 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('AmpReadThreadToolUseMessage preserves threadId and goal', () => {
-		const msg = new AmpReadThreadToolUseMessage(TS, 'id-amp-9', 'thread-123', 'Summarize decisions');
+		const msg = new AmpReadThreadToolUseMessage(
+			TS,
+			'id-amp-9',
+			'thread-123',
+			'Summarize decisions',
+		);
 		const parsed = roundTrip(msg);
 		expect(parsed.threadId).toBe('thread-123');
 		expect(parsed.goal).toBe('Summarize decisions');
 	});
 
 	it('AmpTaskListToolUseMessage preserves task metadata', () => {
-		const msg = new AmpTaskListToolUseMessage(TS, 'id-amp-10', 'update', '42', 'Ship implementation', 'done');
+		const msg = new AmpTaskListToolUseMessage(
+			TS,
+			'id-amp-10',
+			'update',
+			'42',
+			'Ship implementation',
+			'done',
+		);
 		const parsed = roundTrip(msg);
 		expect(parsed.action).toBe('update');
 		expect(parsed.taskId).toBe('42');
@@ -265,7 +299,12 @@ describe('tool-use serialization round-trip', () => {
 	});
 
 	it('RequestPermissionsToolUseMessage preserves requested permissions', () => {
-		const msg = new RequestPermissionsToolUseMessage(TS, 'id-permissions-1', { network: { enabled: true } }, 'Need API access');
+		const msg = new RequestPermissionsToolUseMessage(
+			TS,
+			'id-permissions-1',
+			{ network: { enabled: true } },
+			'Need API access',
+		);
 		const parsed = roundTrip(msg);
 		expect(parsed.permissions).toEqual({ network: { enabled: true } });
 		expect(parsed.reason).toBe('Need API access');
@@ -316,6 +355,23 @@ describe('wire format parsing', () => {
 		expect(parsed.metadata).toEqual({ clientRequestId: 'req-1' });
 	});
 
+	it('filters malformed user-message images at parse boundary', () => {
+		const parsed = parseChatMessage({
+			type: 'user-message',
+			timestamp: TS,
+			content: 'hello',
+			images: [
+				{ data: 'data:image/png;base64,abc', name: 'screenshot.png' },
+				{ data: 123, name: 'bad.png' },
+				{ data: 'data:image/png;base64,def' },
+				null,
+			],
+		}) as UserMessage;
+
+		expect(parsed).toBeInstanceOf(UserMessage);
+		expect(parsed.images).toEqual([{ data: 'data:image/png;base64,abc', name: 'screenshot.png' }]);
+	});
+
 	it('parses bash-tool-use from wire data', () => {
 		const data = { type: 'bash-tool-use', timestamp: TS, toolId: 'id-wire', command: 'echo hello' };
 		const parsed = parseChatMessage(data);
@@ -363,6 +419,44 @@ describe('wire format parsing', () => {
 		expect(parsed).toBeInstanceOf(UnknownToolUseMessage);
 		expect(parsed.rawName).toBe('customX');
 		expect(parsed.input).toEqual({ a: 1, b: 'two' });
+	});
+
+	it('filters malformed edit changes at parse boundary', () => {
+		const parsed = parseChatMessage({
+			type: 'edit-tool-use',
+			timestamp: TS,
+			toolId: 'id-edit-wire',
+			changes: [
+				{ path: '/tmp/a.ts', kind: 'update' },
+				{ path: 123, kind: 'create' },
+				{ path: '/tmp/b.ts', kind: false },
+				'bad',
+			],
+		}) as EditToolUseMessage;
+
+		expect(parsed).toBeInstanceOf(EditToolUseMessage);
+		expect(parsed.changes).toEqual([
+			{ path: '/tmp/a.ts', kind: 'update' },
+			{ kind: 'create' },
+			{ path: '/tmp/b.ts' },
+		]);
+	});
+
+	it('filters malformed exit-plan allowed prompts at parse boundary', () => {
+		const parsed = parseChatMessage({
+			type: 'exit-plan-mode-tool-use',
+			timestamp: TS,
+			toolId: 'id-plan-wire',
+			plan: 'Implement it',
+			allowedPrompts: [
+				{ tool: 'Bash', prompt: 'run tests' },
+				{ tool: 'Read', prompt: 123 },
+				{ tool: false, prompt: 'bad' },
+			],
+		}) as ExitPlanModeToolUseMessage;
+
+		expect(parsed).toBeInstanceOf(ExitPlanModeToolUseMessage);
+		expect(parsed.allowedPrompts).toEqual([{ tool: 'Bash', prompt: 'run tests' }]);
 	});
 });
 

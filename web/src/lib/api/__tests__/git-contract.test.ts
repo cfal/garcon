@@ -54,8 +54,12 @@ describe('git API contract', () => {
 
 	it('getGitStatus calls GET /api/v1/git/status with project param', async () => {
 		const payload = {
-			branch: 'main', hasCommits: true,
-			modified: ['a.txt'], added: [], deleted: [], untracked: [],
+			branch: 'main',
+			hasCommits: true,
+			modified: ['a.txt'],
+			added: [],
+			deleted: [],
+			untracked: [],
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
@@ -122,8 +126,13 @@ describe('git API contract', () => {
 
 	it('getRemoteStatus calls GET with project param', async () => {
 		const payload = {
-			hasRemote: true, hasUpstream: true, branch: 'main',
-			remoteName: 'origin', ahead: 1, behind: 0, isUpToDate: false,
+			hasRemote: true,
+			hasUpstream: true,
+			branch: 'main',
+			remoteName: 'origin',
+			ahead: 1,
+			behind: 0,
+			isUpToDate: false,
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
@@ -207,9 +216,13 @@ describe('git API contract', () => {
 
 	it('getGitFileReviewData calls GET with file/mode/context for unstaged tab', async () => {
 		const payload = {
-			path: 'a.ts', isBinary: false,
-			truncated: false, contentBefore: '', contentAfter: '',
-			diffOps: [], hunks: [],
+			path: 'a.ts',
+			isBinary: false,
+			truncated: false,
+			contentBefore: '',
+			contentAfter: '',
+			diffOps: [],
+			hunks: [],
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
@@ -261,7 +274,18 @@ describe('git API contract', () => {
 	});
 
 	it('getGitWorktrees calls GET with project', async () => {
-		const payload = { worktrees: [{ name: 'main', path: '/repo', branch: 'main', isCurrent: true, isMain: true, isPathMissing: false }] };
+		const payload = {
+			worktrees: [
+				{
+					name: 'main',
+					path: '/repo',
+					branch: 'main',
+					isCurrent: true,
+					isMain: true,
+					isPathMissing: false,
+				},
+			],
+		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
 		const result = await getGitWorktrees('/project');
@@ -340,9 +364,13 @@ describe('git API contract', () => {
 
 	it('getGitFileReviewData sends mode=staged for staged tab', async () => {
 		const payload = {
-			path: 'a.ts', isBinary: false,
-			truncated: false, contentBefore: 'old', contentAfter: 'new',
-			diffOps: [], hunks: [],
+			path: 'a.ts',
+			isBinary: false,
+			truncated: false,
+			contentBefore: 'old',
+			contentAfter: 'new',
+			diffOps: [],
+			hunks: [],
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
@@ -382,4 +410,4 @@ describe('git API contract', () => {
 		expect(url).toContain('/api/v1/git/targets');
 		expect(url).toContain('project=%2Frepo%20with%20space');
 	});
-	});
+});

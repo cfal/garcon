@@ -1,8 +1,12 @@
 import type { AgentEventMetadata } from './session-types.js';
 import type { AgentDirectory } from './directory.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('agents:event-bus');
 
 export interface TurnEventMetadata {
   clientRequestId?: string;
+  commandType?: 'chat-start';
   upstreamRequestId?: string;
   turnId?: string;
 }
@@ -23,10 +27,14 @@ export class AgentEventBus {
     this.#directory = directory;
   }
 
-  trackTurn(chatId: string, opts: { clientRequestId?: string; turnId?: string }): void {
-    if (opts.clientRequestId || opts.turnId) {
+  trackTurn(chatId: string, opts: { clientRequestId?: string; commandType?: 'chat-start'; turnId?: string }): void {
+    if (opts.clientRequestId || opts.commandType || opts.turnId) {
+      if (this.#turnMetadataByChatId.has(chatId)) {
+        logger.warn('agents: overwriting in-flight turn metadata for chat', chatId);
+      }
       this.#turnMetadataByChatId.set(chatId, {
         clientRequestId: opts.clientRequestId,
+        commandType: opts.commandType,
         turnId: opts.turnId,
       });
       return;

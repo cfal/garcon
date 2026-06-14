@@ -33,7 +33,7 @@ async function getMermaid(): Promise<Mermaid> {
 			startOnLoad: false,
 			theme,
 			fontFamily: 'inherit',
-			suppressErrorRendering: true
+			suppressErrorRendering: true,
 		};
 		mermaid.initialize(config);
 		initializedTheme = theme;

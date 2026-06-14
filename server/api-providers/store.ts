@@ -19,8 +19,14 @@ import {
 } from '../../common/api-providers.js';
 import type { AgentModelOption } from '../../common/agents.js';
 import { getConfigDir } from '../config.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { createLogger } from '../lib/log.js';
+import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+
+const logger = createLogger('api-providers:store');
 
 const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;
+const API_PROVIDER_WRITE_LOCK_KEY = 'api-providers';
 const MODEL_DISCOVERY_KINDS = new Set<ModelDiscoveryKind>([
   'none',
   'anthropic-models',
@@ -304,7 +310,7 @@ function applyApiKeyPatch(
 }
 
 export class ApiProviderStore {
-  #writeLock = Promise.resolve();
+  #writeLock = new KeyedPromiseLock();
   #snapshot: ApiProviderStoreSnapshot = { version: 1, apiProviders: [] };
 
   constructor(private readonly filePath = storePath()) {}
@@ -436,25 +442,16 @@ export class ApiProviderStore {
   }
 
   async #withLock<T>(fn: () => Promise<T>): Promise<T> {
-    let release!: () => void;
-    const next = new Promise<void>((resolve) => { release = resolve; });
-    const prev = this.#writeLock;
-    this.#writeLock = next;
-    await prev;
-    try {
-      return await fn();
-    } finally {
-      release();
-    }
+    return this.#writeLock.runExclusive(API_PROVIDER_WRITE_LOCK_KEY, fn);
   }
 
   async #read(): Promise<ApiProviderStoreSnapshot> {
     try {
       const raw = await fs.readFile(this.filePath, 'utf8');
       return normalizeSnapshot(JSON.parse(raw));
-    } catch (error: any) {
-      if (error?.code === 'ENOENT') return { version: 1, apiProviders: [] };
-      console.warn('api-providers: invalid api-providers.json, using empty provider list:', error.message);
+    } catch (error: unknown) {
+      if (hasNodeErrorCode(error, 'ENOENT')) return { version: 1, apiProviders: [] };
+      logger.warn('api-providers: invalid api-providers.json, using empty provider list:', errorMessage(error));
       return { version: 1, apiProviders: [] };
     }
   }

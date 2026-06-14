@@ -4,18 +4,15 @@ import {
 	discoverApiProviderModels,
 	testApiProvider,
 	updateApiProvider,
-	type ApiProviderInput
+	type ApiProviderInput,
 } from '$lib/api/api-providers.js';
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
-import {
-	apiProviderTemplate,
-	type ApiProviderTemplateId
-} from '$shared/api-provider-templates';
+import { apiProviderTemplate, type ApiProviderTemplateId } from '$shared/api-provider-templates';
 import {
 	type ApiProtocol,
 	type ModelDiscoveryKind,
-	type OpenAiEndpointCapabilities
+	type OpenAiEndpointCapabilities,
 } from '$shared/api-providers';
 
 interface DialogOptions {
@@ -38,7 +35,7 @@ export class ApiProviderEndpointDialogState {
 	modelDiscovery = $state<ModelDiscoveryKind>('none');
 	openAiCapabilities = $state<OpenAiEndpointCapabilities>({
 		chatCompletions: true,
-		responses: false
+		responses: false,
 	});
 	isSaving = $state(false);
 	isTesting = $state(false);
@@ -58,13 +55,19 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	get apiKeyPlaceholder(): string {
-		if (this.templateId === 'alibaba-cloud') return m.settings_api_provider_dialog_api_key_placeholder_alibaba_cloud();
-		if (this.templateId === 'fireworks') return m.settings_api_provider_dialog_api_key_placeholder_fireworks();
-		if (this.templateId === 'gemini') return m.settings_api_provider_dialog_api_key_placeholder_gemini();
-		if (this.templateId === 'openrouter') return m.settings_api_provider_dialog_api_key_placeholder_openrouter();
-		if (this.templateId === 'together') return m.settings_api_provider_dialog_api_key_placeholder_together();
+		if (this.templateId === 'alibaba-cloud')
+			return m.settings_api_provider_dialog_api_key_placeholder_alibaba_cloud();
+		if (this.templateId === 'fireworks')
+			return m.settings_api_provider_dialog_api_key_placeholder_fireworks();
+		if (this.templateId === 'gemini')
+			return m.settings_api_provider_dialog_api_key_placeholder_gemini();
+		if (this.templateId === 'openrouter')
+			return m.settings_api_provider_dialog_api_key_placeholder_openrouter();
+		if (this.templateId === 'together')
+			return m.settings_api_provider_dialog_api_key_placeholder_together();
 		if (this.templateId === 'zai') return m.settings_api_provider_dialog_api_key_placeholder_zai();
-		if (this.templateId === 'ollama') return m.settings_api_provider_dialog_api_key_placeholder_ollama();
+		if (this.templateId === 'ollama')
+			return m.settings_api_provider_dialog_api_key_placeholder_ollama();
 		return m.settings_api_provider_dialog_api_key_placeholder();
 	}
 
@@ -95,8 +98,7 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	get supportsChatCompletionsApi(): boolean {
-		return this.protocol === 'openai-compatible'
-			&& this.openAiCapabilities.chatCompletions;
+		return this.protocol === 'openai-compatible' && this.openAiCapabilities.chatCompletions;
 	}
 
 	get supportsResponsesApi(): boolean {
@@ -122,15 +124,17 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	get defaultModelLabel(): string {
-		return this.modelOptions.find((model) => model.value === this.defaultModel)?.label
-			?? m.settings_api_provider_dialog_default_model_placeholder();
+		return (
+			this.modelOptions.find((model) => model.value === this.defaultModel)?.label ??
+			m.settings_api_provider_dialog_default_model_placeholder()
+		);
 	}
 
 	get canFetchModels(): boolean {
 		return Boolean(
 			this.baseUrl.trim() &&
-				(!this.apiKeyRequired || Boolean(this.apiProviderId) || Boolean(this.apiKey.trim())) &&
-				!this.isFetchingModels
+			(!this.apiKeyRequired || Boolean(this.apiProviderId) || Boolean(this.apiKey.trim())) &&
+			!this.isFetchingModels,
 		);
 	}
 
@@ -141,13 +145,13 @@ export class ApiProviderEndpointDialogState {
 	get canSave(): boolean {
 		return Boolean(
 			this.label.trim() &&
-				this.baseUrl.trim() &&
-				this.hasModels &&
-				this.defaultModelIsValid &&
-				this.hasRequiredApiCapability &&
-				(!this.apiKeyRequired || Boolean(this.apiProviderId) || Boolean(this.apiKey.trim())) &&
-				!this.isSaving &&
-				!this.isFetchingModels
+			this.baseUrl.trim() &&
+			this.hasModels &&
+			this.defaultModelIsValid &&
+			this.hasRequiredApiCapability &&
+			(!this.apiKeyRequired || Boolean(this.apiProviderId) || Boolean(this.apiKey.trim())) &&
+			!this.isSaving &&
+			!this.isFetchingModels,
 		);
 	}
 
@@ -179,11 +183,12 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	beginCreate(): void {
-		const template = apiProviderTemplate(this.protocol, this.options.getTemplateId?.() ?? 'custom')
-			?? apiProviderTemplate(this.protocol, 'custom');
+		const template =
+			apiProviderTemplate(this.protocol, this.options.getTemplateId?.() ?? 'custom') ??
+			apiProviderTemplate(this.protocol, 'custom');
 		if (!template) {
 			this.error = m.settings_api_provider_dialog_no_template({
-				protocol: localizedProtocolLabel(this.protocol)
+				protocol: localizedProtocolLabel(this.protocol),
 			});
 			return;
 		}
@@ -207,24 +212,26 @@ export class ApiProviderEndpointDialogState {
 	setSupportsChatCompletionsApi(enabled: boolean): void {
 		this.openAiCapabilities = {
 			...this.openAiCapabilities,
-			chatCompletions: enabled
+			chatCompletions: enabled,
 		};
 	}
 
 	setSupportsResponsesApi(enabled: boolean): void {
 		this.openAiCapabilities = {
 			...this.openAiCapabilities,
-			responses: enabled
+			responses: enabled,
 		};
 	}
 
-	private openAiCapabilitiesFrom(value: OpenAiEndpointCapabilities | undefined): OpenAiEndpointCapabilities {
+	private openAiCapabilitiesFrom(
+		value: OpenAiEndpointCapabilities | undefined,
+	): OpenAiEndpointCapabilities {
 		if (this.protocol !== 'openai-compatible') {
 			return { chatCompletions: false, responses: false };
 		}
 		return {
 			chatCompletions: value?.chatCompletions ?? true,
-			responses: value?.responses ?? false
+			responses: value?.responses ?? false,
 		};
 	}
 
@@ -236,14 +243,12 @@ export class ApiProviderEndpointDialogState {
 				protocol: this.protocol,
 				baseUrl: this.baseUrl.trim(),
 				apiKey: this.apiKey || undefined,
-				...(this.protocol === 'openai-compatible'
-					? { capabilities: this.openAiCapabilities }
-					: {}),
+				...(this.protocol === 'openai-compatible' ? { capabilities: this.openAiCapabilities } : {}),
 				defaultModel: this.defaultModel.trim(),
 				models: this.modelOptions,
 				supportsImages: this.supportsImages,
-				modelDiscovery: this.modelDiscovery
-			}
+				modelDiscovery: this.modelDiscovery,
+			},
 		};
 	}
 
@@ -272,16 +277,17 @@ export class ApiProviderEndpointDialogState {
 		this.error = null;
 		this.testMessage = null;
 		try {
-			const discoveryKind = this.modelDiscovery === 'none'
-				? discoveryKindForProtocol(this.protocol)
-				: this.modelDiscovery;
+			const discoveryKind =
+				this.modelDiscovery === 'none'
+					? discoveryKindForProtocol(this.protocol)
+					: this.modelDiscovery;
 			const result = await discoverApiProviderModels({
 				protocol: this.protocol,
 				baseUrl: this.baseUrl.trim(),
 				apiKey: this.apiKey || undefined,
 				apiProviderId: this.apiProviderId,
 				endpointId: this.endpointId,
-				modelDiscovery: discoveryKind
+				modelDiscovery: discoveryKind,
 			});
 			if (!result.success) {
 				this.error = result.error || m.settings_api_provider_dialog_fetch_failed();
@@ -295,7 +301,9 @@ export class ApiProviderEndpointDialogState {
 			this.modelsText = sortedModels.map((model) => formatModelLine(model)).join('\n');
 			this.modelDiscovery = discoveryKind;
 			this.defaultModel = chooseDefaultModel(sortedModels, this.defaultModel);
-			this.testMessage = m.settings_api_provider_dialog_models_fetched({ count: result.models.length });
+			this.testMessage = m.settings_api_provider_dialog_models_fetched({
+				count: result.models.length,
+			});
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : String(err);
 		} finally {
@@ -315,7 +323,7 @@ export class ApiProviderEndpointDialogState {
 				return;
 			}
 			this.testMessage = m.settings_api_provider_dialog_endpoint_accepted({
-				protocol: localizedProtocolLabel(this.protocol)
+				protocol: localizedProtocolLabel(this.protocol),
 			});
 			if (result.models?.length && !this.modelsText.trim()) {
 				this.modelsText = result.models.map((model) => formatModelLine(model)).join('\n');
@@ -329,7 +337,10 @@ export class ApiProviderEndpointDialogState {
 	}
 }
 
-export async function deleteApiProviderEndpoint(modelCatalog: ModelCatalogStore, endpointId: string): Promise<void> {
+export async function deleteApiProviderEndpoint(
+	modelCatalog: ModelCatalogStore,
+	endpointId: string,
+): Promise<void> {
 	const found = modelCatalog.findEndpoint(endpointId);
 	if (!found) throw new Error(m.settings_api_provider_dialog_endpoint_missing());
 	await deleteApiProvider(found.apiProvider.id);
@@ -362,8 +373,8 @@ function sortModelsForDisplay(models: ModelOption[]): ModelOption[] {
 	return [...models].sort((left, right) =>
 		formatModelLine(left).localeCompare(formatModelLine(right), undefined, {
 			numeric: true,
-			sensitivity: 'base'
-		})
+			sensitivity: 'base',
+		}),
 	);
 }
 

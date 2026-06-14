@@ -112,17 +112,11 @@
 		return value || '';
 	}
 
-	async function copyField(
-		e: MouseEvent,
-		text: string | null,
-		onCopied: (v: boolean) => void,
-	) {
+	async function copyField(e: MouseEvent, text: string | null, onCopied: (v: boolean) => void) {
 		const value = displayText(text);
 		if (!value) return;
 
-		const container =
-			(e.currentTarget as HTMLElement)?.closest('[role="dialog"]') ??
-			undefined;
+		const container = (e.currentTarget as HTMLElement)?.closest('[role="dialog"]') ?? undefined;
 		const copied = await copyToClipboard(value, container);
 		if (!copied) return;
 
@@ -133,7 +127,12 @@
 
 <!-- Delete confirmation dialog -->
 <Dialog.Root open={deleteOpen} onOpenChange={handleDeleteOpenChange}>
-	<Dialog.Content onOpenAutoFocus={(e) => { e.preventDefault(); deleteButtonRef?.focus(); }}>
+	<Dialog.Content
+		onOpenAutoFocus={(e) => {
+			e.preventDefault();
+			deleteButtonRef?.focus();
+		}}
+	>
 		<Dialog.Header class="min-w-0">
 			<Dialog.Title>{m.sidebar_delete_confirmation_delete_chat()}</Dialog.Title>
 			<Dialog.Description class="min-w-0 max-w-full">
@@ -145,7 +144,9 @@
 		</Dialog.Header>
 		<Dialog.Footer>
 			<Button variant="outline" onclick={onCancelDelete}>{m.sidebar_actions_cancel()}</Button>
-			<Button variant="destructive" onclick={onConfirmDelete} bind:ref={deleteButtonRef}>{m.sidebar_actions_delete()}</Button>
+			<Button variant="destructive" onclick={onConfirmDelete} bind:ref={deleteButtonRef}
+				>{m.sidebar_actions_delete()}</Button
+			>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
@@ -184,65 +185,81 @@
 		{:else if chatDetailsDialog?.error}
 			<div class="px-6 py-6 text-sm text-destructive">{chatDetailsDialog.error}</div>
 		{:else}
-			<div class="min-w-0 max-h-[65vh] overflow-y-auto overflow-x-hidden px-6 pt-1 pb-6 sm:max-h-[60vh]">
+			<div
+				class="min-w-0 max-h-[65vh] overflow-y-auto overflow-x-hidden px-6 pt-1 pb-6 sm:max-h-[60vh]"
+			>
 				<div class="space-y-4 min-w-0">
-				<div class="space-y-1">
-					<div class="text-sm font-medium">{m.sidebar_details_created_at()}</div>
-					<div class="text-sm text-muted-foreground">{formatHumanDate(chatDetailsDialog?.createdAt || null)}</div>
-				</div>
-				<div class="space-y-1">
-					<div class="text-sm font-medium">{m.sidebar_details_last_activity()}</div>
-					<div class="text-sm text-muted-foreground">{formatHumanDate(chatDetailsDialog?.lastActivityAt || null)}</div>
-				</div>
-				<div class="space-y-1">
-					<div class="flex items-center justify-between gap-2">
-						<div class="text-sm font-medium">{m.sidebar_details_native_path()}</div>
-						<button
-							type="button"
-							class="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-							onclick={(e) => copyField(e, chatDetailsDialog?.nativePath || null, (v) => nativePathCopied = v)}
-							title={m.chat_tool_display_copy_to_clipboard()}
-							aria-label={m.chat_tool_display_copy_to_clipboard()}
-						>
-							{#if nativePathCopied}
-								<Check class="w-4 h-4 text-status-success-foreground" />
-							{:else}
-								<Copy class="w-4 h-4" />
-							{/if}
-						</button>
+					<div class="space-y-1">
+						<div class="text-sm font-medium">{m.sidebar_details_created_at()}</div>
+						<div class="text-sm text-muted-foreground">
+							{formatHumanDate(chatDetailsDialog?.createdAt || null)}
+						</div>
 					</div>
-					<Textarea
-						readonly
-						rows={2}
-						value={displayText(chatDetailsDialog?.nativePath || null)}
-						class="w-full max-w-full min-w-0 resize-none min-h-16 font-mono text-xs"
-					/>
-				</div>
-				<div class="space-y-1">
-					<div class="flex items-center justify-between gap-2">
-						<div class="text-sm font-medium">{m.sidebar_details_first_message()}</div>
-						<button
-							type="button"
-							class="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-							onclick={(e) => copyField(e, chatDetailsDialog?.firstMessage || null, (v) => firstMessageCopied = v)}
-							title={m.chat_tool_display_copy_to_clipboard()}
-							aria-label={m.chat_tool_display_copy_to_clipboard()}
-						>
-							{#if firstMessageCopied}
-								<Check class="w-4 h-4 text-status-success-foreground" />
-							{:else}
-								<Copy class="w-4 h-4" />
-							{/if}
-						</button>
+					<div class="space-y-1">
+						<div class="text-sm font-medium">{m.sidebar_details_last_activity()}</div>
+						<div class="text-sm text-muted-foreground">
+							{formatHumanDate(chatDetailsDialog?.lastActivityAt || null)}
+						</div>
 					</div>
-					<Textarea
-						readonly
-						rows={8}
-						value={displayText(chatDetailsDialog?.firstMessage || null)}
-						class="w-full max-w-full min-w-0 h-40 max-h-[40vh] resize-none overflow-y-auto font-mono text-xs"
-					/>
+					<div class="space-y-1">
+						<div class="flex items-center justify-between gap-2">
+							<div class="text-sm font-medium">{m.sidebar_details_native_path()}</div>
+							<button
+								type="button"
+								class="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+								onclick={(e) =>
+									copyField(
+										e,
+										chatDetailsDialog?.nativePath || null,
+										(v) => (nativePathCopied = v),
+									)}
+								title={m.chat_tool_display_copy_to_clipboard()}
+								aria-label={m.chat_tool_display_copy_to_clipboard()}
+							>
+								{#if nativePathCopied}
+									<Check class="w-4 h-4 text-status-success-foreground" />
+								{:else}
+									<Copy class="w-4 h-4" />
+								{/if}
+							</button>
+						</div>
+						<Textarea
+							readonly
+							rows={2}
+							value={displayText(chatDetailsDialog?.nativePath || null)}
+							class="w-full max-w-full min-w-0 resize-none min-h-16 font-mono text-xs"
+						/>
+					</div>
+					<div class="space-y-1">
+						<div class="flex items-center justify-between gap-2">
+							<div class="text-sm font-medium">{m.sidebar_details_first_message()}</div>
+							<button
+								type="button"
+								class="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+								onclick={(e) =>
+									copyField(
+										e,
+										chatDetailsDialog?.firstMessage || null,
+										(v) => (firstMessageCopied = v),
+									)}
+								title={m.chat_tool_display_copy_to_clipboard()}
+								aria-label={m.chat_tool_display_copy_to_clipboard()}
+							>
+								{#if firstMessageCopied}
+									<Check class="w-4 h-4 text-status-success-foreground" />
+								{:else}
+									<Copy class="w-4 h-4" />
+								{/if}
+							</button>
+						</div>
+						<Textarea
+							readonly
+							rows={8}
+							value={displayText(chatDetailsDialog?.firstMessage || null)}
+							class="w-full max-w-full min-w-0 h-40 max-h-[40vh] resize-none overflow-y-auto font-mono text-xs"
+						/>
+					</div>
 				</div>
-			</div>
 			</div>
 		{/if}
 	</Dialog.Content>

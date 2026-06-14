@@ -9,7 +9,7 @@ import type {
 	ApiProviderModelDiscoveryResponse,
 	ApiProviderTemplateId,
 	ModelDiscoveryKind,
-	OpenAiEndpointCapabilities
+	OpenAiEndpointCapabilities,
 } from '$shared/api-providers';
 
 export interface ApiProviderEndpointInput {
@@ -39,20 +39,28 @@ export async function createApiProvider(input: ApiProviderInput): Promise<ApiPro
 	return apiPost<ApiProviderCatalogEntry>('/api/v1/api-providers', input);
 }
 
-export async function updateApiProvider(id: string, input: Partial<ApiProviderInput>): Promise<ApiProviderCatalogEntry> {
-	return apiPut<ApiProviderCatalogEntry>(`/api/v1/api-providers?id=${encodeURIComponent(id)}`, input);
+export async function updateApiProvider(
+	id: string,
+	input: Partial<ApiProviderInput>,
+): Promise<ApiProviderCatalogEntry> {
+	return apiPut<ApiProviderCatalogEntry>(
+		`/api/v1/api-providers?id=${encodeURIComponent(id)}`,
+		input,
+	);
 }
 
 export async function deleteApiProvider(id: string): Promise<{ success: boolean }> {
 	return apiDelete<{ success: boolean }>(`/api/v1/api-providers?id=${encodeURIComponent(id)}`);
 }
 
-export async function testApiProvider(input: ApiProviderInput): Promise<ApiProviderModelDiscoveryResponse> {
+export async function testApiProvider(
+	input: ApiProviderInput,
+): Promise<ApiProviderModelDiscoveryResponse> {
 	return apiPost('/api/v1/api-providers/test', input);
 }
 
 export async function discoverApiProviderModels(
-	input: ApiProviderModelDiscoveryRequest
+	input: ApiProviderModelDiscoveryRequest,
 ): Promise<ApiProviderModelDiscoveryResponse> {
 	return apiPost('/api/v1/api-providers/models', input);
 }

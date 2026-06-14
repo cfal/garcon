@@ -1,5 +1,7 @@
 // Coordinates shell-level state and imperative action dispatch.
 
+import { createActionSignal } from '$lib/utils/action-signal';
+
 export type SettingsTab = 'providers' | 'other-agents' | 'local' | 'remote';
 
 function normalizeSettingsTab(value: string): SettingsTab {
@@ -9,8 +11,6 @@ function normalizeSettingsTab(value: string): SettingsTab {
 	if (value === 'remote') return 'remote';
 	return 'providers';
 }
-
-export type RefreshChatsCallback = () => Promise<void> | void;
 
 export interface NewChatDialogSeed {
 	prefill?: string;
@@ -23,8 +23,6 @@ export class AppShellStore {
 	isMobile = $state(false);
 	/** Height of the virtual keyboard in px, tracked via visualViewport. */
 	keyboardHeight = $state(0);
-	refreshChatsCallback = $state<RefreshChatsCallback | null>(null);
-	quietRefreshChatsCallback = $state<RefreshChatsCallback | null>(null);
 	/** Read-only project base path from server config. Set once on settings load. */
 	projectBasePath = $state('/');
 
@@ -33,14 +31,13 @@ export class AppShellStore {
 	/** One-shot seed data (e.g. prefill text) for the dialog form. */
 	newChatDialogSeed = $state<NewChatDialogSeed | null>(null);
 
-	// Callback sets for imperative action dispatch.
-	#newChatCallbacks = new Set<() => void>();
-	#recenterCallbacks = new Set<() => void>();
-	#composerFocusCallbacks = new Set<() => void>();
-	#renameSelectedCallbacks = new Set<() => void>();
-	#deleteSelectedCallbacks = new Set<() => void>();
-	#newChatDialogSeedCallbacks = new Set<() => void>();
-	#sidebarSearchCallbacks = new Set<() => void>();
+	#newChat = createActionSignal();
+	#recenter = createActionSignal();
+	#composerFocus = createActionSignal();
+	#renameSelected = createActionSignal();
+	#deleteSelected = createActionSignal();
+	#newChatDialogSeed = createActionSignal();
+	#sidebarSearch = createActionSignal();
 
 	openSettings(section: string = 'providers'): void {
 		this.showSettings = true;
@@ -59,86 +56,62 @@ export class AppShellStore {
 		this.sidebarOpen = open;
 	}
 
-	registerRefreshChats(cb: RefreshChatsCallback): void {
-		this.refreshChatsCallback = cb;
-	}
-
-	registerQuietRefreshChats(cb: RefreshChatsCallback): void {
-		this.quietRefreshChatsCallback = cb;
-	}
-
-	refreshChats(): Promise<void> | void {
-		return this.refreshChatsCallback?.();
-	}
-
-	/** Refreshes the chat list without showing the loading indicator. */
-	quietRefreshChats(): Promise<void> | void {
-		const cb = this.quietRefreshChatsCallback ?? this.refreshChatsCallback;
-		return cb?.();
-	}
-
 	// Callback registration: returns an unsubscribe function.
 
 	onNewChatRequested(cb: () => void): () => void {
-		this.#newChatCallbacks.add(cb);
-		return () => { this.#newChatCallbacks.delete(cb); };
+		return this.#newChat.subscribe(cb);
 	}
 
 	onSidebarRecenterRequested(cb: () => void): () => void {
-		this.#recenterCallbacks.add(cb);
-		return () => { this.#recenterCallbacks.delete(cb); };
+		return this.#recenter.subscribe(cb);
 	}
 
 	onComposerFocusRequested(cb: () => void): () => void {
-		this.#composerFocusCallbacks.add(cb);
-		return () => { this.#composerFocusCallbacks.delete(cb); };
+		return this.#composerFocus.subscribe(cb);
 	}
 
 	onRenameSelectedChatRequested(cb: () => void): () => void {
-		this.#renameSelectedCallbacks.add(cb);
-		return () => { this.#renameSelectedCallbacks.delete(cb); };
+		return this.#renameSelected.subscribe(cb);
 	}
 
 	onDeleteSelectedChatRequested(cb: () => void): () => void {
-		this.#deleteSelectedCallbacks.add(cb);
-		return () => { this.#deleteSelectedCallbacks.delete(cb); };
+		return this.#deleteSelected.subscribe(cb);
 	}
 
 	onNewChatDialogSeed(cb: () => void): () => void {
-		this.#newChatDialogSeedCallbacks.add(cb);
-		return () => { this.#newChatDialogSeedCallbacks.delete(cb); };
+		return this.#newChatDialogSeed.subscribe(cb);
 	}
 
 	/** Requests sidebar to scroll the selected chat into view. */
 	requestSidebarRecenterToSelected(): void {
-		for (const cb of this.#recenterCallbacks) cb();
+		this.#recenter.emit();
 	}
 
 	/** Requests sidebar to open rename for the currently selected chat. */
 	requestRenameSelectedChat(): void {
-		for (const cb of this.#renameSelectedCallbacks) cb();
+		this.#renameSelected.emit();
 	}
 
 	/** Requests sidebar to open delete confirmation for the currently selected chat. */
 	requestDeleteSelectedChat(): void {
-		for (const cb of this.#deleteSelectedCallbacks) cb();
+		this.#deleteSelected.emit();
 	}
 
 	/** Requests shell navigation to the new-chat screen. */
 	requestNewChat(): void {
-		for (const cb of this.#newChatCallbacks) cb();
+		this.#newChat.emit();
 	}
 
 	/** Requests focus on the active chat composer input. */
 	requestComposerFocus(): void {
-		for (const cb of this.#composerFocusCallbacks) cb();
+		this.#composerFocus.emit();
 	}
 
 	/** Opens the new-chat dialog, optionally seeding it with prefill data. */
 	openNewChatDialog(seed?: NewChatDialogSeed): void {
 		this.newChatDialogSeed = seed ?? null;
 		this.newChatDialogOpen = true;
-		for (const cb of this.#newChatDialogSeedCallbacks) cb();
+		this.#newChatDialogSeed.emit();
 	}
 
 	/** Closes the new-chat dialog without clearing the seed. */
@@ -147,13 +120,12 @@ export class AppShellStore {
 	}
 
 	onSidebarSearchRequested(cb: () => void): () => void {
-		this.#sidebarSearchCallbacks.add(cb);
-		return () => { this.#sidebarSearchCallbacks.delete(cb); };
+		return this.#sidebarSearch.subscribe(cb);
 	}
 
 	/** Toggles the sidebar search dialog via registered callbacks. */
 	openSidebarSearch(): void {
-		for (const cb of this.#sidebarSearchCallbacks) cb();
+		this.#sidebarSearch.emit();
 	}
 }
 

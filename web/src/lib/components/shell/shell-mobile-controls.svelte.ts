@@ -9,7 +9,10 @@ interface ActiveShellModifiers {
 
 const DOUBLE_TAP_WINDOW_MS = 350;
 
-const SHELL_TOOLBAR_KEY_SEQUENCES: Record<ShellToolbarKey, { base: string; final?: string; code?: number }> = {
+const SHELL_TOOLBAR_KEY_SEQUENCES: Record<
+	ShellToolbarKey,
+	{ base: string; final?: string; code?: number }
+> = {
 	escape: { base: '\x1b', code: 27 },
 	tab: { base: '\t', code: 9 },
 	up: { base: '\x1b[A', final: 'A' },

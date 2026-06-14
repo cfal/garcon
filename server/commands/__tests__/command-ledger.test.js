@@ -8,6 +8,21 @@ import { CommandLedger } from '../command-ledger.js';
 
 let workspaceDir;
 
+function makeLedgerRecord(index) {
+  const now = new Date(2026, 0, 1, 0, 0, index).toISOString();
+  return {
+    key: `agent-run:chat-1:req-${index}`,
+    commandType: 'agent-run',
+    chatId: 'chat-1',
+    clientRequestId: `req-${index}`,
+    payloadHash: 'legacy-hash',
+    payload: { command: `cmd-${index}` },
+    status: 'finished',
+    acceptedAt: now,
+    updatedAt: now,
+  };
+}
+
 beforeEach(async () => {
   workspaceDir = path.join(os.tmpdir(), `garcon-command-ledger-test-${randomUUID()}`);
   await fs.mkdir(workspaceDir, { recursive: true });
@@ -134,6 +149,52 @@ describe('CommandLedger', () => {
     expect(JSON.parse(raw).records).toHaveLength(1);
   });
 
+  it('serializes concurrent accepts for different keys on disk', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+
+    await Promise.all(
+      Array.from({ length: 24 }, (_, index) => ledger.accept({
+        commandType: 'agent-run',
+        chatId: 'chat-1',
+        clientRequestId: `req-${index}`,
+        payload: { command: `cmd-${index}` },
+      })),
+    );
+
+    const raw = await fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8');
+    const persisted = JSON.parse(raw);
+    expect(persisted.records).toHaveLength(24);
+    expect(persisted.records.map((record) => record.clientRequestId).sort()).toEqual(
+      Array.from({ length: 24 }, (_, index) => `req-${index}`).sort(),
+    );
+  });
+
+  it('trims loaded records in memory before duplicate detection', async () => {
+    await fs.writeFile(
+      path.join(workspaceDir, 'command-ledger.json'),
+      JSON.stringify({
+        version: 1,
+        records: Array.from({ length: 1005 }, (_, index) => makeLedgerRecord(index)),
+      }),
+      'utf8',
+    );
+
+    const ledger = new CommandLedger(workspaceDir);
+    const accepted = await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-0',
+      payload: { command: 'cmd-0' },
+    });
+
+    expect(accepted.kind).toBe('accepted');
+
+    const raw = await fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8');
+    const persisted = JSON.parse(raw);
+    expect(persisted.records).toHaveLength(1000);
+    expect(persisted.records.at(-1).clientRequestId).toBe('req-0');
+  });
+
   it('updates and persists terminal state', async () => {
     const ledger = new CommandLedger(workspaceDir);
     const accepted = await ledger.accept({
@@ -157,5 +218,44 @@ describe('CommandLedger', () => {
 
     expect(duplicate.kind).toBe('duplicate');
     expect(duplicate.record.status).toBe('finished');
+  });
+
+  it('updates a record by command identity', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    await ledger.accept({
+      commandType: 'chat-start',
+      chatId: 'chat-1',
+      clientRequestId: 'req-1',
+      payload: { chatId: 'chat-1' },
+    });
+
+    const updated = await ledger.updateCommand('chat-start', 'chat-1', 'req-1', {
+      status: 'failed',
+      error: 'startup failed',
+    });
+
+    expect(updated).toMatchObject({
+      commandType: 'chat-start',
+      status: 'failed',
+      error: 'startup failed',
+    });
+  });
+
+  it('does not overwrite blocked statuses', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    const accepted = await ledger.accept({
+      commandType: 'chat-start',
+      chatId: 'chat-1',
+      clientRequestId: 'req-1',
+      payload: { chatId: 'chat-1' },
+    });
+
+    await ledger.update(accepted.record.key, { status: 'failed', error: 'startup failed' });
+    const skipped = await ledger.updateUnlessStatus(accepted.record.key, ['failed'], { status: 'running' });
+
+    expect(skipped).toMatchObject({
+      status: 'failed',
+      error: 'startup failed',
+    });
   });
 });

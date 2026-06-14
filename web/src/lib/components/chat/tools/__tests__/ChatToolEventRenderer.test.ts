@@ -16,9 +16,15 @@ import {
 describe('ChatToolEventRenderer', () => {
 	it('keeps Edit collapsed when autoExpandTools is disabled and defaultOpen is false', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new EditToolUseMessage('', 'tool-1', '/tmp/example.ts', 'const a = 1;', 'const a = 2;'),
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-1',
+				'/tmp/example.ts',
+				'const a = 1;',
+				'const a = 2;',
+			),
 			mode: 'input',
-			autoExpandTools: false
+			autoExpandTools: false,
 		});
 
 		expect(screen.queryByText('const a = 2;')).toBeNull();
@@ -28,7 +34,7 @@ describe('ChatToolEventRenderer', () => {
 		render(ChatToolEventRenderer, {
 			toolMessage: new ExitPlanModeToolUseMessage('', 'tool-2', 'Implement the change.'),
 			mode: 'input',
-			autoExpandTools: false
+			autoExpandTools: false,
 		});
 
 		expect(screen.getByText('Implement the change.')).toBeTruthy();
@@ -36,9 +42,15 @@ describe('ChatToolEventRenderer', () => {
 
 	it('forces Edit open when autoExpandTools is enabled even with defaultOpen=false', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new EditToolUseMessage('', 'tool-3', '/tmp/example.ts', 'const a = 1;', 'const a = 2;'),
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-3',
+				'/tmp/example.ts',
+				'const a = 1;',
+				'const a = 2;',
+			),
 			mode: 'input',
-			autoExpandTools: true
+			autoExpandTools: true,
 		});
 
 		expect(screen.getByText('const a = 2;')).toBeTruthy();
@@ -47,9 +59,11 @@ describe('ChatToolEventRenderer', () => {
 	it('renders streaming Edit without diff as non-expandable single row', () => {
 		const onFileOpen = () => {};
 		render(ChatToolEventRenderer, {
-			toolMessage: new EditToolUseMessage('', 'tool-4', undefined, undefined, undefined, [{ path: '/tmp/ChatEventCard.svelte', kind: 'update' }]),
+			toolMessage: new EditToolUseMessage('', 'tool-4', undefined, undefined, undefined, [
+				{ path: '/tmp/ChatEventCard.svelte', kind: 'update' },
+			]),
 			mode: 'input',
-			onFileOpen
+			onFileOpen,
 		});
 
 		expect(screen.getByRole('button', { name: 'ChatEventCard.svelte' })).toBeTruthy();
@@ -58,8 +72,13 @@ describe('ChatToolEventRenderer', () => {
 
 	it('renders Grep input without jump-to-results affordance', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new GrepToolUseMessage('', 'tool-5', 'border-dotted', '/tmp/ChatEventCard.svelte'),
-			mode: 'input'
+			toolMessage: new GrepToolUseMessage(
+				'',
+				'tool-5',
+				'border-dotted',
+				'/tmp/ChatEventCard.svelte',
+			),
+			mode: 'input',
 		});
 
 		expect(screen.getByText('Pattern')).toBeTruthy();
@@ -69,8 +88,13 @@ describe('ChatToolEventRenderer', () => {
 
 	it('renders WebFetch as url + instruction details without jump affordance', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new WebFetchToolUseMessage('', 'tool-6', 'https://example.com/spec', 'Extract the API version.'),
-			mode: 'input'
+			toolMessage: new WebFetchToolUseMessage(
+				'',
+				'tool-6',
+				'https://example.com/spec',
+				'Extract the API version.',
+			),
+			mode: 'input',
 		});
 
 		expect(screen.getByText('WebFetch')).toBeTruthy();
@@ -82,7 +106,7 @@ describe('ChatToolEventRenderer', () => {
 	it('renders AmpFinder as a typed inline search event', () => {
 		render(ChatToolEventRenderer, {
 			toolMessage: new AmpFinderToolUseMessage('', 'tool-finder-1', 'find auth handlers'),
-			mode: 'input'
+			mode: 'input',
 		});
 
 		expect(screen.getByText('Search')).toBeTruthy();
@@ -96,10 +120,10 @@ describe('ChatToolEventRenderer', () => {
 				'tool-oracle-1',
 				'Review auth flow',
 				'Focus on websocket permissions',
-				['src/auth.ts']
+				['src/auth.ts'],
 			),
 			mode: 'input',
-			autoExpandTools: true
+			autoExpandTools: true,
 		});
 
 		expect(screen.getByText('Task:')).toBeTruthy();
@@ -109,8 +133,15 @@ describe('ChatToolEventRenderer', () => {
 
 	it('renders AmpTaskList using its typed task summary', () => {
 		render(ChatToolEventRenderer, {
-			toolMessage: new AmpTaskListToolUseMessage('', 'tool-task-list-1', 'update', '42', 'Ship implementation', 'done'),
-			mode: 'input'
+			toolMessage: new AmpTaskListToolUseMessage(
+				'',
+				'tool-task-list-1',
+				'update',
+				'42',
+				'Ship implementation',
+				'done',
+			),
+			mode: 'input',
 		});
 
 		expect(screen.getByText('Tasks')).toBeTruthy();
@@ -122,9 +153,9 @@ describe('ChatToolEventRenderer', () => {
 			toolMessage: new WriteStdinToolUseMessage('', 'tool-7', {
 				session_id: 123,
 				yield_time_ms: 30000,
-				max_output_tokens: 4000
+				max_output_tokens: 4000,
 			}),
-			mode: 'input'
+			mode: 'input',
 		});
 
 		expect(screen.queryByText('WriteStdin')).toBeNull();
@@ -135,12 +166,12 @@ describe('ChatToolEventRenderer', () => {
 describe('tool result and jump behavior', () => {
 	it('renders jump-to-results link for Glob when toolResult is present', () => {
 		const toolResult = {
-			content: { filenames: ['a.ts', 'b.ts'], numFiles: 2 }
+			content: { filenames: ['a.ts', 'b.ts'], numFiles: 2 },
 		};
 		render(ChatToolEventRenderer, {
 			toolMessage: new GlobToolUseMessage('', 'tool-glob-1', '**/*.ts'),
 			toolResult,
-			mode: 'input'
+			mode: 'input',
 		});
 
 		const jumpLink = screen.getByLabelText('Jump to results');
@@ -151,7 +182,7 @@ describe('tool result and jump behavior', () => {
 	it('does not render jump link for Glob when toolResult is absent', () => {
 		render(ChatToolEventRenderer, {
 			toolMessage: new GlobToolUseMessage('', 'tool-glob-2', '**/*.ts'),
-			mode: 'input'
+			mode: 'input',
 		});
 
 		expect(screen.queryByLabelText('Jump to results')).toBeNull();
@@ -159,12 +190,12 @@ describe('tool result and jump behavior', () => {
 
 	it('renders result section with anchor id for Glob tool result', () => {
 		const toolResult = {
-			content: { filenames: ['src/a.ts', 'src/b.ts'], numFiles: 2 }
+			content: { filenames: ['src/a.ts', 'src/b.ts'], numFiles: 2 },
 		};
 		const { container } = render(ChatToolEventRenderer, {
 			toolMessage: new GlobToolUseMessage('', 'tool-glob-3', '**/*.ts'),
 			toolResult,
-			mode: 'input'
+			mode: 'input',
 		});
 
 		const anchor = container.querySelector('#tool-result-tool-glob-3');
@@ -173,13 +204,13 @@ describe('tool result and jump behavior', () => {
 
 	it('renders result title derived from tool result data', () => {
 		const toolResult = {
-			content: { filenames: ['one.ts'], numFiles: 1 }
+			content: { filenames: ['one.ts'], numFiles: 1 },
 		};
 		render(ChatToolEventRenderer, {
 			toolMessage: new GlobToolUseMessage('', 'tool-glob-4', '*.ts'),
 			toolResult,
 			mode: 'input',
-			autoExpandTools: true
+			autoExpandTools: true,
 		});
 
 		expect(screen.getByText('Found 1 file')).toBeTruthy();
@@ -187,13 +218,13 @@ describe('tool result and jump behavior', () => {
 
 	it('renders plural file count in result title', () => {
 		const toolResult = {
-			content: { filenames: ['a.ts', 'b.ts', 'c.ts'], numFiles: 3 }
+			content: { filenames: ['a.ts', 'b.ts', 'c.ts'], numFiles: 3 },
 		};
 		render(ChatToolEventRenderer, {
 			toolMessage: new GlobToolUseMessage('', 'tool-glob-5', '*.ts'),
 			toolResult,
 			mode: 'input',
-			autoExpandTools: true
+			autoExpandTools: true,
 		});
 
 		expect(screen.getByText('Found 3 files')).toBeTruthy();

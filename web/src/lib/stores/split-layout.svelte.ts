@@ -74,23 +74,6 @@ function removePaneById(node: LayoutNode, paneId: string): LayoutNode | null {
 	return node;
 }
 
-// Finds the SplitNode that directly parents a given pane id.
-function findParentSplit(
-	node: LayoutNode,
-	paneId: string,
-): { split: SplitNode; childIndex: 0 | 1 } | null {
-	if (node.type === 'pane') return null;
-	for (const idx of [0, 1] as const) {
-		const child = node.children[idx];
-		if (child.type === 'pane' && child.id === paneId) {
-			return { split: node, childIndex: idx };
-		}
-		const deeper = findParentSplit(child, paneId);
-		if (deeper) return deeper;
-	}
-	return null;
-}
-
 export class SplitLayoutStore {
 	root = $state<LayoutNode | null>(null);
 	focusedPaneId = $state<string | null>(null);
@@ -151,10 +134,7 @@ export class SplitLayoutStore {
 			type: 'split',
 			direction,
 			ratio: 0.5,
-			children:
-				position === 'before'
-					? [newPane, existingPane]
-					: [existingPane, newPane],
+			children: position === 'before' ? [newPane, existingPane] : [existingPane, newPane],
 		};
 
 		const result = replacePaneById(this.root, paneId, split);
@@ -176,8 +156,7 @@ export class SplitLayoutStore {
 		}
 		const direction: SplitDirection =
 			zone === 'left' || zone === 'right' ? 'horizontal' : 'vertical';
-		const position: 'before' | 'after' =
-			zone === 'left' || zone === 'top' ? 'before' : 'after';
+		const position: 'before' | 'after' = zone === 'left' || zone === 'top' ? 'before' : 'after';
 		this.splitPane(targetPaneId, direction, chatId, position);
 	}
 
@@ -244,8 +223,18 @@ export class SplitLayoutStore {
 			const topLeft: PaneNode = { type: 'pane', id: nextPaneId(), chatId: ids[0] };
 			const topRight: PaneNode = { type: 'pane', id: nextPaneId(), chatId: ids[1] };
 			const bottom: PaneNode = { type: 'pane', id: nextPaneId(), chatId: ids[2] };
-			const topSplit: SplitNode = { type: 'split', direction: 'horizontal', ratio: 0.5, children: [topLeft, topRight] };
-			this.root = { type: 'split', direction: 'vertical', ratio: 0.5, children: [topSplit, bottom] };
+			const topSplit: SplitNode = {
+				type: 'split',
+				direction: 'horizontal',
+				ratio: 0.5,
+				children: [topLeft, topRight],
+			};
+			this.root = {
+				type: 'split',
+				direction: 'vertical',
+				ratio: 0.5,
+				children: [topSplit, bottom],
+			};
 			this.focusedPaneId = topLeft.id;
 			return;
 		}
@@ -256,16 +245,22 @@ export class SplitLayoutStore {
 		const bottomRight: PaneNode = { type: 'pane', id: nextPaneId(), chatId: ids[3] };
 
 		const topSplit: SplitNode = {
-			type: 'split', direction: 'horizontal', ratio: 0.5,
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
 			children: [topLeft, topRight],
 		};
 		const bottomSplit: SplitNode = {
-			type: 'split', direction: 'horizontal', ratio: 0.5,
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
 			children: [bottomLeft, bottomRight],
 		};
 
 		this.root = {
-			type: 'split', direction: 'vertical', ratio: 0.5,
+			type: 'split',
+			direction: 'vertical',
+			ratio: 0.5,
 			children: [topSplit, bottomSplit],
 		};
 		this.focusedPaneId = topLeft.id;
@@ -296,7 +291,8 @@ export class SplitLayoutStore {
 		const chatB = paneB.chatId;
 		// Rebuild tree immutably via two replacements.
 		let result = replacePaneById(this.root, paneIdA, { type: 'pane', id: paneIdA, chatId: chatB });
-		if (result) result = replacePaneById(result, paneIdB, { type: 'pane', id: paneIdB, chatId: chatA });
+		if (result)
+			result = replacePaneById(result, paneIdB, { type: 'pane', id: paneIdB, chatId: chatA });
 		if (result) this.root = result;
 	}
 }

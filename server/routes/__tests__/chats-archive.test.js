@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
+
+const parseJsonBody = mock(() => undefined);
+
 mock.module('../../lib/http-request.js', () => ({
-  parseJsonBody: mock(() => undefined),
+  parseJsonBody,
+  MalformedJsonError,
 }));
 
 mock.module('../../agents/claude/history-loader.js', () => ({
@@ -13,6 +20,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
+import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 const registry = {
   getChat: mock(() => undefined),
@@ -25,9 +33,9 @@ const settings = {
   getChatName: mock(() => null),
   setSessionName: mock(() => Promise.resolve(undefined)),
   removeSessionName: mock(() => Promise.resolve(undefined)),
-  getPinnedChatIds: mock(() => Promise.resolve([])),
-  getNormalChatIds: mock(() => Promise.resolve([])),
-  getArchivedChatIds: mock(() => Promise.resolve([])),
+  getPinnedChatIds: mock(() => []),
+  getNormalChatIds: mock(() => []),
+  getArchivedChatIds: mock(() => []),
   removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
   insertNormalChatIdTop: mock(() => Promise.resolve(undefined)),
   ensureInNormal: mock(() => Promise.resolve(undefined)),
@@ -51,7 +59,28 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
-const chatsRoutes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+const commandLedger = createRouteCommandLedger('chats-archive');
+const pendingInputs = createRoutePendingInputs();
+
+const chatsRoutes = createChatRoutes({
+  registry,
+  settings,
+  queue,
+  pathCache,
+  metadata,
+  historyCache,
+  agents,
+  pendingInputs,
+  commandService: createRouteCommandService({
+    registry,
+    queue,
+    settings,
+    metadata,
+    agents,
+    commandLedger,
+    pendingInputs,
+  }),
+});
 
 const allMocks = [
   registry.getChat,
@@ -74,7 +103,7 @@ describe('POST /api/chats/archive', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('chatId query parameter is required');
+    expect(body.error).toBe('chatId is required');
   });
 
   it('returns 404 when session not found', async () => {
@@ -93,9 +122,10 @@ describe('POST /api/chats/archive', () => {
   it('delegates to settings.toggleArchive and returns result', async () => {
     registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.toggleArchive.mockImplementation(() => Promise.resolve({ isArchived: true }));
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
 
-    const url = new URL('http://localhost/api/chats/archive?chatId=500');
-    const request = new Request(url, { method: 'POST' });
+    const url = new URL('http://localhost/api/chats/archive');
+    const request = new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
 
     const response = await handler(request, url);
     const body = await response.json();
@@ -105,7 +135,7 @@ describe('POST /api/chats/archive', () => {
     expect(settings.toggleArchive).toHaveBeenCalledWith('500');
   });
 
-  it('returns isArchived false when unarchiving', async () => {
+  it('keeps query chatId compatibility when unarchiving', async () => {
     registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.toggleArchive.mockImplementation(() => Promise.resolve({ isArchived: false }));
 
@@ -131,9 +161,10 @@ describe('POST /api/chats/pin', () => {
   it('delegates to settings.togglePin and returns result', async () => {
     registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.togglePin.mockImplementation(() => Promise.resolve({ isPinned: true }));
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
 
-    const url = new URL('http://localhost/api/chats/pin?chatId=500');
-    const request = new Request(url, { method: 'POST' });
+    const url = new URL('http://localhost/api/chats/pin');
+    const request = new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
 
     const response = await handler(request, url);
     const body = await response.json();
@@ -143,7 +174,7 @@ describe('POST /api/chats/pin', () => {
     expect(settings.togglePin).toHaveBeenCalledWith('500');
   });
 
-  it('returns isPinned false when unpinning', async () => {
+  it('keeps query chatId compatibility when unpinning', async () => {
     registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     settings.togglePin.mockImplementation(() => Promise.resolve({ isPinned: false }));
 
@@ -172,9 +203,9 @@ describe('GET /api/chats archive fields', () => {
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve([]));
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve([]));
-    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getPinnedChatIds.mockImplementation(() => []);
+    settings.getNormalChatIds.mockImplementation(() => []);
+    settings.getArchivedChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();
@@ -191,9 +222,9 @@ describe('GET /api/chats archive fields', () => {
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getPinnedChatIds.mockImplementation(() => Promise.resolve(['300']));
-    settings.getNormalChatIds.mockImplementation(() => Promise.resolve(['200']));
-    settings.getArchivedChatIds.mockImplementation(() => Promise.resolve(['100']));
+    settings.getPinnedChatIds.mockImplementation(() => ['300']);
+    settings.getNormalChatIds.mockImplementation(() => ['200']);
+    settings.getArchivedChatIds.mockImplementation(() => ['100']);
 
     const response = await handler();
     const body = await response.json();

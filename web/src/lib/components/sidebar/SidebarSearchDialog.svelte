@@ -2,14 +2,13 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import SavedSearchPills from './SavedSearchPills.svelte';
-	import SidebarChatSummary from './SidebarChatSummary.svelte';
+	import SidebarSearchResults from './SidebarSearchResults.svelte';
 	import CircleHelp from '@lucide/svelte/icons/circle-help';
 	import Search from '@lucide/svelte/icons/search';
 	import Save from '@lucide/svelte/icons/save';
 	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
-	import { cn } from '$lib/utils/cn';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
@@ -113,12 +112,6 @@
 		if (!open) return;
 		focusInput();
 	});
-
-	$effect(() => {
-		if (!open) return;
-		const item = document.querySelector<HTMLElement>(`[data-search-index="${highlightedIndex}"]`);
-		item?.scrollIntoView({ block: 'nearest' });
-	});
 </script>
 
 {#if open}
@@ -150,7 +143,9 @@
 							data-slot="search-dialog-input-shell"
 							class="relative h-9 min-w-0 flex-1 rounded-lg border border-sidebar-border/70 bg-muted/50 text-sm text-foreground transition-colors focus-within:border-border focus-within:bg-background"
 						>
-							<Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+							<Search
+								class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+							/>
 							<input
 								bind:this={inputRef}
 								type="text"
@@ -175,7 +170,7 @@
 							variant="ghost"
 							size="icon-sm"
 							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
-							onclick={() => helpDialogOpen = true}
+							onclick={() => (helpDialogOpen = true)}
 							title={m.sidebar_search_legend_help()}
 							aria-label={m.sidebar_search_legend_help()}
 						>
@@ -207,94 +202,79 @@
 
 					{#if savedSearches.length > 0}
 						<div class="px-4 pb-4" data-slot="saved-search-pills">
-							<SavedSearchPills
-								searches={savedSearches}
-								onApply={onApplySavedSearch}
-							/>
+							<SavedSearchPills searches={savedSearches} onApply={onApplySavedSearch} />
 						</div>
 					{/if}
 				</div>
 
-				<div class="min-h-0 flex-1 overflow-y-auto" data-slot="search-dialog-results">
-					{#if filteredChats.length === 0}
-						<div class="px-4 py-10 text-center text-sm text-muted-foreground">
-							{m.sidebar_chats_no_matching_chats()}
-						</div>
-					{:else}
-						<div role="listbox">
-							{#each filteredChats as chat, i (chat.id)}
-								<button
-									data-search-index={i}
-									type="button"
-									role="option"
-									aria-selected={i === highlightedIndex}
-									class={cn(
-										'min-w-0 w-full border-b border-border/40 border-l-2 border-l-transparent bg-transparent px-3 py-2.5 text-left font-normal transition-colors duration-150 last:border-b-0',
-										i === highlightedIndex
-											? 'bg-accent text-accent-foreground'
-											: 'hover:bg-accent/40',
-										chat.isProcessing && 'border-l-[3px] border-l-status-processing',
-									)}
-									onclick={() => onSelectChat(chat.id)}
-									onmouseenter={() => onHighlightChange(i)}
-								>
-									<SidebarChatSummary
-										session={chat}
-										isSelected={i === highlightedIndex}
-										isPinned={chat.isPinned}
-										isArchived={chat.isArchived}
-										{currentTime}
-										showTimestamp={true}
-									/>
-								</button>
-							{/each}
-						</div>
-					{/if}
-				</div>
+				<SidebarSearchResults
+					{filteredChats}
+					{currentTime}
+					{highlightedIndex}
+					{onSelectChat}
+					{onHighlightChange}
+				/>
 			</div>
 		</div>
 	</div>
-			<Dialog.Root open={helpDialogOpen} onOpenChange={(v) => helpDialogOpen = v}>
-				<Dialog.Content class="h-dvh w-full max-w-full rounded-none border-0 p-6 sm:h-auto sm:rounded-lg sm:border">
-					<Dialog.Header>
-						<Dialog.Title>{m.sidebar_search_legend_help()}</Dialog.Title>
-						<p class="text-sm text-muted-foreground">
-							{m.sidebar_search_legend_description()}
-						</p>
-					</Dialog.Header>
-					<div class="space-y-2 text-sm">
-						<div class="flex gap-3">
-							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">Any text</code>
-							<span class="text-muted-foreground">{m.sidebar_search_legend_free_text_description()}</span>
-						</div>
-						<div class="flex gap-3">
-							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">tag:X</code>
-							<span class="text-muted-foreground">{m.sidebar_search_legend_tag()}</span>
-						</div>
-						<div class="flex gap-3">
-							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">agent:X</code>
-							<span class="text-muted-foreground">{m.sidebar_search_legend_agent()}</span>
-						</div>
-						<div class="flex gap-3">
-							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">model:X</code>
-							<span class="text-muted-foreground">{m.sidebar_search_legend_model()}</span>
-						</div>
-						<div class="flex gap-3">
-							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">status:X</code>
-							<span class="text-muted-foreground">{m.sidebar_search_legend_status()}</span>
-						</div>
-						<div class="flex gap-3">
-							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">project:X</code>
-							<span class="text-muted-foreground">{m.sidebar_search_legend_project()}</span>
-						</div>
-						<div class="flex gap-3">
-							<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">tag:X project:Y</code>
-							<span class="text-muted-foreground">{m.sidebar_search_legend_combine()}</span>
-						</div>
-					</div>
-					<Dialog.Footer>
-						<Button onclick={() => helpDialogOpen = false}>{m.editor_actions_close()}</Button>
-					</Dialog.Footer>
-				</Dialog.Content>
-			</Dialog.Root>
-	{/if}
+	<Dialog.Root open={helpDialogOpen} onOpenChange={(v) => (helpDialogOpen = v)}>
+		<Dialog.Content
+			class="h-dvh w-full max-w-full rounded-none border-0 p-6 sm:h-auto sm:rounded-lg sm:border"
+		>
+			<Dialog.Header>
+				<Dialog.Title>{m.sidebar_search_legend_help()}</Dialog.Title>
+				<p class="text-sm text-muted-foreground">
+					{m.sidebar_search_legend_description()}
+				</p>
+			</Dialog.Header>
+			<div class="space-y-2 text-sm">
+				<div class="flex gap-3">
+					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground"
+						>Any text</code
+					>
+					<span class="text-muted-foreground"
+						>{m.sidebar_search_legend_free_text_description()}</span
+					>
+				</div>
+				<div class="flex gap-3">
+					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">tag:X</code
+					>
+					<span class="text-muted-foreground">{m.sidebar_search_legend_tag()}</span>
+				</div>
+				<div class="flex gap-3">
+					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground"
+						>agent:X</code
+					>
+					<span class="text-muted-foreground">{m.sidebar_search_legend_agent()}</span>
+				</div>
+				<div class="flex gap-3">
+					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground"
+						>model:X</code
+					>
+					<span class="text-muted-foreground">{m.sidebar_search_legend_model()}</span>
+				</div>
+				<div class="flex gap-3">
+					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground"
+						>status:X</code
+					>
+					<span class="text-muted-foreground">{m.sidebar_search_legend_status()}</span>
+				</div>
+				<div class="flex gap-3">
+					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground"
+						>project:X</code
+					>
+					<span class="text-muted-foreground">{m.sidebar_search_legend_project()}</span>
+				</div>
+				<div class="flex gap-3">
+					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground"
+						>tag:X project:Y</code
+					>
+					<span class="text-muted-foreground">{m.sidebar_search_legend_combine()}</span>
+				</div>
+			</div>
+			<Dialog.Footer>
+				<Button onclick={() => (helpDialogOpen = false)}>{m.editor_actions_close()}</Button>
+			</Dialog.Footer>
+		</Dialog.Content>
+	</Dialog.Root>
+{/if}

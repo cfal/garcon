@@ -15,15 +15,11 @@ describe('appendMessages', () => {
     mockMetadata = { updateFromAppendedMessages: mock(() => undefined) };
     mockAgents = {
       loadMessages: mock(() => Promise.resolve([])),
+      loadMessagePage: mock(() => Promise.resolve(null)),
       isChatRunning: mock(() => false),
     };
 
     cache = new HistoryCache(mockRegistry, mockMetadata, mockAgents);
-    cache._cacheByChatId.set(chatId, {
-      chatId,
-      messages: [],
-      lastAccessAt: Date.now(),
-    });
   });
 
   it('appends finalized messages directly', async () => {
@@ -31,10 +27,10 @@ describe('appendMessages', () => {
       { type: 'assistant-message', timestamp: ts, content: 'Hello world' },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
-    expect(entry.messages).toHaveLength(1);
-    expect(entry.messages[0].type).toBe('assistant-message');
-    expect(entry.messages[0].content).toBe('Hello world');
+    const messages = cache.getMessages(chatId);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].type).toBe('assistant-message');
+    expect(messages[0].content).toBe('Hello world');
   });
 
   it('appends tool-use and tool-result messages', async () => {
@@ -43,10 +39,10 @@ describe('appendMessages', () => {
       { type: 'tool-result', timestamp: ts, toolId: 't1', content: 'ok', isError: false },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
-    expect(entry.messages).toHaveLength(2);
-    expect(entry.messages[0].type).toBe('read-tool-use');
-    expect(entry.messages[1].type).toBe('tool-result');
+    const messages = cache.getMessages(chatId);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].type).toBe('read-tool-use');
+    expect(messages[1].type).toBe('tool-result');
   });
 
   it('appends thinking messages', async () => {
@@ -54,10 +50,10 @@ describe('appendMessages', () => {
       { type: 'thinking', timestamp: ts, content: 'Reasoning here' },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
-    expect(entry.messages).toHaveLength(1);
-    expect(entry.messages[0].type).toBe('thinking');
-    expect(entry.messages[0].content).toBe('Reasoning here');
+    const messages = cache.getMessages(chatId);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].type).toBe('thinking');
+    expect(messages[0].content).toBe('Reasoning here');
   });
 
   it('appends multiple messages in a batch', async () => {
@@ -67,11 +63,31 @@ describe('appendMessages', () => {
       { type: 'bash-tool-use', timestamp: ts, toolId: 't1', command: 'ls' },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
-    expect(entry.messages).toHaveLength(3);
-    expect(entry.messages[0].type).toBe('thinking');
-    expect(entry.messages[1].type).toBe('assistant-message');
-    expect(entry.messages[2].type).toBe('bash-tool-use');
+    const messages = cache.getMessages(chatId);
+    expect(messages).toHaveLength(3);
+    expect(messages[0].type).toBe('thinking');
+    expect(messages[1].type).toBe('assistant-message');
+    expect(messages[2].type).toBe('bash-tool-use');
+  });
+
+  it('deduplicates repeated live appends incrementally', async () => {
+    await cache.appendMessages(chatId, [
+      { type: 'assistant-message', timestamp: ts, content: 'Already seen' },
+      { type: 'bash-tool-use', timestamp: ts, toolId: 'tool-1', command: 'pwd' },
+    ]);
+
+    await cache.appendMessages(chatId, [
+      { type: 'assistant-message', timestamp: ts, content: 'Already seen' },
+      { type: 'bash-tool-use', timestamp: ts, toolId: 'tool-1', command: 'pwd' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'New reply' },
+    ]);
+
+    const messages = cache.getMessages(chatId);
+    expect(messages.map((message) => message.content ?? message.command)).toEqual([
+      'Already seen',
+      'pwd',
+      'New reply',
+    ]);
   });
 
   it('calls updateFromAppendedMessages with all messages', async () => {
@@ -88,11 +104,6 @@ describe('appendMessages', () => {
 
   it('handles multiple chats independently', async () => {
     const chatId2 = 'test-chat-2';
-    cache._cacheByChatId.set(chatId2, {
-      chatId: chatId2,
-      messages: [],
-      lastAccessAt: Date.now(),
-    });
 
     await cache.appendMessages(chatId, [
       { type: 'assistant-message', timestamp: ts, content: 'Chat 1' },
@@ -101,23 +112,22 @@ describe('appendMessages', () => {
       { type: 'assistant-message', timestamp: ts, content: 'Chat 2' },
     ]);
 
-    expect(cache._cacheByChatId.get(chatId).messages).toHaveLength(1);
-    expect(cache._cacheByChatId.get(chatId).messages[0].content).toBe('Chat 1');
-    expect(cache._cacheByChatId.get(chatId2).messages).toHaveLength(1);
-    expect(cache._cacheByChatId.get(chatId2).messages[0].content).toBe('Chat 2');
+    const chatOneMessages = cache.getMessages(chatId);
+    const chatTwoMessages = cache.getMessages(chatId2);
+    expect(chatOneMessages).toHaveLength(1);
+    expect(chatOneMessages[0].content).toBe('Chat 1');
+    expect(chatTwoMessages).toHaveLength(1);
+    expect(chatTwoMessages[0].content).toBe('Chat 2');
   });
 
   it('appends to an uncached chat without loading agent history', async () => {
-    cache._cacheByChatId.delete(chatId);
-
     await cache.appendMessages(chatId, [
       { type: 'assistant-message', timestamp: ts, content: 'Background update' },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
+    const messages = cache.getMessages(chatId);
     expect(mockAgents.loadMessages).toHaveBeenCalledTimes(0);
-    expect(entry.completeness).toBe('tail');
-    expect(entry.messages.map((message) => message.content)).toEqual(['Background update']);
+    expect(messages.map((message) => message.content)).toEqual(['Background update']);
   });
 
   it('loads agent history once and merges a live tail without duplicate assistant text', async () => {
@@ -135,13 +145,121 @@ describe('appendMessages', () => {
       { type: 'assistant-message', timestamp: ts, content: 'Live tail' },
     ]);
     const messages = await cache.ensureLoaded(selectedChatId);
+    await cache.ensureLoaded(selectedChatId);
 
     expect(mockAgents.loadMessages).toHaveBeenCalledTimes(1);
-    expect(cache._cacheByChatId.get(selectedChatId).completeness).toBe('full');
     expect(messages.map((message) => message.content)).toEqual([
       'Prompt',
       'Already present',
       'Live tail',
+    ]);
+  });
+
+  it('loads an uncached chat before returning a paginated page', async () => {
+    const selectedChatId = 'uncached-page-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
+    ));
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: 'Prompt' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'First reply' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Second reply' },
+    ]));
+
+    const page = await cache.getPaginatedMessages(selectedChatId, 2, 0);
+
+    expect(mockAgents.loadMessages).toHaveBeenCalledTimes(1);
+    expect(page.total).toBe(3);
+    expect(page.hasMore).toBe(true);
+    expect(page.messages.map((message) => message.content)).toEqual(['First reply', 'Second reply']);
+  });
+
+  it('uses an agent tail page for the initial paginated page', async () => {
+    const selectedChatId = 'tail-page-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { agentId: 'claude', agentSessionId: 'thread-1' } : null
+    ));
+    mockAgents.loadMessagePage.mockImplementation(() => Promise.resolve({
+      messages: [
+        { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'First tail' },
+        { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Second tail' },
+      ],
+      total: 3,
+      hasMore: true,
+      offset: 0,
+      limit: 2,
+    }));
+
+    const page = await cache.getPaginatedMessages(selectedChatId, 2, 0);
+
+    expect(mockAgents.loadMessagePage).toHaveBeenCalledWith(
+      { agentId: 'claude', agentSessionId: 'thread-1' },
+      2,
+      0,
+      selectedChatId,
+    );
+    expect(mockAgents.loadMessages).not.toHaveBeenCalled();
+    expect(page.hasMore).toBe(true);
+    expect(page.total).toBe(3);
+    expect(page.messages.map((message) => message.content)).toEqual(['First tail', 'Second tail']);
+  });
+
+  it('falls back to a full load for older paginated pages', async () => {
+    const selectedChatId = 'older-page-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { agentId: 'claude', agentSessionId: 'thread-1' } : null
+    ));
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'First' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Second' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:03Z', content: 'Third' },
+    ]));
+
+    const page = await cache.getPaginatedMessages(selectedChatId, 1, 1);
+
+    expect(mockAgents.loadMessagePage).not.toHaveBeenCalled();
+    expect(mockAgents.loadMessages).toHaveBeenCalledTimes(1);
+    expect(page.messages.map((message) => message.content)).toEqual(['Second']);
+  });
+
+  it('keeps repeated assistant messages with identical content at different timestamps', async () => {
+    const selectedChatId = 'repeated-content-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
+    ));
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'Done.' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Done.' },
+    ]));
+
+    const messages = await cache.ensureLoaded(selectedChatId);
+
+    expect(messages.map((message) => message.content)).toEqual(['Done.', 'Done.']);
+    expect(messages.map((message) => message.timestamp)).toEqual([
+      '2026-01-01T00:00:01Z',
+      '2026-01-01T00:00:02Z',
+    ]);
+  });
+
+  it('sorts timestamped messages while preserving timestamp-less fallback order', async () => {
+    const selectedChatId = 'missing-timestamps-chat';
+    mockRegistry.getChat.mockImplementation((id) => (
+      id === selectedChatId ? { agentId: 'codex', agentSessionId: 'thread-1' } : null
+    ));
+    mockAgents.loadMessages.mockImplementation(() => Promise.resolve([
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:02Z', content: 'Second' },
+      { type: 'assistant-message', timestamp: '2026-01-01T00:00:01Z', content: 'First' },
+      { type: 'assistant-message', content: 'Missing A' },
+      { type: 'assistant-message', content: 'Missing B' },
+    ]));
+
+    const messages = await cache.ensureLoaded(selectedChatId);
+
+    expect(messages.map((message) => message.content)).toEqual([
+      'First',
+      'Second',
+      'Missing A',
+      'Missing B',
     ]);
   });
 
@@ -233,8 +351,7 @@ describe('appendMessages', () => {
       },
     ]);
 
-    const entry = cache._cacheByChatId.get(chatId);
-    expect(entry.messages).toHaveLength(2);
+    expect(cache.getMessages(chatId)).toHaveLength(2);
   });
 
   it('deduplicates tool-use messages by toolId when merging history and tail', async () => {

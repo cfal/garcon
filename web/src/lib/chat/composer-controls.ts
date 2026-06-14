@@ -23,65 +23,74 @@ export interface ComposerModeOption<T extends string = string> extends ComposerM
 	toneClass: string;
 }
 
-const PERMISSION_OPTION_METADATA: Record<PermissionMode, Omit<ComposerModeOption<PermissionMode>, 'value'>> = {
+const PERMISSION_OPTION_METADATA: Record<
+	PermissionMode,
+	Omit<ComposerModeOption<PermissionMode>, 'value'>
+> = {
 	default: {
 		label: 'Default',
 		description: 'Asks before high-impact operations.',
 		iconId: 'permission-default',
 		toneClass:
-			'bg-muted text-foreground border-border hover:bg-accent hover:text-accent-foreground'
+			'bg-muted text-foreground border-border hover:bg-accent hover:text-accent-foreground',
 	},
 	acceptEdits: {
 		label: 'Accept Edits',
 		description: 'Allows safe file edits without interruption.',
 		iconId: 'permission-accept-edits',
-		toneClass:
-			'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
+		toneClass: 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80',
 	},
 	bypassPermissions: {
 		label: 'Bypass Permissions',
 		description: 'Runs without permission prompts.',
 		iconId: 'permission-bypass',
 		toneClass:
-			'bg-status-warning text-status-warning-foreground border-status-warning-border hover:bg-status-warning/90'
+			'bg-status-warning text-status-warning-foreground border-status-warning-border hover:bg-status-warning/90',
 	},
 	plan: {
 		label: 'Plan Mode',
 		description: 'Focuses on planning before execution.',
 		iconId: 'permission-plan',
-		toneClass: 'bg-card text-card-foreground border-border hover:bg-muted'
-	}
+		toneClass: 'bg-card text-card-foreground border-border hover:bg-muted',
+	},
 };
 
-const THINKING_ICON_METADATA: Record<ThinkingMode, Pick<ComposerModeOption<ThinkingMode>, 'iconId' | 'toneClass'>> = {
+const THINKING_ICON_METADATA: Record<
+	ThinkingMode,
+	Pick<ComposerModeOption<ThinkingMode>, 'iconId' | 'toneClass'>
+> = {
 	none: {
 		iconId: 'thinking-none',
 		toneClass:
-			'bg-muted text-foreground border-border hover:bg-accent hover:text-accent-foreground'
+			'bg-muted text-foreground border-border hover:bg-accent hover:text-accent-foreground',
 	},
 	think: {
 		iconId: 'thinking-think',
-		toneClass: 'bg-status-info text-status-info-foreground border-status-info-border hover:bg-status-info/90'
+		toneClass:
+			'bg-status-info text-status-info-foreground border-status-info-border hover:bg-status-info/90',
 	},
 	'think-hard': {
 		iconId: 'thinking-think-hard',
-		toneClass: 'bg-status-success text-status-success-foreground border-status-success-border hover:bg-status-success/90'
+		toneClass:
+			'bg-status-success text-status-success-foreground border-status-success-border hover:bg-status-success/90',
 	},
 	'think-harder': {
 		iconId: 'thinking-think-harder',
 		toneClass:
-			'bg-status-warning text-status-warning-foreground border-status-warning-border hover:bg-status-warning/90'
+			'bg-status-warning text-status-warning-foreground border-status-warning-border hover:bg-status-warning/90',
 	},
 	ultrathink: {
 		iconId: 'thinking-ultrathink',
-		toneClass: 'bg-destructive/20 text-destructive border-destructive/40 hover:bg-destructive/30'
-	}
+		toneClass: 'bg-destructive/20 text-destructive border-destructive/40 hover:bg-destructive/30',
+	},
 };
 
-export function buildPermissionOptions(modes: PermissionMode[]): ComposerModeOption<PermissionMode>[] {
+export function buildPermissionOptions(
+	modes: PermissionMode[],
+): ComposerModeOption<PermissionMode>[] {
 	return modes.map((mode) => ({
 		value: mode,
-		...PERMISSION_OPTION_METADATA[mode]
+		...PERMISSION_OPTION_METADATA[mode],
 	}));
 }
 
@@ -93,7 +102,7 @@ export function buildThinkingOptions(): ComposerModeOption<ThinkingMode>[] {
 			label: mode.name,
 			description: mode.description || 'Default thinking behavior.',
 			iconId: iconMeta.iconId,
-			toneClass: iconMeta.toneClass
+			toneClass: iconMeta.toneClass,
 		};
 	});
 }

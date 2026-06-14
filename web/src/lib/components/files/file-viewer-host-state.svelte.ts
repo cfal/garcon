@@ -99,14 +99,14 @@ export class FileViewerHostState {
 		}
 
 		try {
-			const data = await readText(
+			const data = (await readText(
 				{
 					chatId: next.chatId,
 					projectPath: next.projectPath,
 					filePath: next.relativePath,
 				},
 				{ signal: controller.signal },
-			) as { content: string };
+			)) as { content: string };
 
 			if (token !== this.activeReadToken || controller.signal.aborted) return;
 
@@ -261,7 +261,13 @@ export class FileViewerHostState {
 	}
 
 	/** Returns a file object suitable for FileEditorDialog. */
-	toEditorFile(): { name: string; path: string; content: string; line?: number; col?: number } | null {
+	toEditorFile(): {
+		name: string;
+		path: string;
+		content: string;
+		line?: number;
+		col?: number;
+	} | null {
 		if (!this.file) return null;
 		return {
 			...this.file,

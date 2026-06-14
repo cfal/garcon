@@ -33,6 +33,27 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 }
 
 describe('shared sidebar chat row', () => {
+	it('keeps standalone desktop rows natively draggable by default', () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+		});
+
+		expect(screen.getByText('Shared row chat').closest('button')?.getAttribute('draggable')).toBe(
+			'true',
+		);
+	});
+
+	it('omits native row dragging for Pragmatic wrappers', () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			enableNativeDrag: false,
+		});
+
+		expect(screen.getByText('Shared row chat').closest('button')?.hasAttribute('draggable')).toBe(
+			false,
+		);
+	});
+
 	it('renders the shared chat summary inside the sidebar item shell', async () => {
 		const onTagClick = vi.fn();
 		const onManageTags = vi.fn();
@@ -44,32 +65,30 @@ describe('shared sidebar chat row', () => {
 			onManageTags,
 		});
 
-		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(2);
+		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(1);
 		const pinnedBadges = document.querySelectorAll('.border-sidebar-badge-pinned-border');
-		expect(pinnedBadges).toHaveLength(2);
-		expect(screen.getAllByText('Shared row chat')).toHaveLength(2);
-		expect(screen.getAllByLabelText('Unread')).toHaveLength(2);
-		expect(screen.getAllByText('3h ago')).toHaveLength(2);
-		expect(screen.getAllByText('3h ago')[0]?.className).toContain('font-normal');
-		expect(screen.getAllByText('3h ago')[0]?.className).not.toContain('md:group-hover:opacity-0');
+		expect(pinnedBadges).toHaveLength(1);
+		expect(screen.getByText('Shared row chat')).toBeTruthy();
+		expect(screen.getByLabelText('Unread')).toBeTruthy();
+		expect(screen.getByText('3h ago')).toBeTruthy();
+		expect(screen.getByText('3h ago').className).toContain('font-normal');
+		expect(screen.getByText('3h ago').className).not.toContain('md:group-hover:opacity-0');
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
-		expect(screen.getAllByTitle('/very/long/workspace/projects/feature-branch/app')).toHaveLength(2);
-		const metadataProjectLabels = screen.getAllByText('\u2026/projects/feature-branch/app');
-		expect(metadataProjectLabels).toHaveLength(2);
-		expect(metadataProjectLabels[0]?.className).toContain('font-semibold');
-		expect(metadataProjectLabels[0]?.parentElement?.className).toContain('text-[12px]');
-		expect(metadataProjectLabels[0]?.parentElement?.className).toContain('gap-1');
-		const sidebarPreview = screen.getAllByText('Latest preview text');
-		expect(sidebarPreview).toHaveLength(2);
-		expect(sidebarPreview[0]?.className).toContain('mt-0.5');
-		expect(sidebarPreview[0]?.className).toContain('mb-1');
-		expect(screen.getAllByText('Claude')).toHaveLength(2);
-		expect(screen.getAllByText('ops')).toHaveLength(2);
-		expect(screen.getAllByText('prod')).toHaveLength(2);
-		expect(screen.getAllByRole('button', { name: '+1' })).toHaveLength(2);
+		expect(screen.getByTitle('/very/long/workspace/projects/feature-branch/app')).toBeTruthy();
+		const metadataProjectLabel = screen.getByText('\u2026/projects/feature-branch/app');
+		expect(metadataProjectLabel.className).toContain('font-semibold');
+		expect(metadataProjectLabel.parentElement?.className).toContain('text-[12px]');
+		expect(metadataProjectLabel.parentElement?.className).toContain('gap-1');
+		const sidebarPreview = screen.getByText('Latest preview text');
+		expect(sidebarPreview.className).toContain('mt-0.5');
+		expect(sidebarPreview.className).toContain('mb-1');
+		expect(screen.getByText('Claude')).toBeTruthy();
+		expect(screen.getByText('ops')).toBeTruthy();
+		expect(screen.getByText('prod')).toBeTruthy();
+		expect(screen.getByRole('button', { name: '+1' })).toBeTruthy();
 		const desktopMenuTrigger = document.querySelector<HTMLElement>(
-			'[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]'
+			'[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]',
 		);
 		expect(desktopMenuTrigger?.className).toContain('border-sidebar-border/70');
 		expect(desktopMenuTrigger?.className).toContain('bg-background');
@@ -81,11 +100,24 @@ describe('shared sidebar chat row', () => {
 			expect(badge.parentElement?.className).not.toContain('pr-');
 		}
 
-		await fireEvent.click(screen.getAllByRole('button', { name: 'ops' })[0]!);
+		await fireEvent.click(screen.getByRole('button', { name: 'ops' }));
 		expect(onTagClick).toHaveBeenCalledWith('ops');
 
-		await fireEvent.click(screen.getAllByRole('button', { name: '+1' })[0]!);
+		await fireEvent.click(screen.getByRole('button', { name: '+1' }));
 		expect(onManageTags).toHaveBeenCalledWith('chat-1', ['ops', 'prod', 'urgent']);
+	});
+
+	it('renders the mobile chat row without also rendering the desktop row', () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			isMobile: true,
+		});
+
+		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(1);
+		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
+		expect(
+			document.querySelector('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]'),
+		).toBeNull();
 	});
 
 	it('renders the same chat summary content inside the search dialog rows', async () => {
@@ -126,14 +158,14 @@ describe('shared sidebar chat row', () => {
 			currentTime: new Date('2025-01-01T03:00:00.000Z'),
 		});
 
-		expect(screen.getAllByText('3h ago')).toHaveLength(2);
+		expect(screen.getByText('3h ago')).toBeTruthy();
 
 		await rerender({
 			session,
 			currentTime: new Date('2025-01-01T04:00:00.000Z'),
 		});
 
-		expect(screen.getAllByText('4h ago')).toHaveLength(2);
+		expect(screen.getByText('4h ago')).toBeTruthy();
 		expect(screen.queryByText('3h ago')).toBeNull();
 	});
 });

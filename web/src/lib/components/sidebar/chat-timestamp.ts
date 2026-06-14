@@ -47,8 +47,9 @@ function formatRelativeLabel(timestamp: Date, currentTime: Date): string {
 		return NOW_FORMATTER.format(0, 'second');
 	}
 
-	const bucket = RELATIVE_TIME_BUCKETS.find((candidate) => absoluteElapsedMs < candidate.maxMs)
-		?? RELATIVE_TIME_BUCKETS[RELATIVE_TIME_BUCKETS.length - 1]!;
+	const bucket =
+		RELATIVE_TIME_BUCKETS.find((candidate) => absoluteElapsedMs < candidate.maxMs) ??
+		RELATIVE_TIME_BUCKETS[RELATIVE_TIME_BUCKETS.length - 1]!;
 	const count = Math.max(1, Math.floor(absoluteElapsedMs / bucket.divisorMs));
 	const signedCount = elapsedMs < 0 ? count : -count;
 

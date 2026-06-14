@@ -1,59 +1,48 @@
-export interface ReorderWrite<TList extends string> {
+export interface PerListWrite<TList extends string> {
 	list: TList;
-	oldOrder: string[];
-	newOrder: string[];
+	onSuccess?: () => void;
+	onFailure?: () => void;
 }
 
 /**
- * Serializes reorder writes and coalesces queued updates per list.
- * Keeps only the latest pending reorder for each list while a write is in flight.
+ * Serializes writes per list while allowing independent lists to drain concurrently.
+ * Reorder writes are relative operations, so each user drop must be preserved.
  */
-export function createReorderWriteQueue<TList extends string>(
-	write: (task: ReorderWrite<TList>) => Promise<void>,
-	onError: (error: unknown, task: ReorderWrite<TList>) => void,
+export function createPerListWriteQueue<TList extends string, TTask extends PerListWrite<TList>>(
+	write: (task: TTask) => Promise<void>,
+	onError: (error: unknown, task: TTask) => void,
 ) {
-	const pendingByList = new Map<TList, ReorderWrite<TList>>();
-	const pendingOrder: TList[] = [];
-	let draining = false;
+	const pendingByList = new Map<TList, TTask[]>();
+	const drainingLists = new Set<TList>();
 
-	function popNext(): ReorderWrite<TList> | null {
-		while (pendingOrder.length > 0) {
-			const list = pendingOrder.shift()!;
-			const task = pendingByList.get(list);
-			if (!task) continue;
-			pendingByList.delete(list);
-			return task;
-		}
-		return null;
-	}
-
-	async function drain() {
-		draining = true;
+	async function drain(list: TList) {
+		drainingLists.add(list);
 		try {
 			while (true) {
-				const task = popNext();
+				const queue = pendingByList.get(list);
+				const task = queue?.shift() ?? null;
 				if (!task) break;
+				if (queue && queue.length === 0) pendingByList.delete(list);
 				try {
 					await write(task);
+					task.onSuccess?.();
 				} catch (error) {
 					onError(error, task);
+					task.onFailure?.();
 				}
 			}
 		} finally {
-			draining = false;
-			// Handles enqueue-after-empty races without dropping tasks.
-			if (pendingByList.size > 0 && !draining) {
-				void drain();
-			}
+			drainingLists.delete(list);
+			if ((pendingByList.get(list)?.length ?? 0) > 0) void drain(list);
 		}
 	}
 
 	return {
-		enqueue(task: ReorderWrite<TList>) {
-			const hasPendingForList = pendingByList.has(task.list);
-			pendingByList.set(task.list, task);
-			if (!hasPendingForList) pendingOrder.push(task.list);
-			if (!draining) void drain();
+		enqueue(task: TTask) {
+			const queue = pendingByList.get(task.list) ?? [];
+			queue.push(task);
+			pendingByList.set(task.list, queue);
+			if (!drainingLists.has(task.list)) void drain(task.list);
 		},
 	};
 }

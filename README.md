@@ -108,6 +108,8 @@ Telegram notifications are configured from the server settings UI.
 
 Run `bun run help` for the full option list.
 
+Security-sensitive deployment notes live in [`docs/security.md`](docs/security.md).
+
 ## Agents And Models
 
 Configure agents and API providers from Settings. Agents execute chats; API

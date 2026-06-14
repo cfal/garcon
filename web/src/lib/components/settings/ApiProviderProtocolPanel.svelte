@@ -6,7 +6,7 @@
 		DropdownMenu,
 		DropdownMenuContent,
 		DropdownMenuItem,
-		DropdownMenuTrigger
+		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import { cn } from '$lib/utils/cn.js';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -16,10 +16,7 @@
 	import { getModelCatalog } from '$lib/context';
 	import type { ApiProtocol, ApiProviderCatalogEntry } from '$shared/api-providers';
 	import type { DeviceAuthInfo, AgentReadiness } from '$lib/api/agents';
-	import {
-		templatesForProtocol,
-		type ApiProviderTemplateId
-	} from '$shared/api-provider-templates';
+	import { templatesForProtocol, type ApiProviderTemplateId } from '$shared/api-provider-templates';
 	import ApiProviderEndpointDialog from './ApiProviderEndpointDialog.svelte';
 	import AgentCard from './AgentCard.svelte';
 	import { deleteApiProviderEndpoint } from './api-provider-endpoint-dialog-state.svelte';
@@ -47,7 +44,7 @@
 		readiness = undefined,
 		deviceAuth = undefined,
 		pending = false,
-		onLogin = undefined
+		onLogin = undefined,
 	}: {
 		protocol: ApiProtocol;
 		title: string;
@@ -80,9 +77,12 @@
 				if (endpoint.protocol === protocol) rows.push({ apiProvider, endpoint });
 			}
 		}
-		return rows.sort((a, b) =>
-			a.apiProvider.label.localeCompare(b.apiProvider.label, undefined, { sensitivity: 'base' })
-			|| a.endpoint.baseUrl.localeCompare(b.endpoint.baseUrl, undefined, { sensitivity: 'base' })
+		return rows.sort(
+			(a, b) =>
+				a.apiProvider.label.localeCompare(b.apiProvider.label, undefined, {
+					sensitivity: 'base',
+				}) ||
+				a.endpoint.baseUrl.localeCompare(b.endpoint.baseUrl, undefined, { sensitivity: 'base' }),
 		);
 	});
 
@@ -152,7 +152,9 @@
 	</div>
 
 	{#if error}
-		<div class="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+		<div
+			class="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+		>
 			{error}
 		</div>
 	{/if}
@@ -163,11 +165,13 @@
 			agentName={oauthAgent.name}
 			{auth}
 			open={oauthOpen}
-			onOpenChange={(open) => { oauthOpen = open; }}
+			onOpenChange={(open) => {
+				oauthOpen = open;
+			}}
 			onLogin={onLogin ?? (() => undefined)}
-			deviceAuth={deviceAuth}
+			{deviceAuth}
 			{pending}
-			readiness={readiness}
+			{readiness}
 		/>
 	{/if}
 
@@ -177,13 +181,25 @@
 				<div class="flex items-start justify-between gap-3">
 					<div class="min-w-0 space-y-1">
 						<div class="flex items-center gap-2">
-							<div class="truncate text-sm font-medium text-foreground">{row.apiProvider.label}</div>
+							<div class="truncate text-sm font-medium text-foreground">
+								{row.apiProvider.label}
+							</div>
 						</div>
 						<div class="truncate text-xs text-muted-foreground">{row.endpoint.baseUrl}</div>
 						<div class="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-							<span>{m.settings_api_providers_model_count({ count: row.endpoint.models.length })}</span>
-							<span>{m.settings_api_providers_default_model({ model: row.endpoint.defaultModel })}</span>
-							<span>{row.endpoint.hasApiKey ? m.settings_api_providers_key_configured() : m.settings_api_providers_no_key()}</span>
+							<span
+								>{m.settings_api_providers_model_count({ count: row.endpoint.models.length })}</span
+							>
+							<span
+								>{m.settings_api_providers_default_model({
+									model: row.endpoint.defaultModel,
+								})}</span
+							>
+							<span
+								>{row.endpoint.hasApiKey
+									? m.settings_api_providers_key_configured()
+									: m.settings_api_providers_no_key()}</span
+							>
 						</div>
 					</div>
 
@@ -192,17 +208,34 @@
 							<PencilIcon class="mr-1 size-3" />
 							{m.settings_api_providers_edit()}
 						</Button>
-						<Button variant="ghost" size="icon-sm" onclick={() => { deleteEndpointId = row.endpoint.id; }}>
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							onclick={() => {
+								deleteEndpointId = row.endpoint.id;
+							}}
+						>
 							<TrashIcon class="size-4" />
 						</Button>
 					</div>
 				</div>
 
 				{#if deleteEndpointId === row.endpoint.id}
-					<div class="mt-3 flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2">
-						<span class="text-sm text-destructive">{m.settings_api_providers_confirm_delete()}</span>
-						<Button variant="destructive" size="sm" onclick={confirmDelete}>{m.settings_api_providers_delete()}</Button>
-						<Button variant="outline" size="sm" onclick={() => { deleteEndpointId = null; }}>{m.settings_api_providers_cancel()}</Button>
+					<div
+						class="mt-3 flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2"
+					>
+						<span class="text-sm text-destructive">{m.settings_api_providers_confirm_delete()}</span
+						>
+						<Button variant="destructive" size="sm" onclick={confirmDelete}
+							>{m.settings_api_providers_delete()}</Button
+						>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => {
+								deleteEndpointId = null;
+							}}>{m.settings_api_providers_cancel()}</Button
+						>
 					</div>
 				{/if}
 			</div>
@@ -215,7 +248,9 @@
 			{protocol}
 			endpointId={editingEndpointId}
 			templateId={createTemplateId}
-			onOpenChange={(open) => { dialogOpen = open; }}
+			onOpenChange={(open) => {
+				dialogOpen = open;
+			}}
 		/>
 	{/if}
 </section>

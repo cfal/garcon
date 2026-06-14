@@ -7,7 +7,7 @@
 	// Conditional listeners use $effect with a cleanup return.
 
 	import { onMount, onDestroy } from 'svelte';
-	import { getAppShell } from '$lib/context';
+	import { getAppShell, getNavigation } from '$lib/context';
 
 	interface KeyboardShortcutsProps {
 		onToggleCommandMenu?: () => void;
@@ -16,14 +16,13 @@
 	let { onToggleCommandMenu }: KeyboardShortcutsProps = $props();
 
 	const appShell = getAppShell();
+	const navigation = getNavigation();
 
 	function isEditableTarget(target: EventTarget | null): boolean {
 		const element = target as HTMLElement | null;
 		if (!element) return false;
 		return (
-			element.tagName === 'INPUT' ||
-			element.tagName === 'TEXTAREA' ||
-			element.isContentEditable
+			element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.isContentEditable
 		);
 	}
 
@@ -48,20 +47,30 @@
 			appShell.requestNewChat();
 			return;
 		}
-			if (e.ctrlKey && key === 'r') {
-				e.preventDefault();
-				appShell.requestRenameSelectedChat();
-				return;
-			}
-			if (e.ctrlKey && key === 'd') {
-				e.preventDefault();
-				appShell.requestDeleteSelectedChat();
-				return;
-			}
-			if (inEditable) return;
+		if (e.ctrlKey && key === 'r') {
+			e.preventDefault();
+			appShell.requestRenameSelectedChat();
+			return;
+		}
+		if (e.ctrlKey && key === 'd') {
+			e.preventDefault();
+			appShell.requestDeleteSelectedChat();
+			return;
+		}
+		if (e.ctrlKey && e.shiftKey && key === 'j') {
+			e.preventDefault();
+			navigation.requestNavigateChatAbove();
+			return;
+		}
+		if (e.ctrlKey && e.shiftKey && key === 'l') {
+			e.preventDefault();
+			navigation.requestNavigateChatBelow();
+			return;
+		}
+		if (inEditable) return;
 
-			// Ctrl+, -- open settings
-			if (e.ctrlKey && key === ',') {
+		// Ctrl+, -- open settings
+		if (e.ctrlKey && key === ',') {
 			e.preventDefault();
 			appShell.openSettings();
 			return;

@@ -13,11 +13,41 @@ export interface ThinkingModeOption {
 }
 
 export const THINKING_MODES: ThinkingModeOption[] = [
-	{ id: 'none', name: 'Standard', description: 'Regular Claude response', prefix: '', color: 'text-muted-foreground' },
-	{ id: 'think', name: 'Think', description: 'Basic extended thinking', prefix: 'think', color: 'text-foreground' },
-	{ id: 'think-hard', name: 'Think Hard', description: 'More thorough evaluation', prefix: 'think hard', color: 'text-foreground' },
-	{ id: 'think-harder', name: 'Think Harder', description: 'Deep analysis with alternatives', prefix: 'think harder', color: 'text-foreground' },
-	{ id: 'ultrathink', name: 'Ultrathink', description: 'Maximum thinking budget', prefix: 'ultrathink', color: 'text-foreground' },
+	{
+		id: 'none',
+		name: 'Standard',
+		description: 'Regular Claude response',
+		prefix: '',
+		color: 'text-muted-foreground',
+	},
+	{
+		id: 'think',
+		name: 'Think',
+		description: 'Basic extended thinking',
+		prefix: 'think',
+		color: 'text-foreground',
+	},
+	{
+		id: 'think-hard',
+		name: 'Think Hard',
+		description: 'More thorough evaluation',
+		prefix: 'think hard',
+		color: 'text-foreground',
+	},
+	{
+		id: 'think-harder',
+		name: 'Think Harder',
+		description: 'Deep analysis with alternatives',
+		prefix: 'think harder',
+		color: 'text-foreground',
+	},
+	{
+		id: 'ultrathink',
+		name: 'Ultrathink',
+		description: 'Maximum thinking budget',
+		prefix: 'ultrathink',
+		color: 'text-foreground',
+	},
 ];
 
 export const CLAUDE_PERMISSION_MODES: PermissionMode[] = [

@@ -14,7 +14,7 @@
 		ArrowUpDown,
 		ChevronUp,
 		ChevronDown,
-		RefreshCw
+		RefreshCw,
 	} from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { FileTreeNode } from '$lib/api/files';
@@ -29,7 +29,13 @@
 		onImageSelect?: (file: FileTreeNode) => void;
 	}
 
-	let { projectPath, chatId, selectedPath = null, onFileSelect, onImageSelect }: FileTreeProps = $props();
+	let {
+		projectPath,
+		chatId,
+		selectedPath = null,
+		onFileSelect,
+		onImageSelect,
+	}: FileTreeProps = $props();
 
 	const store = new FileTreeStore();
 
@@ -101,7 +107,8 @@
 
 	function getFileIconType(filename: string): 'code' | 'doc' | 'image' | 'generic' {
 		const ext = filename.split('.').pop()?.toLowerCase() ?? '';
-		if (['js', 'jsx', 'ts', 'tsx', 'py', 'java', 'cpp', 'c', 'php', 'rb', 'go', 'rs'].includes(ext)) return 'code';
+		if (['js', 'jsx', 'ts', 'tsx', 'py', 'java', 'cpp', 'c', 'php', 'rb', 'go', 'rs'].includes(ext))
+			return 'code';
 		if (['md', 'txt', 'doc', 'pdf'].includes(ext)) return 'doc';
 		if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp'].includes(ext)) return 'image';
 		return 'generic';
@@ -222,7 +229,9 @@
 		<div class="p-2 border-b border-border">
 			<div class="flex items-center gap-1">
 				<div class="relative min-w-0 flex-1">
-					<Search class="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+					<Search
+						class="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none"
+					/>
 					<Input
 						type="text"
 						placeholder={m.filetree_search_placeholder()}
@@ -241,7 +250,12 @@
 						</Button>
 					{/if}
 				</div>
-				<Button variant="ghost" size="icon-sm" onclick={() => store.refresh()} title="Refresh files">
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					onclick={() => store.refresh()}
+					title={m.filetree_refresh_files()}
+				>
 					<RefreshCw class="w-4 h-4" />
 				</Button>
 				<FileTreeSettingsMenu
@@ -257,25 +271,45 @@
 			<div class="px-2 pt-1 pb-1 border-b border-border bg-card">
 				<div class="grid grid-cols-12 gap-2 px-2 text-xs font-medium text-muted-foreground">
 					<div class="col-span-5">
-						<button type="button" class={headerButtonClass(store.sortKey === 'name')} onclick={() => store.toggleSort('name')} aria-label="Sort by name">
+						<button
+							type="button"
+							class={headerButtonClass(store.sortKey === 'name')}
+							onclick={() => store.toggleSort('name')}
+							aria-label={m.filetree_sort_by_name()}
+						>
 							{m.filetree_name()}
 							{@render sortIcon('name')}
 						</button>
 					</div>
 					<div class="col-span-2">
-						<button type="button" class={headerButtonClass(store.sortKey === 'size')} onclick={() => store.toggleSort('size')} aria-label="Sort by size">
+						<button
+							type="button"
+							class={headerButtonClass(store.sortKey === 'size')}
+							onclick={() => store.toggleSort('size')}
+							aria-label={m.filetree_sort_by_size()}
+						>
 							{m.filetree_size()}
 							{@render sortIcon('size')}
 						</button>
 					</div>
 					<div class="col-span-3">
-						<button type="button" class={headerButtonClass(store.sortKey === 'modified')} onclick={() => store.toggleSort('modified')} aria-label="Sort by modified time">
+						<button
+							type="button"
+							class={headerButtonClass(store.sortKey === 'modified')}
+							onclick={() => store.toggleSort('modified')}
+							aria-label={m.filetree_sort_by_modified()}
+						>
 							{m.filetree_modified()}
 							{@render sortIcon('modified')}
 						</button>
 					</div>
 					<div class="col-span-2">
-						<button type="button" class={headerButtonClass(store.sortKey === 'permissions')} onclick={() => store.toggleSort('permissions')} aria-label="Sort by permissions">
+						<button
+							type="button"
+							class={headerButtonClass(store.sortKey === 'permissions')}
+							onclick={() => store.toggleSort('permissions')}
+							aria-label={m.filetree_sort_by_permissions()}
+						>
 							{m.filetree_permissions()}
 							{@render sortIcon('permissions')}
 						</button>
@@ -301,11 +335,13 @@
 					<h4 class="font-medium text-foreground mb-1">{m.filetree_no_matches_found()}</h4>
 					<p class="text-sm text-muted-foreground">{m.filetree_try_different_search()}</p>
 					<div class="mt-3">
-						<Button variant="outline" size="sm" onclick={() => (store.searchInput = '')}>Clear search</Button>
+						<Button variant="outline" size="sm" onclick={() => (store.searchInput = '')}
+							>Clear search</Button
+						>
 					</div>
 				</div>
 			{:else}
-				<div role="tree" aria-label="Project files">
+				<div role="tree" aria-label={m.filetree_project_files()}>
 					{#each displayFiles as item (item.path)}
 						{@render detailedTreeItem(item, 0)}
 					{/each}

@@ -29,9 +29,7 @@ export interface ActiveFileViewerSession {
 	openedAt: number;
 }
 
-const IMAGE_EXTENSIONS = new Set([
-	'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp',
-]);
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp']);
 
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown']);
 

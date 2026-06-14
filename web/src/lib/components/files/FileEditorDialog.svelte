@@ -1,9 +1,11 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import CodeEditor from './CodeEditor.svelte';
-	import { getLocalSettings } from '$lib/context';
+	import { getLocalSettings, getNotifications } from '$lib/context';
+	import * as m from '$lib/paraglide/messages.js';
 
 	const localSettings = getLocalSettings();
+	const notifications = getNotifications();
 
 	interface SelectedFile {
 		name: string;
@@ -25,12 +27,22 @@
 		onRequestMarkdownView?: () => void;
 	}
 
-	let { file, onRequestClose, onSave, onContentChange, onDirtyChange, showMarkdownViewButton = false, onRequestMarkdownView }: FileEditorDialogProps = $props();
+	let {
+		file,
+		onRequestClose,
+		onSave,
+		onContentChange,
+		onDirtyChange,
+		showMarkdownViewButton = false,
+		onRequestMarkdownView,
+	}: FileEditorDialogProps = $props();
 
 	let maximized = $state(false);
 
-	const BASE_CLASS = 'flex flex-col h-dvh w-full max-w-full sm:max-w-full rounded-none border-0 p-0 gap-0 overflow-hidden';
-	const WINDOWED_CLASS = 'flex flex-col h-dvh w-full max-w-full rounded-none border-0 p-0 gap-0 overflow-hidden sm:h-[85vh] sm:max-w-5xl sm:rounded-lg sm:border';
+	const BASE_CLASS =
+		'flex flex-col h-dvh w-full max-w-full sm:max-w-full rounded-none border-0 p-0 gap-0 overflow-hidden';
+	const WINDOWED_CLASS =
+		'flex flex-col h-dvh w-full max-w-full rounded-none border-0 p-0 gap-0 overflow-hidden sm:h-[85vh] sm:max-w-5xl sm:rounded-lg sm:border';
 
 	let contentClass = $derived(maximized ? BASE_CLASS : WINDOWED_CLASS);
 
@@ -44,10 +56,7 @@
 </script>
 
 <Dialog.Root open={file !== null} onOpenChange={handleOpenChange}>
-	<Dialog.Content
-		class={contentClass}
-		showCloseButton={false}
-	>
+	<Dialog.Content class={contentClass} showCloseButton={false}>
 		{#if file}
 			<CodeEditor
 				content={file.content}
@@ -68,6 +77,7 @@
 				onToggleExpand={toggleMaximize}
 				{showMarkdownViewButton}
 				{onRequestMarkdownView}
+				onSaveError={() => notifications.error(m.notifications_save_file_failed())}
 			/>
 		{/if}
 	</Dialog.Content>

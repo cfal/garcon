@@ -8,15 +8,33 @@ import {
 	normalizePermissionMode,
 	normalizeThinkingMode,
 } from '$shared/chat-modes';
+import { deleteChat as deleteChatApi, getRunningChats, listChats } from '$lib/api/chats.js';
+import { updateSessionName } from '$lib/api/settings.js';
 import type { ChatSession } from '$lib/types/session';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
+import * as m from '$lib/paraglide/messages.js';
 
-function normalizeModeFields<T extends {
-	permissionMode?: unknown;
-	thinkingMode?: unknown;
-	claudeThinkingMode?: unknown;
-	ampAgentMode?: unknown;
-}>(value: T): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'claudeThinkingMode' | 'ampAgentMode'> {
+export interface ChatSessionsStoreDeps {
+	listChats?: typeof listChats;
+	getRunningChats?: typeof getRunningChats;
+	deleteChat?: typeof deleteChatApi;
+	updateSessionName?: typeof updateSessionName;
+	notifyError?: (message: string) => void;
+}
+
+function normalizeModeFields<
+	T extends {
+		permissionMode?: unknown;
+		thinkingMode?: unknown;
+		claudeThinkingMode?: unknown;
+		ampAgentMode?: unknown;
+	},
+>(
+	value: T,
+): Pick<
+	ChatSessionRecord,
+	'permissionMode' | 'thinkingMode' | 'claudeThinkingMode' | 'ampAgentMode'
+> {
 	return {
 		permissionMode: normalizePermissionMode(value.permissionMode),
 		thinkingMode: normalizeThinkingMode(value.thinkingMode),
@@ -29,13 +47,13 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 	return {
 		id: session.id,
 		projectPath: session.projectPath,
-			title: session.title,
-			agentId: session.agentId,
-			model: session.model,
-			apiProviderId: session.apiProviderId ?? null,
-			modelEndpointId: session.modelEndpointId ?? null,
-			modelProtocol: session.modelProtocol ?? null,
-			...normalizeModeFields(session),
+		title: session.title,
+		agentId: session.agentId,
+		model: session.model,
+		apiProviderId: session.apiProviderId ?? null,
+		modelEndpointId: session.modelEndpointId ?? null,
+		modelProtocol: session.modelProtocol ?? null,
+		...normalizeModeFields(session),
 		createdAt: session.activity?.createdAt ?? null,
 		lastActivityAt: session.activity?.lastActivityAt ?? null,
 		lastReadAt: session.activity?.lastReadAt ?? null,
@@ -63,12 +81,12 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.id === b.id &&
 		a.projectPath === b.projectPath &&
 		a.title === b.title &&
-			a.agentId === b.agentId &&
-			a.model === b.model &&
-			a.apiProviderId === b.apiProviderId &&
-			a.modelEndpointId === b.modelEndpointId &&
-			a.modelProtocol === b.modelProtocol &&
-			a.permissionMode === b.permissionMode &&
+		a.agentId === b.agentId &&
+		a.model === b.model &&
+		a.apiProviderId === b.apiProviderId &&
+		a.modelEndpointId === b.modelEndpointId &&
+		a.modelProtocol === b.modelProtocol &&
+		a.permissionMode === b.permissionMode &&
 		a.thinkingMode === b.thinkingMode &&
 		a.claudeThinkingMode === b.claudeThinkingMode &&
 		a.createdAt === b.createdAt &&
@@ -95,20 +113,119 @@ export class ChatSessionsStore {
 	order = $state<string[]>([]);
 	selectedChatId = $state<string | null>(null);
 	startupByChatId = $state<Record<string, ChatStartupConfig>>({});
+	isLoadingChats = $state(true);
 
-	get selectedChat(): ChatSessionRecord | null {
+	#deps: ChatSessionsStoreDeps;
+	#inFlightFetch: Promise<void> | null = null;
+	#needsFollowUpFetch = false;
+
+	#selectedChat = $derived.by(() => {
 		if (!this.selectedChatId) return null;
 		return this.byId[this.selectedChatId] ?? null;
+	});
+
+	#orderedChats = $derived.by(() =>
+		this.order
+			.map((id) => this.byId[id])
+			.filter((chat): chat is ChatSessionRecord => Boolean(chat)),
+	);
+
+	constructor(deps: ChatSessionsStoreDeps = {}) {
+		this.#deps = deps;
+	}
+
+	get selectedChat(): ChatSessionRecord | null {
+		return this.#selectedChat;
 	}
 
 	get orderedChats(): ChatSessionRecord[] {
-		return this.order
-			.map((id) => this.byId[id])
-			.filter((chat): chat is ChatSessionRecord => Boolean(chat));
+		return this.#orderedChats;
 	}
 
 	setSelectedChatId(chatId: string | null): void {
 		this.selectedChatId = chatId;
+	}
+
+	async #runFetch(showLoading: boolean): Promise<void> {
+		if (showLoading) this.isLoadingChats = true;
+		try {
+			const fetchChats = this.#deps.listChats ?? listChats;
+			const res = await fetchChats();
+			this.upsertFromServer(res.sessions ?? []);
+		} catch (err) {
+			const prefix = showLoading ? 'Failed to fetch chats' : 'Quiet refresh failed';
+			console.error(`[ChatSessionsStore] ${prefix}:`, err);
+			this.#deps.notifyError?.(m.notifications_refresh_chats_failed());
+		} finally {
+			if (showLoading) this.isLoadingChats = false;
+		}
+	}
+
+	async #refresh(showLoading: boolean): Promise<void> {
+		if (this.#inFlightFetch) {
+			this.#needsFollowUpFetch = true;
+			return this.#inFlightFetch;
+		}
+
+		this.#inFlightFetch = (async () => {
+			let useLoadingState = showLoading;
+			try {
+				do {
+					this.#needsFollowUpFetch = false;
+					await this.#runFetch(useLoadingState);
+					useLoadingState = false;
+				} while (this.#needsFollowUpFetch);
+			} finally {
+				this.#inFlightFetch = null;
+			}
+		})();
+		return this.#inFlightFetch;
+	}
+
+	/** Fetches the chat list with sidebar loading feedback. */
+	async refreshChats(): Promise<void> {
+		return this.#refresh(true);
+	}
+
+	/** Refreshes the chat list without changing sidebar loading state. */
+	async quietRefreshChats(): Promise<void> {
+		return this.#refresh(false);
+	}
+
+	/** Refreshes sessions before reconciling the real-time processing snapshot. */
+	async refreshChatsAndReconcileProcessing(): Promise<void> {
+		await this.quietRefreshChats();
+		const fetchRunningChats = this.#deps.getRunningChats ?? getRunningChats;
+		const running = await fetchRunningChats();
+		const activeChatIds = new Set<string>();
+		for (const sessionsForProvider of Object.values(running.sessions)) {
+			for (const session of sessionsForProvider) {
+				if (session.id) activeChatIds.add(session.id);
+			}
+		}
+		this.reconcileProcessing(activeChatIds);
+	}
+
+	/** Deletes a chat server-side after callers apply any optimistic local removal. */
+	async deleteRemoteChat(chatId: string): Promise<void> {
+		try {
+			const removeRemoteChat = this.#deps.deleteChat ?? deleteChatApi;
+			await removeRemoteChat(chatId);
+		} catch (err) {
+			console.error('[ChatSessionsStore] Delete failed:', err);
+			this.#deps.notifyError?.(m.notifications_delete_chat_failed());
+			await this.quietRefreshChats();
+		}
+	}
+
+	async renameChat(chatId: string, newTitle: string): Promise<void> {
+		try {
+			const renameRemoteChat = this.#deps.updateSessionName ?? updateSessionName;
+			await renameRemoteChat(chatId, newTitle);
+		} catch (err) {
+			console.error('[ChatSessionsStore] Rename failed:', err);
+			this.#deps.notifyError?.(m.notifications_rename_chat_failed());
+		}
 	}
 
 	/** Returns true if the store contains a record for the given chat ID. */
@@ -135,13 +252,13 @@ export class ChatSessionsStore {
 			}
 		}
 
-			for (const session of sessions) {
-				const next = toRecord(session);
-				const prev = this.byId[next.id];
-				preserveLocalPreview(prev, next);
-				if (prev && sameRecord(prev, next)) {
-					nextById[next.id] = prev;
-				} else {
+		for (const session of sessions) {
+			const next = toRecord(session);
+			const prev = this.byId[next.id];
+			preserveLocalPreview(prev, next);
+			if (prev && sameRecord(prev, next)) {
+				nextById[next.id] = prev;
+			} else {
 				// Preserve WS-authoritative isProcessing flag; the REST
 				// isActive snapshot can lag behind real-time WS events.
 				if (prev?.isProcessing && !next.isProcessing) {
@@ -172,11 +289,7 @@ export class ChatSessionsStore {
 		this.order = [...draftOrder, ...nextOrder];
 	}
 
-	createDraft(params: {
-		id: string;
-		projectPath: string;
-		startup: ChatStartupConfig;
-	}): void {
+	createDraft(params: { id: string; projectPath: string; startup: ChatStartupConfig }): void {
 		const { id, projectPath, startup } = params;
 		const normalizedStartup = {
 			...startup,
@@ -186,12 +299,12 @@ export class ChatSessionsStore {
 		const draft: ChatSessionRecord = {
 			id,
 			projectPath,
-				title: normalizedStartup.firstMessage.trim() || 'New Session',
-				agentId: normalizedStartup.agentId,
-				model: normalizedStartup.model,
-				apiProviderId: normalizedStartup.apiProviderId ?? null,
-				modelEndpointId: normalizedStartup.modelEndpointId ?? null,
-				modelProtocol: normalizedStartup.modelProtocol ?? null,
+			title: normalizedStartup.firstMessage.trim() || 'New Session',
+			agentId: normalizedStartup.agentId,
+			model: normalizedStartup.model,
+			apiProviderId: normalizedStartup.apiProviderId ?? null,
+			modelEndpointId: normalizedStartup.modelEndpointId ?? null,
+			modelProtocol: normalizedStartup.modelProtocol ?? null,
 			...normalizeModeFields(normalizedStartup),
 			createdAt: null,
 			lastActivityAt: null,
@@ -342,6 +455,6 @@ export class ChatSessionsStore {
 	}
 }
 
-export function createChatSessionsStore(): ChatSessionsStore {
-	return new ChatSessionsStore();
+export function createChatSessionsStore(deps: ChatSessionsStoreDeps = {}): ChatSessionsStore {
+	return new ChatSessionsStore(deps);
 }

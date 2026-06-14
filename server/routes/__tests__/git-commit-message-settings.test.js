@@ -6,10 +6,18 @@ class MalformedJsonError extends Error {
 
 const parseJsonBody = mock(() => Promise.resolve({}));
 const generateCommitMessageForFiles = mock(() => Promise.resolve({ message: 'feat: generated' }));
+const assertRealWithinProjectBase = mock((targetPath) => Promise.resolve(targetPath));
+const isProjectBoundaryError = mock(() => false);
 
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody,
   MalformedJsonError,
+}));
+
+mock.module('../../lib/path-boundary.ts', () => ({
+  assertRealWithinProjectBase,
+  isProjectBoundaryError,
+  projectBoundaryErrorResponse: mock(() => Response.json({ error: 'boundary' }, { status: 403 })),
 }));
 
 mock.module('../../git/git-service.js', () => ({
@@ -32,12 +40,14 @@ const agents = {
     'direct-openai-compatible': { authenticated: false },
     'direct-openai-responses-compatible': { authenticated: false },
   })),
+  getAgentReadinessMap: mock(() => Promise.resolve({})),
+  getAgentCatalogEntries: mock(() => Promise.resolve([])),
   getModels: mock(() => Promise.resolve([])),
   hasAgent: mock((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId)),
 };
 
 const settings = {
-  getUiSettings: mock(() => Promise.resolve({})),
+  getUiSettings: mock(() => ({})),
 };
 
 const routes = createGitRoutes(agents, settings);
@@ -57,10 +67,16 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     parseJsonBody.mockClear();
     generateCommitMessageForFiles.mockClear();
     agents.getAgentAuthStatusMap.mockClear();
+    agents.getAgentReadinessMap.mockClear();
+    agents.getAgentCatalogEntries.mockClear();
     agents.getModels.mockClear();
     agents.hasAgent.mockClear();
     agents.hasAgent.mockImplementation((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId));
     settings.getUiSettings.mockClear();
+    assertRealWithinProjectBase.mockClear();
+    assertRealWithinProjectBase.mockImplementation((targetPath) => Promise.resolve(targetPath));
+    isProjectBoundaryError.mockClear();
+    isProjectBoundaryError.mockImplementation(() => false);
   });
 
   it('uses persisted commit message settings when the request omits them', async () => {
@@ -68,7 +84,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       project: '/proj',
       files: ['src/a.ts'],
     }));
-    settings.getUiSettings.mockImplementation(() => Promise.resolve({
+    settings.getUiSettings.mockImplementation(() => ({
       commitMessage: {
         enabled: true,
         agentId: 'amp',
@@ -101,7 +117,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       model: 'gpt-5.4',
       customPrompt: '',
     }));
-    settings.getUiSettings.mockImplementation(() => Promise.resolve({
+    settings.getUiSettings.mockImplementation(() => ({
       commitMessage: {
         enabled: true,
         agentId: 'amp',

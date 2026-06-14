@@ -105,7 +105,11 @@ describe('FactoryCliRuntime lifecycle', () => {
   it('continues an existing session and emits assistant messages', async () => {
     const provider = new FactoryCliRuntime();
     const messages = mock();
+    let runningWhenFinished;
     provider.onMessages(messages);
+    provider.onFinished(() => {
+      runningWhenFinished = provider.isRunning('factory-session-2');
+    });
 
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
@@ -140,5 +144,6 @@ describe('FactoryCliRuntime lifecycle', () => {
     expect(messages).toHaveBeenCalledTimes(1);
     expect(messages.mock.calls[0][0]).toBe('chat-2');
     expect(messages.mock.calls[0][1][0].content).toBe('factory reply');
+    expect(runningWhenFinished).toBe(false);
   });
 });

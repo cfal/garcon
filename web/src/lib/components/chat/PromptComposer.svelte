@@ -3,16 +3,35 @@
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import LoadingStatus from './LoadingStatus.svelte';
-	import { getComposerState, getChatLifecycle, getLocalSettings, getChatSessions, getAppShell, getModelCatalog, getAgentState } from '$lib/context';
+	import {
+		getComposerState,
+		getChatLifecycle,
+		getLocalSettings,
+		getChatSessions,
+		getAppShell,
+		getModelCatalog,
+		getAgentState,
+	} from '$lib/context';
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
-	import { CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS, CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS } from '$lib/chat/chat-max-width';
-	import { CLAUDE_PERMISSION_MODES, NON_CLAUDE_PERMISSION_MODES } from '$lib/chat/chat-ui-constants';
+	import {
+		CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS,
+		CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS,
+	} from '$lib/chat/chat-max-width';
+	import {
+		CLAUDE_PERMISSION_MODES,
+		NON_CLAUDE_PERMISSION_MODES,
+	} from '$lib/chat/chat-ui-constants';
 	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/file-mentions';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
+	import {
+		getLocalStorageItem,
+		LOCAL_STORAGE_KEYS,
+		setLocalStorageItem,
+	} from '$lib/utils/local-persistence';
 	import { ImagePlus, X } from '@lucide/svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
@@ -26,7 +45,13 @@
 		onAbort?: (() => void) | null;
 	}
 
-	let { onsubmit, onModelChange, onPermissionModeChange, onThinkingModeChange, onAbort = null }: Props = $props();
+	let {
+		onsubmit,
+		onModelChange,
+		onPermissionModeChange,
+		onThinkingModeChange,
+		onAbort = null,
+	}: Props = $props();
 
 	const composerState = getComposerState();
 	const lifecycle = getChatLifecycle();
@@ -92,8 +117,12 @@
 	}
 
 	async function insertFileMention(path: string) {
-		const trigger = ui.fileMentionTrigger
-			?? findFileMentionTrigger(composerState.inputText, textarea?.selectionStart ?? composerState.inputText.length);
+		const trigger =
+			ui.fileMentionTrigger ??
+			findFileMentionTrigger(
+				composerState.inputText,
+				textarea?.selectionStart ?? composerState.inputText.length,
+			);
 		if (!trigger) {
 			ui.closeFileMenu();
 			return;
@@ -127,7 +156,8 @@
 				isComposing: event.isComposing,
 				isMobile: appShell.isMobile,
 			})
-		) return;
+		)
+			return;
 
 		event.preventDefault();
 		handleFormSubmit();
@@ -196,23 +226,29 @@
 	}
 
 	const isDraftStartupLoading = $derived(
-		lifecycle.isLoading && sessions.selectedChat?.status === 'draft'
+		lifecycle.isLoading && sessions.selectedChat?.status === 'draft',
 	);
 	const isQueueMode = $derived(
-		Boolean(sessions.selectedChat?.status === 'running' && sessions.selectedChat?.isProcessing)
+		Boolean(sessions.selectedChat?.status === 'running' && sessions.selectedChat?.isProcessing),
 	);
 	const isDisabled = $derived(isDraftStartupLoading);
 	const canSubmit = $derived(
-		canSubmitComposer(isDisabled, composerState.inputText, composerState.images.length)
+		canSubmitComposer(isDisabled, composerState.inputText, composerState.images.length),
 	);
 	const permissionOptions = $derived(
 		buildPermissionOptions(
-			agentState.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES
-		)
+			agentState.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES,
+		),
 	);
 	const thinkingOptions = $derived(buildThinkingOptions());
-	const canAttachImages = $derived(modelCatalog.supportsImages(agentState.agentId, agentState.model));
-	const modelSelectorMode: ModelSelectorMode = { agent: 'fixed', source: 'hidden', surface: 'composer' };
+	const canAttachImages = $derived(
+		modelCatalog.supportsImages(agentState.agentId, agentState.model),
+	);
+	const modelSelectorMode: ModelSelectorMode = {
+		agent: 'fixed',
+		source: 'hidden',
+		surface: 'composer',
+	};
 	const modelSelectorValue = $derived({
 		agentId: agentState.agentId,
 		model: agentState.model,
@@ -220,29 +256,30 @@
 		modelEndpointId: agentState.modelEndpointId,
 		modelProtocol: agentState.modelProtocol,
 	});
-	const sendButtonClass = 'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
-	const composerShellClass = $derived(cn(
-		'flex-shrink-0 bg-background px-2 pb-2',
-		CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS[localSettings.chatMaxWidth]
-	));
-	const composerFrameWrapperClass = $derived(cn(
-		'w-full',
-		CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS[localSettings.chatMaxWidth]
-	));
-	const composerSurfaceClass = $derived(cn(
-		'relative z-20 bg-card overflow-hidden rounded-2xl border border-border shadow-sm'
-	));
-	const imageListClass = $derived(cn(
-		'p-2 bg-muted/40 rounded-lg mx-2 mt-2'
-	));
-	const textareaClass = $derived(cn(
-		'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200',
-		'px-4 py-2.5 sm:px-5 sm:py-4 min-h-[48px]'
-	));
+	const sendButtonClass =
+		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
+	const composerShellClass = $derived(
+		cn(
+			'flex-shrink-0 bg-background px-2 pb-2',
+			CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS[localSettings.chatMaxWidth],
+		),
+	);
+	const composerFrameWrapperClass = $derived(
+		cn('w-full', CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS[localSettings.chatMaxWidth]),
+	);
+	const composerSurfaceClass = $derived(
+		cn('relative z-20 bg-card overflow-hidden rounded-2xl border border-border shadow-sm'),
+	);
+	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
+	const textareaClass = $derived(
+		cn(
+			'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200',
+			'px-4 py-2.5 sm:px-5 sm:py-4 min-h-[48px]',
+		),
+	);
 
-	// Composer resize via drag handle. Persists height to localStorage and
+	// Composer resize via drag handle. Persists height to browser storage and
 	// mutates the DOM directly during drag to avoid render latency.
-	const COMPOSER_STORAGE_KEY = 'composerHeight';
 	const COMPOSER_DEFAULT_HEIGHT = 140;
 	const COMPOSER_MIN_HEIGHT = 52;
 	const COMPOSER_MAX_HEIGHT = 500;
@@ -254,10 +291,10 @@
 	let composerHeight = $state(COMPOSER_DEFAULT_HEIGHT);
 	let dragCleanup: (() => void) | null = null;
 
-	// Initialise from localStorage on mount.
+	// Initialise from persisted browser storage on mount.
 	$effect(() => {
 		if (typeof window === 'undefined') return;
-		const stored = Number(window.localStorage.getItem(COMPOSER_STORAGE_KEY));
+		const stored = Number(getLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight));
 		if (Number.isFinite(stored)) composerHeight = clampHeight(stored);
 	});
 
@@ -285,7 +322,7 @@
 			dragCleanup = null;
 			const finalHeight = clampHeight(startHeight + startY - e.clientY);
 			composerHeight = finalHeight;
-			window.localStorage.setItem(COMPOSER_STORAGE_KEY, String(Math.round(finalHeight)));
+			setLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight, String(Math.round(finalHeight)));
 		}
 
 		document.addEventListener('pointermove', onPointerMove);
@@ -325,7 +362,9 @@
 			class="relative"
 		>
 			{#if composerState.isDragActive}
-				<div class="absolute inset-0 bg-primary/20 border-2 border-dashed border-primary flex items-center justify-center z-50 rounded-lg">
+				<div
+					class="absolute inset-0 bg-primary/20 border-2 border-dashed border-primary flex items-center justify-center z-50 rounded-lg"
+				>
 					<div class="bg-card rounded-lg p-4 shadow-md">
 						<ImagePlus class="w-8 h-8 text-primary mx-auto mb-2" />
 						<p class="text-sm font-medium text-foreground">{m.chat_composer_drop_images()}</p>
@@ -342,11 +381,7 @@
 									{#if file.type.startsWith('image/')}
 										{@const url = imageAttachments.urlFor(file, idx)}
 										{#if url}
-											<img
-												src={url}
-												alt={file.name}
-												class="w-full h-full object-cover"
-											/>
+											<img src={url} alt={file.name} class="w-full h-full object-cover" />
 										{/if}
 									{/if}
 								</div>
@@ -400,16 +435,16 @@
 			</div>
 
 			<ComposerBottomBar
-				canAttachImages={canAttachImages}
+				{canAttachImages}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={handleImagePick}
-				permissionOptions={permissionOptions}
+				{permissionOptions}
 				selectedPermission={agentState.permissionMode}
 				onPermissionSelect={(mode) => {
 					agentState.permissionMode = mode;
 					onPermissionModeChange?.(mode);
 				}}
-				thinkingOptions={thinkingOptions}
+				{thinkingOptions}
 				selectedThinking={agentState.thinkingMode}
 				onThinkingSelect={(mode) => {
 					agentState.thinkingMode = mode;
@@ -418,7 +453,7 @@
 				canSend={canSubmit}
 				onSend={handleFormSubmit}
 				sendTitle={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
-				sendButtonClass={sendButtonClass}
+				{sendButtonClass}
 			>
 				{#snippet modelSelector()}
 					<ComposerModelSelector

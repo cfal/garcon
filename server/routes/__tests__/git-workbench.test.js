@@ -1,12 +1,21 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import path from 'path';
+import os from 'os';
 
 class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
 }
 
+const projectBasePath = os.homedir();
+const gitFixturePath = path.join(projectBasePath, 'garcon-git-route-project');
+
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => Promise.resolve({})),
   MalformedJsonError,
+}));
+
+mock.module('../../config.js', () => ({
+  getProjectBasePath: mock(() => projectBasePath),
 }));
 
 import createGitRoutes from '../git.js';
@@ -15,9 +24,12 @@ import { parseJsonBody } from '../../lib/http-request.js';
 const ctx = {
   agents: {
     runSingleQuery: mock(() => Promise.resolve('feat: auto commit')),
+    getAgentAuthStatusMap: mock(() => Promise.resolve({})),
+    getAgentReadinessMap: mock(() => Promise.resolve({})),
+    getAgentCatalogEntries: mock(() => Promise.resolve([])),
   },
   settings: {
-    getUiSettings: mock(() => Promise.resolve({})),
+    getUiSettings: mock(() => ({})),
   },
 };
 
@@ -149,6 +161,36 @@ describe('GET /api/v1/git/changes-tree validation', () => {
     expect(response.status).toBe(400);
     expect(body.error).toBe('Missing required parameter: project.');
   });
+
+  it('returns 403 when project is outside the configured base', async () => {
+    const url = makeUrl('/api/v1/git/changes-tree', { project: '/' });
+    const request = new Request(url.toString());
+    const response = await handler(request, url);
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.errorCode).toBe('outside_project_base');
+  });
+});
+
+describe('POST /api/v1/git/worktrees/create boundary validation', () => {
+  const handler = routes['/api/v1/git/worktrees/create'].POST;
+
+  beforeEach(() => { parseJsonBody.mockClear(); });
+
+  it('returns 403 when worktreePath is outside the configured base', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({
+        project: gitFixturePath,
+        worktreePath: '/',
+      }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.errorCode).toBe('outside_project_base');
+  });
 });
 
 describe('GET /api/v1/git/file-review-data validation', () => {
@@ -279,7 +321,7 @@ describe('POST /api/v1/git/generate-commit-message contract', () => {
 
   it('returns typed errorCode when no staged changes are found', async () => {
     parseJsonBody.mockImplementation(() =>
-      Promise.resolve({ project: '/definitely-not-a-repo', files: ['a.ts'], agentId: 'claude' }),
+      Promise.resolve({ project: path.join(projectBasePath, 'definitely-not-a-repo'), files: ['a.ts'], agentId: 'claude' }),
     );
     const response = await handler(makeRequest({}));
     const body = await response.json();
@@ -300,15 +342,13 @@ describe('malformed JSON body', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('Request body is not valid JSON.');
+    expect(body.error).toBe('Malformed JSON');
   });
 
-  it('propagates non-JSON parse errors to toHttpError', async () => {
+  it('propagates non-JSON parse errors to the caller', async () => {
     parseJsonBody.mockImplementation(() => { throw new Error('Stream aborted'); });
-    const response = await handler(makeRequest({}));
 
-    // Non-malformed-JSON errors fall through to git.toHttpError which returns 500.
-    expect(response.status).toBe(500);
+    await expect(handler(makeRequest({}))).rejects.toThrow('Stream aborted');
   });
 });
 

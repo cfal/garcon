@@ -18,18 +18,38 @@
 		{#each items as item (item.content)}
 			<li class="flex items-start gap-1.5 text-xs">
 				{#if item.status === 'completed'}
-					<svg class="w-3.5 h-3.5 mt-px flex-shrink-0 text-status-success-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+					<svg
+						class="w-3.5 h-3.5 mt-px flex-shrink-0 text-status-success-foreground"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+						/>
 					</svg>
 					<span class="text-muted-foreground line-through">{item.content}</span>
 				{:else if item.status === 'in_progress'}
-					<svg class="w-3.5 h-3.5 mt-px flex-shrink-0 text-status-info-foreground animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<svg
+						class="w-3.5 h-3.5 mt-px flex-shrink-0 text-status-info-foreground animate-spin"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2" />
 						<circle cx="12" cy="12" r="9" stroke-width="2" fill="none" opacity="0.3" />
 					</svg>
 					<span class="text-foreground font-medium">{item.content}</span>
 				{:else}
-					<svg class="w-3.5 h-3.5 mt-px flex-shrink-0 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<svg
+						class="w-3.5 h-3.5 mt-px flex-shrink-0 text-muted-foreground"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
 						<circle cx="12" cy="12" r="9" stroke-width="2" />
 					</svg>
 					<span class="text-foreground/80">{item.content}</span>

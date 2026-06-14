@@ -8,10 +8,7 @@
 		chatId: string;
 	}
 
-	let {
-		initialPath,
-		chatId
-	}: StandaloneShellProps = $props();
+	let { initialPath, chatId }: StandaloneShellProps = $props();
 </script>
 
 <div class="h-full w-full flex flex-col">

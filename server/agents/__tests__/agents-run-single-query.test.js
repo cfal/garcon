@@ -36,11 +36,13 @@ mock.module('../pi/pi-cli.js', () => ({
 mock.module('../claude/history-loader.js', () => ({
   getClaudePreviewFromNativePath: mock(() => Promise.resolve(null)),
   loadClaudeChatMessages: mock(() => Promise.resolve([])),
+  loadClaudeChatMessagePage: mock(() => Promise.resolve(null)),
 }));
 
 mock.module('../codex/history-loader.js', () => ({
   getCodexPreviewFromNativePath: mock(() => Promise.resolve(null)),
   loadCodexChatMessages: mock(() => Promise.resolve([])),
+  loadCodexChatMessagePage: mock(() => Promise.resolve(null)),
 }));
 
 mock.module('../opencode/history-loader.js', () => ({
@@ -163,7 +165,7 @@ function makeRegistry(args = {}) {
     getChat: mock(() => null),
     getChatByAgentSessionId: mock(() => null),
     listAllChats: mock(() => ({})),
-    updateChat: mock(() => undefined),
+    updateChat: mock((chatId, patch) => ({ id: chatId, ...patch })),
     onChatRemoved: mock(() => undefined),
     ...args.registry,
   };
@@ -329,7 +331,7 @@ function makeRegistry(args = {}) {
           authLoginSupported: false,
         }, factoryQuery, args.prepareEndpointRuntimeByAgentId?.factory),
         agentFromRuntime('pi', 'Pi', pi, {
-          supportsFork: false,
+          supportsFork: true,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
@@ -604,6 +606,33 @@ describe('AgentRegistry session option hydration', () => {
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
       modelProtocol: 'openai-compatible',
+    }, { flush: true });
+  });
+
+  it('aborts a newly started runtime when session binding cannot be flushed', async () => {
+    const bindError = new Error('disk full');
+    const { registry, mockRegistry, codex } = makeRegistry({
+      registry: {
+        getChat: mock(() => ({
+          agentId: 'codex',
+          projectPath: '/proj',
+          model: 'gpt-5',
+          permissionMode: 'default',
+          thinkingMode: 'none',
+        })),
+        updateChat: mock(() => Promise.reject(bindError)),
+      },
     });
+
+    await expect(registry.startSession('123', 'hello', {})).rejects.toThrow('disk full');
+
+    expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
+      agentSessionId: 'codex-session',
+      nativePath: null,
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+    }, { flush: true });
+    expect(codex.abort).toHaveBeenCalledWith('codex-session');
   });
 });

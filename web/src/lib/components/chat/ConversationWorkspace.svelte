@@ -4,7 +4,7 @@
 	// pane, queue controls, and composer. All business logic lives in
 	// the controller modules.
 
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
@@ -19,8 +19,20 @@
 	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
-	import { getChatSessions, getLocalSettings, getAppShell, getWs, getNavigation, setChatState, setComposerState, setAgentState, setChatLifecycle, getReadReceiptOutbox, getModelCatalog } from '$lib/context';
-	import type { PendingPermissionRequest, QueueState, PermissionMode, PendingViewChat } from '$lib/types/chat';
+	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+	import {
+		getChatSessions,
+		getLocalSettings,
+		getAppShell,
+		getWs,
+		getNavigation,
+		setChatState,
+		setComposerState,
+		setAgentState,
+		setChatLifecycle,
+		getReadReceiptOutbox,
+		getModelCatalog,
+	} from '$lib/context';
 	import { ArrowDown, ArrowUp, Loader2 } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
@@ -31,7 +43,8 @@
 		reserveTopFloatingToolbar?: boolean;
 	}
 
-	let { onRegisterSubmit, reserveTopFloatingToolbar = false }: ConversationWorkspaceProps = $props();
+	let { onRegisterSubmit, reserveTopFloatingToolbar = false }: ConversationWorkspaceProps =
+		$props();
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
@@ -45,6 +58,7 @@
 	const composerState = new ComposerState();
 	const agentState = new AgentState();
 	const lifecycle = new ChatLifecycleStore();
+	const conversationUi = new ConversationUiStore();
 	const startupCoordinator = new StartupCoordinator();
 
 	setChatState(chatState);
@@ -52,24 +66,16 @@
 	setAgentState(agentState);
 	setChatLifecycle(lifecycle);
 
-	// Per-chat reactive state for permissions and queue.
-	let pendingPermissionRequests = $state<PendingPermissionRequest[]>([]);
-	let queueByChatId = $state<Record<string, QueueState | null>>({});
-	let pendingViewChat = $state<PendingViewChat | null>(null);
-	let previousPermissionMode = $state<PermissionMode | null>(null);
-	let needsServerLoad = $state(false);
-		const activeQueue = $derived.by(() => {
-			const chatId = sessions.selectedChatId;
-			if (!chatId) return null;
-			return queueByChatId[chatId] ?? null;
-		});
-		function setMessageQueue(chatId: string, q: QueueState | null): void {
-			queueByChatId = { ...queueByChatId, [chatId]: q };
-		}
-	const scrollToTopButtonClass = $derived(cn(
-		'absolute right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg',
-		reserveTopFloatingToolbar ? 'top-16' : 'top-3',
-	));
+	const activeQueue = $derived.by(() => {
+		const chatId = sessions.selectedChatId;
+		return conversationUi.getQueue(chatId);
+	});
+	const scrollToTopButtonClass = $derived(
+		cn(
+			'absolute right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg',
+			reserveTopFloatingToolbar ? 'top-16' : 'top-3',
+		),
+	);
 
 	let scrollContainer: HTMLDivElement | null = $state(null);
 	let queueControlsContainer: HTMLDivElement | undefined = $state();
@@ -83,34 +89,24 @@
 		drainHandle,
 		sessions,
 		chatState,
-		composerState,
 		agentState,
 		lifecycle,
+		conversationUi,
 		startupCoordinator,
-		appShell,
 		readReceiptOutbox,
-		getPendingPermissionRequests: () => pendingPermissionRequests,
-		setPendingPermissionRequests: (updater) => {
-			if (typeof updater === 'function') {
-				pendingPermissionRequests = updater(pendingPermissionRequests);
-			} else {
-				pendingPermissionRequests = updater;
-			}
-		},
-		getPendingViewChat: () => pendingViewChat,
-		setPendingViewChat: (v) => { pendingViewChat = v; },
-			setMessageQueue,
-		getPreviousPermissionMode: () => previousPermissionMode,
-		setPreviousPermissionMode: (mode) => { previousPermissionMode = mode; },
+	});
+
+	conversationUi.mountQueuePruning({
+		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
 	});
 
 	// Scroll controller.
 	const scroll = new ConversationScrollController({
 		getScrollContainer: () => scrollContainer,
-			getQueueContainer: () => queueControlsContainer,
-			chatState,
-			sessions,
-		});
+		getQueueContainer: () => queueControlsContainer,
+		chatState,
+		sessions,
+	});
 
 	// Session controller.
 	const controller = new ConversationSessionController({
@@ -118,9 +114,10 @@
 		chatState,
 		composerState,
 		agentState,
-			lifecycle,
-			startupCoordinator,
-			modelCatalog,
+		lifecycle,
+		conversationUi,
+		startupCoordinator,
+		modelCatalog,
 		appShell,
 		readReceiptOutbox,
 		navigation: {
@@ -130,21 +127,15 @@
 				goto(`/chat/${chatId}`);
 			},
 		},
-		getPendingPermissionRequests: () => pendingPermissionRequests,
-		setPendingPermissionRequests: (v) => { pendingPermissionRequests = v; },
-		getPreviousPermissionMode: () => previousPermissionMode,
-		setPreviousPermissionMode: (v) => { previousPermissionMode = v; },
-			setNeedsServerLoad: (v) => { needsServerLoad = v; },
-			setIsViewportPinnedToBottom: (v) => { scroll.isPinnedToBottom = v; },
-			setMessageQueue,
-			scrollToBottom: () => scroll.scrollToBottom(),
-		});
+		setIsViewportPinnedToBottom: (v) => {
+			scroll.isPinnedToBottom = v;
+		},
+		scrollToBottom: () => scroll.scrollToBottom(),
+	});
 
 	// Expose the submit function to sibling components (runs once on mount).
-	$effect(() => {
-		untrack(() => {
-			if (onRegisterSubmit) onRegisterSubmit(submitToActiveChat);
-		});
+	onMount(() => {
+		onRegisterSubmit?.(submitToActiveChat);
 	});
 
 	// Chat switch effect (dedup handled inside the controller).
@@ -167,11 +158,13 @@
 			const chatId = sessions.selectedChatId;
 
 			if (selected && selected.status === 'running') {
-				void getChatQueue(selected.id).then((result) => {
-					setMessageQueue(selected.id, result.queue);
-				}).catch(() => {
-					// Queue state will converge through later broadcasts.
-				});
+				void getChatQueue(selected.id)
+					.then((result) => {
+						conversationUi.setMessageQueue(selected.id, result.queue);
+					})
+					.catch(() => {
+						// Queue state will converge through later broadcasts.
+					});
 			}
 
 			if (!hasConnectedBefore) {
@@ -184,31 +177,6 @@
 				controller.loadChat(chatId);
 			}
 		});
-	});
-
-	// Syncs lifecycle.isLoading from the selected chat's isProcessing flag.
-	$effect(() => {
-		const selected = sessions.selectedChat;
-		const isProcessing = Boolean(selected?.isProcessing);
-		untrack(() => {
-			if (isProcessing) {
-				if (!lifecycle.isLoading) lifecycle.setIsLoading(true);
-				return;
-			}
-			if (lifecycle.isLoading) lifecycle.setIsLoading(false);
-		});
-	});
-
-	// Prunes queue cache entries for chats no longer present in session state.
-	$effect(() => {
-		const activeChatIds = new Set(Object.keys(sessions.byId));
-		const staleIds = Object.keys(queueByChatId).filter((chatId) => !activeChatIds.has(chatId));
-		if (staleIds.length === 0) return;
-		const nextQueueByChatId = { ...queueByChatId };
-		for (const chatId of staleIds) {
-			delete nextQueueByChatId[chatId];
-		}
-		queueByChatId = nextQueueByChatId;
 	});
 
 	// Debounced persistence to avoid main-thread JSON.stringify per token during streaming.
@@ -312,7 +280,7 @@
 				onscroll={() => scroll.handleScroll()}
 				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
 				onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
-				{pendingPermissionRequests}
+				pendingPermissionRequests={conversationUi.pendingPermissionRequests}
 				onRetry={() => {
 					const chatId = sessions.selectedChatId;
 					if (chatId) controller.loadChat(chatId);
@@ -321,13 +289,13 @@
 			/>
 
 			{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}
-					<Button
-						variant="outline"
-						size="icon"
-						class={scrollToTopButtonClass}
-						onclick={() => scroll.scrollToTop()}
-						disabled={scroll.isScrollingToTop}
-						title="Scroll to initial prompt"
+				<Button
+					variant="outline"
+					size="icon"
+					class={scrollToTopButtonClass}
+					onclick={() => scroll.scrollToTop()}
+					disabled={scroll.isScrollingToTop}
+					title={m.workspace_scroll_to_initial_prompt()}
 				>
 					{#if scroll.isScrollingToTop}
 						<Loader2 class="w-5 h-5 animate-spin" />
@@ -340,28 +308,28 @@
 					size="icon"
 					class="absolute bottom-14 right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg"
 					onclick={() => scroll.scrollToBottom()}
-					title="Scroll to bottom"
+					title={m.workspace_scroll_to_bottom()}
 				>
 					<ArrowDown class="w-5 h-5" />
 				</Button>
 			{/if}
 		</div>
 
-			<div bind:this={queueControlsContainer}>
-				<QueueControls
-					queue={activeQueue}
-					onResume={() => controller.handleQueueResume()}
-					onPause={() => controller.handleQueuePause()}
-					onDequeue={(id) => controller.handleDequeue(id)}
+		<div bind:this={queueControlsContainer}>
+			<QueueControls
+				queue={activeQueue}
+				onResume={() => controller.handleQueueResume()}
+				onPause={() => controller.handleQueuePause()}
+				onDequeue={(id) => controller.handleDequeue(id)}
 			/>
 		</div>
 
-			<PromptComposer
-				onsubmit={onSubmit}
-				onModelChange={(m) => controller.handleModelChange(m)}
-				onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
-				onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
-				onAbort={() => controller.handleAbort()}
-				/>
-		</div>
-		{/if}
+		<PromptComposer
+			onsubmit={onSubmit}
+			onModelChange={(m) => controller.handleModelChange(m)}
+			onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
+			onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
+			onAbort={() => controller.handleAbort()}
+		/>
+	</div>
+{/if}

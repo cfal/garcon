@@ -15,6 +15,9 @@ import { convertCursorToolUse } from "./tool-use-converter.js";
 import { getCursorModels } from './cursor-models.js';
 import { CursorRequestIdentityStore } from './cursor-request-identities.js';
 import { loadCursorChatMessagesBySessionId } from "./history-loader.js";
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:cursor:cursor-cli');
 import type {
   PermissionMode,
   AgentChatEntry,
@@ -329,6 +332,7 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
 export class CursorRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, CursorSession>();
   #requestIdentities: CursorRequestIdentityStore;
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(requestIdentities = new CursorRequestIdentityStore()) {
     super();
@@ -465,6 +469,10 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
       }
       session.resultSeen = true;
       const exitCode = cursorExitCodeForResult(event);
+      if (session.isRunning) {
+        session.isRunning = false;
+        this.emitProcessing(session.chatId, false);
+      }
       this.emitFinished(
         session.chatId,
         exitCode,
@@ -477,6 +485,11 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
     if (event.type === 'error') {
       const message = asString(event.message ?? event.error) ?? 'Cursor Agent reported an error.';
       this.emitMessages(session.chatId, [new ErrorMessage(timestamp, message)]);
+      session.resultSeen = true;
+      if (session.isRunning) {
+        session.isRunning = false;
+        this.emitProcessing(session.chatId, false);
+      }
       this.emitFailed(session.chatId, message);
       this.#finalizeTurn(session, 1);
     }
@@ -510,7 +523,7 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
       this.#parseStdoutLine(session, buffer);
     } catch (error) {
       if (!proc.killed) {
-        console.error(`cursor(${session.id.slice(0, 8)}): stdout read error:`, (error as Error).message);
+        logger.error(`cursor(${session.id.slice(0, 8)}): stdout read error:`, (error as Error).message);
       }
     } finally {
       const exitCode = await proc.exited;
@@ -708,9 +721,10 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
     });
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxAge = 30 * 60 * 1000;
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
       for (const [id, session] of this.#runningSessions.entries()) {
         if (!session.isRunning && now - session.startTime > maxAge) {
@@ -718,5 +732,20 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
         }
       }
     }, 5 * 60 * 1000);
+  }
+
+  shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
+    for (const session of this.#runningSessions.values()) {
+      session.aborted = true;
+      if (session.process && !session.process.killed) {
+        session.process.kill();
+      }
+      this.#finalizeTurn(session, 143);
+    }
+    this.#runningSessions.clear();
   }
 }

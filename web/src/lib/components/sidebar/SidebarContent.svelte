@@ -3,22 +3,20 @@
 	import SidebarChatList from './SidebarChatList.svelte';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatOrderList } from '$lib/api/chats.js';
+	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
 
 	interface SidebarContentProps {
 		chats: ChatSessionRecord[];
 		filteredChats: ChatSessionRecord[];
 		selectedChatId: string | null;
 		isLoading: boolean;
+		isMobile?: boolean;
 		currentTime: Date;
 		searchFilter: string;
-		isReorderMode: boolean;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: (chatId: string) => boolean;
-		onEnterReorderMode: () => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
-		onReorderGroup: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
@@ -29,8 +27,13 @@
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
-		onImmediateReorder: (list: ChatOrderList, oldOrder: string[], newOrder: string[]) => void;
-		onQuickMove: (chatId: string, chatIdAbove?: string, chatIdBelow?: string) => void;
+		onQuickMove: (
+			list: ChatOrderList,
+			chatId: string,
+			target: ReorderQuickTarget,
+			onSuccess?: () => void,
+			onFailure?: () => void,
+		) => void;
 	}
 
 	let {
@@ -38,15 +41,13 @@
 		filteredChats,
 		selectedChatId,
 		isLoading,
+		isMobile = false,
 		currentTime,
 		searchFilter,
-		isReorderMode,
 		isMultiSelectMode,
 		isMultiSelected,
-		onEnterReorderMode,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
-		onReorderGroup,
 		onChatSelect,
 		onDeleteChat,
 		onStartRenameChat,
@@ -57,29 +58,30 @@
 		onManageTags,
 		onTogglePinned,
 		onToggleArchive,
-		onImmediateReorder,
 		onQuickMove,
 	}: SidebarContentProps = $props();
+
+	let viewportRef = $state<HTMLElement | null>(null);
 </script>
 
 <ScrollArea
+	bind:viewportRef
 	class="flex-1 overflow-y-auto overscroll-contain"
 	scrollbarYClasses="w-1.5"
 >
 	<SidebarChatList
+		{viewportRef}
 		{chats}
 		{filteredChats}
 		{selectedChatId}
 		{isLoading}
+		{isMobile}
 		{currentTime}
 		{searchFilter}
-		{isReorderMode}
 		{isMultiSelectMode}
 		{isMultiSelected}
-		{onEnterReorderMode}
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}
-		{onReorderGroup}
 		{onChatSelect}
 		{onDeleteChat}
 		{onStartRenameChat}
@@ -90,7 +92,6 @@
 		{onManageTags}
 		{onTogglePinned}
 		{onToggleArchive}
-		{onImmediateReorder}
 		{onQuickMove}
 	/>
 </ScrollArea>

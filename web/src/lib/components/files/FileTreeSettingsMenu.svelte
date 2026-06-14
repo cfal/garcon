@@ -3,6 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
 	import Settings from '@lucide/svelte/icons/settings';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface FileTreeSettingsMenuProps {
 		showHiddenFiles: boolean;
@@ -26,30 +27,32 @@
 		<Button
 			variant="ghost"
 			size="icon-sm"
-			aria-label="File tree settings"
-			title="File tree settings"
+			aria-label={m.filetree_settings()}
+			title={m.filetree_settings()}
 		>
 			<Settings class="w-4 h-4" />
 		</Button>
 	</Popover.Trigger>
 
-		<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
-			<div class="bg-card text-foreground rounded-md border border-border">
+	<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
+		<div class="bg-card text-foreground rounded-md border border-border">
 			<div class="flex items-center justify-between px-4 py-3">
-				<div class="text-sm font-medium text-foreground">Folders first</div>
+				<div class="text-sm font-medium text-foreground">{m.filetree_settings_folders_first()}</div>
 				<Switch
 					checked={foldersFirst}
 					onCheckedChange={(checked) => onFoldersFirstChange(Boolean(checked))}
-					aria-label="Folders first"
+					aria-label={m.filetree_settings_folders_first()}
 				/>
 			</div>
 
 			<div class="flex items-center justify-between px-4 py-3">
-				<div class="text-sm font-medium text-foreground">Show hidden files</div>
+				<div class="text-sm font-medium text-foreground">
+					{m.filetree_settings_show_hidden_files()}
+				</div>
 				<Switch
 					checked={showHiddenFiles}
 					onCheckedChange={(checked) => onShowHiddenFilesChange(Boolean(checked))}
-					aria-label="Show hidden files"
+					aria-label={m.filetree_settings_show_hidden_files()}
 				/>
 			</div>
 		</div>

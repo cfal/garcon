@@ -11,9 +11,13 @@ import type {
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { launchAgentAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
-import { EMPTY_TRANSCRIPT_SOURCE } from '../shared/empty-transcript-source.js';
+import { loadClaudeChatMessages, getClaudePreviewFromNativePath, loadClaudeChatMessagePage } from './history-loader.js';
+import type { ChatMessage } from '../../../common/chat-types.js';
 import type { Agent, AgentRuntime } from '../types.js';
 import { buildClaudeEndpointRuntime } from './endpoint-runtime.js';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:claude');
 
 interface ClaudeAgentRuntime extends AgentRuntime {
   updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void;
@@ -26,7 +30,8 @@ function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
       const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId);
       const claudeRequest: ClaudeStartSessionRequest = { ...request, agentSessionId };
       claude.startClaudeCliSession(claudeRequest).catch((error: Error) => {
-        console.error(`agents: claude start failed for chat ${request.chatId}:`, error.message);
+        logger.error(`agents: claude start failed for chat ${request.chatId}:`, error.message);
+        claude.failClaudeInternalSession(agentSessionId, request.chatId, error.message);
       });
       return { agentSessionId, nativePath };
     },
@@ -45,8 +50,11 @@ function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
     resolvePermission(permissionRequestId, decision) {
       claude.resolveInternalToolApproval(permissionRequestId, decision);
     },
+    shutdown() {
+      claude.shutdown();
+    },
     startPurgeTimer() {
-      return claude.startPurgeTimer();
+      claude.startPurgeTimer();
     },
     onMessages(cb) { claude.onMessages(cb); },
     onProcessing(cb) { claude.onProcessing(cb); },
@@ -67,7 +75,30 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
     label: 'Claude',
     runtime: createClaudeRuntime(claude),
     transcript: {
-      ...EMPTY_TRANSCRIPT_SOURCE,
+      async loadMessages(session): Promise<ChatMessage[]> {
+        const nativePath = session.nativePath
+          ?? (session.agentSessionId
+            ? await createClaudeNativePath(session.projectPath, session.agentSessionId)
+            : null);
+        if (!nativePath) return [];
+        return loadClaudeChatMessages(nativePath) as Promise<ChatMessage[]>;
+      },
+      async loadMessagePage(session, page) {
+        const nativePath = session.nativePath
+          ?? (session.agentSessionId
+            ? await createClaudeNativePath(session.projectPath, session.agentSessionId)
+            : null);
+        if (!nativePath) return null;
+        return loadClaudeChatMessagePage(nativePath, page.limit, page.offset);
+      },
+      async getPreview(session) {
+        const nativePath = session.nativePath
+          ?? (session.agentSessionId
+            ? await createClaudeNativePath(session.projectPath, session.agentSessionId)
+            : null);
+        if (!nativePath) return null;
+        return getClaudePreviewFromNativePath(nativePath);
+      },
       async resolveNativePath(session) {
         if (!session.agentSessionId) return null;
         const candidate = await createClaudeNativePath(session.projectPath, session.agentSessionId);

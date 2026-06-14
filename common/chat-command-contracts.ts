@@ -2,6 +2,7 @@ import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } f
 import type { AgentCommandImage } from './ws-requests.js';
 import type { ApiProtocol } from './api-providers.js';
 import type { QueueState } from './queue-state.js';
+import type { HttpErrorResponse } from './http-error.js';
 
 export type CommandStatus = 'accepted' | 'duplicate' | 'already-applied';
 
@@ -24,12 +25,8 @@ export interface CommandAcceptedResponse {
   acceptedAt: string;
 }
 
-export interface CommandErrorResponse {
-  success: false;
-  error: string;
+export interface CommandErrorResponse extends HttpErrorResponse {
   errorCode: CommandErrorCode;
-  retryable: boolean;
-  details?: string;
 }
 
 export interface StartChatCommandRequest {

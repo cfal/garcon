@@ -14,6 +14,9 @@ import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AgentCommandImage, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession, ThinkingMode } from "../session-types.js";
 import { getFactoryModelMetadata, getFactoryModels } from './factory-models.js';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:factory:factory-cli');
 
 interface FactorySession {
   aborted: boolean;
@@ -301,6 +304,7 @@ function convertFactoryMessageEvent(event: FactoryMessageEvent): ChatMessage[] {
 
 export class FactoryCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, FactorySession>();
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
     return getFactoryModels();
@@ -340,7 +344,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n')) {
           if (line.trim()) {
-            console.log(`factory(${sessionId.slice(0, 8)}): stderr: ${line}`);
+            logger.info(`factory(${sessionId.slice(0, 8)}): stderr: ${line}`);
           }
         }
       }
@@ -411,6 +415,10 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       case 'completion':
       case 'result':
         session.resultSeen = true;
+        if (session.isRunning) {
+          session.isRunning = false;
+          this.emitProcessing(session.chatId, false);
+        }
         this.emitFinished(session.chatId, 0);
         this.#finalizeTurn(session, 0);
         break;
@@ -440,7 +448,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
           try {
             this.#routeEvent(session, JSON.parse(line) as FactoryCliEvent);
           } catch {
-            console.warn(`factory(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
+            logger.warn(`factory(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
           }
         }
       }
@@ -602,9 +610,10 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       }));
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxAge = 30 * 60 * 1000;
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
       for (const [id, session] of this.#runningSessions.entries()) {
         if (!session.isRunning && now - session.startTime > maxAge) {
@@ -612,5 +621,20 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
         }
       }
     }, 5 * 60 * 1000);
+  }
+
+  shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
+    for (const session of this.#runningSessions.values()) {
+      session.aborted = true;
+      if (session.process && !session.process.killed) {
+        session.process.kill();
+      }
+      this.#finalizeTurn(session, 143);
+    }
+    this.#runningSessions.clear();
   }
 }

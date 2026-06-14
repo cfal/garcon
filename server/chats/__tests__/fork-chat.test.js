@@ -148,6 +148,10 @@ describe('forkChatFileCopy', () => {
         nativePath: sourceNativePath,
         tags: ['ops'],
         agentSessionId: '11111111-1111-1111-1111-111111111111',
+        permissionMode: 'acceptEdits',
+        thinkingMode: 'think-hard',
+        claudeThinkingMode: 'off',
+        ampAgentMode: 'deep',
       },
       '101': {
         agentId: 'claude',
@@ -192,6 +196,10 @@ describe('forkChatFileCopy', () => {
       apiProviderId: 'anthropic-custom',
       modelEndpointId: 'endpoint-1',
       modelProtocol: 'anthropic-messages',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'think-hard',
+      claudeThinkingMode: 'off',
+      ampAgentMode: 'deep',
     });
     expect(metadata.addNewChatMetadata).toHaveBeenCalledWith('103', 'Fallback bug hunt prompt');
     expect(settings.ensureInNormal).toHaveBeenCalledWith('103');

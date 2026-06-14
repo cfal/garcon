@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import {
   buildDirectAnthropicConfig,
   buildDirectOpenAiConfig,
   buildDirectOpenAiResponsesConfig,
   createDirectOpenAiChatRuntime,
   createDirectOpenAiResponsesRuntime,
+  DirectEndpointRouterRuntime,
 } from '../direct/router.ts';
 
 function endpoint(overrides = {}) {
@@ -105,6 +106,77 @@ describe('Direct OpenAI router runtimes', () => {
     expect(await responsesAdapter.getModels?.()).toEqual([
       { value: 'responses-model', label: 'Acme: Responses Model', supportsImages: false },
     ]);
+  });
+
+  it('starts purge timers for existing and newly created endpoint runtimes', async () => {
+    const provider = {
+      id: 'acme',
+      label: 'Acme',
+      endpoints: [
+        endpoint({ id: 'chat_endpoint_a' }),
+        endpoint({ id: 'chat_endpoint_b' }),
+      ],
+    };
+    const runtimes = new Map();
+    const createRuntime = mock((runtimeEndpoint) => {
+      const runtime = {
+        startSession: mock(async () => ({
+          agentSessionId: `${runtimeEndpoint.id}_session`,
+          nativePath: null,
+        })),
+        runTurn: mock(async () => {}),
+        abort: mock(() => false),
+        isRunning: mock(() => false),
+        getRunningSessions: mock(() => []),
+        getModels: mock(async () => []),
+        startPurgeTimer: mock(() => {}),
+        shutdown: mock(() => {}),
+        onMessages: mock(() => {}),
+        onProcessing: mock(() => {}),
+        onSessionCreated: mock(() => {}),
+        onFinished: mock(() => {}),
+        onFailed: mock(() => {}),
+      };
+      runtimes.set(runtimeEndpoint.id, runtime);
+      return runtime;
+    });
+    const router = new DirectEndpointRouterRuntime({
+      agentId: 'direct-openai-compatible',
+      label: 'Direct OpenAI',
+      protocol: 'openai-compatible',
+      noEndpointMessage: 'No endpoint',
+      apiProviders: {
+        list: () => [provider],
+        getEndpoint: (endpointId) => {
+          const runtimeEndpoint = provider.endpoints.find((entry) => entry.id === endpointId);
+          return runtimeEndpoint ? { apiProvider: provider, endpoint: runtimeEndpoint } : null;
+        },
+      },
+      createRuntime,
+      runSingleQuery: mock(async () => ''),
+    });
+
+    router.startPurgeTimer();
+    await router.startSession({
+      chatId: 'chat-a',
+      command: 'hello',
+      projectPath: '/tmp',
+      modelEndpointId: 'chat_endpoint_a',
+    });
+    router.startPurgeTimer();
+    await router.startSession({
+      chatId: 'chat-b',
+      command: 'hello',
+      projectPath: '/tmp',
+      modelEndpointId: 'chat_endpoint_b',
+    });
+    router.shutdown();
+
+    expect(createRuntime).toHaveBeenCalledTimes(2);
+    expect(runtimes.get('chat_endpoint_a').startPurgeTimer).toHaveBeenCalledTimes(1);
+    expect(runtimes.get('chat_endpoint_b').startPurgeTimer).toHaveBeenCalledTimes(1);
+    expect(runtimes.get('chat_endpoint_a').shutdown).toHaveBeenCalledTimes(1);
+    expect(runtimes.get('chat_endpoint_b').shutdown).toHaveBeenCalledTimes(1);
   });
 });
 

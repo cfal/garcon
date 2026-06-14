@@ -108,6 +108,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   #capabilityCache: AcpCapabilityCache;
   #sessions = new Map<string, AcpAgentRuntimeSession>();
   #pendingPermissions = new Map<string, PendingPermissionRequest>();
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(policy: AcpAgentPolicy, options: AcpAgentRuntimeOptions) {
     super();
@@ -204,6 +205,10 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   }
 
   shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
     for (const session of this.#sessions.values()) {
       session.client.close();
     }
@@ -211,9 +216,10 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     this.#pendingPermissions.clear();
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxIdleMs = 30 * 60 * 1000;
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
       for (const [sessionId, session] of this.#sessions.entries()) {
         if (session.running) continue;
@@ -371,6 +377,10 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       }
     } finally {
       this.#emitFlushedMessages(session);
+      this.emitProcessing(session.chatId, false);
+      session.running = false;
+      session.state = session.aborted ? 'aborted' : (failureMessage ? 'failed' : 'idle');
+      session.lastActivityAt = Date.now();
 
       if (success) {
         const metadata = session.upstreamRequestId
@@ -384,10 +394,6 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
         this.emitFailed(session.chatId, failureMessage);
       }
 
-      this.emitProcessing(session.chatId, false);
-      session.running = false;
-      session.state = session.aborted ? 'aborted' : (failureMessage ? 'failed' : 'idle');
-      session.lastActivityAt = Date.now();
       this.#cancelPermissionsForSession(session, session.aborted ? 'aborted' : 'session-complete');
     }
 
@@ -418,11 +424,11 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       if (session.aborted) return;
       const message = `${this.#policy.agentId} ACP process exited with code ${exitCode}`;
       this.emitMessages(session.chatId, [new ErrorMessage(new Date().toISOString(), message)]);
-      this.emitFailed(session.chatId, message);
       this.emitProcessing(session.chatId, false);
       session.running = false;
       session.state = 'failed';
       session.lastActivityAt = Date.now();
+      this.emitFailed(session.chatId, message);
       this.#cancelPermissionsForSession(session, 'cancelled');
     });
 

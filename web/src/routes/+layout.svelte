@@ -9,7 +9,6 @@
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
-	import { createChatRuntimeStore } from '$lib/stores/chat-runtime.svelte.js';
 	import { createChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
@@ -17,12 +16,31 @@
 	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
-	import { setAuth, setNavigation, setChatRuntime, setChatSessions, setAppShell, setWs, setFileViewer, setReadReceiptOutbox, setModelCatalog, setLocalSettings, setRemoteSettings, setSplitLayout } from '$lib/context';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import {
+		setAuth,
+		setNavigation,
+		setChatSessions,
+		setAppShell,
+		setWs,
+		setFileViewer,
+		setReadReceiptOutbox,
+		setModelCatalog,
+		setLocalSettings,
+		setRemoteSettings,
+		setSplitLayout,
+		setNotifications,
+	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import {
+		getLocalStorageItem,
+		LOCAL_STORAGE_KEYS,
+		removeLocalStorageItem,
+	} from '$lib/utils/local-persistence';
 
 	let { children } = $props();
 
@@ -30,8 +48,10 @@
 	const localSettings = createLocalSettingsStore();
 	const remoteSettings = createRemoteSettingsStore();
 	const navigation = createNavigationStore();
-	const chatRuntime = createChatRuntimeStore();
-	const chatSessions = createChatSessionsStore();
+	const notifications = createNotificationsStore();
+	const chatSessions = createChatSessionsStore({
+		notifyError: (message) => notifications.error(message),
+	});
 	const appShell = createAppShellStore();
 	const ws = createWsConnection();
 	const fileViewer = createFileViewerStore();
@@ -43,7 +63,6 @@
 	setLocalSettings(localSettings);
 	setRemoteSettings(remoteSettings);
 	setNavigation(navigation);
-	setChatRuntime(chatRuntime);
 	setChatSessions(chatSessions);
 	setAppShell(appShell);
 	setWs(ws);
@@ -51,11 +70,11 @@
 	setReadReceiptOutbox(readReceiptOutbox);
 	setModelCatalog(modelCatalog);
 	setSplitLayout(splitLayout);
+	setNotifications(notifications);
 
 	const publicRoutes = ['/login', '/setup'];
 	let isPublicRoute = $derived(
-		publicRoutes.includes(page.url.pathname) ||
-		page.url.pathname.startsWith('/shared/')
+		publicRoutes.includes(page.url.pathname) || page.url.pathname.startsWith('/shared/'),
 	);
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
@@ -66,7 +85,9 @@
 		document.documentElement.classList.toggle('dark', isDark);
 		document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
 
-		const statusBarMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+		const statusBarMeta = document.querySelector(
+			'meta[name="apple-mobile-web-app-status-bar-style"]',
+		);
 		statusBarMeta?.setAttribute('content', isDark ? 'black-translucent' : 'default');
 
 		const themeColor = isDark ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
@@ -195,7 +216,7 @@
 	});
 
 	// Opens the settings dialog to the Providers tab on the first authenticated
-	// load right after a successful registration. Gated on a localStorage
+	// load right after a successful registration. Gated on a persisted
 	// flag set during the registration flow so cold loads for existing users
 	// or auth-disabled sessions do not receive a blocking onboarding modal.
 	let settingsAutoOpened = $state(false);
@@ -206,13 +227,9 @@
 			return;
 		}
 		settingsAutoOpened = true;
-		try {
-			if (localStorage.getItem('just-registered') === '1') {
-				localStorage.removeItem('just-registered');
-				appShell.openSettings('providers');
-			}
-		} catch {
-			// localStorage unavailable
+		if (getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1') {
+			removeLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered);
+			appShell.openSettings('providers');
 		}
 	});
 </script>
@@ -228,8 +245,14 @@
 			<h1 class="text-2xl font-bold text-foreground mb-2">{m.sidebar_app_title()}</h1>
 			<div class="flex items-center justify-center space-x-2">
 				<div class="w-2 h-2 bg-status-processing rounded-full animate-bounce"></div>
-				<div class="w-2 h-2 bg-status-processing rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
-				<div class="w-2 h-2 bg-status-processing rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+				<div
+					class="w-2 h-2 bg-status-processing rounded-full animate-bounce"
+					style="animation-delay: 0.1s"
+				></div>
+				<div
+					class="w-2 h-2 bg-status-processing rounded-full animate-bounce"
+					style="animation-delay: 0.2s"
+				></div>
 			</div>
 			<p class="text-muted-foreground mt-2">{m.status_loading()}</p>
 		</div>

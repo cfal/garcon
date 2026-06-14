@@ -83,16 +83,17 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) => {
 			const models = modelsByAgent[agentId] ?? [];
 			if (endpointId) {
-				const selected = models.find((entry) =>
-					entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model)
+				const selected = models.find(
+					(entry) =>
+						entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model),
 				);
 				if (selected) return selected;
 			}
 			return models.find((entry) => entry.value === model || entry.rawModel === model) ?? null;
 		},
 		selectionFor: (agentId: string, model: string) => {
-			const selected = (modelsByAgent[agentId] ?? []).find((entry) =>
-				entry.value === model || entry.rawModel === model
+			const selected = (modelsByAgent[agentId] ?? []).find(
+				(entry) => entry.value === model || entry.rawModel === model,
 			);
 			return {
 				model: selected?.rawModel ?? model,
@@ -102,9 +103,10 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 			};
 		},
 		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) => {
-			const selected = (modelsByAgent[agentId] ?? []).find((entry) =>
-				(endpointId ? entry.endpointId === endpointId : true) &&
-				(entry.value === model || entry.rawModel === model)
+			const selected = (modelsByAgent[agentId] ?? []).find(
+				(entry) =>
+					(endpointId ? entry.endpointId === endpointId : true) &&
+					(entry.value === model || entry.rawModel === model),
 			);
 			return selected?.value ?? model;
 		},
@@ -139,14 +141,17 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 }
 
 function makeLargeEndpointCatalog(count: number): ModelCatalogStore {
-	const models = Array.from({ length: count }, (_, index): ModelOption => ({
-		value: `acme-openai:model-${index}`,
-		label: `Acme: Model ${index}`,
-		rawModel: `model-${index}`,
-		apiProviderId: 'acme',
-		endpointId: 'acme-openai',
-		protocol: 'openai-compatible',
-	}));
+	const models = Array.from(
+		{ length: count },
+		(_, index): ModelOption => ({
+			value: `acme-openai:model-${index}`,
+			label: `Acme: Model ${index}`,
+			rawModel: `model-${index}`,
+			apiProviderId: 'acme',
+			endpointId: 'acme-openai',
+			protocol: 'openai-compatible',
+		}),
+	);
 
 	return {
 		getModels: () => models,
@@ -211,7 +216,10 @@ describe('model selector options', () => {
 	});
 
 	it('groups large endpoint catalogs without dropping model order', () => {
-		const sources = buildModelSources(makeLargeEndpointCatalog(2500), 'direct-openai-responses-compatible');
+		const sources = buildModelSources(
+			makeLargeEndpointCatalog(2500),
+			'direct-openai-responses-compatible',
+		);
 
 		expect(sources).toHaveLength(1);
 		expect(sources[0].models).toHaveLength(2500);
@@ -291,10 +299,13 @@ describe('model selector options', () => {
 	});
 
 	it('filters prepared model rows by raw model', () => {
-		const rows = buildModelRows([
-			{ value: 'display-a', label: 'Display A', rawModel: 'vendor/raw-a' },
-			{ value: 'display-b', label: 'Display B', rawModel: 'vendor/raw-b' },
-		], null);
+		const rows = buildModelRows(
+			[
+				{ value: 'display-a', label: 'Display A', rawModel: 'vendor/raw-a' },
+				{ value: 'display-b', label: 'Display B', rawModel: 'vendor/raw-b' },
+			],
+			null,
+		);
 
 		const result = filterModelRows(rows, 'raw-b');
 

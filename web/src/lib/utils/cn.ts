@@ -5,7 +5,7 @@ export type {
 	WithElementRef,
 	WithoutChild,
 	WithoutChildren,
-	WithoutChildrenOrChild
+	WithoutChildrenOrChild,
 } from 'bits-ui';
 
 export function cn(...inputs: ClassValue[]) {

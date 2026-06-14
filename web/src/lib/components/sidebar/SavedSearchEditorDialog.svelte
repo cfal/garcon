@@ -4,44 +4,40 @@
 	import Input from '$lib/components/ui/input/input.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
-export interface SavedSearchEditorState {
-	mode: 'create' | 'edit';
-	searchId?: string;
-	title: string;
-	query: string;
-	showAsSidebarPill: boolean;
-	showInSidebarMenu: boolean;
-	showInSearchDialog: boolean;
-}
+	export interface SavedSearchEditorState {
+		mode: 'create' | 'edit';
+		searchId?: string;
+		title: string;
+		query: string;
+		showAsSidebarPill: boolean;
+		showInSidebarMenu: boolean;
+		showInSearchDialog: boolean;
+	}
 
 	interface SavedSearchEditorDialogProps {
-	editorState: SavedSearchEditorState | null;
-	onClose: () => void;
-	onSave: (
-		data: {
-			title: string | null;
-			query: string;
-			showAsSidebarPill: boolean;
-			showInSidebarMenu: boolean;
-			showInSearchDialog: boolean;
-		},
-		searchId?: string
-	) => Promise<void>;
-}
+		editorState: SavedSearchEditorState | null;
+		onClose: () => void;
+		onSave: (
+			data: {
+				title: string | null;
+				query: string;
+				showAsSidebarPill: boolean;
+				showInSidebarMenu: boolean;
+				showInSearchDialog: boolean;
+			},
+			searchId?: string,
+		) => Promise<void>;
+	}
 
-	let {
-		editorState,
-		onClose,
-		onSave,
-	}: SavedSearchEditorDialogProps = $props();
+	let { editorState, onClose, onSave }: SavedSearchEditorDialogProps = $props();
 
-let isOpen = $derived(editorState !== null);
-let titleValue = $state('');
-let queryValue = $state('');
-let showAsSidebarPillValue = $state(false);
-let showInSidebarMenuValue = $state(false);
-let showInSearchDialogValue = $state(true);
-let validationError = $state<string | null>(null);
+	let isOpen = $derived(editorState !== null);
+	let titleValue = $state('');
+	let queryValue = $state('');
+	let showAsSidebarPillValue = $state(false);
+	let showInSidebarMenuValue = $state(false);
+	let showInSearchDialogValue = $state(true);
+	let validationError = $state<string | null>(null);
 	let isSaving = $state(false);
 	let inputRef = $state<HTMLInputElement | null>(null);
 
@@ -89,7 +85,7 @@ let validationError = $state<string | null>(null);
 					showInSidebarMenu: showInSidebarMenuValue,
 					showInSearchDialog: showInSearchDialogValue,
 				},
-				editorState?.searchId
+				editorState?.searchId,
 			);
 		} catch (err) {
 			validationError = err instanceof Error ? err.message : String(err);
@@ -112,19 +108,23 @@ let validationError = $state<string | null>(null);
 	let dialogTitle = $derived(
 		editorState?.mode === 'edit'
 			? m.sidebar_saved_searches_edit_dialog_title()
-			: m.sidebar_saved_searches_add_dialog_title()
+			: m.sidebar_saved_searches_add_dialog_title(),
 	);
 </script>
 
 <Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
-	<Dialog.Content class="h-dvh w-full max-w-full rounded-none border-0 p-6 sm:h-auto sm:max-w-md sm:rounded-lg sm:border">
+	<Dialog.Content
+		class="h-dvh w-full max-w-full rounded-none border-0 p-6 sm:h-auto sm:max-w-md sm:rounded-lg sm:border"
+	>
 		<Dialog.Header>
 			<Dialog.Title>{dialogTitle}</Dialog.Title>
 		</Dialog.Header>
 
 		<div class="space-y-4">
 			<label class="block space-y-1.5">
-				<span class="text-sm font-medium text-foreground">{m.sidebar_saved_searches_query_label()}</span>
+				<span class="text-sm font-medium text-foreground"
+					>{m.sidebar_saved_searches_query_label()}</span
+				>
 				<Input
 					bind:ref={inputRef}
 					type="text"
@@ -136,7 +136,9 @@ let validationError = $state<string | null>(null);
 			</label>
 
 			<label class="block space-y-1.5">
-				<span class="text-sm font-medium text-foreground">{m.sidebar_saved_searches_title_label()}</span>
+				<span class="text-sm font-medium text-foreground"
+					>{m.sidebar_saved_searches_title_label()}</span
+				>
 				<Input
 					type="text"
 					bind:value={titleValue}
@@ -183,8 +185,12 @@ let validationError = $state<string | null>(null);
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="outline" onclick={onClose} disabled={isSaving}>{m.sidebar_actions_cancel()}</Button>
-			<Button onclick={handleSave} disabled={isSaving || !queryValue.trim()}>{m.sidebar_actions_save()}</Button>
+			<Button variant="outline" onclick={onClose} disabled={isSaving}
+				>{m.sidebar_actions_cancel()}</Button
+			>
+			<Button onclick={handleSave} disabled={isSaving || !queryValue.trim()}
+				>{m.sidebar_actions_save()}</Button
+			>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

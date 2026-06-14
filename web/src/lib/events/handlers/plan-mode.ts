@@ -3,16 +3,17 @@
 
 import type { AgentRunOutputMessage } from '$shared/ws-events';
 import { isToolUseMessage } from '$shared/chat-types';
-import type { PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
+import type { PermissionMode } from '$lib/types/chat';
+import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 export interface PlanModeContext {
-	currentChatId: string | null;
-	permissionMode: PermissionMode;
+	getCurrentChatId: () => string | null;
+	getPermissionMode: () => PermissionMode;
 	setPermissionMode: (mode: PermissionMode) => void;
-	setPreviousPermissionMode: (mode: PermissionMode | null) => void;
-	setPendingPermissionRequests: (
-		updater: (prev: PendingPermissionRequest[]) => PendingPermissionRequest[],
-	) => void;
+	conversationUi: Pick<
+		ConversationUiStore,
+		'setPreviousPermissionMode' | 'setPendingPermissionRequests'
+	>;
 }
 
 export function handlePlanModeMessages(msg: AgentRunOutputMessage, ctx: PlanModeContext) {
@@ -22,22 +23,23 @@ export function handlePlanModeMessages(msg: AgentRunOutputMessage, ctx: PlanMode
 		if (!isToolUseMessage(chatMsg)) continue;
 
 		if (chatMsg.type === 'enter-plan-mode-tool-use') {
-			if (ctx.permissionMode !== 'plan') {
-				ctx.setPreviousPermissionMode(ctx.permissionMode);
+			const permissionMode = ctx.getPermissionMode();
+			if (permissionMode !== 'plan') {
+				ctx.conversationUi.setPreviousPermissionMode(permissionMode);
 			}
 			ctx.setPermissionMode('plan');
 		}
 
 		if (chatMsg.type === 'exit-plan-mode-tool-use') {
 			const permissionRequestId = `plan-exit-${chatMsg.toolId}`;
-			ctx.setPendingPermissionRequests((prev) => {
+			ctx.conversationUi.setPendingPermissionRequests((prev) => {
 				if (prev.some((r) => r.permissionRequestId === permissionRequestId)) return prev;
 				return [
 					...prev,
 					{
 						permissionRequestId,
 						requestedTool: chatMsg,
-						chatId: msg.chatId || ctx.currentChatId,
+						chatId: msg.chatId || ctx.getCurrentChatId(),
 						receivedAt: new Date(),
 					},
 				];

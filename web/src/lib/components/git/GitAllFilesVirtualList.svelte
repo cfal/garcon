@@ -29,7 +29,14 @@
 		onUnstageLine?: (target: GitDiffActionTarget, diffLineIndex: number) => void;
 		onAddCommentForFile: (filePath: string, side: 'before' | 'after', line: number) => void;
 		commentsForFile?: (filePath: string) => GitReviewCommentDraft[];
-		composerState?: { open: boolean; filePath: string; side: 'before' | 'after'; line: number; body: string; severity: 'note' | 'warning' | 'blocker' } | null;
+		composerState?: {
+			open: boolean;
+			filePath: string;
+			side: 'before' | 'after';
+			line: number;
+			body: string;
+			severity: 'note' | 'warning' | 'blocker';
+		} | null;
 		onComposerBodyChange?: (body: string) => void;
 		onComposerSeverityChange?: (severity: 'note' | 'warning' | 'blocker') => void;
 		onComposerSubmit?: () => void;
@@ -175,7 +182,10 @@
 		observe();
 		const mo = new MutationObserver(observe);
 		mo.observe(itemContainer, { childList: true });
-		return () => { ro.disconnect(); mo.disconnect(); };
+		return () => {
+			ro.disconnect();
+			mo.disconnect();
+		};
 	});
 
 	// Plain (non-reactive) tracking to prevent cascading loads when
@@ -218,11 +228,7 @@
 		No changed files match the current filter
 	</div>
 {:else}
-	<div
-		bind:this={viewport}
-		onscroll={handleScroll}
-		class="flex-1 overflow-auto"
-	>
+	<div bind:this={viewport} onscroll={handleScroll} class="flex-1 overflow-auto">
 		<div style="height:{totalHeight}px; position:relative;" bind:this={itemContainer}>
 			{#each visibleItems as item, i (item.filePath)}
 				{@const idx = startIndex + i}
@@ -231,22 +237,23 @@
 					style="position:absolute; top:{offsets[idx]}px; left:0; right:0;"
 				>
 					<div class="border-b border-border min-h-48">
-							<GitDiffViewer
-								filePath={item.filePath}
-								reviewData={item.reviewData}
-								{activeTab}
-								{diffMode}
-								{contextLines}
-								{fontSize}
-								{selectedLineKeys}
-								isLoading={!item.reviewData}
-								{onToggleLineSelection}
-								{onSelectLineRange}
+						<GitDiffViewer
+							filePath={item.filePath}
+							reviewData={item.reviewData}
+							{activeTab}
+							{diffMode}
+							{contextLines}
+							{fontSize}
+							{selectedLineKeys}
+							isLoading={!item.reviewData}
+							{onToggleLineSelection}
+							{onSelectLineRange}
 							{onStageHunk}
 							{onUnstageHunk}
 							{onStageLine}
 							{onUnstageLine}
-							onAddComment={(side: 'before' | 'after', line: number) => onAddCommentForFile(item.filePath, side, line)}
+							onAddComment={(side: 'before' | 'after', line: number) =>
+								onAddCommentForFile(item.filePath, side, line)}
 							comments={commentsForFile?.(item.filePath) ?? []}
 							{composerState}
 							{onComposerBodyChange}

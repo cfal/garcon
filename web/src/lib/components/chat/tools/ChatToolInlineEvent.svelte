@@ -31,7 +31,7 @@
 		primary: 'text-foreground',
 		secondary: 'text-muted-foreground',
 		background: '',
-		border: 'border-border'
+		border: 'border-border',
 	};
 
 	let {
@@ -46,7 +46,7 @@
 		colorScheme = DEFAULT_SCHEME,
 		resultId,
 		toolResult,
-		toolId
+		toolId,
 	}: OneLineDisplayProps = $props();
 
 	let copied = $state(false);
@@ -81,12 +81,7 @@
 			stroke="currentColor"
 			viewBox="0 0 24 24"
 		>
-			<path
-				stroke-linecap="round"
-				stroke-linejoin="round"
-				stroke-width="2"
-				d="M5 13l4 4L19 7"
-			/>
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
 		</svg>
 	{:else}
 		<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -116,7 +111,9 @@
 		<ChatEventCard variant="default" compact>
 			{#snippet body()}
 				<div class="mb-0.5 flex items-center gap-1.5 min-w-0">
-					<span class="text-[11px] font-medium text-muted-foreground tracking-wide">{label || toolName}</span>
+					<span class="text-[11px] font-medium text-muted-foreground tracking-wide"
+						>{label || toolName}</span
+					>
 					{#if action === 'copyValue'}
 						{@render copyButton()}
 					{/if}
@@ -128,35 +125,35 @@
 				>
 					{value}
 				</code>
-					{#if secondary}
-						<div class="mt-0.5">
-							<span class="text-[11px] text-muted-foreground italic">
-								{secondary}
-							</span>
-						</div>
-					{/if}
+				{#if secondary}
+					<div class="mt-0.5">
+						<span class="text-[11px] text-muted-foreground italic">
+							{secondary}
+						</span>
+					</div>
+				{/if}
 			{/snippet}
 		</ChatEventCard>
 	{:else if action === 'openFile'}
 		<ChatEventCard variant="default" compact>
 			{#snippet body()}
-					<div class="min-w-0">
-						<div class="flex items-center gap-1.5 min-w-0">
-							<span class="text-xs text-muted-foreground flex-shrink-0">{label || toolName}</span>
-							<button
-								onclick={handleAction}
-								class="text-xs text-primary hover:text-primary/80 font-mono hover:underline transition-colors truncate"
-								title={value}
+				<div class="min-w-0">
+					<div class="flex items-center gap-1.5 min-w-0">
+						<span class="text-xs text-muted-foreground flex-shrink-0">{label || toolName}</span>
+						<button
+							onclick={handleAction}
+							class="text-xs text-primary hover:text-primary/80 font-mono hover:underline transition-colors truncate"
+							title={value}
 						>
 							{displayName}
 						</button>
 					</div>
-						{#if secondary}
-							<div class="mt-0.5 text-[11px] text-muted-foreground break-words">{secondary}</div>
-						{/if}
-					</div>
-				{/snippet}
-			</ChatEventCard>
+					{#if secondary}
+						<div class="mt-0.5 text-[11px] text-muted-foreground break-words">{secondary}</div>
+					{/if}
+				</div>
+			{/snippet}
+		</ChatEventCard>
 	{:else if action === 'jumpToResult'}
 		<ChatEventCard variant="default" compact>
 			{#snippet body()}
@@ -187,48 +184,48 @@
 							</a>
 						{/if}
 					</div>
-						{#if secondary}
-							<div class="mt-0.5 text-[11px] text-muted-foreground break-words">{secondary}</div>
-						{/if}
-					</div>
-				{/snippet}
-			</ChatEventCard>
+					{#if secondary}
+						<div class="mt-0.5 text-[11px] text-muted-foreground break-words">{secondary}</div>
+					{/if}
+				</div>
+			{/snippet}
+		</ChatEventCard>
 	{:else}
 		<ChatEventCard variant="default" compact>
-				{#snippet body()}
-					<div class="min-w-0">
-						<div class="flex items-center gap-1.5 min-w-0">
-							{#if label || toolName}
-								<span class="text-xs text-muted-foreground flex-shrink-0">{label || toolName}</span>
-							{/if}
-							<span
-								class="text-xs font-mono {wrapText
+			{#snippet body()}
+				<div class="min-w-0">
+					<div class="flex items-center gap-1.5 min-w-0">
+						{#if label || toolName}
+							<span class="text-xs text-muted-foreground flex-shrink-0">{label || toolName}</span>
+						{/if}
+						<span
+							class="text-xs font-mono {wrapText
 								? 'whitespace-pre-wrap break-all'
 								: 'truncate'} flex-1 min-w-0 {colorScheme.primary}"
-							>
-								{value}
-							</span>
-							{#if action === 'copyValue'}
-								{@render copyButton()}
-							{/if}
-						</div>
-							{#if showGrepPatternRow}
-								<div class="mt-0.5 flex items-center gap-1.5 min-w-0">
-									<span class="text-xs text-muted-foreground flex-shrink-0">Pattern</span>
-									<span
-										class="text-xs font-mono {wrapText
-									? 'whitespace-pre-wrap break-all'
-									: 'truncate'} flex-1 min-w-0 {colorScheme.primary}"
-								>
-									{grepPatternValue}
-								</span>
-							</div>
-						{:else if secondary}
-							<span class="text-[11px] {colorScheme.secondary} italic flex-shrink-0">
-								{secondary}
-							</span>
+						>
+							{value}
+						</span>
+						{#if action === 'copyValue'}
+							{@render copyButton()}
 						{/if}
 					</div>
+					{#if showGrepPatternRow}
+						<div class="mt-0.5 flex items-center gap-1.5 min-w-0">
+							<span class="text-xs text-muted-foreground flex-shrink-0">Pattern</span>
+							<span
+								class="text-xs font-mono {wrapText
+									? 'whitespace-pre-wrap break-all'
+									: 'truncate'} flex-1 min-w-0 {colorScheme.primary}"
+							>
+								{grepPatternValue}
+							</span>
+						</div>
+					{:else if secondary}
+						<span class="text-[11px] {colorScheme.secondary} italic flex-shrink-0">
+							{secondary}
+						</span>
+					{/if}
+				</div>
 			{/snippet}
 		</ChatEventCard>
 	{/if}

@@ -23,7 +23,7 @@ export interface AgentRuntime {
   updateSessionSettings?(agentSessionId: string, patch: AgentSessionSettingsPatch): void | Promise<void>;
   resolvePermission?(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> | void;
   shutdown?(): void;
-  startPurgeTimer?(): ReturnType<typeof setInterval>;
+  startPurgeTimer?(): void;
   onMessages(cb: (chatId: string, messages: unknown[], metadata?: AgentEventMetadata) => void): void;
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
@@ -33,8 +33,21 @@ export interface AgentRuntime {
 
 export interface AgentTranscriptSource {
   loadMessages(session: AgentChatEntry, context?: { chatId?: string }): Promise<ChatMessage[]>;
+  loadMessagePage?(
+    session: AgentChatEntry,
+    page: { limit: number; offset: number },
+    context?: { chatId?: string },
+  ): Promise<AgentTranscriptPage | null>;
   getPreview?(session: AgentChatEntry): Promise<unknown>;
   resolveNativePath?(session: AgentChatEntry): Promise<string | null>;
+}
+
+export interface AgentTranscriptPage {
+  messages: ChatMessage[];
+  total: number;
+  hasMore: boolean;
+  offset: number;
+  limit: number;
 }
 
 export interface AgentAuth {

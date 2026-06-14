@@ -31,22 +31,22 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 		lastModelProtocol: null,
 		lastPermissionMode: 'default',
 		lastThinkingMode: 'none',
-			lastClaudeThinkingMode: 'auto',
-			lastAmpAgentMode: 'smart',
-			projectBasePath: '/workspace',
-			telegram: {
-				botTokenAvailable: false,
-				botUsername: null,
-				botFirstName: null,
-				recipientUsername: null,
-				recipientDisplayName: null,
-				recipientLinked: false,
-				pendingLink: false,
-				linkUrl: null,
-			},
-			...overrides,
-		};
-	}
+		lastClaudeThinkingMode: 'auto',
+		lastAmpAgentMode: 'smart',
+		projectBasePath: '/workspace',
+		telegram: {
+			botTokenAvailable: false,
+			botUsername: null,
+			botFirstName: null,
+			recipientUsername: null,
+			recipientDisplayName: null,
+			recipientLinked: false,
+			pendingLink: false,
+			linkUrl: null,
+		},
+		...overrides,
+	};
+}
 
 describe('RemoteSettingsRouter', () => {
 	beforeEach(() => {
@@ -58,9 +58,7 @@ describe('RemoteSettingsRouter', () => {
 	it('applies settings-changed snapshots to the remote settings store', () => {
 		const store = { applySnapshot: vi.fn() };
 		const snapshot = makeSnapshot({ version: 2, ui: { pinnedInsertPosition: 'bottom' } });
-		drain.mockReturnValue([
-			{ data: { type: 'settings-changed', settings: snapshot } },
-		]);
+		drain.mockReturnValue([{ data: { type: 'settings-changed', settings: snapshot } }]);
 		const router = new RemoteSettingsRouter({} as never, store as never);
 
 		router.start();
@@ -71,9 +69,7 @@ describe('RemoteSettingsRouter', () => {
 
 	it('ignores non-settings websocket messages', () => {
 		const store = { applySnapshot: vi.fn() };
-		drain.mockReturnValue([
-			{ data: { type: 'chat-session-created', chatId: 'chat-1' } },
-		]);
+		drain.mockReturnValue([{ data: { type: 'chat-session-created', chatId: 'chat-1' } }]);
 		const router = new RemoteSettingsRouter({} as never, store as never);
 
 		router.start();

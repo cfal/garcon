@@ -21,7 +21,7 @@
 		header,
 		body,
 		footer,
-		class: className = ''
+		class: className = '',
 	}: Props = $props();
 
 	const variantClass = $derived.by(() => {

@@ -38,10 +38,10 @@ describe('SidebarSelectionBar', () => {
 		renderSelectionBar();
 
 		expect(screen.getByRole('button', { name: 'Archive' }).className).toContain(
-			'text-sidebar-bulk-archive-foreground'
+			'text-sidebar-bulk-archive-foreground',
 		);
 		expect(screen.getByRole('button', { name: 'Unarchive' }).className).toContain(
-			'text-sidebar-bulk-unarchive-foreground'
+			'text-sidebar-bulk-unarchive-foreground',
 		);
 	});
 });

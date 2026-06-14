@@ -14,6 +14,7 @@ function settingsFile() {
 async function writeRaw(data) {
   await fs.mkdir(tmpDir, { recursive: true });
   await fs.writeFile(settingsFile(), JSON.stringify(data, null, 2), 'utf8');
+  await store.loadSettings();
 }
 
 describe('settings store', () => {
@@ -180,6 +181,21 @@ describe('settings store', () => {
       await store.setPathSettings({ lastDir: '/home' });
       expect(await store.getRemoteSettingsVersion()).toBe(2);
       expect(events).toEqual(['changed', 'changed']);
+    });
+
+    it('serves getter reads from cache until an explicit reload', async () => {
+      await store.setUiSettings({ theme: 'dark' });
+      await fs.writeFile(settingsFile(), JSON.stringify({
+        ui: { theme: 'light' },
+        paths: {},
+        chatNames: {},
+      }), 'utf8');
+
+      expect(await store.getUiSettings()).toEqual({ theme: 'dark' });
+
+      await store.loadSettings();
+
+      expect(await store.getUiSettings()).toEqual({ theme: 'light' });
     });
   });
 
@@ -489,6 +505,16 @@ describe('settings store', () => {
       expect(settings.lastThinkingMode).toBe('none');
       expect(settings.lastClaudeThinkingMode).toBe('auto');
       expect(settings.lastAmpAgentMode).toBe('smart');
+    });
+
+    it('keeps cached settings unchanged when a mutation save fails', async () => {
+      await store.setUiSettings({ theme: 'light' });
+      await fs.rm(settingsFile(), { force: true });
+      await fs.mkdir(settingsFile());
+
+      await expect(store.setUiSettings({ theme: 'dark' })).rejects.toThrow();
+
+      expect(store.getUiSettings()).toEqual({ theme: 'light' });
     });
   });
 

@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import SavedSearchEditorDialog from '../SavedSearchEditorDialog.svelte';
 import SavedSearchManagerDialog from '../SavedSearchManagerDialog.svelte';
 import SidebarControlsRow from '../SidebarControlsRow.svelte';
+import SidebarSearchDialog from '../SidebarSearchDialog.svelte';
 import SidebarSearchDock from '../SidebarSearchDock.svelte';
 import SidebarSearchContext from '../SidebarSearchContext.svelte';
 import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
@@ -50,14 +51,17 @@ function createSavedSearch(id: string, title: string, query: string): SavedChatS
 }
 
 describe('sidebar search interactions', () => {
+	afterEach(async () => {
+		cleanup();
+		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
+	});
+
 	it('opens the highlighted chat from the query input and respects Ctrl-J selection', async () => {
 		const onSelectChat = vi.fn();
 
 		render(SidebarSearchDialogHost, {
-			filteredChats: [
-				createChat('chat-1', 'First chat'),
-				createChat('chat-2', 'Second chat'),
-			],
+			filteredChats: [createChat('chat-1', 'First chat'), createChat('chat-2', 'Second chat')],
 			onSelectChat,
 		});
 
@@ -70,6 +74,34 @@ describe('sidebar search interactions', () => {
 		await fireEvent.keyDown(input, { key: 'j', ctrlKey: true });
 		await fireEvent.keyDown(input, { key: 'Enter' });
 		expect(onSelectChat).toHaveBeenNthCalledWith(2, 'chat-2');
+	});
+
+	it('opens a deep virtualized highlighted chat from the query input', async () => {
+		const onSelectChat = vi.fn();
+
+		render(SidebarSearchDialog, {
+			open: true,
+			query: '',
+			filteredChats: Array.from({ length: 120 }, (_, index) =>
+				createChat(`chat-${index}`, `Chat ${index}`),
+			),
+			savedSearches: [],
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			highlightedIndex: 90,
+			onQueryChange: vi.fn(),
+			onSelectChat,
+			onApplySavedSearch: vi.fn(),
+			onCreateSavedSearch: vi.fn(),
+			onOpenManager: vi.fn(),
+			onHighlightChange: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		const input = await screen.findByRole('textbox');
+		input.focus();
+
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(onSelectChat).toHaveBeenCalledWith('chat-90');
 	});
 
 	it('does not let Enter on the manage button, add button, or saved-search pills open a chat', async () => {
@@ -156,10 +188,7 @@ describe('sidebar search interactions', () => {
 
 	it('uses a command-palette shell with a fixed scrollable results pane', async () => {
 		render(SidebarSearchDialogHost, {
-			filteredChats: [
-				createChat('chat-1', 'First chat'),
-				createChat('chat-2', 'Second chat'),
-			],
+			filteredChats: [createChat('chat-1', 'First chat'), createChat('chat-2', 'Second chat')],
 		});
 
 		const dialogContent = document.querySelector('[data-slot="search-dialog-content"]');
@@ -181,8 +210,12 @@ describe('sidebar search interactions', () => {
 		expect(input.className).toContain('outline-none');
 
 		expect(await screen.findByRole('listbox')).toBeTruthy();
-		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain('flex-1');
-		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain('overflow-y-auto');
+		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain(
+			'flex-1',
+		);
+		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain(
+			'overflow-y-auto',
+		);
 	});
 
 	it('disables save for an empty query, enables it for a non-empty query, and opens the add dialog callback', async () => {
@@ -199,7 +232,9 @@ describe('sidebar search interactions', () => {
 		const input = screen.getByRole('textbox');
 		await fireEvent.input(input, { target: { value: 'tag:ops' } });
 
-		expect((screen.getByRole('button', { name: 'Add saved search' }) as HTMLButtonElement).disabled).toBe(false);
+		expect(
+			(screen.getByRole('button', { name: 'Add saved search' }) as HTMLButtonElement).disabled,
+		).toBe(false);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Add saved search' }));
 		expect(onCreateSavedSearch).toHaveBeenCalledTimes(1);
@@ -214,7 +249,9 @@ describe('sidebar search interactions', () => {
 		await fireEvent.input(input, { target: { value: 'tag:ops' } });
 
 		const clearButton = screen.getByRole('button', { name: 'Clear search' });
-		expect(document.querySelector('[data-slot="search-dialog-input-shell"]')?.contains(clearButton)).toBe(true);
+		expect(
+			document.querySelector('[data-slot="search-dialog-input-shell"]')?.contains(clearButton),
+		).toBe(true);
 		await fireEvent.click(clearButton);
 
 		expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('');
@@ -238,7 +275,7 @@ describe('sidebar search interactions', () => {
 			filteredChats: [
 				createChat(
 					'chat-1',
-					'Extremely long chat title that should truncate instead of pushing the row past the modal width'
+					'Extremely long chat title that should truncate instead of pushing the row past the modal width',
 				),
 			],
 		});
@@ -254,21 +291,20 @@ describe('sidebar search interactions', () => {
 		expect(summary.className).toContain('min-w-0');
 
 		const title = screen.getByText(
-			'Extremely long chat title that should truncate instead of pushing the row past the modal width'
+			'Extremely long chat title that should truncate instead of pushing the row past the modal width',
 		);
 		expect(title.className).toContain('truncate');
 
 		const preview = screen.getByText(
-			'Extremely long chat title that should truncate instead of pushing the row past the modal width preview'
+			'Extremely long chat title that should truncate instead of pushing the row past the modal width preview',
 		);
 		expect(preview.className).toContain('truncate');
 	});
 
 	it('renders sidebar menu searches ahead of the row actions and inserts a separator', async () => {
-			render(SidebarControlsRow, {
-				isLoading: false,
-				isReorderMode: false,
-				visibleUnreadCount: 0,
+		render(SidebarControlsRow, {
+			isLoading: false,
+			visibleUnreadCount: 0,
 			sidebarMenuSearches: [
 				createSavedSearch('search-1', 'Unread', 'status:unread'),
 				createSavedSearch('search-2', 'Active', 'status:active'),
@@ -297,7 +333,6 @@ describe('sidebar search interactions', () => {
 	it('shows mark all as read before settings even without quick search entries', async () => {
 		render(SidebarControlsRow, {
 			isLoading: false,
-			isReorderMode: false,
 			visibleUnreadCount: 1,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
@@ -318,7 +353,6 @@ describe('sidebar search interactions', () => {
 	it('suppresses the dock divider when search context sits directly against the controls row', () => {
 		render(SidebarControlsRow, {
 			isLoading: false,
-			isReorderMode: false,
 			visibleUnreadCount: 0,
 			hasAdjacentSearchContext: true,
 			sidebarMenuSearches: [],
@@ -336,7 +370,6 @@ describe('sidebar search interactions', () => {
 	it('omits the separator when no sidebar menu searches are shown', async () => {
 		render(SidebarControlsRow, {
 			isLoading: false,
-			isReorderMode: false,
 			visibleUnreadCount: 0,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
@@ -355,7 +388,7 @@ describe('sidebar search interactions', () => {
 		expect(screen.queryByRole('separator')).toBeNull();
 	});
 
-	it('renders sidebar pill searches and clears the active search banner', async () => {
+	it('renders sidebar pill searches and clears a non-matching active search banner', async () => {
 		const onOpenSearchDialog = vi.fn();
 		const onApplyPillSearch = vi.fn();
 		const onClearActiveQuery = vi.fn();
@@ -369,7 +402,9 @@ describe('sidebar search interactions', () => {
 		});
 
 		expect(screen.getByRole('button', { name: 'Unread' })).toBeTruthy();
-		expect(document.querySelector('[data-slot="active-search-banner"]')?.textContent).toContain('tag:ops');
+		expect(document.querySelector('[data-slot="active-search-banner"]')?.textContent).toContain(
+			'tag:ops',
+		);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Search chats: tag:ops' }));
 		expect(onOpenSearchDialog).toHaveBeenCalledTimes(1);
@@ -382,10 +417,33 @@ describe('sidebar search interactions', () => {
 		expect(onOpenSearchDialog).toHaveBeenCalledTimes(1);
 	});
 
+	it('highlights a matching sidebar pill and clears the active search when pressed again', async () => {
+		const onApplyPillSearch = vi.fn();
+		const onClearActiveQuery = vi.fn();
+
+		render(SidebarSearchContext, {
+			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
+			activeQuery: ' status:unread ',
+			onOpenSearchDialog: vi.fn(),
+			onApplyPillSearch,
+			onClearActiveQuery,
+		});
+
+		const pill = screen.getByRole('button', { name: 'Unread' });
+		expect(pill.getAttribute('aria-pressed')).toBe('true');
+		expect(pill.className).toContain('border-sidebar-ring');
+		expect(pill.className).toContain('text-sidebar-foreground');
+		expect(document.querySelector('[data-slot="active-search-banner"]')).toBeNull();
+
+		await fireEvent.click(pill);
+		expect(onApplyPillSearch).not.toHaveBeenCalled();
+		expect(onClearActiveQuery).toHaveBeenCalledTimes(1);
+	});
+
 	it('tightens the top dock seam when search context sits below the controls row', () => {
 		render(SidebarSearchContext, {
 			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
-			activeQuery: 'tag:ops',
+			activeQuery: 'status:unread',
 			hasAdjacentControlsRow: true,
 			onOpenSearchDialog: vi.fn(),
 			onApplyPillSearch: vi.fn(),
@@ -399,9 +457,9 @@ describe('sidebar search interactions', () => {
 		expect(topContext?.className).not.toContain('pt-');
 		expect(topContext?.className).not.toContain('py-2');
 		const topChildSlots = Array.from(topContext?.children ?? []).map((element) =>
-			element.getAttribute('data-slot')
+			element.getAttribute('data-slot'),
 		);
-		expect(topChildSlots).toEqual(['sidebar-search-pills', 'active-search-banner']);
+		expect(topChildSlots).toEqual(['sidebar-search-pills']);
 	});
 
 	it('omits sidebar search context when there are no pills and no active query', () => {
@@ -420,7 +478,6 @@ describe('sidebar search interactions', () => {
 	it('renders the controls row above the search context', () => {
 		render(SidebarSearchDock, {
 			isLoading: false,
-			isReorderMode: false,
 			visibleUnreadCount: 0,
 			sidebarMenuSearches: [],
 			sidebarPillSearches: [createSavedSearch('search-1', 'Unread', 'status:unread')],
@@ -436,7 +493,7 @@ describe('sidebar search interactions', () => {
 
 		const topDock = document.querySelector('[data-slot="sidebar-search-dock"]');
 		const topChildSlots = Array.from(topDock?.children ?? []).map((element) =>
-			element.getAttribute('data-slot')
+			element.getAttribute('data-slot'),
 		);
 		expect(topChildSlots).toEqual(['sidebar-controls-row', 'sidebar-search-context']);
 	});
@@ -465,8 +522,12 @@ describe('sidebar search interactions', () => {
 			['search-1', 'search-2', 'search-3'],
 			['search-2', 'search-1', 'search-3'],
 		);
-		expect((screen.getByRole('button', { name: 'Move Unread up' }) as HTMLButtonElement).disabled).toBe(true);
-		expect((screen.getByRole('button', { name: 'Move Tagged down' }) as HTMLButtonElement).disabled).toBe(true);
+		expect(
+			(screen.getByRole('button', { name: 'Move Unread up' }) as HTMLButtonElement).disabled,
+		).toBe(true);
+		expect(
+			(screen.getByRole('button', { name: 'Move Tagged down' }) as HTMLButtonElement).disabled,
+		).toBe(true);
 	});
 
 	it('requires at least one saved-search visibility target in the editor', async () => {

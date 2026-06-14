@@ -1,78 +1,96 @@
-export interface SortableDragLike {
-	id: unknown;
-	index?: unknown;
-	initialIndex?: unknown;
+import { reorder } from '@atlaskit/pragmatic-drag-and-drop/reorder';
+import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+import { getReorderDestinationIndex } from '@atlaskit/pragmatic-drag-and-drop-hitbox/util/get-reorder-destination-index';
+
+export type RelativeReorderTarget =
+	| { chatIdAbove: string; chatIdBelow?: never }
+	| { chatIdBelow: string; chatIdAbove?: never };
+
+export type BoundaryMove = 'start' | 'end';
+
+export function arraysEqual(left: string[], right: string[]): boolean {
+	if (left.length !== right.length) return false;
+	for (let index = 0; index < left.length; index += 1) {
+		if (left[index] !== right[index]) return false;
+	}
+	return true;
 }
 
-export interface DragEndLike {
-	canceled?: boolean;
-	operation?: {
-		source?: SortableDragLike | null;
-		target?: SortableDragLike | null;
-	} | null;
+export function sameMembers(left: string[], right: string[]): boolean {
+	if (left.length !== right.length) return false;
+	const seen = new Set(left);
+	if (seen.size !== left.length) return false;
+	for (const id of right) {
+		if (!seen.has(id)) return false;
+	}
+	return true;
 }
 
-/** Checks if a drag node has the shape needed for reorder resolution.
- *  Replaces dnd-kit's isSortable to avoid coupling to its internal types. */
-export function hasSortableShape(node: SortableDragLike | null | undefined): node is SortableDragLike {
-	return node != null && 'id' in node;
-}
-
-function asStringId(value: unknown): string {
-	return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
-}
-
-function asInteger(value: unknown): number | null {
-	return Number.isInteger(value) ? (value as number) : null;
-}
-
-/**
- * Resolves list reorder indices from a dnd-kit drag-end payload.
- * Mirrors dnd-kit sortable mutate semantics for array-backed lists.
- */
-export function resolveReorderIndices(
-	event: DragEndLike,
-	currentIds: string[],
-): { from: number; to: number } | null {
-	if (event.canceled) return null;
-	const source = event.operation?.source;
-	const target = event.operation?.target;
-	if (!source || !target) return null;
-
-	const sourceId = asStringId(source.id);
-	const targetId = asStringId(target.id);
-	const sourceIndex = currentIds.indexOf(sourceId);
-	const targetIndex = currentIds.indexOf(targetId);
-	const projectedIndex = asInteger(source.index);
-	const initialIndex = asInteger(source.initialIndex);
-
-	// Fallback path: dnd-kit may provide sortable indices even when IDs
-	// are temporarily unresolved against a just-refreshed list snapshot.
-	if (sourceIndex === -1 || targetIndex === -1) {
-		if (initialIndex === null || projectedIndex === null) return null;
-		if (
-			initialIndex < 0 ||
-			initialIndex >= currentIds.length ||
-			projectedIndex < 0 ||
-			projectedIndex >= currentIds.length ||
-			initialIndex === projectedIndex
-		) {
-			return null;
+export function movedId(before: string[], after: string[]): string | null {
+	if (!sameMembers(before, after)) return null;
+	for (let index = 0; index < before.length; index += 1) {
+		if (before[index] !== after[index]) {
+			const candidate = after[index];
+			return before.includes(candidate) ? candidate : null;
 		}
-		return { from: initialIndex, to: projectedIndex };
 	}
+	return null;
+}
 
-	// Prefer the projected sortable index only when it differs from the
-	// source's resolved index. This matches dnd-kit mutate behavior.
-	if (
-		projectedIndex !== null &&
-		projectedIndex >= 0 &&
-		projectedIndex < currentIds.length &&
-		projectedIndex !== sourceIndex
-	) {
-		return { from: sourceIndex, to: projectedIndex };
-	}
+export function moveInOrder(input: {
+	order: string[];
+	sourceChatId: string;
+	targetChatId: string;
+	closestEdge: Edge | null;
+}): string[] | null {
+	const startIndex = input.order.indexOf(input.sourceChatId);
+	const indexOfTarget = input.order.indexOf(input.targetChatId);
+	if (startIndex < 0 || indexOfTarget < 0) return null;
 
-	if (sourceIndex === targetIndex) return null;
-	return { from: sourceIndex, to: targetIndex };
+	const finishIndex = getReorderDestinationIndex({
+		startIndex,
+		indexOfTarget,
+		closestEdgeOfTarget: input.closestEdge,
+		axis: 'vertical',
+	});
+	if (finishIndex === startIndex) return null;
+
+	return reorder({
+		list: input.order,
+		startIndex,
+		finishIndex,
+	});
+}
+
+export function moveToBoundary(input: {
+	order: string[];
+	chatId: string;
+	boundary: BoundaryMove;
+}): string[] | null {
+	const startIndex = input.order.indexOf(input.chatId);
+	if (startIndex < 0) return null;
+	const finishIndex = input.boundary === 'start' ? 0 : input.order.length - 1;
+	if (finishIndex === startIndex) return null;
+
+	return reorder({
+		list: input.order,
+		startIndex,
+		finishIndex,
+	});
+}
+
+export function resolveFilteredRelativeMove(
+	chatId: string,
+	finalVisibleOrder: string[],
+): RelativeReorderTarget | null {
+	const index = finalVisibleOrder.indexOf(chatId);
+	if (index < 0) return null;
+
+	const chatIdAbove = finalVisibleOrder[index - 1];
+	if (chatIdAbove) return { chatIdAbove };
+
+	const chatIdBelow = finalVisibleOrder[index + 1];
+	if (chatIdBelow) return { chatIdBelow };
+
+	return null;
 }

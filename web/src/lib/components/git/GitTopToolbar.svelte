@@ -111,14 +111,20 @@
 	});
 </script>
 
-<div class="flex items-center justify-between border-b border-border {isMobile ? 'px-2 py-1' : 'px-3 py-1'}">
+<div
+	class="flex items-center justify-between border-b border-border {isMobile
+		? 'px-2 py-1'
+		: 'px-3 py-1'}"
+>
 	<!-- Left: branch selector + mode badge -->
 	<div class="flex items-center gap-2">
 		<!-- Branch selector -->
 		<div class="relative" bind:this={dropdownEl}>
 			<button
 				onclick={onToggleBranchDropdown}
-				class="flex items-center hover:bg-accent rounded-lg transition-colors duration-150 {isMobile ? 'gap-1.5 px-2 py-1' : 'gap-1.5 px-3 py-1.5'}"
+				class="flex items-center hover:bg-accent rounded-lg transition-colors duration-150 {isMobile
+					? 'gap-1.5 px-2 py-1'
+					: 'gap-1.5 px-3 py-1.5'}"
 			>
 				<GitBranch class="text-muted-foreground w-4 h-4" />
 				<span class="text-sm font-medium max-w-[140px] truncate">{currentBranch}</span>
@@ -135,16 +141,24 @@
 						{/if}
 					</div>
 				{/if}
-				<ChevronDown class="w-3.5 h-3.5 text-muted-foreground transition-transform {showBranchDropdown ? 'rotate-180' : ''}" />
+				<ChevronDown
+					class="w-3.5 h-3.5 text-muted-foreground transition-transform {showBranchDropdown
+						? 'rotate-180'
+						: ''}"
+				/>
 			</button>
 
 			{#if showBranchDropdown}
-				<div class="absolute top-full left-0 mt-1 w-64 bg-popover rounded-lg shadow-lg border border-border z-50">
+				<div
+					class="absolute top-full left-0 mt-1 w-64 bg-popover rounded-lg shadow-lg border border-border z-50"
+				>
 					<div class="py-1 max-h-64 overflow-y-auto">
 						{#each branches as branch (branch)}
 							<button
 								onclick={() => onSwitchBranch(branch)}
-								class="w-full text-left px-4 py-2 text-sm hover:bg-accent {branch === currentBranch ? 'bg-accent/50 font-medium' : 'text-muted-foreground'}"
+								class="w-full text-left px-4 py-2 text-sm hover:bg-accent {branch === currentBranch
+									? 'bg-accent/50 font-medium'
+									: 'text-muted-foreground'}"
 							>
 								<div class="flex items-center space-x-2">
 									{#if branch === currentBranch}
@@ -157,7 +171,10 @@
 					</div>
 					<div class="border-t border-border py-1">
 						<button
-							onclick={() => { onShowNewBranchModal(); onCloseBranchDropdown(); }}
+							onclick={() => {
+								onShowNewBranchModal();
+								onCloseBranchDropdown();
+							}}
 							class="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center space-x-2"
 						>
 							<Plus class="w-3.5 h-3.5" />
@@ -166,37 +183,36 @@
 					</div>
 				</div>
 			{/if}
-			</div>
-
-			{#if targets.length > 0}
-				<label class="sr-only" for="git-target-select">Git target</label>
-				<select
-					id="git-target-select"
-					disabled={isLoadingTargets}
-					value={activeWorktreePath ?? ''}
-					onchange={(event) => onSelectTarget?.(event.currentTarget.value)}
-					class="h-7 max-w-52 rounded border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					title="Git target"
-				>
-					{#each targets as target (target.worktreePath)}
-						<option value={target.worktreePath} disabled={target.isMissing}>
-							{target.label}
-						</option>
-					{/each}
-				</select>
-			{/if}
-
-			<button
-				type="button"
-				onclick={() => onOpenWorktrees?.()}
-				class="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-				title="Manage worktrees"
-				aria-label="Manage worktrees"
-			>
-				<FolderOpen class="w-4 h-4" />
-			</button>
-
 		</div>
+
+		{#if targets.length > 0}
+			<label class="sr-only" for="git-target-select">{m.git_target()}</label>
+			<select
+				id="git-target-select"
+				disabled={isLoadingTargets}
+				value={activeWorktreePath ?? ''}
+				onchange={(event) => onSelectTarget?.(event.currentTarget.value)}
+				class="h-7 max-w-52 rounded border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+				title={m.git_target()}
+			>
+				{#each targets as target (target.worktreePath)}
+					<option value={target.worktreePath} disabled={target.isMissing}>
+						{target.label}
+					</option>
+				{/each}
+			</select>
+		{/if}
+
+		<button
+			type="button"
+			onclick={() => onOpenWorktrees?.()}
+			class="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+			title={m.git_manage_worktrees()}
+			aria-label={m.git_manage_worktrees()}
+		>
+			<FolderOpen class="w-4 h-4" />
+		</button>
+	</div>
 
 	<!-- Right: mode-specific actions -->
 	<div class="flex items-center {isMobile ? 'gap-1' : 'gap-1.5'}">
@@ -205,7 +221,7 @@
 			<button
 				onclick={onViewCommits}
 				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-150"
-				title="View commit history"
+				title={m.git_view_commit_history()}
 			>
 				<History class="w-4 h-4" />
 				{#if !isMobile}History{/if}
@@ -216,14 +232,16 @@
 				onclick={onOpenReview}
 				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border transition-all duration-200
 					{reviewCount > 0
-						? 'bg-interactive-accent/10 text-interactive-accent border-interactive-accent/30 hover:bg-interactive-accent/20'
-						: 'border-border bg-background text-muted-foreground hover:text-foreground'}"
-				title="Review changes"
+					? 'bg-interactive-accent/10 text-interactive-accent border-interactive-accent/30 hover:bg-interactive-accent/20'
+					: 'border-border bg-background text-muted-foreground hover:text-foreground'}"
+				title={m.git_review_changes()}
 			>
 				<MessageSquare class="w-4 h-4" />
 				{#if !isMobile}Review{/if}
 				{#if reviewCount > 0}
-					<span class="px-1.5 py-0 text-[10px] rounded-full bg-interactive-accent text-interactive-accent-foreground font-medium">
+					<span
+						class="px-1.5 py-0 text-[10px] rounded-full bg-interactive-accent text-interactive-accent-foreground font-medium"
+					>
 						{reviewCount}
 					</span>
 				{/if}
@@ -235,9 +253,9 @@
 				disabled={!canCommit || isCommitting}
 				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-200
 					{canCommit && !isCommitting
-						? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
-						: 'bg-muted text-muted-foreground cursor-not-allowed'}"
-				title="Commit staged changes"
+					? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
+					: 'bg-muted text-muted-foreground cursor-not-allowed'}"
+				title={m.git_changes_commit_staged()}
 			>
 				Commit
 			</button>
@@ -248,10 +266,10 @@
 				disabled={!canPush || isPushing}
 				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-200
 					{canPush && !isPushing
-						? 'bg-git-action-push text-git-action-foreground hover:bg-git-action-push-hover'
-						: 'bg-muted text-muted-foreground cursor-not-allowed'}"
-				title="Push to remote"
-				aria-label="Push"
+					? 'bg-git-action-push text-git-action-foreground hover:bg-git-action-push-hover'
+					: 'bg-muted text-muted-foreground cursor-not-allowed'}"
+				title={m.git_header_push_to_remote()}
+				aria-label={m.git_header_push()}
 			>
 				<Upload class="w-4 h-4 {isPushing ? 'animate-pulse' : ''}" />
 				{#if !isMobile}Push{/if}
@@ -262,9 +280,9 @@
 				{diffMode}
 				{contextLines}
 				{diffFontSize}
-				onSetDiffMode={onSetDiffMode}
-				onSetContextLines={onSetContextLines}
-				onSetDiffFontSize={onSetDiffFontSize}
+				{onSetDiffMode}
+				{onSetContextLines}
+				{onSetDiffFontSize}
 				{onOpenCommitSettings}
 			/>
 
@@ -277,7 +295,6 @@
 			>
 				<RefreshCw class="w-4 h-4 {isLoading ? 'animate-spin' : ''}" />
 			</button>
-
 		{:else}
 			<!-- History mode actions -->
 
@@ -285,7 +302,7 @@
 			<button
 				onclick={onViewChanges}
 				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-150"
-				title="View changes"
+				title={m.git_view_changes()}
 			>
 				<ArrowLeft class="w-4 h-4" />
 				{#if !isMobile}Changes{/if}
@@ -295,7 +312,7 @@
 			<button
 				onclick={onRevert}
 				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-status-warning hover:bg-status-warning/10 transition-all duration-200"
-				title="Revert last commit"
+				title={m.git_revert_last_commit()}
 			>
 				<Undo2 class="w-4 h-4" />
 				{#if !isMobile}Revert{/if}

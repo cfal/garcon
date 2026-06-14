@@ -61,10 +61,10 @@ describe('ConversationScrollController', () => {
 
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
-				getQueueContainer: () => queue,
-				chatState: { isUserScrolledUp: false } as never,
-				sessions: { selectedChatId: 'chat-1' },
-			});
+			getQueueContainer: () => queue,
+			chatState: { isUserScrolledUp: false } as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
 
 		controller.isPinnedToBottom = true;
 		const cleanup = controller.observeQueueResize();
@@ -83,10 +83,10 @@ describe('ConversationScrollController', () => {
 
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
-				getQueueContainer: () => queue,
-				chatState: { isUserScrolledUp: true } as never,
-				sessions: { selectedChatId: 'chat-1' },
-			});
+			getQueueContainer: () => queue,
+			chatState: { isUserScrolledUp: true } as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
 
 		controller.isPinnedToBottom = false;
 		const cleanup = controller.observeQueueResize();
@@ -153,10 +153,10 @@ describe('ConversationScrollController', () => {
 
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
-				getQueueContainer: () => undefined,
-				chatState: { isUserScrolledUp: false } as never,
-				sessions: { selectedChatId: 'chat-1' },
-			});
+			getQueueContainer: () => undefined,
+			chatState: { isUserScrolledUp: false } as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
 
 		controller.isPinnedToBottom = true;
 		const cleanup = controller.observeScrollContainerResize();
@@ -175,10 +175,10 @@ describe('ConversationScrollController', () => {
 
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
-				getQueueContainer: () => undefined,
-				chatState: { isUserScrolledUp: true } as never,
-				sessions: { selectedChatId: 'chat-1' },
-			});
+			getQueueContainer: () => undefined,
+			chatState: { isUserScrolledUp: true } as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
 
 		controller.isPinnedToBottom = false;
 		const cleanup = controller.observeScrollContainerResize();

@@ -1,6 +1,7 @@
 import path from 'path';
 import crypto from 'crypto';
 import { JsonFileStore } from '../lib/json-file-store.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 
 export type CommandLedgerStatus =
   | 'accepted'
@@ -45,6 +46,9 @@ interface LedgerFile {
   records: CommandLedgerRecord[];
 }
 
+const LEDGER_RECORD_LIMIT = 1000;
+const LEDGER_PERSIST_LOCK_KEY = 'ledger';
+
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
@@ -84,7 +88,7 @@ export class CommandLedger {
   #store: JsonFileStore<LedgerFile>;
   #loaded = false;
   #records = new Map<string, CommandLedgerRecord>();
-  #locks = new Map<string, Promise<void>>();
+  #locks = new KeyedPromiseLock();
 
   constructor(workspaceDir: string) {
     const filePath = path.join(workspaceDir, 'command-ledger.json');
@@ -121,6 +125,7 @@ export class CommandLedger {
         entryId: input.entryId,
       };
       this.#records.set(key, record);
+      this.#trimRecords();
       await this.#persist();
       return { kind: 'accepted', record };
     });
@@ -137,6 +142,38 @@ export class CommandLedger {
         updatedAt: new Date().toISOString(),
       };
       this.#records.set(key, next);
+      this.#trimRecords();
+      await this.#persist();
+      return next;
+    });
+  }
+
+  async updateCommand(
+    commandType: string,
+    chatId: string,
+    clientRequestId: string,
+    patch: Partial<Omit<CommandLedgerRecord, 'key'>>,
+  ): Promise<CommandLedgerRecord | null> {
+    return this.update(ledgerKey(commandType, chatId, clientRequestId), patch);
+  }
+
+  async updateUnlessStatus(
+    key: string,
+    blockedStatuses: CommandLedgerStatus[],
+    patch: Partial<Omit<CommandLedgerRecord, 'key'>>,
+  ): Promise<CommandLedgerRecord | null> {
+    return this.#withLock(key, async () => {
+      await this.#load();
+      const existing = this.#records.get(key);
+      if (!existing) return null;
+      if (blockedStatuses.includes(existing.status)) return existing;
+      const next = {
+        ...existing,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      this.#records.set(key, next);
+      this.#trimRecords();
       await this.#persist();
       return next;
     });
@@ -144,31 +181,34 @@ export class CommandLedger {
 
   async #load(): Promise<void> {
     if (this.#loaded) return;
-    const parsed = await this.#store.read();
-    this.#records = new Map(parsed.records.map((record) => [record.key, record]));
-    this.#loaded = true;
+    await this.#locks.runExclusive(LEDGER_PERSIST_LOCK_KEY, async () => {
+      if (this.#loaded) return;
+      const parsed = await this.#store.read();
+      this.#records = new Map(parsed.records.map((record) => [record.key, record]));
+      this.#trimRecords();
+      this.#loaded = true;
+    });
   }
 
   async #persist(): Promise<void> {
-    const payload: LedgerFile = {
-      version: 1,
-      records: [...this.#records.values()].slice(-1000),
-    };
-    await this.#store.write(payload);
+    await this.#locks.runExclusive(LEDGER_PERSIST_LOCK_KEY, async () => {
+      const payload: LedgerFile = {
+        version: 1,
+        records: [...this.#records.values()],
+      };
+      await this.#store.write(payload);
+    });
   }
 
   async #withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.#locks.get(key) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => { release = resolve; });
-    const chain = previous.then(() => current);
-    this.#locks.set(key, chain);
-    await previous;
-    try {
-      return await fn();
-    } finally {
-      release();
-      if (this.#locks.get(key) === chain) this.#locks.delete(key);
+    return this.#locks.runExclusive(key, fn);
+  }
+
+  #trimRecords(): void {
+    while (this.#records.size > LEDGER_RECORD_LIMIT) {
+      const oldest = this.#records.keys().next().value;
+      if (!oldest) return;
+      this.#records.delete(oldest);
     }
   }
 }

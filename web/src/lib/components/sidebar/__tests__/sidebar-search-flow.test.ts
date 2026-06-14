@@ -78,4 +78,18 @@ describe('sidebar search dialog flow', () => {
 		expect((resumedInput as HTMLInputElement).value).toBe('tag:ops');
 		expect(screen.getByRole('button', { name: 'Manage searches' })).toBeTruthy();
 	});
+
+	it('notifies when saved searches fail to load', async () => {
+		const notifications = { error: vi.fn(), info: vi.fn() };
+		vi.mocked(getSavedSearches).mockRejectedValue(new Error('network'));
+
+		render(SidebarHost, {
+			chats: [createChat('chat-1', 'First chat')],
+			notifications,
+		});
+
+		await waitFor(() => {
+			expect(notifications.error).toHaveBeenCalledWith('Failed to load saved searches.');
+		});
+	});
 });

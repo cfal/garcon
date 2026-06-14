@@ -9,6 +9,8 @@
 		currentTime?: Date;
 		isPinned?: boolean;
 		isArchived?: boolean;
+		isMobile?: boolean;
+		enableNativeDrag?: boolean;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 	}
@@ -19,6 +21,8 @@
 		currentTime = new Date('2025-01-01T03:00:00.000Z'),
 		isPinned = false,
 		isArchived = false,
+		isMobile = false,
+		enableNativeDrag = true,
 		onTagClick,
 		onManageTags,
 	}: SidebarChatItemHostProps = $props();
@@ -48,6 +52,8 @@
 	{currentTime}
 	{isPinned}
 	{isArchived}
+	{isMobile}
+	{enableNativeDrag}
 	onChatSelect={() => {}}
 	onDeleteChat={() => {}}
 	onStartRenameChat={() => {}}

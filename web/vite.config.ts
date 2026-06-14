@@ -10,13 +10,13 @@ export default defineConfig({
 		sveltekit(),
 		paraglideVitePlugin({
 			project: './project.inlang',
-			outdir: './src/lib/paraglide'
-		})
+			outdir: './src/lib/paraglide',
+		}),
 	],
 	resolve: {
 		alias: {
-			$shared: path.resolve(__dirname, '../common')
-		}
+			$shared: path.resolve(__dirname, '../common'),
+		},
 	},
 	build: {
 		rollupOptions: {
@@ -24,22 +24,27 @@ export default defineConfig({
 				manualChunks(id) {
 					if (id.includes('@xterm/')) return 'vendor-xterm';
 					if (id.includes('@codemirror/') || id.includes('codemirror')) return 'vendor-codemirror';
-					if (id.includes('@thisbeyond/') || id.includes('dnd-kit')) return 'vendor-dnd';
-				}
-			}
-		}
+					if (
+						id.includes('@atlaskit/pragmatic-drag-and-drop') ||
+						id.includes('@tanstack/svelte-virtual') ||
+						id.includes('@tanstack/virtual-core')
+					)
+						return 'vendor-dnd';
+				},
+			},
+		},
 	},
 	server: {
 		proxy: {
 			'/api': 'http://localhost:3001',
 			'/ws': {
 				target: 'ws://localhost:3001',
-				ws: true
+				ws: true,
 			},
 			'/shell': {
 				target: 'ws://localhost:3001',
-				ws: true
-			}
-		}
-	}
+				ws: true,
+			},
+		},
+	},
 });

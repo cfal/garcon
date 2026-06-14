@@ -7,8 +7,13 @@ import { randomUUID } from 'crypto';
 let testBasePath;
 let workspaceDir;
 
+class MalformedJsonError extends Error {
+  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+}
+
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody: mock(() => Promise.resolve({})),
+  MalformedJsonError,
 }));
 
 mock.module('../../config.js', () => ({
@@ -27,6 +32,8 @@ mock.module('../../chats/fork-chat.js', () => ({
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
+import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
+import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 function createSession(overrides = {}) {
   return {
@@ -72,16 +79,16 @@ function createRouteAgent(sessionOverrides = {}) {
     removeSessionName: mock(() => Promise.resolve(undefined)),
     togglePin: mock(() => Promise.resolve({ isPinned: true })),
     toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
-    getPinnedChatIds: mock(() => Promise.resolve([])),
-    getNormalChatIds: mock(() => Promise.resolve([])),
-    getArchivedChatIds: mock(() => Promise.resolve([])),
+    getPinnedChatIds: mock(() => []),
+    getNormalChatIds: mock(() => []),
+    getArchivedChatIds: mock(() => []),
     reorderWindow: mock(() => Promise.resolve({ success: true })),
     reorderRelative: mock(() => Promise.resolve({ success: true })),
   };
   const queue = {
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     submit: mock(() => Promise.resolve(undefined)),
-    appendUserMessage: mock(() => Promise.resolve(undefined)),
+    registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
     abort: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
@@ -123,7 +130,27 @@ function createRouteAgent(sessionOverrides = {}) {
     resolvePermission: mock(() => undefined),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
-  const routes = createChatRoutes(registry, settings, queue, pathCache, metadata, historyCache, agents);
+  const commandLedger = createRouteCommandLedger('chats-command-routes');
+  const pendingInputs = createRoutePendingInputs();
+  const routes = createChatRoutes({
+    registry,
+    settings,
+    queue,
+    pathCache,
+    metadata,
+    historyCache,
+    agents,
+    pendingInputs,
+    commandService: createRouteCommandService({
+      registry,
+      queue,
+      settings,
+      metadata,
+      agents,
+      commandLedger,
+      pendingInputs,
+    }),
+  });
   return { sessions, registry, settings, queue, pathCache, metadata, historyCache, agents, routes };
 }
 
@@ -168,8 +195,8 @@ describe('REST chat command routes', () => {
     const order = [];
     let resolveRun;
     const runPromise = new Promise((resolve) => { resolveRun = resolve; });
-    agent.queue.appendUserMessage.mockImplementation(() => {
-      order.push('append');
+    agent.queue.registerPendingUserInput.mockImplementation(() => {
+      order.push('pending');
       return Promise.resolve();
     });
     agent.queue.runAcceptedTurn.mockImplementation(() => {
@@ -188,8 +215,8 @@ describe('REST chat command routes', () => {
       status: 'accepted',
     });
     expect(typeof body.turnId).toBe('string');
-    expect(order).toEqual(['append', 'run']);
-    expect(agent.queue.appendUserMessage).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
+    expect(order).toEqual(['pending', 'run']);
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
       clientRequestId: 'req-run-1',
       clientMessageId: 'msg-run-1',
       turnId: body.turnId,
@@ -208,7 +235,7 @@ describe('REST chat command routes', () => {
 
     expect(retry.response.status).toBe(202);
     expect(retry.body.status).toBe('duplicate');
-    expect(agent.queue.appendUserMessage).toHaveBeenCalledTimes(1);
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
     expect(agent.queue.runAcceptedTurn).toHaveBeenCalledTimes(1);
   });
 
@@ -221,7 +248,7 @@ describe('REST chat command routes', () => {
 
     expect(conflict.response.status).toBe(409);
     expect(conflict.body.errorCode).toBe('IDEMPOTENCY_CONFLICT');
-    expect(agent.queue.appendUserMessage).toHaveBeenCalledTimes(1);
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
   });
 
   it('POST /run validates content and session existence', async () => {
@@ -254,7 +281,7 @@ describe('REST chat command routes', () => {
     expect(body.sourceChatId).toBe('123');
     expect(body.chatId).toBe('456');
     expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
-    expect(agent.queue.appendUserMessage).toHaveBeenCalledWith('456', 'continue here', expect.objectContaining({
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith('456', 'continue here', expect.objectContaining({
       clientRequestId: 'req-fork-run-1',
       clientMessageId: 'msg-fork-run-1',
     }));
@@ -277,7 +304,7 @@ describe('REST chat command routes', () => {
     expect(response.status).toBe(409);
     expect(body.errorCode).toBe('SESSION_BUSY');
     expect(forkChatFileCopy).not.toHaveBeenCalled();
-    expect(agent.queue.appendUserMessage).not.toHaveBeenCalled();
+    expect(agent.queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
 
   it('POST /queue/enqueue accepts, deduplicates, and preserves queue state', async () => {
@@ -394,6 +421,20 @@ describe('REST chat command routes', () => {
     }));
   });
 
+  it('PATCH /execution-settings returns 400 when chatId is missing', async () => {
+    const agent = createRouteAgent();
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/execution-settings'].PATCH,
+      { permissionMode: 'default' },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(400);
+    expect(body.errorCode).toBe('VALIDATION_FAILED');
+    expect(body.error).toBe('chatId is required');
+  });
+
   it('PATCH /model patches model selection metadata', async () => {
     const agent = createRouteAgent();
 
@@ -429,5 +470,36 @@ describe('REST chat command routes', () => {
       modelEndpointId: 'endpoint',
       modelProtocol: 'openai-compatible',
     }));
+  });
+
+  it('PATCH /model returns 400 when model is missing', async () => {
+    const agent = createRouteAgent();
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/model'].PATCH,
+      { chatId: '123' },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(400);
+    expect(body.errorCode).toBe('VALIDATION_FAILED');
+    expect(body.error).toBe('model is required');
+  });
+
+  it('PATCH /model maps model selection failures to 422', async () => {
+    const agent = createRouteAgent();
+    agent.agents.updateSessionSettings.mockRejectedValueOnce(
+      new ModelSelectionError('Endpoint not found', 'ENDPOINT_NOT_FOUND'),
+    );
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/model'].PATCH,
+      { chatId: '123', model: 'missing:model' },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(422);
+    expect(body.errorCode).toBe('MODEL_SELECTION_ERROR');
+    expect(body.error).toBe('Endpoint not found');
   });
 });

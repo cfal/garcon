@@ -1,8 +1,9 @@
 import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage } from "../../../../common/chat-types.js";
 import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from "../../shared/event-emitter-runtime.js";
-import { loadCodexChatMessages, getCodexPreviewFromNativePath } from "../history-loader.js";
+import { loadCodexChatMessages, getCodexPreviewFromNativePath, loadCodexChatMessagePage } from "../history-loader.js";
 import type { AgentChatEntry, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../../session-types.js";
+import type { AgentTranscriptPage } from '../../types.js';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
 import {
@@ -13,6 +14,9 @@ import {
 } from './converter.js';
 import { waitForMaterializedThread } from './durability.js';
 import { CodexTurnMessageDeduper } from './message-deduper.js';
+import { createLogger } from '../../../lib/log.js';
+
+const logger = createLogger('agents:codex:app-server:runtime');
 import type {
   ErrorNotification,
   ItemCompletedNotification,
@@ -66,6 +70,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #createClient: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   #materializationTimeoutMs: number;
   #terminalBackfillTimeoutMs: number;
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: CodexAppServerRuntimeOptions = {}) {
     super();
@@ -176,7 +181,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
     const interrupt = session.activeTurnId
       ? session.client.interruptTurn(session.threadId, session.activeTurnId).catch((error: Error) => {
-        console.warn(`codex: failed to interrupt turn ${session.activeTurnId}:`, error.message);
+        logger.warn(`codex: failed to interrupt turn ${session.activeTurnId}:`, error.message);
       })
       : Promise.resolve();
 
@@ -202,11 +207,27 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
     try {
       const response = await this.#readThread(session.agentSessionId, true);
-      return convertCodexAppServerThread(response.thread);
+      const converted = convertCodexAppServerThread(response.thread);
+      // App-server can return an empty turn list when the rollout file is
+      // missing, corrupted, or the thread was not fully materialized. Fall
+      // back to the JSONL file on disk when it exists.
+      if (converted.length === 0 && session.nativePath) {
+        const jsonlMessages = await this.#loadJsonlMessages(session);
+        if (jsonlMessages.length > 0) return jsonlMessages;
+      }
+      return converted;
     } catch (error) {
-      console.warn('codex: app-server thread/read failed, falling back to JSONL:', (error as Error).message);
+      logger.warn('codex: app-server thread/read failed, falling back to JSONL:', (error as Error).message);
       return this.#loadJsonlMessages(session);
     }
+  }
+
+  async loadMessagePage(
+    session: AgentChatEntry,
+    page: { limit: number; offset: number },
+  ): Promise<AgentTranscriptPage | null> {
+    if (session.agentSessionId) return null;
+    return loadCodexChatMessagePage(session.nativePath, page.limit, page.offset);
   }
 
   async getPreview(session: AgentChatEntry): Promise<unknown> {
@@ -224,7 +245,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       const response = await this.#readThread(session.agentSessionId, false);
       return getCodexThreadPreview(response.thread);
     } catch (error) {
-      console.warn('codex: app-server preview failed, falling back to JSONL:', (error as Error).message);
+      logger.warn('codex: app-server preview failed, falling back to JSONL:', (error as Error).message);
       return this.#getJsonlPreview(session);
     }
   }
@@ -269,7 +290,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   async resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> {
     const pending = this.#pendingApprovals.get(permissionRequestId);
     if (!pending) {
-      console.warn('codex: resolvePermission, no pending entry for', permissionRequestId);
+      logger.warn('codex: resolvePermission, no pending entry for', permissionRequestId);
       return;
     }
 
@@ -280,8 +301,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     ]);
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
-    return setInterval(() => {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
+    this.#purgeTimer = setInterval(() => {
       for (const [threadId, session] of this.#sessions.entries()) {
         if (session.status !== 'running') this.#sessions.delete(threadId);
       }
@@ -289,6 +311,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
     for (const session of this.#sessions.values()) {
       session.client.shutdown();
     }
@@ -339,7 +365,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       this.#getThreadListCache()
         .then((threads) => threads.get(threadId) ?? null)
         .catch((error) => {
-          console.warn('codex: app-server thread/list preview cache failed:', (error as Error).message);
+          logger.warn('codex: app-server thread/list preview cache failed:', (error as Error).message);
           return null;
         }),
       delay(500).then(() => null),
@@ -417,7 +443,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       };
       this.emit('metric', metric);
     } catch (error) {
-      console.warn('codex: failed to sample loaded app-server threads:', (error as Error).message);
+      logger.warn('codex: failed to sample loaded app-server threads:', (error as Error).message);
     }
   }
 
@@ -425,7 +451,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     try {
       await client.unsubscribeThread(threadId);
     } catch (error) {
-      console.warn(`codex: failed to unsubscribe app-server thread ${threadId}:`, (error as Error).message);
+      logger.warn(`codex: failed to unsubscribe app-server thread ${threadId}:`, (error as Error).message);
     }
   }
 
@@ -452,8 +478,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #wireClient(client: CodexAppServerClient): void {
     client.on('notification', (notification: JsonRpcNotification) => this.#handleNotification(client, notification));
     client.on('serverRequest', (request: JsonRpcServerRequest) => this.#handleServerRequest(client, request));
-    client.on('stderr', (line: string) => console.warn('codex app-server:', line));
-    client.on('warning', (message: string) => console.warn(message));
+    client.on('stderr', (line: string) => logger.warn('codex app-server:', line));
+    client.on('warning', (message: string) => logger.warn(message));
     client.on('metric', (metric: unknown) => this.emit('metric', metric));
     client.on('exit', (code: number) => this.#handleClientExit(client, code));
   }
@@ -513,7 +539,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const turnId = params.turn.id ?? session.activeTurnId;
     if (!aborted && turnId) {
       await this.#backfillCompletedTurn(session, turnId).catch((error) => {
-        console.warn('codex: terminal thread/read backfill failed:', (error as Error).message);
+        logger.warn('codex: terminal thread/read backfill failed:', (error as Error).message);
       });
     }
     this.#finishSession(session, { aborted });
@@ -543,7 +569,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         `active thread/read timed out for ${session.threadId}`,
       );
     } catch (error) {
-      console.warn('codex: active app-server terminal backfill failed, retrying utility app-server:', (error as Error).message);
+      logger.warn('codex: active app-server terminal backfill failed, retrying utility app-server:', (error as Error).message);
       return withTimeout(
         this.#readThread(session.threadId, true),
         this.#terminalBackfillTimeoutMs,

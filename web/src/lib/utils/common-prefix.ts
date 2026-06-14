@@ -1,13 +1,20 @@
 // Computes the longest common prefix from a list of file paths.
 // For single-file commits the prefix includes the filename itself.
 
-const LOCK_EXTENSIONS = new Set([
-	'.lock', '.sum', '.lockb',
-]);
+const LOCK_EXTENSIONS = new Set(['.lock', '.sum', '.lockb']);
 
 const GENERIC_TOKENS = new Set([
-	'src', 'source', 'sources', 'lib', 'pkg', 'packages', 'packages-ts',
-	'internal', 'cmd', 'app', 'apps',
+	'src',
+	'source',
+	'sources',
+	'lib',
+	'pkg',
+	'packages',
+	'packages-ts',
+	'internal',
+	'cmd',
+	'app',
+	'apps',
 ]);
 
 /** Returns true for files that should be ignored when computing the prefix

@@ -51,62 +51,62 @@
 		<h1 class="mb-5 text-center text-xl font-semibold text-foreground">{m.auth_login_title()}</h1>
 
 		<form onsubmit={handleSubmit} class="space-y-4">
-				<div>
-					<label for="username" class="mb-1 block text-sm font-medium text-foreground">
-						{m.auth_login_username()}
-					</label>
+			<div>
+				<label for="username" class="mb-1 block text-sm font-medium text-foreground">
+					{m.auth_login_username()}
+				</label>
+				<Input
+					type="text"
+					id="username"
+					bind:value={username}
+					placeholder={m.auth_login_placeholders_username()}
+					required
+					disabled={isSubmitting}
+				/>
+			</div>
+
+			<div>
+				<label for="password" class="mb-1 block text-sm font-medium text-foreground">
+					{m.auth_login_password()}
+				</label>
+				<div class="relative">
 					<Input
-						type="text"
-						id="username"
-						bind:value={username}
-						placeholder={m.auth_login_placeholders_username()}
+						type={showPassword ? 'text' : 'password'}
+						id="password"
+						bind:value={password}
+						placeholder={m.auth_login_placeholders_password()}
 						required
 						disabled={isSubmitting}
+						class="pr-10"
 					/>
-				</div>
-
-				<div>
-					<label for="password" class="mb-1 block text-sm font-medium text-foreground">
-						{m.auth_login_password()}
-					</label>
-					<div class="relative">
-						<Input
-							type={showPassword ? 'text' : 'password'}
-							id="password"
-							bind:value={password}
-							placeholder={m.auth_login_placeholders_password()}
-							required
-							disabled={isSubmitting}
-							class="pr-10"
-						/>
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon"
-							class="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:text-foreground"
-							onclick={() => (showPassword = !showPassword)}
-							aria-label={showPassword ? m.auth_password_hide() : m.auth_password_show()}
-						>
-							{#if showPassword}
-								<EyeOff class="size-4" />
-							{:else}
-								<Eye class="size-4" />
-							{/if}
-						</Button>
-					</div>
-				</div>
-
-				{#if error}
-					<div class="rounded-md border border-status-error-border bg-status-error p-3">
-						<p class="text-sm text-status-error-foreground">{error}</p>
-					</div>
-				{/if}
-
-				<div class="pt-2">
-					<Button type="submit" class="w-full" disabled={isSubmitting}>
-						{isSubmitting ? m.auth_login_loading() : m.auth_login_submit()}
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon"
+						class="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:text-foreground"
+						onclick={() => (showPassword = !showPassword)}
+						aria-label={showPassword ? m.auth_password_hide() : m.auth_password_show()}
+					>
+						{#if showPassword}
+							<EyeOff class="size-4" />
+						{:else}
+							<Eye class="size-4" />
+						{/if}
 					</Button>
 				</div>
+			</div>
+
+			{#if error}
+				<div class="rounded-md border border-status-error-border bg-status-error p-3">
+					<p class="text-sm text-status-error-foreground">{error}</p>
+				</div>
+			{/if}
+
+			<div class="pt-2">
+				<Button type="submit" class="w-full" disabled={isSubmitting}>
+					{isSubmitting ? m.auth_login_loading() : m.auth_login_submit()}
+				</Button>
+			</div>
 		</form>
 	</div>
 </div>

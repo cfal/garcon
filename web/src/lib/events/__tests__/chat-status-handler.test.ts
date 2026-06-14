@@ -1,22 +1,27 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { handleChatStatus } from '../handlers/chat';
 import { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ChatEventContext } from '../handlers/chat';
 import { ChatProcessingUpdatedMessage } from '$shared/ws-events';
 
+function makeConversationUi(): ChatEventContext['conversationUi'] {
+	return {
+		pendingViewChat: null,
+		setPendingViewChat: vi.fn(),
+		setPendingPermissionRequests: vi.fn(),
+		clearPendingPermissionRequests: vi.fn(),
+	};
+}
+
 function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 	return {
-		agentId: 'claude',
-		projectPath: '/project',
-		selectedChat: null,
+		getSelectedChat: () => null,
 		getCurrentChatId: () => null,
 		setCurrentChatId: vi.fn(),
 		setChatMessages: vi.fn(),
 		loadMessages: vi.fn().mockResolvedValue([]),
 		setIsSystemChatChange: vi.fn(),
-		setPendingPermissionRequests: vi.fn(),
-		pendingViewChat: null,
-		setPendingViewChat: vi.fn(),
+		conversationUi: makeConversationUi(),
 		activateLoadingFor: vi.fn(),
 		clearLoadingIndicators: vi.fn(),
 		markChatsAsCompleted: vi.fn(),
@@ -57,7 +62,7 @@ describe('handleChatStatus', () => {
 		handleChatStatus(makeMsg('chat-a', false), ctx);
 
 		expect(ctx.clearLoadingIndicators).toHaveBeenCalledWith('chat-a');
-		expect(ctx.loadMessages).toHaveBeenCalledWith('chat-a', false, 'claude');
+		expect(ctx.loadMessages).toHaveBeenCalledWith('chat-a');
 	});
 
 	it('fires onChatProcessing/onChatNotProcessing callbacks', () => {
@@ -74,7 +79,9 @@ describe('handleChatStatus', () => {
 		// Simulate: start reload for chat-a, then switch to chat-b before resolve.
 		let activeChatId: string | null = 'chat-a';
 		let resolveReload!: (msgs: unknown[]) => void;
-		const loadPromise = new Promise<unknown[]>((resolve) => { resolveReload = resolve; });
+		const loadPromise = new Promise<unknown[]>((resolve) => {
+			resolveReload = resolve;
+		});
 
 		const ctx = makeCtx({
 			getCurrentChatId: () => activeChatId,
@@ -82,7 +89,7 @@ describe('handleChatStatus', () => {
 		});
 
 		handleChatStatus(makeMsg('chat-a', false), ctx);
-		expect(ctx.loadMessages).toHaveBeenCalledWith('chat-a', false, 'claude');
+		expect(ctx.loadMessages).toHaveBeenCalledWith('chat-a');
 
 		// User switches to a different chat while the reload is in flight.
 		activeChatId = 'chat-b';
@@ -100,7 +107,9 @@ describe('handleChatStatus', () => {
 
 	it('applies reloaded messages when the active chat is still the same', async () => {
 		let resolveReload!: (msgs: unknown[]) => void;
-		const loadPromise = new Promise<unknown[]>((resolve) => { resolveReload = resolve; });
+		const loadPromise = new Promise<unknown[]>((resolve) => {
+			resolveReload = resolve;
+		});
 
 		const ctx = makeCtx({
 			getCurrentChatId: () => 'chat-a',

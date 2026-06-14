@@ -1,35 +1,26 @@
 // Share routes. Provides endpoints to create, query, revoke, and
 // publicly access shared chat snapshots.
 
-import { parseJsonBody } from '../lib/http-request.js';
 import { markRouteNoAuth } from '../lib/http-route.js';
+import { withJsonBody } from '../lib/json-route.js';
 import type { IShareStore } from '../chats/share-store.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ShareChatResponse, ShareStatusResponse, GetSharedChatResponse, RevokeShareResponse } from '../../common/share-types.ts';
 import { renderSharedChatText } from '../chats/share-transcript.ts';
-
-type RouteHandler = (request: Request, url: URL) => Promise<Response> | Response;
-type RouteMap = Record<string, Record<string, RouteHandler>>;
+import { extractFirstLine } from '../lib/text.js';
+import type { RouteMap } from '../lib/http-route-types.js';
+import type { HistoryCachePageReader } from '../chats/history-cache-contract.js';
+import type { ChatMetadata } from '../chats/metadata-store.js';
 
 interface SettingsDep {
   getChatName(chatId: string): string | null;
 }
 
 interface MetadataDep {
-  getChatMetadata(chatId: string): Record<string, unknown> | null;
+  getChatMetadata(chatId: string): ChatMetadata | null;
 }
 
-interface HistoryCacheDep {
-  ensureLoaded(chatId: string): Promise<void>;
-  getPaginatedMessages(chatId: string, limit: number, offset: number): unknown;
-}
-
-function extractFirstLine(text: string | null | undefined): string {
-  if (!text) return '';
-  const nl = text.indexOf('\n');
-  if (nl < 0) return text.trim();
-  return text.slice(0, nl).trim();
-}
+type HistoryCacheDep = HistoryCachePageReader;
 
 function extractLlmTokenFromPath(pathname: string): string | null {
   const match = pathname.match(/^\/shared\/llm\/([^/]+)$/);
@@ -51,9 +42,8 @@ export default function createShareRoutes(
 ): RouteMap {
 
   // POST /api/v1/chats/share - Creates or returns existing share.
-  async function postShareChat(request: Request): Promise<Response> {
+  async function postShareChat(body: Record<string, unknown>): Promise<Response> {
     try {
-      const body = await parseJsonBody(request);
       const chatId = String(body.chatId || '').trim();
       if (!chatId) {
         return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
@@ -64,9 +54,7 @@ export default function createShareRoutes(
         return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
       }
 
-      // Load current messages for the snapshot.
-      await historyCache.ensureLoaded(chatId);
-      const page = historyCache.getPaginatedMessages(chatId, 100_000, 0) as { messages?: unknown[] };
+      const page = await historyCache.getPaginatedMessages(chatId, 100_000, 0) as { messages?: unknown[] };
       const messages = page?.messages ?? [];
 
       const meta = metadata.getChatMetadata(chatId);
@@ -86,7 +74,7 @@ export default function createShareRoutes(
       };
 
       // Update existing share with latest messages, or create a new one.
-      const existing = shareStore.getShareByChatId(chatId);
+      const existing = await shareStore.getShareByChatId(chatId);
       const snapshot = existing
         ? await shareStore.updateShare(chatId, partial)
         : await shareStore.createShare(chatId, partial);
@@ -98,9 +86,6 @@ export default function createShareRoutes(
       };
       return Response.json(resp);
     } catch (error: unknown) {
-      if ((error as Error).message === 'Malformed JSON') {
-        return Response.json({ success: false, error: 'Malformed JSON' }, { status: 400 });
-      }
       return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
     }
   }
@@ -122,13 +107,13 @@ export default function createShareRoutes(
   }
 
   // GET /api/v1/chats/share/status?chatId=X - Checks share status.
-  function getShareStatus(_request: Request, url: URL): Response {
+  async function getShareStatus(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) {
       return Response.json({ success: false, error: 'chatId query parameter is required' }, { status: 400 });
     }
 
-    const existing = shareStore.getShareByChatId(chatId);
+    const existing = await shareStore.getShareByChatId(chatId);
     const resp: ShareStatusResponse = existing
       ? { isShared: true, shareToken: existing.shareToken, shareUrl: `/shared/${existing.shareToken}`, sharedAt: existing.sharedAt }
       : { isShared: false };
@@ -136,13 +121,13 @@ export default function createShareRoutes(
   }
 
   // GET /api/v1/shared - Public endpoint, returns snapshot by token.
-  const getSharedChat = markRouteNoAuth(function getSharedChat(_request: Request, url: URL): Response {
+  const getSharedChat = markRouteNoAuth(async function getSharedChat(_request: Request, url: URL): Promise<Response> {
     const token = url.searchParams.get('token');
     if (!token) {
       return Response.json({ error: 'token query parameter is required' }, { status: 400 });
     }
 
-    const snapshot = shareStore.getShare(token);
+    const snapshot = await shareStore.getShare(token);
     if (!snapshot) {
       return Response.json({ error: 'Share not found' }, { status: 404 });
     }
@@ -152,13 +137,13 @@ export default function createShareRoutes(
   });
 
   // Serves a plain text transcript at /shared/llm/:token for LLM consumption.
-  const getLlmTranscript = markRouteNoAuth(function getLlmTranscript(_request: Request, url: URL): Response {
+  const getLlmTranscript = markRouteNoAuth(async function getLlmTranscript(_request: Request, url: URL): Promise<Response> {
     const token = extractLlmTokenFromPath(url.pathname);
     if (!token) {
       return Response.json({ error: 'Share token is required' }, { status: 400 });
     }
 
-    const snapshot = shareStore.getShare(token);
+    const snapshot = await shareStore.getShare(token);
     if (!snapshot) {
       return Response.json({ error: 'Share not found' }, { status: 404 });
     }
@@ -172,7 +157,7 @@ export default function createShareRoutes(
   });
 
   return {
-    '/api/v1/chats/share': { POST: postShareChat, DELETE: deleteShareChat },
+    '/api/v1/chats/share': { POST: withJsonBody(postShareChat), DELETE: deleteShareChat },
     '/api/v1/chats/share/status': { GET: getShareStatus },
     '/api/v1/shared': { GET: getSharedChat },
     '/shared/llm/:token': { GET: getLlmTranscript },

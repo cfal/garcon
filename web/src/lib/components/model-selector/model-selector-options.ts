@@ -36,7 +36,10 @@ export function buildAgentOptions(modelCatalog: ModelCatalogStore): AgentSelecto
 	});
 }
 
-export function nativeSourceLabel(agentId: SessionAgentId, modelCatalog: ModelCatalogStore): string {
+export function nativeSourceLabel(
+	agentId: SessionAgentId,
+	modelCatalog: ModelCatalogStore,
+): string {
 	return nativeSourceLabelFor(agentId, modelCatalog.getAgentLabel(agentId));
 }
 
@@ -166,10 +169,7 @@ export function buildModelRows(
 	});
 }
 
-export function filterModelRows(
-	rows: ModelSelectorRow[],
-	query: string,
-): FilteredModelRowsResult {
+export function filterModelRows(rows: ModelSelectorRow[], query: string): FilteredModelRowsResult {
 	const trimmed = query.trim();
 	if (!trimmed) {
 		return { items: rows };
@@ -214,11 +214,7 @@ export function modelDisplayLabel(
 }
 
 export function stripSourcePrefix(label: string, source: ModelSourceOption): string {
-	const candidates = [
-		source.label,
-		baseSourceLabel(source.label),
-		source.apiProviderId ?? '',
-	]
+	const candidates = [source.label, baseSourceLabel(source.label), source.apiProviderId ?? '']
 		.map((candidate) => candidate.trim())
 		.filter(Boolean);
 
@@ -237,7 +233,10 @@ export function protocolLabel(protocol: ApiProtocol | null | undefined): string 
 	return '';
 }
 
-function endpointDescription(baseUrl: string | undefined, protocol: ApiProtocol | null | undefined): string {
+function endpointDescription(
+	baseUrl: string | undefined,
+	protocol: ApiProtocol | null | undefined,
+): string {
 	const label = protocolLabel(protocol);
 	if (baseUrl && label) return `${label} - ${baseUrl}`;
 	return baseUrl ?? label;
@@ -261,7 +260,11 @@ function tokenize(query: string): string[] {
 		.filter(Boolean);
 }
 
-function scoreModel(model: ModelOption, tokens: string[], source: ModelSourceOption | null): number {
+function scoreModel(
+	model: ModelOption,
+	tokens: string[],
+	source: ModelSourceOption | null,
+): number {
 	const label = model.label.toLowerCase();
 	const displayLabel = modelDisplayLabel(model, '', source).toLowerCase();
 	const value = model.value.toLowerCase();
@@ -280,8 +283,7 @@ function scoreModel(model: ModelOption, tokens: string[], source: ModelSourceOpt
 			raw.startsWith(token)
 		) {
 			score += 8;
-		}
-		else if (joined.includes(token)) score += 4;
+		} else if (joined.includes(token)) score += 4;
 		else if (compact.includes(compactToken)) score += 2;
 		else return 0;
 	}
@@ -290,12 +292,7 @@ function scoreModel(model: ModelOption, tokens: string[], source: ModelSourceOpt
 }
 
 function buildModelSearchText(model: ModelOption, label: string): string {
-	return [
-		model.label,
-		label,
-		model.value,
-		model.rawModel ?? '',
-	].join(' ').toLowerCase();
+	return [model.label, label, model.value, model.rawModel ?? ''].join(' ').toLowerCase();
 }
 
 function scoreModelRow(row: ModelSelectorRow, tokens: string[]): number {
@@ -317,8 +314,7 @@ function scoreModelRow(row: ModelSelectorRow, tokens: string[]): number {
 			sourceLabel.startsWith(token)
 		) {
 			score += 8;
-		}
-		else if (joined.includes(token)) score += 4;
+		} else if (joined.includes(token)) score += 4;
 		else if (compact.includes(compactToken)) score += 2;
 		else return 0;
 	}

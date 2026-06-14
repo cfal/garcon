@@ -23,23 +23,45 @@
 	}: SidebarSearchContextProps = $props();
 
 	let hasActiveQuery = $derived(activeQuery.trim().length > 0);
+	let activeSidebarPillSearchId = $derived.by(() => {
+		const query = activeQuery.trim();
+		if (!query) return null;
+		const match = sidebarPillSearches.find((search) => search.query.trim() === query);
+		return match?.id ?? null;
+	});
+	let showActiveSearchBanner = $derived(hasActiveQuery && activeSidebarPillSearchId === null);
 	let containerPaddingClass = $derived.by(() => {
 		if (!hasAdjacentControlsRow) return 'px-2 py-2';
 		return 'px-2 pb-2';
 	});
+
+	function handleApplyPillSearch(search: SavedChatSearch): void {
+		if (search.id === activeSidebarPillSearchId) {
+			onClearActiveQuery();
+			return;
+		}
+		onApplyPillSearch(search);
+	}
 </script>
 
 {#snippet savedSearchPills()}
 	{#if sidebarPillSearches.length > 0}
 		<div data-slot="sidebar-search-pills">
-			<SavedSearchPills searches={sidebarPillSearches} onApply={onApplyPillSearch} />
+			<SavedSearchPills
+				searches={sidebarPillSearches}
+				activeSearchId={activeSidebarPillSearchId}
+				onApply={handleApplyPillSearch}
+			/>
 		</div>
 	{/if}
 {/snippet}
 
 {#snippet activeSearchBanner()}
-	{#if hasActiveQuery}
-		<div data-slot="active-search-banner" class="relative rounded-lg border border-border bg-muted/40">
+	{#if showActiveSearchBanner}
+		<div
+			data-slot="active-search-banner"
+			class="relative rounded-lg border border-border bg-muted/40"
+		>
 			<button
 				type="button"
 				class="block w-full rounded-[inherit] px-2.5 py-2 pr-10 text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

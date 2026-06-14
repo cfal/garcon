@@ -29,14 +29,15 @@
 	let telegramRecipientDisplayName = $derived(telegramStatus?.recipientDisplayName ?? null);
 	let telegramLinkUrl = $derived(telegramStatus?.linkUrl ?? null);
 	let telegramEnabled = $derived(
-		remoteSettings.snapshot?.ui?.notifications?.telegram?.enabled === true
+		remoteSettings.snapshot?.ui?.notifications?.telegram?.enabled === true,
 	);
 	let telegramReady = $derived(telegramBotAvailable && telegramRecipientLinked);
 	let telegramNotificationsActive = $derived(telegramReady && telegramEnabled);
 	let linkedRecipientLabel = $derived(
 		telegramRecipientUsername
 			? `@${telegramRecipientUsername}`
-			: telegramRecipientDisplayName ?? (telegramRecipientLinked ? m.settings_telegram_linked_account() : '')
+			: (telegramRecipientDisplayName ??
+					(telegramRecipientLinked ? m.settings_telegram_linked_account() : '')),
 	);
 
 	let telegramBotToken = $state('');
@@ -222,147 +223,153 @@
 		<label class="text-sm font-medium text-foreground" for="telegram-bot-token">
 			{m.settings_telegram_bot_token()}
 		</label>
-			<div class="flex flex-col gap-2 lg:flex-row">
-				<Input
-					id="telegram-bot-token"
-					type="password"
-					class="min-w-0 flex-1"
-					autocomplete="off"
-					placeholder={telegramBotAvailable
-						? m.settings_telegram_bot_token_configured()
-						: m.settings_telegram_bot_token_placeholder()}
-					disabled={telegramBotAvailable || tokenBusy || tokenTestBusy}
-					value={telegramBotToken}
-					oninput={(e) => { telegramBotToken = (e.currentTarget as HTMLInputElement).value; }}
-				/>
+		<div class="flex flex-col gap-2 lg:flex-row">
+			<Input
+				id="telegram-bot-token"
+				type="password"
+				class="min-w-0 flex-1"
+				autocomplete="off"
+				placeholder={telegramBotAvailable
+					? m.settings_telegram_bot_token_configured()
+					: m.settings_telegram_bot_token_placeholder()}
+				disabled={telegramBotAvailable || tokenBusy || tokenTestBusy}
+				value={telegramBotToken}
+				oninput={(e) => {
+					telegramBotToken = (e.currentTarget as HTMLInputElement).value;
+				}}
+			/>
+			<div class="flex flex-wrap gap-2">
+				{#if telegramBotAvailable}
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						disabled={tokenBusy || tokenTestBusy}
+						onclick={handleTokenTest}
+					>
+						<CheckIcon class="size-3.5 mr-1.5" />
+						{tokenTestBusy ? m.settings_telegram_testing_token() : m.settings_telegram_test_token()}
+					</Button>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						disabled={tokenBusy || tokenTestBusy}
+						onclick={handleTokenClear}
+					>
+						<Trash2Icon class="size-3.5 mr-1.5" />
+						{m.settings_telegram_clear_token()}
+					</Button>
+				{:else}
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						disabled={tokenBusy || tokenTestBusy || !telegramBotToken.trim()}
+						onclick={handleTokenSave}
+					>
+						<SaveIcon class="size-3.5 mr-1.5" />
+						{tokenBusy ? m.settings_telegram_saving_token() : m.settings_telegram_save_token()}
+					</Button>
+					<Button type="button" variant="outline" size="sm" disabled onclick={handleTokenClear}>
+						<Trash2Icon class="size-3.5 mr-1.5" />
+						{m.settings_telegram_clear_token()}
+					</Button>
+				{/if}
+			</div>
+		</div>
+		{#if tokenResult}
+			<span class="text-xs {tokenResult.ok ? 'text-accent-foreground' : 'text-destructive'}">
+				{tokenResult.message}
+			</span>
+		{/if}
+	</div>
+
+	{#if telegramBotAvailable}
+		<div class="flex flex-col gap-2 py-2">
+			<div class="min-w-0">
+				{#if telegramRecipientLinked && linkedRecipientLabel}
+					<div class="text-sm text-muted-foreground truncate">
+						{m.settings_telegram_linked_recipient({ recipient: linkedRecipientLabel })}
+					</div>
+				{:else if telegramLinkUrl}
+					<div
+						class="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-muted-foreground"
+					>
+						<span class="shrink-0">{m.settings_telegram_link_instruction()}</span>
+						<a
+							class="min-w-0 truncate text-foreground underline underline-offset-2"
+							href={telegramLinkUrl}
+							target="_blank"
+							rel="noreferrer"
+							title={telegramLinkUrl}
+						>
+							{telegramLinkUrl}
+						</a>
+					</div>
+				{:else}
+					<div class="text-sm text-muted-foreground">
+						{recipientLinkBusy
+							? m.settings_telegram_creating_link()
+							: m.settings_telegram_recipient_not_linked()}
+					</div>
+				{/if}
+			</div>
+
+			<div class="flex flex-col gap-2">
 				<div class="flex flex-wrap gap-2">
-					{#if telegramBotAvailable}
+					{#if !telegramRecipientLinked}
 						<Button
 							type="button"
 							variant="outline"
 							size="sm"
-							disabled={tokenBusy || tokenTestBusy}
-							onclick={handleTokenTest}
+							disabled={recipientResolveBusy || recipientLinkBusy || !telegramLinkUrl}
+							onclick={handleRecipientResolve}
 						>
 							<CheckIcon class="size-3.5 mr-1.5" />
-							{tokenTestBusy ? m.settings_telegram_testing_token() : m.settings_telegram_test_token()}
+							{recipientResolveBusy
+								? m.settings_telegram_checking_message()
+								: m.settings_telegram_check_message()}
 						</Button>
+					{/if}
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						disabled={testMessageBusy || !telegramReady}
+						onclick={handleTelegramTest}
+					>
+						<SendIcon class="size-3.5 mr-1.5" />
+						{testMessageBusy ? m.settings_telegram_sending() : m.settings_telegram_send_test()}
+					</Button>
+					{#if telegramRecipientLinked}
 						<Button
 							type="button"
 							variant="outline"
 							size="sm"
-							disabled={tokenBusy || tokenTestBusy}
-							onclick={handleTokenClear}
+							disabled={recipientClearBusy}
+							onclick={handleRecipientClear}
 						>
 							<Trash2Icon class="size-3.5 mr-1.5" />
-							{m.settings_telegram_clear_token()}
-						</Button>
-					{:else}
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							disabled={tokenBusy || tokenTestBusy || !telegramBotToken.trim()}
-							onclick={handleTokenSave}
-						>
-							<SaveIcon class="size-3.5 mr-1.5" />
-							{tokenBusy ? m.settings_telegram_saving_token() : m.settings_telegram_save_token()}
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							disabled
-							onclick={handleTokenClear}
-						>
-							<Trash2Icon class="size-3.5 mr-1.5" />
-							{m.settings_telegram_clear_token()}
+							{m.settings_telegram_clear_recipient()}
 						</Button>
 					{/if}
 				</div>
-			</div>
-			{#if tokenResult}
-				<span class="text-xs {tokenResult.ok ? 'text-accent-foreground' : 'text-destructive'}">
-					{tokenResult.message}
-				</span>
-			{/if}
-		</div>
-
-		{#if telegramBotAvailable}
-			<div class="flex flex-col gap-2 py-2">
-				<div class="min-w-0">
-					{#if telegramRecipientLinked && linkedRecipientLabel}
-						<div class="text-sm text-muted-foreground truncate">
-							{m.settings_telegram_linked_recipient({ recipient: linkedRecipientLabel })}
-						</div>
-					{:else if telegramLinkUrl}
-						<div class="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-muted-foreground">
-							<span class="shrink-0">{m.settings_telegram_link_instruction()}</span>
-							<a
-								class="min-w-0 truncate text-foreground underline underline-offset-2"
-								href={telegramLinkUrl}
-								target="_blank"
-								rel="noreferrer"
-								title={telegramLinkUrl}
-							>
-								{telegramLinkUrl}
-							</a>
-						</div>
-					{:else}
-						<div class="text-sm text-muted-foreground">
-							{recipientLinkBusy ? m.settings_telegram_creating_link() : m.settings_telegram_recipient_not_linked()}
-						</div>
-					{/if}
-				</div>
-
-				<div class="flex flex-col gap-2">
-					<div class="flex flex-wrap gap-2">
-						{#if !telegramRecipientLinked}
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								disabled={recipientResolveBusy || recipientLinkBusy || !telegramLinkUrl}
-								onclick={handleRecipientResolve}
-							>
-								<CheckIcon class="size-3.5 mr-1.5" />
-								{recipientResolveBusy ? m.settings_telegram_checking_message() : m.settings_telegram_check_message()}
-							</Button>
-						{/if}
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-							disabled={testMessageBusy || !telegramReady}
-							onclick={handleTelegramTest}
+				<div class="min-w-0 flex flex-col gap-1">
+					{#if recipientResult}
+						<span
+							class="text-xs {recipientResult.ok ? 'text-accent-foreground' : 'text-destructive'}"
 						>
-							<SendIcon class="size-3.5 mr-1.5" />
-							{testMessageBusy ? m.settings_telegram_sending() : m.settings_telegram_send_test()}
-						</Button>
-						{#if telegramRecipientLinked}
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								disabled={recipientClearBusy}
-								onclick={handleRecipientClear}
-							>
-								<Trash2Icon class="size-3.5 mr-1.5" />
-								{m.settings_telegram_clear_recipient()}
-							</Button>
-						{/if}
-					</div>
-					<div class="min-w-0 flex flex-col gap-1">
-						{#if recipientResult}
-							<span class="text-xs {recipientResult.ok ? 'text-accent-foreground' : 'text-destructive'}">
-								{recipientResult.message}
-							</span>
-						{/if}
-						{#if testMessageResult}
-							<span class="text-xs {testMessageResult.ok ? 'text-accent-foreground' : 'text-destructive'}">
-								{testMessageResult.message}
-							</span>
-						{/if}
+							{recipientResult.message}
+						</span>
+					{/if}
+					{#if testMessageResult}
+						<span
+							class="text-xs {testMessageResult.ok ? 'text-accent-foreground' : 'text-destructive'}"
+						>
+							{testMessageResult.message}
+						</span>
+					{/if}
 				</div>
 			</div>
 		</div>

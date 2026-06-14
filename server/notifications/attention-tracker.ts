@@ -7,7 +7,11 @@
 // 3. Session stopped     - user-initiated abort
 
 import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, AssistantMessage } from '../../common/chat-types.js';
+import type { ChatMessage } from '../../common/chat-types.js';
 import type { TelegramNotifier } from './telegram.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('notifications:attention-tracker');
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -31,6 +35,12 @@ function toolDisplayName(requestedTool: unknown): string {
   return 'unknown';
 }
 
+function userMessageContent(message: ChatMessage): string | null {
+  return message.type === 'user-message' && 'content' in message && typeof message.content === 'string'
+    ? message.content
+    : null;
+}
+
 // Minimal interfaces for injected dependencies. Avoids importing concrete
 // classes and keeps the module unit-testable with plain mocks.
 
@@ -46,16 +56,17 @@ interface QueueManagerDep {
 }
 
 interface SettingsStoreDep {
-  getUiSettings(): Promise<Record<string, unknown>>;
+  getUiSettings(): Record<string, unknown>;
   getChatName(chatId: string): string | null;
 }
 
 interface ChatRegistryDep {
   getChat(chatId: string): { agentId: string; projectPath: string } | null;
+  onChatRemoved?(cb: (chatId: string) => void): void;
 }
 
 interface HistoryCacheDep {
-  getMessages(chatId: string): { type: string; content?: string }[] | null;
+  getMessages(chatId: string): ChatMessage[] | null;
 }
 
 interface TurnResult {
@@ -118,6 +129,7 @@ export class AttentionTracker {
     this.#agents.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
     this.#queue.onSessionStopped((chatId) => this.#handleSessionStopped(chatId));
+    this.#registry.onChatRemoved?.((chatId) => this.#cleanupChat(chatId));
   }
 
   #handleMessages(chatId: string, messages: unknown[]): void {
@@ -140,9 +152,8 @@ export class AttentionTracker {
     const messages = this.#history.getMessages(chatId);
     if (!messages) return null;
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].type === 'user-message' && messages[i].content) {
-        return messages[i].content!;
-      }
+      const content = userMessageContent(messages[i]);
+      if (content) return content;
     }
     return null;
   }
@@ -255,6 +266,7 @@ export class AttentionTracker {
   }
 
   #cleanupChat(chatId: string): void {
+    this.#pendingPermissions.delete(chatId);
     this.#lastTurnResult.delete(chatId);
     this.#lastAssistantMessage.delete(chatId);
   }
@@ -278,9 +290,8 @@ export class AttentionTracker {
     const messages = this.#history.getMessages(chatId);
     if (!messages) return null;
     for (const msg of messages) {
-      if (msg.type === 'user-message' && msg.content) {
-        return truncate(msg.content, 60);
-      }
+      const content = userMessageContent(msg);
+      if (content) return truncate(content, 60);
     }
     return null;
   }
@@ -289,14 +300,14 @@ export class AttentionTracker {
     if (!this.#telegram.isConfigured) return;
     try {
       const config = await this.#getTelegramConfig();
-      const chatId = this.#telegramSettings.getRecipientChatId();
-      if (!config.enabled || !chatId) return;
-      const ok = await this.#telegram.send(chatId, html, 'HTML');
+      const recipientChatId = this.#telegramSettings.getRecipientChatId();
+      if (!config.enabled || !recipientChatId) return;
+      const ok = await this.#telegram.send(recipientChatId, html, 'HTML');
       if (!ok) {
-        console.warn(`attention: telegram delivery failed for chat ${chatId}`);
+        logger.warn(`attention: telegram delivery failed for chat ${chatId}`);
       }
     } catch (err: unknown) {
-      console.warn('attention: settings read error:', (err as Error).message);
+      logger.warn('attention: settings read error:', (err as Error).message);
     }
   }
 

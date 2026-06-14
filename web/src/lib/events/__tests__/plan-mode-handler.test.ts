@@ -1,18 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 import { handlePlanModeMessages, type PlanModeContext } from '../handlers/plan-mode';
 import { AgentRunOutputMessage } from '$shared/ws-events';
-import { BashToolUseMessage, EnterPlanModeToolUseMessage, ExitPlanModeToolUseMessage } from '$shared/chat-types';
+import {
+	BashToolUseMessage,
+	EnterPlanModeToolUseMessage,
+	ExitPlanModeToolUseMessage,
+} from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 
-function makeContext(mode = 'plan'): { ctx: PlanModeContext; read: () => PendingPermissionRequest[] } {
+function makeContext(mode = 'plan'): {
+	ctx: PlanModeContext;
+	read: () => PendingPermissionRequest[];
+} {
 	let pending: PendingPermissionRequest[] = [];
 	const ctx: PlanModeContext = {
-		currentChatId: 'chat-1',
-		permissionMode: mode as PlanModeContext['permissionMode'],
+		getCurrentChatId: () => 'chat-1',
+		getPermissionMode: () => mode as ReturnType<PlanModeContext['getPermissionMode']>,
 		setPermissionMode: vi.fn(),
-		setPreviousPermissionMode: vi.fn(),
-		setPendingPermissionRequests: (updater) => {
-			pending = updater(pending);
+		conversationUi: {
+			setPreviousPermissionMode: vi.fn(),
+			setPendingPermissionRequests: (updater) => {
+				pending = typeof updater === 'function' ? updater(pending) : updater;
+			},
 		},
 	};
 	return { ctx, read: () => pending };
@@ -39,7 +48,7 @@ describe('plan mode handler', () => {
 		]);
 
 		handlePlanModeMessages(message, ctx);
-		expect(ctx.setPreviousPermissionMode).toHaveBeenCalledWith('default');
+		expect(ctx.conversationUi.setPreviousPermissionMode).toHaveBeenCalledWith('default');
 		expect(ctx.setPermissionMode).toHaveBeenCalledWith('plan');
 	});
 
@@ -50,7 +59,7 @@ describe('plan mode handler', () => {
 		]);
 
 		handlePlanModeMessages(message, ctx);
-		expect(ctx.setPreviousPermissionMode).toHaveBeenCalledWith('default');
+		expect(ctx.conversationUi.setPreviousPermissionMode).toHaveBeenCalledWith('default');
 		expect(ctx.setPermissionMode).toHaveBeenCalledWith('plan');
 	});
 
@@ -74,7 +83,7 @@ describe('plan mode handler', () => {
 		]);
 
 		handlePlanModeMessages(message, ctx);
-		expect(ctx.setPreviousPermissionMode).not.toHaveBeenCalled();
+		expect(ctx.conversationUi.setPreviousPermissionMode).not.toHaveBeenCalled();
 		expect(ctx.setPermissionMode).toHaveBeenCalledWith('plan');
 	});
 

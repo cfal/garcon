@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ConversationMessage from './ConversationMessage.svelte';
 	import ChatBashToolGroup from './tools/ChatBashToolGroup.svelte';
+	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import {
 		isToolUseMessage,
 		PermissionRequestMessage,
@@ -10,7 +11,10 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { createMessageIdAllocator } from '$lib/chat/message-id';
 	import { buildConversationFeedRenderModel } from '$lib/chat/conversation-feed-items';
-	import { CHAT_MAX_WIDTH_FEED_CONTENT_CLASS, CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS } from '$lib/chat/chat-max-width';
+	import {
+		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
+		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
+	} from '$lib/chat/chat-max-width';
 	import { Loader2, TriangleAlert, RefreshCw } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Scrollbar } from '$lib/components/ui/scroll-area';
@@ -20,7 +24,10 @@
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
 		onscroll?: () => void;
-		onPermissionDecision?: (permissionRequestId: string, decision: { allow: boolean; message?: string }) => void;
+		onPermissionDecision?: (
+			permissionRequestId: string,
+			decision: { allow: boolean; message?: string },
+		) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		onRetry?: () => void;
@@ -82,14 +89,14 @@
 			'h-full overflow-y-auto overflow-x-hidden relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
 			'pt-3 sm:pt-4',
 			reserveLoadingStatusSpace ? 'pb-14' : 'pb-3 sm:pb-4',
-			CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS[localSettings.chatMaxWidth]
-		)
+			CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS[localSettings.chatMaxWidth],
+		),
 	);
 	const feedContentClass = $derived(
 		cn(
 			'flex w-full flex-col gap-2 px-[21px] sm:gap-3',
-			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth]
-		)
+			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth],
+		),
 	);
 </script>
 
@@ -111,12 +118,7 @@
 				<p class="text-xs mt-1 text-muted-foreground/70">{chatState.loadError}</p>
 			{/if}
 			{#if onRetry}
-				<Button
-					variant="outline"
-					size="sm"
-					class="mt-3"
-					onclick={onRetry}
-				>
+				<Button variant="outline" size="sm" class="mt-3" onclick={onRetry}>
 					<RefreshCw class="h-3 w-3 mr-1" />
 					{m.chat_feed_retry()}
 				</Button>
@@ -129,17 +131,14 @@
 		</div>
 	{:else}
 		{#if chatState.loadStatus === 'error' && chatState.displayMessageCount > 0}
-			<div class="text-center text-sm text-muted-foreground py-2 border-b border-border bg-destructive/5">
+			<div
+				class="text-center text-sm text-muted-foreground py-2 border-b border-border bg-destructive/5"
+			>
 				<div class="flex items-center justify-center space-x-2">
 					<TriangleAlert class="h-3 w-3 text-destructive" />
 					<span>{m.chat_feed_failed_to_refresh()}</span>
 					{#if onRetry}
-						<Button
-							variant="ghost"
-							size="sm"
-							class="text-xs h-6 px-2"
-							onclick={onRetry}
-						>
+						<Button variant="ghost" size="sm" class="text-xs h-6 px-2" onclick={onRetry}>
 							<RefreshCw class="h-3 w-3 mr-1" />
 							{m.chat_feed_retry()}
 						</Button>
@@ -161,7 +160,10 @@
 				<div class="h-px flex-1 bg-border/70"></div>
 				{#if chatState.totalMessages > 0}
 					<span>
-						{m.chat_chat_messages_showing_of({ shown: chatState.chatMessages.length, total: chatState.totalMessages })}
+						{m.chat_chat_messages_showing_of({
+							shown: chatState.chatMessages.length,
+							total: chatState.totalMessages,
+						})}
 						{#if chatState.pendingUserInputs.length > 0}
 							+
 							{chatState.pendingUserInputs.length}
@@ -177,7 +179,10 @@
 			<div class="my-1 flex items-center gap-2 text-xs text-muted-foreground">
 				<div class="h-px flex-1 bg-border/70"></div>
 				<span>
-					{m.chat_chat_messages_showing_last({ count: chatState.visibleMessageCount, total: chatState.displayMessageCount })}
+					{m.chat_chat_messages_showing_last({
+						count: chatState.visibleMessageCount,
+						total: chatState.displayMessageCount,
+					})}
 				</span>
 				<Button
 					variant="link"
@@ -195,9 +200,7 @@
 				<svelte:boundary>
 					<ChatBashToolGroup messages={item.messages} />
 					{#snippet failed(error)}
-						<div class="px-4 py-2 text-sm text-destructive bg-destructive/10 rounded border border-destructive/20">
-							Failed to render message{error instanceof Error ? `: ${error.message}` : ''}
-						</div>
+						<MessageRenderFallback {error} />
 					{/snippet}
 				</svelte:boundary>
 			{:else}
@@ -205,14 +208,16 @@
 				{@const toolResult = isToolUseMessage(message)
 					? renderModel.toolResultIndex.get(message.toolId)
 					: undefined}
-				{@const exitPlanId = message.type === 'exit-plan-mode-tool-use'
-					? `plan-exit-${message.toolId}`
-					: null}
-				{@const permTerminal = message instanceof PermissionRequestMessage
-					? renderModel.permissionTerminalById.get(message.permissionRequestId)
-					: exitPlanId
-						? (pendingExitPlanIds.has(exitPlanId) ? undefined : { state: 'resolved' as const, allowed: true })
-						: undefined}
+				{@const exitPlanId =
+					message.type === 'exit-plan-mode-tool-use' ? `plan-exit-${message.toolId}` : null}
+				{@const permTerminal =
+					message instanceof PermissionRequestMessage
+						? renderModel.permissionTerminalById.get(message.permissionRequestId)
+						: exitPlanId
+							? pendingExitPlanIds.has(exitPlanId)
+								? undefined
+								: { state: 'resolved' as const, allowed: true }
+							: undefined}
 				<svelte:boundary>
 					<ConversationMessage
 						{message}
@@ -226,9 +231,7 @@
 						showThinking={localSettings.showThinking}
 					/>
 					{#snippet failed(error)}
-						<div class="px-4 py-2 text-sm text-destructive bg-destructive/10 rounded border border-destructive/20">
-							Failed to render message{error instanceof Error ? `: ${error.message}` : ''}
-						</div>
+						<MessageRenderFallback {error} />
 					{/snippet}
 				</svelte:boundary>
 			{/if}
@@ -240,11 +243,11 @@
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D -->
 	<ScrollAreaPrimitive.Viewport
 		bind:ref={scrollContainer}
-		onscroll={onscroll}
+		{onscroll}
 		onfocusin={handleMessagePaneFocusIntent}
 		tabindex={-1}
 		role="log"
-		aria-label="Chat messages"
+		aria-label={m.chat_messages_region()}
 		class={feedViewportClass}
 	>
 		<div class={feedContentClass}>

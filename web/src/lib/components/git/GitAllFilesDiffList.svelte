@@ -50,21 +50,22 @@
 	{:else}
 		{#each items as item (item.filePath)}
 			<div class={itemMinHeightClass}>
-					<GitDiffViewer
-						filePath={item.filePath}
-						reviewData={item.reviewData}
-						{activeTab}
-						diffMode={diffMode}
-					selectedLineKeys={selectedLineKeys}
+				<GitDiffViewer
+					filePath={item.filePath}
+					reviewData={item.reviewData}
+					{activeTab}
+					{diffMode}
+					{selectedLineKeys}
 					isLoading={!item.reviewData}
 					readOnly
-					onToggleLineSelection={onToggleLineSelection}
-					onSelectLineRange={onSelectLineRange}
-					onStageHunk={onStageHunk}
-					onUnstageHunk={onUnstageHunk}
+					{onToggleLineSelection}
+					{onSelectLineRange}
+					{onStageHunk}
+					{onUnstageHunk}
 					{onStageLine}
 					{onUnstageLine}
-					onAddComment={(side: 'before' | 'after', line: number) => onAddCommentForFile(item.filePath, side, line)}
+					onAddComment={(side: 'before' | 'after', line: number) =>
+						onAddCommentForFile(item.filePath, side, line)}
 				/>
 			</div>
 		{/each}

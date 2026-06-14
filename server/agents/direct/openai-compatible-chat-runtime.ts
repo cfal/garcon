@@ -1,20 +1,21 @@
-// Shared OpenAI-compatible chat runtime. Implements the common
-// streaming, persistence, and session lifecycle used by remote
-// chat-completions APIs such as OpenRouter and Z.AI.
+// OpenAI-compatible chat-completions protocol adapter for direct runtimes.
 
-import crypto from 'crypto';
-import { AssistantMessage } from "../../../common/chat-types.js";
 import type { SharedModelOption } from "../../../common/models.js";
-import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
-import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
-import type { AgentCommandImage, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../session-types.js";
-import { DirectSessionStore, type DirectConversationMessage } from "./session-store.js";
+import type { AgentCommandImage } from "../session-types.js";
 import { readSseDataEvents } from "../shared/sse.js";
+import {
+  DirectChatRuntimeBase,
+  type DirectRuntimeSession,
+  type DirectUserTurn,
+} from "./direct-chat-runtime-base.js";
+import type { DirectConversationMessage } from "./session-store.js";
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:direct:openai-compatible-chat-runtime');
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const STREAM_TIMEOUT_MS = 5 * 60_000;
-const MAX_MESSAGES_PER_SESSION = 200;
 
 interface OpenAiCompatibleContentPart {
   type: string;
@@ -25,17 +26,6 @@ interface OpenAiCompatibleContentPart {
 interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string | OpenAiCompatibleContentPart[];
-}
-
-interface RuntimeSession {
-  abortController: AbortController | null;
-  aborted: boolean;
-  chatId: string;
-  id: string;
-  isRunning: boolean;
-  messages: ConversationMessage[];
-  model: string;
-  startTime: number;
 }
 
 interface ModelFetchContext {
@@ -147,62 +137,48 @@ export async function runOpenAiCompatibleSingleQuery(
   }
 }
 
-export class OpenAiCompatibleChatRuntime extends AgentEventEmitterRuntime {
-  readonly #config: OpenAiCompatibleChatRuntimeConfig;
-  readonly #sessionStore: DirectSessionStore;
-  #sessions = new Map<string, RuntimeSession>();
+export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
+  ConversationMessage,
+  OpenAiCompatibleChatRuntimeConfig
+> {
   #modelCache: SharedModelOption[] | null = null;
   #modelCacheTime = 0;
   #modelFetchPromise: Promise<SharedModelOption[]> | null = null;
 
   constructor(config: OpenAiCompatibleChatRuntimeConfig) {
-    super();
-    this.#config = config;
-    this.#sessionStore = new DirectSessionStore({
-      getSessionDir: config.getSessionDir,
-      getSessionFilePath: config.getSessionFilePath,
-    });
+    super(config);
   }
 
-  async #persistMessage(sessionId: string, role: 'user' | 'assistant', content: string): Promise<void> {
-    try {
-      await this.#sessionStore.append(sessionId, role, content);
-    } catch (error: any) {
-      console.warn(`${this.#config.runtimeId}(${sessionId.slice(0, 8)}): persist failed:`, error?.message ?? String(error));
-    }
-  }
-
-  async #hydrateSession(sessionId: string, request: ResumeTurnRequest): Promise<RuntimeSession | null> {
-    const messages = await this.#sessionStore.read(sessionId);
-    if (!messages) {
-      throw new Error(`Cannot hydrate ${this.#config.runtimeLabel} session without persisted messages: ${sessionId}`);
-    }
-
-    const session: RuntimeSession = {
-      abortController: null,
-      aborted: false,
-      chatId: request.chatId,
-      id: sessionId,
-      isRunning: false,
-      messages: messages.map(persistedToOpenAiMessage),
-      model: request.model || this.#config.defaultModel,
-      startTime: Date.now(),
+  protected buildUserTurn(
+    command: string,
+    images?: AgentCommandImage[],
+  ): DirectUserTurn<ConversationMessage> {
+    const content = buildOpenAiCompatibleUserContent(command, images);
+    return {
+      message: { role: 'user', content },
+      persistedContent: extractOpenAiCompatibleTextContent(content),
     };
-    this.#sessions.set(sessionId, session);
-    return session;
   }
 
-  async #streamCompletion(session: RuntimeSession): Promise<string> {
-    const apiKey = this.#config.getApiKey();
+  protected buildAssistantMessage(content: string): ConversationMessage {
+    return { role: 'assistant', content };
+  }
+
+  protected persistedToMessage(message: DirectConversationMessage): ConversationMessage {
+    return persistedToOpenAiMessage(message);
+  }
+
+  protected async streamSession(session: DirectRuntimeSession<ConversationMessage>): Promise<string> {
+    const apiKey = this.config.getApiKey();
     const abortController = new AbortController();
     session.abortController = abortController;
 
     const streamTimer = setTimeout(() => abortController.abort(), STREAM_TIMEOUT_MS);
 
     try {
-      const response = await fetch(`${this.#config.getBaseUrl()}/chat/completions`, {
+      const response = await fetch(`${this.config.getBaseUrl()}/chat/completions`, {
         method: 'POST',
-        headers: buildHeaders(this.#config, apiKey),
+        headers: buildHeaders(this.config, apiKey),
         body: JSON.stringify({
           model: session.model,
           messages: session.messages,
@@ -213,10 +189,10 @@ export class OpenAiCompatibleChatRuntime extends AgentEventEmitterRuntime {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`${this.#config.runtimeLabel} API error ${response.status}: ${errorText}`);
+        throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
       if (!response.body) {
-        throw new Error(`${this.#config.runtimeLabel} response did not include a stream body.`);
+        throw new Error(`${this.config.runtimeLabel} response did not include a stream body.`);
       }
 
       let accumulated = '';
@@ -241,7 +217,7 @@ export class OpenAiCompatibleChatRuntime extends AgentEventEmitterRuntime {
       });
 
       if (!accumulated.trim() && lastStreamError) {
-        throw new Error(`${this.#config.runtimeLabel} stream error: ${lastStreamError}`);
+        throw new Error(`${this.config.runtimeLabel} stream error: ${lastStreamError}`);
       }
 
       return accumulated;
@@ -251,121 +227,9 @@ export class OpenAiCompatibleChatRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  async #runTurnInternal(session: RuntimeSession): Promise<void> {
-    session.isRunning = true;
-    session.aborted = false;
-    this.emitProcessing(session.chatId, true);
-
-    try {
-      const response = await this.#streamCompletion(session);
-      if (session.aborted) return;
-
-      if (!response.trim()) {
-        this.emitFailed(session.chatId, `Empty response from ${this.#config.runtimeLabel}`);
-        return;
-      }
-
-      session.messages.push({ role: 'assistant', content: response });
-
-      await this.#persistMessage(session.id, 'assistant', response);
-
-      const timestamp = new Date().toISOString();
-      this.emitMessages(session.chatId, [new AssistantMessage(timestamp, response)]);
-      this.emitFinished(session.chatId, 0);
-    } catch (error: unknown) {
-      if (session.aborted) return;
-      this.emitFailed(session.chatId, error instanceof Error ? error.message : String(error));
-    } finally {
-      session.isRunning = false;
-      this.emitProcessing(session.chatId, false);
-    }
-  }
-
-  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
-    const sessionId = crypto.randomUUID();
-    const userContent = buildOpenAiCompatibleUserContent(request.command, request.images);
-    const textContent = extractOpenAiCompatibleTextContent(userContent);
-
-    const session: RuntimeSession = {
-      abortController: null,
-      aborted: false,
-      chatId: request.chatId,
-      id: sessionId,
-      isRunning: false,
-      messages: [{ role: 'user', content: userContent }],
-      model: request.model || this.#config.defaultModel,
-      startTime: Date.now(),
-    };
-
-    this.#sessions.set(sessionId, session);
-    this.emitSessionCreated(request.chatId);
-
-    await this.#persistMessage(sessionId, 'user', textContent);
-
-    void this.#runTurnInternal(session);
-
-    return {
-      agentSessionId: sessionId,
-      nativePath: createArtificialNativePath(this.#config.runtimeId, sessionId),
-    };
-  }
-
-  async runTurn(request: ResumeTurnRequest): Promise<void> {
-    const session = this.#sessions.get(request.agentSessionId)
-      ?? await this.#hydrateSession(request.agentSessionId, request);
-    if (!session) {
-      throw new Error(`Unknown ${this.#config.runtimeLabel} session: ${request.agentSessionId}`);
-    }
-    if (session.isRunning) {
-      throw new Error(`Session ${request.agentSessionId} is already running`);
-    }
-
-    if (request.model) {
-      session.model = request.model;
-    }
-
-    const userContent = buildOpenAiCompatibleUserContent(request.command, request.images);
-    const textContent = extractOpenAiCompatibleTextContent(userContent);
-
-    if (session.messages.length >= MAX_MESSAGES_PER_SESSION) {
-      const first = session.messages[0];
-      session.messages = [first, ...session.messages.slice(-(MAX_MESSAGES_PER_SESSION - 2))];
-    }
-
-    session.messages.push({ role: 'user', content: userContent });
-    session.chatId = request.chatId;
-
-    await this.#persistMessage(session.id, 'user', textContent);
-
-    await this.#runTurnInternal(session);
-  }
-
-  abort(agentSessionId: string): boolean {
-    const session = this.#sessions.get(agentSessionId);
-    if (!session?.isRunning) return false;
-
-    session.aborted = true;
-    session.abortController?.abort();
-    return true;
-  }
-
-  isRunning(agentSessionId: string): boolean {
-    return this.#sessions.get(agentSessionId)?.isRunning === true;
-  }
-
-  getRunningSessions(): Array<{ id: string; startedAt: string; status: string }> {
-    return Array.from(this.#sessions.values())
-      .filter((session) => session.isRunning)
-      .map((session) => ({
-        id: session.id,
-        startedAt: new Date(session.startTime).toISOString(),
-        status: 'running',
-      }));
-  }
-
-  async getModels(): Promise<SharedModelOption[]> {
-    if (!this.#config.fetchModels) {
-      return this.#config.fallbackModels;
+  override async getModels(): Promise<SharedModelOption[]> {
+    if (!this.config.fetchModels) {
+      return this.config.fallbackModels;
     }
 
     if (this.#modelCache && Date.now() - this.#modelCacheTime < MODEL_CACHE_TTL_MS) {
@@ -385,17 +249,17 @@ export class OpenAiCompatibleChatRuntime extends AgentEventEmitterRuntime {
   }
 
   async #fetchModels(): Promise<SharedModelOption[]> {
-    const apiKey = this.#config.getApiKey();
+    const apiKey = this.config.getApiKey();
     if (!apiKey) {
-      return this.#config.fallbackModels;
+      return this.config.fallbackModels;
     }
 
     try {
-      const models = await this.#config.fetchModels!({
+      const models = await this.config.fetchModels!({
         apiKey,
-        baseUrl: this.#config.getBaseUrl(),
+        baseUrl: this.config.getBaseUrl(),
         requestTimeoutMs: REQUEST_TIMEOUT_MS,
-        fallbackModels: this.#config.fallbackModels,
+        fallbackModels: this.config.fallbackModels,
       });
       if (models.length > 0) {
         this.#modelCache = models;
@@ -403,21 +267,9 @@ export class OpenAiCompatibleChatRuntime extends AgentEventEmitterRuntime {
         return models;
       }
     } catch (error) {
-      console.warn(`${this.#config.runtimeId}: model fetch failed:`, error instanceof Error ? error.message : error);
+      logger.warn(`${this.config.runtimeId}: model fetch failed:`, error instanceof Error ? error.message : error);
     }
 
-    return this.#config.fallbackModels;
-  }
-
-  startPurgeTimer(): ReturnType<typeof setInterval> {
-    const maxAge = 30 * 60 * 1000;
-    return setInterval(() => {
-      const now = Date.now();
-      for (const [id, session] of this.#sessions.entries()) {
-        if (!session.isRunning && now - session.startTime > maxAge) {
-          this.#sessions.delete(id);
-        }
-      }
-    }, 5 * 60 * 1000);
+    return this.config.fallbackModels;
   }
 }

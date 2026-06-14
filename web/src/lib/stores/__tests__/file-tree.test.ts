@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FileTreeStore } from '../file-tree.svelte';
 import * as filesApi from '$lib/api/files';
 import type { FileTreeNode } from '$lib/api/files';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 vi.mock('$lib/api/files', () => ({
 	getTree: vi.fn(),
@@ -15,7 +16,11 @@ vi.stubGlobal('localStorage', {
 	clear: () => mockStorage.clear(),
 });
 
-function node(name: string, type: 'file' | 'directory', extra?: Partial<FileTreeNode>): FileTreeNode {
+function node(
+	name: string,
+	type: 'file' | 'directory',
+	extra?: Partial<FileTreeNode>,
+): FileTreeNode {
 	return { name, path: `/${name}`, type, ...extra } as FileTreeNode;
 }
 
@@ -189,10 +194,7 @@ describe('FileTreeStore', () => {
 	});
 
 	describe('hidden files', () => {
-		const items: FileTreeNode[] = [
-			node('.gitignore', 'file'),
-			node('README.md', 'file'),
-		];
+		const items: FileTreeNode[] = [node('.gitignore', 'file'), node('README.md', 'file')];
 
 		it('filters dotfiles when showHiddenFiles is false', () => {
 			store.childrenCache.set('/root', items);
@@ -213,29 +215,29 @@ describe('FileTreeStore', () => {
 	describe('localStorage persistence', () => {
 		it('persists sort key', () => {
 			store.setSortKey('size');
-			expect(mockStorage.get('file-tree-sort-key')).toBe('size');
+			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeSortKey)).toBe('size');
 		});
 
 		it('persists sort direction', () => {
 			store.setSortDirection('desc');
-			expect(mockStorage.get('file-tree-sort-direction')).toBe('desc');
+			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeSortDirection)).toBe('desc');
 		});
 
 		it('persists foldersFirst', () => {
 			store.setFoldersFirst(false);
-			expect(mockStorage.get('file-tree-folders-first')).toBe('false');
+			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeFoldersFirst)).toBe('false');
 		});
 
 		it('persists showHiddenFiles', () => {
 			store.setShowHiddenFiles(false);
-			expect(mockStorage.get('file-tree-show-hidden-files')).toBe('false');
+			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles)).toBe('false');
 		});
 
 		it('loads preferences from localStorage on construction', () => {
-			mockStorage.set('file-tree-sort-key', 'modified');
-			mockStorage.set('file-tree-sort-direction', 'desc');
-			mockStorage.set('file-tree-folders-first', 'false');
-			mockStorage.set('file-tree-show-hidden-files', 'false');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortKey, 'modified');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortDirection, 'desc');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeFoldersFirst, 'false');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles, 'false');
 
 			const s = new FileTreeStore();
 			expect(s.sortKey).toBe('modified');
@@ -245,8 +247,8 @@ describe('FileTreeStore', () => {
 		});
 
 		it('ignores invalid localStorage values', () => {
-			mockStorage.set('file-tree-sort-key', 'invalid');
-			mockStorage.set('file-tree-sort-direction', 'sideways');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortKey, 'invalid');
+			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortDirection, 'sideways');
 
 			const s = new FileTreeStore();
 			expect(s.sortKey).toBe('name');
@@ -283,13 +285,17 @@ describe('FileTreeStore', () => {
 		});
 
 		it('includes directories with matching children', () => {
-			const tree: FileTreeNode[] = [{
-				name: 'src', path: '/src', type: 'directory',
-				children: [
-					node('App.svelte', 'file', { path: '/src/App.svelte' }),
-					node('utils.ts', 'file', { path: '/src/utils.ts' }),
-				],
-			} as FileTreeNode];
+			const tree: FileTreeNode[] = [
+				{
+					name: 'src',
+					path: '/src',
+					type: 'directory',
+					children: [
+						node('App.svelte', 'file', { path: '/src/App.svelte' }),
+						node('utils.ts', 'file', { path: '/src/utils.ts' }),
+					],
+				} as FileTreeNode,
+			];
 
 			const result = store.filterTree(tree, 'utils');
 			expect(result).toHaveLength(1);
@@ -317,9 +323,7 @@ describe('FileTreeStore', () => {
 		});
 
 		it('silently ignores AbortError', async () => {
-			vi.mocked(filesApi.getTree).mockRejectedValue(
-				new DOMException('aborted', 'AbortError'),
-			);
+			vi.mocked(filesApi.getTree).mockRejectedValue(new DOMException('aborted', 'AbortError'));
 			const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 			store.init('/project', 'chat1');
@@ -337,7 +341,9 @@ describe('FileTreeStore', () => {
 
 		it('returns inline children if present on node', () => {
 			const n: FileTreeNode = {
-				name: 'src', path: '/src', type: 'directory',
+				name: 'src',
+				path: '/src',
+				type: 'directory',
 				children: [node('a.ts', 'file')],
 			};
 			expect(store.getChildren(n)).toEqual(n.children);

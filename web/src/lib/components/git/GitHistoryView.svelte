@@ -25,7 +25,7 @@
 		expandedCommits,
 		commitDiffs,
 		wrapText,
-		onToggleCommitExpanded
+		onToggleCommitExpanded,
 	}: GitHistoryViewProps = $props();
 </script>
 

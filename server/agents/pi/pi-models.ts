@@ -1,8 +1,10 @@
 import { AuthStorage, createAgentSessionServices, getAgentDir } from '@earendil-works/pi-coding-agent';
 import type { SharedModelOption } from "../../../common/models.js";
+import { isTestEnvironment } from '../../config.js';
+import { errorMessage } from '../../lib/errors.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
-const DISCOVERY_RETRY_DELAYS_MS = process.env.NODE_ENV === 'test' ? [0, 0] : [75, 250];
+const DISCOVERY_RETRY_DELAYS_MS = isTestEnvironment() ? [0, 0] : [75, 250];
 
 let cachedModels: SharedModelOption[] | null = null;
 let cachedAt = 0;
@@ -55,7 +57,20 @@ function diagnosticMessage(value: unknown): string {
   return String(value);
 }
 
-function collectPiDiscoveryDiagnostics(services: any, authStorage: any): string[] {
+interface PiDiagnosticServices {
+  diagnostics?: unknown[];
+  modelRegistry?: { getError?: () => unknown };
+  settingsManager?: { drainErrors?: () => unknown[] };
+}
+
+interface PiAuthStorageDiagnostics {
+  drainErrors?: () => unknown[];
+}
+
+function collectPiDiscoveryDiagnostics(
+  services: PiDiagnosticServices,
+  authStorage: PiAuthStorageDiagnostics,
+): string[] {
   const diagnostics: string[] = [];
   const authErrors = typeof authStorage?.drainErrors === 'function'
     ? authStorage.drainErrors()
@@ -86,10 +101,6 @@ function collectPiDiscoveryDiagnostics(services: any, authStorage: any): string[
   }
 
   return diagnostics;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function delay(ms: number): Promise<void> {

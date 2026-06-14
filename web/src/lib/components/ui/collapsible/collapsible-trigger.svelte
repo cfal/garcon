@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { Collapsible as CollapsiblePrimitive } from "bits-ui";
-	import { cn } from "$lib/utils/cn.js";
+	import { Collapsible as CollapsiblePrimitive } from 'bits-ui';
+	import { cn } from '$lib/utils/cn.js';
 
 	let {
 		ref = $bindable(null),
@@ -12,6 +12,6 @@
 <CollapsiblePrimitive.Trigger
 	bind:ref
 	data-slot="collapsible-trigger"
-	class={cn("", className)}
+	class={cn('', className)}
 	{...restProps}
 />

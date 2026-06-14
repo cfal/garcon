@@ -13,11 +13,15 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import type { GitWorktreeItem } from '$lib/api/git.js';
 	import { deriveWorktreePath } from '$lib/utils/worktree-path.js';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitWorktreePanelProps {
 		worktrees: GitWorktreeItem[];
 		isLoading: boolean;
-		onCreateWorktree: (path: string, options: { branch?: string; baseRef?: string }) => Promise<boolean>;
+		onCreateWorktree: (
+			path: string,
+			options: { branch?: string; baseRef?: string },
+		) => Promise<boolean>;
 		onRemoveWorktree: (path: string, force: boolean) => Promise<boolean>;
 		onRefresh: () => void;
 	}
@@ -79,9 +83,11 @@
 			</span>
 		</div>
 		<button
-			onclick={() => { showCreateForm = !showCreateForm; }}
+			onclick={() => {
+				showCreateForm = !showCreateForm;
+			}}
 			class="p-1 rounded hover:bg-muted transition-colors"
-			title="New worktree"
+			title={m.git_new_worktree()}
 		>
 			<Plus class="w-4 h-4 text-muted-foreground" />
 		</button>
@@ -92,15 +98,19 @@
 		<div class="border border-border rounded p-2 space-y-2 bg-muted/20">
 			<input
 				bind:value={branchName}
-				placeholder="Branch name (e.g. fix/login-bug)"
+				placeholder={m.workspace_worktree_branch_name_placeholder()}
 				class="w-full text-xs p-1.5 bg-background border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-				onkeydown={(e) => { if (e.key === 'Enter') handleCreate(); }}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') handleCreate();
+				}}
 			/>
 			{#if derivedPath}
 				<div class="flex items-center gap-2 text-[10px] text-muted-foreground">
 					<span class="truncate">Path: <span class="font-mono">{effectivePath}</span></span>
 					<button
-						onclick={() => { showAdvanced = !showAdvanced; }}
+						onclick={() => {
+							showAdvanced = !showAdvanced;
+						}}
 						class="flex items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors shrink-0"
 					>
 						{#if showAdvanced}
@@ -115,12 +125,12 @@
 			{#if showAdvanced}
 				<input
 					bind:value={pathOverride}
-					placeholder="Path override ({derivedPath})"
+					placeholder={m.git_path_override_with_default_placeholder({ path: derivedPath })}
 					class="w-full text-xs p-1.5 bg-background border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 				/>
 				<input
 					bind:value={baseRefOverride}
-					placeholder="Base ref (HEAD)"
+					placeholder={m.git_base_ref_placeholder()}
 					class="w-full text-xs p-1.5 bg-background border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 				/>
 			{/if}
@@ -137,7 +147,9 @@
 					Create
 				</button>
 				<button
-					onclick={() => { showCreateForm = false; }}
+					onclick={() => {
+						showCreateForm = false;
+					}}
 					class="px-2 py-1 text-xs rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
 				>
 					Cancel
@@ -153,15 +165,17 @@
 			Loading worktrees...
 		</div>
 	{:else if worktrees.length === 0}
-		<div class="text-xs text-muted-foreground text-center py-4">
-			No worktrees found
-		</div>
+		<div class="text-xs text-muted-foreground text-center py-4">No worktrees found</div>
 	{:else}
 		<div class="space-y-1">
 			{#each worktrees as wt}
-				<div class="flex items-center gap-2 px-2 py-1.5 rounded text-xs
-					{wt.isCurrent ? 'bg-interactive-accent/10 border border-interactive-accent/20' : 'hover:bg-muted/50'}
-					{wt.isPathMissing ? 'opacity-60' : ''} transition-colors group">
+				<div
+					class="flex items-center gap-2 px-2 py-1.5 rounded text-xs
+					{wt.isCurrent
+						? 'bg-interactive-accent/10 border border-interactive-accent/20'
+						: 'hover:bg-muted/50'}
+					{wt.isPathMissing ? 'opacity-60' : ''} transition-colors group"
+				>
 					<GitBranch class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
 					<div class="flex-1 min-w-0">
 						<div class="truncate font-medium text-foreground">
@@ -182,9 +196,11 @@
 					</div>
 					{#if !wt.isMain && !wt.isCurrent}
 						<button
-							onclick={() => { confirmRemovePath = wt.path; }}
+							onclick={() => {
+								confirmRemovePath = wt.path;
+							}}
 							class="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-muted transition-opacity"
-							title="Remove worktree"
+							title={m.git_action_remove_worktree()}
 						>
 							<Trash2 class="w-3.5 h-3.5 text-muted-foreground" />
 						</button>
@@ -193,7 +209,9 @@
 
 				<!-- Remove confirmation -->
 				{#if confirmRemovePath === wt.path}
-					<div class="ml-6 p-2 border border-status-error-border rounded bg-status-error/5 space-y-2">
+					<div
+						class="ml-6 p-2 border border-status-error-border rounded bg-status-error/5 space-y-2"
+					>
 						<p class="text-[10px] text-status-error-foreground flex items-center gap-1">
 							<AlertTriangle class="w-3 h-3" />
 							Remove this worktree?
@@ -214,7 +232,9 @@
 								Force remove
 							</button>
 							<button
-								onclick={() => { confirmRemovePath = null; }}
+								onclick={() => {
+									confirmRemovePath = null;
+								}}
 								class="px-2 py-0.5 text-[10px] rounded bg-muted text-muted-foreground"
 							>
 								Cancel

@@ -23,30 +23,30 @@
 	let titleSelectionSaveToken = 0;
 
 	// Chat title generation local editing state (hydrated from snapshot).
-	let titleEnabled = $derived(
-		remoteSettings.snapshot?.uiEffective?.chatTitle?.enabled !== false
-	);
+	let titleEnabled = $derived(remoteSettings.snapshot?.uiEffective?.chatTitle?.enabled !== false);
 	let titleProvider = $derived<SessionAgentId>(
-		titleSelectionOverride?.agentId
-			?? (remoteSettings.snapshot?.uiEffective?.chatTitle?.agentId as SessionAgentId)
-			?? 'claude'
+		titleSelectionOverride?.agentId ??
+			(remoteSettings.snapshot?.uiEffective?.chatTitle?.agentId as SessionAgentId) ??
+			'claude',
 	);
 	let titleModel = $derived(
-		titleSelectionOverride?.model
-			?? remoteSettings.snapshot?.uiEffective?.chatTitle?.model
-			?? ''
+		titleSelectionOverride?.model ?? remoteSettings.snapshot?.uiEffective?.chatTitle?.model ?? '',
 	);
 	let titleModelEndpointId = $derived(
-		titleSelectionOverride?.modelEndpointId
-			?? remoteSettings.snapshot?.uiEffective?.chatTitle?.modelEndpointId
-			?? null
+		titleSelectionOverride?.modelEndpointId ??
+			remoteSettings.snapshot?.uiEffective?.chatTitle?.modelEndpointId ??
+			null,
 	);
 	let titleModelProtocol = $derived<ApiProtocol | null>(
-		titleSelectionOverride?.modelProtocol
-			?? remoteSettings.snapshot?.uiEffective?.chatTitle?.modelProtocol
-			?? null
+		titleSelectionOverride?.modelProtocol ??
+			remoteSettings.snapshot?.uiEffective?.chatTitle?.modelProtocol ??
+			null,
 	);
-	const titleSelectorMode: ModelSelectorMode = { agent: 'select', source: 'select', surface: 'settings' };
+	const titleSelectorMode: ModelSelectorMode = {
+		agent: 'select',
+		source: 'select',
+		surface: 'settings',
+	};
 	const titleSelectorValue = $derived({
 		agentId: titleProvider,
 		model: titleModel,
@@ -71,12 +71,14 @@
 
 	async function persistChatTitleSettings(overrides?: Record<string, unknown>) {
 		const base = remoteSettings.snapshot?.ui?.chatTitle ?? {};
-		const nextProvider = typeof overrides?.agentId === 'string'
-			? overrides.agentId as SessionAgentId
-			: titleProvider;
-		const nextModelInput = typeof overrides?.model === 'string'
-			? overrides.model
-			: modelCatalog.selectionValueFor(nextProvider, titleModel, titleModelEndpointId);
+		const nextProvider =
+			typeof overrides?.agentId === 'string'
+				? (overrides.agentId as SessionAgentId)
+				: titleProvider;
+		const nextModelInput =
+			typeof overrides?.model === 'string'
+				? overrides.model
+				: modelCatalog.selectionValueFor(nextProvider, titleModel, titleModelEndpointId);
 		const selection = modelCatalog.selectionFor(nextProvider, nextModelInput, titleModelEndpointId);
 		await save({
 			chatTitle: {
@@ -118,7 +120,6 @@
 		if (token !== titleSelectionSaveToken) return;
 		titleSelectionOverride = saved ? null : previousOverride;
 	}
-
 </script>
 
 <div class="space-y-3">
@@ -128,20 +129,26 @@
 		</div>
 	{:else}
 		{#if saveError}
-			<div class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+			<div
+				class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+			>
 				{saveError}
 			</div>
 		{/if}
 
 		<div class="bg-muted/50 border border-border rounded-lg">
 			<div class="flex items-center justify-between px-4 py-2">
-				<div class="text-sm font-medium text-foreground">{m.sidebar_chats_pinned_insert_position()}</div>
+				<div class="text-sm font-medium text-foreground">
+					{m.sidebar_chats_pinned_insert_position()}
+				</div>
 				<select
 					class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
 					aria-label={m.sidebar_chats_pinned_insert_position()}
 					value={remoteSettings.snapshot?.ui.pinnedInsertPosition ?? 'top'}
 					onchange={(e) =>
-						onPinnedInsertPositionChange((e.currentTarget as HTMLSelectElement).value as PinnedInsertPosition)}
+						onPinnedInsertPositionChange(
+							(e.currentTarget as HTMLSelectElement).value as PinnedInsertPosition,
+						)}
 				>
 					<option value="top">{m.sidebar_chats_pinned_insert_top()}</option>
 					<option value="bottom">{m.sidebar_chats_pinned_insert_bottom()}</option>
@@ -162,18 +169,18 @@
 				/>
 			</div>
 
-				{#if titleEnabled}
-					<div class="flex items-center justify-between py-2">
-						<div class="text-sm font-medium text-foreground">{m.settings_chat_title_model()}</div>
-						<SettingsModelSelector
-							value={titleSelectorValue}
-							mode={titleSelectorMode}
-							onChange={persistChatTitleSelection}
-							align="end"
-							side="bottom"
-						/>
-					</div>
-				{/if}
+			{#if titleEnabled}
+				<div class="flex items-center justify-between py-2">
+					<div class="text-sm font-medium text-foreground">{m.settings_chat_title_model()}</div>
+					<SettingsModelSelector
+						value={titleSelectorValue}
+						mode={titleSelectorMode}
+						onChange={persistChatTitleSelection}
+						align="end"
+						side="bottom"
+					/>
+				</div>
+			{/if}
 		</div>
 
 		<TelegramSettingsPanel />

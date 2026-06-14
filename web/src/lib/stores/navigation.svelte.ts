@@ -1,33 +1,33 @@
-// Reactive navigation store using Svelte 5 runes. Tracks the active tab,
-// input focus state, and pending rename requests. Chat selection has been
-// moved to ChatSessionsStore as the single source of truth.
+// Reactive navigation store using Svelte 5 runes. Tracks the active app tab.
 
 import type { AppTab } from '$lib/types/app';
-
-export interface PendingRenameRequest {
-	chatId: string;
-	currentName: string;
-}
+import { createActionSignal } from '$lib/utils/action-signal';
 
 export class NavigationStore {
 	activeTab = $state<AppTab>('chat');
-	isInputFocused = $state(false);
-	pendingRenameRequest = $state<PendingRenameRequest | null>(null);
+	#navigateChatAbove = createActionSignal();
+	#navigateChatBelow = createActionSignal();
 
 	setActiveTab(tab: AppTab): void {
 		this.activeTab = tab;
 	}
 
-	setIsInputFocused(focused: boolean): void {
-		this.isInputFocused = focused;
+	onNavigateChatAboveRequested(cb: () => void): () => void {
+		return this.#navigateChatAbove.subscribe(cb);
 	}
 
-	requestRename(request: PendingRenameRequest): void {
-		this.pendingRenameRequest = request;
+	onNavigateChatBelowRequested(cb: () => void): () => void {
+		return this.#navigateChatBelow.subscribe(cb);
 	}
 
-	clearPendingRenameRequest(): void {
-		this.pendingRenameRequest = null;
+	/** Requests navigation to the chat above the currently selected one. */
+	requestNavigateChatAbove(): void {
+		this.#navigateChatAbove.emit();
+	}
+
+	/** Requests navigation to the chat below the currently selected one. */
+	requestNavigateChatBelow(): void {
+		this.#navigateChatBelow.emit();
 	}
 }
 

@@ -18,6 +18,9 @@ import {
   resolvePiConfiguredSessionDir,
 } from './pi-session-paths.js';
 import { getPiModels } from './pi-models.js';
+import { createLogger } from '../../lib/log.js';
+
+const logger = createLogger('agents:pi:pi-cli');
 import type {
   AgentCommandImage,
   PermissionMode,
@@ -285,6 +288,7 @@ function createStartTracker(): PiSession['startedSession'] & { promise: Promise<
 
 export class PiCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, PiSession>();
+  #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
     return getPiModels();
@@ -384,6 +388,10 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
 
     if (event.type === 'agent_end') {
       session.resultSeen = true;
+      if (session.isRunning) {
+        session.isRunning = false;
+        this.emitProcessing(session.chatId, false);
+      }
       this.emitFinished(session.chatId, 0);
       this.#finalizeTurn(session, 0);
     }
@@ -394,7 +402,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     try {
       this.#routeEvent(session, JSON.parse(line) as PiCliEvent);
     } catch {
-      console.warn(`pi(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
+      logger.warn(`pi(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
     }
   }
 
@@ -419,7 +427,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
       this.#parseStdoutLine(session, buffer);
     } catch (error) {
       if (!proc.killed) {
-        console.error(`pi(${session.id.slice(0, 8)}): stdout read error:`, (error as Error).message);
+        logger.error(`pi(${session.id.slice(0, 8)}): stdout read error:`, (error as Error).message);
       }
     } finally {
       const exitCode = await proc.exited;
@@ -438,7 +446,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
         if (done) break;
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n')) {
-          if (line.trim()) console.log(`pi(${session.id.slice(0, 8)}): stderr: ${line}`);
+          if (line.trim()) logger.info(`pi(${session.id.slice(0, 8)}): stderr: ${line}`);
         }
       }
     } catch {
@@ -613,9 +621,10 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
       }));
   }
 
-  startPurgeTimer(): ReturnType<typeof setInterval> {
+  startPurgeTimer(): void {
+    if (this.#purgeTimer) return;
     const maxAge = 30 * 60 * 1000;
-    return setInterval(() => {
+    this.#purgeTimer = setInterval(() => {
       const now = Date.now();
       for (const [id, session] of this.#runningSessions.entries()) {
         if (!session.isRunning && now - session.startTime > maxAge) {
@@ -623,5 +632,20 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
         }
       }
     }, 5 * 60 * 1000);
+  }
+
+  shutdown(): void {
+    if (this.#purgeTimer) {
+      clearInterval(this.#purgeTimer);
+      this.#purgeTimer = null;
+    }
+    for (const session of this.#runningSessions.values()) {
+      session.aborted = true;
+      if (session.process && !session.process.killed) {
+        session.process.kill();
+      }
+      this.#finalizeTurn(session, 143);
+    }
+    this.#runningSessions.clear();
   }
 }

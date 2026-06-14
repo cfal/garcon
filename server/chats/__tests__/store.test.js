@@ -143,6 +143,11 @@ describe('ChatRegistry', () => {
       expect(result).toBeNull();
     });
 
+    it('resolves null for unknown chat when flush is requested', async () => {
+      const result = await registry.updateChat('unknown', { model: 'opus' }, { flush: true });
+      expect(result).toBeNull();
+    });
+
     it('normalizes invalid mode patches', () => {
       registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
 
@@ -166,6 +171,19 @@ describe('ChatRegistry', () => {
 
       registry.updateChat('c1', { nextForkOrdinal: 0 });
       expect(registry.getChat('c1')?.nextForkOrdinal).toBeUndefined();
+    });
+
+    it('flushes session identity patches immediately when requested', async () => {
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
+
+      await registry.updateChat('c1', {
+        agentSessionId: 'native-1',
+        nativePath: '/tmp/native-1.jsonl',
+      }, { flush: true });
+
+      const persisted = JSON.parse(await fs.readFile(path.join(tmpDir, 'chats.json'), 'utf8'));
+      expect(persisted.sessions.c1.agentSessionId).toBe('native-1');
+      expect(persisted.sessions.c1.nativePath).toBe('/tmp/native-1.jsonl');
     });
   });
 
@@ -232,6 +250,41 @@ describe('ChatRegistry', () => {
       const result = registry.getChatByAgentSessionId('ps1');
       expect(result).not.toBeNull();
       expect(result[0]).toBe('c1');
+    });
+
+    it('updates the agent session ID index when chats change', () => {
+      registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
+
+      registry.updateChat('c1', { agentSessionId: 'ps1' });
+      expect(registry.getChatByAgentSessionId('ps1')?.[0]).toBe('c1');
+
+      registry.updateChat('c1', { agentSessionId: 'ps2' });
+      expect(registry.getChatByAgentSessionId('ps1')).toBeNull();
+      expect(registry.getChatByAgentSessionId('ps2')?.[0]).toBe('c1');
+
+      registry.removeChat('c1');
+      expect(registry.getChatByAgentSessionId('ps2')).toBeNull();
+    });
+
+    it('builds the agent session ID index from persisted sessions', async () => {
+      const filePath = path.join(tmpDir, 'chats.json');
+      await fs.writeFile(filePath, JSON.stringify({
+        version: 2,
+        sessions: {
+          c1: {
+            agentId: 'claude',
+            agentSessionId: 'ps1',
+            nativePath: '/tmp/ps1.jsonl',
+            projectPath: '/p',
+            model: 'opus',
+          },
+        },
+      }));
+
+      const fresh = new ChatRegistry(tmpDir);
+      await fresh.init();
+
+      expect(fresh.getChatByAgentSessionId('ps1')?.[0]).toBe('c1');
     });
 
     it('returns null for unknown session ID', () => {

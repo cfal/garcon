@@ -9,7 +9,7 @@
 	import {
 		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	} from '$shared/agents';
 
 	interface SidebarChatSummaryProps {
@@ -42,28 +42,26 @@
 	let isTagManagementEnabled = $derived(Boolean(onManageTags));
 	let activityTimestamp = $derived(session.lastActivityAt ?? session.createdAt);
 	let formattedTimestamp = $derived(
-		showTimestamp ? formatSidebarChatTimestamp(activityTimestamp, currentTime) : null
+		showTimestamp ? formatSidebarChatTimestamp(activityTimestamp, currentTime) : null,
 	);
 
 	const AGENT_TAG_VARIANTS: Record<string, string> = {
 		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
 		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
 		cursor: 'border-provider-cursor-border bg-provider-cursor-bg text-provider-cursor-foreground',
-		opencode: 'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
+		opencode:
+			'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
 		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
-		factory: 'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
+		factory:
+			'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
 		pi: 'border-provider-pi-border bg-provider-pi-bg text-provider-pi-foreground',
 		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
 		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
 		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
 	};
 
-	let agentTagVariant = $derived(
-		AGENT_TAG_VARIANTS[agentId] ?? AGENT_TAG_VARIANTS.claude
-	);
-	let agentTagLabel = $derived(
-		agentLabelFor(agentId, agentId || m.agent_claude())
-	);
+	let agentTagVariant = $derived(AGENT_TAG_VARIANTS[agentId] ?? AGENT_TAG_VARIANTS.claude);
+	let agentTagLabel = $derived(agentLabelFor(agentId, agentId || m.agent_claude()));
 	function prefixEllipsis(pathStr: string, maxLen = 40): string {
 		if (!pathStr || pathStr.length <= maxLen) return pathStr;
 		const segments = pathStr.split('/');
@@ -153,7 +151,11 @@
 		<div class="mt-1 flex items-center gap-1">
 			<ColoredTag label={agentTagLabel} variant={agentTagVariant} />
 			{#each visibleTags as tag (tag)}
-				<ColoredTag label={tag} autoColor onclick={onTagClick ? (event) => handleTagClick(event, tag) : undefined} />
+				<ColoredTag
+					label={tag}
+					autoColor
+					onclick={onTagClick ? (event) => handleTagClick(event, tag) : undefined}
+				/>
 			{/each}
 			{#if overflowCount > 0}
 				{#if isTagManagementEnabled}

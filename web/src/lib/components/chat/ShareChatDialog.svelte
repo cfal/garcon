@@ -65,7 +65,9 @@
 		if (!shareUrl) return;
 		await copyToClipboard(shareUrl);
 		copied = true;
-		setTimeout(() => { copied = false; }, 2000);
+		setTimeout(() => {
+			copied = false;
+		}, 2000);
 	}
 
 	async function handleRevoke() {
@@ -116,19 +118,18 @@
 					<button
 						type="button"
 						class="text-xs text-muted-foreground hover:text-destructive transition-colors"
-						onclick={() => { showRevokeConfirm = true; }}
+						onclick={() => {
+							showRevokeConfirm = true;
+						}}
 					>
 						{m.share_dialog_revoke()}
 					</button>
 				{:else}
-					<div class="flex items-center gap-2 flex-1 p-2.5 rounded-lg bg-destructive/5 border border-destructive/20">
+					<div
+						class="flex items-center gap-2 flex-1 p-2.5 rounded-lg bg-destructive/5 border border-destructive/20"
+					>
 						<span class="text-xs text-destructive flex-1">{m.share_dialog_revoke_confirm()}</span>
-						<Button
-							variant="destructive"
-							size="sm"
-							onclick={handleRevoke}
-							disabled={isRevoking}
-						>
+						<Button variant="destructive" size="sm" onclick={handleRevoke} disabled={isRevoking}>
 							{#if isRevoking}
 								<Loader2 class="w-3 h-3 animate-spin" />
 							{:else}
@@ -139,7 +140,9 @@
 						<Button
 							variant="ghost"
 							size="sm"
-							onclick={() => { showRevokeConfirm = false; }}
+							onclick={() => {
+								showRevokeConfirm = false;
+							}}
 						>
 							{m.sidebar_actions_cancel()}
 						</Button>

@@ -86,13 +86,21 @@ describe('parseServerWsMessage', () => {
 	});
 
 	it('parses chat-session-stopped', () => {
-		const msg = parseServerWsMessage({ type: 'chat-session-stopped', chatId: 'c-1', success: true });
+		const msg = parseServerWsMessage({
+			type: 'chat-session-stopped',
+			chatId: 'c-1',
+			success: true,
+		});
 		expect(msg).toBeInstanceOf(ChatSessionStoppedMessage);
 		expect((msg as ChatSessionStoppedMessage).success).toBe(true);
 	});
 
 	it('parses chat-processing-updated', () => {
-		const msg = parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', isProcessing: true });
+		const msg = parseServerWsMessage({
+			type: 'chat-processing-updated',
+			chatId: 'c-1',
+			isProcessing: true,
+		});
 		expect(msg).toBeInstanceOf(ChatProcessingUpdatedMessage);
 		expect((msg as ChatProcessingUpdatedMessage).isProcessing).toBe(true);
 	});
@@ -107,7 +115,11 @@ describe('parseServerWsMessage', () => {
 	});
 
 	it('parses chat-title-updated', () => {
-		const msg = parseServerWsMessage({ type: 'chat-title-updated', chatId: 'c-1', title: 'Hello World' });
+		const msg = parseServerWsMessage({
+			type: 'chat-title-updated',
+			chatId: 'c-1',
+			title: 'Hello World',
+		});
 		expect(msg).toBeInstanceOf(ChatTitleUpdatedMessage);
 		expect((msg as ChatTitleUpdatedMessage).title).toBe('Hello World');
 	});
@@ -125,7 +137,7 @@ describe('parseServerWsMessage', () => {
 		});
 		expect(msg).toBeInstanceOf(ChatReadUpdatedV1Message);
 		expect((msg as ChatReadUpdatedV1Message).lastReadAt).toBe('2025-01-01T00:00:00Z');
-		expect((msg as ChatReadUpdatedV1Message)).not.toHaveProperty('isUnread');
+		expect(msg as ChatReadUpdatedV1Message).not.toHaveProperty('isUnread');
 	});
 
 	it('parses chat-list-refresh-requested', () => {
@@ -162,21 +174,21 @@ describe('parseServerWsMessage', () => {
 				lastModel: 'opus',
 				lastPermissionMode: 'default',
 				lastThinkingMode: 'none',
-					lastClaudeThinkingMode: 'auto',
-					lastAmpAgentMode: 'smart',
-					projectBasePath: '/workspace',
-					telegram: {
-						botTokenAvailable: false,
-						botUsername: null,
-						botFirstName: null,
-						recipientUsername: null,
-						recipientDisplayName: null,
-						recipientLinked: false,
-						pendingLink: false,
-						linkUrl: null,
-					},
+				lastClaudeThinkingMode: 'auto',
+				lastAmpAgentMode: 'smart',
+				projectBasePath: '/workspace',
+				telegram: {
+					botTokenAvailable: false,
+					botUsername: null,
+					botFirstName: null,
+					recipientUsername: null,
+					recipientDisplayName: null,
+					recipientLinked: false,
+					pendingLink: false,
+					linkUrl: null,
 				},
-			});
+			},
+		});
 		expect(msg).toBeInstanceOf(SettingsChangedMessage);
 		expect((msg as SettingsChangedMessage).settings.version).toBe(2);
 		expect((msg as SettingsChangedMessage).settings.ui.pinnedInsertPosition).toBe('bottom');
@@ -319,11 +331,13 @@ describe('parseClientWsMessage', () => {
 	});
 
 	it('rejects fork-run without a command', () => {
-		expect(() => parseClientWsMessage({
-			type: 'fork-run',
-			sourceChatId: 'c-1',
-			chatId: 'c-2',
-			command: '   ',
-		})).toThrow('command');
+		expect(() =>
+			parseClientWsMessage({
+				type: 'fork-run',
+				sourceChatId: 'c-1',
+				chatId: 'c-2',
+				command: '   ',
+			}),
+		).toThrow('command');
 	});
 });

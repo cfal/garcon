@@ -89,10 +89,7 @@
 			/>
 		</div>
 
-		<SplitResizer
-			direction={node.direction}
-			onResize={handleResize}
-		/>
+		<SplitResizer direction={node.direction} onResize={handleResize} />
 
 		<div
 			class="overflow-hidden min-w-0 min-h-0 rounded-lg"

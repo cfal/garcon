@@ -1,7 +1,6 @@
 // Chat session API for listing, starting, messaging, and managing chats.
 
 import { apiGet, apiPost, apiPatch, apiDelete } from './client.js';
-import type { ChatSession } from '$lib/types/session.js';
 import type { SessionAgentId } from '$lib/types/app.js';
 import {
 	normalizeAmpAgentMode,
@@ -15,6 +14,7 @@ import {
 } from '$shared/chat-modes';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { ChatMessage } from '$shared/chat-types';
+import type { ChatListResponse } from '$shared/chat-list';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type {
 	AgentRunCommandRequest,
@@ -61,10 +61,7 @@ export interface ChatDetailsResponse {
 	nativePath: string | null;
 }
 
-export interface ListChatsResponse {
-	sessions: ChatSession[];
-	total: number;
-}
+export type ListChatsResponse = ChatListResponse;
 
 /** Lists all chat sessions. */
 export async function listChats(): Promise<ListChatsResponse> {
@@ -107,27 +104,43 @@ export async function runChat(params: AgentRunCommandRequest): Promise<CommandAc
 	return apiPost<CommandAcceptedResponse>('/api/v1/chats/run', params);
 }
 
-export async function forkRunChat(params: ForkRunCommandRequest): Promise<CommandAcceptedResponse & { sourceChatId?: string }> {
-	return apiPost<CommandAcceptedResponse & { sourceChatId?: string }>('/api/v1/chats/fork-run', params);
+export async function forkRunChat(
+	params: ForkRunCommandRequest,
+): Promise<CommandAcceptedResponse & { sourceChatId?: string }> {
+	return apiPost<CommandAcceptedResponse & { sourceChatId?: string }>(
+		'/api/v1/chats/fork-run',
+		params,
+	);
 }
 
 export async function stopChat(params: AgentStopCommandRequest): Promise<AgentStopResponse> {
 	return apiPost<AgentStopResponse>('/api/v1/chats/stop', params);
 }
 
-export async function sendPermissionDecision(params: PermissionDecisionCommandRequest): Promise<CommandAcceptedResponse> {
+export async function sendPermissionDecision(
+	params: PermissionDecisionCommandRequest,
+): Promise<CommandAcceptedResponse> {
 	return apiPost<CommandAcceptedResponse>('/api/v1/chats/permissions/decision', params);
 }
 
-export async function enqueueChatMessage(params: QueueEnqueueCommandRequest): Promise<QueueEnqueueResponse> {
+export async function enqueueChatMessage(
+	params: QueueEnqueueCommandRequest,
+): Promise<QueueEnqueueResponse> {
 	return apiPost<QueueEnqueueResponse>('/api/v1/chats/queue/enqueue', params);
 }
 
-export async function getChatQueue(chatId: string): Promise<{ success: true; chatId: string; queue: QueueState }> {
-	return apiGet<{ success: true; chatId: string; queue: QueueState }>(`/api/v1/chats/queue?chatId=${encodeURIComponent(chatId)}`);
+export async function getChatQueue(
+	chatId: string,
+): Promise<{ success: true; chatId: string; queue: QueueState }> {
+	return apiGet<{ success: true; chatId: string; queue: QueueState }>(
+		`/api/v1/chats/queue?chatId=${encodeURIComponent(chatId)}`,
+	);
 }
 
-export async function dequeueChatMessage(chatId: string, entryId: string): Promise<QueueMutationResponse> {
+export async function dequeueChatMessage(
+	chatId: string,
+	entryId: string,
+): Promise<QueueMutationResponse> {
 	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/dequeue', { chatId, entryId });
 }
 
@@ -143,7 +156,9 @@ export async function resumeChatQueue(chatId: string): Promise<QueueMutationResp
 	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', { chatId });
 }
 
-export async function updateExecutionSettings(params: ExecutionSettingsPatchRequest): Promise<ExecutionSettingsPatchResponse> {
+export async function updateExecutionSettings(
+	params: ExecutionSettingsPatchRequest,
+): Promise<ExecutionSettingsPatchResponse> {
 	return apiPatch<ExecutionSettingsPatchResponse>('/api/v1/chats/execution-settings', params);
 }
 
@@ -155,7 +170,11 @@ export async function getRunningChats(): Promise<RunningChatsResponse> {
 	return apiGet<RunningChatsResponse>('/api/v1/chats/running');
 }
 
-export async function getChatMessages(params: { chatId: string; limit?: number; offset?: number }): Promise<{
+export async function getChatMessages(params: {
+	chatId: string;
+	limit?: number;
+	offset?: number;
+}): Promise<{
 	messages: ChatMessage[];
 	pendingUserInputs: PendingUserInput[];
 	total: number;
@@ -177,7 +196,7 @@ export interface DeleteChatResponse {
 
 /** Deletes a chat session. */
 export async function deleteChat(chatId: string): Promise<DeleteChatResponse> {
-	return apiDelete<DeleteChatResponse>(`/api/v1/chats?chatId=${encodeURIComponent(chatId)}`);
+	return apiDelete<DeleteChatResponse>('/api/v1/chats', { chatId });
 }
 
 /** Fetches detailed chat metadata for sidebar details dialog. */
@@ -186,8 +205,10 @@ export async function getChatDetails(chatId: string): Promise<ChatDetailsRespons
 }
 
 /** Toggles the pinned state of a chat session. */
-export async function togglePinned(chatId: string): Promise<{ success: boolean; isPinned: boolean }> {
-	return apiPost(`/api/v1/chats/pin?chatId=${encodeURIComponent(chatId)}`);
+export async function togglePinned(
+	chatId: string,
+): Promise<{ success: boolean; isPinned: boolean }> {
+	return apiPost('/api/v1/chats/pin', { chatId });
 }
 
 export interface ToggleArchiveResponse {
@@ -197,7 +218,7 @@ export interface ToggleArchiveResponse {
 
 /** Toggles the archived state of a chat session. */
 export async function toggleArchive(chatId: string): Promise<ToggleArchiveResponse> {
-	return apiPost<ToggleArchiveResponse>(`/api/v1/chats/archive?chatId=${encodeURIComponent(chatId)}`);
+	return apiPost<ToggleArchiveResponse>('/api/v1/chats/archive', { chatId });
 }
 
 export interface MarkReadBatchResponse {
@@ -221,6 +242,7 @@ export type ValidateStartErrorCode =
 	| 'unknown';
 
 export interface ValidateStartResponse {
+	success?: false;
 	valid: boolean;
 	isGitRepo?: boolean;
 	error?: string;
@@ -228,7 +250,9 @@ export interface ValidateStartResponse {
 }
 
 export async function validateStart(path: string): Promise<ValidateStartResponse> {
-	return apiGet<ValidateStartResponse>(`/api/v1/chats/validate-start?path=${encodeURIComponent(path)}`);
+	return apiGet<ValidateStartResponse>(
+		`/api/v1/chats/validate-start?path=${encodeURIComponent(path)}`,
+	);
 }
 
 export interface ForkChatParams {
@@ -256,11 +280,11 @@ export interface ReorderChatsRequest {
 	newOrder: string[];
 }
 
-export interface ReorderQuickRequest {
-	chatId: string;
-	chatIdAbove?: string;
-	chatIdBelow?: string;
-}
+export type ReorderQuickTarget =
+	| { chatIdAbove: string; chatIdBelow?: never }
+	| { chatIdBelow: string; chatIdAbove?: never };
+
+export type ReorderQuickRequest = { chatId: string } & ReorderQuickTarget;
 
 /** Persists a window reorder within a group. */
 export async function reorderChats(body: ReorderChatsRequest): Promise<{ success: boolean }> {

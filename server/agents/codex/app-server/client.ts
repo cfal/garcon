@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { getPackageVersion } from '../../../config.js';
 import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
 import type {
   InitializeResponse,
@@ -200,7 +201,7 @@ export class CodexAppServerClient extends EventEmitter {
       clientInfo: {
         name: 'garcon',
         title: 'Garcon',
-        version: process.env.npm_package_version ?? '0.1.0',
+        version: getPackageVersion(),
       },
       capabilities: {
         experimentalApi: true,

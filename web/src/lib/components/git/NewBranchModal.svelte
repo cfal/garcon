@@ -21,7 +21,7 @@
 		isCreatingBranch,
 		onNameChange,
 		onCreateBranch,
-		onClose
+		onClose,
 	}: NewBranchModalProps = $props();
 
 	function handleKeydown(event: KeyboardEvent) {
@@ -31,7 +31,12 @@
 	}
 </script>
 
-<Dialog.Root open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
+<Dialog.Root
+	open={true}
+	onOpenChange={(open) => {
+		if (!open) onClose();
+	}}
+>
 	<Dialog.Content>
 		<Dialog.Header>
 			<Dialog.Title>{m.git_new_branch_title()}</Dialog.Title>
@@ -42,7 +47,9 @@
 
 		<div class="space-y-4">
 			<div>
-				<label for="branch-name" class="block text-sm font-medium mb-2">{m.git_new_branch_branch_name()}</label>
+				<label for="branch-name" class="block text-sm font-medium mb-2"
+					>{m.git_new_branch_branch_name()}</label
+				>
 				<input
 					id="branch-name"
 					type="text"
@@ -57,9 +64,13 @@
 
 		<Dialog.Footer>
 			<button
-				onclick={() => { onClose(); onNameChange(''); }}
+				onclick={() => {
+					onClose();
+					onNameChange('');
+				}}
 				class="px-4 py-2 text-sm text-muted-foreground hover:bg-accent rounded-md"
-			>{m.git_new_branch_cancel()}</button>
+				>{m.git_new_branch_cancel()}</button
+			>
 			<button
 				onclick={onCreateBranch}
 				disabled={!newBranchName.trim() || isCreatingBranch}

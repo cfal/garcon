@@ -1,9 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { enqueueChatMessage, forkChat, forkRunChat, getChatQueue, runChat } from '$lib/api/chats.js';
+import {
+	enqueueChatMessage,
+	forkChat,
+	forkRunChat,
+	getChatQueue,
+	runChat,
+} from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
-import { AssistantMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
+import type { ChatRestoreResult } from '../state.svelte';
+import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
+import type { PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
 
 vi.mock('$lib/api/chats.js', () => ({
 	dequeueChatMessage: vi.fn(),
@@ -67,11 +75,11 @@ function createDeps(chat = createRunningChat()) {
 		pendingUserInputs: [] as PendingUserInput[],
 		isUserScrolledUp: false,
 		clearMessages: vi.fn(),
-		resetForNewChat: vi.fn(() => {
-			chatState.chatMessages = [];
-			chatState.pendingUserInputs = [];
-		}),
-		restoreMessages: vi.fn(() => false),
+			resetForNewChat: vi.fn(() => {
+				chatState.chatMessages = [];
+				chatState.pendingUserInputs = [];
+			}),
+			restoreMessages: vi.fn<() => ChatRestoreResult | null>(() => null),
 		loadMessages: vi.fn(() => new Promise<never>(() => {})),
 		setMessages: vi.fn((messages: ChatMessage[]) => {
 			chatState.chatMessages = messages;
@@ -79,8 +87,19 @@ function createDeps(chat = createRunningChat()) {
 		setPendingUserInputs: vi.fn((inputs: PendingUserInput[]) => {
 			chatState.pendingUserInputs = inputs;
 		}),
+		appendMessages: vi.fn((messages: ChatMessage[]) => {
+			chatState.chatMessages = [...chatState.chatMessages, ...messages];
+		}),
+		appendErrorMessage: vi.fn((content: string) => {
+			chatState.chatMessages = [
+				...chatState.chatMessages,
+				new ErrorMessage(new Date().toISOString(), content),
+			];
+		}),
 		upsertPendingUserInput: vi.fn((input: PendingUserInput) => {
-			const index = chatState.pendingUserInputs.findIndex((existing) => existing.clientRequestId === input.clientRequestId);
+			const index = chatState.pendingUserInputs.findIndex(
+				(existing) => existing.clientRequestId === input.clientRequestId,
+			);
 			if (index >= 0) {
 				chatState.pendingUserInputs[index] = input;
 				return;
@@ -90,15 +109,34 @@ function createDeps(chat = createRunningChat()) {
 		updatePendingUserInputDeliveryStatus: vi.fn(
 			(clientRequestId: string, deliveryStatus: 'submitting' | 'accepted' | 'failed') => {
 				chatState.pendingUserInputs = chatState.pendingUserInputs.map((input) =>
-					input.clientRequestId === clientRequestId
-						? { ...input, deliveryStatus }
-						: input,
+					input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
 				);
 			},
 		),
 		snapshotCache: {
 			markValidated: vi.fn(),
 		},
+	};
+	const conversationUi = {
+		pendingPermissionRequests: [] as PendingPermissionRequest[],
+		previousPermissionMode: null as PermissionMode | null,
+		clearPendingPermissionRequests: vi.fn(() => {
+			conversationUi.pendingPermissionRequests = [];
+		}),
+		setPendingPermissionRequests: vi.fn(
+			(
+				update:
+					| PendingPermissionRequest[]
+					| ((previous: PendingPermissionRequest[]) => PendingPermissionRequest[]),
+			) => {
+				conversationUi.pendingPermissionRequests =
+					typeof update === 'function' ? update(conversationUi.pendingPermissionRequests) : update;
+			},
+		),
+		setPreviousPermissionMode: vi.fn((mode: PermissionMode | null) => {
+			conversationUi.previousPermissionMode = mode;
+		}),
+		setMessageQueue: vi.fn(),
 	};
 	return {
 		deps: {
@@ -114,42 +152,45 @@ function createDeps(chat = createRunningChat()) {
 				promoteDraft: vi.fn(),
 				setChatProcessing: vi.fn(),
 				setSelectedChatId: vi.fn(),
+				quietRefreshChats: vi.fn(),
 			},
 			chatState,
-			composerState: {
-				inputText: '',
-				images: [],
+				composerState: {
+					inputText: '',
+					images: [] as File[],
 				clearImages: vi.fn(),
 				clearAfterSubmit: vi.fn(),
 				saveDraft: vi.fn(),
 				restoreDraft: vi.fn(),
 			},
 			agentState: {
-					setAgentId: vi.fn(),
-					setModelSelection: vi.fn(),
-					agentId: 'claude',
-					model: '',
-					apiProviderId: null,
-					modelEndpointId: null,
-					modelProtocol: null,
-					permissionMode: 'default',
+				setAgentId: vi.fn(),
+				setModelSelection: vi.fn(),
+				agentId: 'claude',
+				model: '',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
 			},
-				lifecycle: {
-					activateLoading: vi.fn(),
-					clearLoading: vi.fn(),
-					setCanAbort: vi.fn(),
-					setCurrentChatId: vi.fn(),
-					setLoadingStatus: vi.fn(),
-				},
+			lifecycle: {
+				activateLoading: vi.fn(),
+				clearLoading: vi.fn(),
+				syncFromProcessing: vi.fn(),
+				setCanAbort: vi.fn(),
+				setCurrentChatId: vi.fn(),
+				setLoadingStatus: vi.fn(),
+				beginTurn: vi.fn(),
+			},
+			conversationUi,
 			startupCoordinator: {},
 			ws: {
 				sendMessage: vi.fn(),
 				waitForConnection,
 			},
 			appShell: {
-				quietRefreshChats: vi.fn(),
 				openNewChatDialog: vi.fn(),
 			},
 			modelCatalog: {
@@ -162,22 +203,16 @@ function createDeps(chat = createRunningChat()) {
 				})),
 				selectionValueFor: vi.fn((_provider, model) => model),
 			},
-		readReceiptOutbox: {
-			enqueue: vi.fn(),
-		},
-		navigation: {
+			readReceiptOutbox: {
+				enqueue: vi.fn(),
+			},
+			navigation: {
 				setActiveTab: vi.fn(),
 				navigateToChat: vi.fn(),
 			},
-			getPendingPermissionRequests: vi.fn(() => []),
-			setPendingPermissionRequests: vi.fn(),
-			getPreviousPermissionMode: vi.fn(() => null),
-			setPreviousPermissionMode: vi.fn(),
-				setNeedsServerLoad: vi.fn(),
-				setIsViewportPinnedToBottom: vi.fn(),
-				setMessageQueue: vi.fn(),
-				scrollToBottom: vi.fn(),
-			},
+			setIsViewportPinnedToBottom: vi.fn(),
+			scrollToBottom: vi.fn(),
+		},
 		waitForConnection,
 	};
 }
@@ -202,8 +237,14 @@ describe('ConversationSessionController', () => {
 
 		controller.handleChatSwitch('chat-1');
 
-		expect(deps.readReceiptOutbox.enqueue).toHaveBeenCalledWith('chat-1', '2026-03-27T08:00:00.000Z');
-		expect(deps.sessions.patchLastReadAt).toHaveBeenCalledWith('chat-1', '2026-03-27T08:00:00.000Z');
+		expect(deps.readReceiptOutbox.enqueue).toHaveBeenCalledWith(
+			'chat-1',
+			'2026-03-27T08:00:00.000Z',
+		);
+		expect(deps.sessions.patchLastReadAt).toHaveBeenCalledWith(
+			'chat-1',
+			'2026-03-27T08:00:00.000Z',
+		);
 	});
 
 	it('does not enqueue a read receipt when the chat is already fully read', () => {
@@ -220,6 +261,16 @@ describe('ConversationSessionController', () => {
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
 	});
 
+	it('syncs lifecycle loading from the selected running chat on switch', () => {
+		const chat = createRunningChat({ isProcessing: true });
+		const { deps } = createDeps(chat);
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleChatSwitch('chat-1');
+
+		expect(deps.lifecycle.syncFromProcessing).toHaveBeenCalledWith(true);
+	});
+
 	it('does not enqueue a second read receipt after chat load when the optimistic mark already applied', async () => {
 		const chat = createRunningChat({
 			lastReadAt: '2026-03-27T08:00:00.000Z',
@@ -234,6 +285,23 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
+	});
+
+	it('validates restored snapshots with a matching message limit on chat switch', () => {
+		const { deps } = createDeps();
+		deps.chatState.restoreMessages = vi.fn(() => {
+			deps.chatState.chatMessages = Array.from(
+				{ length: 75 },
+				(_, index) => new AssistantMessage('2026-05-14T00:00:00.000Z', `cached ${index}`),
+			);
+			return { count: 75, stale: false };
+		});
+		deps.chatState.loadMessages = vi.fn(() => new Promise<never>(() => {}));
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleChatSwitch('chat-1');
+
+		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', { minimumLimit: 75 });
 	});
 
 	it('merges loaded Cursor user echoes with local pending messages by request identity', async () => {
@@ -290,16 +358,18 @@ describe('ConversationSessionController', () => {
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('123');
 
 		expect(deps.ws.sendMessage).not.toHaveBeenCalled();
-		expect(mockForkRunChat).toHaveBeenCalledWith(expect.objectContaining({
-			sourceChatId: '123',
-			command: 'continue from here',
-			permissionMode: 'default',
-			thinkingMode: 'none',
-			model: 'sonnet',
-			chatId: expect.stringMatching(/^\d+$/),
-			clientRequestId: expect.any(String),
-			clientMessageId: expect.any(String),
-		}));
+		expect(mockForkRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sourceChatId: '123',
+				command: 'continue from here',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				model: 'sonnet',
+				chatId: expect.stringMatching(/^\d+$/),
+				clientRequestId: expect.any(String),
+				clientMessageId: expect.any(String),
+			}),
+		);
 	});
 
 	it('submits bare /fork through the fork API without sending fork-run', async () => {
@@ -327,7 +397,7 @@ describe('ConversationSessionController', () => {
 			type: 'assistant-message',
 			content: 'Forking chat..',
 		});
-		expect(deps.appShell.quietRefreshChats).toHaveBeenCalled();
+		expect(deps.sessions.quietRefreshChats).toHaveBeenCalled();
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('456');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('456');
@@ -358,14 +428,16 @@ describe('ConversationSessionController', () => {
 		expect(pending.clientRequestId).toEqual(expect.any(String));
 		expect(pending.clientMessageId).toEqual(expect.any(String));
 		expect(pending.deliveryStatus).toBe('submitting');
-		expect(mockRunChat).toHaveBeenCalledWith(expect.objectContaining({
-			clientRequestId: pending.clientRequestId,
-			clientMessageId: pending.clientMessageId,
-			chatId: 'chat-1',
-			command: 'hello over REST',
-			model: 'opus',
-		}));
-		expect(deps.lifecycle.activateLoading).not.toHaveBeenCalled();
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				clientRequestId: pending.clientRequestId,
+				clientMessageId: pending.clientMessageId,
+				chatId: 'chat-1',
+				command: 'hello over REST',
+				model: 'opus',
+			}),
+		);
+		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
 
 		accepted.resolve({
 			success: true,
@@ -380,8 +452,33 @@ describe('ConversationSessionController', () => {
 
 		const delivered = deps.chatState.pendingUserInputs[0];
 		expect(delivered.deliveryStatus).toBe('accepted');
-		expect(deps.lifecycle.activateLoading).toHaveBeenCalled();
+		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-1', true);
+	});
+
+	it('submits image attachments as native data URLs', async () => {
+		mockRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-1',
+			chatId: 'chat-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+		});
+		const { deps } = createDeps();
+		deps.agentState.model = 'opus';
+		deps.composerState.inputText = 'describe this';
+		deps.composerState.images = [new File(['hello'], 'hello.txt', { type: 'text/plain' })];
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('chat-1');
+
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				images: [{ data: 'data:text/plain;base64,aGVsbG8=', name: 'hello.txt' }],
+			}),
+		);
 	});
 
 	it('marks the pending user message failed and restores composer input on REST rejection', async () => {
@@ -416,7 +513,17 @@ describe('ConversationSessionController', () => {
 			acceptedAt: '2026-05-14T00:00:00.000Z',
 			entryId: 'entry-1',
 			merged: false,
-			queue: { entries: [{ id: 'entry-1', content: 'queue this', status: 'queued', createdAt: '2026-05-14T00:00:00.000Z' }], paused: false },
+			queue: {
+				entries: [
+					{
+						id: 'entry-1',
+						content: 'queue this',
+						status: 'queued',
+						createdAt: '2026-05-14T00:00:00.000Z',
+					},
+				],
+				paused: false,
+			},
 		});
 		const controller = new ConversationSessionController(deps as never);
 
@@ -429,9 +536,12 @@ describe('ConversationSessionController', () => {
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.chatState.chatMessages).toHaveLength(0);
-		expect(deps.setMessageQueue).toHaveBeenCalledWith('chat-1', expect.objectContaining({
-			entries: expect.arrayContaining([expect.objectContaining({ id: 'entry-1' })]),
-		}));
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith(
+			'chat-1',
+			expect.objectContaining({
+				entries: expect.arrayContaining([expect.objectContaining({ id: 'entry-1' })]),
+			}),
+		);
 	});
 
 	it('keeps local pending command messages when a REST history load returns an older snapshot', async () => {
@@ -446,7 +556,7 @@ describe('ConversationSessionController', () => {
 		const loaded = [new AssistantMessage('2026-05-14T00:00:00.000Z', 'older server snapshot')];
 		const { deps } = createDeps();
 		deps.chatState.pendingUserInputs = [pending];
-		deps.chatState.restoreMessages = vi.fn(() => false);
+		deps.chatState.restoreMessages = vi.fn(() => null);
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue(loaded);
 		const controller = new ConversationSessionController(deps as never);
 
@@ -455,5 +565,4 @@ describe('ConversationSessionController', () => {
 		expect(deps.chatState.setMessages).toHaveBeenCalledWith([loaded[0]]);
 		expect(deps.chatState.pendingUserInputs).toEqual([pending]);
 	});
-
 });

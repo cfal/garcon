@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GitWorkbenchStore, makeLineSelectionKey, type GitWorkbenchDeps } from '../git-workbench.svelte';
+import {
+	GitWorkbenchStore,
+	makeLineSelectionKey,
+	type GitWorkbenchDeps,
+} from '../git-workbench.svelte';
 import { ApiError } from '$lib/api/client.js';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 const mockDeps: GitWorkbenchDeps = {
 	getSettings: vi.fn().mockResolvedValue({ ui: {} }),
@@ -57,7 +62,14 @@ describe('GitWorkbenchStore', () => {
 	describe('tree loading', () => {
 		it('loads tree and sets hasCommits from response', async () => {
 			const tree = [
-				{ path: 'a.ts', name: 'a.ts', kind: 'file' as const, staged: false, hasUnstaged: true, changeKind: 'modified' as const },
+				{
+					path: 'a.ts',
+					name: 'a.ts',
+					kind: 'file' as const,
+					staged: false,
+					hasUnstaged: true,
+					changeKind: 'modified' as const,
+				},
 			];
 			mockedApi.getGitChangesTree.mockResolvedValue({ root: tree, hasCommits: true });
 
@@ -125,16 +137,23 @@ describe('GitWorkbenchStore', () => {
 	describe('file review data', () => {
 		it('loads review data with active tab', async () => {
 			const reviewData = {
-				path: 'a.ts', isBinary: false,
-				truncated: false, contentBefore: '', contentAfter: '',
-				diffOps: [], hunks: [],
+				path: 'a.ts',
+				isBinary: false,
+				truncated: false,
+				contentBefore: '',
+				contentAfter: '',
+				diffOps: [],
+				hunks: [],
 			};
 			mockedApi.getGitFileReviewData.mockResolvedValue(reviewData);
 
 			await wb.loadFileReviewData('/project', 'a.ts');
 
 			expect(mockedApi.getGitFileReviewData).toHaveBeenCalledWith(
-				'/project', 'a.ts', 'unstaged', 5,
+				'/project',
+				'a.ts',
+				'unstaged',
+				5,
 			);
 			expect(wb.reviewDataByPath['a.ts']).toEqual(reviewData);
 		});
@@ -142,14 +161,22 @@ describe('GitWorkbenchStore', () => {
 		it('ignores stale file review data after tab changes', async () => {
 			const staleReviewLoad = deferred<Awaited<ReturnType<typeof gitApi.getGitFileReviewData>>>();
 			const staleReviewData = {
-				path: 'a.ts', isBinary: false,
-				truncated: false, contentBefore: 'old', contentAfter: '',
-				diffOps: [], hunks: [],
+				path: 'a.ts',
+				isBinary: false,
+				truncated: false,
+				contentBefore: 'old',
+				contentAfter: '',
+				diffOps: [],
+				hunks: [],
 			};
 			const currentReviewData = {
-				path: 'a.ts', isBinary: false,
-				truncated: false, contentBefore: 'new', contentAfter: '',
-				diffOps: [], hunks: [],
+				path: 'a.ts',
+				isBinary: false,
+				truncated: false,
+				contentBefore: 'new',
+				contentAfter: '',
+				diffOps: [],
+				hunks: [],
 			};
 			mockedApi.getGitFileReviewData
 				.mockReturnValueOnce(staleReviewLoad.promise)
@@ -163,28 +190,44 @@ describe('GitWorkbenchStore', () => {
 			await Promise.all([staleLoad, currentLoad]);
 
 			expect(mockedApi.getGitFileReviewData).toHaveBeenNthCalledWith(
-				1, '/project', 'a.ts', 'unstaged', 5,
+				1,
+				'/project',
+				'a.ts',
+				'unstaged',
+				5,
 			);
 			expect(mockedApi.getGitFileReviewData).toHaveBeenNthCalledWith(
-				2, '/project', 'a.ts', 'staged', 5,
+				2,
+				'/project',
+				'a.ts',
+				'staged',
+				5,
 			);
 			expect(wb.reviewDataByPath['a.ts']).toEqual(currentReviewData);
 			expect(wb.isLoadingFile).toBe(false);
 		});
 
 		it('requestFilesLoaded fetches uncached files', async () => {
-			mockedApi.getGitFileReviewDataBatch.mockImplementation(async (_project, files) => ({
-				files: Object.fromEntries((files as string[]).map((file) => [file, {
-					path: file,
-					isBinary: false,
-					truncated: false,
-					contentBefore: '',
-					contentAfter: '',
-					diffOps: [],
-					hunks: [],
-				}])),
-				errors: {},
-			}) as any);
+			mockedApi.getGitFileReviewDataBatch.mockImplementation(
+				async (_project, files) =>
+					({
+						files: Object.fromEntries(
+							(files as string[]).map((file) => [
+								file,
+								{
+									path: file,
+									isBinary: false,
+									truncated: false,
+									contentBefore: '',
+									contentAfter: '',
+									diffOps: [],
+									hunks: [],
+								},
+							]),
+						),
+						errors: {},
+					}) as any,
+			);
 
 			wb.requestFilesLoaded('/project', ['a.ts', 'src/b.ts']);
 
@@ -202,15 +245,20 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.getGitFileReviewDataBatch.mockImplementation(async (_project, files) => {
 				callCount++;
 				return {
-					files: Object.fromEntries((files as string[]).map((file) => [file, {
-						path: file,
-						isBinary: false,
-						truncated: false,
-						contentBefore: '',
-						contentAfter: '',
-						diffOps: [],
-						hunks: [],
-					}])),
+					files: Object.fromEntries(
+						(files as string[]).map((file) => [
+							file,
+							{
+								path: file,
+								isBinary: false,
+								truncated: false,
+								contentBefore: '',
+								contentAfter: '',
+								diffOps: [],
+								hunks: [],
+							},
+						]),
+					),
 					errors: {},
 				} as any;
 			});
@@ -241,7 +289,6 @@ describe('GitWorkbenchStore', () => {
 
 			expect(wb.reviewDataByPath).toEqual({});
 		});
-
 	});
 
 	describe('line selection', () => {
@@ -281,7 +328,6 @@ describe('GitWorkbenchStore', () => {
 
 			expect(wb.hasSelection).toBe(false);
 		});
-
 	});
 
 	describe('staging', () => {
@@ -294,9 +340,13 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.gitStageSelection.mockResolvedValue({ success: true });
 			mockedApi.getGitChangesTree.mockResolvedValue({ root: [], hasCommits: true });
 			mockedApi.getGitFileReviewData.mockResolvedValue({
-				path: 'a.ts', isBinary: false,
-				truncated: false, contentBefore: '', contentAfter: '',
-				diffOps: [], hunks: [],
+				path: 'a.ts',
+				isBinary: false,
+				truncated: false,
+				contentBefore: '',
+				contentAfter: '',
+				diffOps: [],
+				hunks: [],
 			} as any);
 
 			const result = await wb.stageSelectedLines('/project');
@@ -370,69 +420,69 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.hasCommits).toBe(true);
 		});
 
-			it('generates commit message from staged files', async () => {
-				wb.tree = [
-					{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
-				] as any;
-				mockedApi.generateCommitMessage.mockResolvedValue({ message: 'feat: auto-generated' });
+		it('generates commit message from staged files', async () => {
+			wb.tree = [
+				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
+			] as any;
+			mockedApi.generateCommitMessage.mockResolvedValue({ message: 'feat: auto-generated' });
 
 			await wb.generateCommitMsg('/project');
 
-				expect(wb.commitMessage).toBe('feat: auto-generated');
-				expect(wb.isGeneratingMessage).toBe(false);
-			});
-
-			it('prepends directory prefix to generated message when enabled', async () => {
-				wb.tree = [
-					{ path: 'feature/auth/a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
-					{ path: 'feature/auth/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
-				] as any;
-				(wb as any).hydrateCommitSettings = vi.fn(async () => {
-					wb.commitUseCommonDirPrefix = true;
-				});
-				mockedApi.generateCommitMessage.mockResolvedValue({ message: 'feat: auto-generated' });
-
-				await wb.generateCommitMsg('/project');
-
-				expect(wb.commitMessage).toBe('feature/auth: feat: auto-generated');
-			});
-
-			it('does not prepend directory prefix to generated message when disabled', async () => {
-				wb.tree = [
-					{ path: 'feature/auth/a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
-					{ path: 'feature/auth/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
-				] as any;
-				(wb as any).hydrateCommitSettings = vi.fn(async () => {
-					wb.commitUseCommonDirPrefix = false;
-				});
-				mockedApi.generateCommitMessage.mockResolvedValue({ message: 'feat: auto-generated' });
-
-				await wb.generateCommitMsg('/project');
-
-				expect(wb.commitMessage).toBe('feat: auto-generated');
-			});
-
-			it('surfaces error when no staged files for message generation', async () => {
-				wb.tree = [];
-
-			await wb.generateCommitMsg('/project');
-
-				expect(wb.lastError).toContain('No staged files');
-			});
-
-			it('maps typed commit generation errorCode to localized message', async () => {
-				wb.tree = [
-					{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
-				] as any;
-				mockedApi.generateCommitMessage.mockRejectedValue(
-					new ApiError(504, 'Timed out', 'commit_message_timeout'),
-				);
-
-				await wb.generateCommitMsg('/project');
-
-				expect(wb.lastError).toContain('timed out');
-			});
+			expect(wb.commitMessage).toBe('feat: auto-generated');
+			expect(wb.isGeneratingMessage).toBe(false);
 		});
+
+		it('prepends directory prefix to generated message when enabled', async () => {
+			wb.tree = [
+				{ path: 'feature/auth/a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
+				{ path: 'feature/auth/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
+			] as any;
+			(wb as any).hydrateCommitSettings = vi.fn(async () => {
+				wb.commitUseCommonDirPrefix = true;
+			});
+			mockedApi.generateCommitMessage.mockResolvedValue({ message: 'feat: auto-generated' });
+
+			await wb.generateCommitMsg('/project');
+
+			expect(wb.commitMessage).toBe('feature/auth: feat: auto-generated');
+		});
+
+		it('does not prepend directory prefix to generated message when disabled', async () => {
+			wb.tree = [
+				{ path: 'feature/auth/a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
+				{ path: 'feature/auth/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
+			] as any;
+			(wb as any).hydrateCommitSettings = vi.fn(async () => {
+				wb.commitUseCommonDirPrefix = false;
+			});
+			mockedApi.generateCommitMessage.mockResolvedValue({ message: 'feat: auto-generated' });
+
+			await wb.generateCommitMsg('/project');
+
+			expect(wb.commitMessage).toBe('feat: auto-generated');
+		});
+
+		it('surfaces error when no staged files for message generation', async () => {
+			wb.tree = [];
+
+			await wb.generateCommitMsg('/project');
+
+			expect(wb.lastError).toContain('No staged files');
+		});
+
+		it('maps typed commit generation errorCode to localized message', async () => {
+			wb.tree = [
+				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
+			] as any;
+			mockedApi.generateCommitMessage.mockRejectedValue(
+				new ApiError(504, 'Timed out', 'commit_message_timeout'),
+			);
+
+			await wb.generateCommitMsg('/project');
+
+			expect(wb.lastError).toContain('timed out');
+		});
+	});
 
 	describe('derived getters', () => {
 		it('stagedFiles collects staged file paths', () => {
@@ -440,7 +490,11 @@ describe('GitWorkbenchStore', () => {
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
 				{ path: 'b.ts', name: 'b.ts', kind: 'file', staged: false, hasUnstaged: true },
 				{
-					path: 'src', name: 'src', kind: 'directory', staged: true, hasUnstaged: false,
+					path: 'src',
+					name: 'src',
+					kind: 'directory',
+					staged: true,
+					hasUnstaged: false,
 					children: [
 						{ path: 'src/c.ts', name: 'c.ts', kind: 'file', staged: true, hasUnstaged: false },
 					],
@@ -465,7 +519,11 @@ describe('GitWorkbenchStore', () => {
 			wb.tree = [
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
 				{
-					path: 'src', name: 'src', kind: 'directory', staged: false, hasUnstaged: true,
+					path: 'src',
+					name: 'src',
+					kind: 'directory',
+					staged: false,
+					hasUnstaged: true,
 					children: [
 						{ path: 'src/b.ts', name: 'b.ts', kind: 'file', staged: false, hasUnstaged: true },
 						{ path: 'src/c.ts', name: 'c.ts', kind: 'file', staged: false, hasUnstaged: true },
@@ -481,16 +539,38 @@ describe('GitWorkbenchStore', () => {
 		it('collapses single-child directory chains', () => {
 			wb.tree = [
 				{
-					path: 'a', name: 'a', kind: 'directory', staged: false, hasUnstaged: true,
-					children: [{
-						path: 'a/b', name: 'b', kind: 'directory', staged: false, hasUnstaged: true,
-						children: [{
-							path: 'a/b/c', name: 'c', kind: 'directory', staged: false, hasUnstaged: true,
+					path: 'a',
+					name: 'a',
+					kind: 'directory',
+					staged: false,
+					hasUnstaged: true,
+					children: [
+						{
+							path: 'a/b',
+							name: 'b',
+							kind: 'directory',
+							staged: false,
+							hasUnstaged: true,
 							children: [
-								{ path: 'a/b/c/file.ts', name: 'file.ts', kind: 'file', staged: false, hasUnstaged: true },
+								{
+									path: 'a/b/c',
+									name: 'c',
+									kind: 'directory',
+									staged: false,
+									hasUnstaged: true,
+									children: [
+										{
+											path: 'a/b/c/file.ts',
+											name: 'file.ts',
+											kind: 'file',
+											staged: false,
+											hasUnstaged: true,
+										},
+									],
+								},
 							],
-						}],
-					}],
+						},
+					],
 				},
 			] as any;
 
@@ -505,14 +585,36 @@ describe('GitWorkbenchStore', () => {
 		it('stops compacting when directory has multiple children', () => {
 			wb.tree = [
 				{
-					path: 'src', name: 'src', kind: 'directory', staged: false, hasUnstaged: true,
-					children: [{
-						path: 'src/lib', name: 'lib', kind: 'directory', staged: false, hasUnstaged: true,
-						children: [
-							{ path: 'src/lib/a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
-							{ path: 'src/lib/b.ts', name: 'b.ts', kind: 'file', staged: false, hasUnstaged: true },
-						],
-					}],
+					path: 'src',
+					name: 'src',
+					kind: 'directory',
+					staged: false,
+					hasUnstaged: true,
+					children: [
+						{
+							path: 'src/lib',
+							name: 'lib',
+							kind: 'directory',
+							staged: false,
+							hasUnstaged: true,
+							children: [
+								{
+									path: 'src/lib/a.ts',
+									name: 'a.ts',
+									kind: 'file',
+									staged: false,
+									hasUnstaged: true,
+								},
+								{
+									path: 'src/lib/b.ts',
+									name: 'b.ts',
+									kind: 'file',
+									staged: false,
+									hasUnstaged: true,
+								},
+							],
+						},
+					],
 				},
 			] as any;
 
@@ -525,9 +627,19 @@ describe('GitWorkbenchStore', () => {
 		it('does not compact directory with a single file child', () => {
 			wb.tree = [
 				{
-					path: 'src', name: 'src', kind: 'directory', staged: false, hasUnstaged: true,
+					path: 'src',
+					name: 'src',
+					kind: 'directory',
+					staged: false,
+					hasUnstaged: true,
 					children: [
-						{ path: 'src/index.ts', name: 'index.ts', kind: 'file', staged: false, hasUnstaged: true },
+						{
+							path: 'src/index.ts',
+							name: 'index.ts',
+							kind: 'file',
+							staged: false,
+							hasUnstaged: true,
+						},
 					],
 				},
 			] as any;
@@ -541,13 +653,29 @@ describe('GitWorkbenchStore', () => {
 		it('preserves staged/hasUnstaged flags through compaction', () => {
 			wb.tree = [
 				{
-					path: 'a', name: 'a', kind: 'directory', staged: true, hasUnstaged: false,
-					children: [{
-						path: 'a/b', name: 'b', kind: 'directory', staged: false, hasUnstaged: true,
-						children: [
-							{ path: 'a/b/file.ts', name: 'file.ts', kind: 'file', staged: true, hasUnstaged: true },
-						],
-					}],
+					path: 'a',
+					name: 'a',
+					kind: 'directory',
+					staged: true,
+					hasUnstaged: false,
+					children: [
+						{
+							path: 'a/b',
+							name: 'b',
+							kind: 'directory',
+							staged: false,
+							hasUnstaged: true,
+							children: [
+								{
+									path: 'a/b/file.ts',
+									name: 'file.ts',
+									kind: 'file',
+									staged: true,
+									hasUnstaged: true,
+								},
+							],
+						},
+					],
 				},
 			] as any;
 
@@ -560,8 +688,11 @@ describe('GitWorkbenchStore', () => {
 	describe('review comments', () => {
 		it('adds, updates, and removes draft comments', () => {
 			wb.addDraftComment({
-				filePath: 'a.ts', side: 'after', line: 10,
-				body: 'Needs refactoring', severity: 'warning',
+				filePath: 'a.ts',
+				side: 'after',
+				line: 10,
+				body: 'Needs refactoring',
+				severity: 'warning',
 			});
 
 			expect(wb.reviewComments).toHaveLength(1);
@@ -576,9 +707,27 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('groups comments by file', () => {
-			wb.addDraftComment({ filePath: 'a.ts', side: 'after', line: 1, body: 'one', severity: 'note' });
-			wb.addDraftComment({ filePath: 'b.ts', side: 'after', line: 2, body: 'two', severity: 'note' });
-			wb.addDraftComment({ filePath: 'a.ts', side: 'before', line: 5, body: 'three', severity: 'blocker' });
+			wb.addDraftComment({
+				filePath: 'a.ts',
+				side: 'after',
+				line: 1,
+				body: 'one',
+				severity: 'note',
+			});
+			wb.addDraftComment({
+				filePath: 'b.ts',
+				side: 'after',
+				line: 2,
+				body: 'two',
+				severity: 'note',
+			});
+			wb.addDraftComment({
+				filePath: 'a.ts',
+				side: 'before',
+				line: 5,
+				body: 'three',
+				severity: 'blocker',
+			});
 
 			const grouped = wb.commentsByFile;
 			expect(Object.keys(grouped)).toEqual(['a.ts', 'b.ts']);
@@ -588,7 +737,13 @@ describe('GitWorkbenchStore', () => {
 
 		it('builds finalized review message', () => {
 			wb.reviewSummary = 'Overall good';
-			wb.addDraftComment({ filePath: 'a.ts', side: 'after', line: 10, body: 'Fix this', severity: 'warning' });
+			wb.addDraftComment({
+				filePath: 'a.ts',
+				side: 'after',
+				line: 10,
+				body: 'Fix this',
+				severity: 'warning',
+			});
 
 			const msg = wb.buildFinalizedReviewMessage();
 
@@ -599,7 +754,13 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('finalizeReviewToAgent calls send and clears on success', async () => {
-			wb.addDraftComment({ filePath: 'a.ts', side: 'after', line: 1, body: 'test', severity: 'note' });
+			wb.addDraftComment({
+				filePath: 'a.ts',
+				side: 'after',
+				line: 1,
+				body: 'test',
+				severity: 'note',
+			});
 			wb.reviewSummary = 'summary';
 			const send = vi.fn().mockResolvedValue(true);
 
@@ -633,7 +794,7 @@ describe('GitWorkbenchStore', () => {
 		it('persists to localStorage', () => {
 			const spy = vi.spyOn(localStorage, 'setItem');
 			wb.setTreePaneWidth(400);
-			expect(spy).toHaveBeenCalledWith('git.treePaneWidthPx', '400');
+			expect(spy).toHaveBeenCalledWith(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx, '400');
 		});
 
 		it('loads from localStorage', () => {
@@ -676,7 +837,14 @@ describe('GitWorkbenchStore', () => {
 			wb.tree = [
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
 				{ path: 'b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
-				{ path: 'c.ts', name: 'c.ts', kind: 'file', staged: false, hasUnstaged: false, changeKind: 'untracked' },
+				{
+					path: 'c.ts',
+					name: 'c.ts',
+					kind: 'file',
+					staged: false,
+					hasUnstaged: false,
+					changeKind: 'untracked',
+				},
 			] as any;
 
 			expect(wb.unstagedFileCount).toBe(2);
@@ -697,7 +865,11 @@ describe('GitWorkbenchStore', () => {
 		it('finds the first visible file for a selected directory in unstaged tab', () => {
 			wb.tree = [
 				{
-					path: 'src', name: 'src', kind: 'directory', staged: false, hasUnstaged: true,
+					path: 'src',
+					name: 'src',
+					kind: 'directory',
+					staged: false,
+					hasUnstaged: true,
 					children: [
 						{ path: 'src/a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
 						{ path: 'src/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
@@ -713,7 +885,11 @@ describe('GitWorkbenchStore', () => {
 		it('finds the first visible file for a selected directory in staged tab', () => {
 			wb.tree = [
 				{
-					path: 'src', name: 'src', kind: 'directory', staged: true, hasUnstaged: true,
+					path: 'src',
+					name: 'src',
+					kind: 'directory',
+					staged: true,
+					hasUnstaged: true,
 					children: [
 						{ path: 'src/a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
 						{ path: 'src/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
@@ -728,7 +904,11 @@ describe('GitWorkbenchStore', () => {
 		it('returns null when directory has no visible files for active tab', () => {
 			wb.tree = [
 				{
-					path: 'src', name: 'src', kind: 'directory', staged: false, hasUnstaged: false,
+					path: 'src',
+					name: 'src',
+					kind: 'directory',
+					staged: false,
+					hasUnstaged: false,
 					children: [
 						{ path: 'src/a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: false },
 					],
@@ -826,7 +1006,9 @@ describe('GitWorkbenchStore', () => {
 
 	describe('reset', () => {
 		it('clears all state including activeTab', () => {
-			wb.tree = [{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true }] as any;
+			wb.tree = [
+				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
+			] as any;
 			wb.selectedFile = 'a.ts';
 			wb.commitMessage = 'test';
 			wb.setActiveTab('staged');

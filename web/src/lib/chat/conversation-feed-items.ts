@@ -4,35 +4,35 @@ import {
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
 	ToolResultMessage,
-} from '$shared/chat-types'
-import type { ChatMessage } from '$shared/chat-types'
+} from '$shared/chat-types';
+import type { ChatMessage } from '$shared/chat-types';
 
 export interface PermissionTerminalState {
-	state: 'resolved' | 'cancelled'
-	allowed?: boolean
-	reason?: string
+	state: 'resolved' | 'cancelled';
+	allowed?: boolean;
+	reason?: string;
 }
 
 export type ConversationFeedRenderItem =
 	| {
-			kind: 'message'
-			id: string
-			message: ChatMessage
-			index: number
-			prevMessage: ChatMessage | null
+			kind: 'message';
+			id: string;
+			message: ChatMessage;
+			index: number;
+			prevMessage: ChatMessage | null;
 	  }
 	| {
-			kind: 'bash-group'
-			id: string
-			messages: BashToolUseMessage[]
-			index: number
-			prevMessage: ChatMessage | null
-	  }
+			kind: 'bash-group';
+			id: string;
+			messages: BashToolUseMessage[];
+			index: number;
+			prevMessage: ChatMessage | null;
+	  };
 
 export interface ConversationFeedRenderModel {
-	items: ConversationFeedRenderItem[]
-	toolResultIndex: Map<string, ToolResultMessage>
-	permissionTerminalById: Map<string, PermissionTerminalState>
+	items: ConversationFeedRenderItem[];
+	toolResultIndex: Map<string, ToolResultMessage>;
+	permissionTerminalById: Map<string, PermissionTerminalState>;
 }
 
 function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
@@ -40,23 +40,26 @@ function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
 		message instanceof ToolResultMessage ||
 		message instanceof PermissionResolvedMessage ||
 		message instanceof PermissionCancelledMessage ||
-		(message instanceof PermissionRequestMessage && message.requestedTool.type === 'exit-plan-mode-tool-use')
-	)
+		(message instanceof PermissionRequestMessage &&
+			message.requestedTool.type === 'exit-plan-mode-tool-use')
+	);
 }
 
 function bashGroupId(messages: BashToolUseMessage[]): string {
-	return `bash-group-${messages[0]?.toolId ?? 'empty'}`
+	return `bash-group-${messages[0]?.toolId ?? 'empty'}`;
 }
 
-export function buildConversationFeedRenderModel(messages: ChatMessage[]): ConversationFeedRenderModel {
-	const items: ConversationFeedRenderItem[] = []
-	const toolResultIndex = new Map<string, ToolResultMessage>()
-	const permissionTerminalById = new Map<string, PermissionTerminalState>()
-	let previousRenderable: ChatMessage | null = null
-	let index = 0
+export function buildConversationFeedRenderModel(
+	messages: ChatMessage[],
+): ConversationFeedRenderModel {
+	const items: ConversationFeedRenderItem[] = [];
+	const toolResultIndex = new Map<string, ToolResultMessage>();
+	const permissionTerminalById = new Map<string, PermissionTerminalState>();
+	let previousRenderable: ChatMessage | null = null;
+	let index = 0;
 
 	while (index < messages.length) {
-		const message = messages[index]
+		const message = messages[index];
 
 		if (message instanceof ToolResultMessage) {
 			toolResultIndex.set(message.toolId, message)
@@ -73,26 +76,26 @@ export function buildConversationFeedRenderModel(messages: ChatMessage[]): Conve
 		}
 
 		if (shouldSkipStandaloneMessage(message)) {
-			index += 1
-			continue
+			index += 1;
+			continue;
 		}
 
 		if (message instanceof BashToolUseMessage) {
-			const group: BashToolUseMessage[] = []
-			const prevMessage = previousRenderable
-			const firstIndex = index
+			const group: BashToolUseMessage[] = [];
+			const prevMessage = previousRenderable;
+			const firstIndex = index;
 
 			while (index < messages.length) {
-				const candidate = messages[index]
+				const candidate = messages[index];
 				if (candidate instanceof ToolResultMessage) {
-					toolResultIndex.set(candidate.toolId, candidate)
-					index += 1
-					continue
+					toolResultIndex.set(candidate.toolId, candidate);
+					index += 1;
+					continue;
 				}
-				if (!(candidate instanceof BashToolUseMessage)) break
-				group.push(candidate)
-				previousRenderable = candidate
-				index += 1
+				if (!(candidate instanceof BashToolUseMessage)) break;
+				group.push(candidate);
+				previousRenderable = candidate;
+				index += 1;
 			}
 
 			if (group.length > 1) {
@@ -102,7 +105,7 @@ export function buildConversationFeedRenderModel(messages: ChatMessage[]): Conve
 					messages: group,
 					index: firstIndex,
 					prevMessage,
-				})
+				});
 			} else {
 				items.push({
 					kind: 'message',
@@ -110,9 +113,9 @@ export function buildConversationFeedRenderModel(messages: ChatMessage[]): Conve
 					message: group[0],
 					index: firstIndex,
 					prevMessage,
-				})
+				});
 			}
-			continue
+			continue;
 		}
 
 		items.push({
@@ -121,14 +124,16 @@ export function buildConversationFeedRenderModel(messages: ChatMessage[]): Conve
 			message,
 			index,
 			prevMessage: previousRenderable,
-		})
-		previousRenderable = message
-		index += 1
+		});
+		previousRenderable = message;
+		index += 1;
 	}
 
-	return { items, toolResultIndex, permissionTerminalById }
+	return { items, toolResultIndex, permissionTerminalById };
 }
 
-export function buildConversationFeedRenderItems(messages: ChatMessage[]): ConversationFeedRenderItem[] {
-	return buildConversationFeedRenderModel(messages).items
+export function buildConversationFeedRenderItems(
+	messages: ChatMessage[],
+): ConversationFeedRenderItem[] {
+	return buildConversationFeedRenderModel(messages).items;
 }

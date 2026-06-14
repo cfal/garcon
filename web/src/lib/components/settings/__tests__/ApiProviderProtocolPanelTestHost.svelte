@@ -8,7 +8,7 @@
 		title,
 		description,
 		addLabel,
-		apiProviderCatalog = []
+		apiProviderCatalog = [],
 	}: {
 		protocol: ApiProtocol;
 		title: string;
@@ -34,7 +34,7 @@
 		},
 		refreshApiProviders() {
 			return Promise.resolve();
-		}
+		},
 	} as never);
 </script>
 

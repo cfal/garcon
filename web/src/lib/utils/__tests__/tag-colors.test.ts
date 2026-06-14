@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import { getTagColorVariant, getTagColorClasses, type TagColorVariant } from '../tag-colors';
 
-const VALID_VARIANTS: TagColorVariant[] = ['blue', 'green', 'amber', 'purple', 'rose', 'teal', 'indigo', 'orange'];
+const VALID_VARIANTS: TagColorVariant[] = [
+	'blue',
+	'green',
+	'amber',
+	'purple',
+	'rose',
+	'teal',
+	'indigo',
+	'orange',
+];
 
 describe('getTagColorVariant', () => {
 	it('returns the same variant for the same tag (deterministic)', () => {
@@ -12,7 +21,9 @@ describe('getTagColorVariant', () => {
 	});
 
 	it('can return different variants for different tags', () => {
-		const variants = new Set(['ops', 'bugs', 'deploy', 'infra', 'test', 'ci', 'docs', 'perf'].map(getTagColorVariant));
+		const variants = new Set(
+			['ops', 'bugs', 'deploy', 'infra', 'test', 'ci', 'docs', 'perf'].map(getTagColorVariant),
+		);
 		expect(variants.size).toBeGreaterThan(1);
 	});
 
@@ -26,7 +37,8 @@ describe('getTagColorClasses', () => {
 	it('returns a non-empty CSS class string', () => {
 		const classes = getTagColorClasses('ops');
 		expect(classes.length).toBeGreaterThan(0);
-		expect(classes).toContain('bg-');
-		expect(classes).toContain('text-');
+		expect(classes).toContain('bg-tag-');
+		expect(classes).toContain('text-tag-');
+		expect(classes).toContain('border-tag-');
 	});
 });

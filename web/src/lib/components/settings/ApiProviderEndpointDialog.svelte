@@ -18,7 +18,7 @@
 		protocol,
 		endpointId = null,
 		templateId = 'custom',
-		onOpenChange = () => undefined
+		onOpenChange = () => undefined,
 	} = $props<{
 		open?: boolean;
 		protocol: ApiProtocol;
@@ -33,7 +33,7 @@
 		getProtocol: () => protocol,
 		getEndpointId: () => endpointId,
 		getTemplateId: () => templateId,
-		onSaved: () => onOpenChange(false)
+		onSaved: () => onOpenChange(false),
 	});
 
 	$effect(() => {
@@ -57,7 +57,9 @@
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
-	<Dialog.Content class="flex h-dvh w-full max-w-full flex-col rounded-none border-0 p-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:max-w-3xl sm:rounded-lg sm:border">
+	<Dialog.Content
+		class="flex h-dvh w-full max-w-full flex-col rounded-none border-0 p-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:max-w-3xl sm:rounded-lg sm:border"
+	>
 		<Dialog.Header class="border-b border-border px-6 py-4">
 			<Dialog.Title>{dialog.title}</Dialog.Title>
 			<Dialog.Description>{dialog.description}</Dialog.Description>
@@ -71,17 +73,27 @@
 			}}
 		>
 			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-label">{m.settings_api_provider_dialog_display_name()}</label>
+				<label class="text-sm font-medium" for="api-provider-label"
+					>{m.settings_api_provider_dialog_display_name()}</label
+				>
 				<Input id="api-provider-label" bind:value={dialog.label} />
 			</div>
 
 			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-base-url">{m.settings_api_provider_dialog_base_url()}</label>
-				<Input id="api-provider-base-url" bind:value={dialog.baseUrl} placeholder={dialog.baseUrlPlaceholder} />
+				<label class="text-sm font-medium" for="api-provider-base-url"
+					>{m.settings_api_provider_dialog_base_url()}</label
+				>
+				<Input
+					id="api-provider-base-url"
+					bind:value={dialog.baseUrl}
+					placeholder={dialog.baseUrlPlaceholder}
+				/>
 			</div>
 
 			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-api-key">{m.settings_api_provider_dialog_api_key()}</label>
+				<label class="text-sm font-medium" for="api-provider-api-key"
+					>{m.settings_api_provider_dialog_api_key()}</label
+				>
 				<Input
 					id="api-provider-api-key"
 					type="password"
@@ -92,7 +104,9 @@
 			</div>
 
 			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-default-model">{m.settings_api_provider_dialog_default_model()}</label>
+				<label class="text-sm font-medium" for="api-provider-default-model"
+					>{m.settings_api_provider_dialog_default_model()}</label
+				>
 				<Select.Root
 					type="single"
 					value={dialog.defaultModel}
@@ -118,7 +132,9 @@
 
 			<div class="grid gap-2">
 				<div class="flex items-center justify-between gap-3">
-					<label class="text-sm font-medium" for="api-provider-models">{m.settings_api_provider_dialog_models()}</label>
+					<label class="text-sm font-medium" for="api-provider-models"
+						>{m.settings_api_provider_dialog_models()}</label
+					>
 					<Button
 						type="button"
 						variant="outline"
@@ -145,11 +161,15 @@
 			<div class="flex items-center justify-between rounded-lg border border-border p-3">
 				<div>
 					<div class="text-sm font-medium">{m.settings_api_provider_dialog_supports_images()}</div>
-					<div class="text-xs text-muted-foreground">{m.settings_api_provider_dialog_supports_images_description()}</div>
+					<div class="text-xs text-muted-foreground">
+						{m.settings_api_provider_dialog_supports_images_description()}
+					</div>
 				</div>
 				<Switch
 					checked={dialog.supportsImages}
-					onCheckedChange={(checked) => { dialog.supportsImages = Boolean(checked); }}
+					onCheckedChange={(checked) => {
+						dialog.supportsImages = Boolean(checked);
+					}}
 					aria-label={m.settings_api_provider_dialog_supports_images()}
 				/>
 			</div>
@@ -157,8 +177,12 @@
 			{#if dialog.usesOpenAiCapabilityToggles}
 				<label class="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
 					<div>
-						<div class="text-sm font-medium">{m.settings_api_provider_capability_chat_completions_label()}</div>
-						<div class="text-xs text-muted-foreground">{m.settings_api_provider_capability_chat_completions_description()}</div>
+						<div class="text-sm font-medium">
+							{m.settings_api_provider_capability_chat_completions_label()}
+						</div>
+						<div class="text-xs text-muted-foreground">
+							{m.settings_api_provider_capability_chat_completions_description()}
+						</div>
 					</div>
 					<Switch
 						checked={dialog.supportsChatCompletionsApi}
@@ -169,8 +193,12 @@
 
 				<label class="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
 					<div>
-						<div class="text-sm font-medium">{m.settings_api_provider_capability_responses_label()}</div>
-						<div class="text-xs text-muted-foreground">{m.settings_api_provider_capability_responses_description()}</div>
+						<div class="text-sm font-medium">
+							{m.settings_api_provider_capability_responses_label()}
+						</div>
+						<div class="text-xs text-muted-foreground">
+							{m.settings_api_provider_capability_responses_description()}
+						</div>
 					</div>
 					<Switch
 						checked={dialog.supportsResponsesApi}
@@ -181,24 +209,39 @@
 			{/if}
 
 			{#if dialog.error}
-				<div class="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+				<div
+					class="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+				>
 					{dialog.error}
 				</div>
 			{/if}
 
 			{#if dialog.testMessage}
-				<div class="rounded border border-status-success-border bg-status-success px-3 py-2 text-sm text-status-success-foreground">
+				<div
+					class="rounded border border-status-success-border bg-status-success px-3 py-2 text-sm text-status-success-foreground"
+				>
 					{dialog.testMessage}
 				</div>
 			{/if}
 
 			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={() => onOpenChange(false)}>{m.settings_api_provider_dialog_cancel()}</Button>
-				<Button type="button" variant="outline" onclick={() => dialog.test()} disabled={!dialog.canTest}>
-					{dialog.isTesting ? m.settings_api_provider_dialog_testing() : m.settings_api_provider_dialog_test()}
+				<Button type="button" variant="outline" onclick={() => onOpenChange(false)}
+					>{m.settings_api_provider_dialog_cancel()}</Button
+				>
+				<Button
+					type="button"
+					variant="outline"
+					onclick={() => dialog.test()}
+					disabled={!dialog.canTest}
+				>
+					{dialog.isTesting
+						? m.settings_api_provider_dialog_testing()
+						: m.settings_api_provider_dialog_test()}
 				</Button>
 				<Button type="submit" disabled={!dialog.canSave}>
-					{dialog.isSaving ? m.settings_api_provider_dialog_saving() : m.settings_api_provider_dialog_save()}
+					{dialog.isSaving
+						? m.settings_api_provider_dialog_saving()
+						: m.settings_api_provider_dialog_save()}
 				</Button>
 			</Dialog.Footer>
 		</form>
