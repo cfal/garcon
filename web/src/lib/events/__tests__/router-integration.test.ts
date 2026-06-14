@@ -192,6 +192,34 @@ describe('event router integration', () => {
 		expect(stores.chatState.clearPendingUserInput).toHaveBeenCalledWith('req-1');
 	});
 
+	it('routes pending input updates by nested input chat ID', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'pending-user-input-updated',
+					input: {
+						chatId: 'chat-a',
+						clientRequestId: 'req-1',
+						clientMessageId: 'message-1',
+						content: 'hello',
+						createdAt: '2026-06-14T00:00:00.000Z',
+						deliveryStatus: 'submitting',
+					},
+				},
+			],
+			stores,
+		);
+
+		expect(stores.chatState.upsertPendingUserInput).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-a',
+				clientRequestId: 'req-1',
+				clientMessageId: 'message-1',
+			}),
+		);
+	});
+
 	it('skips scoped lifecycle events for non-active chats', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
