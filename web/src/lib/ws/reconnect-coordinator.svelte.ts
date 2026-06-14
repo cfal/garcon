@@ -122,7 +122,7 @@ export class ChatReconnectCoordinator {
 	async #refreshQueue(chatId: string): Promise<void> {
 		try {
 			const result = await this.options.getQueue(chatId);
-			this.options.conversationUi.setMessageQueue(chatId, result.queue);
+			this.options.conversationUi.setMessageQueueFromRefresh(chatId, result.queue);
 		} catch {
 			// Later queue broadcasts will converge the visible queue state.
 		}

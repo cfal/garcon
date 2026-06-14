@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationUiStore } from '../conversation-ui.svelte';
-import type { PendingPermissionRequest } from '$lib/types/chat';
+import type { PendingPermissionRequest, QueueState } from '$lib/types/chat';
 
 function makePermissionRequest(id: string, chatId: string | null = null): PendingPermissionRequest {
 	return {
@@ -42,5 +42,24 @@ describe('ConversationUiStore', () => {
 		expect(store.getQueue('chat-a')).toEqual(queue);
 		expect(store.getQueue('chat-b')).toBeNull();
 		expect(store.queueChatIds).toEqual(['chat-a']);
+	});
+
+	it('does not let refresh responses overwrite same-version live queue state', () => {
+		const store = new ConversationUiStore();
+		const live: QueueState = {
+			entries: [{ id: 'entry-live', content: 'live', status: 'queued', createdAt: '2026-01-01T00:00:00.000Z' }],
+			paused: false,
+			version: 4,
+		};
+		const staleRefresh: QueueState = {
+			entries: [{ id: 'entry-refresh', content: 'stale', status: 'queued', createdAt: '2026-01-01T00:00:00.000Z' }],
+			paused: true,
+			version: 4,
+		};
+
+		store.setMessageQueue('chat-a', live);
+		store.setMessageQueueFromRefresh('chat-a', staleRefresh);
+
+		expect(store.getQueue('chat-a')).toEqual(live);
 	});
 });

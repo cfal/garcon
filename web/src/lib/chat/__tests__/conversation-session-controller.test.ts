@@ -140,6 +140,7 @@ function createDeps(chat = createRunningChat()) {
 			conversationUi.previousPermissionMode = mode;
 		}),
 		setMessageQueue: vi.fn(),
+		setMessageQueueFromRefresh: vi.fn(),
 	};
 	return {
 		deps: {

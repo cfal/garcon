@@ -91,6 +91,7 @@ function createReconnectDeps(options: {
 	} as unknown as ChatState;
 	const conversationUi = {
 		setMessageQueue: vi.fn(),
+		setMessageQueueFromRefresh: vi.fn(),
 	} as unknown as ConversationUiStore;
 
 	return {

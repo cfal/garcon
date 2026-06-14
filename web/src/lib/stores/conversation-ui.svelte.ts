@@ -55,6 +55,12 @@ export class ConversationUiStore {
 		this.queueByChatId = { ...this.queueByChatId, [chatId]: queue };
 	}
 
+	setMessageQueueFromRefresh(chatId: string, queue: QueueState | null): void {
+		const current = this.queueByChatId[chatId] ?? null;
+		if (current && queueVersion(queue) <= queueVersion(current)) return;
+		this.queueByChatId = { ...this.queueByChatId, [chatId]: queue };
+	}
+
 	pruneQueues(activeChatIds: Set<string>): void {
 		const staleIds = Object.keys(this.queueByChatId).filter((chatId) => !activeChatIds.has(chatId));
 		if (staleIds.length === 0) return;

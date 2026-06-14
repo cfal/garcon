@@ -236,7 +236,7 @@ export class ConversationSessionController {
 		getChatQueue(chatId)
 			.then((result) => {
 				if (deps.sessions.selectedChatId === chatId) {
-					deps.conversationUi.setMessageQueue(chatId, result.queue);
+					deps.conversationUi.setMessageQueueFromRefresh(chatId, result.queue);
 				}
 			})
 			.catch(() => {
