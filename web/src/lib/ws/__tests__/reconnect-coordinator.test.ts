@@ -166,6 +166,37 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.chatState.snapshotCache.markValidated).toHaveBeenCalledWith('chat-1');
 	});
 
+	it('falls back to selected snapshot when subscribe request fails', async () => {
+		const deps = createReconnectDeps();
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'chats-running-query') return runningResponse([]);
+				if (request.type === 'chat-subscribe') throw new Error('network down');
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			},
+		);
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.snapshotCache.markValidated).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.applyEvents).not.toHaveBeenCalled();
+	});
+
+	it('falls back to selected snapshot when subscribe response is malformed', async () => {
+		const deps = createReconnectDeps({
+			subscribeResponses: {
+				'chat-1': { type: 'chat-subscribed', chatId: 'chat-1', mode: 'delta' },
+			},
+		});
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.snapshotCache.markValidated).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.applyEvents).not.toHaveBeenCalled();
+	});
+
 	it('resumes a bounded set of background cached cursors', async () => {
 		const backgroundCursors = Array.from({ length: 25 }, (_, index) => ({
 			chatId: `chat-${index + 2}`,

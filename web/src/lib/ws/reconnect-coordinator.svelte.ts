@@ -135,19 +135,31 @@ export class ChatReconnectCoordinator {
 			if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
 
 			if (message.mode === 'snapshot-required') {
-				await this.options.chatState.loadMessages(chatId);
-				this.options.chatState.snapshotCache.markValidated(chatId);
+				await this.#loadSelectedSnapshot(chatId, epoch);
 				return;
 			}
 
 			const result = this.options.chatState.applyEvents(message.logId, message.events);
 			if (result === 'generation-changed') {
-				await this.options.chatState.loadMessages(chatId);
+				await this.#loadSelectedSnapshot(chatId, epoch);
+				return;
 			}
 			this.options.chatState.snapshotCache.markValidated(chatId);
 		} catch {
-			// The stale snapshot flag remains set so the next load revalidates.
+			if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
+			try {
+				await this.#loadSelectedSnapshot(chatId, epoch);
+			} catch {
+				// Leaves the stale snapshot flag set so the next load revalidates.
+			}
 		}
+	}
+
+	async #loadSelectedSnapshot(chatId: string, epoch: number): Promise<void> {
+		if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
+		await this.options.chatState.loadMessages(chatId);
+		if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
+		this.options.chatState.snapshotCache.markValidated(chatId);
 	}
 
 	async #resumeBackgroundChats(
