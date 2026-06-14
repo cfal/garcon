@@ -13,6 +13,7 @@
 		enableNativeDrag?: boolean;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
+		onReloadChat?: (chatId: string) => void;
 	}
 
 	let {
@@ -25,6 +26,7 @@
 		enableNativeDrag = true,
 		onTagClick,
 		onManageTags,
+		onReloadChat,
 	}: SidebarChatItemHostProps = $props();
 
 	setAppShell({
@@ -61,6 +63,7 @@
 	onToggleArchive={() => {}}
 	onShowDetails={() => {}}
 	onForkChat={() => {}}
+	{onReloadChat}
 	onShareChat={() => {}}
 	{onTagClick}
 	{onManageTags}

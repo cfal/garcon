@@ -14,6 +14,7 @@
 	import Info from '@lucide/svelte/icons/info';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Share2 from '@lucide/svelte/icons/share-2';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Tag from '@lucide/svelte/icons/tag';
 	import CheckSquare from '@lucide/svelte/icons/check-square';
 	import {
@@ -45,6 +46,7 @@
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
+		onReloadChat?: (chatId: string) => void;
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
@@ -73,6 +75,7 @@
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
+		onReloadChat,
 		onShareChat,
 		onTagClick,
 		onManageTags,
@@ -377,6 +380,17 @@
 						<Info />
 						{m.sidebar_chats_details()}
 					</DropdownMenuItem>
+					{#if isSelected && onReloadChat}
+						<DropdownMenuItem
+							disabled={isProcessing}
+							onclick={() => {
+								if (!isProcessing) onReloadChat?.(session.id);
+							}}
+						>
+							<RefreshCw />
+							{m.sidebar_chats_reload()}
+						</DropdownMenuItem>
+					{/if}
 					<DropdownMenuItem onclick={() => onShareChat(session.id, chatName)}>
 						<Share2 />
 						{m.share_button()}

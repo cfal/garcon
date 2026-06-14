@@ -50,6 +50,7 @@
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
+		onReloadChat?: (chatId: string) => void;
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
@@ -78,6 +79,7 @@
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
+		onReloadChat,
 		onShareChat,
 		onTagClick,
 		onManageTags,
@@ -779,6 +781,7 @@
 					{onToggleArchive}
 					{onShowDetails}
 					{onForkChat}
+					{onReloadChat}
 					{onShareChat}
 					{onTagClick}
 					{onManageTags}

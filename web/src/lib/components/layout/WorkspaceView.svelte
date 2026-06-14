@@ -34,6 +34,7 @@
 		onMenuClick?: () => void;
 		isDesktopFullscreen?: boolean;
 		onToggleDesktopFullscreen?: () => void;
+		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 	}
 
 	let {
@@ -42,6 +43,7 @@
 		onMenuClick,
 		isDesktopFullscreen = false,
 		onToggleDesktopFullscreen,
+		onRegisterReload,
 	}: MainContentProps = $props();
 
 	const sessions = getChatSessions();
@@ -344,6 +346,7 @@
 						>
 							<ConversationWorkspace
 								onRegisterSubmit={handleRegisterSubmit}
+								{onRegisterReload}
 								reserveTopFloatingToolbar={showFloatingDesktopTabs}
 							/>
 						</div>
@@ -407,6 +410,7 @@
 				>
 					<ConversationWorkspace
 						onRegisterSubmit={handleRegisterSubmit}
+						{onRegisterReload}
 						reserveTopFloatingToolbar={showFloatingDesktopTabs}
 					/>
 					{#if splitDrop.workspaceDragOver}

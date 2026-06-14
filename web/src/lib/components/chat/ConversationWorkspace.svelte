@@ -13,6 +13,7 @@
 	import { ComposerState } from '$lib/chat/composer.svelte';
 	import { AgentState } from '$lib/chat/agent-state.svelte';
 	import { getChatQueue } from '$lib/api/chats.js';
+	import { reloadChatFromNative } from '$lib/chat/reload-chat';
 	import { StartupCoordinator } from '$lib/chat/startup-coordinator.js';
 	import { createDrainCursor } from '$lib/ws/drain';
 	import { ChatReconnectCoordinator } from '$lib/ws/reconnect-coordinator.svelte';
@@ -41,11 +42,15 @@
 
 	interface ConversationWorkspaceProps {
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
+		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		reserveTopFloatingToolbar?: boolean;
 	}
 
-	let { onRegisterSubmit, reserveTopFloatingToolbar = false }: ConversationWorkspaceProps =
-		$props();
+	let {
+		onRegisterSubmit,
+		onRegisterReload,
+		reserveTopFloatingToolbar = false,
+	}: ConversationWorkspaceProps = $props();
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
@@ -146,6 +151,7 @@
 	// Expose the submit function to sibling components (runs once on mount).
 	onMount(() => {
 		onRegisterSubmit?.(submitToActiveChat);
+		onRegisterReload?.(reloadSelectedChat);
 	});
 
 	// Chat switch effect (dedup handled inside the controller).
@@ -235,6 +241,13 @@
 		} catch {
 			return false;
 		}
+	}
+
+	async function reloadSelectedChat(chatId: string): Promise<void> {
+		if (!chatId || chatId !== sessions.selectedChatId) {
+			throw new Error(m.sidebar_chats_reload_failed());
+		}
+		await reloadChatFromNative(ws, chatState, chatId);
 	}
 
 	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
