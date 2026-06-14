@@ -13,6 +13,10 @@ export interface QueuePruningOptions {
 	getActiveChatIds: () => Set<string>;
 }
 
+function queueVersion(queue: QueueState | null): number {
+	return queue?.version ?? -1;
+}
+
 export class ConversationUiStore {
 	pendingPermissionRequests = $state<PendingPermissionRequest[]>([]);
 	pendingViewChat = $state<PendingViewChat | null>(null);
@@ -46,6 +50,8 @@ export class ConversationUiStore {
 	}
 
 	setMessageQueue(chatId: string, queue: QueueState | null): void {
+		const current = this.queueByChatId[chatId] ?? null;
+		if (queueVersion(queue) < queueVersion(current)) return;
 		this.queueByChatId = { ...this.queueByChatId, [chatId]: queue };
 	}
 

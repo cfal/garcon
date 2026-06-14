@@ -6,6 +6,7 @@ import {
 	ToolResultMessage,
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
+import type { ChatMessageRow } from './state.svelte';
 
 export interface PermissionTerminalState {
 	state: 'resolved' | 'cancelled';
@@ -35,8 +36,6 @@ export interface ConversationFeedRenderModel {
 	permissionTerminalById: Map<string, PermissionTerminalState>;
 }
 
-export type ConversationFeedMessageIdAllocator = (message: ChatMessage) => string;
-
 function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
 	return (
 		message instanceof ToolResultMessage ||
@@ -47,21 +46,12 @@ function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
 	);
 }
 
-function bashGroupId(messages: BashToolUseMessage[]): string {
-	return `bash-group-${messages[0]?.toolId ?? 'empty'}`;
-}
-
-export function getConversationFeedRenderItemKey(
-	item: ConversationFeedRenderItem,
-	getMessageId: ConversationFeedMessageIdAllocator,
-): string {
-	if (item.kind === 'message') return getMessageId(item.message);
-	const firstMessage = item.messages[0];
-	return firstMessage ? `bash-group-${getMessageId(firstMessage)}` : item.id;
+function bashGroupId(rows: ChatMessageRow[]): string {
+	return `bash-group-${rows[0]?.id ?? 'empty'}`;
 }
 
 export function buildConversationFeedRenderModel(
-	messages: ChatMessage[],
+	rows: ChatMessageRow[],
 ): ConversationFeedRenderModel {
 	const items: ConversationFeedRenderItem[] = [];
 	const toolResultIndex = new Map<string, ToolResultMessage>();
@@ -69,8 +59,9 @@ export function buildConversationFeedRenderModel(
 	let previousRenderable: ChatMessage | null = null;
 	let index = 0;
 
-	while (index < messages.length) {
-		const message = messages[index];
+	while (index < rows.length) {
+		const row = rows[index];
+		const message = row.message;
 
 		if (message instanceof ToolResultMessage) {
 			toolResultIndex.set(message.toolId, message);
@@ -92,18 +83,21 @@ export function buildConversationFeedRenderModel(
 		}
 
 		if (message instanceof BashToolUseMessage) {
+			const groupRows: ChatMessageRow[] = [];
 			const group: BashToolUseMessage[] = [];
 			const prevMessage = previousRenderable;
 			const firstIndex = index;
 
-			while (index < messages.length) {
-				const candidate = messages[index];
+			while (index < rows.length) {
+				const candidateRow = rows[index];
+				const candidate = candidateRow.message;
 				if (candidate instanceof ToolResultMessage) {
 					toolResultIndex.set(candidate.toolId, candidate);
 					index += 1;
 					continue;
 				}
 				if (!(candidate instanceof BashToolUseMessage)) break;
+				groupRows.push(candidateRow);
 				group.push(candidate);
 				previousRenderable = candidate;
 				index += 1;
@@ -112,7 +106,7 @@ export function buildConversationFeedRenderModel(
 			if (group.length > 1) {
 				items.push({
 					kind: 'bash-group',
-					id: bashGroupId(group),
+					id: bashGroupId(groupRows),
 					messages: group,
 					index: firstIndex,
 					prevMessage,
@@ -120,7 +114,7 @@ export function buildConversationFeedRenderModel(
 			} else {
 				items.push({
 					kind: 'message',
-					id: group[0].toolId,
+					id: groupRows[0].id,
 					message: group[0],
 					index: firstIndex,
 					prevMessage,
@@ -131,7 +125,7 @@ export function buildConversationFeedRenderModel(
 
 		items.push({
 			kind: 'message',
-			id: `${message.type}-${index}`,
+			id: row.id,
 			message,
 			index,
 			prevMessage: previousRenderable,
@@ -144,7 +138,7 @@ export function buildConversationFeedRenderModel(
 }
 
 export function buildConversationFeedRenderItems(
-	messages: ChatMessage[],
+	rows: ChatMessageRow[],
 ): ConversationFeedRenderItem[] {
-	return buildConversationFeedRenderModel(messages).items;
+	return buildConversationFeedRenderModel(rows).items;
 }

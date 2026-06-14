@@ -9,7 +9,7 @@ import {
 } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 import type { ChatRestoreResult } from '../state.svelte';
-import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
+import { AssistantMessage, ErrorMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
 
@@ -81,19 +81,19 @@ function createDeps(chat = createRunningChat()) {
 			}),
 			restoreMessages: vi.fn<() => ChatRestoreResult | null>(() => null),
 		loadMessages: vi.fn(() => new Promise<never>(() => {})),
-		setMessages: vi.fn((messages: ChatMessage[]) => {
-			chatState.chatMessages = messages;
-		}),
 		setPendingUserInputs: vi.fn((inputs: PendingUserInput[]) => {
 			chatState.pendingUserInputs = inputs;
-		}),
-		appendMessages: vi.fn((messages: ChatMessage[]) => {
-			chatState.chatMessages = [...chatState.chatMessages, ...messages];
 		}),
 		appendErrorMessage: vi.fn((content: string) => {
 			chatState.chatMessages = [
 				...chatState.chatMessages,
 				new ErrorMessage(new Date().toISOString(), content),
+			];
+		}),
+		appendLocalAssistantMessage: vi.fn((content: string) => {
+			chatState.chatMessages = [
+				...chatState.chatMessages,
+				new AssistantMessage(new Date().toISOString(), content),
 			];
 		}),
 		upsertPendingUserInput: vi.fn((input: PendingUserInput) => {
@@ -107,7 +107,10 @@ function createDeps(chat = createRunningChat()) {
 			chatState.pendingUserInputs = [...chatState.pendingUserInputs, input];
 		}),
 		updatePendingUserInputDeliveryStatus: vi.fn(
-			(clientRequestId: string, deliveryStatus: 'submitting' | 'accepted' | 'failed') => {
+			(
+				clientRequestId: string,
+				deliveryStatus: 'submitting' | 'accepted' | 'delivered' | 'failed',
+			) => {
 				chatState.pendingUserInputs = chatState.pendingUserInputs.map((input) =>
 					input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
 				);
@@ -302,33 +305,6 @@ describe('ConversationSessionController', () => {
 		controller.handleChatSwitch('chat-1');
 
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', { minimumLimit: 75 });
-	});
-
-	it('merges loaded Cursor user echoes with local pending messages by request identity', async () => {
-		const { deps } = createDeps();
-		deps.chatState.chatMessages = [
-			new UserMessage('2026-05-14T00:00:00.000Z', 'hello', undefined, {
-				messageId: 'msg-1',
-				clientRequestId: 'req-1',
-				deliveryStatus: 'accepted',
-			}),
-		];
-		deps.chatState.loadMessages = vi.fn().mockResolvedValue([
-			new UserMessage('2026-05-14T00:00:01.000Z', 'hello', undefined, {
-				clientRequestId: 'req-1',
-				upstreamRequestId: 'cursor-req-1',
-			}),
-			new AssistantMessage('2026-05-14T00:00:02.000Z', 'hi'),
-		]);
-		const controller = new ConversationSessionController(deps as never);
-
-		await controller.loadChat('chat-1');
-
-		expect(deps.chatState.setMessages).toHaveBeenCalledTimes(1);
-		const merged = vi.mocked(deps.chatState.setMessages).mock.calls[0][0] as ChatMessage[];
-		expect(merged.filter((message) => message.type === 'user-message')).toHaveLength(1);
-		expect((merged[0] as UserMessage).metadata?.upstreamRequestId).toBe('cursor-req-1');
-		expect(merged.map((message) => message.type)).toEqual(['user-message', 'assistant-message']);
 	});
 
 	it('submits /fork with a message as a fork-run request after appending the status message', async () => {
@@ -562,7 +538,6 @@ describe('ConversationSessionController', () => {
 
 		await controller.loadChat('chat-1');
 
-		expect(deps.chatState.setMessages).toHaveBeenCalledWith([loaded[0]]);
 		expect(deps.chatState.pendingUserInputs).toEqual([pending]);
 	});
 });

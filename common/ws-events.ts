@@ -4,8 +4,8 @@
 // Top-level server->client messages.
 // Each interface matches exactly the object literal the server constructs.
 
-import type { ChatMessage } from './chat-types';
-import { parseChatMessages } from './chat-types';
+import type { ChatMessageEvent } from './chat-events';
+import { parseChatMessageEvents } from './chat-events';
 import type { PendingUserInput, PendingUserInputClearReason } from './pending-user-input';
 import { normalizePendingUserInput } from './pending-user-input';
 import type { QueueState } from './queue-state';
@@ -13,14 +13,40 @@ import { normalizeQueueState } from './queue-state';
 import type { RemoteSettingsSnapshot } from './settings';
 import { normalizeRemoteSettingsSnapshot } from './settings';
 
-export class AgentRunOutputMessage {
-  readonly type = 'agent-run-output' as const;
+export class ChatEventsMessage {
+  readonly type = 'chat-events' as const;
   constructor(
     public chatId: string,
-    public messages: ChatMessage[],
+    public logId: string,
+    public events: ChatMessageEvent[],
     public turnId?: string,
     public clientRequestId?: string,
     public upstreamRequestId?: string,
+  ) { }
+}
+
+export type ChatSubscribeMode = 'delta' | 'snapshot-required';
+
+export class ChatSubscribedMessage {
+  readonly type = 'chat-subscribed' as const;
+  constructor(
+    public clientRequestId: string,
+    public chatId: string,
+    public logId: string,
+    public mode: ChatSubscribeMode,
+    public events: ChatMessageEvent[],
+    public lastAppendSeq: number,
+  ) { }
+}
+
+export class ChatGenerationResetMessage {
+  readonly type = 'chat-generation-reset' as const;
+  constructor(
+    public chatId: string,
+    public logId: string,
+    public events: ChatMessageEvent[],
+    public lastAppendSeq: number,
+    public localNotice?: string,
   ) { }
 }
 
@@ -156,11 +182,12 @@ export class ChatLogResponseMessage {
   constructor(
     public clientRequestId: string,
     public chatId: string,
-    public messages: ChatMessage[],
+    public logId: string,
+    public events: ChatMessageEvent[],
     public pendingUserInputs: PendingUserInput[],
-    public total: number,
+    public lastAppendSeq: number,
+    public pageOldestSeq: number,
     public hasMore: boolean,
-    public offset: number,
     public limit: number,
   ) { }
 }
@@ -169,6 +196,7 @@ export type ClientRequestErrorCode =
   | 'MISSING_CHAT_ID'
   | 'REQUEST_VALIDATION_FAILED'
   | 'SESSION_NOT_FOUND'
+  | 'CHAT_RUNNING'
   | 'NATIVE_PATH_UNRESOLVED'
   | 'HISTORY_LOAD_FAILED'
   | 'REQUEST_TIMEOUT'
@@ -188,7 +216,9 @@ export class ClientRequestErrorMessage {
 
 // Discriminated union of all server->client WS messages
 export type ServerWsMessage =
-  | AgentRunOutputMessage
+  | ChatEventsMessage
+  | ChatSubscribedMessage
+  | ChatGenerationResetMessage
   | AgentRunFinishedMessage
   | AgentRunFailedMessage
   | ChatSessionCreatedMessage
@@ -233,15 +263,50 @@ function parseChatListInvalidationReason(v: unknown): ChatListInvalidationReason
 // Returns null for unrecognized message types.
 export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMessage | null {
   switch (data.type) {
-    case 'agent-run-output': {
+    case 'chat-events': {
       const chatId = requiredStr(data.chatId);
-      if (!chatId) return null;
-      return new AgentRunOutputMessage(
+      const logId = requiredStr(data.logId);
+      if (!chatId || !logId) return null;
+      const events = parseChatMessageEvents(data.events);
+      if (events === null) return null;
+      return new ChatEventsMessage(
         chatId,
-        parseChatMessages(data.messages),
+        logId,
+        events,
         typeof data.turnId === 'string' ? data.turnId : undefined,
         typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
         typeof data.upstreamRequestId === 'string' ? data.upstreamRequestId : undefined,
+      );
+    }
+    case 'chat-subscribed': {
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const chatId = requiredStr(data.chatId);
+      const logId = requiredStr(data.logId);
+      const mode = data.mode === 'delta' || data.mode === 'snapshot-required' ? data.mode : null;
+      if (!clientRequestId || !chatId || !logId || !mode) return null;
+      const events = parseChatMessageEvents(data.events);
+      if (events === null) return null;
+      return new ChatSubscribedMessage(
+        clientRequestId,
+        chatId,
+        logId,
+        mode,
+        events,
+        Number(data.lastAppendSeq) || 0,
+      );
+    }
+    case 'chat-generation-reset': {
+      const chatId = requiredStr(data.chatId);
+      const logId = requiredStr(data.logId);
+      if (!chatId || !logId) return null;
+      const events = parseChatMessageEvents(data.events);
+      if (events === null) return null;
+      return new ChatGenerationResetMessage(
+        chatId,
+        logId,
+        events,
+        Number(data.lastAppendSeq) || 0,
+        typeof data.localNotice === 'string' ? data.localNotice : undefined,
       );
     }
     case 'agent-run-finished': {
@@ -346,15 +411,25 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
     case 'chat-log-response': {
       const clientRequestId = requiredStr(data.clientRequestId);
       const chatId = requiredStr(data.chatId);
-      if (!clientRequestId || !chatId) return null;
+      const logId = requiredStr(data.logId);
+      if (!clientRequestId || !chatId || !logId) return null;
+      const events = parseChatMessageEvents(data.events);
+      if (events === null) return null;
       const pendingUserInputs = Array.isArray(data.pendingUserInputs)
         ? data.pendingUserInputs
           .map(normalizePendingUserInput)
           .filter((input): input is PendingUserInput => Boolean(input))
         : [];
       return new ChatLogResponseMessage(
-        clientRequestId, chatId, parseChatMessages(data.messages), pendingUserInputs,
-        Number(data.total), Boolean(data.hasMore), Number(data.offset), Number(data.limit),
+        clientRequestId,
+        chatId,
+        logId,
+        events,
+        pendingUserInputs,
+        Number(data.lastAppendSeq) || 0,
+        Number(data.pageOldestSeq) || 0,
+        Boolean(data.hasMore),
+        Number(data.limit),
       );
     }
     case 'client-request-error': {

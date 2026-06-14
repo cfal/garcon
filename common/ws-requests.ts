@@ -193,7 +193,7 @@ export class ChatLogQueryRequest {
     public clientRequestId: string | null,
     public chatId: string | null,
     public limit?: number,
-    public offset?: number,
+    public beforeSeq?: number,
   ) { }
 
   static fromJson(data: Record<string, unknown>): ChatLogQueryRequest {
@@ -201,8 +201,45 @@ export class ChatLogQueryRequest {
       strOrNull(data.clientRequestId),
       strOrNull(data.chatId),
       data.limit as number | undefined,
-      data.offset as number | undefined,
+      data.beforeSeq as number | undefined,
     );
+  }
+}
+
+export class ChatSubscribeRequest {
+  readonly type = 'chat-subscribe' as const;
+  constructor(
+    public clientRequestId: string | null,
+    public chatId: string | null,
+    public logId: string,
+    public afterAppendSeq: number,
+  ) { }
+
+  static fromJson(data: Record<string, unknown>): ChatSubscribeRequest {
+    const afterAppendSeq = typeof data.afterAppendSeq === 'number'
+      && Number.isInteger(data.afterAppendSeq)
+      && data.afterAppendSeq >= 0
+      ? data.afterAppendSeq
+      : 0;
+    const logId = typeof data.logId === 'string' ? data.logId : '';
+    return new ChatSubscribeRequest(
+      strOrNull(data.clientRequestId),
+      strOrNull(data.chatId),
+      logId,
+      afterAppendSeq,
+    );
+  }
+}
+
+export class ChatReloadRequest {
+  readonly type = 'chat-reload' as const;
+  constructor(
+    public clientRequestId: string | null,
+    public chatId: string | null,
+  ) { }
+
+  static fromJson(data: Record<string, unknown>): ChatReloadRequest {
+    return new ChatReloadRequest(strOrNull(data.clientRequestId), strOrNull(data.chatId));
   }
 }
 
@@ -358,6 +395,8 @@ export type ClientWsMessage =
   | AgentStopRequest
   | ChatRunningQueryRequest
   | ChatLogQueryRequest
+  | ChatSubscribeRequest
+  | ChatReloadRequest
   | PermissionDecisionRequest
   | PermissionModeSetRequest
   | ThinkingModeSetRequest
@@ -383,6 +422,10 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
       return ChatRunningQueryRequest.fromJson();
     case 'chat-log-query':
       return ChatLogQueryRequest.fromJson(data);
+    case 'chat-subscribe':
+      return ChatSubscribeRequest.fromJson(data);
+    case 'chat-reload':
+      return ChatReloadRequest.fromJson(data);
     case 'permission-decision':
       return PermissionDecisionRequest.fromJson(data);
     case 'permission-mode-set':

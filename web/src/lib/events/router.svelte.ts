@@ -6,7 +6,8 @@ import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { ServerWsMessage, EventKey } from '$shared/ws-events';
 import {
-	AgentRunOutputMessage,
+	ChatEventsMessage,
+	ChatGenerationResetMessage,
 	AgentRunFinishedMessage,
 	AgentRunFailedMessage,
 	ChatSessionCreatedMessage,
@@ -24,6 +25,7 @@ import {
 	ChatReadUpdatedV1Message,
 	ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
+import type { ChatMessageEvent } from '$shared/chat-events';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
@@ -79,13 +81,25 @@ export interface EventRouterSessionsStore {
 }
 
 export interface EventRouterChatStateStore {
-	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
-	appendChatMessagesByIdentity: (messages: ChatMessage[]) => void;
+	applyChatEvents: (
+		chatId: string,
+		logId: string,
+		events: ChatMessageEvent[],
+	) => 'applied' | 'generation-changed';
+	replaceChatGeneration: (
+		chatId: string,
+		logId: string,
+		events: ChatMessageEvent[],
+		options: { lastAppendSeq: number; localNotice?: string },
+	) => void;
+	reloadChatSnapshot: (chatId: string) => void;
+	appendErrorMessage: (content: string) => void;
+	appendLocalAssistantMessage: (content: string) => void;
 	upsertPendingUserInput: (input: PendingUserInput) => void;
 	clearPendingUserInput: (clientRequestId: string) => void;
 	updatePendingUserInputDeliveryStatus: (
 		clientRequestId: string,
-		deliveryStatus: 'submitting' | 'accepted' | 'failed',
+		deliveryStatus: 'submitting' | 'accepted' | 'delivered' | 'failed',
 	) => void;
 	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
 	removeChatSnapshot?: (chatId: string) => void;
@@ -158,22 +172,35 @@ export function selectPreviewFromBatch(
 	return null;
 }
 
-// Coalesces output chunks from one drain pass into one message-array write.
-export function createAgentOutputAccumulator(
-	chatState: Pick<EventRouterChatStateStore, 'appendChatMessagesByIdentity'>,
+export function createChatEventsAccumulator(
+	chatState: Pick<EventRouterChatStateStore, 'applyChatEvents' | 'reloadChatSnapshot'>,
 ) {
-	let pendingMessages: ChatMessage[] = [];
+	let pendingEvents: ChatMessageEvent[] = [];
+	let pendingLogId = '';
+	let pendingChatId = '';
 
 	return {
-		enqueue(msg: AgentRunOutputMessage) {
-			if (msg.messages.length === 0) return;
-			pendingMessages.push(...msg.messages);
+		enqueue(msg: ChatEventsMessage) {
+			if (msg.events.length === 0) return;
+			if (pendingEvents.length > 0 && msg.logId !== pendingLogId) {
+				this.flush();
+			}
+			pendingLogId = msg.logId;
+			pendingChatId = msg.chatId;
+			pendingEvents.push(...msg.events);
 		},
 		flush() {
-			if (pendingMessages.length === 0) return;
-			const messages = pendingMessages;
-			pendingMessages = [];
-			chatState.appendChatMessagesByIdentity(messages);
+			if (pendingEvents.length === 0) return;
+			const events = pendingEvents;
+			const logId = pendingLogId;
+			const chatId = pendingChatId;
+			pendingEvents = [];
+			pendingLogId = '';
+			pendingChatId = '';
+			const result = chatState.applyChatEvents(chatId, logId, events);
+			if (result === 'generation-changed') {
+				chatState.reloadChatSnapshot(chatId);
+			}
 		},
 	};
 }
@@ -214,7 +241,7 @@ function createHelpers(stores: EventRouterStores) {
 // Builds the dispatch table mapping EventKey to handler functions.
 function buildDispatch(
 	stores: EventRouterStores,
-	outputAccumulator: ReturnType<typeof createAgentOutputAccumulator>,
+	eventsAccumulator: ReturnType<typeof createChatEventsAccumulator>,
 ): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
 	const { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted } =
 		createHelpers(stores);
@@ -232,7 +259,7 @@ function buildDispatch(
 	const lifecycleCtx: LifecycleContext = {
 		getCurrentChatId: stores.lifecycle.currentChatId,
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
-		setChatMessages: stores.chatState.setChatMessages,
+		appendErrorMessage: stores.chatState.appendErrorMessage,
 		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
 		conversationUi: stores.conversationUi,
 		clearLoadingIndicators,
@@ -247,8 +274,8 @@ function buildDispatch(
 		getSelectedChat: stores.sessions.selectedChat,
 		getCurrentChatId: stores.lifecycle.currentChatId,
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
-		setChatMessages: stores.chatState.setChatMessages,
-		loadMessages: stores.chatState.loadMessages,
+		appendErrorMessage: stores.chatState.appendErrorMessage,
+		appendLocalAssistantMessage: stores.chatState.appendLocalAssistantMessage,
 		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
 		conversationUi: stores.conversationUi,
 		activateLoadingFor,
@@ -304,26 +331,34 @@ function buildDispatch(
 	};
 
 	return {
-		'agent-run-output': (msg) => {
-			if (!(msg instanceof AgentRunOutputMessage)) return;
+		'chat-events': (msg) => {
+			if (!(msg instanceof ChatEventsMessage)) return;
 			activateLoadingFor(msg.chatId);
 			stores.lifecycle.setCanAbort(true);
 			onChatProcessing(msg.chatId);
 			markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
-			outputAccumulator.enqueue(msg);
-			handlePlanModeMessages(msg, planModeCtx);
-			handlePermissionLifecycleFromBatch(msg, permLifecycleCtx);
+			eventsAccumulator.enqueue(msg);
+			const batch = messagesOf(msg);
+			handlePlanModeMessages(batch, planModeCtx);
+			handlePermissionLifecycleFromBatch(batch, permLifecycleCtx);
+		},
+		'chat-generation-reset': (msg) => {
+			if (!(msg instanceof ChatGenerationResetMessage)) return;
+			stores.chatState.replaceChatGeneration(msg.chatId, msg.logId, msg.events, {
+				lastAppendSeq: msg.lastAppendSeq,
+				localNotice: msg.localNotice,
+			});
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
-				outputAccumulator.flush();
+				eventsAccumulator.flush();
 				markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
 				handleAgentComplete(msg, lifecycleCtx);
 			}
 		},
 		'agent-run-failed': (msg) => {
 			if (msg instanceof AgentRunFailedMessage) {
-				outputAccumulator.flush();
+				eventsAccumulator.flush();
 				markPendingUserInputDelivery(msg.clientRequestId, stores, 'failed');
 				handleAgentError(msg, lifecycleCtx);
 			}
@@ -342,7 +377,7 @@ function buildDispatch(
 		},
 		'chat-session-stopped': (msg) => {
 			if (msg instanceof ChatSessionStoppedMessage) {
-				outputAccumulator.flush();
+				eventsAccumulator.flush();
 				handleChatAborted(msg, chatEventCtx);
 			}
 		},
@@ -371,29 +406,15 @@ function buildDispatch(
 		},
 		'pending-user-input-cleared': (msg) => {
 			if (!(msg instanceof PendingUserInputClearedMessage)) return;
-			outputAccumulator.flush();
-			if (msg.reason !== 'persisted') {
-				stores.chatState.clearPendingUserInput(msg.clientRequestId);
-				return;
-			}
-			void stores.chatState
-				.loadMessages(msg.chatId)
-				.then((messages) => {
-					if (stores.lifecycle.currentChatId() && stores.lifecycle.currentChatId() !== msg.chatId)
-						return;
-					stores.chatState.setChatMessages(messages);
-					stores.chatState.clearPendingUserInput(msg.clientRequestId);
-				})
-				.catch(() => {
-					// The local pending overlay remains visible until the next successful reload.
-				});
+			eventsAccumulator.flush();
+			stores.chatState.clearPendingUserInput(msg.clientRequestId);
 		},
 		'chat-sessions-running': (msg) => {
 			if (msg instanceof ChatSessionsRunningMessage) handleRunningChats(msg, runningCtx);
 		},
 		'ws-fault': (msg) => {
 			if (msg instanceof WsFaultMessage) {
-				outputAccumulator.flush();
+				eventsAccumulator.flush();
 				handleWsError(msg, chatEventCtx);
 			}
 		},
@@ -422,8 +443,8 @@ export function createEventRouter(
 	drainHandle: DrainHandle,
 	stores: EventRouterStores,
 ): void {
-	const outputAccumulator = createAgentOutputAccumulator(stores.chatState);
-	const dispatch = buildDispatch(stores, outputAccumulator);
+	const eventsAccumulator = createChatEventsAccumulator(stores.chatState);
+	const dispatch = buildDispatch(stores, eventsAccumulator);
 
 	$effect(() => {
 		// Sole tracked dependency: re-run whenever a new WS message arrives.
@@ -446,10 +467,13 @@ export function createEventRouter(
 
 				// Pre-filter: patch sidebar preview for any chat so background
 				// chats update even when the filter skips full dispatch.
-				if (event.message instanceof AgentRunOutputMessage) {
+				if (
+					event.message instanceof ChatEventsMessage ||
+					event.message instanceof ChatGenerationResetMessage
+				) {
 					const agentMsg = event.message;
-					if (agentMsg.chatId && agentMsg.messages.length > 0) {
-						const preview = selectPreviewFromBatch(agentMsg.messages);
+					if (agentMsg.chatId && agentMsg.events.length > 0) {
+						const preview = selectPreviewFromBatch(agentMsg.events.map((entry) => entry.message));
 						if (preview) {
 							stores.sessions.patchChatPreview(
 								agentMsg.chatId,
@@ -478,9 +502,16 @@ export function createEventRouter(
 				if (handler) handler(event.message);
 			}
 
-			outputAccumulator.flush();
+			eventsAccumulator.flush();
 		});
 	});
 }
 
 export { extractFirstLine as _extractFirstLine };
+
+function messagesOf(msg: ChatEventsMessage): { chatId: string; messages: ChatMessage[] } {
+	return {
+		chatId: msg.chatId,
+		messages: msg.events.map((event) => event.message),
+	};
+}

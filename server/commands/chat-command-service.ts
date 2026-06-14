@@ -61,7 +61,7 @@ interface MetadataDep {
   getChatMetadata(chatId: string): { firstMessage?: string | null } | null;
 }
 
-type PendingInputsDep = Pick<PendingUserInputServiceContract, 'register' | 'clearChat'>;
+type PendingInputsDep = Pick<PendingUserInputServiceContract, 'clearChat'>;
 
 type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
@@ -337,16 +337,15 @@ export class ChatCommandService {
       claudeThinkingMode,
       ampAgentMode,
     });
-    await this.deps.settings.ensureInNormal(chatId);
-    await this.deps.pendingInputs.register(chatId, command, {
-      clientRequestId,
-      clientMessageId,
-      turnId,
-      images: images.length > 0 ? images : undefined,
-      deliveryStatus: 'accepted',
-    });
-
     try {
+      await this.deps.settings.ensureInNormal(chatId);
+      await this.deps.queue.registerPendingUserInput(chatId, command, {
+        clientRequestId,
+        clientMessageId,
+        turnId,
+        images: images.length > 0 ? images : undefined,
+        deliveryStatus: 'accepted',
+      });
       await this.deps.ledger.update(ledger.record.key, { status: 'scheduled', turnId });
       await this.deps.agents.startSession(chatId, command, {
         ...(input.requestOptions ?? {}),

@@ -7,7 +7,7 @@ export interface ChatImage {
   name: string;
 }
 
-export type UserMessageDeliveryStatus = 'submitting' | 'accepted' | 'failed';
+export type UserMessageDeliveryStatus = 'submitting' | 'accepted' | 'delivered' | 'failed';
 
 export interface ChatMessageMetadata {
   messageId?: string;
@@ -509,6 +509,7 @@ function parseChatMessageMetadata(v: unknown): ChatMessageMetadata | undefined {
   if (
     raw.deliveryStatus === 'submitting' ||
     raw.deliveryStatus === 'accepted' ||
+    raw.deliveryStatus === 'delivered' ||
     raw.deliveryStatus === 'failed'
   ) {
     metadata.deliveryStatus = raw.deliveryStatus;

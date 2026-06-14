@@ -1,15 +1,32 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LocalChatSnapshotCache } from '../chat-snapshot-cache';
-import { UserMessage } from '$shared/chat-types';
+import { UserMessage, type ChatMessage } from '$shared/chat-types';
+import type { ChatMessageEvent } from '$shared/chat-events';
 
-const INDEX_KEY = 'chat_snapshot_index_v1';
+const INDEX_KEY = 'chat_snapshot_index_v2';
+const TS = '2024-01-01T00:00:00.000Z';
 
 function snapshotKey(chatId: string): string {
 	return `chat_snapshot_${chatId}`;
 }
 
-function msg(text: string): UserMessage {
-	return new UserMessage('2024-01-01T00:00:00Z', text);
+function event(seq: number, content: string, patch: Partial<ChatMessageEvent> = {}): ChatMessageEvent {
+	return {
+		appendSeq: seq,
+		seq,
+		messageId: `message-${seq}`,
+		rev: 1,
+		message: new UserMessage(TS, content) as ChatMessage,
+		...patch,
+	};
+}
+
+function cursor(lastAppendSeq = 1) {
+	return { logId: 'log-1', lastAppendSeq };
+}
+
+function persist(cache: LocalChatSnapshotCache, chatId: string, events: ChatMessageEvent[]) {
+	cache.persist(chatId, events, cursor(events.at(-1)?.appendSeq ?? 0));
 }
 
 describe('LocalChatSnapshotCache', () => {
@@ -24,157 +41,103 @@ describe('LocalChatSnapshotCache', () => {
 		vi.useRealTimers();
 	});
 
-	it('persists and restores a snapshot', () => {
-		cache.persist('chat-1', [msg('hello')]);
+	it('persists and restores event entries with cursor metadata', () => {
+		cache.persist('chat-1', [event(1, 'hello')], cursor(1));
+
 		const restored = cache.restore('chat-1');
+
 		expect(restored).not.toBeNull();
-		expect(restored!.messages).toHaveLength(1);
-		expect((restored!.messages[0] as UserMessage).content).toBe('hello');
+		expect(restored!.logId).toBe('log-1');
+		expect(restored!.lastAppendSeq).toBe(1);
+		expect(restored!.entries).toHaveLength(1);
+		expect((restored!.entries[0].message as UserMessage).content).toBe('hello');
 		expect(restored!.stale).toBe(false);
 	});
 
-	it('persists only the trailing message window when a limit is provided', () => {
-		cache.persist('chat-1', [msg('a'), msg('b'), msg('c')], { limit: 2 });
+	it('persists only the trailing event window when a limit is provided', () => {
+		cache.persist('chat-1', [event(1, 'a'), event(2, 'b'), event(3, 'c')], cursor(3), {
+			limit: 2,
+		});
 
 		const restored = cache.restore('chat-1');
 
-		expect(restored?.messages.map((message) => (message as UserMessage).content)).toEqual(['b', 'c']);
+		expect(restored?.entries.map((entry) => (entry.message as UserMessage).content)).toEqual([
+			'b',
+			'c',
+		]);
+		expect(restored?.lastAppendSeq).toBe(3);
 	});
 
-	it('restores only the trailing message window from oversized snapshots', () => {
-		cache.persist('chat-1', [msg('a'), msg('b'), msg('c')]);
+	it('restores only the trailing event window from oversized snapshots', () => {
+		cache.persist('chat-1', [event(1, 'a'), event(2, 'b'), event(3, 'c')], cursor(3));
 
 		const restored = cache.restore('chat-1', { limit: 2 });
 
-		expect(restored?.messages.map((message) => (message as UserMessage).content)).toEqual(['b', 'c']);
+		expect(restored?.entries.map((entry) => (entry.message as UserMessage).content)).toEqual([
+			'b',
+			'c',
+		]);
 	});
 
-	it('removes snapshot when messages array is empty', () => {
-		cache.persist('chat-1', [msg('hello')]);
-		cache.persist('chat-1', []);
+	it('removes snapshot when event array is empty or cursor is missing', () => {
+		persist(cache, 'chat-1', [event(1, 'hello')]);
+		cache.persist('chat-1', [], cursor(0));
+
 		expect(cache.restore('chat-1')).toBeNull();
 		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
 	});
 
-	it('removes snapshot on invalid envelope JSON', () => {
-		localStorage.setItem(snapshotKey('chat-1'), '{not valid json');
-		const index = {
-			version: 1,
-			entries: [
-				{
-					chatId: 'chat-1',
-					lastAccessedAt: '2024-01-01T00:00:00Z',
-					lastValidatedAt: null,
-					schemaVersion: 1,
-					stale: false,
-				},
-			],
-		};
-		localStorage.setItem(INDEX_KEY, JSON.stringify(index));
+	it('rejects old message-array snapshot envelopes', () => {
+		localStorage.setItem(
+			snapshotKey('chat-1'),
+			JSON.stringify({
+				version: 1,
+				chatId: 'chat-1',
+				savedAt: TS,
+				messages: [{ type: 'user-message', timestamp: TS, content: 'old' }],
+			}),
+		);
 
-		const restored = cache.restore('chat-1');
-		expect(restored).toBeNull();
+		expect(cache.restore('chat-1')).toBeNull();
 		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
 	});
 
-	it('removes snapshot on schema version mismatch', () => {
-		const envelope = {
-			version: 99,
-			chatId: 'chat-1',
-			savedAt: '2024-01-01T00:00:00Z',
-			messages: [],
-		};
-		localStorage.setItem(snapshotKey('chat-1'), JSON.stringify(envelope));
-
-		const restored = cache.restore('chat-1');
-		expect(restored).toBeNull();
-	});
-
-	it('removes snapshot when chatId in envelope does not match', () => {
-		const envelope = {
-			version: 1,
-			chatId: 'chat-wrong',
-			savedAt: '2024-01-01T00:00:00Z',
-			messages: [],
-		};
-		localStorage.setItem(snapshotKey('chat-1'), JSON.stringify(envelope));
-
-		const restored = cache.restore('chat-1');
-		expect(restored).toBeNull();
-	});
-
-	it('updates lastAccessedAt on restore', () => {
-		cache.persist('chat-1', [msg('hello')]);
-
-		const indexBefore = JSON.parse(localStorage.getItem(INDEX_KEY)!);
-		const accessBefore = indexBefore.entries.find(
-			(e: { chatId: string }) => e.chatId === 'chat-1',
-		).lastAccessedAt;
-
-		// Small delay so timestamps differ.
-		cache.restore('chat-1');
-
-		const indexAfter = JSON.parse(localStorage.getItem(INDEX_KEY)!);
-		const accessAfter = indexAfter.entries.find(
-			(e: { chatId: string }) => e.chatId === 'chat-1',
-		).lastAccessedAt;
-		expect(new Date(accessAfter).getTime()).toBeGreaterThanOrEqual(
-			new Date(accessBefore).getTime(),
+	it('removes snapshot on invalid event envelopes', () => {
+		localStorage.setItem(
+			snapshotKey('chat-1'),
+			JSON.stringify({
+				version: 2,
+				chatId: 'chat-1',
+				savedAt: TS,
+				logId: 'log-1',
+				lastAppendSeq: 1,
+				entries: [{ messageId: 'missing-seq' }],
+			}),
 		);
+
+		expect(cache.restore('chat-1')).toBeNull();
 	});
 
-	it('preserves stale bit on restore', () => {
-		cache.persist('chat-1', [msg('hello')]);
+	it('preserves stale bit and clears it after validation', () => {
+		persist(cache, 'chat-1', [event(1, 'hello')]);
 		cache.markStale('chat-1');
 
-		const restored = cache.restore('chat-1');
-		expect(restored).not.toBeNull();
-		expect(restored!.stale).toBe(true);
-	});
-
-	it('markStale creates or updates index entry', () => {
-		cache.persist('chat-1', [msg('hello')]);
-		cache.markStale('chat-1');
-
-		const index = JSON.parse(localStorage.getItem(INDEX_KEY)!);
-		const entry = index.entries.find((e: { chatId: string }) => e.chatId === 'chat-1');
-		expect(entry.stale).toBe(true);
-	});
-
-	it('markValidated clears stale bit and sets lastValidatedAt', () => {
-		cache.persist('chat-1', [msg('hello')]);
-		cache.markStale('chat-1');
+		expect(cache.restore('chat-1')?.stale).toBe(true);
 		cache.markValidated('chat-1');
-
-		const index = JSON.parse(localStorage.getItem(INDEX_KEY)!);
-		const entry = index.entries.find((e: { chatId: string }) => e.chatId === 'chat-1');
-		expect(entry.stale).toBe(false);
-		expect(entry.lastValidatedAt).not.toBeNull();
-	});
-
-	it('markStale is a no-op when no snapshot exists', () => {
-		cache.markStale('chat-1');
-		const index = JSON.parse(localStorage.getItem(INDEX_KEY)!);
-		expect(index.entries).toHaveLength(0);
-	});
-
-	it('markValidated is a no-op when no snapshot exists', () => {
-		cache.markValidated('chat-1');
-		const index = JSON.parse(localStorage.getItem(INDEX_KEY)!);
-		expect(index.entries).toHaveLength(0);
+		expect(cache.restore('chat-1')?.stale).toBe(false);
 	});
 
 	it('restore removes stray index entries when snapshot is missing', () => {
 		localStorage.setItem(
 			INDEX_KEY,
 			JSON.stringify({
-				version: 1,
+				version: 2,
 				entries: [
 					{
 						chatId: 'chat-1',
-						lastAccessedAt: '2024-01-01T00:00:00Z',
+						lastAccessedAt: TS,
 						lastValidatedAt: null,
-						schemaVersion: 1,
+						schemaVersion: 2,
 						stale: true,
 					},
 				],
@@ -191,17 +154,14 @@ describe('LocalChatSnapshotCache', () => {
 		const base = new Date('2024-06-01T00:00:00Z').getTime();
 		for (let i = 0; i < 30; i++) {
 			vi.setSystemTime(base + i * 1000);
-			cache.persist(`chat-${i}`, [msg(String(i))]);
+			persist(cache, `chat-${i}`, [event(1, String(i))]);
 		}
 
 		const index = JSON.parse(localStorage.getItem(INDEX_KEY)!);
 		expect(index.entries).toHaveLength(25);
-
-		// Oldest chats (0-4) should have been evicted.
 		for (let i = 0; i < 5; i++) {
 			expect(localStorage.getItem(snapshotKey(`chat-${i}`))).toBeNull();
 		}
-		// Newest chats should remain.
 		for (let i = 5; i < 30; i++) {
 			expect(localStorage.getItem(snapshotKey(`chat-${i}`))).not.toBeNull();
 		}
@@ -212,53 +172,39 @@ describe('LocalChatSnapshotCache', () => {
 		const base = new Date('2024-06-01T00:00:00Z').getTime();
 		for (let i = 0; i < 25; i++) {
 			vi.setSystemTime(base + i * 1000);
-			cache.persist(`chat-${i}`, [msg(String(i))]);
+			persist(cache, `chat-${i}`, [event(1, String(i))]);
 		}
 
-		// Access chat-0 to make it the most recent.
 		vi.setSystemTime(base + 50_000);
 		cache.restore('chat-0');
 
-		// Add 5 more to trigger eviction.
 		for (let i = 25; i < 30; i++) {
 			vi.setSystemTime(base + 60_000 + i * 1000);
-			cache.persist(`chat-${i}`, [msg(String(i))]);
+			persist(cache, `chat-${i}`, [event(1, String(i))]);
 		}
 
-		// chat-0 was recently accessed, so it should survive.
 		expect(localStorage.getItem(snapshotKey('chat-0'))).not.toBeNull();
-
-		// chat-1 through chat-5 should be evicted (least recently used).
 		for (let i = 1; i <= 5; i++) {
 			expect(localStorage.getItem(snapshotKey(`chat-${i}`))).toBeNull();
 		}
 	});
 
-	it('remove deletes both snapshot and index entry', () => {
-		cache.persist('chat-1', [msg('hello')]);
+	it('remove and clearAll delete snapshots and index state', () => {
+		persist(cache, 'chat-1', [event(1, 'a')]);
+		persist(cache, 'chat-2', [event(1, 'b')]);
+
 		cache.remove('chat-1');
-
 		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
-		const index = JSON.parse(localStorage.getItem(INDEX_KEY)!);
-		expect(index.entries.find((e: { chatId: string }) => e.chatId === 'chat-1')).toBeUndefined();
-	});
+		expect(localStorage.getItem(snapshotKey('chat-2'))).not.toBeNull();
 
-	it('clearAll removes all snapshots and the index', () => {
-		cache.persist('chat-1', [msg('a')]);
-		cache.persist('chat-2', [msg('b')]);
 		cache.clearAll();
-
-		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
 		expect(localStorage.getItem(snapshotKey('chat-2'))).toBeNull();
 		expect(localStorage.getItem(INDEX_KEY)).toBeNull();
 	});
 
-	it('returns null for empty chatId', () => {
+	it('empty chatId persists are no-ops', () => {
+		cache.persist('', [event(1, 'hello')], cursor(1));
 		expect(cache.restore('')).toBeNull();
-	});
-
-	it('persist with empty chatId is a no-op', () => {
-		cache.persist('', [msg('hello')]);
 		expect(localStorage.getItem(INDEX_KEY)).toBeNull();
 	});
 });

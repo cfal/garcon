@@ -51,15 +51,37 @@ const mockQueue = {
   resumeChatQueue: mock(() => Promise.resolve({ entries: [], paused: false })),
 };
 
-const mockHistoryCache = {
-  appendMessages: mock(() => Promise.resolve(undefined)),
-  ensureLoaded: mock(() => Promise.resolve([])),
-  getPaginatedMessages: mock((chatId, limit, offset) => ({
-    messages: [{ type: 'user-message', content: 'hello', timestamp: '2024-01-01T00:00:00Z' }],
-    total: 1,
+const chatEvent = {
+  appendSeq: 1,
+  seq: 1,
+  messageId: 'message-1',
+  rev: 1,
+  message: { type: 'user-message', content: 'hello', timestamp: '2024-01-01T00:00:00Z' },
+};
+
+const mockChatEvents = {
+  readPage: mock((_chatId, limit, beforeSeq) => Promise.resolve({
+    events: [chatEvent],
+    logId: 'log-1',
+    lastAppendSeq: 1,
+    pageOldestSeq: beforeSeq ?? 1,
     hasMore: false,
-    offset: offset || 0,
     limit: limit || 20,
+  })),
+  readReplay: mock((_chatId, _logId, _afterAppendSeq) => Promise.resolve({
+    logId: 'log-1',
+    mode: 'delta',
+    events: [chatEvent],
+    lastAppendSeq: 1,
+  })),
+};
+
+const mockNativeReloader = {
+  ensureColdLoaded: mock(() => Promise.resolve(undefined)),
+  reloadFromNative: mock(() => Promise.resolve({
+    logId: 'log-2',
+    events: [chatEvent],
+    lastAppendSeq: 1,
   })),
 };
 
@@ -111,8 +133,8 @@ const injectedMocks = [
   mockQueue.runAcceptedTurn, mockQueue.abort, mockQueue.triggerDrain,
   mockQueue.readChatQueue, mockQueue.enqueueChat, mockQueue.dequeueChat,
   mockQueue.clearChatQueue, mockQueue.pauseChatQueue, mockQueue.resumeChatQueue,
-  mockHistoryCache.appendMessages, mockHistoryCache.ensureLoaded,
-  mockHistoryCache.getPaginatedMessages,
+  mockChatEvents.readPage, mockChatEvents.readReplay,
+  mockNativeReloader.ensureColdLoaded, mockNativeReloader.reloadFromNative,
   mockPendingInputs.register, mockPendingInputs.reconcile,
   mockPendingInputs.listForChat, mockPendingInputs.clearChat,
   mockSettings.getUiSettings, mockSettings.getChatName,
@@ -129,7 +151,8 @@ const moduleMocks = [sendWebSocketJson];
 const chatHandlerInstance = new ChatHandler({
   agents: mockAgents,
   queue: mockQueue,
-  historyCache: mockHistoryCache,
+  chatEvents: mockChatEvents,
+  nativeReloader: mockNativeReloader,
   registry: mockRegistry,
   pendingInputs: mockPendingInputs,
   commands: new ChatCommandService({
@@ -730,7 +753,7 @@ describe('chat WebSocket handler', () => {
       });
     });
 
-    it('returns messages for a valid chat', async () => {
+    it('returns event page for a valid chat', async () => {
       mockRegistry.getChat.mockReturnValue({
         agentId: 'claude',
         nativePath: '/tmp/session.jsonl',
@@ -742,15 +765,17 @@ describe('chat WebSocket handler', () => {
         clientRequestId: 'req-msg-2',
       });
       expect(mockPendingInputs.reconcile).toHaveBeenCalledWith('123');
-      expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 20, 0);
+      expect(mockChatEvents.readPage).toHaveBeenCalledWith('123', 20, undefined);
       const payload = lastSentPayload();
       expect(payload).toMatchObject({
         type: 'chat-log-response',
         clientRequestId: 'req-msg-2',
         chatId: '123',
+        logId: 'log-1',
         pendingUserInputs: [],
+        lastAppendSeq: 1,
       });
-      expect(payload.messages.length).toBe(1);
+      expect(payload.events.length).toBe(1);
     });
 
     it('sends error for missing chatId', async () => {
@@ -763,7 +788,7 @@ describe('chat WebSocket handler', () => {
       expect(payload.error).toContain('Missing chatId');
     });
 
-    it('respects limit and offset params', async () => {
+    it('respects limit and beforeSeq params', async () => {
       mockRegistry.getChat.mockReturnValue({
         agentId: 'claude',
         nativePath: '/tmp/session.jsonl',
@@ -774,13 +799,13 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
         clientRequestId: 'req-msg-4',
         limit: 50,
-        offset: 10,
+        beforeSeq: 10,
       });
       expect(mockPendingInputs.reconcile).toHaveBeenCalledWith('123');
-      expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 50, 10);
+      expect(mockChatEvents.readPage).toHaveBeenCalledWith('123', 50, 10);
     });
 
-    it('clamps invalid pagination params', async () => {
+    it('clamps invalid limit params', async () => {
       mockRegistry.getChat.mockReturnValue({
         agentId: 'claude',
         nativePath: '/tmp/session.jsonl',
@@ -791,9 +816,8 @@ describe('chat WebSocket handler', () => {
         chatId: '123',
         clientRequestId: 'req-msg-4b',
         limit: '999999',
-        offset: -10,
       });
-      expect(mockHistoryCache.getPaginatedMessages).toHaveBeenCalledWith('123', 200, 0);
+      expect(mockChatEvents.readPage).toHaveBeenCalledWith('123', 200, undefined);
     });
 
     it('includes clientRequestId in response', async () => {
@@ -824,6 +848,72 @@ describe('chat WebSocket handler', () => {
       });
       // No response sent because clientRequestId is missing
       expect(sendWebSocketJson).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('chat-subscribe', () => {
+    it('replays event deltas for the requested cursor', async () => {
+      mockRegistry.getChat.mockReturnValue({
+        agentId: 'claude',
+        nativePath: '/tmp/test.jsonl',
+        agentSessionId: 'x',
+      });
+      await chatHandler.message(ws, {
+        type: 'chat-subscribe',
+        chatId: '123',
+        clientRequestId: 'req-sub-1',
+        logId: 'log-1',
+        afterAppendSeq: 1,
+      });
+
+      expect(mockNativeReloader.ensureColdLoaded).toHaveBeenCalledWith('123');
+      expect(mockChatEvents.readReplay).toHaveBeenCalledWith('123', 'log-1', 1);
+      expect(lastSentPayload()).toMatchObject({
+        type: 'chat-subscribed',
+        clientRequestId: 'req-sub-1',
+        chatId: '123',
+        logId: 'log-1',
+        mode: 'delta',
+        lastAppendSeq: 1,
+      });
+    });
+
+    it('returns client-request-error for unknown chatId', async () => {
+      mockRegistry.getChat.mockReturnValue(null);
+      await chatHandler.message(ws, {
+        type: 'chat-subscribe',
+        chatId: 'missing',
+        clientRequestId: 'req-sub-2',
+      });
+
+      expect(lastSentPayload()).toMatchObject({
+        type: 'client-request-error',
+        clientRequestId: 'req-sub-2',
+        code: 'SESSION_NOT_FOUND',
+      });
+    });
+  });
+
+  describe('chat-reload', () => {
+    it('reloads from native and sends a generation reset', async () => {
+      mockRegistry.getChat.mockReturnValue({
+        agentId: 'claude',
+        nativePath: '/tmp/test.jsonl',
+        agentSessionId: 'x',
+      });
+      await chatHandler.message(ws, {
+        type: 'chat-reload',
+        chatId: '123',
+        clientRequestId: 'req-reload-1',
+      });
+
+      expect(mockNativeReloader.reloadFromNative).toHaveBeenCalledWith('123', 'manual-reload');
+      expect(lastSentPayload()).toMatchObject({
+        type: 'chat-generation-reset',
+        chatId: '123',
+        logId: 'log-2',
+        lastAppendSeq: 1,
+      });
     });
   });
 

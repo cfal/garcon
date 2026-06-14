@@ -1,9 +1,13 @@
-// Per-chat message state: message arrays, pagination, scroll management,
-// and message persistence via LocalChatSnapshotCache.
+// Per-chat event-log state: event entries, cursor pagination, pending
+// overlays, and resumable local snapshots.
 
-import { ErrorMessage, parseChatMessages, UserMessage, type ChatMessage } from '$shared/chat-types';
+import {
+	applyChatMessageEvents,
+	buildEventIndex,
+	type ChatMessageEvent,
+} from '$shared/chat-events';
+import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
-import { ChatMessageIdentityIndex } from '$shared/chat-message-identity';
 import { LocalChatSnapshotCache } from './chat-snapshot-cache';
 import { getChatMessages } from '$lib/api/chats.js';
 
@@ -21,128 +25,253 @@ export interface ChatRestoreResult {
 	stale: boolean;
 }
 
+export interface ChatCursor {
+	logId: string;
+	lastAppendSeq: number;
+}
+
+export interface ChatMessageRow {
+	id: string;
+	message: ChatMessage;
+}
+
+function localMessageId(): string {
+	return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+		? crypto.randomUUID()
+		: Math.random().toString(36).slice(2);
+}
+
 export class ChatState {
 	readonly snapshotCache = new LocalChatSnapshotCache();
-	chatMessages = $state<ChatMessage[]>([]);
+	entries = $state<ChatMessageEvent[]>([]);
+	logId = $state('');
+	lastAppendSeq = $state(0);
+	oldestSeq = $state(0);
 	pendingUserInputs = $state<PendingUserInput[]>([]);
+	localMessages = $state<Array<{ id: string; message: ChatMessage }>>([]);
 	visibleMessageCount = $state(INITIAL_VISIBLE_MESSAGES);
 	isLoadingMessages = $state(false);
 	isLoadingMoreMessages = $state(false);
-	totalMessages = $state(0);
 	hasMoreMessages = $state(false);
+	totalMessages = $state(0);
 	isUserScrolledUp = $state(false);
 	loadStatus = $state<ChatLoadStatus>('idle');
 	loadError = $state<string | null>(null);
-	#messageIdentityIndex = new ChatMessageIdentityIndex();
+	#eventIndex = new Map<string, number>();
+	#snapshotBuffer: Array<{ logId: string; events: ChatMessageEvent[] }> | null = null;
+	#loadEpoch = 0;
+	#isLoadingMore = false;
 
-	#displayMessages = $derived.by(() => {
-		if (this.pendingUserInputs.length === 0) return this.chatMessages;
-		return mergeMessagesWithPendingInputs(this.chatMessages, this.pendingUserInputs);
-	});
-
-	#displayMessageCount = $derived.by(() => this.#displayMessages.length);
-
-	#visibleMessages = $derived.by(() => {
-		if (this.#displayMessages.length <= this.visibleMessageCount) {
-			return this.#displayMessages;
+	#echoedClientRequestIds = $derived.by(() => {
+		const ids = new Set<string>();
+		for (const entry of this.entries) {
+			const message = entry.message;
+			if (message instanceof UserMessage && message.metadata?.clientRequestId) {
+				ids.add(message.metadata.clientRequestId);
+			}
 		}
-		return this.#displayMessages.slice(-this.visibleMessageCount);
+		return ids;
 	});
+
+	#displayRows = $derived.by(() => {
+		const durableRows = this.entries.map((entry) => ({
+			id: entry.messageId,
+			message: entry.message,
+		}));
+		const merged = this.visiblePendingInputs.length === 0
+			? durableRows
+			: mergeRowsWithPendingInputs(durableRows, this.visiblePendingInputs);
+		if (this.localMessages.length === 0) return merged;
+		return [...merged, ...this.localMessages];
+	});
+
+	#displayMessages = $derived.by(() => this.#displayRows.map((row) => row.message));
+
+	#displayMessageCount = $derived.by(() => this.#displayRows.length);
+
+	#visibleRows = $derived.by(() => {
+		if (this.#displayRows.length <= this.visibleMessageCount) {
+			return this.#displayRows;
+		}
+		return this.#displayRows.slice(-this.visibleMessageCount);
+	});
+
+	#visibleMessages = $derived.by(() => this.#visibleRows.map((row) => row.message));
+
+	get chatMessages(): ChatMessage[] {
+		return this.entries.map((entry) => entry.message);
+	}
 
 	get displayMessages(): ChatMessage[] {
 		return this.#displayMessages;
+	}
+
+	get visibleRows(): ChatMessageRow[] {
+		return this.#visibleRows;
 	}
 
 	get displayMessageCount(): number {
 		return this.#displayMessageCount;
 	}
 
-	// Visible slice of messages, capped by visibleMessageCount.
 	get visibleMessages(): ChatMessage[] {
 		return this.#visibleMessages;
 	}
 
-	// Tracks offset for paginated fetches from the server.
-	#messagesOffset = 0;
+	get visiblePendingInputs(): PendingUserInput[] {
+		return this.pendingUserInputs.filter(
+			(input) => !this.#echoedClientRequestIds.has(input.clientRequestId),
+		);
+	}
 
-	// Guards against concurrent loadMore calls.
-	#isLoadingMore = false;
+	getCursor(): ChatCursor {
+		return { logId: this.logId, lastAppendSeq: this.lastAppendSeq };
+	}
 
-	// Generation counter to avoid stale initial-load completions clearing
-	// the loading state from a newer load.
-	#loadGeneration = 0;
+	applyEvents(logId: string, events: ChatMessageEvent[]): 'applied' | 'generation-changed' {
+		if (this.#snapshotBuffer) {
+			this.#snapshotBuffer.push({ logId, events });
+			return 'applied';
+		}
+		if (this.logId && logId !== this.logId) {
+			this.entries = [];
+			this.lastAppendSeq = 0;
+			this.oldestSeq = 0;
+			this.#eventIndex = new Map();
+			this.logId = logId;
+			return 'generation-changed';
+		}
+		this.logId = logId;
+		const result = applyChatMessageEvents(
+			this.entries,
+			events,
+			this.lastAppendSeq,
+			this.#eventIndex,
+		);
+		if (result.changed) this.entries = result.entries;
+		this.lastAppendSeq = result.lastAppendSeq;
+		this.totalMessages = this.entries.length;
+		if (this.oldestSeq === 0 && this.entries.length > 0) {
+			this.oldestSeq = this.entries[0].seq;
+		}
+		if (this.entries.length > 0 && this.loadStatus !== 'error') {
+			this.loadStatus = 'loaded';
+		}
+		return 'applied';
+	}
 
-	/** Loads messages for a chat through the REST history endpoint. */
-	async loadMessages(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<ChatMessage[]> {
-		if (!chatId) return [];
-		const limit = Math.max(MESSAGES_PER_PAGE, Math.floor(options.minimumLimit ?? MESSAGES_PER_PAGE));
-
-		const generation = ++this.#loadGeneration;
+	beginSnapshotLoad(): number {
+		const epoch = ++this.#loadEpoch;
+		this.#snapshotBuffer = [];
 		this.isLoadingMessages = true;
 		this.loadStatus = 'loading';
 		this.loadError = null;
-		this.#messagesOffset = 0;
+		return epoch;
+	}
 
-		try {
-			const data = await getChatMessages({ chatId, limit, offset: 0 });
-			const messages = parseChatMessages(data.messages);
-			const pendingUserInputs = Array.isArray(data.pendingUserInputs)
-				? data.pendingUserInputs
-						.map(normalizePendingUserInput)
-						.filter((input): input is PendingUserInput => Boolean(input))
-				: [];
+	abortSnapshotLoad(epoch: number): void {
+		if (epoch !== this.#loadEpoch) return;
+		this.#snapshotBuffer = null;
+		this.isLoadingMessages = false;
+	}
 
-			if (data.hasMore !== undefined) {
-				this.hasMoreMessages = Boolean(data.hasMore);
-				this.totalMessages = Number(data.total || 0);
-			} else {
-				this.hasMoreMessages = false;
-				this.totalMessages = messages.length;
+	replaceGeneration(
+		logId: string,
+		events: ChatMessageEvent[],
+		options: { lastAppendSeq: number; localNotice?: string },
+	): void {
+		this.#loadEpoch += 1;
+		this.#snapshotBuffer = null;
+		this.logId = logId;
+		this.entries = events;
+		this.lastAppendSeq = options.lastAppendSeq;
+		this.oldestSeq = events.length > 0 ? events[0].seq : 0;
+		this.hasMoreMessages = false;
+		this.totalMessages = events.length;
+		this.localMessages = options.localNotice
+			? [{ id: `local_${localMessageId()}`, message: new ErrorMessage(new Date().toISOString(), options.localNotice) }]
+			: [];
+		this.#eventIndex = buildEventIndex(events);
+		this.loadStatus = events.length === 0 ? 'empty' : 'loaded';
+		this.isLoadingMessages = false;
+	}
+
+	setFromPage(page: {
+		logId: string;
+		events: ChatMessageEvent[];
+		lastAppendSeq: number;
+		pageOldestSeq: number;
+		hasMore: boolean;
+	}, epoch: number): 'applied' | 'generation-changed' | 'stale' {
+		if (epoch !== this.#loadEpoch) return 'stale';
+		const buffered = this.#snapshotBuffer ?? [];
+		this.#snapshotBuffer = null;
+		this.logId = page.logId;
+		this.entries = page.events;
+		this.lastAppendSeq = page.lastAppendSeq;
+		this.oldestSeq = page.pageOldestSeq;
+		this.hasMoreMessages = page.hasMore;
+		this.totalMessages = page.events.length;
+		this.loadStatus = page.events.length === 0 ? 'empty' : 'loaded';
+		this.loadError = null;
+		this.isLoadingMessages = false;
+		this.#eventIndex = buildEventIndex(page.events);
+		for (const batch of buffered) {
+			if (this.applyEvents(batch.logId, batch.events) === 'generation-changed') {
+				return 'generation-changed';
 			}
+		}
+		return 'applied';
+	}
 
-			this.#messagesOffset = messages.length;
-			this.pendingUserInputs = sortPendingInputs(pendingUserInputs);
-			this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
-			return messages;
+	async loadMessages(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<ChatMessage[]> {
+		if (!chatId) return [];
+		const limit = Math.max(MESSAGES_PER_PAGE, Math.floor(options.minimumLimit ?? MESSAGES_PER_PAGE));
+		const epoch = this.beginSnapshotLoad();
+		try {
+			const page = await getChatMessages({ chatId, limit });
+			this.pendingUserInputs = sortPendingInputs(
+				page.pendingUserInputs
+					.map(normalizePendingUserInput)
+					.filter((input): input is PendingUserInput => Boolean(input)),
+			);
+			this.setFromPage(page, epoch);
+			return this.chatMessages;
 		} catch (error) {
+			this.abortSnapshotLoad(epoch);
 			this.loadStatus = 'error';
 			this.loadError = error instanceof Error ? error.message : 'Failed to load messages';
 			throw error;
-		} finally {
-			if (this.#loadGeneration === generation) {
-				this.isLoadingMessages = false;
-			}
 		}
 	}
 
-	/** Loads older messages and prepends them to the current array. */
 	async loadMoreMessages(chatId: string): Promise<boolean> {
 		if (this.#isLoadingMore || this.isLoadingMoreMessages) return false;
 		if (!this.hasMoreMessages || !chatId) return false;
 
 		this.#isLoadingMore = true;
 		this.isLoadingMoreMessages = true;
-
 		try {
-			const data = await getChatMessages({
+			const page = await getChatMessages({
 				chatId,
 				limit: MESSAGES_PER_PAGE,
-				offset: this.#messagesOffset,
+				beforeSeq: this.oldestSeq,
 			});
-			const messages = parseChatMessages(data.messages);
-			if (messages.length === 0) return false;
-
-			if (data.hasMore !== undefined) {
-				this.hasMoreMessages = Boolean(data.hasMore);
-				this.totalMessages = Number(data.total || 0);
-			} else {
-				this.hasMoreMessages = false;
+			if (page.logId !== this.logId) {
+				const epoch = this.beginSnapshotLoad();
+				this.setFromPage(page, epoch);
+				return false;
 			}
-
-			this.#messagesOffset += messages.length;
-			this.#messageIdentityIndex.addMany(messages);
-			this.chatMessages = [...messages, ...this.chatMessages];
-			this.visibleMessageCount += messages.length;
+			if (page.events.length === 0) {
+				this.hasMoreMessages = false;
+				return false;
+			}
+			this.entries = [...page.events, ...this.entries];
+			this.oldestSeq = page.events[0].seq;
+			this.hasMoreMessages = page.hasMore;
+			this.totalMessages = this.entries.length;
+			this.visibleMessageCount += page.events.length;
+			this.#eventIndex = buildEventIndex(this.entries);
 			return true;
 		} catch (error) {
 			console.error('Error loading more messages:', error);
@@ -153,30 +282,18 @@ export class ChatState {
 		}
 	}
 
-	/** Appends new messages to the end of the array. */
-	appendMessages(msgs: ChatMessage[]): void {
-		if (msgs.length === 0) return;
-		this.#messageIdentityIndex.addMany(msgs);
-		this.chatMessages = [...this.chatMessages, ...msgs];
-	}
-
-	/** Appends only messages not already represented by the identity index. */
-	appendMessagesByIdentity(msgs: ChatMessage[]): void {
-		if (msgs.length === 0) return;
-		const nextMessages = this.#messageIdentityIndex.takeNew(msgs);
-		if (nextMessages.length === 0) return;
-		this.chatMessages = [...this.chatMessages, ...nextMessages];
-	}
-
-	/** Appends a local error row to the durable message list. */
 	appendErrorMessage(content: string): void {
-		this.appendMessages([new ErrorMessage(new Date().toISOString(), content)]);
+		this.localMessages = [
+			...this.localMessages,
+			{ id: `local_${localMessageId()}`, message: new ErrorMessage(new Date().toISOString(), content) },
+		];
 	}
 
-	/** Replaces the entire durable message array. */
-	setMessages(msgs: ChatMessage[]): void {
-		this.#messageIdentityIndex.reset(msgs);
-		this.chatMessages = msgs;
+	appendLocalAssistantMessage(content: string): void {
+		this.localMessages = [
+			...this.localMessages,
+			{ id: `local_${localMessageId()}`, message: new AssistantMessage(new Date().toISOString(), content) },
+		];
 	}
 
 	setPendingUserInputs(inputs: PendingUserInput[]): void {
@@ -186,11 +303,8 @@ export class ChatState {
 	upsertPendingUserInput(input: PendingUserInput): void {
 		const next = this.pendingUserInputs.slice();
 		const index = next.findIndex((entry) => entry.clientRequestId === input.clientRequestId);
-		if (index >= 0) {
-			next[index] = input;
-		} else {
-			next.push(input);
-		}
+		if (index >= 0) next[index] = input;
+		else next.push(input);
 		this.pendingUserInputs = sortPendingInputs(next);
 	}
 
@@ -202,67 +316,69 @@ export class ChatState {
 
 	updatePendingUserInputDeliveryStatus(
 		clientRequestId: string,
-		deliveryStatus: 'submitting' | 'accepted' | 'failed',
+		deliveryStatus: 'submitting' | 'accepted' | 'delivered' | 'failed',
 	): void {
 		this.pendingUserInputs = this.pendingUserInputs.map((input) =>
 			input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
 		);
 	}
 
-	/** Clears all messages and resets pagination state. */
 	clearMessages(): void {
-		this.#messageIdentityIndex.reset();
-		this.chatMessages = [];
+		this.entries = [];
+		this.logId = '';
+		this.lastAppendSeq = 0;
+		this.oldestSeq = 0;
 		this.pendingUserInputs = [];
-		this.#messagesOffset = 0;
+		this.localMessages = [];
 		this.hasMoreMessages = false;
 		this.totalMessages = 0;
 		this.loadStatus = 'idle';
 		this.loadError = null;
+		this.#snapshotBuffer = null;
+		this.#eventIndex = new Map();
 	}
 
-	/** Increases the visible message window by 100. */
 	loadEarlierMessages(): void {
 		this.visibleMessageCount += 100;
 	}
 
-	/** Loads all remaining paginated messages so the full history is available. */
 	async loadAllMessages(chatId: string): Promise<void> {
 		while (this.hasMoreMessages) {
 			const loaded = await this.loadMoreMessages(chatId);
 			if (!loaded) break;
 		}
-		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.chatMessages.length);
+		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
 	}
 
-	/** Resets scroll and pagination state for a new chat selection. */
 	resetForNewChat(): void {
-		this.#messageIdentityIndex.reset();
-		this.chatMessages = [];
-		this.pendingUserInputs = [];
+		this.clearMessages();
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.isUserScrolledUp = false;
-		this.#messagesOffset = 0;
-		this.hasMoreMessages = false;
-		this.totalMessages = 0;
-		this.loadStatus = 'idle';
-		this.loadError = null;
 	}
 
-	/** Persists current durable messages via the snapshot cache. */
 	persistMessages(chatId: string): void {
-		this.snapshotCache.persist(chatId, this.chatMessages, { limit: INITIAL_VISIBLE_MESSAGES });
+		this.snapshotCache.persist(
+			chatId,
+			this.entries,
+			{ logId: this.logId, lastAppendSeq: this.lastAppendSeq },
+			{ limit: INITIAL_VISIBLE_MESSAGES },
+		);
 	}
 
-	/** Restores durable messages from the snapshot cache. */
 	restoreMessages(chatId: string): ChatRestoreResult | null {
 		const restored = this.snapshotCache.restore(chatId, { limit: INITIAL_VISIBLE_MESSAGES });
 		if (!restored) return null;
-		this.setMessages(restored.messages);
-		return { count: restored.messages.length, stale: restored.stale };
+		this.entries = restored.entries;
+		this.logId = restored.logId;
+		this.lastAppendSeq = restored.lastAppendSeq;
+		this.oldestSeq = restored.entries.length > 0 ? restored.entries[0].seq : 0;
+		this.totalMessages = restored.entries.length;
+		this.hasMoreMessages = false;
+		this.loadStatus = restored.entries.length === 0 ? 'empty' : 'loaded';
+		this.#eventIndex = buildEventIndex(restored.entries);
+		return { count: restored.entries.length, stale: restored.stale };
 	}
 
-	/** Removes cached messages for the given chat ID. */
 	removeCachedMessages(chatId: string): void {
 		this.snapshotCache.remove(chatId);
 	}
@@ -285,22 +401,29 @@ function pendingInputToMessage(input: PendingUserInput): UserMessage {
 	});
 }
 
-function mergeMessagesWithPendingInputs(
-	messages: ChatMessage[],
-	pendingInputs: PendingUserInput[],
-): ChatMessage[] {
-	if (messages.length === 0) return pendingInputs.map(pendingInputToMessage);
+function pendingInputToRow(input: PendingUserInput): ChatMessageRow {
+	return {
+		id: `pending:${input.clientRequestId}`,
+		message: pendingInputToMessage(input),
+	};
+}
 
-	const pendingMessages = pendingInputs.map(pendingInputToMessage);
-	const merged: ChatMessage[] = [];
+function mergeRowsWithPendingInputs(
+	rows: ChatMessageRow[],
+	pendingInputs: PendingUserInput[],
+): ChatMessageRow[] {
+	if (rows.length === 0) return pendingInputs.map(pendingInputToRow);
+
+	const pendingRows = pendingInputs.map(pendingInputToRow);
+	const merged: ChatMessageRow[] = [];
 	let messageIndex = 0;
 	let pendingIndex = 0;
 
-	while (messageIndex < messages.length && pendingIndex < pendingMessages.length) {
-		const message = messages[messageIndex];
-		const pending = pendingMessages[pendingIndex];
-		if (message.timestamp.localeCompare(pending.timestamp) < 0) {
-			merged.push(message);
+	while (messageIndex < rows.length && pendingIndex < pendingRows.length) {
+		const row = rows[messageIndex];
+		const pending = pendingRows[pendingIndex];
+		if (row.message.timestamp.localeCompare(pending.message.timestamp) < 0) {
+			merged.push(row);
 			messageIndex += 1;
 		} else {
 			merged.push(pending);
@@ -308,12 +431,7 @@ function mergeMessagesWithPendingInputs(
 		}
 	}
 
-	if (messageIndex < messages.length) {
-		merged.push(...messages.slice(messageIndex));
-	}
-	if (pendingIndex < pendingMessages.length) {
-		merged.push(...pendingMessages.slice(pendingIndex));
-	}
-
+	if (messageIndex < rows.length) merged.push(...rows.slice(messageIndex));
+	if (pendingIndex < pendingRows.length) merged.push(...pendingRows.slice(pendingIndex));
 	return merged;
 }

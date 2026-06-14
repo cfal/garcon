@@ -22,7 +22,8 @@ import { QueueManager, queueDrainOptions } from './queue.js';
 import { PathCache } from './chats/path-cache.js';
 import { ShellManager } from './ws/shell.js';
 import { MetadataIndex } from './chats/metadata-store.js';
-import { HistoryCache } from './chats/history-cache.js';
+import { ChatEventLog } from './chats/chat-event-log.js';
+import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
 import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
 import { ApiProviderStore } from './api-providers/store.js';
@@ -36,9 +37,10 @@ import { TelegramSettingsStore } from './notifications/telegram-settings-store.j
 import { AttentionTracker } from './notifications/attention-tracker.js';
 import { abortRunningSessionsWithTimeout } from './lib/shutdown.js';
 import {
-  AgentRunOutputMessage,
   AgentRunFinishedMessage,
   AgentRunFailedMessage,
+  ChatEventsMessage,
+  ChatGenerationResetMessage,
   ChatSessionCreatedMessage,
   ChatProcessingUpdatedMessage,
   ChatTitleUpdatedMessage,
@@ -132,9 +134,55 @@ export async function startServer(): Promise<void> {
     });
     await metadata.init();
 
-    const historyCache = new HistoryCache(chatRegistry, metadata, agentRegistry);
-    historyCache.init();
-    const pendingInputs = new PendingUserInputService(historyCache);
+    const chatEventLog = new ChatEventLog(
+      workspaceDir,
+      (chatId) => agentRegistry.isChatRunning(chatId),
+    );
+    const chatNativeReloader = new ChatNativeReloader(
+      chatEventLog,
+      {
+        async loadNativeMessages(chatId) {
+          const session = chatRegistry.getChat(chatId);
+          if (!session) return [];
+          return parseChatMessages(await agentRegistry.loadMessages(session, chatId));
+        },
+      },
+      (chatId) => agentRegistry.isChatRunning(chatId),
+    );
+    const chatMessageReader = {
+      async ensureLoaded(chatId: string) {
+        await chatNativeReloader.ensureColdLoaded(chatId);
+        return chatEventLog.getMessages(chatId);
+      },
+      getMessages(chatId: string) {
+        return chatEventLog.getLoadedMessages(chatId);
+      },
+    };
+    const chatEventPages = {
+      async readPage(chatId: string, limit: number, beforeSeq?: number) {
+        await chatNativeReloader.ensureColdLoaded(chatId);
+        return chatEventLog.readPage(chatId, limit, beforeSeq);
+      },
+    };
+    const chatEventAppender = {
+      async appendMessages(
+        chatId: string,
+        messages: Parameters<ChatEventLog['appendMessages']>[1],
+        origin: 'submit',
+      ) {
+        await chatNativeReloader.ensureColdLoaded(chatId);
+        return chatEventLog.appendMessages(chatId, messages, origin);
+      },
+      async reviseUserMessageDelivery(
+        chatId: string,
+        ids: Parameters<ChatEventLog['reviseUserMessageDelivery']>[1],
+        deliveryStatus: 'delivered',
+      ) {
+        await chatNativeReloader.ensureColdLoaded(chatId);
+        return chatEventLog.reviseUserMessageDelivery(chatId, ids, deliveryStatus);
+      },
+    };
+    const pendingInputs = new PendingUserInputService(chatMessageReader);
 
     const shareStore = new ShareStore(workspaceDir);
     await shareStore.init();
@@ -143,6 +191,7 @@ export async function startServer(): Promise<void> {
       workspaceDir,
       agentRegistry,
       pendingInputs,
+      chatEventAppender,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
     );
     const commandLedger = new CommandLedger(workspaceDir);
@@ -162,7 +211,7 @@ export async function startServer(): Promise<void> {
     await telegramSettings.init();
     const telegramNotifier = new TelegramNotifier(telegramSettings.getBotToken());
     // eslint-disable-next-line no-unused-vars
-    const _attentionTracker = new AttentionTracker(agentRegistry, queue, settings, chatRegistry, historyCache, telegramNotifier, telegramSettings);
+    const _attentionTracker = new AttentionTracker(agentRegistry, queue, settings, chatRegistry, chatMessageReader, telegramNotifier, telegramSettings);
 
     // Start agent runtime purge timers.
     agentRegistry.startPurgeTimers();
@@ -181,7 +230,7 @@ export async function startServer(): Promise<void> {
       queue,
       pathCache,
       metadata,
-      historyCache,
+      chatEvents: chatEventPages,
       agents: agentRegistry,
       pendingInputs,
       telegramNotifier,
@@ -195,7 +244,12 @@ export async function startServer(): Promise<void> {
     const chatHandler = new ChatHandler({
       agents: agentRegistry,
       queue,
-      historyCache,
+      chatEvents: {
+        ...chatEventPages,
+        readReplay: (chatId, logId, afterAppendSeq) =>
+          chatEventLog.readReplay(chatId, logId, afterAppendSeq),
+      },
+      nativeReloader: chatNativeReloader,
       registry: chatRegistry,
       pendingInputs,
       commands: chatCommands,
@@ -298,16 +352,69 @@ export async function startServer(): Promise<void> {
     // active or routes are called, both of which happen after server is up.
     const broadcast = (payload: unknown) => server.publish('chat', JSON.stringify(payload));
 
-    // Wire agent events to broadcast via AgentRegistry fan-out.
-    // HistoryCache's init() already self-wired appendMessages via
-    // agentRegistry.onMessages(), so only broadcast wiring is needed here.
+    async function reviseDeliveredFromMetadata(
+      chatId: string,
+      metadata: { clientRequestId?: string; turnId?: string } | undefined,
+    ): Promise<void> {
+      const revised = await chatEventLog.reviseUserMessageDelivery(
+        chatId,
+        {
+          clientRequestId: metadata?.clientRequestId,
+          turnId: metadata?.turnId,
+        },
+        'delivered',
+      );
+      if (!revised) return;
+      broadcast(new ChatEventsMessage(
+        chatId,
+        revised.logId,
+        [revised.event],
+        metadata?.turnId,
+        metadata?.clientRequestId,
+      ));
+    }
+
+    async function reloadAfterProcessError(chatId: string, message: string): Promise<void> {
+      try {
+        const reload = await chatNativeReloader.reloadFromNative(chatId, 'process-error');
+        broadcast(new ChatGenerationResetMessage(
+          chatId,
+          reload.logId,
+          reload.events,
+          reload.lastAppendSeq,
+          reload.localNotice,
+        ));
+      } catch (err) {
+        logger.warn('chat-events: process-error reload failed:', errorMessage(err));
+      }
+      broadcast(new AgentRunFailedMessage(chatId, message));
+    }
+
+    // Wire agent events to the event log before broadcasting.
     const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
-    agentRegistry.onMessages((chatId, messages, metadata) => {
+    agentRegistry.onMessages((chatId, messages, turnMetadata) => {
       if (!chatExists(chatId)) return;
-      broadcast(new AgentRunOutputMessage(chatId, parseChatMessages(messages), metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
-      pendingInputs.reconcile(chatId).catch((err) => {
-        logger.warn('pending-inputs: reconcile after messages failed:', errorMessage(err));
-      });
+      void (async () => {
+        try {
+          const parsed = parseChatMessages(messages);
+          await chatNativeReloader.ensureColdLoaded(chatId);
+          const { logId, events } = await chatEventLog.appendMessages(chatId, parsed, 'agent');
+          if (parsed.length > 0) metadata.updateFromAppendedMessages(chatId, parsed);
+          broadcast(new ChatEventsMessage(
+            chatId,
+            logId,
+            events,
+            turnMetadata?.turnId,
+            turnMetadata?.clientRequestId,
+            turnMetadata?.upstreamRequestId,
+          ));
+          await reviseDeliveredFromMetadata(chatId, turnMetadata);
+          await pendingInputs.reconcile(chatId);
+        } catch (err) {
+          logger.warn('chat-events: append failed; reloading from native:', errorMessage(err));
+          await reloadAfterProcessError(chatId, errorMessage(err));
+        }
+      })();
     });
     agentRegistry.onProcessing((chatId, isProcessing) => {
       if (!chatExists(chatId)) return;
@@ -317,9 +424,12 @@ export async function startServer(): Promise<void> {
       if (!chatExists(chatId)) return;
       broadcast(new ChatSessionCreatedMessage(chatId));
     });
-    agentRegistry.onFinished((chatId, exitCode, metadata) => {
+    agentRegistry.onFinished((chatId, exitCode, turnMetadata) => {
       if (!chatExists(chatId)) return;
-      broadcast(new AgentRunFinishedMessage(chatId, exitCode, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
+      void reviseDeliveredFromMetadata(chatId, turnMetadata).catch((err) => {
+        logger.warn('chat-events: delivery revision after finish failed:', errorMessage(err));
+      });
+      broadcast(new AgentRunFinishedMessage(chatId, exitCode, turnMetadata?.turnId, turnMetadata?.clientRequestId, turnMetadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         logger.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
       });
@@ -327,17 +437,17 @@ export async function startServer(): Promise<void> {
         logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
     });
-    agentRegistry.onFailed((chatId, agentErrorMessage, metadata) => {
+    agentRegistry.onFailed((chatId, agentErrorMessage, turnMetadata) => {
       if (!chatExists(chatId)) return;
-      if (metadata?.commandType === 'chat-start' && metadata.clientRequestId) {
-        commandLedger.updateCommand('chat-start', chatId, metadata.clientRequestId, {
+      if (turnMetadata?.commandType === 'chat-start' && turnMetadata.clientRequestId) {
+        commandLedger.updateCommand('chat-start', chatId, turnMetadata.clientRequestId, {
           status: 'failed',
           error: agentErrorMessage,
         }).catch((err) => {
           logger.warn('commands: failed to mark chat-start command failed:', errorMessage(err));
         });
       }
-      broadcast(new AgentRunFailedMessage(chatId, agentErrorMessage, metadata?.turnId, metadata?.clientRequestId, metadata?.upstreamRequestId));
+      void reloadAfterProcessError(chatId, agentErrorMessage);
       pendingInputs.reconcile(chatId).catch((err) => {
         logger.warn('pending-inputs: reconcile after failure failed:', errorMessage(err));
       });
@@ -373,6 +483,9 @@ export async function startServer(): Promise<void> {
     });
     chatRegistry.onChatRemoved((chatId) => {
       pendingInputs.clearChat(chatId, 'chat-removed');
+      chatEventLog.deleteChatLog(chatId).catch((err) => {
+        logger.warn('chat-events: failed to delete log on chat removal:', errorMessage(err));
+      });
       broadcast(new ChatSessionDeletedWsMessage(chatId));
       shareStore.revokeShareByChatId(chatId).catch((err) => {
         logger.warn('share-store: failed to revoke share on chat removal:', errorMessage(err));
@@ -390,17 +503,28 @@ export async function startServer(): Promise<void> {
     queue.onDispatching((chatId, entryId, content) => {
       broadcast(new QueueDispatchingMessage(chatId, entryId, content));
     });
+    queue.onChatEvents((chatId, logId, events, eventMetadata = {}) => {
+      metadata.updateFromAppendedMessages(chatId, events.map((event) => event.message));
+      broadcast(new ChatEventsMessage(
+        chatId,
+        logId,
+        events,
+        eventMetadata.turnId,
+        eventMetadata.clientRequestId,
+      ));
+    });
     pendingInputs.store.onUpdated((input) => {
       broadcast(new PendingUserInputUpdatedMessage(input));
     });
     pendingInputs.store.onCleared((chatId, clientRequestId, reason) => {
+      if (reason === 'persisted') return;
       broadcast(new PendingUserInputClearedMessage(chatId, clientRequestId, reason));
     });
     queue.onSessionStopped((chatId, success) => {
       broadcast(new ChatSessionStoppedMessage(chatId, success));
     });
     queue.onTurnFailed((chatId, errorMessage, options = {}) => {
-      broadcast(new AgentRunFailedMessage(chatId, errorMessage, options.turnId, options.clientRequestId));
+      void reloadAfterProcessError(chatId, errorMessage);
     });
 
     // Graceful shutdown: flush pending writes and clean up timers.
@@ -425,7 +549,6 @@ export async function startServer(): Promise<void> {
         }
         agentRegistry.shutdown();
         shellManager.shutdown();
-        historyCache.destroy();
         await metadata.flush();
         await chatRegistry.flush();
       } catch (err) {

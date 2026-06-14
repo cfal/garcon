@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	selectPreviewFromBatch,
 	_extractFirstLine,
-	createAgentOutputAccumulator,
+	createChatEventsAccumulator,
 } from '../router.svelte';
 import {
 	UserMessage,
@@ -12,7 +12,18 @@ import {
 	UnknownToolUseMessage,
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
-import { AgentRunOutputMessage } from '$shared/ws-events';
+import { ChatEventsMessage } from '$shared/ws-events';
+import type { ChatMessageEvent } from '$shared/chat-events';
+
+function event(seq: number, message: ChatMessage): ChatMessageEvent {
+	return {
+		appendSeq: seq,
+		seq,
+		messageId: `message-${seq}`,
+		rev: 1,
+		message,
+	};
+}
 
 describe('extractFirstLine', () => {
 	it('returns text before first newline', () => {
@@ -36,29 +47,31 @@ describe('extractFirstLine', () => {
 	});
 });
 
-describe('createAgentOutputAccumulator', () => {
-	it('coalesces same-drain output chunks into one message write', () => {
+describe('createChatEventsAccumulator', () => {
+	it('coalesces same-drain event chunks into one event write', () => {
 		let current: ChatMessage[] = [];
 		let writes = 0;
-		const accumulator = createAgentOutputAccumulator({
-			appendChatMessagesByIdentity: (messages) => {
+		const accumulator = createChatEventsAccumulator({
+			applyChatEvents: (_chatId, _logId, events) => {
 				writes += 1;
-				current = [...current, ...messages];
+				current = [...current, ...events.map((entry) => entry.message)];
+				return 'applied';
 			},
+			reloadChatSnapshot: () => {},
 		});
 
 		accumulator.enqueue(
-			new AgentRunOutputMessage(
+			new ChatEventsMessage(
 				'chat-a',
-				[new AssistantMessage('2024-01-01T00:00:00Z', 'first')],
-				'req-1',
+				'log-1',
+				[event(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first'))],
 			),
 		);
 		accumulator.enqueue(
-			new AgentRunOutputMessage(
+			new ChatEventsMessage(
 				'chat-a',
-				[new AssistantMessage('2024-01-01T00:00:01Z', 'second')],
-				'req-1',
+				'log-1',
+				[event(2, new AssistantMessage('2024-01-01T00:00:01Z', 'second'))],
 			),
 		);
 		accumulator.flush();
@@ -72,10 +85,12 @@ describe('createAgentOutputAccumulator', () => {
 
 	it('does not write when no output was queued', () => {
 		let writes = 0;
-		const accumulator = createAgentOutputAccumulator({
-			appendChatMessagesByIdentity: () => {
+		const accumulator = createChatEventsAccumulator({
+			applyChatEvents: () => {
 				writes += 1;
+				return 'applied';
 			},
+			reloadChatSnapshot: () => {},
 		});
 
 		accumulator.flush();

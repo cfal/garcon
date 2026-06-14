@@ -15,6 +15,7 @@
 	import { getChatQueue } from '$lib/api/chats.js';
 	import { StartupCoordinator } from '$lib/chat/startup-coordinator.js';
 	import { createDrainCursor } from '$lib/ws/drain';
+	import { ChatReconnectCoordinator } from '$lib/ws/reconnect-coordinator.svelte';
 	import { mountConversationRouter } from '$lib/chat/conversation-router-adapter.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
@@ -60,6 +61,14 @@
 	const lifecycle = new ChatLifecycleStore();
 	const conversationUi = new ConversationUiStore();
 	const startupCoordinator = new StartupCoordinator();
+	const reconnectCoordinator = new ChatReconnectCoordinator({
+		ws,
+		chatState,
+		conversationUi,
+		getSelectedChat: () => sessions.selectedChat,
+		getSelectedChatId: () => sessions.selectedChatId,
+		getQueue: getChatQueue,
+	});
 
 	setChatState(chatState);
 	setComposerState(composerState);
@@ -95,6 +104,7 @@
 		startupCoordinator,
 		readReceiptOutbox,
 	});
+	reconnectCoordinator.mount();
 
 	conversationUi.mountQueuePruning({
 		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
@@ -143,47 +153,13 @@
 		controller.handleChatSwitchIfChanged(sessions.selectedChatId);
 	});
 
-	// Reloads the current chat when WS reconnects after a disconnect.
-	// Marks the active snapshot stale before revalidating so the cache
-	// reflects that messages may have been missed while offline.
-	// Skips the first connection since handleChatSwitch already loads.
-	let hasConnectedBefore = false;
-
-	$effect(() => {
-		const connected = ws.isConnected;
-		untrack(() => {
-			if (!connected) return;
-
-			const selected = sessions.selectedChat;
-			const chatId = sessions.selectedChatId;
-
-			if (selected && selected.status === 'running') {
-				void getChatQueue(selected.id)
-					.then((result) => {
-						conversationUi.setMessageQueue(selected.id, result.queue);
-					})
-					.catch(() => {
-						// Queue state will converge through later broadcasts.
-					});
-			}
-
-			if (!hasConnectedBefore) {
-				hasConnectedBefore = true;
-				return;
-			}
-
-			if (chatId) {
-				chatState.snapshotCache.markStale(chatId);
-				controller.loadChat(chatId);
-			}
-		});
-	});
-
 	// Debounced persistence to avoid main-thread JSON.stringify per token during streaming.
 	let persistTimer: ReturnType<typeof setTimeout> | null = null;
 	$effect(() => {
 		const chatId = sessions.selectedChatId;
-		const _messages = chatState.chatMessages;
+		const _entries = chatState.entries;
+		const _cursor = chatState.lastAppendSeq;
+		const _logId = chatState.logId;
 		if (!chatId) return;
 		if (persistTimer) clearTimeout(persistTimer);
 		persistTimer = setTimeout(() => {

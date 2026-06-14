@@ -1,8 +1,8 @@
 // Handles plan mode transitions from tool-use messages with
 // EnterPlanMode / ExitPlanMode tool types.
 
-import type { AgentRunOutputMessage } from '$shared/ws-events';
 import { isToolUseMessage } from '$shared/chat-types';
+import type { ChatMessage } from '$shared/chat-types';
 import type { PermissionMode } from '$lib/types/chat';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
@@ -16,7 +16,10 @@ export interface PlanModeContext {
 	>;
 }
 
-export function handlePlanModeMessages(msg: AgentRunOutputMessage, ctx: PlanModeContext) {
+export function handlePlanModeMessages(
+	msg: { chatId?: string | null; messages: ChatMessage[] },
+	ctx: PlanModeContext,
+) {
 	if (!msg.messages) return;
 
 	for (const chatMsg of msg.messages) {

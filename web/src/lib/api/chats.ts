@@ -13,7 +13,7 @@ import {
 	type ThinkingMode,
 } from '$shared/chat-modes';
 import type { ApiProtocol } from '$shared/api-providers';
-import type { ChatMessage } from '$shared/chat-types';
+import { parseChatMessageEvents, type ChatMessageEvent } from '$shared/chat-events';
 import type { ChatListResponse } from '$shared/chat-list';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type {
@@ -173,21 +173,41 @@ export async function getRunningChats(): Promise<RunningChatsResponse> {
 export async function getChatMessages(params: {
 	chatId: string;
 	limit?: number;
-	offset?: number;
+	beforeSeq?: number;
 }): Promise<{
-	messages: ChatMessage[];
+	events: ChatMessageEvent[];
+	logId: string;
+	lastAppendSeq: number;
+	pageOldestSeq: number;
 	pendingUserInputs: PendingUserInput[];
-	total: number;
 	hasMore: boolean;
-	offset: number;
 	limit: number;
 }> {
 	const query = new URLSearchParams({
 		chatId: params.chatId,
 		limit: String(params.limit ?? 20),
-		offset: String(params.offset ?? 0),
 	});
-	return apiGet(`/api/v1/chats/messages?${query.toString()}`);
+	if (params.beforeSeq !== undefined) query.set('beforeSeq', String(params.beforeSeq));
+	const response = await apiGet<{
+		events?: unknown;
+		logId?: unknown;
+		lastAppendSeq?: unknown;
+		pageOldestSeq?: unknown;
+		pendingUserInputs?: PendingUserInput[];
+		hasMore?: unknown;
+		limit?: unknown;
+	}>(`/api/v1/chats/messages?${query.toString()}`);
+	const events = parseChatMessageEvents(response.events);
+	if (events === null) throw new Error('Invalid chat event page');
+	return {
+		events,
+		logId: typeof response.logId === 'string' ? response.logId : '',
+		lastAppendSeq: Number(response.lastAppendSeq) || 0,
+		pageOldestSeq: Number(response.pageOldestSeq) || 0,
+		pendingUserInputs: Array.isArray(response.pendingUserInputs) ? response.pendingUserInputs : [],
+		hasMore: Boolean(response.hasMore),
+		limit: Number(response.limit) || params.limit || 20,
+	};
 }
 
 export interface DeleteChatResponse {

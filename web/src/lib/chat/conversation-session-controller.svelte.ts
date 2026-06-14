@@ -18,7 +18,7 @@ import {
 	updateChatModel,
 	updateExecutionSettings,
 } from '$lib/api/chats.js';
-import { AssistantMessage, type ChatImage } from '$shared/chat-types';
+import type { ChatImage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import { createClientChatId } from '$lib/chat/client-id';
 import { createClientCommandId } from '$lib/chat/client-command-id';
@@ -279,12 +279,11 @@ export class ConversationSessionController {
 		}
 
 		try {
-			const messages = await deps.chatState.loadMessages(chatId, {
+			await deps.chatState.loadMessages(chatId, {
 				minimumLimit: minimumMessageLimit,
 			});
 			if (deps.sessions.selectedChatId !== chatId) return;
 
-			deps.chatState.setMessages(messages);
 			deps.chatState.snapshotCache.markValidated(chatId);
 			requestAnimationFrame(() => deps.scrollToBottom());
 
@@ -504,9 +503,7 @@ export class ConversationSessionController {
 
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		deps.chatState.appendMessages([
-			new AssistantMessage(new Date().toISOString(), 'Forking chat..'),
-		]);
+		deps.chatState.appendLocalAssistantMessage('Forking chat..');
 		deps.chatState.isUserScrolledUp = false;
 		if (clearComposer) {
 			deps.composerState.clearAfterSubmit(sourceChatId);

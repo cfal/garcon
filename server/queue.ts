@@ -8,6 +8,8 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
+import { UserMessage, type ChatMessage, type UserMessageDeliveryStatus } from '../common/chat-types.ts';
+import type { ChatMessageEvent } from '../common/chat-events.ts';
 import { requireChatExecutionConfig, type RunAgentTurnOptions } from "./agents/session-types.js";
 import type { IChatRegistry } from './chats/store.js';
 import { writeJsonFileAtomic } from './lib/json-file-store.js';
@@ -44,6 +46,13 @@ function optionsForQueuedTurn(options: RunAgentTurnOptions): RunAgentTurnOptions
   };
 }
 
+type PendingUserInputRegistrationOptions = Pick<
+  RunAgentTurnOptions,
+  'clientRequestId' | 'clientMessageId' | 'turnId' | 'images'
+> & {
+  deliveryStatus?: UserMessageDeliveryStatus;
+};
+
 export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunAgentTurnOptions {
   const chat = registry.getChat(chatId);
   const entry = requireChatExecutionConfig(chatId, chat);
@@ -71,9 +80,22 @@ interface PendingInputsDep {
     clientMessageId?: string;
     turnId?: string;
     images?: RunAgentTurnOptions['images'];
-    deliveryStatus?: 'submitting' | 'accepted' | 'failed';
+    deliveryStatus?: UserMessageDeliveryStatus;
   }): Promise<unknown>;
-  updateDeliveryStatus(chatId: string, clientRequestId: string, deliveryStatus: 'submitting' | 'accepted' | 'failed'): unknown;
+  updateDeliveryStatus(chatId: string, clientRequestId: string, deliveryStatus: UserMessageDeliveryStatus): unknown;
+}
+
+interface ChatEventsDep {
+  appendMessages(
+    chatId: string,
+    messages: ChatMessage[],
+    origin: 'submit',
+  ): Promise<{ logId: string; events: ChatMessageEvent[] }>;
+  reviseUserMessageDelivery(
+    chatId: string,
+    ids: { clientMessageId?: string; clientRequestId?: string; turnId?: string },
+    deliveryStatus: 'delivered',
+  ): Promise<{ logId: string; event: ChatMessageEvent } | null>;
 }
 
 type QueueUpdatedCallback = (chatId: string, state: QueueState) => void;
@@ -81,12 +103,18 @@ type DispatchingCallback = (chatId: string, entryId: string, content: string) =>
 type SessionStoppedCallback = (chatId: string, success: boolean) => void;
 type ChatIdleCallback = (chatId: string) => void;
 type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunAgentTurnOptions) => void;
+type ChatEventsCallback = (
+  chatId: string,
+  logId: string,
+  events: ChatMessageEvent[],
+  metadata?: { clientRequestId?: string; turnId?: string },
+) => void;
 type QueueDrainOptionsResolver = (chatId: string) => RunAgentTurnOptions;
 
 export interface ChatQueueService {
   deleteChatQueueFile(chatId: string): Promise<void>;
   submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  registerPendingUserInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  registerPendingUserInput(chatId: string, command: string, options: PendingUserInputRegistrationOptions): Promise<void>;
   runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   abort(chatId: string): Promise<boolean>;
   triggerDrain(chatId: string): Promise<void>;
@@ -105,21 +133,25 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   #workspaceDir: string;
   #turnRunner: AgentTurnRunnerDep;
   #pendingInputs: PendingInputsDep;
+  #chatEvents: ChatEventsDep;
   #getDrainOptions: QueueDrainOptionsResolver;
 
   constructor(
     workspaceDir: string,
     turnRunner: AgentTurnRunnerDep,
     pendingInputs: PendingInputsDep,
+    chatEvents: ChatEventsDep,
     getDrainOptions: QueueDrainOptionsResolver,
   ) {
     super();
     if (!turnRunner) throw new Error('QueueManager requires an agent turn runner');
     if (!pendingInputs) throw new Error('QueueManager requires a pending input service');
+    if (!chatEvents) throw new Error('QueueManager requires a chat event log');
     if (!getDrainOptions) throw new Error('QueueManager requires a drain option resolver');
     this.#workspaceDir = workspaceDir;
     this.#turnRunner = turnRunner;
     this.#pendingInputs = pendingInputs;
+    this.#chatEvents = chatEvents;
     this.#getDrainOptions = getDrainOptions;
   }
 
@@ -128,6 +160,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   onSessionStopped(cb: SessionStoppedCallback): void { this.on('session-stopped', cb); }
   onChatIdle(cb: ChatIdleCallback): void { this.on('chat-idle', cb); }
   onTurnFailed(cb: TurnFailedCallback): void { this.on('turn-failed', cb); }
+  onChatEvents(cb: ChatEventsCallback): void { this.on('chat-events', cb); }
 
   // Emits chat-idle if the chat has no queued items and the agent is not
   // running. Called after an agent turn finishes to cover the initial-session
@@ -304,14 +337,31 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     await this.runAcceptedTurn(chatId, command, turnOptions);
   }
 
-  async registerPendingUserInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
+  async registerPendingUserInput(chatId: string, command: string, options: PendingUserInputRegistrationOptions): Promise<void> {
     if (!command) return;
+    const deliveryStatus = options.deliveryStatus ?? 'accepted';
     await this.#pendingInputs.register(chatId, command, {
       clientRequestId: options.clientRequestId,
       clientMessageId: options.clientMessageId,
       turnId: options.turnId,
       images: options.images,
-      deliveryStatus: 'accepted',
+      deliveryStatus,
+    });
+    const userMessage = new UserMessage(
+      new Date().toISOString(),
+      command,
+      options.images,
+      {
+        clientRequestId: options.clientRequestId,
+        messageId: options.clientMessageId,
+        turnId: options.turnId,
+        deliveryStatus,
+      },
+    );
+    const { logId, events } = await this.#chatEvents.appendMessages(chatId, [userMessage], 'submit');
+    this.emit('chat-events', chatId, logId, events, {
+      clientRequestId: options.clientRequestId,
+      turnId: options.turnId,
     });
   }
 
@@ -323,7 +373,25 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       this.emit('turn-failed', chatId, message, options);
       throw error;
     }
+    await this.#reviseDeliveryStatus(chatId, options);
     await this.#drain(chatId);
+  }
+
+  async #reviseDeliveryStatus(chatId: string, options: RunAgentTurnOptions): Promise<void> {
+    const revised = await this.#chatEvents.reviseUserMessageDelivery(
+      chatId,
+      {
+        clientMessageId: options.clientMessageId,
+        clientRequestId: options.clientRequestId,
+        turnId: options.turnId,
+      },
+      'delivered',
+    );
+    if (!revised) return;
+    this.emit('chat-events', chatId, revised.logId, [revised.event], {
+      clientRequestId: options.clientRequestId,
+      turnId: options.turnId,
+    });
   }
 
   // Aborts the running agent session and pauses the queue if entries remain.
@@ -370,6 +438,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
         try {
           await this.#turnRunner.runAgentTurn(chatId, entry.content, queuedTurnOptions);
+          await this.#reviseDeliveryStatus(chatId, queuedTurnOptions);
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
           logger.error('queue: error processing queued message:', (error as Error).message);

@@ -6,8 +6,6 @@ import type {
 	ChatProcessingUpdatedMessage,
 	WsFaultMessage,
 } from '$shared/ws-events';
-import { AssistantMessage, ErrorMessage } from '$shared/chat-types';
-import type { ChatMessage } from '$lib/types/chat';
 import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
@@ -16,8 +14,8 @@ export interface ChatEventContext {
 	getSelectedChat: () => ChatSessionRouterView | null;
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
-	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
-	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
+	appendErrorMessage: (content: string) => void;
+	appendLocalAssistantMessage: (content: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
 		ConversationUiStore,
@@ -82,15 +80,9 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 			ctx.clearPendingChatId();
 		}
 		ctx.conversationUi.clearPendingPermissionRequests();
-		ctx.setChatMessages((previous) => [
-			...previous,
-			new AssistantMessage(new Date().toISOString(), 'Chat interrupted by user.'),
-		]);
+		ctx.appendLocalAssistantMessage('Chat interrupted by user.');
 	} else {
-		ctx.setChatMessages((previous) => [
-			...previous,
-			new ErrorMessage(new Date().toISOString(), 'Stop request failed. The chat is still running.'),
-		]);
+		ctx.appendErrorMessage('Stop request failed. The chat is still running.');
 	}
 }
 
@@ -116,30 +108,9 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 		ctx.setCanAbort(true);
 	} else {
 		ctx.clearLoadingIndicators(statusChatId);
-		// The chat finished while disconnected -- agent-run-finished was lost so
-		// the authoritative reload never happened. Reload now.
-		const reloadId = statusChatId || selectedChat?.id;
-		if (reloadId) {
-			ctx
-				.loadMessages(reloadId)
-				.then((messages) => {
-					// Guard: active chat may have changed while the reload was in flight.
-					if (ctx.getCurrentChatId() !== reloadId) return;
-					if (messages.length > 0) {
-						ctx.setChatMessages(messages);
-					}
-				})
-				.catch((err) => {
-					// Transport failure; the reconnect effect in ConversationWorkspace retries.
-					console.debug('[chat] reload failed for', reloadId, err);
-				});
-		}
 	}
 }
 
 export function handleWsError(msg: WsFaultMessage, ctx: ChatEventContext) {
-	ctx.setChatMessages((previous) => [
-		...previous,
-		new ErrorMessage(new Date().toISOString(), msg.error || 'WebSocket error'),
-	]);
+	ctx.appendErrorMessage(msg.error || 'WebSocket error');
 }

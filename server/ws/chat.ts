@@ -8,6 +8,8 @@ import {
   AgentRunFailedMessage, ChatLogResponseMessage,
   ChatSessionsRunningMessage, WsFaultMessage, ChatForkCreatedMessage,
   ClientRequestErrorMessage,
+  ChatSubscribedMessage,
+  ChatGenerationResetMessage,
 } from '../../common/ws-events.ts';
 import type { ClientRequestErrorCode } from '../../common/ws-events.ts';
 import type { PendingUserInput } from '../../common/pending-user-input.js';
@@ -23,6 +25,8 @@ import {
   ThinkingModeSetRequest,
   ModelSetRequest,
   ChatLogQueryRequest,
+  ChatSubscribeRequest,
+  ChatReloadRequest,
   ChatRunningQueryRequest,
   QueueEnqueueRequest,
   QueueDropRequest,
@@ -32,7 +36,6 @@ import {
   QueueQueryRequest,
 } from '../../common/ws-requests.ts';
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
-import type { ChatMessage } from '../../common/chat-types.ts';
 import type { IChatRegistry } from '../chats/store.js';
 import type { AgentSessionSettingsPatch } from "../agents/session-types.js";
 import {
@@ -42,7 +45,9 @@ import {
 } from '../commands/chat-command-service.js';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import type { ChatQueueService } from '../queue.js';
-import type { HistoryCachePageReader } from '../chats/history-cache-contract.js';
+import type { ChatEventPageReader } from '../chats/chat-message-reader.js';
+import type { ChatEventLog } from '../chats/chat-event-log.js';
+import type { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { createLogger } from '../lib/log.js';
@@ -72,7 +77,8 @@ type QueueManagerDep = Pick<
   | 'resumeChatQueue'
 >;
 
-type HistoryCacheDep = HistoryCachePageReader;
+type ChatEventsDep = ChatEventPageReader & Pick<ChatEventLog, 'readReplay'>;
+type NativeReloaderDep = Pick<ChatNativeReloader, 'ensureColdLoaded' | 'reloadFromNative'>;
 
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'reconcile' | 'listForChat'>;
 
@@ -89,7 +95,8 @@ type QueueMutationAction = 'dequeue' | 'clear' | 'pause' | 'resume';
 interface ChatHandlerDeps {
   agents: AgentRegistryDep;
   queue: QueueManagerDep;
-  historyCache: HistoryCacheDep;
+  chatEvents: ChatEventsDep;
+  nativeReloader: NativeReloaderDep;
   registry: IChatRegistry;
   pendingInputs: PendingInputsDep;
   commands: ChatCommandService;
@@ -117,7 +124,8 @@ interface RequestErrorParams {
 export class ChatHandler {
   #agents: AgentRegistryDep;
   #queue: QueueManagerDep;
-  #historyCache: HistoryCacheDep;
+  #chatEvents: ChatEventsDep;
+  #nativeReloader: NativeReloaderDep;
   #pendingInputs: PendingInputsDep;
   #registry: IChatRegistry;
   #commands: ChatCommandService;
@@ -127,14 +135,16 @@ export class ChatHandler {
   constructor({
     agents,
     queue,
-    historyCache,
+    chatEvents,
+    nativeReloader,
     registry,
     pendingInputs,
     commands,
   }: ChatHandlerDeps) {
     this.#agents = agents;
     this.#queue = queue;
-    this.#historyCache = historyCache;
+    this.#chatEvents = chatEvents;
+    this.#nativeReloader = nativeReloader;
     this.#pendingInputs = pendingInputs;
     this.#registry = registry;
     this.#commands = commands;
@@ -267,14 +277,21 @@ export class ChatHandler {
         return;
       }
 
-      const { limit, offset } = parsePagination(data.limit, data.offset, { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
+      const { limit } = parsePagination(data.limit, null, { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
 
       await this.#pendingInputs.reconcile(chatId);
-      const result = await this.#historyCache.getPaginatedMessages(chatId, limit, offset);
+      const result = await this.#chatEvents.readPage(chatId, limit, data.beforeSeq);
 
       writer.send(new ChatLogResponseMessage(
-        clientRequestId, chatId, result.messages as ChatMessage[], this.#pendingInputs.listForChat(chatId) as PendingUserInput[], result.total,
-        result.hasMore, result.offset, result.limit,
+        clientRequestId,
+        chatId,
+        result.logId,
+        result.events,
+        this.#pendingInputs.listForChat(chatId) as PendingUserInput[],
+        result.lastAppendSeq,
+        result.pageOldestSeq,
+        result.hasMore,
+        limit,
       ));
     } catch (error: unknown) {
       logger.error(`ws: error reading messages for ${chatId}:`, (error as Error).message);
@@ -289,6 +306,75 @@ export class ChatHandler {
 
   #handleGetRunningSessions(_data: ChatRunningQueryRequest, writer: WebSocketWriter): void {
     writer.send(new ChatSessionsRunningMessage(this.#agents.getRunningSessions()));
+  }
+
+  async #handleChatSubscribe(data: ChatSubscribeRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
+    const clientRequestId = data.clientRequestId;
+    if (!clientRequestId) return;
+    const requestType = 'chat-subscribe';
+    try {
+      const session = this.#registry.getChat(chatId);
+      if (!session) {
+        this.#sendRequestError(writer, {
+          clientRequestId, requestType,
+          code: 'SESSION_NOT_FOUND',
+          message: `Chat not found: ${chatId}`,
+          retryable: false, chatId,
+        });
+        return;
+      }
+      await this.#nativeReloader.ensureColdLoaded(chatId);
+      const replay = await this.#chatEvents.readReplay(chatId, data.logId, data.afterAppendSeq);
+      writer.send(new ChatSubscribedMessage(
+        clientRequestId,
+        chatId,
+        replay.logId,
+        replay.mode,
+        replay.events,
+        replay.lastAppendSeq,
+      ));
+    } catch (error: unknown) {
+      this.#sendRequestError(writer, {
+        clientRequestId, requestType,
+        code: 'HISTORY_LOAD_FAILED',
+        message: (error as Error).message || 'Failed to replay chat events',
+        retryable: true, chatId,
+      });
+    }
+  }
+
+  async #handleChatReload(data: ChatReloadRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
+    const clientRequestId = data.clientRequestId;
+    if (!clientRequestId) return;
+    const requestType = 'chat-reload';
+    try {
+      const session = this.#registry.getChat(chatId);
+      if (!session) {
+        this.#sendRequestError(writer, {
+          clientRequestId, requestType,
+          code: 'SESSION_NOT_FOUND',
+          message: `Chat not found: ${chatId}`,
+          retryable: false, chatId,
+        });
+        return;
+      }
+      const reload = await this.#nativeReloader.reloadFromNative(chatId, 'manual-reload');
+      writer.send(new ChatGenerationResetMessage(
+        chatId,
+        reload.logId,
+        reload.events,
+        reload.lastAppendSeq,
+        reload.localNotice,
+      ));
+    } catch (error: unknown) {
+      const message = (error as Error).message || 'Failed to reload chat';
+      this.#sendRequestError(writer, {
+        clientRequestId, requestType,
+        code: message.includes('running') ? 'CHAT_RUNNING' : 'HISTORY_LOAD_FAILED',
+        message,
+        retryable: true, chatId,
+      });
+    }
   }
 
   #createRequestHandlers(): Record<ClientWsMessage['type'], WsRequestHandler> {
@@ -308,6 +394,12 @@ export class ChatHandler {
       'model-set': (data, writer) => this.#handleModelSet(data as ModelSetRequest, writer),
       'chat-log-query': (data, writer) => this.#withChatId(data as ChatLogQueryRequest, writer, (chatId) => {
         return this.#handleGetMessages(data as ChatLogQueryRequest, chatId, writer);
+      }),
+      'chat-subscribe': (data, writer) => this.#withChatId(data as ChatSubscribeRequest, writer, (chatId) => {
+        return this.#handleChatSubscribe(data as ChatSubscribeRequest, chatId, writer);
+      }),
+      'chat-reload': (data, writer) => this.#withChatId(data as ChatReloadRequest, writer, (chatId) => {
+        return this.#handleChatReload(data as ChatReloadRequest, chatId, writer);
       }),
       'chats-running-query': (data, writer) => this.#handleGetRunningSessions(data as ChatRunningQueryRequest, writer),
       'queue-enqueue': (data, writer) => this.#handleQueueEnqueue(data as QueueEnqueueRequest, writer),

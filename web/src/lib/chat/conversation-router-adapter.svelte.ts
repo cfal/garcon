@@ -49,13 +49,23 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			},
 		},
 		chatState: {
-			setChatMessages: (updater) => {
-				const nextMessages =
-					typeof updater === 'function' ? updater(deps.chatState.chatMessages) : updater;
-				deps.chatState.setMessages(nextMessages);
+			applyChatEvents: (chatId, logId, events) => {
+				if (deps.sessions.selectedChatId !== chatId) return 'applied';
+				return deps.chatState.applyEvents(logId, events);
 			},
-			appendChatMessagesByIdentity: (messages) =>
-				deps.chatState.appendMessagesByIdentity(messages),
+			replaceChatGeneration: (chatId, logId, events, options) => {
+				if (deps.sessions.selectedChatId !== chatId) return;
+				deps.chatState.replaceGeneration(logId, events, options);
+			},
+			reloadChatSnapshot: (chatId) => {
+				if (deps.sessions.selectedChatId !== chatId) return;
+				void deps.chatState.loadMessages(chatId).catch(() => {
+					// Leaves current visible state until a later retry succeeds.
+				});
+			},
+			appendErrorMessage: (content) => deps.chatState.appendErrorMessage(content),
+			appendLocalAssistantMessage: (content) =>
+				deps.chatState.appendLocalAssistantMessage(content),
 			upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
 			clearPendingUserInput: (clientRequestId) =>
 				deps.chatState.clearPendingUserInput(clientRequestId),

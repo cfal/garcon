@@ -52,6 +52,10 @@ interface ClaudeContentPart {
   [key: string]: unknown;
 }
 
+function isClaudeContentPart(value: unknown): value is ClaudeContentPart {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 interface ClaudeSessionOptions {
   agentSessionId: string;
   sessionId: string;
@@ -158,10 +162,11 @@ function convertCLIMessageToChatMessages(msg: CLIMessage): unknown[] {
 
   const chatMessages: unknown[] = [];
   const now = new Date().toISOString();
-  const content: ClaudeContentPart[] =
+  const rawContent =
     Array.isArray(msg.content) ? msg.content
       : Array.isArray(msg.message?.content) ? msg.message!.content!
         : [];
+  const content = rawContent.filter(isClaudeContentPart);
 
   for (const part of content) {
     if (part.type === 'text' && part.text?.trim()) {

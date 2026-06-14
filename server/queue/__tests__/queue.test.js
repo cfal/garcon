@@ -23,6 +23,26 @@ function createPendingInputs() {
   };
 }
 
+function createChatEvents() {
+  let appendSeq = 0;
+  return {
+    appendMessages: mock((_chatId, messages) => {
+      const events = messages.map((message) => {
+        appendSeq += 1;
+        return {
+          appendSeq,
+          seq: appendSeq,
+          messageId: `message-${appendSeq}`,
+          rev: 1,
+          message,
+        };
+      });
+      return Promise.resolve({ logId: 'log-1', events });
+    }),
+    reviseUserMessageDelivery: mock(() => Promise.resolve(null)),
+  };
+}
+
 function emptyDrainOptions() {
   return {};
 }
@@ -30,7 +50,13 @@ function emptyDrainOptions() {
 beforeEach(async () => {
   workspaceDir = path.join(os.tmpdir(), `garcon-queue-test-${randomUUID()}`);
   await fs.mkdir(workspaceDir, { recursive: true });
-  queue = new QueueManager(workspaceDir, createStateOnlyAgents(), createPendingInputs(), emptyDrainOptions);
+  queue = new QueueManager(
+    workspaceDir,
+    createStateOnlyAgents(),
+    createPendingInputs(),
+    createChatEvents(),
+    emptyDrainOptions,
+  );
 });
 
 afterEach(async () => {
@@ -192,6 +218,7 @@ describe('queue-updated event', () => {
 describe('orchestration', () => {
   let mockAgents;
   let mockPendingInputs;
+  let mockChatEvents;
   let mockDrainOptions;
   let orchQueue;
 
@@ -205,6 +232,7 @@ describe('orchestration', () => {
       register: mock(() => Promise.resolve()),
       updateDeliveryStatus: mock(() => undefined),
     };
+    mockChatEvents = createChatEvents();
     mockDrainOptions = mock(() => ({
       permissionMode: 'plan',
       thinkingMode: 'think',
@@ -212,7 +240,7 @@ describe('orchestration', () => {
       ampAgentMode: 'deep',
       model: 'persisted-model',
     }));
-    orchQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs, mockDrainOptions);
+    orchQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs, mockChatEvents, mockDrainOptions);
   });
 
   describe('submit', () => {
@@ -234,6 +262,37 @@ describe('orchestration', () => {
         turnId: expect.any(String),
         deliveryStatus: 'accepted',
       }));
+    });
+
+    it('appends the accepted user message and emits chat events', async () => {
+      const batches = [];
+      orchQueue.onChatEvents((chatId, logId, events, metadata) => batches.push({ chatId, logId, events, metadata }));
+
+      await orchQueue.submit('c1', 'hello', {
+        clientRequestId: 'req-1',
+        clientMessageId: 'msg-1',
+        turnId: 'turn-1',
+      });
+
+      expect(mockChatEvents.appendMessages).toHaveBeenCalledWith(
+        'c1',
+        [expect.objectContaining({
+          content: 'hello',
+          metadata: expect.objectContaining({
+            clientRequestId: 'req-1',
+            messageId: 'msg-1',
+            turnId: 'turn-1',
+            deliveryStatus: 'accepted',
+          }),
+        })],
+        'submit',
+      );
+      expect(batches[0]).toMatchObject({
+        chatId: 'c1',
+        logId: 'log-1',
+        metadata: { clientRequestId: 'req-1', turnId: 'turn-1' },
+      });
+      expect(batches[0].events[0].message.content).toBe('hello');
     });
 
     it('registers provided metadata for accepted REST turns', async () => {
@@ -292,6 +351,44 @@ describe('orchestration', () => {
           clientMessageId: 'msg-1',
           turnId: 'turn-1',
         },
+      }]);
+    });
+
+    it('emits delivery revisions after accepted turns complete', async () => {
+      mockChatEvents.reviseUserMessageDelivery.mockResolvedValue({
+        logId: 'log-1',
+        event: {
+          appendSeq: 2,
+          seq: 1,
+          messageId: 'message-1',
+          rev: 2,
+          message: {
+            type: 'user-message',
+            timestamp: '2026-06-01T00:00:00.000Z',
+            content: 'hello',
+            metadata: { deliveryStatus: 'delivered' },
+          },
+        },
+      });
+      const batches = [];
+      orchQueue.onChatEvents((chatId, logId, events, metadata) => batches.push({ chatId, logId, events, metadata }));
+
+      await orchQueue.runAcceptedTurn('c1', 'hello', {
+        clientRequestId: 'req-1',
+        clientMessageId: 'msg-1',
+        turnId: 'turn-1',
+      });
+
+      expect(mockChatEvents.reviseUserMessageDelivery).toHaveBeenCalledWith(
+        'c1',
+        { clientMessageId: 'msg-1', clientRequestId: 'req-1', turnId: 'turn-1' },
+        'delivered',
+      );
+      expect(batches).toEqual([{
+        chatId: 'c1',
+        logId: 'log-1',
+        events: [expect.objectContaining({ rev: 2 })],
+        metadata: { clientRequestId: 'req-1', turnId: 'turn-1' },
       }]);
     });
   });

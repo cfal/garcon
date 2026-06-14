@@ -2,14 +2,7 @@ import { EventEmitter } from 'events';
 import type { PendingUserInput, PendingUserInputClearReason } from '../../common/pending-user-input.js';
 import type { UserMessageDeliveryStatus } from '../../common/chat-types.js';
 
-export interface PendingUserCheckpoint {
-  createdAt: string;
-  userMessageCount: number;
-}
-
-export interface PendingUserInputRecord extends PendingUserInput {
-  checkpoint: PendingUserCheckpoint;
-}
+export type PendingUserInputRecord = PendingUserInput;
 
 type UpdatedCallback = (input: PendingUserInput) => void;
 type ClearedCallback = (chatId: string, clientRequestId: string, reason: PendingUserInputClearReason) => void;
@@ -49,18 +42,14 @@ export class PendingUserInputStore extends EventEmitter {
     return (this.#recordsByChatId.get(chatId)?.length ?? 0) > 0;
   }
 
-  upsert(input: PendingUserInput, checkpoint: PendingUserCheckpoint): PendingUserInput {
+  upsert(input: PendingUserInput): PendingUserInput {
     const records = this.#recordsByChatId.get(input.chatId) ?? [];
     const index = records.findIndex((record) => record.clientRequestId === input.clientRequestId);
-    const next: PendingUserInputRecord = {
-      ...input,
-      checkpoint,
-    };
+    const next: PendingUserInputRecord = { ...input };
     if (index >= 0) {
       records[index] = {
         ...records[index],
         ...next,
-        checkpoint,
       };
     } else {
       records.push(next);

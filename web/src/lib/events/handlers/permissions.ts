@@ -1,12 +1,12 @@
-// Handles permission lifecycle from agent-run-output message batches.
+// Handles permission lifecycle from chat event message batches.
 // Inspects ChatMessage entries for permission-request, permission-resolved,
 // and permission-cancelled types.
 
-import type { AgentRunOutputMessage } from '$shared/ws-events';
 import {
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
 	PermissionCancelledMessage,
+	type ChatMessage,
 } from '$shared/chat-types';
 import type { LoadingStatusEntry } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
@@ -26,7 +26,7 @@ const WAITING_FOR_PERMISSION_ID = 'WAITING_FOR_PERMISSION';
 // Scans a message batch for permission lifecycle messages and updates
 // pending permission state and loading status accordingly.
 export function handlePermissionLifecycleFromBatch(
-	msg: AgentRunOutputMessage,
+	msg: { chatId?: string | null; messages: ChatMessage[] },
 	ctx: PermissionLifecycleContext,
 ) {
 	if (!msg.messages) return;

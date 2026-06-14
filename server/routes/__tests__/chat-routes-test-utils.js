@@ -18,6 +18,18 @@ export function createRoutePendingInputs() {
   };
 }
 
+export function createRouteChatEvents() {
+  return {
+    readPage: () => Promise.resolve({
+      events: [],
+      logId: 'log-1',
+      lastAppendSeq: 0,
+      pageOldestSeq: 0,
+      hasMore: false,
+    }),
+  };
+}
+
 export function createRouteCommandService({
   registry,
   queue,

@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
 	parseServerWsMessage,
-	AgentRunOutputMessage,
+	ChatEventsMessage,
+	ChatSubscribedMessage,
+	ChatGenerationResetMessage,
 	AgentRunFinishedMessage,
 	AgentRunFailedMessage,
 	ChatSessionCreatedMessage,
@@ -20,21 +22,61 @@ import {
 } from '$shared/ws-events';
 import { ForkRunRequest, parseClientWsMessage } from '$shared/ws-requests';
 
+const chatEvent = {
+	appendSeq: 1,
+	seq: 1,
+	messageId: 'message-1',
+	rev: 1,
+	message: { type: 'assistant-message', timestamp: '2025-01-01T00:00:00Z', content: 'hi' },
+};
+
 describe('parseServerWsMessage', () => {
-	it('parses agent-run-output', () => {
+	it('parses chat-events', () => {
 		const msg = parseServerWsMessage({
-			type: 'agent-run-output',
+			type: 'chat-events',
 			chatId: 'c-1',
-			messages: [{ type: 'assistant-message', timestamp: '2025-01-01T00:00:00Z', content: 'hi' }],
+			logId: 'log-1',
+			events: [chatEvent],
 			turnId: 'turn-1',
 			clientRequestId: 'req-1',
 			upstreamRequestId: 'cursor-req-1',
 		});
-		expect(msg).toBeInstanceOf(AgentRunOutputMessage);
-		expect((msg as AgentRunOutputMessage).chatId).toBe('c-1');
-		expect((msg as AgentRunOutputMessage).turnId).toBe('turn-1');
-		expect((msg as AgentRunOutputMessage).clientRequestId).toBe('req-1');
-		expect((msg as AgentRunOutputMessage).upstreamRequestId).toBe('cursor-req-1');
+		expect(msg).toBeInstanceOf(ChatEventsMessage);
+		expect((msg as ChatEventsMessage).chatId).toBe('c-1');
+		expect((msg as ChatEventsMessage).logId).toBe('log-1');
+		expect((msg as ChatEventsMessage).events).toHaveLength(1);
+		expect((msg as ChatEventsMessage).turnId).toBe('turn-1');
+		expect((msg as ChatEventsMessage).clientRequestId).toBe('req-1');
+		expect((msg as ChatEventsMessage).upstreamRequestId).toBe('cursor-req-1');
+	});
+
+	it('parses chat-subscribed', () => {
+		const msg = parseServerWsMessage({
+			type: 'chat-subscribed',
+			clientRequestId: 'req-subscribe',
+			chatId: 'c-1',
+			logId: 'log-1',
+			mode: 'delta',
+			events: [chatEvent],
+			lastAppendSeq: 1,
+		});
+		expect(msg).toBeInstanceOf(ChatSubscribedMessage);
+		expect((msg as ChatSubscribedMessage).clientRequestId).toBe('req-subscribe');
+		expect((msg as ChatSubscribedMessage).mode).toBe('delta');
+	});
+
+	it('parses chat-generation-reset', () => {
+		const msg = parseServerWsMessage({
+			type: 'chat-generation-reset',
+			chatId: 'c-1',
+			logId: 'log-2',
+			events: [chatEvent],
+			lastAppendSeq: 1,
+			localNotice: 'The process died.',
+		});
+		expect(msg).toBeInstanceOf(ChatGenerationResetMessage);
+		expect((msg as ChatGenerationResetMessage).logId).toBe('log-2');
+		expect((msg as ChatGenerationResetMessage).localNotice).toBe('The process died.');
 	});
 
 	it('parses agent-run-finished with exitCode', () => {
@@ -199,14 +241,17 @@ describe('parseServerWsMessage', () => {
 			type: 'chat-log-response',
 			clientRequestId: 'req-1',
 			chatId: 'c-1',
-			messages: [],
-			total: 0,
+			logId: 'log-1',
+			events: [chatEvent],
+			pendingUserInputs: [],
+			lastAppendSeq: 1,
+			pageOldestSeq: 1,
 			hasMore: false,
-			offset: 0,
 			limit: 50,
 		});
 		expect(msg).toBeInstanceOf(ChatLogResponseMessage);
 		expect((msg as ChatLogResponseMessage).clientRequestId).toBe('req-1');
+		expect((msg as ChatLogResponseMessage).events).toHaveLength(1);
 	});
 
 	it('parses client-request-error', () => {
@@ -253,8 +298,8 @@ describe('parseServerWsMessage', () => {
 		expect(msg).toBeNull();
 	});
 
-	it('returns null for agent-run-output when chatId is empty string', () => {
-		const msg = parseServerWsMessage({ type: 'agent-run-output', chatId: '', messages: [] });
+	it('returns null for chat-events when chatId is empty string', () => {
+		const msg = parseServerWsMessage({ type: 'chat-events', chatId: '', logId: 'log-1', events: [] });
 		expect(msg).toBeNull();
 	});
 
@@ -272,10 +317,12 @@ describe('parseServerWsMessage', () => {
 		const msg = parseServerWsMessage({
 			type: 'chat-log-response',
 			chatId: 'c-1',
-			messages: [],
-			total: 0,
+			logId: 'log-1',
+			events: [],
+			pendingUserInputs: [],
+			lastAppendSeq: 0,
+			pageOldestSeq: 0,
 			hasMore: false,
-			offset: 0,
 			limit: 50,
 		});
 		expect(msg).toBeNull();

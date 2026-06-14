@@ -52,7 +52,7 @@ function createRoutes(snapshot = createSnapshot()) {
     { getChat: mock(() => null) },
     { getChatName: mock(() => null) },
     { getChatMetadata: mock(() => null) },
-    { ensureLoaded: mock(() => Promise.resolve(undefined)), getPaginatedMessages: mock(() => ({ messages: [] })) },
+    { readPage: mock(() => Promise.resolve({ events: [], logId: 'log-1', lastAppendSeq: 0, pageOldestSeq: 0, hasMore: false })) },
   );
 }
 

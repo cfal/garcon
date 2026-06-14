@@ -26,6 +26,12 @@ describe('ConversationMessage delivery status', () => {
 		expect(screen.getByLabelText('Sent')).toBeTruthy();
 	});
 
+	it('renders a sent indicator for delivered user messages', () => {
+		renderUserDeliveryStatus('delivered');
+
+		expect(screen.getByLabelText('Sent')).toBeTruthy();
+	});
+
 	it('renders a failed indicator for failed user messages', () => {
 		renderUserDeliveryStatus('failed');
 

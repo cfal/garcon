@@ -126,7 +126,7 @@
 	const userDeliveryTitle = $derived(
 		userDeliveryStatus === 'submitting'
 			? m.chat_message_delivery_sending()
-			: userDeliveryStatus === 'accepted'
+			: userDeliveryStatus === 'accepted' || userDeliveryStatus === 'delivered'
 				? m.chat_message_delivery_sent()
 				: userDeliveryStatus === 'failed'
 					? m.chat_message_delivery_failed()
@@ -261,7 +261,7 @@
 										>
 											{#if userDeliveryStatus === 'submitting'}
 												<LoaderCircle class="size-3 animate-spin" />
-											{:else if userDeliveryStatus === 'accepted'}
+											{:else if userDeliveryStatus === 'accepted' || userDeliveryStatus === 'delivered'}
 												<Check class="size-3" />
 											{:else}
 												<CircleAlert class="size-3" />

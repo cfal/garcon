@@ -59,10 +59,15 @@ function createRoutesFixture() {
     getChatMetadata: mock(() => null),
     addNewChatMetadata: mock(() => undefined),
   };
-  const historyCache = {
-    ensureLoaded: mock(async () => undefined),
-    getPaginatedMessages: mock((chatId, limit, offset) => ({ messages: [], total: 0, hasMore: false, offset, limit })),
-    appendMessages: mock(async () => undefined),
+  const chatEvents = {
+    readPage: mock(async (_chatId, limit, beforeSeq) => ({
+      events: [],
+      logId: 'log-1',
+      lastAppendSeq: 0,
+      pageOldestSeq: beforeSeq ?? 0,
+      hasMore: false,
+      limit,
+    })),
   };
   const agents = {
     hasAgent: mock(() => true),
@@ -89,7 +94,7 @@ function createRoutesFixture() {
     queue,
     pathCache,
     metadata,
-    historyCache,
+    chatEvents,
     agents,
     pendingInputs,
     commandService: createRouteCommandService({
@@ -103,18 +108,18 @@ function createRoutesFixture() {
     }),
   });
 
-  return { historyCache, pendingInputs, routes };
+  return { chatEvents, pendingInputs, routes };
 }
 
 describe('GET /api/v1/chats/messages', () => {
   it('clamps pagination parameters before reading history', async () => {
-    const { historyCache, pendingInputs, routes } = createRoutesFixture();
-    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=999999&offset=-10');
+    const { chatEvents, pendingInputs, routes } = createRoutesFixture();
+    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=999999&beforeSeq=10');
 
     const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
 
     expect(response.status).toBe(200);
     expect(pendingInputs.reconcile).toHaveBeenCalledWith('123');
-    expect(historyCache.getPaginatedMessages).toHaveBeenCalledWith('123', 200, 0);
+    expect(chatEvents.readPage).toHaveBeenCalledWith('123', 200, 10);
   });
 });

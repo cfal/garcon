@@ -8,6 +8,16 @@ import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage } from '$shared/chat-types';
 import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
+function rawEvent(seq: number, message: Record<string, unknown>) {
+	return {
+		appendSeq: seq,
+		seq,
+		messageId: `message-${seq}`,
+		rev: 1,
+		message,
+	};
+}
+
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
 	return {
 		agentSettings: {
@@ -15,8 +25,11 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			setPermissionMode: vi.fn(),
 		},
 		chatState: {
-			setChatMessages: vi.fn(),
-			appendChatMessagesByIdentity: vi.fn(),
+			applyChatEvents: vi.fn((): 'applied' => 'applied'),
+			replaceChatGeneration: vi.fn(),
+			reloadChatSnapshot: vi.fn(),
+			appendErrorMessage: vi.fn(),
+			appendLocalAssistantMessage: vi.fn(),
 			upsertPendingUserInput: vi.fn(),
 			clearPendingUserInput: vi.fn(),
 			updatePendingUserInputDeliveryStatus: vi.fn(),
@@ -182,12 +195,17 @@ describe('event router integration', () => {
 		renderRouterWithRawMessages(
 			[
 				{
-					type: 'agent-run-output',
+					type: 'chat-events',
 					chatId: 'chat-a',
+					logId: 'log-1',
 					clientRequestId: 'req-1',
 					upstreamRequestId: 'cursor-req-1',
-					messages: [
-						{ type: 'assistant-message', timestamp: '2026-05-14T00:00:01.000Z', content: 'hi' },
+					events: [
+						rawEvent(1, {
+							type: 'assistant-message',
+							timestamp: '2026-05-14T00:00:01.000Z',
+							content: 'hi',
+						}),
 					],
 				},
 			],
@@ -241,11 +259,15 @@ describe('event router integration', () => {
 		const stores = createStores({
 			chatState: {
 				...defaults.chatState,
-				appendChatMessagesByIdentity: (messages) => {
-					currentMessages = [...currentMessages, ...messages];
+				applyChatEvents: (_chatId, _logId, events) => {
+					currentMessages = [...currentMessages, ...events.map((entry) => entry.message)];
+					return 'applied';
 				},
-				setChatMessages: (updater) => {
-					currentMessages = typeof updater === 'function' ? updater(currentMessages) : updater;
+				appendLocalAssistantMessage: (content) => {
+					currentMessages = [
+						...currentMessages,
+						{ type: 'assistant-message', timestamp: '2026-05-14T00:00:02.000Z', content } as never,
+					];
 				},
 			},
 		});
@@ -253,14 +275,15 @@ describe('event router integration', () => {
 		renderRouterWithRawMessages(
 			[
 				{
-					type: 'agent-run-output',
+					type: 'chat-events',
 					chatId: 'chat-a',
-					messages: [
-						{
+					logId: 'log-1',
+					events: [
+						rawEvent(1, {
 							type: 'assistant-message',
 							timestamp: '2026-05-14T00:00:01.000Z',
 							content: 'streamed',
-						},
+						}),
 					],
 				},
 				{
