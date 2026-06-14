@@ -66,7 +66,7 @@
 
 <ScrollArea
 	bind:viewportRef
-	class="flex-1 overflow-y-auto overscroll-contain"
+	class="flex-1 overflow-y-auto overscroll-contain bg-sidebar-chat-item-bg"
 	scrollbarYClasses="w-1.5"
 >
 	<SidebarChatList

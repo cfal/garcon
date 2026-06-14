@@ -696,7 +696,7 @@
 
 <div
 	bind:this={listEl}
-	class="relative min-h-full"
+	class="relative min-h-full bg-sidebar-chat-item-bg"
 	style={`height:${totalHeight}px;`}
 	data-sidebar-virtual-list
 	data-sidebar-filtered={isFiltered ? 'true' : 'false'}

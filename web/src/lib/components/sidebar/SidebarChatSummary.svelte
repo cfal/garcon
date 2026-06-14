@@ -95,7 +95,7 @@
 	<div class="min-w-0 flex-1">
 		<div
 			class={cn(
-				'flex min-w-0 items-center gap-1.5 truncate text-[14px] font-medium',
+				'flex min-w-0 items-center gap-1.5 truncate text-[14px] font-semibold tracking-tight',
 				isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
 			)}
 		>
@@ -105,7 +105,7 @@
 					aria-label={m.sidebar_chat_unread()}
 				></span>
 			{/if}
-			<span class="truncate">{chatName}</span>
+			<span class="truncate" title={chatName}>{chatName}</span>
 		</div>
 
 		{#if projectPath || formattedTimestamp}
@@ -141,8 +141,8 @@
 
 		<div
 			class={cn(
-				'mb-1 mt-0.5 truncate text-[13px] italic',
-				isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80',
+				'mb-1 mt-0.5 truncate text-[12px] leading-[1.3]',
+				isSelected ? 'text-sidebar-chat-item-selected-foreground/80' : 'text-muted-foreground',
 			)}
 		>
 			{lastMessage || '\u00A0'}

@@ -38,9 +38,8 @@ describe('shared sidebar chat row', () => {
 			session: createChat(),
 		});
 
-		expect(screen.getByText('Shared row chat').closest('button')?.getAttribute('draggable')).toBe(
-			'true',
-		);
+		const rowButton = screen.getByRole('button', { name: /Open chat Shared row chat/ });
+		expect(rowButton.getAttribute('draggable')).toBe('true');
 	});
 
 	it('omits native row dragging for Pragmatic wrappers', () => {
@@ -49,9 +48,28 @@ describe('shared sidebar chat row', () => {
 			enableNativeDrag: false,
 		});
 
-		expect(screen.getByText('Shared row chat').closest('button')?.hasAttribute('draggable')).toBe(
-			false,
-		);
+		const rowButton = screen.getByRole('button', { name: /Open chat Shared row chat/ });
+		expect(rowButton.hasAttribute('draggable')).toBe(false);
+	});
+
+	it('exposes a single concise accessible name on the row control', () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			onTagClick: vi.fn(),
+			onManageTags: vi.fn(),
+		});
+
+		const rowButton = screen.getByRole('button', { name: /Open chat Shared row chat/ });
+		// The primary control carries the whole accessible name; the long preview,
+		// project path, and provider tag must not leak into it.
+		expect(rowButton.textContent?.trim()).toBe('');
+		expect(rowButton.getAttribute('aria-label')).toContain('Shared row chat');
+		expect(rowButton.getAttribute('aria-label')).not.toContain('Latest preview text');
+
+		// Tag and overflow buttons are siblings, never nested inside the row button.
+		const tagButton = screen.getByRole('button', { name: 'ops' });
+		expect(tagButton.closest('button')).toBe(tagButton);
+		expect(rowButton.querySelector('button')).toBeNull();
 	});
 
 	it('renders the shared chat summary inside the sidebar item shell', async () => {

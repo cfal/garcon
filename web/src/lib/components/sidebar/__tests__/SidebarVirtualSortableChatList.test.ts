@@ -129,7 +129,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(screen.getByText('Chat 0')).toBeTruthy();
 		expect(screen.queryByText('Chat 499')).toBeNull();
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
-		expect(screen.getByText('Chat 0').closest('button')?.hasAttribute('draggable')).toBe(false);
+		const firstRowButton = screen.getByRole('button', { name: /Open chat Chat 0/ });
+		expect(firstRowButton.hasAttribute('draggable')).toBe(false);
 	});
 
 	it('updates visible rows when the shared viewport scrolls', async () => {

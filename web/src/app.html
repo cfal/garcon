@@ -20,6 +20,25 @@
 		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 		<link rel="manifest" href="/site.webmanifest" />
 		<title>Garcon</title>
+		<script>
+			// Applies the persisted theme before first paint so the shell (sidebar
+			// included) never flashes light while waiting for hydration. The key and
+			// shape mirror LOCAL_STORAGE_KEYS.localSettings; +layout.svelte keeps the
+			// class in sync at runtime.
+			(function () {
+				try {
+					var raw = localStorage.getItem('pref_local_settings');
+					var theme = raw ? JSON.parse(raw).theme : 'system';
+					var isDark =
+						theme === 'dark' ||
+						(theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+					document.documentElement.classList.toggle('dark', isDark);
+					document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+				} catch (e) {
+					/* storage or JSON unavailable; runtime theme effect will apply it */
+				}
+			})();
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

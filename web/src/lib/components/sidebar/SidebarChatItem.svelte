@@ -2,7 +2,6 @@
 	import { onMount } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
-	import { Button } from '$lib/components/ui/button';
 	import { getAppShell, getModelCatalog, getSplitLayout } from '$lib/context';
 	import Pin from '@lucide/svelte/icons/pin';
 	import Archive from '@lucide/svelte/icons/archive';
@@ -24,6 +23,7 @@
 		DropdownMenuSeparator,
 	} from '$lib/components/ui/dropdown-menu';
 	import SidebarChatSummary from './SidebarChatSummary.svelte';
+	import { formatSidebarChatTimestamp } from './chat-timestamp.js';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -87,6 +87,18 @@
 	let isSelected = $derived(selectedChatId === session.id);
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
+
+	// Concise accessible name for the row's primary control so screen readers
+	// announce the chat title and recency instead of the entire summary block.
+	let rowAriaLabel = $derived.by(() => {
+		const timestamp = formatSidebarChatTimestamp(
+			session.lastActivityAt ?? session.createdAt,
+			currentTime,
+		);
+		return timestamp
+			? m.sidebar_chat_open_with_time({ name: chatName, time: timestamp.label })
+			: m.sidebar_chat_open({ name: chatName });
+	});
 
 	function handleItemClick(e: MouseEvent) {
 		if (isMultiSelectMode) {
@@ -261,6 +273,34 @@
 	</div>
 {/snippet}
 
+<!--
+	The row is a presentation container holding a single stretched primary
+	button plus independently interactive siblings (tags, overflow, actions).
+	The primary button carries a concise aria-label and no text descendants,
+	so its accessible name stays short and no button nests inside another.
+	The visible content layer is pointer-events-none so clicks fall through to
+	the stretched button, while interactive children re-enable pointer events.
+-->
+{#snippet rowBody(extraButtonClass: string)}
+	<button
+		type="button"
+		class={cn('absolute inset-0 z-0 rounded-none', extraButtonClass)}
+		aria-label={rowAriaLabel}
+		aria-current={!isMultiSelectMode && isSelected ? 'true' : undefined}
+		draggable={canNativeDrag ? true : undefined}
+		ondragstart={canNativeDrag ? handleDragStart : undefined}
+		ondragend={canNativeDrag ? handleDragEnd : undefined}
+		oncontextmenu={handleRightClick}
+		onclick={handleItemClick}
+	></button>
+	<div
+		class="pointer-events-none relative z-10 flex min-w-0 flex-1 items-center [&_a]:pointer-events-auto [&_button]:pointer-events-auto"
+	>
+		{@render selectionCheckbox()}
+		{@render chatSummary()}
+	</div>
+{/snippet}
+
 <div class="chat-item-root group relative" bind:this={itemEl}>
 	{#if isMobile}
 		<div
@@ -273,16 +313,16 @@
 				!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
 			)}
 		>
-			<button
+			<div
 				class={cn(
-					'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
+					'relative flex min-w-0 flex-1 items-center py-[5px] pr-2',
 					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
 				)}
-				onclick={handleItemClick}
 			>
-				{@render selectionCheckbox()}
-				{@render chatSummary()}
-			</button>
+				{@render rowBody(
+					'text-left hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,transform] duration-150',
+				)}
+			</div>
 			{#if !isMultiSelectMode}
 				<button
 					type="button"
@@ -296,29 +336,20 @@
 			{/if}
 		</div>
 	{:else}
-		<div>
-			<Button
-				variant="ghost"
-				draggable={canNativeDrag ? true : undefined}
-				ondragstart={canNativeDrag ? handleDragStart : undefined}
-				ondragend={canNativeDrag ? handleDragEnd : undefined}
-				oncontextmenu={handleRightClick}
-				class={cn(
-					'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30',
-					isMultiSelectMode
-						? 'py-[5px] pl-1 border-l-0'
-						: 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
-					!isMultiSelectMode &&
-						isSelected &&
-						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
-					!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
-					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
-				)}
-				onclick={handleItemClick}
-			>
-				{@render selectionCheckbox()}
-				{@render chatSummary()}
-			</Button>
+		<div
+			class={cn(
+				'relative flex min-w-0 items-center pr-2 bg-sidebar-chat-item-bg transition-colors duration-200 border-b border-border/30',
+				isMultiSelectMode
+					? 'py-[5px] pl-1 border-l-0'
+					: 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
+				!isMultiSelectMode &&
+					isSelected &&
+					'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
+				!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
+				isMultiSelectMode && isMultiSelected && 'bg-primary/8',
+			)}
+		>
+			{@render rowBody('hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200')}
 		</div>
 	{/if}
 

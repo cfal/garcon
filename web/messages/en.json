@@ -656,6 +656,8 @@
 	"sidebar_actions_settings": "Settings",
 	"sidebar_app_title": "Garcon",
 	"sidebar_chat_more_actions": "Chat actions",
+	"sidebar_chat_open": "Open chat {name}",
+	"sidebar_chat_open_with_time": "Open chat {name}, last active {time}",
 	"sidebar_chat_unread": "Unread",
 	"sidebar_chats_archive": "Archive",
 	"sidebar_chats_details": "Details",
