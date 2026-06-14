@@ -4,16 +4,13 @@
 	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import {
 		isToolUseMessage,
-		ToolResultMessage,
 		PermissionRequestMessage,
-		PermissionResolvedMessage,
-		PermissionCancelledMessage,
 	} from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import { getChatState, getAgentState, getLocalSettings, getAppShell } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createMessageIdAllocator } from '$lib/chat/message-id';
-	import { buildConversationFeedRenderItems } from '$lib/chat/conversation-feed-items';
+	import { buildConversationFeedRenderModel } from '$lib/chat/conversation-feed-items';
 	import {
 		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
 		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
@@ -69,39 +66,6 @@
 		}
 	});
 
-	// Builds a lookup of toolId -> ToolResultMessage so tool-use messages
-	// can render their results inline. tool-result messages are then
-	// skipped from the main render loop.
-	const toolResultIndex = $derived.by(() => {
-		const index = new Map<string, ToolResultMessage>();
-		for (const msg of chatState.visibleMessages) {
-			if (msg instanceof ToolResultMessage) {
-				index.set(msg.toolId, msg);
-			}
-		}
-		return index;
-	});
-
-	// Builds a lookup from permissionRequestId to terminal state so
-	// permission-request rows render as pending/resolved/cancelled.
-	// Terminal messages (permission-resolved, permission-cancelled) are
-	// skipped from the main render loop.
-	const permissionTerminalById = $derived.by(() => {
-		const map = new Map<
-			string,
-			{ state: 'resolved' | 'cancelled'; allowed?: boolean; reason?: string }
-		>();
-		for (const m of chatState.visibleMessages) {
-			if (m instanceof PermissionResolvedMessage) {
-				map.set(m.permissionRequestId, { state: 'resolved', allowed: m.allowed });
-			}
-			if (m instanceof PermissionCancelledMessage) {
-				map.set(m.permissionRequestId, { state: 'cancelled', reason: m.reason });
-			}
-		}
-		return map;
-	});
-
 	// Tracks which ExitPlanMode synthetic permission requests are still
 	// pending so we can derive terminal state for the tool-use rendering.
 	// Matches both PascalCase and snake_case variants since claude-cli
@@ -114,7 +78,10 @@
 		),
 	);
 
-	const renderItems = $derived(buildConversationFeedRenderItems(chatState.visibleMessages));
+	// Builds render items and lookup tables in a single pass over the
+	// visible transcript, keeping stream updates cheaper.
+	const renderModel = $derived(buildConversationFeedRenderModel(chatState.visibleMessages));
+	const renderItems = $derived(renderModel.items);
 
 	const feedScrollAreaClass = 'h-full overflow-hidden relative';
 	const feedViewportClass = $derived(
@@ -239,13 +206,13 @@
 			{:else}
 				{@const message = item.message}
 				{@const toolResult = isToolUseMessage(message)
-					? toolResultIndex.get(message.toolId)
+					? renderModel.toolResultIndex.get(message.toolId)
 					: undefined}
 				{@const exitPlanId =
 					message.type === 'exit-plan-mode-tool-use' ? `plan-exit-${message.toolId}` : null}
 				{@const permTerminal =
 					message instanceof PermissionRequestMessage
-						? permissionTerminalById.get(message.permissionRequestId)
+						? renderModel.permissionTerminalById.get(message.permissionRequestId)
 						: exitPlanId
 							? pendingExitPlanIds.has(exitPlanId)
 								? undefined
