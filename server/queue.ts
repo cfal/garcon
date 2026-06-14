@@ -447,7 +447,9 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           await this.#reviseDeliveryStatus(chatId, queuedTurnOptions);
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
-          logger.error('queue: error processing queued message:', (error as Error).message);
+          const message = error instanceof Error ? error.message : String(error);
+          logger.error('queue: error processing queued message:', message);
+          this.emit('turn-failed', chatId, message, queuedTurnOptions);
           await this.resetAndPauseChat(chatId, entry.id);
           break;
         }

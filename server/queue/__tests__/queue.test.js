@@ -471,6 +471,8 @@ describe('orchestration', () => {
 
     it('pauses on agent error via resetAndPauseChat', async () => {
       await orchQueue.enqueueChat('c1', 'will fail');
+      const failures = [];
+      orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
 
       mockAgents.runAgentTurn.mockRejectedValue(new Error('agent error'));
 
@@ -479,6 +481,16 @@ describe('orchestration', () => {
       const result = await orchQueue.readChatQueue('c1');
       expect(result.paused).toBe(true);
       expect(result.entries[0].status).toBe('queued');
+      expect(failures).toEqual([{
+        chatId: 'c1',
+        error: 'agent error',
+        options: expect.objectContaining({
+          clientRequestId: expect.any(String),
+          clientMessageId: expect.any(String),
+          turnId: expect.any(String),
+          model: 'persisted-model',
+        }),
+      }]);
     });
 
     it('registers queued messages as pending input before dispatch', async () => {
