@@ -482,14 +482,24 @@ describe('normalizeCodexJsonlEntry', () => {
       const secondResult = normalizeCodexJsonlEntry(secondEntry);
       const firstLineResult = normalizeCodexJsonlEntry(firstEntry, { sourceLineNumber: 10 });
       const secondLineResult = normalizeCodexJsonlEntry(firstEntry, { sourceLineNumber: 11 });
+      const firstByteResult = normalizeCodexJsonlEntry(firstEntry, {
+        sourceByteOffset: 1000,
+        sourceLineNumber: 10,
+      });
+      const repeatedByteResult = normalizeCodexJsonlEntry(firstEntry, {
+        sourceByteOffset: 1000,
+        sourceLineNumber: 11,
+      });
 
       expect(firstResult.canonical[0].toolId).toBe(repeatedFirstResult.canonical[0].toolId);
       expect(firstResult.canonical[0].toolId).not.toBe(secondResult.canonical[0].toolId);
       expect(firstLineResult.canonical[0].toolId).not.toBe(secondLineResult.canonical[0].toolId);
+      expect(firstByteResult.canonical[0].toolId).toBe(repeatedByteResult.canonical[0].toolId);
       expect(firstResult.canonical[1].toolId).toBe(firstResult.canonical[0].toolId);
       expect(secondResult.canonical[1].toolId).toBe(secondResult.canonical[0].toolId);
       expect(firstLineResult.canonical[1].toolId).toBe(firstLineResult.canonical[0].toolId);
       expect(secondLineResult.canonical[1].toolId).toBe(secondLineResult.canonical[0].toolId);
+      expect(firstByteResult.canonical[1].toolId).toBe(firstByteResult.canonical[0].toolId);
     });
   });
 });

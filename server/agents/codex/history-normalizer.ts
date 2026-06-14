@@ -30,6 +30,7 @@ export interface ParsedApplyPatch {
 }
 
 export interface CodexJsonlNormalizationContext {
+  sourceByteOffset?: number;
   sourceLineNumber?: number;
 }
 
@@ -60,8 +61,10 @@ function syntheticWebSearchToolId(
   context: CodexJsonlNormalizationContext,
 ): string {
   const actionType = asString(action.type) || '';
-  const lineNumber = context.sourceLineNumber == null ? '' : String(context.sourceLineNumber);
-  const fingerprint = [ts, actionType, lineNumber, query, ...queries].join('\u001f');
+  const sourcePosition = context.sourceByteOffset == null
+    ? `line:${context.sourceLineNumber ?? ''}`
+    : `byte:${context.sourceByteOffset}`;
+  const fingerprint = [ts, actionType, sourcePosition, query, ...queries].join('\u001f');
   return `web-search-${stableHash(fingerprint)}`;
 }
 

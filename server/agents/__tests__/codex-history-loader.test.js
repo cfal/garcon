@@ -383,6 +383,48 @@ describe('loadCodexChatMessages', () => {
     expect(page.messages.map((message) => message.content)).toEqual(['reply 9', 'reply 10', 'reply 11']);
   });
 
+  it('keeps synthetic web search IDs stable between tail pages and full loads', async () => {
+    const fillerLines = Array.from({ length: 520 }, (_, index) => JSON.stringify({
+      type: 'response_item',
+      timestamp: `2026-02-21T16:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}.000Z`,
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: `reply ${index}` }],
+      },
+    }));
+    const webSearchLine = JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-02-21T17:00:00.000Z',
+      payload: {
+        type: 'web_search_call',
+        status: 'completed',
+        action: {
+          type: 'search',
+          query: 'Codex duplicate keyed each',
+          queries: ['Codex duplicate keyed each'],
+        },
+      },
+    });
+    const lines = [...fillerLines, webSearchLine];
+
+    await withTempJsonl(lines, async (filePath) => {
+      const fullMessages = await loadCodexChatMessages(filePath);
+      const page = await loadCodexChatMessagePage(filePath, 5, 0);
+      expect(page).not.toBeNull();
+      if (!page) throw new Error('expected tail page');
+
+      const fullWebSearch = fullMessages.find((message) => message.type === 'web-search-tool-use');
+      const pageWebSearch = page.messages.find((message) => message.type === 'web-search-tool-use');
+      expect(fullWebSearch).toBeTruthy();
+      expect(pageWebSearch).toBeTruthy();
+      if (!fullWebSearch || !pageWebSearch) throw new Error('expected web search in full and tail loads');
+
+      expect(page.hasMore).toBe(true);
+      expect(pageWebSearch.toolId).toBe(fullWebSearch.toolId);
+    });
+  });
+
   it('returns null for older tail pages so callers use the full loader', async () => {
     const page = await loadCodexChatMessagePage('/tmp/missing.jsonl', 3, 2);
 
