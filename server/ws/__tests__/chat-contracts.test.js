@@ -728,10 +728,12 @@ describe('chat WebSocket handler', () => {
     it('responds with chat-sessions-running shape', async () => {
       await chatHandler.message(ws, {
         type: 'chats-running-query',
+        clientRequestId: 'req-running-1',
       });
       const payload = lastSentPayload();
       expect(payload).toMatchObject({
         type: 'chat-sessions-running',
+        clientRequestId: 'req-running-1',
       });
       expect(payload.sessions).toEqual({ claude: [], codex: [], opencode: [], amp: [], factory: [], 'direct-anthropic-compatible': [], 'direct-openai-compatible': [], 'direct-openai-responses-compatible': [] });
     });
@@ -896,7 +898,7 @@ describe('chat WebSocket handler', () => {
   });
 
   describe('chat-reload', () => {
-    it('reloads from native and sends a generation reset', async () => {
+    it('reloads from native and sends a correlated reload response', async () => {
       mockRegistry.getChat.mockReturnValue({
         agentId: 'claude',
         nativePath: '/tmp/test.jsonl',
@@ -910,10 +912,35 @@ describe('chat WebSocket handler', () => {
 
       expect(mockNativeReloader.reloadFromNative).toHaveBeenCalledWith('123', 'manual-reload');
       expect(lastSentPayload()).toMatchObject({
-        type: 'chat-generation-reset',
+        type: 'chat-reloaded',
+        clientRequestId: 'req-reload-1',
         chatId: '123',
         logId: 'log-2',
         lastAppendSeq: 1,
+      });
+    });
+
+    it('rejects manual reload while the chat is running', async () => {
+      mockRegistry.getChat.mockReturnValue({
+        agentId: 'claude',
+        nativePath: '/tmp/test.jsonl',
+        agentSessionId: 'x',
+      });
+      mockNativeReloader.reloadFromNative.mockRejectedValueOnce(
+        new Error('Cannot manually reload running chat'),
+      );
+
+      await chatHandler.message(ws, {
+        type: 'chat-reload',
+        chatId: '123',
+        clientRequestId: 'req-reload-running',
+      });
+
+      expect(lastSentPayload()).toMatchObject({
+        type: 'client-request-error',
+        clientRequestId: 'req-reload-running',
+        code: 'CHAT_RUNNING',
+        retryable: true,
       });
     });
   });

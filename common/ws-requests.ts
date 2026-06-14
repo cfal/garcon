@@ -182,8 +182,10 @@ export class AgentStopRequest {
 
 export class ChatRunningQueryRequest {
   readonly type = 'chats-running-query' as const;
-  static fromJson(): ChatRunningQueryRequest {
-    return new ChatRunningQueryRequest();
+  constructor(public clientRequestId: string | null = null) { }
+
+  static fromJson(data: Record<string, unknown>): ChatRunningQueryRequest {
+    return new ChatRunningQueryRequest(strOrNull(data.clientRequestId));
   }
 }
 
@@ -419,7 +421,7 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
     case 'agent-stop':
       return AgentStopRequest.fromJson(data);
     case 'chats-running-query':
-      return ChatRunningQueryRequest.fromJson();
+      return ChatRunningQueryRequest.fromJson(data);
     case 'chat-log-query':
       return ChatLogQueryRequest.fromJson(data);
     case 'chat-subscribe':

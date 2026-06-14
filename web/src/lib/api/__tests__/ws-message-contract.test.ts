@@ -4,6 +4,7 @@ import {
 	ChatEventsMessage,
 	ChatSubscribedMessage,
 	ChatGenerationResetMessage,
+	ChatReloadedMessage,
 	AgentRunFinishedMessage,
 	AgentRunFailedMessage,
 	ChatSessionCreatedMessage,
@@ -15,6 +16,7 @@ import {
 	ChatSessionDeletedWsMessage,
 	ChatReadUpdatedV1Message,
 	ChatListRefreshRequestedMessage,
+	ChatSessionsRunningMessage,
 	SettingsChangedMessage,
 	ChatLogResponseMessage,
 	ClientRequestErrorMessage,
@@ -77,6 +79,36 @@ describe('parseServerWsMessage', () => {
 		expect(msg).toBeInstanceOf(ChatGenerationResetMessage);
 		expect((msg as ChatGenerationResetMessage).logId).toBe('log-2');
 		expect((msg as ChatGenerationResetMessage).localNotice).toBe('The process died.');
+	});
+
+	it('parses chat-reloaded responses with request correlation', () => {
+		const msg = parseServerWsMessage({
+			type: 'chat-reloaded',
+			clientRequestId: 'req-reload',
+			chatId: 'c-1',
+			logId: 'log-2',
+			events: [chatEvent],
+			lastAppendSeq: 1,
+			localNotice: 'Reloaded.',
+		});
+		expect(msg).toBeInstanceOf(ChatReloadedMessage);
+		expect((msg as ChatReloadedMessage).clientRequestId).toBe('req-reload');
+		expect((msg as ChatReloadedMessage).chatId).toBe('c-1');
+		expect((msg as ChatReloadedMessage).logId).toBe('log-2');
+		expect((msg as ChatReloadedMessage).localNotice).toBe('Reloaded.');
+	});
+
+	it('parses chat-sessions-running responses with optional request correlation', () => {
+		const msg = parseServerWsMessage({
+			type: 'chat-sessions-running',
+			clientRequestId: 'req-running',
+			sessions: { claude: [{ id: 'c-1' }] },
+		});
+		expect(msg).toBeInstanceOf(ChatSessionsRunningMessage);
+		expect((msg as ChatSessionsRunningMessage).clientRequestId).toBe('req-running');
+		expect((msg as ChatSessionsRunningMessage).sessions).toEqual({
+			claude: [{ id: 'c-1' }],
+		});
 	});
 
 	it('parses agent-run-finished with exitCode', () => {

@@ -50,6 +50,18 @@ export class ChatGenerationResetMessage {
   ) { }
 }
 
+export class ChatReloadedMessage {
+  readonly type = 'chat-reloaded' as const;
+  constructor(
+    public clientRequestId: string,
+    public chatId: string,
+    public logId: string,
+    public events: ChatMessageEvent[],
+    public lastAppendSeq: number,
+    public localNotice?: string,
+  ) { }
+}
+
 export class AgentRunFinishedMessage {
   readonly type = 'agent-run-finished' as const;
   constructor(
@@ -118,7 +130,10 @@ export class PendingUserInputClearedMessage {
 
 export class ChatSessionsRunningMessage {
   readonly type = 'chat-sessions-running' as const;
-  constructor(public sessions: Record<string, Array<{ id: string }>>) { }
+  constructor(
+    public sessions: Record<string, Array<{ id: string }>>,
+    public clientRequestId?: string,
+  ) { }
 }
 
 export class WsFaultMessage {
@@ -219,6 +234,7 @@ export type ServerWsMessage =
   | ChatEventsMessage
   | ChatSubscribedMessage
   | ChatGenerationResetMessage
+  | ChatReloadedMessage
   | AgentRunFinishedMessage
   | AgentRunFailedMessage
   | ChatSessionCreatedMessage
@@ -309,6 +325,22 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
         typeof data.localNotice === 'string' ? data.localNotice : undefined,
       );
     }
+    case 'chat-reloaded': {
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const chatId = requiredStr(data.chatId);
+      const logId = requiredStr(data.logId);
+      if (!clientRequestId || !chatId || !logId) return null;
+      const events = parseChatMessageEvents(data.events);
+      if (events === null) return null;
+      return new ChatReloadedMessage(
+        clientRequestId,
+        chatId,
+        logId,
+        events,
+        Number(data.lastAppendSeq) || 0,
+        typeof data.localNotice === 'string' ? data.localNotice : undefined,
+      );
+    }
     case 'agent-run-finished': {
       const chatId = requiredStr(data.chatId);
       if (!chatId) return null;
@@ -378,7 +410,10 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
       return new PendingUserInputClearedMessage(chatId, clientRequestId, reason);
     }
     case 'chat-sessions-running':
-      return new ChatSessionsRunningMessage(data.sessions as ChatSessionsRunningMessage['sessions']);
+      return new ChatSessionsRunningMessage(
+        data.sessions as ChatSessionsRunningMessage['sessions'],
+        typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
+      );
     case 'ws-fault':
       return new WsFaultMessage(str(data.error));
     case 'chat-title-updated': {

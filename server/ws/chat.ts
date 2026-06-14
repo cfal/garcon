@@ -9,7 +9,7 @@ import {
   ChatSessionsRunningMessage, WsFaultMessage, ChatForkCreatedMessage,
   ClientRequestErrorMessage,
   ChatSubscribedMessage,
-  ChatGenerationResetMessage,
+  ChatReloadedMessage,
 } from '../../common/ws-events.ts';
 import type { ClientRequestErrorCode } from '../../common/ws-events.ts';
 import type { PendingUserInput } from '../../common/pending-user-input.js';
@@ -304,8 +304,11 @@ export class ChatHandler {
     }
   }
 
-  #handleGetRunningSessions(_data: ChatRunningQueryRequest, writer: WebSocketWriter): void {
-    writer.send(new ChatSessionsRunningMessage(this.#agents.getRunningSessions()));
+  #handleGetRunningSessions(data: ChatRunningQueryRequest, writer: WebSocketWriter): void {
+    writer.send(new ChatSessionsRunningMessage(
+      this.#agents.getRunningSessions(),
+      data.clientRequestId ?? undefined,
+    ));
   }
 
   async #handleChatSubscribe(data: ChatSubscribeRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
@@ -359,7 +362,8 @@ export class ChatHandler {
         return;
       }
       const reload = await this.#nativeReloader.reloadFromNative(chatId, 'manual-reload');
-      writer.send(new ChatGenerationResetMessage(
+      writer.send(new ChatReloadedMessage(
+        clientRequestId,
         chatId,
         reload.logId,
         reload.events,
