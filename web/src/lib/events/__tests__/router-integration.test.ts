@@ -315,6 +315,57 @@ describe('event router integration', () => {
 		expect(pendingUserInputs[0]?.deliveryStatus).toBe('failed');
 	});
 
+	it('flushes queued chat events before replacing a generation', () => {
+		const calls: string[] = [];
+		const defaults = createStores();
+		const stores = createStores({
+			chatState: {
+				...defaults.chatState,
+				applyChatEvents: vi.fn((): 'applied' => {
+					calls.push('apply');
+					return 'applied';
+				}),
+				replaceChatGeneration: vi.fn(() => {
+					calls.push('replace');
+				}),
+			},
+		});
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-events',
+					chatId: 'chat-a',
+					logId: 'log-old',
+					events: [
+						rawEvent(1, {
+							type: 'assistant-message',
+							timestamp: '2026-05-14T00:00:01.000Z',
+							content: 'streamed',
+						}),
+					],
+				},
+				{
+					type: 'chat-generation-reset',
+					chatId: 'chat-a',
+					logId: 'log-new',
+					events: [],
+					lastAppendSeq: 0,
+				},
+			],
+			stores,
+		);
+
+		expect(calls).toEqual(['apply', 'replace']);
+		expect(stores.chatState.applyChatEvents).toHaveBeenCalledTimes(1);
+		expect(stores.chatState.replaceChatGeneration).toHaveBeenCalledWith(
+			'chat-a',
+			'log-new',
+			[],
+			{ lastAppendSeq: 0, localNotice: undefined },
+		);
+	});
+
 	it('preserves streamed output order before same-drain stop messages', () => {
 		let currentMessages: ChatMessage[] = [];
 		const defaults = createStores();

@@ -344,6 +344,7 @@ function buildDispatch(
 		},
 		'chat-generation-reset': (msg) => {
 			if (!(msg instanceof ChatGenerationResetMessage)) return;
+			eventsAccumulator.flush();
 			stores.chatState.replaceChatGeneration(msg.chatId, msg.logId, msg.events, {
 				lastAppendSeq: msg.lastAppendSeq,
 				localNotice: msg.localNotice,
