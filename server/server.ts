@@ -24,6 +24,7 @@ import { ShellManager } from './ws/shell.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatEventLog } from './chats/chat-event-log.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
+import { ColdLoadedChatEventLog } from './chats/cold-loaded-chat-event-log.js';
 import { ChatStreamFence } from './chats/chat-stream-fence.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
 import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
@@ -152,19 +153,18 @@ export async function startServer(): Promise<void> {
       },
       (chatId) => agentRegistry.isChatRunning(chatId),
     );
+    const coldLoadedChatEvents = new ColdLoadedChatEventLog(chatEventLog, chatNativeReloader);
     const chatMessageReader = {
       async ensureLoaded(chatId: string) {
-        await chatNativeReloader.ensureColdLoaded(chatId);
-        return chatEventLog.getMessages(chatId);
+        return coldLoadedChatEvents.getMessages(chatId);
       },
       getMessages(chatId: string) {
-        return chatEventLog.getLoadedMessages(chatId);
+        return coldLoadedChatEvents.getLoadedMessages(chatId);
       },
     };
     const chatEventPages = {
       async readPage(chatId: string, limit: number, beforeSeq?: number) {
-        await chatNativeReloader.ensureColdLoaded(chatId);
-        return chatEventLog.readPage(chatId, limit, beforeSeq);
+        return coldLoadedChatEvents.readPage(chatId, limit, beforeSeq);
       },
     };
     const chatEventAppender = {
@@ -173,16 +173,14 @@ export async function startServer(): Promise<void> {
         messages: Parameters<ChatEventLog['appendMessages']>[1],
         origin: 'submit',
       ) {
-        await chatNativeReloader.ensureColdLoaded(chatId);
-        return chatEventLog.appendMessages(chatId, messages, origin);
+        return coldLoadedChatEvents.appendMessages(chatId, messages, origin);
       },
       async reviseUserMessageDelivery(
         chatId: string,
         ids: Parameters<ChatEventLog['reviseUserMessageDelivery']>[1],
         deliveryStatus: 'delivered',
       ) {
-        await chatNativeReloader.ensureColdLoaded(chatId);
-        return chatEventLog.reviseUserMessageDelivery(chatId, ids, deliveryStatus);
+        return coldLoadedChatEvents.reviseUserMessageDelivery(chatId, ids, deliveryStatus);
       },
     };
     const pendingInputs = new PendingUserInputService(chatMessageReader);
@@ -250,7 +248,7 @@ export async function startServer(): Promise<void> {
       chatEvents: {
         ...chatEventPages,
         readReplay: (chatId, logId, afterAppendSeq) =>
-          chatEventLog.readReplay(chatId, logId, afterAppendSeq),
+          coldLoadedChatEvents.readReplay(chatId, logId, afterAppendSeq),
       },
       nativeReloader: chatNativeReloader,
       registry: chatRegistry,
@@ -359,7 +357,7 @@ export async function startServer(): Promise<void> {
       chatId: string,
       metadata: { clientRequestId?: string; turnId?: string } | undefined,
     ): Promise<void> {
-      const revised = await chatEventLog.reviseUserMessageDelivery(
+      const revised = await coldLoadedChatEvents.reviseUserMessageDelivery(
         chatId,
         {
           clientRequestId: metadata?.clientRequestId,
@@ -413,8 +411,7 @@ export async function startServer(): Promise<void> {
       void (async () => {
         try {
           const parsed = parseChatMessages(messages);
-          await chatNativeReloader.ensureColdLoaded(chatId);
-          const appended = await chatEventLog.appendMessages(chatId, parsed, 'agent', {
+          const appended = await coldLoadedChatEvents.appendMessages(chatId, parsed, 'agent', {
             guard: () => streamFence.isCurrent(chatId, epoch),
           });
           if (appended.skipped) return;

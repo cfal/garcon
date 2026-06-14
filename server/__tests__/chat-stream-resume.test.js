@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { ChatEventLog } from '../chats/chat-event-log.js';
 import { ChatNativeReloader } from '../chats/chat-native-reload.js';
+import { ColdLoadedChatEventLog } from '../chats/cold-loaded-chat-event-log.js';
 import { ChatStreamFence } from '../chats/chat-stream-fence.js';
 import { PendingUserInputService } from '../chats/pending-user-input-service.js';
 import {
@@ -25,6 +26,9 @@ function assistant(content) {
 
 async function createResumeHarness() {
   const chatEventLog = new ChatEventLog(tmpDir, () => false);
+  const coldLoadedChatEvents = new ColdLoadedChatEventLog(chatEventLog, {
+    ensureColdLoaded: async () => undefined,
+  });
   const broadcasts = [];
   const broadcast = (message) => broadcasts.push(message);
 
@@ -32,10 +36,10 @@ async function createResumeHarness() {
     chatEventLog,
     broadcasts,
     async submit(chatId, content, metadata = {}) {
-      return chatEventLog.appendMessages(chatId, [user(content, metadata)], 'submit');
+      return coldLoadedChatEvents.appendMessages(chatId, [user(content, metadata)], 'submit');
     },
     async emitMessages(chatId, messages, metadata = {}) {
-      const appended = await chatEventLog.appendMessages(chatId, messages, 'agent');
+      const appended = await coldLoadedChatEvents.appendMessages(chatId, messages, 'agent');
       broadcast(new ChatEventsMessage(
         chatId,
         appended.logId,
@@ -46,7 +50,7 @@ async function createResumeHarness() {
       return appended;
     },
     async finish(chatId, metadata = {}) {
-      const revised = await chatEventLog.reviseUserMessageDelivery(
+      const revised = await coldLoadedChatEvents.reviseUserMessageDelivery(
         chatId,
         { clientRequestId: metadata.clientRequestId, turnId: metadata.turnId },
         'delivered',
@@ -63,7 +67,7 @@ async function createResumeHarness() {
       };
     },
     subscribe(chatId, cursor) {
-      return chatEventLog.readReplay(chatId, cursor.logId, cursor.lastAppendSeq);
+      return coldLoadedChatEvents.readReplay(chatId, cursor.logId, cursor.lastAppendSeq);
     },
   };
 }
@@ -104,13 +108,13 @@ describe('chat stream resume integration', () => {
       { loadNativeMessages: async () => [assistant('last native message')] },
       () => true,
     );
+    const coldLoadedChatEvents = new ColdLoadedChatEventLog(chatEventLog, nativeReloader);
     const pendingInputs = new PendingUserInputService({
       async ensureLoaded(chatId) {
-        await nativeReloader.ensureColdLoaded(chatId);
-        return chatEventLog.getMessages(chatId);
+        return coldLoadedChatEvents.getMessages(chatId);
       },
       getMessages(chatId) {
-        return chatEventLog.getLoadedMessages(chatId);
+        return coldLoadedChatEvents.getLoadedMessages(chatId);
       },
     });
     const broadcasts = [];
@@ -131,11 +135,11 @@ describe('chat stream resume integration', () => {
     ));
     broadcasts.push(new AgentRunFailedMessage('chat-1', 'process died', turn.turnId, turn.clientRequestId));
 
-    const late = await chatEventLog.appendMessages('chat-1', [assistant('late')], 'agent', {
+    const late = await coldLoadedChatEvents.appendMessages('chat-1', [assistant('late')], 'agent', {
       guard: () => streamFence.isCurrent('chat-1', staleEpoch),
     });
 
-    const page = await chatEventLog.readPage('chat-1', 100);
+    const page = await coldLoadedChatEvents.readPage('chat-1', 100);
     expect(late.skipped).toBe(true);
     expect(page.events.map((event) => event.message.content)).toEqual(['last native message']);
     expect(pendingInputs.listForChat('chat-1')).toEqual([]);

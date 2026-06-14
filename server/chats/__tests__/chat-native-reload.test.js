@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { ChatNativeReloader } from '../chat-native-reload.js';
 import { ChatEventLog } from '../chat-event-log.js';
+import { ColdLoadedChatEventLog } from '../cold-loaded-chat-event-log.js';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 
 let tmpDir;
@@ -58,6 +59,32 @@ describe('ChatNativeReloader', () => {
     expect(nativeSource.loadNativeMessages).not.toHaveBeenCalled();
     const page = await log.readPage('chat-1', 10);
     expect(page.events.map((event) => event.message.content)).toEqual(['existing prompt']);
+  });
+
+  it('cold-loads before append when no Garcon event log exists', async () => {
+    const guarded = new ColdLoadedChatEventLog(log, reloader);
+
+    await guarded.appendMessages('chat-1', [assistant('new output')], 'agent');
+
+    expect(nativeSource.loadNativeMessages).toHaveBeenCalledTimes(1);
+    const page = await log.readPage('chat-1', 10);
+    expect(page.events.map((event) => event.message.content)).toEqual([
+      'native prompt',
+      'native response',
+      'new output',
+    ]);
+  });
+
+  it('cold-loads before replay when no Garcon event log exists', async () => {
+    const guarded = new ColdLoadedChatEventLog(log, reloader);
+
+    const replay = await guarded.readReplay('chat-1', 'stale-log', 1);
+
+    expect(nativeSource.loadNativeMessages).toHaveBeenCalledTimes(1);
+    expect(replay).toMatchObject({
+      mode: 'snapshot-required',
+      lastAppendSeq: 2,
+    });
   });
 
   it('manual reload replaces the existing generation', async () => {

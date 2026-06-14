@@ -78,7 +78,7 @@ type QueueManagerDep = Pick<
 >;
 
 type ChatEventsDep = ChatEventPageReader & Pick<ChatEventLog, 'readReplay'>;
-type NativeReloaderDep = Pick<ChatNativeReloader, 'ensureColdLoaded' | 'reloadFromNative'>;
+type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
 
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'reconcile' | 'listForChat'>;
 
@@ -326,7 +326,6 @@ export class ChatHandler {
         });
         return;
       }
-      await this.#nativeReloader.ensureColdLoaded(chatId);
       const replay = await this.#chatEvents.readReplay(chatId, data.logId, data.afterAppendSeq);
       writer.send(new ChatSubscribedMessage(
         clientRequestId,

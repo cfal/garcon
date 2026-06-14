@@ -91,7 +91,6 @@ const mockChatEvents = {
 };
 
 const mockNativeReloader = {
-  ensureColdLoaded: mock(() => Promise.resolve(undefined)),
   reloadFromNative: mock(() => Promise.resolve({
     logId: 'log-2',
     events: [chatEvent],
@@ -148,7 +147,7 @@ const injectedMocks = [
   mockQueue.readChatQueue, mockQueue.enqueueChat, mockQueue.dequeueChat,
   mockQueue.clearChatQueue, mockQueue.pauseChatQueue, mockQueue.resumeChatQueue,
   mockChatEvents.readPage, mockChatEvents.readReplay,
-  mockNativeReloader.ensureColdLoaded, mockNativeReloader.reloadFromNative,
+  mockNativeReloader.reloadFromNative,
   mockPendingInputs.register, mockPendingInputs.reconcile,
   mockPendingInputs.listForChat, mockPendingInputs.clearChat,
   mockSettings.getUiSettings, mockSettings.getChatName,
@@ -882,7 +881,6 @@ describe('chat WebSocket handler', () => {
         afterAppendSeq: 1,
       });
 
-      expect(mockNativeReloader.ensureColdLoaded).toHaveBeenCalledWith('123');
       expect(mockChatEvents.readReplay).toHaveBeenCalledWith('123', 'log-1', 1);
       expect(lastSentPayload()).toMatchObject({
         type: 'chat-subscribed',
