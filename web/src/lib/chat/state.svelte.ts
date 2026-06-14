@@ -290,8 +290,7 @@ export class ChatState {
 				beforeSeq: this.oldestSeq,
 			});
 			if (page.logId !== this.logId) {
-				const epoch = this.beginSnapshotLoad();
-				this.setFromPage(page, epoch);
+				await this.loadMessages(chatId);
 				return false;
 			}
 			if (page.events.length === 0) {

@@ -241,6 +241,46 @@ describe('ChatState', () => {
 		expect(chat.getCursor()).toEqual({ logId: '', lastAppendSeq: 0 });
 	});
 
+	it('loads the latest snapshot when older-page pagination sees a new generation', async () => {
+		const chat = new ChatState();
+		chat.applyEvents('log-1', [
+			event(10, new AssistantMessage(TS, 'old visible'), { messageId: 'old-visible' }),
+		]);
+		chat.hasMoreMessages = true;
+
+		getChatMessagesMock
+			.mockResolvedValueOnce(page({
+				logId: 'log-2',
+				events: [event(5, new AssistantMessage(TS, 'middle page'), { messageId: 'middle' })],
+				lastAppendSeq: 5,
+				pageOldestSeq: 5,
+				hasMore: true,
+			}))
+			.mockResolvedValueOnce(page({
+				logId: 'log-2',
+				events: [event(21, new AssistantMessage(TS, 'latest page'), { messageId: 'latest' })],
+				lastAppendSeq: 21,
+				pageOldestSeq: 21,
+				hasMore: false,
+			}));
+
+		const loaded = await chat.loadMoreMessages('chat-1');
+
+		expect(loaded).toBe(false);
+		expect(getChatMessagesMock).toHaveBeenCalledTimes(2);
+		expect(getChatMessagesMock).toHaveBeenNthCalledWith(1, {
+			chatId: 'chat-1',
+			limit: 20,
+			beforeSeq: 10,
+		});
+		expect(getChatMessagesMock).toHaveBeenNthCalledWith(2, {
+			chatId: 'chat-1',
+			limit: 20,
+		});
+		expect(chat.getCursor()).toEqual({ logId: 'log-2', lastAppendSeq: 21 });
+		expect(messageContents(chat.chatMessages)).toEqual(['latest page']);
+	});
+
 	it('replaceGeneration clears pending overlays and resets the visible window', () => {
 		const chat = new ChatState();
 		chat.setPendingUserInputs([{
