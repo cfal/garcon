@@ -35,6 +35,8 @@ export interface ConversationFeedRenderModel {
 	permissionTerminalById: Map<string, PermissionTerminalState>;
 }
 
+export type ConversationFeedMessageIdAllocator = (message: ChatMessage) => string;
+
 function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
 	return (
 		message instanceof ToolResultMessage ||
@@ -47,6 +49,15 @@ function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
 
 function bashGroupId(messages: BashToolUseMessage[]): string {
 	return `bash-group-${messages[0]?.toolId ?? 'empty'}`;
+}
+
+export function getConversationFeedRenderItemKey(
+	item: ConversationFeedRenderItem,
+	getMessageId: ConversationFeedMessageIdAllocator,
+): string {
+	if (item.kind === 'message') return getMessageId(item.message);
+	const firstMessage = item.messages[0];
+	return firstMessage ? `bash-group-${getMessageId(firstMessage)}` : item.id;
 }
 
 export function buildConversationFeedRenderModel(
@@ -62,17 +73,17 @@ export function buildConversationFeedRenderModel(
 		const message = messages[index];
 
 		if (message instanceof ToolResultMessage) {
-			toolResultIndex.set(message.toolId, message)
+			toolResultIndex.set(message.toolId, message);
 		} else if (message instanceof PermissionResolvedMessage) {
 			permissionTerminalById.set(message.permissionRequestId, {
 				state: 'resolved',
 				allowed: message.allowed,
-			})
+			});
 		} else if (message instanceof PermissionCancelledMessage) {
 			permissionTerminalById.set(message.permissionRequestId, {
 				state: 'cancelled',
 				reason: message.reason,
-			})
+			});
 		}
 
 		if (shouldSkipStandaloneMessage(message)) {

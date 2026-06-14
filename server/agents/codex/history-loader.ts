@@ -46,11 +46,11 @@ function createCodexMessageBuckets(): CodexMessageBuckets {
   };
 }
 
-function addCodexJsonlLine(buckets: CodexMessageBuckets, line: string): void {
+function addCodexJsonlLine(buckets: CodexMessageBuckets, line: string, sourceLineNumber?: number): void {
   if (!line.trim()) return;
   try {
     const entry = JSON.parse(line);
-    const result = normalizeCodexJsonlEntry(entry);
+    const result = normalizeCodexJsonlEntry(entry, { sourceLineNumber });
     if (!result) return;
 
     buckets.canonical.push(...result.canonical);
@@ -73,7 +73,9 @@ function finishCodexMessages(buckets: CodexMessageBuckets, includeFallback: bool
 
 function collectCodexMessagesFromLines(lines: string[], includeFallback: boolean): ChatMessage[] {
   const buckets = createCodexMessageBuckets();
-  for (const line of lines) addCodexJsonlLine(buckets, line);
+  for (let index = 0; index < lines.length; index += 1) {
+    addCodexJsonlLine(buckets, lines[index], index + 1);
+  }
   return finishCodexMessages(buckets, includeFallback);
 }
 
@@ -90,8 +92,10 @@ export async function loadCodexChatMessages(nativePath: string | null | undefine
     const fileStream = fsSync.createReadStream(nativePath);
     const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
 
+    let sourceLineNumber = 0;
     for await (const line of rl) {
-      addCodexJsonlLine(buckets, line);
+      sourceLineNumber += 1;
+      addCodexJsonlLine(buckets, line, sourceLineNumber);
     }
 
     return finishCodexMessages(buckets, true);

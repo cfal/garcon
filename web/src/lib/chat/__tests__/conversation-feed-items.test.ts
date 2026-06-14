@@ -8,9 +8,11 @@ import {
 	ToolResultMessage,
 	UserMessage,
 } from '$shared/chat-types';
+import { createMessageIdAllocator } from '../message-id';
 import {
 	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
+	getConversationFeedRenderItemKey,
 } from '../conversation-feed-items';
 
 const TS = '2026-05-29T00:00:00.000Z';
@@ -95,5 +97,22 @@ describe('buildConversationFeedRenderItems', () => {
 			state: 'cancelled',
 			reason: 'cancelled',
 		});
+	});
+
+	it('derives unique render keys for bash groups with duplicate starting tool IDs', () => {
+		const messages = [
+			new BashToolUseMessage(TS, 'dup-bash', 'pwd'),
+			new BashToolUseMessage(TS, 'bash-2', 'ls'),
+			new AssistantMessage(TS, 'separator'),
+			new BashToolUseMessage(TS, 'dup-bash', 'git status'),
+			new BashToolUseMessage(TS, 'bash-4', 'bun test'),
+		];
+
+		const allocator = createMessageIdAllocator();
+		const items = buildConversationFeedRenderItems(messages);
+		const keys = items.map((item) => getConversationFeedRenderItemKey(item, allocator));
+
+		expect(items.filter((item) => item.kind === 'bash-group')).toHaveLength(2);
+		expect(new Set(keys).size).toBe(keys.length);
 	});
 });

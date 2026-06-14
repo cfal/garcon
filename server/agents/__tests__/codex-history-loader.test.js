@@ -248,6 +248,40 @@ describe('loadCodexChatMessages', () => {
     expect(messages[1].type).toBe('tool-result');
   });
 
+  it('assigns unique fallback IDs to repeated web_search_call entries without provider IDs', async () => {
+    const ts = '2026-02-21T14:10:00.000Z';
+    const webSearchEntry = {
+      type: 'response_item',
+      timestamp: ts,
+      payload: {
+        type: 'web_search_call',
+        status: 'completed',
+        action: {
+          type: 'search',
+          query: 'Svelte keyed each duplicate',
+          queries: ['Svelte keyed each duplicate'],
+        },
+      },
+    };
+    const lines = [
+      JSON.stringify(webSearchEntry),
+      JSON.stringify(webSearchEntry),
+    ];
+
+    const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
+
+    expect(messages).toHaveLength(4);
+    expect(messages.map((message) => message.type)).toEqual([
+      'web-search-tool-use',
+      'tool-result',
+      'web-search-tool-use',
+      'tool-result',
+    ]);
+    expect(messages[0].toolId).not.toBe(messages[2].toolId);
+    expect(messages[1].toolId).toBe(messages[0].toolId);
+    expect(messages[3].toolId).toBe(messages[2].toolId);
+  });
+
   it('skips ghost_snapshot, developer messages, and operational events', async () => {
     const ts = '2026-02-21T15:00:00.000Z';
     const lines = [
