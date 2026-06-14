@@ -86,6 +86,9 @@
 				<DropdownMenuTrigger
 					class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activePermission?.toneClass}"
 					title={activePermission?.label ?? m.chat_composer_permission_mode()}
+					aria-label={activePermission
+						? m.chat_composer_permission_mode_active({ mode: activePermission.label })
+						: m.chat_composer_permission_mode()}
 				>
 					{#if activePermission}
 						<ComposerModeIcon iconId={activePermission.iconId} class="size-4" />
@@ -108,6 +111,9 @@
 				<DropdownMenuTrigger
 					class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activeThinking?.toneClass}"
 					title={activeThinking?.label ?? m.chat_composer_thinking_effort()}
+					aria-label={activeThinking
+						? m.chat_composer_thinking_effort_active({ mode: activeThinking.label })
+						: m.chat_composer_thinking_effort()}
 				>
 					{#if activeThinking}
 						<ComposerModeIcon iconId={activeThinking.iconId} class="size-4" />

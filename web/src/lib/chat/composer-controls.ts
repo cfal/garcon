@@ -40,6 +40,7 @@ const PERMISSION_OPTION_METADATA: Record<
 		iconId: 'permission-accept-edits',
 		toneClass: 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80',
 	},
+	// Warning tone is reserved for this unsafe state so the orange keeps its safety meaning.
 	bypassPermissions: {
 		label: 'Bypass Permissions',
 		description: 'Runs without permission prompts.',
@@ -74,14 +75,16 @@ const THINKING_ICON_METADATA: Record<
 		toneClass:
 			'bg-status-success text-status-success-foreground border-status-success-border hover:bg-status-success/90',
 	},
+	// Reasoning effort is benign, so it escalates through neutral emphasis rather than the
+	// warning/danger tones reserved for unsafe states like bypass permissions.
 	'think-harder': {
 		iconId: 'thinking-think-harder',
-		toneClass:
-			'bg-status-warning text-status-warning-foreground border-status-warning-border hover:bg-status-warning/90',
+		toneClass: 'bg-accent text-accent-foreground border-border hover:bg-accent/80',
 	},
 	ultrathink: {
 		iconId: 'thinking-ultrathink',
-		toneClass: 'bg-destructive/20 text-destructive border-destructive/40 hover:bg-destructive/30',
+		toneClass:
+			'bg-status-processing text-status-processing-foreground border-status-processing-border hover:bg-status-processing/90',
 	},
 };
 
