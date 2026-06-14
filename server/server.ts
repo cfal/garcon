@@ -531,7 +531,7 @@ export async function startServer(): Promise<void> {
       broadcast(new PendingUserInputUpdatedMessage(input));
     });
     pendingInputs.store.onCleared((chatId, clientRequestId, reason) => {
-      if (reason === 'persisted') return;
+      if (reason !== 'chat-removed') return;
       broadcast(new PendingUserInputClearedMessage(chatId, clientRequestId, reason));
     });
     queue.onSessionStopped((chatId, success) => {

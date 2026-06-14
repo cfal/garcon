@@ -12,6 +12,7 @@ import {
 	ChatSessionStoppedMessage,
 	ChatProcessingUpdatedMessage,
 	QueueStateUpdatedMessage,
+	PendingUserInputClearedMessage,
 	ChatTitleUpdatedMessage,
 	ChatSessionDeletedWsMessage,
 	ChatReadUpdatedV1Message,
@@ -242,6 +243,29 @@ describe('parseServerWsMessage', () => {
 			queue: { entries: [], paused: false },
 		});
 		expect(msg).toBeInstanceOf(QueueStateUpdatedMessage);
+	});
+
+	it('parses pending clear messages only for chat removal', () => {
+		const msg = parseServerWsMessage({
+			type: 'pending-user-input-cleared',
+			chatId: 'c-1',
+			clientRequestId: 'req-1',
+			reason: 'chat-removed',
+		});
+
+		expect(msg).toBeInstanceOf(PendingUserInputClearedMessage);
+		expect((msg as PendingUserInputClearedMessage).reason).toBe('chat-removed');
+	});
+
+	it('rejects persisted pending clear messages at the shared parser', () => {
+		const msg = parseServerWsMessage({
+			type: 'pending-user-input-cleared',
+			chatId: 'c-1',
+			clientRequestId: 'req-1',
+			reason: 'persisted',
+		});
+
+		expect(msg).toBeNull();
 	});
 
 	it('parses chat-title-updated', () => {

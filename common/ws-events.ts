@@ -403,9 +403,7 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
     case 'pending-user-input-cleared': {
       const chatId = requiredStr(data.chatId);
       const clientRequestId = requiredStr(data.clientRequestId);
-      const reason = data.reason === 'persisted' || data.reason === 'chat-removed'
-        ? data.reason
-        : null;
+      const reason = data.reason === 'chat-removed' ? data.reason : null;
       if (!chatId || !clientRequestId || !reason) return null;
       return new PendingUserInputClearedMessage(chatId, clientRequestId, reason);
     }

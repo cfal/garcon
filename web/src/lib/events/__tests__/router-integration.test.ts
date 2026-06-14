@@ -158,6 +158,40 @@ describe('event router integration', () => {
 		expect(stores.sessions.refreshChats).not.toHaveBeenCalled();
 	});
 
+	it('drops persisted pending clear payloads before reaching handlers', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'pending-user-input-cleared',
+					chatId: 'chat-a',
+					clientRequestId: 'req-1',
+					reason: 'persisted',
+				},
+			],
+			stores,
+		);
+
+		expect(stores.chatState.clearPendingUserInput).not.toHaveBeenCalled();
+	});
+
+	it('routes chat-removed pending clear payloads to chat state', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'pending-user-input-cleared',
+					chatId: 'chat-a',
+					clientRequestId: 'req-1',
+					reason: 'chat-removed',
+				},
+			],
+			stores,
+		);
+
+		expect(stores.chatState.clearPendingUserInput).toHaveBeenCalledWith('req-1');
+	});
+
 	it('skips scoped lifecycle events for non-active chats', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(

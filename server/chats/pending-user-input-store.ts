@@ -3,9 +3,10 @@ import type { PendingUserInput, PendingUserInputClearReason } from '../../common
 import type { UserMessageDeliveryStatus } from '../../common/chat-types.js';
 
 export type PendingUserInputRecord = PendingUserInput;
+export type PendingUserInputStoreClearReason = PendingUserInputClearReason | 'persisted';
 
 type UpdatedCallback = (input: PendingUserInput) => void;
-type ClearedCallback = (chatId: string, clientRequestId: string, reason: PendingUserInputClearReason) => void;
+type ClearedCallback = (chatId: string, clientRequestId: string, reason: PendingUserInputStoreClearReason) => void;
 
 function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }): number {
   return left.createdAt.localeCompare(right.createdAt);
@@ -82,7 +83,7 @@ export class PendingUserInputStore extends EventEmitter {
     return clonePendingInput(next);
   }
 
-  clear(chatId: string, clientRequestId: string, reason: PendingUserInputClearReason): boolean {
+  clear(chatId: string, clientRequestId: string, reason: PendingUserInputStoreClearReason): boolean {
     const records = this.#recordsByChatId.get(chatId);
     if (!records) return false;
     const next = records.filter((record) => record.clientRequestId !== clientRequestId);
