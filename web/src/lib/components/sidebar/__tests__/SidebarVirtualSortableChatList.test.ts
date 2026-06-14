@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import SidebarChatListHost from './SidebarChatListHost.svelte';
 import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatListHost.svelte';
-import type { SidebarVirtualChatRow } from '../sidebar-virtual-chat-list';
+import {
+	CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
+	type SidebarVirtualChatRow,
+} from '../sidebar-virtual-chat-list';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 const rowHeight = 88;
@@ -130,6 +133,25 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(screen.queryByText('Chat 499')).toBeNull();
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
 		expect(screen.getByText('Chat 0').closest('button')?.hasAttribute('draggable')).toBe(false);
+	});
+
+	it('paints chat separators from the virtual list layer', () => {
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			rowHeight,
+		});
+
+		const separator = document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator]');
+		const row = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		const rowContent = row?.querySelector<HTMLElement>('[data-sidebar-virtual-row-content]');
+
+		expect(separator).toBeTruthy();
+		expect(separator?.className).toContain('bg-border');
+		expect(separator?.style.top).toBe('87px');
+		expect(separator?.style.height).toBe('1px');
+		expect(row?.className).not.toContain('border-b');
+		expect(row?.className).not.toContain('border-border');
+		expect(rowContent?.style.height).toBe(`calc(100% - ${CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px)`);
 	});
 
 	it('updates visible rows when the shared viewport scrolls', async () => {

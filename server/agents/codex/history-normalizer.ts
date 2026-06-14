@@ -29,6 +29,11 @@ export interface ParsedApplyPatch {
   new_string: string;
 }
 
+export interface CodexJsonlNormalizationContext {
+  sourceByteOffset?: number;
+  sourceLineNumber?: number;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -37,6 +42,30 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function stableHash(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function syntheticWebSearchToolId(
+  ts: string,
+  action: Record<string, unknown>,
+  query: string,
+  queries: string[],
+  context: CodexJsonlNormalizationContext,
+): string {
+  const actionType = asString(action.type) || '';
+  const sourcePosition = context.sourceByteOffset == null
+    ? `line:${context.sourceLineNumber ?? ''}`
+    : `byte:${context.sourceByteOffset}`;
+  const fingerprint = [ts, actionType, sourcePosition, query, ...queries].join('\u001f');
+  return `web-search-${stableHash(fingerprint)}`;
 }
 
 function createNormalizationResult(): CodexJsonlNormalizationResult {
@@ -97,7 +126,10 @@ export function parseApplyPatch(input: string): ParsedApplyPatch {
 //     isCanonicalUser: bool, isCanonicalAssistant: bool,
 //     isCanonicalThinking: bool }
 //   or null when the entry should be skipped entirely.
-export function normalizeCodexJsonlEntry(entry: unknown): CodexJsonlNormalizationResult | null {
+export function normalizeCodexJsonlEntry(
+  entry: unknown,
+  context: CodexJsonlNormalizationContext = {},
+): CodexJsonlNormalizationResult | null {
   const rawEntry = asRecord(entry);
   if (Object.keys(rawEntry).length === 0) return null;
 
@@ -108,7 +140,7 @@ export function normalizeCodexJsonlEntry(entry: unknown): CodexJsonlNormalizatio
   }
 
   if (rawEntry.type === 'response_item') {
-    return normalizeResponseItem(rawEntry.payload, ts);
+    return normalizeResponseItem(rawEntry.payload, ts, context);
   }
 
   // session_meta, turn_context, compacted -- skip
@@ -160,7 +192,11 @@ function normalizeEventMsg(payload: unknown, ts: string): CodexJsonlNormalizatio
   }
 }
 
-function normalizeResponseItem(payload: unknown, ts: string): CodexJsonlNormalizationResult | null {
+function normalizeResponseItem(
+  payload: unknown,
+  ts: string,
+  context: CodexJsonlNormalizationContext,
+): CodexJsonlNormalizationResult | null {
   const rawPayload = asRecord(payload);
   if (Object.keys(rawPayload).length === 0) return null;
   const result = createNormalizationResult();
@@ -229,7 +265,7 @@ function normalizeResponseItem(payload: unknown, ts: string): CodexJsonlNormaliz
       const query = asString(action.query)
         || queries.join(', ')
         || '';
-      const toolId = asString(rawPayload.id) || `web-search-${Date.now()}`;
+      const toolId = asString(rawPayload.id) || syntheticWebSearchToolId(ts, action, query, queries, context);
       result.canonical.push(new WebSearchToolUseMessage(ts, toolId, query));
       // Synthetic tool-result summarizing status
       if (rawPayload.status === 'completed' || rawPayload.status === 'searching') {

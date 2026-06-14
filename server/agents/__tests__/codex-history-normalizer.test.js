@@ -448,5 +448,58 @@ describe('normalizeCodexJsonlEntry', () => {
       const result = normalizeCodexJsonlEntry(entry);
       expect(result.canonical[0].query).toBe('q1, q2');
     });
+
+    it('uses deterministic distinct fallback tool IDs when provider IDs are absent', () => {
+      const firstEntry = {
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'web_search_call',
+          status: 'completed',
+          action: {
+            type: 'search',
+            query: 'Svelte keyed each duplicate',
+            queries: ['Svelte keyed each duplicate'],
+          },
+        },
+      };
+      const secondEntry = {
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'web_search_call',
+          status: 'completed',
+          action: {
+            type: 'search',
+            query: 'Svelte 5 runes best practices',
+            queries: ['Svelte 5 runes best practices'],
+          },
+        },
+      };
+
+      const firstResult = normalizeCodexJsonlEntry(firstEntry);
+      const repeatedFirstResult = normalizeCodexJsonlEntry(firstEntry);
+      const secondResult = normalizeCodexJsonlEntry(secondEntry);
+      const firstLineResult = normalizeCodexJsonlEntry(firstEntry, { sourceLineNumber: 10 });
+      const secondLineResult = normalizeCodexJsonlEntry(firstEntry, { sourceLineNumber: 11 });
+      const firstByteResult = normalizeCodexJsonlEntry(firstEntry, {
+        sourceByteOffset: 1000,
+        sourceLineNumber: 10,
+      });
+      const repeatedByteResult = normalizeCodexJsonlEntry(firstEntry, {
+        sourceByteOffset: 1000,
+        sourceLineNumber: 11,
+      });
+
+      expect(firstResult.canonical[0].toolId).toBe(repeatedFirstResult.canonical[0].toolId);
+      expect(firstResult.canonical[0].toolId).not.toBe(secondResult.canonical[0].toolId);
+      expect(firstLineResult.canonical[0].toolId).not.toBe(secondLineResult.canonical[0].toolId);
+      expect(firstByteResult.canonical[0].toolId).toBe(repeatedByteResult.canonical[0].toolId);
+      expect(firstResult.canonical[1].toolId).toBe(firstResult.canonical[0].toolId);
+      expect(secondResult.canonical[1].toolId).toBe(secondResult.canonical[0].toolId);
+      expect(firstLineResult.canonical[1].toolId).toBe(firstLineResult.canonical[0].toolId);
+      expect(secondLineResult.canonical[1].toolId).toBe(secondLineResult.canonical[0].toolId);
+      expect(firstByteResult.canonical[1].toolId).toBe(firstByteResult.canonical[0].toolId);
+    });
   });
 });

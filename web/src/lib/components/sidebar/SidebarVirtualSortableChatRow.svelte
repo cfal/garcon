@@ -19,7 +19,10 @@
 		isSidebarChatDragData,
 		sidebarDragCanReorder,
 	} from './sidebar-pragmatic-dnd';
-	import type { SidebarVirtualChatRow } from './sidebar-virtual-chat-list';
+	import {
+		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
+		type SidebarVirtualChatRow,
+	} from './sidebar-virtual-chat-list';
 	import type { SessionAgentId } from '$lib/types/app';
 
 	interface SidebarVirtualSortableChatRowProps {
@@ -145,7 +148,7 @@
 <div
 	bind:this={rowEl}
 	class={cn(
-		'relative h-full overflow-hidden bg-sidebar-chat-item-bg transition-opacity',
+		'relative h-full overflow-hidden transition-opacity',
 		dragEnabled && 'cursor-grab active:cursor-grabbing',
 		isMobile && 'select-none [-webkit-touch-callout:none] [-webkit-user-select:none]',
 		isDragging && 'opacity-45',
@@ -164,41 +167,47 @@
 		></div>
 	{/if}
 
-	<svelte:boundary>
-		<SidebarChatItem
-			session={row.chat}
-			{selectedChatId}
-			{currentTime}
-			{isMobile}
-			isPinned={row.isPinned}
-			isArchived={row.isArchived}
-			{isMultiSelectMode}
-			{isMultiSelected}
-			enableNativeDrag={false}
-			enableRecenterOnRequest={false}
-			{onChatSelect}
-			{onDeleteChat}
-			{onStartRenameChat}
-			{onTogglePinned}
-			{onToggleArchive}
-			{onShowDetails}
-			{onForkChat}
-			{onShareChat}
-			{onTagClick}
-			{onManageTags}
-			{onEnterMultiSelect}
-			{onMultiSelectToggle}
-			{onMoveToTop}
-			{onMoveToBottom}
-			{hasPinnedChats}
-		/>
-		{#snippet failed()}
-			<div
-				class="flex h-full items-center border-b border-border/30 px-3 text-sm text-muted-foreground"
-				data-sidebar-virtual-row-error={row.chat.id}
-			>
-				{row.chat.title || m.sidebar_chats_unnamed()}
-			</div>
-		{/snippet}
-	</svelte:boundary>
+	<div
+		class="overflow-hidden bg-sidebar-chat-item-bg"
+		style={`height:calc(100% - ${CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px);`}
+		data-sidebar-virtual-row-content
+	>
+		<svelte:boundary>
+			<SidebarChatItem
+				session={row.chat}
+				{selectedChatId}
+				{currentTime}
+				{isMobile}
+				isPinned={row.isPinned}
+				isArchived={row.isArchived}
+				{isMultiSelectMode}
+				{isMultiSelected}
+				enableNativeDrag={false}
+				enableRecenterOnRequest={false}
+				{onChatSelect}
+				{onDeleteChat}
+				{onStartRenameChat}
+				{onTogglePinned}
+				{onToggleArchive}
+				{onShowDetails}
+				{onForkChat}
+				{onShareChat}
+				{onTagClick}
+				{onManageTags}
+				{onEnterMultiSelect}
+				{onMultiSelectToggle}
+				{onMoveToTop}
+				{onMoveToBottom}
+				{hasPinnedChats}
+			/>
+			{#snippet failed()}
+				<div
+					class="flex h-full items-center px-3 text-sm text-muted-foreground"
+					data-sidebar-virtual-row-error={row.chat.id}
+				>
+					{row.chat.title || m.sidebar_chats_unnamed()}
+				</div>
+			{/snippet}
+		</svelte:boundary>
+	</div>
 </div>

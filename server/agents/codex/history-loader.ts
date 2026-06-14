@@ -2,10 +2,16 @@
 // Accepts absolute nativePath instead of scanning ~/.codex/sessions/.
 
 import { promises as fs } from 'fs';
-import fsSync from 'fs';
-import readline from 'readline';
-import { readJsonlTailLines } from '../shared/history-loader-utils.ts';
-import { normalizeCodexJsonlEntry, extractTextContent } from './history-normalizer.js';
+import {
+  readJsonlLineEntries,
+  readJsonlTailLines,
+  type JsonlLineEntry,
+} from '../shared/history-loader-utils.ts';
+import {
+  normalizeCodexJsonlEntry,
+  extractTextContent,
+  type CodexJsonlNormalizationContext,
+} from './history-normalizer.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { AgentTranscriptPage } from '../types.js';
 import { createLogger } from '../../lib/log.js';
@@ -46,11 +52,15 @@ function createCodexMessageBuckets(): CodexMessageBuckets {
   };
 }
 
-function addCodexJsonlLine(buckets: CodexMessageBuckets, line: string): void {
+function addCodexJsonlLine(
+  buckets: CodexMessageBuckets,
+  line: string,
+  context: CodexJsonlNormalizationContext = {},
+): void {
   if (!line.trim()) return;
   try {
     const entry = JSON.parse(line);
-    const result = normalizeCodexJsonlEntry(entry);
+    const result = normalizeCodexJsonlEntry(entry, context);
     if (!result) return;
 
     buckets.canonical.push(...result.canonical);
@@ -71,9 +81,17 @@ function finishCodexMessages(buckets: CodexMessageBuckets, includeFallback: bool
   return sortChatMessagesByTimestamp(messages);
 }
 
-function collectCodexMessagesFromLines(lines: string[], includeFallback: boolean): ChatMessage[] {
+function collectCodexMessagesFromLineEntries(
+  lineEntries: JsonlLineEntry[],
+  includeFallback: boolean,
+): ChatMessage[] {
   const buckets = createCodexMessageBuckets();
-  for (const line of lines) addCodexJsonlLine(buckets, line);
+  for (const entry of lineEntries) {
+    addCodexJsonlLine(buckets, entry.line, {
+      sourceByteOffset: entry.byteOffset,
+      sourceLineNumber: entry.lineNumber,
+    });
+  }
   return finishCodexMessages(buckets, includeFallback);
 }
 
@@ -87,11 +105,11 @@ export async function loadCodexChatMessages(nativePath: string | null | undefine
   try {
     const buckets = createCodexMessageBuckets();
 
-    const fileStream = fsSync.createReadStream(nativePath);
-    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-
-    for await (const line of rl) {
-      addCodexJsonlLine(buckets, line);
+    for await (const entry of readJsonlLineEntries(nativePath)) {
+      addCodexJsonlLine(buckets, entry.line, {
+        sourceByteOffset: entry.byteOffset,
+        sourceLineNumber: entry.lineNumber,
+      });
     }
 
     return finishCodexMessages(buckets, true);
@@ -112,8 +130,8 @@ export async function loadCodexChatMessagePage(
     let maxBytes = 256 * 1024;
     let maxLines = Math.max(500, limit * 40);
     while (true) {
-      const { lines, fullyRead } = await readJsonlTailLines(nativePath, maxBytes, maxLines);
-      const messages = collectCodexMessagesFromLines(lines, fullyRead);
+      const { lineEntries, fullyRead } = await readJsonlTailLines(nativePath, maxBytes, maxLines);
+      const messages = collectCodexMessagesFromLineEntries(lineEntries, fullyRead);
       if (messages.length >= limit || fullyRead) {
         const pageMessages = messages.slice(Math.max(0, messages.length - limit));
         const hasMore = !fullyRead || messages.length > pageMessages.length;

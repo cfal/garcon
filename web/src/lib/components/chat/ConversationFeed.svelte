@@ -10,7 +10,10 @@
 	import { getChatState, getAgentState, getLocalSettings, getAppShell } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createMessageIdAllocator } from '$lib/chat/message-id';
-	import { buildConversationFeedRenderModel } from '$lib/chat/conversation-feed-items';
+	import {
+		buildConversationFeedRenderModel,
+		getConversationFeedRenderItemKey,
+	} from '$lib/chat/conversation-feed-items';
 	import {
 		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
 		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
@@ -195,7 +198,7 @@
 			</div>
 		{/if}
 
-		{#each renderItems as item (item.kind === 'message' ? getMessageId(item.message) : item.id)}
+		{#each renderItems as item (getConversationFeedRenderItemKey(item, getMessageId))}
 			{#if item.kind === 'bash-group'}
 				<svelte:boundary>
 					<ChatBashToolGroup messages={item.messages} />

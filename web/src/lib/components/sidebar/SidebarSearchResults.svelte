@@ -117,7 +117,7 @@
 						/>
 						{#snippet failed()}
 							<div
-								class="flex h-full items-center border-b border-border/40 px-3 text-sm text-muted-foreground"
+								class="flex h-full items-center border-b border-border px-3 text-sm text-muted-foreground"
 							>
 								{entry.chat.title || m.sidebar_chats_unnamed()}
 							</div>
@@ -139,7 +139,7 @@
 						{onHighlightChange}
 					/>
 					{#snippet failed()}
-						<div class="border-b border-border/40 px-3 py-2.5 text-sm text-muted-foreground">
+						<div class="border-b border-border px-3 py-2.5 text-sm text-muted-foreground">
 							{chat.title || m.sidebar_chats_unnamed()}
 						</div>
 					{/snippet}
