@@ -9,7 +9,7 @@
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueueControls from './QueueControls.svelte';
-	import { ChatState } from '$lib/chat/state.svelte';
+	import { ChatState, INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
 	import { ComposerState } from '$lib/chat/composer.svelte';
 	import { AgentState } from '$lib/chat/agent-state.svelte';
 	import { getChatQueue } from '$lib/api/chats.js';
@@ -18,6 +18,7 @@
 	import { createDrainCursor } from '$lib/ws/drain';
 	import { ChatReconnectCoordinator } from '$lib/ws/reconnect-coordinator.svelte';
 	import { mountConversationRouter } from '$lib/chat/conversation-router-adapter.svelte';
+	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
@@ -73,6 +74,24 @@
 		getSelectedChat: () => sessions.selectedChat,
 		getSelectedChatId: () => sessions.selectedChatId,
 		getQueue: getChatQueue,
+		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),
+		quietRefreshChats: () => sessions.quietRefreshChats(),
+		getBackgroundCursors: () => chatState.snapshotCache.listCursors(20),
+		loadBackgroundSnapshot: async (chatId) => {
+			chatState.snapshotCache.markStale(chatId);
+			if (sessions.selectedChatId === chatId) {
+				await chatState.loadMessages(chatId);
+				return;
+			}
+			await sessions.quietRefreshChats();
+		},
+		onBackgroundEvents: (chatId, logId, events, lastAppendSeq) => {
+			chatState.snapshotCache.applyEvents(chatId, logId, events, lastAppendSeq, {
+				limit: INITIAL_VISIBLE_MESSAGES,
+			});
+			const preview = selectPreviewFromBatch(events.map((entry) => entry.message));
+			if (preview) sessions.patchPreview(chatId, preview.content);
+		},
 	});
 
 	setChatState(chatState);

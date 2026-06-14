@@ -1,7 +1,12 @@
 // Bounded localStorage cache for chat event snapshots. Stores the event-log
 // generation cursor so restored snapshots can resume with a delta.
 
-import { parseChatMessageEvents, type ChatMessageEvent } from '$shared/chat-events';
+import {
+	applyChatMessageEvents,
+	buildEventIndex,
+	parseChatMessageEvents,
+	type ChatMessageEvent,
+} from '$shared/chat-events';
 
 const SNAPSHOT_PREFIX = 'chat_snapshot_';
 const INDEX_KEY = 'chat_snapshot_index_v2';
@@ -35,6 +40,12 @@ export interface RestoredChatSnapshot {
 	logId: string;
 	lastAppendSeq: number;
 	stale: boolean;
+}
+
+export interface CachedChatCursor {
+	chatId: string;
+	logId: string;
+	lastAppendSeq: number;
 }
 
 export interface ChatSnapshotWindowOptions {
@@ -231,6 +242,71 @@ export class LocalChatSnapshotCache {
 		} catch {
 			// Leaves validation best-effort.
 		}
+	}
+
+	listCursors(limit = 20): CachedChatCursor[] {
+		const boundedLimit = Math.max(0, Math.floor(limit));
+		if (boundedLimit === 0) return [];
+		try {
+			const sorted = [...readIndex().entries].sort(
+				(a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime(),
+			);
+			const cursors: CachedChatCursor[] = [];
+			for (const entry of sorted) {
+				if (cursors.length >= boundedLimit) break;
+				const raw = localStorage.getItem(snapshotKey(entry.chatId));
+				if (!raw) {
+					this.remove(entry.chatId);
+					continue;
+				}
+				const parsed = JSON.parse(raw) as Partial<ChatSnapshotEnvelope>;
+				if (
+					parsed.version !== SCHEMA_VERSION ||
+					parsed.chatId !== entry.chatId ||
+					typeof parsed.logId !== 'string' ||
+					!parsed.logId ||
+					!(Number(parsed.lastAppendSeq) > 0)
+				) {
+					this.remove(entry.chatId);
+					continue;
+				}
+				cursors.push({
+					chatId: entry.chatId,
+					logId: parsed.logId,
+					lastAppendSeq: Number(parsed.lastAppendSeq),
+				});
+			}
+			return cursors;
+		} catch {
+			return [];
+		}
+	}
+
+	applyEvents(
+		chatId: string,
+		logId: string,
+		events: ChatMessageEvent[],
+		lastAppendSeq: number,
+		options: ChatSnapshotWindowOptions = {},
+	): boolean {
+		if (!chatId || !logId) return false;
+		const restored = this.restore(chatId);
+		if (!restored || restored.logId !== logId) {
+			this.markStale(chatId);
+			return false;
+		}
+		const result = applyChatMessageEvents(
+			restored.entries,
+			events,
+			restored.lastAppendSeq,
+			buildEventIndex(restored.entries),
+		);
+		this.persist(chatId, result.entries, {
+			logId,
+			lastAppendSeq: Math.max(result.lastAppendSeq, lastAppendSeq),
+		}, options);
+		this.markValidated(chatId);
+		return true;
 	}
 
 	clearAll(): void {

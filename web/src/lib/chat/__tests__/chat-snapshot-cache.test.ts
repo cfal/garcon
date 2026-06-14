@@ -202,6 +202,41 @@ describe('LocalChatSnapshotCache', () => {
 		expect(localStorage.getItem(INDEX_KEY)).toBeNull();
 	});
 
+	it('lists cached cursors in most-recently-accessed order', () => {
+		vi.useFakeTimers();
+		const base = new Date('2024-06-01T00:00:00Z').getTime();
+
+		vi.setSystemTime(base);
+		cache.persist('chat-1', [event(1, 'a')], { logId: 'log-1', lastAppendSeq: 1 });
+		vi.setSystemTime(base + 1000);
+		cache.persist('chat-2', [event(1, 'b'), event(2, 'c')], {
+			logId: 'log-2',
+			lastAppendSeq: 2,
+		});
+
+		expect(cache.listCursors()).toEqual([
+			{ chatId: 'chat-2', logId: 'log-2', lastAppendSeq: 2 },
+			{ chatId: 'chat-1', logId: 'log-1', lastAppendSeq: 1 },
+		]);
+		expect(cache.listCursors(1)).toEqual([
+			{ chatId: 'chat-2', logId: 'log-2', lastAppendSeq: 2 },
+		]);
+	});
+
+	it('applies background delta events to cached snapshots', () => {
+		cache.persist('chat-1', [event(1, 'a')], cursor(1));
+
+		const applied = cache.applyEvents('chat-1', 'log-1', [event(2, 'b')], 2);
+		const restored = cache.restore('chat-1');
+
+		expect(applied).toBe(true);
+		expect(restored?.lastAppendSeq).toBe(2);
+		expect(restored?.entries.map((entry) => (entry.message as UserMessage).content)).toEqual([
+			'a',
+			'b',
+		]);
+	});
+
 	it('empty chatId persists are no-ops', () => {
 		cache.persist('', [event(1, 'hello')], cursor(1));
 		expect(cache.restore('')).toBeNull();
