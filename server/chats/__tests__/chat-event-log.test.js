@@ -17,6 +17,27 @@ function assistant(content) {
   return new AssistantMessage('2026-06-01T00:00:01.000Z', content);
 }
 
+function persistedLine(message, overrides = {}) {
+  return {
+    appendSeq: overrides.appendSeq ?? 1,
+    seq: overrides.seq ?? 1,
+    messageId: overrides.messageId ?? `message-${Math.random().toString(36).slice(2)}`,
+    rev: overrides.rev ?? 1,
+    origin: overrides.origin ?? 'agent',
+    message,
+  };
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.stat(filePath);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 describe('ChatEventLog', () => {
   beforeEach(async () => {
     tmpDir = path.join(os.tmpdir(), `chat-event-log-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -96,6 +117,132 @@ describe('ChatEventLog', () => {
       events: [],
       lastAppendSeq: 1,
     });
+  });
+
+  it('reloads persisted events to identical visible state across instances', async () => {
+    const first = new ChatEventLog(tmpDir, () => false);
+    await first.appendMessages('chat-1', [user('A'), assistant('B')], 'agent');
+
+    const second = new ChatEventLog(tmpDir, () => false);
+    const page = await second.readPage('chat-1', 10);
+
+    expect(page.events.map((event) => event.message.content)).toEqual(['A', 'B']);
+    expect(page.lastAppendSeq).toBe(2);
+  });
+
+  it('replays a revision of an old message after the client cursor', async () => {
+    const appended = await log.appendMessages('chat-1', [
+      user('A', { clientRequestId: 'req-A', deliveryStatus: 'accepted' }),
+      assistant('B'),
+      assistant('C'),
+      assistant('D'),
+    ], 'agent');
+
+    const revised = await log.reviseUserMessageDelivery('chat-1', { clientRequestId: 'req-A' }, 'delivered');
+    const replay = await log.readReplay('chat-1', appended.logId, 4);
+
+    expect(revised.event.seq).toBe(1);
+    expect(replay.mode).toBe('delta');
+    expect(replay.events).toHaveLength(1);
+    expect(replay.events[0]).toMatchObject({
+      seq: 1,
+      appendSeq: 5,
+      rev: 2,
+    });
+  });
+
+  it('returns snapshot-required for stale logId, client-ahead cursor, and replay gaps', async () => {
+    const appended = await log.appendMessages('chat-1', [user('one'), assistant('two')], 'agent');
+
+    await expect(log.readReplay('chat-1', 'stale-log', 1)).resolves.toMatchObject({
+      mode: 'snapshot-required',
+      logId: appended.logId,
+    });
+
+    await expect(log.readReplay('chat-1', appended.logId, 999)).resolves.toMatchObject({
+      mode: 'snapshot-required',
+      logId: appended.logId,
+    });
+
+    const tiny = new ChatEventLog(tmpDir, () => false, { replayLimit: 1 });
+    await tiny.appendMessages('chat-2', [user('A'), assistant('B'), assistant('C')], 'agent');
+    const page = await tiny.readPage('chat-2', 10);
+
+    await expect(tiny.readReplay('chat-2', page.logId, 1)).resolves.toMatchObject({
+      mode: 'snapshot-required',
+      logId: page.logId,
+    });
+  });
+
+  it('drops corrupt persisted tail from the first bad line', async () => {
+    const appended = await log.appendMessages('chat-1', [user('valid')], 'submit');
+    const filePath = path.join(tmpDir, 'chat-events', 'chat-1.events.jsonl');
+    await fs.appendFile(
+      filePath,
+      '{not valid json}\n'
+        + JSON.stringify(persistedLine(assistant('after corrupt'), {
+          appendSeq: appended.events[0].appendSeq + 1,
+          seq: appended.events[0].seq + 1,
+        }))
+        + '\n',
+    );
+
+    const fresh = new ChatEventLog(tmpDir, () => false);
+    const page = await fresh.readPage('chat-1', 10);
+
+    expect(page.events.map((event) => event.message.content)).toEqual(['valid']);
+    expect(page.lastAppendSeq).toBe(1);
+  });
+
+  it('serializes concurrent appends into gap-free appendSeq values', async () => {
+    const writes = Array.from({ length: 25 }, (_, index) =>
+      log.appendMessages('chat-1', [assistant(`message ${index}`)], 'agent'));
+
+    await Promise.all(writes);
+    const page = await log.readPage('chat-1', 100);
+
+    expect(page.events.map((event) => event.appendSeq)).toEqual(
+      Array.from({ length: 25 }, (_, index) => index + 1),
+    );
+  });
+
+  it('does not mutate memory when append persistence fails', async () => {
+    const brokenWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), 'chat-event-log-broken-'));
+    const broken = new ChatEventLog(brokenWorkspace, () => false);
+
+    try {
+      await broken.readPage('chat-1', 10);
+      await fs.writeFile(path.join(brokenWorkspace, 'chat-events'), 'not a directory');
+      await expect(broken.appendMessages('chat-1', [user('lost')], 'submit')).rejects.toThrow();
+      expect(broken.getLoadedMessages('chat-1')).toEqual([]);
+    } finally {
+      await fs.rm(brokenWorkspace, { recursive: true, force: true });
+    }
+  });
+
+  it('does not replace memory when native replacement persistence fails', async () => {
+    const brokenWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), 'chat-event-log-replace-broken-'));
+    await fs.writeFile(path.join(brokenWorkspace, 'chat-events'), 'not a directory');
+    const broken = new ChatEventLog(brokenWorkspace, () => false);
+
+    try {
+      await expect(broken.replaceGenerationFromNative('chat-1', [assistant('native')])).rejects.toThrow();
+      expect(broken.getLoadedMessages('chat-1')).toBeNull();
+    } finally {
+      await fs.rm(brokenWorkspace, { recursive: true, force: true });
+    }
+  });
+
+  it('deleteChatLog removes memory and the persisted file', async () => {
+    await log.appendMessages('chat-1', [user('delete me')], 'submit');
+    const filePath = path.join(tmpDir, 'chat-events', 'chat-1.events.jsonl');
+    expect(await fileExists(filePath)).toBe(true);
+
+    await log.deleteChatLog('chat-1');
+    const page = await log.readPage('chat-1', 10);
+
+    expect(page.events).toEqual([]);
+    expect(await fileExists(filePath)).toBe(false);
   });
 
   it('honors append guards inside the mutation lock', async () => {
