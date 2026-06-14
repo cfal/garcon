@@ -20,6 +20,7 @@ function createPendingInputs() {
   return {
     register: mock(() => Promise.resolve()),
     updateDeliveryStatus: mock(() => undefined),
+    discard: mock(() => true),
   };
 }
 
@@ -231,6 +232,7 @@ describe('orchestration', () => {
     mockPendingInputs = {
       register: mock(() => Promise.resolve()),
       updateDeliveryStatus: mock(() => undefined),
+      discard: mock(() => true),
     };
     mockChatEvents = createChatEvents();
     mockDrainOptions = mock(() => ({
@@ -314,6 +316,11 @@ describe('orchestration', () => {
     it('does not register pending input when command is empty', async () => {
       await orchQueue.submit('c1', '', {});
       expect(mockPendingInputs.register).not.toHaveBeenCalled();
+    });
+
+    it('silently discards pending input through the pending service', () => {
+      expect(orchQueue.discardPendingUserInput('c1', 'req-1')).toBe(true);
+      expect(mockPendingInputs.discard).toHaveBeenCalledWith('c1', 'req-1');
     });
 
     it('drains queued entries after agent turn', async () => {

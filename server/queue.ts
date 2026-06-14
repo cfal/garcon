@@ -83,6 +83,7 @@ interface PendingInputsDep {
     deliveryStatus?: UserMessageDeliveryStatus;
   }): Promise<unknown>;
   updateDeliveryStatus(chatId: string, clientRequestId: string, deliveryStatus: UserMessageDeliveryStatus): unknown;
+  discard(chatId: string, clientRequestId: string): boolean;
 }
 
 interface ChatEventsDep {
@@ -115,6 +116,7 @@ export interface ChatQueueService {
   deleteChatQueueFile(chatId: string): Promise<void>;
   submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   registerPendingUserInput(chatId: string, command: string, options: PendingUserInputRegistrationOptions): Promise<void>;
+  discardPendingUserInput(chatId: string, clientRequestId: string): boolean;
   runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   abort(chatId: string): Promise<boolean>;
   triggerDrain(chatId: string): Promise<void>;
@@ -363,6 +365,10 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       clientRequestId: options.clientRequestId,
       turnId: options.turnId,
     });
+  }
+
+  discardPendingUserInput(chatId: string, clientRequestId: string): boolean {
+    return this.#pendingInputs.discard(chatId, clientRequestId);
   }
 
   async runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {

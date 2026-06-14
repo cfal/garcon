@@ -43,6 +43,7 @@ function createRoutesFixture() {
     deleteChatQueueFile: mock(async () => undefined),
     submit: mock(async () => undefined),
     registerPendingUserInput: mock(async () => undefined),
+    discardPendingUserInput: mock(() => true),
     runAcceptedTurn: mock(async () => undefined),
     abort: mock(async () => true),
     triggerDrain: mock(async () => undefined),

@@ -13,6 +13,8 @@ import { getChatMessages } from '$lib/api/chats.js';
 
 const MESSAGES_PER_PAGE = 20;
 export const INITIAL_VISIBLE_MESSAGES = 100;
+type ChatPage = Awaited<ReturnType<typeof getChatMessages>>;
+type PageApplyResult = 'applied' | 'generation-changed' | 'stale';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 
@@ -39,6 +41,14 @@ function localMessageId(): string {
 	return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
 		? crypto.randomUUID()
 		: Math.random().toString(36).slice(2);
+}
+
+function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): PendingUserInput[] {
+	return sortPendingInputs(
+		page.pendingUserInputs
+			.map(normalizePendingUserInput)
+			.filter((input): input is PendingUserInput => Boolean(input)),
+	);
 }
 
 export class ChatState {
@@ -188,12 +198,17 @@ export class ChatState {
 		this.oldestSeq = events.length > 0 ? events[0].seq : 0;
 		this.hasMoreMessages = false;
 		this.totalMessages = events.length;
+		this.pendingUserInputs = [];
+		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.localMessages = options.localNotice
 			? [{ id: `local_${localMessageId()}`, message: new ErrorMessage(new Date().toISOString(), options.localNotice) }]
 			: [];
 		this.#eventIndex = buildEventIndex(events);
 		this.loadStatus = events.length === 0 ? 'empty' : 'loaded';
+		this.loadError = null;
 		this.isLoadingMessages = false;
+		this.isLoadingMoreMessages = false;
+		this.#isLoadingMore = false;
 	}
 
 	setFromPage(page: {
@@ -202,10 +217,17 @@ export class ChatState {
 		lastAppendSeq: number;
 		pageOldestSeq: number;
 		hasMore: boolean;
-	}, epoch: number): 'applied' | 'generation-changed' | 'stale' {
+	}, epoch: number): PageApplyResult {
 		if (epoch !== this.#loadEpoch) return 'stale';
+
 		const buffered = this.#snapshotBuffer ?? [];
 		this.#snapshotBuffer = null;
+		const hasBufferedGenerationChange = buffered.some((batch) => batch.logId !== page.logId);
+		if (hasBufferedGenerationChange) {
+			this.isLoadingMessages = false;
+			return 'generation-changed';
+		}
+
 		this.logId = page.logId;
 		this.entries = page.events;
 		this.lastAppendSeq = page.lastAppendSeq;
@@ -227,22 +249,32 @@ export class ChatState {
 	async loadMessages(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<ChatMessage[]> {
 		if (!chatId) return [];
 		const limit = Math.max(MESSAGES_PER_PAGE, Math.floor(options.minimumLimit ?? MESSAGES_PER_PAGE));
-		const epoch = this.beginSnapshotLoad();
-		try {
-			const page = await getChatMessages({ chatId, limit });
-			this.pendingUserInputs = sortPendingInputs(
-				page.pendingUserInputs
-					.map(normalizePendingUserInput)
-					.filter((input): input is PendingUserInput => Boolean(input)),
-			);
-			this.setFromPage(page, epoch);
-			return this.chatMessages;
-		} catch (error) {
-			this.abortSnapshotLoad(epoch);
-			this.loadStatus = 'error';
-			this.loadError = error instanceof Error ? error.message : 'Failed to load messages';
-			throw error;
+		const maxAttempts = 2;
+
+		for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+			const epoch = this.beginSnapshotLoad();
+			try {
+				const page = await getChatMessages({ chatId, limit });
+				const result = this.setFromPage(page, epoch);
+
+				if (result === 'applied') {
+					this.pendingUserInputs = pendingInputsFromPage(page);
+					return this.chatMessages;
+				}
+				if (result === 'stale') return this.chatMessages;
+
+				this.abortSnapshotLoad(epoch);
+			} catch (error) {
+				this.abortSnapshotLoad(epoch);
+				this.loadStatus = 'error';
+				this.loadError = error instanceof Error ? error.message : 'Failed to load messages';
+				throw error;
+			}
 		}
+
+		this.loadStatus = 'error';
+		this.loadError = 'Chat generation changed while loading messages';
+		throw new Error(this.loadError);
 	}
 
 	async loadMoreMessages(chatId: string): Promise<boolean> {

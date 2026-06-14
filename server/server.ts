@@ -24,8 +24,10 @@ import { ShellManager } from './ws/shell.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatEventLog } from './chats/chat-event-log.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
+import { ChatStreamFence } from './chats/chat-stream-fence.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
 import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
+import type { TurnEventMetadata } from './agents/event-bus.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
 import { ApiProviderService } from './api-providers/service.js';
@@ -138,6 +140,7 @@ export async function startServer(): Promise<void> {
       workspaceDir,
       (chatId) => agentRegistry.isChatRunning(chatId),
     );
+    const streamFence = new ChatStreamFence();
     const chatNativeReloader = new ChatNativeReloader(
       chatEventLog,
       {
@@ -374,9 +377,15 @@ export async function startServer(): Promise<void> {
       ));
     }
 
-    async function reloadAfterProcessError(chatId: string, message: string): Promise<void> {
+    async function reloadAfterProcessError(
+      chatId: string,
+      message: string,
+      turnMetadata?: TurnEventMetadata,
+    ): Promise<void> {
+      streamFence.invalidate(chatId);
       try {
         const reload = await chatNativeReloader.reloadFromNative(chatId, 'process-error');
+        pendingInputs.discardChat(chatId);
         broadcast(new ChatGenerationResetMessage(
           chatId,
           reload.logId,
@@ -387,23 +396,33 @@ export async function startServer(): Promise<void> {
       } catch (err) {
         logger.warn('chat-events: process-error reload failed:', errorMessage(err));
       }
-      broadcast(new AgentRunFailedMessage(chatId, message));
+      broadcast(new AgentRunFailedMessage(
+        chatId,
+        message,
+        turnMetadata?.turnId,
+        turnMetadata?.clientRequestId,
+        turnMetadata?.upstreamRequestId,
+      ));
     }
 
     // Wire agent events to the event log before broadcasting.
     const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
     agentRegistry.onMessages((chatId, messages, turnMetadata) => {
       if (!chatExists(chatId)) return;
+      const epoch = streamFence.capture(chatId);
       void (async () => {
         try {
           const parsed = parseChatMessages(messages);
           await chatNativeReloader.ensureColdLoaded(chatId);
-          const { logId, events } = await chatEventLog.appendMessages(chatId, parsed, 'agent');
+          const appended = await chatEventLog.appendMessages(chatId, parsed, 'agent', {
+            guard: () => streamFence.isCurrent(chatId, epoch),
+          });
+          if (appended.skipped) return;
           if (parsed.length > 0) metadata.updateFromAppendedMessages(chatId, parsed);
           broadcast(new ChatEventsMessage(
             chatId,
-            logId,
-            events,
+            appended.logId,
+            appended.events,
             turnMetadata?.turnId,
             turnMetadata?.clientRequestId,
             turnMetadata?.upstreamRequestId,
@@ -412,7 +431,7 @@ export async function startServer(): Promise<void> {
           await pendingInputs.reconcile(chatId);
         } catch (err) {
           logger.warn('chat-events: append failed; reloading from native:', errorMessage(err));
-          await reloadAfterProcessError(chatId, errorMessage(err));
+          await reloadAfterProcessError(chatId, errorMessage(err), turnMetadata);
         }
       })();
     });
@@ -447,10 +466,7 @@ export async function startServer(): Promise<void> {
           logger.warn('commands: failed to mark chat-start command failed:', errorMessage(err));
         });
       }
-      void reloadAfterProcessError(chatId, agentErrorMessage);
-      pendingInputs.reconcile(chatId).catch((err) => {
-        logger.warn('pending-inputs: reconcile after failure failed:', errorMessage(err));
-      });
+      void reloadAfterProcessError(chatId, agentErrorMessage, turnMetadata);
       queue.checkChatIdle(chatId).catch((err) => {
         logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
@@ -482,6 +498,7 @@ export async function startServer(): Promise<void> {
       void broadcastRemoteSettings();
     });
     chatRegistry.onChatRemoved((chatId) => {
+      streamFence.clear(chatId);
       pendingInputs.clearChat(chatId, 'chat-removed');
       chatEventLog.deleteChatLog(chatId).catch((err) => {
         logger.warn('chat-events: failed to delete log on chat removal:', errorMessage(err));
@@ -524,7 +541,7 @@ export async function startServer(): Promise<void> {
       broadcast(new ChatSessionStoppedMessage(chatId, success));
     });
     queue.onTurnFailed((chatId, errorMessage, options = {}) => {
-      void reloadAfterProcessError(chatId, errorMessage);
+      void reloadAfterProcessError(chatId, errorMessage, options);
     });
 
     // Graceful shutdown: flush pending writes and clean up timers.

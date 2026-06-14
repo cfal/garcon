@@ -15,6 +15,8 @@ export function createRoutePendingInputs() {
     reconcile: () => Promise.resolve(undefined),
     listForChat: () => [],
     clearChat: () => undefined,
+    discardChat: () => 0,
+    discard: () => false,
   };
 }
 

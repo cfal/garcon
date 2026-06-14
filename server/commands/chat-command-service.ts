@@ -21,7 +21,7 @@ import { normalizeQueueState } from '../../common/queue-state.js';
 import type { QueueState } from '../../common/queue-state.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { RunAgentTurnOptions, StartedAgentSession } from '../agents/session-types.js';
-import type { CommandLedger, CommandLedgerRecord } from './command-ledger.js';
+import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedger, type CommandLedgerRecord } from './command-ledger.js';
 import type { ChatQueueService } from '../queue.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
@@ -36,6 +36,7 @@ type QueueDep = Pick<
   ChatQueueService,
   | 'submit'
   | 'registerPendingUserInput'
+  | 'discardPendingUserInput'
   | 'runAcceptedTurn'
   | 'abort'
   | 'triggerDrain'
@@ -594,7 +595,20 @@ export class ChatCommandService {
     });
     if (input.images !== undefined) options.images = input.images;
 
-    await this.#registerPendingInput(input.chatId, input.command, options);
+    try {
+      await this.#registerPendingInput(input.chatId, input.command, options);
+    } catch (error) {
+      try {
+        this.deps.queue.discardPendingUserInput(input.chatId, options.clientRequestId!);
+      } catch {}
+      await this.deps.ledger.update(ledger.record.key, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+      });
+      throw error;
+    }
+
     const scheduled = await this.deps.ledger.update(ledger.record.key, {
       status: 'scheduled',
       turnId: options.turnId,

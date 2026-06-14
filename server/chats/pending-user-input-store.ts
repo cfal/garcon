@@ -96,6 +96,19 @@ export class PendingUserInputStore extends EventEmitter {
     return true;
   }
 
+  discard(chatId: string, clientRequestId: string): boolean {
+    const records = this.#recordsByChatId.get(chatId);
+    if (!records) return false;
+    const next = records.filter((record) => record.clientRequestId !== clientRequestId);
+    if (next.length === records.length) return false;
+    if (next.length > 0) {
+      this.#recordsByChatId.set(chatId, next);
+    } else {
+      this.#recordsByChatId.delete(chatId);
+    }
+    return true;
+  }
+
   clearChat(chatId: string, reason: PendingUserInputClearReason): void {
     const records = this.#recordsByChatId.get(chatId);
     if (!records || records.length === 0) return;
@@ -103,6 +116,13 @@ export class PendingUserInputStore extends EventEmitter {
     for (const record of records) {
       this.emit('cleared', chatId, record.clientRequestId, reason);
     }
+  }
+
+  discardChat(chatId: string): number {
+    const records = this.#recordsByChatId.get(chatId);
+    if (!records || records.length === 0) return 0;
+    this.#recordsByChatId.delete(chatId);
+    return records.length;
   }
 
   onUpdated(callback: UpdatedCallback): void {

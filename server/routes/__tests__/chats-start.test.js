@@ -52,6 +52,7 @@ const settings = {
 const queue = {
   deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
   registerPendingUserInput: mock(() => Promise.resolve(undefined)),
+  discardPendingUserInput: mock(() => true),
 };
 const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };
 const metadata = {

@@ -40,6 +40,7 @@ const mockRegistry = {
 const mockQueue = {
   submit: mock(() => Promise.resolve()),
   registerPendingUserInput: mock(() => Promise.resolve()),
+  discardPendingUserInput: mock(() => true),
   runAcceptedTurn: mock(() => Promise.resolve()),
   abort: mock(() => Promise.resolve(true)),
   triggerDrain: mock(() => Promise.resolve()),
@@ -129,7 +130,7 @@ const injectedMocks = [
   mockAgents.getAgentCatalogEntries, mockAgents.runSingleQuery,
   mockRegistry.getChat, mockRegistry.addChat, mockRegistry.removeChat,
   mockRegistry.updateChat,
-  mockQueue.submit, mockQueue.registerPendingUserInput,
+  mockQueue.submit, mockQueue.registerPendingUserInput, mockQueue.discardPendingUserInput,
   mockQueue.runAcceptedTurn, mockQueue.abort, mockQueue.triggerDrain,
   mockQueue.readChatQueue, mockQueue.enqueueChat, mockQueue.dequeueChat,
   mockQueue.clearChatQueue, mockQueue.pauseChatQueue, mockQueue.resumeChatQueue,

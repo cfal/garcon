@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { ChatEventLog } from '../chat-event-log.js';
+import { ChatStreamFence } from '../chat-stream-fence.js';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 
 let tmpDir;
@@ -95,5 +96,50 @@ describe('ChatEventLog', () => {
       events: [],
       lastAppendSeq: 1,
     });
+  });
+
+  it('honors append guards inside the mutation lock', async () => {
+    const first = await log.appendMessages('chat-1', [user('before')], 'submit');
+    const skipped = await log.appendMessages('chat-1', [assistant('stale')], 'agent', {
+      guard: () => false,
+    });
+
+    expect(skipped.skipped).toBe(true);
+    expect(skipped.logId).toBe(first.logId);
+
+    const page = await log.readPage('chat-1', 10);
+    expect(page.events.map((event) => event.message.content)).toEqual(['before']);
+    expect(page.lastAppendSeq).toBe(1);
+  });
+
+  it('allows native generation replacement while normal append mutations are backpressured', async () => {
+    const smallLog = new ChatEventLog(tmpDir, () => false, {
+      maxPendingMutationsPerChat: 0,
+    });
+
+    await expect(
+      smallLog.appendMessages('chat-1', [assistant('rejected')], 'agent'),
+    ).rejects.toThrow('mutation queue is full');
+
+    const replacement = await smallLog.replaceGenerationFromNative('chat-1', [assistant('native')]);
+
+    expect(replacement.events.map((event) => event.message.content)).toEqual(['native']);
+    const page = await smallLog.readPage('chat-1', 10);
+    expect(page.events.map((event) => event.message.content)).toEqual(['native']);
+  });
+
+  it('drops stale warm output after a process-error generation replacement', async () => {
+    const fence = new ChatStreamFence();
+    const epoch = fence.capture('chat-1');
+
+    fence.invalidate('chat-1');
+    await log.replaceGenerationFromNative('chat-1', [assistant('native')]);
+    const stale = await log.appendMessages('chat-1', [assistant('late warm output')], 'agent', {
+      guard: () => fence.isCurrent('chat-1', epoch),
+    });
+
+    expect(stale.skipped).toBe(true);
+    const page = await log.readPage('chat-1', 10);
+    expect(page.events.map((event) => event.message.content)).toEqual(['native']);
   });
 });

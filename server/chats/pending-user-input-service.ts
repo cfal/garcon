@@ -20,6 +20,8 @@ export interface RegisterPendingUserInputOptions {
 export interface PendingUserInputServiceContract {
   listForChat(chatId: string): PendingUserInput[];
   clearChat(chatId: string, reason?: PendingUserInputClearReason): void;
+  discardChat(chatId: string): number;
+  discard(chatId: string, clientRequestId: string): boolean;
   updateDeliveryStatus(chatId: string, clientRequestId: string, deliveryStatus: UserMessageDeliveryStatus): PendingUserInput | null;
   register(chatId: string, content: string, options?: RegisterPendingUserInputOptions): Promise<PendingUserInput>;
   reconcile(chatId: string): Promise<void>;
@@ -40,6 +42,14 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
 
   clearChat(chatId: string, reason: PendingUserInputClearReason = 'chat-removed'): void {
     this.store.clearChat(chatId, reason);
+  }
+
+  discardChat(chatId: string): number {
+    return this.store.discardChat(chatId);
+  }
+
+  discard(chatId: string, clientRequestId: string): boolean {
+    return this.store.discard(chatId, clientRequestId);
   }
 
   updateDeliveryStatus(chatId: string, clientRequestId: string, deliveryStatus: UserMessageDeliveryStatus): PendingUserInput | null {

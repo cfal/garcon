@@ -40,9 +40,14 @@ export interface ChatEventReplay {
   lastAppendSeq: number;
 }
 
+export interface AppendMessagesOptions {
+  guard?: () => boolean;
+}
+
 export interface AppendedChatEvents {
   logId: string;
   events: ChatMessageEvent[];
+  skipped?: boolean;
 }
 
 export interface RevisedChatEvent {
@@ -73,6 +78,10 @@ export interface ChatEventLogOptions {
   staleNonActiveMs?: number;
   maxPendingMutationsPerChat?: number;
   now?: () => number;
+}
+
+interface MutationOptions {
+  bypassBackpressure?: boolean;
 }
 
 const REPLAY_LIMIT = 2048;
@@ -119,9 +128,13 @@ export class ChatEventLog {
     chatId: string,
     messages: ChatMessage[],
     origin: ChatEventOrigin,
+    options: AppendMessagesOptions = {},
   ): Promise<AppendedChatEvents> {
     return this.#runMutation(chatId, async () => {
       const entry = await this.#ensureLoaded(chatId);
+      if (options.guard && !options.guard()) {
+        return { logId: entry.logId, events: [], skipped: true };
+      }
       if (messages.length === 0) return { logId: entry.logId, events: [] };
       const lines: PersistedEventLine[] = [];
       const events: ChatMessageEvent[] = [];
@@ -138,6 +151,10 @@ export class ChatEventLog {
         assertValidChatMessageEvent(event);
         events.push(event);
         lines.push({ ...event, origin });
+      }
+
+      if (options.guard && !options.guard()) {
+        return { logId: entry.logId, events: [], skipped: true };
       }
 
       await this.#persistLines(chatId, lines);
@@ -195,7 +212,7 @@ export class ChatEventLog {
         lastAppendSeq: entry.lastAppendSeq,
         localNotice: options.localNotice,
       };
-    });
+    }, { bypassBackpressure: true });
   }
 
   async reviseMessage(
@@ -366,18 +383,28 @@ export class ChatEventLog {
     return event;
   }
 
-  async #runMutation<T>(chatId: string, fn: () => Promise<T>): Promise<T> {
-    const pending = this.#pendingMutations.get(chatId) ?? 0;
-    if (pending >= this.#maxPendingMutationsPerChat) {
-      throw new ChatEventBackpressureError(chatId);
+  async #runMutation<T>(
+    chatId: string,
+    fn: () => Promise<T>,
+    options: MutationOptions = {},
+  ): Promise<T> {
+    let counted = false;
+    if (!options.bypassBackpressure) {
+      const pending = this.#pendingMutations.get(chatId) ?? 0;
+      if (pending >= this.#maxPendingMutationsPerChat) {
+        throw new ChatEventBackpressureError(chatId);
+      }
+      this.#pendingMutations.set(chatId, pending + 1);
+      counted = true;
     }
-    this.#pendingMutations.set(chatId, pending + 1);
     try {
       return await this.#locks.runExclusive(`chat:${chatId}`, fn);
     } finally {
-      const next = (this.#pendingMutations.get(chatId) ?? 1) - 1;
-      if (next <= 0) this.#pendingMutations.delete(chatId);
-      else this.#pendingMutations.set(chatId, next);
+      if (counted) {
+        const next = (this.#pendingMutations.get(chatId) ?? 1) - 1;
+        if (next <= 0) this.#pendingMutations.delete(chatId);
+        else this.#pendingMutations.set(chatId, next);
+      }
     }
   }
 

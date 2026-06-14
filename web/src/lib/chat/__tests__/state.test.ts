@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { ChatState } from '../state.svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const getChatMessagesMock = vi.hoisted(() => vi.fn());
+
+vi.mock('$lib/api/chats.js', () => ({
+	getChatMessages: getChatMessagesMock,
+}));
+
+import { ChatState, INITIAL_VISIBLE_MESSAGES } from '../state.svelte';
 import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { ChatMessageEvent } from '$shared/chat-events';
 
@@ -16,7 +23,57 @@ function event(seq: number, message: ChatMessage, patch: Partial<ChatMessageEven
 	};
 }
 
+function page(overrides: Partial<{
+	logId: string;
+	events: ChatMessageEvent[];
+	lastAppendSeq: number;
+	pageOldestSeq: number;
+	hasMore: boolean;
+	pendingUserInputs: unknown[];
+	limit: number;
+}> = {}) {
+	const events = overrides.events ?? [];
+	return {
+		logId: overrides.logId ?? 'log-1',
+		events,
+		lastAppendSeq: overrides.lastAppendSeq ?? events.at(-1)?.appendSeq ?? 0,
+		pageOldestSeq: overrides.pageOldestSeq ?? events[0]?.seq ?? 0,
+		hasMore: overrides.hasMore ?? false,
+		limit: overrides.limit ?? 20,
+		pendingUserInputs: overrides.pendingUserInputs ?? [],
+	};
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+		resolve = resolvePromise;
+		reject = rejectPromise;
+	});
+	return { promise, resolve, reject };
+}
+
+function contentOf(message: ChatMessage): string {
+	if (
+		message instanceof UserMessage ||
+		message instanceof AssistantMessage ||
+		message instanceof ErrorMessage
+	) {
+		return message.content;
+	}
+	return '';
+}
+
+function messageContents(messages: ChatMessage[]): string[] {
+	return messages.map(contentOf);
+}
+
 describe('ChatState', () => {
+	beforeEach(() => {
+		getChatMessagesMock.mockReset();
+	});
+
 	it('starts with empty event state', () => {
 		const chat = new ChatState();
 
@@ -91,6 +148,120 @@ describe('ChatState', () => {
 		expect(chat.chatMessages).toHaveLength(1);
 		expect(chat.displayMessages).toHaveLength(2);
 		expect(chat.displayMessages[1]).toBeInstanceOf(ErrorMessage);
+	});
+
+	it('does not install pending inputs from a stale snapshot page', async () => {
+		const chat = new ChatState();
+		const first = deferred<ReturnType<typeof page>>();
+		getChatMessagesMock.mockReturnValueOnce(first.promise);
+
+		const load = chat.loadMessages('chat-1');
+		chat.replaceGeneration('fresh-log', [
+			event(1, new AssistantMessage(TS, 'fresh'), { messageId: 'fresh-1' }),
+		], { lastAppendSeq: 1 });
+
+		first.resolve(page({
+			logId: 'old-log',
+			events: [event(1, new UserMessage(TS, 'old'), { messageId: 'old-1' })],
+			pendingUserInputs: [{
+				chatId: 'chat-1',
+				clientRequestId: 'req-old',
+				content: 'old pending',
+				createdAt: TS,
+				deliveryStatus: 'accepted',
+			}],
+		}));
+
+		await expect(load).resolves.toEqual(chat.chatMessages);
+		expect(chat.getCursor()).toEqual({ logId: 'fresh-log', lastAppendSeq: 1 });
+		expect(messageContents(chat.chatMessages)).toEqual(['fresh']);
+		expect(chat.pendingUserInputs).toEqual([]);
+	});
+
+	it('refetches when a buffered event belongs to a newer generation', async () => {
+		const chat = new ChatState();
+		const first = deferred<ReturnType<typeof page>>();
+		getChatMessagesMock
+			.mockReturnValueOnce(first.promise)
+			.mockResolvedValueOnce(page({
+				logId: 'new-log',
+				events: [event(1, new AssistantMessage(TS, 'new'), { messageId: 'new-1' })],
+				pendingUserInputs: [{
+					chatId: 'chat-1',
+					clientRequestId: 'req-new',
+					content: 'new pending',
+					createdAt: TS,
+					deliveryStatus: 'accepted',
+				}],
+			}));
+
+		const load = chat.loadMessages('chat-1');
+		chat.applyEvents('new-log', [
+			event(1, new AssistantMessage(TS, 'new live'), { messageId: 'new-live-1' }),
+		]);
+
+		first.resolve(page({
+			logId: 'old-log',
+			events: [event(1, new UserMessage(TS, 'old'), { messageId: 'old-1' })],
+			pendingUserInputs: [{
+				chatId: 'chat-1',
+				clientRequestId: 'req-old',
+				content: 'old pending',
+				createdAt: TS,
+				deliveryStatus: 'accepted',
+			}],
+		}));
+
+		await load;
+
+		expect(getChatMessagesMock).toHaveBeenCalledTimes(2);
+		expect(chat.getCursor()).toEqual({ logId: 'new-log', lastAppendSeq: 1 });
+		expect(messageContents(chat.chatMessages)).toEqual(['new']);
+		expect(chat.pendingUserInputs.map((input) => input.clientRequestId)).toEqual(['req-new']);
+	});
+
+	it('reports generation-changed without installing a stale page when a buffered batch has a new logId', () => {
+		const chat = new ChatState();
+		const epoch = chat.beginSnapshotLoad();
+
+		chat.applyEvents('new-log', [
+			event(1, new AssistantMessage(TS, 'new'), { messageId: 'new-1' }),
+		]);
+
+		const result = chat.setFromPage({
+			logId: 'old-log',
+			events: [event(1, new UserMessage(TS, 'old'), { messageId: 'old-1' })],
+			lastAppendSeq: 1,
+			pageOldestSeq: 1,
+			hasMore: false,
+		}, epoch);
+
+		expect(result).toBe('generation-changed');
+		expect(chat.chatMessages).toEqual([]);
+		expect(chat.getCursor()).toEqual({ logId: '', lastAppendSeq: 0 });
+	});
+
+	it('replaceGeneration clears pending overlays and resets the visible window', () => {
+		const chat = new ChatState();
+		chat.setPendingUserInputs([{
+			chatId: 'chat-1',
+			clientRequestId: 'req-1',
+			content: 'old prompt',
+			createdAt: TS,
+			deliveryStatus: 'accepted',
+		}]);
+		chat.visibleMessageCount = 500;
+
+		chat.replaceGeneration('new-log', [
+			event(1, new AssistantMessage(TS, 'native'), { messageId: 'native-1' }),
+		], { lastAppendSeq: 1, localNotice: 'The process died.' });
+
+		expect(chat.visiblePendingInputs).toEqual([]);
+		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
+		expect(messageContents(chat.displayMessages)).toEqual([
+			'native',
+			'The process died.',
+		]);
 	});
 
 	it('persists and restores the event cursor with the visible event window', () => {
