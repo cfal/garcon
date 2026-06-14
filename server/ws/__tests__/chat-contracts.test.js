@@ -60,6 +60,19 @@ const chatEvent = {
   message: { type: 'user-message', content: 'hello', timestamp: '2024-01-01T00:00:00Z' },
 };
 
+const revisionEvent = {
+  appendSeq: 5,
+  seq: 1,
+  messageId: 'message-1',
+  rev: 2,
+  message: {
+    type: 'user-message',
+    content: 'hello',
+    timestamp: '2024-01-01T00:00:00Z',
+    metadata: { clientRequestId: 'req-1', deliveryStatus: 'delivered' },
+  },
+};
+
 const mockChatEvents = {
   readPage: mock((_chatId, limit, beforeSeq) => Promise.resolve({
     events: [chatEvent],
@@ -878,6 +891,69 @@ describe('chat WebSocket handler', () => {
         logId: 'log-1',
         mode: 'delta',
         lastAppendSeq: 1,
+      });
+    });
+
+    it('returns snapshot-required when the replay cursor is not resumable', async () => {
+      mockRegistry.getChat.mockReturnValue({
+        agentId: 'claude',
+        nativePath: '/tmp/test.jsonl',
+        agentSessionId: 'x',
+      });
+      mockChatEvents.readReplay.mockResolvedValueOnce({
+        logId: 'log-1',
+        mode: 'snapshot-required',
+        events: [],
+        lastAppendSeq: 3,
+      });
+
+      await chatHandler.message(ws, {
+        type: 'chat-subscribe',
+        chatId: '123',
+        clientRequestId: 'req-sub-ahead',
+        logId: 'log-1',
+        afterAppendSeq: 99,
+      });
+
+      expect(mockChatEvents.readReplay).toHaveBeenCalledWith('123', 'log-1', 99);
+      expect(lastSentPayload()).toMatchObject({
+        type: 'chat-subscribed',
+        clientRequestId: 'req-sub-ahead',
+        chatId: '123',
+        logId: 'log-1',
+        mode: 'snapshot-required',
+        events: [],
+        lastAppendSeq: 3,
+      });
+    });
+
+    it('replays offline revisions as delta events', async () => {
+      mockRegistry.getChat.mockReturnValue({
+        agentId: 'claude',
+        nativePath: '/tmp/test.jsonl',
+        agentSessionId: 'x',
+      });
+      mockChatEvents.readReplay.mockResolvedValueOnce({
+        logId: 'log-1',
+        mode: 'delta',
+        events: [revisionEvent],
+        lastAppendSeq: 5,
+      });
+
+      await chatHandler.message(ws, {
+        type: 'chat-subscribe',
+        chatId: '123',
+        clientRequestId: 'req-sub-revision',
+        logId: 'log-1',
+        afterAppendSeq: 4,
+      });
+
+      expect(lastSentPayload()).toMatchObject({
+        type: 'chat-subscribed',
+        clientRequestId: 'req-sub-revision',
+        mode: 'delta',
+        events: [expect.objectContaining({ appendSeq: 5, rev: 2 })],
+        lastAppendSeq: 5,
       });
     });
 

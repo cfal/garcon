@@ -22,6 +22,7 @@ import {
 	ClientRequestErrorMessage,
 	WsFaultMessage,
 } from '$shared/ws-events';
+import { ErrorMessage } from '$shared/chat-types';
 import { ForkRunRequest, parseClientWsMessage } from '$shared/ws-requests';
 
 const chatEvent = {
@@ -52,6 +53,41 @@ describe('parseServerWsMessage', () => {
 		expect((msg as ChatEventsMessage).upstreamRequestId).toBe('cursor-req-1');
 	});
 
+	it('rejects a chat-events batch when any envelope has invalid sequence values', () => {
+		const msg = parseServerWsMessage({
+			type: 'chat-events',
+			chatId: 'c-1',
+			logId: 'log-1',
+			events: [{
+				appendSeq: 0,
+				seq: 1,
+				messageId: 'message-1',
+				rev: 1,
+				message: { type: 'user-message', timestamp: '2025-01-01T00:00:00Z', content: 'bad' },
+			}],
+		});
+
+		expect(msg).toBeNull();
+	});
+
+	it('keeps unknown inner messages as error placeholders inside a valid envelope', () => {
+		const msg = parseServerWsMessage({
+			type: 'chat-events',
+			chatId: 'c-1',
+			logId: 'log-1',
+			events: [{
+				appendSeq: 1,
+				seq: 1,
+				messageId: 'message-1',
+				rev: 1,
+				message: { type: 'future-message', timestamp: '2025-01-01T00:00:00Z', payload: {} },
+			}],
+		});
+
+		expect(msg).toBeInstanceOf(ChatEventsMessage);
+		expect((msg as ChatEventsMessage).events[0].message).toBeInstanceOf(ErrorMessage);
+	});
+
 	it('parses chat-subscribed', () => {
 		const msg = parseServerWsMessage({
 			type: 'chat-subscribed',
@@ -65,6 +101,26 @@ describe('parseServerWsMessage', () => {
 		expect(msg).toBeInstanceOf(ChatSubscribedMessage);
 		expect((msg as ChatSubscribedMessage).clientRequestId).toBe('req-subscribe');
 		expect((msg as ChatSubscribedMessage).mode).toBe('delta');
+	});
+
+	it('rejects chat-subscribed without mode or logId', () => {
+		expect(parseServerWsMessage({
+			type: 'chat-subscribed',
+			clientRequestId: 'req-subscribe',
+			chatId: 'c-1',
+			mode: 'delta',
+			events: [],
+			lastAppendSeq: 0,
+		})).toBeNull();
+
+		expect(parseServerWsMessage({
+			type: 'chat-subscribed',
+			clientRequestId: 'req-subscribe',
+			chatId: 'c-1',
+			logId: 'log-1',
+			events: [],
+			lastAppendSeq: 0,
+		})).toBeNull();
 	});
 
 	it('parses chat-generation-reset', () => {
