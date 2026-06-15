@@ -54,7 +54,7 @@ export class ChatState {
 	lastSeq = $state(0);
 	oldestSeq = $state(0);
 	pendingUserInputs = $state<PendingUserInput[]>([]);
-	localMessages = $state<Array<{ id: string; message: ChatMessage }>>([]);
+	localNotices = $state<Array<{ id: string; message: ChatMessage }>>([]);
 	visibleMessageCount = $state(INITIAL_VISIBLE_MESSAGES);
 	isLoadingMessages = $state(false);
 	isLoadingMoreMessages = $state(false);
@@ -86,8 +86,8 @@ export class ChatState {
 		const merged = this.visiblePendingInputs.length === 0
 			? durableRows
 			: mergeRowsWithPendingInputs(durableRows, this.visiblePendingInputs);
-		if (this.localMessages.length === 0) return merged;
-		return [...merged, ...this.localMessages];
+		if (this.localNotices.length === 0) return merged;
+		return [...merged, ...this.localNotices];
 	});
 
 	#displayMessages = $derived.by(() => this.#displayRows.map((row) => row.message));
@@ -146,11 +146,15 @@ export class ChatState {
 			this.lastSeq = 0;
 			this.oldestSeq = 0;
 			this.generationId = generationId;
+			this.localNotices = [];
 			return 'generation-changed';
 		}
 		this.generationId = generationId;
 		const result = applyChatViewMessages(this.entries, messages, this.lastSeq);
-		if (result.changed) this.entries = result.messages;
+		if (result.changed) {
+			this.entries = result.messages;
+			this.localNotices = [];
+		}
 		this.lastSeq = result.lastSeq;
 		this.totalMessages = this.entries.length;
 		if (this.oldestSeq === 0 && this.entries.length > 0) {
@@ -192,7 +196,7 @@ export class ChatState {
 		this.totalMessages = messages.length;
 		this.pendingUserInputs = options.pendingUserInputs ? sortPendingInputs(options.pendingUserInputs) : [];
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
-		this.localMessages = [];
+		this.localNotices = [];
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
@@ -225,7 +229,7 @@ export class ChatState {
 		this.hasMoreMessages = page.hasMore;
 		this.totalMessages = page.messages.length;
 		this.pendingUserInputs = pendingInputsFromPage(page);
-		this.localMessages = [];
+		this.localNotices = [];
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
@@ -302,15 +306,15 @@ export class ChatState {
 	}
 
 	appendErrorMessage(content: string): void {
-		this.localMessages = [
-			...this.localMessages,
+		this.localNotices = [
+			...this.localNotices,
 			{ id: `local_${localMessageId()}`, message: new ErrorMessage(new Date().toISOString(), content) },
 		];
 	}
 
 	appendLocalAssistantMessage(content: string): void {
-		this.localMessages = [
-			...this.localMessages,
+		this.localNotices = [
+			...this.localNotices,
 			{ id: `local_${localMessageId()}`, message: new AssistantMessage(new Date().toISOString(), content) },
 		];
 	}
@@ -348,7 +352,7 @@ export class ChatState {
 		this.lastSeq = 0;
 		this.oldestSeq = 0;
 		this.pendingUserInputs = [];
-		this.localMessages = [];
+		this.localNotices = [];
 		this.hasMoreMessages = false;
 		this.totalMessages = 0;
 		this.loadStatus = 'idle';

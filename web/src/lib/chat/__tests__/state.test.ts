@@ -86,6 +86,49 @@ describe('ChatState', () => {
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-2', lastSeq: 0 });
 	});
 
+	it('renders local messages as transient display-only rows', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+
+		chat.appendLocalAssistantMessage('local status');
+		chat.appendErrorMessage('local error');
+
+		expect(chat.chatMessages.map(contentOf)).toEqual(['server']);
+		expect(chat.displayMessages.map(contentOf)).toEqual(['server', 'local status', 'local error']);
+	});
+
+	it('clears transient local messages when new server messages apply', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+		chat.appendLocalAssistantMessage('local status');
+		chat.appendErrorMessage('local error');
+
+		chat.applyMessages('generation-1', [entry(2, assistant('next'))]);
+
+		expect(chat.displayMessages.map(contentOf)).toEqual(['server', 'next']);
+	});
+
+	it('keeps transient local messages when replay only overlaps existing server messages', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+		chat.appendErrorMessage('local error');
+
+		chat.applyMessages('generation-1', [entry(1, user('duplicate'))]);
+
+		expect(chat.displayMessages.map(contentOf)).toEqual(['server', 'local error']);
+	});
+
+	it('clears transient local messages when a live batch changes generation', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('old'))]);
+		chat.appendErrorMessage('local error');
+
+		const result = chat.applyMessages('generation-2', [entry(1, assistant('fresh'))]);
+
+		expect(result).toBe('generation-changed');
+		expect(chat.displayMessages).toEqual([]);
+	});
+
 	it('buffers live same-generation messages while a snapshot is loading', () => {
 		const chat = new ChatState();
 		const epoch = chat.beginSnapshotLoad();
