@@ -24,6 +24,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			getCursor: vi.fn(() => ({ generationId: 'generation-current', lastSeq: 1 })),
 			applyChatMessages: vi.fn((): 'applied' => 'applied'),
 			reloadChatSnapshot: vi.fn(),
+			warmBackgroundChatSnapshot: vi.fn(() => true),
 			appendLocalNotice: vi.fn(),
 			upsertPendingUserInput: vi.fn(),
 			clearPendingUserInput: vi.fn(),
@@ -131,6 +132,7 @@ describe('event router integration', () => {
 		);
 
 		expect(stores.chatState.updatePendingUserInputDeliveryStatus).toHaveBeenCalledWith('req-1', 'accepted');
+		expect(stores.chatState.warmBackgroundChatSnapshot).not.toHaveBeenCalled();
 		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
 			'chat-a',
 			'generation-current',
@@ -173,7 +175,7 @@ describe('event router integration', () => {
 		expect(stores.chatState.reloadChatSnapshot).toHaveBeenCalledWith('chat-a');
 	});
 
-	it('patches background previews without applying background messages to selected state', () => {
+	it('patches background previews and warms cached background snapshots', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
 			[{
@@ -192,6 +194,11 @@ describe('event router integration', () => {
 		);
 
 		expect(stores.sessions.patchChatPreview).toHaveBeenCalledWith('chat-b', 'background', TS);
+		expect(stores.chatState.warmBackgroundChatSnapshot).toHaveBeenCalledWith(
+			'chat-b',
+			'generation-b',
+			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
+		);
 		expect(stores.chatState.applyChatMessages).not.toHaveBeenCalled();
 	});
 

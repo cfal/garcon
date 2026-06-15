@@ -89,6 +89,11 @@ export interface EventRouterChatStateStore {
 		messages: ChatViewMessage[],
 	) => 'applied' | 'generation-changed' | 'gap-detected';
 	reloadChatSnapshot: (chatId: string) => void;
+	warmBackgroundChatSnapshot?: (
+		chatId: string,
+		generationId: string,
+		messages: ChatViewMessage[],
+	) => boolean;
 	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
 	upsertPendingUserInput: (input: PendingUserInput) => void;
 	clearPendingUserInput: (clientRequestId: string) => void;
@@ -467,12 +472,21 @@ export function createEventRouter(
 				const selectedChat = stores.sessions.selectedChat();
 				const currentChatId = stores.lifecycle.currentChatId();
 				const pendingViewChatId = stores.conversationUi.pendingViewChat?.chatId || null;
+				const activeViewChatId = selectedChat?.id || currentChatId || pendingViewChatId;
 
 				// Pre-filter: patch sidebar preview for any chat so background
-				// chats update even when the filter skips full dispatch.
+				// chats update even when the filter skips full dispatch. Cached
+				// background transcripts are warmed only when already contiguous.
 				if (event.message instanceof ChatMessagesMessage) {
 					const agentMsg = event.message;
 					if (agentMsg.chatId && agentMsg.messages.length > 0) {
+						if (agentMsg.chatId !== activeViewChatId) {
+							stores.chatState.warmBackgroundChatSnapshot?.(
+								agentMsg.chatId,
+								agentMsg.generationId,
+								agentMsg.messages,
+							);
+						}
 						const preview = selectPreviewFromBatch(agentMsg.messages.map((entry) => entry.message));
 						if (preview) {
 							stores.sessions.patchChatPreview(

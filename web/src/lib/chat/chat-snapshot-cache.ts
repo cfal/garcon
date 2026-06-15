@@ -282,7 +282,7 @@ export class LocalChatSnapshotCache {
 		chatId: string,
 		generationId: string,
 		messages: ChatViewMessage[],
-		lastSeq: number,
+		lastSeq?: number,
 		options: ChatSnapshotWindowOptions = {},
 	): boolean {
 		if (!chatId || !generationId) return false;
@@ -292,7 +292,10 @@ export class LocalChatSnapshotCache {
 			return false;
 		}
 		const result = applyChatViewMessages(restored.entries, messages, restored.lastSeq);
-		if (result.status === 'gap-detected' || lastSeq > result.lastSeq) {
+		if (
+			result.status === 'gap-detected' ||
+			(typeof lastSeq === 'number' && lastSeq > result.lastSeq)
+		) {
 			this.markStale(chatId);
 			return false;
 		}

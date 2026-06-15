@@ -6,7 +6,7 @@ import { goto } from '$app/navigation';
 import { createEventRouter, type EventRouterStores } from '$lib/events/router.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
-import type { ChatState } from '$lib/chat/state.svelte';
+import { INITIAL_VISIBLE_MESSAGES, type ChatState } from '$lib/chat/state.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
@@ -60,6 +60,10 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 					// Leaves current visible state until a later retry succeeds.
 				});
 			},
+			warmBackgroundChatSnapshot: (chatId, generationId, messages) =>
+				deps.chatState.snapshotCache.applyMessages(chatId, generationId, messages, undefined, {
+					limit: INITIAL_VISIBLE_MESSAGES,
+				}),
 			appendLocalNotice: (noticeType, content) =>
 				deps.chatState.appendLocalNotice(noticeType, content),
 			upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
@@ -67,11 +71,11 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				deps.chatState.clearPendingUserInput(clientRequestId),
 			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
 				deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
-				loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
-				removeChatSnapshot: (chatId) => deps.chatState.snapshotCache.remove(chatId),
-				markChatSnapshotStale: (chatId) => deps.chatState.snapshotCache.markStale(chatId),
-				markChatSnapshotValidated: (chatId) => deps.chatState.snapshotCache.markValidated(chatId),
-			},
+			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
+			removeChatSnapshot: (chatId) => deps.chatState.snapshotCache.remove(chatId),
+			markChatSnapshotStale: (chatId) => deps.chatState.snapshotCache.markStale(chatId),
+			markChatSnapshotValidated: (chatId) => deps.chatState.snapshotCache.markValidated(chatId),
+		},
 		lifecycle: {
 			currentChatId: () => deps.lifecycle.currentChatId,
 			setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),
