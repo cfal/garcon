@@ -10,6 +10,7 @@
 	import PromptComposer from './PromptComposer.svelte';
 	import QueueControls from './QueueControls.svelte';
 	import { ChatState, INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
+	import { ChatSnapshotPersistence } from '$lib/chat/chat-snapshot-persistence';
 	import { ComposerState } from '$lib/chat/composer.svelte';
 	import { AgentState } from '$lib/chat/agent-state.svelte';
 	import { getChatQueue } from '$lib/api/chats.js';
@@ -62,6 +63,16 @@
 	const modelCatalog = getModelCatalog();
 
 	const chatState = new ChatState();
+	const snapshotPersistence = new ChatSnapshotPersistence({
+		persist: ({ chatId, entries, logId, lastAppendSeq }) => {
+			chatState.snapshotCache.persist(
+				chatId,
+				entries,
+				{ logId, lastAppendSeq },
+				{ limit: INITIAL_VISIBLE_MESSAGES },
+			);
+		},
+	});
 	const composerState = new ComposerState();
 	const agentState = new AgentState();
 	const lifecycle = new ChatLifecycleStore();
@@ -115,7 +126,10 @@
 
 	// WS drain and event router.
 	const drainHandle = createDrainCursor(ws);
-	onDestroy(() => drainHandle.cleanup());
+	onDestroy(() => {
+		drainHandle.cleanup();
+		snapshotPersistence.dispose();
+	});
 
 	mountConversationRouter({
 		ws,
@@ -179,24 +193,21 @@
 	});
 
 	// Debounced persistence to avoid main-thread JSON.stringify per token during streaming.
-	let persistTimer: ReturnType<typeof setTimeout> | null = null;
 	$effect(() => {
 		const chatId = sessions.selectedChatId;
-		const _entries = chatState.entries;
-		const _cursor = chatState.lastAppendSeq;
-		const _logId = chatState.logId;
-		if (!chatId) return;
-		if (persistTimer) clearTimeout(persistTimer);
-		persistTimer = setTimeout(() => {
-			chatState.persistMessages(chatId);
-		}, 800);
-		return () => {
-			// Flush on cleanup to avoid data loss when navigating away.
-			if (persistTimer) {
-				clearTimeout(persistTimer);
-				chatState.persistMessages(chatId);
-			}
-		};
+		const entries = chatState.entries;
+		const lastAppendSeq = chatState.lastAppendSeq;
+		const logId = chatState.logId;
+		if (!chatId) {
+			snapshotPersistence.flush();
+			return;
+		}
+		snapshotPersistence.schedule({
+			chatId,
+			entries: entries.slice(),
+			logId,
+			lastAppendSeq,
+		});
 	});
 
 	// Scrolls to bottom on new messages and loading status changes unless user scrolled up.
