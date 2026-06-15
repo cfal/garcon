@@ -9,13 +9,17 @@
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueueControls from './QueueControls.svelte';
-	import { ChatState } from '$lib/chat/state.svelte';
+	import { ChatState, INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
+	import { ChatSnapshotPersistence } from '$lib/chat/chat-snapshot-persistence';
 	import { ComposerState } from '$lib/chat/composer.svelte';
 	import { AgentState } from '$lib/chat/agent-state.svelte';
 	import { getChatQueue } from '$lib/api/chats.js';
+	import { reloadChatFromNative } from '$lib/chat/reload-chat';
 	import { StartupCoordinator } from '$lib/chat/startup-coordinator.js';
 	import { createDrainCursor } from '$lib/ws/drain';
+	import { ChatReconnectCoordinator } from '$lib/ws/reconnect-coordinator.svelte';
 	import { mountConversationRouter } from '$lib/chat/conversation-router-adapter.svelte';
+	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
@@ -40,11 +44,15 @@
 
 	interface ConversationWorkspaceProps {
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
+		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		reserveTopFloatingToolbar?: boolean;
 	}
 
-	let { onRegisterSubmit, reserveTopFloatingToolbar = false }: ConversationWorkspaceProps =
-		$props();
+	let {
+		onRegisterSubmit,
+		onRegisterReload,
+		reserveTopFloatingToolbar = false,
+	}: ConversationWorkspaceProps = $props();
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
@@ -55,11 +63,49 @@
 	const modelCatalog = getModelCatalog();
 
 	const chatState = new ChatState();
+	const snapshotPersistence = new ChatSnapshotPersistence({
+		persist: ({ chatId, entries, generationId, lastSeq }) => {
+			chatState.snapshotCache.persist(
+				chatId,
+				entries,
+				{ generationId, lastSeq },
+				{ limit: INITIAL_VISIBLE_MESSAGES },
+			);
+		},
+	});
 	const composerState = new ComposerState();
 	const agentState = new AgentState();
 	const lifecycle = new ChatLifecycleStore();
 	const conversationUi = new ConversationUiStore();
 	const startupCoordinator = new StartupCoordinator();
+	const reconnectCoordinator = new ChatReconnectCoordinator({
+		ws,
+		chatState,
+		conversationUi,
+		getSelectedChat: () => sessions.selectedChat,
+		getSelectedChatId: () => sessions.selectedChatId,
+		getQueue: getChatQueue,
+		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),
+		quietRefreshChats: () => sessions.quietRefreshChats(),
+		getBackgroundCursors: () => chatState.snapshotCache.listCursors(20),
+		loadBackgroundSnapshot: async (chatId) => {
+			chatState.snapshotCache.markStale(chatId);
+			if (sessions.selectedChatId === chatId) {
+				await chatState.loadMessages(chatId);
+				return;
+			}
+			await sessions.quietRefreshChats();
+		},
+		onBackgroundMessages: (chatId, generationId, messages, lastSeq) => {
+			const applied = chatState.snapshotCache.applyMessages(chatId, generationId, messages, lastSeq, {
+				limit: INITIAL_VISIBLE_MESSAGES,
+			});
+			if (!applied) return false;
+			const preview = selectPreviewFromBatch(messages.map((entry) => entry.message));
+			if (preview) sessions.patchPreview(chatId, preview.content);
+			return true;
+		},
+	});
 
 	setChatState(chatState);
 	setComposerState(composerState);
@@ -82,7 +128,10 @@
 
 	// WS drain and event router.
 	const drainHandle = createDrainCursor(ws);
-	onDestroy(() => drainHandle.cleanup());
+	onDestroy(() => {
+		drainHandle.cleanup();
+		snapshotPersistence.dispose();
+	});
 
 	mountConversationRouter({
 		ws,
@@ -95,6 +144,7 @@
 		startupCoordinator,
 		readReceiptOutbox,
 	});
+	reconnectCoordinator.mount();
 
 	conversationUi.mountQueuePruning({
 		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
@@ -136,6 +186,7 @@
 	// Expose the submit function to sibling components (runs once on mount).
 	onMount(() => {
 		onRegisterSubmit?.(submitToActiveChat);
+		onRegisterReload?.(reloadSelectedChat);
 	});
 
 	// Chat switch effect (dedup handled inside the controller).
@@ -143,64 +194,27 @@
 		controller.handleChatSwitchIfChanged(sessions.selectedChatId);
 	});
 
-	// Reloads the current chat when WS reconnects after a disconnect.
-	// Marks the active snapshot stale before revalidating so the cache
-	// reflects that messages may have been missed while offline.
-	// Skips the first connection since handleChatSwitch already loads.
-	let hasConnectedBefore = false;
-
+	// Debounced persistence to avoid main-thread JSON.stringify per token during streaming.
 	$effect(() => {
-		const connected = ws.isConnected;
-		untrack(() => {
-			if (!connected) return;
-
-			const selected = sessions.selectedChat;
-			const chatId = sessions.selectedChatId;
-
-			if (selected && selected.status === 'running') {
-				void getChatQueue(selected.id)
-					.then((result) => {
-						conversationUi.setMessageQueue(selected.id, result.queue);
-					})
-					.catch(() => {
-						// Queue state will converge through later broadcasts.
-					});
-			}
-
-			if (!hasConnectedBefore) {
-				hasConnectedBefore = true;
-				return;
-			}
-
-			if (chatId) {
-				chatState.snapshotCache.markStale(chatId);
-				controller.loadChat(chatId);
-			}
+		const chatId = sessions.selectedChatId;
+		const entries = chatState.entries;
+		const lastSeq = chatState.lastSeq;
+		const generationId = chatState.generationId;
+		if (!chatId) {
+			snapshotPersistence.flush();
+			return;
+		}
+		snapshotPersistence.schedule({
+			chatId,
+			entries: entries.slice(),
+			generationId,
+			lastSeq,
 		});
 	});
 
-	// Debounced persistence to avoid main-thread JSON.stringify per token during streaming.
-	let persistTimer: ReturnType<typeof setTimeout> | null = null;
+	// Scrolls to bottom when the bottom row changes, including same-count replacements.
 	$effect(() => {
-		const chatId = sessions.selectedChatId;
-		const _messages = chatState.chatMessages;
-		if (!chatId) return;
-		if (persistTimer) clearTimeout(persistTimer);
-		persistTimer = setTimeout(() => {
-			chatState.persistMessages(chatId);
-		}, 800);
-		return () => {
-			// Flush on cleanup to avoid data loss when navigating away.
-			if (persistTimer) {
-				clearTimeout(persistTimer);
-				chatState.persistMessages(chatId);
-			}
-		};
-	});
-
-	// Scrolls to bottom on new messages and loading status changes unless user scrolled up.
-	$effect(() => {
-		const _count = chatState.displayMessageCount;
+		const _bottomRowId = chatState.bottomVisibleRowId;
 		const _isLoading = lifecycle.isLoading;
 		if (!chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
 			requestAnimationFrame(() => scroll.scrollToBottom());
@@ -259,6 +273,13 @@
 		} catch {
 			return false;
 		}
+	}
+
+	async function reloadSelectedChat(chatId: string): Promise<void> {
+		if (!chatId || chatId !== sessions.selectedChatId) {
+			throw new Error(m.sidebar_chats_reload_failed());
+		}
+		await reloadChatFromNative(ws, chatState, chatId);
 	}
 
 	const projectPath = $derived(sessions.selectedChat?.projectPath || null);

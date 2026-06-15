@@ -89,6 +89,7 @@ function createRouteAgent(sessionOverrides = {}) {
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
+    discardPendingUserInput: mock(() => true),
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
     abort: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
@@ -113,10 +114,8 @@ function createRouteAgent(sessionOverrides = {}) {
     listAllChatMetadata: mock(() => new Map()),
     getChatMetadata: mock(() => null),
   };
-  const historyCache = {
-    ensureLoaded: mock(() => Promise.resolve(undefined)),
-    getPaginatedMessages: mock(() => ({ messages: [], total: 0, hasMore: false, offset: 0, limit: 20 })),
-    appendMessages: mock(() => Promise.resolve(undefined)),
+  const chatViews = {
+    getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
   };
   const agents = {
     hasAgent: mock(() => true),
@@ -138,7 +137,7 @@ function createRouteAgent(sessionOverrides = {}) {
     queue,
     pathCache,
     metadata,
-    historyCache,
+    chatViews,
     agents,
     pendingInputs,
     commandService: createRouteCommandService({
@@ -151,7 +150,7 @@ function createRouteAgent(sessionOverrides = {}) {
       pendingInputs,
     }),
   });
-  return { sessions, registry, settings, queue, pathCache, metadata, historyCache, agents, routes };
+  return { sessions, registry, settings, queue, pathCache, metadata, chatViews, agents, routes };
 }
 
 async function callJson(handler, body, method = 'POST') {

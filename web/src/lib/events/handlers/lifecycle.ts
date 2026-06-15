@@ -2,14 +2,13 @@
 // Covers chat completion, chat reloading, and error display.
 
 import type { AgentRunFinishedMessage, AgentRunFailedMessage } from '$shared/ws-events';
-import { ErrorMessage } from '$shared/chat-types';
-import type { ChatMessage } from '$lib/types/chat';
+import type { LocalNoticeType } from '$lib/chat/local-notice';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 export interface LifecycleContext {
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
-	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
+	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
 		ConversationUiStore,
@@ -57,9 +56,6 @@ export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleConte
 	ctx.clearLoadingIndicators(errorChatId);
 	ctx.markChatsAsCompleted(errorChatId);
 
-	ctx.setChatMessages((prev) => [
-		...prev,
-		new ErrorMessage(new Date().toISOString(), msg.error || 'An error occurred'),
-	]);
+	ctx.appendLocalNotice('error', msg.error || 'An error occurred');
 	ctx.conversationUi.clearPendingPermissionRequests();
 }

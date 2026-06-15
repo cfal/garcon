@@ -1,25 +1,32 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import ChatPaneTestHost from './ChatPaneTestHost.svelte';
+import { AssistantMessage, UserMessage } from '$shared/chat-types';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(() =>
 		Promise.resolve({
+			generationId: 'generation-1',
 			messages: [
 				{
-					type: 'user-message',
-					timestamp: '2026-05-01T00:00:00.000Z',
-					content: 'Unfocused user question',
+					seq: 1,
+					message: new UserMessage(
+						'2026-05-01T00:00:00.000Z',
+						'Unfocused user question',
+					),
 				},
 				{
-					type: 'assistant-message',
-					timestamp: '2026-05-01T00:00:01.000Z',
-					content: 'Unfocused assistant answer',
+					seq: 2,
+					message: new AssistantMessage(
+						'2026-05-01T00:00:01.000Z',
+						'Unfocused assistant answer',
+					),
 				},
 			],
-			total: 2,
+			pendingUserInputs: [],
+			lastSeq: 2,
+			pageOldestSeq: 1,
 			hasMore: false,
-			offset: 0,
 			limit: 50,
 		}),
 	),

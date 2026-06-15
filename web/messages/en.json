@@ -674,6 +674,8 @@
 	"sidebar_chats_pinned_insert_top": "Top",
 	"sidebar_chats_pinned_insert_bottom": "Bottom",
 	"sidebar_chats_rename_chat": "Rename chat",
+	"sidebar_chats_reload": "Reload from native history",
+	"sidebar_chats_reload_failed": "Failed to reload chat.",
 	"sidebar_chats_try_different_search": "Try a different search term.",
 	"sidebar_chats_unarchive": "Unarchive",
 	"sidebar_chats_unnamed": "Untitled chat",

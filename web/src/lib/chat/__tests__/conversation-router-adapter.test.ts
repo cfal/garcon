@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildRouterStores, type ConversationRouterDeps } from '../conversation-router-adapter.svelte';
 import { ChatState } from '../state.svelte';
 import { AgentState } from '../agent-state.svelte';
@@ -6,6 +6,8 @@ import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import { StartupCoordinator } from '../startup-coordinator';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatViewMessage } from '$shared/chat-view';
+import { UserMessage } from '$shared/chat-types';
 
 vi.mock('$app/navigation', () => ({
 	goto: vi.fn(),
@@ -63,11 +65,55 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterDeps
 	};
 }
 
+function entry(seq: number, content: string): ChatViewMessage {
+	return {
+		seq,
+		message: new UserMessage('2026-01-01T00:00:00.000Z', content),
+	};
+}
+
 describe('buildRouterStores', () => {
+	beforeEach(() => {
+		localStorage.clear();
+	});
+
 	it('returns the selected chat record directly for router consumers', () => {
 		const selectedChat = chatRecord();
 		const stores = buildRouterStores(depsFor(selectedChat));
 
 		expect(stores.sessions.selectedChat()).toBe(selectedChat);
+	});
+
+	it('warms background snapshots through the local snapshot cache', () => {
+		const deps = depsFor(chatRecord());
+		deps.chatState.snapshotCache.persist(
+			'chat-2',
+			[entry(1, 'one')],
+			{ generationId: 'generation-2', lastSeq: 1 },
+		);
+		const stores = buildRouterStores(deps);
+
+		const applied = stores.chatState.warmBackgroundChatSnapshot?.(
+			'chat-2',
+			'generation-2',
+			[entry(2, 'two')],
+		);
+
+		expect(applied).toBe(true);
+		expect(deps.chatState.snapshotCache.restore('chat-2')?.entries.map((item) => item.seq)).toEqual([1, 2]);
+	});
+
+	it('does not create tail-only background snapshots', () => {
+		const deps = depsFor(chatRecord());
+		const stores = buildRouterStores(deps);
+
+		const applied = stores.chatState.warmBackgroundChatSnapshot?.(
+			'chat-2',
+			'generation-2',
+			[entry(4, 'tail')],
+		);
+
+		expect(applied).toBe(false);
+		expect(deps.chatState.snapshotCache.restore('chat-2')).toBeNull();
 	});
 });

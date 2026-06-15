@@ -43,6 +43,7 @@ function createRoutesFixture() {
     deleteChatQueueFile: mock(async () => undefined),
     submit: mock(async () => undefined),
     registerPendingUserInput: mock(async () => undefined),
+    discardPendingUserInput: mock(() => true),
     runAcceptedTurn: mock(async () => undefined),
     abort: mock(async () => true),
     triggerDrain: mock(async () => undefined),
@@ -59,10 +60,15 @@ function createRoutesFixture() {
     getChatMetadata: mock(() => null),
     addNewChatMetadata: mock(() => undefined),
   };
-  const historyCache = {
-    ensureLoaded: mock(async () => undefined),
-    getPaginatedMessages: mock((chatId, limit, offset) => ({ messages: [], total: 0, hasMore: false, offset, limit })),
-    appendMessages: mock(async () => undefined),
+  const chatViews = {
+    getOrCreatePage: mock(async (_chatId, limit, beforeSeq) => ({
+      messages: [],
+      generationId: 'generation-1',
+      lastSeq: 0,
+      pageOldestSeq: beforeSeq ?? 0,
+      hasMore: false,
+      limit,
+    })),
   };
   const agents = {
     hasAgent: mock(() => true),
@@ -89,7 +95,7 @@ function createRoutesFixture() {
     queue,
     pathCache,
     metadata,
-    historyCache,
+    chatViews,
     agents,
     pendingInputs,
     commandService: createRouteCommandService({
@@ -103,18 +109,28 @@ function createRoutesFixture() {
     }),
   });
 
-  return { historyCache, pendingInputs, routes };
+  return { chatViews, pendingInputs, routes };
 }
 
 describe('GET /api/v1/chats/messages', () => {
   it('clamps pagination parameters before reading history', async () => {
-    const { historyCache, pendingInputs, routes } = createRoutesFixture();
-    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=999999&offset=-10');
+    const { chatViews, pendingInputs, routes } = createRoutesFixture();
+    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=999999&beforeSeq=10');
 
     const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      chatId: '123',
+      generationId: 'generation-1',
+      messages: [],
+      lastSeq: 0,
+      pageOldestSeq: 10,
+      hasMore: false,
+      limit: 200,
+      pendingUserInputs: [],
+    });
     expect(pendingInputs.reconcile).toHaveBeenCalledWith('123');
-    expect(historyCache.getPaginatedMessages).toHaveBeenCalledWith('123', 200, 0);
+    expect(chatViews.getOrCreatePage).toHaveBeenCalledWith('123', 200, 10);
   });
 });

@@ -1,11 +1,5 @@
-// Discriminated union of all WebSocket messages the server can emit.
-// Shared between server and client to enforce a typed contract.
-
-// Top-level server->client messages.
-// Each interface matches exactly the object literal the server constructs.
-
-import type { ChatMessage } from './chat-types';
-import { parseChatMessages } from './chat-types';
+import type { ChatGenerationResetReason, ChatViewMessage } from './chat-view';
+import { parseChatViewMessages } from './chat-view';
 import type { PendingUserInput, PendingUserInputClearReason } from './pending-user-input';
 import { normalizePendingUserInput } from './pending-user-input';
 import type { QueueState } from './queue-state';
@@ -13,14 +7,52 @@ import { normalizeQueueState } from './queue-state';
 import type { RemoteSettingsSnapshot } from './settings';
 import { normalizeRemoteSettingsSnapshot } from './settings';
 
-export class AgentRunOutputMessage {
-  readonly type = 'agent-run-output' as const;
+export class ChatMessagesMessage {
+  readonly type = 'chat-messages' as const;
   constructor(
     public chatId: string,
-    public messages: ChatMessage[],
+    public generationId: string,
+    public messages: ChatViewMessage[],
     public turnId?: string,
     public clientRequestId?: string,
     public upstreamRequestId?: string,
+  ) { }
+}
+
+export type ChatSubscribeMode = 'delta' | 'snapshot-required';
+
+export class ChatSubscribedMessage {
+  readonly type = 'chat-subscribed' as const;
+  constructor(
+    public clientRequestId: string,
+    public chatId: string,
+    public generationId: string | null,
+    public mode: ChatSubscribeMode,
+    public messages: ChatViewMessage[],
+    public lastSeq: number,
+  ) { }
+}
+
+export class ChatGenerationResetMessage {
+  readonly type = 'chat-generation-reset' as const;
+  constructor(
+    public chatId: string,
+    public generationId: string,
+    public reason: ChatGenerationResetReason,
+    public lastSeq: number,
+  ) { }
+}
+
+export class ChatReloadedMessage {
+  readonly type = 'chat-reloaded' as const;
+  constructor(
+    public clientRequestId: string,
+    public chatId: string,
+    public generationId: string,
+    public messages: ChatViewMessage[],
+    public lastSeq: number,
+    public pageOldestSeq: number,
+    public hasMore: boolean,
   ) { }
 }
 
@@ -92,7 +124,10 @@ export class PendingUserInputClearedMessage {
 
 export class ChatSessionsRunningMessage {
   readonly type = 'chat-sessions-running' as const;
-  constructor(public sessions: Record<string, Array<{ id: string }>>) { }
+  constructor(
+    public sessions: Record<string, Array<{ id: string }>>,
+    public clientRequestId?: string,
+  ) { }
 }
 
 export class WsFaultMessage {
@@ -110,9 +145,6 @@ export class ChatSessionDeletedWsMessage {
   constructor(public chatId: string) { }
 }
 
-// Sent back to the client when a client sends a mark read message (see postMarkRead, postMarkReadBatch)
-// Mainly for multi-client syncing. Clients compute isUnread locally to
-// avoid a race where server-side lastActivity advances during streaming.
 export class ChatReadUpdatedV1Message {
   readonly type = 'chat-read-updated-v1' as const;
   constructor(
@@ -136,8 +168,6 @@ export function isChatListInvalidationReason(value: unknown): value is ChatListI
     && (CHAT_LIST_INVALIDATION_REASONS as readonly string[]).includes(value);
 }
 
-// Broadcast when a sidebar list mutation (add/pin/archive/reorder) occurs.
-// Receivers trigger a full chat list refresh for server-authoritative convergence.
 export class ChatListRefreshRequestedMessage {
   readonly type = 'chat-list-refresh-requested' as const;
   constructor(
@@ -151,24 +181,11 @@ export class SettingsChangedMessage {
   constructor(public settings: RemoteSettingsSnapshot) { }
 }
 
-export class ChatLogResponseMessage {
-  readonly type = 'chat-log-response' as const;
-  constructor(
-    public clientRequestId: string,
-    public chatId: string,
-    public messages: ChatMessage[],
-    public pendingUserInputs: PendingUserInput[],
-    public total: number,
-    public hasMore: boolean,
-    public offset: number,
-    public limit: number,
-  ) { }
-}
-
 export type ClientRequestErrorCode =
   | 'MISSING_CHAT_ID'
   | 'REQUEST_VALIDATION_FAILED'
   | 'SESSION_NOT_FOUND'
+  | 'CHAT_RUNNING'
   | 'NATIVE_PATH_UNRESOLVED'
   | 'HISTORY_LOAD_FAILED'
   | 'REQUEST_TIMEOUT'
@@ -186,9 +203,11 @@ export class ClientRequestErrorMessage {
   ) { }
 }
 
-// Discriminated union of all server->client WS messages
 export type ServerWsMessage =
-  | AgentRunOutputMessage
+  | ChatMessagesMessage
+  | ChatSubscribedMessage
+  | ChatGenerationResetMessage
+  | ChatReloadedMessage
   | AgentRunFinishedMessage
   | AgentRunFailedMessage
   | ChatSessionCreatedMessage
@@ -206,42 +225,96 @@ export type ServerWsMessage =
   | ChatReadUpdatedV1Message
   | ChatListRefreshRequestedMessage
   | SettingsChangedMessage
-  | ChatLogResponseMessage
   | ClientRequestErrorMessage;
 
-// Uses the message union as the single source of truth for dispatch keys.
 export type EventKey = ServerWsMessage['type'];
 
-// Narrows an unknown value to string, defaulting to ''.
 function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
 
-// Validates a required non-empty string field. Returns null when the
-// value is not a non-empty string so the caller can reject the message.
 function requiredStr(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function nonNegativeInt(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
+}
+
+function hasField(data: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(data, key);
+}
+
+function nullableGenerationId(data: Record<string, unknown>): string | null | undefined {
+  if (!hasField(data, 'generationId')) return undefined;
+  if (data.generationId === null) return null;
+  return requiredStr(data.generationId) ?? undefined;
+}
+
 function parseChatListInvalidationReason(v: unknown): ChatListInvalidationReason | null {
   return isChatListInvalidationReason(v) ? v : null;
 }
 
-// Constructs a typed ServerWsMessage class instance from raw data.
-// Returns null for unrecognized message types.
+function parseResetReason(value: unknown): ChatGenerationResetReason | null {
+  return value === 'manual-reload' || value === 'process-error' ? value : null;
+}
+
 export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMessage | null {
   switch (data.type) {
-    case 'agent-run-output': {
+    case 'chat-messages': {
       const chatId = requiredStr(data.chatId);
-      if (!chatId) return null;
-      return new AgentRunOutputMessage(
+      const generationId = requiredStr(data.generationId);
+      if (!chatId || !generationId) return null;
+      const messages = parseChatViewMessages(data.messages);
+      if (messages === null) return null;
+      return new ChatMessagesMessage(
         chatId,
-        parseChatMessages(data.messages),
+        generationId,
+        messages,
         typeof data.turnId === 'string' ? data.turnId : undefined,
         typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
         typeof data.upstreamRequestId === 'string' ? data.upstreamRequestId : undefined,
+      );
+    }
+    case 'chat-subscribed': {
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const chatId = requiredStr(data.chatId);
+      const mode = data.mode === 'delta' || data.mode === 'snapshot-required' ? data.mode : null;
+      const generationId = nullableGenerationId(data);
+      const lastSeq = nonNegativeInt(data.lastSeq);
+      if (!clientRequestId || !chatId || !mode || generationId === undefined || lastSeq === null) return null;
+      if (mode === 'delta' && generationId === null) return null;
+      const messages = parseChatViewMessages(data.messages);
+      if (messages === null) return null;
+      return new ChatSubscribedMessage(clientRequestId, chatId, generationId, mode, messages, lastSeq);
+    }
+    case 'chat-generation-reset': {
+      const chatId = requiredStr(data.chatId);
+      const generationId = requiredStr(data.generationId);
+      const reason = parseResetReason(data.reason);
+      const lastSeq = nonNegativeInt(data.lastSeq);
+      if (!chatId || !generationId || !reason || lastSeq === null) return null;
+      return new ChatGenerationResetMessage(chatId, generationId, reason, lastSeq);
+    }
+    case 'chat-reloaded': {
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const chatId = requiredStr(data.chatId);
+      const generationId = requiredStr(data.generationId);
+      const lastSeq = nonNegativeInt(data.lastSeq);
+      const pageOldestSeq = nonNegativeInt(data.pageOldestSeq);
+      if (!clientRequestId || !chatId || !generationId || lastSeq === null || pageOldestSeq === null) return null;
+      const messages = parseChatViewMessages(data.messages);
+      if (messages === null) return null;
+      return new ChatReloadedMessage(
+        clientRequestId,
+        chatId,
+        generationId,
+        messages,
+        lastSeq,
+        pageOldestSeq,
+        Boolean(data.hasMore),
       );
     }
     case 'agent-run-finished': {
@@ -269,35 +342,29 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
     }
     case 'chat-session-created': {
       const chatId = requiredStr(data.chatId);
-      if (!chatId) return null;
-      return new ChatSessionCreatedMessage(chatId);
+      return chatId ? new ChatSessionCreatedMessage(chatId) : null;
     }
     case 'chat-fork-created': {
       const sourceChatId = requiredStr(data.sourceChatId);
       const chatId = requiredStr(data.chatId);
-      if (!sourceChatId || !chatId) return null;
-      return new ChatForkCreatedMessage(sourceChatId, chatId);
+      return sourceChatId && chatId ? new ChatForkCreatedMessage(sourceChatId, chatId) : null;
     }
     case 'chat-session-stopped': {
       const chatId = requiredStr(data.chatId);
-      if (!chatId) return null;
-      return new ChatSessionStoppedMessage(chatId, Boolean(data.success));
+      return chatId ? new ChatSessionStoppedMessage(chatId, Boolean(data.success)) : null;
     }
     case 'chat-processing-updated': {
       const chatId = requiredStr(data.chatId);
-      if (!chatId) return null;
-      return new ChatProcessingUpdatedMessage(chatId, Boolean(data.isProcessing));
+      return chatId ? new ChatProcessingUpdatedMessage(chatId, Boolean(data.isProcessing)) : null;
     }
     case 'queue-state-updated': {
       const chatId = requiredStr(data.chatId);
-      if (!chatId) return null;
-      return new QueueStateUpdatedMessage(chatId, normalizeQueueState(data.queue));
+      return chatId ? new QueueStateUpdatedMessage(chatId, normalizeQueueState(data.queue)) : null;
     }
     case 'queue-dispatching': {
       const chatId = requiredStr(data.chatId);
       const entryId = requiredStr(data.entryId);
-      if (!chatId || !entryId) return null;
-      return new QueueDispatchingMessage(chatId, entryId, String(data.content ?? ''));
+      return chatId && entryId ? new QueueDispatchingMessage(chatId, entryId, String(data.content ?? '')) : null;
     }
     case 'pending-user-input-updated': {
       const input = normalizePendingUserInput(data.input);
@@ -306,56 +373,39 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
     case 'pending-user-input-cleared': {
       const chatId = requiredStr(data.chatId);
       const clientRequestId = requiredStr(data.clientRequestId);
-      const reason = data.reason === 'persisted' || data.reason === 'chat-removed'
-        ? data.reason
+      const reason = data.reason === 'chat-removed' ? data.reason : null;
+      return chatId && clientRequestId && reason
+        ? new PendingUserInputClearedMessage(chatId, clientRequestId, reason)
         : null;
-      if (!chatId || !clientRequestId || !reason) return null;
-      return new PendingUserInputClearedMessage(chatId, clientRequestId, reason);
     }
     case 'chat-sessions-running':
-      return new ChatSessionsRunningMessage(data.sessions as ChatSessionsRunningMessage['sessions']);
+      return new ChatSessionsRunningMessage(
+        data.sessions as ChatSessionsRunningMessage['sessions'],
+        typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined,
+      );
     case 'ws-fault':
       return new WsFaultMessage(str(data.error));
     case 'chat-title-updated': {
       const chatId = requiredStr(data.chatId);
-      if (!chatId) return null;
-      return new ChatTitleUpdatedMessage(chatId, str(data.title));
+      return chatId ? new ChatTitleUpdatedMessage(chatId, str(data.title)) : null;
     }
     case 'chat-session-deleted': {
       const chatId = requiredStr(data.chatId);
-      if (!chatId) return null;
-      return new ChatSessionDeletedWsMessage(chatId);
+      return chatId ? new ChatSessionDeletedWsMessage(chatId) : null;
     }
     case 'chat-read-updated-v1': {
       const chatId = requiredStr(data.chatId);
       const lastReadAt = requiredStr(data.lastReadAt);
-      if (!chatId || !lastReadAt) return null;
-      return new ChatReadUpdatedV1Message(chatId, lastReadAt);
+      return chatId && lastReadAt ? new ChatReadUpdatedV1Message(chatId, lastReadAt) : null;
     }
     case 'chat-list-refresh-requested': {
       const reason = parseChatListInvalidationReason(data.reason);
       const chatId = requiredStr(data.chatId);
-      if (!reason || !chatId) return null;
-      return new ChatListRefreshRequestedMessage(reason, chatId);
+      return reason && chatId ? new ChatListRefreshRequestedMessage(reason, chatId) : null;
     }
     case 'settings-changed': {
       const settings = normalizeRemoteSettingsSnapshot(data.settings);
-      if (!settings) return null;
-      return new SettingsChangedMessage(settings);
-    }
-    case 'chat-log-response': {
-      const clientRequestId = requiredStr(data.clientRequestId);
-      const chatId = requiredStr(data.chatId);
-      if (!clientRequestId || !chatId) return null;
-      const pendingUserInputs = Array.isArray(data.pendingUserInputs)
-        ? data.pendingUserInputs
-          .map(normalizePendingUserInput)
-          .filter((input): input is PendingUserInput => Boolean(input))
-        : [];
-      return new ChatLogResponseMessage(
-        clientRequestId, chatId, parseChatMessages(data.messages), pendingUserInputs,
-        Number(data.total), Boolean(data.hasMore), Number(data.offset), Number(data.limit),
-      );
+      return settings ? new SettingsChangedMessage(settings) : null;
     }
     case 'client-request-error': {
       const clientRequestId = requiredStr(data.clientRequestId);
@@ -374,5 +424,3 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
       return null;
   }
 }
-
-// Client->server request types are defined in shared/ws-requests.ts.

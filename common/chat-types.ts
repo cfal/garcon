@@ -10,7 +10,6 @@ export interface ChatImage {
 export type UserMessageDeliveryStatus = 'submitting' | 'accepted' | 'failed';
 
 export interface ChatMessageMetadata {
-  messageId?: string;
   clientRequestId?: string;
   upstreamRequestId?: string;
   turnId?: string;
@@ -502,7 +501,6 @@ function asRecord(v: unknown): Record<string, unknown> {
 function parseChatMessageMetadata(v: unknown): ChatMessageMetadata | undefined {
   const raw = asRecord(v);
   const metadata: ChatMessageMetadata = {};
-  if (typeof raw.messageId === 'string') metadata.messageId = raw.messageId;
   if (typeof raw.clientRequestId === 'string') metadata.clientRequestId = raw.clientRequestId;
   if (typeof raw.upstreamRequestId === 'string') metadata.upstreamRequestId = raw.upstreamRequestId;
   if (typeof raw.turnId === 'string') metadata.turnId = raw.turnId;

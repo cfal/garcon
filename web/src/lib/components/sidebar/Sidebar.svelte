@@ -46,6 +46,7 @@
 		 *  the server. Used by bulk delete so the list updates instantly. */
 		onLocallyDeleteChat?: (chatId: string) => void;
 		onQuietRefresh: () => Promise<void> | void;
+		onReloadChat?: (chatId: string) => Promise<void> | void;
 		onChatRenamed?: (chatId: string, newTitle: string) => void;
 		onShowSettings: () => void;
 	}
@@ -60,6 +61,7 @@
 		onChatDelete,
 		onLocallyDeleteChat,
 		onQuietRefresh,
+		onReloadChat,
 		onChatRenamed,
 		onShowSettings,
 	}: SidebarProps = $props();
@@ -405,6 +407,19 @@
 		}
 	}
 
+	async function handleReloadChat(chatId: string) {
+		if (!onReloadChat) return;
+		try {
+			await onReloadChat(chatId);
+		} catch (error) {
+			reportActionFailure(
+				'Failed to reload chat from native history:',
+				m.sidebar_chats_reload_failed(),
+				error,
+			);
+		}
+	}
+
 	async function handleMarkAllRead() {
 		if (isMarkingAllRead || visibleUnreadChatIds.length === 0) return;
 		isMarkingAllRead = true;
@@ -526,6 +541,9 @@
 			onShowDetails={showChatDetails}
 			onForkChat={(id) => {
 				void handleForkChat(id);
+			}}
+			onReloadChat={(id) => {
+				void handleReloadChat(id);
 			}}
 			onShareChat={(id, title) => {
 				dialogs.showShareDialog(id, title);

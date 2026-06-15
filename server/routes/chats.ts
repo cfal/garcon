@@ -24,7 +24,7 @@ import { extractFirstLine } from '../lib/text.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ChatQueueService } from '../queue.js';
-import type { HistoryCachePageReader } from '../chats/history-cache-contract.js';
+import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
@@ -71,7 +71,7 @@ interface MetadataDep {
 }
 
 type QueueDep = ChatQueueService;
-type HistoryCacheDep = HistoryCachePageReader;
+type ChatViewsDep = ChatViewPageReader;
 type AgentRegistryDep = AgentRegistryServiceContract;
 type PendingInputsDep = PendingUserInputServiceContract;
 
@@ -153,7 +153,7 @@ interface ChatRouteDeps {
   queue: QueueDep;
   pathCache: PathCacheDep;
   metadata: MetadataDep;
-  historyCache: HistoryCacheDep;
+  chatViews: ChatViewsDep;
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
   commandService: ChatCommandService;
@@ -165,7 +165,7 @@ export default function createChatRoutes({
   queue,
   pathCache,
   metadata,
-  historyCache,
+  chatViews,
   agents,
   pendingInputs,
   commandService,
@@ -380,12 +380,20 @@ export default function createChatRoutes({
         return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
-      const { limit, offset } = parsePagination(url.searchParams.get('limit'), url.searchParams.get('offset'), { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
+      const { limit } = parsePagination(url.searchParams.get('limit'), null, { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
+      const beforeSeqRaw = url.searchParams.get('beforeSeq');
+      const beforeSeq = beforeSeqRaw ? Number(beforeSeqRaw) : undefined;
 
       await pendingInputs.reconcile(chatId);
-      const page = await historyCache.getPaginatedMessages(chatId, limit, offset);
+      const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
       return Response.json({
-        ...page,
+        chatId,
+        generationId: page.generationId,
+        messages: page.messages,
+        lastSeq: page.lastSeq,
+        pageOldestSeq: page.pageOldestSeq,
+        hasMore: page.hasMore,
+        limit,
         pendingUserInputs: pendingInputs.listForChat(chatId),
       });
     } catch (error: unknown) {
@@ -609,7 +617,6 @@ export default function createChatRoutes({
 
       const options = runOptionsFromCommandRequest(body as AgentRunCommandRequest);
       const result = await commands.submitRun({
-        transport: 'http',
         chatId,
         command,
         images,
@@ -654,7 +661,6 @@ export default function createChatRoutes({
 
       const options = runOptionsFromCommandRequest(body as ForkRunCommandRequest);
       const result = await commands.submitForkRun({
-        transport: 'http',
         sourceChatId,
         chatId,
         command,

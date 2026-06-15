@@ -49,17 +49,19 @@ const settings = {
   reorderRelative: mock(() => Promise.resolve({ success: true })),
 };
 
-const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
+const queue = {
+  deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
+  registerPendingUserInput: mock(() => Promise.resolve(undefined)),
+  discardPendingUserInput: mock(() => true),
+};
 const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
-const historyCache = {
-  ensureLoaded: mock(() => Promise.resolve(undefined)),
-  getPaginatedMessages: mock(() => ({ messages: [], total: 0, hasMore: false, offset: 0, limit: 20 })),
-  appendMessages: mock(() => Promise.resolve(undefined)),
+const chatViews = {
+  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
 };
 const agents = {
   startSession: mock(() => Promise.resolve(undefined)),
@@ -80,7 +82,7 @@ const routes = createChatRoutes({
   queue,
   pathCache,
   metadata,
-  historyCache,
+  chatViews,
   agents,
   pendingInputs,
   commandService: createRouteCommandService({
@@ -107,7 +109,8 @@ describe('POST /api/v1/chats/start', () => {
     settings.removeFromAllOrderLists.mockClear();
     settings.setLastChatDefaults.mockClear();
     metadata.addNewChatMetadata.mockClear();
-    historyCache.appendMessages.mockClear();
+    chatViews.getOrCreatePage.mockClear();
+    queue.registerPendingUserInput.mockClear();
     agents.startSession.mockClear();
     agents.getModels.mockClear();
     agents.hasAgent.mockClear();

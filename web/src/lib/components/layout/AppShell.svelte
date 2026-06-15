@@ -36,6 +36,7 @@
 	let mobileAppHeight = $state<number | null>(null);
 	let mobileViewportBaselineHeight = $state<number | null>(null);
 	let mobileKeyboardVisible = $state(false);
+	let reloadSelectedChatFn = $state<((chatId: string) => Promise<void>) | null>(null);
 	const isAutoFullscreenOnGitTab = $derived(
 		!isMobile && navigation.activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel,
 	);
@@ -184,6 +185,18 @@
 		return sessions.renameChat(chatId, newTitle);
 	}
 
+	function handleRegisterReload(fn: (chatId: string) => Promise<void>): void {
+		reloadSelectedChatFn = fn;
+	}
+
+	async function handleReloadChat(chatId: string): Promise<void> {
+		if (!reloadSelectedChatFn) {
+			throw new Error(m.sidebar_chats_reload_failed());
+		}
+		await reloadSelectedChatFn(chatId);
+		await quietRefresh();
+	}
+
 	function handleTabChange(tab: AppTab) {
 		navigation.setActiveTab(tab);
 	}
@@ -226,6 +239,7 @@
 				onChatDelete={handleChatDelete}
 				onLocallyDeleteChat={locallyDeleteChat}
 				onQuietRefresh={quietRefresh}
+				onReloadChat={handleReloadChat}
 				onChatRenamed={handleChatRenamed}
 				onShowSettings={() => appShell.openSettings()}
 			/>
@@ -243,6 +257,7 @@
 				onTabChange={handleTabChange}
 				isDesktopFullscreen={effectiveWorkspaceFullscreen}
 				onToggleDesktopFullscreen={() => (isWorkspaceFullscreen = !isWorkspaceFullscreen)}
+				onRegisterReload={handleRegisterReload}
 			/>
 		</div>
 	</div>
@@ -269,6 +284,7 @@
 						onChatDelete={handleChatDelete}
 						onLocallyDeleteChat={locallyDeleteChat}
 						onQuietRefresh={quietRefresh}
+						onReloadChat={handleReloadChat}
 						onChatRenamed={handleChatRenamed}
 						onShowSettings={() => appShell.openSettings()}
 					/>
@@ -281,6 +297,7 @@
 				activeTab={navigation.activeTab}
 				onTabChange={handleTabChange}
 				onMenuClick={toggleMobileSidebar}
+				onRegisterReload={handleRegisterReload}
 			/>
 		</div>
 

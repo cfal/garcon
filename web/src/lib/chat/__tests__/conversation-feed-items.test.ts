@@ -7,15 +7,29 @@ import {
 	ReadToolUseMessage,
 	ToolResultMessage,
 	UserMessage,
+	type ChatMessage,
 } from '$shared/chat-types';
-import { createMessageIdAllocator } from '../message-id';
 import {
 	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
-	getConversationFeedRenderItemKey,
 } from '../conversation-feed-items';
+import type { LocalNoticeRow } from '../local-notice';
 
 const TS = '2026-05-29T00:00:00.000Z';
+
+function rows(messages: ChatMessage[]) {
+	return messages.map((message, index) => ({ kind: 'message' as const, id: `row-${index}`, message }));
+}
+
+function notice(content: string): LocalNoticeRow {
+	return {
+		kind: 'local-notice',
+		id: `notice-${content}`,
+		noticeType: 'warning',
+		content,
+		timestamp: TS,
+	};
+}
 
 describe('buildConversationFeedRenderItems', () => {
 	it('groups adjacent bash tool uses into one render item', () => {
@@ -26,7 +40,7 @@ describe('buildConversationFeedRenderItems', () => {
 			new AssistantMessage(TS, 'done'),
 		];
 
-		const items = buildConversationFeedRenderItems(messages);
+		const items = buildConversationFeedRenderItems(rows(messages));
 
 		expect(items).toHaveLength(3);
 		expect(items[1]).toMatchObject({ kind: 'bash-group' });
@@ -42,7 +56,7 @@ describe('buildConversationFeedRenderItems', () => {
 			new ReadToolUseMessage(TS, 'read-1', '/tmp/file.ts'),
 		];
 
-		const items = buildConversationFeedRenderItems(messages);
+		const items = buildConversationFeedRenderItems(rows(messages));
 
 		expect(items).toHaveLength(3);
 		expect(items[1]).toMatchObject({ kind: 'message', message: messages[1] });
@@ -56,7 +70,7 @@ describe('buildConversationFeedRenderItems', () => {
 			new ToolResultMessage(TS, 'bash-2', { content: 'ok' }, false),
 		];
 
-		const items = buildConversationFeedRenderItems(messages);
+		const items = buildConversationFeedRenderItems(rows(messages));
 
 		expect(items).toHaveLength(1);
 		expect(items[0]).toMatchObject({ kind: 'bash-group' });
@@ -71,8 +85,8 @@ describe('buildConversationFeedRenderItems', () => {
 		];
 		const secondBatch = [...firstBatch, new BashToolUseMessage(TS, 'bash-3', 'bun run test')];
 
-		const firstItems = buildConversationFeedRenderItems(firstBatch);
-		const secondItems = buildConversationFeedRenderItems(secondBatch);
+		const firstItems = buildConversationFeedRenderItems(rows(firstBatch));
+		const secondItems = buildConversationFeedRenderItems(rows(secondBatch));
 
 		expect(firstItems[0]).toMatchObject({ kind: 'bash-group' });
 		expect(secondItems[0]).toMatchObject({ kind: 'bash-group' });
@@ -88,7 +102,7 @@ describe('buildConversationFeedRenderItems', () => {
 			new AssistantMessage(TS, 'done'),
 		];
 
-		const model = buildConversationFeedRenderModel(messages);
+		const model = buildConversationFeedRenderModel(rows(messages));
 
 		expect(model.items.map((item) => item.kind)).toEqual(['message', 'message']);
 		expect(model.toolResultIndex.get('bash-1')?.content).toEqual({ content: 'ok' });
@@ -96,6 +110,30 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(model.permissionTerminalById.get('perm-2')).toEqual({
 			state: 'cancelled',
 			reason: 'cancelled',
+		});
+	});
+
+	it('keeps local notices as their own render items and breaks assistant grouping', () => {
+		const firstAssistant = new AssistantMessage(TS, 'before');
+		const secondAssistant = new AssistantMessage(TS, 'after');
+		const localNotice = notice('Chat interrupted by user.');
+
+		const items = buildConversationFeedRenderItems([
+			{ kind: 'message', id: 'assistant-1', message: firstAssistant },
+			localNotice,
+			{ kind: 'message', id: 'assistant-2', message: secondAssistant },
+		]);
+
+		expect(items.map((item) => item.kind)).toEqual(['message', 'local-notice', 'message']);
+		expect(items[1]).toMatchObject({
+			kind: 'local-notice',
+			notice: localNotice,
+			prevMessage: firstAssistant,
+		});
+		expect(items[2]).toMatchObject({
+			kind: 'message',
+			message: secondAssistant,
+			prevMessage: null,
 		});
 	});
 
@@ -108,9 +146,8 @@ describe('buildConversationFeedRenderItems', () => {
 			new BashToolUseMessage(TS, 'bash-4', 'bun test'),
 		];
 
-		const allocator = createMessageIdAllocator();
-		const items = buildConversationFeedRenderItems(messages);
-		const keys = items.map((item) => getConversationFeedRenderItemKey(item, allocator));
+		const items = buildConversationFeedRenderItems(rows(messages));
+		const keys = items.map((item) => item.id);
 
 		expect(items.filter((item) => item.kind === 'bash-group')).toHaveLength(2);
 		expect(new Set(keys).size).toBe(keys.length);

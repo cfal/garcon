@@ -10,7 +10,7 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 	return {
 		getCurrentChatId: () => 'chat-1',
 		setCurrentChatId: vi.fn(),
-		setChatMessages: vi.fn(),
+		appendLocalNotice: vi.fn(),
 		setIsSystemChatChange: vi.fn(),
 		conversationUi: {
 			setPendingPermissionRequests: vi.fn(),
@@ -93,7 +93,7 @@ describe('handleAgentError', () => {
 
 		expect(ctx.clearLoadingIndicators).toHaveBeenCalledWith('chat-1');
 		expect(ctx.markChatsAsCompleted).toHaveBeenCalledWith('chat-1');
-		expect(ctx.setChatMessages).toHaveBeenCalledWith(expect.any(Function));
+		expect(ctx.appendLocalNotice).toHaveBeenCalledWith('error', 'Something broke');
 		expect(ctx.conversationUi.clearPendingPermissionRequests).toHaveBeenCalled();
 	});
 });

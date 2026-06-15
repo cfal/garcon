@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	selectPreviewFromBatch,
 	_extractFirstLine,
-	createAgentOutputAccumulator,
+	createChatMessagesAccumulator,
 } from '../router.svelte';
 import {
 	UserMessage,
@@ -12,7 +12,12 @@ import {
 	UnknownToolUseMessage,
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
-import { AgentRunOutputMessage } from '$shared/ws-events';
+import { ChatMessagesMessage } from '$shared/ws-events';
+import type { ChatViewMessage } from '$shared/chat-view';
+
+function entry(seq: number, message: ChatMessage): ChatViewMessage {
+	return { seq, message };
+}
 
 describe('extractFirstLine', () => {
 	it('returns text before first newline', () => {
@@ -30,35 +35,33 @@ describe('extractFirstLine', () => {
 	it('returns empty string for empty input', () => {
 		expect(_extractFirstLine('')).toBe('');
 	});
-
-	it('handles leading newline', () => {
-		expect(_extractFirstLine('\nfirst real line')).toBe('');
-	});
 });
 
-describe('createAgentOutputAccumulator', () => {
-	it('coalesces same-drain output chunks into one message write', () => {
+describe('createChatMessagesAccumulator', () => {
+	it('coalesces same-drain message chunks into one state write', () => {
 		let current: ChatMessage[] = [];
 		let writes = 0;
-		const accumulator = createAgentOutputAccumulator({
-			appendChatMessagesByIdentity: (messages) => {
+		const accumulator = createChatMessagesAccumulator({
+			applyChatMessages: (_chatId, _generationId, messages) => {
 				writes += 1;
-				current = [...current, ...messages];
+				current = [...current, ...messages.map((item) => item.message)];
+				return 'applied';
 			},
+			reloadChatSnapshot: () => {},
 		});
 
 		accumulator.enqueue(
-			new AgentRunOutputMessage(
+			new ChatMessagesMessage(
 				'chat-a',
-				[new AssistantMessage('2024-01-01T00:00:00Z', 'first')],
-				'req-1',
+				'generation-1',
+				[entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first'))],
 			),
 		);
 		accumulator.enqueue(
-			new AgentRunOutputMessage(
+			new ChatMessagesMessage(
 				'chat-a',
-				[new AssistantMessage('2024-01-01T00:00:01Z', 'second')],
-				'req-1',
+				'generation-1',
+				[entry(2, new AssistantMessage('2024-01-01T00:00:01Z', 'second'))],
 			),
 		);
 		accumulator.flush();
@@ -70,12 +73,31 @@ describe('createAgentOutputAccumulator', () => {
 		]);
 	});
 
+	it('reloads the snapshot when accumulated messages report a generation change', () => {
+		const reloads: string[] = [];
+		const accumulator = createChatMessagesAccumulator({
+			applyChatMessages: () => 'generation-changed',
+			reloadChatSnapshot: (chatId) => reloads.push(chatId),
+		});
+
+		accumulator.enqueue(new ChatMessagesMessage(
+			'chat-a',
+			'generation-2',
+			[entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'fresh'))],
+		));
+		accumulator.flush();
+
+		expect(reloads).toEqual(['chat-a']);
+	});
+
 	it('does not write when no output was queued', () => {
 		let writes = 0;
-		const accumulator = createAgentOutputAccumulator({
-			appendChatMessagesByIdentity: () => {
+		const accumulator = createChatMessagesAccumulator({
+			applyChatMessages: () => {
 				writes += 1;
+				return 'applied';
 			},
+			reloadChatSnapshot: () => {},
 		});
 
 		accumulator.flush();

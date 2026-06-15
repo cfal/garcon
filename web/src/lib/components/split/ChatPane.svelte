@@ -4,13 +4,7 @@
 	import { cn } from '$lib/utils/cn';
 	import { getChatSessions, getSplitLayout } from '$lib/context';
 	import { LocalChatSnapshotCache } from '$lib/chat/chat-snapshot-cache';
-	import {
-		parseChatMessages,
-		type ChatMessage,
-		UserMessage,
-		AssistantMessage,
-		ErrorMessage,
-	} from '$shared/chat-types';
+	import { type ChatMessage, UserMessage, AssistantMessage, ErrorMessage } from '$shared/chat-types';
 	import { getChatMessages } from '$lib/api/chats.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import X from '@lucide/svelte/icons/x';
@@ -109,7 +103,7 @@
 
 		const cached = snapshotCache.restore(id);
 		if (cached) {
-			previewMessages = cached.messages;
+			previewMessages = cached.entries.map((entry) => entry.message);
 			isPreviewLoading = false;
 		}
 
@@ -118,13 +112,17 @@
 
 	async function fetchPreviewMessages(targetChatId: string) {
 		try {
-			const data = await getChatMessages({ chatId: targetChatId, limit: 50, offset: 0 });
+			const data = await getChatMessages({ chatId: targetChatId, limit: 50 });
 
 			if (targetChatId !== chatId || isFocused) return;
 
-			const parsed = parseChatMessages(data.messages);
-			previewMessages = parsed;
-			snapshotCache.persist(targetChatId, parsed);
+			previewMessages = data.messages.map((entry) => entry.message);
+			snapshotCache.persist(
+				targetChatId,
+				data.messages,
+				{ generationId: data.generationId, lastSeq: data.lastSeq },
+				{ limit: 50 },
+			);
 		} catch {
 			// Leaves cached preview content in place when refresh fails.
 		} finally {

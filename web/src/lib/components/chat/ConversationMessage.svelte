@@ -261,7 +261,7 @@
 										>
 											{#if userDeliveryStatus === 'submitting'}
 												<LoaderCircle class="size-3 animate-spin" />
-											{:else if userDeliveryStatus === 'accepted'}
+												{:else if userDeliveryStatus === 'accepted'}
 												<Check class="size-3" />
 											{:else}
 												<CircleAlert class="size-3" />

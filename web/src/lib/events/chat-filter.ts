@@ -18,6 +18,7 @@ const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 	'chat-fork-created',
 	'chat-session-deleted',
 	'chat-processing-updated',
+	'chat-generation-reset',
 	'queue-state-updated',
 	'chat-title-updated',
 	'chat-read-updated-v1',
@@ -27,9 +28,13 @@ const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 // Extracts chatId from any message in the union. Most message types
 // carry chatId; returns empty string for those that don't.
 function getChatId(message: ServerWsMessage): string {
-	if (!('chatId' in message)) return '';
-	if (typeof message.chatId !== 'string') return '';
-	return message.chatId;
+	if ('chatId' in message) {
+		return typeof message.chatId === 'string' ? message.chatId : '';
+	}
+	if (message.type === 'pending-user-input-updated') {
+		return message.input.chatId;
+	}
+	return '';
 }
 
 export function filterByChat(

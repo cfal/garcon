@@ -323,7 +323,24 @@ describe('chats API contract', () => {
 	});
 
 	it('settings, model, running, and history helpers use REST endpoints', async () => {
-		fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ success: true })));
+		fetchMock.mockImplementation((url: string) =>
+			Promise.resolve(
+				jsonResponse(
+					url.startsWith('/api/v1/chats/messages')
+						? {
+								chatId: 'c/1',
+								messages: [],
+								generationId: 'generation-1',
+								lastSeq: 0,
+								pageOldestSeq: 0,
+								pendingUserInputs: [],
+								hasMore: false,
+								limit: 50,
+							}
+						: { success: true },
+				),
+			),
+		);
 
 		await updateExecutionSettings({ chatId: 'c-1', permissionMode: 'acceptEdits' });
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/execution-settings');
@@ -347,11 +364,41 @@ describe('chats API contract', () => {
 		expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/chats/running');
 		expect(fetchMock.mock.calls[2][1].method ?? 'GET').toBe('GET');
 
-		await getChatMessages({ chatId: 'c/1', limit: 50, offset: 20 });
+		const messages = await getChatMessages({ chatId: 'c/1', limit: 50, beforeSeq: 20 });
 		expect(fetchMock.mock.calls[3][0]).toBe(
-			'/api/v1/chats/messages?chatId=c%2F1&limit=50&offset=20',
+			'/api/v1/chats/messages?chatId=c%2F1&limit=50&beforeSeq=20',
 		);
 		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
+		expect(messages.generationId).toBe('generation-1');
+	});
+
+	it('rejects malformed chat message page metadata', async () => {
+		const validPage = {
+			chatId: 'c-1',
+			messages: [],
+			generationId: 'generation-1',
+			lastSeq: 0,
+			pageOldestSeq: 0,
+			pendingUserInputs: [],
+			hasMore: false,
+			limit: 20,
+		};
+
+		const cases: Array<[string, Record<string, unknown>]> = [
+			['chatId', { chatId: '' }],
+			['generationId', { generationId: '' }],
+			['lastSeq', { lastSeq: '0' }],
+			['pageOldestSeq', { pageOldestSeq: -1 }],
+			['pendingUserInputs', { pendingUserInputs: [{ clientRequestId: 'req-1' }] }],
+			['hasMore', { hasMore: 'false' }],
+			['limit', { limit: 0 }],
+		];
+
+		for (const [fieldName, patch] of cases) {
+			fetchMock.mockResolvedValueOnce(jsonResponse({ ...validPage, ...patch }));
+
+			await expect(getChatMessages({ chatId: 'c-1' })).rejects.toThrow(fieldName);
+		}
 	});
 
 	it('deleteChat sends chatId in the JSON body', async () => {

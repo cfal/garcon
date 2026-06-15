@@ -122,6 +122,7 @@
 	--color-status-neutral-border: hsl(var(--status-neutral-border));
 	--color-status-warning: hsl(var(--status-warning));
 	--color-status-warning-foreground: hsl(var(--status-warning-foreground));
+	--color-status-warning-muted-foreground: hsl(var(--status-warning-muted-foreground));
 	--color-status-warning-border: hsl(var(--status-warning-border));
 	--color-queue-surface: hsl(var(--queue-surface));
 	--color-queue-border: hsl(var(--queue-border));
@@ -301,6 +302,7 @@
 	--status-neutral-border: 220 12% 80%;
 	--status-warning: 34 93% 52%;
 	--status-warning-foreground: 0 0% 10%;
+	--status-warning-muted-foreground: 34 90% 28%;
 	--status-warning-border: 34 88% 42%;
 	--queue-surface: 34 93% 52% / 0.2;
 	--queue-border: 34 88% 42%;
@@ -504,6 +506,7 @@
 	--status-neutral-border: 220 10% 32%;
 	--status-warning: 34 92% 62%;
 	--status-warning-foreground: 0 0% 8%;
+	--status-warning-muted-foreground: 38 96% 86%;
 	--status-warning-border: 34 74% 44%;
 	--queue-surface: 34 92% 62% / 0.2;
 	--queue-border: 34 74% 44%;

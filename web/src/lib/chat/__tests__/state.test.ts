@@ -1,289 +1,292 @@
-// Unit tests for ChatState class. Tests synchronous state management
-// only; async loadMessages relies on network APIs and is not tested here.
-
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatState } from '../state.svelte';
-import { UserMessage, AssistantMessage, ErrorMessage } from '$shared/chat-types';
+import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
+import type { ChatViewMessage } from '$shared/chat-view';
+import type { PendingUserInput } from '$shared/pending-user-input';
+import { getChatMessages } from '$lib/api/chats.js';
+import type { ChatDisplayRow } from '../state.svelte';
+
+vi.mock('$lib/api/chats.js', () => ({
+	getChatMessages: vi.fn(),
+}));
+
+const TS = '2026-06-01T00:00:00.000Z';
+
+function entry(seq: number, message: ChatMessage): ChatViewMessage {
+	return { seq, message };
+}
+
+function user(content: string, metadata: Record<string, unknown> = {}) {
+	return new UserMessage(TS, content, undefined, metadata);
+}
+
+function assistant(content: string) {
+	return new AssistantMessage(TS, content);
+}
+
+function contentOf(message: ChatMessage): string {
+	return 'content' in message ? String(message.content) : '';
+}
+
+function rowContentOf(row: ChatDisplayRow): string {
+	return row.kind === 'local-notice' ? row.content : contentOf(row.message);
+}
+
+function page(overrides: Partial<{
+	generationId: string;
+	messages: ChatViewMessage[];
+	lastSeq: number;
+	pageOldestSeq: number;
+	hasMore: boolean;
+	pendingUserInputs: PendingUserInput[];
+}> = {}) {
+	const messages = overrides.messages ?? [entry(1, assistant('hello'))];
+	return {
+		generationId: overrides.generationId ?? 'generation-1',
+		messages,
+		lastSeq: overrides.lastSeq ?? messages.at(-1)?.seq ?? 0,
+		pageOldestSeq: overrides.pageOldestSeq ?? messages[0]?.seq ?? 0,
+		hasMore: overrides.hasMore ?? false,
+		pendingUserInputs: overrides.pendingUserInputs ?? [],
+	};
+}
 
 describe('ChatState', () => {
-	it('starts with empty messages', () => {
-		const state = new ChatState();
-		expect(state.chatMessages).toEqual([]);
-		expect(state.isLoadingMessages).toBe(false);
-		expect(state.hasMoreMessages).toBe(false);
-		expect(state.totalMessages).toBe(0);
-		expect(state.isUserScrolledUp).toBe(false);
+	beforeEach(() => {
+		localStorage.clear();
+		vi.mocked(getChatMessages).mockReset();
 	});
 
-	it('setMessages replaces the message array', () => {
-		const state = new ChatState();
-		const msgs = [new UserMessage('2024-01-01T00:00:00Z', 'hello')];
-		state.setMessages(msgs);
-		expect(state.chatMessages).toEqual(msgs);
+	it('starts with an empty generation cursor', () => {
+		const chat = new ChatState();
+
+		expect(chat.getCursor()).toEqual({ generationId: '', lastSeq: 0 });
+		expect(chat.chatMessages).toEqual([]);
 	});
 
-	it('appendMessages adds to the end', () => {
-		const state = new ChatState();
-		state.setMessages([new UserMessage('2024-01-01T00:00:00Z', 'first')]);
-		state.appendMessages([new AssistantMessage('2024-01-01T00:00:01Z', 'second')]);
-		expect(state.chatMessages).toHaveLength(2);
-		expect((state.chatMessages[1] as AssistantMessage).content).toBe('second');
+	it('applies same-generation messages by seq and ignores duplicates', () => {
+		const chat = new ChatState();
+
+		expect(chat.applyMessages('generation-1', [
+			entry(1, user('hello')),
+			entry(2, assistant('hi')),
+		])).toBe('applied');
+		expect(chat.applyMessages('generation-1', [
+			entry(2, assistant('duplicate')),
+			entry(3, assistant('next')),
+		])).toBe('applied');
+
+		expect(chat.chatMessages.map(contentOf)).toEqual(['hello', 'hi', 'next']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 3 });
 	});
 
-	it('appendMessagesByIdentity deduplicates across batches', () => {
-		const state = new ChatState();
-		const first = new UserMessage('2024-01-01T00:00:00Z', 'hello', undefined, {
+	it('signals generation changes instead of merging across generations', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('old'))]);
+
+		const result = chat.applyMessages('generation-2', [entry(1, assistant('fresh'))]);
+
+		expect(result).toBe('generation-changed');
+		expect(chat.chatMessages).toEqual([]);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-2', lastSeq: 0 });
+	});
+
+	it('renders local messages as transient display-only rows', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+
+		chat.appendLocalNotice('progress', 'local status');
+		chat.appendLocalNotice('error', 'local error');
+
+		expect(chat.chatMessages.map(contentOf)).toEqual(['server']);
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'local status', 'local error']);
+		expect(chat.visibleRows.at(-2)).toMatchObject({ kind: 'local-notice', noticeType: 'progress' });
+		expect(chat.visibleRows.at(-1)).toMatchObject({ kind: 'local-notice', noticeType: 'error' });
+	});
+
+	it('clears transient local messages when new server messages apply', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+		chat.appendLocalNotice('progress', 'local status');
+		chat.appendLocalNotice('error', 'local error');
+
+		chat.applyMessages('generation-1', [entry(2, assistant('next'))]);
+
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'next']);
+	});
+
+	it('clears transient local messages when a pending user input is submitted', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+		chat.appendLocalNotice('warning', 'Chat interrupted by user.');
+		const noticeBottomRowId = chat.bottomVisibleRowId;
+		expect(chat.displayMessageCount).toBe(2);
+		expect(noticeBottomRowId).toMatch(/^local_/);
+
+		chat.upsertPendingUserInput({
+			chatId: 'chat-1',
 			clientRequestId: 'req-1',
+			clientMessageId: 'msg-1',
+			content: 'continue',
+			createdAt: '2026-06-01T00:00:01.000Z',
+			deliveryStatus: 'submitting',
 		});
-		const duplicate = new UserMessage('2024-01-01T00:00:01Z', 'hello again', undefined, {
-			clientRequestId: 'req-1',
-		});
-		const assistant = new AssistantMessage('2024-01-01T00:00:02Z', 'response');
 
-		state.appendMessagesByIdentity([first]);
-		state.appendMessagesByIdentity([duplicate, assistant]);
-
-		expect(state.chatMessages).toEqual([first, assistant]);
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'continue']);
+		expect(chat.displayMessageCount).toBe(2);
+		expect(chat.bottomVisibleRowId).toBe('pending:req-1');
+		expect(chat.bottomVisibleRowId).not.toBe(noticeBottomRowId);
 	});
 
-	it('resetForNewChat clears identity tokens for the next chat', () => {
-		const state = new ChatState();
-		state.appendMessagesByIdentity([
-			new UserMessage('2024-01-01T00:00:00Z', 'old chat', undefined, {
-				clientRequestId: 'req-1',
-			}),
-		]);
+	it('keeps transient local messages when replay only overlaps existing server messages', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+		chat.appendLocalNotice('error', 'local error');
 
-		state.resetForNewChat();
-		state.appendMessagesByIdentity([
-			new UserMessage('2024-01-01T00:00:00Z', 'new chat', undefined, {
-				clientRequestId: 'req-1',
-			}),
-		]);
+		chat.applyMessages('generation-1', [entry(1, user('duplicate'))]);
 
-		expect(state.chatMessages).toHaveLength(1);
-		expect((state.chatMessages[0] as UserMessage).content).toBe('new chat');
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'local error']);
 	});
 
-	it('setMessages rebuilds identity tokens for replacement transcripts', () => {
-		const state = new ChatState();
-		state.setMessages([
-			new UserMessage('2024-01-01T00:00:00Z', 'loaded', undefined, {
-				clientRequestId: 'req-1',
-			}),
-		]);
+	it('detects same-generation gaps without advancing the cursor', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('server'))]);
 
-		state.appendMessagesByIdentity([
-			new UserMessage('2024-01-01T00:00:01Z', 'duplicate echo', undefined, {
-				clientRequestId: 'req-1',
-			}),
-		]);
+		const result = chat.applyMessages('generation-1', [entry(3, assistant('later'))]);
 
-		expect(state.chatMessages).toHaveLength(1);
-		expect((state.chatMessages[0] as UserMessage).content).toBe('loaded');
+		expect(result).toBe('gap-detected');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['server']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 1 });
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('expected=2 received=3'));
+		warn.mockRestore();
 	});
 
-	it('appendErrorMessage adds an error row', () => {
-		const state = new ChatState();
+	it('clears transient local messages when a live batch changes generation', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('old'))]);
+		chat.appendLocalNotice('error', 'local error');
 
-		state.appendErrorMessage('Failed to send message');
+		const result = chat.applyMessages('generation-2', [entry(1, assistant('fresh'))]);
 
-		expect(state.chatMessages).toHaveLength(1);
-		expect(state.chatMessages[0]).toBeInstanceOf(ErrorMessage);
-		expect((state.chatMessages[0] as ErrorMessage).content).toBe('Failed to send message');
+		expect(result).toBe('generation-changed');
+		expect(chat.displayMessages).toEqual([]);
 	});
 
-	it('clearMessages resets all state', () => {
-		const state = new ChatState();
-		state.setMessages([new UserMessage('2024-01-01T00:00:00Z', 'test')]);
-		state.hasMoreMessages = true;
-		state.totalMessages = 5;
+	it('buffers live same-generation messages while a snapshot is loading', () => {
+		const chat = new ChatState();
+		const epoch = chat.beginSnapshotLoad();
 
-		state.clearMessages();
+		chat.applyMessages('generation-1', [entry(2, assistant('live'))]);
+		const result = chat.setFromPage(page({
+			generationId: 'generation-1',
+			messages: [entry(1, user('history'))],
+			lastSeq: 1,
+		}), epoch);
 
-		expect(state.chatMessages).toEqual([]);
-		expect(state.hasMoreMessages).toBe(false);
-		expect(state.totalMessages).toBe(0);
+		expect(result).toBe('applied');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['history', 'live']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
 	});
 
-	it('resetForNewChat clears messages and resets selection state', () => {
-		const state = new ChatState();
-		state.setMessages([new UserMessage('2024-01-01T00:00:00Z', 'old')]);
-		state.isUserScrolledUp = true;
-		state.hasMoreMessages = true;
-		state.totalMessages = 50;
+	it('surfaces buffered same-generation gaps during snapshot load', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const chat = new ChatState();
+		const epoch = chat.beginSnapshotLoad();
 
-		state.resetForNewChat();
+		chat.applyMessages('generation-1', [entry(5, assistant('later'))]);
+		const result = chat.setFromPage(page({
+			generationId: 'generation-1',
+			messages: [
+				entry(1, user('one')),
+				entry(2, assistant('two')),
+				entry(3, assistant('three')),
+			],
+			lastSeq: 3,
+		}), epoch);
 
-		expect(state.chatMessages).toEqual([]);
-		expect(state.isUserScrolledUp).toBe(false);
-		expect(state.hasMoreMessages).toBe(false);
-		expect(state.totalMessages).toBe(0);
+		expect(result).toBe('gap-detected');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['one', 'two', 'three']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 3 });
+		warn.mockRestore();
 	});
 
-	it('loadEarlierMessages increases visible count by 100', () => {
-		const state = new ChatState();
-		const initial = state.visibleMessageCount;
-		state.loadEarlierMessages();
-		expect(state.visibleMessageCount).toBe(initial + 100);
+	it('does not install a stale snapshot when buffered messages indicate a new generation', () => {
+		const chat = new ChatState();
+		chat.replaceGeneration('current-generation', [entry(1, assistant('current'))], { lastSeq: 1 });
+		const epoch = chat.beginSnapshotLoad();
+
+		chat.applyMessages('new-generation', [entry(1, assistant('new live'))]);
+		const result = chat.setFromPage(page({
+			generationId: 'old-generation',
+			messages: [entry(1, user('old page'))],
+			lastSeq: 1,
+		}), epoch);
+
+		expect(result).toBe('generation-changed');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['current']);
+		expect(chat.getCursor()).toEqual({ generationId: 'current-generation', lastSeq: 1 });
 	});
 
-	it('visibleMessages returns full array when under limit', () => {
-		const state = new ChatState();
-		const msgs = [
-			new UserMessage('2024-01-01T00:00:00Z', 'a'),
-			new UserMessage('2024-01-01T00:00:01Z', 'b'),
-		];
-		state.setMessages(msgs);
-		expect(state.visibleMessages).toEqual(msgs);
-	});
+	it('installs pending inputs from HTTP snapshots and hides them after durable echo', () => {
+		const chat = new ChatState();
+		const epoch = chat.beginSnapshotLoad();
 
-	it('displayMessages reuses chatMessages when there are no pending inputs', () => {
-		const state = new ChatState();
-		const msgs = [
-			new UserMessage('2024-01-01T00:00:00Z', 'a'),
-			new AssistantMessage('2024-01-01T00:00:01Z', 'b'),
-		];
-
-		state.setMessages(msgs);
-
-		expect(state.displayMessages).toBe(state.chatMessages);
-	});
-
-	it('displayMessages merges sorted pending inputs without resorting durable messages', () => {
-		const state = new ChatState();
-		state.setMessages([
-			new AssistantMessage('2024-01-01T00:00:01Z', 'server 1'),
-			new AssistantMessage('2024-01-01T00:00:03Z', 'server 3'),
-		]);
-
-		state.setPendingUserInputs([
-			{
-				chatId: 'chat-1',
-				clientRequestId: 'req-2',
-				clientMessageId: 'msg-2',
-				content: 'pending 2',
-				createdAt: '2024-01-01T00:00:02Z',
-				deliveryStatus: 'submitting',
-			},
-			{
-				chatId: 'chat-1',
-				clientRequestId: 'req-0',
-				clientMessageId: 'msg-0',
-				content: 'pending 0',
-				createdAt: '2024-01-01T00:00:00Z',
-				deliveryStatus: 'submitting',
-			},
-		]);
-
-		expect(state.displayMessages.map((message) => ('content' in message ? message.content : ''))).toEqual([
-			'pending 0',
-			'server 1',
-			'pending 2',
-			'server 3',
-		]);
-	});
-
-	it('displayMessages places pending inputs before durable messages with matching timestamps', () => {
-		const state = new ChatState();
-		state.setMessages([new AssistantMessage('2024-01-01T00:00:01Z', 'server')]);
-		state.setPendingUserInputs([
-			{
+		chat.setFromPage(page({
+			messages: [],
+			lastSeq: 0,
+			pendingUserInputs: [{
 				chatId: 'chat-1',
 				clientRequestId: 'req-1',
-				clientMessageId: 'msg-1',
 				content: 'pending',
-				createdAt: '2024-01-01T00:00:01Z',
-				deliveryStatus: 'submitting',
-			},
+				createdAt: TS,
+				deliveryStatus: 'accepted',
+			}],
+		}), epoch);
+		expect(chat.visiblePendingInputs).toHaveLength(1);
+		expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
+
+		chat.applyMessages('generation-1', [
+			entry(1, user('pending', { clientRequestId: 'req-1', deliveryStatus: 'accepted' })),
 		]);
 
-		expect(state.displayMessages.map((message) => ('content' in message ? message.content : ''))).toEqual([
-			'pending',
-			'server',
+		expect(chat.visiblePendingInputs).toHaveLength(0);
+		expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
+	});
+
+	it('clears pending overlays when a generation is replaced without snapshot pending inputs', () => {
+		const chat = new ChatState();
+		chat.setPendingUserInputs([{
+			chatId: 'chat-1',
+			clientRequestId: 'req-1',
+			content: 'pending',
+			createdAt: TS,
+			deliveryStatus: 'accepted',
+		}]);
+
+		chat.replaceGeneration('generation-2', [
+			entry(1, assistant('native')),
+			entry(2, new ErrorMessage(TS, 'The process died.')),
+		], { lastSeq: 2 });
+
+		expect(chat.pendingUserInputs).toEqual([]);
+		expect(chat.chatMessages.map(contentOf)).toEqual(['native', 'The process died.']);
+		expect(chat.chatMessages[1]).toBeInstanceOf(ErrorMessage);
+	});
+
+	it('persists and restores generation-scoped snapshots', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [
+			entry(1, user('first')),
+			entry(2, assistant('second')),
 		]);
-	});
-
-	it('memoizes display and visible messages between state writes', () => {
-		const state = new ChatState();
-		state.setMessages([
-			new UserMessage('2024-01-01T00:00:00Z', 'a'),
-			new AssistantMessage('2024-01-01T00:00:01Z', 'b'),
-		]);
-
-		const displayBefore = state.displayMessages;
-		const visibleBefore = state.visibleMessages;
-
-		expect(state.displayMessages).toBe(displayBefore);
-		expect(state.visibleMessages).toBe(visibleBefore);
-
-		state.appendMessages([new AssistantMessage('2024-01-01T00:00:02Z', 'c')]);
-
-		expect(state.displayMessages).not.toBe(displayBefore);
-		expect(state.visibleMessages).not.toBe(visibleBefore);
-	});
-
-	it('visibleMessages slices to tail when over limit', () => {
-		const state = new ChatState();
-		state.visibleMessageCount = 1;
-		const msgs = [
-			new UserMessage('2024-01-01T00:00:00Z', 'a'),
-			new UserMessage('2024-01-01T00:00:01Z', 'b'),
-		];
-		state.setMessages(msgs);
-		expect(state.visibleMessages).toHaveLength(1);
-		expect((state.visibleMessages[0] as UserMessage).content).toBe('b');
-	});
-
-	it('persistMessages overwrites cached content for same-length replacements', () => {
-		const chatId = 'persist-chat';
-		localStorage.clear();
-		const chatState = new ChatState();
-		chatState.setMessages([new UserMessage('2024-01-01T00:00:00Z', 'first')]);
-		chatState.persistMessages(chatId);
-
-		chatState.setMessages([new UserMessage('2024-01-01T00:00:01Z', 'second')]);
-		chatState.persistMessages(chatId);
+		chat.persistMessages('chat-1');
 
 		const restored = new ChatState();
-		const result = restored.restoreMessages(chatId);
-		expect(result).toEqual({ count: 1, stale: false });
-		expect(restored.chatMessages).toHaveLength(1);
-		expect((restored.chatMessages[0] as UserMessage).content).toBe('second');
-		localStorage.clear();
-	});
+		const result = restored.restoreMessages('chat-1');
 
-	it('persistMessages stores only the initial visible message window', () => {
-		const chatId = 'window-chat';
-		localStorage.clear();
-		const chatState = new ChatState();
-		chatState.setMessages(
-			Array.from(
-				{ length: 105 },
-				(_, index) => new UserMessage('2024-01-01T00:00:00Z', `message-${index}`),
-			),
-		);
-
-		chatState.persistMessages(chatId);
-
-		const restored = new ChatState();
-		const result = restored.restoreMessages(chatId);
-		expect(result?.count).toBe(100);
-		expect((restored.chatMessages[0] as UserMessage).content).toBe('message-5');
-		localStorage.clear();
-	});
-
-	it('removeCachedMessages delegates to snapshot cache', () => {
-		const chatId = 'remove-chat';
-		localStorage.clear();
-		const chatState = new ChatState();
-		chatState.setMessages([new UserMessage('2024-01-01T00:00:00Z', 'hello')]);
-		chatState.persistMessages(chatId);
-
-		chatState.removeCachedMessages(chatId);
-
-		const restored = new ChatState();
-		expect(restored.restoreMessages(chatId)).toBeNull();
-		localStorage.clear();
+		expect(result).toEqual({ count: 2, stale: false });
+		expect(restored.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
+		expect(restored.chatMessages.map(contentOf)).toEqual(['first', 'second']);
 	});
 });

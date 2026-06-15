@@ -1,37 +1,47 @@
-// Bounded localStorage cache for chat message snapshots. Maintains an
-// LRU index capped at 25 entries with schema-versioned envelopes so
-// snapshots survive across sessions without unbounded growth.
-
-import { parseChatMessages, type ChatMessage } from '$shared/chat-types';
+import {
+	applyChatViewMessages,
+	parseChatViewMessages,
+	type ChatViewMessage,
+} from '$shared/chat-view';
 
 const SNAPSHOT_PREFIX = 'chat_snapshot_';
-const INDEX_KEY = 'chat_snapshot_index_v1';
-const SCHEMA_VERSION = 1;
+const INDEX_KEY = 'chat_snapshot_index_v3';
+const SCHEMA_VERSION = 3;
 const MAX_ENTRIES = 25;
 
 interface ChatSnapshotEnvelope {
-	version: 1;
+	version: 3;
 	chatId: string;
 	savedAt: string;
-	messages: ChatMessage[];
+	generationId: string;
+	lastSeq: number;
+	entries: ChatViewMessage[];
 }
 
 interface ChatSnapshotIndexEntry {
 	chatId: string;
 	lastAccessedAt: string;
 	lastValidatedAt: string | null;
-	schemaVersion: 1;
+	schemaVersion: 3;
 	stale: boolean;
 }
 
 interface ChatSnapshotIndex {
-	version: 1;
+	version: 3;
 	entries: ChatSnapshotIndexEntry[];
 }
 
 export interface RestoredChatSnapshot {
-	messages: ChatMessage[];
+	entries: ChatViewMessage[];
+	generationId: string;
+	lastSeq: number;
 	stale: boolean;
+}
+
+export interface CachedChatCursor {
+	chatId: string;
+	generationId: string;
+	lastSeq: number;
 }
 
 export interface ChatSnapshotWindowOptions {
@@ -42,16 +52,12 @@ function snapshotKey(chatId: string): string {
 	return `${SNAPSHOT_PREFIX}${chatId}`;
 }
 
-function hasSnapshot(chatId: string): boolean {
-	return Boolean(localStorage.getItem(snapshotKey(chatId)));
-}
-
 function nowIso(): string {
 	return new Date().toISOString();
 }
 
 function emptyIndex(): ChatSnapshotIndex {
-	return { version: 1, entries: [] };
+	return { version: SCHEMA_VERSION, entries: [] };
 }
 
 function readIndex(): ChatSnapshotIndex {
@@ -74,10 +80,10 @@ function writeIndex(index: ChatSnapshotIndex): void {
 	localStorage.setItem(INDEX_KEY, JSON.stringify(index));
 }
 
-function windowMessages(messages: ChatMessage[], options: ChatSnapshotWindowOptions = {}): ChatMessage[] {
+function windowEntries(entries: ChatViewMessage[], options: ChatSnapshotWindowOptions = {}): ChatViewMessage[] {
 	const limit = Number.isFinite(options.limit) ? Math.floor(options.limit ?? 0) : 0;
-	if (limit <= 0 || messages.length <= limit) return messages;
-	return messages.slice(-limit);
+	if (limit <= 0 || entries.length <= limit) return entries;
+	return entries.slice(-limit);
 }
 
 function upsertEntry(
@@ -90,7 +96,7 @@ function upsertEntry(
 		chatId,
 		lastAccessedAt: nowIso(),
 		lastValidatedAt: null,
-		schemaVersion: 1,
+		schemaVersion: SCHEMA_VERSION,
 		stale: false,
 	};
 
@@ -111,10 +117,8 @@ function pruneIndex(index: ChatSnapshotIndex): ChatSnapshotIndex {
 	const sorted = [...index.entries].sort(
 		(a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime(),
 	);
-
 	const keep = sorted.slice(0, MAX_ENTRIES);
 	const evicted = sorted.slice(MAX_ENTRIES);
-
 	for (const entry of evicted) {
 		try {
 			localStorage.removeItem(snapshotKey(entry.chatId));
@@ -122,36 +126,39 @@ function pruneIndex(index: ChatSnapshotIndex): ChatSnapshotIndex {
 			// Ignores storage removal failures.
 		}
 	}
-
 	return { ...index, entries: keep };
 }
 
+function hasSnapshot(chatId: string): boolean {
+	return Boolean(localStorage.getItem(snapshotKey(chatId)));
+}
+
 export class LocalChatSnapshotCache {
-	/** Restores a snapshot, bumps recency, and returns stale status. */
 	restore(chatId: string, options: ChatSnapshotWindowOptions = {}): RestoredChatSnapshot | null {
 		if (!chatId) return null;
-
 		try {
 			const raw = localStorage.getItem(snapshotKey(chatId));
 			if (!raw) {
 				this.remove(chatId);
 				return null;
 			}
-
 			const parsed = JSON.parse(raw) as ChatSnapshotEnvelope;
 			if (parsed.version !== SCHEMA_VERSION || parsed.chatId !== chatId) {
 				this.remove(chatId);
 				return null;
 			}
-
-			const messages = windowMessages(parseChatMessages(parsed.messages), options);
+			const entries = parseChatViewMessages(parsed.entries);
+			if (entries === null || typeof parsed.generationId !== 'string' || !parsed.generationId) {
+				this.remove(chatId);
+				return null;
+			}
 			const index = readIndex();
 			const entry = index.entries.find((candidate) => candidate.chatId === chatId);
-			const nextIndex = upsertEntry(index, chatId, { lastAccessedAt: nowIso() });
-			writeIndex(pruneIndex(nextIndex));
-
+			writeIndex(pruneIndex(upsertEntry(index, chatId, { lastAccessedAt: nowIso() })));
 			return {
-				messages,
+				entries: windowEntries(entries, options),
+				generationId: parsed.generationId,
+				lastSeq: Number(parsed.lastSeq) || 0,
 				stale: entry?.stale ?? false,
 			};
 		} catch {
@@ -160,39 +167,39 @@ export class LocalChatSnapshotCache {
 		}
 	}
 
-	/** Writes envelope, updates index, prunes to 25 entries. */
-	persist(chatId: string, messages: ChatMessage[], options: ChatSnapshotWindowOptions = {}): void {
+	persist(
+		chatId: string,
+		entries: ChatViewMessage[],
+		cursor: { generationId: string; lastSeq: number },
+		options: ChatSnapshotWindowOptions = {},
+	): void {
 		if (!chatId) return;
-
-		if (messages.length === 0) {
+		if (entries.length === 0 || !cursor.generationId) {
 			this.remove(chatId);
 			return;
 		}
-
 		const envelope: ChatSnapshotEnvelope = {
-			version: 1,
+			version: SCHEMA_VERSION,
 			chatId,
 			savedAt: nowIso(),
-			messages: windowMessages(messages, options),
+			generationId: cursor.generationId,
+			lastSeq: cursor.lastSeq,
+			entries: windowEntries(entries, options),
 		};
-
 		try {
 			localStorage.setItem(snapshotKey(chatId), JSON.stringify(envelope));
 			const index = readIndex();
-			const nextIndex = upsertEntry(index, chatId, {
+			writeIndex(pruneIndex(upsertEntry(index, chatId, {
 				lastAccessedAt: nowIso(),
-				schemaVersion: 1,
-			});
-			writeIndex(pruneIndex(nextIndex));
+				schemaVersion: SCHEMA_VERSION,
+			})));
 		} catch {
 			// Leaves storage best-effort.
 		}
 	}
 
-	/** Removes both snapshot and index entry. */
 	remove(chatId: string): void {
 		if (!chatId) return;
-
 		try {
 			localStorage.removeItem(snapshotKey(chatId));
 			const index = readIndex();
@@ -202,7 +209,6 @@ export class LocalChatSnapshotCache {
 		}
 	}
 
-	/** Marks the snapshot stale without removing it. */
 	markStale(chatId: string): void {
 		if (!chatId) return;
 		try {
@@ -217,7 +223,6 @@ export class LocalChatSnapshotCache {
 		}
 	}
 
-	/** Clears the stale bit and updates lastValidatedAt. */
 	markValidated(chatId: string): void {
 		if (!chatId) return;
 		try {
@@ -226,18 +231,82 @@ export class LocalChatSnapshotCache {
 				return;
 			}
 			const index = readIndex();
-			writeIndex(
-				upsertEntry(index, chatId, {
-					stale: false,
-					lastValidatedAt: nowIso(),
-				}),
-			);
+			writeIndex(upsertEntry(index, chatId, {
+				stale: false,
+				lastValidatedAt: nowIso(),
+			}));
 		} catch {
 			// Leaves validation best-effort.
 		}
 	}
 
-	/** Removes all snapshots and the index. */
+	listCursors(limit = 20): CachedChatCursor[] {
+		const boundedLimit = Math.max(0, Math.floor(limit));
+		if (boundedLimit === 0) return [];
+		try {
+			const sorted = [...readIndex().entries].sort(
+				(a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime(),
+			);
+			const cursors: CachedChatCursor[] = [];
+			for (const entry of sorted) {
+				if (cursors.length >= boundedLimit) break;
+				const raw = localStorage.getItem(snapshotKey(entry.chatId));
+				if (!raw) {
+					this.remove(entry.chatId);
+					continue;
+				}
+				const parsed = JSON.parse(raw) as Partial<ChatSnapshotEnvelope>;
+				if (
+					parsed.version !== SCHEMA_VERSION ||
+					parsed.chatId !== entry.chatId ||
+					typeof parsed.generationId !== 'string' ||
+					!parsed.generationId ||
+					!(Number(parsed.lastSeq) > 0)
+				) {
+					this.remove(entry.chatId);
+					continue;
+				}
+				cursors.push({
+					chatId: entry.chatId,
+					generationId: parsed.generationId,
+					lastSeq: Number(parsed.lastSeq),
+				});
+			}
+			return cursors;
+		} catch {
+			return [];
+		}
+	}
+
+	applyMessages(
+		chatId: string,
+		generationId: string,
+		messages: ChatViewMessage[],
+		lastSeq?: number,
+		options: ChatSnapshotWindowOptions = {},
+	): boolean {
+		if (!chatId || !generationId) return false;
+		const restored = this.restore(chatId);
+		if (!restored || restored.generationId !== generationId) {
+			this.markStale(chatId);
+			return false;
+		}
+		const result = applyChatViewMessages(restored.entries, messages, restored.lastSeq);
+		if (
+			result.status === 'gap-detected' ||
+			(typeof lastSeq === 'number' && lastSeq > result.lastSeq)
+		) {
+			this.markStale(chatId);
+			return false;
+		}
+		this.persist(chatId, result.messages, {
+			generationId,
+			lastSeq: result.lastSeq,
+		}, options);
+		this.markValidated(chatId);
+		return true;
+	}
+
 	clearAll(): void {
 		try {
 			const index = readIndex();

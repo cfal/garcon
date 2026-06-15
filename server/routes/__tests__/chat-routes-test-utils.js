@@ -15,6 +15,20 @@ export function createRoutePendingInputs() {
     reconcile: () => Promise.resolve(undefined),
     listForChat: () => [],
     clearChat: () => undefined,
+    discardChat: () => 0,
+    discard: () => false,
+  };
+}
+
+export function createRouteChatViews() {
+  return {
+    getOrCreatePage: () => Promise.resolve({
+      messages: [],
+      generationId: 'generation-1',
+      lastSeq: 0,
+      pageOldestSeq: 0,
+      hasMore: false,
+    }),
   };
 }
 

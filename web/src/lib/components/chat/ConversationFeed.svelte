@@ -2,6 +2,7 @@
 	import ConversationMessage from './ConversationMessage.svelte';
 	import ChatBashToolGroup from './tools/ChatBashToolGroup.svelte';
 	import MessageRenderFallback from './MessageRenderFallback.svelte';
+	import LocalNoticeRow from './rows/LocalNoticeRow.svelte';
 	import {
 		isToolUseMessage,
 		PermissionRequestMessage,
@@ -9,11 +10,7 @@
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import { getChatState, getAgentState, getLocalSettings, getAppShell } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import { createMessageIdAllocator } from '$lib/chat/message-id';
-	import {
-		buildConversationFeedRenderModel,
-		getConversationFeedRenderItemKey,
-	} from '$lib/chat/conversation-feed-items';
+	import { buildConversationFeedRenderModel } from '$lib/chat/conversation-feed-items';
 	import {
 		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
 		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
@@ -56,19 +53,6 @@
 		appShell.requestSidebarRecenterToSelected();
 	}
 
-	const getMessageId = createMessageIdAllocator();
-
-	// Reset collision state when messages are cleared (chat switch via
-	// resetForNewChat in state.svelte.ts). Prevents unbounded growth of the
-	// allocator's internal Set/Map across chat switches.
-	// INVARIANT: resetForNewChat must clear chatMessages before populating
-	// the next chat's messages, so this effect fires between chat switches.
-	$effect(() => {
-		if (chatState.displayMessageCount === 0) {
-			getMessageId.reset();
-		}
-	});
-
 	// Tracks which ExitPlanMode synthetic permission requests are still
 	// pending so we can derive terminal state for the tool-use rendering.
 	// Matches both PascalCase and snake_case variants since claude-cli
@@ -83,7 +67,7 @@
 
 	// Builds render items and lookup tables in a single pass over the
 	// visible transcript, keeping stream updates cheaper.
-	const renderModel = $derived(buildConversationFeedRenderModel(chatState.visibleMessages));
+	const renderModel = $derived(buildConversationFeedRenderModel(chatState.visibleRows));
 	const renderItems = $derived(renderModel.items);
 
 	const feedScrollAreaClass = 'h-full overflow-hidden relative';
@@ -161,19 +145,7 @@
 		{#if chatState.hasMoreMessages && !chatState.isLoadingMoreMessages}
 			<div class="my-1 flex items-center gap-2 text-xs text-muted-foreground">
 				<div class="h-px flex-1 bg-border/70"></div>
-				{#if chatState.totalMessages > 0}
-					<span>
-						{m.chat_chat_messages_showing_of({
-							shown: chatState.chatMessages.length,
-							total: chatState.totalMessages,
-						})}
-						{#if chatState.pendingUserInputs.length > 0}
-							+
-							{chatState.pendingUserInputs.length}
-						{/if}
-						| {m.chat_chat_messages_scroll_to_load()}
-					</span>
-				{/if}
+				<span>{m.chat_chat_messages_scroll_to_load()}</span>
 				<div class="h-px flex-1 bg-border/70"></div>
 			</div>
 		{/if}
@@ -198,10 +170,17 @@
 			</div>
 		{/if}
 
-		{#each renderItems as item (getConversationFeedRenderItemKey(item, getMessageId))}
+		{#each renderItems as item (item.id)}
 			{#if item.kind === 'bash-group'}
 				<svelte:boundary>
 					<ChatBashToolGroup messages={item.messages} />
+					{#snippet failed(error)}
+						<MessageRenderFallback {error} />
+					{/snippet}
+				</svelte:boundary>
+			{:else if item.kind === 'local-notice'}
+				<svelte:boundary>
+					<LocalNoticeRow notice={item.notice} />
 					{#snippet failed(error)}
 						<MessageRenderFallback {error} />
 					{/snippet}

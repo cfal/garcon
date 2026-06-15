@@ -6,7 +6,7 @@ import { goto } from '$app/navigation';
 import { createEventRouter, type EventRouterStores } from '$lib/events/router.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
-import type { ChatState } from '$lib/chat/state.svelte';
+import { INITIAL_VISIBLE_MESSAGES, type ChatState } from '$lib/chat/state.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
@@ -49,13 +49,23 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			},
 		},
 		chatState: {
-			setChatMessages: (updater) => {
-				const nextMessages =
-					typeof updater === 'function' ? updater(deps.chatState.chatMessages) : updater;
-				deps.chatState.setMessages(nextMessages);
+			getCursor: () => deps.chatState.getCursor(),
+			applyChatMessages: (chatId, generationId, messages) => {
+				if (deps.sessions.selectedChatId !== chatId) return 'applied';
+				return deps.chatState.applyMessages(generationId, messages);
 			},
-			appendChatMessagesByIdentity: (messages) =>
-				deps.chatState.appendMessagesByIdentity(messages),
+			reloadChatSnapshot: (chatId) => {
+				if (deps.sessions.selectedChatId !== chatId) return;
+				void deps.chatState.loadMessages(chatId).catch(() => {
+					// Leaves current visible state until a later retry succeeds.
+				});
+			},
+			warmBackgroundChatSnapshot: (chatId, generationId, messages) =>
+				deps.chatState.snapshotCache.applyMessages(chatId, generationId, messages, undefined, {
+					limit: INITIAL_VISIBLE_MESSAGES,
+				}),
+			appendLocalNotice: (noticeType, content) =>
+				deps.chatState.appendLocalNotice(noticeType, content),
 			upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
 			clearPendingUserInput: (clientRequestId) =>
 				deps.chatState.clearPendingUserInput(clientRequestId),
@@ -63,6 +73,7 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
 			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
 			removeChatSnapshot: (chatId) => deps.chatState.snapshotCache.remove(chatId),
+			markChatSnapshotStale: (chatId) => deps.chatState.snapshotCache.markStale(chatId),
 			markChatSnapshotValidated: (chatId) => deps.chatState.snapshotCache.markValidated(chatId),
 		},
 		lifecycle: {
