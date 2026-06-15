@@ -29,6 +29,7 @@ import type { ChatViewMessage } from '$shared/chat-view';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
+import type { LocalNoticeType } from '$lib/chat/local-notice';
 import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import { clearPendingChatId, getPendingChatId, setPendingChatId } from '$lib/chat/pending-chat-handoff';
@@ -88,8 +89,7 @@ export interface EventRouterChatStateStore {
 		messages: ChatViewMessage[],
 	) => 'applied' | 'generation-changed' | 'gap-detected';
 	reloadChatSnapshot: (chatId: string) => void;
-	appendErrorMessage: (content: string) => void;
-	appendLocalAssistantMessage: (content: string) => void;
+	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
 	upsertPendingUserInput: (input: PendingUserInput) => void;
 	clearPendingUserInput: (clientRequestId: string) => void;
 	updatePendingUserInputDeliveryStatus: (
@@ -255,7 +255,7 @@ function buildDispatch(
 	const lifecycleCtx: LifecycleContext = {
 		getCurrentChatId: stores.lifecycle.currentChatId,
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
-		appendErrorMessage: stores.chatState.appendErrorMessage,
+		appendLocalNotice: stores.chatState.appendLocalNotice,
 		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
 		conversationUi: stores.conversationUi,
 		clearLoadingIndicators,
@@ -270,8 +270,7 @@ function buildDispatch(
 		getSelectedChat: stores.sessions.selectedChat,
 		getCurrentChatId: stores.lifecycle.currentChatId,
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
-		appendErrorMessage: stores.chatState.appendErrorMessage,
-		appendLocalAssistantMessage: stores.chatState.appendLocalAssistantMessage,
+		appendLocalNotice: stores.chatState.appendLocalNotice,
 		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
 		conversationUi: stores.conversationUi,
 		activateLoadingFor,

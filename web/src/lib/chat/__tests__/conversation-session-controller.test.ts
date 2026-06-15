@@ -9,8 +9,9 @@ import {
 } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 import type { ChatRestoreResult } from '../state.svelte';
-import { AssistantMessage, ErrorMessage, type ChatMessage } from '$shared/chat-types';
+import { AssistantMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
+import type { LocalNoticeRow, LocalNoticeType } from '../local-notice';
 import type { PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
 
 vi.mock('$lib/api/chats.js', () => ({
@@ -72,11 +73,13 @@ function createDeps(chat = createRunningChat()) {
 	const waitForConnection = vi.fn(() => new Promise<void>(() => {}));
 	const chatState = {
 		chatMessages: [] as ChatMessage[],
+		localNotices: [] as LocalNoticeRow[],
 		pendingUserInputs: [] as PendingUserInput[],
 		isUserScrolledUp: false,
 		clearMessages: vi.fn(),
 			resetForNewChat: vi.fn(() => {
 				chatState.chatMessages = [];
+				chatState.localNotices = [];
 				chatState.pendingUserInputs = [];
 			}),
 			restoreMessages: vi.fn<() => ChatRestoreResult | null>(() => null),
@@ -84,16 +87,16 @@ function createDeps(chat = createRunningChat()) {
 		setPendingUserInputs: vi.fn((inputs: PendingUserInput[]) => {
 			chatState.pendingUserInputs = inputs;
 		}),
-		appendErrorMessage: vi.fn((content: string) => {
-			chatState.chatMessages = [
-				...chatState.chatMessages,
-				new ErrorMessage(new Date().toISOString(), content),
-			];
-		}),
-		appendLocalAssistantMessage: vi.fn((content: string) => {
-			chatState.chatMessages = [
-				...chatState.chatMessages,
-				new AssistantMessage(new Date().toISOString(), content),
+		appendLocalNotice: vi.fn((noticeType: LocalNoticeType, content: string) => {
+			chatState.localNotices = [
+				...chatState.localNotices,
+				{
+					kind: 'local-notice',
+					id: `local-${chatState.localNotices.length + 1}`,
+					noticeType,
+					content,
+					timestamp: new Date().toISOString(),
+				},
 			];
 		}),
 		clearLocalNotices: vi.fn(),
@@ -327,10 +330,10 @@ describe('ConversationSessionController', () => {
 
 		await controller.submitForChat('123');
 
-		expect(deps.chatState.chatMessages).toHaveLength(1);
-		expect(deps.chatState.chatMessages[0]).toMatchObject({
-			type: 'assistant-message',
-			content: 'Forking chat..',
+		expect(deps.chatState.localNotices).toHaveLength(1);
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'progress',
+			content: 'Forking chat...',
 		});
 		expect(deps.chatState.isUserScrolledUp).toBe(false);
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('123');
@@ -370,10 +373,10 @@ describe('ConversationSessionController', () => {
 			sourceChatId: '123',
 			chatId: expect.stringMatching(/^\d+$/),
 		});
-		expect(deps.chatState.chatMessages).toHaveLength(1);
-		expect(deps.chatState.chatMessages[0]).toMatchObject({
-			type: 'assistant-message',
-			content: 'Forking chat..',
+		expect(deps.chatState.localNotices).toHaveLength(1);
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'progress',
+			content: 'Forking chat...',
 		});
 		expect(deps.sessions.quietRefreshChats).toHaveBeenCalled();
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('456');
@@ -469,8 +472,8 @@ describe('ConversationSessionController', () => {
 		await controller.submitForChat('chat-1');
 
 		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('failed');
-		expect(deps.chatState.chatMessages[0]).toMatchObject({
-			type: 'error',
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'error',
 			content: 'Failed to send message: network down',
 		});
 		expect(deps.composerState.inputText).toBe('please send');

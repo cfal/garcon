@@ -60,9 +60,8 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 					// Leaves current visible state until a later retry succeeds.
 				});
 			},
-			appendErrorMessage: (content) => deps.chatState.appendErrorMessage(content),
-			appendLocalAssistantMessage: (content) =>
-				deps.chatState.appendLocalAssistantMessage(content),
+			appendLocalNotice: (noticeType, content) =>
+				deps.chatState.appendLocalNotice(noticeType, content),
 			upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
 			clearPendingUserInput: (clientRequestId) =>
 				deps.chatState.clearPendingUserInput(clientRequestId),

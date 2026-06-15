@@ -6,6 +6,7 @@ import type {
 	ChatProcessingUpdatedMessage,
 	WsFaultMessage,
 } from '$shared/ws-events';
+import type { LocalNoticeType } from '$lib/chat/local-notice';
 import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
@@ -14,8 +15,7 @@ export interface ChatEventContext {
 	getSelectedChat: () => ChatSessionRouterView | null;
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
-	appendErrorMessage: (content: string) => void;
-	appendLocalAssistantMessage: (content: string) => void;
+	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
 		ConversationUiStore,
@@ -80,9 +80,9 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 			ctx.clearPendingChatId();
 		}
 		ctx.conversationUi.clearPendingPermissionRequests();
-		ctx.appendLocalAssistantMessage('Chat interrupted by user.');
+		ctx.appendLocalNotice('warning', 'Chat interrupted by user.');
 	} else {
-		ctx.appendErrorMessage('Stop request failed. The chat is still running.');
+		ctx.appendLocalNotice('error', 'Stop request failed. The chat is still running.');
 	}
 }
 
@@ -112,5 +112,5 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 }
 
 export function handleWsError(msg: WsFaultMessage, ctx: ChatEventContext) {
-	ctx.appendErrorMessage(msg.error || 'WebSocket error');
+	ctx.appendLocalNotice('error', msg.error || 'WebSocket error');
 }

@@ -6,7 +6,8 @@ import {
 	ToolResultMessage,
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
-import type { ChatMessageRow } from './state.svelte';
+import type { ChatDisplayRow, ChatTranscriptRow } from './state.svelte';
+import type { LocalNoticeRow } from './local-notice';
 
 export interface PermissionTerminalState {
 	state: 'resolved' | 'cancelled';
@@ -28,6 +29,13 @@ export type ConversationFeedRenderItem =
 			messages: BashToolUseMessage[];
 			index: number;
 			prevMessage: ChatMessage | null;
+	  }
+	| {
+			kind: 'local-notice';
+			id: string;
+			notice: LocalNoticeRow;
+			index: number;
+			prevMessage: ChatMessage | null;
 	  };
 
 export interface ConversationFeedRenderModel {
@@ -46,12 +54,12 @@ function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
 	);
 }
 
-function bashGroupId(rows: ChatMessageRow[]): string {
+function bashGroupId(rows: ChatTranscriptRow[]): string {
 	return `bash-group-${rows[0]?.id ?? 'empty'}`;
 }
 
 export function buildConversationFeedRenderModel(
-	rows: ChatMessageRow[],
+	rows: ChatDisplayRow[],
 ): ConversationFeedRenderModel {
 	const items: ConversationFeedRenderItem[] = [];
 	const toolResultIndex = new Map<string, ToolResultMessage>();
@@ -61,6 +69,19 @@ export function buildConversationFeedRenderModel(
 
 	while (index < rows.length) {
 		const row = rows[index];
+		if (row.kind === 'local-notice') {
+			items.push({
+				kind: 'local-notice',
+				id: row.id,
+				notice: row,
+				index,
+				prevMessage: previousRenderable,
+			});
+			previousRenderable = null;
+			index += 1;
+			continue;
+		}
+
 		const message = row.message;
 
 		if (message instanceof ToolResultMessage) {
@@ -83,13 +104,14 @@ export function buildConversationFeedRenderModel(
 		}
 
 		if (message instanceof BashToolUseMessage) {
-			const groupRows: ChatMessageRow[] = [];
+			const groupRows: ChatTranscriptRow[] = [];
 			const group: BashToolUseMessage[] = [];
 			const prevMessage = previousRenderable;
 			const firstIndex = index;
 
 			while (index < rows.length) {
 				const candidateRow = rows[index];
+				if (candidateRow.kind === 'local-notice') break;
 				const candidate = candidateRow.message;
 				if (candidate instanceof ToolResultMessage) {
 					toolResultIndex.set(candidate.toolId, candidate);
@@ -138,7 +160,7 @@ export function buildConversationFeedRenderModel(
 }
 
 export function buildConversationFeedRenderItems(
-	rows: ChatMessageRow[],
+	rows: ChatDisplayRow[],
 ): ConversationFeedRenderItem[] {
 	return buildConversationFeedRenderModel(rows).items;
 }

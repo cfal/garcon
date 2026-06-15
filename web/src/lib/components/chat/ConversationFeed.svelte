@@ -2,6 +2,7 @@
 	import ConversationMessage from './ConversationMessage.svelte';
 	import ChatBashToolGroup from './tools/ChatBashToolGroup.svelte';
 	import MessageRenderFallback from './MessageRenderFallback.svelte';
+	import LocalNoticeRow from './rows/LocalNoticeRow.svelte';
 	import {
 		isToolUseMessage,
 		PermissionRequestMessage,
@@ -173,6 +174,13 @@
 			{#if item.kind === 'bash-group'}
 				<svelte:boundary>
 					<ChatBashToolGroup messages={item.messages} />
+					{#snippet failed(error)}
+						<MessageRenderFallback {error} />
+					{/snippet}
+				</svelte:boundary>
+			{:else if item.kind === 'local-notice'}
+				<svelte:boundary>
+					<LocalNoticeRow notice={item.notice} />
 					{#snippet failed(error)}
 						<MessageRenderFallback {error} />
 					{/snippet}

@@ -336,7 +336,7 @@ export class ConversationSessionController {
 		}
 
 		if (selected.status === 'running' && selected.isProcessing && submissionImages.length > 0) {
-			deps.chatState.appendErrorMessage(
+			deps.chatState.appendLocalNotice('error',
 				'Messages with images cannot be queued while a turn is already running.',
 			);
 			return;
@@ -348,7 +348,7 @@ export class ConversationSessionController {
 				imagePayload = await Promise.all(submissionImages.map(fileToChatImage));
 			} catch (error) {
 				console.error('[SessionController] Failed to prepare image payload:', error);
-				deps.chatState.appendErrorMessage(
+				deps.chatState.appendLocalNotice('error',
 					`Failed to prepare images: ${error instanceof Error ? error.message : String(error)}`,
 				);
 				return;
@@ -366,7 +366,7 @@ export class ConversationSessionController {
 				deps.conversationUi.setMessageQueue(chatId, result.queue);
 				deps.composerState.clearAfterSubmit(chatId);
 			} catch (err) {
-				deps.chatState.appendErrorMessage(
+				deps.chatState.appendLocalNotice('error',
 					`Failed to queue message: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
@@ -440,7 +440,7 @@ export class ConversationSessionController {
 					deps.composerState.images = previousImages;
 					deps.composerState.saveDraft(chatId);
 				}
-				deps.chatState.appendErrorMessage(
+				deps.chatState.appendLocalNotice('error',
 					`Failed to start chat: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			} finally {
@@ -480,7 +480,7 @@ export class ConversationSessionController {
 					deps.composerState.images = previousImages;
 					deps.composerState.saveDraft(chatId);
 				}
-				deps.chatState.appendErrorMessage(
+				deps.chatState.appendLocalNotice('error',
 					`Failed to send message: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			} finally {
@@ -498,13 +498,13 @@ export class ConversationSessionController {
 	): Promise<void> {
 		const { deps } = this;
 		if (sourceChat.status !== 'running') {
-			deps.chatState.appendErrorMessage('Cannot fork a draft chat. Select an existing chat first.');
+			deps.chatState.appendLocalNotice('error', 'Cannot fork a draft chat. Select an existing chat first.');
 			return;
 		}
 
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		deps.chatState.appendLocalAssistantMessage('Forking chat..');
+		deps.chatState.appendLocalNotice('progress', 'Forking chat...');
 		deps.chatState.isUserScrolledUp = false;
 		if (clearComposer) {
 			deps.composerState.clearAfterSubmit(sourceChatId);
@@ -525,7 +525,7 @@ export class ConversationSessionController {
 					deps.composerState.images = previousImages;
 					deps.composerState.saveDraft(sourceChatId);
 				}
-				deps.chatState.appendErrorMessage(
+				deps.chatState.appendLocalNotice('error',
 					`Failed to prepare images: ${error instanceof Error ? error.message : String(error)}`,
 				);
 				return;
@@ -567,7 +567,7 @@ export class ConversationSessionController {
 				deps.composerState.images = previousImages;
 				deps.composerState.saveDraft(sourceChatId);
 			}
-			deps.chatState.appendErrorMessage(
+			deps.chatState.appendLocalNotice('error',
 				`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		}
@@ -594,7 +594,7 @@ export class ConversationSessionController {
 				deps.composerState.images = previousImages;
 				deps.composerState.saveDraft(sourceChatId);
 			}
-			deps.chatState.appendErrorMessage(
+			deps.chatState.appendLocalNotice('error',
 				`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		}
@@ -614,7 +614,7 @@ export class ConversationSessionController {
 				deps.lifecycle.clearLoading();
 			})
 			.catch((error) => {
-				deps.chatState.appendErrorMessage(
+				deps.chatState.appendLocalNotice('error',
 					`Failed to stop chat: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			});
@@ -642,7 +642,7 @@ export class ConversationSessionController {
 				);
 			})
 			.catch((error) => {
-				deps.chatState.appendErrorMessage(
+				deps.chatState.appendLocalNotice('error',
 					`Failed to send permission decision: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			});
@@ -691,7 +691,7 @@ export class ConversationSessionController {
 					deps.sessions.setChatProcessing(chatId, true);
 				})
 				.catch((error) => {
-					deps.chatState.appendErrorMessage(
+					deps.chatState.appendLocalNotice('error',
 						`Failed to resume plan: ${error instanceof Error ? error.message : String(error)}`,
 					);
 				});
@@ -722,7 +722,7 @@ export class ConversationSessionController {
 						allow: false,
 						alwaysAllow: false,
 					}).catch((error) => {
-						deps.chatState.appendErrorMessage(
+						deps.chatState.appendLocalNotice('error',
 							`Failed to deny permission: ${error instanceof Error ? error.message : String(error)}`,
 						);
 					});
@@ -741,7 +741,7 @@ export class ConversationSessionController {
 				deps.conversationUi.setMessageQueue(chatId, result.queue);
 			})
 			.catch((error) => {
-				deps.chatState.appendErrorMessage(
+				deps.chatState.appendLocalNotice('error',
 					`Failed to resume queue: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			});
@@ -756,7 +756,7 @@ export class ConversationSessionController {
 				deps.conversationUi.setMessageQueue(chatId, result.queue);
 			})
 			.catch((error) => {
-				deps.chatState.appendErrorMessage(
+				deps.chatState.appendLocalNotice('error',
 					`Failed to pause queue: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			});
@@ -771,7 +771,7 @@ export class ConversationSessionController {
 				deps.conversationUi.setMessageQueue(chatId, result.queue);
 			})
 			.catch((error) => {
-				deps.chatState.appendErrorMessage(
+				deps.chatState.appendLocalNotice('error',
 					`Failed to remove queued message: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			});
@@ -816,7 +816,7 @@ export class ConversationSessionController {
 		const isLocal = deps.modelCatalog.isLocalModel(agentId, model, selection.modelEndpointId);
 		if (wasLocal !== isLocal) {
 			const target = isLocal ? 'local' : 'cloud';
-			deps.chatState.appendErrorMessage(
+			deps.chatState.appendLocalNotice('error',
 				`Cannot switch to a ${target} model mid-session. Start a new chat to use ${selection.model}.`,
 			);
 			return;
@@ -854,7 +854,7 @@ export class ConversationSessionController {
 				modelEndpointId: previousEndpointId ?? null,
 				modelProtocol: previousProtocol ?? null,
 			});
-			deps.chatState.appendErrorMessage(
+			deps.chatState.appendLocalNotice('error',
 				`Failed to update model: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		});
@@ -880,7 +880,7 @@ export class ConversationSessionController {
 		void updateExecutionSettings({ chatId, permissionMode: mode }).catch((error) => {
 			deps.agentState.permissionMode = previous;
 			deps.sessions.patchChat(chatId, { permissionMode: previous });
-			deps.chatState.appendErrorMessage(
+			deps.chatState.appendLocalNotice('error',
 				`Failed to update permission mode: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		});
@@ -900,7 +900,7 @@ export class ConversationSessionController {
 		void updateExecutionSettings({ chatId, thinkingMode: mode }).catch((error) => {
 			deps.agentState.thinkingMode = previous;
 			deps.sessions.patchChat(chatId, { thinkingMode: previous });
-			deps.chatState.appendErrorMessage(
+			deps.chatState.appendLocalNotice('error',
 				`Failed to update thinking mode: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		});
@@ -920,7 +920,7 @@ export class ConversationSessionController {
 		void updateExecutionSettings({ chatId, ampAgentMode: mode }).catch((error) => {
 			deps.agentState.ampAgentMode = previous;
 			deps.sessions.patchChat(chatId, { ampAgentMode: previous });
-			deps.chatState.appendErrorMessage(
+			deps.chatState.appendLocalNotice('error',
 				`Failed to update agent mode: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		});

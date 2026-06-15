@@ -2,10 +2,11 @@ import {
 	applyChatViewMessages,
 	type ChatViewMessage,
 } from '$shared/chat-view';
-import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
+import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import { LocalChatSnapshotCache } from './chat-snapshot-cache';
 import { getChatMessages } from '$lib/api/chats.js';
+import type { LocalNoticeRow, LocalNoticeType } from './local-notice';
 
 const MESSAGES_PER_PAGE = 20;
 export const INITIAL_VISIBLE_MESSAGES = 100;
@@ -29,10 +30,13 @@ export interface ChatCursor {
 	lastSeq: number;
 }
 
-export interface ChatMessageRow {
+export interface ChatTranscriptRow {
+	kind: 'message';
 	id: string;
 	message: ChatMessage;
 }
+
+export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
 
 function localMessageId(): string {
 	return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -55,7 +59,7 @@ export class ChatState {
 	lastSeq = $state(0);
 	oldestSeq = $state(0);
 	pendingUserInputs = $state<PendingUserInput[]>([]);
-	localNotices = $state<Array<{ id: string; message: ChatMessage }>>([]);
+	localNotices = $state<LocalNoticeRow[]>([]);
 	visibleMessageCount = $state(INITIAL_VISIBLE_MESSAGES);
 	isLoadingMessages = $state(false);
 	isLoadingMoreMessages = $state(false);
@@ -81,6 +85,7 @@ export class ChatState {
 
 	#displayRows = $derived.by(() => {
 		const durableRows = this.entries.map((entry) => ({
+			kind: 'message' as const,
 			id: `${this.generationId}:${entry.seq}`,
 			message: entry.message,
 		}));
@@ -91,7 +96,9 @@ export class ChatState {
 		return [...merged, ...this.localNotices];
 	});
 
-	#displayMessages = $derived.by(() => this.#displayRows.map((row) => row.message));
+	#displayMessages = $derived.by(() =>
+		this.#displayRows.flatMap((row) => row.kind === 'message' ? [row.message] : []),
+	);
 
 	#displayMessageCount = $derived.by(() => this.#displayRows.length);
 
@@ -102,7 +109,9 @@ export class ChatState {
 		return this.#displayRows.slice(-this.visibleMessageCount);
 	});
 
-	#visibleMessages = $derived.by(() => this.#visibleRows.map((row) => row.message));
+	#visibleMessages = $derived.by(() =>
+		this.#visibleRows.flatMap((row) => row.kind === 'message' ? [row.message] : []),
+	);
 
 	get chatMessages(): ChatMessage[] {
 		return this.entries.map((entry) => entry.message);
@@ -112,7 +121,7 @@ export class ChatState {
 		return this.#displayMessages;
 	}
 
-	get visibleRows(): ChatMessageRow[] {
+	get visibleRows(): ChatDisplayRow[] {
 		return this.#visibleRows;
 	}
 
@@ -311,17 +320,16 @@ export class ChatState {
 		}
 	}
 
-	appendErrorMessage(content: string): void {
+	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
 		this.localNotices = [
 			...this.localNotices,
-			{ id: `local_${localMessageId()}`, message: new ErrorMessage(new Date().toISOString(), content) },
-		];
-	}
-
-	appendLocalAssistantMessage(content: string): void {
-		this.localNotices = [
-			...this.localNotices,
-			{ id: `local_${localMessageId()}`, message: new AssistantMessage(new Date().toISOString(), content) },
+			{
+				kind: 'local-notice',
+				id: `local_${localMessageId()}`,
+				noticeType,
+				content,
+				timestamp: new Date().toISOString(),
+			},
 		];
 	}
 
@@ -432,21 +440,22 @@ function pendingInputToMessage(input: PendingUserInput): UserMessage {
 	});
 }
 
-function pendingInputToRow(input: PendingUserInput): ChatMessageRow {
+function pendingInputToRow(input: PendingUserInput): ChatTranscriptRow {
 	return {
+		kind: 'message',
 		id: `pending:${input.clientRequestId}`,
 		message: pendingInputToMessage(input),
 	};
 }
 
 function mergeRowsWithPendingInputs(
-	rows: ChatMessageRow[],
+	rows: ChatTranscriptRow[],
 	pendingInputs: PendingUserInput[],
-): ChatMessageRow[] {
+): ChatTranscriptRow[] {
 	if (rows.length === 0) return pendingInputs.map(pendingInputToRow);
 
 	const pendingRows = pendingInputs.map(pendingInputToRow);
-	const merged: ChatMessageRow[] = [];
+	const merged: ChatTranscriptRow[] = [];
 	let messageIndex = 0;
 	let pendingIndex = 0;
 

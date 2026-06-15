@@ -13,11 +13,22 @@ import {
 	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
 } from '../conversation-feed-items';
+import type { LocalNoticeRow } from '../local-notice';
 
 const TS = '2026-05-29T00:00:00.000Z';
 
 function rows(messages: ChatMessage[]) {
-	return messages.map((message, index) => ({ id: `row-${index}`, message }));
+	return messages.map((message, index) => ({ kind: 'message' as const, id: `row-${index}`, message }));
+}
+
+function notice(content: string): LocalNoticeRow {
+	return {
+		kind: 'local-notice',
+		id: `notice-${content}`,
+		noticeType: 'warning',
+		content,
+		timestamp: TS,
+	};
 }
 
 describe('buildConversationFeedRenderItems', () => {
@@ -99,6 +110,30 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(model.permissionTerminalById.get('perm-2')).toEqual({
 			state: 'cancelled',
 			reason: 'cancelled',
+		});
+	});
+
+	it('keeps local notices as their own render items and breaks assistant grouping', () => {
+		const firstAssistant = new AssistantMessage(TS, 'before');
+		const secondAssistant = new AssistantMessage(TS, 'after');
+		const localNotice = notice('Chat interrupted by user.');
+
+		const items = buildConversationFeedRenderItems([
+			{ kind: 'message', id: 'assistant-1', message: firstAssistant },
+			localNotice,
+			{ kind: 'message', id: 'assistant-2', message: secondAssistant },
+		]);
+
+		expect(items.map((item) => item.kind)).toEqual(['message', 'local-notice', 'message']);
+		expect(items[1]).toMatchObject({
+			kind: 'local-notice',
+			notice: localNotice,
+			prevMessage: firstAssistant,
+		});
+		expect(items[2]).toMatchObject({
+			kind: 'message',
+			message: secondAssistant,
+			prevMessage: null,
 		});
 	});
 

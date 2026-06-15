@@ -5,7 +5,7 @@ import type { EventRouterStores } from '../router.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { PendingUserInput } from '$shared/pending-user-input';
-import type { ChatMessage } from '$shared/chat-types';
+import type { LocalNoticeType } from '$lib/chat/local-notice';
 import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 const TS = '2026-05-14T00:00:01.000Z';
@@ -24,8 +24,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			getCursor: vi.fn(() => ({ generationId: 'generation-current', lastSeq: 1 })),
 			applyChatMessages: vi.fn((): 'applied' => 'applied'),
 			reloadChatSnapshot: vi.fn(),
-			appendErrorMessage: vi.fn(),
-			appendLocalAssistantMessage: vi.fn(),
+			appendLocalNotice: vi.fn(),
 			upsertPendingUserInput: vi.fn(),
 			clearPendingUserInput: vi.fn(),
 			updatePendingUserInputDeliveryStatus: vi.fn(),
@@ -293,20 +292,22 @@ describe('event router integration', () => {
 	});
 
 	it('preserves streamed output order before same-drain stop messages', () => {
-		let currentMessages: ChatMessage[] = [];
+		let currentRows: Array<{ noticeType?: LocalNoticeType; content: string }> = [];
 		const defaults = createStores();
 		const stores = createStores({
 			chatState: {
 				...defaults.chatState,
 				applyChatMessages: (_chatId, _generationId, messages) => {
-					currentMessages = [...currentMessages, ...messages.map((entry) => entry.message)];
+					currentRows = [
+						...currentRows,
+						...messages.map((entry) => ({
+							content: 'content' in entry.message ? String(entry.message.content) : '',
+						})),
+					];
 					return 'applied';
 				},
-				appendLocalAssistantMessage: (content) => {
-					currentMessages = [
-						...currentMessages,
-						{ type: 'assistant-message', timestamp: '2026-05-14T00:00:02.000Z', content } as never,
-					];
+				appendLocalNotice: (noticeType, content) => {
+					currentRows = [...currentRows, { noticeType, content }];
 				},
 			},
 		});
@@ -334,8 +335,9 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(
-			currentMessages.map((message) => ('content' in message ? String(message.content) : '')),
-		).toEqual(['streamed', 'Chat interrupted by user.']);
+		expect(currentRows).toEqual([
+			{ content: 'streamed' },
+			{ noticeType: 'warning', content: 'Chat interrupted by user.' },
+		]);
 	});
 });

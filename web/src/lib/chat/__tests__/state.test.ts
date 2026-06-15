@@ -4,6 +4,7 @@ import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$
 import type { ChatViewMessage } from '$shared/chat-view';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import { getChatMessages } from '$lib/api/chats.js';
+import type { ChatDisplayRow } from '../state.svelte';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(),
@@ -25,6 +26,10 @@ function assistant(content: string) {
 
 function contentOf(message: ChatMessage): string {
 	return 'content' in message ? String(message.content) : '';
+}
+
+function rowContentOf(row: ChatDisplayRow): string {
+	return row.kind === 'local-notice' ? row.content : contentOf(row.message);
 }
 
 function page(overrides: Partial<{
@@ -90,28 +95,30 @@ describe('ChatState', () => {
 		const chat = new ChatState();
 		chat.applyMessages('generation-1', [entry(1, user('server'))]);
 
-		chat.appendLocalAssistantMessage('local status');
-		chat.appendErrorMessage('local error');
+		chat.appendLocalNotice('progress', 'local status');
+		chat.appendLocalNotice('error', 'local error');
 
 		expect(chat.chatMessages.map(contentOf)).toEqual(['server']);
-		expect(chat.displayMessages.map(contentOf)).toEqual(['server', 'local status', 'local error']);
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'local status', 'local error']);
+		expect(chat.visibleRows.at(-2)).toMatchObject({ kind: 'local-notice', noticeType: 'progress' });
+		expect(chat.visibleRows.at(-1)).toMatchObject({ kind: 'local-notice', noticeType: 'error' });
 	});
 
 	it('clears transient local messages when new server messages apply', () => {
 		const chat = new ChatState();
 		chat.applyMessages('generation-1', [entry(1, user('server'))]);
-		chat.appendLocalAssistantMessage('local status');
-		chat.appendErrorMessage('local error');
+		chat.appendLocalNotice('progress', 'local status');
+		chat.appendLocalNotice('error', 'local error');
 
 		chat.applyMessages('generation-1', [entry(2, assistant('next'))]);
 
-		expect(chat.displayMessages.map(contentOf)).toEqual(['server', 'next']);
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'next']);
 	});
 
 	it('clears transient local messages when a pending user input is submitted', () => {
 		const chat = new ChatState();
 		chat.applyMessages('generation-1', [entry(1, user('server'))]);
-		chat.appendLocalAssistantMessage('Chat interrupted by user.');
+		chat.appendLocalNotice('warning', 'Chat interrupted by user.');
 
 		chat.upsertPendingUserInput({
 			chatId: 'chat-1',
@@ -122,17 +129,17 @@ describe('ChatState', () => {
 			deliveryStatus: 'submitting',
 		});
 
-		expect(chat.displayMessages.map(contentOf)).toEqual(['server', 'continue']);
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'continue']);
 	});
 
 	it('keeps transient local messages when replay only overlaps existing server messages', () => {
 		const chat = new ChatState();
 		chat.applyMessages('generation-1', [entry(1, user('server'))]);
-		chat.appendErrorMessage('local error');
+		chat.appendLocalNotice('error', 'local error');
 
 		chat.applyMessages('generation-1', [entry(1, user('duplicate'))]);
 
-		expect(chat.displayMessages.map(contentOf)).toEqual(['server', 'local error']);
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'local error']);
 	});
 
 	it('detects same-generation gaps without advancing the cursor', () => {
@@ -152,7 +159,7 @@ describe('ChatState', () => {
 	it('clears transient local messages when a live batch changes generation', () => {
 		const chat = new ChatState();
 		chat.applyMessages('generation-1', [entry(1, user('old'))]);
-		chat.appendErrorMessage('local error');
+		chat.appendLocalNotice('error', 'local error');
 
 		const result = chat.applyMessages('generation-2', [entry(1, assistant('fresh'))]);
 
