@@ -30,5 +30,8 @@ describe('LocalNoticeRow', () => {
 
 		expect(screen.getByText('Chat interrupted by user.')).toBeTruthy();
 		expect(container.querySelector('article')?.className).toContain('border-status-warning-border');
+		expect(container.querySelector('article')?.className).toContain(
+			'text-status-warning-muted-foreground',
+		);
 	});
 });

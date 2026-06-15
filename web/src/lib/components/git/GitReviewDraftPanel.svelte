@@ -63,7 +63,7 @@
 			case 'blocker':
 				return 'text-status-error-foreground bg-status-error/10';
 			case 'warning':
-				return 'text-status-warning-foreground bg-status-warning/10';
+				return 'text-status-warning-muted-foreground bg-status-warning/10';
 			default:
 				return 'text-status-info-foreground bg-status-info/10';
 		}
