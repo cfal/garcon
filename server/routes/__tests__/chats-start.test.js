@@ -60,8 +60,8 @@ const metadata = {
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
-const chatEvents = {
-  readPage: mock(() => Promise.resolve({ events: [], logId: 'log-1', lastAppendSeq: 0, pageOldestSeq: 0, hasMore: false })),
+const chatViews = {
+  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
 };
 const agents = {
   startSession: mock(() => Promise.resolve(undefined)),
@@ -82,7 +82,7 @@ const routes = createChatRoutes({
   queue,
   pathCache,
   metadata,
-  chatEvents,
+  chatViews,
   agents,
   pendingInputs,
   commandService: createRouteCommandService({
@@ -109,7 +109,7 @@ describe('POST /api/v1/chats/start', () => {
     settings.removeFromAllOrderLists.mockClear();
     settings.setLastChatDefaults.mockClear();
     metadata.addNewChatMetadata.mockClear();
-    chatEvents.readPage.mockClear();
+    chatViews.getOrCreatePage.mockClear();
     queue.registerPendingUserInput.mockClear();
     agents.startSession.mockClear();
     agents.getModels.mockClear();

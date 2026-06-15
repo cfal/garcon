@@ -326,18 +326,17 @@ describe('chats API contract', () => {
 		fetchMock.mockImplementation((url: string) =>
 			Promise.resolve(
 				jsonResponse(
-					url.startsWith('/api/v1/chats/messages')
-						? {
-								events: [],
-								logId: 'log-1',
-								lastAppendSeq: 0,
-								pageOldestSeq: 0,
-								pendingUserInputs: [],
-								hasMore: false,
-								limit: 50,
-								localNotice: 'The process died.',
-							}
-						: { success: true },
+						url.startsWith('/api/v1/chats/messages')
+							? {
+									messages: [],
+									generationId: 'generation-1',
+									lastSeq: 0,
+									pageOldestSeq: 0,
+									pendingUserInputs: [],
+									hasMore: false,
+									limit: 50,
+								}
+							: { success: true },
 				),
 			),
 		);
@@ -365,11 +364,11 @@ describe('chats API contract', () => {
 		expect(fetchMock.mock.calls[2][1].method ?? 'GET').toBe('GET');
 
 		const messages = await getChatMessages({ chatId: 'c/1', limit: 50, beforeSeq: 20 });
-		expect(fetchMock.mock.calls[3][0]).toBe(
-			'/api/v1/chats/messages?chatId=c%2F1&limit=50&beforeSeq=20',
-		);
-		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
-		expect(messages.localNotice).toBe('The process died.');
+			expect(fetchMock.mock.calls[3][0]).toBe(
+				'/api/v1/chats/messages?chatId=c%2F1&limit=50&beforeSeq=20',
+			);
+			expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
+			expect(messages.generationId).toBe('generation-1');
 	});
 
 	it('deleteChat sends chatId in the JSON body', async () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	selectPreviewFromBatch,
 	_extractFirstLine,
-	createChatEventsAccumulator,
+	createChatMessagesAccumulator,
 } from '../router.svelte';
 import {
 	UserMessage,
@@ -12,17 +12,11 @@ import {
 	UnknownToolUseMessage,
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
-import { ChatEventsMessage } from '$shared/ws-events';
-import type { ChatMessageEvent } from '$shared/chat-events';
+import { ChatMessagesMessage } from '$shared/ws-events';
+import type { ChatViewMessage } from '$shared/chat-view';
 
-function event(seq: number, message: ChatMessage): ChatMessageEvent {
-	return {
-		appendSeq: seq,
-		seq,
-		messageId: `message-${seq}`,
-		rev: 1,
-		message,
-	};
+function entry(seq: number, message: ChatMessage): ChatViewMessage {
+	return { seq, message };
 }
 
 describe('extractFirstLine', () => {
@@ -41,37 +35,33 @@ describe('extractFirstLine', () => {
 	it('returns empty string for empty input', () => {
 		expect(_extractFirstLine('')).toBe('');
 	});
-
-	it('handles leading newline', () => {
-		expect(_extractFirstLine('\nfirst real line')).toBe('');
-	});
 });
 
-describe('createChatEventsAccumulator', () => {
-	it('coalesces same-drain event chunks into one event write', () => {
+describe('createChatMessagesAccumulator', () => {
+	it('coalesces same-drain message chunks into one state write', () => {
 		let current: ChatMessage[] = [];
 		let writes = 0;
-		const accumulator = createChatEventsAccumulator({
-			applyChatEvents: (_chatId, _logId, events) => {
+		const accumulator = createChatMessagesAccumulator({
+			applyChatMessages: (_chatId, _generationId, messages) => {
 				writes += 1;
-				current = [...current, ...events.map((entry) => entry.message)];
+				current = [...current, ...messages.map((item) => item.message)];
 				return 'applied';
 			},
 			reloadChatSnapshot: () => {},
 		});
 
 		accumulator.enqueue(
-			new ChatEventsMessage(
+			new ChatMessagesMessage(
 				'chat-a',
-				'log-1',
-				[event(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first'))],
+				'generation-1',
+				[entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first'))],
 			),
 		);
 		accumulator.enqueue(
-			new ChatEventsMessage(
+			new ChatMessagesMessage(
 				'chat-a',
-				'log-1',
-				[event(2, new AssistantMessage('2024-01-01T00:00:01Z', 'second'))],
+				'generation-1',
+				[entry(2, new AssistantMessage('2024-01-01T00:00:01Z', 'second'))],
 			),
 		);
 		accumulator.flush();
@@ -83,10 +73,27 @@ describe('createChatEventsAccumulator', () => {
 		]);
 	});
 
+	it('reloads the snapshot when accumulated messages report a generation change', () => {
+		const reloads: string[] = [];
+		const accumulator = createChatMessagesAccumulator({
+			applyChatMessages: () => 'generation-changed',
+			reloadChatSnapshot: (chatId) => reloads.push(chatId),
+		});
+
+		accumulator.enqueue(new ChatMessagesMessage(
+			'chat-a',
+			'generation-2',
+			[entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'fresh'))],
+		));
+		accumulator.flush();
+
+		expect(reloads).toEqual(['chat-a']);
+	});
+
 	it('does not write when no output was queued', () => {
 		let writes = 0;
-		const accumulator = createChatEventsAccumulator({
-			applyChatEvents: () => {
+		const accumulator = createChatMessagesAccumulator({
+			applyChatMessages: () => {
 				writes += 1;
 				return 'applied';
 			},

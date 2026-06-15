@@ -1,355 +1,183 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-const getChatMessagesMock = vi.hoisted(() => vi.fn());
+import { ChatState } from '../state.svelte';
+import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
+import type { ChatViewMessage } from '$shared/chat-view';
+import type { PendingUserInput } from '$shared/pending-user-input';
+import { getChatMessages } from '$lib/api/chats.js';
 
 vi.mock('$lib/api/chats.js', () => ({
-	getChatMessages: getChatMessagesMock,
+	getChatMessages: vi.fn(),
 }));
 
-import { ChatState, INITIAL_VISIBLE_MESSAGES } from '../state.svelte';
-import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
-import type { ChatMessageEvent } from '$shared/chat-events';
+const TS = '2026-06-01T00:00:00.000Z';
 
-const TS = '2024-01-01T00:00:00.000Z';
-
-function event(seq: number, message: ChatMessage, patch: Partial<ChatMessageEvent> = {}): ChatMessageEvent {
-	return {
-		appendSeq: seq,
-		seq,
-		messageId: `message-${seq}`,
-		rev: 1,
-		message,
-		...patch,
-	};
+function entry(seq: number, message: ChatMessage): ChatViewMessage {
+	return { seq, message };
 }
 
-function page(overrides: Partial<{
-	logId: string;
-	events: ChatMessageEvent[];
-	lastAppendSeq: number;
-	pageOldestSeq: number;
-	hasMore: boolean;
-	pendingUserInputs: unknown[];
-	limit: number;
-	localNotice: string;
-}> = {}) {
-	const events = overrides.events ?? [];
-	return {
-		logId: overrides.logId ?? 'log-1',
-		events,
-		lastAppendSeq: overrides.lastAppendSeq ?? events.at(-1)?.appendSeq ?? 0,
-		pageOldestSeq: overrides.pageOldestSeq ?? events[0]?.seq ?? 0,
-		hasMore: overrides.hasMore ?? false,
-		limit: overrides.limit ?? 20,
-		pendingUserInputs: overrides.pendingUserInputs ?? [],
-		localNotice: overrides.localNotice,
-	};
+function user(content: string, metadata: Record<string, unknown> = {}) {
+	return new UserMessage(TS, content, undefined, metadata);
 }
 
-function deferred<T>() {
-	let resolve!: (value: T) => void;
-	let reject!: (error: unknown) => void;
-	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-		resolve = resolvePromise;
-		reject = rejectPromise;
-	});
-	return { promise, resolve, reject };
+function assistant(content: string) {
+	return new AssistantMessage(TS, content);
 }
 
 function contentOf(message: ChatMessage): string {
-	if (
-		message instanceof UserMessage ||
-		message instanceof AssistantMessage ||
-		message instanceof ErrorMessage
-	) {
-		return message.content;
-	}
-	return '';
+	return 'content' in message ? String(message.content) : '';
 }
 
-function messageContents(messages: ChatMessage[]): string[] {
-	return messages.map(contentOf);
+function page(overrides: Partial<{
+	generationId: string;
+	messages: ChatViewMessage[];
+	lastSeq: number;
+	pageOldestSeq: number;
+	hasMore: boolean;
+	pendingUserInputs: PendingUserInput[];
+}> = {}) {
+	const messages = overrides.messages ?? [entry(1, assistant('hello'))];
+	return {
+		generationId: overrides.generationId ?? 'generation-1',
+		messages,
+		lastSeq: overrides.lastSeq ?? messages.at(-1)?.seq ?? 0,
+		pageOldestSeq: overrides.pageOldestSeq ?? messages[0]?.seq ?? 0,
+		hasMore: overrides.hasMore ?? false,
+		pendingUserInputs: overrides.pendingUserInputs ?? [],
+	};
 }
 
 describe('ChatState', () => {
 	beforeEach(() => {
-		getChatMessagesMock.mockReset();
+		localStorage.clear();
+		vi.mocked(getChatMessages).mockReset();
 	});
 
-	it('starts with empty event state', () => {
+	it('starts with an empty generation cursor', () => {
 		const chat = new ChatState();
 
+		expect(chat.getCursor()).toEqual({ generationId: '', lastSeq: 0 });
 		expect(chat.chatMessages).toEqual([]);
-		expect(chat.visibleRows).toEqual([]);
-		expect(chat.getCursor()).toEqual({ logId: '', lastAppendSeq: 0 });
-		expect(chat.hasMoreMessages).toBe(false);
 	});
 
-	it('applies event-log creations and revisions by messageId', () => {
+	it('applies same-generation messages by seq and ignores duplicates', () => {
 		const chat = new ChatState();
-		const first = event(1, new UserMessage(TS, 'hello'), { messageId: 'user-1' });
-		const revision = event(2, new UserMessage(TS, 'hello delivered'), {
-			messageId: 'user-1',
-			seq: 1,
-			rev: 2,
-		});
 
-		expect(chat.applyEvents('log-1', [first])).toBe('applied');
-		expect(chat.applyEvents('log-1', [revision])).toBe('applied');
+		expect(chat.applyMessages('generation-1', [
+			entry(1, user('hello')),
+			entry(2, assistant('hi')),
+		])).toBe('applied');
+		expect(chat.applyMessages('generation-1', [
+			entry(2, assistant('duplicate')),
+			entry(3, assistant('next')),
+		])).toBe('applied');
 
-		expect(chat.chatMessages).toHaveLength(1);
-		expect((chat.chatMessages[0] as UserMessage).content).toBe('hello delivered');
-		expect(chat.getCursor()).toEqual({ logId: 'log-1', lastAppendSeq: 2 });
-		expect(chat.visibleRows[0].id).toBe('user-1');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['hello', 'hi', 'next']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 3 });
 	});
 
-	it('signals a generation change when incoming logId changes', () => {
+	it('signals generation changes instead of merging across generations', () => {
 		const chat = new ChatState();
-		chat.applyEvents('log-1', [event(1, new UserMessage(TS, 'hello'))]);
+		chat.applyMessages('generation-1', [entry(1, user('old'))]);
 
-		const result = chat.applyEvents('log-2', [event(1, new AssistantMessage(TS, 'new log'))]);
+		const result = chat.applyMessages('generation-2', [entry(1, assistant('fresh'))]);
 
 		expect(result).toBe('generation-changed');
 		expect(chat.chatMessages).toEqual([]);
-		expect(chat.getCursor()).toEqual({ logId: 'log-2', lastAppendSeq: 0 });
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-2', lastSeq: 0 });
 	});
 
-	it('overlays pending user inputs until the durable echo arrives', () => {
-		const chat = new ChatState();
-		chat.setPendingUserInputs([
-			{
-				chatId: 'chat-1',
-				clientRequestId: 'req-1',
-				clientMessageId: 'client-message-1',
-				content: 'pending',
-				createdAt: TS,
-				deliveryStatus: 'accepted',
-			},
-		]);
-
-		expect(chat.displayMessages).toHaveLength(1);
-		expect(chat.visibleRows[0].id).toBe('pending:req-1');
-
-		chat.applyEvents('log-1', [
-			event(1, new UserMessage(TS, 'pending', undefined, { clientRequestId: 'req-1' }), {
-				messageId: 'server-message-1',
-			}),
-		]);
-
-		expect(chat.visiblePendingInputs).toEqual([]);
-		expect(chat.displayMessages).toHaveLength(1);
-		expect(chat.visibleRows[0].id).toBe('server-message-1');
-	});
-
-	it('keeps local notices out of durable chatMessages', () => {
-		const chat = new ChatState();
-		chat.applyEvents('log-1', [event(1, new AssistantMessage(TS, 'server'))]);
-
-		chat.appendErrorMessage('local failure');
-
-		expect(chat.chatMessages).toHaveLength(1);
-		expect(chat.displayMessages).toHaveLength(2);
-		expect(chat.displayMessages[1]).toBeInstanceOf(ErrorMessage);
-	});
-
-	it('loads local notices from snapshot pages', async () => {
-		getChatMessagesMock.mockResolvedValueOnce(page({
-			events: [event(1, new AssistantMessage(TS, 'server'))],
-			localNotice: 'The process died.',
-		}));
-		const chat = new ChatState();
-
-		await chat.loadMessages('chat-1');
-
-		expect(messageContents(chat.chatMessages)).toEqual(['server']);
-		expect(messageContents(chat.displayMessages)).toEqual(['server', 'The process died.']);
-		expect(chat.displayMessages[1]).toBeInstanceOf(ErrorMessage);
-	});
-
-	it('does not install pending inputs from a stale snapshot page', async () => {
-		const chat = new ChatState();
-		const first = deferred<ReturnType<typeof page>>();
-		getChatMessagesMock.mockReturnValueOnce(first.promise);
-
-		const load = chat.loadMessages('chat-1');
-		chat.replaceGeneration('fresh-log', [
-			event(1, new AssistantMessage(TS, 'fresh'), { messageId: 'fresh-1' }),
-		], { lastAppendSeq: 1 });
-
-		first.resolve(page({
-			logId: 'old-log',
-			events: [event(1, new UserMessage(TS, 'old'), { messageId: 'old-1' })],
-			pendingUserInputs: [{
-				chatId: 'chat-1',
-				clientRequestId: 'req-old',
-				content: 'old pending',
-				createdAt: TS,
-				deliveryStatus: 'accepted',
-			}],
-		}));
-
-		await expect(load).resolves.toEqual(chat.chatMessages);
-		expect(chat.getCursor()).toEqual({ logId: 'fresh-log', lastAppendSeq: 1 });
-		expect(messageContents(chat.chatMessages)).toEqual(['fresh']);
-		expect(chat.pendingUserInputs).toEqual([]);
-	});
-
-	it('refetches when a buffered event belongs to a newer generation', async () => {
-		const chat = new ChatState();
-		const first = deferred<ReturnType<typeof page>>();
-		getChatMessagesMock
-			.mockReturnValueOnce(first.promise)
-			.mockResolvedValueOnce(page({
-				logId: 'new-log',
-				events: [event(1, new AssistantMessage(TS, 'new'), { messageId: 'new-1' })],
-				pendingUserInputs: [{
-					chatId: 'chat-1',
-					clientRequestId: 'req-new',
-					content: 'new pending',
-					createdAt: TS,
-					deliveryStatus: 'accepted',
-				}],
-			}));
-
-		const load = chat.loadMessages('chat-1');
-		chat.applyEvents('new-log', [
-			event(1, new AssistantMessage(TS, 'new live'), { messageId: 'new-live-1' }),
-		]);
-
-		first.resolve(page({
-			logId: 'old-log',
-			events: [event(1, new UserMessage(TS, 'old'), { messageId: 'old-1' })],
-			pendingUserInputs: [{
-				chatId: 'chat-1',
-				clientRequestId: 'req-old',
-				content: 'old pending',
-				createdAt: TS,
-				deliveryStatus: 'accepted',
-			}],
-		}));
-
-		await load;
-
-		expect(getChatMessagesMock).toHaveBeenCalledTimes(2);
-		expect(chat.getCursor()).toEqual({ logId: 'new-log', lastAppendSeq: 1 });
-		expect(messageContents(chat.chatMessages)).toEqual(['new']);
-		expect(chat.pendingUserInputs.map((input) => input.clientRequestId)).toEqual(['req-new']);
-	});
-
-	it('reports generation-changed without installing a stale page when a buffered batch has a new logId', () => {
+	it('buffers live same-generation messages while a snapshot is loading', () => {
 		const chat = new ChatState();
 		const epoch = chat.beginSnapshotLoad();
 
-		chat.applyEvents('new-log', [
-			event(1, new AssistantMessage(TS, 'new'), { messageId: 'new-1' }),
-		]);
+		chat.applyMessages('generation-1', [entry(2, assistant('live'))]);
+		const result = chat.setFromPage(page({
+			generationId: 'generation-1',
+			messages: [entry(1, user('history'))],
+			lastSeq: 1,
+		}), epoch);
 
-		const result = chat.setFromPage({
-			logId: 'old-log',
-			events: [event(1, new UserMessage(TS, 'old'), { messageId: 'old-1' })],
-			lastAppendSeq: 1,
-			pageOldestSeq: 1,
-			hasMore: false,
-		}, epoch);
+		expect(result).toBe('applied');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['history', 'live']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
+	});
+
+	it('does not install a stale snapshot when buffered messages indicate a new generation', () => {
+		const chat = new ChatState();
+		chat.replaceGeneration('current-generation', [entry(1, assistant('current'))], { lastSeq: 1 });
+		const epoch = chat.beginSnapshotLoad();
+
+		chat.applyMessages('new-generation', [entry(1, assistant('new live'))]);
+		const result = chat.setFromPage(page({
+			generationId: 'old-generation',
+			messages: [entry(1, user('old page'))],
+			lastSeq: 1,
+		}), epoch);
 
 		expect(result).toBe('generation-changed');
-		expect(chat.chatMessages).toEqual([]);
-		expect(chat.getCursor()).toEqual({ logId: '', lastAppendSeq: 0 });
+		expect(chat.chatMessages.map(contentOf)).toEqual(['current']);
+		expect(chat.getCursor()).toEqual({ generationId: 'current-generation', lastSeq: 1 });
 	});
 
-	it('loads the latest snapshot when older-page pagination sees a new generation', async () => {
+	it('installs pending inputs from HTTP snapshots and hides them after durable echo', () => {
 		const chat = new ChatState();
-		chat.applyEvents('log-1', [
-			event(10, new AssistantMessage(TS, 'old visible'), { messageId: 'old-visible' }),
+		const epoch = chat.beginSnapshotLoad();
+
+		chat.setFromPage(page({
+			messages: [],
+			lastSeq: 0,
+			pendingUserInputs: [{
+				chatId: 'chat-1',
+				clientRequestId: 'req-1',
+				content: 'pending',
+				createdAt: TS,
+				deliveryStatus: 'accepted',
+			}],
+		}), epoch);
+		expect(chat.visiblePendingInputs).toHaveLength(1);
+		expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
+
+		chat.applyMessages('generation-1', [
+			entry(1, user('pending', { clientRequestId: 'req-1', deliveryStatus: 'accepted' })),
 		]);
-		chat.hasMoreMessages = true;
 
-		getChatMessagesMock
-			.mockResolvedValueOnce(page({
-				logId: 'log-2',
-				events: [event(5, new AssistantMessage(TS, 'middle page'), { messageId: 'middle' })],
-				lastAppendSeq: 5,
-				pageOldestSeq: 5,
-				hasMore: true,
-			}))
-			.mockResolvedValueOnce(page({
-				logId: 'log-2',
-				events: [event(21, new AssistantMessage(TS, 'latest page'), { messageId: 'latest' })],
-				lastAppendSeq: 21,
-				pageOldestSeq: 21,
-				hasMore: false,
-			}));
-
-		const loaded = await chat.loadMoreMessages('chat-1');
-
-		expect(loaded).toBe(false);
-		expect(getChatMessagesMock).toHaveBeenCalledTimes(2);
-		expect(getChatMessagesMock).toHaveBeenNthCalledWith(1, {
-			chatId: 'chat-1',
-			limit: 20,
-			beforeSeq: 10,
-		});
-		expect(getChatMessagesMock).toHaveBeenNthCalledWith(2, {
-			chatId: 'chat-1',
-			limit: 20,
-		});
-		expect(chat.getCursor()).toEqual({ logId: 'log-2', lastAppendSeq: 21 });
-		expect(messageContents(chat.chatMessages)).toEqual(['latest page']);
+		expect(chat.visiblePendingInputs).toHaveLength(0);
+		expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
 	});
 
-	it('replaceGeneration clears pending overlays and resets the visible window', () => {
+	it('clears pending overlays when a generation is replaced without snapshot pending inputs', () => {
 		const chat = new ChatState();
 		chat.setPendingUserInputs([{
 			chatId: 'chat-1',
 			clientRequestId: 'req-1',
-			content: 'old prompt',
+			content: 'pending',
 			createdAt: TS,
 			deliveryStatus: 'accepted',
 		}]);
-		chat.visibleMessageCount = 500;
 
-		chat.replaceGeneration('new-log', [
-			event(1, new AssistantMessage(TS, 'native'), { messageId: 'native-1' }),
-		], { lastAppendSeq: 1, localNotice: 'The process died.' });
+		chat.replaceGeneration('generation-2', [
+			entry(1, assistant('native')),
+			entry(2, new ErrorMessage(TS, 'The process died.')),
+		], { lastSeq: 2 });
 
-		expect(chat.visiblePendingInputs).toEqual([]);
-		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
-		expect(messageContents(chat.displayMessages)).toEqual([
-			'native',
-			'The process died.',
-		]);
+		expect(chat.pendingUserInputs).toEqual([]);
+		expect(chat.chatMessages.map(contentOf)).toEqual(['native', 'The process died.']);
+		expect(chat.chatMessages[1]).toBeInstanceOf(ErrorMessage);
 	});
 
-	it('persists and restores the event cursor with the visible event window', () => {
-		const chatId = 'persist-chat';
-		localStorage.clear();
+	it('persists and restores generation-scoped snapshots', () => {
 		const chat = new ChatState();
-		chat.applyEvents('log-1', [
-			event(1, new UserMessage(TS, 'first'), { messageId: 'first' }),
-			event(2, new UserMessage(TS, 'second'), { messageId: 'second' }),
+		chat.applyMessages('generation-1', [
+			entry(1, user('first')),
+			entry(2, assistant('second')),
 		]);
+		chat.persistMessages('chat-1');
 
-		chat.persistMessages(chatId);
 		const restored = new ChatState();
-		const result = restored.restoreMessages(chatId);
+		const result = restored.restoreMessages('chat-1');
 
 		expect(result).toEqual({ count: 2, stale: false });
-		expect(restored.getCursor()).toEqual({ logId: 'log-1', lastAppendSeq: 2 });
-		expect(restored.visibleRows.map((row) => row.id)).toEqual(['first', 'second']);
-		localStorage.clear();
-	});
-
-	it('resetForNewChat clears event, pending, and local state', () => {
-		const chat = new ChatState();
-		chat.applyEvents('log-1', [event(1, new UserMessage(TS, 'hello'))]);
-		chat.appendLocalAssistantMessage('local');
-		chat.isUserScrolledUp = true;
-
-		chat.resetForNewChat();
-
-		expect(chat.chatMessages).toEqual([]);
-		expect(chat.displayMessages).toEqual([]);
-		expect(chat.getCursor()).toEqual({ logId: '', lastAppendSeq: 0 });
-		expect(chat.isUserScrolledUp).toBe(false);
+		expect(restored.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
+		expect(restored.chatMessages.map(contentOf)).toEqual(['first', 'second']);
 	});
 });

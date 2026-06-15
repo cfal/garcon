@@ -107,10 +107,10 @@ function createDeps(chat = createRunningChat()) {
 			chatState.pendingUserInputs = [...chatState.pendingUserInputs, input];
 		}),
 		updatePendingUserInputDeliveryStatus: vi.fn(
-			(
-				clientRequestId: string,
-				deliveryStatus: 'submitting' | 'accepted' | 'delivered' | 'failed',
-			) => {
+				(
+					clientRequestId: string,
+					deliveryStatus: 'submitting' | 'accepted' | 'failed',
+				) => {
 				chatState.pendingUserInputs = chatState.pendingUserInputs.map((input) =>
 					input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
 				);
@@ -427,8 +427,8 @@ describe('ConversationSessionController', () => {
 		});
 		await submit;
 
-		const delivered = deps.chatState.pendingUserInputs[0];
-		expect(delivered.deliveryStatus).toBe('accepted');
+			const acceptedInput = deps.chatState.pendingUserInputs[0];
+			expect(acceptedInput.deliveryStatus).toBe('accepted');
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-1', true);
 	});

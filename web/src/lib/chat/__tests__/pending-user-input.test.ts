@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizePendingUserInput } from '$shared/pending-user-input';
 
 describe('pending user input', () => {
-	it('accepts delivered delivery status', () => {
+	it('rejects obsolete delivered delivery status', () => {
 		const input = normalizePendingUserInput({
 			chatId: 'chat-1',
 			clientRequestId: 'request-1',
@@ -11,6 +11,6 @@ describe('pending user input', () => {
 			deliveryStatus: 'delivered',
 		});
 
-		expect(input?.deliveryStatus).toBe('delivered');
+		expect(input).toBeNull();
 	});
 });

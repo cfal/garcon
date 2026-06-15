@@ -68,8 +68,8 @@ describe('filterByChat', () => {
 
 	it('skips scoped events for non-matching chats', () => {
 		const result = filterByChat(
-			'chat-events',
-			{ type: 'chat-events', chatId: 'chat-b' } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 'chat-b' } as never,
 			ctx,
 		);
 		expect(result).toEqual({ action: 'skip' });
@@ -95,8 +95,8 @@ describe('filterByChat', () => {
 
 	it('processes scoped events for the active chat', () => {
 		const result = filterByChat(
-			'chat-events',
-			{ type: 'chat-events', chatId: 'chat-a' } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 'chat-a' } as never,
 			ctx,
 		);
 		expect(result).toEqual({ action: 'process' });
@@ -141,15 +141,15 @@ describe('filterByChat', () => {
 	});
 
 	it('skips scoped events with no chatId and no pending view', () => {
-		const result = filterByChat('chat-events', { type: 'chat-events' } as never, ctx);
+		const result = filterByChat('chat-messages', { type: 'chat-messages' } as never, ctx);
 		expect(result).toEqual({ action: 'skip' });
 	});
 
 	it('skips scoped events when no active view chat exists', () => {
 		const noActiveCtx = { selectedChatId: null, currentChatId: null, pendingViewChatId: null };
 		const result = filterByChat(
-			'chat-events',
-			{ type: 'chat-events', chatId: 'chat-x' } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 'chat-x' } as never,
 			noActiveCtx,
 		);
 		expect(result).toEqual({ action: 'skip' });
@@ -157,8 +157,8 @@ describe('filterByChat', () => {
 
 	it('handles message with non-string chatId gracefully', () => {
 		const result = filterByChat(
-			'chat-events',
-			{ type: 'chat-events', chatId: 12345 } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 12345 } as never,
 			ctx,
 		);
 		expect(result).toEqual({ action: 'skip' });
@@ -167,8 +167,8 @@ describe('filterByChat', () => {
 	it('falls back to currentChatId when selectedChatId is null', () => {
 		const fallbackCtx = { selectedChatId: null, currentChatId: 'chat-b', pendingViewChatId: null };
 		const result = filterByChat(
-			'chat-events',
-			{ type: 'chat-events', chatId: 'chat-b' } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 'chat-b' } as never,
 			fallbackCtx,
 		);
 		expect(result).toEqual({ action: 'process' });
@@ -177,8 +177,8 @@ describe('filterByChat', () => {
 	it('falls back to pendingViewChatId when both selected and current are null', () => {
 		const fallbackCtx = { selectedChatId: null, currentChatId: null, pendingViewChatId: 'chat-c' };
 		const result = filterByChat(
-			'chat-events',
-			{ type: 'chat-events', chatId: 'chat-c' } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 'chat-c' } as never,
 			fallbackCtx,
 		);
 		expect(result).toEqual({ action: 'process' });

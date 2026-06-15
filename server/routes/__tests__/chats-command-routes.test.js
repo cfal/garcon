@@ -114,8 +114,8 @@ function createRouteAgent(sessionOverrides = {}) {
     listAllChatMetadata: mock(() => new Map()),
     getChatMetadata: mock(() => null),
   };
-  const chatEvents = {
-    readPage: mock(() => Promise.resolve({ events: [], logId: 'log-1', lastAppendSeq: 0, pageOldestSeq: 0, hasMore: false })),
+  const chatViews = {
+    getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
   };
   const agents = {
     hasAgent: mock(() => true),
@@ -137,7 +137,7 @@ function createRouteAgent(sessionOverrides = {}) {
     queue,
     pathCache,
     metadata,
-    chatEvents,
+    chatViews,
     agents,
     pendingInputs,
     commandService: createRouteCommandService({
@@ -150,7 +150,7 @@ function createRouteAgent(sessionOverrides = {}) {
       pendingInputs,
     }),
   });
-  return { sessions, registry, settings, queue, pathCache, metadata, chatEvents, agents, routes };
+  return { sessions, registry, settings, queue, pathCache, metadata, chatViews, agents, routes };
 }
 
 async function callJson(handler, body, method = 'POST') {

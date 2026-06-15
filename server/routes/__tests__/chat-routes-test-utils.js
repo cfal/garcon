@@ -20,12 +20,12 @@ export function createRoutePendingInputs() {
   };
 }
 
-export function createRouteChatEvents() {
+export function createRouteChatViews() {
   return {
-    readPage: () => Promise.resolve({
-      events: [],
-      logId: 'log-1',
-      lastAppendSeq: 0,
+    getOrCreatePage: () => Promise.resolve({
+      messages: [],
+      generationId: 'generation-1',
+      lastSeq: 0,
       pageOldestSeq: 0,
       hasMore: false,
     }),

@@ -23,13 +23,12 @@ describe('reloadChatFromNative', () => {
 			type: 'chat-reloaded',
 			clientRequestId: 'req-1',
 			chatId: 'chat-1',
-			logId: 'log-2',
-			lastAppendSeq: 1,
-			events: [{
-				appendSeq: 1,
+			generationId: 'generation-2',
+			lastSeq: 1,
+			pageOldestSeq: 1,
+			hasMore: false,
+			messages: [{
 				seq: 1,
-				messageId: 'native-1',
-				rev: 1,
 				message: { type: 'assistant-message', timestamp: TS, content: 'native' },
 			}],
 		});
@@ -41,10 +40,10 @@ describe('reloadChatFromNative', () => {
 			type: 'chat-reload',
 			chatId: 'chat-1',
 		});
-		expect(chat.getCursor()).toEqual({ logId: 'log-2', lastAppendSeq: 1 });
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-2', lastSeq: 1 });
 		expect(chat.chatMessages[0]).toBeInstanceOf(AssistantMessage);
 		expect((chat.chatMessages[0] as AssistantMessage).content).toBe('native');
-		expect(chat.snapshotCache.restore('chat-1')?.lastAppendSeq).toBe(1);
+		expect(chat.snapshotCache.restore('chat-1')?.lastSeq).toBe(1);
 	});
 
 	it('rejects unexpected reload responses', async () => {
@@ -52,10 +51,10 @@ describe('reloadChatFromNative', () => {
 			type: 'chat-subscribed',
 			clientRequestId: 'req-1',
 			chatId: 'chat-1',
-			logId: 'log-1',
+			generationId: 'generation-1',
 			mode: 'delta',
-			events: [],
-			lastAppendSeq: 0,
+			messages: [],
+			lastSeq: 0,
 		});
 
 		await expect(reloadChatFromNative(ws, new ChatState(), 'chat-1')).rejects.toThrow(

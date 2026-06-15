@@ -39,8 +39,8 @@ const metadata = {
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
-const chatEvents = {
-  readPage: mock(() => Promise.resolve({ events: [], logId: 'log-1', lastAppendSeq: 0, pageOldestSeq: 0, hasMore: false })),
+const chatViews = {
+  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
 };
 const agents = {
   startSession: mock(() => Promise.resolve(undefined)),
@@ -56,7 +56,7 @@ const routes = createChatRoutes({
   queue,
   pathCache,
   metadata,
-  chatEvents,
+  chatViews,
   agents,
   pendingInputs,
   commandService: createRouteCommandService({

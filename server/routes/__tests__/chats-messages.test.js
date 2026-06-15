@@ -60,15 +60,14 @@ function createRoutesFixture() {
     getChatMetadata: mock(() => null),
     addNewChatMetadata: mock(() => undefined),
   };
-  const chatEvents = {
-    readPage: mock(async (_chatId, limit, beforeSeq) => ({
-      events: [],
-      logId: 'log-1',
-      lastAppendSeq: 0,
+  const chatViews = {
+    getOrCreatePage: mock(async (_chatId, limit, beforeSeq) => ({
+      messages: [],
+      generationId: 'generation-1',
+      lastSeq: 0,
       pageOldestSeq: beforeSeq ?? 0,
       hasMore: false,
       limit,
-      localNotice: 'The process died.',
     })),
   };
   const agents = {
@@ -96,7 +95,7 @@ function createRoutesFixture() {
     queue,
     pathCache,
     metadata,
-    chatEvents,
+    chatViews,
     agents,
     pendingInputs,
     commandService: createRouteCommandService({
@@ -110,21 +109,28 @@ function createRoutesFixture() {
     }),
   });
 
-  return { chatEvents, pendingInputs, routes };
+  return { chatViews, pendingInputs, routes };
 }
 
 describe('GET /api/v1/chats/messages', () => {
   it('clamps pagination parameters before reading history', async () => {
-    const { chatEvents, pendingInputs, routes } = createRoutesFixture();
+    const { chatViews, pendingInputs, routes } = createRoutesFixture();
     const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=999999&beforeSeq=10');
 
     const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      localNotice: 'The process died.',
+      chatId: '123',
+      generationId: 'generation-1',
+      messages: [],
+      lastSeq: 0,
+      pageOldestSeq: 10,
+      hasMore: false,
+      limit: 200,
+      pendingUserInputs: [],
     });
     expect(pendingInputs.reconcile).toHaveBeenCalledWith('123');
-    expect(chatEvents.readPage).toHaveBeenCalledWith('123', 200, 10);
+    expect(chatViews.getOrCreatePage).toHaveBeenCalledWith('123', 200, 10);
   });
 });

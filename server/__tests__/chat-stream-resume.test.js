@@ -1,151 +1,94 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { promises as fs } from 'fs';
-import os from 'os';
-import path from 'path';
-import { ChatEventLog } from '../chats/chat-event-log.js';
+import { describe, expect, it } from 'bun:test';
 import { ChatNativeReloader } from '../chats/chat-native-reload.js';
-import { ColdLoadedChatEventLog } from '../chats/cold-loaded-chat-event-log.js';
-import { ChatStreamFence } from '../chats/chat-stream-fence.js';
+import { ChatViewStore } from '../chats/chat-view-store.js';
 import { PendingUserInputService } from '../chats/pending-user-input-service.js';
 import {
-  ChatEventsMessage,
-  ChatGenerationResetMessage,
   AgentRunFailedMessage,
+  ChatGenerationResetMessage,
+  ChatMessagesMessage,
 } from '../../common/ws-events.ts';
-import { AssistantMessage, UserMessage } from '../../common/chat-types.js';
+import { AssistantMessage, ErrorMessage, UserMessage } from '../../common/chat-types.js';
 
-let tmpDir;
+const TS = '2026-06-01T00:00:00.000Z';
+const RELOAD_FAILED_NOTICE = 'The process died. Reloading chat history failed.';
 
 function user(content, metadata = {}) {
-  return new UserMessage('2026-06-01T00:00:00.000Z', content, undefined, metadata);
+  return new UserMessage(TS, content, undefined, metadata);
 }
 
 function assistant(content) {
-  return new AssistantMessage('2026-06-01T00:00:01.000Z', content);
+  return new AssistantMessage(TS, content);
 }
 
-async function createResumeHarness() {
-  const chatEventLog = new ChatEventLog(tmpDir, () => false);
-  const coldLoadedChatEvents = new ColdLoadedChatEventLog(chatEventLog, {
-    ensureColdLoaded: async () => undefined,
-  });
-  const broadcasts = [];
-  const broadcast = (message) => broadcasts.push(message);
-
-  return {
-    chatEventLog,
-    broadcasts,
-    async submit(chatId, content, metadata = {}) {
-      return coldLoadedChatEvents.appendMessages(chatId, [user(content, metadata)], 'submit');
-    },
-    async emitMessages(chatId, messages, metadata = {}) {
-      const appended = await coldLoadedChatEvents.appendMessages(chatId, messages, 'agent');
-      broadcast(new ChatEventsMessage(
-        chatId,
-        appended.logId,
-        appended.events,
-        metadata.turnId,
-        metadata.clientRequestId,
-      ));
-      return appended;
-    },
-    async finish(chatId, metadata = {}) {
-      const revised = await coldLoadedChatEvents.reviseUserMessageDelivery(
-        chatId,
-        { clientRequestId: metadata.clientRequestId, turnId: metadata.turnId },
-        'delivered',
-      );
-      if (revised) {
-        broadcast(new ChatEventsMessage(chatId, revised.logId, [revised.event], metadata.turnId, metadata.clientRequestId));
-      }
-      return revised;
-    },
-    readCursor(appended) {
-      return {
-        logId: appended.logId,
-        lastAppendSeq: appended.events.at(-1)?.appendSeq ?? 0,
-      };
-    },
-    subscribe(chatId, cursor) {
-      return coldLoadedChatEvents.readReplay(chatId, cursor.logId, cursor.lastAppendSeq);
-    },
-  };
+function contents(result) {
+  return result.messages.map((entry) => entry.message.content);
 }
 
 describe('chat stream resume integration', () => {
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chat-stream-resume-test-'));
-  });
-
-  afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
-  });
-
-  it('replays missed output and delivery revisions after reconnect', async () => {
-    const app = await createResumeHarness();
+  it('replays missed same-generation output after reconnect', async () => {
+    const views = new ChatViewStore(() => false);
     const turn = { clientRequestId: 'req-1', turnId: 'turn-1' };
 
-    await app.submit('chat-1', 'hello', { ...turn, deliveryStatus: 'accepted' });
-    const first = await app.emitMessages('chat-1', [assistant('first')], turn);
-    const cursor = app.readCursor(first);
+    await views.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => [],
+      [user('hello', { ...turn, deliveryStatus: 'accepted' })],
+    );
+    const first = await views.appendAfterEnsuringGeneration('chat-1', async () => [], [assistant('first')]);
+    const cursor = { generationId: first.generationId, lastSeq: first.lastSeq };
 
-    await app.emitMessages('chat-1', [assistant('missed')], turn);
-    await app.finish('chat-1', turn);
+    await views.appendAfterEnsuringGeneration('chat-1', async () => [], [assistant('missed')]);
 
-    const replay = await app.subscribe('chat-1', cursor);
+    const replay = views.readReplay('chat-1', cursor.generationId, cursor.lastSeq);
 
     expect(replay.mode).toBe('delta');
-    expect(replay.events.map((event) => event.message.content)).toContain('missed');
-    expect(replay.events.some((event) => event.seq === 1 && event.rev === 2)).toBe(true);
-    expect(replay.lastAppendSeq).toBe(4);
+    expect(contents(replay)).toEqual(['missed']);
+    expect(replay.lastSeq).toBe(3);
   });
 
   it('process failure reload resets generation and prevents stale late output', async () => {
-    const chatEventLog = new ChatEventLog(tmpDir, () => false);
-    const streamFence = new ChatStreamFence();
+    const views = new ChatViewStore(() => false);
     const nativeReloader = new ChatNativeReloader(
-      chatEventLog,
+      views,
       { loadNativeMessages: async () => [assistant('last native message')] },
       () => true,
     );
-    const coldLoadedChatEvents = new ColdLoadedChatEventLog(chatEventLog, nativeReloader);
     const pendingInputs = new PendingUserInputService({
-      async ensureLoaded(chatId) {
-        return coldLoadedChatEvents.getMessages(chatId);
-      },
-      getMessages(chatId) {
-        return coldLoadedChatEvents.getLoadedMessages(chatId);
-      },
+      ensureLoaded: async (chatId) => views.getOrCreateMessages(chatId, async () => []),
+      getMessages: (chatId) => views.getLoadedMessages(chatId),
     });
     const broadcasts = [];
     const turn = { clientRequestId: 'req-1', turnId: 'turn-1' };
+    const staleFence = views.captureFence('chat-1');
 
     await pendingInputs.register('chat-1', 'lost prompt', turn);
-    const staleEpoch = streamFence.capture('chat-1');
-
-    streamFence.invalidate('chat-1');
+    views.invalidateFence('chat-1');
     const reload = await nativeReloader.reloadFromNative('chat-1', 'process-error');
     pendingInputs.discardChat('chat-1');
     broadcasts.push(new ChatGenerationResetMessage(
       'chat-1',
-      reload.logId,
-      reload.events,
-      reload.lastAppendSeq,
-      reload.localNotice,
+      reload.generationId,
+      'process-error',
+      reload.lastSeq,
     ));
     broadcasts.push(new AgentRunFailedMessage('chat-1', 'process died', turn.turnId, turn.clientRequestId));
 
-    const late = await coldLoadedChatEvents.appendMessages('chat-1', [assistant('late')], 'agent', {
-      guard: () => streamFence.isCurrent('chat-1', staleEpoch),
-    });
+    const late = await views.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => [],
+      [assistant('late')],
+      { fence: staleFence },
+    );
+    const page = views.readPage('chat-1', 100);
 
-    const page = await coldLoadedChatEvents.readPage('chat-1', 100);
     expect(late.skipped).toBe(true);
-    expect(page.events.map((event) => event.message.content)).toEqual(['last native message']);
+    expect(contents(page)).toEqual(['last native message', 'The process died.']);
     expect(pendingInputs.listForChat('chat-1')).toEqual([]);
     expect(broadcasts).toContainEqual(expect.objectContaining({
       type: 'chat-generation-reset',
-      localNotice: 'The process died.',
+      generationId: reload.generationId,
+      reason: 'process-error',
+      lastSeq: 2,
     }));
     expect(broadcasts).toContainEqual(expect.objectContaining({
       type: 'agent-run-failed',
@@ -154,44 +97,44 @@ describe('chat stream resume integration', () => {
     }));
   });
 
-  it('process failure reload failure broadcasts a reset with an explanatory local notice', async () => {
-    const chatEventLog = new ChatEventLog(tmpDir, () => false);
-    const streamFence = new ChatStreamFence();
+  it('process failure reload failure broadcasts an explanatory in-generation error message', async () => {
+    const views = new ChatViewStore(() => false);
     const nativeReloader = new ChatNativeReloader(
-      chatEventLog,
+      views,
       { loadNativeMessages: async () => { throw new Error('native read failed'); } },
       () => true,
     );
     const broadcasts = [];
 
-    const original = await chatEventLog.appendMessages('chat-1', [assistant('warm output')], 'agent');
-    streamFence.invalidate('chat-1');
+    const original = await views.appendAfterEnsuringGeneration('chat-1', async () => [], [assistant('warm output')]);
+    views.invalidateFence('chat-1');
     await expect(nativeReloader.reloadFromNative('chat-1', 'process-error')).rejects.toThrow('native read failed');
-    const reset = await chatEventLog.replaceGenerationFromCurrent('chat-1', {
-      localNotice: 'The process died. Reloading chat history failed.',
-    });
-    broadcasts.push(new ChatGenerationResetMessage(
+    const appended = await views.appendToCurrentOrEmpty('chat-1', [
+      new ErrorMessage(TS, RELOAD_FAILED_NOTICE),
+    ]);
+    broadcasts.push(new ChatMessagesMessage(
       'chat-1',
-      reset.logId,
-      reset.events,
-      reset.lastAppendSeq,
-      reset.localNotice,
+      appended.generationId,
+      appended.messages,
+      'turn-1',
+      'req-1',
     ));
     broadcasts.push(new AgentRunFailedMessage('chat-1', 'process died', 'turn-1', 'req-1'));
 
-    const page = await chatEventLog.readPage('chat-1', 100);
-    const replay = await chatEventLog.readReplay('chat-1', original.logId, original.events[0].appendSeq);
+    const page = views.readPage('chat-1', 100);
+    const replay = views.readReplay('chat-1', original.generationId, original.lastSeq);
 
-    expect(reset.logId).not.toBe(original.logId);
-    expect(page.events.map((event) => event.message.content)).toEqual(['warm output']);
-    expect(page.localNotice).toBe('The process died. Reloading chat history failed.');
+    expect(page.generationId).toBe(original.generationId);
+    expect(contents(page)).toEqual(['warm output', RELOAD_FAILED_NOTICE]);
     expect(replay).toMatchObject({
-      mode: 'snapshot-required',
-      logId: reset.logId,
+      mode: 'delta',
+      generationId: original.generationId,
     });
+    expect(contents(replay)).toEqual([RELOAD_FAILED_NOTICE]);
     expect(broadcasts).toContainEqual(expect.objectContaining({
-      type: 'chat-generation-reset',
-      localNotice: 'The process died. Reloading chat history failed.',
+      type: 'chat-messages',
+      generationId: original.generationId,
+      messages: [expect.objectContaining({ message: expect.any(ErrorMessage) })],
     }));
   });
 });

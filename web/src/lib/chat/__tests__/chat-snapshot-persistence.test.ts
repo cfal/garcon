@@ -1,26 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage } from '$shared/chat-types';
-import type { ChatMessageEvent } from '$shared/chat-events';
+import type { ChatViewMessage } from '$shared/chat-view';
 import { ChatSnapshotPersistence, type ChatSnapshotDraft } from '../chat-snapshot-persistence';
 
 const TS = '2026-06-01T00:00:00.000Z';
 
-function event(seq: number): ChatMessageEvent {
+function entry(seq: number): ChatViewMessage {
 	return {
-		appendSeq: seq,
 		seq,
-		messageId: `message-${seq}`,
-		rev: 1,
 		message: new AssistantMessage(TS, `message ${seq}`),
 	};
 }
 
-function draft(chatId: string, lastAppendSeq: number): ChatSnapshotDraft {
+function draft(chatId: string, lastSeq: number): ChatSnapshotDraft {
 	return {
 		chatId,
-		entries: [event(lastAppendSeq)],
-		logId: `log-${chatId}`,
-		lastAppendSeq,
+		entries: [entry(lastSeq)],
+		generationId: `generation-${chatId}`,
+		lastSeq,
 	};
 }
 
@@ -87,7 +84,8 @@ describe('ChatSnapshotPersistence', () => {
 		expect(persist).toHaveBeenCalledOnce();
 		expect(persist).toHaveBeenCalledWith(expect.objectContaining({
 			chatId: 'chat-1',
-			lastAppendSeq: 2,
+			generationId: 'generation-chat-1',
+			lastSeq: 2,
 		}));
 	});
 
@@ -102,14 +100,14 @@ describe('ChatSnapshotPersistence', () => {
 		expect(persist).toHaveBeenCalledOnce();
 		expect(persist).toHaveBeenCalledWith(expect.objectContaining({
 			chatId: 'chat-1',
-			lastAppendSeq: 1,
+			lastSeq: 1,
 		}));
 
 		vi.advanceTimersByTime(100);
 		expect(persist).toHaveBeenCalledTimes(2);
 		expect(persist).toHaveBeenLastCalledWith(expect.objectContaining({
 			chatId: 'chat-2',
-			lastAppendSeq: 5,
+			lastSeq: 5,
 		}));
 	});
 
@@ -125,7 +123,7 @@ describe('ChatSnapshotPersistence', () => {
 		expect(persist).toHaveBeenCalledOnce();
 		expect(persist).toHaveBeenCalledWith(expect.objectContaining({
 			chatId: 'chat-1',
-			lastAppendSeq: 3,
+			lastSeq: 3,
 		}));
 	});
 });
