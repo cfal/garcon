@@ -103,6 +103,41 @@ describe('ChatEventLog', () => {
     expect(replay.events[0].message.metadata.deliveryStatus).toBe('delivered');
   });
 
+  it('does not create another revision for already delivered user messages', async () => {
+    const appended = await log.appendMessages(
+      'chat-1',
+      [user('ship it', {
+        clientRequestId: 'request-1',
+        messageId: 'client-message-1',
+        deliveryStatus: 'accepted',
+      })],
+      'submit',
+    );
+
+    const first = await log.reviseUserMessageDelivery(
+      'chat-1',
+      { clientRequestId: 'request-1' },
+      'delivered',
+    );
+    const second = await log.reviseUserMessageDelivery(
+      'chat-1',
+      { clientRequestId: 'request-1' },
+      'delivered',
+    );
+
+    expect(first?.event).toMatchObject({ appendSeq: 2, rev: 2 });
+    expect(second).toBeNull();
+
+    const page = await log.readPage('chat-1', 10);
+    expect(page.lastAppendSeq).toBe(2);
+    expect(page.events).toHaveLength(1);
+    expect(page.events[0].message.metadata.deliveryStatus).toBe('delivered');
+
+    const replay = await log.readReplay('chat-1', appended.logId, 1);
+    expect(replay.events).toHaveLength(1);
+    expect(replay.events[0]).toMatchObject({ appendSeq: 2, rev: 2 });
+  });
+
   it('requires a snapshot when the native generation replaces the log', async () => {
     const original = await log.appendMessages('chat-1', [user('old')], 'submit');
     const replacement = await log.replaceGenerationFromNative('chat-1', [assistant('fresh')]);
