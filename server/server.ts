@@ -236,7 +236,6 @@ export async function startServer(): Promise<void> {
       },
       nativeReloader: chatNativeReloader,
       registry: chatRegistry,
-      pendingInputs,
     });
     const wsHandlers = {
       '/shell': shellManager.createHandler(),
@@ -335,12 +334,53 @@ export async function startServer(): Promise<void> {
     // Broadcast helper: all event callbacks only fire when sessions are
     // active or routes are called, both of which happen after server is up.
     const broadcast = (payload: unknown) => server.publish('chat', JSON.stringify(payload));
+    const recentProcessFailures = new Map<string, number>();
+    const processFailureDedupeMs = 30_000;
+
+    function turnFailureKey(chatId: string, turnMetadata?: TurnEventMetadata): string {
+      return `${chatId}:${turnMetadata?.turnId ?? turnMetadata?.clientRequestId ?? 'chat'}`;
+    }
+
+    function pruneRecentProcessFailures(): void {
+      const cutoff = Date.now() - processFailureDedupeMs;
+      for (const [key, markedAt] of recentProcessFailures) {
+        if (markedAt < cutoff) recentProcessFailures.delete(key);
+      }
+    }
+
+    function markProcessFailure(chatId: string, turnMetadata?: TurnEventMetadata): void {
+      pruneRecentProcessFailures();
+      recentProcessFailures.set(turnFailureKey(chatId, turnMetadata), Date.now());
+    }
+
+    function consumeProcessFailure(chatId: string, turnMetadata?: TurnEventMetadata): boolean {
+      pruneRecentProcessFailures();
+      const key = turnFailureKey(chatId, turnMetadata);
+      const wasProcessFailure = recentProcessFailures.has(key);
+      if (wasProcessFailure) recentProcessFailures.delete(key);
+      return wasProcessFailure;
+    }
+
+    function broadcastAgentFailure(
+      chatId: string,
+      message: string,
+      turnMetadata?: TurnEventMetadata,
+    ): void {
+      broadcast(new AgentRunFailedMessage(
+        chatId,
+        message,
+        turnMetadata?.turnId,
+        turnMetadata?.clientRequestId,
+        turnMetadata?.upstreamRequestId,
+      ));
+    }
 
     async function reloadAfterProcessError(
       chatId: string,
       message: string,
       turnMetadata?: TurnEventMetadata,
     ): Promise<void> {
+      markProcessFailure(chatId, turnMetadata);
       chatViews.invalidateFence(chatId);
       try {
         const reload = await chatNativeReloader.reloadFromNative(chatId, 'process-error');
@@ -372,13 +412,7 @@ export async function startServer(): Promise<void> {
           logger.warn('chat-view: process-error fallback append failed:', errorMessage(resetErr));
         }
       }
-      broadcast(new AgentRunFailedMessage(
-        chatId,
-        message,
-        turnMetadata?.turnId,
-        turnMetadata?.clientRequestId,
-        turnMetadata?.upstreamRequestId,
-      ));
+      broadcastAgentFailure(chatId, message, turnMetadata);
     }
 
     // Wire agent output into the current chat view before broadcasting.
@@ -514,7 +548,11 @@ export async function startServer(): Promise<void> {
       broadcast(new ChatSessionStoppedMessage(chatId, success));
     });
     queue.onTurnFailed((chatId, errorMessage, options = {}) => {
-      void reloadAfterProcessError(chatId, errorMessage, options);
+      if (consumeProcessFailure(chatId, options)) return;
+      if (options.clientRequestId) {
+        pendingInputs.markFailed(chatId, options.clientRequestId);
+      }
+      broadcastAgentFailure(chatId, errorMessage, options);
     });
 
     // Graceful shutdown: flush pending writes and clean up timers.

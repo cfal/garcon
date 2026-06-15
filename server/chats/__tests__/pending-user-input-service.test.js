@@ -38,4 +38,29 @@ describe('PendingUserInputService', () => {
     expect(service.listForChat('chat-1').map((input) => input.clientRequestId)).toEqual(['req-2']);
     expect(cleared).toEqual([]);
   });
+
+  it('marks one input failed without clearing the overlay', async () => {
+    const service = new PendingUserInputService(createReader());
+    const updated = [];
+    const cleared = [];
+    service.store.onUpdated((input) => {
+      updated.push(input);
+    });
+    service.store.onCleared((chatId, clientRequestId, reason) => {
+      cleared.push({ chatId, clientRequestId, reason });
+    });
+
+    await service.register('chat-1', 'first', { clientRequestId: 'req-1' });
+
+    expect(service.markFailed('chat-1', 'req-1')).toBe(true);
+    expect(service.listForChat('chat-1')).toMatchObject([{
+      clientRequestId: 'req-1',
+      deliveryStatus: 'failed',
+    }]);
+    expect(updated.at(-1)).toMatchObject({
+      clientRequestId: 'req-1',
+      deliveryStatus: 'failed',
+    });
+    expect(cleared).toEqual([]);
+  });
 });

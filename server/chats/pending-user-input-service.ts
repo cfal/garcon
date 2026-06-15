@@ -22,6 +22,7 @@ export interface PendingUserInputServiceContract {
   clearChat(chatId: string, reason?: PendingUserInputClearReason): void;
   discardChat(chatId: string): number;
   discard(chatId: string, clientRequestId: string): boolean;
+  markFailed(chatId: string, clientRequestId: string): boolean;
   register(chatId: string, content: string, options?: RegisterPendingUserInputOptions): Promise<PendingUserInput>;
   reconcile(chatId: string): Promise<void>;
 }
@@ -49,6 +50,15 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
 
   discard(chatId: string, clientRequestId: string): boolean {
     return this.store.discard(chatId, clientRequestId);
+  }
+
+  markFailed(chatId: string, clientRequestId: string): boolean {
+    const record = this.store
+      .listRecordsForChat(chatId)
+      .find((input) => input.clientRequestId === clientRequestId);
+    if (!record) return false;
+    this.store.upsert({ ...record, deliveryStatus: 'failed' });
+    return true;
   }
 
   async register(chatId: string, content: string, options: RegisterPendingUserInputOptions = {}): Promise<PendingUserInput> {
