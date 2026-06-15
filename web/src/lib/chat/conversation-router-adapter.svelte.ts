@@ -4,6 +4,7 @@
 
 import { goto } from '$app/navigation';
 import { createEventRouter, type EventRouterStores } from '$lib/events/router.svelte';
+import { gotoChat } from '$lib/chat/chat-navigation';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import { INITIAL_VISIBLE_MESSAGES, type ChatState } from '$lib/chat/state.svelte';
@@ -93,14 +94,14 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			reconcileProcessing: (activeChatIds) => deps.sessions.reconcileProcessing(activeChatIds),
 			setChatProcessing: (chatId, isProcessing) =>
 				deps.sessions.setChatProcessing(chatId, isProcessing),
-			patchChatPreview: (chatId, content, _timestamp) => {
-				deps.sessions.patchPreview(chatId, content);
-			},
+				patchChatPreview: (chatId, content, _timestamp) => {
+					deps.sessions.patchPreview(chatId, content);
+				},
 			refreshChats: () => {
 				void deps.sessions.quietRefreshChats();
 			},
 			navigateToChat: (chatId) => {
-				goto(`/chat/${chatId}`);
+				void gotoChat(chatId);
 				void deps.sessions.quietRefreshChats();
 			},
 			removeChat: (chatId) => deps.sessions.removeChat(chatId),
@@ -111,7 +112,7 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				const neighborId = deps.sessions.order[idx - 1] ?? deps.sessions.order[idx + 1] ?? null;
 				if (neighborId) {
 					deps.sessions.setSelectedChatId(neighborId);
-					goto(`/chat/${neighborId}`);
+					void gotoChat(neighborId);
 				} else {
 					deps.sessions.setSelectedChatId(null);
 					goto('/');
@@ -125,7 +126,7 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				deps.sessions.setChatProcessing(chatId, true);
 				deps.lifecycle.setCurrentChatId(chatId);
 				deps.sessions.setSelectedChatId(chatId);
-				goto(`/chat/${chatId}`);
+				void gotoChat(chatId);
 				void deps.sessions.quietRefreshChats();
 			},
 			onExternalChatCreated: (chatId) => {

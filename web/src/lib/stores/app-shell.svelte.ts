@@ -1,5 +1,6 @@
 // Coordinates shell-level state and imperative action dispatch.
 
+import { untrack } from 'svelte';
 import { createActionSignal } from '$lib/utils/action-signal';
 
 export type SettingsTab = 'providers' | 'other-agents' | 'local' | 'remote';
@@ -21,6 +22,7 @@ export class AppShellStore {
 	settingsTab = $state<SettingsTab>('providers');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
+	composerFocusRequestId = $state(0);
 	/** Height of the virtual keyboard in px, tracked via visualViewport. */
 	keyboardHeight = $state(0);
 	/** Read-only project base path from server config. Set once on settings load. */
@@ -104,6 +106,7 @@ export class AppShellStore {
 
 	/** Requests focus on the active chat composer input. */
 	requestComposerFocus(): void {
+		this.composerFocusRequestId = untrack(() => this.composerFocusRequestId) + 1;
 		this.#composerFocus.emit();
 	}
 

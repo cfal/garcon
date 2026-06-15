@@ -5,7 +5,6 @@
 	// the controller modules.
 
 	import { onDestroy, onMount, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueueControls from './QueueControls.svelte';
@@ -15,6 +14,7 @@
 	import { AgentState } from '$lib/chat/agent-state.svelte';
 	import { getChatQueue } from '$lib/api/chats.js';
 	import { reloadChatFromNative } from '$lib/chat/reload-chat';
+	import { gotoChat } from '$lib/chat/chat-navigation';
 	import { StartupCoordinator } from '$lib/chat/startup-coordinator.js';
 	import { createDrainCursor } from '$lib/ws/drain';
 	import { ChatReconnectCoordinator } from '$lib/ws/reconnect-coordinator.svelte';
@@ -174,7 +174,7 @@
 			setActiveTab: (tab) => navigation.setActiveTab(tab),
 			navigateToChat: (chatId) => {
 				sessions.setSelectedChatId(chatId);
-				goto(`/chat/${chatId}`);
+				void gotoChat(chatId).finally(() => appShell.requestComposerFocus());
 			},
 		},
 		setIsViewportPinnedToBottom: (v) => {

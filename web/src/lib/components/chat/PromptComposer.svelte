@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy, tick } from 'svelte';
+	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import LoadingStatus from './LoadingStatus.svelte';
@@ -64,11 +64,19 @@
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
+	let nextFocusRequestId = 0;
+	let handledAppShellFocusRequestId = 0;
+	let pendingFocusRequest = $state<{ chatId: string; requestId: number } | null>(null);
+
+	function requestComposerFocusForChat(chatId: string | null): void {
+		if (!chatId) return;
+		nextFocusRequestId += 1;
+		pendingFocusRequest = { chatId, requestId: nextFocusRequestId };
+	}
 
 	// Auto-focus textarea when the composer mounts (new chat or chat switch).
 	onMount(() => {
-		tick().then(() => textarea?.focus());
-		return appShell.onComposerFocusRequested(() => textarea?.focus());
+		tick().then(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
 
 	// Ephemeral UI state extracted to companion class.
@@ -77,13 +85,38 @@
 
 	// Resets ephemeral UI state when switching chats without remounting the composer.
 	$effect(() => {
-		const changed = ui.resetOnChatSwitch(sessions.selectedChatId);
+		const chatId = sessions.selectedChatId;
+		const changed = ui.resetOnChatSwitch(chatId);
 		if (!changed) return;
 		composerState.isDragActive = false;
-		requestAnimationFrame(() => {
+		requestComposerFocusForChat(chatId);
+	});
+
+	// Shell focus requests can happen while navigation is changing ownership.
+	// The request ID makes them durable until this mounted composer can consume them.
+	$effect(() => {
+		const requestId = appShell.composerFocusRequestId;
+		if (requestId === 0 || requestId === handledAppShellFocusRequestId) return;
+		handledAppShellFocusRequestId = requestId;
+		untrack(() => requestComposerFocusForChat(sessions.selectedChatId));
+	});
+
+	// Focuses after the textarea is enabled; draft startup can briefly disable it.
+	$effect(() => {
+		const request = pendingFocusRequest;
+		const disabled = isDisabled;
+		const target = textarea;
+		if (!request || disabled || !target) return;
+		const frameId = requestAnimationFrame(() => {
+			if (pendingFocusRequest?.requestId !== request.requestId) return;
+			if (sessions.selectedChatId !== request.chatId || isDisabled || !textarea) return;
 			autoResize();
-			textarea?.focus();
+			textarea.focus();
+			if (pendingFocusRequest?.requestId === request.requestId) {
+				pendingFocusRequest = null;
+			}
 		});
+		return () => cancelAnimationFrame(frameId);
 	});
 
 	// Shared image URL lifecycle management. Syncs blob URLs with

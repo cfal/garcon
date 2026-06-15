@@ -6,9 +6,9 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { getAppShell, getNavigation, getChatSessions } from '$lib/context';
 	import { createClientChatId } from '$lib/chat/client-id.js';
+	import { gotoChat } from '$lib/chat/chat-navigation';
 	import type { NewChatConfig } from '$lib/types/app';
 	import NewChatForm from './NewChatForm.svelte';
-	import { goto } from '$app/navigation';
 
 	const appShell = getAppShell();
 	const navigation = getNavigation();
@@ -45,7 +45,7 @@
 
 		appShell.closeNewChatDialog();
 		navigation.setActiveTab('chat');
-		goto(`/chat/${chatId}`);
+		void gotoChat(chatId).finally(() => appShell.requestComposerFocus());
 	}
 </script>
 

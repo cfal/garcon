@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { gotoChat } from '$lib/chat/chat-navigation';
 	import Sidebar from '../sidebar/Sidebar.svelte';
 	import ResizeHandle from './ResizeHandle.svelte';
 	import BottomTabBar from './BottomTabBar.svelte';
@@ -47,7 +48,10 @@
 	$effect(() => {
 		const chatId = page.params.id as string | undefined;
 		const selectedChatId = selectedChatIdFromRoute(page.url.pathname, chatId);
-		if (selectedChatId !== undefined) sessions.setSelectedChatId(selectedChatId);
+		if (selectedChatId === undefined) return;
+		const changed = untrack(() => selectedChatId !== sessions.selectedChatId);
+		sessions.setSelectedChatId(selectedChatId);
+		if (changed && selectedChatId) appShell.requestComposerFocus();
 	});
 
 	$effect(() => {
@@ -131,9 +135,17 @@
 		void sessions.refreshChats();
 	});
 
-	function handleChatSelect(chatId: string) {
+	function requestComposerFocusAfterNavigation(navigation: Promise<void>): void {
+		void navigation.finally(() => appShell.requestComposerFocus());
+	}
+
+	function navigateToChat(chatId: string): void {
 		sessions.setSelectedChatId(chatId);
-		goto(`/chat/${chatId}`);
+		requestComposerFocusAfterNavigation(gotoChat(chatId));
+	}
+
+	function handleChatSelect(chatId: string) {
+		navigateToChat(chatId);
 	}
 
 	function handleNewChat() {
@@ -153,8 +165,7 @@
 		if (idx < 0) return;
 		const targetId = order[idx + offset];
 		if (!targetId) return;
-		sessions.setSelectedChatId(targetId);
-		goto(`/chat/${targetId}`);
+		navigateToChat(targetId);
 	}
 
 	// Applies the same store mutations the ChatSessionDeletedWsMessage handler
@@ -166,8 +177,7 @@
 			const idx = sessions.order.indexOf(chatId);
 			const neighborId = sessions.order[idx - 1] ?? sessions.order[idx + 1] ?? null;
 			if (neighborId) {
-				sessions.setSelectedChatId(neighborId);
-				goto(`/chat/${neighborId}`);
+				navigateToChat(neighborId);
 			} else {
 				sessions.setSelectedChatId(null);
 				goto('/');
