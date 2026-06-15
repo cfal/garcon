@@ -319,11 +319,16 @@ export class ChatState {
 		];
 	}
 
+	clearLocalNotices(): void {
+		this.localNotices = [];
+	}
+
 	setPendingUserInputs(inputs: PendingUserInput[]): void {
 		this.pendingUserInputs = sortPendingInputs(inputs);
 	}
 
 	upsertPendingUserInput(input: PendingUserInput): void {
+		this.clearLocalNotices();
 		const next = this.pendingUserInputs.slice();
 		const index = next.findIndex((entry) => entry.clientRequestId === input.clientRequestId);
 		if (index >= 0) next[index] = input;

@@ -96,6 +96,7 @@ function createDeps(chat = createRunningChat()) {
 				new AssistantMessage(new Date().toISOString(), content),
 			];
 		}),
+		clearLocalNotices: vi.fn(),
 		upsertPendingUserInput: vi.fn((input: PendingUserInput) => {
 			const index = chatState.pendingUserInputs.findIndex(
 				(existing) => existing.clientRequestId === input.clientRequestId,
@@ -513,6 +514,7 @@ describe('ConversationSessionController', () => {
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.chatState.chatMessages).toHaveLength(0);
+		expect(deps.chatState.clearLocalNotices).toHaveBeenCalledOnce();
 		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith(
 			'chat-1',
 			expect.objectContaining({

@@ -108,6 +108,23 @@ describe('ChatState', () => {
 		expect(chat.displayMessages.map(contentOf)).toEqual(['server', 'next']);
 	});
 
+	it('clears transient local messages when a pending user input is submitted', () => {
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+		chat.appendLocalAssistantMessage('Chat interrupted by user.');
+
+		chat.upsertPendingUserInput({
+			chatId: 'chat-1',
+			clientRequestId: 'req-1',
+			clientMessageId: 'msg-1',
+			content: 'continue',
+			createdAt: '2026-06-01T00:00:01.000Z',
+			deliveryStatus: 'submitting',
+		});
+
+		expect(chat.displayMessages.map(contentOf)).toEqual(['server', 'continue']);
+	});
+
 	it('keeps transient local messages when replay only overlaps existing server messages', () => {
 		const chat = new ChatState();
 		chat.applyMessages('generation-1', [entry(1, user('server'))]);

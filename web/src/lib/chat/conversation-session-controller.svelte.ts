@@ -362,6 +362,7 @@ export class ConversationSessionController {
 					chatId,
 					content: text,
 				});
+				deps.chatState.clearLocalNotices();
 				deps.conversationUi.setMessageQueue(chatId, result.queue);
 				deps.composerState.clearAfterSubmit(chatId);
 			} catch (err) {
