@@ -81,6 +81,7 @@ const mockChatEvents = {
     pageOldestSeq: beforeSeq ?? 1,
     hasMore: false,
     limit: limit || 20,
+    localNotice: 'The process died.',
   })),
   readReplay: mock((_chatId, _logId, _afterAppendSeq) => Promise.resolve({
     logId: 'log-1',
@@ -789,6 +790,7 @@ describe('chat WebSocket handler', () => {
         logId: 'log-1',
         pendingUserInputs: [],
         lastAppendSeq: 1,
+        localNotice: 'The process died.',
       });
       expect(payload.events.length).toBe(1);
     });

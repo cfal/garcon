@@ -103,6 +103,9 @@ describe('ChatNativeReloader', () => {
     const reload = await reloader.reloadFromNative('chat-1', 'process-error');
     expect(reload.localNotice).toBe('The process died.');
 
+    const warmPage = await log.readPage('chat-1', 10);
+    expect(warmPage.localNotice).toBe('The process died.');
+
     const freshLog = new ChatEventLog(tmpDir, () => false);
     const page = await freshLog.readPage('chat-1', 10);
     expect(page.events.map((event) => event.message.content)).toEqual([
@@ -110,6 +113,7 @@ describe('ChatNativeReloader', () => {
       'native response',
     ]);
     expect(page.events.map((event) => event.message.content)).not.toContain('The process died.');
+    expect(page.localNotice).toBeUndefined();
   });
 
   it('rejects manual reload for running chats', async () => {

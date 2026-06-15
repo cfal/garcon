@@ -394,6 +394,7 @@ export default function createChatRoutes({
         hasMore: page.hasMore,
         limit,
         pendingUserInputs: pendingInputs.listForChat(chatId),
+        localNotice: page.localNotice,
       });
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);

@@ -204,6 +204,7 @@ export class ChatLogResponseMessage {
     public pageOldestSeq: number,
     public hasMore: boolean,
     public limit: number,
+    public localNotice?: string,
   ) { }
 }
 
@@ -463,6 +464,7 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
         Number(data.pageOldestSeq) || 0,
         Boolean(data.hasMore),
         Number(data.limit),
+        typeof data.localNotice === 'string' ? data.localNotice : undefined,
       );
     }
     case 'client-request-error': {

@@ -182,6 +182,7 @@ export async function getChatMessages(params: {
 	pendingUserInputs: PendingUserInput[];
 	hasMore: boolean;
 	limit: number;
+	localNotice?: string;
 }> {
 	const query = new URLSearchParams({
 		chatId: params.chatId,
@@ -196,6 +197,7 @@ export async function getChatMessages(params: {
 		pendingUserInputs?: PendingUserInput[];
 		hasMore?: unknown;
 		limit?: unknown;
+		localNotice?: unknown;
 	}>(`/api/v1/chats/messages?${query.toString()}`);
 	const events = parseChatMessageEvents(response.events);
 	if (events === null) throw new Error('Invalid chat event page');
@@ -207,6 +209,7 @@ export async function getChatMessages(params: {
 		pendingUserInputs: Array.isArray(response.pendingUserInputs) ? response.pendingUserInputs : [],
 		hasMore: Boolean(response.hasMore),
 		limit: Number(response.limit) || params.limit || 20,
+		localNotice: typeof response.localNotice === 'string' ? response.localNotice : undefined,
 	};
 }
 

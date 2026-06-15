@@ -68,6 +68,7 @@ import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 
 const logger = createLogger('server');
+const PROCESS_ERROR_RELOAD_FAILED_NOTICE = 'The process died. Reloading chat history failed.';
 
 type WsPath = '/shell' | '/ws';
 
@@ -393,6 +394,21 @@ export async function startServer(): Promise<void> {
         ));
       } catch (err) {
         logger.warn('chat-events: process-error reload failed:', errorMessage(err));
+        try {
+          const reset = await chatEventLog.replaceGenerationFromCurrent(chatId, {
+            localNotice: PROCESS_ERROR_RELOAD_FAILED_NOTICE,
+          });
+          pendingInputs.discardChat(chatId);
+          broadcast(new ChatGenerationResetMessage(
+            chatId,
+            reset.logId,
+            reset.events,
+            reset.lastAppendSeq,
+            reset.localNotice,
+          ));
+        } catch (resetErr) {
+          logger.warn('chat-events: process-error fallback reset failed:', errorMessage(resetErr));
+        }
       }
       broadcast(new AgentRunFailedMessage(
         chatId,

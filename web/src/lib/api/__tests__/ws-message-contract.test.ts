@@ -360,10 +360,12 @@ describe('parseServerWsMessage', () => {
 			pageOldestSeq: 1,
 			hasMore: false,
 			limit: 50,
+			localNotice: 'The process died.',
 		});
 		expect(msg).toBeInstanceOf(ChatLogResponseMessage);
 		expect((msg as ChatLogResponseMessage).clientRequestId).toBe('req-1');
 		expect((msg as ChatLogResponseMessage).events).toHaveLength(1);
+		expect((msg as ChatLogResponseMessage).localNotice).toBe('The process died.');
 	});
 
 	it('parses client-request-error', () => {

@@ -43,6 +43,12 @@ function localMessageId(): string {
 		: Math.random().toString(36).slice(2);
 }
 
+function localNoticeRows(localNotice?: string): ChatMessageRow[] {
+	return localNotice
+		? [{ id: `local_${localMessageId()}`, message: new ErrorMessage(new Date().toISOString(), localNotice) }]
+		: [];
+}
+
 function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): PendingUserInput[] {
 	return sortPendingInputs(
 		page.pendingUserInputs
@@ -200,9 +206,7 @@ export class ChatState {
 		this.totalMessages = events.length;
 		this.pendingUserInputs = [];
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
-		this.localMessages = options.localNotice
-			? [{ id: `local_${localMessageId()}`, message: new ErrorMessage(new Date().toISOString(), options.localNotice) }]
-			: [];
+		this.localMessages = localNoticeRows(options.localNotice);
 		this.#eventIndex = buildEventIndex(events);
 		this.loadStatus = events.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
@@ -217,6 +221,7 @@ export class ChatState {
 		lastAppendSeq: number;
 		pageOldestSeq: number;
 		hasMore: boolean;
+		localNotice?: string;
 	}, epoch: number): PageApplyResult {
 		if (epoch !== this.#loadEpoch) return 'stale';
 
@@ -234,6 +239,7 @@ export class ChatState {
 		this.oldestSeq = page.pageOldestSeq;
 		this.hasMoreMessages = page.hasMore;
 		this.totalMessages = page.events.length;
+		this.localMessages = localNoticeRows(page.localNotice);
 		this.loadStatus = page.events.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;

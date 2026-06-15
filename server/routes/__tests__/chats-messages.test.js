@@ -68,6 +68,7 @@ function createRoutesFixture() {
       pageOldestSeq: beforeSeq ?? 0,
       hasMore: false,
       limit,
+      localNotice: 'The process died.',
     })),
   };
   const agents = {
@@ -120,6 +121,9 @@ describe('GET /api/v1/chats/messages', () => {
     const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      localNotice: 'The process died.',
+    });
     expect(pendingInputs.reconcile).toHaveBeenCalledWith('123');
     expect(chatEvents.readPage).toHaveBeenCalledWith('123', 200, 10);
   });

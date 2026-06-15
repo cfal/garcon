@@ -31,6 +31,7 @@ export interface ChatEventPage {
   lastAppendSeq: number;
   pageOldestSeq: number;
   hasMore: boolean;
+  localNotice?: string;
 }
 
 export interface ChatEventReplay {
@@ -70,6 +71,7 @@ interface LogEntry {
   lastAppendSeq: number;
   loaded: boolean;
   lastAccessAt: number;
+  localNotice?: string;
 }
 
 export interface ChatEventLogOptions {
@@ -103,6 +105,7 @@ export class ChatEventLog {
   #pendingMutations = new Map<string, number>();
   #locks = new KeyedPromiseLock();
   #generations = new Map<string, string>();
+  #generationLocalNotices = new Map<string, string>();
   #replayLimit: number;
   #cacheLimit: number;
   #staleNonActiveMs: number;
@@ -183,6 +186,7 @@ export class ChatEventLog {
         lastAppendSeq: 0,
         loaded: true,
         lastAccessAt: this.#now(),
+        localNotice: options.localNotice,
       };
       for (const message of messages) {
         const appendSeq = entry.lastAppendSeq + 1;
@@ -204,6 +208,36 @@ export class ChatEventLog {
         entry.events.map((event) => ({ ...event, origin: 'native' })),
       );
       this.#generations.set(chatId, entry.logId);
+      this.#setGenerationLocalNotice(chatId, options.localNotice);
+      this.#entries.set(chatId, entry);
+      this.#pruneIfNeeded();
+      return {
+        logId: entry.logId,
+        events: [...entry.events],
+        lastAppendSeq: entry.lastAppendSeq,
+        localNotice: options.localNotice,
+      };
+    }, { bypassBackpressure: true });
+  }
+
+  async replaceGenerationFromCurrent(
+    chatId: string,
+    options: { localNotice?: string } = {},
+  ): Promise<ReplacedChatGeneration> {
+    return this.#runMutation(chatId, async () => {
+      const current = await this.#ensureLoaded(chatId);
+      const entry: LogEntry = {
+        chatId,
+        logId: crypto.randomUUID(),
+        events: current.events.map((event) => ({ ...event })),
+        byMessageId: buildMessageIndex(current.events),
+        lastAppendSeq: current.lastAppendSeq,
+        loaded: true,
+        lastAccessAt: this.#now(),
+        localNotice: options.localNotice,
+      };
+      this.#generations.set(chatId, entry.logId);
+      this.#setGenerationLocalNotice(chatId, options.localNotice);
       this.#entries.set(chatId, entry);
       this.#pruneIfNeeded();
       return {
@@ -266,6 +300,7 @@ export class ChatEventLog {
       lastAppendSeq: entry.lastAppendSeq,
       pageOldestSeq: page.length > 0 ? page[0].seq : 0,
       hasMore: start > 0,
+      localNotice: beforeSeq && beforeSeq > 0 ? undefined : entry.localNotice,
     };
   }
 
@@ -313,6 +348,7 @@ export class ChatEventLog {
     await this.#runMutation(chatId, async () => {
       this.#entries.delete(chatId);
       this.#generations.delete(chatId);
+      this.#generationLocalNotices.delete(chatId);
       try {
         await fs.unlink(this.#filePath(chatId));
       } catch (error: unknown) {
@@ -427,6 +463,7 @@ export class ChatEventLog {
         lastAppendSeq: 0,
         loaded: true,
         lastAccessAt: this.#now(),
+        localNotice: this.#generationLocalNotices.get(chatId),
       };
       const generation = this.#generations.get(chatId) ?? crypto.randomUUID();
       this.#generations.set(chatId, generation);
@@ -463,6 +500,11 @@ export class ChatEventLog {
 
   #pruneIfNeeded(): void {
     if (this.#entries.size > this.#cacheLimit) this.prune();
+  }
+
+  #setGenerationLocalNotice(chatId: string, localNotice?: string): void {
+    if (localNotice) this.#generationLocalNotices.set(chatId, localNotice);
+    else this.#generationLocalNotices.delete(chatId);
   }
 
   async #persistReplacement(chatId: string, lines: PersistedEventLine[]): Promise<void> {
@@ -503,6 +545,14 @@ function lowerBound(events: ChatMessageEvent[], seq: number): number {
     else hi = mid;
   }
   return lo;
+}
+
+function buildMessageIndex(events: ChatMessageEvent[]): Map<string, number> {
+  const index = new Map<string, number>();
+  events.forEach((event, eventIndex) => {
+    index.set(event.messageId, eventIndex);
+  });
+  return index;
 }
 
 function parsePersistedLine(line: string): PersistedEventLine | null {

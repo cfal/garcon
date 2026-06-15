@@ -292,6 +292,7 @@ export class ChatHandler {
         result.pageOldestSeq,
         result.hasMore,
         limit,
+        result.localNotice,
       ));
     } catch (error: unknown) {
       logger.error(`ws: error reading messages for ${chatId}:`, (error as Error).message);

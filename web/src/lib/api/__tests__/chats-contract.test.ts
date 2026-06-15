@@ -335,6 +335,7 @@ describe('chats API contract', () => {
 								pendingUserInputs: [],
 								hasMore: false,
 								limit: 50,
+								localNotice: 'The process died.',
 							}
 						: { success: true },
 				),
@@ -363,11 +364,12 @@ describe('chats API contract', () => {
 		expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/chats/running');
 		expect(fetchMock.mock.calls[2][1].method ?? 'GET').toBe('GET');
 
-		await getChatMessages({ chatId: 'c/1', limit: 50, beforeSeq: 20 });
+		const messages = await getChatMessages({ chatId: 'c/1', limit: 50, beforeSeq: 20 });
 		expect(fetchMock.mock.calls[3][0]).toBe(
 			'/api/v1/chats/messages?chatId=c%2F1&limit=50&beforeSeq=20',
 		);
 		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
+		expect(messages.localNotice).toBe('The process died.');
 	});
 
 	it('deleteChat sends chatId in the JSON body', async () => {

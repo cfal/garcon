@@ -31,6 +31,7 @@ function page(overrides: Partial<{
 	hasMore: boolean;
 	pendingUserInputs: unknown[];
 	limit: number;
+	localNotice: string;
 }> = {}) {
 	const events = overrides.events ?? [];
 	return {
@@ -41,6 +42,7 @@ function page(overrides: Partial<{
 		hasMore: overrides.hasMore ?? false,
 		limit: overrides.limit ?? 20,
 		pendingUserInputs: overrides.pendingUserInputs ?? [],
+		localNotice: overrides.localNotice,
 	};
 }
 
@@ -147,6 +149,20 @@ describe('ChatState', () => {
 
 		expect(chat.chatMessages).toHaveLength(1);
 		expect(chat.displayMessages).toHaveLength(2);
+		expect(chat.displayMessages[1]).toBeInstanceOf(ErrorMessage);
+	});
+
+	it('loads local notices from snapshot pages', async () => {
+		getChatMessagesMock.mockResolvedValueOnce(page({
+			events: [event(1, new AssistantMessage(TS, 'server'))],
+			localNotice: 'The process died.',
+		}));
+		const chat = new ChatState();
+
+		await chat.loadMessages('chat-1');
+
+		expect(messageContents(chat.chatMessages)).toEqual(['server']);
+		expect(messageContents(chat.displayMessages)).toEqual(['server', 'The process died.']);
 		expect(chat.displayMessages[1]).toBeInstanceOf(ErrorMessage);
 	});
 

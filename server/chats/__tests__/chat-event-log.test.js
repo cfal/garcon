@@ -119,6 +119,36 @@ describe('ChatEventLog', () => {
     });
   });
 
+  it('exposes process-scoped local notices on latest pages only', async () => {
+    const original = await log.appendMessages('chat-1', [user('old'), assistant('warmer')], 'submit');
+    const replacement = await log.replaceGenerationFromCurrent('chat-1', {
+      localNotice: 'The process died. Reloading chat history failed.',
+    });
+
+    expect(replacement.logId).not.toBe(original.logId);
+    expect(replacement.localNotice).toBe('The process died. Reloading chat history failed.');
+    expect(replacement.events.map((event) => event.message.content)).toEqual(['old', 'warmer']);
+
+    const latest = await log.readPage('chat-1', 1);
+    expect(latest.localNotice).toBe('The process died. Reloading chat history failed.');
+    expect(latest.events.map((event) => event.message.content)).toEqual(['warmer']);
+
+    const older = await log.readPage('chat-1', 1, latest.pageOldestSeq);
+    expect(older.localNotice).toBeUndefined();
+
+    const replay = await log.readReplay('chat-1', original.logId, original.events[0].appendSeq);
+    expect(replay).toMatchObject({
+      logId: replacement.logId,
+      mode: 'snapshot-required',
+      lastAppendSeq: 2,
+    });
+
+    const fresh = new ChatEventLog(tmpDir, () => false);
+    const persisted = await fresh.readPage('chat-1', 10);
+    expect(persisted.events.map((event) => event.message.content)).toEqual(['old', 'warmer']);
+    expect(persisted.localNotice).toBeUndefined();
+  });
+
   it('reloads persisted events to identical visible state across instances', async () => {
     const first = new ChatEventLog(tmpDir, () => false);
     await first.appendMessages('chat-1', [user('A'), assistant('B')], 'agent');
