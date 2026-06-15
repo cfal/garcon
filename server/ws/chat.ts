@@ -9,6 +9,7 @@ import {
   ChatSessionsRunningMessage, WsFaultMessage, ChatForkCreatedMessage,
   ClientRequestErrorMessage,
   ChatSubscribedMessage,
+  ChatGenerationResetMessage,
   ChatReloadedMessage,
 } from '../../common/ws-events.ts';
 import type { ClientRequestErrorCode } from '../../common/ws-events.ts';
@@ -109,6 +110,9 @@ class WebSocketWriter {
   }
   send(data: unknown): void {
     sendWebSocketJson(this.#ws, data);
+  }
+  publish(data: unknown): void {
+    this.#ws.publish('chat', JSON.stringify(data));
   }
 }
 
@@ -364,6 +368,13 @@ export class ChatHandler {
       const reload = await this.#nativeReloader.reloadFromNative(chatId, 'manual-reload');
       writer.send(new ChatReloadedMessage(
         clientRequestId,
+        chatId,
+        reload.logId,
+        reload.events,
+        reload.lastAppendSeq,
+        reload.localNotice,
+      ));
+      writer.publish(new ChatGenerationResetMessage(
         chatId,
         reload.logId,
         reload.events,

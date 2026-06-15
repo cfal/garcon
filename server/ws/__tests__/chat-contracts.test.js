@@ -194,6 +194,11 @@ function lastSentPayload() {
   return calls.length > 0 ? calls[calls.length - 1][1] : null;
 }
 
+function lastPublishedPayload(ws) {
+  const calls = ws.publish.mock.calls;
+  return calls.length > 0 ? JSON.parse(calls[calls.length - 1][1]) : null;
+}
+
 describe('chat WebSocket handler', () => {
   let ws;
 
@@ -994,6 +999,13 @@ describe('chat WebSocket handler', () => {
         logId: 'log-2',
         lastAppendSeq: 1,
       });
+      expect(lastPublishedPayload(ws)).toMatchObject({
+        type: 'chat-generation-reset',
+        chatId: '123',
+        logId: 'log-2',
+        lastAppendSeq: 1,
+      });
+      expect(ws.publish.mock.calls[0][0]).toBe('chat');
     });
 
     it('rejects manual reload while the chat is running', async () => {
