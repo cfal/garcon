@@ -4,35 +4,28 @@
 
 import { sendWebSocketJson } from './utils.js';
 import {
-  ChatLogResponseMessage,
-  ChatSessionsRunningMessage, WsFaultMessage,
+  ChatSessionsRunningMessage,
+  WsFaultMessage,
   ClientRequestErrorMessage,
   ChatSubscribedMessage,
   ChatGenerationResetMessage,
   ChatReloadedMessage,
 } from '../../common/ws-events.ts';
 import type { ClientRequestErrorCode } from '../../common/ws-events.ts';
-import type { PendingUserInput } from '../../common/pending-user-input.js';
 import {
   parseClientWsMessage,
-  ChatLogQueryRequest,
   ChatSubscribeRequest,
   ChatReloadRequest,
   ChatRunningQueryRequest,
 } from '../../common/ws-requests.ts';
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { IChatRegistry } from '../chats/store.js';
-import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
-import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatNativeReloader } from '../chats/chat-native-reload.js';
-import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('ws:chat');
-
-const PERMISSION_DEDUP_TTL_MS = 30_000;
 
 // Bun's ServerWebSocket parameterized over the per-socket data bag.
 type WS = import('bun').ServerWebSocket<unknown>;
@@ -42,12 +35,10 @@ type AgentRegistryDep = Pick<
   'getRunningSessions'
 >;
 
-type ChatViewsDep = ChatViewPageReader & {
+type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
+type ChatViewsDep = {
   readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null;
 };
-type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
-
-type PendingInputsDep = Pick<PendingUserInputServiceContract, 'reconcile' | 'listForChat'>;
 
 type WsRequestHandler = (data: ClientWsMessage, writer: WebSocketWriter) => Promise<void> | void;
 type ChatIdRequest = { type: string; chatId?: string | null };
@@ -57,7 +48,6 @@ interface ChatHandlerDeps {
   chatViews: ChatViewsDep;
   nativeReloader: NativeReloaderDep;
   registry: IChatRegistry;
-  pendingInputs: PendingInputsDep;
 }
 
 class WebSocketWriter {
@@ -86,7 +76,6 @@ export class ChatHandler {
   #agents: AgentRegistryDep;
   #chatViews: ChatViewsDep;
   #nativeReloader: NativeReloaderDep;
-  #pendingInputs: PendingInputsDep;
   #registry: IChatRegistry;
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
@@ -95,12 +84,10 @@ export class ChatHandler {
     chatViews,
     nativeReloader,
     registry,
-    pendingInputs,
   }: ChatHandlerDeps) {
     this.#agents = agents;
     this.#chatViews = chatViews;
     this.#nativeReloader = nativeReloader;
-    this.#pendingInputs = pendingInputs;
     this.#registry = registry;
     this.#requestHandlers = this.#createRequestHandlers();
   }
@@ -122,51 +109,6 @@ export class ChatHandler {
       params.clientRequestId, params.requestType, params.code,
       params.message, Boolean(params.retryable), params.chatId,
     ));
-  }
-
-  async #handleGetMessages(data: ChatLogQueryRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
-    const clientRequestId = data.clientRequestId;
-    if (!clientRequestId) return;
-
-    const requestType = 'chat-log-query';
-
-    try {
-      const session = this.#registry.getChat(chatId);
-      if (!session) {
-        this.#sendRequestError(writer, {
-          clientRequestId, requestType,
-          code: 'SESSION_NOT_FOUND',
-          message: `Chat not found: ${chatId}`,
-          retryable: false, chatId,
-        });
-        return;
-      }
-
-      const { limit } = parsePagination(data.limit, null, { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
-
-      await this.#pendingInputs.reconcile(chatId);
-      const result = await this.#chatViews.getOrCreatePage(chatId, limit, data.beforeSeq);
-
-      writer.send(new ChatLogResponseMessage(
-        clientRequestId,
-        chatId,
-        result.generationId,
-        result.messages,
-        this.#pendingInputs.listForChat(chatId) as PendingUserInput[],
-        result.lastSeq,
-        result.pageOldestSeq,
-        result.hasMore,
-        limit,
-      ));
-    } catch (error: unknown) {
-      logger.error(`ws: error reading messages for ${chatId}:`, (error as Error).message);
-      this.#sendRequestError(writer, {
-        clientRequestId, requestType,
-        code: 'HISTORY_LOAD_FAILED',
-        message: (error as Error).message || 'Failed to load chat history',
-        retryable: true, chatId,
-      });
-    }
   }
 
   #handleGetRunningSessions(data: ChatRunningQueryRequest, writer: WebSocketWriter): void {
@@ -265,9 +207,6 @@ export class ChatHandler {
 
   #createRequestHandlers(): Record<ClientWsMessage['type'], WsRequestHandler> {
     return {
-      'chat-log-query': (data, writer) => this.#withChatId(data as ChatLogQueryRequest, writer, (chatId) => {
-        return this.#handleGetMessages(data as ChatLogQueryRequest, chatId, writer);
-      }),
       'chat-subscribe': (data, writer) => this.#withChatId(data as ChatSubscribeRequest, writer, (chatId) => {
         return this.#handleChatSubscribe(data as ChatSubscribeRequest, chatId, writer);
       }),

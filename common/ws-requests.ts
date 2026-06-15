@@ -21,25 +21,6 @@ export class ChatRunningQueryRequest {
   }
 }
 
-export class ChatLogQueryRequest {
-  readonly type = 'chat-log-query' as const;
-  constructor(
-    public clientRequestId: string | null,
-    public chatId: string | null,
-    public limit?: number,
-    public beforeSeq?: number,
-  ) { }
-
-  static fromJson(data: Record<string, unknown>): ChatLogQueryRequest {
-    return new ChatLogQueryRequest(
-      strOrNull(data.clientRequestId),
-      strOrNull(data.chatId),
-      data.limit as number | undefined,
-      data.beforeSeq as number | undefined,
-    );
-  }
-}
-
 export class ChatSubscribeRequest {
   readonly type = 'chat-subscribe' as const;
   constructor(
@@ -79,7 +60,6 @@ export class ChatReloadRequest {
 
 export type ClientWsMessage =
   | ChatRunningQueryRequest
-  | ChatLogQueryRequest
   | ChatSubscribeRequest
   | ChatReloadRequest;
 
@@ -87,8 +67,6 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
   switch (data.type) {
     case 'chats-running-query':
       return ChatRunningQueryRequest.fromJson(data);
-    case 'chat-log-query':
-      return ChatLogQueryRequest.fromJson(data);
     case 'chat-subscribe':
       return ChatSubscribeRequest.fromJson(data);
     case 'chat-reload':

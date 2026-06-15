@@ -30,14 +30,6 @@ const mockRegistry = {
 };
 
 const mockChatViews = {
-  getOrCreatePage: mock((_chatId, limit, beforeSeq) => Promise.resolve({
-    generationId: 'generation-1',
-    messages: [chatViewMessage],
-    lastSeq: 1,
-    pageOldestSeq: beforeSeq ?? 1,
-    hasMore: false,
-    limit: limit || 20,
-  })),
   readReplay: mock(() => ({
     generationId: 'generation-1',
     mode: 'delta',
@@ -57,19 +49,11 @@ const mockNativeReloader = {
   })),
 };
 
-const mockPendingInputs = {
-  reconcile: mock(() => Promise.resolve(undefined)),
-  listForChat: mock(() => []),
-};
-
 const injectedMocks = [
   mockAgents.getRunningSessions,
   mockRegistry.getChat,
-  mockChatViews.getOrCreatePage,
   mockChatViews.readReplay,
   mockNativeReloader.reloadFromNative,
-  mockPendingInputs.reconcile,
-  mockPendingInputs.listForChat,
 ];
 
 const moduleMocks = [sendWebSocketJson];
@@ -80,7 +64,6 @@ function createHandler() {
     chatViews: mockChatViews,
     nativeReloader: mockNativeReloader,
     registry: mockRegistry,
-    pendingInputs: mockPendingInputs,
   });
   return instance.createHandler();
 }
@@ -110,14 +93,6 @@ describe('chat WebSocket handler', () => {
     injectedMocks.forEach((fn) => fn.mockClear());
     moduleMocks.forEach((fn) => fn.mockClear());
     mockRegistry.getChat.mockReturnValue({ agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' });
-    mockPendingInputs.listForChat.mockReturnValue([]);
-    mockChatViews.getOrCreatePage.mockResolvedValue({
-      generationId: 'generation-1',
-      messages: [chatViewMessage],
-      lastSeq: 1,
-      pageOldestSeq: 1,
-      hasMore: false,
-    });
     mockChatViews.readReplay.mockReturnValue({
       generationId: 'generation-1',
       mode: 'delta',
@@ -154,62 +129,9 @@ describe('chat WebSocket handler', () => {
     });
   });
 
-  it('returns a get-or-create message page for a valid chat', async () => {
-    await chatHandler.message(ws, {
-      type: 'chat-log-query',
-      chatId: '123',
-      clientRequestId: 'req-msg-1',
-    });
-
-    expect(mockPendingInputs.reconcile).toHaveBeenCalledWith('123');
-    expect(mockChatViews.getOrCreatePage).toHaveBeenCalledWith('123', 20, undefined);
-    expect(lastSentPayload()).toMatchObject({
-      type: 'chat-log-response',
-      clientRequestId: 'req-msg-1',
-      chatId: '123',
-      generationId: 'generation-1',
-      messages: [chatViewMessage],
-      pendingUserInputs: [],
-      lastSeq: 1,
-      pageOldestSeq: 1,
-      hasMore: false,
-      limit: 20,
-    });
-  });
-
-  it('respects page limit and beforeSeq params', async () => {
-    await chatHandler.message(ws, {
-      type: 'chat-log-query',
-      chatId: '123',
-      clientRequestId: 'req-msg-2',
-      limit: 50,
-      beforeSeq: 10,
-    });
-
-    expect(mockChatViews.getOrCreatePage).toHaveBeenCalledWith('123', 50, 10);
-  });
-
-  it('returns client-request-error for unknown chat log queries', async () => {
-    mockRegistry.getChat.mockReturnValue(null);
-
-    await chatHandler.message(ws, {
-      type: 'chat-log-query',
-      chatId: 'missing',
-      clientRequestId: 'req-msg-missing',
-    });
-
-    expect(lastSentPayload()).toMatchObject({
-      type: 'client-request-error',
-      clientRequestId: 'req-msg-missing',
-      chatId: 'missing',
-      code: 'SESSION_NOT_FOUND',
-      retryable: false,
-    });
-  });
-
   it('sends ws-fault for missing chatId', async () => {
     await chatHandler.message(ws, {
-      type: 'chat-log-query',
+      type: 'chat-subscribe',
       clientRequestId: 'req-missing-chat',
     });
 
@@ -249,7 +171,6 @@ describe('chat WebSocket handler', () => {
       afterSeq: 1,
     });
 
-    expect(mockChatViews.getOrCreatePage).not.toHaveBeenCalled();
     expect(lastSentPayload()).toMatchObject({
       type: 'chat-subscribed',
       clientRequestId: 'req-sub-unloaded',

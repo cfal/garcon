@@ -5,7 +5,6 @@ import {
 	ChatForkCreatedMessage,
 	ChatGenerationResetMessage,
 	ChatListRefreshRequestedMessage,
-	ChatLogResponseMessage,
 	ChatMessagesMessage,
 	ChatProcessingUpdatedMessage,
 	ChatReadUpdatedV1Message,
@@ -23,7 +22,6 @@ import {
 	parseServerWsMessage,
 } from '$shared/ws-events';
 import {
-	ChatLogQueryRequest,
 	ChatReloadRequest,
 	ChatRunningQueryRequest,
 	ChatSubscribeRequest,
@@ -216,25 +214,6 @@ describe('parseServerWsMessage', () => {
 		expect((msg as ChatReloadedMessage).generationId).toBe('generation-2');
 	});
 
-	it('parses chat-log-response', () => {
-		const msg = parseServerWsMessage({
-			type: 'chat-log-response',
-			clientRequestId: 'req-1',
-			chatId: 'c-1',
-			generationId: 'generation-1',
-			messages: [chatViewMessage],
-			pendingUserInputs: [],
-			lastSeq: 1,
-			pageOldestSeq: 1,
-			hasMore: false,
-			limit: 50,
-		});
-
-		expect(msg).toBeInstanceOf(ChatLogResponseMessage);
-		expect((msg as ChatLogResponseMessage).messages).toHaveLength(1);
-		expect((msg as ChatLogResponseMessage).lastSeq).toBe(1);
-	});
-
 	it('rejects legacy event-log payloads', () => {
 		expect(parseServerWsMessage({ type: 'chat-events', chatId: 'c-1', logId: 'log-1', events: [] })).toBeNull();
 		expect(parseServerWsMessage({
@@ -310,14 +289,6 @@ describe('parseClientWsMessage', () => {
 			clientRequestId: 'req-running',
 		})).toBeInstanceOf(ChatRunningQueryRequest);
 
-		expect(parseClientWsMessage({
-			type: 'chat-log-query',
-			clientRequestId: 'req-log',
-			chatId: 'c-1',
-			limit: 25,
-			beforeSeq: 10,
-		})).toBeInstanceOf(ChatLogQueryRequest);
-
 		const subscribe = parseClientWsMessage({
 			type: 'chat-subscribe',
 			clientRequestId: 'req-subscribe',
@@ -352,5 +323,12 @@ describe('parseClientWsMessage', () => {
 
 	it('rejects unknown client request messages', () => {
 		expect(parseClientWsMessage({ type: 'fork-run' })).toBeNull();
+		expect(parseClientWsMessage({
+			type: 'chat-log-query',
+			clientRequestId: 'req-log',
+			chatId: 'c-1',
+			limit: 25,
+			beforeSeq: 10,
+		})).toBeNull();
 	});
 });

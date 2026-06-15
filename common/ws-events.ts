@@ -181,21 +181,6 @@ export class SettingsChangedMessage {
   constructor(public settings: RemoteSettingsSnapshot) { }
 }
 
-export class ChatLogResponseMessage {
-  readonly type = 'chat-log-response' as const;
-  constructor(
-    public clientRequestId: string,
-    public chatId: string,
-    public generationId: string,
-    public messages: ChatViewMessage[],
-    public pendingUserInputs: PendingUserInput[],
-    public lastSeq: number,
-    public pageOldestSeq: number,
-    public hasMore: boolean,
-    public limit: number,
-  ) { }
-}
-
 export type ClientRequestErrorCode =
   | 'MISSING_CHAT_ID'
   | 'REQUEST_VALIDATION_FAILED'
@@ -240,7 +225,6 @@ export type ServerWsMessage =
   | ChatReadUpdatedV1Message
   | ChatListRefreshRequestedMessage
   | SettingsChangedMessage
-  | ChatLogResponseMessage
   | ClientRequestErrorMessage;
 
 export type EventKey = ServerWsMessage['type'];
@@ -275,14 +259,6 @@ function parseChatListInvalidationReason(v: unknown): ChatListInvalidationReason
 
 function parseResetReason(value: unknown): ChatGenerationResetReason | null {
   return value === 'manual-reload' || value === 'process-error' ? value : null;
-}
-
-function parsePendingUserInputs(value: unknown): PendingUserInput[] {
-  return Array.isArray(value)
-    ? value
-      .map(normalizePendingUserInput)
-      .filter((input): input is PendingUserInput => Boolean(input))
-    : [];
 }
 
 export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMessage | null {
@@ -430,30 +406,6 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
     case 'settings-changed': {
       const settings = normalizeRemoteSettingsSnapshot(data.settings);
       return settings ? new SettingsChangedMessage(settings) : null;
-    }
-    case 'chat-log-response': {
-      const clientRequestId = requiredStr(data.clientRequestId);
-      const chatId = requiredStr(data.chatId);
-      const generationId = requiredStr(data.generationId);
-      const lastSeq = nonNegativeInt(data.lastSeq);
-      const pageOldestSeq = nonNegativeInt(data.pageOldestSeq);
-      const limit = nonNegativeInt(data.limit);
-      if (!clientRequestId || !chatId || !generationId || lastSeq === null || pageOldestSeq === null || limit === null) {
-        return null;
-      }
-      const messages = parseChatViewMessages(data.messages);
-      if (messages === null) return null;
-      return new ChatLogResponseMessage(
-        clientRequestId,
-        chatId,
-        generationId,
-        messages,
-        parsePendingUserInputs(data.pendingUserInputs),
-        lastSeq,
-        pageOldestSeq,
-        Boolean(data.hasMore),
-        limit,
-      );
     }
     case 'client-request-error': {
       const clientRequestId = requiredStr(data.clientRequestId);
