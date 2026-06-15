@@ -75,6 +75,17 @@
 	const ui = new PromptComposerUiState();
 	ui.previousChatId = sessions.selectedChatId;
 
+	// Resets ephemeral UI state when switching chats without remounting the composer.
+	$effect(() => {
+		const changed = ui.resetOnChatSwitch(sessions.selectedChatId);
+		if (!changed) return;
+		composerState.isDragActive = false;
+		requestAnimationFrame(() => {
+			autoResize();
+			textarea?.focus();
+		});
+	});
+
 	// Shared image URL lifecycle management. Syncs blob URLs with
 	// composerState.images and revokes stale URLs automatically.
 	const imageAttachments = new ImageAttachmentState();
@@ -221,22 +232,6 @@
 		Boolean(sessions.selectedChat?.status === 'running' && sessions.selectedChat?.isProcessing),
 	);
 	const isDisabled = $derived(isDraftStartupLoading);
-
-	// Resets ephemeral UI state when switching chats without remounting the composer.
-	// Also re-fires when isDisabled transitions to false, so the textarea
-	// receives focus even if it was briefly disabled during the chat switch
-	// (e.g. while the new chat's startup data is loading).
-	$effect(() => {
-		const chatId = sessions.selectedChatId;
-		const disabled = isDisabled;
-		const changed = ui.resetOnChatSwitch(chatId);
-		if (!changed && disabled) return;
-		composerState.isDragActive = false;
-		requestAnimationFrame(() => {
-			autoResize();
-			if (!disabled) textarea?.focus();
-		});
-	});
 	const canSubmit = $derived(
 		canSubmitComposer(isDisabled, composerState.inputText, composerState.images.length),
 	);
