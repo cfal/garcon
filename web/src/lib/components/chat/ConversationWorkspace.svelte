@@ -212,9 +212,9 @@
 		});
 	});
 
-	// Scrolls to bottom on new messages and loading status changes unless user scrolled up.
+	// Scrolls to bottom when the bottom row changes, including same-count replacements.
 	$effect(() => {
-		const _count = chatState.displayMessageCount;
+		const _bottomRowId = chatState.bottomVisibleRowId;
 		const _isLoading = lifecycle.isLoading;
 		if (!chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
 			requestAnimationFrame(() => scroll.scrollToBottom());

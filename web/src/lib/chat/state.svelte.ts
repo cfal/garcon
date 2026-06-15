@@ -109,6 +109,8 @@ export class ChatState {
 		return this.#displayRows.slice(-this.visibleMessageCount);
 	});
 
+	#bottomVisibleRowId = $derived.by(() => this.#visibleRows.at(-1)?.id ?? null);
+
 	#visibleMessages = $derived.by(() =>
 		this.#visibleRows.flatMap((row) => row.kind === 'message' ? [row.message] : []),
 	);
@@ -123,6 +125,10 @@ export class ChatState {
 
 	get visibleRows(): ChatDisplayRow[] {
 		return this.#visibleRows;
+	}
+
+	get bottomVisibleRowId(): string | null {
+		return this.#bottomVisibleRowId;
 	}
 
 	get displayMessageCount(): number {
