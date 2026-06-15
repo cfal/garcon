@@ -64,11 +64,11 @@
 
 	const chatState = new ChatState();
 	const snapshotPersistence = new ChatSnapshotPersistence({
-		persist: ({ chatId, entries, logId, lastAppendSeq }) => {
+		persist: ({ chatId, entries, generationId, lastSeq }) => {
 			chatState.snapshotCache.persist(
 				chatId,
 				entries,
-				{ logId, lastAppendSeq },
+				{ generationId, lastSeq },
 				{ limit: INITIAL_VISIBLE_MESSAGES },
 			);
 		},
@@ -96,11 +96,11 @@
 			}
 			await sessions.quietRefreshChats();
 		},
-		onBackgroundEvents: (chatId, logId, events, lastAppendSeq) => {
-			chatState.snapshotCache.applyEvents(chatId, logId, events, lastAppendSeq, {
+		onBackgroundMessages: (chatId, generationId, messages, lastSeq) => {
+			chatState.snapshotCache.applyMessages(chatId, generationId, messages, lastSeq, {
 				limit: INITIAL_VISIBLE_MESSAGES,
 			});
-			const preview = selectPreviewFromBatch(events.map((entry) => entry.message));
+			const preview = selectPreviewFromBatch(messages.map((entry) => entry.message));
 			if (preview) sessions.patchPreview(chatId, preview.content);
 		},
 	});
@@ -196,8 +196,8 @@
 	$effect(() => {
 		const chatId = sessions.selectedChatId;
 		const entries = chatState.entries;
-		const lastAppendSeq = chatState.lastAppendSeq;
-		const logId = chatState.logId;
+		const lastSeq = chatState.lastSeq;
+		const generationId = chatState.generationId;
 		if (!chatId) {
 			snapshotPersistence.flush();
 			return;
@@ -205,8 +205,8 @@
 		snapshotPersistence.schedule({
 			chatId,
 			entries: entries.slice(),
-			logId,
-			lastAppendSeq,
+			generationId,
+			lastSeq,
 		});
 	});
 

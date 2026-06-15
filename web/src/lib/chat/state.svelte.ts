@@ -1,11 +1,7 @@
-// Per-chat event-log state: event entries, cursor pagination, pending
-// overlays, and resumable local snapshots.
-
 import {
-	applyChatMessageEvents,
-	buildEventIndex,
-	type ChatMessageEvent,
-} from '$shared/chat-events';
+	applyChatViewMessages,
+	type ChatViewMessage,
+} from '$shared/chat-view';
 import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import { LocalChatSnapshotCache } from './chat-snapshot-cache';
@@ -28,8 +24,8 @@ export interface ChatRestoreResult {
 }
 
 export interface ChatCursor {
-	logId: string;
-	lastAppendSeq: number;
+	generationId: string;
+	lastSeq: number;
 }
 
 export interface ChatMessageRow {
@@ -43,12 +39,6 @@ function localMessageId(): string {
 		: Math.random().toString(36).slice(2);
 }
 
-function localNoticeRows(localNotice?: string): ChatMessageRow[] {
-	return localNotice
-		? [{ id: `local_${localMessageId()}`, message: new ErrorMessage(new Date().toISOString(), localNotice) }]
-		: [];
-}
-
 function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): PendingUserInput[] {
 	return sortPendingInputs(
 		page.pendingUserInputs
@@ -59,9 +49,9 @@ function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): Pendi
 
 export class ChatState {
 	readonly snapshotCache = new LocalChatSnapshotCache();
-	entries = $state<ChatMessageEvent[]>([]);
-	logId = $state('');
-	lastAppendSeq = $state(0);
+	entries = $state<ChatViewMessage[]>([]);
+	generationId = $state('');
+	lastSeq = $state(0);
 	oldestSeq = $state(0);
 	pendingUserInputs = $state<PendingUserInput[]>([]);
 	localMessages = $state<Array<{ id: string; message: ChatMessage }>>([]);
@@ -73,8 +63,7 @@ export class ChatState {
 	isUserScrolledUp = $state(false);
 	loadStatus = $state<ChatLoadStatus>('idle');
 	loadError = $state<string | null>(null);
-	#eventIndex = new Map<string, number>();
-	#snapshotBuffer: Array<{ logId: string; events: ChatMessageEvent[] }> | null = null;
+	#snapshotBuffer: Array<{ generationId: string; messages: ChatViewMessage[] }> | null = null;
 	#loadEpoch = 0;
 	#isLoadingMore = false;
 
@@ -91,7 +80,7 @@ export class ChatState {
 
 	#displayRows = $derived.by(() => {
 		const durableRows = this.entries.map((entry) => ({
-			id: entry.messageId,
+			id: `${this.generationId}:${entry.seq}`,
 			message: entry.message,
 		}));
 		const merged = this.visiblePendingInputs.length === 0
@@ -141,31 +130,28 @@ export class ChatState {
 	}
 
 	getCursor(): ChatCursor {
-		return { logId: this.logId, lastAppendSeq: this.lastAppendSeq };
+		return { generationId: this.generationId, lastSeq: this.lastSeq };
 	}
 
-	applyEvents(logId: string, events: ChatMessageEvent[]): 'applied' | 'generation-changed' {
+	applyMessages(
+		generationId: string,
+		messages: ChatViewMessage[],
+	): 'applied' | 'generation-changed' {
 		if (this.#snapshotBuffer) {
-			this.#snapshotBuffer.push({ logId, events });
+			this.#snapshotBuffer.push({ generationId, messages });
 			return 'applied';
 		}
-		if (this.logId && logId !== this.logId) {
+		if (this.generationId && generationId !== this.generationId) {
 			this.entries = [];
-			this.lastAppendSeq = 0;
+			this.lastSeq = 0;
 			this.oldestSeq = 0;
-			this.#eventIndex = new Map();
-			this.logId = logId;
+			this.generationId = generationId;
 			return 'generation-changed';
 		}
-		this.logId = logId;
-		const result = applyChatMessageEvents(
-			this.entries,
-			events,
-			this.lastAppendSeq,
-			this.#eventIndex,
-		);
-		if (result.changed) this.entries = result.entries;
-		this.lastAppendSeq = result.lastAppendSeq;
+		this.generationId = generationId;
+		const result = applyChatViewMessages(this.entries, messages, this.lastSeq);
+		if (result.changed) this.entries = result.messages;
+		this.lastSeq = result.lastSeq;
 		this.totalMessages = this.entries.length;
 		if (this.oldestSeq === 0 && this.entries.length > 0) {
 			this.oldestSeq = this.entries[0].seq;
@@ -192,23 +178,22 @@ export class ChatState {
 	}
 
 	replaceGeneration(
-		logId: string,
-		events: ChatMessageEvent[],
-		options: { lastAppendSeq: number; localNotice?: string },
+		generationId: string,
+		messages: ChatViewMessage[],
+		options: { lastSeq: number; pendingUserInputs?: PendingUserInput[] } = { lastSeq: 0 },
 	): void {
 		this.#loadEpoch += 1;
 		this.#snapshotBuffer = null;
-		this.logId = logId;
-		this.entries = events;
-		this.lastAppendSeq = options.lastAppendSeq;
-		this.oldestSeq = events.length > 0 ? events[0].seq : 0;
+		this.generationId = generationId;
+		this.entries = messages;
+		this.lastSeq = options.lastSeq;
+		this.oldestSeq = messages.length > 0 ? messages[0].seq : 0;
 		this.hasMoreMessages = false;
-		this.totalMessages = events.length;
-		this.pendingUserInputs = [];
+		this.totalMessages = messages.length;
+		this.pendingUserInputs = options.pendingUserInputs ? sortPendingInputs(options.pendingUserInputs) : [];
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
-		this.localMessages = localNoticeRows(options.localNotice);
-		this.#eventIndex = buildEventIndex(events);
-		this.loadStatus = events.length === 0 ? 'empty' : 'loaded';
+		this.localMessages = [];
+		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		this.isLoadingMoreMessages = false;
@@ -216,36 +201,36 @@ export class ChatState {
 	}
 
 	setFromPage(page: {
-		logId: string;
-		events: ChatMessageEvent[];
-		lastAppendSeq: number;
+		generationId: string;
+		messages: ChatViewMessage[];
+		lastSeq: number;
 		pageOldestSeq: number;
 		hasMore: boolean;
-		localNotice?: string;
+		pendingUserInputs: PendingUserInput[];
 	}, epoch: number): PageApplyResult {
 		if (epoch !== this.#loadEpoch) return 'stale';
 
 		const buffered = this.#snapshotBuffer ?? [];
 		this.#snapshotBuffer = null;
-		const hasBufferedGenerationChange = buffered.some((batch) => batch.logId !== page.logId);
+		const hasBufferedGenerationChange = buffered.some((batch) => batch.generationId !== page.generationId);
 		if (hasBufferedGenerationChange) {
 			this.isLoadingMessages = false;
 			return 'generation-changed';
 		}
 
-		this.logId = page.logId;
-		this.entries = page.events;
-		this.lastAppendSeq = page.lastAppendSeq;
+		this.generationId = page.generationId;
+		this.entries = page.messages;
+		this.lastSeq = page.lastSeq;
 		this.oldestSeq = page.pageOldestSeq;
 		this.hasMoreMessages = page.hasMore;
-		this.totalMessages = page.events.length;
-		this.localMessages = localNoticeRows(page.localNotice);
-		this.loadStatus = page.events.length === 0 ? 'empty' : 'loaded';
+		this.totalMessages = page.messages.length;
+		this.pendingUserInputs = pendingInputsFromPage(page);
+		this.localMessages = [];
+		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
-		this.#eventIndex = buildEventIndex(page.events);
 		for (const batch of buffered) {
-			if (this.applyEvents(batch.logId, batch.events) === 'generation-changed') {
+			if (this.applyMessages(batch.generationId, batch.messages) === 'generation-changed') {
 				return 'generation-changed';
 			}
 		}
@@ -263,10 +248,7 @@ export class ChatState {
 				const page = await getChatMessages({ chatId, limit });
 				const result = this.setFromPage(page, epoch);
 
-				if (result === 'applied') {
-					this.pendingUserInputs = pendingInputsFromPage(page);
-					return this.chatMessages;
-				}
+				if (result === 'applied') return this.chatMessages;
 				if (result === 'stale') return this.chatMessages;
 
 				this.abortSnapshotLoad(epoch);
@@ -295,20 +277,20 @@ export class ChatState {
 				limit: MESSAGES_PER_PAGE,
 				beforeSeq: this.oldestSeq,
 			});
-			if (page.logId !== this.logId) {
+			if (page.generationId !== this.generationId) {
 				await this.loadMessages(chatId);
 				return false;
 			}
-			if (page.events.length === 0) {
+			if (page.messages.length === 0) {
 				this.hasMoreMessages = false;
 				return false;
 			}
-			this.entries = [...page.events, ...this.entries];
-			this.oldestSeq = page.events[0].seq;
+			this.entries = [...page.messages, ...this.entries];
+			this.oldestSeq = page.messages[0].seq;
+			this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
 			this.hasMoreMessages = page.hasMore;
 			this.totalMessages = this.entries.length;
-			this.visibleMessageCount += page.events.length;
-			this.#eventIndex = buildEventIndex(this.entries);
+			this.visibleMessageCount += page.messages.length;
 			return true;
 		} catch (error) {
 			console.error('Error loading more messages:', error);
@@ -353,7 +335,7 @@ export class ChatState {
 
 	updatePendingUserInputDeliveryStatus(
 		clientRequestId: string,
-		deliveryStatus: 'submitting' | 'accepted' | 'delivered' | 'failed',
+		deliveryStatus: 'submitting' | 'accepted' | 'failed',
 	): void {
 		this.pendingUserInputs = this.pendingUserInputs.map((input) =>
 			input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
@@ -362,8 +344,8 @@ export class ChatState {
 
 	clearMessages(): void {
 		this.entries = [];
-		this.logId = '';
-		this.lastAppendSeq = 0;
+		this.generationId = '';
+		this.lastSeq = 0;
 		this.oldestSeq = 0;
 		this.pendingUserInputs = [];
 		this.localMessages = [];
@@ -372,7 +354,6 @@ export class ChatState {
 		this.loadStatus = 'idle';
 		this.loadError = null;
 		this.#snapshotBuffer = null;
-		this.#eventIndex = new Map();
 	}
 
 	loadEarlierMessages(): void {
@@ -397,7 +378,7 @@ export class ChatState {
 		this.snapshotCache.persist(
 			chatId,
 			this.entries,
-			{ logId: this.logId, lastAppendSeq: this.lastAppendSeq },
+			{ generationId: this.generationId, lastSeq: this.lastSeq },
 			{ limit: INITIAL_VISIBLE_MESSAGES },
 		);
 	}
@@ -406,13 +387,12 @@ export class ChatState {
 		const restored = this.snapshotCache.restore(chatId, { limit: INITIAL_VISIBLE_MESSAGES });
 		if (!restored) return null;
 		this.entries = restored.entries;
-		this.logId = restored.logId;
-		this.lastAppendSeq = restored.lastAppendSeq;
+		this.generationId = restored.generationId;
+		this.lastSeq = restored.lastSeq;
 		this.oldestSeq = restored.entries.length > 0 ? restored.entries[0].seq : 0;
 		this.totalMessages = restored.entries.length;
 		this.hasMoreMessages = false;
 		this.loadStatus = restored.entries.length === 0 ? 'empty' : 'loaded';
-		this.#eventIndex = buildEventIndex(restored.entries);
 		return { count: restored.entries.length, stale: restored.stale };
 	}
 
@@ -432,7 +412,6 @@ function sortPendingInputs(inputs: PendingUserInput[]): PendingUserInput[] {
 function pendingInputToMessage(input: PendingUserInput): UserMessage {
 	return new UserMessage(input.createdAt, input.content, input.images, {
 		clientRequestId: input.clientRequestId,
-		messageId: input.clientMessageId,
 		turnId: input.turnId,
 		deliveryStatus: input.deliveryStatus,
 	});

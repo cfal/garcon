@@ -13,7 +13,7 @@ import {
 	type ThinkingMode,
 } from '$shared/chat-modes';
 import type { ApiProtocol } from '$shared/api-providers';
-import { parseChatMessageEvents, type ChatMessageEvent } from '$shared/chat-events';
+import { parseChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
 import type { ChatListResponse } from '$shared/chat-list';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type {
@@ -175,14 +175,14 @@ export async function getChatMessages(params: {
 	limit?: number;
 	beforeSeq?: number;
 }): Promise<{
-	events: ChatMessageEvent[];
-	logId: string;
-	lastAppendSeq: number;
+	chatId: string;
+	messages: ChatViewMessage[];
+	generationId: string;
+	lastSeq: number;
 	pageOldestSeq: number;
 	pendingUserInputs: PendingUserInput[];
 	hasMore: boolean;
 	limit: number;
-	localNotice?: string;
 }> {
 	const query = new URLSearchParams({
 		chatId: params.chatId,
@@ -190,26 +190,26 @@ export async function getChatMessages(params: {
 	});
 	if (params.beforeSeq !== undefined) query.set('beforeSeq', String(params.beforeSeq));
 	const response = await apiGet<{
-		events?: unknown;
-		logId?: unknown;
-		lastAppendSeq?: unknown;
+		chatId?: unknown;
+		messages?: unknown;
+		generationId?: unknown;
+		lastSeq?: unknown;
 		pageOldestSeq?: unknown;
 		pendingUserInputs?: PendingUserInput[];
 		hasMore?: unknown;
 		limit?: unknown;
-		localNotice?: unknown;
 	}>(`/api/v1/chats/messages?${query.toString()}`);
-	const events = parseChatMessageEvents(response.events);
-	if (events === null) throw new Error('Invalid chat event page');
+	const messages = parseChatViewMessages(response.messages);
+	if (messages === null) throw new Error('Invalid chat messages page');
 	return {
-		events,
-		logId: typeof response.logId === 'string' ? response.logId : '',
-		lastAppendSeq: Number(response.lastAppendSeq) || 0,
+		chatId: typeof response.chatId === 'string' ? response.chatId : params.chatId,
+		messages,
+		generationId: typeof response.generationId === 'string' ? response.generationId : '',
+		lastSeq: Number(response.lastSeq) || 0,
 		pageOldestSeq: Number(response.pageOldestSeq) || 0,
 		pendingUserInputs: Array.isArray(response.pendingUserInputs) ? response.pendingUserInputs : [],
 		hasMore: Boolean(response.hasMore),
 		limit: Number(response.limit) || params.limit || 20,
-		localNotice: typeof response.localNotice === 'string' ? response.localNotice : undefined,
 	};
 }
 

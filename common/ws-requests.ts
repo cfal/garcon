@@ -1,6 +1,12 @@
 // Discriminated union of WebSocket request messages the client can emit.
 // Mutating chat commands use the HTTP command ledger; WS is read/resume only.
 
+export interface AgentCommandImage {
+  data: string;
+  name?: string;
+  mimeType?: string;
+}
+
 // Narrows an unknown value to string | null for chatId fields.
 function strOrNull(v: unknown): string | null {
   return typeof v === 'string' ? v : null;
@@ -39,22 +45,22 @@ export class ChatSubscribeRequest {
   constructor(
     public clientRequestId: string | null,
     public chatId: string | null,
-    public logId: string,
-    public afterAppendSeq: number,
+    public generationId: string,
+    public afterSeq: number,
   ) { }
 
   static fromJson(data: Record<string, unknown>): ChatSubscribeRequest {
-    const afterAppendSeq = typeof data.afterAppendSeq === 'number'
-      && Number.isInteger(data.afterAppendSeq)
-      && data.afterAppendSeq >= 0
-      ? data.afterAppendSeq
+    const afterSeq = typeof data.afterSeq === 'number'
+      && Number.isInteger(data.afterSeq)
+      && data.afterSeq >= 0
+      ? data.afterSeq
       : 0;
-    const logId = typeof data.logId === 'string' ? data.logId : '';
+    const generationId = typeof data.generationId === 'string' ? data.generationId : '';
     return new ChatSubscribeRequest(
       strOrNull(data.clientRequestId),
       strOrNull(data.chatId),
-      logId,
-      afterAppendSeq,
+      generationId,
+      afterSeq,
     );
   }
 }

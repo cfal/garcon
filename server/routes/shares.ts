@@ -9,7 +9,7 @@ import type { ShareChatResponse, ShareStatusResponse, GetSharedChatResponse, Rev
 import { renderSharedChatText } from '../chats/share-transcript.ts';
 import { extractFirstLine } from '../lib/text.js';
 import type { RouteMap } from '../lib/http-route-types.js';
-import type { ChatEventPageReader } from '../chats/chat-message-reader.js';
+import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 
 interface SettingsDep {
@@ -20,7 +20,7 @@ interface MetadataDep {
   getChatMetadata(chatId: string): ChatMetadata | null;
 }
 
-type ChatEventsDep = ChatEventPageReader;
+type ChatViewsDep = ChatViewPageReader;
 
 function extractLlmTokenFromPath(pathname: string): string | null {
   const match = pathname.match(/^\/shared\/llm\/([^/]+)$/);
@@ -38,7 +38,7 @@ export default function createShareRoutes(
   registry: IChatRegistry,
   settings: SettingsDep,
   metadata: MetadataDep,
-  chatEvents: ChatEventsDep,
+  chatViews: ChatViewsDep,
 ): RouteMap {
 
   // POST /api/v1/chats/share - Creates or returns existing share.
@@ -54,8 +54,8 @@ export default function createShareRoutes(
         return Response.json({ success: false, error: 'Session not found' }, { status: 404 });
       }
 
-      const page = await chatEvents.readPage(chatId, 100_000);
-      const messages = page.events.map((event) => event.message);
+      const page = await chatViews.getOrCreatePage(chatId, 100_000);
+      const messages = page.messages.map((entry) => entry.message);
 
       const meta = metadata.getChatMetadata(chatId);
       const overrideTitle = settings.getChatName(chatId);

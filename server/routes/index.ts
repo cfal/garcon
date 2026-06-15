@@ -14,7 +14,7 @@ import type { SettingsStore } from '../settings/store.js';
 import type { ChatQueueService } from '../queue.js';
 import type { PathCache } from '../chats/path-cache.js';
 import type { MetadataIndex } from '../chats/metadata-store.js';
-import type { ChatEventPageReader } from '../chats/chat-message-reader.js';
+import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
@@ -30,7 +30,7 @@ export default function createAllRoutes({
   queue,
   pathCache,
   metadata,
-  chatEvents,
+  chatViews,
   agents,
   pendingInputs,
   telegramNotifier,
@@ -45,7 +45,7 @@ export default function createAllRoutes({
   queue: ChatQueueService;
   pathCache: PathCache;
   metadata: MetadataIndex;
-  chatEvents: ChatEventPageReader;
+  chatViews: ChatViewPageReader;
   agents: AgentRegistry;
   pendingInputs: PendingUserInputServiceContract;
   telegramNotifier: TelegramNotifier;
@@ -66,12 +66,12 @@ export default function createAllRoutes({
       queue,
       pathCache,
       metadata,
-      chatEvents,
+      chatViews,
       agents,
       pendingInputs,
       commandService: chatCommands,
     }),
-    ...createShareRoutes(shareStore, registry, settings, metadata, chatEvents),
+    ...createShareRoutes(shareStore, registry, settings, metadata, chatViews),
     ...createFilesRoutes(registry),
     ...createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings),
     ...createModelsRoutes({

@@ -49,13 +49,10 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			},
 		},
 		chatState: {
-			applyChatEvents: (chatId, logId, events) => {
+			getCursor: () => deps.chatState.getCursor(),
+			applyChatMessages: (chatId, generationId, messages) => {
 				if (deps.sessions.selectedChatId !== chatId) return 'applied';
-				return deps.chatState.applyEvents(logId, events);
-			},
-			replaceChatGeneration: (chatId, logId, events, options) => {
-				if (deps.sessions.selectedChatId !== chatId) return;
-				deps.chatState.replaceGeneration(logId, events, options);
+				return deps.chatState.applyMessages(generationId, messages);
 			},
 			reloadChatSnapshot: (chatId) => {
 				if (deps.sessions.selectedChatId !== chatId) return;
@@ -71,10 +68,11 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				deps.chatState.clearPendingUserInput(clientRequestId),
 			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
 				deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
-			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
-			removeChatSnapshot: (chatId) => deps.chatState.snapshotCache.remove(chatId),
-			markChatSnapshotValidated: (chatId) => deps.chatState.snapshotCache.markValidated(chatId),
-		},
+				loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
+				removeChatSnapshot: (chatId) => deps.chatState.snapshotCache.remove(chatId),
+				markChatSnapshotStale: (chatId) => deps.chatState.snapshotCache.markStale(chatId),
+				markChatSnapshotValidated: (chatId) => deps.chatState.snapshotCache.markValidated(chatId),
+			},
 		lifecycle: {
 			currentChatId: () => deps.lifecycle.currentChatId,
 			setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),

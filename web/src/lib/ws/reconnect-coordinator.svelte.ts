@@ -1,6 +1,5 @@
-// Coordinates selected-chat catch-up after a WebSocket reconnect. The
-// server replies with event-log deltas when the local cursor is still valid,
-// or asks the client to fetch a fresh snapshot when the generation changed.
+// Coordinates selected-chat catch-up after a WebSocket reconnect. The server
+// replies with same-generation deltas or asks the client to fetch a snapshot.
 
 import { untrack } from 'svelte';
 import {
@@ -9,7 +8,7 @@ import {
 	parseServerWsMessage,
 } from '$shared/ws-events';
 import type { QueueState } from '$shared/queue-state';
-import type { ChatMessageEvent } from '$shared/chat-events';
+import type { ChatViewMessage } from '$shared/chat-view';
 import type { CachedChatCursor } from '$lib/chat/chat-snapshot-cache';
 import type { ChatState } from '$lib/chat/state.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
@@ -32,11 +31,11 @@ export interface ChatReconnectCoordinatorOptions {
 	quietRefreshChats: () => Promise<void> | void;
 	getBackgroundCursors: () => CachedChatCursor[];
 	loadBackgroundSnapshot: (chatId: string) => Promise<void> | void;
-	onBackgroundEvents?: (
+	onBackgroundMessages?: (
 		chatId: string,
-		logId: string,
-		events: ChatMessageEvent[],
-		lastAppendSeq: number,
+		generationId: string,
+		messages: ChatViewMessage[],
+		lastSeq: number,
 	) => Promise<void> | void;
 }
 
@@ -129,9 +128,9 @@ export class ChatReconnectCoordinator {
 	}
 
 	async #resumeSelectedChat(chatId: string, epoch: number): Promise<void> {
-		const cursor = this.options.chatState.getCursor();
-		try {
-			const message = await this.#subscribe(chatId, cursor.logId, cursor.lastAppendSeq);
+			const cursor = this.options.chatState.getCursor();
+			try {
+				const message = await this.#subscribe(chatId, cursor.generationId, cursor.lastSeq);
 			if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
 
 			if (message.mode === 'snapshot-required') {
@@ -139,7 +138,7 @@ export class ChatReconnectCoordinator {
 				return;
 			}
 
-			const result = this.options.chatState.applyEvents(message.logId, message.events);
+				const result = this.options.chatState.applyMessages(message.generationId ?? '', message.messages);
 			if (result === 'generation-changed') {
 				await this.#loadSelectedSnapshot(chatId, epoch);
 				return;
@@ -168,8 +167,8 @@ export class ChatReconnectCoordinator {
 		epoch: number,
 	): Promise<void> {
 		const cursors = this.options.getBackgroundCursors()
-			.filter((cursor) => cursor.chatId !== selectedChatId)
-			.filter((cursor) => cursor.logId && cursor.lastAppendSeq > 0)
+				.filter((cursor) => cursor.chatId !== selectedChatId)
+				.filter((cursor) => cursor.generationId && cursor.lastSeq > 0)
 			.sort((left, right) => Number(runningChatIds.has(right.chatId)) - Number(runningChatIds.has(left.chatId)))
 			.slice(0, BACKGROUND_RESUME_LIMIT);
 
@@ -177,21 +176,21 @@ export class ChatReconnectCoordinator {
 		for (const cursor of cursors) {
 			if (epoch !== this.#reconnectEpoch) return;
 			try {
-				const message = await this.#subscribe(cursor.chatId, cursor.logId, cursor.lastAppendSeq);
+					const message = await this.#subscribe(cursor.chatId, cursor.generationId, cursor.lastSeq);
 				if (epoch !== this.#reconnectEpoch) return;
 				if (message.mode === 'snapshot-required') {
 					await this.options.loadBackgroundSnapshot(cursor.chatId);
 					shouldRefresh = true;
 					continue;
 				}
-				if (message.events.length > 0) {
-					await this.options.onBackgroundEvents?.(
-						cursor.chatId,
-						message.logId,
-						message.events,
-						message.lastAppendSeq,
-					);
-					shouldRefresh = true;
+					if (message.messages.length > 0) {
+						await this.options.onBackgroundMessages?.(
+							cursor.chatId,
+							message.generationId ?? '',
+							message.messages,
+							message.lastSeq,
+						);
+						shouldRefresh = true;
 				}
 			} catch {
 				// Background resume is opportunistic; visible selected-chat recovery wins.
@@ -205,14 +204,14 @@ export class ChatReconnectCoordinator {
 
 	async #subscribe(
 		chatId: string,
-		logId: string,
-		afterAppendSeq: number,
+		generationId: string,
+		afterSeq: number,
 	): Promise<ChatSubscribedMessage> {
 		const raw = await this.options.ws.sendRequest<Record<string, unknown>>({
 			type: 'chat-subscribe',
 			chatId,
-			logId,
-			afterAppendSeq,
+			generationId,
+			afterSeq,
 		});
 		const message = parseServerWsMessage(raw);
 		if (!(message instanceof ChatSubscribedMessage) || message.chatId !== chatId) {

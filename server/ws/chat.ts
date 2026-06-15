@@ -23,11 +23,11 @@ import {
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { IChatRegistry } from '../chats/store.js';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
-import type { ChatEventPageReader } from '../chats/chat-message-reader.js';
-import type { ChatEventLog } from '../chats/chat-event-log.js';
+import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { ChatReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('ws:chat');
@@ -42,7 +42,9 @@ type AgentRegistryDep = Pick<
   'getRunningSessions'
 >;
 
-type ChatEventsDep = ChatEventPageReader & Pick<ChatEventLog, 'readReplay'>;
+type ChatViewsDep = ChatViewPageReader & {
+  readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null;
+};
 type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
 
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'reconcile' | 'listForChat'>;
@@ -52,7 +54,7 @@ type ChatIdRequest = { type: string; chatId?: string | null };
 
 interface ChatHandlerDeps {
   agents: AgentRegistryDep;
-  chatEvents: ChatEventsDep;
+  chatViews: ChatViewsDep;
   nativeReloader: NativeReloaderDep;
   registry: IChatRegistry;
   pendingInputs: PendingInputsDep;
@@ -82,7 +84,7 @@ interface RequestErrorParams {
 
 export class ChatHandler {
   #agents: AgentRegistryDep;
-  #chatEvents: ChatEventsDep;
+  #chatViews: ChatViewsDep;
   #nativeReloader: NativeReloaderDep;
   #pendingInputs: PendingInputsDep;
   #registry: IChatRegistry;
@@ -90,13 +92,13 @@ export class ChatHandler {
 
   constructor({
     agents,
-    chatEvents,
+    chatViews,
     nativeReloader,
     registry,
     pendingInputs,
   }: ChatHandlerDeps) {
     this.#agents = agents;
-    this.#chatEvents = chatEvents;
+    this.#chatViews = chatViews;
     this.#nativeReloader = nativeReloader;
     this.#pendingInputs = pendingInputs;
     this.#registry = registry;
@@ -143,19 +145,18 @@ export class ChatHandler {
       const { limit } = parsePagination(data.limit, null, { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
 
       await this.#pendingInputs.reconcile(chatId);
-      const result = await this.#chatEvents.readPage(chatId, limit, data.beforeSeq);
+      const result = await this.#chatViews.getOrCreatePage(chatId, limit, data.beforeSeq);
 
       writer.send(new ChatLogResponseMessage(
         clientRequestId,
         chatId,
-        result.logId,
-        result.events,
+        result.generationId,
+        result.messages,
         this.#pendingInputs.listForChat(chatId) as PendingUserInput[],
-        result.lastAppendSeq,
+        result.lastSeq,
         result.pageOldestSeq,
         result.hasMore,
         limit,
-        result.localNotice,
       ));
     } catch (error: unknown) {
       logger.error(`ws: error reading messages for ${chatId}:`, (error as Error).message);
@@ -190,20 +191,31 @@ export class ChatHandler {
         });
         return;
       }
-      const replay = await this.#chatEvents.readReplay(chatId, data.logId, data.afterAppendSeq);
+      const replay = this.#chatViews.readReplay(chatId, data.generationId, data.afterSeq);
+      if (!replay) {
+        writer.send(new ChatSubscribedMessage(
+          clientRequestId,
+          chatId,
+          null,
+          'snapshot-required',
+          [],
+          0,
+        ));
+        return;
+      }
       writer.send(new ChatSubscribedMessage(
         clientRequestId,
         chatId,
-        replay.logId,
+        replay.generationId,
         replay.mode,
-        replay.events,
-        replay.lastAppendSeq,
+        replay.messages,
+        replay.lastSeq,
       ));
     } catch (error: unknown) {
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
         code: 'HISTORY_LOAD_FAILED',
-        message: (error as Error).message || 'Failed to replay chat events',
+        message: (error as Error).message || 'Failed to replay chat messages',
         retryable: true, chatId,
       });
     }
@@ -228,17 +240,17 @@ export class ChatHandler {
       writer.send(new ChatReloadedMessage(
         clientRequestId,
         chatId,
-        reload.logId,
-        reload.events,
-        reload.lastAppendSeq,
-        reload.localNotice,
+        reload.generationId,
+        reload.messages,
+        reload.lastSeq,
+        reload.pageOldestSeq,
+        reload.hasMore,
       ));
       writer.publish(new ChatGenerationResetMessage(
         chatId,
-        reload.logId,
-        reload.events,
-        reload.lastAppendSeq,
-        reload.localNotice,
+        reload.generationId,
+        'manual-reload',
+        reload.lastSeq,
       ));
     } catch (error: unknown) {
       const message = (error as Error).message || 'Failed to reload chat';

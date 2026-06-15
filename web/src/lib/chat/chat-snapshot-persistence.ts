@@ -1,10 +1,10 @@
-import type { ChatMessageEvent } from '$shared/chat-events';
+import type { ChatViewMessage } from '$shared/chat-view';
 
 export interface ChatSnapshotDraft {
 	chatId: string;
-	entries: ChatMessageEvent[];
-	logId: string;
-	lastAppendSeq: number;
+	entries: ChatViewMessage[];
+	generationId: string;
+	lastSeq: number;
 }
 
 type TimeoutHandle = ReturnType<typeof setTimeout>;

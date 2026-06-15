@@ -16,9 +16,8 @@ export async function reloadChatFromNative(
 		throw new Error('Unexpected chat reload response');
 	}
 
-	chatState.replaceGeneration(message.logId, message.events, {
-		lastAppendSeq: message.lastAppendSeq,
-		localNotice: message.localNotice,
+	chatState.replaceGeneration(message.generationId, message.messages, {
+		lastSeq: message.lastSeq,
 	});
 	chatState.persistMessages(chatId);
 	chatState.snapshotCache.markValidated(chatId);

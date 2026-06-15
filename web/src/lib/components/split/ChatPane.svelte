@@ -116,11 +116,11 @@
 
 			if (targetChatId !== chatId || isFocused) return;
 
-			previewMessages = data.events.map((entry) => entry.message);
+			previewMessages = data.messages.map((entry) => entry.message);
 			snapshotCache.persist(
 				targetChatId,
-				data.events,
-				{ logId: data.logId, lastAppendSeq: data.lastAppendSeq },
+				data.messages,
+				{ generationId: data.generationId, lastSeq: data.lastSeq },
 				{ limit: 50 },
 			);
 		} catch {

@@ -1,40 +1,35 @@
 import type { ChatMessage } from '../../common/chat-types.js';
-import type { ChatMessageEvent } from '../../common/chat-events.js';
-import type { ChatEventLog } from './chat-event-log.js';
+import type { ChatViewPage } from '../../common/chat-view.js';
+import type { ChatViewStore } from './chat-view-store.js';
 
 interface NativeHistorySource {
   loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
 }
 
-export type NativeReloadMode = 'cold-load' | 'manual-reload' | 'process-error';
+export type NativeReloadMode = 'manual-reload' | 'process-error';
 
-export interface NativeReloadResult {
-  logId: string;
-  events: ChatMessageEvent[];
-  lastAppendSeq: number;
+export interface NativeReloadResult extends ChatViewPage {
   mode: NativeReloadMode;
-  localNotice?: string;
 }
 
 export class ChatNativeReloader {
-  #log: ChatEventLog;
+  #views: ChatViewStore;
   #source: NativeHistorySource;
   #isChatRunning: (chatId: string) => boolean;
   #inFlight = new Map<string, Promise<NativeReloadResult>>();
 
   constructor(
-    log: ChatEventLog,
+    views: ChatViewStore,
     source: NativeHistorySource,
     isChatRunning: (chatId: string) => boolean,
   ) {
-    this.#log = log;
+    this.#views = views;
     this.#source = source;
     this.#isChatRunning = isChatRunning;
   }
 
-  async ensureColdLoaded(chatId: string): Promise<void> {
-    if (await this.#log.hasPersistedLog(chatId)) return;
-    await this.reloadFromNative(chatId, 'cold-load');
+  loadNativeMessages(chatId: string): Promise<ChatMessage[]> {
+    return this.#source.loadNativeMessages(chatId);
   }
 
   async reloadFromNative(chatId: string, mode: NativeReloadMode): Promise<NativeReloadResult> {
@@ -53,12 +48,12 @@ export class ChatNativeReloader {
   }
 
   async #run(chatId: string, mode: NativeReloadMode): Promise<NativeReloadResult> {
-    const nativeMessages = await this.#source.loadNativeMessages(chatId);
-    const localNotice = mode === 'process-error' ? 'The process died.' : undefined;
-    const replacement = await this.#log.replaceGenerationFromNative(chatId, nativeMessages, {
-      localNotice,
-    });
-    console.info(`native reload: ${mode} ${nativeMessages.length}`);
-    return { ...replacement, mode };
+    const page = await this.#views.replaceFromNative(
+      chatId,
+      () => this.#source.loadNativeMessages(chatId),
+      { appendProcessDiedNotice: mode === 'process-error' },
+    );
+    console.info(`native reload: ${mode} messages=${page.lastSeq}`);
+    return { ...page, mode };
   }
 }

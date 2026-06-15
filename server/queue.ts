@@ -9,7 +9,7 @@ import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
 import { UserMessage, type ChatMessage, type UserMessageDeliveryStatus } from '../common/chat-types.ts';
-import type { ChatMessageEvent } from '../common/chat-events.ts';
+import type { ChatViewMessage } from '../common/chat-view.ts';
 import { requireChatExecutionConfig, type RunAgentTurnOptions } from "./agents/session-types.js";
 import type { IChatRegistry } from './chats/store.js';
 import { writeJsonFileAtomic } from './lib/json-file-store.js';
@@ -82,21 +82,14 @@ interface PendingInputsDep {
     images?: RunAgentTurnOptions['images'];
     deliveryStatus?: UserMessageDeliveryStatus;
   }): Promise<unknown>;
-  updateDeliveryStatus(chatId: string, clientRequestId: string, deliveryStatus: UserMessageDeliveryStatus): unknown;
   discard(chatId: string, clientRequestId: string): boolean;
 }
 
-interface ChatEventsDep {
+interface ChatMessagesDep {
   appendMessages(
     chatId: string,
     messages: ChatMessage[],
-    origin: 'submit',
-  ): Promise<{ logId: string; events: ChatMessageEvent[] }>;
-  reviseUserMessageDelivery(
-    chatId: string,
-    ids: { clientMessageId?: string; clientRequestId?: string; turnId?: string },
-    deliveryStatus: 'delivered',
-  ): Promise<{ logId: string; event: ChatMessageEvent } | null>;
+  ): Promise<{ generationId: string; messages: ChatViewMessage[] }>;
 }
 
 type QueueUpdatedCallback = (chatId: string, state: QueueState) => void;
@@ -104,10 +97,10 @@ type DispatchingCallback = (chatId: string, entryId: string, content: string) =>
 type SessionStoppedCallback = (chatId: string, success: boolean) => void;
 type ChatIdleCallback = (chatId: string) => void;
 type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunAgentTurnOptions) => void;
-type ChatEventsCallback = (
+type ChatMessagesCallback = (
   chatId: string,
-  logId: string,
-  events: ChatMessageEvent[],
+  generationId: string,
+  messages: ChatViewMessage[],
   metadata?: { clientRequestId?: string; turnId?: string },
 ) => void;
 type QueueDrainOptionsResolver = (chatId: string) => RunAgentTurnOptions;
@@ -135,25 +128,25 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   #workspaceDir: string;
   #turnRunner: AgentTurnRunnerDep;
   #pendingInputs: PendingInputsDep;
-  #chatEvents: ChatEventsDep;
+  #chatMessages: ChatMessagesDep;
   #getDrainOptions: QueueDrainOptionsResolver;
 
   constructor(
     workspaceDir: string,
     turnRunner: AgentTurnRunnerDep,
     pendingInputs: PendingInputsDep,
-    chatEvents: ChatEventsDep,
+    chatMessages: ChatMessagesDep,
     getDrainOptions: QueueDrainOptionsResolver,
   ) {
     super();
     if (!turnRunner) throw new Error('QueueManager requires an agent turn runner');
     if (!pendingInputs) throw new Error('QueueManager requires a pending input service');
-    if (!chatEvents) throw new Error('QueueManager requires a chat event log');
+    if (!chatMessages) throw new Error('QueueManager requires chat message storage');
     if (!getDrainOptions) throw new Error('QueueManager requires a drain option resolver');
     this.#workspaceDir = workspaceDir;
     this.#turnRunner = turnRunner;
     this.#pendingInputs = pendingInputs;
-    this.#chatEvents = chatEvents;
+    this.#chatMessages = chatMessages;
     this.#getDrainOptions = getDrainOptions;
   }
 
@@ -162,7 +155,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   onSessionStopped(cb: SessionStoppedCallback): void { this.on('session-stopped', cb); }
   onChatIdle(cb: ChatIdleCallback): void { this.on('chat-idle', cb); }
   onTurnFailed(cb: TurnFailedCallback): void { this.on('turn-failed', cb); }
-  onChatEvents(cb: ChatEventsCallback): void { this.on('chat-events', cb); }
+  onChatMessages(cb: ChatMessagesCallback): void { this.on('chat-messages', cb); }
 
   // Emits chat-idle if the chat has no queued items and the agent is not
   // running. Called after an agent turn finishes to cover the initial-session
@@ -355,13 +348,12 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       options.images,
       {
         clientRequestId: options.clientRequestId,
-        messageId: options.clientMessageId,
         turnId: options.turnId,
         deliveryStatus,
       },
     );
-    const { logId, events } = await this.#chatEvents.appendMessages(chatId, [userMessage], 'submit');
-    this.emit('chat-events', chatId, logId, events, {
+    const { generationId, messages } = await this.#chatMessages.appendMessages(chatId, [userMessage]);
+    this.emit('chat-messages', chatId, generationId, messages, {
       clientRequestId: options.clientRequestId,
       turnId: options.turnId,
     });
@@ -379,25 +371,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       this.emit('turn-failed', chatId, message, options);
       throw error;
     }
-    await this.#reviseDeliveryStatus(chatId, options);
     await this.#drain(chatId);
-  }
-
-  async #reviseDeliveryStatus(chatId: string, options: RunAgentTurnOptions): Promise<void> {
-    const revised = await this.#chatEvents.reviseUserMessageDelivery(
-      chatId,
-      {
-        clientMessageId: options.clientMessageId,
-        clientRequestId: options.clientRequestId,
-        turnId: options.turnId,
-      },
-      'delivered',
-    );
-    if (!revised) return;
-    this.emit('chat-events', chatId, revised.logId, [revised.event], {
-      clientRequestId: options.clientRequestId,
-      turnId: options.turnId,
-    });
   }
 
   // Aborts the running agent session and pauses the queue if entries remain.
@@ -444,7 +418,6 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
         try {
           await this.#turnRunner.runAgentTurn(chatId, entry.content, queuedTurnOptions);
-          await this.#reviseDeliveryStatus(chatId, queuedTurnOptions);
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);

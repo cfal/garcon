@@ -6,7 +6,7 @@ import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { ServerWsMessage, EventKey } from '$shared/ws-events';
 import {
-	ChatEventsMessage,
+	ChatMessagesMessage,
 	ChatGenerationResetMessage,
 	AgentRunFinishedMessage,
 	AgentRunFailedMessage,
@@ -25,7 +25,7 @@ import {
 	ChatReadUpdatedV1Message,
 	ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
-import type { ChatMessageEvent } from '$shared/chat-events';
+import type { ChatViewMessage } from '$shared/chat-view';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
@@ -81,17 +81,12 @@ export interface EventRouterSessionsStore {
 }
 
 export interface EventRouterChatStateStore {
-	applyChatEvents: (
+	getCursor: () => { generationId: string; lastSeq: number };
+	applyChatMessages: (
 		chatId: string,
-		logId: string,
-		events: ChatMessageEvent[],
+		generationId: string,
+		messages: ChatViewMessage[],
 	) => 'applied' | 'generation-changed';
-	replaceChatGeneration: (
-		chatId: string,
-		logId: string,
-		events: ChatMessageEvent[],
-		options: { lastAppendSeq: number; localNotice?: string },
-	) => void;
 	reloadChatSnapshot: (chatId: string) => void;
 	appendErrorMessage: (content: string) => void;
 	appendLocalAssistantMessage: (content: string) => void;
@@ -99,10 +94,11 @@ export interface EventRouterChatStateStore {
 	clearPendingUserInput: (clientRequestId: string) => void;
 	updatePendingUserInputDeliveryStatus: (
 		clientRequestId: string,
-		deliveryStatus: 'submitting' | 'accepted' | 'delivered' | 'failed',
+		deliveryStatus: 'submitting' | 'accepted' | 'failed',
 	) => void;
 	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
 	removeChatSnapshot?: (chatId: string) => void;
+	markChatSnapshotStale?: (chatId: string) => void;
 	markChatSnapshotValidated?: (chatId: string) => void;
 }
 
@@ -172,32 +168,32 @@ export function selectPreviewFromBatch(
 	return null;
 }
 
-export function createChatEventsAccumulator(
-	chatState: Pick<EventRouterChatStateStore, 'applyChatEvents' | 'reloadChatSnapshot'>,
+export function createChatMessagesAccumulator(
+	chatState: Pick<EventRouterChatStateStore, 'applyChatMessages' | 'reloadChatSnapshot'>,
 ) {
-	let pendingEvents: ChatMessageEvent[] = [];
-	let pendingLogId = '';
+	let pendingMessages: ChatViewMessage[] = [];
+	let pendingGenerationId = '';
 	let pendingChatId = '';
 
 	return {
-		enqueue(msg: ChatEventsMessage) {
-			if (msg.events.length === 0) return;
-			if (pendingEvents.length > 0 && msg.logId !== pendingLogId) {
+		enqueue(msg: ChatMessagesMessage) {
+			if (msg.messages.length === 0) return;
+			if (pendingMessages.length > 0 && msg.generationId !== pendingGenerationId) {
 				this.flush();
 			}
-			pendingLogId = msg.logId;
+			pendingGenerationId = msg.generationId;
 			pendingChatId = msg.chatId;
-			pendingEvents.push(...msg.events);
+			pendingMessages.push(...msg.messages);
 		},
 		flush() {
-			if (pendingEvents.length === 0) return;
-			const events = pendingEvents;
-			const logId = pendingLogId;
+			if (pendingMessages.length === 0) return;
+			const messages = pendingMessages;
+			const generationId = pendingGenerationId;
 			const chatId = pendingChatId;
-			pendingEvents = [];
-			pendingLogId = '';
+			pendingMessages = [];
+			pendingGenerationId = '';
 			pendingChatId = '';
-			const result = chatState.applyChatEvents(chatId, logId, events);
+			const result = chatState.applyChatMessages(chatId, generationId, messages);
 			if (result === 'generation-changed') {
 				chatState.reloadChatSnapshot(chatId);
 			}
@@ -241,7 +237,7 @@ function createHelpers(stores: EventRouterStores) {
 // Builds the dispatch table mapping EventKey to handler functions.
 function buildDispatch(
 	stores: EventRouterStores,
-	eventsAccumulator: ReturnType<typeof createChatEventsAccumulator>,
+	messagesAccumulator: ReturnType<typeof createChatMessagesAccumulator>,
 ): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
 	const { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted } =
 		createHelpers(stores);
@@ -331,35 +327,42 @@ function buildDispatch(
 	};
 
 	return {
-		'chat-events': (msg) => {
-			if (!(msg instanceof ChatEventsMessage)) return;
+		'chat-messages': (msg) => {
+			if (!(msg instanceof ChatMessagesMessage)) return;
 			activateLoadingFor(msg.chatId);
 			stores.lifecycle.setCanAbort(true);
 			onChatProcessing(msg.chatId);
 			markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
-			eventsAccumulator.enqueue(msg);
+			messagesAccumulator.enqueue(msg);
 			const batch = messagesOf(msg);
 			handlePlanModeMessages(batch, planModeCtx);
 			handlePermissionLifecycleFromBatch(batch, permLifecycleCtx);
 		},
 		'chat-generation-reset': (msg) => {
 			if (!(msg instanceof ChatGenerationResetMessage)) return;
-			eventsAccumulator.flush();
-			stores.chatState.replaceChatGeneration(msg.chatId, msg.logId, msg.events, {
-				lastAppendSeq: msg.lastAppendSeq,
-				localNotice: msg.localNotice,
-			});
+			messagesAccumulator.flush();
+			const selectedChatId = stores.sessions.selectedChat()?.id ?? null;
+			if (selectedChatId === msg.chatId) {
+				const cursor = stores.chatState.getCursor();
+				if (cursor.generationId !== msg.generationId) {
+					stores.chatState.reloadChatSnapshot(msg.chatId);
+				} else {
+					stores.chatState.markChatSnapshotValidated?.(msg.chatId);
+				}
+				return;
+			}
+			stores.chatState.markChatSnapshotStale?.(msg.chatId);
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
-				eventsAccumulator.flush();
+				messagesAccumulator.flush();
 				markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
 				handleAgentComplete(msg, lifecycleCtx);
 			}
 		},
 		'agent-run-failed': (msg) => {
 			if (msg instanceof AgentRunFailedMessage) {
-				eventsAccumulator.flush();
+				messagesAccumulator.flush();
 				markPendingUserInputDelivery(msg.clientRequestId, stores, 'failed');
 				handleAgentError(msg, lifecycleCtx);
 			}
@@ -378,7 +381,7 @@ function buildDispatch(
 		},
 		'chat-session-stopped': (msg) => {
 			if (msg instanceof ChatSessionStoppedMessage) {
-				eventsAccumulator.flush();
+				messagesAccumulator.flush();
 				handleChatAborted(msg, chatEventCtx);
 			}
 		},
@@ -407,7 +410,7 @@ function buildDispatch(
 		},
 		'pending-user-input-cleared': (msg) => {
 			if (!(msg instanceof PendingUserInputClearedMessage)) return;
-			eventsAccumulator.flush();
+			messagesAccumulator.flush();
 			stores.chatState.clearPendingUserInput(msg.clientRequestId);
 		},
 		'chat-sessions-running': (msg) => {
@@ -415,7 +418,7 @@ function buildDispatch(
 		},
 		'ws-fault': (msg) => {
 			if (msg instanceof WsFaultMessage) {
-				eventsAccumulator.flush();
+				messagesAccumulator.flush();
 				handleWsError(msg, chatEventCtx);
 			}
 		},
@@ -444,8 +447,8 @@ export function createEventRouter(
 	drainHandle: DrainHandle,
 	stores: EventRouterStores,
 ): void {
-	const eventsAccumulator = createChatEventsAccumulator(stores.chatState);
-	const dispatch = buildDispatch(stores, eventsAccumulator);
+	const messagesAccumulator = createChatMessagesAccumulator(stores.chatState);
+	const dispatch = buildDispatch(stores, messagesAccumulator);
 
 	$effect(() => {
 		// Sole tracked dependency: re-run whenever a new WS message arrives.
@@ -468,13 +471,10 @@ export function createEventRouter(
 
 				// Pre-filter: patch sidebar preview for any chat so background
 				// chats update even when the filter skips full dispatch.
-				if (
-					event.message instanceof ChatEventsMessage ||
-					event.message instanceof ChatGenerationResetMessage
-				) {
+				if (event.message instanceof ChatMessagesMessage) {
 					const agentMsg = event.message;
-					if (agentMsg.chatId && agentMsg.events.length > 0) {
-						const preview = selectPreviewFromBatch(agentMsg.events.map((entry) => entry.message));
+					if (agentMsg.chatId && agentMsg.messages.length > 0) {
+						const preview = selectPreviewFromBatch(agentMsg.messages.map((entry) => entry.message));
 						if (preview) {
 							stores.sessions.patchChatPreview(
 								agentMsg.chatId,
@@ -503,16 +503,16 @@ export function createEventRouter(
 				if (handler) handler(event.message);
 			}
 
-			eventsAccumulator.flush();
+			messagesAccumulator.flush();
 		});
-	});
-}
+		});
+	}
 
 export { extractFirstLine as _extractFirstLine };
 
-function messagesOf(msg: ChatEventsMessage): { chatId: string; messages: ChatMessage[] } {
+function messagesOf(msg: ChatMessagesMessage): { chatId: string; messages: ChatMessage[] } {
 	return {
 		chatId: msg.chatId,
-		messages: msg.events.map((event) => event.message),
+		messages: msg.messages.map((entry) => entry.message),
 	};
 }

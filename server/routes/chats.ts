@@ -24,7 +24,7 @@ import { extractFirstLine } from '../lib/text.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ChatQueueService } from '../queue.js';
-import type { ChatEventPageReader } from '../chats/chat-message-reader.js';
+import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
@@ -71,7 +71,7 @@ interface MetadataDep {
 }
 
 type QueueDep = ChatQueueService;
-type ChatEventsDep = ChatEventPageReader;
+type ChatViewsDep = ChatViewPageReader;
 type AgentRegistryDep = AgentRegistryServiceContract;
 type PendingInputsDep = PendingUserInputServiceContract;
 
@@ -153,7 +153,7 @@ interface ChatRouteDeps {
   queue: QueueDep;
   pathCache: PathCacheDep;
   metadata: MetadataDep;
-  chatEvents: ChatEventsDep;
+  chatViews: ChatViewsDep;
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
   commandService: ChatCommandService;
@@ -165,7 +165,7 @@ export default function createChatRoutes({
   queue,
   pathCache,
   metadata,
-  chatEvents,
+  chatViews,
   agents,
   pendingInputs,
   commandService,
@@ -385,16 +385,16 @@ export default function createChatRoutes({
       const beforeSeq = beforeSeqRaw ? Number(beforeSeqRaw) : undefined;
 
       await pendingInputs.reconcile(chatId);
-      const page = await chatEvents.readPage(chatId, limit, beforeSeq);
+      const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
       return Response.json({
-        events: page.events,
-        logId: page.logId,
-        lastAppendSeq: page.lastAppendSeq,
+        chatId,
+        generationId: page.generationId,
+        messages: page.messages,
+        lastSeq: page.lastSeq,
         pageOldestSeq: page.pageOldestSeq,
         hasMore: page.hasMore,
         limit,
         pendingUserInputs: pendingInputs.listForChat(chatId),
-        localNotice: page.localNotice,
       });
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);

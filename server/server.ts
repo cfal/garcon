@@ -11,7 +11,7 @@ import { jsonError } from './lib/http-error.js';
 import { verifyAuthToken } from './auth/token.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
-import { parseChatMessages } from '../common/chat-types.js';
+import { ErrorMessage, parseChatMessages } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
 
 // Classes
@@ -22,10 +22,8 @@ import { QueueManager, queueDrainOptions } from './queue.js';
 import { PathCache } from './chats/path-cache.js';
 import { ShellManager } from './ws/shell.js';
 import { MetadataIndex } from './chats/metadata-store.js';
-import { ChatEventLog } from './chats/chat-event-log.js';
+import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
-import { ColdLoadedChatEventLog } from './chats/cold-loaded-chat-event-log.js';
-import { ChatStreamFence } from './chats/chat-stream-fence.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
 import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
 import type { TurnEventMetadata } from './agents/event-bus.js';
@@ -42,7 +40,7 @@ import { abortRunningSessionsWithTimeout } from './lib/shutdown.js';
 import {
   AgentRunFinishedMessage,
   AgentRunFailedMessage,
-  ChatEventsMessage,
+  ChatMessagesMessage,
   ChatGenerationResetMessage,
   ChatSessionCreatedMessage,
   ChatProcessingUpdatedMessage,
@@ -138,50 +136,36 @@ export async function startServer(): Promise<void> {
     });
     await metadata.init();
 
-    const chatEventLog = new ChatEventLog(
-      workspaceDir,
-      (chatId) => agentRegistry.isChatRunning(chatId),
-    );
-    const streamFence = new ChatStreamFence();
+    const chatViews = new ChatViewStore((chatId) => agentRegistry.isChatRunning(chatId));
+    const loadNativeMessages = async (chatId: string) => {
+      const session = chatRegistry.getChat(chatId);
+      if (!session) return [];
+      return parseChatMessages(await agentRegistry.loadMessages(session, chatId));
+    };
     const chatNativeReloader = new ChatNativeReloader(
-      chatEventLog,
-      {
-        async loadNativeMessages(chatId) {
-          const session = chatRegistry.getChat(chatId);
-          if (!session) return [];
-          return parseChatMessages(await agentRegistry.loadMessages(session, chatId));
-        },
-      },
+      chatViews,
+      { loadNativeMessages },
       (chatId) => agentRegistry.isChatRunning(chatId),
     );
-    const coldLoadedChatEvents = new ColdLoadedChatEventLog(chatEventLog, chatNativeReloader);
     const chatMessageReader = {
       async ensureLoaded(chatId: string) {
-        return coldLoadedChatEvents.getMessages(chatId);
+        return chatViews.getOrCreateMessages(chatId, () => loadNativeMessages(chatId));
       },
       getMessages(chatId: string) {
-        return coldLoadedChatEvents.getLoadedMessages(chatId);
+        return chatViews.getLoadedMessages(chatId);
       },
     };
-    const chatEventPages = {
-      async readPage(chatId: string, limit: number, beforeSeq?: number) {
-        return coldLoadedChatEvents.readPage(chatId, limit, beforeSeq);
+    const chatViewPages = {
+      async getOrCreatePage(chatId: string, limit: number, beforeSeq?: number) {
+        return chatViews.getOrCreatePage(chatId, () => loadNativeMessages(chatId), limit, beforeSeq);
       },
     };
-    const chatEventAppender = {
+    const chatMessageAppender = {
       async appendMessages(
         chatId: string,
-        messages: Parameters<ChatEventLog['appendMessages']>[1],
-        origin: 'submit',
+        messages: Parameters<ChatViewStore['appendAfterEnsuringGeneration']>[2],
       ) {
-        return coldLoadedChatEvents.appendMessages(chatId, messages, origin);
-      },
-      async reviseUserMessageDelivery(
-        chatId: string,
-        ids: Parameters<ChatEventLog['reviseUserMessageDelivery']>[1],
-        deliveryStatus: 'delivered',
-      ) {
-        return coldLoadedChatEvents.reviseUserMessageDelivery(chatId, ids, deliveryStatus);
+        return chatViews.appendAfterEnsuringGeneration(chatId, () => loadNativeMessages(chatId), messages);
       },
     };
     const pendingInputs = new PendingUserInputService(chatMessageReader);
@@ -193,7 +177,7 @@ export async function startServer(): Promise<void> {
       workspaceDir,
       agentRegistry,
       pendingInputs,
-      chatEventAppender,
+      chatMessageAppender,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
     );
     const commandLedger = new CommandLedger(workspaceDir);
@@ -232,7 +216,7 @@ export async function startServer(): Promise<void> {
       queue,
       pathCache,
       metadata,
-      chatEvents: chatEventPages,
+      chatViews: chatViewPages,
       agents: agentRegistry,
       pendingInputs,
       telegramNotifier,
@@ -245,16 +229,14 @@ export async function startServer(): Promise<void> {
 
     const chatHandler = new ChatHandler({
       agents: agentRegistry,
-      queue,
-      chatEvents: {
-        ...chatEventPages,
-        readReplay: (chatId, logId, afterAppendSeq) =>
-          coldLoadedChatEvents.readReplay(chatId, logId, afterAppendSeq),
+      chatViews: {
+        ...chatViewPages,
+        readReplay: (chatId, generationId, afterSeq) =>
+          chatViews.readReplay(chatId, generationId, afterSeq),
       },
       nativeReloader: chatNativeReloader,
       registry: chatRegistry,
       pendingInputs,
-      commands: chatCommands,
     });
     const wsHandlers = {
       '/shell': shellManager.createHandler(),
@@ -354,60 +336,40 @@ export async function startServer(): Promise<void> {
     // active or routes are called, both of which happen after server is up.
     const broadcast = (payload: unknown) => server.publish('chat', JSON.stringify(payload));
 
-    async function reviseDeliveredFromMetadata(
-      chatId: string,
-      metadata: { clientRequestId?: string; turnId?: string } | undefined,
-    ): Promise<void> {
-      const revised = await coldLoadedChatEvents.reviseUserMessageDelivery(
-        chatId,
-        {
-          clientRequestId: metadata?.clientRequestId,
-          turnId: metadata?.turnId,
-        },
-        'delivered',
-      );
-      if (!revised) return;
-      broadcast(new ChatEventsMessage(
-        chatId,
-        revised.logId,
-        [revised.event],
-        metadata?.turnId,
-        metadata?.clientRequestId,
-      ));
-    }
-
     async function reloadAfterProcessError(
       chatId: string,
       message: string,
       turnMetadata?: TurnEventMetadata,
     ): Promise<void> {
-      streamFence.invalidate(chatId);
+      chatViews.invalidateFence(chatId);
       try {
         const reload = await chatNativeReloader.reloadFromNative(chatId, 'process-error');
         pendingInputs.discardChat(chatId);
         broadcast(new ChatGenerationResetMessage(
           chatId,
-          reload.logId,
-          reload.events,
-          reload.lastAppendSeq,
-          reload.localNotice,
+          reload.generationId,
+          'process-error',
+          reload.lastSeq,
         ));
       } catch (err) {
-        logger.warn('chat-events: process-error reload failed:', errorMessage(err));
+        logger.warn('chat-view: process-error reload failed:', errorMessage(err));
         try {
-          const reset = await chatEventLog.replaceGenerationFromCurrent(chatId, {
-            localNotice: PROCESS_ERROR_RELOAD_FAILED_NOTICE,
-          });
+          const reset = await chatViews.appendToCurrentOrEmpty(chatId, [
+            new ErrorMessage(new Date().toISOString(), PROCESS_ERROR_RELOAD_FAILED_NOTICE),
+          ]);
           pendingInputs.discardChat(chatId);
-          broadcast(new ChatGenerationResetMessage(
-            chatId,
-            reset.logId,
-            reset.events,
-            reset.lastAppendSeq,
-            reset.localNotice,
-          ));
+          if (reset.messages.length > 0) {
+            broadcast(new ChatMessagesMessage(
+              chatId,
+              reset.generationId,
+              reset.messages,
+              turnMetadata?.turnId,
+              turnMetadata?.clientRequestId,
+              turnMetadata?.upstreamRequestId,
+            ));
+          }
         } catch (resetErr) {
-          logger.warn('chat-events: process-error fallback reset failed:', errorMessage(resetErr));
+          logger.warn('chat-view: process-error fallback append failed:', errorMessage(resetErr));
         }
       }
       broadcast(new AgentRunFailedMessage(
@@ -419,31 +381,35 @@ export async function startServer(): Promise<void> {
       ));
     }
 
-    // Wire agent events to the event log before broadcasting.
+    // Wire agent output into the current chat view before broadcasting.
     const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
     agentRegistry.onMessages((chatId, messages, turnMetadata) => {
       if (!chatExists(chatId)) return;
-      const epoch = streamFence.capture(chatId);
+      const fence = chatViews.captureFence(chatId);
       void (async () => {
         try {
           const parsed = parseChatMessages(messages);
-          const appended = await coldLoadedChatEvents.appendMessages(chatId, parsed, 'agent', {
-            guard: () => streamFence.isCurrent(chatId, epoch),
-          });
+          const appended = await chatViews.appendAfterEnsuringGeneration(
+            chatId,
+            () => loadNativeMessages(chatId),
+            parsed,
+            { fence },
+          );
           if (appended.skipped) return;
           if (parsed.length > 0) metadata.updateFromAppendedMessages(chatId, parsed);
-          broadcast(new ChatEventsMessage(
-            chatId,
-            appended.logId,
-            appended.events,
-            turnMetadata?.turnId,
-            turnMetadata?.clientRequestId,
-            turnMetadata?.upstreamRequestId,
-          ));
-          await reviseDeliveredFromMetadata(chatId, turnMetadata);
+          if (appended.messages.length > 0) {
+            broadcast(new ChatMessagesMessage(
+              chatId,
+              appended.generationId,
+              appended.messages,
+              turnMetadata?.turnId,
+              turnMetadata?.clientRequestId,
+              turnMetadata?.upstreamRequestId,
+            ));
+          }
           await pendingInputs.reconcile(chatId);
         } catch (err) {
-          logger.warn('chat-events: append failed; reloading from native:', errorMessage(err));
+          logger.warn('chat-view: append failed; reloading from native:', errorMessage(err));
           await reloadAfterProcessError(chatId, errorMessage(err), turnMetadata);
         }
       })();
@@ -458,9 +424,6 @@ export async function startServer(): Promise<void> {
     });
     agentRegistry.onFinished((chatId, exitCode, turnMetadata) => {
       if (!chatExists(chatId)) return;
-      void reviseDeliveredFromMetadata(chatId, turnMetadata).catch((err) => {
-        logger.warn('chat-events: delivery revision after finish failed:', errorMessage(err));
-      });
       broadcast(new AgentRunFinishedMessage(chatId, exitCode, turnMetadata?.turnId, turnMetadata?.clientRequestId, turnMetadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         logger.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
@@ -511,11 +474,8 @@ export async function startServer(): Promise<void> {
       void broadcastRemoteSettings();
     });
     chatRegistry.onChatRemoved((chatId) => {
-      streamFence.clear(chatId);
       pendingInputs.clearChat(chatId, 'chat-removed');
-      chatEventLog.deleteChatLog(chatId).catch((err) => {
-        logger.warn('chat-events: failed to delete log on chat removal:', errorMessage(err));
-      });
+      chatViews.deleteChatView(chatId);
       broadcast(new ChatSessionDeletedWsMessage(chatId));
       shareStore.revokeShareByChatId(chatId).catch((err) => {
         logger.warn('share-store: failed to revoke share on chat removal:', errorMessage(err));
@@ -533,12 +493,12 @@ export async function startServer(): Promise<void> {
     queue.onDispatching((chatId, entryId, content) => {
       broadcast(new QueueDispatchingMessage(chatId, entryId, content));
     });
-    queue.onChatEvents((chatId, logId, events, eventMetadata = {}) => {
-      metadata.updateFromAppendedMessages(chatId, events.map((event) => event.message));
-      broadcast(new ChatEventsMessage(
+    queue.onChatMessages((chatId, generationId, messages, eventMetadata = {}) => {
+      metadata.updateFromAppendedMessages(chatId, messages.map((entry) => entry.message));
+      broadcast(new ChatMessagesMessage(
         chatId,
-        logId,
-        events,
+        generationId,
+        messages,
         eventMetadata.turnId,
         eventMetadata.clientRequestId,
       ));

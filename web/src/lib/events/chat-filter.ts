@@ -18,6 +18,7 @@ const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 	'chat-fork-created',
 	'chat-session-deleted',
 	'chat-processing-updated',
+	'chat-generation-reset',
 	'queue-state-updated',
 	'chat-title-updated',
 	'chat-read-updated-v1',

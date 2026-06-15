@@ -1,6 +1,5 @@
 import { EventEmitter } from 'events';
 import type { PendingUserInput, PendingUserInputClearReason } from '../../common/pending-user-input.js';
-import type { UserMessageDeliveryStatus } from '../../common/chat-types.js';
 
 export type PendingUserInputRecord = PendingUserInput;
 export type PendingUserInputStoreClearReason = PendingUserInputClearReason | 'persisted';
@@ -61,26 +60,6 @@ export class PendingUserInputStore extends EventEmitter {
     const normalized = clonePendingInput(stored);
     this.emit('updated', normalized);
     return normalized;
-  }
-
-  updateDeliveryStatus(
-    chatId: string,
-    clientRequestId: string,
-    deliveryStatus: UserMessageDeliveryStatus,
-  ): PendingUserInput | null {
-    const records = this.#recordsByChatId.get(chatId);
-    if (!records) return null;
-    const index = records.findIndex((record) => record.clientRequestId === clientRequestId);
-    if (index < 0) return null;
-    const current = records[index];
-    if (current.deliveryStatus === deliveryStatus) return clonePendingInput(current);
-    const next: PendingUserInputRecord = {
-      ...current,
-      deliveryStatus,
-    };
-    records[index] = next;
-    this.emit('updated', clonePendingInput(next));
-    return clonePendingInput(next);
   }
 
   clear(chatId: string, clientRequestId: string, reason: PendingUserInputStoreClearReason): boolean {
