@@ -617,7 +617,6 @@ export default function createChatRoutes({
 
       const options = runOptionsFromCommandRequest(body as AgentRunCommandRequest);
       const result = await commands.submitRun({
-        transport: 'http',
         chatId,
         command,
         images,
@@ -662,7 +661,6 @@ export default function createChatRoutes({
 
       const options = runOptionsFromCommandRequest(body as ForkRunCommandRequest);
       const result = await commands.submitForkRun({
-        transport: 'http',
         sourceChatId,
         chatId,
         command,

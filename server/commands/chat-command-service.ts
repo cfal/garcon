@@ -16,7 +16,6 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common/chat-command-contracts.js';
-import type { AgentRunRequest, ForkRunRequest } from '../../common/ws-requests.js';
 import { normalizeQueueState } from '../../common/queue-state.js';
 import type { QueueState } from '../../common/queue-state.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
@@ -30,11 +29,8 @@ import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('commands:chat-command-service');
 
-type CommandTransport = 'http' | 'websocket';
-
 type QueueDep = Pick<
   ChatQueueService,
-  | 'submit'
   | 'registerPendingUserInput'
   | 'discardPendingUserInput'
   | 'runAcceptedTurn'
@@ -107,7 +103,6 @@ interface ForkContext {
 }
 
 interface SubmitRunInput {
-  transport: CommandTransport;
   chatId: string;
   command: string;
   images?: RunAgentTurnOptions['images'];
@@ -119,7 +114,6 @@ interface SubmitRunInput {
 
 interface SubmitForkRunInput extends SubmitRunInput {
   sourceChatId: string;
-  onForked?: (result: ForkChatFileCopyResult) => void;
 }
 
 interface SubmitStartInput {
@@ -201,7 +195,7 @@ export function commandResultFromRecord(
 }
 
 export function runOptionsFromCommandRequest(
-  body: Partial<AgentRunCommandRequest | ForkRunCommandRequest | AgentRunRequest | ForkRunRequest>,
+  body: Partial<AgentRunCommandRequest | ForkRunCommandRequest>,
 ): RunAgentTurnOptions {
   const options: RunAgentTurnOptions = {};
   if (body.images !== undefined) options.images = body.images;
@@ -374,9 +368,6 @@ export class ChatCommandService {
   async submitRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
     this.#requireChat(input.chatId);
     this.#assertContent(input.command, input.images);
-    if (input.transport === 'websocket') {
-      return this.#submitWebSocketRun(input);
-    }
     return this.#submitHttpRun(input);
   }
 
@@ -386,15 +377,7 @@ export class ChatCommandService {
   }
 
   async submitForkRun(input: SubmitForkRunInput): Promise<CommandAcceptedResponse> {
-    const context = this.#validateFork(input);
     this.#assertContent(input.command, input.images);
-
-    if (input.transport === 'websocket') {
-      const result = await this.#forkChatFromContext(context);
-      input.onForked?.(result);
-      return this.#submitWebSocketRun(input);
-    }
-
     return this.#submitHttpForkRun(input);
   }
 
@@ -516,24 +499,6 @@ export class ChatCommandService {
     };
   }
 
-  async #submitWebSocketRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
-    const options = this.#withTurnIds(input.options ?? {}, {
-      clientRequestId: input.clientRequestId,
-      clientMessageId: input.clientMessageId,
-    });
-    if (input.images !== undefined) options.images = input.images;
-    await this.deps.queue.submit(input.chatId, input.command, options);
-    return {
-      success: true,
-      commandType: 'sourceChatId' in input ? 'fork-run' : 'agent-run',
-      chatId: input.chatId,
-      clientRequestId: options.clientRequestId!,
-      turnId: options.turnId,
-      status: 'accepted',
-      acceptedAt: new Date().toISOString(),
-    };
-  }
-
   async #submitHttpRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
     const clientRequestId = this.#requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.#requireClientRequestId(input.clientMessageId, 'clientMessageId');
@@ -566,8 +531,7 @@ export class ChatCommandService {
     if (ledger.kind === 'duplicate') return commandResultFromRecord(ledger.record, 'duplicate');
 
     try {
-      const result = await this.#forkChatFromContext(this.#validateFork(input));
-      input.onForked?.(result);
+      await this.#forkChatFromContext(this.#validateFork(input));
     } catch (error: unknown) {
       await this.deps.ledger.update(ledger.record.key, {
         status: 'failed',

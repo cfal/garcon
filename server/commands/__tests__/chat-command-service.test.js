@@ -37,7 +37,6 @@ function makeService() {
     removeChat: mock((chatId) => sessions.delete(chatId)),
   };
   const queue = {
-    submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     discardPendingUserInput: mock(() => true),
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
@@ -108,28 +107,20 @@ describe('ChatCommandService', () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
-  it('rejects empty commands consistently for HTTP and WebSocket submissions', async () => {
+  it('rejects empty commands', async () => {
     const { service } = makeService();
 
     await expect(service.submitRun({
-      transport: 'http',
       chatId: '1',
       command: '',
       clientRequestId: 'req-1',
       clientMessageId: 'msg-1',
-    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-
-    await expect(service.submitRun({
-      transport: 'websocket',
-      chatId: '1',
-      command: '',
     })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 
   it('deduplicates HTTP retries without resubmitting queue work', async () => {
     const { service, queue } = makeService();
     const input = {
-      transport: 'http',
       chatId: '1',
       command: 'continue',
       clientRequestId: 'req-1',
@@ -151,7 +142,6 @@ describe('ChatCommandService', () => {
     queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
 
     await expect(service.submitRun({
-      transport: 'http',
       chatId: '1',
       command: 'continue',
       clientRequestId: 'req-fail-1',
@@ -174,7 +164,6 @@ describe('ChatCommandService', () => {
   it('does not return duplicate accepted after a failed pre-schedule append', async () => {
     const { service, queue } = makeService();
     const input = {
-      transport: 'http',
       chatId: '1',
       command: 'continue',
       clientRequestId: 'req-retry-1',
@@ -192,26 +181,6 @@ describe('ChatCommandService', () => {
     expect(queue.runAcceptedTurn).toHaveBeenCalledTimes(1);
   });
 
-  it('submits WebSocket runs through the queue with generated turn ids', async () => {
-    const { service, queue } = makeService();
-
-    const result = await service.submitRun({
-      transport: 'websocket',
-      chatId: '1',
-      command: 'hello',
-      options: { model: 'opus' },
-    });
-
-    expect(result.commandType).toBe('agent-run');
-    expect(result.clientRequestId).toBeTruthy();
-    expect(result.turnId).toBeTruthy();
-    expect(queue.submit).toHaveBeenCalledWith('1', 'hello', expect.objectContaining({
-      model: 'opus',
-      clientRequestId: result.clientRequestId,
-      turnId: result.turnId,
-    }));
-  });
-
   it('applies shared fork validation before copying', async () => {
     const { service, agents, forkChatFileCopy } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);
@@ -225,29 +194,5 @@ describe('ChatCommandService', () => {
     });
 
     expect(forkChatFileCopy).not.toHaveBeenCalled();
-  });
-
-  it('submits WebSocket fork-runs through the shared fork path', async () => {
-    const { service, queue, forkChatFileCopy } = makeService();
-    const onForked = mock(() => undefined);
-
-    const result = await service.submitForkRun({
-      transport: 'websocket',
-      sourceChatId: '1',
-      chatId: '2',
-      command: 'continue',
-      onForked,
-    });
-
-    expect(result.commandType).toBe('fork-run');
-    expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
-    expect(onForked).toHaveBeenCalledWith(expect.objectContaining({
-      sourceChatId: '1',
-      chatId: '2',
-    }));
-    expect(queue.submit).toHaveBeenCalledWith('2', 'continue', expect.objectContaining({
-      clientRequestId: result.clientRequestId,
-      turnId: result.turnId,
-    }));
   });
 });

@@ -15,7 +15,7 @@ import {
 import type { ApiProtocol } from '$shared/api-providers';
 import { parseChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
 import type { ChatListResponse } from '$shared/chat-list';
-import type { PendingUserInput } from '$shared/pending-user-input';
+import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import type {
 	AgentRunCommandRequest,
 	AgentStopCommandRequest,
@@ -170,6 +170,42 @@ export async function getRunningChats(): Promise<RunningChatsResponse> {
 	return apiGet<RunningChatsResponse>('/api/v1/chats/running');
 }
 
+function requireNonEmptyString(value: unknown, fieldName: string): string {
+	if (typeof value !== 'string' || value.trim().length === 0) {
+		throw new Error(`Invalid chat messages page: ${fieldName}`);
+	}
+	return value;
+}
+
+function requireNonNegativeInteger(value: unknown, fieldName: string): number {
+	if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+		throw new Error(`Invalid chat messages page: ${fieldName}`);
+	}
+	return value;
+}
+
+function requirePositiveInteger(value: unknown, fieldName: string): number {
+	if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+		throw new Error(`Invalid chat messages page: ${fieldName}`);
+	}
+	return value;
+}
+
+function parsePendingUserInputs(value: unknown): PendingUserInput[] {
+	if (!Array.isArray(value)) {
+		throw new Error('Invalid chat messages page: pendingUserInputs');
+	}
+	const pendingInputs: PendingUserInput[] = [];
+	for (const item of value) {
+		const pendingInput = normalizePendingUserInput(item);
+		if (pendingInput === null) {
+			throw new Error('Invalid chat messages page: pendingUserInputs');
+		}
+		pendingInputs.push(pendingInput);
+	}
+	return pendingInputs;
+}
+
 export async function getChatMessages(params: {
 	chatId: string;
 	limit?: number;
@@ -195,21 +231,24 @@ export async function getChatMessages(params: {
 		generationId?: unknown;
 		lastSeq?: unknown;
 		pageOldestSeq?: unknown;
-		pendingUserInputs?: PendingUserInput[];
+		pendingUserInputs?: unknown;
 		hasMore?: unknown;
 		limit?: unknown;
 	}>(`/api/v1/chats/messages?${query.toString()}`);
 	const messages = parseChatViewMessages(response.messages);
-	if (messages === null) throw new Error('Invalid chat messages page');
+	if (messages === null) throw new Error('Invalid chat messages page: messages');
+	if (typeof response.hasMore !== 'boolean') {
+		throw new Error('Invalid chat messages page: hasMore');
+	}
 	return {
-		chatId: typeof response.chatId === 'string' ? response.chatId : params.chatId,
+		chatId: requireNonEmptyString(response.chatId, 'chatId'),
 		messages,
-		generationId: typeof response.generationId === 'string' ? response.generationId : '',
-		lastSeq: Number(response.lastSeq) || 0,
-		pageOldestSeq: Number(response.pageOldestSeq) || 0,
-		pendingUserInputs: Array.isArray(response.pendingUserInputs) ? response.pendingUserInputs : [],
-		hasMore: Boolean(response.hasMore),
-		limit: Number(response.limit) || params.limit || 20,
+		generationId: requireNonEmptyString(response.generationId, 'generationId'),
+		lastSeq: requireNonNegativeInteger(response.lastSeq, 'lastSeq'),
+		pageOldestSeq: requireNonNegativeInteger(response.pageOldestSeq, 'pageOldestSeq'),
+		pendingUserInputs: parsePendingUserInputs(response.pendingUserInputs),
+		hasMore: response.hasMore,
+		limit: requirePositiveInteger(response.limit, 'limit'),
 	};
 }
 
