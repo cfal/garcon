@@ -29,11 +29,15 @@ export type ChatReplayResult =
     };
 
 export type ChatGenerationResetReason = 'manual-reload' | 'process-error';
+export type ChatViewApplyStatus = 'applied' | 'gap-detected';
 
 export interface ChatViewApplyResult {
   messages: ChatViewMessage[];
   changed: boolean;
   lastSeq: number;
+  status: ChatViewApplyStatus;
+  expectedSeq?: number;
+  receivedSeq?: number;
 }
 
 function isPositiveInt(value: unknown): value is number {
@@ -79,14 +83,29 @@ export function applyChatViewMessages(
   incoming: ChatViewMessage[],
   lastSeq: number,
 ): ChatViewApplyResult {
-  if (incoming.length === 0) return { messages: current, changed: false, lastSeq };
+  if (incoming.length === 0) return { messages: current, changed: false, lastSeq, status: 'applied' };
   const filtered = incoming.filter((message) => message.seq > lastSeq);
   if (filtered.length === 0) {
-    return { messages: current, changed: false, lastSeq };
+    return { messages: current, changed: false, lastSeq, status: 'applied' };
+  }
+  let expectedSeq = lastSeq + 1;
+  for (const message of filtered) {
+    if (message.seq !== expectedSeq) {
+      return {
+        messages: current,
+        changed: false,
+        lastSeq,
+        status: 'gap-detected',
+        expectedSeq,
+        receivedSeq: message.seq,
+      };
+    }
+    expectedSeq += 1;
   }
   return {
     messages: [...current, ...filtered],
     changed: true,
     lastSeq: filtered[filtered.length - 1].seq,
+    status: 'applied',
   };
 }

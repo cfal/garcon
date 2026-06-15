@@ -189,6 +189,30 @@ describe('LocalChatSnapshotCache', () => {
 		expect(cache.restore('chat-1')?.stale).toBe(true);
 	});
 
+	it('marks snapshots stale when background messages have a seq gap', () => {
+		cache.persist('chat-1', [entry(1, 'a')], cursor(1));
+
+		const applied = cache.applyMessages('chat-1', 'generation-1', [entry(3, 'c')], 3);
+
+		expect(applied).toBe(false);
+		const restored = cache.restore('chat-1');
+		expect(restored?.stale).toBe(true);
+		expect(restored?.lastSeq).toBe(1);
+		expect(restored?.entries.map((item) => (item.message as UserMessage).content)).toEqual(['a']);
+	});
+
+	it('marks snapshots stale when delta lastSeq is ahead of applied messages', () => {
+		cache.persist('chat-1', [entry(1, 'a')], cursor(1));
+
+		const applied = cache.applyMessages('chat-1', 'generation-1', [entry(2, 'b')], 3);
+
+		expect(applied).toBe(false);
+		const restored = cache.restore('chat-1');
+		expect(restored?.stale).toBe(true);
+		expect(restored?.lastSeq).toBe(1);
+		expect(restored?.entries.map((item) => (item.message as UserMessage).content)).toEqual(['a']);
+	});
+
 	it('remove and clearAll delete snapshots and index state', () => {
 		persist(cache, 'chat-1', [entry(1, 'a')]);
 		persist(cache, 'chat-2', [entry(1, 'b')]);

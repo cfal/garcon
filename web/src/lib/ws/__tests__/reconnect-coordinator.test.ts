@@ -70,6 +70,7 @@ function createReconnectDeps(options: {
 	backgroundCursors?: Array<{ chatId: string; generationId: string; lastSeq: number }>;
 } = {}) {
 	const selectedChatId = options.selectedChatId ?? 'chat-1';
+	let selectedCursor = { generationId: 'generation-selected', lastSeq: 2 };
 	const sendRequest = vi.fn(async (request: Record<string, unknown>) => {
 		if (request.type === 'chats-running-query') return runningResponse(options.runningIds ?? []);
 		if (request.type === 'chat-subscribe') {
@@ -79,8 +80,14 @@ function createReconnectDeps(options: {
 		throw new Error(`Unexpected request: ${String(request.type)}`);
 	});
 	const chatState = {
-		getCursor: vi.fn(() => ({ generationId: 'generation-selected', lastSeq: 2 })),
-		applyMessages: vi.fn(() => 'applied'),
+		getCursor: vi.fn(() => selectedCursor),
+		applyMessages: vi.fn((generationId: string, messages: Array<{ seq?: unknown }>) => {
+			const last = messages.at(-1);
+			if (typeof last?.seq === 'number') {
+				selectedCursor = { generationId, lastSeq: last.seq };
+			}
+			return 'applied';
+		}),
 		loadMessages: vi.fn(async () => []),
 		snapshotCache: {
 			markStale: vi.fn(),
@@ -165,6 +172,36 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.chatState.snapshotCache.markValidated).toHaveBeenCalledWith('chat-1');
 	});
 
+	it('falls back to selected snapshot when reconnect replay detects a seq gap', async () => {
+		const deps = createReconnectDeps({
+			subscribeResponses: {
+				'chat-1': deltaResponse('chat-1', 'generation-selected', [messageJson(5, 'later')]),
+			},
+		});
+		(deps.chatState.applyMessages as ReturnType<typeof vi.fn>).mockReturnValueOnce('gap-detected');
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.snapshotCache.markValidated).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('falls back to selected snapshot when reconnect delta lastSeq stays ahead after apply', async () => {
+		const deps = createReconnectDeps({
+			subscribeResponses: {
+				'chat-1': {
+					...deltaResponse('chat-1', 'generation-selected', [messageJson(3, 'partial')]),
+					lastSeq: 4,
+				},
+			},
+		});
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.snapshotCache.markValidated).toHaveBeenCalledWith('chat-1');
+	});
+
 	it('falls back to selected snapshot when subscribe request fails', async () => {
 		const deps = createReconnectDeps();
 		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
@@ -232,6 +269,22 @@ describe('ChatReconnectCoordinator', () => {
 				'chat-2': snapshotRequiredResponse('chat-2', 'generation-3'),
 			},
 		});
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.loadBackgroundSnapshot).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('loads background snapshots when background delta apply reports a gap', async () => {
+		const deps = createReconnectDeps({
+			selectedChatId: 'chat-1',
+			backgroundCursors: [{ chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 }],
+			subscribeResponses: {
+				'chat-1': deltaResponse('chat-1', 'generation-selected'),
+				'chat-2': deltaResponse('chat-2', 'generation-2', [messageJson(3, 'later')]),
+			},
+		});
+		deps.onBackgroundMessages.mockResolvedValueOnce(false);
 
 		await reconnectAfterFirstConnection(deps);
 

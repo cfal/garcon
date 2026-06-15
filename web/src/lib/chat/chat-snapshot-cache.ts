@@ -292,9 +292,13 @@ export class LocalChatSnapshotCache {
 			return false;
 		}
 		const result = applyChatViewMessages(restored.entries, messages, restored.lastSeq);
+		if (result.status === 'gap-detected' || lastSeq > result.lastSeq) {
+			this.markStale(chatId);
+			return false;
+		}
 		this.persist(chatId, result.messages, {
 			generationId,
-			lastSeq: Math.max(result.lastSeq, lastSeq),
+			lastSeq: result.lastSeq,
 		}, options);
 		this.markValidated(chatId);
 		return true;

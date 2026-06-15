@@ -36,7 +36,7 @@ export interface ChatReconnectCoordinatorOptions {
 		generationId: string,
 		messages: ChatViewMessage[],
 		lastSeq: number,
-	) => Promise<void> | void;
+	) => Promise<boolean | void> | boolean | void;
 }
 
 const BACKGROUND_RESUME_LIMIT = 20;
@@ -128,9 +128,9 @@ export class ChatReconnectCoordinator {
 	}
 
 	async #resumeSelectedChat(chatId: string, epoch: number): Promise<void> {
-			const cursor = this.options.chatState.getCursor();
-			try {
-				const message = await this.#subscribe(chatId, cursor.generationId, cursor.lastSeq);
+		const cursor = this.options.chatState.getCursor();
+		try {
+			const message = await this.#subscribe(chatId, cursor.generationId, cursor.lastSeq);
 			if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
 
 			if (message.mode === 'snapshot-required') {
@@ -138,8 +138,12 @@ export class ChatReconnectCoordinator {
 				return;
 			}
 
-				const result = this.options.chatState.applyMessages(message.generationId ?? '', message.messages);
-			if (result === 'generation-changed') {
+			const result = this.options.chatState.applyMessages(message.generationId ?? '', message.messages);
+			if (result !== 'applied') {
+				await this.#loadSelectedSnapshot(chatId, epoch);
+				return;
+			}
+			if (message.lastSeq > this.options.chatState.getCursor().lastSeq) {
 				await this.#loadSelectedSnapshot(chatId, epoch);
 				return;
 			}
@@ -167,8 +171,8 @@ export class ChatReconnectCoordinator {
 		epoch: number,
 	): Promise<void> {
 		const cursors = this.options.getBackgroundCursors()
-				.filter((cursor) => cursor.chatId !== selectedChatId)
-				.filter((cursor) => cursor.generationId && cursor.lastSeq > 0)
+			.filter((cursor) => cursor.chatId !== selectedChatId)
+			.filter((cursor) => cursor.generationId && cursor.lastSeq > 0)
 			.sort((left, right) => Number(runningChatIds.has(right.chatId)) - Number(runningChatIds.has(left.chatId)))
 			.slice(0, BACKGROUND_RESUME_LIMIT);
 
@@ -176,21 +180,29 @@ export class ChatReconnectCoordinator {
 		for (const cursor of cursors) {
 			if (epoch !== this.#reconnectEpoch) return;
 			try {
-					const message = await this.#subscribe(cursor.chatId, cursor.generationId, cursor.lastSeq);
+				const message = await this.#subscribe(cursor.chatId, cursor.generationId, cursor.lastSeq);
 				if (epoch !== this.#reconnectEpoch) return;
 				if (message.mode === 'snapshot-required') {
 					await this.options.loadBackgroundSnapshot(cursor.chatId);
 					shouldRefresh = true;
 					continue;
 				}
-					if (message.messages.length > 0) {
-						await this.options.onBackgroundMessages?.(
-							cursor.chatId,
-							message.generationId ?? '',
-							message.messages,
-							message.lastSeq,
-						);
-						shouldRefresh = true;
+				if (message.messages.length === 0 && message.lastSeq > cursor.lastSeq) {
+					await this.options.loadBackgroundSnapshot(cursor.chatId);
+					shouldRefresh = true;
+					continue;
+				}
+				if (message.messages.length > 0) {
+					const applied = await this.options.onBackgroundMessages?.(
+						cursor.chatId,
+						message.generationId ?? '',
+						message.messages,
+						message.lastSeq,
+					);
+					if (applied === false) {
+						await this.options.loadBackgroundSnapshot(cursor.chatId);
+					}
+					shouldRefresh = true;
 				}
 			} catch {
 				// Background resume is opportunistic; visible selected-chat recovery wins.

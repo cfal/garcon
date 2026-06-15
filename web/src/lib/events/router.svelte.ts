@@ -86,7 +86,7 @@ export interface EventRouterChatStateStore {
 		chatId: string,
 		generationId: string,
 		messages: ChatViewMessage[],
-	) => 'applied' | 'generation-changed';
+	) => 'applied' | 'generation-changed' | 'gap-detected';
 	reloadChatSnapshot: (chatId: string) => void;
 	appendErrorMessage: (content: string) => void;
 	appendLocalAssistantMessage: (content: string) => void;
@@ -194,7 +194,7 @@ export function createChatMessagesAccumulator(
 			pendingGenerationId = '';
 			pendingChatId = '';
 			const result = chatState.applyChatMessages(chatId, generationId, messages);
-			if (result === 'generation-changed') {
+			if (result !== 'applied') {
 				chatState.reloadChatSnapshot(chatId);
 			}
 		},

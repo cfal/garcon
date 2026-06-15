@@ -97,11 +97,13 @@
 			await sessions.quietRefreshChats();
 		},
 		onBackgroundMessages: (chatId, generationId, messages, lastSeq) => {
-			chatState.snapshotCache.applyMessages(chatId, generationId, messages, lastSeq, {
+			const applied = chatState.snapshotCache.applyMessages(chatId, generationId, messages, lastSeq, {
 				limit: INITIAL_VISIBLE_MESSAGES,
 			});
+			if (!applied) return false;
 			const preview = selectPreviewFromBatch(messages.map((entry) => entry.message));
 			if (preview) sessions.patchPreview(chatId, preview.content);
+			return true;
 		},
 	});
 

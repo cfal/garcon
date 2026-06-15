@@ -140,6 +140,40 @@ describe('event router integration', () => {
 		expect(stores.sessions.patchChatPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
 	});
 
+	it('reloads the selected chat when live messages expose a seq gap', () => {
+		const defaults = createStores();
+		const stores = createStores({
+			chatState: {
+				...defaults.chatState,
+				applyChatMessages: vi.fn((): 'gap-detected' => 'gap-detected'),
+				reloadChatSnapshot: vi.fn(),
+			},
+		});
+
+		renderRouterWithRawMessages(
+			[{
+				type: 'chat-messages',
+				chatId: 'chat-a',
+				generationId: 'generation-current',
+				messages: [
+					rawMessage(3, {
+						type: 'assistant-message',
+						timestamp: TS,
+						content: 'later',
+					}),
+				],
+			}],
+			stores,
+		);
+
+		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
+			'chat-a',
+			'generation-current',
+			expect.arrayContaining([expect.objectContaining({ seq: 3 })]),
+		);
+		expect(stores.chatState.reloadChatSnapshot).toHaveBeenCalledWith('chat-a');
+	});
+
 	it('patches background previews without applying background messages to selected state', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(

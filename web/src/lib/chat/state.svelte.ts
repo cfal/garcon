@@ -10,7 +10,8 @@ import { getChatMessages } from '$lib/api/chats.js';
 const MESSAGES_PER_PAGE = 20;
 export const INITIAL_VISIBLE_MESSAGES = 100;
 type ChatPage = Awaited<ReturnType<typeof getChatMessages>>;
-type PageApplyResult = 'applied' | 'generation-changed' | 'stale';
+type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detected';
+type PageApplyResult = MessageApplyResult | 'stale';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 
@@ -136,7 +137,7 @@ export class ChatState {
 	applyMessages(
 		generationId: string,
 		messages: ChatViewMessage[],
-	): 'applied' | 'generation-changed' {
+	): MessageApplyResult {
 		if (this.#snapshotBuffer) {
 			this.#snapshotBuffer.push({ generationId, messages });
 			return 'applied';
@@ -151,6 +152,12 @@ export class ChatState {
 		}
 		this.generationId = generationId;
 		const result = applyChatViewMessages(this.entries, messages, this.lastSeq);
+		if (result.status === 'gap-detected') {
+			console.warn(
+				`[chat-state] seq gap detected generation=${generationId} expected=${result.expectedSeq} received=${result.receivedSeq}`,
+			);
+			return 'gap-detected';
+		}
 		if (result.changed) {
 			this.entries = result.messages;
 			this.localNotices = [];
@@ -234,9 +241,8 @@ export class ChatState {
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		for (const batch of buffered) {
-			if (this.applyMessages(batch.generationId, batch.messages) === 'generation-changed') {
-				return 'generation-changed';
-			}
+			const result = this.applyMessages(batch.generationId, batch.messages);
+			if (result !== 'applied') return result;
 		}
 		return 'applied';
 	}

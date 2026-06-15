@@ -135,6 +135,20 @@ describe('ChatState', () => {
 		expect(chat.displayMessages.map(contentOf)).toEqual(['server', 'local error']);
 	});
 
+	it('detects same-generation gaps without advancing the cursor', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const chat = new ChatState();
+		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+
+		const result = chat.applyMessages('generation-1', [entry(3, assistant('later'))]);
+
+		expect(result).toBe('gap-detected');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['server']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 1 });
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('expected=2 received=3'));
+		warn.mockRestore();
+	});
+
 	it('clears transient local messages when a live batch changes generation', () => {
 		const chat = new ChatState();
 		chat.applyMessages('generation-1', [entry(1, user('old'))]);
@@ -160,6 +174,28 @@ describe('ChatState', () => {
 		expect(result).toBe('applied');
 		expect(chat.chatMessages.map(contentOf)).toEqual(['history', 'live']);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
+	});
+
+	it('surfaces buffered same-generation gaps during snapshot load', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const chat = new ChatState();
+		const epoch = chat.beginSnapshotLoad();
+
+		chat.applyMessages('generation-1', [entry(5, assistant('later'))]);
+		const result = chat.setFromPage(page({
+			generationId: 'generation-1',
+			messages: [
+				entry(1, user('one')),
+				entry(2, assistant('two')),
+				entry(3, assistant('three')),
+			],
+			lastSeq: 3,
+		}), epoch);
+
+		expect(result).toBe('gap-detected');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['one', 'two', 'three']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 3 });
+		warn.mockRestore();
 	});
 
 	it('does not install a stale snapshot when buffered messages indicate a new generation', () => {

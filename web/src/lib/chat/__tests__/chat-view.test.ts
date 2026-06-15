@@ -43,8 +43,46 @@ describe('chat view helpers', () => {
 
 		const applied = applyChatViewMessages(current, incoming, 1);
 
+		expect(applied.status).toBe('applied');
 		expect(applied.changed).toBe(true);
 		expect(applied.messages.map((entry) => entry.seq)).toEqual([1, 2]);
 		expect(applied.lastSeq).toBe(2);
+	});
+
+	it('detects a gap before the first new message', () => {
+		const current: ChatViewMessage[] = [{ seq: 1, message: parseChatViewMessage({ seq: 1, message })!.message }];
+		const incoming: ChatViewMessage[] = [
+			{ seq: 3, message: parseChatViewMessage({ seq: 3, message })!.message },
+		];
+
+		const applied = applyChatViewMessages(current, incoming, 1);
+
+		expect(applied).toMatchObject({
+			status: 'gap-detected',
+			changed: false,
+			lastSeq: 1,
+			expectedSeq: 2,
+			receivedSeq: 3,
+		});
+		expect(applied.messages).toBe(current);
+	});
+
+	it('detects an internal gap in a new message batch', () => {
+		const current: ChatViewMessage[] = [{ seq: 1, message: parseChatViewMessage({ seq: 1, message })!.message }];
+		const incoming: ChatViewMessage[] = [
+			{ seq: 2, message: parseChatViewMessage({ seq: 2, message })!.message },
+			{ seq: 4, message: parseChatViewMessage({ seq: 4, message })!.message },
+		];
+
+		const applied = applyChatViewMessages(current, incoming, 1);
+
+		expect(applied).toMatchObject({
+			status: 'gap-detected',
+			changed: false,
+			lastSeq: 1,
+			expectedSeq: 3,
+			receivedSeq: 4,
+		});
+		expect(applied.messages).toBe(current);
 	});
 });
