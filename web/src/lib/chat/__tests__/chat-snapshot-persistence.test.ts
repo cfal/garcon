@@ -29,6 +29,50 @@ describe('ChatSnapshotPersistence', () => {
 		vi.useRealTimers();
 	});
 
+	it('calls default timers with the global receiver', () => {
+		const originalSetTimeout = globalThis.setTimeout;
+		const originalClearTimeout = globalThis.clearTimeout;
+		const timerHandle = 1 as unknown as ReturnType<typeof setTimeout>;
+		const scheduled: { callback?: () => void } = {};
+
+		const setTimeoutMock = vi.fn(function (
+			this: typeof globalThis,
+			callback: () => void,
+			delayMs?: number,
+		) {
+			expect(this).toBe(globalThis);
+			expect(delayMs).toBe(100);
+			scheduled.callback = callback;
+			return timerHandle;
+		});
+		const clearTimeoutMock = vi.fn(function (
+			this: typeof globalThis,
+			handle: ReturnType<typeof setTimeout>,
+		) {
+			expect(this).toBe(globalThis);
+			expect(handle).toBe(timerHandle);
+		});
+
+		globalThis.setTimeout = setTimeoutMock as unknown as typeof setTimeout;
+		globalThis.clearTimeout = clearTimeoutMock as unknown as typeof clearTimeout;
+
+		try {
+			const persist = vi.fn();
+			const persistence = new ChatSnapshotPersistence({ delayMs: 100, persist });
+			persistence.schedule(draft('chat-1', 1));
+
+			expect(setTimeoutMock).toHaveBeenCalledOnce();
+			expect(scheduled.callback).toEqual(expect.any(Function));
+
+			scheduled.callback?.();
+			expect(clearTimeoutMock).toHaveBeenCalledOnce();
+			expect(persist).toHaveBeenCalledOnce();
+		} finally {
+			globalThis.setTimeout = originalSetTimeout;
+			globalThis.clearTimeout = originalClearTimeout;
+		}
+	});
+
 	it('debounces repeated snapshots for the same chat', () => {
 		vi.useFakeTimers();
 		const persist = vi.fn();

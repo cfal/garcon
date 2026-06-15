@@ -7,26 +7,30 @@ export interface ChatSnapshotDraft {
 	lastAppendSeq: number;
 }
 
+type TimeoutHandle = ReturnType<typeof setTimeout>;
+type SetTimeoutFn = (callback: () => void, delayMs: number) => TimeoutHandle;
+type ClearTimeoutFn = (timer: TimeoutHandle) => void;
+
 export interface ChatSnapshotPersistenceOptions {
 	delayMs?: number;
 	persist: (draft: ChatSnapshotDraft) => void;
-	setTimeoutFn?: typeof setTimeout;
-	clearTimeoutFn?: typeof clearTimeout;
+	setTimeoutFn?: SetTimeoutFn;
+	clearTimeoutFn?: ClearTimeoutFn;
 }
 
 export class ChatSnapshotPersistence {
 	#delayMs: number;
 	#persist: (draft: ChatSnapshotDraft) => void;
-	#setTimeout: typeof setTimeout;
-	#clearTimeout: typeof clearTimeout;
-	#timer: ReturnType<typeof setTimeout> | null = null;
+	#setTimeout: SetTimeoutFn;
+	#clearTimeout: ClearTimeoutFn;
+	#timer: TimeoutHandle | null = null;
 	#pending: ChatSnapshotDraft | null = null;
 
 	constructor(options: ChatSnapshotPersistenceOptions) {
 		this.#delayMs = options.delayMs ?? 800;
 		this.#persist = options.persist;
-		this.#setTimeout = options.setTimeoutFn ?? setTimeout;
-		this.#clearTimeout = options.clearTimeoutFn ?? clearTimeout;
+		this.#setTimeout = options.setTimeoutFn ?? ((callback, delayMs) => globalThis.setTimeout(callback, delayMs));
+		this.#clearTimeout = options.clearTimeoutFn ?? ((timer) => globalThis.clearTimeout(timer));
 	}
 
 	schedule(draft: ChatSnapshotDraft): void {
