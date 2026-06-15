@@ -2,6 +2,9 @@ import crypto from 'crypto';
 import { ErrorMessage, type ChatMessage } from '../../common/chat-types.js';
 import type { ChatReplayResult, ChatViewMessage, ChatViewPage } from '../../common/chat-view.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('chat-view');
 
 export interface ChatViewStoreOptions {
   replayLimit?: number;
@@ -241,7 +244,7 @@ export class ChatViewStore {
       lastAccessAt: now,
     };
     this.#appendToView(view, messages);
-    console.info(`chat-view: generation created chat=${chatId} messages=${messages.length} lastSeq=${view.lastSeq}`);
+    logger.info(`generation created chat=${chatId} messages=${messages.length} lastSeq=${view.lastSeq}`);
     return view;
   }
 

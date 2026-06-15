@@ -88,4 +88,66 @@ describe('ChatNativeReloader', () => {
     expect(first.generationId).toBe(second.generationId);
     expect(nativeSource.loadNativeMessages).toHaveBeenCalledTimes(1);
   });
+
+  it('does not coalesce process-error reloads behind manual reloads', async () => {
+    let releaseManual;
+    const manualGate = new Promise((resolve) => {
+      releaseManual = resolve;
+    });
+    let calls = 0;
+    const nativeSource = {
+      loadNativeMessages: mock(async () => {
+        calls += 1;
+        if (calls === 1) {
+          await manualGate;
+          return [assistant('manual native')];
+        }
+        return [assistant('process native')];
+      }),
+    };
+    const reloader = new ChatNativeReloader(new ChatViewStore(() => false), nativeSource, () => false);
+
+    const manualPromise = reloader.reloadFromNative('chat-1', 'manual-reload');
+    const processPromise = reloader.reloadFromNative('chat-1', 'process-error');
+    releaseManual();
+    const [manual, process] = await Promise.all([manualPromise, processPromise]);
+
+    expect(manual.mode).toBe('manual-reload');
+    expect(process.mode).toBe('process-error');
+    expect(manual.generationId).not.toBe(process.generationId);
+    expect(contents(manual)).toEqual(['manual native']);
+    expect(contents(process)).toEqual(['process native', 'The process died.']);
+    expect(nativeSource.loadNativeMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not coalesce manual reloads behind process-error reloads', async () => {
+    let releaseProcess;
+    const processGate = new Promise((resolve) => {
+      releaseProcess = resolve;
+    });
+    let calls = 0;
+    const nativeSource = {
+      loadNativeMessages: mock(async () => {
+        calls += 1;
+        if (calls === 1) {
+          await processGate;
+          return [assistant('process native')];
+        }
+        return [assistant('manual native')];
+      }),
+    };
+    const reloader = new ChatNativeReloader(new ChatViewStore(() => false), nativeSource, () => false);
+
+    const processPromise = reloader.reloadFromNative('chat-1', 'process-error');
+    const manualPromise = reloader.reloadFromNative('chat-1', 'manual-reload');
+    releaseProcess();
+    const [process, manual] = await Promise.all([processPromise, manualPromise]);
+
+    expect(process.mode).toBe('process-error');
+    expect(manual.mode).toBe('manual-reload');
+    expect(process.generationId).not.toBe(manual.generationId);
+    expect(contents(process)).toEqual(['process native', 'The process died.']);
+    expect(contents(manual)).toEqual(['manual native']);
+    expect(nativeSource.loadNativeMessages).toHaveBeenCalledTimes(2);
+  });
 });

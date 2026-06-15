@@ -1,6 +1,9 @@
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatViewPage } from '../../common/chat-view.js';
 import type { ChatViewStore } from './chat-view-store.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('chat-native-reload');
 
 interface NativeHistorySource {
   loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
@@ -36,14 +39,15 @@ export class ChatNativeReloader {
     if (mode !== 'process-error' && this.#isChatRunning(chatId)) {
       throw new Error('Cannot reload a running chat');
     }
-    const pending = this.#inFlight.get(chatId);
+    const key = `${chatId}:${mode}`;
+    const pending = this.#inFlight.get(key);
     if (pending) return pending;
     const run = this.#run(chatId, mode);
-    this.#inFlight.set(chatId, run);
+    this.#inFlight.set(key, run);
     try {
       return await run;
     } finally {
-      this.#inFlight.delete(chatId);
+      this.#inFlight.delete(key);
     }
   }
 
@@ -53,7 +57,7 @@ export class ChatNativeReloader {
       () => this.#source.loadNativeMessages(chatId),
       { appendProcessDiedNotice: mode === 'process-error' },
     );
-    console.info(`native reload: ${mode} messages=${page.lastSeq}`);
+    logger.info(`reload complete mode=${mode} chat=${chatId} messages=${page.lastSeq}`);
     return { ...page, mode };
   }
 }
