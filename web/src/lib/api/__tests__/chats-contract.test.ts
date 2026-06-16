@@ -24,6 +24,7 @@ import {
 	updateChatModel,
 	getRunningChats,
 	getChatMessages,
+	getChatDetails,
 } from '../chats';
 import type { ChatListResponse } from '$shared/chat-list';
 
@@ -85,6 +86,24 @@ describe('chats API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats');
 		expect(opts.method ?? 'GET').toBe('GET');
+	});
+
+	it('getChatDetails returns agent session id from the details endpoint', async () => {
+		const payload = {
+			chatId: 'c-1',
+			firstMessage: 'Hello',
+			createdAt: '2026-02-20T10:00:00.000Z',
+			lastActivityAt: '2026-02-21T11:00:00.000Z',
+			agentSessionId: 'thread-abc',
+			nativePath: '/tmp/session.jsonl',
+		};
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		const result = await getChatDetails('c/1');
+
+		expect(result).toEqual(payload);
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/details?chatId=c%2F1');
+		expect(fetchMock.mock.calls[0][1].method ?? 'GET').toBe('GET');
 	});
 
 	it('startChat sends POST with correct shape', async () => {

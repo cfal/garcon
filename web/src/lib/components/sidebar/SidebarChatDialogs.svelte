@@ -25,6 +25,7 @@
 		firstMessage: string | null;
 		createdAt: string | null;
 		lastActivityAt: string | null;
+		agentSessionId: string | null;
 		nativePath: string | null;
 		isLoading: boolean;
 		error: string | null;
@@ -56,6 +57,7 @@
 	let renameInputRef = $state<HTMLInputElement | null>(null);
 	let deleteButtonRef = $state<HTMLButtonElement | null>(null);
 	let firstMessageCopied = $state(false);
+	let agentSessionIdCopied = $state(false);
 	let nativePathCopied = $state(false);
 
 	// Tracks whether the delete dialog is open via binding.
@@ -174,8 +176,8 @@
 <!-- Details dialog -->
 <Dialog.Root open={detailsOpen} onOpenChange={handleDetailsOpenChange}>
 	<Dialog.Content class="max-w-2xl overflow-hidden p-0 sm:max-h-[85vh]">
-		<Dialog.Header class="px-6 pt-6 pb-1">
-			<Dialog.Title class="truncate">
+		<Dialog.Header class="min-w-0 max-w-full overflow-hidden px-6 pt-6 pb-1 pr-12">
+			<Dialog.Title class="block min-w-0 max-w-full truncate">
 				{chatDetailsDialog?.chatTitle || m.sidebar_chats_unnamed()}
 			</Dialog.Title>
 		</Dialog.Header>
@@ -227,6 +229,35 @@
 							readonly
 							rows={2}
 							value={displayText(chatDetailsDialog?.nativePath || null)}
+							class="w-full max-w-full min-w-0 resize-none min-h-16 font-mono text-xs"
+						/>
+					</div>
+					<div class="space-y-1">
+						<div class="flex items-center justify-between gap-2">
+							<div class="text-sm font-medium">{m.sidebar_details_agent_session_id()}</div>
+							<button
+								type="button"
+								class="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+								onclick={(e) =>
+									copyField(
+										e,
+										chatDetailsDialog?.agentSessionId || null,
+										(v) => (agentSessionIdCopied = v),
+									)}
+								title={m.chat_tool_display_copy_to_clipboard()}
+								aria-label={m.chat_tool_display_copy_to_clipboard()}
+							>
+								{#if agentSessionIdCopied}
+									<Check class="w-4 h-4 text-status-success-foreground" />
+								{:else}
+									<Copy class="w-4 h-4" />
+								{/if}
+							</button>
+						</div>
+						<Textarea
+							readonly
+							rows={2}
+							value={displayText(chatDetailsDialog?.agentSessionId || null)}
 							class="w-full max-w-full min-w-0 resize-none min-h-16 font-mono text-xs"
 						/>
 					</div>

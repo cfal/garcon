@@ -234,6 +234,7 @@
 					firstMessage: details.firstMessage,
 					createdAt: details.createdAt,
 					lastActivityAt: details.lastActivityAt,
+					agentSessionId: details.agentSessionId,
 					nativePath: details.nativePath,
 				});
 			} catch (error) {

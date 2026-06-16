@@ -682,6 +682,7 @@
 	"sidebar_chats_unpin": "Unpin",
 	"sidebar_delete_confirmation_cannot_undo": "This can't be undone",
 	"sidebar_delete_confirmation_delete_chat": "Delete chat",
+	"sidebar_details_agent_session_id": "Agent session ID",
 	"sidebar_details_created_at": "Created",
 	"sidebar_details_dialog_title": "Chat details",
 	"sidebar_details_error_loading": "Failed to load chat details.",

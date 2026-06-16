@@ -58,6 +58,7 @@ export interface ChatDetailsResponse {
 	firstMessage: string;
 	createdAt: string | null;
 	lastActivityAt: string | null;
+	agentSessionId: string | null;
 	nativePath: string | null;
 }
 

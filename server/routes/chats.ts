@@ -418,6 +418,7 @@ export default function createChatRoutes({
         firstMessage: meta?.firstMessage || '',
         createdAt: meta?.createdAt || null,
         lastActivityAt: meta?.lastActivity || null,
+        agentSessionId: session.agentSessionId || null,
         nativePath: session.nativePath || null,
       });
     } catch (error: unknown) {
