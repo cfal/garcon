@@ -37,6 +37,7 @@ import { TelegramNotifier } from './notifications/telegram.js';
 import { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
 import { abortRunningSessionsWithTimeout } from './lib/shutdown.js';
+import { ExpectedUserAbortTracker } from './lib/expected-user-aborts.js';
 import {
   AgentRunFinishedMessage,
   AgentRunFailedMessage,
@@ -336,6 +337,7 @@ export async function startServer(): Promise<void> {
     const broadcast = (payload: unknown) => server.publish('chat', JSON.stringify(payload));
     const recentProcessFailures = new Map<string, number>();
     const processFailureDedupeMs = 30_000;
+    const expectedUserAborts = new ExpectedUserAbortTracker();
 
     function turnFailureKey(chatId: string, turnMetadata?: TurnEventMetadata): string {
       return `${chatId}:${turnMetadata?.turnId ?? turnMetadata?.clientRequestId ?? 'chat'}`;
@@ -450,6 +452,7 @@ export async function startServer(): Promise<void> {
     });
     agentRegistry.onProcessing((chatId, isProcessing) => {
       if (!chatExists(chatId)) return;
+      if (isProcessing) expectedUserAborts.clear(chatId);
       broadcast(new ChatProcessingUpdatedMessage(chatId, isProcessing));
     });
     agentRegistry.onSessionCreated((chatId) => {
@@ -458,6 +461,7 @@ export async function startServer(): Promise<void> {
     });
     agentRegistry.onFinished((chatId, exitCode, turnMetadata) => {
       if (!chatExists(chatId)) return;
+      expectedUserAborts.clear(chatId);
       broadcast(new AgentRunFinishedMessage(chatId, exitCode, turnMetadata?.turnId, turnMetadata?.clientRequestId, turnMetadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         logger.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
@@ -468,6 +472,12 @@ export async function startServer(): Promise<void> {
     });
     agentRegistry.onFailed((chatId, agentErrorMessage, turnMetadata) => {
       if (!chatExists(chatId)) return;
+      if (expectedUserAborts.has(chatId)) {
+        queue.checkChatIdle(chatId).catch((err) => {
+          logger.warn('queue: checkChatIdle error:', errorMessage(err));
+        });
+        return;
+      }
       if (turnMetadata?.commandType === 'chat-start' && turnMetadata.clientRequestId) {
         commandLedger.updateCommand('chat-start', chatId, turnMetadata.clientRequestId, {
           status: 'failed',
@@ -524,6 +534,9 @@ export async function startServer(): Promise<void> {
     queue.onQueueUpdated((chatId, queueState) => {
       broadcast(new QueueStateUpdatedMessage(chatId, queueState));
     });
+    queue.onSessionStopRequested((chatId) => {
+      expectedUserAborts.mark(chatId);
+    });
     queue.onDispatching((chatId, entryId, content) => {
       broadcast(new QueueDispatchingMessage(chatId, entryId, content));
     });
@@ -545,10 +558,12 @@ export async function startServer(): Promise<void> {
       broadcast(new PendingUserInputClearedMessage(chatId, clientRequestId, reason));
     });
     queue.onSessionStopped((chatId, success) => {
+      if (!success) expectedUserAborts.clear(chatId);
       broadcast(new ChatSessionStoppedMessage(chatId, success));
     });
     queue.onTurnFailed((chatId, errorMessage, options = {}) => {
       if (consumeProcessFailure(chatId, options)) return;
+      if (expectedUserAborts.has(chatId)) return;
       if (options.clientRequestId) {
         pendingInputs.markFailed(chatId, options.clientRequestId);
       }

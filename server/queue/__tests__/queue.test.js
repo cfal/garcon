@@ -372,6 +372,19 @@ describe('orchestration', () => {
       expect(mockAgents.abortSession).toHaveBeenCalledWith('c1');
     });
 
+    it('emits session-stop-requested before abortSession', async () => {
+      const events = [];
+      mockAgents.abortSession.mockImplementation((chatId) => {
+        events.push(`abort:${chatId}`);
+        return Promise.resolve(true);
+      });
+      orchQueue.onSessionStopRequested((chatId) => events.push(`requested:${chatId}`));
+
+      await orchQueue.abort('c1');
+
+      expect(events).toEqual(['requested:c1', 'abort:c1']);
+    });
+
     it('emits session-stopped event', async () => {
       const events = [];
       orchQueue.onSessionStopped((chatId, success) => events.push({ chatId, success }));

@@ -1,6 +1,6 @@
 // Manages per-chat message queues and orchestrates turn execution.
 // Extends EventEmitter to notify listeners of queue state changes,
-// dispatching events, and session stops.
+// dispatching events, stop requests, and session stops.
 
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -94,6 +94,7 @@ interface ChatMessagesDep {
 
 type QueueUpdatedCallback = (chatId: string, state: QueueState) => void;
 type DispatchingCallback = (chatId: string, entryId: string, content: string) => void;
+type SessionStopRequestedCallback = (chatId: string) => void;
 type SessionStoppedCallback = (chatId: string, success: boolean) => void;
 type ChatIdleCallback = (chatId: string) => void;
 type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunAgentTurnOptions) => void;
@@ -152,6 +153,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   onQueueUpdated(cb: QueueUpdatedCallback): void { this.on('queue-updated', cb); }
   onDispatching(cb: DispatchingCallback): void { this.on('dispatching', cb); }
+  onSessionStopRequested(cb: SessionStopRequestedCallback): void { this.on('session-stop-requested', cb); }
   onSessionStopped(cb: SessionStoppedCallback): void { this.on('session-stopped', cb); }
   onChatIdle(cb: ChatIdleCallback): void { this.on('chat-idle', cb); }
   onTurnFailed(cb: TurnFailedCallback): void { this.on('turn-failed', cb); }
@@ -376,6 +378,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   // Aborts the running agent session and pauses the queue if entries remain.
   async abort(chatId: string): Promise<boolean> {
+    this.emit('session-stop-requested', chatId);
     const success = await this.#turnRunner.abortSession(chatId);
     if (success) {
       try {
