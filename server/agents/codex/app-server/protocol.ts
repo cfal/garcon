@@ -135,7 +135,6 @@ export interface ThreadStartResponse {
 
 export interface ThreadResumeResponse extends ThreadStartResponse {}
 export interface ThreadForkResponse extends ThreadStartResponse {}
-export interface ThreadReadResponse { thread: CodexThread }
 export interface ThreadListResponse {
   data: CodexThread[];
   nextCursor: string | null;

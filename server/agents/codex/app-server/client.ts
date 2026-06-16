@@ -10,7 +10,6 @@ import type {
   ThreadListResponse,
   ThreadForkResponse,
   ThreadLoadedListResponse,
-  ThreadReadResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
   ThreadUnsubscribeResponse,
@@ -162,10 +161,6 @@ export class CodexAppServerClient extends EventEmitter {
 
   forkThread(params: Record<string, unknown>): Promise<ThreadForkResponse> {
     return this.request<ThreadForkResponse>('thread/fork', params);
-  }
-
-  readThread(threadId: string, includeTurns: boolean): Promise<ThreadReadResponse> {
-    return this.request<ThreadReadResponse>('thread/read', { threadId, includeTurns });
   }
 
   listThreads(params: Record<string, unknown>): Promise<ThreadListResponse> {
