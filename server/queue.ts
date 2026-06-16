@@ -8,7 +8,7 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { normalizeQueueState } from '../common/queue-state.ts';
 import type { QueueState, QueueEntry } from '../common/queue-state.ts';
-import { UserMessage, type ChatMessage, type UserMessageDeliveryStatus } from '../common/chat-types.ts';
+import { UserMessage, type ChatImage, type ChatMessage, type UserMessageDeliveryStatus } from '../common/chat-types.ts';
 import type { ChatViewMessage } from '../common/chat-view.ts';
 import { requireChatExecutionConfig, type RunAgentTurnOptions } from "./agents/session-types.js";
 import type { IChatRegistry } from './chats/store.js';
@@ -46,6 +46,14 @@ function optionsForQueuedTurn(options: RunAgentTurnOptions): RunAgentTurnOptions
   };
 }
 
+function normalizeChatImages(images: RunAgentTurnOptions['images']): ChatImage[] | undefined {
+  if (!images?.length) return undefined;
+  return images.map((image, index) => ({
+    data: image.data,
+    name: image.name || `image-${index + 1}`,
+  }));
+}
+
 type PendingUserInputRegistrationOptions = Pick<
   RunAgentTurnOptions,
   'clientRequestId' | 'clientMessageId' | 'turnId' | 'images'
@@ -79,7 +87,7 @@ interface PendingInputsDep {
     clientRequestId?: string;
     clientMessageId?: string;
     turnId?: string;
-    images?: RunAgentTurnOptions['images'];
+    images?: ChatImage[];
     deliveryStatus?: UserMessageDeliveryStatus;
   }): Promise<unknown>;
   discard(chatId: string, clientRequestId: string): boolean;
@@ -337,17 +345,18 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   async registerPendingUserInput(chatId: string, command: string, options: PendingUserInputRegistrationOptions): Promise<void> {
     if (!command) return;
     const deliveryStatus = options.deliveryStatus ?? 'accepted';
+    const images = normalizeChatImages(options.images);
     await this.#pendingInputs.register(chatId, command, {
       clientRequestId: options.clientRequestId,
       clientMessageId: options.clientMessageId,
       turnId: options.turnId,
-      images: options.images,
+      images,
       deliveryStatus,
     });
     const userMessage = new UserMessage(
       new Date().toISOString(),
       command,
-      options.images,
+      images,
       {
         clientRequestId: options.clientRequestId,
         turnId: options.turnId,

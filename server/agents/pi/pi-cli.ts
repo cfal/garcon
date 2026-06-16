@@ -121,9 +121,11 @@ async function writeImagesToTempFiles(images: AgentCommandImage[] | undefined): 
   const fileArgs: string[] = [];
 
   for (let index = 0; index < images.length; index += 1) {
-    const parsed = parseImageData(images[index].data);
+    const image = images[index];
+    if (!image) continue;
+    const parsed = parseImageData(image.data);
     if (!parsed) continue;
-    const safeStem = images[index].name
+    const safeStem = (image.name || `image-${index + 1}`)
       .replace(/\.[^.]+$/, '')
       .replace(/[^a-zA-Z0-9._-]/g, '-')
       .slice(0, 80) || `image-${index + 1}`;
