@@ -24,10 +24,9 @@ export interface ChatEventContext {
 		| 'setPendingPermissionRequests'
 		| 'clearPendingPermissionRequests'
 	>;
-	activateLoadingFor: (chatId?: string | null) => void;
-	clearLoadingIndicators: (chatId?: string | null) => void;
+	markTurnRunning: (chatId?: string | null) => void;
+	clearTurnStatus: (chatId?: string | null) => void;
 	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
-	setCanAbort: (v: boolean) => void;
 	onChatProcessing?: (chatId?: string | null) => void;
 	onChatNotProcessing?: (chatId?: string | null) => void;
 	// Startup ownership callbacks.
@@ -74,7 +73,7 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 	const abortSucceeded = msg.success !== false;
 
 	if (abortSucceeded) {
-		ctx.clearLoadingIndicators(abortedChatId);
+		ctx.clearTurnStatus(abortedChatId);
 		ctx.markChatsAsCompleted(abortedChatId);
 		if (pendingChatId && (!abortedChatId || pendingChatId === abortedChatId)) {
 			ctx.clearPendingChatId();
@@ -104,10 +103,9 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 	if (!isCurrentChat) return;
 
 	if (msg.isProcessing) {
-		ctx.activateLoadingFor(statusChatId);
-		ctx.setCanAbort(true);
+		ctx.markTurnRunning(statusChatId);
 	} else {
-		ctx.clearLoadingIndicators(statusChatId);
+		ctx.clearTurnStatus(statusChatId);
 	}
 }
 

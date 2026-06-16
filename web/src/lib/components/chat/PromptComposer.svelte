@@ -14,6 +14,7 @@
 	} from '$lib/context';
 	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
+	import { isChatProcessing } from '$lib/chat/chat-processing';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
 	import {
@@ -258,13 +259,12 @@
 		}
 	}
 
-	const isDraftStartupLoading = $derived(
-		lifecycle.isLoading && sessions.selectedChat?.status === 'draft',
+	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
+	const isDraftStartupSubmitting = $derived(
+		composerState.isSubmitting && sessions.selectedChat?.status === 'draft',
 	);
-	const isQueueMode = $derived(
-		Boolean(sessions.selectedChat?.status === 'running' && sessions.selectedChat?.isProcessing),
-	);
-	const isDisabled = $derived(isDraftStartupLoading);
+	const isQueueMode = $derived(selectedIsProcessing);
+	const isDisabled = $derived(isDraftStartupSubmitting);
 	const canSubmit = $derived(
 		canSubmitComposer(isDisabled, composerState.inputText, composerState.images.length),
 	);
@@ -505,7 +505,7 @@
 {#snippet composerFrame()}
 	<div class="relative">
 		<LoadingStatus
-			isLoading={lifecycle.isLoading}
+			isVisible={selectedIsProcessing}
 			status={lifecycle.loadingStatus}
 			agentId={agentState.agentId}
 			spinnerSelectionKey={sessions.selectedChatId}

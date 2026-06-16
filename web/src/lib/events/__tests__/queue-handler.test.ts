@@ -5,20 +5,19 @@ import { handleQueueSending, handleQueueUpdated, type QueueContext } from '../ha
 function makeQueueContext(overrides: Partial<QueueContext> = {}): {
 	ctx: QueueContext;
 	setMessageQueue: ReturnType<typeof vi.fn>;
-	activateLoadingFor: ReturnType<typeof vi.fn>;
+	markTurnRunning: ReturnType<typeof vi.fn>;
 } {
 	const setMessageQueue = vi.fn();
-	const activateLoadingFor = vi.fn();
+	const markTurnRunning = vi.fn();
 	const ctx: QueueContext = {
 		getCurrentChatId: () => 'chat-a',
 		getSelectedChatId: () => 'chat-a',
 		conversationUi: { setMessageQueue },
-		activateLoadingFor,
-		setCanAbort: vi.fn(),
+		markTurnRunning,
 		onChatProcessing: vi.fn(),
 		...overrides,
 	};
-	return { ctx, setMessageQueue, activateLoadingFor };
+	return { ctx, setMessageQueue, markTurnRunning };
 }
 
 describe('queue handler', () => {
@@ -34,16 +33,17 @@ describe('queue handler', () => {
 		expect(setMessageQueue).toHaveBeenCalledWith('chat-b', queueState);
 	});
 
-	it('activates loading only for current or selected chat', () => {
-		const { ctx, activateLoadingFor } = makeQueueContext({
+	it('marks the selected turn running only for current or selected chat', () => {
+		const { ctx, markTurnRunning } = makeQueueContext({
 			getCurrentChatId: () => 'chat-a',
 			getSelectedChatId: () => 'chat-a',
 		});
 
 		handleQueueSending(new QueueDispatchingMessage('chat-b', 'q1', 'queued text'), ctx);
-		expect(activateLoadingFor).not.toHaveBeenCalled();
+		expect(markTurnRunning).not.toHaveBeenCalled();
 
 		handleQueueSending(new QueueDispatchingMessage('chat-a', 'q2', 'queued text'), ctx);
-		expect(activateLoadingFor).toHaveBeenCalledTimes(1);
+		expect(markTurnRunning).toHaveBeenCalledTimes(1);
+		expect(markTurnRunning).toHaveBeenCalledWith('chat-a');
 	});
 });

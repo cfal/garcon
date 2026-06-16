@@ -15,8 +15,7 @@ import * as m from '$lib/paraglide/messages.js';
 export interface PermissionLifecycleContext {
 	getCurrentChatId: () => string | null;
 	conversationUi: Pick<ConversationUiStore, 'setPendingPermissionRequests'>;
-	activateLoadingFor: (chatId?: string | null) => void;
-	setCanAbort: (v: boolean) => void;
+	markTurnRunning: (chatId?: string | null) => void;
 	pushLoadingStatus: (entry: LoadingStatusEntry) => void;
 	popLoadingStatus: (id: string) => void;
 }
@@ -47,8 +46,7 @@ export function handlePermissionLifecycleFromBatch(
 				];
 			});
 
-			ctx.activateLoadingFor(msg.chatId || ctx.getCurrentChatId());
-			ctx.setCanAbort(true);
+			ctx.markTurnRunning(msg.chatId || ctx.getCurrentChatId());
 			ctx.pushLoadingStatus({
 				id: WAITING_FOR_PERMISSION_ID,
 				text: m.chat_loading_waiting_for_permission(),

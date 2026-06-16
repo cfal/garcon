@@ -18,10 +18,12 @@ import type { PendingPermissionRequest } from '$lib/types/chat';
 function makeContext(initial: PendingPermissionRequest[] = []): {
 	ctx: PermissionLifecycleContext;
 	read: () => PendingPermissionRequest[];
+	markTurnRunning: ReturnType<typeof vi.fn>;
 	pushLoadingStatus: ReturnType<typeof vi.fn>;
 	popLoadingStatus: ReturnType<typeof vi.fn>;
 } {
 	let pending = [...initial];
+	const markTurnRunning = vi.fn();
 	const pushLoadingStatus = vi.fn();
 	const popLoadingStatus = vi.fn();
 	const ctx: PermissionLifecycleContext = {
@@ -31,12 +33,11 @@ function makeContext(initial: PendingPermissionRequest[] = []): {
 				pending = typeof updater === 'function' ? updater(pending) : updater;
 			},
 		},
-		activateLoadingFor: () => {},
-		setCanAbort: () => {},
+		markTurnRunning,
 		pushLoadingStatus,
 		popLoadingStatus,
 	};
-	return { ctx, read: () => pending, pushLoadingStatus, popLoadingStatus };
+	return { ctx, read: () => pending, markTurnRunning, pushLoadingStatus, popLoadingStatus };
 }
 
 function makeBatch(chatId: string, messages: ChatMessage[]): { chatId: string; messages: ChatMessage[] } {
@@ -66,7 +67,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 	});
 
 	it('pushes WAITING_FOR_PERMISSION status on permission request', () => {
-		const { ctx, pushLoadingStatus } = makeContext();
+		const { ctx, markTurnRunning, pushLoadingStatus } = makeContext();
 
 		handlePermissionLifecycleFromBatch(
 			makeBatch('chat-1', [
@@ -82,6 +83,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		expect(pushLoadingStatus).toHaveBeenCalledWith(
 			expect.objectContaining({ id: 'WAITING_FOR_PERMISSION' }),
 		);
+		expect(markTurnRunning).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('pushes one status entry per concurrent permission request', () => {

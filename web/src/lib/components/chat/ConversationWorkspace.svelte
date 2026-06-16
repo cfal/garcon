@@ -24,6 +24,7 @@
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+	import { isChatProcessing } from '$lib/chat/chat-processing';
 	import {
 		getChatSessions,
 		getLocalSettings,
@@ -122,6 +123,10 @@
 			reserveTopFloatingToolbar ? 'top-16' : 'top-3',
 		),
 	);
+	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
+	const canInterruptSelectedChat = $derived(
+		selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
+	);
 
 	let scrollContainer: HTMLDivElement | null = $state(null);
 	let queueControlsContainer: HTMLDivElement | undefined = $state();
@@ -215,7 +220,7 @@
 	// Scrolls to bottom when the bottom row changes, including same-count replacements.
 	$effect(() => {
 		const _bottomRowId = chatState.bottomVisibleRowId;
-		const _isLoading = lifecycle.isLoading;
+		const _isProcessing = selectedIsProcessing;
 		if (!chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
 			requestAnimationFrame(() => scroll.scrollToBottom());
 		}
@@ -250,7 +255,7 @@
 	});
 
 	function handleGlobalKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape' && !event.repeat && lifecycle.isLoading && lifecycle.canAbort) {
+		if (event.key === 'Escape' && !event.repeat && canInterruptSelectedChat) {
 			event.preventDefault();
 			controller.handleAbort();
 		}
@@ -306,7 +311,7 @@
 					const chatId = sessions.selectedChatId;
 					if (chatId) controller.loadChat(chatId);
 				}}
-				reserveLoadingStatusSpace={lifecycle.isLoading}
+				reserveLoadingStatusSpace={selectedIsProcessing}
 			/>
 
 			{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}

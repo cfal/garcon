@@ -148,7 +148,7 @@ export class ConversationSessionController {
 		if (!chatId) {
 			deps.chatState.clearMessages();
 			deps.composerState.inputText = '';
-			deps.lifecycle.clearLoading();
+			deps.lifecycle.clearTurnStatus();
 			deps.lifecycle.setCurrentChatId(null);
 			deps.conversationUi.clearPendingPermissionRequests();
 			deps.setIsViewportPinnedToBottom(true);
@@ -169,7 +169,7 @@ export class ConversationSessionController {
 
 		deps.composerState.inputText = '';
 		deps.composerState.clearImages();
-		deps.lifecycle.clearLoading();
+		deps.lifecycle.clearTurnStatus();
 		deps.conversationUi.clearPendingPermissionRequests();
 		deps.setIsViewportPinnedToBottom(true);
 
@@ -231,7 +231,6 @@ export class ConversationSessionController {
 		}
 
 		deps.lifecycle.setCurrentChatId(chatId);
-		deps.lifecycle.syncFromProcessing(selected.isProcessing);
 		deps.composerState.restoreDraft(chatId);
 		getChatQueue(chatId)
 			.then((result) => {
@@ -373,7 +372,7 @@ export class ConversationSessionController {
 			return;
 		}
 
-		if (deps.lifecycle.isLoading && selected.status === 'draft') return;
+		if (deps.composerState.isSubmitting && selected.status === 'draft') return;
 
 		const clientRequestId = createClientCommandId();
 		const clientMessageId = createClientCommandId();
@@ -433,7 +432,7 @@ export class ConversationSessionController {
 				console.error('[SessionController] Failed to start chat:', err);
 				this.#markPendingUserInputDelivery(clientRequestId, 'failed');
 				deps.startupCoordinator.completeStartup(chatId);
-				deps.lifecycle.clearLoading();
+				deps.lifecycle.clearTurnStatus();
 				deps.sessions.setChatProcessing(chatId, false);
 				if (restoreComposerOnFailure) {
 					deps.composerState.inputText = previousText;
@@ -473,7 +472,7 @@ export class ConversationSessionController {
 				deps.sessions.setChatProcessing(chatId, true);
 			} catch (err) {
 				this.#markPendingUserInputDelivery(clientRequestId, 'failed');
-				deps.lifecycle.clearLoading();
+				deps.lifecycle.clearTurnStatus();
 				deps.sessions.setChatProcessing(chatId, false);
 				if (restoreComposerOnFailure) {
 					deps.composerState.inputText = previousText;
@@ -611,7 +610,8 @@ export class ConversationSessionController {
 			agentId: deps.agentState.agentId,
 		})
 			.then(() => {
-				deps.lifecycle.clearLoading();
+				deps.lifecycle.clearTurnStatus();
+				deps.sessions.setChatProcessing(chatId, false);
 			})
 			.catch((error) => {
 				deps.chatState.appendLocalNotice('error',

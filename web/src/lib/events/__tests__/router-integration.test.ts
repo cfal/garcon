@@ -36,8 +36,8 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		lifecycle: {
 			currentChatId: () => 'chat-a',
 			setCurrentChatId: vi.fn(),
-			setIsLoading: vi.fn(),
-			setCanAbort: vi.fn(),
+			markTurnRunning: vi.fn(),
+			clearTurnStatus: vi.fn(),
 			setLoadingStatus: vi.fn(),
 			pushLoadingStatus: vi.fn(),
 			popLoadingStatus: vi.fn(),
@@ -133,12 +133,46 @@ describe('event router integration', () => {
 
 		expect(stores.chatState.updatePendingUserInputDeliveryStatus).toHaveBeenCalledWith('req-1', 'accepted');
 		expect(stores.chatState.warmBackgroundChatSnapshot).not.toHaveBeenCalled();
+		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
+		expect(stores.sessions.setChatProcessing).not.toHaveBeenCalled();
 		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
 			'chat-a',
 			'generation-current',
 			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
 		);
 		expect(stores.sessions.patchChatPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
+	});
+
+	it('does not re-enable processing from a late selected chat message', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages(
+			[
+				{ type: 'chat-processing-updated', chatId: 'chat-a', isProcessing: false },
+				{
+					type: 'chat-messages',
+					chatId: 'chat-a',
+					generationId: 'generation-current',
+					messages: [
+						rawMessage(2, {
+							type: 'assistant-message',
+							timestamp: TS,
+							content: 'final output',
+						}),
+					],
+				},
+			],
+			stores,
+		);
+
+		expect(stores.lifecycle.clearTurnStatus).toHaveBeenCalledWith();
+		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
+		expect(stores.sessions.setChatProcessing).toHaveBeenCalledTimes(1);
+		expect(stores.sessions.setChatProcessing).toHaveBeenCalledWith('chat-a', false);
+		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
+			'chat-a',
+			'generation-current',
+			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
+		);
 	});
 
 	it('reloads the selected chat when live messages expose a seq gap', () => {

@@ -7,8 +7,7 @@ export interface QueueContext {
 	getCurrentChatId: () => string | null;
 	getSelectedChatId: () => string | null;
 	conversationUi: Pick<ConversationUiStore, 'setMessageQueue'>;
-	activateLoadingFor: (chatId?: string | null) => void;
-	setCanAbort: (v: boolean) => void;
+	markTurnRunning: (chatId?: string | null) => void;
 	onChatProcessing?: (chatId?: string | null) => void;
 }
 
@@ -24,8 +23,7 @@ export function handleQueueUpdated(msg: QueueStateUpdatedMessage, ctx: QueueCont
 
 export function handleQueueSending(msg: QueueDispatchingMessage, ctx: QueueContext) {
 	if (isForCurrentSession(msg.chatId, ctx)) {
-		ctx.activateLoadingFor(msg.chatId || ctx.getCurrentChatId());
-		ctx.setCanAbort(true);
+		ctx.markTurnRunning(msg.chatId || ctx.getCurrentChatId());
 		ctx.onChatProcessing?.(msg.chatId || undefined);
 	}
 }

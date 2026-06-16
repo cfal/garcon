@@ -11,8 +11,7 @@ function makeContext(
 		getCurrentChatId: () => 'chat-a',
 		getSelectedChatId: () => 'chat-a',
 		conversationUi: { setMessageQueue },
-		activateLoadingFor: vi.fn(),
-		setCanAbort: vi.fn(),
+		markTurnRunning: vi.fn(),
 		onChatProcessing: vi.fn(),
 	};
 }

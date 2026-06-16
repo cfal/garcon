@@ -110,8 +110,8 @@ export interface EventRouterChatStateStore {
 export interface EventRouterLifecycleStore {
 	currentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
-	setIsLoading: (v: boolean) => void;
-	setCanAbort: (v: boolean) => void;
+	markTurnRunning: (chatId?: string | null) => void;
+	clearTurnStatus: () => void;
 	setLoadingStatus: (
 		status: { text: string; tokens: number; can_interrupt: boolean } | null,
 	) => void;
@@ -217,14 +217,12 @@ function markPendingUserInputDelivery(
 
 // Creates helper functions used by multiple handler contexts.
 function createHelpers(stores: EventRouterStores) {
-	const activateLoadingFor = (_chatId?: string | null) => {
-		stores.lifecycle.setIsLoading(true);
+	const markTurnRunning = (chatId?: string | null) => {
+		stores.lifecycle.markTurnRunning(chatId);
 	};
 
-	const clearLoadingIndicators = (_chatId?: string | null) => {
-		stores.lifecycle.setIsLoading(false);
-		stores.lifecycle.setCanAbort(false);
-		stores.lifecycle.setLoadingStatus(null);
+	const clearTurnStatus = (_chatId?: string | null) => {
+		stores.lifecycle.clearTurnStatus();
 	};
 
 	const markChatsAsCompleted = (...chatIds: Array<string | null | undefined>) => {
@@ -236,7 +234,7 @@ function createHelpers(stores: EventRouterStores) {
 		}
 	};
 
-	return { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted };
+	return { markTurnRunning, clearTurnStatus, markChatsAsCompleted };
 }
 
 // Builds the dispatch table mapping EventKey to handler functions.
@@ -244,7 +242,7 @@ function buildDispatch(
 	stores: EventRouterStores,
 	messagesAccumulator: ReturnType<typeof createChatMessagesAccumulator>,
 ): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
-	const { activateLoadingFor, clearLoadingIndicators, markChatsAsCompleted } =
+	const { markTurnRunning, clearTurnStatus, markChatsAsCompleted } =
 		createHelpers(stores);
 
 	const onNavigateToChat = stores.sessions.navigateToChat
@@ -263,7 +261,7 @@ function buildDispatch(
 		appendLocalNotice: stores.chatState.appendLocalNotice,
 		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
 		conversationUi: stores.conversationUi,
-		clearLoadingIndicators,
+		clearTurnStatus,
 		markChatsAsCompleted,
 		onNavigateToChat,
 		getPendingChatId,
@@ -278,10 +276,9 @@ function buildDispatch(
 		appendLocalNotice: stores.chatState.appendLocalNotice,
 		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
 		conversationUi: stores.conversationUi,
-		activateLoadingFor,
-		clearLoadingIndicators,
+		markTurnRunning,
+		clearTurnStatus,
 		markChatsAsCompleted,
-		setCanAbort: stores.lifecycle.setCanAbort,
 		onChatProcessing,
 		onChatNotProcessing,
 		startupCoordinator: stores.startup.startupCoordinator,
@@ -295,8 +292,7 @@ function buildDispatch(
 	const permLifecycleCtx: PermissionLifecycleContext = {
 		getCurrentChatId: stores.lifecycle.currentChatId,
 		conversationUi: stores.conversationUi,
-		activateLoadingFor,
-		setCanAbort: stores.lifecycle.setCanAbort,
+		markTurnRunning,
 		pushLoadingStatus: stores.lifecycle.pushLoadingStatus,
 		popLoadingStatus: stores.lifecycle.popLoadingStatus,
 	};
@@ -305,8 +301,7 @@ function buildDispatch(
 		getCurrentChatId: stores.lifecycle.currentChatId,
 		getSelectedChatId: () => stores.sessions.selectedChat()?.id || null,
 		conversationUi: stores.conversationUi,
-		activateLoadingFor,
-		setCanAbort: stores.lifecycle.setCanAbort,
+		markTurnRunning,
 		onChatProcessing,
 	};
 
@@ -333,9 +328,6 @@ function buildDispatch(
 	return {
 		'chat-messages': (msg) => {
 			if (!(msg instanceof ChatMessagesMessage)) return;
-			activateLoadingFor(msg.chatId);
-			stores.lifecycle.setCanAbort(true);
-			onChatProcessing(msg.chatId);
 			markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
 			messagesAccumulator.enqueue(msg);
 			const batch = messagesOf(msg);

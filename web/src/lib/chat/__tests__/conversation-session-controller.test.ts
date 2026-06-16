@@ -184,10 +184,9 @@ function createDeps(chat = createRunningChat()) {
 				claudeThinkingMode: 'auto',
 			},
 			lifecycle: {
-				activateLoading: vi.fn(),
-				clearLoading: vi.fn(),
-				syncFromProcessing: vi.fn(),
-				setCanAbort: vi.fn(),
+				currentChatId: null as string | null,
+				clearTurnStatus: vi.fn(),
+				markTurnRunning: vi.fn(),
 				setCurrentChatId: vi.fn(),
 				setLoadingStatus: vi.fn(),
 				beginTurn: vi.fn(),
@@ -269,14 +268,15 @@ describe('ConversationSessionController', () => {
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
 	});
 
-	it('syncs lifecycle loading from the selected running chat on switch', () => {
+	it('does not mirror selected processing into lifecycle on switch', () => {
 		const chat = createRunningChat({ isProcessing: true });
 		const { deps } = createDeps(chat);
 		const controller = new ConversationSessionController(deps as never);
 
 		controller.handleChatSwitch('chat-1');
 
-		expect(deps.lifecycle.syncFromProcessing).toHaveBeenCalledWith(true);
+		expect(deps.lifecycle.markTurnRunning).not.toHaveBeenCalled();
+		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
 	});
 
 	it('does not enqueue a second read receipt after chat load when the optimistic mark already applied', async () => {

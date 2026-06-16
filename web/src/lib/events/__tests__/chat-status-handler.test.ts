@@ -21,10 +21,9 @@ function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 		appendLocalNotice: vi.fn(),
 		setIsSystemChatChange: vi.fn(),
 		conversationUi: makeConversationUi(),
-		activateLoadingFor: vi.fn(),
-		clearLoadingIndicators: vi.fn(),
+		markTurnRunning: vi.fn(),
+		clearTurnStatus: vi.fn(),
 		markChatsAsCompleted: vi.fn(),
-		setCanAbort: vi.fn(),
 		startupCoordinator: new StartupCoordinator(),
 		onChatProcessing: vi.fn(),
 		onChatNotProcessing: vi.fn(),
@@ -44,22 +43,22 @@ describe('handleChatStatus', () => {
 		const ctx = makeCtx({ getCurrentChatId: () => 'chat-a' });
 		handleChatStatus(makeMsg('chat-b', false), ctx);
 
-		expect(ctx.activateLoadingFor).not.toHaveBeenCalled();
+		expect(ctx.markTurnRunning).not.toHaveBeenCalled();
+		expect(ctx.clearTurnStatus).not.toHaveBeenCalled();
 	});
 
-	it('activates loading for the current chat when processing', () => {
+	it('marks the selected turn running when processing starts', () => {
 		const ctx = makeCtx({ getCurrentChatId: () => 'chat-a' });
 		handleChatStatus(makeMsg('chat-a', true), ctx);
 
-		expect(ctx.activateLoadingFor).toHaveBeenCalledWith('chat-a');
-		expect(ctx.setCanAbort).toHaveBeenCalledWith(true);
+		expect(ctx.markTurnRunning).toHaveBeenCalledWith('chat-a');
 	});
 
-	it('clears loading when processing stops', () => {
+	it('clears selected-turn metadata when processing stops', () => {
 		const ctx = makeCtx({ getCurrentChatId: () => 'chat-a' });
 		handleChatStatus(makeMsg('chat-a', false), ctx);
 
-		expect(ctx.clearLoadingIndicators).toHaveBeenCalledWith('chat-a');
+		expect(ctx.clearTurnStatus).toHaveBeenCalledWith('chat-a');
 	});
 
 	it('fires onChatProcessing/onChatNotProcessing callbacks', () => {

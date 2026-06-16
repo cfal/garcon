@@ -80,8 +80,8 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 		lifecycle: {
 			currentChatId: () => deps.lifecycle.currentChatId,
 			setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),
-			setIsLoading: (v) => deps.lifecycle.setIsLoading(v),
-			setCanAbort: (v) => deps.lifecycle.setCanAbort(v),
+			markTurnRunning: (chatId) => deps.lifecycle.markTurnRunning(chatId),
+			clearTurnStatus: () => deps.lifecycle.clearTurnStatus(),
 			setLoadingStatus: (s) => deps.lifecycle.setLoadingStatus(s),
 			pushLoadingStatus: (e) => deps.lifecycle.pushLoadingStatus(e),
 			popLoadingStatus: (id) => deps.lifecycle.popLoadingStatus(id),

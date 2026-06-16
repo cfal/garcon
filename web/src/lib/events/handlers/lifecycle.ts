@@ -14,7 +14,7 @@ export interface LifecycleContext {
 		ConversationUiStore,
 		'setPendingPermissionRequests' | 'clearPendingPermissionRequests'
 	>;
-	clearLoadingIndicators: (chatId?: string | null) => void;
+	clearTurnStatus: (chatId?: string | null) => void;
 	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
 	onNavigateToChat?: (chatId: string) => void;
 	getPendingChatId: () => string | null;
@@ -27,7 +27,7 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	const currentChatId = ctx.getCurrentChatId();
 	const completedChatId = msg.chatId || currentChatId || pendingChatId;
 
-	ctx.clearLoadingIndicators(completedChatId);
+	ctx.clearTurnStatus(completedChatId);
 	ctx.markChatsAsCompleted(completedChatId);
 
 	// Navigate to completed chat if it was pending and didn't error
@@ -53,7 +53,7 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleContext) {
 	const errorChatId = msg.chatId || ctx.getCurrentChatId();
 
-	ctx.clearLoadingIndicators(errorChatId);
+	ctx.clearTurnStatus(errorChatId);
 	ctx.markChatsAsCompleted(errorChatId);
 
 	ctx.appendLocalNotice('error', msg.error || 'An error occurred');

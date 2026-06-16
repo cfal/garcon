@@ -7,14 +7,14 @@
 	import { Square } from '@lucide/svelte';
 
 	interface Props {
-		isLoading: boolean;
+		isVisible: boolean;
 		status: { text?: string; can_interrupt?: boolean } | null;
 		agentId: string;
 		onAbort: (() => void) | null;
 		spinnerSelectionKey?: string | null;
 	}
 
-	let { isLoading, status, agentId, onAbort, spinnerSelectionKey = null }: Props = $props();
+	let { isVisible, status, agentId, onAbort, spinnerSelectionKey = null }: Props = $props();
 
 	// Frame cadence for the character spinner. Lower feels snappier; the scale
 	// pulse transition is tied to the same value so the two stay in step.
@@ -54,7 +54,7 @@
 			clearInterval(animTimer);
 			animTimer = null;
 		}
-		if (!isLoading) return;
+		if (!isVisible) return;
 		animTimer = setInterval(() => {
 			animationPhase = (animationPhase + 1) % activeSpinners.length;
 		}, FRAME_INTERVAL_MS);
@@ -67,7 +67,7 @@
 	// the selected chat changes while the indicator remains visible.
 	$effect(() => {
 		const nextSelectionKey = spinnerSelectionKey ?? null;
-		if (!isLoading) {
+		if (!isVisible) {
 			hasSpinnerSelection = false;
 			lastSpinnerSelectionKey = null;
 			animationPhase = 0;
@@ -97,7 +97,7 @@
 	);
 </script>
 
-{#if isLoading}
+{#if isVisible}
 	<div class={statusTrayClass}>
 		<div class={statusPanelClass} role="status" aria-live="polite">
 			<div class="flex min-w-0 items-center gap-1.5">
