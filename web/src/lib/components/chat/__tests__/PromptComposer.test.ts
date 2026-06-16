@@ -30,7 +30,7 @@ describe('PromptComposer focus', () => {
 		const { rerender } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
-			isLoading: false,
+			isSubmitting: false,
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 
@@ -42,7 +42,7 @@ describe('PromptComposer focus', () => {
 		await rerender({
 			selectedChatId: 'chat-2',
 			selectedStatus: 'draft',
-			isLoading: true,
+			isSubmitting: true,
 		});
 		await nextAnimationFrame();
 
@@ -52,7 +52,7 @@ describe('PromptComposer focus', () => {
 		await rerender({
 			selectedChatId: 'chat-2',
 			selectedStatus: 'draft',
-			isLoading: false,
+			isSubmitting: false,
 		});
 		await expectComposerFocus(textarea);
 
@@ -63,7 +63,7 @@ describe('PromptComposer focus', () => {
 			await rerender({
 				selectedChatId: chatId,
 				selectedStatus: 'running',
-				isLoading: false,
+				isSubmitting: false,
 			});
 			await expectComposerFocus(textarea);
 		}
@@ -78,7 +78,7 @@ describe('PromptComposer focus', () => {
 		const { rerender } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
 			selectedStatus: 'draft',
-			isLoading: true,
+			isSubmitting: true,
 			focusRequestToken: 0,
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
@@ -89,7 +89,7 @@ describe('PromptComposer focus', () => {
 		await rerender({
 			selectedChatId: 'chat-1',
 			selectedStatus: 'draft',
-			isLoading: true,
+			isSubmitting: true,
 			focusRequestToken: 1,
 		});
 		await nextAnimationFrame();
@@ -100,7 +100,7 @@ describe('PromptComposer focus', () => {
 		await rerender({
 			selectedChatId: 'chat-1',
 			selectedStatus: 'draft',
-			isLoading: false,
+			isSubmitting: false,
 			focusRequestToken: 1,
 		});
 		await expectComposerFocus(textarea);

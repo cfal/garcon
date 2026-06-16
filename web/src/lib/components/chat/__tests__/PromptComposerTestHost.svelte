@@ -19,7 +19,7 @@
 	interface Props {
 		selectedChatId?: string;
 		selectedStatus?: ChatStatus;
-		isLoading?: boolean;
+		isSubmitting?: boolean;
 		focusRequestToken?: number;
 		onsubmit?: () => void;
 	}
@@ -27,7 +27,7 @@
 	let {
 		selectedChatId = 'chat-1',
 		selectedStatus = 'running',
-		isLoading = false,
+		isSubmitting = false,
 		focusRequestToken = 0,
 		onsubmit = () => {},
 	}: Props = $props();
@@ -60,7 +60,7 @@
 	});
 
 	$effect(() => {
-		lifecycle.isLoading = isLoading;
+		composer.isSubmitting = isSubmitting;
 	});
 
 	$effect(() => {
