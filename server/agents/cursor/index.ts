@@ -6,9 +6,12 @@ import type { Agent } from '../types.js';
 import { cursorAuthDriver } from './cursor-auth-driver.js';
 import { createCursorTranscriptSource } from './cursor-transcript-source.js';
 import { createCursorStreamJsonNativePath } from './cursor-native-path.js';
+import { forkCursorStreamJsonSession } from './cursor-session-store.js';
 
 export interface CreateCursorAgentArgs {
   workspaceDir: string;
+  cursorHome?: string;
+  createSessionId?: () => string;
 }
 
 export function createCursorAgent(args: CreateCursorAgentArgs): Agent {
@@ -30,13 +33,19 @@ export function createCursorAgent(args: CreateCursorAgentArgs): Agent {
     },
     auth: cursorAuthDriver,
     capabilities: createAgentCapabilities({
-      supportsFork: false,
+      supportsFork: true,
       supportsImages: false,
       acceptsApiProviderEndpoints: false,
       supportedProtocols: [],
       authLoginSupported: false,
       getModels: getCursorModels,
     }),
+    forkSession({ sourceSession }) {
+      return forkCursorStreamJsonSession(sourceSession, {
+        cursorHome: args.cursorHome,
+        createSessionId: args.createSessionId,
+      });
+    },
     runSingleQuery(prompt, options) {
       return runSingleQueryCursor(prompt, options);
     },

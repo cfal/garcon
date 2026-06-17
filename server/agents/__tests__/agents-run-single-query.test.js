@@ -317,7 +317,7 @@ function makeRegistry(args = {}) {
           authLoginSupported: false,
         }, ampQuery, args.prepareEndpointRuntimeByAgentId?.amp),
         agentFromRuntime('cursor', 'Cursor', cursor, {
-          supportsFork: false,
+          supportsFork: true,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],

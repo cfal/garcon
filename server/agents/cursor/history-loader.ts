@@ -78,12 +78,20 @@ export function cursorStreamJsonStoreDbPath(
   projectPath: string,
   cursorHome = cursorHomePath(),
 ): string {
+  return path.join(cursorStreamJsonSessionDirPath(sessionId, projectPath, cursorHome), 'store.db');
+}
+
+export function cursorStreamJsonSessionDirPath(
+  sessionId: string,
+  projectPath: string,
+  cursorHome = cursorHomePath(),
+): string {
   const safeSessionId = sanitizeCursorSessionId(sessionId);
   const baseSessionsPath = path.join(cursorHome, 'chats', cursorWorkspaceHash(projectPath));
-  const storeDbPath = path.join(baseSessionsPath, safeSessionId, 'store.db');
+  const sessionDirPath = path.join(baseSessionsPath, safeSessionId);
   return assertPathWithin(
     baseSessionsPath,
-    storeDbPath,
+    sessionDirPath,
     `Invalid Cursor transcript session path for "${sessionId}".`,
   );
 }
