@@ -41,23 +41,23 @@ vi.mock('$lib/api/chats.js', () => ({
 }));
 
 describe('ChatPane', () => {
-	it('shows chat history and a composer target when unfocused', async () => {
+	it('shows chat history without a fake composer when unfocused', async () => {
 		const onFocus = vi.fn();
 		render(ChatPaneTestHost, { isFocused: false, onFocus });
 
-		const composerTarget = screen.getByRole('button', {
+		const focusTarget = screen.getByRole('button', {
 			name: 'Focus chat composer for Pane Test Chat',
 		});
 
-			expect(document.querySelector('[data-pane-body]')).toBeTruthy();
-			expect(await screen.findByText('Unfocused user question')).toBeTruthy();
-			expect(await screen.findByText('Unfocused assistant answer')).toBeTruthy();
-			expect(await screen.findByText('2 commands')).toBeTruthy();
-			expect(await screen.findByText('pwd')).toBeTruthy();
-			expect(await screen.findByText('rg split')).toBeTruthy();
-			expect(screen.getByText('Reply...')).toBeTruthy();
+		expect(document.querySelector('[data-pane-body]')).toBeTruthy();
+		expect(await screen.findByText('Unfocused user question')).toBeTruthy();
+		expect(await screen.findByText('Unfocused assistant answer')).toBeTruthy();
+		expect(await screen.findByText('2 commands')).toBeTruthy();
+		expect(await screen.findByText('pwd')).toBeTruthy();
+		expect(await screen.findByText('rg split')).toBeTruthy();
+		expect(screen.queryByText('Reply...')).toBeNull();
 
-		await fireEvent.click(composerTarget);
+		await fireEvent.click(focusTarget);
 
 		expect(onFocus).toHaveBeenCalledTimes(1);
 	});

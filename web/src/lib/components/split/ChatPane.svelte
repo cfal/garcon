@@ -17,8 +17,6 @@
 	import X from '@lucide/svelte/icons/x';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
-	import ImagePlus from '@lucide/svelte/icons/image-plus';
-	import SendHorizontal from '@lucide/svelte/icons/send-horizontal';
 	import DropZoneOverlay from './DropZoneOverlay.svelte';
 
 	interface ChatPaneProps {
@@ -260,74 +258,57 @@
 		</div>
 	</div>
 
-	<!-- Content area: full interactive workspace for focused pane, composer target for others -->
+	<!-- Content area: full interactive workspace for focused pane, transcript preview for others -->
 	{#if focusedContent && isFocused}
 		<div class="flex-1 min-h-0 overflow-hidden" data-pane-body>
 			{@render focusedContent()}
 		</div>
 	{:else}
-			<div
-				data-pane-body
-				class={cn(
-					'flex-1 min-h-0 flex flex-col gap-2 text-left',
-					'bg-background/40 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-					'transition-colors',
-				)}
-				onclick={handlePreviewClick}
-				onkeydown={(e) => {
-					if (isInteractiveTarget(e.target, e.currentTarget)) return;
-					if (e.key === 'Enter' || e.key === ' ') onFocus();
-				}}
+		<div
+			data-pane-body
+			class={cn(
+				'flex-1 min-h-0 flex flex-col text-left',
+				'bg-background/40 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+				'transition-colors',
+			)}
+			onclick={handlePreviewClick}
+			onkeydown={(e) => {
+				if (isInteractiveTarget(e.target, e.currentTarget)) return;
+				if (e.key === 'Enter' || e.key === ' ') onFocus();
+			}}
 			role="button"
 			tabindex="0"
 			aria-label={m.chat_pane_focus_composer({ title: chatTitle })}
 		>
-				<ScrollAreaPrimitive.Root type="auto" class="min-h-0 flex-1 overflow-hidden relative">
-					<ScrollAreaPrimitive.Viewport
-						bind:ref={previewScrollContainer}
-						class={previewViewportClass}
-						role="log"
-						aria-label={m.chat_pane_preview({ title: chatTitle })}
-					>
-						{#if isPreviewLoading && previewRows.length === 0}
-							<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
-								Loading messages...
-							</div>
-						{:else if previewRows.length === 0}
-							<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
-								No messages yet
-							</div>
-						{:else}
-							<div class={previewContentClass}>
-								<ConversationTranscript
-									rows={previewRows}
-									agentId={previewAgentId}
-									showThinking={localSettings.showThinking}
-									chatContext={previewChatContext}
-								/>
-							</div>
-						{/if}
-					</ScrollAreaPrimitive.Viewport>
-					<Scrollbar orientation="vertical" class="w-1.5" />
-					<ScrollAreaPrimitive.Corner />
-				</ScrollAreaPrimitive.Root>
-				<div class="mx-2 mb-2 rounded-lg border border-border/70 bg-card/95 shadow-sm overflow-hidden">
-				<div class="min-h-[72px] px-3 py-2 text-sm text-muted-foreground">
-					{m.chat_composer_reply_placeholder()}
-				</div>
-				<div class="flex items-center justify-between border-t border-border/70 px-2 py-1.5">
-					<div class="flex items-center gap-1.5 text-muted-foreground/70">
-						<ImagePlus class="size-3.5" />
-						<span class="h-2.5 w-2.5 rounded-full border border-current"></span>
-						<span class="h-2.5 w-2.5 rounded-full border border-current"></span>
-					</div>
-					<span
-						class="inline-flex size-7 items-center justify-center rounded-full border border-primary/30 bg-primary/90 text-primary-foreground"
-					>
-						<SendHorizontal class="size-3.5" />
-					</span>
-				</div>
-			</div>
+			<ScrollAreaPrimitive.Root type="auto" class="min-h-0 flex-1 overflow-hidden relative">
+				<ScrollAreaPrimitive.Viewport
+					bind:ref={previewScrollContainer}
+					class={previewViewportClass}
+					role="log"
+					aria-label={m.chat_pane_preview({ title: chatTitle })}
+				>
+					{#if isPreviewLoading && previewRows.length === 0}
+						<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
+							Loading messages...
+						</div>
+					{:else if previewRows.length === 0}
+						<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
+							No messages yet
+						</div>
+					{:else}
+						<div class={previewContentClass}>
+							<ConversationTranscript
+								rows={previewRows}
+								agentId={previewAgentId}
+								showThinking={localSettings.showThinking}
+								chatContext={previewChatContext}
+							/>
+						</div>
+					{/if}
+				</ScrollAreaPrimitive.Viewport>
+				<Scrollbar orientation="vertical" class="w-1.5" />
+				<ScrollAreaPrimitive.Corner />
+			</ScrollAreaPrimitive.Root>
 		</div>
 	{/if}
 
