@@ -141,6 +141,49 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
+	it('publishes connection status transitions', () => {
+		vi.setSystemTime(1_000);
+		const connection = new WsConnection();
+
+		expect(connection.connectionStatus.phase).toBe('idle');
+
+		connection.connect('token');
+
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'connecting',
+			reason: 'initial-connect',
+			episodeId: 0,
+			reconnectAttempt: 0,
+			nextRetryAt: null,
+		});
+
+		const socket = mockSockets[0];
+		socket.open();
+
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'connected',
+			reason: null,
+			reconnectAttempt: 0,
+			nextRetryAt: null,
+			lastConnectedAt: 1_000,
+		});
+
+		vi.setSystemTime(2_000);
+		socket.closeFromServer();
+
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'reconnecting',
+			reason: 'socket-close',
+			episodeId: 1,
+			reconnectAttempt: 1,
+			lastDisconnectedAt: 2_000,
+			nextRetryAt: 5_000,
+		});
+
+		connection.disconnect();
+		expect(connection.connectionStatus.phase).toBe('destroyed');
+	});
+
 	it('sends application heartbeats and accepts matching pongs', async () => {
 		const connection = new WsConnection();
 
@@ -184,6 +227,10 @@ describe('WsConnection', () => {
 
 		expect(first.close).toHaveBeenCalledOnce();
 		expect(connection.isConnected).toBe(false);
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'reconnecting',
+			reason: 'heartbeat-timeout',
+		});
 		expect(mockSockets).toHaveLength(2);
 		expect(mockSockets[1].url).toContain('token=stored-token');
 
@@ -216,12 +263,20 @@ describe('WsConnection', () => {
 
 		expect(first.close).toHaveBeenCalledOnce();
 		expect(connection.isConnected).toBe(false);
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'offline',
+			reason: 'browser-offline',
+		});
 		expect(mockSockets).toHaveLength(1);
 
 		window.dispatchEvent(new Event('online'));
 
 		expect(mockSockets).toHaveLength(2);
 		expect(mockSockets[1].url).toContain('token=stored-token');
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'reconnecting',
+			reason: 'browser-online',
+		});
 
 		connection.disconnect();
 	});

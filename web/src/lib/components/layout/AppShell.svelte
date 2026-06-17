@@ -20,6 +20,7 @@
 		getNotifications,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
+	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
 	import { selectedChatIdFromRoute } from './app-shell-route';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileViewerHost from '../files/FileViewerHost.svelte';
@@ -31,6 +32,7 @@
 	const ws = getWs();
 	const localSettings = getLocalSettings();
 	const notifications = getNotifications();
+	const wsConnectionNotifications = new WsConnectionNotificationPresenter({ notifications });
 
 	let isMobile = $state(false);
 	let isWorkspaceFullscreen = $state(false);
@@ -42,6 +44,9 @@
 		!isMobile && navigation.activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel,
 	);
 	const effectiveWorkspaceFullscreen = $derived(isWorkspaceFullscreen || isAutoFullscreenOnGitTab);
+	const notificationDesktopLeftPx = $derived(
+		effectiveWorkspaceFullscreen ? 16 : localSettings.sidebarWidth + 16,
+	);
 
 	// Syncs URL params to selected chat ID. The session store is the
 	// single source of truth; this effect keeps it in sync with the URL.
@@ -127,6 +132,11 @@
 				error instanceof Error ? error.message : String(error),
 			);
 		});
+	});
+
+	$effect(() => {
+		const status = ws.connectionStatus;
+		return untrack(() => wsConnectionNotifications.observe(status));
 	});
 
 	onMount(() => {
@@ -323,7 +333,7 @@
 
 <NewChatDialog />
 <FileViewerHost />
-<NotificationHost {notifications} />
+<NotificationHost {notifications} desktopLeftPx={notificationDesktopLeftPx} />
 
 {#if appShell.showSettings}
 	{#await lazySettings() then { default: Settings }}

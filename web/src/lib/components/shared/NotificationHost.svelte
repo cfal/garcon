@@ -8,17 +8,21 @@
 
 	interface NotificationHostProps {
 		notifications: NotificationsStore;
+		desktopLeftPx?: number;
 	}
 
-	let { notifications }: NotificationHostProps = $props();
+	let { notifications, desktopLeftPx = 16 }: NotificationHostProps = $props();
 
 	const visibleNotifications = $derived(notifications.items);
+	const notificationStyle = $derived(`--notification-left-desktop: ${desktopLeftPx}px`);
 
 	$effect(() => {
-		const timeoutIds = visibleNotifications.map((notification) => {
-			const remainingMs = Math.max(0, notification.expiresAt - Date.now());
-			return window.setTimeout(() => notifications.dismiss(notification.id), remainingMs);
-		});
+		const timeoutIds = visibleNotifications
+			.filter((notification) => notification.expiresAt !== null)
+			.map((notification) => {
+				const remainingMs = Math.max(0, notification.expiresAt! - Date.now());
+				return window.setTimeout(() => notifications.dismiss(notification.id), remainingMs);
+			});
 
 		return () => {
 			for (const timeoutId of timeoutIds) window.clearTimeout(timeoutId);
@@ -46,7 +50,8 @@
 
 {#if visibleNotifications.length > 0}
 	<section
-		class="fixed inset-x-3 top-[calc(env(safe-area-inset-top,0px)+0.75rem)] z-[100] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:w-96"
+		class="fixed inset-x-3 top-[calc(env(safe-area-inset-top,0px)+0.75rem)] z-[100] flex flex-col gap-2 sm:inset-x-auto sm:left-[var(--notification-left-desktop)] sm:right-auto sm:w-96"
+		style={notificationStyle}
 		aria-label={m.notifications_region()}
 		aria-live="polite"
 	>
