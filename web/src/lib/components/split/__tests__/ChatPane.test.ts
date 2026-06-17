@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/svelte';
-import ChatPaneTestHost from './ChatPaneTestHost.svelte';
-import { AssistantMessage, UserMessage } from '$shared/chat-types';
+	import { describe, expect, it, vi } from 'vitest';
+	import { fireEvent, render, screen } from '@testing-library/svelte';
+	import ChatPaneTestHost from './ChatPaneTestHost.svelte';
+	import { AssistantMessage, BashToolUseMessage, UserMessage } from '$shared/chat-types';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(() =>
@@ -15,19 +15,27 @@ vi.mock('$lib/api/chats.js', () => ({
 						'Unfocused user question',
 					),
 				},
-				{
-					seq: 2,
-					message: new AssistantMessage(
-						'2026-05-01T00:00:01.000Z',
-						'Unfocused assistant answer',
-					),
-				},
-			],
-			pendingUserInputs: [],
-			lastSeq: 2,
-			pageOldestSeq: 1,
-			hasMore: false,
-			limit: 50,
+					{
+						seq: 2,
+						message: new AssistantMessage(
+							'2026-05-01T00:00:01.000Z',
+							'Unfocused assistant answer',
+						),
+					},
+					{
+						seq: 3,
+						message: new BashToolUseMessage('2026-05-01T00:00:02.000Z', 'tool-1', 'pwd'),
+					},
+					{
+						seq: 4,
+						message: new BashToolUseMessage('2026-05-01T00:00:03.000Z', 'tool-2', 'rg split'),
+					},
+				],
+				pendingUserInputs: [],
+				lastSeq: 4,
+				pageOldestSeq: 1,
+				hasMore: false,
+				limit: 50,
 		}),
 	),
 }));
@@ -41,10 +49,13 @@ describe('ChatPane', () => {
 			name: 'Focus chat composer for Pane Test Chat',
 		});
 
-		expect(document.querySelector('[data-pane-body]')).toBeTruthy();
-		expect(await screen.findByText('Unfocused user question')).toBeTruthy();
-		expect(await screen.findByText('Unfocused assistant answer')).toBeTruthy();
-		expect(screen.getByText('Reply...')).toBeTruthy();
+			expect(document.querySelector('[data-pane-body]')).toBeTruthy();
+			expect(await screen.findByText('Unfocused user question')).toBeTruthy();
+			expect(await screen.findByText('Unfocused assistant answer')).toBeTruthy();
+			expect(await screen.findByText('2 commands')).toBeTruthy();
+			expect(await screen.findByText('pwd')).toBeTruthy();
+			expect(await screen.findByText('rg split')).toBeTruthy();
+			expect(screen.getByText('Reply...')).toBeTruthy();
 
 		await fireEvent.click(composerTarget);
 

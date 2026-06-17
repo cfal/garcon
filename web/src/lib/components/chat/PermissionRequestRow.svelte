@@ -3,6 +3,7 @@
 	// pending/resolved/cancelled state via ChatEventCard status variants.
 
 	import type { PermissionRequestMessage } from '$shared/chat-types';
+	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { getToolDisplayDetails, getToolDisplayLabel } from '$lib/chat/tool-display-registry';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ShieldAlert, FileCode, ChevronDown, Check, X } from '@lucide/svelte';
@@ -28,16 +29,23 @@
 			decision: { allow: boolean; message?: string },
 		) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: PlanExitChoice, plan: string) => void;
+		chatContext?: ConversationMessageChatContext | null;
 	}
 
-	let { request, terminal, onDecision, onExitPlanMode }: Props = $props();
+	let { request, terminal, onDecision, onExitPlanMode, chatContext = null }: Props = $props();
 
 	const sessions = getChatSessions();
 	const fileViewer = getFileViewer();
 	const appShell = getAppShell();
 
 	const projectBasePath = $derived(appShell.projectBasePath);
-	const chatProjectPath = $derived(sessions.selectedChat?.projectPath ?? null);
+	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
+		if (chatContext?.chatId) return chatContext;
+		const selected = sessions.selectedChat;
+		if (!selected?.id) return null;
+		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
+	});
+	const chatProjectPath = $derived(activeChatContext?.projectPath ?? null);
 	const isPending = $derived(!terminal);
 	const isResolved = $derived(terminal?.state === 'resolved');
 	const isCancelled = $derived(terminal?.state === 'cancelled');
@@ -65,12 +73,12 @@
 
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file') return;
-		const chat = sessions.selectedChat;
-		if (!chat) return;
+		const chat = activeChatContext;
+		if (!chat?.projectPath) return;
 		const parsed = parseFileLink(link.rawHref, { projectBasePath: chat.projectPath });
 		if (parsed.kind !== 'file') return;
 		fileViewer.openAuto({
-			chatId: chat.id,
+			chatId: chat.chatId,
 			projectPath: chat.projectPath,
 			relativePath: parsed.relativePath,
 			source: 'markdown-link',

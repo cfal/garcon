@@ -1,7 +1,13 @@
-<script lang="ts">
-	import ChatPane from '../ChatPane.svelte';
-	import { setChatSessions, setSplitLayout } from '$lib/context';
-	import { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
+	<script lang="ts">
+		import ChatPane from '../ChatPane.svelte';
+		import {
+			setAppShell,
+			setChatSessions,
+			setFileViewer,
+			setLocalSettings,
+			setSplitLayout,
+		} from '$lib/context';
+		import { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
 
 	interface Props {
 		isFocused?: boolean;
@@ -14,12 +20,29 @@
 	setChatSessions({
 		byId: {
 			'chat-1': {
-				id: 'chat-1',
-				title: 'Pane Test Chat',
-				agentId: 'codex',
-				isProcessing: false,
+					id: 'chat-1',
+					title: 'Pane Test Chat',
+					agentId: 'codex',
+					projectPath: '/workspace/project',
+					isProcessing: false,
+				},
 			},
-		},
+			selectedChat: { id: 'chat-2', projectPath: '/workspace/other' },
+		} as never);
+
+	setFileViewer({
+		openAuto: () => {},
+	} as never);
+
+	setAppShell({
+		projectBasePath: '/workspace',
+		openNewChatDialog: () => {},
+	} as never);
+
+	setLocalSettings({
+		autoExpandTools: false,
+		showThinking: true,
+		chatMaxWidth: 'none',
 	} as never);
 
 	setSplitLayout({

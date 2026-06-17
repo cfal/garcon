@@ -2,9 +2,17 @@
 	import { tick, untrack } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import { cn } from '$lib/utils/cn';
-	import { getChatSessions, getSplitLayout } from '$lib/context';
-	import { type ChatMessage, UserMessage, AssistantMessage, ErrorMessage } from '$shared/chat-types';
+	import { getChatSessions, getLocalSettings, getSplitLayout } from '$lib/context';
 	import type { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
+	import type { ChatDisplayRow } from '$lib/chat/state.svelte';
+	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
+	import {
+		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
+		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
+	} from '$lib/chat/chat-max-width';
+	import ConversationTranscript from '$lib/components/chat/ConversationTranscript.svelte';
+	import { Scrollbar } from '$lib/components/ui/scroll-area';
+	import { ScrollArea as ScrollAreaPrimitive } from 'bits-ui';
 	import * as m from '$lib/paraglide/messages.js';
 	import X from '@lucide/svelte/icons/x';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -40,16 +48,40 @@
 	}: ChatPaneProps = $props();
 
 	const sessions = getChatSessions();
+	const localSettings = getLocalSettings();
 	const splitLayout = getSplitLayout();
 
-	let previewScrollContainer: HTMLDivElement | undefined = $state();
+	let previewScrollContainer: HTMLDivElement | null = $state(null);
 
 	const previewEntry = $derived(previewStore.entry(chatId));
-	const previewMessages = $derived(previewEntry.messages.map((entry) => entry.message));
+	const previewRows = $derived.by((): ChatDisplayRow[] =>
+		previewEntry.messages.map((entry) => ({
+			kind: 'message',
+			id: `${previewEntry.generationId}:${entry.seq}`,
+			message: entry.message,
+		})),
+	);
 	const isPreviewLoading = $derived(previewEntry.isLoading);
 	const chatRecord = $derived(sessions.byId[chatId] ?? null);
 	const chatTitle = $derived(chatRecord?.title || 'Untitled');
 	const providerLabel = $derived(chatRecord?.agentId || '');
+	const previewAgentId = $derived(providerLabel || 'unknown');
+	const previewChatContext = $derived.by((): ConversationMessageChatContext => ({
+		chatId,
+		projectPath: chatRecord?.projectPath ?? null,
+	}));
+	const previewContentClass = $derived(
+		cn(
+			'flex w-full flex-col gap-2 px-[21px] sm:gap-3',
+			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth],
+		),
+	);
+	const previewViewportClass = $derived(
+		cn(
+			'h-full overflow-y-auto overflow-x-hidden relative outline-none pt-3 sm:pt-4 pb-3 sm:pb-4',
+			CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS[localSettings.chatMaxWidth],
+		),
+	);
 	const isProcessing = $derived(chatRecord?.isProcessing ?? false);
 	// Signals a finished, non-focused pane that has new content the user
 	// hasn't acknowledged -- lets the user see at a glance which pane
@@ -115,18 +147,15 @@
 		});
 	});
 
-	function getMessageText(msg: ChatMessage): string | null {
-		if (msg instanceof UserMessage) return msg.content;
-		if (msg instanceof AssistantMessage) return msg.content;
-		if (msg instanceof ErrorMessage) return msg.content;
-		return null;
+	function isInteractiveTarget(target: EventTarget | null, container: EventTarget | null): boolean {
+		if (!(target instanceof Element) || !(container instanceof Element)) return false;
+		const interactive = target.closest('button,a,input,textarea,select,[role="button"]');
+		return Boolean(interactive && interactive !== container);
 	}
 
-	function getMessageRole(msg: ChatMessage): 'user' | 'assistant' | 'system' | null {
-		if (msg instanceof UserMessage) return 'user';
-		if (msg instanceof AssistantMessage) return 'assistant';
-		if (msg instanceof ErrorMessage) return 'system';
-		return null;
+	function handlePreviewClick(event: MouseEvent): void {
+		if (isInteractiveTarget(event.target, event.currentTarget)) return;
+		onFocus();
 	}
 </script>
 
@@ -237,57 +266,52 @@
 			{@render focusedContent()}
 		</div>
 	{:else}
-		<div
-			data-pane-body
-			class={cn(
-				'flex-1 min-h-0 flex flex-col gap-2 p-2 text-left',
-				'bg-background/40 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-				'transition-colors',
-			)}
-			onclick={onFocus}
-			onkeydown={(e) => {
-				if (e.key === 'Enter' || e.key === ' ') onFocus();
-			}}
+			<div
+				data-pane-body
+				class={cn(
+					'flex-1 min-h-0 flex flex-col gap-2 text-left',
+					'bg-background/40 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+					'transition-colors',
+				)}
+				onclick={handlePreviewClick}
+				onkeydown={(e) => {
+					if (isInteractiveTarget(e.target, e.currentTarget)) return;
+					if (e.key === 'Enter' || e.key === ' ') onFocus();
+				}}
 			role="button"
 			tabindex="0"
 			aria-label={m.chat_pane_focus_composer({ title: chatTitle })}
 		>
-			<div
-				bind:this={previewScrollContainer}
-				class="min-h-0 flex-1 overflow-y-auto space-y-1.5 scrollbar-hide"
-				role="log"
-				aria-label={m.chat_pane_preview({ title: chatTitle })}
-			>
-				{#if isPreviewLoading && previewMessages.length === 0}
-					<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
-						Loading messages...
-					</div>
-				{:else if previewMessages.length === 0}
-					<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
-						No messages yet
-					</div>
-				{:else}
-					{#each previewMessages as msg}
-						{@const text = getMessageText(msg)}
-						{@const role = getMessageRole(msg)}
-						{#if text && role}
-							<div
-								class={cn(
-									'text-[11px] leading-relaxed rounded-md px-2.5 py-1.5 max-w-full',
-									role === 'user'
-										? 'bg-primary/8 text-foreground ml-6'
-										: role === 'assistant'
-											? 'bg-muted/40 text-foreground mr-3'
-											: 'bg-destructive/10 text-destructive',
-								)}
-							>
-								<div class="whitespace-pre-wrap break-words line-clamp-[20]">{text}</div>
+				<ScrollAreaPrimitive.Root type="auto" class="min-h-0 flex-1 overflow-hidden relative">
+					<ScrollAreaPrimitive.Viewport
+						bind:ref={previewScrollContainer}
+						class={previewViewportClass}
+						role="log"
+						aria-label={m.chat_pane_preview({ title: chatTitle })}
+					>
+						{#if isPreviewLoading && previewRows.length === 0}
+							<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
+								Loading messages...
+							</div>
+						{:else if previewRows.length === 0}
+							<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
+								No messages yet
+							</div>
+						{:else}
+							<div class={previewContentClass}>
+								<ConversationTranscript
+									rows={previewRows}
+									agentId={previewAgentId}
+									showThinking={localSettings.showThinking}
+									chatContext={previewChatContext}
+								/>
 							</div>
 						{/if}
-					{/each}
-				{/if}
-			</div>
-			<div class="rounded-lg border border-border/70 bg-card/95 shadow-sm overflow-hidden">
+					</ScrollAreaPrimitive.Viewport>
+					<Scrollbar orientation="vertical" class="w-1.5" />
+					<ScrollAreaPrimitive.Corner />
+				</ScrollAreaPrimitive.Root>
+				<div class="mx-2 mb-2 rounded-lg border border-border/70 bg-card/95 shadow-sm overflow-hidden">
 				<div class="min-h-[72px] px-3 py-2 text-sm text-muted-foreground">
 					{m.chat_composer_reply_placeholder()}
 				</div>

@@ -1,16 +1,8 @@
 <script lang="ts">
-	import ConversationMessage from './ConversationMessage.svelte';
-	import ChatBashToolGroup from './tools/ChatBashToolGroup.svelte';
-	import MessageRenderFallback from './MessageRenderFallback.svelte';
-	import LocalNoticeRow from './rows/LocalNoticeRow.svelte';
-	import {
-		isToolUseMessage,
-		PermissionRequestMessage,
-	} from '$shared/chat-types';
+	import ConversationTranscript from './ConversationTranscript.svelte';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import { getChatState, getAgentState, getLocalSettings, getAppShell } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import { buildConversationFeedRenderModel } from '$lib/chat/conversation-feed-items';
 	import {
 		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
 		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
@@ -52,23 +44,6 @@
 	function handleMessagePaneFocusIntent() {
 		appShell.requestSidebarRecenterToSelected();
 	}
-
-	// Tracks which ExitPlanMode synthetic permission requests are still
-	// pending so we can derive terminal state for the tool-use rendering.
-	// Matches both PascalCase and snake_case variants since claude-cli
-	// forwards tool_name verbatim from the provider.
-	const pendingExitPlanIds = $derived(
-		new Set(
-			pendingPermissionRequests
-				.filter((r) => r.requestedTool.type === 'exit-plan-mode-tool-use')
-				.map((r) => r.permissionRequestId),
-		),
-	);
-
-	// Builds render items and lookup tables in a single pass over the
-	// visible transcript, keeping stream updates cheaper.
-	const renderModel = $derived(buildConversationFeedRenderModel(chatState.visibleRows));
-	const renderItems = $derived(renderModel.items);
 
 	const feedScrollAreaClass = 'h-full overflow-hidden relative';
 	const feedViewportClass = $derived(
@@ -170,56 +145,16 @@
 			</div>
 		{/if}
 
-		{#each renderItems as item (item.id)}
-			{#if item.kind === 'bash-group'}
-				<svelte:boundary>
-					<ChatBashToolGroup messages={item.messages} />
-					{#snippet failed(error)}
-						<MessageRenderFallback {error} />
-					{/snippet}
-				</svelte:boundary>
-			{:else if item.kind === 'local-notice'}
-				<svelte:boundary>
-					<LocalNoticeRow notice={item.notice} />
-					{#snippet failed(error)}
-						<MessageRenderFallback {error} />
-					{/snippet}
-				</svelte:boundary>
-			{:else}
-				{@const message = item.message}
-				{@const toolResult = isToolUseMessage(message)
-					? renderModel.toolResultIndex.get(message.toolId)
-					: undefined}
-				{@const exitPlanId =
-					message.type === 'exit-plan-mode-tool-use' ? `plan-exit-${message.toolId}` : null}
-				{@const permTerminal =
-					message instanceof PermissionRequestMessage
-						? renderModel.permissionTerminalById.get(message.permissionRequestId)
-						: exitPlanId
-							? pendingExitPlanIds.has(exitPlanId)
-								? undefined
-								: { state: 'resolved' as const, allowed: true }
-							: undefined}
-				<svelte:boundary>
-					<ConversationMessage
-						{message}
-						index={item.index}
-						prevMessage={item.prevMessage}
-						{toolResult}
-						permissionTerminal={permTerminal}
-						{onPermissionDecision}
-						{onExitPlanMode}
-						agentId={agentState.agentId}
-						showThinking={localSettings.showThinking}
-					/>
-					{#snippet failed(error)}
-						<MessageRenderFallback {error} />
-					{/snippet}
-				</svelte:boundary>
-			{/if}
-		{/each}
-	{/if}
-{/snippet}
+			<ConversationTranscript
+				rows={chatState.visibleRows}
+				agentId={agentState.agentId}
+				showThinking={localSettings.showThinking}
+				{pendingPermissionRequests}
+				{onPermissionDecision}
+				{onExitPlanMode}
+			/>
+		{/if}
+	{/snippet}
 
 <ScrollAreaPrimitive.Root type="auto" class={feedScrollAreaClass}>
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D -->
