@@ -1,11 +1,10 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import { cn } from '$lib/utils/cn';
 	import { getChatSessions, getSplitLayout } from '$lib/context';
-	import { LocalChatSnapshotCache } from '$lib/chat/chat-snapshot-cache';
 	import { type ChatMessage, UserMessage, AssistantMessage, ErrorMessage } from '$shared/chat-types';
-	import { getChatMessages } from '$lib/api/chats.js';
+	import type { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import X from '@lucide/svelte/icons/x';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -19,6 +18,7 @@
 		chatId: string;
 		isFocused: boolean;
 		draggedChatId: string | null;
+		previewStore: SplitPanePreviewStore;
 		onFocus: () => void;
 		onClose: () => void;
 		onDelete: () => void;
@@ -31,6 +31,7 @@
 		chatId,
 		isFocused,
 		draggedChatId,
+		previewStore,
 		onFocus,
 		onClose,
 		onDelete,
@@ -40,12 +41,12 @@
 
 	const sessions = getChatSessions();
 	const splitLayout = getSplitLayout();
-	const snapshotCache = new LocalChatSnapshotCache();
 
-	let previewMessages = $state<ChatMessage[]>([]);
-	let isPreviewLoading = $state(false);
 	let previewScrollContainer: HTMLDivElement | undefined = $state();
 
+	const previewEntry = $derived(previewStore.entry(chatId));
+	const previewMessages = $derived(previewEntry.messages.map((entry) => entry.message));
+	const isPreviewLoading = $derived(previewEntry.isLoading);
 	const chatRecord = $derived(sessions.byId[chatId] ?? null);
 	const chatTitle = $derived(chatRecord?.title || 'Untitled');
 	const providerLabel = $derived(chatRecord?.agentId || '');
@@ -98,42 +99,14 @@
 		const id = chatId;
 		if (isFocused) return;
 
-		previewMessages = [];
-		isPreviewLoading = true;
-
-		const cached = snapshotCache.restore(id);
-		if (cached) {
-			previewMessages = cached.entries.map((entry) => entry.message);
-			isPreviewLoading = false;
-		}
-
-		fetchPreviewMessages(id);
+		untrack(() => {
+			previewStore.restore(id);
+			void previewStore.ensureLoaded(id);
+		});
 	});
 
-	async function fetchPreviewMessages(targetChatId: string) {
-		try {
-			const data = await getChatMessages({ chatId: targetChatId, limit: 50 });
-
-			if (targetChatId !== chatId || isFocused) return;
-
-			previewMessages = data.messages.map((entry) => entry.message);
-			snapshotCache.persist(
-				targetChatId,
-				data.messages,
-				{ generationId: data.generationId, lastSeq: data.lastSeq },
-				{ limit: 50 },
-			);
-		} catch {
-			// Leaves cached preview content in place when refresh fails.
-		} finally {
-			if (targetChatId === chatId && !isFocused) {
-				isPreviewLoading = false;
-			}
-		}
-	}
-
 	$effect(() => {
-		previewMessages;
+		previewEntry.lastSeq;
 		previewScrollContainer;
 		tick().then(() => {
 			if (previewScrollContainer) {

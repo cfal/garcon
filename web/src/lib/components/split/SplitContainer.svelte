@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { LayoutNode } from '$lib/stores/split-layout.svelte';
+	import type { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
 	import SplitResizer from './SplitResizer.svelte';
 	import ChatPane from './ChatPane.svelte';
 	import Self from './SplitContainer.svelte';
@@ -9,6 +10,7 @@
 		path?: number[];
 		focusedPaneId: string | null;
 		draggedChatId: string | null;
+		previewStore: SplitPanePreviewStore;
 		onFocusPane: (paneId: string) => void;
 		onClosePane: (paneId: string) => void;
 		onDeleteChat: (paneId: string) => void;
@@ -21,6 +23,7 @@
 		path = [],
 		focusedPaneId,
 		draggedChatId,
+		previewStore,
 		onFocusPane,
 		onClosePane,
 		onDeleteChat,
@@ -55,6 +58,7 @@
 		chatId={node.chatId}
 		isFocused={focusedPaneId === node.id}
 		{draggedChatId}
+		{previewStore}
 		onFocus={() => onFocusPane(node.id)}
 		onClose={() => onClosePane(node.id)}
 		onDelete={() => onDeleteChat(node.id)}
@@ -81,6 +85,7 @@
 				path={[...path, 0]}
 				{focusedPaneId}
 				{draggedChatId}
+				{previewStore}
 				{onFocusPane}
 				{onClosePane}
 				{onDeleteChat}
@@ -100,6 +105,7 @@
 				path={[...path, 1]}
 				{focusedPaneId}
 				{draggedChatId}
+				{previewStore}
 				{onFocusPane}
 				{onClosePane}
 				{onDeleteChat}

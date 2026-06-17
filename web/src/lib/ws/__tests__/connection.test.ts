@@ -44,11 +44,23 @@ class MockWebSocket {
 
 let mockSockets: MockWebSocket[] = [];
 
+async function flushPromises(): Promise<void> {
+	await Promise.resolve();
+	await Promise.resolve();
+}
+
+function lastSentPayload(socket: MockWebSocket): Record<string, unknown> {
+	const raw = socket.send.mock.calls.at(-1)?.[0];
+	if (typeof raw !== 'string') throw new Error('No socket payload was sent');
+	return JSON.parse(raw) as Record<string, unknown>;
+}
+
 describe('WsConnection', () => {
 	let originalWebSocket: typeof WebSocket;
 
 	beforeEach(() => {
 		vi.useFakeTimers();
+		vi.spyOn(Math, 'random').mockReturnValue(0);
 		mockSockets = [];
 		originalWebSocket = globalThis.WebSocket;
 		vi.stubGlobal('WebSocket', MockWebSocket);
@@ -56,6 +68,7 @@ describe('WsConnection', () => {
 
 	afterEach(() => {
 		vi.useRealTimers();
+		vi.restoreAllMocks();
 		vi.stubGlobal('WebSocket', originalWebSocket);
 	});
 
@@ -124,6 +137,91 @@ describe('WsConnection', () => {
 		expect(connection.messageVersion).toBe(1);
 		expect(connection.messages).toHaveLength(1);
 		expect(connection.messages[0].data).toEqual({ type: 'chat-list-refresh-requested' });
+
+		connection.disconnect();
+	});
+
+	it('sends application heartbeats and accepts matching pongs', async () => {
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		await vi.advanceTimersByTimeAsync(15_000);
+
+		const ping = lastSentPayload(socket);
+		expect(ping).toMatchObject({ type: 'ws-ping' });
+		expect(typeof ping.clientRequestId).toBe('string');
+		expect(typeof ping.sentAt).toBe('number');
+
+		socket.message({
+			type: 'ws-pong',
+			clientRequestId: ping.clientRequestId,
+			sentAt: ping.sentAt,
+			serverTime: '2026-06-17T00:00:00.000Z',
+		});
+		await flushPromises();
+
+		expect(connection.isConnected).toBe(true);
+		expect(mockSockets).toHaveLength(1);
+
+		connection.disconnect();
+	});
+
+	it('forces reconnect when a heartbeat pong is not received', async () => {
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const first = mockSockets[0];
+		first.open();
+
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(lastSentPayload(first)).toMatchObject({ type: 'ws-ping' });
+
+		await vi.advanceTimersByTimeAsync(6_000);
+		await flushPromises();
+
+		expect(first.close).toHaveBeenCalledOnce();
+		expect(connection.isConnected).toBe(false);
+		expect(mockSockets).toHaveLength(2);
+		expect(mockSockets[1].url).toContain('token=stored-token');
+
+		connection.disconnect();
+	});
+
+	it('rejects pending requests when the socket closes', async () => {
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		const request = connection.sendRequest({ type: 'chats-running-query' });
+		socket.closeFromServer();
+
+		await expect(request).rejects.toThrow('WebSocket disconnected');
+
+		connection.disconnect();
+	});
+
+	it('abandons offline sockets and reconnects immediately when the browser returns online', () => {
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const first = mockSockets[0];
+		first.open();
+
+		window.dispatchEvent(new Event('offline'));
+
+		expect(first.close).toHaveBeenCalledOnce();
+		expect(connection.isConnected).toBe(false);
+		expect(mockSockets).toHaveLength(1);
+
+		window.dispatchEvent(new Event('online'));
+
+		expect(mockSockets).toHaveLength(2);
+		expect(mockSockets[1].url).toContain('token=stored-token');
 
 		connection.disconnect();
 	});

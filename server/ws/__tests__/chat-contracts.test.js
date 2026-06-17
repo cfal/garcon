@@ -129,6 +129,21 @@ describe('chat WebSocket handler', () => {
     });
   });
 
+  it('responds to application heartbeat pings', async () => {
+    await chatHandler.message(ws, {
+      type: 'ws-ping',
+      clientRequestId: 'req-ping-1',
+      sentAt: 1234,
+    });
+
+    expect(lastSentPayload()).toMatchObject({
+      type: 'ws-pong',
+      clientRequestId: 'req-ping-1',
+      sentAt: 1234,
+    });
+    expect(typeof lastSentPayload().serverTime).toBe('string');
+  });
+
   it('sends ws-fault for missing chatId', async () => {
     await chatHandler.message(ws, {
       type: 'chat-subscribe',

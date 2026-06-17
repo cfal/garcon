@@ -1,6 +1,12 @@
 <script lang="ts">
 	interface ConversationWorkspaceStubProps {
 		reserveTopFloatingToolbar?: boolean;
+		getVisibleChatIds?: () => string[];
+		isVisiblePreviewChat?: (chatId: string) => boolean;
+		getVisiblePreviewCursor?: (chatId: string) => unknown;
+		applyVisiblePreviewMessages?: (...args: unknown[]) => unknown;
+		loadVisiblePreviewSnapshot?: (chatId: string) => unknown;
+		markVisiblePreviewStale?: (chatId: string) => unknown;
 	}
 
 	let { reserveTopFloatingToolbar = false }: ConversationWorkspaceStubProps = $props();

@@ -3,6 +3,7 @@
 
 	interface SplitContainerStubProps {
 		node: LayoutNode;
+		previewStore?: unknown;
 	}
 
 	let { node }: SplitContainerStubProps = $props();

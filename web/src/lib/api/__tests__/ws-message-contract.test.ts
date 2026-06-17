@@ -19,12 +19,14 @@ import {
 	QueueStateUpdatedMessage,
 	SettingsChangedMessage,
 	WsFaultMessage,
+	WsPongMessage,
 	parseServerWsMessage,
 } from '$shared/ws-events';
 import {
 	ChatReloadRequest,
 	ChatRunningQueryRequest,
 	ChatSubscribeRequest,
+	WsPingRequest,
 	parseClientWsMessage,
 } from '$shared/ws-requests';
 import { ErrorMessage } from '$shared/chat-types';
@@ -271,6 +273,12 @@ describe('parseServerWsMessage', () => {
 			retryable: false,
 		})).toBeInstanceOf(ClientRequestErrorMessage);
 		expect(parseServerWsMessage({ type: 'ws-fault', error: 'disconnected' })).toBeInstanceOf(WsFaultMessage);
+		expect(parseServerWsMessage({
+			type: 'ws-pong',
+			clientRequestId: 'req-ping',
+			sentAt: 1234,
+			serverTime: '2026-06-17T00:00:00.000Z',
+		})).toBeInstanceOf(WsPongMessage);
 	});
 
 	it('rejects malformed existing stream messages', () => {
@@ -278,6 +286,7 @@ describe('parseServerWsMessage', () => {
 		expect(parseServerWsMessage({ type: 'agent-run-failed', chatId: 'c-1' })).toBeNull();
 		expect(parseServerWsMessage({ type: 'chat-list-refresh-requested', reason: 'mystery', chatId: 'c-1' })).toBeNull();
 		expect(parseServerWsMessage({ type: 'settings-changed', settings: { version: 'oops' } })).toBeNull();
+		expect(parseServerWsMessage({ type: 'ws-pong', clientRequestId: 'req-ping' })).toBeNull();
 		expect(parseServerWsMessage({ type: 'unknown-event', data: 123 })).toBeNull();
 	});
 });
@@ -305,6 +314,14 @@ describe('parseClientWsMessage', () => {
 			clientRequestId: 'req-reload',
 			chatId: 'c-1',
 		})).toBeInstanceOf(ChatReloadRequest);
+
+		const ping = parseClientWsMessage({
+			type: 'ws-ping',
+			clientRequestId: 'req-ping',
+			sentAt: 1234,
+		});
+		expect(ping).toBeInstanceOf(WsPingRequest);
+		expect((ping as WsPingRequest).sentAt).toBe(1234);
 	});
 
 	it('defaults malformed subscribe cursors to an empty cursor', () => {

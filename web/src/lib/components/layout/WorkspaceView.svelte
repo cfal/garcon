@@ -12,6 +12,7 @@
 	import ConversationWorkspace from '$lib/components/chat/ConversationWorkspace.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SplitContainer from '$lib/components/split/SplitContainer.svelte';
+	import { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
@@ -49,6 +50,7 @@
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
 	const splitLayout = getSplitLayout();
+	const splitPanePreviews = new SplitPanePreviewStore();
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
@@ -71,6 +73,9 @@
 		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen(),
 	);
 	const splitDropZones = SPLIT_DROP_ZONES;
+	const visibleSplitChatIds = $derived(
+		splitLayout.isEnabled ? splitLayout.panes.map((pane) => pane.chatId) : [],
+	);
 
 	// Holds the chat submit function registered by ConversationWorkspace.
 	let chatSubmitFn = $state<((message: string) => Promise<boolean>) | null>(null);
@@ -200,6 +205,14 @@
 		if (focusedChat) sessions.setSelectedChatId(focusedChat);
 	}
 
+	function getVisibleSplitChatIds(): string[] {
+		return visibleSplitChatIds;
+	}
+
+	function isVisibleSplitChat(chatId: string): boolean {
+		return visibleSplitChatIds.includes(chatId);
+	}
+
 	let splitRootEl: HTMLDivElement | undefined = $state();
 	const splitDrop = new SplitDropController({
 		get activeTab() {
@@ -322,6 +335,7 @@
 						node={splitLayout.root}
 						focusedPaneId={splitLayout.focusedPaneId}
 						draggedChatId={splitLayout.draggedChatId}
+						previewStore={splitPanePreviews}
 						onFocusPane={handleSplitFocusPane}
 						onClosePane={handleSplitClosePane}
 						onDeleteChat={handleSplitDeleteChat}
@@ -348,6 +362,13 @@
 								onRegisterSubmit={handleRegisterSubmit}
 								{onRegisterReload}
 								reserveTopFloatingToolbar={showFloatingDesktopTabs}
+								getVisibleChatIds={getVisibleSplitChatIds}
+								isVisiblePreviewChat={isVisibleSplitChat}
+								getVisiblePreviewCursor={(chatId) => splitPanePreviews.cursor(chatId)}
+								applyVisiblePreviewMessages={(chatId, generationId, messages, lastSeq) =>
+									splitPanePreviews.applyMessages(chatId, generationId, messages, lastSeq)}
+								loadVisiblePreviewSnapshot={(chatId) => splitPanePreviews.loadSnapshot(chatId)}
+								markVisiblePreviewStale={(chatId) => splitPanePreviews.markStale(chatId)}
 							/>
 						</div>
 					{/if}

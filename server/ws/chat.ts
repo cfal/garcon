@@ -10,6 +10,7 @@ import {
   ChatSubscribedMessage,
   ChatGenerationResetMessage,
   ChatReloadedMessage,
+  WsPongMessage,
 } from '../../common/ws-events.ts';
 import type { ClientRequestErrorCode } from '../../common/ws-events.ts';
 import {
@@ -17,6 +18,7 @@ import {
   ChatSubscribeRequest,
   ChatReloadRequest,
   ChatRunningQueryRequest,
+  WsPingRequest,
 } from '../../common/ws-requests.ts';
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { IChatRegistry } from '../chats/store.js';
@@ -118,6 +120,15 @@ export class ChatHandler {
     ));
   }
 
+  #handleWsPing(data: WsPingRequest, writer: WebSocketWriter): void {
+    if (!data.clientRequestId) return;
+    writer.send(new WsPongMessage(
+      data.clientRequestId,
+      data.sentAt,
+      new Date().toISOString(),
+    ));
+  }
+
   async #handleChatSubscribe(data: ChatSubscribeRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
     const clientRequestId = data.clientRequestId;
     if (!clientRequestId) return;
@@ -214,6 +225,7 @@ export class ChatHandler {
         return this.#handleChatReload(data as ChatReloadRequest, chatId, writer);
       }),
       'chats-running-query': (data, writer) => this.#handleGetRunningSessions(data as ChatRunningQueryRequest, writer),
+      'ws-ping': (data, writer) => this.#handleWsPing(data as WsPingRequest, writer),
     };
   }
 

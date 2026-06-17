@@ -30,6 +30,15 @@ export interface ChatReconnectCoordinatorOptions {
 	reconcileProcessing: (activeChatIds: Set<string>) => void;
 	quietRefreshChats: () => Promise<void> | void;
 	getBackgroundCursors: () => CachedChatCursor[];
+	getVisibleChatIds?: () => string[];
+	getVisibleChatCursor?: (chatId: string) => CachedChatCursor | null;
+	loadVisibleChatSnapshot?: (chatId: string) => Promise<void> | void;
+	onVisibleChatMessages?: (
+		chatId: string,
+		generationId: string,
+		messages: ChatViewMessage[],
+		lastSeq: number,
+	) => Promise<boolean | void> | boolean | void;
 	loadBackgroundSnapshot: (chatId: string) => Promise<void> | void;
 	onBackgroundMessages?: (
 		chatId: string,
@@ -102,7 +111,14 @@ export class ChatReconnectCoordinator {
 			await this.#resumeSelectedChat(selectedChatId, epoch);
 		}
 
-		await this.#resumeBackgroundChats(selectedChatId, runningChatIds, epoch);
+		const visibleChatIds = this.#visibleChatIds(selectedChatId);
+		await this.#resumeVisibleChats(visibleChatIds, epoch);
+
+		const excludedBackgroundChatIds = new Set([
+			...visibleChatIds,
+			...(selectedChatId ? [selectedChatId] : []),
+		]);
+		await this.#resumeBackgroundChats(excludedBackgroundChatIds, runningChatIds, epoch);
 	}
 
 	async #requestRunningChatIds(): Promise<Set<string>> {
@@ -165,13 +181,54 @@ export class ChatReconnectCoordinator {
 		this.options.chatState.snapshotCache.markValidated(chatId);
 	}
 
+	#visibleChatIds(selectedChatId: string | null): string[] {
+		const ids = this.options.getVisibleChatIds?.() ?? [];
+		return [...new Set(ids)].filter((chatId) => chatId && chatId !== selectedChatId);
+	}
+
+	async #resumeVisibleChats(chatIds: string[], epoch: number): Promise<void> {
+		for (const chatId of chatIds) {
+			if (epoch !== this.#reconnectEpoch) return;
+			const cursor = this.options.getVisibleChatCursor?.(chatId) ?? null;
+			if (!cursor) {
+				await this.options.loadVisibleChatSnapshot?.(chatId);
+				continue;
+			}
+			try {
+				const message = await this.#subscribe(chatId, cursor.generationId, cursor.lastSeq);
+				if (epoch !== this.#reconnectEpoch) return;
+				if (message.mode === 'snapshot-required') {
+					await this.options.loadVisibleChatSnapshot?.(chatId);
+					continue;
+				}
+				if (message.messages.length === 0 && message.lastSeq > cursor.lastSeq) {
+					await this.options.loadVisibleChatSnapshot?.(chatId);
+					continue;
+				}
+				if (message.messages.length > 0) {
+					const applied = await this.options.onVisibleChatMessages?.(
+						chatId,
+						message.generationId ?? '',
+						message.messages,
+						message.lastSeq,
+					);
+					if (applied === false) {
+						await this.options.loadVisibleChatSnapshot?.(chatId);
+					}
+				}
+			} catch {
+				await this.options.loadVisibleChatSnapshot?.(chatId);
+			}
+		}
+	}
+
 	async #resumeBackgroundChats(
-		selectedChatId: string | null,
+		excludedChatIds: Set<string>,
 		runningChatIds: Set<string>,
 		epoch: number,
 	): Promise<void> {
 		const cursors = this.options.getBackgroundCursors()
-			.filter((cursor) => cursor.chatId !== selectedChatId)
+			.filter((cursor) => !excludedChatIds.has(cursor.chatId))
 			.filter((cursor) => cursor.generationId && cursor.lastSeq > 0)
 			.sort((left, right) => Number(runningChatIds.has(right.chatId)) - Number(runningChatIds.has(left.chatId)))
 			.slice(0, BACKGROUND_RESUME_LIMIT);

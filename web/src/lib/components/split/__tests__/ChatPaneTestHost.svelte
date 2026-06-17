@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ChatPane from '../ChatPane.svelte';
 	import { setChatSessions, setSplitLayout } from '$lib/context';
+	import { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
 
 	interface Props {
 		isFocused?: boolean;
@@ -8,6 +9,7 @@
 	}
 
 	let { isFocused = false, onFocus = () => {} }: Props = $props();
+	const previewStore = new SplitPanePreviewStore();
 
 	setChatSessions({
 		byId: {
@@ -37,6 +39,7 @@
 	chatId="chat-1"
 	{isFocused}
 	draggedChatId={null}
+	{previewStore}
 	{onFocus}
 	onClose={() => {}}
 	onDelete={() => {}}

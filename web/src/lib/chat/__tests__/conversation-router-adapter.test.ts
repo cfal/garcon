@@ -116,4 +116,29 @@ describe('buildRouterStores', () => {
 		expect(applied).toBe(false);
 		expect(deps.chatState.snapshotCache.restore('chat-2')).toBeNull();
 	});
+
+	it('maps visible preview callbacks into router chat state hooks', () => {
+		const deps = depsFor(chatRecord());
+		deps.visiblePreviews = {
+			isVisible: vi.fn((chatId) => chatId === 'chat-2'),
+			applyMessages: vi.fn(() => true),
+			loadSnapshot: vi.fn(),
+			markStale: vi.fn(),
+		};
+		const stores = buildRouterStores(deps);
+
+		expect(stores.chatState.isVisiblePreviewChat?.('chat-2')).toBe(true);
+		expect(stores.chatState.warmVisibleChatPreview?.('chat-2', 'generation-2', [entry(2, 'two')]))
+			.toBe(true);
+		stores.chatState.markVisibleChatPreviewStale?.('chat-2');
+		void stores.chatState.loadVisibleChatPreview?.('chat-2');
+
+		expect(deps.visiblePreviews.applyMessages).toHaveBeenCalledWith(
+			'chat-2',
+			'generation-2',
+			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
+		);
+		expect(deps.visiblePreviews.markStale).toHaveBeenCalledWith('chat-2');
+		expect(deps.visiblePreviews.loadSnapshot).toHaveBeenCalledWith('chat-2');
+	});
 });

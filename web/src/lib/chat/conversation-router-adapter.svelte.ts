@@ -13,6 +13,7 @@ import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatViewMessage } from '$shared/chat-view';
 
 export interface ConversationRouterDeps {
 	ws: WsConnection;
@@ -38,6 +39,16 @@ export interface ConversationRouterDeps {
 	conversationUi: ConversationUiStore;
 	startupCoordinator: StartupCoordinator;
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
+	visiblePreviews?: {
+		isVisible: (chatId: string) => boolean;
+		applyMessages: (
+			chatId: string,
+			generationId: string,
+			messages: ChatViewMessage[],
+		) => boolean | void;
+		loadSnapshot: (chatId: string) => Promise<void> | void;
+		markStale: (chatId: string) => void;
+	};
 }
 
 // Assembles the EventRouterStores contract from workspace dependencies.
@@ -65,6 +76,11 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				deps.chatState.snapshotCache.applyMessages(chatId, generationId, messages, undefined, {
 					limit: INITIAL_VISIBLE_MESSAGES,
 				}),
+			isVisiblePreviewChat: (chatId) => deps.visiblePreviews?.isVisible(chatId) ?? false,
+			warmVisibleChatPreview: (chatId, generationId, messages) =>
+				deps.visiblePreviews?.applyMessages(chatId, generationId, messages),
+			loadVisibleChatPreview: (chatId) => deps.visiblePreviews?.loadSnapshot(chatId),
+			markVisibleChatPreviewStale: (chatId) => deps.visiblePreviews?.markStale(chatId),
 			appendLocalNotice: (noticeType, content) =>
 				deps.chatState.appendLocalNotice(noticeType, content),
 			upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),

@@ -68,6 +68,8 @@ function createReconnectDeps(options: {
 	runningIds?: string[];
 	subscribeResponses?: Record<string, Record<string, unknown>>;
 	backgroundCursors?: Array<{ chatId: string; generationId: string; lastSeq: number }>;
+	visibleChatIds?: string[];
+	visibleCursors?: Record<string, { chatId: string; generationId: string; lastSeq: number } | null>;
 } = {}) {
 	const selectedChatId = options.selectedChatId ?? 'chat-1';
 	let selectedCursor = { generationId: 'generation-selected', lastSeq: 2 };
@@ -109,6 +111,10 @@ function createReconnectDeps(options: {
 		reconcileProcessing: vi.fn(),
 		quietRefreshChats: vi.fn(async () => undefined),
 		getBackgroundCursors: vi.fn(() => options.backgroundCursors ?? []),
+		getVisibleChatIds: vi.fn(() => options.visibleChatIds ?? []),
+		getVisibleChatCursor: vi.fn((chatId: string) => options.visibleCursors?.[chatId] ?? null),
+		loadVisibleChatSnapshot: vi.fn(async () => undefined),
+		onVisibleChatMessages: vi.fn(),
 		loadBackgroundSnapshot: vi.fn(async () => undefined),
 		onBackgroundMessages: vi.fn(),
 	};
@@ -258,6 +264,85 @@ describe('ChatReconnectCoordinator', () => {
 			.filter((request) => request.type === 'chat-subscribe' && request.chatId !== 'chat-1');
 		expect(backgroundSubscribes).toHaveLength(20);
 		expect(deps.onBackgroundMessages).toHaveBeenCalledTimes(20);
+	});
+
+	it('resumes visible split-pane chats before bounded background cursors', async () => {
+		const deps = createReconnectDeps({
+			selectedChatId: 'chat-1',
+			visibleChatIds: ['chat-2'],
+			visibleCursors: {
+				'chat-2': { chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 },
+			},
+			backgroundCursors: [
+				{ chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 },
+				{ chatId: 'chat-3', generationId: 'generation-3', lastSeq: 1 },
+			],
+			subscribeResponses: {
+				'chat-1': deltaResponse('chat-1', 'generation-selected'),
+				'chat-2': deltaResponse('chat-2', 'generation-2', [messageJson(2, 'visible')]),
+				'chat-3': deltaResponse('chat-3', 'generation-3', [messageJson(2, 'background')]),
+			},
+		});
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.onVisibleChatMessages).toHaveBeenCalledWith(
+			'chat-2',
+			'generation-2',
+			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
+			2,
+		);
+		expect(deps.onBackgroundMessages).toHaveBeenCalledTimes(1);
+		expect(deps.onBackgroundMessages).toHaveBeenCalledWith(
+			'chat-3',
+			'generation-3',
+			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
+			2,
+		);
+
+		const subscribeOrder = (deps.ws.sendRequest as ReturnType<typeof vi.fn>).mock.calls
+			.map(([request]) => request as Record<string, unknown>)
+			.filter((request) => request.type === 'chat-subscribe')
+			.map((request) => request.chatId);
+		expect(subscribeOrder).toEqual(['chat-1', 'chat-2', 'chat-3']);
+	});
+
+	it('loads visible split-pane snapshots when no visible cursor exists', async () => {
+		const deps = createReconnectDeps({
+			selectedChatId: 'chat-1',
+			visibleChatIds: ['chat-2'],
+			visibleCursors: { 'chat-2': null },
+			subscribeResponses: {
+				'chat-1': deltaResponse('chat-1', 'generation-selected'),
+			},
+		});
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.loadVisibleChatSnapshot).toHaveBeenCalledWith('chat-2');
+		expect(deps.ws.sendRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+			type: 'chat-subscribe',
+			chatId: 'chat-2',
+		}));
+	});
+
+	it('loads visible split-pane snapshots when visible apply reports a gap', async () => {
+		const deps = createReconnectDeps({
+			selectedChatId: 'chat-1',
+			visibleChatIds: ['chat-2'],
+			visibleCursors: {
+				'chat-2': { chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 },
+			},
+			subscribeResponses: {
+				'chat-1': deltaResponse('chat-1', 'generation-selected'),
+				'chat-2': deltaResponse('chat-2', 'generation-2', [messageJson(3, 'later')]),
+			},
+		});
+		deps.onVisibleChatMessages.mockResolvedValueOnce(false);
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.loadVisibleChatSnapshot).toHaveBeenCalledWith('chat-2');
 	});
 
 	it('loads background snapshots for non-resumable cached cursors', async () => {

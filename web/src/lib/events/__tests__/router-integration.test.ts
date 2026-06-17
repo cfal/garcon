@@ -236,6 +236,77 @@ describe('event router integration', () => {
 		expect(stores.chatState.applyChatMessages).not.toHaveBeenCalled();
 	});
 
+	it('warms visible split-pane previews before background chat filtering skips them', () => {
+		const defaults = createStores();
+		const stores = createStores({
+			chatState: {
+				...defaults.chatState,
+				isVisiblePreviewChat: vi.fn((chatId) => chatId === 'chat-b'),
+				warmVisibleChatPreview: vi.fn(() => true),
+			},
+		});
+
+		renderRouterWithRawMessages(
+			[{
+				type: 'chat-messages',
+				chatId: 'chat-b',
+				generationId: 'generation-b',
+				messages: [
+					rawMessage(1, {
+						type: 'assistant-message',
+						timestamp: TS,
+						content: 'visible split',
+					}),
+				],
+			}],
+			stores,
+		);
+
+		expect(stores.chatState.warmVisibleChatPreview).toHaveBeenCalledWith(
+			'chat-b',
+			'generation-b',
+			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
+		);
+		expect(stores.chatState.warmBackgroundChatSnapshot).toHaveBeenCalledWith(
+			'chat-b',
+			'generation-b',
+			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
+		);
+		expect(stores.chatState.applyChatMessages).not.toHaveBeenCalled();
+	});
+
+	it('reloads visible split-pane previews when live warming detects a gap', () => {
+		const defaults = createStores();
+		const stores = createStores({
+			chatState: {
+				...defaults.chatState,
+				isVisiblePreviewChat: vi.fn((chatId) => chatId === 'chat-b'),
+				warmVisibleChatPreview: vi.fn(() => false),
+				markVisibleChatPreviewStale: vi.fn(),
+				loadVisibleChatPreview: vi.fn(),
+			},
+		});
+
+		renderRouterWithRawMessages(
+			[{
+				type: 'chat-messages',
+				chatId: 'chat-b',
+				generationId: 'generation-b',
+				messages: [
+					rawMessage(3, {
+						type: 'assistant-message',
+						timestamp: TS,
+						content: 'gap',
+					}),
+				],
+			}],
+			stores,
+		);
+
+		expect(stores.chatState.markVisibleChatPreviewStale).toHaveBeenCalledWith('chat-b');
+		expect(stores.chatState.loadVisibleChatPreview).toHaveBeenCalledWith('chat-b');
+	});
+
 	it('marks pending user messages failed on correlated execution failure', () => {
 		let pendingUserInputs: PendingUserInput[] = [{
 			chatId: 'chat-a',
@@ -329,6 +400,33 @@ describe('event router integration', () => {
 			stores,
 		);
 
+		expect(stores.chatState.markChatSnapshotStale).toHaveBeenCalledWith('chat-b');
+	});
+
+	it('reloads visible split-pane previews on generation reset', () => {
+		const defaults = createStores();
+		const stores = createStores({
+			chatState: {
+				...defaults.chatState,
+				isVisiblePreviewChat: vi.fn((chatId) => chatId === 'chat-b'),
+				markVisibleChatPreviewStale: vi.fn(),
+				loadVisibleChatPreview: vi.fn(),
+			},
+		});
+
+		renderRouterWithRawMessages(
+			[{
+				type: 'chat-generation-reset',
+				chatId: 'chat-b',
+				generationId: 'generation-new',
+				reason: 'manual-reload',
+				lastSeq: 2,
+			}],
+			stores,
+		);
+
+		expect(stores.chatState.markVisibleChatPreviewStale).toHaveBeenCalledWith('chat-b');
+		expect(stores.chatState.loadVisibleChatPreview).toHaveBeenCalledWith('chat-b');
 		expect(stores.chatState.markChatSnapshotStale).toHaveBeenCalledWith('chat-b');
 	});
 

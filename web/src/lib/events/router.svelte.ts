@@ -94,6 +94,14 @@ export interface EventRouterChatStateStore {
 		generationId: string,
 		messages: ChatViewMessage[],
 	) => boolean;
+	isVisiblePreviewChat?: (chatId: string) => boolean;
+	warmVisibleChatPreview?: (
+		chatId: string,
+		generationId: string,
+		messages: ChatViewMessage[],
+	) => boolean | void;
+	loadVisibleChatPreview?: (chatId: string) => Promise<void> | void;
+	markVisibleChatPreviewStale?: (chatId: string) => void;
 	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
 	upsertPendingUserInput: (input: PendingUserInput) => void;
 	clearPendingUserInput: (clientRequestId: string) => void;
@@ -347,6 +355,10 @@ function buildDispatch(
 				}
 				return;
 			}
+			if (stores.chatState.isVisiblePreviewChat?.(msg.chatId)) {
+				stores.chatState.markVisibleChatPreviewStale?.(msg.chatId);
+				void stores.chatState.loadVisibleChatPreview?.(msg.chatId);
+			}
 			stores.chatState.markChatSnapshotStale?.(msg.chatId);
 		},
 		'agent-run-finished': (msg) => {
@@ -473,6 +485,17 @@ export function createEventRouter(
 					const agentMsg = event.message;
 					if (agentMsg.chatId && agentMsg.messages.length > 0) {
 						if (agentMsg.chatId !== activeViewChatId) {
+							if (stores.chatState.isVisiblePreviewChat?.(agentMsg.chatId)) {
+								const applied = stores.chatState.warmVisibleChatPreview?.(
+									agentMsg.chatId,
+									agentMsg.generationId,
+									agentMsg.messages,
+								);
+								if (applied === false) {
+									stores.chatState.markVisibleChatPreviewStale?.(agentMsg.chatId);
+									void stores.chatState.loadVisibleChatPreview?.(agentMsg.chatId);
+								}
+							}
 							stores.chatState.warmBackgroundChatSnapshot?.(
 								agentMsg.chatId,
 								agentMsg.generationId,

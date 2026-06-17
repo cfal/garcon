@@ -135,6 +135,15 @@ export class WsFaultMessage {
   constructor(public error: string) { }
 }
 
+export class WsPongMessage {
+  readonly type = 'ws-pong' as const;
+  constructor(
+    public clientRequestId: string,
+    public sentAt: number,
+    public serverTime: string,
+  ) { }
+}
+
 export class ChatTitleUpdatedMessage {
   readonly type = 'chat-title-updated' as const;
   constructor(public chatId: string, public title: string) { }
@@ -220,6 +229,7 @@ export type ServerWsMessage =
   | PendingUserInputClearedMessage
   | ChatSessionsRunningMessage
   | WsFaultMessage
+  | WsPongMessage
   | ChatTitleUpdatedMessage
   | ChatSessionDeletedWsMessage
   | ChatReadUpdatedV1Message
@@ -385,6 +395,16 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
       );
     case 'ws-fault':
       return new WsFaultMessage(str(data.error));
+    case 'ws-pong': {
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const sentAt = typeof data.sentAt === 'number' && Number.isFinite(data.sentAt)
+        ? data.sentAt
+        : null;
+      const serverTime = requiredStr(data.serverTime);
+      return clientRequestId && sentAt !== null && serverTime
+        ? new WsPongMessage(clientRequestId, sentAt, serverTime)
+        : null;
+    }
     case 'chat-title-updated': {
       const chatId = requiredStr(data.chatId);
       return chatId ? new ChatTitleUpdatedMessage(chatId, str(data.title)) : null;

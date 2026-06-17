@@ -9,7 +9,9 @@
 	import PromptComposer from './PromptComposer.svelte';
 	import QueueControls from './QueueControls.svelte';
 	import { ChatState, INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
+	import type { ChatViewMessage } from '$shared/chat-view';
 	import { ChatSnapshotPersistence } from '$lib/chat/chat-snapshot-persistence';
+	import type { SplitPanePreviewCursor } from '$lib/chat/split-pane-preview-store.svelte';
 	import { ComposerState } from '$lib/chat/composer.svelte';
 	import { AgentState } from '$lib/chat/agent-state.svelte';
 	import { getChatQueue } from '$lib/api/chats.js';
@@ -47,12 +49,29 @@
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		reserveTopFloatingToolbar?: boolean;
+		getVisibleChatIds?: () => string[];
+		isVisiblePreviewChat?: (chatId: string) => boolean;
+		getVisiblePreviewCursor?: (chatId: string) => SplitPanePreviewCursor | null;
+		applyVisiblePreviewMessages?: (
+			chatId: string,
+			generationId: string,
+			messages: ChatViewMessage[],
+			lastSeq?: number,
+		) => boolean | void;
+		loadVisiblePreviewSnapshot?: (chatId: string) => Promise<void> | void;
+		markVisiblePreviewStale?: (chatId: string) => void;
 	}
 
 	let {
 		onRegisterSubmit,
 		onRegisterReload,
 		reserveTopFloatingToolbar = false,
+		getVisibleChatIds,
+		isVisiblePreviewChat,
+		getVisiblePreviewCursor,
+		applyVisiblePreviewMessages,
+		loadVisiblePreviewSnapshot,
+		markVisiblePreviewStale,
 	}: ConversationWorkspaceProps = $props();
 
 	const sessions = getChatSessions();
@@ -89,6 +108,11 @@
 		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),
 		quietRefreshChats: () => sessions.quietRefreshChats(),
 		getBackgroundCursors: () => chatState.snapshotCache.listCursors(20),
+		getVisibleChatIds: () => getVisibleChatIds?.() ?? [],
+		getVisibleChatCursor: (chatId) => getVisiblePreviewCursor?.(chatId) ?? null,
+		loadVisibleChatSnapshot: (chatId) => loadVisiblePreviewSnapshot?.(chatId),
+		onVisibleChatMessages: (chatId, generationId, messages, lastSeq) =>
+			applyVisiblePreviewMessages?.(chatId, generationId, messages, lastSeq),
 		loadBackgroundSnapshot: async (chatId) => {
 			chatState.snapshotCache.markStale(chatId);
 			if (sessions.selectedChatId === chatId) {
@@ -148,6 +172,13 @@
 		conversationUi,
 		startupCoordinator,
 		readReceiptOutbox,
+		visiblePreviews: {
+			isVisible: (chatId) => isVisiblePreviewChat?.(chatId) ?? false,
+			applyMessages: (chatId, generationId, messages) =>
+				applyVisiblePreviewMessages?.(chatId, generationId, messages),
+			loadSnapshot: (chatId) => loadVisiblePreviewSnapshot?.(chatId),
+			markStale: (chatId) => markVisiblePreviewStale?.(chatId),
+		},
 	});
 	reconnectCoordinator.mount();
 

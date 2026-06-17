@@ -14,6 +14,11 @@ const RECONNECT_BASE_MS = 3000;
 // Maximum reconnection delay (ms).
 const RECONNECT_MAX_MS = 30000;
 
+const HEARTBEAT_INTERVAL_MS = 15_000;
+const HEARTBEAT_TIMEOUT_MS = 6_000;
+const HEARTBEAT_IMMEDIATE_PROBE_MS = 250;
+const HEARTBEAT_JITTER_MS = 1_500;
+
 export interface WsMessage {
 	data: Record<string, unknown>;
 	timestamp: number;
@@ -68,20 +73,37 @@ export class WsConnection {
 		timer: ReturnType<typeof setTimeout>;
 	}>();
 	#visibilityHandler: (() => void) | null = null;
+	#onlineHandler: (() => void) | null = null;
+	#offlineHandler: (() => void) | null = null;
+	#heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+	#heartbeatInFlight = false;
 	#authDisabled = false;
 
 	constructor() {
 		if (typeof window !== 'undefined') {
 			this.#visibilityHandler = () => {
-				// Reconnect fast when the app resumes on iOS/Safari
-				if (document.visibilityState === 'visible' && !this.isConnected && !this.#destroyed) {
-					this.#reconnectAttempts = 0;
-					this.#clearReconnectTimeout();
-					const token = getAuthToken();
-					this.connect(token, this.#authDisabled);
+				if (this.#destroyed) return;
+				if (document.visibilityState === 'hidden') {
+					this.#clearHeartbeatTimer();
+					return;
+				}
+				if (this.isConnected) {
+					this.#scheduleHeartbeat(HEARTBEAT_IMMEDIATE_PROBE_MS);
+				} else {
+					this.#connectNow();
+				}
+			};
+			this.#onlineHandler = () => {
+				if (!this.#destroyed) this.#connectNow();
+			};
+			this.#offlineHandler = () => {
+				if (!this.#destroyed) {
+					this.#forceReconnect('browser offline', { reconnectNow: false });
 				}
 			};
 			window.addEventListener('visibilitychange', this.#visibilityHandler);
+			window.addEventListener('online', this.#onlineHandler);
+			window.addEventListener('offline', this.#offlineHandler);
 		}
 	}
 
@@ -94,8 +116,8 @@ export class WsConnection {
 			return;
 		}
 
-		// Close any existing socket before opening a new one.
-		this.#closeExisting();
+		// Closes any existing socket before opening a new one.
+		this.#closeExisting({ rejectPending: true });
 
 		try {
 			const wsUrl = buildWebSocketUrl(token);
@@ -108,6 +130,7 @@ export class WsConnection {
 				this.#ws = websocket;
 				this.#reconnectAttempts = 0;
 				this.#resolveAllWaiters();
+				this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 			};
 
 			websocket.onmessage = (event: MessageEvent) => {
@@ -142,9 +165,12 @@ export class WsConnection {
 
 			websocket.onclose = () => {
 				if (!this.#isCurrentSocket(websocket)) return;
+				this.#clearHeartbeatTimer();
+				this.#heartbeatInFlight = false;
 				this.isConnected = false;
 				this.#ws = null;
 				this.#activeSocket = null;
+				this.#rejectAllPending();
 				this.#scheduleReconnect();
 			};
 
@@ -160,12 +186,21 @@ export class WsConnection {
 	disconnect(): void {
 		this.#destroyed = true;
 		this.#clearReconnectTimeout();
+		this.#clearHeartbeatTimer();
 		this.#rejectAllWaiters('WebSocket destroyed');
 		this.#rejectAllPending();
-		this.#closeExisting();
+		this.#closeExisting({ rejectPending: false });
 		if (this.#visibilityHandler) {
 			window.removeEventListener('visibilitychange', this.#visibilityHandler);
 			this.#visibilityHandler = null;
+		}
+		if (this.#onlineHandler) {
+			window.removeEventListener('online', this.#onlineHandler);
+			this.#onlineHandler = null;
+		}
+		if (this.#offlineHandler) {
+			window.removeEventListener('offline', this.#offlineHandler);
+			this.#offlineHandler = null;
 		}
 	}
 
@@ -257,8 +292,11 @@ export class WsConnection {
 		}
 	}
 
-	#closeExisting(): void {
+	#closeExisting(options: { rejectPending?: boolean } = {}): void {
 		this.#clearReconnectTimeout();
+		this.#clearHeartbeatTimer();
+		this.#heartbeatInFlight = false;
+		if (options.rejectPending) this.#rejectAllPending();
 		const socket = this.#activeSocket ?? this.#ws;
 		if (socket) {
 			socket.onopen = null;
@@ -300,6 +338,51 @@ export class WsConnection {
 		this.#pendingRequests.clear();
 	}
 
+	#scheduleHeartbeat(delayMs: number): void {
+		this.#clearHeartbeatTimer();
+		if (this.#destroyed || !this.isConnected) return;
+		if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+		this.#heartbeatTimer = setTimeout(() => {
+			void this.#sendHeartbeat();
+		}, delayMs);
+	}
+
+	async #sendHeartbeat(): Promise<void> {
+		if (this.#heartbeatInFlight || !this.isConnected || this.#destroyed) return;
+		this.#heartbeatInFlight = true;
+		try {
+			const raw = await this.sendRequest<Record<string, unknown>>({
+				type: 'ws-ping',
+				sentAt: Date.now(),
+			}, HEARTBEAT_TIMEOUT_MS);
+			if (raw.type !== 'ws-pong') throw new Error('Unexpected heartbeat response');
+			this.#heartbeatInFlight = false;
+			this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
+		} catch {
+			this.#heartbeatInFlight = false;
+			this.#forceReconnect('heartbeat timeout', { reconnectNow: true });
+		}
+	}
+
+	#forceReconnect(reason: string, options: { reconnectNow: boolean }): void {
+		console.warn(`WebSocket reconnecting: ${reason}`);
+		this.#rejectAllPending();
+		this.#closeExisting({ rejectPending: false });
+		this.isConnected = false;
+		if (options.reconnectNow) this.#connectNow();
+	}
+
+	#connectNow(): void {
+		if (this.#destroyed) return;
+		this.#reconnectAttempts = 0;
+		this.#clearReconnectTimeout();
+		this.connect(getAuthToken(), this.#authDisabled);
+	}
+
+	#nextHeartbeatDelay(): number {
+		return HEARTBEAT_INTERVAL_MS + Math.floor(Math.random() * HEARTBEAT_JITTER_MS);
+	}
+
 	#scheduleReconnect(): void {
 		if (this.#destroyed) return;
 		this.#clearReconnectTimeout();
@@ -321,6 +404,13 @@ export class WsConnection {
 		if (this.#reconnectTimeout !== null) {
 			clearTimeout(this.#reconnectTimeout);
 			this.#reconnectTimeout = null;
+		}
+	}
+
+	#clearHeartbeatTimer(): void {
+		if (this.#heartbeatTimer !== null) {
+			clearTimeout(this.#heartbeatTimer);
+			this.#heartbeatTimer = null;
 		}
 	}
 }

@@ -58,10 +58,26 @@ export class ChatReloadRequest {
   }
 }
 
+export class WsPingRequest {
+  readonly type = 'ws-ping' as const;
+  constructor(
+    public clientRequestId: string | null,
+    public sentAt: number,
+  ) { }
+
+  static fromJson(data: Record<string, unknown>): WsPingRequest {
+    const sentAt = typeof data.sentAt === 'number' && Number.isFinite(data.sentAt)
+      ? data.sentAt
+      : 0;
+    return new WsPingRequest(strOrNull(data.clientRequestId), sentAt);
+  }
+}
+
 export type ClientWsMessage =
   | ChatRunningQueryRequest
   | ChatSubscribeRequest
-  | ChatReloadRequest;
+  | ChatReloadRequest
+  | WsPingRequest;
 
 export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMessage | null {
   switch (data.type) {
@@ -71,6 +87,8 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
       return ChatSubscribeRequest.fromJson(data);
     case 'chat-reload':
       return ChatReloadRequest.fromJson(data);
+    case 'ws-ping':
+      return WsPingRequest.fromJson(data);
     default:
       return null;
   }
