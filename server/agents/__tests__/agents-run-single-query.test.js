@@ -21,7 +21,7 @@ mock.module('../amp/amp-cli.js', () => ({
   runSingleQuery: ampQuery,
 }));
 
-mock.module('../cursor/run-single-query.js', () => ({
+mock.module('../cursor/cursor-cli.js', () => ({
   runSingleQuery: cursorQuery,
 }));
 

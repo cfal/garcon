@@ -50,8 +50,8 @@
 	function handleAction() {
 		const cfg = displayConfig as ToolInputDisplayRule | undefined;
 		if (cfg?.action === 'openFile' && onFileOpen) {
-			const filePath = typeof parsedData.filePath === 'string' ? parsedData.filePath : '';
-			if (filePath) onFileOpen(filePath);
+			const value = cfg.getValue?.(parsedData) || '';
+			onFileOpen(value);
 		}
 	}
 
@@ -122,13 +122,6 @@
 		return cfg.getSecondary?.(parsedData);
 	});
 
-	let inlineAction = $derived.by((): ToolInlineAction | undefined => {
-		if (!displayConfig || displayConfig.mode !== 'inline') return undefined;
-		const cfg = displayConfig as ToolInputDisplayRule;
-		if (cfg.action === 'openFile' && !parsedData.filePath) return 'none';
-		return cfg.action;
-	});
-
 	// Success message helper
 	let successMessage = $derived.by(() => {
 		if (!displayConfig || displayConfig.mode !== 'collapsible') return '';
@@ -190,13 +183,13 @@
 	{#if displayConfig.mode === 'inline'}
 		{@const cfg = displayConfig as ToolInputDisplayRule}
 		<ChatToolInlineEvent
-				{toolName}
-				{toolResult}
-				{toolId}
-				label={cfg.label}
-				value={inlineValue}
-				secondary={inlineSecondary}
-				action={inlineAction}
+			{toolName}
+			{toolResult}
+			{toolId}
+			label={cfg.label}
+			value={inlineValue}
+			secondary={inlineSecondary}
+			action={cfg.action}
 			onAction={handleAction}
 			style={cfg.style}
 			wrapText={cfg.wrapText}

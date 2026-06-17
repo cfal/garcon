@@ -3,7 +3,7 @@
 
 import { coerceTodoItems, type ToolUseChatMessage } from '$shared/chat-types';
 import * as m from '$lib/paraglide/messages.js';
-import type { ToolDisplayRule, ToolPayload } from './tool-display-contract';
+import type { ToolDisplayRule } from './tool-display-contract';
 import {
 	diffProps,
 	extractContentString,
@@ -18,50 +18,6 @@ const truncate = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '...'
 
 function filesFoundTitle(count: number): string {
 	return count === 1 ? m.chat_tool_file_found() : m.chat_tool_files_found({ count });
-}
-
-function matchesFoundTitle(count: number): string {
-	return count === 1 ? m.chat_tool_match_found() : m.chat_tool_matches_found({ count });
-}
-
-function finiteCount(value: unknown): number | null {
-	if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
-	if (typeof value === 'string' && value.trim()) {
-		const parsed = Number(value);
-		if (Number.isFinite(parsed)) return Math.max(0, Math.trunc(parsed));
-	}
-	return null;
-}
-
-function searchToolData(result: ToolPayload | undefined): Record<string, unknown> {
-	const content = (result?.content || {}) as Record<string, unknown>;
-	return (content.toolUseResult || content) as Record<string, unknown>;
-}
-
-function searchResultTitle(result: ToolPayload | undefined): string {
-	const toolData = searchToolData(result);
-	const filenames = toolData.filenames as unknown[] | undefined;
-	const fileCount = finiteCount(toolData.numFiles) ?? filenames?.length ?? 0;
-	if (fileCount > 0) return filesFoundTitle(fileCount);
-	const totalMatches = finiteCount(toolData.totalMatches);
-	if (totalMatches !== null) return matchesFoundTitle(totalMatches);
-	return filesFoundTitle(0);
-}
-
-function searchResultFiles(result: ToolPayload | undefined): string[] {
-	const toolData = searchToolData(result);
-	return (toolData.filenames as string[]) || [];
-}
-
-function searchResultContentProps(result: ToolPayload | undefined): Record<string, unknown> {
-	const files = searchResultFiles(result);
-	const toolData = searchToolData(result);
-	if (files.length > 0) return { files };
-	const totalMatches = finiteCount(toolData.totalMatches);
-	return {
-		files,
-		...(totalMatches !== null ? { title: m.chat_tool_file_list_unavailable() } : {}),
-	};
 }
 
 const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
@@ -197,7 +153,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'inline',
 			label: 'Read',
-			getValue: (input) => String(input.filePath ?? m.chat_tool_file()),
+			getValue: (input) => String(input.filePath ?? ''),
 			getSecondary: (input) => readRangePresenter(input),
 			action: 'openFile',
 			colorScheme: {
@@ -338,9 +294,23 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		result: {
 			mode: 'collapsible',
 			defaultOpen: false,
-			title: searchResultTitle,
+			title: (result) => {
+				const content = (result?.content || {}) as Record<string, unknown>;
+				const toolData = (content.toolUseResult || content) as Record<string, unknown>;
+				const count =
+					(toolData.numFiles as number) ||
+					(toolData.filenames as unknown[] | undefined)?.length ||
+					0;
+				return filesFoundTitle(count);
+			},
 			contentKind: 'fileList',
-			getContentProps: searchResultContentProps,
+			getContentProps: (result) => {
+				const content = (result?.content || {}) as Record<string, unknown>;
+				const toolData = (content.toolUseResult || content) as Record<string, unknown>;
+				return {
+					files: (toolData.filenames as string[]) || [],
+				};
+			},
 		},
 	},
 
