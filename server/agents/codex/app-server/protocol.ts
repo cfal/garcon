@@ -76,6 +76,12 @@ export type CodexUserInput =
   | { type: 'skill'; name: string; path: string }
   | { type: 'mention'; name: string; path: string };
 
+export type CodexWebSearchAction =
+  | { type: 'search'; query?: string | null; queries?: string[] | null }
+  | { type: 'openPage' | 'open_page'; url?: string | null }
+  | { type: 'findInPage' | 'find_in_page'; url?: string | null; pattern?: string | null }
+  | { type: 'other' };
+
 export type CodexThreadItem =
   | { type: 'userMessage'; id: string; content: CodexUserInput[] }
   | { type: 'hookPrompt'; id: string; fragments: unknown[] }
@@ -118,7 +124,7 @@ export type CodexThreadItem =
       success: boolean | null;
       durationMs: number | null;
     }
-  | { type: 'webSearch'; id: string; query: string; action: unknown }
+  | { type: 'webSearch'; id: string; query: string; action: CodexWebSearchAction | null }
   | { type: 'imageView'; id: string; path: string }
   | { type: 'imageGeneration'; id: string; status: string; revisedPrompt: string | null; result: string; savedPath?: string }
   | { type: 'enteredReviewMode'; id: string; review: string }

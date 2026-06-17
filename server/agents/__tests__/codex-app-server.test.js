@@ -322,6 +322,7 @@ describe('Codex app-server converter', () => {
       'web-search-tool-use',
       'tool-result',
     ]);
+    expect(messages.find((message) => message.type === 'web-search-tool-use')?.query).toBe('codex app server');
   });
 
   it('suppresses echoed user messages on the live notification path', () => {
@@ -330,6 +331,82 @@ describe('Codex app-server converter', () => {
       id: 'u1',
       content: [{ type: 'text', text: 'Hi', text_elements: [] }],
     })).toEqual([]);
+  });
+
+  it('uses web-search action details when the app-server top-level query is empty', () => {
+    const messages = convertCodexAppServerLiveItem({
+      type: 'webSearch',
+      id: 'w1',
+      query: '',
+      action: {
+        type: 'search',
+        query: 'Kalshi prediction market volume',
+        queries: ['ignored fallback'],
+      },
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages.map((message) => message.type)).toEqual([
+      'web-search-tool-use',
+      'tool-result',
+    ]);
+    expect(messages[0].query).toBe('Kalshi prediction market volume');
+  });
+
+  it('falls back to web-search action queries and page details without rendering blank searches', () => {
+    const items = [
+      {
+        type: 'webSearch',
+        id: 'w1',
+        query: '',
+        action: { type: 'search', query: null, queries: ['first query', 'second query'] },
+      },
+      {
+        type: 'webSearch',
+        id: 'w2',
+        query: '',
+        action: { type: 'openPage', url: 'https://example.com/page' },
+      },
+      {
+        type: 'webSearch',
+        id: 'w3',
+        query: '',
+        action: { type: 'findInPage', url: 'https://example.com/page', pattern: 'pricing' },
+      },
+      {
+        type: 'webSearch',
+        id: 'w4',
+        query: '',
+        action: null,
+      },
+    ];
+
+    const searches = items
+      .flatMap((item) => convertCodexAppServerLiveItem(item, '2026-02-21T10:00:00.000Z'))
+      .filter((message) => message.type === 'web-search-tool-use');
+
+    expect(searches.map((message) => message.query)).toEqual([
+      'first query',
+      'https://example.com/page',
+      'pricing',
+    ]);
+  });
+
+  it('ignores incomplete web-search rows instead of rendering empty tool calls', () => {
+    const messages = [
+      {
+        type: 'webSearch',
+        id: 'w1',
+        action: null,
+      },
+      {
+        type: 'webSearch',
+        id: 'w2',
+        query: '',
+        action: { type: 'search', query: null, queries: [null, ''] },
+      },
+    ].flatMap((item) => convertCodexAppServerLiveItem(item, '2026-02-21T10:00:00.000Z'));
+
+    expect(messages).toEqual([]);
   });
 
   it('uses generic structured tool-use messages for dynamic and MCP item families', () => {

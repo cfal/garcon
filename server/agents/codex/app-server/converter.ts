@@ -22,7 +22,7 @@ import {
 } from "../../../../common/chat-types.js";
 import { stripResolvedFileMentionContext } from "../../shared/file-mention-context.js";
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from "../../shared/normalize-util.js";
-import type { CodexThreadItem, CodexUserInput } from './protocol.js';
+import type { CodexThreadItem, CodexUserInput, CodexWebSearchAction } from './protocol.js';
 
 export interface ConvertCodexAppServerItemOptions {
   includeUserMessages?: boolean;
@@ -101,12 +101,45 @@ function convertFileChange(item: Extract<CodexThreadItem, { type: 'fileChange' }
 }
 
 function convertWebSearch(item: Extract<CodexThreadItem, { type: 'webSearch' }>, timestamp: string): ChatMessage[] {
-  const query = item.query || '';
+  const query = webSearchDisplayQuery(item);
+  if (!query) return [];
   const messages: ChatMessage[] = [new WebSearchToolUseMessage(timestamp, item.id, query)];
-  if (query) {
-    messages.push(new ToolResultMessage(timestamp, item.id, normalizeToolResultContent(`Searched: ${query}`), false));
-  }
+  messages.push(new ToolResultMessage(timestamp, item.id, normalizeToolResultContent(`Searched: ${query}`), false));
   return messages;
+}
+
+function webSearchDisplayQuery(item: Extract<CodexThreadItem, { type: 'webSearch' }>): string {
+  const directQuery = stringValue(item.query);
+  if (directQuery) return directQuery;
+  return webSearchActionDisplayQuery(item.action);
+}
+
+function webSearchActionDisplayQuery(action: CodexWebSearchAction | null): string {
+  if (!action) return '';
+  switch (action.type) {
+    case 'search':
+      return firstNonEmpty(action.query, ...stringArray(action.queries));
+    case 'openPage':
+    case 'open_page':
+      return action.url?.trim() ?? '';
+    case 'findInPage':
+    case 'find_in_page':
+      return firstNonEmpty(action.pattern, action.url);
+    case 'other':
+      return '';
+  }
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>): string {
+  return values.map(stringValue).find(Boolean) ?? '';
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
 }
 
 function convertDynamicToolCall(item: Extract<CodexThreadItem, { type: 'dynamicToolCall' }>, timestamp: string): ChatMessage[] {
