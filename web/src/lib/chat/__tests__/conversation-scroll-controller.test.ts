@@ -147,6 +147,69 @@ describe('ConversationScrollController', () => {
 		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
 	});
 
+	it('loads older messages until an initially underfilled viewport can scroll', async () => {
+		let scrollHeight = 300;
+		const scroller = { scrollTop: 0, clientHeight: 500 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = {
+			hasMoreMessages: true,
+			isUserScrolledUp: false,
+			loadMoreMessages: vi.fn(async () => {
+				scrollHeight = scrollHeight === 300 ? 450 : 800;
+				return true;
+			}),
+		};
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		await controller.fillUnderfilledViewport();
+
+		expect(chatState.loadMoreMessages).toHaveBeenCalledTimes(2);
+		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
+		expect(scroller.scrollTop).toBe(800);
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+	});
+
+	it('stops viewport auto-fill if the selected chat changes', async () => {
+		let scrollHeight = 300;
+		const scroller = { scrollTop: 0, clientHeight: 500 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const sessions = { selectedChatId: 'chat-1' };
+		const chatState = {
+			hasMoreMessages: true,
+			isUserScrolledUp: false,
+			loadMoreMessages: vi.fn(async () => {
+				scrollHeight = 800;
+				sessions.selectedChatId = 'chat-2';
+				return true;
+			}),
+		};
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions,
+		});
+
+		await controller.fillUnderfilledViewport();
+
+		expect(chatState.loadMoreMessages).toHaveBeenCalledTimes(1);
+		expect(scroller.scrollTop).toBe(0);
+	});
+
 	it('keeps the viewport pinned to bottom when the scroll container height changes', () => {
 		const scrollToBottom = vi.spyOn(ConversationScrollController.prototype, 'scrollToBottom');
 		const scroller = { scrollTop: 120, scrollHeight: 800, clientHeight: 520 } as HTMLDivElement;
@@ -189,5 +252,28 @@ describe('ConversationScrollController', () => {
 		expect(scroller.scrollTop).toBe(120);
 		cleanup?.();
 		scrollToBottom.mockRestore();
+	});
+
+	it('auto-fills an underfilled viewport after the scroll container resizes', () => {
+		const fillUnderfilledViewport = vi
+			.spyOn(ConversationScrollController.prototype, 'fillUnderfilledViewport')
+			.mockResolvedValue(undefined);
+		const scroller = { scrollTop: 120, scrollHeight: 480, clientHeight: 520 } as HTMLDivElement;
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: { isUserScrolledUp: false, hasMoreMessages: true } as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.isPinnedToBottom = true;
+		const cleanup = controller.observeScrollContainerResize();
+
+		ResizeObserverStub.instances[0]?.emit(640);
+
+		expect(fillUnderfilledViewport).toHaveBeenCalledTimes(1);
+		cleanup?.();
+		fillUnderfilledViewport.mockRestore();
 	});
 });

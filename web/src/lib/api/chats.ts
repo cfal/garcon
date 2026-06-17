@@ -223,7 +223,7 @@ export async function getChatMessages(params: {
 }> {
 	const query = new URLSearchParams({
 		chatId: params.chatId,
-		limit: String(params.limit ?? 20),
+		limit: String(params.limit ?? 50),
 	});
 	if (params.beforeSeq !== undefined) query.set('beforeSeq', String(params.beforeSeq));
 	const response = await apiGet<{

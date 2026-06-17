@@ -16,6 +16,7 @@ export interface ScrollControllerDeps {
 export class ConversationScrollController {
 	isPinnedToBottom = $state(true);
 	isScrollingToTop = $state(false);
+	#isAutoFillingViewport = false;
 
 	constructor(private deps: ScrollControllerDeps) {}
 
@@ -87,6 +88,33 @@ export class ConversationScrollController {
 		this.isPinnedToBottom = false;
 	}
 
+	async fillUnderfilledViewport(): Promise<void> {
+		const chatId = this.deps.sessions.selectedChatId;
+		if (!chatId || this.#isAutoFillingViewport) return;
+
+		this.#isAutoFillingViewport = true;
+		try {
+			while (this.deps.sessions.selectedChatId === chatId && this.deps.chatState.hasMoreMessages) {
+				await tick();
+				const container = this.deps.getScrollContainer();
+				if (!container) return;
+				if (container.scrollHeight > container.clientHeight + 1) return;
+
+				const previousHeight = container.scrollHeight;
+				const loaded = await this.deps.chatState.loadMoreMessages(chatId);
+				if (!loaded || this.deps.sessions.selectedChatId !== chatId) return;
+
+				await tick();
+				const updated = this.deps.getScrollContainer();
+				if (!updated) return;
+				this.scrollToBottom();
+				if (updated.scrollHeight <= previousHeight) return;
+			}
+		} finally {
+			this.#isAutoFillingViewport = false;
+		}
+	}
+
 	// Creates a ResizeObserver for the queue controls container that
 	// reconciles scroll position when the queue panel height changes.
 	// Returns a cleanup function to disconnect the observer.
@@ -121,7 +149,10 @@ export class ConversationScrollController {
 			if (nextHeight <= 0 || nextHeight === previousHeight) return;
 			const pinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
 			if (pinned) {
-				requestAnimationFrame(() => this.scrollToBottom());
+				requestAnimationFrame(() => {
+					this.scrollToBottom();
+					void this.fillUnderfilledViewport();
+				});
 			}
 			previousHeight = nextHeight;
 		});

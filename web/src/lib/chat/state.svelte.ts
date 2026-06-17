@@ -8,7 +8,7 @@ import { LocalChatSnapshotCache } from './chat-snapshot-cache';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { LocalNoticeRow, LocalNoticeType } from './local-notice';
 
-const MESSAGES_PER_PAGE = 20;
+const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
 type ChatPage = Awaited<ReturnType<typeof getChatMessages>>;
 type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detected';

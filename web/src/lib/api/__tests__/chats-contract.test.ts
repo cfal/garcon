@@ -389,6 +389,9 @@ describe('chats API contract', () => {
 		);
 		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
 		expect(messages.generationId).toBe('generation-1');
+
+		await getChatMessages({ chatId: 'c/2' });
+		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/messages?chatId=c%2F2&limit=50');
 	});
 
 	it('rejects malformed chat message page metadata', async () => {

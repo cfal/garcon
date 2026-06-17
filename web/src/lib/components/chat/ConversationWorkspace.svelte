@@ -196,6 +196,11 @@
 		sessions,
 	});
 
+	function scrollToBottomAndFill(): void {
+		scroll.scrollToBottom();
+		void scroll.fillUnderfilledViewport();
+	}
+
 	// Session controller.
 	const controller = new ConversationSessionController({
 		sessions,
@@ -218,7 +223,7 @@
 		setIsViewportPinnedToBottom: (v) => {
 			scroll.isPinnedToBottom = v;
 		},
-		scrollToBottom: () => scroll.scrollToBottom(),
+		scrollToBottom: scrollToBottomAndFill,
 	});
 
 	// Expose the submit function to sibling components (runs once on mount).
@@ -255,7 +260,7 @@
 		const _bottomRowId = chatState.bottomVisibleRowId;
 		const _isProcessing = selectedIsProcessing;
 		if (!chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
-			requestAnimationFrame(() => scroll.scrollToBottom());
+			requestAnimationFrame(scrollToBottomAndFill);
 		}
 	});
 
@@ -267,7 +272,7 @@
 		const _container = scrollContainer;
 		untrack(() => {
 			if (_container && chatState.displayMessageCount > 0 && localSettings.autoScrollToBottom) {
-				requestAnimationFrame(() => scroll.scrollToBottom());
+				requestAnimationFrame(scrollToBottomAndFill);
 			}
 		});
 	});
