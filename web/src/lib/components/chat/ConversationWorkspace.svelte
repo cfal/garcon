@@ -58,9 +58,10 @@
 			messages: ChatViewMessage[],
 			lastSeq?: number,
 		) => boolean | void;
-		loadVisiblePreviewSnapshot?: (chatId: string) => Promise<void> | void;
-		markVisiblePreviewStale?: (chatId: string) => void;
-	}
+			loadVisiblePreviewSnapshot?: (chatId: string) => Promise<void> | void;
+			markVisiblePreviewStale?: (chatId: string) => void;
+			textScale?: number;
+		}
 
 	let {
 		onRegisterSubmit,
@@ -70,9 +71,10 @@
 		isVisiblePreviewChat,
 		getVisiblePreviewCursor,
 		applyVisiblePreviewMessages,
-		loadVisiblePreviewSnapshot,
-		markVisiblePreviewStale,
-	}: ConversationWorkspaceProps = $props();
+			loadVisiblePreviewSnapshot,
+			markVisiblePreviewStale,
+			textScale = 1,
+		}: ConversationWorkspaceProps = $props();
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
@@ -332,18 +334,19 @@
 {:else}
 	<div class="h-full flex flex-col">
 		<div class="relative flex-1 min-h-0">
-			<ConversationFeed
-				bind:scrollContainer
-				onscroll={() => scroll.handleScroll()}
+				<ConversationFeed
+					bind:scrollContainer
+					onscroll={() => scroll.handleScroll()}
 				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
 				onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
 				pendingPermissionRequests={conversationUi.pendingPermissionRequests}
-				onRetry={() => {
-					const chatId = sessions.selectedChatId;
-					if (chatId) controller.loadChat(chatId);
-				}}
-				reserveLoadingStatusSpace={selectedIsProcessing}
-			/>
+					onRetry={() => {
+						const chatId = sessions.selectedChatId;
+						if (chatId) controller.loadChat(chatId);
+					}}
+					reserveLoadingStatusSpace={selectedIsProcessing}
+					{textScale}
+				/>
 
 			{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}
 				<Button

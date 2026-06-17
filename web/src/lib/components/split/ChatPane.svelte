@@ -25,6 +25,7 @@
 		isFocused: boolean;
 		draggedChatId: string | null;
 		previewStore: SplitPanePreviewStore;
+		textScale?: number;
 		onFocus: () => void;
 		onClose: () => void;
 		onDelete: () => void;
@@ -38,6 +39,7 @@
 		isFocused,
 		draggedChatId,
 		previewStore,
+		textScale = 1,
 		onFocus,
 		onClose,
 		onDelete,
@@ -302,6 +304,7 @@
 								agentId={previewAgentId}
 								showThinking={localSettings.showThinking}
 								chatContext={previewChatContext}
+								{textScale}
 							/>
 						</div>
 					{/if}

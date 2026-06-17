@@ -13,6 +13,7 @@
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SplitContainer from '$lib/components/split/SplitContainer.svelte';
 	import { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
+	import { getSplitPaneTextScale } from '$lib/chat/split-pane-text-scale';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
@@ -75,6 +76,9 @@
 	const splitDropZones = SPLIT_DROP_ZONES;
 	const visibleSplitChatIds = $derived(
 		splitLayout.isEnabled ? splitLayout.panes.map((pane) => pane.chatId) : [],
+	);
+	const splitPaneTextScale = $derived(
+		splitLayout.isEnabled ? getSplitPaneTextScale(splitLayout.paneCount) : 1,
 	);
 
 	// Holds the chat submit function registered by ConversationWorkspace.
@@ -331,12 +335,13 @@
 			{#if splitLayout.isEnabled && splitLayout.root && activeTab === 'chat'}
 				<!-- svelte-ignore a11y_no_static_element_interactions -- container tracks focused pane rect -->
 				<div class="h-full relative" bind:this={splitRootEl}>
-					<SplitContainer
-						node={splitLayout.root}
-						focusedPaneId={splitLayout.focusedPaneId}
-						draggedChatId={splitLayout.draggedChatId}
-						previewStore={splitPanePreviews}
-						onFocusPane={handleSplitFocusPane}
+						<SplitContainer
+							node={splitLayout.root}
+							focusedPaneId={splitLayout.focusedPaneId}
+							draggedChatId={splitLayout.draggedChatId}
+							previewStore={splitPanePreviews}
+							textScale={splitPaneTextScale}
+							onFocusPane={handleSplitFocusPane}
 						onClosePane={handleSplitClosePane}
 						onDeleteChat={handleSplitDeleteChat}
 						onSetRatio={handleSplitSetRatio}
@@ -358,11 +363,12 @@
 							style:width="{splitDrop.focusedOverlayRect.width}px"
 							style:height="{splitDrop.focusedOverlayRect.height}px"
 						>
-							<ConversationWorkspace
-								onRegisterSubmit={handleRegisterSubmit}
-								{onRegisterReload}
-								reserveTopFloatingToolbar={showFloatingDesktopTabs}
-								getVisibleChatIds={getVisibleSplitChatIds}
+								<ConversationWorkspace
+									onRegisterSubmit={handleRegisterSubmit}
+									{onRegisterReload}
+									reserveTopFloatingToolbar={showFloatingDesktopTabs}
+									textScale={splitPaneTextScale}
+									getVisibleChatIds={getVisibleSplitChatIds}
 								isVisiblePreviewChat={isVisibleSplitChat}
 								getVisiblePreviewCursor={(chatId) => splitPanePreviews.cursor(chatId)}
 								applyVisiblePreviewMessages={(chatId, generationId, messages, lastSeq) =>

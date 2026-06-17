@@ -62,6 +62,13 @@ describe('ChatPane', () => {
 		expect(onFocus).toHaveBeenCalledTimes(1);
 	});
 
+	it('applies the provided text scale to the preview transcript', async () => {
+		const { container } = render(ChatPaneTestHost, { isFocused: false, textScale: 0.7 });
+
+		expect(await screen.findByText('Unfocused assistant answer')).toBeTruthy();
+		expect(container.querySelector('[data-chat-transcript-scale="0.7"]')).toBeTruthy();
+	});
+
 	it('renders the full workspace for the focused pane', () => {
 		render(ChatPaneTestHost, { isFocused: true });
 

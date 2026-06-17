@@ -24,6 +24,7 @@
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		onRetry?: () => void;
 		reserveLoadingStatusSpace?: boolean;
+		textScale?: number;
 	}
 
 	let {
@@ -34,6 +35,7 @@
 		pendingPermissionRequests = [],
 		onRetry,
 		reserveLoadingStatusSpace = false,
+		textScale = 1,
 	}: Props = $props();
 
 	const chatState = getChatState();
@@ -145,13 +147,14 @@
 			</div>
 		{/if}
 
-			<ConversationTranscript
-				rows={chatState.visibleRows}
-				agentId={agentState.agentId}
-				showThinking={localSettings.showThinking}
-				{pendingPermissionRequests}
-				{onPermissionDecision}
-				{onExitPlanMode}
+				<ConversationTranscript
+					rows={chatState.visibleRows}
+					agentId={agentState.agentId}
+					showThinking={localSettings.showThinking}
+					{textScale}
+					{pendingPermissionRequests}
+					{onPermissionDecision}
+					{onExitPlanMode}
 			/>
 		{/if}
 	{/snippet}

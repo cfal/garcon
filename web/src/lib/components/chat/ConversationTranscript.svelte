@@ -21,6 +21,7 @@
 		showThinking?: boolean;
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
+		textScale?: number;
 		onPermissionDecision?: (permissionRequestId: string, decision: PermissionDecision) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
 	}
@@ -31,6 +32,7 @@
 		showThinking = true,
 		pendingPermissionRequests = [],
 		chatContext = null,
+		textScale = 1,
 		onPermissionDecision,
 		onExitPlanMode,
 	}: Props = $props();
@@ -47,53 +49,59 @@
 	const renderItems = $derived(renderModel.items);
 </script>
 
-{#each renderItems as item (item.id)}
-	{#if item.kind === 'bash-group'}
-		<svelte:boundary>
-			<ChatBashToolGroup messages={item.messages} />
-			{#snippet failed(error)}
-				<MessageRenderFallback {error} />
-			{/snippet}
-		</svelte:boundary>
-	{:else if item.kind === 'local-notice'}
-		<svelte:boundary>
-			<LocalNoticeRow notice={item.notice} />
-			{#snippet failed(error)}
-				<MessageRenderFallback {error} />
-			{/snippet}
-		</svelte:boundary>
-	{:else}
-		{@const message = item.message}
-		{@const toolResult = isToolUseMessage(message)
-			? renderModel.toolResultIndex.get(message.toolId)
-			: undefined}
-		{@const exitPlanId = message.type === 'exit-plan-mode-tool-use'
-			? `plan-exit-${message.toolId}`
-			: null}
-		{@const permTerminal =
-			message instanceof PermissionRequestMessage
-				? renderModel.permissionTerminalById.get(message.permissionRequestId)
-				: exitPlanId
-					? pendingExitPlanIds.has(exitPlanId)
-						? undefined
-						: { state: 'resolved' as const, allowed: true }
-					: undefined}
-		<svelte:boundary>
-			<ConversationMessage
-				{message}
-				index={item.index}
-				prevMessage={item.prevMessage}
-				{toolResult}
-				permissionTerminal={permTerminal}
-				{onPermissionDecision}
-				{onExitPlanMode}
-				{agentId}
-				{showThinking}
-				{chatContext}
-			/>
-			{#snippet failed(error)}
-				<MessageRenderFallback {error} />
-			{/snippet}
-		</svelte:boundary>
-	{/if}
-{/each}
+<div
+	class="flex w-full flex-col gap-2 sm:gap-3"
+	style:zoom={textScale}
+	data-chat-transcript-scale={String(textScale)}
+>
+	{#each renderItems as item (item.id)}
+		{#if item.kind === 'bash-group'}
+			<svelte:boundary>
+				<ChatBashToolGroup messages={item.messages} />
+				{#snippet failed(error)}
+					<MessageRenderFallback {error} />
+				{/snippet}
+			</svelte:boundary>
+		{:else if item.kind === 'local-notice'}
+			<svelte:boundary>
+				<LocalNoticeRow notice={item.notice} />
+				{#snippet failed(error)}
+					<MessageRenderFallback {error} />
+				{/snippet}
+			</svelte:boundary>
+		{:else}
+			{@const message = item.message}
+			{@const toolResult = isToolUseMessage(message)
+				? renderModel.toolResultIndex.get(message.toolId)
+				: undefined}
+			{@const exitPlanId = message.type === 'exit-plan-mode-tool-use'
+				? `plan-exit-${message.toolId}`
+				: null}
+			{@const permTerminal =
+				message instanceof PermissionRequestMessage
+					? renderModel.permissionTerminalById.get(message.permissionRequestId)
+					: exitPlanId
+						? pendingExitPlanIds.has(exitPlanId)
+							? undefined
+							: { state: 'resolved' as const, allowed: true }
+						: undefined}
+			<svelte:boundary>
+				<ConversationMessage
+					{message}
+					index={item.index}
+					prevMessage={item.prevMessage}
+					{toolResult}
+					permissionTerminal={permTerminal}
+					{onPermissionDecision}
+					{onExitPlanMode}
+					{agentId}
+					{showThinking}
+					{chatContext}
+				/>
+				{#snippet failed(error)}
+					<MessageRenderFallback {error} />
+				{/snippet}
+			</svelte:boundary>
+		{/if}
+	{/each}
+</div>

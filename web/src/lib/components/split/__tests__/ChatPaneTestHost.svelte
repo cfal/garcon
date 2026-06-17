@@ -11,10 +11,11 @@
 
 	interface Props {
 		isFocused?: boolean;
+		textScale?: number;
 		onFocus?: () => void;
 	}
 
-	let { isFocused = false, onFocus = () => {} }: Props = $props();
+	let { isFocused = false, textScale = 1, onFocus = () => {} }: Props = $props();
 	const previewStore = new SplitPanePreviewStore();
 
 	setChatSessions({
@@ -57,13 +58,14 @@
 	<div data-testid="focused-workspace">Focused workspace</div>
 {/snippet}
 
-<ChatPane
-	paneId="pane-1"
-	chatId="chat-1"
-	{isFocused}
-	draggedChatId={null}
-	{previewStore}
-	{onFocus}
+	<ChatPane
+		paneId="pane-1"
+		chatId="chat-1"
+		{isFocused}
+		draggedChatId={null}
+		{previewStore}
+		{textScale}
+		{onFocus}
 	onClose={() => {}}
 	onDelete={() => {}}
 	onDrop={() => {}}

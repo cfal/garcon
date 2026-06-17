@@ -122,6 +122,112 @@ describe('WorkspaceView header visibility', () => {
 		expect(container.querySelector('.bg-chat-tabs-active')).toBeTruthy();
 	});
 
+	it('uses compact transcript scale for two split panes', () => {
+		const root = {
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+		};
+		const splitLayout = {
+			isEnabled: true,
+			root,
+			focusedPaneId: 'pane-left',
+			draggedChatId: null,
+			draggedPaneId: null,
+			paneCount: 2,
+			panes: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+			focusedChatId: 'chat-1',
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			addChatToZone: vi.fn(),
+			endDrag: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable: vi.fn(),
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			splitLayout,
+		});
+
+		expect(screen.getByTestId('split-container-stub').dataset.textScale).toBe('0.85');
+	});
+
+	it('uses dense transcript scale for four split panes', () => {
+		const root = {
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{
+					type: 'split',
+					direction: 'vertical',
+					ratio: 0.5,
+					children: [
+						{ type: 'pane', id: 'pane-1', chatId: 'chat-1' },
+						{ type: 'pane', id: 'pane-2', chatId: 'chat-2' },
+					],
+				},
+				{
+					type: 'split',
+					direction: 'vertical',
+					ratio: 0.5,
+					children: [
+						{ type: 'pane', id: 'pane-3', chatId: 'chat-3' },
+						{ type: 'pane', id: 'pane-4', chatId: 'chat-4' },
+					],
+				},
+			],
+		};
+		const splitLayout = {
+			isEnabled: true,
+			root,
+			focusedPaneId: 'pane-1',
+			draggedChatId: null,
+			draggedPaneId: null,
+			paneCount: 4,
+			panes: [
+				{ type: 'pane', id: 'pane-1', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-2', chatId: 'chat-2' },
+				{ type: 'pane', id: 'pane-3', chatId: 'chat-3' },
+				{ type: 'pane', id: 'pane-4', chatId: 'chat-4' },
+			],
+			focusedChatId: 'chat-1',
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			addChatToZone: vi.fn(),
+			endDrag: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable: vi.fn(),
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			splitLayout,
+		});
+
+		expect(screen.getByTestId('split-container-stub').dataset.textScale).toBe('0.7');
+	});
+
 	it('accepts sidebar chat drops while split mode is already active', async () => {
 		const addChatToZone = vi.fn();
 		const endDrag = vi.fn();
