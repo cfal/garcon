@@ -16,4 +16,15 @@ describe('default agent suite', () => {
       'pi',
     ]);
   });
+
+  it('advertises Cursor fork support through the default suite', () => {
+    const suite = defaultAgentModules.find((module) => module.id === 'cursor');
+    const agent = suite.createAgent({
+      workspaceDir: '/tmp/project',
+      apiProviderReader: {},
+    });
+
+    expect(agent.capabilities.supportsFork).toBe(true);
+    expect(agent.forkSession).toBeDefined();
+  });
 });

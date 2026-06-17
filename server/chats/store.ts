@@ -158,6 +158,11 @@ function normalizeAgentId(rawEntry: Record<string, unknown>): AgentName {
   return typeof value === 'string' ? value as AgentName : '';
 }
 
+function artificialNativePathMatchesAgent(artificialAgentId: string, agentId: AgentName): boolean {
+  if (!agentId) return true;
+  return artificialAgentId === agentId || artificialAgentId.startsWith(`${agentId}-`);
+}
+
 function migratePersistedChatEntry(rawEntry: Record<string, unknown>): {
   entry: Record<string, unknown>;
   migrated: boolean;
@@ -190,7 +195,7 @@ function recoverAgentSessionId(rawEntry: Record<string, unknown>, agentId: Agent
   if (!nativePath) return null;
 
   const artificial = parseArtificialNativePath(nativePath);
-  if (artificial && (!agentId || artificial.agentId === agentId)) {
+  if (artificial && artificialNativePathMatchesAgent(artificial.agentId, agentId)) {
     return artificial.agentSessionId;
   }
 

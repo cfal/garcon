@@ -369,6 +369,36 @@ describe('ChatRegistry', () => {
       expect(fresh.getChat('c1')?.nativePath).toBe('!amp:amp-thread-1');
     });
 
+    it('recovers missing Cursor agentSessionId from transport-specific artificial native paths', async () => {
+      await fs.writeFile(path.join(tmpDir, 'chats.json'), JSON.stringify({
+        version: 2,
+        sessions: {
+          acp: {
+            agentId: 'cursor',
+            nativePath: '!cursor-acp:cursor-acp-session',
+            projectPath: '/p',
+            tags: [],
+            model: 'default',
+          },
+          streamJson: {
+            agentId: 'cursor',
+            nativePath: '!cursor-stream-json:cursor-stream-session',
+            projectPath: '/p',
+            tags: [],
+            model: 'default',
+          },
+        },
+      }, null, 2), 'utf8');
+
+      const fresh = new ChatRegistry(tmpDir);
+      await fresh.init();
+
+      expect(fresh.getChat('acp')?.agentSessionId).toBe('cursor-acp-session');
+      expect(fresh.getChat('streamJson')?.agentSessionId).toBe('cursor-stream-session');
+      const changed = await fresh.reconcileSessions(async () => '/should-not-be-used');
+      expect(changed).toBe(false);
+    });
+
     it('recovers missing agentSessionId from jsonl native paths during migration', async () => {
       const nativePath = path.join(tmpDir, 'native-1.jsonl');
       await fs.writeFile(nativePath, '', 'utf8');

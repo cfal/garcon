@@ -12,14 +12,12 @@ function walk(dir) {
 }
 
 describe('agent architecture boundaries', () => {
-  test('keeps server/acp protocol-only', () => {
-    for (const file of walk('server/acp')) {
-      const source = readFileSync(file, 'utf8');
-      expect(source).not.toContain('common/chat-types');
-      expect(source).not.toContain('server/agents');
-      expect(source).not.toContain('../agents');
-      expect(source).not.toContain('api-providers');
-    }
+  test('does not keep the removed ACP runtime layer', () => {
+    expect(existsSync('server/acp')).toBe(false);
+    expect(existsSync('server/agents/shared/acp-agent-runtime.ts')).toBe(false);
+    expect(existsSync('server/agents/shared/acp-event-converter.ts')).toBe(false);
+    expect(existsSync('server/agents/cursor/cursor-acp-policy.ts')).toBe(false);
+    expect(existsSync('server/agents/cursor/cursor-acp-event-converter.ts')).toBe(false);
   });
 
   test('keeps server/providers empty', () => {

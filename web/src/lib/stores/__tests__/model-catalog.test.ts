@@ -96,7 +96,7 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('claude')).toBe(true);
 		expect(store.supportsFork('codex')).toBe(true);
 		expect(store.supportsFork('opencode')).toBe(false);
-		expect(store.supportsFork('cursor')).toBe(false);
+		expect(store.supportsFork('cursor')).toBe(true);
 		expect(store.supportsFork('pi')).toBe(true);
 		expect(store.supportsFork('zai')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);

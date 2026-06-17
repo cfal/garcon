@@ -161,6 +161,8 @@
 	"chat_tool_file_found": "Found 1 file",
 	"chat_tool_files_count": "{count} file(s)",
 	"chat_tool_files_found": "Found {count} files",
+	"chat_tool_match_found": "Found 1 match",
+	"chat_tool_matches_found": "Found {count} matches",
 	"chat_tool_implementation_plan": "Implementation plan",
 	"chat_tool_librarian_response": "Librarian Response",
 	"chat_tool_librarian_title": "Librarian: {query}",

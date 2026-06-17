@@ -226,7 +226,7 @@ function makeRegistry(args = {}) {
     onFailed: mock(() => {}),
   };
   const cursor = {
-    startSession: mock(() => Promise.resolve({ agentSessionId: 'cursor-session', nativePath: '!cursor:cursor-session' })),
+    startSession: mock(() => Promise.resolve({ agentSessionId: 'cursor-session', nativePath: '!cursor-stream-json:cursor-session' })),
     runTurn: mock(() => Promise.resolve()),
     isRunning: mock(() => false),
     abort: mock(() => false),
@@ -317,7 +317,7 @@ function makeRegistry(args = {}) {
           authLoginSupported: false,
         }, ampQuery, args.prepareEndpointRuntimeByAgentId?.amp),
         agentFromRuntime('cursor', 'Cursor', cursor, {
-          supportsFork: false,
+          supportsFork: true,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],

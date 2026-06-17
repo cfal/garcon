@@ -80,7 +80,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
     authLoginSupported: true,
   },
   cursor: {
-    supportsFork: false,
+    supportsFork: true,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],

@@ -229,4 +229,22 @@ describe('tool result and jump behavior', () => {
 
 		expect(screen.getByText('Found 3 files')).toBeTruthy();
 	});
+
+	it('renders grep result title from total match count', () => {
+		const toolResult = {
+			content: {
+				filenames: ['src/a.ts', 'src/b.ts'],
+				numFiles: 2,
+				totalMatches: 5,
+			},
+		};
+		render(ChatToolEventRenderer, {
+			toolMessage: new GrepToolUseMessage('', 'tool-grep-1', 'needle', 'src'),
+			toolResult,
+			mode: 'input',
+			autoExpandTools: true,
+		});
+
+		expect(screen.getByText('Found 5 matches')).toBeTruthy();
+	});
 });
