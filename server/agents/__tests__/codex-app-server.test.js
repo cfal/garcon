@@ -705,8 +705,8 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.listThreads).toHaveBeenCalledTimes(2);
   });
 
-  it('backfills completed-turn items before emitting finished', async () => {
-    const nativePath = path.join(tmpDir, 'backfill-thread.jsonl');
+  it('does not backfill terminal JSONL rows during a healthy live turn', async () => {
+    const nativePath = path.join(tmpDir, 'no-backfill-thread.jsonl');
     const fake = new FakeClient({
       startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
       startTurn: async () => {
@@ -734,25 +734,26 @@ describe('CodexAppServerRuntime', () => {
     });
     await finished;
 
-    expect(emitted.map((message) => message.type)).toEqual(['assistant-message']);
-    expect(emitted[0].content).toBe('Final line');
+    expect(emitted).toEqual([]);
   });
 
-  it('does not duplicate live items during completed-turn backfill', async () => {
-    const nativePath = path.join(tmpDir, 'dedupe-backfill-thread.jsonl');
+  it('uses live streaming as the source of truth on successful turn completion', async () => {
+    const nativePath = path.join(tmpDir, 'live-source-thread.jsonl');
     const liveItem = { type: 'agentMessage', id: 'a1', text: 'Already emitted', phase: null, memoryCitation: null };
     const fake = new FakeClient({
       startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
       startTurn: async () => {
-        await writeJsonl(nativePath, [{
-          type: 'response_item',
-          timestamp: new Date(Date.now() + 1_000).toISOString(),
-          payload: {
-            type: 'message',
-            role: 'assistant',
-            content: [{ type: 'output_text', text: 'Already emitted' }],
+        await writeJsonl(nativePath, [
+          {
+            type: 'response_item',
+            timestamp: new Date(Date.now() + 1_000).toISOString(),
+            payload: {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'JSONL should not append' }],
+            },
           },
-        }]);
+        ]);
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
@@ -773,111 +774,6 @@ describe('CodexAppServerRuntime', () => {
     await finished;
 
     expect(emitted.map((message) => message.content)).toEqual(['Already emitted']);
-  });
-
-  it('does not duplicate live tool rows during JSONL terminal backfill when ids differ', async () => {
-    const nativePath = path.join(tmpDir, 'tool-dedupe-backfill-thread.jsonl');
-    const liveItem = {
-      type: 'commandExecution',
-      id: 'live-command',
-      command: 'ls',
-      cwd: '/repo',
-      processId: null,
-      source: 'agent',
-      status: 'completed',
-      commandActions: [],
-      aggregatedOutput: 'ok',
-      exitCode: 0,
-      durationMs: 12,
-    };
-    const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
-      startTurn: async () => {
-        const startedAt = Date.now();
-        await writeJsonl(nativePath, [
-          {
-            type: 'response_item',
-            timestamp: new Date(startedAt + 1_000).toISOString(),
-            payload: {
-              type: 'function_call',
-              name: 'exec_command',
-              arguments: '{"cmd":"ls","workdir":"/repo"}',
-              call_id: 'jsonl-call',
-            },
-          },
-          {
-            type: 'response_item',
-            timestamp: new Date(startedAt + 1_001).toISOString(),
-            payload: { type: 'function_call_output', call_id: 'jsonl-call', output: 'ok' },
-          },
-        ]);
-        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress', completedAt: null, durationMs: null }) };
-      },
-    });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-
-    await provider.startSession(makeRequest());
-    fake.emit('notification', {
-      method: 'item/completed',
-      params: { threadId: 'thread-1', turnId: 'turn-1', item: liveItem },
-    });
-    fake.emit('notification', {
-      method: 'turn/completed',
-      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
-    });
-    await finished;
-
-    expect(emitted.map((message) => message.type)).toEqual(['bash-tool-use', 'tool-result']);
-    expect(emitted[0].toolId).toBe('live-command');
-    expect(emitted[1].toolId).toBe('live-command');
-  });
-
-  it('keeps a repeated backfill assistant item from rendering around missing reasoning', async () => {
-    const nativePath = path.join(tmpDir, 'reasoning-dedupe-backfill-thread.jsonl');
-    const liveAssistant = { type: 'agentMessage', id: 'a-live', text: 'Final answer', phase: null, memoryCitation: null };
-    const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
-      startTurn: async () => {
-        await writeJsonl(nativePath, [
-          {
-            type: 'response_item',
-            timestamp: new Date(Date.now() + 1_000).toISOString(),
-            payload: { type: 'reasoning', summary: [{ text: 'Worked through details' }] },
-          },
-          {
-            type: 'response_item',
-            timestamp: new Date(Date.now() + 1_001).toISOString(),
-            payload: {
-              type: 'message',
-              role: 'assistant',
-              content: [{ type: 'output_text', text: 'Final answer' }],
-            },
-          },
-        ]);
-        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress', completedAt: null, durationMs: null }) };
-      },
-    });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-
-    await provider.startSession(makeRequest());
-    fake.emit('notification', {
-      method: 'item/completed',
-      params: { threadId: 'thread-1', turnId: 'turn-1', item: liveAssistant },
-    });
-    fake.emit('notification', {
-      method: 'turn/completed',
-      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
-    });
-    await finished;
-
-    expect(emitted.map((message) => message.type)).toEqual(['assistant-message', 'thinking']);
-    expect(emitted.filter((message) => message.content === 'Final answer')).toHaveLength(1);
   });
 
   it('retries retryable utility app-server overload responses while resolving native paths', async () => {

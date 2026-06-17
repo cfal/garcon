@@ -1,4 +1,4 @@
-import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, UserMessage, type ChatMessage } from "../../../../common/chat-types.js";
+import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage } from "../../../../common/chat-types.js";
 import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from "../../shared/event-emitter-runtime.js";
 import { loadCodexChatMessages, getCodexPreviewFromNativePath, loadCodexChatMessagePage } from "../history-loader.js";
@@ -8,7 +8,6 @@ import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isA
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
 import { convertCodexAppServerLiveItem } from './converter.js';
 import { waitForMaterializedThread } from './durability.js';
-import { CodexTurnMessageDeduper } from './message-deduper.js';
 import { createLogger } from '../../../lib/log.js';
 
 const logger = createLogger('agents:codex:app-server:runtime');
@@ -38,7 +37,6 @@ interface RunningCodexSession {
   nativePath: string | null;
   client: CodexAppServerClient;
   activeTurnId: string | null;
-  messageDeduper: CodexTurnMessageDeduper;
   status: RunningStatus;
   startedAt: string;
 }
@@ -409,7 +407,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       nativePath: args.nativePath,
       client: args.client,
       activeTurnId: null,
-      messageDeduper: new CodexTurnMessageDeduper(),
       status: 'running',
       startedAt: new Date().toISOString(),
     };
@@ -454,7 +451,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const session = this.#sessions.get(params.threadId);
     if (!session) return;
     const messages = convertCodexAppServerLiveItem(params.item);
-    session.messageDeduper.recordItem(params.item, messages);
     if (messages.length) this.emitMessages(session.chatId, messages);
   }
 
@@ -478,24 +474,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const aborted = params.turn.status === 'interrupted' || session.status === 'aborted';
     session.status = 'completing';
     this.#threadListCaches.clear();
-    if (!aborted) {
-      await this.#backfillCompletedTurn(session).catch((error) => {
-        logger.warn('codex: terminal JSONL backfill failed:', (error as Error).message);
-      });
-    }
     this.#finishSession(session, { aborted });
-  }
-
-  async #backfillCompletedTurn(session: RunningCodexSession): Promise<void> {
-    if (!session.nativePath) return;
-    const messages = await loadCodexChatMessages(session.nativePath);
-    const candidates = messages.filter((message) => {
-      if (message instanceof UserMessage) return false;
-      return isAtOrAfter(message.timestamp, session.startedAt);
-    });
-    const missing = candidates.filter((message) => session.messageDeduper.shouldEmitMessage(message));
-    if (missing.length) this.emitMessages(session.chatId, missing);
-    session.messageDeduper.recordMessages(candidates);
   }
 
   #handleErrorNotification(client: CodexAppServerClient, params: ErrorNotification): void {
@@ -618,10 +597,4 @@ function isUtilityOverload(error: unknown): boolean {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isAtOrAfter(timestamp: string, cutoff: string): boolean {
-  const value = Date.parse(timestamp);
-  const cutoffValue = Date.parse(cutoff);
-  return Number.isFinite(value) && Number.isFinite(cutoffValue) && value >= cutoffValue;
 }

@@ -446,7 +446,42 @@ describe('normalizeCodexJsonlEntry', () => {
         },
       };
       const result = normalizeCodexJsonlEntry(entry);
-      expect(result.canonical[0].query).toBe('q1, q2');
+      expect(result.canonical[0].query).toBe('q1');
+    });
+
+    it('does not render web search calls without displayable action details', () => {
+      const entries = [
+        {
+          type: 'response_item',
+          timestamp: ts,
+          payload: {
+            type: 'web_search_call',
+            status: 'completed',
+          },
+        },
+        {
+          type: 'response_item',
+          timestamp: ts,
+          payload: {
+            type: 'web_search_call',
+            status: 'completed',
+            action: { type: 'other' },
+          },
+        },
+        {
+          type: 'response_item',
+          timestamp: ts,
+          payload: {
+            type: 'web_search_call',
+            status: 'completed',
+            action: { type: 'search', query: '', queries: [] },
+          },
+        },
+      ];
+
+      for (const entry of entries) {
+        expect(normalizeCodexJsonlEntry(entry).canonical).toEqual([]);
+      }
     });
 
     it('uses deterministic distinct fallback tool IDs when provider IDs are absent', () => {

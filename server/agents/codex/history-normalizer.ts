@@ -56,7 +56,7 @@ function stableHash(input: string): string {
 function syntheticWebSearchToolId(
   ts: string,
   action: Record<string, unknown>,
-  query: string,
+  displayQuery: string,
   queries: string[],
   context: CodexJsonlNormalizationContext,
 ): string {
@@ -64,8 +64,37 @@ function syntheticWebSearchToolId(
   const sourcePosition = context.sourceByteOffset == null
     ? `line:${context.sourceLineNumber ?? ''}`
     : `byte:${context.sourceByteOffset}`;
-  const fingerprint = [ts, actionType, sourcePosition, query, ...queries].join('\u001f');
+  const fingerprint = [ts, actionType, sourcePosition, displayQuery, ...queries].join('\u001f');
   return `web-search-${stableHash(fingerprint)}`;
+}
+
+function webSearchActionDisplayQuery(action: Record<string, unknown>): string {
+  const type = asString(action.type) || '';
+  switch (type) {
+    case 'search':
+      return firstNonEmpty(action.query, ...stringArray(action.queries));
+    case 'open_page':
+    case 'openPage':
+      return stringValue(action.url);
+    case 'find_in_page':
+    case 'findInPage':
+      return firstNonEmpty(action.pattern, action.url);
+    case 'other':
+    default:
+      return '';
+  }
+}
+
+function firstNonEmpty(...values: unknown[]): string {
+  return values.map(stringValue).find(Boolean) ?? '';
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function createNormalizationResult(): CodexJsonlNormalizationResult {
@@ -261,15 +290,14 @@ function normalizeResponseItem(
 
     case 'web_search_call': {
       const action = asRecord(rawPayload.action);
-      const queries = Array.isArray(action.queries) ? action.queries.filter((value): value is string => typeof value === 'string') : [];
-      const query = asString(action.query)
-        || queries.join(', ')
-        || '';
+      const queries = stringArray(action.queries);
+      const query = webSearchActionDisplayQuery(action);
+      if (!query) return result;
+
       const toolId = asString(rawPayload.id) || syntheticWebSearchToolId(ts, action, query, queries, context);
       result.canonical.push(new WebSearchToolUseMessage(ts, toolId, query));
-      // Synthetic tool-result summarizing status
       if (rawPayload.status === 'completed' || rawPayload.status === 'searching') {
-        result.canonical.push(new ToolResultMessage(ts, toolId, normalizeToolResultContent(query ? `Searched: ${query}` : 'Web search completed'), false));
+        result.canonical.push(new ToolResultMessage(ts, toolId, normalizeToolResultContent(`Searched: ${query}`), false));
       }
       return result;
     }
