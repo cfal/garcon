@@ -109,7 +109,7 @@ describe('CursorRuntime lifecycle', () => {
 
     await expect(startedPromise).resolves.toEqual({
       agentSessionId: 'cursor-session-1',
-      nativePath: '!cursor:cursor-session-1',
+      nativePath: '!cursor-stream-json:cursor-session-1',
     });
 
     proc.pushJson({ type: 'result', subtype: 'success', session_id: 'cursor-session-1' });
@@ -239,6 +239,194 @@ describe('CursorRuntime lifecycle', () => {
     expect(emitted.find((message) => message.type === 'tool-result')?.content).toEqual({
       filenames: ['./contracts/a/daml.yaml', './contracts/b/daml.yaml'],
       numFiles: 2,
+    });
+  });
+
+  it('normalizes wrapped stream-json Read and Grep tool metadata', async () => {
+    const provider = new CursorRuntime();
+    const messages = mock();
+    provider.onMessages(messages);
+
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const turnPromise = provider.runTurn({
+      command: 'inspect cursor tools',
+      agentSessionId: 'cursor-session-4',
+      chatId: 'chat-4',
+      projectPath: '/repo',
+      model: 'default',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    proc.pushJson({
+      type: 'tool_call',
+      subtype: 'started',
+      call_id: 'tool-read-1',
+      tool_call: {
+        readToolCall: {
+          args: { path: '/repo/server/agents/cursor/tool-use-converter.ts' },
+        },
+        hookAdditionalContexts: [],
+        toolCallId: 'tool-read-1',
+      },
+    });
+    proc.pushJson({
+      type: 'tool_call',
+      subtype: 'started',
+      call_id: 'tool-grep-1',
+      tool_call: {
+        grepToolCall: {
+          args: {
+            pattern: 'convertCursorToolUse',
+            path: '/repo/server/agents/cursor',
+            caseInsensitive: false,
+            multiline: false,
+            toolCallId: 'tool-grep-1',
+            offset: 0,
+          },
+        },
+        hookAdditionalContexts: [],
+        toolCallId: 'tool-grep-1',
+      },
+    });
+    proc.pushJson({
+      type: 'tool_call',
+      subtype: 'completed',
+      call_id: 'tool-read-1',
+      tool_call: {
+        readToolCall: {
+          args: { path: '/repo/server/agents/cursor/tool-use-converter.ts' },
+          result: {
+            success: {
+              content: 'export function convertCursorToolUse() {}\n',
+              totalLines: 1,
+              fileSize: 43,
+              path: '/repo/server/agents/cursor/tool-use-converter.ts',
+              readRange: { startLine: 1, endLine: 1 },
+            },
+          },
+        },
+        hookAdditionalContexts: [],
+        toolCallId: 'tool-read-1',
+      },
+    });
+    proc.pushJson({
+      type: 'tool_call',
+      subtype: 'completed',
+      call_id: 'tool-grep-1',
+      tool_call: {
+        grepToolCall: {
+          args: {
+            pattern: 'convertCursorToolUse',
+            path: '/repo/server/agents/cursor',
+            caseInsensitive: false,
+            multiline: false,
+            toolCallId: 'tool-grep-1',
+            offset: 0,
+          },
+          result: {
+            success: {
+              pattern: 'convertCursorToolUse',
+              path: '/repo/server/agents/cursor',
+              outputMode: 'content',
+              workspaceResults: {
+                '/repo': {
+                  content: {
+                    matches: [
+                      {
+                        file: 'server/agents/cursor/tool-use-converter.ts',
+                        matches: [
+                          {
+                            lineNumber: 158,
+                            content: 'export function convertCursorToolUse() {}',
+                            contentTruncated: false,
+                            isContextLine: false,
+                          },
+                        ],
+                      },
+                      {
+                        file: 'server/agents/cursor/cursor-cli.ts',
+                        matches: [
+                          {
+                            lineNumber: 439,
+                            content: 'convertCursorToolUse(timestamp, event)',
+                            contentTruncated: false,
+                            isContextLine: false,
+                          },
+                        ],
+                      },
+                    ],
+                    totalLines: 2,
+                    totalMatchedLines: 2,
+                    clientTruncated: false,
+                    ripgrepTruncated: false,
+                  },
+                },
+              },
+            },
+          },
+        },
+        hookAdditionalContexts: [],
+        toolCallId: 'tool-grep-1',
+      },
+    });
+    proc.pushJson({ type: 'result', subtype: 'success', session_id: 'cursor-session-4' });
+    proc.close(0);
+
+    await turnPromise;
+
+    const emitted = messages.mock.calls.flatMap((call) => call[1]);
+    expect(emitted.map((message) => message.type)).toEqual([
+      'read-tool-use',
+      'grep-tool-use',
+      'tool-result',
+      'tool-result',
+    ]);
+    expect(emitted[0].filePath).toBe('/repo/server/agents/cursor/tool-use-converter.ts');
+    expect(emitted[1].pattern).toBe('convertCursorToolUse');
+    expect(emitted[1].path).toBe('/repo/server/agents/cursor');
+    expect(emitted[2].content).toEqual({
+      content: 'export function convertCursorToolUse() {}\n',
+      totalLines: 1,
+      fileSize: 43,
+      path: '/repo/server/agents/cursor/tool-use-converter.ts',
+      readRange: { startLine: 1, endLine: 1 },
+    });
+    expect(emitted[3].content).toEqual({
+      filenames: [
+        'server/agents/cursor/tool-use-converter.ts',
+        'server/agents/cursor/cursor-cli.ts',
+      ],
+      numFiles: 2,
+      totalMatches: 2,
+      matches: [
+        {
+          file: 'server/agents/cursor/tool-use-converter.ts',
+          matches: [
+            {
+              lineNumber: 158,
+              content: 'export function convertCursorToolUse() {}',
+              contentTruncated: false,
+              isContextLine: false,
+            },
+          ],
+        },
+        {
+          file: 'server/agents/cursor/cursor-cli.ts',
+          matches: [
+            {
+              lineNumber: 439,
+              content: 'convertCursorToolUse(timestamp, event)',
+              contentTruncated: false,
+              isContextLine: false,
+            },
+          ],
+        },
+      ],
+      pattern: 'convertCursorToolUse',
+      path: '/repo/server/agents/cursor',
     });
   });
 

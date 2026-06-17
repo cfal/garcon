@@ -226,7 +226,7 @@ function makeRegistry(args = {}) {
     onFailed: mock(() => {}),
   };
   const cursor = {
-    startSession: mock(() => Promise.resolve({ agentSessionId: 'cursor-session', nativePath: '!cursor:cursor-session' })),
+    startSession: mock(() => Promise.resolve({ agentSessionId: 'cursor-session', nativePath: '!cursor-stream-json:cursor-session' })),
     runTurn: mock(() => Promise.resolve()),
     isRunning: mock(() => false),
     abort: mock(() => false),

@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import crypto from 'crypto';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { Database } from 'bun:sqlite';
 
 import {
+  cursorLegacyAcpStoreDbPath,
   cursorStoreDbPath,
+  cursorStreamJsonStoreDbPath,
   getCursorPreviewFromSessionId,
   loadCursorChatMessagesBySessionId,
   normalizeCursorBlobs,
@@ -22,15 +25,23 @@ describe('Cursor history loader', () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
-  it('builds ACP session store paths and rejects unsafe session ids', () => {
-    expect(cursorStoreDbPath('session-1', tempRoot))
+  it('builds stream-json and legacy ACP session store paths and rejects unsafe session ids', () => {
+    const projectPath = '/tmp/project';
+    const projectHash = crypto.createHash('md5').update(path.resolve(projectPath)).digest('hex');
+
+    expect(cursorStreamJsonStoreDbPath('session-1', projectPath, tempRoot))
+      .toBe(path.join(tempRoot, 'chats', projectHash, 'session-1', 'store.db'));
+    expect(cursorLegacyAcpStoreDbPath('session-1', tempRoot))
       .toBe(path.join(tempRoot, 'acp-sessions', 'session-1', 'store.db'));
-    expect(() => cursorStoreDbPath('../session', tempRoot)).toThrow('Invalid Cursor session id');
+    expect(cursorStoreDbPath('session-1', projectPath, tempRoot))
+      .toBe(path.join(tempRoot, 'chats', projectHash, 'session-1', 'store.db'));
+    expect(() => cursorStreamJsonStoreDbPath('../session', projectPath, tempRoot))
+      .toThrow('Invalid Cursor session id');
   });
 
-  it('raises a clear error when the ACP store is missing', async () => {
+  it('raises a clear error when the Cursor store is missing', async () => {
     await expect(loadCursorChatMessagesBySessionId('missing-session', '/tmp/project', tempRoot))
-      .rejects.toThrow('Cursor ACP transcript database not found');
+      .rejects.toThrow('Cursor transcript database not found');
   });
 
   it('normalizes Cursor blobs into canonical chat messages', () => {
@@ -255,7 +266,7 @@ describe('Cursor history loader', () => {
   it('loads Cursor store.db blobs and builds previews', async () => {
     const sessionId = 'session-db';
     const projectPath = '/tmp/project';
-    const storeDbPath = cursorStoreDbPath(sessionId, tempRoot);
+    const storeDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, tempRoot);
     await fs.mkdir(path.dirname(storeDbPath), { recursive: true });
 
     const db = new Database(storeDbPath);
@@ -291,5 +302,31 @@ describe('Cursor history loader', () => {
       lastActivity: '2026-05-22T02:00:01.000Z',
       lastMessage: 'Final reply',
     });
+  });
+
+  it('falls back to legacy ACP store.db blobs when stream-json storage is absent', async () => {
+    const sessionId = 'legacy-session-db';
+    const projectPath = '/tmp/project';
+    const storeDbPath = cursorLegacyAcpStoreDbPath(sessionId, tempRoot);
+    await fs.mkdir(path.dirname(storeDbPath), { recursive: true });
+
+    const db = new Database(storeDbPath);
+    try {
+      db.query('CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)').run();
+      db.query('INSERT INTO blobs (id, data) VALUES (?, ?)').run(
+        'user_blob',
+        Buffer.from(JSON.stringify({
+          role: 'user',
+          timestamp: '2026-05-22T02:00:00.000Z',
+          content: '<user_query>Legacy prompt</user_query>',
+        })),
+      );
+    } finally {
+      db.close();
+    }
+
+    const messages = await loadCursorChatMessagesBySessionId(sessionId, projectPath, tempRoot);
+    expect(messages.map((message) => message.type)).toEqual(['user-message']);
+    expect(messages[0].content).toBe('Legacy prompt');
   });
 });

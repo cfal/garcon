@@ -8,13 +8,13 @@ import {
   type ChatMessage,
 } from "../../../common/chat-types.js";
 import { getCursorBinary } from "../../config.js";
-import { createArtificialNativePath, getArtificialAgentSessionId } from "../../chats/artificial-native-path.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { normalizeCursorToolResultContent } from "./tool-result-converter.js";
 import { convertCursorToolUse } from "./tool-use-converter.js";
 import { getCursorModels } from './cursor-models.js';
 import { CursorRequestIdentityStore } from './cursor-request-identities.js';
 import { loadCursorChatMessagesBySessionId } from "./history-loader.js";
+import { createCursorStreamJsonNativePath, getCursorAgentSessionIdFromNativePath } from './cursor-native-path.js';
 import { createLogger } from '../../lib/log.js';
 
 const logger = createLogger('agents:cursor:cursor-cli');
@@ -110,6 +110,32 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+function canonicalize(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_\-]+/g, '');
+}
+
+function displayNameFromWrapperKey(key: string): string {
+  const base = key.replace(/ToolCall$/i, '');
+  switch (canonicalize(base)) {
+    case 'shell':
+    case 'terminal':
+    case 'execute':
+    case 'runcommand':
+      return 'Bash';
+    case 'ls':
+    case 'listdirectory':
+      return 'LS';
+    case 'searchfiles':
+      return 'Grep';
+    default:
+      return base.charAt(0).toUpperCase() + base.slice(1);
+  }
+}
+
+function getWrappedToolCallKey(wrapper: Record<string, unknown>): string | undefined {
+  return Object.keys(wrapper).find((key) => key.toLowerCase().endsWith('toolcall'));
+}
+
 function getSessionId(event: Record<string, unknown>): string | undefined {
   return asString(event.session_id ?? event.sessionId ?? event.chat_id ?? event.chatId);
 }
@@ -134,6 +160,13 @@ function getToolName(event: Record<string, unknown>): string | undefined {
   if (direct) return direct;
 
   const toolCall = asObject(event.tool_call ?? event.toolCall);
+  const wrapperKey = getWrappedToolCallKey(toolCall);
+  if (wrapperKey) {
+    const wrapped = asObject(toolCall[wrapperKey]);
+    return asString(wrapped.toolName ?? wrapped.tool_name ?? wrapped.name ?? wrapped.tool)
+      ?? displayNameFromWrapperKey(wrapperKey);
+  }
+
   const nested = Object.values(toolCall)
     .map((entry) => asObject(entry))
     .find((entry) => Object.keys(entry).length > 0);
@@ -365,7 +398,7 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
       tracker.resolved = true;
       tracker.resolve({
         agentSessionId: sessionId,
-        nativePath: createArtificialNativePath('cursor', sessionId),
+        nativePath: createCursorStreamJsonNativePath(sessionId),
       });
     }
   }
@@ -712,7 +745,7 @@ export class CursorRuntime extends AgentEventEmitterRuntime {
 
   async loadMessages(session: AgentChatEntry, context: { chatId?: string } = {}): Promise<ChatMessage[]> {
     const agentSessionId = session.agentSessionId
-      || getArtificialAgentSessionId(session.nativePath, 'cursor')
+      || getCursorAgentSessionIdFromNativePath(session.nativePath)
       || '';
     const messages = await loadCursorChatMessagesBySessionId(agentSessionId, session.projectPath);
     return this.#requestIdentities.applyToMessages(messages, {

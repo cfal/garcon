@@ -20,6 +20,10 @@ describe('artificial native path helpers', () => {
       agentSessionId: 'session-1',
     });
     expect(getArtificialAgentSessionId('!opencode:session-1', 'opencode')).toBe('session-1');
+    expect(getArtificialAgentSessionId('!cursor-acp:session-1', [
+      'cursor-stream-json',
+      'cursor-acp',
+    ])).toBe('session-1');
   });
 
   it('rejects non-prefixed paths', () => {

@@ -32,9 +32,10 @@ export function parseArtificialNativePath(nativePath: unknown): ArtificialNative
   };
 }
 
-export function getArtificialAgentSessionId(nativePath: unknown, agentId: string): string | null {
+export function getArtificialAgentSessionId(nativePath: unknown, agentId: string | readonly string[]): string | null {
   const parsed = parseArtificialNativePath(nativePath);
-  if (!parsed || parsed.agentId !== agentId) {
+  const agentIds = Array.isArray(agentId) ? agentId : [agentId];
+  if (!parsed || !agentIds.includes(parsed.agentId)) {
     return null;
   }
 
