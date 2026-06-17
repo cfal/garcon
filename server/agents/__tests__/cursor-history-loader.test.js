@@ -25,7 +25,7 @@ describe('Cursor history loader', () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
-  it('builds stream-json and legacy ACP session store paths and rejects unsafe session ids', () => {
+  it('builds stream-json and legacy ACP migration source paths and rejects unsafe session ids', () => {
     const projectPath = '/tmp/project';
     const projectHash = crypto.createHash('md5').update(path.resolve(projectPath)).digest('hex');
 
@@ -304,29 +304,4 @@ describe('Cursor history loader', () => {
     });
   });
 
-  it('falls back to legacy ACP store.db blobs when stream-json storage is absent', async () => {
-    const sessionId = 'legacy-session-db';
-    const projectPath = '/tmp/project';
-    const storeDbPath = cursorLegacyAcpStoreDbPath(sessionId, tempRoot);
-    await fs.mkdir(path.dirname(storeDbPath), { recursive: true });
-
-    const db = new Database(storeDbPath);
-    try {
-      db.query('CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)').run();
-      db.query('INSERT INTO blobs (id, data) VALUES (?, ?)').run(
-        'user_blob',
-        Buffer.from(JSON.stringify({
-          role: 'user',
-          timestamp: '2026-05-22T02:00:00.000Z',
-          content: '<user_query>Legacy prompt</user_query>',
-        })),
-      );
-    } finally {
-      db.close();
-    }
-
-    const messages = await loadCursorChatMessagesBySessionId(sessionId, projectPath, tempRoot);
-    expect(messages.map((message) => message.type)).toEqual(['user-message']);
-    expect(messages[0].content).toBe('Legacy prompt');
-  });
 });

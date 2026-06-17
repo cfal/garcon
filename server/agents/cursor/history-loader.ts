@@ -100,13 +100,7 @@ export function cursorLegacyAcpStoreDbPath(sessionId: string, cursorHome = curso
 }
 
 export function cursorStoreDbPath(sessionId: string, projectPath: string, cursorHome = cursorHomePath()): string {
-  const streamJsonStoreDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, cursorHome);
-  if (fs.existsSync(streamJsonStoreDbPath)) return streamJsonStoreDbPath;
-
-  const legacyAcpStoreDbPath = cursorLegacyAcpStoreDbPath(sessionId, cursorHome);
-  if (fs.existsSync(legacyAcpStoreDbPath)) return legacyAcpStoreDbPath;
-
-  return streamJsonStoreDbPath;
+  return cursorStreamJsonStoreDbPath(sessionId, projectPath, cursorHome);
 }
 
 function isInternalCursorText(value: unknown): boolean {
@@ -442,11 +436,7 @@ export async function loadCursorChatMessagesBySessionId(
   if (!sessionId) return [];
   const storeDbPath = cursorStoreDbPath(sessionId, projectPath, cursorHome);
   if (!fs.existsSync(storeDbPath)) {
-    const legacyStoreDbPath = cursorLegacyAcpStoreDbPath(sessionId, cursorHome);
-    throw new Error(
-      `Cursor transcript database not found: ${storeDbPath}`
-      + (legacyStoreDbPath !== storeDbPath ? `; fallback checked: ${legacyStoreDbPath}` : ''),
-    );
+    throw new Error(`Cursor transcript database not found: ${storeDbPath}`);
   }
   return normalizeCursorBlobs(readCursorBlobs(storeDbPath));
 }
