@@ -14,6 +14,14 @@ export function createCursorStreamJsonNativePath(agentSessionId: string | null |
   return createArtificialNativePath(CURSOR_STREAM_JSON_NATIVE_AGENT_ID, agentSessionId);
 }
 
+export function createCursorAcpNativePath(agentSessionId: string | null | undefined): string | null {
+  return createArtificialNativePath(CURSOR_ACP_NATIVE_AGENT_ID, agentSessionId);
+}
+
+export function getCursorAcpAgentSessionIdFromNativePath(nativePath: unknown): string | null {
+  return getArtificialAgentSessionId(nativePath, CURSOR_ACP_NATIVE_AGENT_ID);
+}
+
 export function getCursorAgentSessionIdFromNativePath(nativePath: unknown): string | null {
   return getArtificialAgentSessionId(nativePath, CURSOR_NATIVE_AGENT_IDS);
 }
