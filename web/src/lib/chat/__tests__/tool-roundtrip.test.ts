@@ -67,6 +67,13 @@ describe('tool-use serialization round-trip', () => {
 		expect(parsed.endLine).toBe(60);
 	});
 
+	it('ReadToolUseMessage round-trips without a file path', () => {
+		const msg = new ReadToolUseMessage(TS, 'id-pathless-read');
+		const parsed = roundTrip(msg);
+		expect(parsed.filePath).toBeUndefined();
+		expect(parsed.type).toBe('read-tool-use');
+	});
+
 	it('ListToolUseMessage preserves directory path', () => {
 		const msg = new ListToolUseMessage(TS, 'id-2b', '/tmp');
 		const parsed = roundTrip(msg);
@@ -489,13 +496,14 @@ describe('malformed known-type payloads return null', () => {
 		expect(msg).toBeNull();
 	});
 
-	it('read-tool-use without filePath returns null', () => {
+	it('read-tool-use without filePath parses as a pathless read', () => {
 		const msg = parseChatMessage({
 			type: 'read-tool-use',
 			timestamp: TS,
-			toolId: 'id-bad',
+			toolId: 'id-pathless-read',
 		});
-		expect(msg).toBeNull();
+		expect(msg).toBeInstanceOf(ReadToolUseMessage);
+		expect((msg as ReadToolUseMessage).filePath).toBeUndefined();
 	});
 
 	it('write-tool-use without filePath returns null', () => {

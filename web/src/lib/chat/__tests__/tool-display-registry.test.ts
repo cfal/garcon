@@ -14,6 +14,7 @@ import {
 	ExitPlanModeToolUseMessage,
 	ListToolUseMessage,
 	McpToolUseMessage,
+	ReadToolUseMessage,
 } from '$shared/chat-types';
 
 describe('TOOL_DISPLAY_REGISTRY', () => {
@@ -96,6 +97,19 @@ describe('tool display helpers', () => {
 	it('returns the display label for list tool-use messages', () => {
 		const label = getToolDisplayLabel(new ListToolUseMessage('', 'tool-list-1', '/tmp'));
 		expect(label).toBe('List');
+	});
+
+	it('returns the display label for pathless read messages', () => {
+		const label = getToolDisplayLabel(new ReadToolUseMessage('', 'tool-read-1'));
+		expect(label).toBe('Read');
+	});
+
+	it('shows Cursor grep match counts when file lists are unavailable', () => {
+		const title = TOOL_DISPLAY_REGISTRY['grep-tool-use'].result?.title;
+		expect(typeof title).toBe('function');
+		if (typeof title !== 'function') throw new Error('grep result title missing');
+
+		expect(title({ content: { filenames: [], totalMatches: 17 } })).toBe('Found 17 matches');
 	});
 
 	it('returns structured external and MCP labels from typed fields', () => {

@@ -1,4 +1,4 @@
-import { runSingleQuery as runSingleQueryCursor } from './cursor-cli.js';
+import { runSingleQuery as runSingleQueryCursor } from './run-single-query.js';
 import { getCursorModels } from './cursor-models.js';
 import { CursorRequestIdentityStore } from './cursor-request-identities.js';
 import { createAgentCapabilities } from '../capabilities.js';

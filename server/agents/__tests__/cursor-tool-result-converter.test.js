@@ -35,6 +35,18 @@ describe('normalizeCursorToolResultContent', () => {
     });
   });
 
+  it('preserves Cursor ACP grep total match counts when file lists are unavailable', () => {
+    const content = normalizeCursorToolResultContent(
+      'search',
+      { totalMatches: 17, truncated: false },
+    );
+
+    expect(content).toEqual({
+      filenames: [],
+      totalMatches: 17,
+    });
+  });
+
   it('maps Cursor high-level Read results without line-number decoration', () => {
     const content = normalizeCursorToolResultContent(
       'Read',

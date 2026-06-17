@@ -65,7 +65,7 @@ function formatToolUseMessage(message: ToolUseChatMessage): { role: string; cont
       return { role: 'Tool Call', content: lines.join('\n') || 'Bash command executed.' };
     }
     case 'read-tool-use': {
-      const details = [`Read ${message.filePath}`];
+      const details = [message.filePath ? `Read ${message.filePath}` : 'Read file'];
       const range = formatReadRange(message);
       if (range) details.push(range);
       return { role: 'Tool Call', content: details.join('\n') };

@@ -66,6 +66,27 @@ describe('CursorAcpEventConverter', () => {
     expect(requestedTool?.filePath).toBe('/garcon/README.md');
   });
 
+  it('maps pathless ACP read tool calls to generic read tool-use', () => {
+    const converter = new CursorAcpEventConverter();
+    converter.beginTurn('session-1');
+
+    const messages = converter.fromSessionUpdate({
+      sessionId: 'remote-session-1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call-pathless-read',
+        kind: 'read',
+        title: 'Read File',
+        rawInput: {},
+      },
+    }, context());
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].type).toBe('read-tool-use');
+    expect(messages[0].toolId).toBe('call-pathless-read');
+    expect(messages[0].filePath).toBeUndefined();
+  });
+
   it('emits tool results when terminal update output arrives via content only', () => {
     const converter = new CursorAcpEventConverter();
     converter.beginTurn('session-1');

@@ -82,7 +82,7 @@ export class ReadToolUseMessage {
   constructor(
     public timestamp: string,
     public toolId: string,
-    public filePath: string,
+    public filePath?: string,
     public offset?: number,
     public limit?: number,
     public endLine?: number,
@@ -571,11 +571,9 @@ const TOOL_USE_MESSAGE_PARSERS = {
   },
 
   'read-tool-use': (data) => {
-    const filePath = asOptionalString(data.filePath);
-    if (filePath === undefined) return null;
     return new ReadToolUseMessage(
       str(data.timestamp), str(data.toolId),
-      filePath,
+      asOptionalString(data.filePath),
       asOptionalNumber(data.offset), asOptionalNumber(data.limit),
       asOptionalNumber(data.endLine));
   },

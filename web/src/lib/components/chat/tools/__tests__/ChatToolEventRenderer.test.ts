@@ -9,6 +9,7 @@ import {
 	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
 	GrepToolUseMessage,
+	ReadToolUseMessage,
 	WebFetchToolUseMessage,
 	WriteStdinToolUseMessage,
 } from '$shared/chat-types';
@@ -84,6 +85,18 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.getByText('Pattern')).toBeTruthy();
 		expect(screen.getByText('border-dotted')).toBeTruthy();
 		expect(screen.queryByLabelText('Jump to results')).toBeNull();
+	});
+
+	it('renders pathless Read as a known read event without an open-file action', () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new ReadToolUseMessage('', 'tool-read-1'),
+			mode: 'input',
+		});
+
+		expect(screen.getByText('Read')).toBeTruthy();
+		expect(screen.getByText('file')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'file' })).toBeNull();
+		expect(screen.queryByText('Parameters')).toBeNull();
 	});
 
 	it('renders WebFetch as url + instruction details without jump affordance', () => {
@@ -228,5 +241,20 @@ describe('tool result and jump behavior', () => {
 		});
 
 		expect(screen.getByText('Found 3 files')).toBeTruthy();
+	});
+
+	it('renders grep match count when Cursor ACP omits the file list', () => {
+		const toolResult = {
+			content: { filenames: [], totalMatches: 17 },
+		};
+		render(ChatToolEventRenderer, {
+			toolMessage: new GrepToolUseMessage('', 'tool-grep-1', undefined),
+			toolResult,
+			mode: 'input',
+			autoExpandTools: true,
+		});
+
+		expect(screen.getByText('Found 17 matches')).toBeTruthy();
+		expect(screen.getByText('File list unavailable')).toBeTruthy();
 	});
 });

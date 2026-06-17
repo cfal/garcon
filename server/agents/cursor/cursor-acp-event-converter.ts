@@ -110,6 +110,8 @@ function inferredInput(snapshot: ToolCallSnapshot): Record<string, unknown> {
   const contentText = toolCallTextContent(snapshot.content);
 
   if (firstPath) inferred.path = firstPath;
+  if (snapshot.title) inferred.title = snapshot.title;
+  if (snapshot.kind) inferred.kind = snapshot.kind;
 
   if (kind === 'execute' && contentText) {
     inferred.command = contentText;

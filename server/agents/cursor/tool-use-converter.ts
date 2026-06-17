@@ -173,7 +173,6 @@ export function convertCursorToolUse(timestamp: string, part: unknown): CursorTo
 
     case 'read': {
       const filePath = filePathFrom(input);
-      if (filePath === undefined) break;
       return new ReadToolUseMessage(
         timestamp,
         envelope.id,

@@ -61,6 +61,19 @@ function normalizeSearchResultFromText(raw: string): Record<string, unknown> | n
   };
 }
 
+function normalizeSearchResultFromRecord(value: unknown): Record<string, unknown> | null {
+  const raw = asObject(value);
+  const filenames = asStringArray(raw.files ?? raw.filenames ?? raw.paths);
+  const numFiles = asNumber(raw.totalFiles ?? raw.numFiles ?? raw.total ?? raw.count);
+  const totalMatches = asNumber(raw.totalMatches ?? raw.total_matches ?? raw.matchCount ?? raw.matches);
+  if (!filenames && numFiles === undefined && totalMatches === undefined) return null;
+  return {
+    filenames: filenames ?? [],
+    ...(numFiles === undefined ? {} : { numFiles }),
+    ...(totalMatches === undefined ? {} : { totalMatches }),
+  };
+}
+
 function normalizeReadResultFromSuccess(success: Record<string, unknown>): Record<string, unknown> | null {
   if (Object.keys(success).length === 0) return null;
   return {
@@ -85,6 +98,9 @@ export function normalizeCursorToolResultContent(
     if (structured) return structured;
 
     const normalized = normalizeToolResultContent(rawContent);
+    const fromRecord = normalizeSearchResultFromRecord(normalized);
+    if (fromRecord) return fromRecord;
+
     const raw = asString(normalized.raw);
     if (raw) {
       const parsed = normalizeSearchResultFromText(raw);

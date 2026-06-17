@@ -64,6 +64,18 @@ describe('convertCursorToolUse', () => {
     expect(message.filePath).toBe('/repo/contracts/ccip/core/daml.yaml');
   });
 
+  it('maps pathless Cursor ACP Read calls to generic read messages', () => {
+    const message = convertCursorToolUse(ts, {
+      id: 'read-acp-1',
+      name: 'read',
+      input: { title: 'Read File', kind: 'read' },
+    });
+
+    expect(message.type).toBe('read-tool-use');
+    expect(message.toolId).toBe('read-acp-1');
+    expect(message.filePath).toBeUndefined();
+  });
+
   it('normalizes Cursor todo items into canonical todos', () => {
     const message = convertCursorToolUse(ts, {
       id: 'todo-1',
