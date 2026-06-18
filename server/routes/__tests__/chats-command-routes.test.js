@@ -426,6 +426,25 @@ describe('REST chat command routes', () => {
     }));
   });
 
+  it('PATCH /execution-settings preserves manual bypass mode', async () => {
+    const agent = createRouteAgent();
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/execution-settings'].PATCH,
+      {
+        chatId: '123',
+        permissionMode: 'manualBypass',
+      },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(200);
+    expect(body.permissionMode).toBe('manualBypass');
+    expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith('123', {
+      permissionMode: 'manualBypass',
+    });
+  });
+
   it('PATCH /execution-settings returns 400 when chatId is missing', async () => {
     const agent = createRouteAgent();
 

@@ -256,6 +256,7 @@ function createRuntimeHarness() {
   return {
     acp,
     runtime,
+    messages,
     waitForMessage(predicate) {
       const existing = messages.find(predicate);
       if (existing) return Promise.resolve(existing);
@@ -337,6 +338,65 @@ describe('Cursor ACP runtime', () => {
     expect(response.result).toEqual({
       outcome: { outcome: 'selected', optionId: 'allow-once' },
     });
+
+    acp.finishPrompt();
+    runtime.shutdown();
+  });
+
+  it('auto-approves standard ACP permission requests in manual bypass without emitting a row', async () => {
+    const { acp, runtime, messages } = createRuntimeHarness();
+    await runtime.startSession(startRequest({ permissionMode: 'manualBypass' }));
+    await acp.waitForClientMethod('session/prompt');
+
+    acp.serverRequest({
+      id: 'permission-manual',
+      method: 'session/request_permission',
+      params: {
+        sessionId: 'cursor-session',
+        toolCall: {
+          toolCallId: 'tool-1',
+          toolName: 'Bash',
+          rawInput: { command: 'echo hello' },
+        },
+        options: [{ optionId: 'allow-once' }, { optionId: 'allow-always' }, { optionId: 'reject-once' }],
+      },
+    });
+
+    const response = await acp.waitForWrite((message) => message.id === 'permission-manual' && message.result);
+    expect(response.result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once' },
+    });
+    expect(messages.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+
+    acp.finishPrompt();
+    runtime.shutdown();
+  });
+
+  it('uses live manual bypass setting updates for subsequent ACP permission requests', async () => {
+    const { acp, runtime, messages } = createRuntimeHarness();
+    const started = await runtime.startSession(startRequest());
+    await acp.waitForClientMethod('session/prompt');
+
+    runtime.updateSessionSettings(started.agentSessionId, { permissionMode: 'manualBypass' });
+    acp.serverRequest({
+      id: 'permission-updated',
+      method: 'session/request_permission',
+      params: {
+        sessionId: 'cursor-session',
+        toolCall: {
+          toolCallId: 'tool-1',
+          toolName: 'Bash',
+          rawInput: { command: 'echo hello' },
+        },
+        options: [{ optionId: 'allow-once' }, { optionId: 'reject-once' }],
+      },
+    });
+
+    const response = await acp.waitForWrite((message) => message.id === 'permission-updated' && message.result);
+    expect(response.result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once' },
+    });
+    expect(messages.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
 
     acp.finishPrompt();
     runtime.shutdown();

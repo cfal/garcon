@@ -24,6 +24,11 @@ export const MODE_STYLES: Record<string, { button: string; dot: string }> = {
 		button: 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80',
 		dot: 'bg-primary',
 	},
+	manualBypass: {
+		button:
+			'bg-status-info text-status-info-foreground border-status-info-border hover:bg-status-info/90',
+		dot: 'bg-status-info-foreground',
+	},
 	bypassPermissions: {
 		button:
 			'bg-status-warning text-status-warning-foreground border-status-warning-border hover:bg-status-warning/90',

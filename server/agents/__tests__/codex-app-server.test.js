@@ -208,6 +208,27 @@ describe('Codex app-server request builders', () => {
     expect(params).not.toHaveProperty('persistExtendedHistory');
   });
 
+  it('keeps manual bypass on normal Codex sandbox settings', () => {
+    const startParams = buildThreadStartParams(makeRequest({ permissionMode: 'manualBypass' }));
+    const turnParams = buildTurnStartParams({
+      threadId: 'thread-1',
+      command: 'run this',
+      model: 'gpt-5.4-codex',
+      projectPath: '/repo',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'none',
+    });
+
+    expect(startParams).toMatchObject({
+      sandbox: 'workspace-write',
+      approvalPolicy: 'never',
+    });
+    expect(turnParams).toMatchObject({
+      approvalPolicy: 'never',
+      approvalsReviewer: 'user',
+    });
+  });
+
   it('builds thread/resume params with only the needed experimental field', () => {
     const params = buildThreadResumeParams({
       ...makeRequest(),
@@ -832,6 +853,56 @@ describe('CodexAppServerRuntime', () => {
 
     expect(fake.respond).toHaveBeenCalledWith(7, { decision: 'accept' });
     expect(emitted.some((message) => message instanceof PermissionResolvedMessage)).toBe(true);
+  });
+
+  it('auto-approves app-server approvals in manual bypass without emitting a permission row', async () => {
+    const nativePath = path.join(tmpDir, 'manual-bypass-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    await provider.startSession(makeRequest({ permissionMode: 'manualBypass' }));
+    fake.emit('serverRequest', {
+      id: 9,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'cmd-1', command: 'ls' },
+    });
+
+    expect(fake.respond).toHaveBeenCalledWith(9, { decision: 'accept' });
+    expect(emitted.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+    expect(emitted.some((message) => message instanceof PermissionResolvedMessage)).toBe(false);
+  });
+
+  it('applies live manual bypass updates to app-server approvals', async () => {
+    const nativePath = path.join(tmpDir, 'manual-bypass-updated-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    const started = await provider.startSession(makeRequest());
+    provider.updateSessionSettings(started.agentSessionId, { permissionMode: 'manualBypass' });
+    fake.emit('serverRequest', {
+      id: 10,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'cmd-1', command: 'ls' },
+    });
+
+    expect(fake.respond).toHaveBeenCalledWith(10, { decision: 'accept' });
+    expect(emitted.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
   });
 
   it('does not re-emit the submitted prompt when app-server echoes userMessage items', async () => {

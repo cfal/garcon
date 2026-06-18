@@ -231,6 +231,23 @@ describe('PiCliRuntime lifecycle', () => {
     });
   });
 
+  it('treats manual bypass like default Pi execution mode', async () => {
+    const provider = new PiCliRuntime();
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const startedPromise = provider.startSession(baseStartRequest({ permissionMode: 'manualBypass' }));
+    proc.pushJson(sessionHeader('pi-session-manual'));
+    const started = await startedPromise;
+
+    expect(started.agentSessionId).toBe('pi-session-manual');
+    expect(spawnMock.mock.calls[0][0]).not.toContain('--tools');
+    expect(proc.stdin.writes.join('')).not.toContain('Garcon plan mode');
+
+    proc.pushJson({ type: 'agent_end' });
+    proc.close(0);
+  });
+
   it('rejects startSession when the process exits before a session header', async () => {
     const provider = new PiCliRuntime();
     const proc = createFakeProc();

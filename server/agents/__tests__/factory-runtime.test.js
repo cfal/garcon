@@ -146,4 +146,34 @@ describe('FactoryCliRuntime lifecycle', () => {
     expect(messages.mock.calls[0][1][0].content).toBe('factory reply');
     expect(runningWhenFinished).toBe(false);
   });
+
+  it('does not add Factory unsafe bypass flags for manual bypass', async () => {
+    const provider = new FactoryCliRuntime();
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const turnPromise = provider.runTurn({
+      command: 'continue',
+      agentSessionId: 'factory-session-3',
+      chatId: 'chat-3',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'none',
+    });
+
+    proc.pushJson({
+      type: 'system',
+      subtype: 'init',
+      session_id: 'factory-session-3',
+    });
+    proc.pushJson({ type: 'completion', session_id: 'factory-session-3' });
+    proc.close(0);
+
+    await turnPromise;
+
+    const args = spawnMock.mock.calls[0][0];
+    expect(args).not.toContain('--auto');
+    expect(args).not.toContain('--skip-permissions-unsafe');
+  });
 });

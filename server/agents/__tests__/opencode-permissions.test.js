@@ -10,7 +10,50 @@ import {
   OPENCODE_PERMISSION_KEYS,
 } from '../opencode/opencode.js';
 import { convertOpencodePermissionTool } from '../opencode/permission-tool-converter.js';
-import { EnterPlanModeToolUseMessage, RequestPermissionsToolUseMessage, UnknownToolUseMessage } from '../../../common/chat-types.js';
+import { EnterPlanModeToolUseMessage, PermissionRequestMessage, RequestPermissionsToolUseMessage, UnknownToolUseMessage } from '../../../common/chat-types.js';
+
+function createAsyncEventStream() {
+  const events = [];
+  const waiters = [];
+  let closed = false;
+
+  function flushWaiters() {
+    for (const resolve of waiters.splice(0)) {
+      resolve();
+    }
+  }
+
+  return {
+    push(event) {
+      events.push(event);
+      flushWaiters();
+    },
+    close() {
+      closed = true;
+      flushWaiters();
+    },
+    async *stream() {
+      while (true) {
+        if (events.length > 0) {
+          yield events.shift();
+          continue;
+        }
+        if (closed) return;
+        await new Promise((resolve) => {
+          waiters.push(resolve);
+        });
+      }
+    },
+  };
+}
+
+async function waitForMockCall(fn) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (fn.mock.calls.length > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error('Timed out waiting for mock call');
+}
 
 describe('mapPermissionDecision', () => {
   it('returns "once" for allow=true, alwaysAllow=false', () => {
@@ -196,6 +239,10 @@ describe('mapPermissionMode', () => {
     ]);
   });
 
+  it('emits default ask rules for manual bypass mode', () => {
+    expect(mapPermissionMode('manualBypass')).toEqual(mapPermissionMode('default'));
+  });
+
   it('falls back to default mode for unknown mode', () => {
     expect(mapPermissionMode('unknown-mode')).toEqual(mapPermissionMode('default'));
   });
@@ -244,6 +291,38 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
         action: 'allow',
       })),
     });
+  });
+
+  it('auto-replies once for manual bypass permission events without emitting a permission row', async () => {
+    const eventStream = createAsyncEventStream();
+    client.event.subscribe.mockImplementation(() => Promise.resolve({ stream: eventStream.stream() }));
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    await provider.startSession({
+      command: 'test command',
+      chatId: '123',
+      permissionMode: 'manualBypass',
+    });
+
+    eventStream.push({
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'sess-1',
+        requestID: 'req-manual',
+        permission: 'bash',
+      },
+    });
+
+    await waitForMockCall(client.permission.reply);
+    expect(client.permission.reply.mock.calls[0][0]).toEqual({
+      requestID: 'req-manual',
+      reply: 'once',
+    });
+    expect(emitted.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+
+    eventStream.close();
+    provider.shutdown();
   });
 
   it('returns early for null permissionRequestId', async () => {

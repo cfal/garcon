@@ -2,7 +2,7 @@ import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, ty
 import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from "../../shared/event-emitter-runtime.js";
 import { loadCodexChatMessages, getCodexPreviewFromNativePath, loadCodexChatMessagePage } from "../history-loader.js";
-import type { AgentChatEntry, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../../session-types.js";
+import type { AgentChatEntry, AgentSessionSettingsPatch, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../../session-types.js";
 import type { AgentTranscriptPage } from '../../types.js';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
@@ -38,6 +38,7 @@ interface RunningCodexSession {
   client: CodexAppServerClient;
   activeTurnId: string | null;
   status: RunningStatus;
+  permissionMode: PermissionMode;
   startedAt: string;
 }
 
@@ -81,6 +82,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         threadId,
         nativePath: started.thread.path,
         client,
+        permissionMode: request.permissionMode,
       });
       activeSession = session;
       this.emitProcessing(request.chatId, true);
@@ -132,6 +134,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         threadId: resumed.thread.id,
         nativePath: resumed.thread.path ?? request.nativePath ?? null,
         client,
+        permissionMode: request.permissionMode,
       });
       activeSession = session;
       this.emitProcessing(request.chatId, true);
@@ -255,6 +258,12 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.emitMessages(pending.chatId, [
       new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, Boolean(decision.allow)),
     ]);
+  }
+
+  updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void {
+    const session = this.#sessions.get(agentSessionId);
+    if (!session) return;
+    if (patch.permissionMode !== undefined) session.permissionMode = patch.permissionMode;
   }
 
   startPurgeTimer(): void {
@@ -400,6 +409,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     threadId: string;
     nativePath: string | null;
     client: CodexAppServerClient;
+    permissionMode: PermissionMode;
   }): RunningCodexSession {
     const session: RunningCodexSession = {
       chatId: args.chatId,
@@ -408,6 +418,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       client: args.client,
       activeTurnId: null,
       status: 'running',
+      permissionMode: args.permissionMode,
       startedAt: new Date().toISOString(),
     };
     this.#sessions.set(args.threadId, session);
@@ -504,6 +515,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }
 
     const pending = { ...createPendingApproval(session.chatId, request), client };
+    if (session.permissionMode === 'manualBypass') {
+      client.respond(request.id, buildApprovalResponse(pending, { allow: true, alwaysAllow: false }));
+      return;
+    }
     this.#pendingApprovals.set(pending.permissionRequestId, pending);
     this.emitMessages(session.chatId, [buildApprovalMessage(pending)]);
   }

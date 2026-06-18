@@ -56,6 +56,19 @@ describe('buildClaudeCLIArgs', () => {
       '-p', '',
     ]);
   });
+
+  it('starts manual bypass as normal Claude mode with stdio permission prompts', () => {
+    const args = buildClaudeCLIArgs({
+      permissionMode: 'manualBypass',
+      prompt: '',
+      streamJson: true,
+    });
+
+    expect(args).toContain('--permission-prompt-tool');
+    expect(args).toContain('stdio');
+    expect(args).not.toContain('--dangerously-skip-permissions');
+    expect(args).not.toContain('manualBypass');
+  });
 });
 
 describe('convertCLIMessageToChatMessages', () => {

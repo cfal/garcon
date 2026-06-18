@@ -200,6 +200,25 @@ describe('NewChatFormState', () => {
 		expect(formState.projectPath).toBe('/workspace/project');
 	});
 
+	it('offers manual bypass in Claude and non-Claude permission mode menus', () => {
+		formState.agentId = 'claude';
+		expect(formState.permissionModes).toEqual([
+			'default',
+			'acceptEdits',
+			'manualBypass',
+			'bypassPermissions',
+			'plan',
+		]);
+
+		formState.agentId = 'codex';
+		expect(formState.permissionModes).toEqual([
+			'default',
+			'acceptEdits',
+			'manualBypass',
+			'bypassPermissions',
+		]);
+	});
+
 	it('loads API provider startup defaults from server settings', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(
 			makeSnapshot({

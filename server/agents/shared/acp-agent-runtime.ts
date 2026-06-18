@@ -10,7 +10,7 @@ import type { PermissionDecisionPayload } from '../../../common/chat-command-con
 import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
 import { AgentEventEmitterRuntime } from './event-emitter-runtime.js';
 import { normalizeToolInput } from './normalize-util.js';
-import type { PermissionMode, AgentEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
+import type { PermissionMode, AgentEventMetadata, AgentSessionSettingsPatch, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import type { AgentRuntime } from '../types.js';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';
@@ -94,7 +94,7 @@ function buildEnvFallback(request: StartSessionRequest | ResumeTurnRequest): Rec
 }
 
 function isAutoApproveMode(mode: PermissionMode): boolean {
-  return mode === 'acceptEdits' || mode === 'bypassPermissions';
+  return mode === 'acceptEdits' || mode === 'manualBypass' || mode === 'bypassPermissions';
 }
 
 function autoApproveOptionId(mode: PermissionMode): 'allow-once' | 'allow-always' {
@@ -248,6 +248,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     this.emitMessages(session.chatId, [
       new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, Boolean(decision.allow)),
     ]);
+  }
+
+  updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void {
+    const session = this.#sessions.get(agentSessionId);
+    if (!session) return;
+    if (patch.permissionMode !== undefined) session.permissionMode = patch.permissionMode;
   }
 
   shutdown(): void {

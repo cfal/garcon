@@ -4,6 +4,7 @@
 export const PERMISSION_MODE_VALUES = [
   'default',
   'acceptEdits',
+  'manualBypass',
   'bypassPermissions',
   'plan',
 ] as const;

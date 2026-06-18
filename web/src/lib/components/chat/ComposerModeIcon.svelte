@@ -24,6 +24,9 @@
 	{:else if iconId === 'permission-accept-edits'}
 		<path d="M4 17.5V20h2.5L17.8 8.7l-2.5-2.5L4 17.5z" />
 		<path d="M14.7 4.5l2.5 2.5" />
+	{:else if iconId === 'permission-manual-bypass'}
+		<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" />
+		<path d="M9 12l2 2 4-5" />
 	{:else if iconId === 'permission-bypass'}
 		<path d="M13 2L4 14h7l-1 8 10-13h-7l0-7z" />
 	{:else if iconId === 'permission-plan'}

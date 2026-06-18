@@ -363,12 +363,12 @@ describe('chats API contract', () => {
 			),
 		);
 
-		await updateExecutionSettings({ chatId: 'c-1', permissionMode: 'acceptEdits' });
+		await updateExecutionSettings({ chatId: 'c-1', permissionMode: 'manualBypass' });
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/execution-settings');
 		expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
 		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
 			chatId: 'c-1',
-			permissionMode: 'acceptEdits',
+			permissionMode: 'manualBypass',
 		});
 
 		await updateChatModel({
