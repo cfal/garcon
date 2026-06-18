@@ -41,6 +41,8 @@ interface AcpAgentRuntimeSession {
   state: RuntimeSessionState;
   running: boolean;
   aborted: boolean;
+  retired: boolean;
+  turnGeneration: number;
   permissionMode: PermissionMode;
   pendingPermissionIds: Set<string>;
   startedAt: string;
@@ -49,10 +51,13 @@ interface AcpAgentRuntimeSession {
   upstreamRequestId?: string;
 }
 
+export type AcpAbortStrategy = 'cancel' | 'process-restart';
+
 export interface AcpAgentPolicy {
   agentId: string;
   command: string;
   args?: string[];
+  abortStrategy?: AcpAbortStrategy;
   authenticateMethodId?: string;
   mcpServers?: unknown[];
   binaryVersion?: string;
@@ -128,6 +133,10 @@ function upstreamRequestIdFromUpdate(notification: AcpSessionUpdateNotification)
   return asString(update.requestId ?? update.request_id);
 }
 
+function abortStrategy(policy: AcpAgentPolicy): AcpAbortStrategy {
+  return policy.abortStrategy ?? 'cancel';
+}
+
 export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRuntime {
   #policy: AcpAgentPolicy;
   #converter: AcpEventConverter;
@@ -167,6 +176,8 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       state: 'idle',
       running: false,
       aborted: false,
+      retired: false,
+      turnGeneration: 0,
       permissionMode: request.permissionMode,
       pendingPermissionIds: new Set(),
       startedAt: now,
@@ -195,6 +206,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   abort(agentSessionId: string): boolean {
     const session = this.#sessions.get(agentSessionId);
     if (!session || !session.running) return false;
+
+    if (abortStrategy(this.#policy) === 'process-restart') {
+      this.#retireSessionForAbort(session);
+      return true;
+    }
+
     session.aborted = true;
     session.state = 'aborted';
     this.#cancelPermissionsForSession(session, 'aborted');
@@ -301,6 +318,8 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       state: 'idle',
       running: false,
       aborted: false,
+      retired: false,
+      turnGeneration: 0,
       permissionMode: request.permissionMode,
       pendingPermissionIds: new Set(),
       startedAt: new Date().toISOString(),
@@ -368,6 +387,8 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   }
 
   async #runPrompt(session: AcpAgentRuntimeSession, request: StartSessionRequest | ResumeTurnRequest): Promise<void> {
+    const turnGeneration = ++session.turnGeneration;
+    session.retired = false;
     session.running = true;
     session.state = 'running';
     session.aborted = false;
@@ -405,6 +426,10 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
         failureMessage = humanizeError(error);
       }
     } finally {
+      if (session.retired || this.#sessions.get(session.id) !== session || session.turnGeneration !== turnGeneration) {
+        return;
+      }
+
       this.#emitFlushedMessages(session);
       this.emitProcessing(session.chatId, false);
       session.running = false;
@@ -429,6 +454,22 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     if (shouldThrow) {
       throw new Error(failureMessage);
     }
+  }
+
+  #retireSessionForAbort(session: AcpAgentRuntimeSession): void {
+    session.aborted = true;
+    session.retired = true;
+    session.running = false;
+    session.state = 'aborted';
+    session.turnGeneration += 1;
+    session.lastActivityAt = Date.now();
+
+    this.#cancelPermissionsForSession(session, 'aborted');
+    this.emitProcessing(session.chatId, false);
+    this.#sessions.delete(session.id);
+
+    void session.client.cancelSession({ sessionId: session.remoteSessionId }).catch(() => {});
+    session.client.close();
   }
 
   #emitFlushedMessages(session: AcpAgentRuntimeSession): void {

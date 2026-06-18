@@ -29,6 +29,7 @@ export function createCursorAcpPolicy(): AcpAgentPolicy {
     agentId: 'cursor',
     command: getCursorBinary(),
     args: ['acp'],
+    abortStrategy: 'process-restart',
     authenticateMethodId: 'cursor_login',
     buildPrompt: promptForRequest,
     buildEnv,

@@ -14,128 +14,206 @@ import { runSingleQuery } from '../cursor/run-single-query.js';
 
 function createAcpHarness() {
   const encoder = new TextEncoder();
-  let stdoutController;
-  let exitResolve;
-  let promptRequestId = null;
-  const writes = [];
-  const writeWaiters = [];
+  const instances = [];
+  const instanceWaiters = [];
 
-  const stdout = new ReadableStream({
-    start(controller) {
-      stdoutController = controller;
-    },
-  });
-  const stderr = new ReadableStream({
-    start(controller) {
-      controller.close();
-    },
-  });
-  const exited = new Promise((resolve) => {
-    exitResolve = resolve;
-  });
+  function createInstance() {
+    let stdoutController;
+    let exitResolve;
+    let promptRequestId = null;
+    let closed = false;
+    let killed = false;
+    const writes = [];
+    const writeWaiters = [];
 
-  function resolveWriteWaiters(message) {
-    for (let i = writeWaiters.length - 1; i >= 0; i -= 1) {
-      const waiter = writeWaiters[i];
-      if (!waiter.predicate(message)) continue;
-      writeWaiters.splice(i, 1);
-      waiter.resolve(message);
-    }
-  }
-
-  function emit(message) {
-    stdoutController.enqueue(encoder.encode(`${JSON.stringify(message)}\n`));
-  }
-
-  function handleClientMessage(message) {
-    writes.push(message);
-    resolveWriteWaiters(message);
-
-    if (message.method === 'initialize') {
-      emit({
-        jsonrpc: '2.0',
-        id: message.id,
-        result: {
-          protocolVersion: 1,
-          agentCapabilities: {
-            loadSession: true,
-            sessionCapabilities: { load: true },
-          },
-        },
-      });
-      return;
-    }
-
-    if (message.method === 'authenticate') {
-      emit({ jsonrpc: '2.0', id: message.id, result: {} });
-      return;
-    }
-
-    if (message.method === 'session/new') {
-      emit({ jsonrpc: '2.0', id: message.id, result: { sessionId: 'cursor-session' } });
-      return;
-    }
-
-    if (message.method === 'session/prompt') {
-      promptRequestId = message.id;
-      return;
-    }
-
-    if (message.method === 'session/cancel') {
-      emit({ jsonrpc: '2.0', id: message.id, result: {} });
-    }
-  }
-
-  const process = {
-    stdin: {
-      write(data) {
-        for (const line of String(data).split('\n')) {
-          if (!line.trim()) continue;
-          handleClientMessage(JSON.parse(line));
-        }
+    const stdout = new ReadableStream({
+      start(controller) {
+        stdoutController = controller;
       },
-      end() {},
-    },
-    stdout,
-    stderr,
-    exited,
-    kill() {
+    });
+    const stderr = new ReadableStream({
+      start(controller) {
+        controller.close();
+      },
+    });
+    const exited = new Promise((resolve) => {
+      exitResolve = resolve;
+    });
+
+    function resolveWriteWaiters(message) {
+      for (let i = writeWaiters.length - 1; i >= 0; i -= 1) {
+        const waiter = writeWaiters[i];
+        if (!waiter.predicate(message)) continue;
+        writeWaiters.splice(i, 1);
+        waiter.resolve(message);
+      }
+    }
+
+    function emit(message) {
+      if (closed) return;
+      stdoutController.enqueue(encoder.encode(`${JSON.stringify(message)}\n`));
+    }
+
+    function handleClientMessage(message) {
+      writes.push(message);
+      resolveWriteWaiters(message);
+
+      if (message.method === 'initialize') {
+        emit({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: {
+            protocolVersion: 1,
+            agentCapabilities: {
+              loadSession: true,
+              sessionCapabilities: { load: true },
+            },
+          },
+        });
+        return;
+      }
+
+      if (message.method === 'authenticate') {
+        emit({ jsonrpc: '2.0', id: message.id, result: {} });
+        return;
+      }
+
+      if (message.method === 'session/new') {
+        emit({ jsonrpc: '2.0', id: message.id, result: { sessionId: 'cursor-session' } });
+        return;
+      }
+
+      if (message.method === 'session/load' || message.method === 'session/resume') {
+        emit({ jsonrpc: '2.0', id: message.id, result: {} });
+        return;
+      }
+
+      if (message.method === 'session/prompt') {
+        promptRequestId = message.id;
+        return;
+      }
+
+      if (message.method === 'session/cancel') {
+        emit({ jsonrpc: '2.0', id: message.id, result: {} });
+      }
+    }
+
+    function close(exitCode = 0) {
+      if (closed) return;
+      closed = true;
       stdoutController.close();
-      exitResolve(0);
-    },
-  };
+      exitResolve(exitCode);
+    }
+
+    const instance = {
+      get killed() {
+        return killed;
+      },
+      writes,
+      process: {
+        stdin: {
+          write(data) {
+            for (const line of String(data).split('\n')) {
+              if (!line.trim()) continue;
+              handleClientMessage(JSON.parse(line));
+            }
+          },
+          end() {},
+        },
+        stdout,
+        stderr,
+        exited,
+        kill() {
+          killed = true;
+          close(143);
+        },
+      },
+      serverRequest(message) {
+        emit({ jsonrpc: '2.0', ...message });
+      },
+      sessionUpdate(update) {
+        emit({
+          jsonrpc: '2.0',
+          method: 'session/update',
+          params: { sessionId: 'cursor-session', update },
+        });
+      },
+      finishPrompt() {
+        if (promptRequestId === null) throw new Error('session/prompt was not received');
+        emit({
+          jsonrpc: '2.0',
+          id: promptRequestId,
+          result: { stopReason: 'end_turn', requestId: 'cursor-request-1' },
+        });
+      },
+      waitForWrite(predicate) {
+        const existing = writes.find(predicate);
+        if (existing) return Promise.resolve(existing);
+        return new Promise((resolve) => {
+          writeWaiters.push({ predicate, resolve });
+        });
+      },
+      waitForClientMethod(method) {
+        return this.waitForWrite((message) => message.method === method);
+      },
+      waitForExit() {
+        return exited;
+      },
+    };
+
+    instances.push(instance);
+    for (let i = instanceWaiters.length - 1; i >= 0; i -= 1) {
+      const waiter = instanceWaiters[i];
+      if (instances[waiter.index] !== instance) continue;
+      instanceWaiters.splice(i, 1);
+      waiter.resolve(instance);
+    }
+    return instance;
+  }
+
+  function currentInstance() {
+    const instance = instances.at(-1);
+    if (!instance) throw new Error('ACP process has not been spawned');
+    return instance;
+  }
 
   return {
-    writes,
+    get writes() {
+      return instances.flatMap((instance) => instance.writes);
+    },
     createTransport() {
       return new AcpTransport({
-        spawn: () => process,
+        spawn: () => createInstance().process,
       });
+    },
+    instance(index) {
+      const instance = instances[index];
+      if (!instance) throw new Error(`ACP process ${index} has not been spawned`);
+      return instance;
+    },
+    waitForInstance(index) {
+      const instance = instances[index];
+      if (instance) return Promise.resolve(instance);
+      return new Promise((resolve) => {
+        instanceWaiters.push({ index, resolve });
+      });
+    },
+    killCount() {
+      return instances.filter((instance) => instance.killed).length;
     },
     serverRequest(message) {
-      emit({ jsonrpc: '2.0', ...message });
+      currentInstance().serverRequest(message);
     },
     sessionUpdate(update) {
-      emit({
-        jsonrpc: '2.0',
-        method: 'session/update',
-        params: { sessionId: 'cursor-session', update },
-      });
+      currentInstance().sessionUpdate(update);
     },
     finishPrompt() {
-      if (promptRequestId === null) throw new Error('session/prompt was not received');
-      emit({
-        jsonrpc: '2.0',
-        id: promptRequestId,
-        result: { stopReason: 'end_turn', requestId: 'cursor-request-1' },
-      });
+      currentInstance().finishPrompt();
     },
     waitForWrite(predicate) {
-      const existing = writes.find(predicate);
+      const existing = this.writes.find(predicate);
       if (existing) return Promise.resolve(existing);
-      return new Promise((resolve) => {
-        writeWaiters.push({ predicate, resolve });
-      });
+      return currentInstance().waitForWrite(predicate);
     },
     waitForClientMethod(method) {
       return this.waitForWrite((message) => message.method === method);
@@ -189,6 +267,43 @@ function createRuntimeHarness() {
 }
 
 describe('Cursor ACP runtime', () => {
+  it('kills the Cursor ACP process and marks the session idle immediately on abort', async () => {
+    const { acp, runtime } = createRuntimeHarness();
+    const started = await runtime.startSession(startRequest());
+    await acp.waitForClientMethod('session/prompt');
+
+    expect(runtime.isRunning(started.agentSessionId)).toBe(true);
+    expect(runtime.abort(started.agentSessionId)).toBe(true);
+
+    expect(runtime.isRunning(started.agentSessionId)).toBe(false);
+    expect(acp.killCount()).toBe(1);
+
+    runtime.shutdown();
+  });
+
+  it('reconnects after abort and sends the next prompt to Cursor', async () => {
+    const { acp, runtime } = createRuntimeHarness();
+    const started = await runtime.startSession(startRequest({ command: 'first message' }));
+    await acp.waitForClientMethod('session/prompt');
+
+    expect(runtime.abort(started.agentSessionId)).toBe(true);
+
+    const nextTurn = runtime.runTurn(startRequest({
+      agentSessionId: started.agentSessionId,
+      command: 'second message',
+    }));
+    const restarted = await acp.waitForInstance(1);
+    const load = await restarted.waitForClientMethod('session/load');
+    expect(load.params.sessionId).toBe(started.agentSessionId);
+
+    const prompt = await restarted.waitForClientMethod('session/prompt');
+    expect(prompt.params.prompt).toEqual([{ type: 'text', text: 'second message' }]);
+
+    restarted.finishPrompt();
+    await nextTurn;
+    runtime.shutdown();
+  });
+
   it('emits standard ACP permission requests and responds with selected option outcomes', async () => {
     const { acp, runtime, waitForMessage } = createRuntimeHarness();
     const started = await runtime.startSession(startRequest());
