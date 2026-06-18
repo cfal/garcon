@@ -5,13 +5,16 @@
 	import LocalNoticeRow from './rows/LocalNoticeRow.svelte';
 	import { isToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
+	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatDisplayRow } from '$lib/chat/state.svelte';
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { buildConversationFeedRenderModel } from '$lib/chat/conversation-feed-items';
 
 	interface PermissionDecision {
-		allow: boolean;
+		allow: PermissionDecisionPayload['allow'];
+		alwaysAllow?: PermissionDecisionPayload['alwaysAllow'];
+		response?: PermissionDecisionPayload['response'];
 		message?: string;
 	}
 

@@ -5,6 +5,7 @@ import type {
   AgentStopResponse,
   CommandAcceptedResponse,
   CommandErrorCode,
+  PermissionDecisionPayload,
   QueueEnqueueResponse,
   QueueMutationResponse,
 } from '../../common/chat-command-contracts.js';
@@ -153,11 +154,9 @@ interface QueueMutationInput {
   entryId?: string;
 }
 
-interface PermissionDecisionInput {
+interface PermissionDecisionInput extends PermissionDecisionPayload {
   chatId: string;
   permissionRequestId: string;
-  allow: boolean;
-  alwaysAllow: boolean;
   clientRequestId: string;
 }
 
@@ -465,6 +464,7 @@ export class ChatCommandService {
         permissionRequestId: input.permissionRequestId,
         allow: input.allow,
         alwaysAllow: input.alwaysAllow,
+        ...(input.response ? { response: input.response } : {}),
       },
     });
     this.#throwOnConflict(ledger, 'Conflicting permission decision retry');
@@ -472,6 +472,7 @@ export class ChatCommandService {
       this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
         allow: input.allow,
         alwaysAllow: input.alwaysAllow,
+        response: input.response,
       });
       await this.deps.ledger.update(ledger.record.key, { status: 'scheduled' });
     }

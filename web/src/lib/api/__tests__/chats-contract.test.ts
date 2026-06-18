@@ -295,6 +295,7 @@ describe('chats API contract', () => {
 			permissionRequestId: 'perm-1',
 			allow: true,
 			alwaysAllow: false,
+			response: { outcome: { outcome: 'accepted' } },
 		});
 
 		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/permissions/decision');
@@ -304,6 +305,7 @@ describe('chats API contract', () => {
 			permissionRequestId: 'perm-1',
 			allow: true,
 			alwaysAllow: false,
+			response: { outcome: { outcome: 'accepted' } },
 		});
 	});
 

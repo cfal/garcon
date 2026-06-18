@@ -33,6 +33,7 @@ import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import type { AppTab, SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
+import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 
 export interface SessionControllerDeps {
 	sessions: {
@@ -622,7 +623,7 @@ export class ConversationSessionController {
 
 	handlePermissionDecision(
 		permissionRequestId: string,
-		decision: { allow: boolean; alwaysAllow?: boolean },
+		decision: PermissionDecisionPayload,
 	): void {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
@@ -633,6 +634,7 @@ export class ConversationSessionController {
 			permissionRequestId,
 			allow: decision.allow,
 			alwaysAllow: Boolean(decision.alwaysAllow),
+			response: decision.response,
 		})
 			.then(() => {
 				deps.conversationUi.setPendingPermissionRequests(

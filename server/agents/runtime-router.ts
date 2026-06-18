@@ -4,6 +4,7 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
+import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type {
   AmpAgentMode,
   ClaudeThinkingMode,
@@ -238,7 +239,7 @@ export class AgentRuntimeRouter {
     return total;
   }
 
-  resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void {
+  resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void {
     if (!chatId || !permissionRequestId) return;
 
     const chat = this.#registry.getChat(chatId);

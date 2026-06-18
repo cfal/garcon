@@ -12,12 +12,16 @@ function walk(dir) {
 }
 
 describe('agent architecture boundaries', () => {
-  test('does not keep the removed ACP runtime layer', () => {
-    expect(existsSync('server/acp')).toBe(false);
-    expect(existsSync('server/agents/shared/acp-agent-runtime.ts')).toBe(false);
-    expect(existsSync('server/agents/shared/acp-event-converter.ts')).toBe(false);
-    expect(existsSync('server/agents/cursor/cursor-acp-policy.ts')).toBe(false);
-    expect(existsSync('server/agents/cursor/cursor-acp-event-converter.ts')).toBe(false);
+  test('keeps ACP transport generic and Cursor ACP translation colocated', () => {
+    expect(existsSync('server/acp')).toBe(true);
+    expect(existsSync('server/agents/shared/acp-agent-runtime.ts')).toBe(true);
+    expect(existsSync('server/agents/shared/acp-event-converter.ts')).toBe(true);
+    expect(existsSync('server/agents/cursor/cursor-acp-policy.ts')).toBe(true);
+    expect(existsSync('server/agents/cursor/cursor-acp-event-converter.ts')).toBe(true);
+
+    const sharedRuntime = readFileSync('server/agents/shared/acp-agent-runtime.ts', 'utf8');
+    expect(sharedRuntime).not.toContain('CursorAskQuestion');
+    expect(sharedRuntime).not.toContain('CursorCreatePlan');
   });
 
   test('keeps server/providers empty', () => {

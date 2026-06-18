@@ -195,4 +195,27 @@ describe('ChatCommandService', () => {
 
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
+
+  it('forwards structured permission decision responses to agents', async () => {
+    const { service, agents } = makeService();
+    const response = { outcome: { outcome: 'accepted' } };
+
+    await service.submitPermissionDecision({
+      chatId: '1',
+      permissionRequestId: 'perm-1',
+      allow: true,
+      alwaysAllow: false,
+      response,
+      clientRequestId: 'req-perm-1',
+    });
+
+    expect(agents.resolvePermission).toHaveBeenCalledWith('1', 'perm-1', {
+      allow: true,
+      alwaysAllow: false,
+      response,
+    });
+
+    const records = await readLedgerRecords();
+    expect(records[0].payload.response).toEqual(response);
+  });
 });

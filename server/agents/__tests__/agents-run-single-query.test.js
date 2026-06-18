@@ -21,7 +21,7 @@ mock.module('../amp/amp-cli.js', () => ({
   runSingleQuery: ampQuery,
 }));
 
-mock.module('../cursor/cursor-cli.js', () => ({
+mock.module('../cursor/run-single-query.js', () => ({
   runSingleQuery: cursorQuery,
 }));
 
@@ -226,7 +226,7 @@ function makeRegistry(args = {}) {
     onFailed: mock(() => {}),
   };
   const cursor = {
-    startSession: mock(() => Promise.resolve({ agentSessionId: 'cursor-session', nativePath: '!cursor-stream-json:cursor-session' })),
+    startSession: mock(() => Promise.resolve({ agentSessionId: 'cursor-session', nativePath: '!cursor-acp:cursor-session' })),
     runTurn: mock(() => Promise.resolve()),
     isRunning: mock(() => false),
     abort: mock(() => false),

@@ -96,19 +96,29 @@ export function cursorStreamJsonSessionDirPath(
   );
 }
 
-export function cursorLegacyAcpStoreDbPath(sessionId: string, cursorHome = cursorHomePath()): string {
+export function cursorAcpSessionDirPath(sessionId: string, cursorHome = cursorHomePath()): string {
   const safeSessionId = sanitizeCursorSessionId(sessionId);
   const baseSessionsPath = path.join(cursorHome, 'acp-sessions');
-  const storeDbPath = path.join(baseSessionsPath, safeSessionId, 'store.db');
+  const sessionDirPath = path.join(baseSessionsPath, safeSessionId);
   return assertPathWithin(
     baseSessionsPath,
-    storeDbPath,
+    sessionDirPath,
     `Invalid Cursor transcript session path for "${sessionId}".`,
   );
 }
 
+export function cursorAcpStoreDbPath(sessionId: string, cursorHome = cursorHomePath()): string {
+  return path.join(cursorAcpSessionDirPath(sessionId, cursorHome), 'store.db');
+}
+
 export function cursorStoreDbPath(sessionId: string, projectPath: string, cursorHome = cursorHomePath()): string {
-  return cursorStreamJsonStoreDbPath(sessionId, projectPath, cursorHome);
+  const acpStoreDbPath = cursorAcpStoreDbPath(sessionId, cursorHome);
+  if (fs.existsSync(acpStoreDbPath)) return acpStoreDbPath;
+
+  const streamJsonStoreDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, cursorHome);
+  if (fs.existsSync(streamJsonStoreDbPath)) return streamJsonStoreDbPath;
+
+  return acpStoreDbPath;
 }
 
 function isInternalCursorText(value: unknown): boolean {

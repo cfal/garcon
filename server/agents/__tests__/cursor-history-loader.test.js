@@ -6,7 +6,7 @@ import path from 'path';
 import { Database } from 'bun:sqlite';
 
 import {
-  cursorLegacyAcpStoreDbPath,
+  cursorAcpStoreDbPath,
   cursorStoreDbPath,
   cursorStreamJsonStoreDbPath,
   getCursorPreviewFromSessionId,
@@ -25,18 +25,28 @@ describe('Cursor history loader', () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
-  it('builds stream-json and legacy ACP migration source paths and rejects unsafe session ids', () => {
+  it('builds ACP and stream-json paths and rejects unsafe session ids', () => {
     const projectPath = '/tmp/project';
     const projectHash = crypto.createHash('md5').update(path.resolve(projectPath)).digest('hex');
 
     expect(cursorStreamJsonStoreDbPath('session-1', projectPath, tempRoot))
       .toBe(path.join(tempRoot, 'chats', projectHash, 'session-1', 'store.db'));
-    expect(cursorLegacyAcpStoreDbPath('session-1', tempRoot))
+    expect(cursorAcpStoreDbPath('session-1', tempRoot))
       .toBe(path.join(tempRoot, 'acp-sessions', 'session-1', 'store.db'));
     expect(cursorStoreDbPath('session-1', projectPath, tempRoot))
-      .toBe(path.join(tempRoot, 'chats', projectHash, 'session-1', 'store.db'));
+      .toBe(path.join(tempRoot, 'acp-sessions', 'session-1', 'store.db'));
     expect(() => cursorStreamJsonStoreDbPath('../session', projectPath, tempRoot))
       .toThrow('Invalid Cursor session id');
+  });
+
+  it('falls back to stream-json store paths when no ACP store exists', async () => {
+    const sessionId = 'stream-fallback';
+    const projectPath = '/tmp/project';
+    const streamJsonStoreDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, tempRoot);
+    await fs.mkdir(path.dirname(streamJsonStoreDbPath), { recursive: true });
+    await fs.writeFile(streamJsonStoreDbPath, 'stream db');
+
+    expect(cursorStoreDbPath(sessionId, projectPath, tempRoot)).toBe(streamJsonStoreDbPath);
   });
 
   it('raises a clear error when the Cursor store is missing', async () => {
@@ -266,7 +276,7 @@ describe('Cursor history loader', () => {
   it('loads Cursor store.db blobs and builds previews', async () => {
     const sessionId = 'session-db';
     const projectPath = '/tmp/project';
-    const storeDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, tempRoot);
+    const storeDbPath = cursorAcpStoreDbPath(sessionId, tempRoot);
     await fs.mkdir(path.dirname(storeDbPath), { recursive: true });
 
     const db = new Database(storeDbPath);

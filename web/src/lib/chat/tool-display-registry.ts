@@ -51,6 +51,8 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'write-stdin-tool-use': 'WriteStdin',
 	'enter-plan-mode-tool-use': 'EnterPlanMode',
 	'exit-plan-mode-tool-use': 'ExitPlanMode',
+	'cursor-ask-question-tool-use': 'Question',
+	'cursor-create-plan-tool-use': 'Plan',
 	'amp-finder-tool-use': 'Finder',
 	'amp-oracle-tool-use': 'Oracle',
 	'amp-librarian-tool-use': 'Librarian',
@@ -465,6 +467,26 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 	},
 
 	'exit-plan-mode-tool-use': EXIT_PLAN_MODE_RULE,
+
+	'cursor-ask-question-tool-use': {
+		input: {
+			mode: 'hidden',
+			label: 'Question',
+		},
+		result: {
+			hidden: true,
+		},
+	},
+
+	'cursor-create-plan-tool-use': {
+		input: {
+			mode: 'hidden',
+			label: 'Plan',
+		},
+		result: {
+			hidden: true,
+		},
+	},
 
 	'web-search-tool-use': WEB_SEARCH_RULE,
 

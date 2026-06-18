@@ -3,15 +3,16 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { forkCursorStreamJsonSession } from '../cursor/cursor-session-store.js';
+import { forkCursorAcpSession } from '../cursor/cursor-session-store.js';
 import {
-  cursorStreamJsonSessionDirPath,
+  cursorAcpSessionDirPath,
+  cursorAcpStoreDbPath,
   cursorStreamJsonStoreDbPath,
 } from '../cursor/history-loader.js';
 
 let tempRoot;
 
-describe('Cursor stream-json session store', () => {
+describe('Cursor ACP session store', () => {
   beforeEach(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-cursor-session-store-'));
   });
@@ -20,20 +21,20 @@ describe('Cursor stream-json session store', () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
-  it('forks a Cursor stream-json session by copying the full session directory to a new id', async () => {
+  it('forks a Cursor ACP session by copying the full session directory to a new id', async () => {
     const projectPath = path.join(tempRoot, 'project');
     const sourceSessionId = 'source-session';
     const targetSessionId = 'target-session';
-    const sourceDbPath = cursorStreamJsonStoreDbPath(sourceSessionId, projectPath, tempRoot);
-    const targetDbPath = cursorStreamJsonStoreDbPath(targetSessionId, projectPath, tempRoot);
+    const sourceDbPath = cursorAcpStoreDbPath(sourceSessionId, tempRoot);
+    const targetDbPath = cursorAcpStoreDbPath(targetSessionId, tempRoot);
     await fs.mkdir(path.dirname(sourceDbPath), { recursive: true });
     await fs.writeFile(sourceDbPath, 'source db');
     await fs.writeFile(path.join(path.dirname(sourceDbPath), 'meta.json'), '{"hasConversation":true}');
     await fs.writeFile(path.join(path.dirname(sourceDbPath), 'store.db-wal'), 'source wal');
 
-    const result = await forkCursorStreamJsonSession({
+    const result = await forkCursorAcpSession({
       agentSessionId: sourceSessionId,
-      nativePath: `!cursor-stream-json:${sourceSessionId}`,
+      nativePath: `!cursor-acp:${sourceSessionId}`,
       projectPath,
     }, {
       cursorHome: tempRoot,
@@ -42,7 +43,7 @@ describe('Cursor stream-json session store', () => {
 
     expect(result).toEqual({
       agentSessionId: targetSessionId,
-      nativePath: `!cursor-stream-json:${targetSessionId}`,
+      nativePath: `!cursor-acp:${targetSessionId}`,
     });
     expect(await fs.readFile(targetDbPath, 'utf8')).toBe('source db');
     expect(await fs.readFile(path.join(path.dirname(targetDbPath), 'meta.json'), 'utf8')).toBe('{"hasConversation":true}');
@@ -53,13 +54,13 @@ describe('Cursor stream-json session store', () => {
     const projectPath = path.join(tempRoot, 'project');
     const sourceSessionId = 'native-path-source';
     const targetSessionId = 'native-path-target';
-    const sourceDbPath = cursorStreamJsonStoreDbPath(sourceSessionId, projectPath, tempRoot);
+    const sourceDbPath = cursorAcpStoreDbPath(sourceSessionId, tempRoot);
     await fs.mkdir(path.dirname(sourceDbPath), { recursive: true });
     await fs.writeFile(sourceDbPath, 'source db');
 
-    const result = await forkCursorStreamJsonSession({
+    const result = await forkCursorAcpSession({
       agentSessionId: null,
-      nativePath: `!cursor-stream-json:${sourceSessionId}`,
+      nativePath: `!cursor-acp:${sourceSessionId}`,
       projectPath,
     }, {
       cursorHome: tempRoot,
@@ -67,23 +68,49 @@ describe('Cursor stream-json session store', () => {
     });
 
     expect(result.agentSessionId).toBe(targetSessionId);
-    expect(await fs.readFile(cursorStreamJsonStoreDbPath(targetSessionId, projectPath, tempRoot), 'utf8')).toBe('source db');
+    expect(await fs.readFile(cursorAcpStoreDbPath(targetSessionId, tempRoot), 'utf8')).toBe('source db');
+  });
+
+  it('can fork an unmigrated stream-json source into an ACP target', async () => {
+    const projectPath = path.join(tempRoot, 'project');
+    const sourceSessionId = 'stream-source';
+    const targetSessionId = 'acp-target';
+    const sourceDbPath = cursorStreamJsonStoreDbPath(sourceSessionId, projectPath, tempRoot);
+    await fs.mkdir(path.dirname(sourceDbPath), { recursive: true });
+    await fs.writeFile(sourceDbPath, 'source db');
+    await fs.writeFile(`${sourceDbPath}-wal`, 'source wal');
+
+    const result = await forkCursorAcpSession({
+      agentSessionId: sourceSessionId,
+      nativePath: `!cursor-stream-json:${sourceSessionId}`,
+      projectPath,
+    }, {
+      cursorHome: tempRoot,
+      createSessionId: () => targetSessionId,
+    });
+
+    expect(result).toEqual({
+      agentSessionId: targetSessionId,
+      nativePath: `!cursor-acp:${targetSessionId}`,
+    });
+    expect(await fs.readFile(cursorAcpStoreDbPath(targetSessionId, tempRoot), 'utf8')).toBe('source db');
+    expect(await fs.readFile(`${cursorAcpStoreDbPath(targetSessionId, tempRoot)}-wal`, 'utf8')).toBe('source wal');
   });
 
   it('does not overwrite an existing target session directory', async () => {
     const projectPath = path.join(tempRoot, 'project');
     const sourceSessionId = 'source-session';
     const targetSessionId = 'target-session';
-    const sourceDbPath = cursorStreamJsonStoreDbPath(sourceSessionId, projectPath, tempRoot);
-    const targetDir = cursorStreamJsonSessionDirPath(targetSessionId, projectPath, tempRoot);
+    const sourceDbPath = cursorAcpStoreDbPath(sourceSessionId, tempRoot);
+    const targetDir = cursorAcpSessionDirPath(targetSessionId, tempRoot);
     await fs.mkdir(path.dirname(sourceDbPath), { recursive: true });
     await fs.writeFile(sourceDbPath, 'source db');
     await fs.mkdir(targetDir, { recursive: true });
     await fs.writeFile(path.join(targetDir, 'store.db'), 'existing db');
 
-    await expect(forkCursorStreamJsonSession({
+    await expect(forkCursorAcpSession({
       agentSessionId: sourceSessionId,
-      nativePath: `!cursor-stream-json:${sourceSessionId}`,
+      nativePath: `!cursor-acp:${sourceSessionId}`,
       projectPath,
     }, {
       cursorHome: tempRoot,

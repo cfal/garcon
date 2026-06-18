@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 
 import { createCursorAgent } from '../cursor/index.js';
-import { cursorStreamJsonStoreDbPath } from '../cursor/history-loader.js';
+import { cursorAcpStoreDbPath, cursorStreamJsonStoreDbPath } from '../cursor/history-loader.js';
 
 let tempRoot;
 
@@ -17,7 +17,7 @@ describe('createCursorAgent', () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
-  it('advertises fork support and forks by copying Cursor stream-json storage', async () => {
+  it('advertises fork support and forks Cursor storage into an ACP session', async () => {
     const workspaceDir = path.join(tempRoot, 'workspace');
     const cursorHome = path.join(tempRoot, 'cursor-home');
     const sourceSessionId = 'source-session';
@@ -47,9 +47,9 @@ describe('createCursorAgent', () => {
 
     expect(forked).toEqual({
       agentSessionId: targetSessionId,
-      nativePath: `!cursor-stream-json:${targetSessionId}`,
+      nativePath: `!cursor-acp:${targetSessionId}`,
     });
-    expect(await fs.readFile(cursorStreamJsonStoreDbPath(targetSessionId, workspaceDir, cursorHome), 'utf8'))
+    expect(await fs.readFile(cursorAcpStoreDbPath(targetSessionId, cursorHome), 'utf8'))
       .toBe('source db');
   });
 });

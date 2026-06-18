@@ -17,6 +17,8 @@ import {
 	WriteStdinToolUseMessage,
 	EnterPlanModeToolUseMessage,
 	ExitPlanModeToolUseMessage,
+	CursorAskQuestionToolUseMessage,
+	CursorCreatePlanToolUseMessage,
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
 	AmpLibrarianToolUseMessage,
@@ -194,6 +196,47 @@ describe('tool-use serialization round-trip', () => {
 		const parsed = roundTrip(msg);
 		expect(parsed.plan).toBe('The plan text');
 		expect(parsed.allowedPrompts).toEqual(prompts);
+	});
+
+	it('CursorAskQuestionToolUseMessage preserves questions', () => {
+		const msg = new CursorAskQuestionToolUseMessage(TS, 'id-cursor-question', 'Need input', [
+			{
+				id: 'q1',
+				prompt: 'Which mode?',
+				options: [{ id: 'agent', label: 'Agent' }],
+				allowMultiple: false,
+			},
+		]);
+		const parsed = roundTrip(msg);
+		expect(parsed).toBeInstanceOf(CursorAskQuestionToolUseMessage);
+		expect(parsed.questions).toEqual([
+			{
+				id: 'q1',
+				prompt: 'Which mode?',
+				options: [{ id: 'agent', label: 'Agent' }],
+				allowMultiple: false,
+			},
+		]);
+	});
+
+	it('CursorCreatePlanToolUseMessage preserves plan metadata', () => {
+		const msg = new CursorCreatePlanToolUseMessage(
+			TS,
+			'id-cursor-plan',
+			'Do the work',
+			'Refactor',
+			'Tighten implementation',
+			[{ id: 'todo-1', content: 'Inspect', status: 'completed' }],
+			false,
+			[{ name: 'Phase 1', todos: [{ content: 'Patch', status: 'in_progress' }] }],
+		);
+		const parsed = roundTrip(msg);
+		expect(parsed).toBeInstanceOf(CursorCreatePlanToolUseMessage);
+		expect(parsed.plan).toBe('Do the work');
+		expect(parsed.todos).toEqual([{ id: 'todo-1', content: 'Inspect', status: 'completed' }]);
+		expect(parsed.phases).toEqual([
+			{ name: 'Phase 1', todos: [{ content: 'Patch', status: 'in_progress' }] },
+		]);
 	});
 
 	it('AmpFinderToolUseMessage preserves query', () => {

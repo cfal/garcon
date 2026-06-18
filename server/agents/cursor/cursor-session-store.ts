@@ -2,9 +2,10 @@ import crypto from 'crypto';
 import { constants, promises as fs } from 'fs';
 import path from 'path';
 import type { AgentChatEntry, StartedAgentSession } from '../session-types.js';
-import { createCursorStreamJsonNativePath, getCursorAgentSessionIdFromNativePath } from './cursor-native-path.js';
+import { createCursorAcpNativePath, getCursorAgentSessionIdFromNativePath } from './cursor-native-path.js';
 import {
-  cursorStreamJsonSessionDirPath,
+  cursorAcpSessionDirPath,
+  cursorAcpStoreDbPath,
   cursorStreamJsonStoreDbPath,
 } from './history-loader.js';
 
@@ -40,7 +41,33 @@ async function copyCursorSessionDirectory(sourceDir: string, targetDir: string):
   }
 }
 
-export async function forkCursorStreamJsonSession(
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function copySqliteStore(sourceDbPath: string, targetDbPath: string): Promise<void> {
+  if (!await pathExists(sourceDbPath)) {
+    throw new Error(`Cursor source session database not found: ${sourceDbPath}`);
+  }
+  await fs.mkdir(path.dirname(targetDbPath), { recursive: true });
+  try {
+    for (const suffix of ['', '-wal', '-shm']) {
+      const sourcePath = `${sourceDbPath}${suffix}`;
+      if (!await pathExists(sourcePath)) continue;
+      await fs.copyFile(sourcePath, `${targetDbPath}${suffix}`, constants.COPYFILE_EXCL);
+    }
+  } catch (error) {
+    await fs.rm(path.dirname(targetDbPath), { force: true, recursive: true }).catch(() => {});
+    throw error;
+  }
+}
+
+export async function forkCursorAcpSession(
   sourceSession: Pick<AgentChatEntry, 'agentSessionId' | 'nativePath' | 'projectPath'>,
   options: CursorForkSessionOptions = {},
 ): Promise<StartedAgentSession> {
@@ -51,15 +78,22 @@ export async function forkCursorStreamJsonSession(
   }
 
   const targetSessionId = options.createSessionId?.() ?? crypto.randomUUID();
-  const sourceDbPath = cursorStreamJsonStoreDbPath(sourceSessionId, sourceSession.projectPath, options.cursorHome);
-  await fs.access(sourceDbPath, constants.F_OK);
+  const sourceAcpDir = cursorAcpSessionDirPath(sourceSessionId, options.cursorHome);
+  const targetAcpDir = cursorAcpSessionDirPath(targetSessionId, options.cursorHome);
 
-  const sourceDir = cursorStreamJsonSessionDirPath(sourceSessionId, sourceSession.projectPath, options.cursorHome);
-  const targetDir = cursorStreamJsonSessionDirPath(targetSessionId, sourceSession.projectPath, options.cursorHome);
-  await copyCursorSessionDirectory(sourceDir, targetDir);
+  if (await pathExists(cursorAcpStoreDbPath(sourceSessionId, options.cursorHome))) {
+    await copyCursorSessionDirectory(sourceAcpDir, targetAcpDir);
+  } else {
+    const sourceStreamJsonDbPath = cursorStreamJsonStoreDbPath(
+      sourceSessionId,
+      sourceSession.projectPath,
+      options.cursorHome,
+    );
+    await copySqliteStore(sourceStreamJsonDbPath, cursorAcpStoreDbPath(targetSessionId, options.cursorHome));
+  }
 
   return {
     agentSessionId: targetSessionId,
-    nativePath: createCursorStreamJsonNativePath(targetSessionId),
+    nativePath: createCursorAcpNativePath(targetSessionId),
   };
 }

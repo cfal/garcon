@@ -5,7 +5,7 @@ import { getCursorPreviewFromSessionId, loadCursorChatMessagesBySessionId } from
 import type { AgentChatEntry } from '../session-types.js';
 import type { AgentTranscriptSource } from '../types.js';
 
-// Cursor stream-json sessions persist SQLite transcripts under ~/.cursor/chats.
+// Cursor ACP sessions persist SQLite transcripts under ~/.cursor/acp-sessions.
 export function createCursorTranscriptSource(
   requestIdentities: CursorRequestIdentityStore,
 ): AgentTranscriptSource {

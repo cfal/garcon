@@ -4,9 +4,9 @@ import os from 'os';
 import path from 'path';
 
 import { ChatRegistry } from '../../chats/store.js';
-import { migrateCursorAcpSessionsToStreamJson } from '../cursor/cursor-acp-migration.js';
+import { migrateCursorStreamJsonSessionsToAcp } from '../cursor/cursor-acp-migration.js';
 import {
-  cursorLegacyAcpStoreDbPath,
+  cursorAcpStoreDbPath,
   cursorStreamJsonStoreDbPath,
 } from '../cursor/history-loader.js';
 
@@ -18,7 +18,7 @@ async function readRegistryFile() {
   return JSON.parse(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'));
 }
 
-describe('Cursor ACP session migration', () => {
+describe('Cursor stream-json to ACP session migration', () => {
   beforeEach(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-cursor-acp-migration-'));
     workspaceDir = path.join(tempRoot, 'workspace');
@@ -30,14 +30,14 @@ describe('Cursor ACP session migration', () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
-  it('copies ACP transcript databases and converts Cursor native paths to stream-json', async () => {
+  it('copies stream-json transcript databases and converts Cursor native paths to ACP', async () => {
     const sessionId = 'cursor-session-1';
     const projectPath = path.join(tempRoot, 'project');
-    const sourceDbPath = cursorLegacyAcpStoreDbPath(sessionId, cursorHome);
-    const targetDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, cursorHome);
+    const sourceDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, cursorHome);
+    const targetDbPath = cursorAcpStoreDbPath(sessionId, cursorHome);
     await fs.mkdir(path.dirname(sourceDbPath), { recursive: true });
-    await fs.writeFile(sourceDbPath, 'legacy db');
-    await fs.writeFile(`${sourceDbPath}-wal`, 'legacy wal');
+    await fs.writeFile(sourceDbPath, 'stream db');
+    await fs.writeFile(`${sourceDbPath}-wal`, 'stream wal');
 
     await fs.writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
       version: 2,
@@ -45,7 +45,7 @@ describe('Cursor ACP session migration', () => {
         cursorChat: {
           agentId: 'cursor',
           agentSessionId: sessionId,
-          nativePath: `!cursor-acp:${sessionId}`,
+          nativePath: `!cursor-stream-json:${sessionId}`,
           projectPath,
           tags: [],
           model: 'default',
@@ -56,7 +56,7 @@ describe('Cursor ACP session migration', () => {
     const registry = new ChatRegistry(workspaceDir);
     await registry.init();
 
-    const result = await migrateCursorAcpSessionsToStreamJson(registry, cursorHome);
+    const result = await migrateCursorStreamJsonSessionsToAcp(registry, cursorHome);
 
     expect(result).toEqual({
       converted: 1,
@@ -64,23 +64,23 @@ describe('Cursor ACP session migration', () => {
       skipped: 0,
       failed: 0,
     });
-    expect(registry.getChat('cursorChat')?.nativePath).toBe(`!cursor-stream-json:${sessionId}`);
-    expect(await fs.readFile(targetDbPath, 'utf8')).toBe('legacy db');
-    expect(await fs.readFile(`${targetDbPath}-wal`, 'utf8')).toBe('legacy wal');
+    expect(registry.getChat('cursorChat')?.nativePath).toBe(`!cursor-acp:${sessionId}`);
+    expect(await fs.readFile(targetDbPath, 'utf8')).toBe('stream db');
+    expect(await fs.readFile(`${targetDbPath}-wal`, 'utf8')).toBe('stream wal');
 
     const persisted = await readRegistryFile();
-    expect(persisted.sessions.cursorChat.nativePath).toBe(`!cursor-stream-json:${sessionId}`);
+    expect(persisted.sessions.cursorChat.nativePath).toBe(`!cursor-acp:${sessionId}`);
   });
 
-  it('converts native paths when the stream-json transcript already exists without overwriting it', async () => {
+  it('converts native paths when the ACP transcript already exists without overwriting it', async () => {
     const sessionId = 'cursor-session-2';
     const projectPath = path.join(tempRoot, 'project');
-    const sourceDbPath = cursorLegacyAcpStoreDbPath(sessionId, cursorHome);
-    const targetDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, cursorHome);
+    const sourceDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, cursorHome);
+    const targetDbPath = cursorAcpStoreDbPath(sessionId, cursorHome);
     await fs.mkdir(path.dirname(sourceDbPath), { recursive: true });
     await fs.mkdir(path.dirname(targetDbPath), { recursive: true });
-    await fs.writeFile(sourceDbPath, 'legacy db');
-    await fs.writeFile(targetDbPath, 'stream db');
+    await fs.writeFile(sourceDbPath, 'stream db');
+    await fs.writeFile(targetDbPath, 'acp db');
 
     await fs.writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
       version: 2,
@@ -88,7 +88,7 @@ describe('Cursor ACP session migration', () => {
         cursorChat: {
           agentId: 'cursor',
           agentSessionId: sessionId,
-          nativePath: `!cursor-acp:${sessionId}`,
+          nativePath: `!cursor-stream-json:${sessionId}`,
           projectPath,
           tags: [],
           model: 'default',
@@ -99,7 +99,7 @@ describe('Cursor ACP session migration', () => {
     const registry = new ChatRegistry(workspaceDir);
     await registry.init();
 
-    const result = await migrateCursorAcpSessionsToStreamJson(registry, cursorHome);
+    const result = await migrateCursorStreamJsonSessionsToAcp(registry, cursorHome);
 
     expect(result).toEqual({
       converted: 1,
@@ -107,18 +107,18 @@ describe('Cursor ACP session migration', () => {
       skipped: 0,
       failed: 0,
     });
-    expect(registry.getChat('cursorChat')?.nativePath).toBe(`!cursor-stream-json:${sessionId}`);
-    expect(await fs.readFile(targetDbPath, 'utf8')).toBe('stream db');
+    expect(registry.getChat('cursorChat')?.nativePath).toBe(`!cursor-acp:${sessionId}`);
+    expect(await fs.readFile(targetDbPath, 'utf8')).toBe('acp db');
   });
 
-  it('leaves non-ACP Cursor sessions and other agents unchanged', async () => {
+  it('leaves ACP Cursor sessions and other agents unchanged', async () => {
     await fs.writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
       version: 2,
       sessions: {
         cursorStream: {
           agentId: 'cursor',
-          agentSessionId: 'cursor-stream',
-          nativePath: '!cursor-stream-json:cursor-stream',
+          agentSessionId: 'cursor-acp',
+          nativePath: '!cursor-acp:cursor-acp',
           projectPath: '/p',
           tags: [],
           model: 'default',
@@ -137,7 +137,7 @@ describe('Cursor ACP session migration', () => {
     const registry = new ChatRegistry(workspaceDir);
     await registry.init();
 
-    const result = await migrateCursorAcpSessionsToStreamJson(registry, cursorHome);
+    const result = await migrateCursorStreamJsonSessionsToAcp(registry, cursorHome);
 
     expect(result).toEqual({
       converted: 0,
@@ -145,7 +145,7 @@ describe('Cursor ACP session migration', () => {
       skipped: 0,
       failed: 0,
     });
-    expect(registry.getChat('cursorStream')?.nativePath).toBe('!cursor-stream-json:cursor-stream');
+    expect(registry.getChat('cursorStream')?.nativePath).toBe('!cursor-acp:cursor-acp');
     expect(registry.getChat('ampChat')?.nativePath).toBe('!cursor-acp:not-a-cursor-chat');
   });
 });

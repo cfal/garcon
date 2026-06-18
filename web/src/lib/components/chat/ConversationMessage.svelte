@@ -19,6 +19,7 @@
 		PermissionRequestMessage,
 	} from '$shared/chat-types';
 	import type { ChatMessage, ToolResultMessage, ToolUseChatMessage } from '$shared/chat-types';
+	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { Check, ChevronRight, CircleAlert, LoaderCircle } from '@lucide/svelte';
@@ -55,7 +56,7 @@
 		permissionTerminal?: PermissionTerminal;
 		onPermissionDecision?: (
 			permissionRequestId: string,
-			decision: { allow: boolean; message?: string },
+			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
 		agentId: SessionAgentId | string;

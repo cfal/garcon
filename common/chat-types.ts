@@ -252,6 +252,57 @@ export class ExitPlanModeToolUseMessage {
   ) {}
 }
 
+export interface CursorAskQuestionOption {
+  id: string;
+  label: string;
+}
+
+export interface CursorAskQuestionPrompt {
+  id: string;
+  prompt: string;
+  options: CursorAskQuestionOption[];
+  allowMultiple?: boolean;
+}
+
+export class CursorAskQuestionToolUseMessage {
+  readonly type = 'cursor-ask-question-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public title: string | undefined,
+    public questions: CursorAskQuestionPrompt[],
+  ) {}
+}
+
+export type CursorPlanTodoStatus = TodoStatus | 'cancelled';
+
+export interface CursorPlanTodo {
+  id?: string;
+  content: string;
+  status: CursorPlanTodoStatus;
+}
+
+export interface CursorPlanPhase {
+  name: string;
+  todos: CursorPlanTodo[];
+}
+
+export class CursorCreatePlanToolUseMessage {
+  readonly type = 'cursor-create-plan-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public plan: string,
+    public name?: string,
+    public overview?: string,
+    public todos?: CursorPlanTodo[],
+    public isProject?: boolean,
+    public phases?: CursorPlanPhase[],
+  ) {}
+}
+
 export class AmpFinderToolUseMessage {
   readonly type = 'amp-finder-tool-use' as const;
 
@@ -449,6 +500,8 @@ export type ToolUseChatMessage =
   | WriteStdinToolUseMessage
   | EnterPlanModeToolUseMessage
   | ExitPlanModeToolUseMessage
+  | CursorAskQuestionToolUseMessage
+  | CursorCreatePlanToolUseMessage
   | AmpFinderToolUseMessage
   | AmpOracleToolUseMessage
   | AmpLibrarianToolUseMessage
@@ -541,6 +594,77 @@ function asAllowedPrompts(v: unknown): Array<{ tool: string; prompt: string }> |
     prompts.push({ tool: raw.tool, prompt: raw.prompt });
   }
   if (prompts.length > 0 || v.length === 0) return prompts;
+  return undefined;
+}
+
+function asOptionalBoolean(v: unknown): boolean | undefined {
+  return typeof v === 'boolean' ? v : undefined;
+}
+
+function asCursorAskQuestionOptions(v: unknown): CursorAskQuestionOption[] {
+  if (!Array.isArray(v)) return [];
+  const options: CursorAskQuestionOption[] = [];
+  for (const entry of v) {
+    const raw = asRecord(entry);
+    if (typeof raw.id !== 'string' || typeof raw.label !== 'string') continue;
+    options.push({ id: raw.id, label: raw.label });
+  }
+  return options;
+}
+
+function asCursorAskQuestions(v: unknown): CursorAskQuestionPrompt[] {
+  if (!Array.isArray(v)) return [];
+  const questions: CursorAskQuestionPrompt[] = [];
+  for (const entry of v) {
+    const raw = asRecord(entry);
+    if (typeof raw.id !== 'string' || typeof raw.prompt !== 'string') continue;
+    questions.push({
+      id: raw.id,
+      prompt: raw.prompt,
+      options: asCursorAskQuestionOptions(raw.options),
+      allowMultiple: asOptionalBoolean(raw.allowMultiple),
+    });
+  }
+  return questions;
+}
+
+function asCursorPlanTodoStatus(v: unknown): CursorPlanTodoStatus {
+  return v === 'completed'
+    || v === 'in_progress'
+    || v === 'cancelled'
+    ? v
+    : 'pending';
+}
+
+function asCursorPlanTodos(v: unknown): CursorPlanTodo[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const todos: CursorPlanTodo[] = [];
+  for (const entry of v) {
+    const raw = asRecord(entry);
+    if (typeof raw.content !== 'string') continue;
+    const todo: CursorPlanTodo = {
+      content: raw.content,
+      status: asCursorPlanTodoStatus(raw.status),
+    };
+    if (typeof raw.id === 'string') todo.id = raw.id;
+    todos.push(todo);
+  }
+  if (todos.length > 0 || v.length === 0) return todos;
+  return undefined;
+}
+
+function asCursorPlanPhases(v: unknown): CursorPlanPhase[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const phases: CursorPlanPhase[] = [];
+  for (const entry of v) {
+    const raw = asRecord(entry);
+    if (typeof raw.name !== 'string') continue;
+    phases.push({
+      name: raw.name,
+      todos: asCursorPlanTodos(raw.todos) ?? [],
+    });
+  }
+  if (phases.length > 0 || v.length === 0) return phases;
   return undefined;
 }
 
@@ -670,6 +794,25 @@ const TOOL_USE_MESSAGE_PARSERS = {
       str(data.timestamp), str(data.toolId),
       plan,
       asAllowedPrompts(data.allowedPrompts));
+  },
+
+  'cursor-ask-question-tool-use': (data) =>
+    new CursorAskQuestionToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.title),
+      asCursorAskQuestions(data.questions)),
+
+  'cursor-create-plan-tool-use': (data) => {
+    const plan = asOptionalString(data.plan);
+    if (plan === undefined) return null;
+    return new CursorCreatePlanToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      plan,
+      asOptionalString(data.name),
+      asOptionalString(data.overview),
+      asCursorPlanTodos(data.todos),
+      asOptionalBoolean(data.isProject),
+      asCursorPlanPhases(data.phases));
   },
 
   'amp-finder-tool-use': (data) =>

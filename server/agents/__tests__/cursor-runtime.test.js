@@ -1,490 +1,324 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
-import { CursorRuntime, runSingleQuery } from '../cursor/cursor-cli.js';
+import {
+  BashToolUseMessage,
+  CursorAskQuestionToolUseMessage,
+  CursorCreatePlanToolUseMessage,
+  PermissionRequestMessage,
+} from '../../../common/chat-types.js';
+import { AcpTransport } from '../../acp/transport.js';
+import { AcpAgentRuntime } from '../shared/acp-agent-runtime.js';
+import { CursorAcpEventConverter } from '../cursor/cursor-acp-event-converter.js';
+import { createCursorAcpPolicy } from '../cursor/cursor-acp-policy.js';
+import { runSingleQuery } from '../cursor/run-single-query.js';
 
-function createFakeProc() {
+function createAcpHarness() {
   const encoder = new TextEncoder();
   let stdoutController;
-  let resolveExited;
-  let closed = false;
+  let exitResolve;
+  let promptRequestId = null;
+  const writes = [];
+  const writeWaiters = [];
 
   const stdout = new ReadableStream({
     start(controller) {
       stdoutController = controller;
     },
   });
-
   const stderr = new ReadableStream({
     start(controller) {
       controller.close();
     },
   });
+  const exited = new Promise((resolve) => {
+    exitResolve = resolve;
+  });
 
-  const proc = {
+  function resolveWriteWaiters(message) {
+    for (let i = writeWaiters.length - 1; i >= 0; i -= 1) {
+      const waiter = writeWaiters[i];
+      if (!waiter.predicate(message)) continue;
+      writeWaiters.splice(i, 1);
+      waiter.resolve(message);
+    }
+  }
+
+  function emit(message) {
+    stdoutController.enqueue(encoder.encode(`${JSON.stringify(message)}\n`));
+  }
+
+  function handleClientMessage(message) {
+    writes.push(message);
+    resolveWriteWaiters(message);
+
+    if (message.method === 'initialize') {
+      emit({
+        jsonrpc: '2.0',
+        id: message.id,
+        result: {
+          protocolVersion: 1,
+          agentCapabilities: {
+            loadSession: true,
+            sessionCapabilities: { load: true },
+          },
+        },
+      });
+      return;
+    }
+
+    if (message.method === 'authenticate') {
+      emit({ jsonrpc: '2.0', id: message.id, result: {} });
+      return;
+    }
+
+    if (message.method === 'session/new') {
+      emit({ jsonrpc: '2.0', id: message.id, result: { sessionId: 'cursor-session' } });
+      return;
+    }
+
+    if (message.method === 'session/prompt') {
+      promptRequestId = message.id;
+      return;
+    }
+
+    if (message.method === 'session/cancel') {
+      emit({ jsonrpc: '2.0', id: message.id, result: {} });
+    }
+  }
+
+  const process = {
+    stdin: {
+      write(data) {
+        for (const line of String(data).split('\n')) {
+          if (!line.trim()) continue;
+          handleClientMessage(JSON.parse(line));
+        }
+      },
+      end() {},
+    },
     stdout,
     stderr,
-    killed: false,
-    exited: new Promise((resolve) => {
-      resolveExited = resolve;
-    }),
-    pushJson(message) {
-      stdoutController.enqueue(encoder.encode(JSON.stringify(message) + '\n'));
-    },
-    close(exitCode = 0) {
-      if (closed) return;
-      closed = true;
-      stdoutController.close();
-      resolveExited(exitCode);
-    },
+    exited,
     kill() {
-      this.killed = true;
-      this.close(143);
+      stdoutController.close();
+      exitResolve(0);
     },
   };
 
-  return proc;
+  return {
+    writes,
+    createTransport() {
+      return new AcpTransport({
+        spawn: () => process,
+      });
+    },
+    serverRequest(message) {
+      emit({ jsonrpc: '2.0', ...message });
+    },
+    sessionUpdate(update) {
+      emit({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: { sessionId: 'cursor-session', update },
+      });
+    },
+    finishPrompt() {
+      if (promptRequestId === null) throw new Error('session/prompt was not received');
+      emit({
+        jsonrpc: '2.0',
+        id: promptRequestId,
+        result: { stopReason: 'end_turn', requestId: 'cursor-request-1' },
+      });
+    },
+    waitForWrite(predicate) {
+      const existing = writes.find(predicate);
+      if (existing) return Promise.resolve(existing);
+      return new Promise((resolve) => {
+        writeWaiters.push({ predicate, resolve });
+      });
+    },
+    waitForClientMethod(method) {
+      return this.waitForWrite((message) => message.method === method);
+    },
+  };
 }
 
-function createCommandProc(stdoutText, exitCode = 0) {
-  const encoder = new TextEncoder();
-  const streamFor = (text) => new ReadableStream({
-    start(controller) {
-      if (text) controller.enqueue(encoder.encode(text));
-      controller.close();
-    },
+function startRequest(overrides = {}) {
+  return {
+    chatId: 'chat-1',
+    command: 'do work',
+    projectPath: '/tmp/project',
+    model: 'default',
+    permissionMode: 'default',
+    thinkingMode: 'none',
+    ...overrides,
+  };
+}
+
+function createRuntimeHarness() {
+  const acp = createAcpHarness();
+  const runtime = new AcpAgentRuntime(createCursorAcpPolicy(), {
+    converter: new CursorAcpEventConverter(),
+    createTransport: acp.createTransport,
+  });
+  const messages = [];
+  const messageWaiters = [];
+
+  runtime.onMessages((_chatId, incoming) => {
+    messages.push(...incoming);
+    for (let i = messageWaiters.length - 1; i >= 0; i -= 1) {
+      const waiter = messageWaiters[i];
+      const match = messages.find(waiter.predicate);
+      if (!match) continue;
+      messageWaiters.splice(i, 1);
+      waiter.resolve(match);
+    }
   });
 
   return {
-    stdout: streamFor(stdoutText),
-    stderr: streamFor(''),
-    exited: Promise.resolve(exitCode),
+    acp,
+    runtime,
+    waitForMessage(predicate) {
+      const existing = messages.find(predicate);
+      if (existing) return Promise.resolve(existing);
+      return new Promise((resolve) => {
+        messageWaiters.push({ predicate, resolve });
+      });
+    },
   };
 }
 
-describe('CursorRuntime lifecycle', () => {
-  let originalSpawn;
-  let spawnMock;
+describe('Cursor ACP runtime', () => {
+  it('emits standard ACP permission requests and responds with selected option outcomes', async () => {
+    const { acp, runtime, waitForMessage } = createRuntimeHarness();
+    const started = await runtime.startSession(startRequest());
 
-  beforeEach(() => {
-    originalSpawn = Bun.spawn;
-    spawnMock = mock();
-    Bun.spawn = spawnMock;
-  });
-
-  afterEach(() => {
-    Bun.spawn = originalSpawn;
-  });
-
-  it('resolves startSession on system init and requests Cursor stream JSON', async () => {
-    const provider = new CursorRuntime();
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const startedPromise = provider.startSession({
-      command: 'hello cursor',
-      chatId: 'chat-1',
-      projectPath: '/proj',
-      model: 'gpt-5.3-codex',
-      permissionMode: 'default',
-      thinkingMode: 'none',
+    expect(started).toEqual({
+      agentSessionId: 'cursor-session',
+      nativePath: '!cursor-acp:cursor-session',
     });
 
-    expect(spawnMock.mock.calls[0][0].slice(1)).toEqual([
-      '--print',
-      '--output-format',
-      'stream-json',
-      '--workspace',
-      '/proj',
-      '--trust',
-      '--model',
-      'gpt-5.3-codex',
-      'hello cursor',
-    ]);
-
-    proc.pushJson({
-      type: 'system',
-      subtype: 'init',
-      session_id: 'cursor-session-1',
-    });
-
-    await expect(startedPromise).resolves.toEqual({
-      agentSessionId: 'cursor-session-1',
-      nativePath: '!cursor-stream-json:cursor-session-1',
-    });
-
-    proc.pushJson({ type: 'result', subtype: 'success', session_id: 'cursor-session-1' });
-    proc.close(0);
-  });
-
-  it('continues a session, deduplicates tool calls, and emits tool results', async () => {
-    const provider = new CursorRuntime();
-    const messages = mock();
-    const finished = mock();
-    let runningWhenFinished;
-    provider.onMessages(messages);
-    provider.onFinished((chatId, exitCode, metadata) => {
-      runningWhenFinished = provider.isRunning('cursor-session-2');
-      finished(chatId, exitCode, metadata);
-    });
-
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const turnPromise = provider.runTurn({
-      command: 'continue',
-      agentSessionId: 'cursor-session-2',
-      chatId: 'chat-2',
-      projectPath: '/proj',
-      model: 'gpt-5.3-codex',
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'none',
-      clientRequestId: 'req-2',
-      turnId: 'turn-2',
-    });
-
-    expect(spawnMock.mock.calls[0][0].slice(1)).toEqual([
-      '--print',
-      '--output-format',
-      'stream-json',
-      '--workspace',
-      '/proj',
-      '--trust',
-      '--resume',
-      'cursor-session-2',
-      '--force',
-      'continue',
-    ]);
-
-    proc.pushJson({
-      type: 'user',
-      session_id: 'cursor-session-2',
-      message: { role: 'user', content: 'continue' },
-    });
-    proc.pushJson({
-      type: 'assistant',
-      message: {
-        role: 'assistant',
-        content: [
-          { type: 'reasoning', text: 'checking' },
-          { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'pwd' } },
-          { type: 'text', text: 'done' },
-        ],
+    await acp.waitForClientMethod('session/prompt');
+    acp.serverRequest({
+      id: 'permission-1',
+      method: 'session/request_permission',
+      params: {
+        sessionId: 'cursor-session',
+        toolCall: {
+          toolCallId: 'tool-1',
+          toolName: 'Bash',
+          rawInput: { command: 'echo hello' },
+        },
+        options: [{ optionId: 'allow-once' }, { optionId: 'reject-once' }],
       },
     });
-    proc.pushJson({
-      type: 'tool_call',
-      subtype: 'completed',
-      call_id: 'tool-1',
-      toolName: 'Bash',
-      input: { command: 'pwd' },
-      result: { stdout: '/proj' },
-    });
-    proc.pushJson({
-      type: 'result',
-      subtype: 'success',
-      session_id: 'cursor-session-2',
-      request_id: 'cursor-req-2',
-    });
-    proc.close(0);
 
-    await turnPromise;
+    const request = await waitForMessage((message) => message instanceof PermissionRequestMessage);
+    expect(request.requestedTool).toBeInstanceOf(BashToolUseMessage);
+    expect(request.requestedTool.command).toBe('echo hello');
 
-    const emitted = messages.mock.calls.flatMap((call) => call[1]);
-    expect(emitted.map((message) => message.type)).toEqual([
-      'thinking',
-      'bash-tool-use',
-      'assistant-message',
-      'tool-result',
-    ]);
-    expect(finished).toHaveBeenCalledWith('chat-2', 0, { upstreamRequestId: 'cursor-req-2' });
-    expect(runningWhenFinished).toBe(false);
-    expect(emitted.filter((message) => message.type === 'bash-tool-use')).toHaveLength(1);
-    expect(emitted.find((message) => message.type === 'tool-result')?.content).toEqual({ stdout: '/proj' });
+    runtime.resolvePermission(request.permissionRequestId, { allow: true });
+    const response = await acp.waitForWrite((message) => message.id === 'permission-1' && message.result);
+    expect(response.result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once' },
+    });
+
+    acp.finishPrompt();
+    runtime.shutdown();
   });
 
-  it('normalizes live Cursor Glob results to canonical file lists', async () => {
-    const provider = new CursorRuntime();
-    const messages = mock();
-    provider.onMessages(messages);
+  it('emits Cursor ask-question requests and forwards answered responses', async () => {
+    const { acp, runtime, waitForMessage } = createRuntimeHarness();
+    await runtime.startSession(startRequest());
+    await acp.waitForClientMethod('session/prompt');
 
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const turnPromise = provider.runTurn({
-      command: 'find daml files',
-      agentSessionId: 'cursor-session-3',
-      chatId: 'chat-3',
-      projectPath: '/proj',
-      model: 'kimi-k2.5',
-      permissionMode: 'default',
-      thinkingMode: 'none',
+    acp.serverRequest({
+      id: 'question-1',
+      method: 'cursor/ask_question',
+      params: {
+        toolCallId: 'call-question',
+        title: 'Need input',
+        questions: [{
+          id: 'q1',
+          prompt: 'Which mode?',
+          options: [{ id: 'agent', label: 'Agent' }],
+        }],
+      },
     });
 
-    proc.pushJson({
-      type: 'tool_call',
-      subtype: 'completed',
-      call_id: 'functions.Glob:0',
-      toolName: 'Glob',
-      args: { glob_pattern: 'contracts/**/daml.yaml' },
-      result: 'Result of search in "" (total 2 files):\n- ./contracts/a/daml.yaml\n- ./contracts/b/daml.yaml\n',
-    });
-    proc.pushJson({ type: 'result', subtype: 'success', session_id: 'cursor-session-3' });
-    proc.close(0);
+    const request = await waitForMessage((message) => message instanceof PermissionRequestMessage);
+    expect(request.requestedTool).toBeInstanceOf(CursorAskQuestionToolUseMessage);
+    expect(request.requestedTool.questions[0].prompt).toBe('Which mode?');
 
-    await turnPromise;
+    const answered = {
+      outcome: {
+        outcome: 'answered',
+        answers: [{ questionId: 'q1', selectedOptionIds: ['agent'] }],
+      },
+    };
+    runtime.resolvePermission(request.permissionRequestId, { allow: true, response: answered });
 
-    const emitted = messages.mock.calls.flatMap((call) => call[1]);
-    expect(emitted.find((message) => message.type === 'glob-tool-use')?.pattern)
-      .toBe('contracts/**/daml.yaml');
-    expect(emitted.find((message) => message.type === 'tool-result')?.content).toEqual({
-      filenames: ['./contracts/a/daml.yaml', './contracts/b/daml.yaml'],
-      numFiles: 2,
-    });
+    const response = await acp.waitForWrite((message) => message.id === 'question-1' && message.result);
+    expect(response.result).toEqual(answered);
+
+    acp.finishPrompt();
+    runtime.shutdown();
   });
 
-  it('normalizes wrapped stream-json Read and Grep tool metadata', async () => {
-    const provider = new CursorRuntime();
-    const messages = mock();
-    provider.onMessages(messages);
+  it('emits Cursor create-plan requests and can reject them', async () => {
+    const { acp, runtime, waitForMessage } = createRuntimeHarness();
+    await runtime.startSession(startRequest());
+    await acp.waitForClientMethod('session/prompt');
 
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const turnPromise = provider.runTurn({
-      command: 'inspect cursor tools',
-      agentSessionId: 'cursor-session-4',
-      chatId: 'chat-4',
-      projectPath: '/repo',
-      model: 'default',
-      permissionMode: 'default',
-      thinkingMode: 'none',
-    });
-
-    proc.pushJson({
-      type: 'tool_call',
-      subtype: 'started',
-      call_id: 'tool-read-1',
-      tool_call: {
-        readToolCall: {
-          args: { path: '/repo/server/agents/cursor/tool-use-converter.ts' },
-        },
-        hookAdditionalContexts: [],
-        toolCallId: 'tool-read-1',
+    acp.serverRequest({
+      id: 'plan-1',
+      method: 'cursor/create_plan',
+      params: {
+        toolCallId: 'call-plan',
+        name: 'Refactor',
+        plan: 'Do the work',
+        todos: [{ id: 'todo-1', content: 'Inspect', status: 'pending' }],
       },
     });
-    proc.pushJson({
-      type: 'tool_call',
-      subtype: 'started',
-      call_id: 'tool-grep-1',
-      tool_call: {
-        grepToolCall: {
-          args: {
-            pattern: 'convertCursorToolUse',
-            path: '/repo/server/agents/cursor',
-            caseInsensitive: false,
-            multiline: false,
-            toolCallId: 'tool-grep-1',
-            offset: 0,
-          },
-        },
-        hookAdditionalContexts: [],
-        toolCallId: 'tool-grep-1',
-      },
-    });
-    proc.pushJson({
-      type: 'tool_call',
-      subtype: 'completed',
-      call_id: 'tool-read-1',
-      tool_call: {
-        readToolCall: {
-          args: { path: '/repo/server/agents/cursor/tool-use-converter.ts' },
-          result: {
-            success: {
-              content: 'export function convertCursorToolUse() {}\n',
-              totalLines: 1,
-              fileSize: 43,
-              path: '/repo/server/agents/cursor/tool-use-converter.ts',
-              readRange: { startLine: 1, endLine: 1 },
-            },
-          },
-        },
-        hookAdditionalContexts: [],
-        toolCallId: 'tool-read-1',
-      },
-    });
-    proc.pushJson({
-      type: 'tool_call',
-      subtype: 'completed',
-      call_id: 'tool-grep-1',
-      tool_call: {
-        grepToolCall: {
-          args: {
-            pattern: 'convertCursorToolUse',
-            path: '/repo/server/agents/cursor',
-            caseInsensitive: false,
-            multiline: false,
-            toolCallId: 'tool-grep-1',
-            offset: 0,
-          },
-          result: {
-            success: {
-              pattern: 'convertCursorToolUse',
-              path: '/repo/server/agents/cursor',
-              outputMode: 'content',
-              workspaceResults: {
-                '/repo': {
-                  content: {
-                    matches: [
-                      {
-                        file: 'server/agents/cursor/tool-use-converter.ts',
-                        matches: [
-                          {
-                            lineNumber: 158,
-                            content: 'export function convertCursorToolUse() {}',
-                            contentTruncated: false,
-                            isContextLine: false,
-                          },
-                        ],
-                      },
-                      {
-                        file: 'server/agents/cursor/cursor-cli.ts',
-                        matches: [
-                          {
-                            lineNumber: 439,
-                            content: 'convertCursorToolUse(timestamp, event)',
-                            contentTruncated: false,
-                            isContextLine: false,
-                          },
-                        ],
-                      },
-                    ],
-                    totalLines: 2,
-                    totalMatchedLines: 2,
-                    clientTruncated: false,
-                    ripgrepTruncated: false,
-                  },
-                },
-              },
-            },
-          },
-        },
-        hookAdditionalContexts: [],
-        toolCallId: 'tool-grep-1',
-      },
-    });
-    proc.pushJson({ type: 'result', subtype: 'success', session_id: 'cursor-session-4' });
-    proc.close(0);
 
-    await turnPromise;
+    const request = await waitForMessage((message) => message instanceof PermissionRequestMessage);
+    expect(request.requestedTool).toBeInstanceOf(CursorCreatePlanToolUseMessage);
+    expect(request.requestedTool.plan).toBe('Do the work');
 
-    const emitted = messages.mock.calls.flatMap((call) => call[1]);
-    expect(emitted.map((message) => message.type)).toEqual([
-      'read-tool-use',
-      'grep-tool-use',
-      'tool-result',
-      'tool-result',
-    ]);
-    expect(emitted[0].filePath).toBe('/repo/server/agents/cursor/tool-use-converter.ts');
-    expect(emitted[1].pattern).toBe('convertCursorToolUse');
-    expect(emitted[1].path).toBe('/repo/server/agents/cursor');
-    expect(emitted[2].content).toEqual({
-      content: 'export function convertCursorToolUse() {}\n',
-      totalLines: 1,
-      fileSize: 43,
-      path: '/repo/server/agents/cursor/tool-use-converter.ts',
-      readRange: { startLine: 1, endLine: 1 },
+    runtime.resolvePermission(request.permissionRequestId, { allow: false });
+    const response = await acp.waitForWrite((message) => message.id === 'plan-1' && message.result);
+    expect(response.result).toEqual({
+      outcome: { outcome: 'rejected', reason: 'User rejected plan' },
     });
-    expect(emitted[3].content).toEqual({
-      filenames: [
-        'server/agents/cursor/tool-use-converter.ts',
-        'server/agents/cursor/cursor-cli.ts',
-      ],
-      numFiles: 2,
-      totalMatches: 2,
-      matches: [
-        {
-          file: 'server/agents/cursor/tool-use-converter.ts',
-          matches: [
-            {
-              lineNumber: 158,
-              content: 'export function convertCursorToolUse() {}',
-              contentTruncated: false,
-              isContextLine: false,
-            },
-          ],
-        },
-        {
-          file: 'server/agents/cursor/cursor-cli.ts',
-          matches: [
-            {
-              lineNumber: 439,
-              content: 'convertCursorToolUse(timestamp, event)',
-              contentTruncated: false,
-              isContextLine: false,
-            },
-          ],
-        },
-      ],
-      pattern: 'convertCursorToolUse',
-      path: '/repo/server/agents/cursor',
-    });
+
+    acp.finishPrompt();
+    runtime.shutdown();
   });
 
-  it('marks Cursor sessions idle before emitting failed from error events', async () => {
-    const provider = new CursorRuntime();
-    const failed = mock();
-    let runningWhenFailed;
-    provider.onFailed((chatId, message) => {
-      runningWhenFailed = provider.isRunning('cursor-session-error');
-      failed(chatId, message);
+  it('rejects permissions in noninteractive Cursor single-query mode without hanging', async () => {
+    const acp = createAcpHarness();
+    const query = runSingleQuery('hello', { createTransport: acp.createTransport });
+    await acp.waitForClientMethod('session/prompt');
+
+    acp.serverRequest({
+      id: 'permission-single',
+      method: 'session/request_permission',
+      params: {
+        sessionId: 'cursor-session',
+        toolCall: { toolCallId: 'tool-1', toolName: 'Bash', rawInput: { command: 'echo hello' } },
+      },
+    });
+    const permissionResponse = await acp.waitForWrite((message) => message.id === 'permission-single' && message.result);
+    expect(permissionResponse.result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'reject-once' },
     });
 
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const turnPromise = provider.runTurn({
-      command: 'continue',
-      agentSessionId: 'cursor-session-error',
-      chatId: 'chat-error',
-      projectPath: '/proj',
-      model: 'gpt-5.3-codex',
-      permissionMode: 'default',
-      thinkingMode: 'none',
+    acp.sessionUpdate({
+      sessionUpdate: 'agent_message_chunk',
+      content: { text: 'Hello from Cursor' },
     });
+    acp.finishPrompt();
 
-    proc.pushJson({
-      type: 'error',
-      session_id: 'cursor-session-error',
-      message: 'cursor failed',
-    });
-    proc.close(1);
-
-    await turnPromise;
-
-    expect(failed).toHaveBeenCalledWith('chat-error', 'cursor failed');
-    expect(runningWhenFailed).toBe(false);
-  });
-
-  it('runs one-shot prompts with print JSON mode', async () => {
-    spawnMock.mockReturnValueOnce(createCommandProc(JSON.stringify({ result: 'one-shot result' })));
-
-    await expect(runSingleQuery('say hi', {
-      cwd: '/proj',
-      model: 'gpt-5.3-codex',
-    })).resolves.toBe('one-shot result');
-
-    expect(spawnMock.mock.calls[0][0].slice(1)).toEqual([
-      '--print',
-      '--output-format',
-      'json',
-      '--mode',
-      'ask',
-      '--workspace',
-      '/proj',
-      '--trust',
-      '--model',
-      'gpt-5.3-codex',
-      'say hi',
-    ]);
+    expect(await query).toBe('Hello from Cursor');
   });
 });

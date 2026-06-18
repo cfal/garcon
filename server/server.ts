@@ -38,7 +38,7 @@ import { TelegramSettingsStore } from './notifications/telegram-settings-store.j
 import { AttentionTracker } from './notifications/attention-tracker.js';
 import { abortRunningSessionsWithTimeout } from './lib/shutdown.js';
 import { ExpectedUserAbortTracker } from './lib/expected-user-aborts.js';
-import { migrateCursorAcpSessionsToStreamJson } from './agents/cursor/cursor-acp-migration.js';
+import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
 import {
   AgentRunFinishedMessage,
   AgentRunFailedMessage,
@@ -101,7 +101,7 @@ export async function startServer(): Promise<void> {
 
     await initAuthStore();
     await chatRegistry.init();
-    await migrateCursorAcpSessionsToStreamJson(chatRegistry);
+    await migrateCursorStreamJsonSessionsToAcp(chatRegistry);
     await settings.init();
 
     // User-managed API provider store and resolver.

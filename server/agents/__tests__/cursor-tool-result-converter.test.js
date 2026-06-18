@@ -108,11 +108,11 @@ describe('normalizeCursorToolResultContent', () => {
                     ],
                   },
                   {
-                    file: 'server/agents/cursor/cursor-cli.ts',
+                    file: 'server/agents/cursor/cursor-acp-event-converter.ts',
                     matches: [
                       {
-                        lineNumber: 439,
-                        content: 'convertCursorToolUse(timestamp, event)',
+                        lineNumber: 289,
+                        content: 'return convertCursorToolUse(context.timestamp, {',
                         contentTruncated: false,
                         isContextLine: false,
                       },
@@ -133,7 +133,7 @@ describe('normalizeCursorToolResultContent', () => {
     expect(content).toEqual({
       filenames: [
         'server/agents/cursor/tool-use-converter.ts',
-        'server/agents/cursor/cursor-cli.ts',
+        'server/agents/cursor/cursor-acp-event-converter.ts',
       ],
       numFiles: 2,
       totalMatches: 2,
@@ -150,11 +150,11 @@ describe('normalizeCursorToolResultContent', () => {
           ],
         },
         {
-          file: 'server/agents/cursor/cursor-cli.ts',
+          file: 'server/agents/cursor/cursor-acp-event-converter.ts',
           matches: [
             {
-              lineNumber: 439,
-              content: 'convertCursorToolUse(timestamp, event)',
+              lineNumber: 289,
+              content: 'return convertCursorToolUse(context.timestamp, {',
               contentTruncated: false,
               isContextLine: false,
             },

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ConversationTranscript from './ConversationTranscript.svelte';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
+	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import { getChatState, getAgentState, getLocalSettings, getAppShell } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
@@ -18,7 +19,7 @@
 		onscroll?: () => void;
 		onPermissionDecision?: (
 			permissionRequestId: string,
-			decision: { allow: boolean; message?: string },
+			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
 		pendingPermissionRequests?: PendingPermissionRequest[];

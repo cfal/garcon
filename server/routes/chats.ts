@@ -110,6 +110,12 @@ function bodyRecord(body: unknown): Record<string, unknown> {
   return body && typeof body === 'object' ? body as Record<string, unknown> : {};
 }
 
+function optionalRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
 function chatIdFromBodyOrQuery(body: unknown, url: URL): string {
   const input = bodyRecord(body);
   const bodyChatId = typeof input.chatId === 'string' ? input.chatId.trim() : '';
@@ -738,6 +744,7 @@ export default function createChatRoutes({
         permissionRequestId,
         allow: Boolean(body.allow),
         alwaysAllow: Boolean(body.alwaysAllow),
+        response: optionalRecord(body.response),
         clientRequestId,
       });
       return Response.json(result);

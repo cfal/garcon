@@ -361,6 +361,7 @@ describe('REST chat command routes', () => {
       permissionRequestId: 'perm-1',
       allow: true,
       alwaysAllow: false,
+      response: { outcome: { outcome: 'accepted' } },
     };
 
     const first = await callJson(handler, decision);
@@ -372,6 +373,11 @@ describe('REST chat command routes', () => {
     expect(conflict.response.status).toBe(409);
     expect(conflict.body.errorCode).toBe('IDEMPOTENCY_CONFLICT');
     expect(agent.agents.resolvePermission).toHaveBeenCalledTimes(1);
+    expect(agent.agents.resolvePermission).toHaveBeenCalledWith('123', 'perm-1', {
+      allow: true,
+      alwaysAllow: false,
+      response: { outcome: { outcome: 'accepted' } },
+    });
   });
 
   it('POST /stop deduplicates abort requests', async () => {
