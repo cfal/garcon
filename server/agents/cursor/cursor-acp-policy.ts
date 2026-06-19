@@ -1,16 +1,11 @@
 import { getCursorBinary } from '../../config.js';
 import type { PermissionMode, ResumeTurnRequest, StartSessionRequest } from '../session-types.js';
 import type { AcpAgentPolicy } from '../shared/acp-agent-runtime.js';
+import { configureCursorAcpSession, cursorAcpModeForPermissionMode } from './cursor-acp-model-config.js';
 import { createCursorAcpNativePath } from './cursor-native-path.js';
 
 function mappedMode(permissionMode: PermissionMode): string {
-  return permissionMode === 'plan' ? 'plan' : 'agent';
-}
-
-export function mapCursorAcpModel(model: string): string | undefined {
-  if (!model || model === 'default') return 'default[]';
-  if (model === 'auto') return 'default[]';
-  return model;
+  return cursorAcpModeForPermissionMode(permissionMode);
 }
 
 function promptForRequest(request: StartSessionRequest | ResumeTurnRequest): Array<{ type: string; text: string }> {
@@ -31,10 +26,21 @@ export function createCursorAcpPolicy(): AcpAgentPolicy {
     args: ['acp'],
     abortStrategy: 'process-restart',
     authenticateMethodId: 'cursor_login',
+    clientCapabilities: {
+      _meta: {
+        // Enables Cursor's split model/context/reasoning config options.
+        // See https://github.com/zed-industries/zed/issues/57571 and
+        // https://forum.cursor.com/t/bug-agent-acp-model-switching-updates-session-metadata-but-does-not-change-the-inference-backend/157312.
+        parameterizedModelPicker: true,
+      },
+    },
+    newSessionModelConfig: false,
+    promptModelConfig: false,
+    promptModeConfig: false,
+    configureSession: configureCursorAcpSession,
     buildPrompt: promptForRequest,
     buildEnv,
     mapPermissionMode: mappedMode,
-    mapModel: mapCursorAcpModel,
     resolveNativePath: createCursorAcpNativePath,
   };
 }

@@ -2,6 +2,7 @@ import type {
   AcpInitializeParams,
   AcpInitializeResult,
   AcpJsonRpcId,
+  AcpSessionConfigOptionsResult,
   AcpSessionLoadResult,
   AcpSessionNewResult,
   AcpSessionPromptResult,
@@ -79,6 +80,14 @@ export class AcpClient {
     config?: Record<string, unknown>;
   }): Promise<AcpSessionPromptResult> {
     return this.#transport.request<AcpSessionPromptResult>('session/prompt', params);
+  }
+
+  async setSessionConfigOption(params: {
+    sessionId: string;
+    configId: string;
+    value: string;
+  }): Promise<AcpSessionConfigOptionsResult> {
+    return this.#transport.request<AcpSessionConfigOptionsResult>('session/set_config_option', params);
   }
 
   async cancelSession(params: { sessionId: string }): Promise<Record<string, unknown>> {

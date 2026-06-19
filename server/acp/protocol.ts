@@ -6,6 +6,13 @@ export interface AcpJsonRpcError {
 
 export type AcpJsonRpcId = number | string;
 
+export interface AcpClientCapabilities {
+  fs?: { readTextFile?: boolean; writeTextFile?: boolean };
+  terminal?: boolean;
+  _meta?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 export interface AcpJsonRpcMessage {
   jsonrpc: '2.0';
   id?: AcpJsonRpcId;
@@ -18,10 +25,7 @@ export interface AcpJsonRpcMessage {
 export interface AcpInitializeParams {
   protocolVersion: number;
   clientInfo?: { name: string; version: string };
-  clientCapabilities?: {
-    fs?: { readTextFile?: boolean; writeTextFile?: boolean };
-    terminal?: boolean;
-  };
+  clientCapabilities?: AcpClientCapabilities;
   mcpServers?: unknown[];
 }
 
@@ -36,11 +40,33 @@ export interface AcpInitializeResult {
   authMethods?: Array<{ id: string; name?: string; description?: string }>;
 }
 
+export interface AcpSessionConfigOptionValue {
+  value: string;
+  name?: string;
+  description?: string;
+  [key: string]: unknown;
+}
+
+export interface AcpSessionConfigOption {
+  id: string;
+  name?: string;
+  description?: string;
+  category?: string;
+  type?: string;
+  currentValue?: string;
+  options?: AcpSessionConfigOptionValue[];
+  [key: string]: unknown;
+}
+
+export interface AcpSessionConfigOptionsResult {
+  configOptions?: AcpSessionConfigOption[];
+}
+
 export interface AcpSessionNewResult {
   sessionId: string;
   modes?: unknown;
   models?: unknown;
-  configOptions?: unknown[];
+  configOptions?: AcpSessionConfigOption[];
 }
 
 export interface AcpSessionPromptResult {
@@ -51,7 +77,7 @@ export interface AcpSessionPromptResult {
 export interface AcpSessionLoadResult {
   modes?: unknown;
   models?: unknown;
-  configOptions?: unknown[];
+  configOptions?: AcpSessionConfigOption[];
 }
 
 export interface AcpSessionRequestPermission {

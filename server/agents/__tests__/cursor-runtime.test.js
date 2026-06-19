@@ -4,6 +4,7 @@ import {
   BashToolUseMessage,
   CursorAskQuestionToolUseMessage,
   CursorCreatePlanToolUseMessage,
+  ErrorMessage,
   PermissionRequestMessage,
 } from '../../../common/chat-types.js';
 import { AcpTransport } from '../../acp/transport.js';
@@ -12,7 +13,46 @@ import { CursorAcpEventConverter } from '../cursor/cursor-acp-event-converter.js
 import { createCursorAcpPolicy } from '../cursor/cursor-acp-policy.js';
 import { runSingleQuery } from '../cursor/run-single-query.js';
 
-function createAcpHarness() {
+function option(id, currentValue, values, extra = {}) {
+  return {
+    id,
+    currentValue,
+    options: values.map((value) => ({ value })),
+    ...extra,
+  };
+}
+
+function configOptionsFromState(state, overrides = {}) {
+  const effective = { ...state, ...overrides };
+  return [
+    option('mode', effective.mode, ['agent', 'plan', 'ask'], { category: 'mode' }),
+    option('model', effective.model, [
+      'default',
+      'composer-2.5',
+      'gpt-5.5',
+      'claude-opus-4-8',
+    ], { category: 'model' }),
+    option('context', effective.context, ['272k', '1m'], { category: 'model_config' }),
+    option('reasoning', effective.reasoning, ['none', 'low', 'medium', 'high', 'extra-high'], { category: 'thought_level' }),
+    option('effort', effective.effort, ['low', 'medium', 'high', 'xhigh', 'max'], { category: 'thought_level' }),
+    option('thinking', effective.thinking, ['false', 'true'], { category: 'model_config' }),
+    option('fast', effective.fast, ['false', 'true'], { category: 'model_config' }),
+  ];
+}
+
+function createDefaultConfigState() {
+  return {
+    mode: 'agent',
+    model: 'default',
+    context: '272k',
+    reasoning: 'medium',
+    effort: 'medium',
+    thinking: 'false',
+    fast: 'false',
+  };
+}
+
+function createAcpHarness(options = {}) {
   const encoder = new TextEncoder();
   const instances = [];
   const instanceWaiters = [];
@@ -21,6 +61,7 @@ function createAcpHarness() {
     let stdoutController;
     let exitResolve;
     let promptRequestId = null;
+    const configState = createDefaultConfigState();
     let closed = false;
     let killed = false;
     const writes = [];
@@ -79,12 +120,29 @@ function createAcpHarness() {
       }
 
       if (message.method === 'session/new') {
-        emit({ jsonrpc: '2.0', id: message.id, result: { sessionId: 'cursor-session' } });
+        emit({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: { sessionId: 'cursor-session', configOptions: configOptionsFromState(configState) },
+        });
         return;
       }
 
       if (message.method === 'session/load' || message.method === 'session/resume') {
-        emit({ jsonrpc: '2.0', id: message.id, result: {} });
+        emit({ jsonrpc: '2.0', id: message.id, result: { configOptions: configOptionsFromState(configState) } });
+        return;
+      }
+
+      if (message.method === 'session/set_config_option') {
+        configState[message.params.configId] = message.params.value;
+        const mismatch = options.configMismatch?.configId === message.params.configId
+          ? { [message.params.configId]: options.configMismatch.currentValue }
+          : {};
+        emit({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: { configOptions: configOptionsFromState(configState, mismatch) },
+        });
         return;
       }
 
@@ -233,8 +291,8 @@ function startRequest(overrides = {}) {
   };
 }
 
-function createRuntimeHarness() {
-  const acp = createAcpHarness();
+function createRuntimeHarness(options = {}) {
+  const acp = createAcpHarness(options);
   const runtime = new AcpAgentRuntime(createCursorAcpPolicy(), {
     converter: new CursorAcpEventConverter(),
     createTransport: acp.createTransport,
@@ -268,6 +326,55 @@ function createRuntimeHarness() {
 }
 
 describe('Cursor ACP runtime', () => {
+  it('advertises Cursor parameterized model support during ACP initialization', async () => {
+    const { acp, runtime } = createRuntimeHarness();
+    await runtime.startSession(startRequest());
+
+    const initialize = acp.writes.find((message) => message.method === 'initialize');
+    expect(initialize.params.clientCapabilities).toEqual({
+      _meta: { parameterizedModelPicker: true },
+    });
+
+    await acp.waitForClientMethod('session/prompt');
+    acp.finishPrompt();
+    runtime.shutdown();
+  });
+
+  it('configures the selected Cursor model through ACP config options before prompting', async () => {
+    const { acp, runtime } = createRuntimeHarness();
+    await runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high' }));
+
+    const prompt = await acp.waitForClientMethod('session/prompt');
+    const setConfigCalls = acp.writes.filter((message) => message.method === 'session/set_config_option');
+    expect(setConfigCalls.map((message) => message.params)).toEqual([
+      { sessionId: 'cursor-session', configId: 'mode', value: 'agent' },
+      { sessionId: 'cursor-session', configId: 'model', value: 'gpt-5.5' },
+      { sessionId: 'cursor-session', configId: 'context', value: '1m' },
+      { sessionId: 'cursor-session', configId: 'reasoning', value: 'extra-high' },
+      { sessionId: 'cursor-session', configId: 'fast', value: 'false' },
+    ]);
+
+    const methods = acp.writes.map((message) => message.method);
+    expect(methods.indexOf('session/set_config_option')).toBeLessThan(methods.indexOf('session/prompt'));
+    expect(prompt.params.config).toBeUndefined();
+
+    acp.finishPrompt();
+    runtime.shutdown();
+  });
+
+  it('fails before prompting when Cursor reports a model config mismatch', async () => {
+    const { acp, runtime, waitForMessage } = createRuntimeHarness({
+      configMismatch: { configId: 'reasoning', currentValue: 'medium' },
+    });
+    await runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high' }));
+
+    const error = await waitForMessage((message) => message instanceof ErrorMessage);
+    expect(error.content).toContain('Cursor did not apply requested model gpt-5.5-extra-high');
+    expect(acp.writes.some((message) => message.method === 'session/prompt')).toBe(false);
+
+    runtime.shutdown();
+  });
+
   it('kills the Cursor ACP process and marks the session idle immediately on abort', async () => {
     const { acp, runtime } = createRuntimeHarness();
     const started = await runtime.startSession(startRequest());
@@ -284,7 +391,7 @@ describe('Cursor ACP runtime', () => {
 
   it('reconnects after abort and sends the next prompt to Cursor', async () => {
     const { acp, runtime } = createRuntimeHarness();
-    const started = await runtime.startSession(startRequest({ command: 'first message' }));
+    const started = await runtime.startSession(startRequest({ command: 'first message', model: 'gpt-5.5-extra-high' }));
     await acp.waitForClientMethod('session/prompt');
 
     expect(runtime.abort(started.agentSessionId)).toBe(true);
@@ -292,6 +399,7 @@ describe('Cursor ACP runtime', () => {
     const nextTurn = runtime.runTurn(startRequest({
       agentSessionId: started.agentSessionId,
       command: 'second message',
+      model: 'gpt-5.5-extra-high',
     }));
     const restarted = await acp.waitForInstance(1);
     const load = await restarted.waitForClientMethod('session/load');
@@ -299,6 +407,9 @@ describe('Cursor ACP runtime', () => {
 
     const prompt = await restarted.waitForClientMethod('session/prompt');
     expect(prompt.params.prompt).toEqual([{ type: 'text', text: 'second message' }]);
+    const methods = restarted.writes.map((message) => message.method);
+    expect(methods.indexOf('session/load')).toBeLessThan(methods.indexOf('session/set_config_option'));
+    expect(methods.indexOf('session/set_config_option')).toBeLessThan(methods.indexOf('session/prompt'));
 
     restarted.finishPrompt();
     await nextTurn;
@@ -472,8 +583,18 @@ describe('Cursor ACP runtime', () => {
 
   it('rejects permissions in noninteractive Cursor single-query mode without hanging', async () => {
     const acp = createAcpHarness();
-    const query = runSingleQuery('hello', { createTransport: acp.createTransport });
-    await acp.waitForClientMethod('session/prompt');
+    const query = runSingleQuery('hello', { model: 'gpt-5.5-extra-high', createTransport: acp.createTransport });
+    const prompt = await acp.waitForClientMethod('session/prompt');
+
+    const setConfigCalls = acp.writes.filter((message) => message.method === 'session/set_config_option');
+    expect(setConfigCalls.map((message) => message.params)).toEqual([
+      { sessionId: 'cursor-session', configId: 'mode', value: 'ask' },
+      { sessionId: 'cursor-session', configId: 'model', value: 'gpt-5.5' },
+      { sessionId: 'cursor-session', configId: 'context', value: '1m' },
+      { sessionId: 'cursor-session', configId: 'reasoning', value: 'extra-high' },
+      { sessionId: 'cursor-session', configId: 'fast', value: 'false' },
+    ]);
+    expect(prompt.params.config).toBeUndefined();
 
     acp.serverRequest({
       id: 'permission-single',

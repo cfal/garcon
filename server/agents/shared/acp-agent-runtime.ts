@@ -15,7 +15,13 @@ import type { AgentRuntime } from '../types.js';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';
 import { isRecoverableLoadFailure } from '../../acp/errors.js';
-import type { AcpJsonRpcId, AcpSessionRequestPermission, AcpSessionUpdateNotification } from '../../acp/protocol.js';
+import type {
+  AcpInitializeParams,
+  AcpJsonRpcId,
+  AcpSessionConfigOption,
+  AcpSessionRequestPermission,
+  AcpSessionUpdateNotification,
+} from '../../acp/protocol.js';
 import type { AcpAdvertisedCapabilities, ReconnectStrategy } from '../../acp/reconnect-policy.js';
 import { reconnectOrder } from '../../acp/reconnect-policy.js';
 import { AcpTransport } from '../../acp/transport.js';
@@ -45,6 +51,7 @@ interface AcpAgentRuntimeSession {
   turnGeneration: number;
   permissionMode: PermissionMode;
   pendingPermissionIds: Set<string>;
+  configOptions?: AcpSessionConfigOption[];
   startedAt: string;
   lastActivityAt: number;
   lastUpdateAt: number;
@@ -52,6 +59,13 @@ interface AcpAgentRuntimeSession {
 }
 
 export type AcpAbortStrategy = 'cancel' | 'process-restart';
+
+export interface AcpSessionConfigurationContext {
+  client: AcpClient;
+  sessionId: string;
+  request: StartSessionRequest | ResumeTurnRequest;
+  configOptions?: AcpSessionConfigOption[];
+}
 
 export interface AcpAgentPolicy {
   agentId: string;
@@ -62,6 +76,11 @@ export interface AcpAgentPolicy {
   mcpServers?: unknown[];
   binaryVersion?: string;
   reconnectAllowNewSession?: boolean;
+  clientCapabilities?: AcpInitializeParams['clientCapabilities'];
+  configureSession?: (context: AcpSessionConfigurationContext) => Promise<AcpSessionConfigOption[] | void>;
+  newSessionModelConfig?: boolean;
+  promptModelConfig?: boolean;
+  promptModeConfig?: boolean;
   buildEnv?: (request: StartSessionRequest | ResumeTurnRequest) => Record<string, string | undefined>;
   buildPrompt?: (request: StartSessionRequest | ResumeTurnRequest) => Array<{ type: string; text?: string; [key: string]: unknown }>;
   mapPermissionMode?: (mode: PermissionMode) => string | undefined;
@@ -156,7 +175,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
 
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const client = await this.#connectClient(request);
-    const model = this.#mappedModel(request.model);
+    const model = this.#newSessionModelForRequest(request);
     const created = await client.newSession({
       cwd: request.projectPath,
       mcpServers: this.#policy.mcpServers,
@@ -180,6 +199,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       turnGeneration: 0,
       permissionMode: request.permissionMode,
       pendingPermissionIds: new Set(),
+      configOptions: created.configOptions,
       startedAt: now,
       lastActivityAt: Date.now(),
       lastUpdateAt: 0,
@@ -187,7 +207,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     this.#sessions.set(sessionId, session);
     this.#bindClientEvents(session);
     this.emitSessionCreated(request.chatId);
-    void this.#runPrompt(session, request);
+    void this.#runPrompt(session, request).catch(() => {});
 
     return {
       agentSessionId: sessionId,
@@ -289,7 +309,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       initialize: {
         protocolVersion: 1,
         clientInfo: { name: 'garcon', version: '1.0.0' },
-        clientCapabilities: {},
+        clientCapabilities: this.#policy.clientCapabilities ?? {},
         mcpServers: this.#policy.mcpServers ?? [],
       },
       authenticateMethodId: this.#policy.authenticateMethodId,
@@ -352,11 +372,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     for (const strategy of order) {
       if (strategy === 'resume') {
         try {
-          await session.client.resumeSession({
+          const loaded = await session.client.resumeSession({
             sessionId: session.remoteSessionId,
             cwd: request.projectPath,
             mcpServers: this.#policy.mcpServers,
           });
+          session.configOptions = loaded.configOptions;
           return true;
         } catch (error) {
           if (isRecoverableLoadFailure(error)) continue;
@@ -366,11 +387,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
 
       if (strategy === 'load') {
         try {
-          await session.client.loadSession({
+          const loaded = await session.client.loadSession({
             sessionId: session.remoteSessionId,
             cwd: request.projectPath,
             mcpServers: this.#policy.mcpServers,
           });
+          session.configOptions = loaded.configOptions;
           return true;
         } catch (error) {
           if (isRecoverableLoadFailure(error)) continue;
@@ -379,13 +401,14 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       }
 
       if (strategy === 'new' && this.#policy.reconnectAllowNewSession) {
-        const model = this.#mappedModel(request.model);
+        const model = this.#newSessionModelForRequest(request);
         const created = await session.client.newSession({
           cwd: request.projectPath,
           mcpServers: this.#policy.mcpServers,
           ...(model ? { model } : {}),
         });
         session.remoteSessionId = created.sessionId;
+        session.configOptions = created.configOptions;
         return true;
       }
     }
@@ -412,6 +435,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     let failureMessage = '';
 
     try {
+      await this.#configureSession(session, request);
       const prompt = this.#buildPrompt(request);
       const promptConfig = this.#promptConfigForRequest(request);
       const result = await session.client.promptSession({
@@ -670,6 +694,26 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     return this.#policy.mapModel ? this.#policy.mapModel(model) : model;
   }
 
+  #newSessionModelForRequest(request: StartSessionRequest | ResumeTurnRequest): string | undefined {
+    if (this.#policy.newSessionModelConfig === false) return undefined;
+    return this.#mappedModel(request.model);
+  }
+
+  async #configureSession(
+    session: AcpAgentRuntimeSession,
+    request: StartSessionRequest | ResumeTurnRequest,
+  ): Promise<void> {
+    const configured = await this.#policy.configureSession?.({
+      client: session.client,
+      sessionId: session.remoteSessionId,
+      request,
+      configOptions: session.configOptions,
+    });
+    if (configured) {
+      session.configOptions = configured;
+    }
+  }
+
   #buildPrompt(request: StartSessionRequest | ResumeTurnRequest): Array<{ type: string; text?: string; [key: string]: unknown }> {
     const prompt = this.#policy.buildPrompt
       ? this.#policy.buildPrompt(request)
@@ -685,9 +729,13 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
 
   #promptConfigForRequest(request: StartSessionRequest | ResumeTurnRequest): Record<string, unknown> | null {
     const config: Record<string, unknown> = {};
-    const mode = this.#policy.mapPermissionMode?.(request.permissionMode);
+    const mode = this.#policy.promptModeConfig === false
+      ? undefined
+      : this.#policy.mapPermissionMode?.(request.permissionMode);
     if (mode) config.mode = mode;
-    const model = this.#mappedModel(request.model);
+    const model = this.#policy.promptModelConfig === false
+      ? undefined
+      : this.#mappedModel(request.model);
     if (model) config.model = model;
     return Object.keys(config).length > 0 ? config : null;
   }

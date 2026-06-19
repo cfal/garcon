@@ -2,7 +2,7 @@ import { getCursorBinary } from '../../config.js';
 import { AcpClient } from '../../acp/client.js';
 import { AcpTransport } from '../../acp/transport.js';
 import { asObject, asString } from '../shared/acp-event-converter.js';
-import { mapCursorAcpModel } from './cursor-acp-policy.js';
+import { configureCursorAcpSessionOptions } from './cursor-acp-model-config.js';
 
 interface CursorSingleQueryOptions {
   cwd?: string;
@@ -56,13 +56,12 @@ export async function runSingleQuery(
 ): Promise<string> {
   const options = normalizeOptions(rawOptions);
   const cwd = options.cwd || options.projectPath || process.cwd();
-  const model = mapCursorAcpModel(options.model ?? 'default');
   const transport = options.createTransport?.() ?? new AcpTransport();
   const client = new AcpClient(transport, {
     initialize: {
       protocolVersion: 1,
       clientInfo: { name: 'garcon', version: '1.0.0' },
-      clientCapabilities: {},
+      clientCapabilities: { _meta: { parameterizedModelPicker: true } },
       mcpServers: [],
     },
     authenticateMethodId: 'cursor_login',
@@ -110,16 +109,19 @@ export async function runSingleQuery(
     const created = await client.newSession({
       cwd,
       mcpServers: [],
-      ...(model ? { model } : {}),
+    });
+
+    await configureCursorAcpSessionOptions({
+      client,
+      sessionId: created.sessionId,
+      model: options.model ?? 'default',
+      mode: 'ask',
+      configOptions: created.configOptions,
     });
 
     await client.promptSession({
       sessionId: created.sessionId,
       prompt: [{ type: 'text', text: prompt.trim() }],
-      config: {
-        mode: 'ask',
-        ...(model ? { model } : {}),
-      },
     });
 
     return assistantChunks.join('').trim();

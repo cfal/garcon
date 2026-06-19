@@ -37,11 +37,17 @@ describe('Cursor model discovery', () => {
 Models
 - gpt-5.3-codex - GPT-5.3
 * sonnet-4.5-thinking (Claude 4.5 Sonnet Thinking)
+gpt-5.5-extra-high - GPT-5.5 1M Extra High
+gpt-5.5-extra-high-fast - GPT-5.5 Extra High Fast
+composer-2.5-fast - Composer 2.5 Fast (default)
 No models available for this account
 gpt-5.3-codex - Duplicate
 `)).toEqual([
       { value: 'gpt-5.3-codex', label: 'GPT-5.3', supportsImages: false },
       { value: 'sonnet-4.5-thinking', label: 'Claude 4.5 Sonnet Thinking', supportsImages: false },
+      { value: 'gpt-5.5-extra-high', label: 'GPT-5.5 1M Extra High', supportsImages: false },
+      { value: 'gpt-5.5-extra-high-fast', label: 'GPT-5.5 Extra High Fast', supportsImages: false },
+      { value: 'composer-2.5-fast', label: 'Composer 2.5 Fast (default)', supportsImages: false },
     ]);
   });
 
