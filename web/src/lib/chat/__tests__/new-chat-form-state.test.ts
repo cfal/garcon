@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
 import * as chatsApi from '$lib/api/chats';
+import type { ModelOption } from '$lib/stores/model-catalog.svelte';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 vi.mock('$lib/api/files', () => ({
@@ -11,23 +12,39 @@ vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn(),
 }));
 
-function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSettingsSnapshot {
-	return {
+type SnapshotOverrides = Partial<Omit<RemoteSettingsSnapshot, 'paths' | 'executionDefaults'>> & {
+	paths?: Partial<RemoteSettingsSnapshot['paths']>;
+	executionDefaults?: {
+		global?: Partial<RemoteSettingsSnapshot['executionDefaults']['global']>;
+		byAgent?: RemoteSettingsSnapshot['executionDefaults']['byAgent'];
+	};
+};
+
+function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot {
+	const snapshot: RemoteSettingsSnapshot = {
 		version: 1,
 		ui: {},
 		uiEffective: {},
-		paths: { pinnedProjectPaths: [], browseStartPath: '' },
+		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
 		pinnedChatIds: [],
-		lastAgentId: 'claude',
-		lastProjectPath: '',
-		lastModel: 'opus',
-		lastApiProviderId: null,
-		lastModelEndpointId: null,
-		lastModelProtocol: null,
-		lastPermissionMode: 'default',
-		lastThinkingMode: 'none',
-		lastClaudeThinkingMode: 'auto',
-		lastAmpAgentMode: 'smart',
+		recentAgentSettings: [
+			{
+				agentId: 'claude',
+				model: 'opus',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			},
+		],
+		executionDefaults: {
+			global: {
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
+			},
+			byAgent: {},
+		},
 		projectBasePath: '/workspace',
 		telegram: {
 			botTokenAvailable: false,
@@ -39,7 +56,24 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 			pendingLink: false,
 			linkUrl: null,
 		},
+	};
+	return {
+		...snapshot,
 		...overrides,
+		paths: {
+			...snapshot.paths,
+			...(overrides.paths ?? {}),
+		},
+		executionDefaults: {
+			global: {
+				...snapshot.executionDefaults.global,
+				...(overrides.executionDefaults?.global ?? {}),
+			},
+			byAgent: {
+				...snapshot.executionDefaults.byAgent,
+				...(overrides.executionDefaults?.byAgent ?? {}),
+			},
+		},
 	};
 }
 
@@ -82,7 +116,7 @@ const mockModelCatalog = {
 		if (agentId === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
 		return '';
 	}),
-	getModels: vi.fn((agentId: string) => {
+	getModels: vi.fn((agentId: string): ModelOption[] => {
 		if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
 		if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
 		if (agentId === 'direct-anthropic-compatible') {
@@ -110,6 +144,16 @@ const mockModelCatalog = {
 			];
 		}
 		return [];
+	}),
+	getModelForSelection: vi.fn((agentId: string, model: string, endpointId?: string | null) => {
+		const models = mockModelCatalog.getModels(agentId);
+		return (
+			models.find(
+				(entry) =>
+					(endpointId ? entry.endpointId === endpointId : true) &&
+					(entry.value === model || entry.rawModel === model),
+			) ?? null
+		);
 	}),
 	selectionFor: vi.fn((agentId: string, model: string) => {
 		if (agentId === 'direct-anthropic-compatible' && model === 'acme_anthropic:acme-sonnet') {
@@ -180,12 +224,25 @@ describe('NewChatFormState', () => {
 	it('loads startup defaults from server settings', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(
 			makeSnapshot({
-				lastAgentId: 'codex',
-				lastProjectPath: '/workspace/project',
-				lastModel: 'gpt-5.4',
-				lastPermissionMode: 'acceptEdits',
-				lastThinkingMode: 'think-hard',
-				lastClaudeThinkingMode: 'off',
+				paths: { recentProjectPaths: ['/workspace/project'] },
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+				executionDefaults: {
+					byAgent: {
+						codex: {
+							permissionMode: 'acceptEdits',
+							thinkingMode: 'think-hard',
+							claudeThinkingMode: 'off',
+						},
+					},
+				},
 			}),
 		);
 
@@ -222,12 +279,16 @@ describe('NewChatFormState', () => {
 	it('loads API provider startup defaults from server settings', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(
 			makeSnapshot({
-				lastAgentId: 'direct-openai-compatible',
-				lastProjectPath: '/workspace/project',
-				lastModel: 'glm-5.1',
-				lastApiProviderId: 'zai',
-				lastModelEndpointId: 'zai_openai',
-				lastModelProtocol: 'openai-compatible',
+				paths: { recentProjectPaths: ['/workspace/project'] },
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'glm-5.1',
+						apiProviderId: 'zai',
+						modelEndpointId: 'zai_openai',
+						modelProtocol: 'openai-compatible',
+					},
+				],
 			}),
 		);
 
@@ -240,12 +301,16 @@ describe('NewChatFormState', () => {
 	it('loads Direct Anthropic startup defaults from server settings', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(
 			makeSnapshot({
-				lastAgentId: 'direct-anthropic-compatible',
-				lastProjectPath: '/workspace/project',
-				lastModel: 'acme-sonnet',
-				lastApiProviderId: 'acme',
-				lastModelEndpointId: 'acme_anthropic',
-				lastModelProtocol: 'anthropic-messages',
+				paths: { recentProjectPaths: ['/workspace/project'] },
+				recentAgentSettings: [
+					{
+						agentId: 'direct-anthropic-compatible',
+						model: 'acme-sonnet',
+						apiProviderId: 'acme',
+						modelEndpointId: 'acme_anthropic',
+						modelProtocol: 'anthropic-messages',
+					},
+				],
 			}),
 		);
 
@@ -259,12 +324,16 @@ describe('NewChatFormState', () => {
 		mockModelCatalog.getSelectableAgents.mockReturnValue(['claude', 'codex']);
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(
 			makeSnapshot({
-				lastAgentId: 'direct-anthropic-compatible',
-				lastProjectPath: '/workspace/project',
-				lastModel: 'acme-sonnet',
-				lastApiProviderId: 'acme',
-				lastModelEndpointId: 'acme_anthropic',
-				lastModelProtocol: 'anthropic-messages',
+				paths: { recentProjectPaths: ['/workspace/project'] },
+				recentAgentSettings: [
+					{
+						agentId: 'direct-anthropic-compatible',
+						model: 'acme-sonnet',
+						apiProviderId: 'acme',
+						modelEndpointId: 'acme_anthropic',
+						modelProtocol: 'anthropic-messages',
+					},
+				],
 			}),
 		);
 
@@ -277,9 +346,16 @@ describe('NewChatFormState', () => {
 	it('falls back when startup defaults reference a non-agent API provider id', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(
 			makeSnapshot({
-				lastAgentId: 'zai' as RemoteSettingsSnapshot['lastAgentId'],
-				lastProjectPath: '/workspace/project',
-				lastModel: 'glm-5.1',
+				paths: { recentProjectPaths: ['/workspace/project'] },
+				recentAgentSettings: [
+					{
+						agentId: 'zai' as any,
+						model: 'glm-5.1',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
 			}),
 		);
 
@@ -292,10 +368,15 @@ describe('NewChatFormState', () => {
 	it('normalizes invalid startup defaults from server settings', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(
 			makeSnapshot({
-				lastPermissionMode: 'bogus' as any,
-				lastThinkingMode: 'very-hard' as any,
-				lastClaudeThinkingMode: 'sometimes' as any,
-				lastProjectPath: '/workspace/project',
+				paths: { recentProjectPaths: ['/workspace/project'] },
+				executionDefaults: {
+					global: {
+						permissionMode: 'bogus' as any,
+						thinkingMode: 'very-hard' as any,
+						claudeThinkingMode: 'sometimes' as any,
+						ampAgentMode: 'unreal' as any,
+					},
+				},
 			}),
 		);
 
@@ -304,6 +385,47 @@ describe('NewChatFormState', () => {
 		expect(formState.permissionMode).toBe('default');
 		expect(formState.thinkingMode).toBe('none');
 		expect(formState.claudeThinkingMode).toBe('auto');
+		expect(formState.ampAgentMode).toBe('smart');
+	});
+
+	it('does not replace manually touched execution modes when changing agent', async () => {
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+				executionDefaults: {
+					byAgent: {
+						claude: {
+							permissionMode: 'acceptEdits',
+							thinkingMode: 'none',
+							claudeThinkingMode: 'on',
+							ampAgentMode: 'smart',
+						},
+						codex: {
+							permissionMode: 'bypassPermissions',
+							thinkingMode: 'think-hard',
+							claudeThinkingMode: 'off',
+							ampAgentMode: 'deep',
+						},
+					},
+				},
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		formState.setPermissionMode('manualBypass');
+		formState.setThinkingMode('think-hard');
+		formState.selectAgent('claude');
+
+		expect(formState.permissionMode).toBe('manualBypass');
+		expect(formState.thinkingMode).toBe('think-hard');
 	});
 
 	it('debounces directory validation', async () => {

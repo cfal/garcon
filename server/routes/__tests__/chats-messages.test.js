@@ -30,7 +30,7 @@ function createRoutesFixture() {
     getNormalChatIds: mock(async () => []),
     getArchivedChatIds: mock(async () => []),
     getChatName: mock(() => null),
-    setLastChatDefaults: mock(async () => undefined),
+    recordChatStartup: mock(async () => undefined),
     ensureInNormal: mock(async () => undefined),
     removeFromAllOrderLists: mock(async () => undefined),
     removeSessionName: mock(async () => undefined),

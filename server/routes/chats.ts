@@ -50,7 +50,7 @@ interface SettingsDep {
   getUiSettings(): { chatTitle?: unknown } | null | undefined;
   getChatName(chatId: string): string | null;
   setSessionName(chatId: string, title: string): Promise<unknown>;
-  setLastChatDefaults(defaults: Record<string, unknown>): Promise<void>;
+  recordChatStartup(defaults: Record<string, unknown>): Promise<void>;
   ensureInNormal(chatId: string): Promise<void>;
   removeFromAllOrderLists(chatId: string): Promise<void>;
   removeSessionName(chatId: string): Promise<void>;

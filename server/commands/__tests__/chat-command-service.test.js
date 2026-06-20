@@ -45,7 +45,7 @@ function makeService() {
     getUiSettings: mock(() => null),
     getChatName: mock(() => null),
     setSessionName: mock(() => Promise.resolve(undefined)),
-    setLastChatDefaults: mock(() => Promise.resolve(undefined)),
+    recordChatStartup: mock(() => Promise.resolve(undefined)),
     ensureInNormal: mock(() => Promise.resolve(undefined)),
     removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
   };

@@ -9,10 +9,18 @@ import type {
   ThinkingMode,
 } from './chat-modes';
 import {
+  DEFAULT_AMP_AGENT_MODE,
+  DEFAULT_CLAUDE_THINKING_MODE,
+  DEFAULT_PERMISSION_MODE,
+  DEFAULT_THINKING_MODE,
   isAmpAgentMode,
   isClaudeThinkingMode,
   isPermissionMode,
   isThinkingMode,
+  normalizeAmpAgentMode,
+  normalizeClaudeThinkingMode,
+  normalizePermissionMode,
+  normalizeThinkingMode,
 } from './chat-modes';
 import type { AgentId } from './agents';
 import { isAgentId } from './agents';
@@ -75,6 +83,27 @@ export interface RemoteUiEffectiveSettings {
 export interface RemotePathSettings {
   pinnedProjectPaths: string[];
   browseStartPath: string;
+  recentProjectPaths: string[];
+}
+
+export interface RecentAgentSetting {
+  agentId: AgentId;
+  model: string;
+  apiProviderId: string | null;
+  modelEndpointId: string | null;
+  modelProtocol: ApiProtocol | null;
+}
+
+export interface ExecutionDefaults {
+  permissionMode: PermissionMode;
+  thinkingMode: ThinkingMode;
+  claudeThinkingMode: ClaudeThinkingMode;
+  ampAgentMode: AmpAgentMode;
+}
+
+export interface RemoteExecutionDefaults {
+  global: ExecutionDefaults;
+  byAgent: Partial<Record<AgentId, Partial<ExecutionDefaults>>>;
 }
 
 export interface RemoteSettingsSnapshot {
@@ -83,16 +112,8 @@ export interface RemoteSettingsSnapshot {
   uiEffective: RemoteUiEffectiveSettings;
   paths: RemotePathSettings;
   pinnedChatIds: string[];
-  lastAgentId: AgentId;
-  lastProjectPath: string;
-  lastModel: string;
-  lastApiProviderId: string | null;
-  lastModelEndpointId: string | null;
-  lastModelProtocol: ApiProtocol | null;
-  lastPermissionMode: PermissionMode;
-  lastThinkingMode: ThinkingMode;
-  lastClaudeThinkingMode: ClaudeThinkingMode;
-  lastAmpAgentMode: AmpAgentMode;
+  recentAgentSettings: RecentAgentSetting[];
+  executionDefaults: RemoteExecutionDefaults;
   projectBasePath: string;
   telegram: RemoteTelegramStatus;
 }
@@ -222,8 +243,9 @@ function normalizeRemotePathSettings(value: unknown): RemotePathSettings | null 
   if (!raw) return null;
   const pinnedProjectPaths = asStringArray(raw.pinnedProjectPaths);
   const browseStartPath = asString(raw.browseStartPath);
-  if (!pinnedProjectPaths || browseStartPath === null) return null;
-  return { pinnedProjectPaths, browseStartPath };
+  const recentProjectPaths = asStringArray(raw.recentProjectPaths);
+  if (!pinnedProjectPaths || browseStartPath === null || !recentProjectPaths) return null;
+  return { pinnedProjectPaths, browseStartPath, recentProjectPaths };
 }
 
 function normalizeRemoteSettingsVersion(value: unknown): number | null {
@@ -234,6 +256,96 @@ function normalizeRemoteSettingsVersion(value: unknown): number | null {
 
 function normalizeNullableString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
+}
+
+function normalizeRecentAgentSetting(value: unknown): RecentAgentSetting | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  const model = asString(raw.model);
+  if (!isAgentId(raw.agentId) || model === null || !model.trim()) return null;
+  return {
+    agentId: raw.agentId,
+    model,
+    apiProviderId: safeOptionalId(raw.apiProviderId),
+    modelEndpointId: safeOptionalId(raw.modelEndpointId),
+    modelProtocol: safeOptionalProtocol(raw.modelProtocol),
+  };
+}
+
+function normalizeRecentAgentSettings(value: unknown): RecentAgentSetting[] | null {
+  if (!Array.isArray(value)) return null;
+  const normalized: RecentAgentSetting[] = [];
+  for (const entry of value) {
+    const recent = normalizeRecentAgentSetting(entry);
+    if (!recent) return null;
+    normalized.push(recent);
+  }
+  return normalized;
+}
+
+function normalizeExecutionDefaults(value: unknown): ExecutionDefaults | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  if (!isPermissionMode(raw.permissionMode)) return null;
+  if (!isThinkingMode(raw.thinkingMode)) return null;
+  if (!isClaudeThinkingMode(raw.claudeThinkingMode)) return null;
+  if (!isAmpAgentMode(raw.ampAgentMode)) return null;
+  return {
+    permissionMode: raw.permissionMode,
+    thinkingMode: raw.thinkingMode,
+    claudeThinkingMode: raw.claudeThinkingMode,
+    ampAgentMode: raw.ampAgentMode,
+  };
+}
+
+function normalizeExecutionDefaultsPatch(value: unknown): Partial<ExecutionDefaults> | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  const patch: Partial<ExecutionDefaults> = {};
+  if (raw.permissionMode !== undefined) {
+    if (!isPermissionMode(raw.permissionMode)) return null;
+    patch.permissionMode = raw.permissionMode;
+  }
+  if (raw.thinkingMode !== undefined) {
+    if (!isThinkingMode(raw.thinkingMode)) return null;
+    patch.thinkingMode = raw.thinkingMode;
+  }
+  if (raw.claudeThinkingMode !== undefined) {
+    if (!isClaudeThinkingMode(raw.claudeThinkingMode)) return null;
+    patch.claudeThinkingMode = raw.claudeThinkingMode;
+  }
+  if (raw.ampAgentMode !== undefined) {
+    if (!isAmpAgentMode(raw.ampAgentMode)) return null;
+    patch.ampAgentMode = raw.ampAgentMode;
+  }
+  return patch;
+}
+
+function normalizeRemoteExecutionDefaults(value: unknown): RemoteExecutionDefaults | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  const global = normalizeExecutionDefaults(raw.global);
+  const rawByAgent = asRecord(raw.byAgent);
+  if (!global || !rawByAgent) return null;
+
+  const byAgent: RemoteExecutionDefaults['byAgent'] = {};
+  for (const [agentId, defaults] of Object.entries(rawByAgent)) {
+    if (!isAgentId(agentId)) return null;
+    const patch = normalizeExecutionDefaultsPatch(defaults);
+    if (!patch) return null;
+    byAgent[agentId] = patch;
+  }
+
+  return { global, byAgent };
+}
+
+export function defaultExecutionDefaults(): ExecutionDefaults {
+  return {
+    permissionMode: normalizePermissionMode(DEFAULT_PERMISSION_MODE),
+    thinkingMode: normalizeThinkingMode(DEFAULT_THINKING_MODE),
+    claudeThinkingMode: normalizeClaudeThinkingMode(DEFAULT_CLAUDE_THINKING_MODE),
+    ampAgentMode: normalizeAmpAgentMode(DEFAULT_AMP_AGENT_MODE),
+  };
 }
 
 function normalizeRemoteTelegramStatus(value: unknown): RemoteTelegramStatus | null {
@@ -276,22 +388,14 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
   const uiEffective = normalizeRemoteUiEffectiveSettings(raw.uiEffective);
   const paths = normalizeRemotePathSettings(raw.paths);
   const pinnedChatIds = asStringArray(raw.pinnedChatIds);
-  const lastProjectPath = asString(raw.lastProjectPath);
-  const lastModel = asString(raw.lastModel);
   const projectBasePath = asString(raw.projectBasePath);
-  const lastApiProviderId = safeOptionalId(raw.lastApiProviderId);
-  const lastModelEndpointId = safeOptionalId(raw.lastModelEndpointId);
-  const lastModelProtocol = safeOptionalProtocol(raw.lastModelProtocol);
+  const recentAgentSettings = normalizeRecentAgentSettings(raw.recentAgentSettings);
+  const executionDefaults = normalizeRemoteExecutionDefaults(raw.executionDefaults);
   const telegram = normalizeRemoteTelegramStatus(raw.telegram);
 
   if (version === null) return null;
   if (!ui || !uiEffective || !paths || !pinnedChatIds) return null;
-  if (!isAgentId(raw.lastAgentId)) return null;
-  if (lastProjectPath === null || lastModel === null || projectBasePath === null) return null;
-  if (!isPermissionMode(raw.lastPermissionMode)) return null;
-  if (!isThinkingMode(raw.lastThinkingMode)) return null;
-  if (!isClaudeThinkingMode(raw.lastClaudeThinkingMode)) return null;
-  if (!isAmpAgentMode(raw.lastAmpAgentMode)) return null;
+  if (projectBasePath === null || !recentAgentSettings || !executionDefaults) return null;
   if (!telegram) return null;
 
   return {
@@ -300,16 +404,8 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
     uiEffective,
     paths,
     pinnedChatIds,
-    lastAgentId: raw.lastAgentId,
-    lastProjectPath,
-    lastModel,
-    lastApiProviderId,
-    lastModelEndpointId,
-    lastModelProtocol,
-    lastPermissionMode: raw.lastPermissionMode,
-    lastThinkingMode: raw.lastThinkingMode,
-    lastClaudeThinkingMode: raw.lastClaudeThinkingMode,
-    lastAmpAgentMode: raw.lastAmpAgentMode,
+    recentAgentSettings,
+    executionDefaults,
     projectBasePath,
     telegram,
   };

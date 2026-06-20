@@ -20,18 +20,18 @@ function remoteSettingsSource(overrides = {}) {
   return {
     version: 0,
     ui: {},
-    paths: {},
+    paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
     pinnedChatIds: [],
-    lastAgentId: 'claude',
-    lastProjectPath: '',
-    lastModel: '',
-    lastApiProviderId: null,
-    lastModelEndpointId: null,
-    lastModelProtocol: null,
-    lastPermissionMode: 'default',
-    lastThinkingMode: 'none',
-    lastClaudeThinkingMode: 'auto',
-    lastAmpAgentMode: 'smart',
+    recentAgentSettings: [],
+    executionDefaults: {
+      global: {
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        claudeThinkingMode: 'auto',
+        ampAgentMode: 'smart',
+      },
+      byAgent: {},
+    },
     ...overrides,
   };
 }
@@ -47,16 +47,6 @@ function createMockCtx() {
       getPathSettings: mock(() => ({})),
       setPathSettings: mock(() => Promise.resolve({})),
       getPinnedChatIds: mock(() => []),
-      getLastAgentId: mock(() => 'claude'),
-      getLastProjectPath: mock(() => ''),
-      getLastModel: mock(() => ''),
-      getLastPermissionMode: mock(() => 'default'),
-      getLastThinkingMode: mock(() => 'none'),
-      getLastClaudeThinkingMode: mock(() => 'auto'),
-      getLastAmpAgentMode: mock(() => 'smart'),
-      getLastApiProviderId: mock(() => null),
-      getLastModelEndpointId: mock(() => null),
-      getLastModelProtocol: mock(() => null),
       getFolders: mock(() => []),
       addFolder: mock(() => Promise.resolve(undefined)),
       updateFolder: mock(() => Promise.resolve(undefined)),
@@ -106,12 +96,6 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
-    ctx.settings.getLastAgentId.mockClear();
-    ctx.settings.getLastProjectPath.mockClear();
-    ctx.settings.getLastModel.mockClear();
-    ctx.settings.getLastPermissionMode.mockClear();
-    ctx.settings.getLastThinkingMode.mockClear();
-    ctx.settings.getLastClaudeThinkingMode.mockClear();
     ctx.agents.getAgentAuthStatusMap.mockClear();
     ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
@@ -178,12 +162,6 @@ describe('GET /api/app/settings', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
-    ctx.settings.getLastAgentId.mockClear();
-    ctx.settings.getLastProjectPath.mockClear();
-    ctx.settings.getLastModel.mockClear();
-    ctx.settings.getLastPermissionMode.mockClear();
-    ctx.settings.getLastThinkingMode.mockClear();
-    ctx.settings.getLastClaudeThinkingMode.mockClear();
     ctx.agents.getAgentAuthStatusMap.mockClear();
     ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
@@ -193,14 +171,37 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
       version: 7,
       ui: { theme: 'dark' },
-      paths: { pinnedProjectPaths: ['/home'], browseStartPath: '/workspace' },
+      paths: {
+        pinnedProjectPaths: ['/home'],
+        browseStartPath: '/workspace',
+        recentProjectPaths: ['/workspace/project'],
+      },
       pinnedChatIds: ['a', 'b'],
-      lastAgentId: 'codex',
-      lastProjectPath: '/workspace/project',
-      lastModel: 'gpt-5.4',
-      lastPermissionMode: 'acceptEdits',
-      lastThinkingMode: 'think-hard',
-      lastClaudeThinkingMode: 'on',
+      recentAgentSettings: [
+        {
+          agentId: 'codex',
+          model: 'gpt-5.4',
+          apiProviderId: null,
+          modelEndpointId: null,
+          modelProtocol: null,
+        },
+      ],
+      executionDefaults: {
+        global: {
+          permissionMode: 'default',
+          thinkingMode: 'none',
+          claudeThinkingMode: 'auto',
+          ampAgentMode: 'smart',
+        },
+        byAgent: {
+          codex: {
+            permissionMode: 'acceptEdits',
+            thinkingMode: 'think-hard',
+            claudeThinkingMode: 'on',
+            ampAgentMode: 'smart',
+          },
+        },
+      },
     }));
 
     const response = await handler();
@@ -208,17 +209,30 @@ describe('GET /api/app/settings', () => {
 
     expect(body.version).toBe(7);
     expect(body.ui).toEqual({ theme: 'dark' });
-    expect(body.paths).toEqual({ pinnedProjectPaths: ['/home'], browseStartPath: '/workspace' });
+    expect(body.paths).toEqual({
+      pinnedProjectPaths: ['/home'],
+      browseStartPath: '/workspace',
+      recentProjectPaths: ['/workspace/project'],
+    });
     expect(body.pinnedChatIds).toEqual(['a', 'b']);
-    expect(body.lastAgentId).toBe('codex');
-    expect(body.lastProjectPath).toBe('/workspace/project');
-    expect(body.lastModel).toBe('gpt-5.4');
-    expect(body.lastApiProviderId).toBeNull();
-    expect(body.lastModelEndpointId).toBeNull();
-    expect(body.lastModelProtocol).toBeNull();
-    expect(body.lastPermissionMode).toBe('acceptEdits');
-    expect(body.lastThinkingMode).toBe('think-hard');
-    expect(body.lastClaudeThinkingMode).toBe('on');
+    expect(body.recentAgentSettings).toEqual([
+      {
+        agentId: 'codex',
+        model: 'gpt-5.4',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+      },
+    ]);
+    expect(body.executionDefaults.byAgent.codex).toEqual({
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'think-hard',
+      claudeThinkingMode: 'on',
+      ampAgentMode: 'smart',
+    });
+    for (const key of ['last' + 'AgentId', 'last' + 'ProjectPath', 'last' + 'Model', 'last' + 'PermissionMode']) {
+      expect(body[key]).toBeUndefined();
+    }
     expect(body.uiEffective.chatTitle.enabled).toBe(false);
     expect(body.uiEffective.chatTitle.agentId).toBe('claude');
     expect(body.uiEffective.chatTitle.model).toBe('haiku');
@@ -289,12 +303,6 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
-    ctx.settings.getLastAgentId.mockClear();
-    ctx.settings.getLastProjectPath.mockClear();
-    ctx.settings.getLastModel.mockClear();
-    ctx.settings.getLastPermissionMode.mockClear();
-    ctx.settings.getLastThinkingMode.mockClear();
-    ctx.settings.getLastClaudeThinkingMode.mockClear();
     ctx.agents.getAgentAuthStatusMap.mockClear();
     ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
@@ -337,18 +345,34 @@ describe('PUT /api/app/settings', () => {
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ chatTitle: chatTitleConfig });
   });
 
-  it('does not patch last startup settings through app settings', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({ lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard', lastClaudeThinkingMode: 'off' }));
+  it('does not patch startup defaults through app settings', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      recentAgentSettings: [
+        {
+          agentId: 'codex',
+          model: 'gpt-5.4',
+          apiProviderId: null,
+          modelEndpointId: null,
+          modelProtocol: null,
+        },
+      ],
+      executionDefaults: {
+        byAgent: {
+          codex: { permissionMode: 'acceptEdits' },
+        },
+      },
+    }));
     ctx.settings.getUiSettings.mockImplementation(() => ({}));
     ctx.settings.getPathSettings.mockImplementation(() => ({}));
 
-    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { lastPermissionMode: 'acceptEdits', lastThinkingMode: 'think-hard', lastClaudeThinkingMode: 'off' }));
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
     const body = await response.json();
 
     expect(body.success).toBe(true);
-    expect(body.lastPermissionMode).toBeUndefined();
-    expect(body.lastThinkingMode).toBeUndefined();
-    expect(body.lastClaudeThinkingMode).toBeUndefined();
+    expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+    expect(ctx.settings.setPathSettings).not.toHaveBeenCalled();
+    expect(body.settings.recentAgentSettings).toEqual([]);
+    expect(body.settings.executionDefaults.byAgent).toEqual({});
   });
 });
 
@@ -436,12 +460,6 @@ describe('Telegram token settings API', () => {
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
-    ctx.settings.getLastAgentId.mockClear();
-    ctx.settings.getLastProjectPath.mockClear();
-    ctx.settings.getLastModel.mockClear();
-    ctx.settings.getLastPermissionMode.mockClear();
-    ctx.settings.getLastThinkingMode.mockClear();
-    ctx.settings.getLastClaudeThinkingMode.mockClear();
     ctx.agents.getAgentAuthStatusMap.mockClear();
     ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();

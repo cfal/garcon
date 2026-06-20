@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ModelSelectorPopoverHost from './ModelSelectorPopoverHost.svelte';
+import type { ModelSelectorRecentOption } from '../model-selector-types';
 
 let originalMatchMedia: typeof window.matchMedia | undefined;
 
@@ -42,6 +43,60 @@ async function chooseCodexModelInCompactLayout(): Promise<void> {
 	await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 	await fireEvent.click(await screen.findByRole('button', { name: 'Codex' }));
 	await fireEvent.click(await screen.findByText('Codex Model 0'));
+}
+
+function codexRecent(
+	overrides: Partial<ModelSelectorRecentOption> = {},
+): ModelSelectorRecentOption {
+	return {
+		id: 'codex:gpt-5',
+		agentId: 'codex',
+		modelValue: 'codex-model-1',
+		model: 'codex-model-1',
+		apiProviderId: null,
+		modelEndpointId: null,
+		modelProtocol: null,
+		agentLabel: 'Codex',
+		sourceLabel: 'OpenAI',
+		modelLabel: 'Codex Model 1',
+		displayLabel: 'Codex · OpenAI OAuth · Codex Model 1',
+		...overrides,
+	};
+}
+
+function claudeRecent(
+	overrides: Partial<ModelSelectorRecentOption> = {},
+): ModelSelectorRecentOption {
+	return {
+		id: 'claude:model-0',
+		agentId: 'claude',
+		modelValue: 'model-0',
+		model: 'model-0',
+		apiProviderId: null,
+		modelEndpointId: null,
+		modelProtocol: null,
+		agentLabel: 'Claude',
+		sourceLabel: 'Claude OAuth',
+		modelLabel: 'Model 0',
+		displayLabel: 'Claude · Claude OAuth · Model 0',
+		...overrides,
+	};
+}
+
+function endpointRecent(): ModelSelectorRecentOption {
+	return codexRecent({
+		id: 'claude:acme:endpoint-model',
+		agentId: 'claude',
+		modelValue: 'acme-claude:endpoint-model',
+		model: 'endpoint-model',
+		apiProviderId: 'acme',
+		modelEndpointId: 'acme-claude',
+		modelProtocol: 'anthropic-messages',
+		agentLabel: 'Claude',
+		sourceLabel: 'Acme',
+		modelLabel: 'Endpoint Model',
+		displayLabel: 'Claude · Acme · Endpoint Model',
+	});
 }
 
 describe('ModelSelectorPopover', () => {
@@ -239,6 +294,114 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
 	});
 
+	it('renders desktop recents above the agent header and commits a recent immediately', async () => {
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			recents: [codexRecent()],
+			onChange,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		const recentsButton = await screen.findByRole('button', { name: 'Recents' });
+		const agentHeader = screen.getByText('Agent');
+
+		expect(
+			recentsButton.compareDocumentPosition(agentHeader) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+
+		await fireEvent.click(recentsButton);
+
+		expect(screen.getByText('Recent models')).toBeTruthy();
+		expect(recentsButton.querySelector('.lucide-check')).toBeNull();
+		expect(screen.queryByRole('listbox', { name: 'Provider' })).toBeNull();
+		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
+
+		await fireEvent.click(
+			screen.getByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' }),
+		);
+
+		expect(onChange).toHaveBeenCalledWith({
+			agentId: 'codex',
+			modelValue: 'codex-model-1',
+			model: 'codex-model-1',
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+		});
+		await waitFor(() => {
+			expect(screen.queryByText('Recent models')).toBeNull();
+		});
+	});
+
+	it('opens desktop selection at recents when requested with multiple recents', async () => {
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			recents: [claudeRecent(), codexRecent()],
+			preferRecentsOnOpen: true,
+			onChange: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+
+		expect(await screen.findByText('Recent models')).toBeTruthy();
+		const currentRecent = screen.getByRole('button', {
+			name: 'Claude · Claude OAuth · Model 0',
+		});
+		expect(
+			screen.getByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' }),
+		).toBeTruthy();
+		expect(currentRecent.querySelector('.lucide-check')).toBeTruthy();
+		expect(screen.queryByRole('listbox', { name: 'Provider' })).toBeNull();
+		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
+	});
+
+	it('keeps desktop selection on the selected model when only one recent exists', async () => {
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			recents: [codexRecent()],
+			preferRecentsOnOpen: true,
+			onChange: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+
+		const listbox = await screen.findByRole('listbox', { name: 'Model' });
+		expect(within(listbox).getByText('Model 0')).toBeTruthy();
+		expect(screen.queryByText('Recent models')).toBeNull();
+	});
+
+	it('preserves endpoint metadata when committing a recent', async () => {
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			recents: [endpointRecent()],
+			includeEndpointModel: true,
+			onChange,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Recents' }));
+		await fireEvent.click(
+			await screen.findByRole('button', { name: 'Claude · Acme · Endpoint Model' }),
+		);
+
+		expect(onChange).toHaveBeenCalledWith({
+			agentId: 'claude',
+			modelValue: 'acme-claude:endpoint-model',
+			model: 'endpoint-model',
+			apiProviderId: 'acme',
+			modelEndpointId: 'acme-claude',
+			modelProtocol: 'anthropic-messages',
+		});
+	});
+
 	it('reserves the trigger subtitle row when the committed subtitle is empty', () => {
 		render(ModelSelectorPopoverHost, {
 			value: { agentId: 'claude', model: '' },
@@ -329,6 +492,77 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.getByText('Agent')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
+	});
+
+	it('opens compact recents from the top-level menu and commits immediately', async () => {
+		installMatchMedia(true);
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			recents: [codexRecent()],
+			onChange,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+
+		expect(await screen.findByRole('listbox', { name: 'Model' })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+		expect(screen.getByRole('button', { name: 'Codex' })).toBeTruthy();
+		await fireEvent.click(await screen.findByRole('button', { name: 'Recents' }));
+
+		expect(screen.getByText('Recent models')).toBeTruthy();
+		await fireEvent.click(
+			await screen.findByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' }),
+		);
+
+		expect(onChange).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentId: 'codex',
+				modelValue: 'codex-model-1',
+				model: 'codex-model-1',
+			}),
+		);
+		await waitFor(() => {
+			expect(screen.queryByText('Recent models')).toBeNull();
+		});
+	});
+
+	it('opens compact selection at recents when requested with multiple recents', async () => {
+		installMatchMedia(true);
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			recents: [claudeRecent(), codexRecent()],
+			preferRecentsOnOpen: true,
+			onChange,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+
+		expect(await screen.findByText('Recent models')).toBeTruthy();
+		expect(
+			screen
+				.getByRole('button', { name: 'Claude · Claude OAuth · Model 0' })
+				.querySelector('.lucide-check'),
+		).toBeTruthy();
+		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
+
+		await fireEvent.click(
+			await screen.findByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' }),
+		);
+
+		expect(onChange).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentId: 'codex',
+				modelValue: 'codex-model-1',
+				model: 'codex-model-1',
+			}),
+		);
 	});
 
 	it('commits compact draft selection only from Done', async () => {

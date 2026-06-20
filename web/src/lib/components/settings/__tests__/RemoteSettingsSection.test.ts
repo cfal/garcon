@@ -23,23 +23,39 @@ vi.mock('$lib/api/settings.js', () => ({
 	testTelegramBotToken: vi.fn(),
 }));
 
-function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSettingsSnapshot {
-	return {
+type SnapshotOverrides = Partial<Omit<RemoteSettingsSnapshot, 'paths' | 'executionDefaults'>> & {
+	paths?: Partial<RemoteSettingsSnapshot['paths']>;
+	executionDefaults?: {
+		global?: Partial<RemoteSettingsSnapshot['executionDefaults']['global']>;
+		byAgent?: RemoteSettingsSnapshot['executionDefaults']['byAgent'];
+	};
+};
+
+function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot {
+	const snapshot: RemoteSettingsSnapshot = {
 		version: 1,
 		ui: {},
 		uiEffective: {},
-		paths: { pinnedProjectPaths: [], browseStartPath: '' },
+		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
 		pinnedChatIds: [],
-		lastAgentId: 'claude',
-		lastProjectPath: '',
-		lastModel: 'opus',
-		lastApiProviderId: null,
-		lastModelEndpointId: null,
-		lastModelProtocol: null,
-		lastPermissionMode: 'default',
-		lastThinkingMode: 'none',
-		lastClaudeThinkingMode: 'auto',
-		lastAmpAgentMode: 'smart',
+		recentAgentSettings: [
+			{
+				agentId: 'claude',
+				model: 'opus',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			},
+		],
+		executionDefaults: {
+			global: {
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
+			},
+			byAgent: {},
+		},
 		projectBasePath: '/workspace',
 		telegram: {
 			botTokenAvailable: false,
@@ -51,7 +67,24 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 			pendingLink: false,
 			linkUrl: null,
 		},
+	};
+	return {
+		...snapshot,
 		...overrides,
+		paths: {
+			...snapshot.paths,
+			...(overrides.paths ?? {}),
+		},
+		executionDefaults: {
+			global: {
+				...snapshot.executionDefaults.global,
+				...(overrides.executionDefaults?.global ?? {}),
+			},
+			byAgent: {
+				...snapshot.executionDefaults.byAgent,
+				...(overrides.executionDefaults?.byAgent ?? {}),
+			},
+		},
 	};
 }
 

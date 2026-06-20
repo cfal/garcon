@@ -17,6 +17,26 @@ async function writeRaw(data) {
   await store.loadSettings();
 }
 
+function defaultExecutionDefaults() {
+  return {
+    permissionMode: 'default',
+    thinkingMode: 'none',
+    claudeThinkingMode: 'auto',
+    ampAgentMode: 'smart',
+  };
+}
+
+function startupSettings(overrides = {}) {
+  return {
+    recentAgentSettings: [],
+    executionDefaults: {
+      global: defaultExecutionDefaults(),
+      byAgent: {},
+    },
+    ...overrides,
+  };
+}
+
 describe('settings store', () => {
   beforeEach(async () => {
     tmpDir = path.join(os.tmpdir(), `store-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -462,13 +482,9 @@ describe('settings store', () => {
       expect(settings).toEqual({
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
+        ...startupSettings(),
         chatFolders: [],
         savedChatSearches: [],
-        lastAgentId: 'claude', lastProjectPath: '', lastModel: '',
-        lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
-        lastPermissionMode: 'default', lastThinkingMode: 'none',
-        lastClaudeThinkingMode: 'auto',
-        lastAmpAgentMode: 'smart',
       });
     });
 
@@ -478,33 +494,80 @@ describe('settings store', () => {
       expect(settings).toEqual({
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
+        ...startupSettings(),
         chatFolders: [],
         savedChatSearches: [],
-        lastAgentId: 'claude', lastProjectPath: '', lastModel: '',
-        lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
-        lastPermissionMode: 'default', lastThinkingMode: 'none',
-        lastClaudeThinkingMode: 'auto',
-        lastAmpAgentMode: 'smart',
       });
     });
 
-    it('normalizes invalid persisted mode settings on load', async () => {
+    it('migrates legacy startup settings on load', async () => {
       await writeRaw({
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         chatFolders: [],
-        lastAgentId: 'claude', lastProjectPath: '', lastModel: '',
-        lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
-        lastPermissionMode: 'bogus',
-        lastThinkingMode: 'very-hard',
-        lastClaudeThinkingMode: 'sometimes',
+        lastAgentId: 'codex',
+        lastProjectPath: '/workspace/project',
+        lastModel: 'gpt-5.4',
+        lastApiProviderId: null,
+        lastModelEndpointId: null,
+        lastModelProtocol: null,
+        lastPermissionMode: 'acceptEdits',
+        lastThinkingMode: 'think-hard',
+        lastClaudeThinkingMode: 'off',
+        lastAmpAgentMode: 'deep',
       });
 
       const settings = await store.loadSettings();
-      expect(settings.lastPermissionMode).toBe('default');
-      expect(settings.lastThinkingMode).toBe('none');
-      expect(settings.lastClaudeThinkingMode).toBe('auto');
-      expect(settings.lastAmpAgentMode).toBe('smart');
+      expect(settings.recentAgentSettings).toEqual([{
+        agentId: 'codex',
+        model: 'gpt-5.4',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+      }]);
+      expect(settings.paths.recentProjectPaths).toEqual(['/workspace/project']);
+      expect(settings.executionDefaults.global).toEqual({
+        permissionMode: 'acceptEdits',
+        thinkingMode: 'think-hard',
+        claudeThinkingMode: 'off',
+        ampAgentMode: 'deep',
+      });
+      expect(settings.executionDefaults.byAgent.codex).toEqual(settings.executionDefaults.global);
+
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      for (const key of ['last' + 'AgentId', 'last' + 'ProjectPath', 'last' + 'Model', 'last' + 'PermissionMode']) {
+        expect(persisted[key]).toBeUndefined();
+      }
+    });
+
+    it('normalizes invalid execution defaults on load', async () => {
+      await writeRaw({
+        ui: {}, paths: {}, chatNames: {},
+        pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
+        executionDefaults: {
+          global: {
+            permissionMode: 'bogus',
+            thinkingMode: 'very-hard',
+            claudeThinkingMode: 'sometimes',
+            ampAgentMode: 'unreal',
+          },
+          byAgent: {
+            codex: {
+              permissionMode: 'manualBypass',
+              thinkingMode: 'think-hard',
+              claudeThinkingMode: 'sometimes',
+            },
+          },
+        },
+      });
+
+      const settings = await store.loadSettings();
+      expect(settings.executionDefaults.global).toEqual(defaultExecutionDefaults());
+      expect(settings.executionDefaults.byAgent.codex).toEqual({
+        permissionMode: 'manualBypass',
+        thinkingMode: 'think-hard',
+        claudeThinkingMode: 'auto',
+      });
     });
 
     it('keeps cached settings unchanged when a mutation save fails', async () => {
@@ -528,13 +591,7 @@ describe('settings store', () => {
         pinnedChatIds: ['a'],
         normalChatIds: [],
         archivedChatIds: [],
-        lastAgentId: 'claude',
-        lastModel: '',
-        lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
-        lastPermissionMode: 'default',
-        lastThinkingMode: 'none',
-        lastClaudeThinkingMode: 'auto',
-        lastAmpAgentMode: 'smart',
+        ...startupSettings(),
       });
 
       await store.reconcileWithRegistry(mockRegistry);
@@ -554,13 +611,7 @@ describe('settings store', () => {
         pinnedChatIds: ['a', 'gone'],
         normalChatIds: ['also-gone'],
         archivedChatIds: [],
-        lastAgentId: 'claude',
-        lastModel: '',
-        lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
-        lastPermissionMode: 'default',
-        lastThinkingMode: 'none',
-        lastClaudeThinkingMode: 'auto',
-        lastAmpAgentMode: 'smart',
+        ...startupSettings(),
       });
 
       await store.reconcileWithRegistry(mockRegistry);
@@ -579,13 +630,7 @@ describe('settings store', () => {
         pinnedChatIds: ['a'],
         normalChatIds: ['a', 'b'],
         archivedChatIds: ['a'],
-        lastAgentId: 'claude',
-        lastModel: '',
-        lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
-        lastPermissionMode: 'default',
-        lastThinkingMode: 'none',
-        lastClaudeThinkingMode: 'auto',
-        lastAmpAgentMode: 'smart',
+        ...startupSettings(),
       });
 
       await store.reconcileWithRegistry(mockRegistry);
@@ -759,11 +804,7 @@ describe('settings store', () => {
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: ['existing'],
         archivedChatIds: [],
-        lastAgentId: 'claude', lastModel: '',
-        lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
-        lastPermissionMode: 'default', lastThinkingMode: 'none',
-        lastClaudeThinkingMode: 'auto',
-        lastAmpAgentMode: 'smart',
+        ...startupSettings(),
       });
 
       // Fire both mutations concurrently — without the lock, the second
@@ -778,21 +819,17 @@ describe('settings store', () => {
       expect(settings.chatNames['existing']).toBe('title');
     });
 
-    it('does not lose ensureInNormal when setLastChatDefaults runs concurrently', async () => {
+    it('does not lose ensureInNormal when recordChatStartup runs concurrently', async () => {
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
         pinnedChatIds: [], normalChatIds: [],
         archivedChatIds: [],
-        lastAgentId: 'claude', lastProjectPath: '', lastModel: '',
-        lastApiProviderId: null, lastModelEndpointId: null, lastModelProtocol: null,
-        lastPermissionMode: 'default', lastThinkingMode: 'none',
-        lastClaudeThinkingMode: 'auto',
-        lastAmpAgentMode: 'smart',
+        ...startupSettings(),
       });
 
       await Promise.all([
         store.ensureInNormal('chat-1'),
-        store.setLastChatDefaults({
+        store.recordChatStartup({
           agentId: 'codex',
           projectPath: '/workspace/chat-2',
           model: 'gpt-5.4',
@@ -806,30 +843,35 @@ describe('settings store', () => {
       const settings = await store.loadSettings();
       expect(settings.normalChatIds).toContain('chat-1');
       expect(settings.normalChatIds).toContain('chat-2');
-      expect(settings.lastAgentId).toBe('codex');
-      expect(settings.lastProjectPath).toBe('/workspace/chat-2');
-      expect(settings.lastModel).toBe('gpt-5.4');
-      expect(settings.lastPermissionMode).toBe('bypassPermissions');
-      expect(settings.lastThinkingMode).toBe('think-hard');
-      expect(settings.lastClaudeThinkingMode).toBe('off');
+      expect(settings.recentAgentSettings[0]).toEqual({
+        agentId: 'codex',
+        model: 'gpt-5.4',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+      });
+      expect(settings.paths.recentProjectPaths).toEqual(['/workspace/chat-2']);
+      expect(settings.executionDefaults.byAgent.codex).toEqual({
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'think-hard',
+        claudeThinkingMode: 'off',
+        ampAgentMode: 'smart',
+      });
     });
   });
 
   describe('chat startup defaults', () => {
-    it('getLastAgentId defaults to "claude"', async () => {
-      expect(await store.getLastAgentId()).toBe('claude');
+    it('defaults to empty recents and initialized execution defaults', async () => {
+      expect(store.getRecentAgentSettings()).toEqual([]);
+      expect(store.getRecentProjectPaths()).toEqual([]);
+      expect(store.getExecutionDefaults()).toEqual({
+        global: defaultExecutionDefaults(),
+        byAgent: {},
+      });
     });
 
-    it('getLastProjectPath defaults to empty string', async () => {
-      expect(await store.getLastProjectPath()).toBe('');
-    });
-
-    it('getLastModel defaults to empty string', async () => {
-      expect(await store.getLastModel()).toBe('');
-    });
-
-    it('setLastChatDefaults persists the full startup selection', async () => {
-      await store.setLastChatDefaults({
+    it('recordChatStartup persists the full startup selection', async () => {
+      await store.recordChatStartup({
         agentId: 'codex',
         projectPath: '/workspace/project-a',
         model: 'gpt-5.4',
@@ -838,93 +880,98 @@ describe('settings store', () => {
         claudeThinkingMode: 'on',
         ampAgentMode: 'deep',
       });
-      expect(await store.getLastAgentId()).toBe('codex');
-      expect(await store.getLastProjectPath()).toBe('/workspace/project-a');
-      expect(await store.getLastModel()).toBe('gpt-5.4');
-      expect(await store.getLastPermissionMode()).toBe('bypassPermissions');
-      expect(await store.getLastThinkingMode()).toBe('think-hard');
-      expect(await store.getLastClaudeThinkingMode()).toBe('on');
-      expect(await store.getLastAmpAgentMode()).toBe('deep');
-    });
 
-    it('preserves unspecified fields when updating only one startup setting', async () => {
-      await store.setLastChatDefaults({
+      expect(store.getRecentAgentSettings()).toEqual([{
         agentId: 'codex',
-        projectPath: '/workspace/project-a',
         model: 'gpt-5.4',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+      }]);
+      expect(store.getRecentProjectPaths()).toEqual(['/workspace/project-a']);
+      expect(store.getExecutionDefaults().byAgent.codex).toEqual({
         permissionMode: 'bypassPermissions',
         thinkingMode: 'think-hard',
         claudeThinkingMode: 'on',
         ampAgentMode: 'deep',
       });
-      await store.setLastPermissionMode('acceptEdits');
-      expect(await store.getLastAgentId()).toBe('codex');
-      expect(await store.getLastProjectPath()).toBe('/workspace/project-a');
-      expect(await store.getLastModel()).toBe('gpt-5.4');
-      expect(await store.getLastPermissionMode()).toBe('acceptEdits');
-      expect(await store.getLastThinkingMode()).toBe('think-hard');
-      expect(await store.getLastClaudeThinkingMode()).toBe('on');
-      expect(await store.getLastAmpAgentMode()).toBe('deep');
+      expect(await store.getRemoteSettingsVersion()).toBe(1);
     });
 
-    it('getLastPermissionMode defaults to "default"', async () => {
-      expect(await store.getLastPermissionMode()).toBe('default');
+    it('records endpoint-backed model targets', async () => {
+      await store.recordChatStartup({
+        agentId: 'direct-openai-compatible',
+        projectPath: '/workspace/project-a',
+        model: 'glm-5.1',
+        apiProviderId: 'zai',
+        modelEndpointId: 'zai_openai',
+        modelProtocol: 'openai-compatible',
+      });
+
+      expect(store.getRecentAgentSettings()).toEqual([{
+        agentId: 'direct-openai-compatible',
+        model: 'glm-5.1',
+        apiProviderId: 'zai',
+        modelEndpointId: 'zai_openai',
+        modelProtocol: 'openai-compatible',
+      }]);
     });
 
-    it('setLastPermissionMode persists the mode', async () => {
-      await store.setLastPermissionMode('bypassPermissions');
-      expect(await store.getLastPermissionMode()).toBe('bypassPermissions');
+    it('moves duplicate recent targets to the front and caps the list', async () => {
+      for (let index = 0; index < 21; index += 1) {
+        await store.recordChatStartup({
+          agentId: 'codex',
+          projectPath: `/workspace/project-${index}`,
+          model: `gpt-5.${index}`,
+        });
+      }
+
+      await store.recordChatStartup({
+        agentId: 'codex',
+        projectPath: '/workspace/project-5',
+        model: 'gpt-5.5',
+      });
+
+      const recents = store.getRecentAgentSettings();
+      expect(recents).toHaveLength(20);
+      expect(recents[0].model).toBe('gpt-5.5');
+      expect(recents.filter((entry) => entry.model === 'gpt-5.5')).toHaveLength(1);
+      expect(store.getRecentProjectPaths()).toHaveLength(10);
+      expect(store.getRecentProjectPaths()[0]).toBe('/workspace/project-5');
     });
 
-    it('getLastThinkingMode defaults to "none"', async () => {
-      expect(await store.getLastThinkingMode()).toBe('none');
-    });
-
-    it('setLastThinkingMode persists the mode', async () => {
-      await store.setLastThinkingMode('think-hard');
-      expect(await store.getLastThinkingMode()).toBe('think-hard');
-    });
-
-    it('getLastClaudeThinkingMode defaults to "auto"', async () => {
-      expect(await store.getLastClaudeThinkingMode()).toBe('auto');
-    });
-
-    it('setLastClaudeThinkingMode persists the mode', async () => {
-      await store.setLastClaudeThinkingMode('off');
-      expect(await store.getLastClaudeThinkingMode()).toBe('off');
-    });
-
-    it('getLastAmpAgentMode defaults to "smart"', async () => {
-      expect(await store.getLastAmpAgentMode()).toBe('smart');
-    });
-
-    it('setLastAmpAgentMode persists the mode', async () => {
-      await store.setLastAmpAgentMode('deep');
-      expect(await store.getLastAmpAgentMode()).toBe('deep');
-    });
-
-    it('preserves existing startup modes when an update provides invalid values', async () => {
-      await store.setLastChatDefaults({
+    it('normalizes invalid execution values recorded with startup', async () => {
+      await store.recordChatStartup({
         agentId: 'claude',
         projectPath: '/workspace/project-a',
         model: 'opus',
-        permissionMode: 'acceptEdits',
-        thinkingMode: 'think-hard',
-        claudeThinkingMode: 'off',
-        ampAgentMode: 'deep',
-      });
-
-      await store.setLastChatDefaults({
         permissionMode: 'bogus',
         thinkingMode: 'very-hard',
         claudeThinkingMode: 'sometimes',
         ampAgentMode: 'bogus',
       });
 
-      expect(await store.getLastPermissionMode()).toBe('acceptEdits');
-      expect(await store.getLastThinkingMode()).toBe('think-hard');
-      expect(await store.getLastClaudeThinkingMode()).toBe('off');
-      expect(await store.getLastAmpAgentMode()).toBe('deep');
+      expect(store.getExecutionDefaults().byAgent.claude).toEqual(defaultExecutionDefaults());
+    });
+
+    it('updates execution defaults for one agent without changing recents', async () => {
+      await store.recordChatStartup({
+        agentId: 'codex',
+        projectPath: '/workspace/project-a',
+        model: 'gpt-5.4',
+      });
+      await store.updateExecutionDefaultsForAgent('codex', {
+        permissionMode: 'manualBypass',
+        thinkingMode: 'think-hard',
+      });
+
+      expect(store.getRecentAgentSettings()[0].model).toBe('gpt-5.4');
+      expect(store.getExecutionDefaults().byAgent.codex).toEqual({
+        permissionMode: 'manualBypass',
+        thinkingMode: 'think-hard',
+        claudeThinkingMode: 'auto',
+        ampAgentMode: 'smart',
+      });
     });
   });
 });

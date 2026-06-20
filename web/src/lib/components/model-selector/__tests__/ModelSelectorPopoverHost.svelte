@@ -5,6 +5,7 @@
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
+		ModelSelectorRecentOption,
 		ModelSelectorValue,
 	} from '../model-selector-types';
 
@@ -15,6 +16,8 @@
 		modelCount?: number;
 		includeDuplicateModel?: boolean;
 		includeEndpointModel?: boolean;
+		recents?: ModelSelectorRecentOption[];
+		preferRecentsOnOpen?: boolean;
 	}
 
 	let {
@@ -24,6 +27,8 @@
 		modelCount = 120,
 		includeDuplicateModel = true,
 		includeEndpointModel = false,
+		recents = [],
+		preferRecentsOnOpen = false,
 	}: Props = $props();
 
 	let claudeModels = $derived.by<ModelOption[]>(() => {
@@ -130,4 +135,4 @@
 	} as unknown as ModelCatalogStore);
 </script>
 
-<ModelSelectorPopover {value} {mode} {onChange} />
+<ModelSelectorPopover {value} {mode} {onChange} {recents} {preferRecentsOnOpen} />
