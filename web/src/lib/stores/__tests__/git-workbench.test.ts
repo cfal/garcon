@@ -420,6 +420,58 @@ describe('GitWorkbenchStore', () => {
 			expect(mockedApi.gitStageFile).toHaveBeenCalledWith('/project', 'new-file.ts', 'stage');
 		});
 
+		it('advances selection after staging the selected file out of the active tab', async () => {
+			mockedApi.gitStageFile.mockResolvedValue({ success: true });
+			mockedApi.getGitChangesTree
+				.mockResolvedValueOnce({
+					root: [
+						{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
+						{ path: 'b.ts', name: 'b.ts', kind: 'file', staged: false, hasUnstaged: true },
+					],
+					hasCommits: true,
+				})
+				.mockResolvedValueOnce({
+					root: [
+						{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
+						{ path: 'b.ts', name: 'b.ts', kind: 'file', staged: false, hasUnstaged: true },
+					],
+					hasCommits: true,
+				});
+			mockedApi.getGitFileReviewData.mockImplementation(
+				async (_project, filePath, mode = 'working') =>
+					({
+						path: filePath,
+						mode,
+						isBinary: false,
+						truncated: false,
+						contentBefore: '',
+						contentAfter: '',
+						diffOps: [],
+						hunks: [],
+					}) as any,
+			);
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+			expect(wb.selectedFile).toBe('a.ts');
+
+			const result = await wb.stageFile('/project', 'a.ts');
+
+			expect(result).toBe(true);
+			expect(wb.selectedFile).toBe('b.ts');
+			expect(mockedApi.getGitFileReviewData).toHaveBeenLastCalledWith(
+				'/project',
+				'b.ts',
+				'unstaged',
+				5,
+			);
+		});
+
 		it('unstages entire file', async () => {
 			mockedApi.gitStageFile.mockResolvedValue({ success: true });
 			mockedApi.getGitChangesTree.mockResolvedValue({ root: [], hasCommits: true });

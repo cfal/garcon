@@ -219,23 +219,25 @@ describe('GET /api/v1/git/changes-tree validation', () => {
       const url = makeUrl('/api/v1/git/changes-tree', { project: projectPath });
       const request = new Request(url.toString());
       const response = await handler(request, url);
-      const body = await response.json();
+      const responseText = await response.text();
+      const body = JSON.parse(responseText);
+      const responseBytes = Buffer.byteLength(responseText);
+      const traceLog = console.debug.mock.calls.find(
+        (call) => call[0] === '[routes:git]' && call[1] === 'git workbench route',
+      )?.[2];
 
       expect(response.status).toBe(200);
       expect(body.statsState).toBe('pending');
-      expect(console.debug).toHaveBeenCalledWith(
-        '[routes:git]',
-        'git workbench route',
-        expect.objectContaining({
-          route: 'changes-tree',
-          commandCount: expect.any(Number),
-          responseBytes: expect.any(Number),
-          slowestCommand: expect.objectContaining({
-            args: expect.any(Array),
-            durationMs: expect.any(Number),
-          }),
+      expect(responseBytes).toBeLessThan(32 * 1024);
+      expect(traceLog).toMatchObject({
+        route: 'changes-tree',
+        commandCount: 2,
+        responseBytes,
+        slowestCommand: expect.objectContaining({
+          args: expect.any(Array),
+          durationMs: expect.any(Number),
         }),
-      );
+      });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
       restoreConsoleDebug();

@@ -853,7 +853,8 @@ export class GitWorkbenchStore {
 			effective.preserveSelection &&
 			effective.preferSelectedFile &&
 			previousSelectedFile &&
-			this.treeState.hasFile(previousSelectedFile)
+			this.treeState.hasFile(previousSelectedFile) &&
+			this.visibleFilePaths.includes(previousSelectedFile)
 		) {
 			this.selectedFile = previousSelectedFile;
 			const selectedFileStartedAt = performance.now();
@@ -895,7 +896,19 @@ export class GitWorkbenchStore {
 			reason: 'git-action',
 			preferSelectedFile: true,
 		});
-		if (this.treeState.hasFile(filePath)) await this.loadFileReviewData(projectPath, filePath);
+		const visibleFilePaths = this.visibleFilePaths;
+		if (this.selectedFile === filePath && !visibleFilePaths.includes(filePath)) {
+			this.selectedFile = visibleFilePaths[0] ?? null;
+			if (this.selectedFile) await this.loadFileReviewData(projectPath, this.selectedFile);
+			return;
+		}
+		if (
+			this.selectedFile === filePath &&
+			this.treeState.hasFile(filePath) &&
+			this.currentReviewData?.path !== filePath
+		) {
+			await this.loadFileReviewData(projectPath, filePath);
+		}
 	}
 
 	private async refreshAfterGitAction(

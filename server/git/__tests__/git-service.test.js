@@ -130,6 +130,7 @@ describe('getChangesTree', () => {
 
       expect(tree.statsState).toBe('pending');
       expect(trace.some((entry) => entry.args.includes('--numstat'))).toBe(false);
+      expect(trace).toHaveLength(2);
       expect(tree.root[0]).toMatchObject({
         path: 'a.txt',
         additions: 0,
