@@ -6,6 +6,15 @@ export interface GitCommandResult {
   stderr: string;
 }
 
+export interface GitCommandTrace {
+  args: string[];
+  durationMs: number;
+  stdoutBytes: number;
+  stderrBytes: number;
+  failed?: boolean;
+  exitCode?: number;
+}
+
 export interface GitProcessError extends Error {
   code?: number;
   stdout?: string;
@@ -147,6 +156,28 @@ export interface CreateGitServiceOptions {
 
 export interface ProjectOptions {
   projectPath: string;
+  trace?: GitCommandTrace[];
+}
+
+export type GitTreeStatsState = 'pending' | 'loaded';
+
+export interface ChangesTreeOptions extends ProjectOptions {
+  includeStats?: boolean;
+}
+
+export interface ChangesStatsOptions extends ProjectOptions {
+  skipRepositoryAssert?: boolean;
+}
+
+export interface ChangesTreeResult {
+  root: TreeNode[];
+  hasCommits: boolean;
+  statsState: GitTreeStatsState;
+}
+
+export interface ChangesStatsResult {
+  working: NumstatMap;
+  staged: NumstatMap;
 }
 
 export interface FileOptions extends ProjectOptions {
@@ -293,7 +324,8 @@ export interface GitService {
   deleteUntracked(options: FileOptions): Promise<unknown>;
   getFileReviewData(options: FileReviewOptions): Promise<unknown>;
   getFileReviewDataBatch(options: BatchFileReviewOptions): Promise<unknown>;
-  getChangesTree(options: ProjectOptions): Promise<unknown>;
+  getChangesTree(options: ChangesTreeOptions): Promise<unknown>;
+  getChangesStats(options: ChangesStatsOptions): Promise<unknown>;
   stageSelection(options: StageSelectionOptions): Promise<unknown>;
   stageHunk(options: StageHunkOptions): Promise<unknown>;
   getRepoInfo(options: ProjectOptions): Promise<RepoInfo>;
@@ -306,4 +338,3 @@ export interface GitService {
   revertLastCommit(options: RevertLastCommitOptions): Promise<unknown>;
   toHttpError(error: unknown): Response;
 }
-

@@ -93,12 +93,22 @@ export function createWorktreeOperations() {
       targets.push(target);
     }
 
+    // The chat-project target shares the current worktree's path, so the
+    // dedup below drops the matching worktree entry. Carry its branch onto
+    // the chat-project candidate so the toolbar shows the branch on first
+    // paint without a separate status request.
+    const chatProjectWorktreePath = repoInfo.currentWorktreePath || projectPath;
+    const resolvedChatProjectWorktreePath = path.resolve(chatProjectWorktreePath);
+    const currentWorktree =
+      worktrees.find((wt) => wt.isCurrent) ??
+      worktrees.find((wt) => path.resolve(wt.path) === resolvedChatProjectWorktreePath);
+
     addTarget({
       projectPath,
       repoRoot: repoInfo.repoRoot || projectPath,
-      worktreePath: repoInfo.currentWorktreePath || projectPath,
+      worktreePath: chatProjectWorktreePath,
       label: path.basename(projectPath) || projectPath,
-      branch: '',
+      branch: currentWorktree?.branch ?? '',
       source: 'chat-project',
       isCurrent: true,
       isMissing: false,

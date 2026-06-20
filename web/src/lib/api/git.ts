@@ -15,6 +15,8 @@ export interface GitChangeStats {
 	deletions: number;
 }
 
+export type GitTreeStatsState = 'pending' | 'loaded';
+
 export interface GitFileChangeFacet {
 	status: GitStatusCode;
 	changeKind: GitChangeKind;
@@ -36,6 +38,17 @@ export interface GitTreeNode {
 	children?: GitTreeNode[];
 	additions?: number;
 	deletions?: number;
+}
+
+export interface GitChangesTreeResult {
+	root: GitTreeNode[];
+	hasCommits: boolean;
+	statsState?: GitTreeStatsState;
+}
+
+export interface GitChangesStatsResult {
+	working: Record<string, GitChangeStats>;
+	staged: Record<string, GitChangeStats>;
 }
 
 export interface GitDiffRange {
@@ -322,10 +335,15 @@ export async function getGitFileReviewDataBatch(
 
 export async function getGitChangesTree(
 	project: string,
-): Promise<{ root: GitTreeNode[]; hasCommits: boolean }> {
-	return apiGet<{ root: GitTreeNode[]; hasCommits: boolean }>(
-		`/api/v1/git/changes-tree?${projectParam(project)}`,
+	includeStats = false,
+): Promise<GitChangesTreeResult> {
+	return apiGet<GitChangesTreeResult>(
+		`/api/v1/git/changes-tree?${projectParam(project)}&includeStats=${includeStats}`,
 	);
+}
+
+export async function getGitChangesStats(project: string): Promise<GitChangesStatsResult> {
+	return apiGet<GitChangesStatsResult>(`/api/v1/git/changes-stats?${projectParam(project)}`);
 }
 
 export async function getGitTargetCandidates(

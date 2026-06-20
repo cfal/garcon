@@ -8,6 +8,7 @@ vi.stubGlobal('localStorage', {
 });
 
 vi.mock('$lib/api/git.js', () => ({
+	getGitRepoInfo: vi.fn().mockResolvedValue({ isGitRepository: true }),
 	getGitStatus: vi.fn(),
 	getGitDiff: vi.fn().mockResolvedValue({}),
 	getBranches: vi.fn().mockResolvedValue({ branches: [] }),
@@ -36,13 +37,21 @@ vi.mock('$lib/paraglide/messages.js', () => ({
 	git_changes_untracked: () => 'Untracked',
 }));
 
-import { getGitStatus, gitCommit, gitCheckout } from '$lib/api/git.js';
+import {
+	getGitRepoInfo,
+	getGitStatus,
+	getBranches,
+	getRemoteStatus,
+	gitCommit,
+	gitCheckout,
+} from '$lib/api/git.js';
 
 describe('GitPanelStore', () => {
 	let store: GitPanelStore;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.mocked(getGitRepoInfo).mockResolvedValue({ isGitRepository: true });
 		store = new GitPanelStore();
 	});
 
@@ -76,6 +85,57 @@ describe('GitPanelStore', () => {
 			await store.fetchGitStatus('/bad-path');
 			expect(store.gitStatus?.error).toBe('Not a git repo');
 			expect(store.currentBranch).toBe('');
+		});
+	});
+
+	describe('deferred metadata', () => {
+		it('does not fetch branch list or remote status during deferred project reset', () => {
+			store.resetForProject('/project', { deferMetadata: true, currentBranch: 'main' });
+
+			expect(store.currentBranch).toBe('main');
+			expect(getGitStatus).not.toHaveBeenCalled();
+			expect(getBranches).not.toHaveBeenCalled();
+			expect(getRemoteStatus).not.toHaveBeenCalled();
+		});
+
+		it('loads branches when branch dropdown opens', async () => {
+			await store.openBranchDropdown('/project');
+
+			expect(store.showBranchDropdown).toBe(true);
+			expect(getBranches).toHaveBeenCalledWith('/project');
+		});
+	});
+
+	describe('validateRepository', () => {
+		it('keeps the persistent init-repo state for non-repository projects', async () => {
+			vi.mocked(getGitRepoInfo).mockResolvedValue({ isGitRepository: false });
+
+			const isRepository = await store.validateRepository('/project');
+
+			expect(isRepository).toBe(false);
+			expect(store.gitStatus?.error).toBe('Git is not initialized in this directory.');
+			expect(store.gitStatus?.details).toContain('git init');
+			expect(store.isCheckingRepository).toBe(false);
+			expect(getGitStatus).not.toHaveBeenCalled();
+		});
+
+		it('clears a stale repository error after validation succeeds', async () => {
+			store.gitStatus = {
+				branch: '',
+				hasCommits: false,
+				modified: [],
+				added: [],
+				deleted: [],
+				untracked: [],
+				error: 'Git is not initialized in this directory.',
+			};
+			vi.mocked(getGitRepoInfo).mockResolvedValue({ isGitRepository: true });
+
+			const isRepository = await store.validateRepository('/project');
+
+			expect(isRepository).toBe(true);
+			expect(store.gitStatus).toBeNull();
+			expect(store.isCheckingRepository).toBe(false);
 		});
 	});
 

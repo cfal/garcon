@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { GitDomainError } from '../git-types.js';
 import { createGitService } from '../git-service.js';
+import { runGitTraced } from '../run.js';
 
 // Minimal classifier stub for toHttpError tests
 function mockClassifyGitError(error) {
@@ -67,7 +68,7 @@ describe('createGitService', () => {
       'getCommits', 'getCommitDiff', 'generateCommitMessageForFiles',
       'getRemoteStatus', 'getRemotes', 'fetch', 'pull', 'push',
       'discard', 'deleteUntracked', 'getFileReviewData',
-      'getFileReviewDataBatch', 'getChangesTree', 'stageSelection', 'stageHunk',
+      'getFileReviewDataBatch', 'getChangesTree', 'getChangesStats', 'stageSelection', 'stageHunk',
       'getWorktrees', 'getTargetCandidates', 'createWorktree', 'removeWorktree',
       'commitIndex', 'stageFile', 'revertLastCommit', 'toHttpError',
     ];
@@ -77,7 +78,90 @@ describe('createGitService', () => {
   });
 });
 
+describe('getTargetCandidates', () => {
+  it('reports the current branch on the chat-project candidate', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-targets-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ['branch', '-M', 'work']);
+
+      const { targets } = await git.getTargetCandidates({ projectPath });
+      const chatProject = targets.find((target) => target.source === 'chat-project');
+
+      expect(chatProject).toBeDefined();
+      expect(chatProject.isCurrent).toBe(true);
+      expect(chatProject.branch).toBe('work');
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('getChangesTree', () => {
+  it('records git command duration and byte counts when trace is provided', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-trace-'));
+    try {
+      await runGitCommand(projectPath, ['init']);
+      const trace = [];
+      await runGitTraced(projectPath, ['rev-parse', '--is-inside-work-tree'], trace);
+
+      expect(trace).toHaveLength(1);
+      expect(trace[0]).toMatchObject({
+        args: ['rev-parse', '--is-inside-work-tree'],
+      });
+      expect(trace[0].durationMs).toBeGreaterThanOrEqual(0);
+      expect(trace[0].stdoutBytes).toBeGreaterThan(0);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('skips numstat by default and marks stats pending', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tree-fast-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf-8');
+      const trace = [];
+      const tree = await git.getChangesTree({ projectPath, trace });
+
+      expect(tree.statsState).toBe('pending');
+      expect(trace.some((entry) => entry.args.includes('--numstat'))).toBe(false);
+      expect(tree.root[0]).toMatchObject({
+        path: 'a.txt',
+        additions: 0,
+        deletions: 0,
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('loads numstat when includeStats is true', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tree-stats-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf-8');
+      const trace = [];
+      const tree = await git.getChangesTree({ projectPath, includeStats: true, trace });
+
+      expect(tree.statsState).toBe('loaded');
+      expect(trace.some((entry) => entry.args.includes('--numstat'))).toBe(true);
+      expect(tree.root[0]).toMatchObject({
+        path: 'a.txt',
+        additions: 1,
+        deletions: 0,
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it('expands untracked directories to untracked files', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tree-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });

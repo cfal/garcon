@@ -1,4 +1,11 @@
-import { getGitChangesTree, type GitDiffTab, type GitTreeNode } from '$lib/api/git.js';
+import {
+	getGitChangesStats,
+	getGitChangesTree,
+	type GitChangesStatsResult,
+	type GitDiffTab,
+	type GitTreeNode,
+	type GitTreeStatsState,
+} from '$lib/api/git.js';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
@@ -15,8 +22,14 @@ export class GitTreeState {
 	isLoadingTree = $state(false);
 	treeSearchQuery = $state('');
 	hasCommits = $state(true);
+	statsState = $state<GitTreeStatsState>('pending');
 	collapsedDirs = $state(new Set<string>());
 	treePaneWidthPx = $state(300);
+	private filePathsValue = $state<string[]>([]);
+	private stagedFileNodesValue = $state<GitTreeNode[]>([]);
+	private unstagedFilePathsValue = $state<string[]>([]);
+	private stagedFilePathsValue = $state<string[]>([]);
+	private fileNodeByPath = new Map<string, GitTreeNode>();
 
 	get filteredTree(): GitTreeNode[] {
 		return compactTree(filterTreeNodes(this.tree, this.treeSearchQuery));
@@ -31,38 +44,34 @@ export class GitTreeState {
 	}
 
 	get stagedFileNodes(): GitTreeNode[] {
-		return collectStagedNodes(this.tree);
+		return this.stagedFileNodesValue;
 	}
 
 	get filePaths(): string[] {
-		return collectFilePaths(this.tree);
+		return this.filePathsValue;
 	}
 
 	visibleFilePaths(activeTab: GitDiffTab): string[] {
-		const predicate =
-			activeTab === 'staged'
-				? (node: GitTreeNode) => node.staged
-				: (node: GitTreeNode) => node.hasUnstaged || node.changeKind === 'untracked';
-		return collectFilePathsByPredicate(this.filteredTree, predicate);
+		const paths = activeTab === 'staged' ? this.stagedFilePathsValue : this.unstagedFilePathsValue;
+		if (!this.treeSearchQuery) return paths;
+		const visible = new Set(collectFilePaths(this.filteredTree));
+		return paths.filter((path) => visible.has(path));
 	}
 
 	unstagedFileCount(): number {
-		return countFilesByPredicate(
-			this.tree,
-			(node) => node.hasUnstaged || node.changeKind === 'untracked',
-		);
+		return this.unstagedFilePathsValue.length;
 	}
 
 	stagedFileCount(): number {
-		return countFilesByPredicate(this.tree, (node) => node.staged);
+		return this.stagedFilePathsValue.length;
 	}
 
 	hasFile(filePath: string): boolean {
-		return this.filePaths.includes(filePath);
+		return this.fileNodeByPath.has(filePath);
 	}
 
 	findTreeNode(filePath: string): GitTreeNode | undefined {
-		return findTreeNode(this.tree, filePath);
+		return this.fileNodeByPath.get(filePath);
 	}
 
 	toggleDirCollapsed(dirPath: string): void {
@@ -89,19 +98,50 @@ export class GitTreeState {
 		try {
 			const data = await getGitChangesTree(projectPath);
 			if (!options.isCurrent()) return false;
-			this.tree = data.root;
-			this.hasCommits = data.hasCommits;
+			this.applyTree(data.root, data.hasCommits, data.statsState ?? 'pending');
 			return true;
 		} catch (error) {
 			if (!options.isCurrent()) return false;
 			options.surfaceError(
 				`Failed to load changes: ${error instanceof Error ? error.message : String(error)}`,
 			);
-			this.tree = [];
+			this.applyTree([], this.hasCommits, 'pending');
 			return true;
 		} finally {
 			if (options.isCurrent()) this.isLoadingTree = false;
 		}
+	}
+
+	async hydrateStats(projectPath: string, options: GitTreeLoadOptions): Promise<boolean> {
+		try {
+			const stats = await getGitChangesStats(projectPath);
+			if (!options.isCurrent()) return false;
+			this.applyStats(stats);
+			return true;
+		} catch (error) {
+			if (!options.isCurrent()) return false;
+			options.surfaceError(
+				`Failed to load change counts: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return false;
+		}
+	}
+
+	applyTree(
+		root: GitTreeNode[],
+		hasCommits = this.hasCommits,
+		statsState: GitTreeStatsState = this.statsState,
+	): void {
+		this.tree = root;
+		this.hasCommits = hasCommits;
+		this.statsState = statsState;
+		this.rebuildIndexes();
+	}
+
+	applyStats(stats: GitChangesStatsResult): void {
+		this.tree = applyStatsToNodes(this.tree, stats);
+		this.statsState = 'loaded';
+		this.rebuildIndexes();
 	}
 
 	reset(): void {
@@ -109,8 +149,94 @@ export class GitTreeState {
 		this.isLoadingTree = false;
 		this.treeSearchQuery = '';
 		this.hasCommits = true;
+		this.statsState = 'pending';
 		this.collapsedDirs = new Set();
+		this.filePathsValue = [];
+		this.stagedFileNodesValue = [];
+		this.unstagedFilePathsValue = [];
+		this.stagedFilePathsValue = [];
+		this.fileNodeByPath = new Map();
 	}
+
+	private rebuildIndexes(): void {
+		const filePaths: string[] = [];
+		const stagedFileNodes: GitTreeNode[] = [];
+		const unstagedFilePaths: string[] = [];
+		const stagedFilePaths: string[] = [];
+		const fileNodeByPath = new Map<string, GitTreeNode>();
+
+		visitTree(this.tree, (node) => {
+			if (node.kind !== 'file') return;
+			filePaths.push(node.path);
+			fileNodeByPath.set(node.path, node);
+			if (node.staged) {
+				stagedFilePaths.push(node.path);
+				stagedFileNodes.push(node);
+			}
+			if (node.hasUnstaged || node.changeKind === 'untracked') {
+				unstagedFilePaths.push(node.path);
+			}
+		});
+
+		this.filePathsValue = filePaths;
+		this.stagedFileNodesValue = stagedFileNodes;
+		this.unstagedFilePathsValue = unstagedFilePaths;
+		this.stagedFilePathsValue = stagedFilePaths;
+		this.fileNodeByPath = fileNodeByPath;
+	}
+}
+
+function visitTree(nodes: GitTreeNode[], visitor: (node: GitTreeNode) => void): void {
+	for (const node of nodes) {
+		visitor(node);
+		if (node.children) visitTree(node.children, visitor);
+	}
+}
+
+function statsForFile(node: GitTreeNode, stats: GitChangesStatsResult): GitTreeNode {
+	if (!node.unstagedFacet && !node.stagedFacet) return node;
+	const unstagedStats = node.unstagedFacet ? stats.working[node.path] : undefined;
+	const stagedStats = node.stagedFacet ? stats.staged[node.path] : undefined;
+	const primaryStats = unstagedStats ?? stagedStats ?? { additions: 0, deletions: 0 };
+	const nextNode: GitTreeNode = {
+		...node,
+		additions: primaryStats.additions,
+		deletions: primaryStats.deletions,
+	};
+	if (node.unstagedFacet) {
+		nextNode.unstagedFacet = {
+			...node.unstagedFacet,
+			stats: unstagedStats ?? { additions: 0, deletions: 0 },
+		};
+	}
+	if (node.stagedFacet) {
+		nextNode.stagedFacet = {
+			...node.stagedFacet,
+			stats: stagedStats ?? { additions: 0, deletions: 0 },
+		};
+	}
+	return nextNode;
+}
+
+function applyStatsToNodes(nodes: GitTreeNode[], stats: GitChangesStatsResult): GitTreeNode[] {
+	return nodes.map((node) => {
+		if (node.kind === 'file') return statsForFile(node, stats);
+
+		const children = node.children ? applyStatsToNodes(node.children, stats) : [];
+		const totals = children.reduce(
+			(acc, child) => ({
+				additions: acc.additions + (child.additions ?? 0),
+				deletions: acc.deletions + (child.deletions ?? 0),
+			}),
+			{ additions: 0, deletions: 0 },
+		);
+		return {
+			...node,
+			children,
+			additions: totals.additions,
+			deletions: totals.deletions,
+		};
+	});
 }
 
 export function collectStagedNodes(nodes: GitTreeNode[]): GitTreeNode[] {

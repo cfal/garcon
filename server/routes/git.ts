@@ -1,5 +1,6 @@
 import { createGitService } from '../git/git-service.js';
 import type { GitService } from '../git/git-service.js';
+import type { GitCommandTrace } from '../git/types.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { resolveGenerationContext } from '../settings/generation-config-source.ts';
@@ -14,11 +15,14 @@ import {
   isProjectBoundaryError,
   projectBoundaryErrorResponse,
 } from '../lib/path-boundary.ts';
+import { createLogger } from '../lib/log.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 
 type GitMode = 'working' | 'staged';
 type StageMode = 'stage' | 'unstage';
 type RevertStrategy = 'revert' | 'reset-soft';
+
+const logger = createLogger('routes:git');
 
 interface StageSelectionInput {
   lineIndices: number[];
@@ -115,6 +119,19 @@ function validStageMode(value: unknown): StageMode | null {
 function validSelection(value: unknown): StageSelectionInput | null {
   if (!isRecord(value) || !isValidLineIndices(value.lineIndices)) return null;
   return { lineIndices: value.lineIndices };
+}
+
+function traceJsonResponse(route: string, startedAt: number, trace: GitCommandTrace[], body: unknown): Response {
+  const responseBytes = Buffer.byteLength(JSON.stringify(body));
+  const slowestCommand = [...trace].sort((a, b) => b.durationMs - a.durationMs)[0];
+  logger.debug('git workbench route', {
+    route,
+    durationMs: Math.round(performance.now() - startedAt),
+    commandCount: trace.length,
+    slowestCommand,
+    responseBytes,
+  });
+  return Response.json(body);
 }
 
 export default function createGitRoutes(
@@ -456,8 +473,27 @@ export default function createGitRoutes(
     }
 
     try {
-      const result = await git.getChangesTree({ projectPath: project });
-      return Response.json(result);
+      const includeStats = url.searchParams.get('includeStats') === 'true';
+      const trace: GitCommandTrace[] = [];
+      const startedAt = performance.now();
+      const result = await git.getChangesTree({ projectPath: project, includeStats, trace });
+      return traceJsonResponse('changes-tree', startedAt, trace, result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function getChangesStats(_request: Request, url: URL): Promise<Response> {
+    const project = url.searchParams.get('project');
+    if (!project) {
+      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
+    }
+
+    try {
+      const trace: GitCommandTrace[] = [];
+      const startedAt = performance.now();
+      const result = await git.getChangesStats({ projectPath: project, trace });
+      return traceJsonResponse('changes-stats', startedAt, trace, result);
     } catch (error) {
       return git.toHttpError(error);
     }
@@ -714,6 +750,7 @@ export default function createGitRoutes(
     '/api/v1/git/file-review-data': { GET: getFileReviewData },
     '/api/v1/git/file-review-data/batch': { POST: withJsonBody(postFileReviewDataBatch) },
     '/api/v1/git/changes-tree': { GET: getChangesTree },
+    '/api/v1/git/changes-stats': { GET: getChangesStats },
     '/api/v1/git/stage-selection': { POST: withJsonBody(postStageSelection) },
     '/api/v1/git/stage-hunk': { POST: withJsonBody(postStageHunk) },
     '/api/v1/git/repo-info': { GET: getRepoInfo },

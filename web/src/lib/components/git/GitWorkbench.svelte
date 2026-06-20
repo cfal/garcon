@@ -12,6 +12,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import GitFileTree from './GitFileTree.svelte';
 	import GitAllFilesVirtualList from './GitAllFilesVirtualList.svelte';
+	import GitDiffViewer from './GitDiffViewer.svelte';
 	import GitReviewChangesModal from './GitReviewChangesModal.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
@@ -182,6 +183,12 @@
 		wb.requestDiscard(filePath);
 	}
 
+	function renderScopeToggleClass(scope: 'selected-file' | 'all-files'): string {
+		return wb.reviewScope === scope
+			? 'bg-background text-foreground shadow-sm'
+			: 'text-muted-foreground hover:text-foreground';
+	}
+
 	let discardConfirmAction = $derived.by((): ConfirmAction | null => {
 		if (!wb.pendingDiscardFile) return null;
 		const name = wb.pendingDiscardFile.split('/').pop() ?? wb.pendingDiscardFile;
@@ -292,28 +299,78 @@
 							</button>
 						{/each}
 					</div>
-					<GitAllFilesVirtualList
-						items={allScopeReviewItems}
-						activeTab={wb.activeTab}
-						diffMode={wb.diffMode}
-						contextLines={wb.contextLines}
-						fontSize={diffFontSize}
-						selectedLineKeys={wb.selectedLineKeys}
-						overscan={3}
-						onRequestLoad={handleRequestLoad}
-						onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
-						onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
-						onStageHunk={handleStageHunk}
-						onUnstageHunk={handleUnstageHunk}
-						onStageLine={handleStageLine}
-						onUnstageLine={handleUnstageLine}
-						onAddCommentForFile={handleAddCommentForFile}
-						commentsForFile={(fp) => wb.commentsForFile(fp)}
-						onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
-						onRemoveComment={(id) => wb.removeDraftComment(id)}
-						scrollToRequest={wb.diffScrollRequest}
-						{onOpenInEditor}
-					/>
+					<div class="flex justify-end border-b border-border px-2 py-1">
+						<div class="flex rounded-md bg-muted p-0.5">
+							<button
+								type="button"
+								onclick={() => wb.setReviewScope('selected-file')}
+								class="px-2 py-0.5 text-[11px] font-medium rounded transition-colors {renderScopeToggleClass(
+									'selected-file',
+								)}"
+							>
+								File
+							</button>
+							<button
+								type="button"
+								onclick={() => wb.setReviewScope('all-files')}
+								class="px-2 py-0.5 text-[11px] font-medium rounded transition-colors {renderScopeToggleClass(
+									'all-files',
+								)}"
+							>
+								All
+							</button>
+						</div>
+					</div>
+					{#if wb.reviewScope === 'selected-file'}
+						<GitDiffViewer
+							filePath={wb.selectedFile ?? ''}
+							reviewData={wb.currentReviewData}
+							activeTab={wb.activeTab}
+							diffMode={wb.diffMode}
+							contextLines={wb.contextLines}
+							fontSize={diffFontSize}
+							selectedLineKeys={wb.selectedLineKeys}
+							isLoading={wb.isLoadingFile || wb.isLoadingTree}
+							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
+							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
+							onStageHunk={handleStageHunk}
+							onUnstageHunk={handleUnstageHunk}
+							onStageLine={handleStageLine}
+							onUnstageLine={handleUnstageLine}
+							onAddComment={(side, line) => {
+								if (wb.selectedFile) handleAddCommentForFile(wb.selectedFile, side, line);
+							}}
+							comments={wb.selectedFile ? wb.commentsForFile(wb.selectedFile) : []}
+							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
+							onRemoveComment={(id) => wb.removeDraftComment(id)}
+							onOpenInEditor={(line) => {
+								if (wb.selectedFile) onOpenInEditor?.(wb.selectedFile, line);
+							}}
+						/>
+					{:else}
+						<GitAllFilesVirtualList
+							items={allScopeReviewItems}
+							activeTab={wb.activeTab}
+							diffMode={wb.diffMode}
+							contextLines={wb.contextLines}
+							fontSize={diffFontSize}
+							selectedLineKeys={wb.selectedLineKeys}
+							overscan={3}
+							onRequestLoad={handleRequestLoad}
+							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
+							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
+							onStageHunk={handleStageHunk}
+							onUnstageHunk={handleUnstageHunk}
+							onStageLine={handleStageLine}
+							onUnstageLine={handleUnstageLine}
+							onAddCommentForFile={handleAddCommentForFile}
+							commentsForFile={(fp) => wb.commentsForFile(fp)}
+							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
+							onRemoveComment={(id) => wb.removeDraftComment(id)}
+							scrollToRequest={wb.diffScrollRequest}
+							{onOpenInEditor}
+						/>
+					{/if}
 				{/if}
 			</div>
 
@@ -385,53 +442,112 @@
 				></button>
 				<div class="flex flex-col min-h-0 overflow-hidden">
 					<!-- Desktop diff tab bar (Unstaged / Staged) -->
-					<div class="flex border-b border-border shrink-0">
-						{#each ['unstaged', 'staged'] as const as tab}
-							<button
-								onclick={() => wb.setActiveTab(tab)}
-								class="px-3 py-1.5 text-xs font-medium transition-colors
-									{wb.activeTab === tab
-									? 'text-interactive-accent border-b-2 border-interactive-accent'
-									: 'text-muted-foreground hover:text-foreground'}"
-							>
-								{tab === 'unstaged' ? 'Unstaged' : 'Staged'}
-								<span class="ml-1 text-[10px] opacity-70"
-									>({tab === 'unstaged' ? wb.unstagedFileCount : wb.stagedFileCount})</span
+					<div class="flex items-center justify-between gap-2 border-b border-border shrink-0 pr-2">
+						<div class="flex">
+							{#each ['unstaged', 'staged'] as const as tab}
+								<button
+									onclick={() => wb.setActiveTab(tab)}
+									class="px-3 py-1.5 text-xs font-medium transition-colors
+										{wb.activeTab === tab
+										? 'text-interactive-accent border-b-2 border-interactive-accent'
+										: 'text-muted-foreground hover:text-foreground'}"
 								>
+									{tab === 'unstaged' ? 'Unstaged' : 'Staged'}
+									<span class="ml-1 text-[10px] opacity-70"
+										>({tab === 'unstaged' ? wb.unstagedFileCount : wb.stagedFileCount})</span
+									>
+								</button>
+							{/each}
+						</div>
+						<div class="flex rounded-md bg-muted p-0.5">
+							<button
+								type="button"
+								onclick={() => wb.setReviewScope('selected-file')}
+								class="px-2 py-0.5 text-[11px] font-medium rounded transition-colors {renderScopeToggleClass(
+									'selected-file',
+								)}"
+							>
+								File
 							</button>
-						{/each}
+							<button
+								type="button"
+								onclick={() => wb.setReviewScope('all-files')}
+								class="px-2 py-0.5 text-[11px] font-medium rounded transition-colors {renderScopeToggleClass(
+									'all-files',
+								)}"
+							>
+								All
+							</button>
+						</div>
 					</div>
-					<GitAllFilesVirtualList
-						items={allScopeReviewItems}
-						activeTab={wb.activeTab}
-						diffMode={wb.diffMode}
-						contextLines={wb.contextLines}
-						fontSize={diffFontSize}
-						selectedLineKeys={wb.selectedLineKeys}
-						overscan={5}
-						onRequestLoad={handleRequestLoad}
-						onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
-						onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
-						onStageHunk={handleStageHunk}
-						onUnstageHunk={handleUnstageHunk}
-						onStageLine={handleStageLine}
-						onUnstageLine={handleUnstageLine}
-						onAddCommentForFile={handleAddCommentForFile}
-						commentsForFile={(fp) => wb.commentsForFile(fp)}
-						composerState={wb.commentComposer}
-						onComposerBodyChange={(b) => {
-							wb.commentComposer = { ...wb.commentComposer, body: b };
-						}}
-						onComposerSeverityChange={(s) => {
-							wb.commentComposer = { ...wb.commentComposer, severity: s };
-						}}
-						onComposerSubmit={() => wb.commitCommentComposer()}
-						onComposerClose={() => wb.closeCommentComposer()}
-						onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
-						onRemoveComment={(id) => wb.removeDraftComment(id)}
-						scrollToRequest={wb.diffScrollRequest}
-						{onOpenInEditor}
-					/>
+					{#if wb.reviewScope === 'selected-file'}
+						<GitDiffViewer
+							filePath={wb.selectedFile ?? ''}
+							reviewData={wb.currentReviewData}
+							activeTab={wb.activeTab}
+							diffMode={wb.diffMode}
+							contextLines={wb.contextLines}
+							fontSize={diffFontSize}
+							selectedLineKeys={wb.selectedLineKeys}
+							isLoading={wb.isLoadingFile || wb.isLoadingTree}
+							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
+							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
+							onStageHunk={handleStageHunk}
+							onUnstageHunk={handleUnstageHunk}
+							onStageLine={handleStageLine}
+							onUnstageLine={handleUnstageLine}
+							onAddComment={(side, line) => {
+								if (wb.selectedFile) handleAddCommentForFile(wb.selectedFile, side, line);
+							}}
+							comments={wb.selectedFile ? wb.commentsForFile(wb.selectedFile) : []}
+							composerState={wb.commentComposer}
+							onComposerBodyChange={(b) => {
+								wb.commentComposer = { ...wb.commentComposer, body: b };
+							}}
+							onComposerSeverityChange={(s) => {
+								wb.commentComposer = { ...wb.commentComposer, severity: s };
+							}}
+							onComposerSubmit={() => wb.commitCommentComposer()}
+							onComposerClose={() => wb.closeCommentComposer()}
+							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
+							onRemoveComment={(id) => wb.removeDraftComment(id)}
+							onOpenInEditor={(line) => {
+								if (wb.selectedFile) onOpenInEditor?.(wb.selectedFile, line);
+							}}
+						/>
+					{:else}
+						<GitAllFilesVirtualList
+							items={allScopeReviewItems}
+							activeTab={wb.activeTab}
+							diffMode={wb.diffMode}
+							contextLines={wb.contextLines}
+							fontSize={diffFontSize}
+							selectedLineKeys={wb.selectedLineKeys}
+							overscan={5}
+							onRequestLoad={handleRequestLoad}
+							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
+							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
+							onStageHunk={handleStageHunk}
+							onUnstageHunk={handleUnstageHunk}
+							onStageLine={handleStageLine}
+							onUnstageLine={handleUnstageLine}
+							onAddCommentForFile={handleAddCommentForFile}
+							commentsForFile={(fp) => wb.commentsForFile(fp)}
+							composerState={wb.commentComposer}
+							onComposerBodyChange={(b) => {
+								wb.commentComposer = { ...wb.commentComposer, body: b };
+							}}
+							onComposerSeverityChange={(s) => {
+								wb.commentComposer = { ...wb.commentComposer, severity: s };
+							}}
+							onComposerSubmit={() => wb.commitCommentComposer()}
+							onComposerClose={() => wb.closeCommentComposer()}
+							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
+							onRemoveComment={(id) => wb.removeDraftComment(id)}
+							scrollToRequest={wb.diffScrollRequest}
+							{onOpenInEditor}
+						/>
+					{/if}
 					{#if wb.hasSelection}
 						<div
 							class="flex items-center gap-2 px-3 py-2 border-t border-border bg-background shrink-0"

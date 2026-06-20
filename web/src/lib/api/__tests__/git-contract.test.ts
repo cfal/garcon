@@ -16,6 +16,7 @@ import {
 	getGitFileReviewData,
 	getGitFileReviewDataBatch,
 	getGitChangesTree,
+	getGitChangesStats,
 	getGitTargetCandidates,
 	gitStageSelection,
 	gitStageHunk,
@@ -238,13 +239,33 @@ describe('git API contract', () => {
 	});
 
 	it('getGitChangesTree calls GET with project', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ root: [] }));
+		fetchMock.mockResolvedValue(jsonResponse({ root: [], hasCommits: true, statsState: 'pending' }));
 
 		const result = await getGitChangesTree('/project');
 
 		expect(result.root).toEqual([]);
 		const [url] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/git/changes-tree');
+		expect(url).toContain('includeStats=false');
+	});
+
+	it('getGitChangesTree can request stats explicitly', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ root: [], hasCommits: true, statsState: 'loaded' }));
+
+		await getGitChangesTree('/project', true);
+
+		const [url] = fetchMock.mock.calls[0];
+		expect(url).toContain('includeStats=true');
+	});
+
+	it('getGitChangesStats calls lazy stats endpoint', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ working: {}, staged: {} }));
+
+		const result = await getGitChangesStats('/project');
+
+		expect(result).toEqual({ working: {}, staged: {} });
+		const [url] = fetchMock.mock.calls[0];
+		expect(url).toContain('/api/v1/git/changes-stats');
 	});
 
 	it('gitStageSelection sends POST with selection payload', async () => {

@@ -9,6 +9,7 @@ import {
 	type GitCommit,
 	type ConfirmAction,
 	type GitRemoteEntry,
+	getGitRepoInfo,
 	getGitStatus,
 	getBranches as fetchBranchesApi,
 	getRemoteStatus as fetchRemoteStatusApi,
@@ -35,6 +36,31 @@ const EMPTY_STATUS: GitStatus = {
 	untracked: [],
 };
 
+function notGitRepositoryStatus(): GitStatus {
+	return {
+		...EMPTY_STATUS,
+		error: 'Git is not initialized in this directory.',
+		details: 'Initialize a repository with "git init" before using source control actions.',
+	};
+}
+
+function repositoryValidationErrorStatus(error: unknown): GitStatus {
+	const message = error instanceof Error ? error.message : String(error);
+	const lower = message.toLowerCase();
+	if (
+		lower.includes('not initialized') ||
+		lower.includes('not a git repository') ||
+		lower.includes('not inside a git')
+	) {
+		return notGitRepositoryStatus();
+	}
+	return {
+		...EMPTY_STATUS,
+		error: 'Git operation failed',
+		details: message,
+	};
+}
+
 export class GitPanelStore {
 	// Git state
 	gitStatus = $state<GitStatus | null>(null);
@@ -46,6 +72,7 @@ export class GitPanelStore {
 	isCommitting = $state(false);
 	currentBranch = $state('');
 	branches = $state<string[]>([]);
+	isLoadingBranches = $state(false);
 	wrapText = $state(true);
 	showLegend = $state(false);
 	showBranchDropdown = $state(false);
@@ -66,6 +93,9 @@ export class GitPanelStore {
 	confirmAction = $state<ConfirmAction | null>(null);
 	isCreatingInitialCommit = $state(false);
 	lastError = $state<string | null>(null);
+	isCheckingRepository = $state(true);
+
+	private repositoryCheckGeneration = 0;
 
 	// Data fetching
 
@@ -107,13 +137,41 @@ export class GitPanelStore {
 		}
 	}
 
+	async validateRepository(projectPath: string): Promise<boolean> {
+		const generation = ++this.repositoryCheckGeneration;
+		this.isCheckingRepository = true;
+		try {
+			const data = await getGitRepoInfo(projectPath);
+			if (generation !== this.repositoryCheckGeneration) return false;
+			if (!data.isGitRepository) {
+				this.gitStatus = notGitRepositoryStatus();
+				this.currentBranch = '';
+				this.selectedFiles = new Set();
+				return false;
+			}
+			if (this.gitStatus?.error) this.gitStatus = null;
+			return true;
+		} catch (err) {
+			if (generation !== this.repositoryCheckGeneration) return false;
+			this.gitStatus = repositoryValidationErrorStatus(err);
+			this.currentBranch = '';
+			this.selectedFiles = new Set();
+			return false;
+		} finally {
+			if (generation === this.repositoryCheckGeneration) this.isCheckingRepository = false;
+		}
+	}
+
 	async fetchBranches(projectPath: string): Promise<void> {
+		this.isLoadingBranches = true;
 		try {
 			const data = await fetchBranchesApi(projectPath);
 			this.branches = !data.error && data.branches ? data.branches : [];
 		} catch (err) {
 			console.error('[Git] Error fetching branches:', err);
 			this.branches = [];
+		} finally {
+			this.isLoadingBranches = false;
 		}
 	}
 
@@ -153,14 +211,33 @@ export class GitPanelStore {
 		this.fetchRemoteStatus(projectPath);
 	}
 
+	refreshDeferredMetadata(projectPath: string): void {
+		this.fetchBranches(projectPath);
+		this.fetchRemoteStatus(projectPath);
+	}
+
 	// Resets transient state when the project path changes.
-	resetForProject(projectPath: string | null): void {
-		this.currentBranch = '';
+	resetForProject(
+		projectPath: string | null,
+		options: { deferMetadata?: boolean; currentBranch?: string } = {},
+	): void {
+		this.repositoryCheckGeneration += 1;
+		this.isCheckingRepository = Boolean(projectPath && options.deferMetadata);
+		this.currentBranch = options.currentBranch ?? '';
 		this.branches = [];
 		this.gitStatus = null;
 		this.remoteStatus = null;
 		this.selectedFiles = new Set();
-		if (projectPath) this.refreshAll(projectPath);
+		if (!projectPath) return;
+		if (options.deferMetadata) return;
+		this.refreshAll(projectPath);
+	}
+
+	async openBranchDropdown(projectPath: string): Promise<void> {
+		this.showBranchDropdown = true;
+		if (this.branches.length === 0 && !this.isLoadingBranches) {
+			await this.fetchBranches(projectPath);
+		}
 	}
 
 	// Remote action helper that refreshes status after completion.

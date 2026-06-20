@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import fs from 'node:fs/promises';
 import path from 'path';
 import os from 'os';
 
@@ -34,6 +35,38 @@ const ctx = {
 };
 
 const routes = createGitRoutes(ctx.agents, ctx.settings);
+
+const originalDebug = console.debug;
+const originalLogLevel = process.env.GARCON_LOG_LEVEL;
+
+async function streamText(stream) {
+  return stream ? new Response(stream).text() : '';
+}
+
+async function runGitCommand(cwd, args) {
+  const proc = Bun.spawn(['git', ...args], {
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    streamText(proc.stdout),
+    streamText(proc.stderr),
+    proc.exited,
+  ]);
+  if (exitCode !== 0) {
+    throw new Error(`git ${args.join(' ')} failed: ${stderr || stdout}`);
+  }
+}
+
+function restoreConsoleDebug() {
+  console.debug = originalDebug;
+  if (originalLogLevel === undefined) {
+    delete process.env.GARCON_LOG_LEVEL;
+  } else {
+    process.env.GARCON_LOG_LEVEL = originalLogLevel;
+  }
+}
 
 function makeUrl(path, params = {}) {
   const url = new URL(`http://localhost${path}`);
@@ -152,6 +185,10 @@ describe('POST /api/v1/git/stage-file validation', () => {
 describe('GET /api/v1/git/changes-tree validation', () => {
   const handler = routes['/api/v1/git/changes-tree'].GET;
 
+  beforeEach(() => {
+    restoreConsoleDebug();
+  });
+
   it('returns 400 when project param is missing', async () => {
     const url = makeUrl('/api/v1/git/changes-tree');
     const request = new Request(url.toString());
@@ -164,6 +201,63 @@ describe('GET /api/v1/git/changes-tree validation', () => {
 
   it('returns 403 when project is outside the configured base', async () => {
     const url = makeUrl('/api/v1/git/changes-tree', { project: '/' });
+    const request = new Request(url.toString());
+    const response = await handler(request, url);
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.errorCode).toBe('outside_project_base');
+  });
+
+  it('emits a safe route trace for successful workbench tree loads', async () => {
+    const projectPath = await fs.mkdtemp(path.join(projectBasePath, 'garcon-git-route-trace-'));
+    process.env.GARCON_LOG_LEVEL = 'debug';
+    console.debug = mock(() => undefined);
+
+    try {
+      await runGitCommand(projectPath, ['init']);
+      const url = makeUrl('/api/v1/git/changes-tree', { project: projectPath });
+      const request = new Request(url.toString());
+      const response = await handler(request, url);
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.statsState).toBe('pending');
+      expect(console.debug).toHaveBeenCalledWith(
+        '[routes:git]',
+        'git workbench route',
+        expect.objectContaining({
+          route: 'changes-tree',
+          commandCount: expect.any(Number),
+          responseBytes: expect.any(Number),
+          slowestCommand: expect.objectContaining({
+            args: expect.any(Array),
+            durationMs: expect.any(Number),
+          }),
+        }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+      restoreConsoleDebug();
+    }
+  });
+});
+
+describe('GET /api/v1/git/changes-stats validation', () => {
+  const handler = routes['/api/v1/git/changes-stats'].GET;
+
+  it('returns 400 when project param is missing', async () => {
+    const url = makeUrl('/api/v1/git/changes-stats');
+    const request = new Request(url.toString());
+    const response = await handler(request, url);
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Missing required parameter: project.');
+  });
+
+  it('returns 403 when project is outside the configured base', async () => {
+    const url = makeUrl('/api/v1/git/changes-stats', { project: '/' });
     const request = new Request(url.toString());
     const response = await handler(request, url);
     const body = await response.json();
