@@ -440,6 +440,8 @@ export class ModelSelectorState {
 		this.showBrowsePane();
 		this.#setDraftSelection(this.agentId, modelValue, this.sourceKey);
 		this.resetActiveModelIndex();
+		this.#commitDraftSelection();
+		this.#finishClose();
 	}
 
 	selectRecent(recent: ModelSelectorRecentOption): void {

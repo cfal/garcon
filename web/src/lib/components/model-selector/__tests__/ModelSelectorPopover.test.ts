@@ -118,7 +118,7 @@ describe('ModelSelectorPopover', () => {
 		}
 	});
 
-	it('keeps the popup open after model selection and commits the draft on outside close', async () => {
+	it('commits normal model selection immediately and closes', async () => {
 		const onChange = vi.fn();
 
 		render(ModelSelectorPopoverHost, {
@@ -132,11 +132,6 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.input(input, { target: { value: 'model-119' } });
 		await fireEvent.click(await screen.findByText('Model 119'));
 
-		expect(onChange).not.toHaveBeenCalled();
-		expect(screen.getByRole('listbox', { name: 'Model' })).toBeTruthy();
-
-		await closePopoverByOutsideClick();
-
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
 				agentId: 'claude',
@@ -146,6 +141,9 @@ describe('ModelSelectorPopover', () => {
 				modelEndpointId: null,
 				modelProtocol: null,
 			});
+		});
+		await waitFor(() => {
+			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 		});
 	});
 
@@ -164,7 +162,7 @@ describe('ModelSelectorPopover', () => {
 		expect(within(listbox).getAllByRole('option').length).toBeLessThan(40);
 	});
 
-	it('switches the open agent view without committing until the popup closes', async () => {
+	it('keeps agent navigation draft-only until a model is selected', async () => {
 		const onChange = vi.fn();
 
 		render(ModelSelectorPopoverHost, {
@@ -185,21 +183,22 @@ describe('ModelSelectorPopover', () => {
 
 		await fireEvent.click(within(listbox).getByText('Codex Model 0'));
 
-		expect(onChange).not.toHaveBeenCalled();
-
-		await closePopoverByOutsideClick();
-
-		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenCalledWith(
-			expect.objectContaining({
-				agentId: 'codex',
-				modelValue: 'codex-model-0',
-				model: 'codex-model-0',
-			}),
-		);
+		await waitFor(() => {
+			expect(onChange).toHaveBeenCalledTimes(1);
+			expect(onChange).toHaveBeenCalledWith(
+				expect.objectContaining({
+					agentId: 'codex',
+					modelValue: 'codex-model-0',
+					model: 'codex-model-0',
+				}),
+			);
+		});
+		await waitFor(() => {
+			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
+		});
 	});
 
-	it('keeps the trigger display on the committed selection while editing a draft', async () => {
+	it('keeps the trigger display on the committed selection while browsing another agent', async () => {
 		const onChange = vi.fn();
 
 		render(ModelSelectorPopoverHost, {
@@ -210,7 +209,6 @@ describe('ModelSelectorPopover', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
 		await fireEvent.click(await screen.findByRole('button', { name: /Codex/ }));
-		await fireEvent.click(await screen.findByText('Codex Model 0'));
 
 		expect(onChange).not.toHaveBeenCalled();
 		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
@@ -235,7 +233,7 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
 	});
 
-	it('keeps provider source and model changes draft-only until the popup closes', async () => {
+	it('keeps provider source navigation draft-only until a model is selected', async () => {
 		const onChange = vi.fn();
 
 		render(ModelSelectorPopoverHost, {
@@ -256,18 +254,19 @@ describe('ModelSelectorPopover', () => {
 
 		await fireEvent.click(within(listbox).getByText('Endpoint Model'));
 
-		expect(onChange).not.toHaveBeenCalled();
-
-		await closePopoverByOutsideClick();
-
-		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenCalledWith({
-			agentId: 'claude',
-			modelValue: 'acme-claude:endpoint-model',
-			model: 'endpoint-model',
-			apiProviderId: 'acme',
-			modelEndpointId: 'acme-claude',
-			modelProtocol: 'anthropic-messages',
+		await waitFor(() => {
+			expect(onChange).toHaveBeenCalledTimes(1);
+			expect(onChange).toHaveBeenCalledWith({
+				agentId: 'claude',
+				modelValue: 'acme-claude:endpoint-model',
+				model: 'endpoint-model',
+				apiProviderId: 'acme',
+				modelEndpointId: 'acme-claude',
+				modelProtocol: 'anthropic-messages',
+			});
+		});
+		await waitFor(() => {
+			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 		});
 	});
 
@@ -565,7 +564,7 @@ describe('ModelSelectorPopover', () => {
 		);
 	});
 
-	it('commits compact draft selection only from Done', async () => {
+	it('commits compact model selection immediately', async () => {
 		installMatchMedia(true);
 		const onChange = vi.fn();
 
@@ -578,24 +577,22 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
 		await chooseCodexModelInCompactLayout();
 
-		expect(onChange).not.toHaveBeenCalled();
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Done' }));
-
-		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenCalledWith(
-			expect.objectContaining({
-				agentId: 'codex',
-				modelValue: 'codex-model-0',
-				model: 'codex-model-0',
-			}),
-		);
+		await waitFor(() => {
+			expect(onChange).toHaveBeenCalledTimes(1);
+			expect(onChange).toHaveBeenCalledWith(
+				expect.objectContaining({
+					agentId: 'codex',
+					modelValue: 'codex-model-0',
+					model: 'codex-model-0',
+				}),
+			);
+		});
 		await waitFor(() => {
 			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 		});
 	});
 
-	it('keeps compact Done disabled until a model is selected after navigation', async () => {
+	it('keeps compact Done disabled while agent navigation has no selected model', async () => {
 		installMatchMedia(true);
 
 		render(ModelSelectorPopoverHost, {
@@ -614,13 +611,9 @@ describe('ModelSelectorPopover', () => {
 		expect(within(listbox).getByText('Codex Model 0')).toBeTruthy();
 		expect(listbox.querySelector('.lucide-check')).toBeNull();
 		expect(done.hasAttribute('disabled')).toBe(true);
-
-		await fireEvent.click(within(listbox).getByText('Codex Model 0'));
-
-		expect(done.hasAttribute('disabled')).toBe(false);
 	});
 
-	it('discards compact draft selection from Cancel or outside close', async () => {
+	it('discards compact navigation from Cancel or outside close', async () => {
 		installMatchMedia(true);
 		const onChange = vi.fn();
 
@@ -631,14 +624,16 @@ describe('ModelSelectorPopover', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
-		await chooseCodexModelInCompactLayout();
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Codex' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
 		expect(onChange).not.toHaveBeenCalled();
 		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
-		await chooseCodexModelInCompactLayout();
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Codex' }));
 		await closePopoverByOutsideClick();
 
 		expect(onChange).not.toHaveBeenCalled();
@@ -675,10 +670,6 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.input(input, { target: { value: 'model-599' } });
 		await fireEvent.click(await screen.findByText('Model 599'));
 
-		expect(onChange).not.toHaveBeenCalled();
-
-		await closePopoverByOutsideClick();
-
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -687,6 +678,9 @@ describe('ModelSelectorPopover', () => {
 					model: 'model-599',
 				}),
 			);
+		});
+		await waitFor(() => {
+			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 		});
 	});
 
@@ -707,10 +701,6 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.keyDown(input, { key: 'End' });
 		await fireEvent.keyDown(input, { key: 'Enter' });
 
-		expect(onChange).not.toHaveBeenCalled();
-
-		await closePopoverByOutsideClick();
-
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -719,6 +709,9 @@ describe('ModelSelectorPopover', () => {
 					model: 'model-599',
 				}),
 			);
+		});
+		await waitFor(() => {
+			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 		});
 	});
 });
