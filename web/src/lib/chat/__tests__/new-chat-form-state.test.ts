@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
 import * as chatsApi from '$lib/api/chats';
+import type { ModelOption } from '$lib/stores/model-catalog.svelte';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 vi.mock('$lib/api/files', () => ({
@@ -115,7 +116,7 @@ const mockModelCatalog = {
 		if (agentId === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
 		return '';
 	}),
-	getModels: vi.fn((agentId: string) => {
+	getModels: vi.fn((agentId: string): ModelOption[] => {
 		if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
 		if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
 		if (agentId === 'direct-anthropic-compatible') {
