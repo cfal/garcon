@@ -20,6 +20,8 @@ import {
 	filterModelRows,
 	modelDisplayLabel,
 	modelSourceKeyFor,
+	shouldShowSourceLabelForAgent,
+	shouldShowSourcePickerForAgent,
 } from './model-selector-options';
 
 interface ModelSelectorStateOptions {
@@ -129,6 +131,15 @@ export class ModelSelectorState {
 
 	get sources(): ModelSourceOption[] {
 		return this.sourcesFor(this.agentId);
+	}
+
+	get shouldShowSourcePicker(): boolean {
+		return this.shouldShowSourcePickerFor(this.agentId);
+	}
+
+	shouldShowSourcePickerFor(agentId: SessionAgentId): boolean {
+		if (this.mode.source !== 'select') return false;
+		return shouldShowSourcePickerForAgent(this.modelCatalog, agentId, this.sourcesFor(agentId));
 	}
 
 	sourcesFor(agentId: SessionAgentId): ModelSourceOption[] {
@@ -259,8 +270,9 @@ export class ModelSelectorState {
 	get triggerSecondary(): string {
 		const committed = this.committedSelection;
 		if (this.mode.surface === 'settings') {
-			if (this.mode.source === 'select' && committed.source) {
-				return [committed.source.label, committed.modelLabel].filter(Boolean).join(' / ');
+			const source = this.#visibleSourceFor(committed);
+			if (source) {
+				return [source.label, committed.modelLabel].filter(Boolean).join(' / ');
 			}
 			return committed.modelLabel;
 		}
@@ -270,11 +282,7 @@ export class ModelSelectorState {
 
 	get triggerTitle(): string {
 		const committed = this.committedSelection;
-		return [
-			committed.agentLabel,
-			this.mode.source === 'select' ? committed.source?.label : '',
-			committed.modelLabel,
-		]
+		return [committed.agentLabel, this.#visibleSourceFor(committed)?.label, committed.modelLabel]
 			.filter(Boolean)
 			.join(' / ');
 	}
@@ -533,7 +541,7 @@ export class ModelSelectorState {
 			input.modelValue,
 			input.modelEndpointId,
 		);
-		const modelLabelSource = this.mode.source === 'select' ? source : null;
+		const modelLabelSource = this.#visibleSourceForSelection(input.agentId, source) ? source : null;
 		const modelLabel = modelDisplayLabel(selectedModel, input.modelValue, modelLabelSource);
 		return {
 			agentId: input.agentId,
@@ -553,5 +561,19 @@ export class ModelSelectorState {
 		source: ModelSourceOption | null,
 	): string {
 		return `${agentId}:${source ? 'source' : 'flat'}:${sourceKey ?? 'all'}`;
+	}
+
+	#visibleSourceFor(selection: SelectionView): ModelSourceOption | null {
+		return this.#visibleSourceForSelection(selection.agentId, selection.source);
+	}
+
+	#visibleSourceForSelection(
+		agentId: SessionAgentId,
+		source: ModelSourceOption | null,
+	): ModelSourceOption | null {
+		const sources = this.sourcesFor(agentId);
+		return shouldShowSourceLabelForAgent(this.modelCatalog, agentId, source, sources)
+			? source
+			: null;
 	}
 }

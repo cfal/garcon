@@ -1,7 +1,12 @@
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
 import type { RecentAgentSetting } from '$shared/settings';
-import { buildModelSources, modelDisplayLabel, modelSourceKeyFor } from './model-selector-options';
+import {
+	buildModelSources,
+	modelDisplayLabel,
+	modelSourceKeyFor,
+	shouldShowSourceLabelForAgent,
+} from './model-selector-options';
 import type { ModelSelectorRecentOption } from './model-selector-types';
 
 export const MODEL_SELECTOR_RECENTS_LIMIT = 20;
@@ -42,12 +47,14 @@ export function buildModelSelectorRecents(
 		if (!selectedModel) continue;
 
 		const sourceKey = modelSourceKeyFor(agentId, selectedModel);
-		const sourceOption =
-			buildModelSources(modelCatalog, agentId).find((source) => source.key === sourceKey) ?? null;
+		const sources = buildModelSources(modelCatalog, agentId);
+		const sourceOption = sources.find((source) => source.key === sourceKey) ?? null;
 		if (!sourceOption) continue;
 
 		const agentLabel = modelCatalog.getAgentLabel(agentId);
-		const sourceLabel = sourceOption.label;
+		const sourceLabel = shouldShowSourceLabelForAgent(modelCatalog, agentId, sourceOption, sources)
+			? sourceOption.label
+			: '';
 		const modelLabel = modelDisplayLabel(selectedModel, modelValue, sourceOption);
 
 		rows.push({

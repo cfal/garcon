@@ -293,6 +293,32 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
 	});
 
+	it('hides the desktop provider column for a single agent-managed source', async () => {
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			includeManagedAgent: true,
+			onChange: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		expect(await screen.findByText('Provider')).toBeTruthy();
+		expect(document.querySelector('[data-popover-content]')?.getAttribute('class')).toContain(
+			'w-[min(50rem,calc(100vw-1rem))]',
+		);
+
+		await fireEvent.click(await screen.findByRole('button', { name: 'Amp' }));
+
+		await waitFor(() => {
+			expect(screen.queryByText('Provider')).toBeNull();
+		});
+		expect(document.querySelector('[data-popover-content]')?.getAttribute('class')).toContain(
+			'w-[min(50rem,calc(100vw-1rem))]',
+		);
+		const listbox = await screen.findByRole('listbox', { name: 'Model' });
+		expect(within(listbox).getByText('Amp Smart')).toBeTruthy();
+	});
+
 	it('renders desktop recents above the agent header and commits a recent immediately', async () => {
 		const onChange = vi.fn();
 

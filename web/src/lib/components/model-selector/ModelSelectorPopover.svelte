@@ -64,17 +64,18 @@
 	let isCompactLayout = $state(false);
 
 	const showAgent = $derived(mode.agent === 'select');
-	const showSource = $derived(mode.source === 'select');
+	const sourceSelectionEnabled = $derived(mode.source === 'select');
+	const showSource = $derived(selector.shouldShowSourcePicker);
 	const surfaceIsSettings = $derived(mode.surface === 'settings');
 	const contentWidthClass = $derived.by(() => {
 		if (isCompactLayout) return 'w-[min(24rem,calc(100vw-1rem))]';
-		if (!showAgent && !showSource) return 'w-[min(22rem,calc(100vw-1rem))]';
-		if (showAgent && showSource) return 'w-[min(50rem,calc(100vw-1rem))]';
+		if (!showAgent && !sourceSelectionEnabled) return 'w-[min(22rem,calc(100vw-1rem))]';
+		if (showAgent && sourceSelectionEnabled) return 'w-[min(50rem,calc(100vw-1rem))]';
 		return 'w-[min(38rem,calc(100vw-1rem))]';
 	});
 	const contentHeightClass = $derived.by(() => {
 		if (isCompactLayout) return 'h-[min(32rem,calc(100vh-1rem))]';
-		return !showAgent && !showSource ? 'h-[18rem]' : 'h-[26rem]';
+		return !showAgent && !sourceSelectionEnabled ? 'h-[18rem]' : 'h-[26rem]';
 	});
 	const triggerBaseClass = $derived(
 		surfaceIsSettings
@@ -148,7 +149,7 @@
 			<ModelSelectorCompactLayout
 				{selector}
 				{showAgent}
-				{showSource}
+				showSource={sourceSelectionEnabled}
 				{modelListId}
 				onCancel={() => selector.discardAndClose()}
 				onDone={() => selector.commitAndClose()}

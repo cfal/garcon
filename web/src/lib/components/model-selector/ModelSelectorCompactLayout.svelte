@@ -29,6 +29,7 @@
 
 	const hasFilteredModels = $derived(selector.filteredModelRows.items.length > 0);
 	const canFinish = $derived(Boolean(selector.currentModelValue));
+	const showCurrentSource = $derived(selector.shouldShowSourcePicker);
 	const previousPane = $derived.by<CompactPane | null>(() => {
 		if (pane === 'recent') return 'menu';
 		if (pane === 'agent') return selector.recentOptions.length > 0 ? 'menu' : null;
@@ -46,8 +47,8 @@
 		if (pane === 'agent') return m.model_selector_agent();
 		if (pane === 'source') return m.model_selector_provider_title({ agent: selector.agentLabel });
 		const parts = [
-			showAgent || showSource ? selector.agentLabel : '',
-			showSource ? selector.source?.label : '',
+			showAgent || showCurrentSource ? selector.agentLabel : '',
+			showCurrentSource ? selector.source?.label : '',
 		].filter(Boolean);
 		return parts.length > 0 ? parts.join(' / ') : m.model_selector_model();
 	});

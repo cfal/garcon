@@ -4,6 +4,7 @@ import type { RecentAgentSetting } from '$shared/settings';
 import { buildModelSelectorRecents } from '../model-selector-recents';
 
 const codexModel: ModelOption = { value: 'gpt-5', label: 'gpt-5' };
+const ampModel: ModelOption = { value: 'amp-smart', label: 'Amp Smart' };
 const claudeEndpointModel: ModelOption = {
 	value: 'acme-anthropic:sonnet',
 	label: 'Acme: Sonnet',
@@ -17,6 +18,7 @@ function makeCatalog(): ModelCatalogStore {
 	const modelsByAgent: Record<string, ModelOption[]> = {
 		codex: [codexModel],
 		claude: [claudeEndpointModel],
+		amp: [ampModel],
 	};
 	const endpoint = {
 		id: 'acme-anthropic',
@@ -29,8 +31,12 @@ function makeCatalog(): ModelCatalogStore {
 	};
 
 	return {
-		getSelectableAgents: () => ['codex', 'claude'],
-		getAgentLabel: (agentId: string) => (agentId === 'codex' ? 'Codex' : 'Claude'),
+		getSelectableAgents: () => ['codex', 'claude', 'amp'],
+		getAgentLabel: (agentId: string) => {
+			if (agentId === 'codex') return 'Codex';
+			if (agentId === 'amp') return 'Amp';
+			return 'Claude';
+		},
 		getModels: (agentId: string) => modelsByAgent[agentId] ?? [],
 		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) =>
 			(modelsByAgent[agentId] ?? []).find(
@@ -104,6 +110,29 @@ describe('model selector recents', () => {
 			modelEndpointId: 'acme-anthropic',
 			modelProtocol: 'anthropic-messages',
 			displayLabel: 'Claude · Acme · Sonnet',
+		});
+	});
+
+	it('omits redundant agent-managed provider labels from recents', () => {
+		const rows = buildModelSelectorRecents(makeCatalog(), [
+			{
+				agentId: 'amp',
+				model: 'amp-smart',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			},
+		]);
+
+		expect(rows[0]).toMatchObject({
+			agentId: 'amp',
+			modelValue: 'amp-smart',
+			model: 'amp-smart',
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+			sourceLabel: '',
+			displayLabel: 'Amp · Amp Smart',
 		});
 	});
 
