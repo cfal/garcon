@@ -108,6 +108,17 @@ export class ModelSelectorState {
 		return this.#options.preferRecentsOnOpen && this.recentOptions.length > 1;
 	}
 
+	isRecentSelected(recent: ModelSelectorRecentOption): boolean {
+		const selectedModel = this.selectedModel;
+		return (
+			recent.agentId === this.agentId &&
+			recent.modelValue === this.currentModelValue &&
+			recent.apiProviderId === (selectedModel?.apiProviderId ?? null) &&
+			recent.modelEndpointId === (selectedModel?.endpointId ?? null) &&
+			recent.modelProtocol === (selectedModel?.protocol ?? null)
+		);
+	}
+
 	get agentId(): SessionAgentId {
 		return this.draftSelection.agentId;
 	}

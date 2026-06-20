@@ -210,10 +210,17 @@
 					<button
 						type="button"
 						title={recent.displayLabel}
-						class="flex min-h-12 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+						class={cn(
+							'flex min-h-12 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+							selector.isRecentSelected(recent) && 'bg-accent text-accent-foreground',
+						)}
+						aria-pressed={selector.isRecentSelected(recent)}
 						onclick={() => selector.selectRecent(recent)}
 					>
 						<span class="min-w-0 flex-1 truncate">{recent.displayLabel}</span>
+						{#if selector.isRecentSelected(recent)}
+							<Check class="size-4 shrink-0" />
+						{/if}
 					</button>
 				{/each}
 			</div>

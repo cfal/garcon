@@ -69,9 +69,6 @@
 					<span class="min-w-0 flex-1 truncate font-medium">
 						{m.model_selector_recents()}
 					</span>
-					{#if selector.isRecentsPaneActive}
-						<Check class="size-4 shrink-0" />
-					{/if}
 				</button>
 			{/if}
 			<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">
@@ -108,7 +105,9 @@
 	{/if}
 
 	{#if selector.isRecentsPaneActive}
-		<section class="min-h-0 min-w-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]">
+		<section
+			class="min-h-0 min-w-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
+		>
 			<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">
 				{m.model_selector_recent_models()}
 			</div>
@@ -117,10 +116,17 @@
 					<button
 						type="button"
 						title={recent.displayLabel}
-						class="flex min-h-9 w-full items-center rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+						class={cn(
+							'flex min-h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+							selector.isRecentSelected(recent) && 'bg-accent text-accent-foreground',
+						)}
+						aria-pressed={selector.isRecentSelected(recent)}
 						onclick={() => selector.selectRecent(recent)}
 					>
-						<span class="min-w-0 truncate">{recent.displayLabel}</span>
+						<span class="min-w-0 flex-1 truncate">{recent.displayLabel}</span>
+						{#if selector.isRecentSelected(recent)}
+							<Check class="size-4 shrink-0" />
+						{/if}
 					</button>
 				{/each}
 			</div>
@@ -157,40 +163,40 @@
 	{/if}
 
 	{#if !selector.isRecentsPaneActive}
-	<section class="flex min-h-0 min-w-0 flex-1 flex-col">
-		<div class="flex items-center gap-2 border-b border-border px-3">
-			<Search class="size-4 shrink-0 text-muted-foreground" />
-			<input
-				bind:this={inputRef}
-				type="text"
-				value={selector.query}
-				placeholder={m.model_selector_filter_placeholder()}
-				aria-label={m.model_selector_filter_placeholder()}
-				aria-controls={modelListId}
-				aria-activedescendant={activeOptionId}
-				class="flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-				oninput={handleQueryInput}
-				onkeydown={handleModelInputKeydown}
-			/>
-		</div>
-		{#if !hasFilteredModels}
-			<div class="px-3 py-8 text-center text-sm text-muted-foreground">
-				{selector.availableModels.length === 0
-					? m.model_selector_no_models()
-					: m.model_selector_no_results()}
+		<section class="flex min-h-0 min-w-0 flex-1 flex-col">
+			<div class="flex items-center gap-2 border-b border-border px-3">
+				<Search class="size-4 shrink-0 text-muted-foreground" />
+				<input
+					bind:this={inputRef}
+					type="text"
+					value={selector.query}
+					placeholder={m.model_selector_filter_placeholder()}
+					aria-label={m.model_selector_filter_placeholder()}
+					aria-controls={modelListId}
+					aria-activedescendant={activeOptionId}
+					class="flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+					oninput={handleQueryInput}
+					onkeydown={handleModelInputKeydown}
+				/>
 			</div>
-		{:else}
-			<VirtualModelList
-				listId={modelListId}
-				ariaLabel={m.model_selector_model()}
-				rows={selector.filteredModelRows.items}
-				selectedValue={selector.currentModelValue}
-				activeIndex={selector.activeModelIndex}
-				onActiveIndexChange={(index) => selector.setActiveModelIndex(index)}
-				onSelect={(modelValue) => selector.selectModel(modelValue)}
-				onMetricsChange={handleModelListMetrics}
-			/>
-		{/if}
-	</section>
+			{#if !hasFilteredModels}
+				<div class="px-3 py-8 text-center text-sm text-muted-foreground">
+					{selector.availableModels.length === 0
+						? m.model_selector_no_models()
+						: m.model_selector_no_results()}
+				</div>
+			{:else}
+				<VirtualModelList
+					listId={modelListId}
+					ariaLabel={m.model_selector_model()}
+					rows={selector.filteredModelRows.items}
+					selectedValue={selector.currentModelValue}
+					activeIndex={selector.activeModelIndex}
+					onActiveIndexChange={(index) => selector.setActiveModelIndex(index)}
+					onSelect={(modelValue) => selector.selectModel(modelValue)}
+					onMetricsChange={handleModelListMetrics}
+				/>
+			{/if}
+		</section>
 	{/if}
 </div>

@@ -64,6 +64,25 @@ function codexRecent(
 	};
 }
 
+function claudeRecent(
+	overrides: Partial<ModelSelectorRecentOption> = {},
+): ModelSelectorRecentOption {
+	return {
+		id: 'claude:model-0',
+		agentId: 'claude',
+		modelValue: 'model-0',
+		model: 'model-0',
+		apiProviderId: null,
+		modelEndpointId: null,
+		modelProtocol: null,
+		agentLabel: 'Claude',
+		sourceLabel: 'Anthropic',
+		modelLabel: 'Model 0',
+		displayLabel: 'Claude · Anthropic · Model 0',
+		...overrides,
+	};
+}
+
 function endpointRecent(): ModelSelectorRecentOption {
 	return codexRecent({
 		id: 'claude:acme:endpoint-model',
@@ -296,6 +315,7 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.click(recentsButton);
 
 		expect(screen.getByText('Recent models')).toBeTruthy();
+		expect(recentsButton.querySelector('.lucide-check')).toBeNull();
 		expect(screen.queryByRole('listbox', { name: 'Provider' })).toBeNull();
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 
@@ -318,7 +338,7 @@ describe('ModelSelectorPopover', () => {
 		render(ModelSelectorPopoverHost, {
 			value: { agentId: 'claude', model: 'model-0' },
 			mode: { agent: 'select', source: 'select', surface: 'composer' },
-			recents: [codexRecent(), endpointRecent()],
+			recents: [claudeRecent(), codexRecent()],
 			preferRecentsOnOpen: true,
 			onChange: vi.fn(),
 		});
@@ -326,8 +346,9 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
+		const currentRecent = screen.getByRole('button', { name: 'Claude · Anthropic · Model 0' });
 		expect(screen.getByRole('button', { name: 'Codex · OpenAI · Codex Model 1' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Claude · Acme · Endpoint Model' })).toBeTruthy();
+		expect(currentRecent.querySelector('.lucide-check')).toBeTruthy();
 		expect(screen.queryByRole('listbox', { name: 'Provider' })).toBeNull();
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 	});
@@ -510,7 +531,7 @@ describe('ModelSelectorPopover', () => {
 		render(ModelSelectorPopoverHost, {
 			value: { agentId: 'claude', model: 'model-0' },
 			mode: { agent: 'select', source: 'select', surface: 'composer' },
-			recents: [codexRecent(), endpointRecent()],
+			recents: [claudeRecent(), codexRecent()],
 			preferRecentsOnOpen: true,
 			onChange,
 		});
@@ -518,6 +539,11 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
+		expect(
+			screen
+				.getByRole('button', { name: 'Claude · Anthropic · Model 0' })
+				.querySelector('.lucide-check'),
+		).toBeTruthy();
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 
 		await fireEvent.click(
