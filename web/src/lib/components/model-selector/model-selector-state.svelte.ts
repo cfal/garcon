@@ -6,6 +6,7 @@ import type {
 	AgentSelectorOption,
 	ModelSelectorChange,
 	ModelSelectorMode,
+	ModelSelectorRecentOption,
 	ModelSelectorRow,
 	ModelSelectorValue,
 	ModelSourceOption,
@@ -25,8 +26,11 @@ interface ModelSelectorStateOptions {
 	get modelCatalog(): ModelCatalogStore;
 	get value(): ModelSelectorValue;
 	get mode(): ModelSelectorMode;
+	get recents(): ModelSelectorRecentOption[];
 	onChange: (next: ModelSelectorChange) => void | Promise<void>;
 }
+
+type ModelSelectorContentPane = 'browse' | 'recents';
 
 interface RowsCache {
 	catalogVersion: number;
@@ -59,6 +63,7 @@ export class ModelSelectorState {
 	activeModelIndex = $state(0);
 	draftAgentId = $state<SessionAgentId | null>(null);
 	draftModelValue = $state<string | null>(null);
+	contentPane = $state<ModelSelectorContentPane>('browse');
 
 	readonly #options: ModelSelectorStateOptions;
 	#sourcesCache = new Map<SessionAgentId, ModelSourceOption[]>();
@@ -87,6 +92,15 @@ export class ModelSelectorState {
 
 	get agentOptions(): AgentSelectorOption[] {
 		return buildAgentOptions(this.modelCatalog);
+	}
+
+	get recentOptions(): ModelSelectorRecentOption[] {
+		if (this.mode.surface !== 'composer' || this.mode.agent !== 'select') return [];
+		return this.#options.recents;
+	}
+
+	get isRecentsPaneActive(): boolean {
+		return this.contentPane === 'recents';
 	}
 
 	get agentId(): SessionAgentId {
@@ -278,6 +292,7 @@ export class ModelSelectorState {
 		if (this.open) return;
 		this.open = true;
 		this.query = '';
+		this.contentPane = 'browse';
 		this.#startDraftFromValue();
 		this.resetActiveModelIndex();
 	}
@@ -297,7 +312,18 @@ export class ModelSelectorState {
 		this.open = false;
 		this.query = '';
 		this.activeModelIndex = 0;
+		this.contentPane = 'browse';
 		this.#clearDraft();
+	}
+
+	showRecentsPane(): void {
+		if (this.recentOptions.length === 0) return;
+		this.query = '';
+		this.contentPane = 'recents';
+	}
+
+	showBrowsePane(): void {
+		this.contentPane = 'browse';
 	}
 
 	setQuery(query: string): void {
@@ -373,6 +399,7 @@ export class ModelSelectorState {
 	}
 
 	selectAgent(agentId: SessionAgentId): void {
+		this.showBrowsePane();
 		if (agentId === this.agentId) return;
 		const sources = this.sourcesFor(agentId);
 		const currentSourceKey = this.sourceKey;
@@ -384,6 +411,7 @@ export class ModelSelectorState {
 	}
 
 	selectSource(sourceKey: string): void {
+		this.showBrowsePane();
 		if (sourceKey === this.sourceKey) return;
 		const source = this.sources.find((entry) => entry.key === sourceKey) ?? null;
 		const modelValue = this.#committedModelValueFor(this.agentId, source?.key ?? null);
@@ -393,8 +421,21 @@ export class ModelSelectorState {
 	}
 
 	selectModel(modelValue: string): void {
+		this.showBrowsePane();
 		this.#setDraftSelection(this.agentId, modelValue, this.sourceKey);
 		this.resetActiveModelIndex();
+	}
+
+	selectRecent(recent: ModelSelectorRecentOption): void {
+		void this.#options.onChange({
+			agentId: recent.agentId,
+			modelValue: recent.modelValue,
+			model: recent.model,
+			apiProviderId: recent.apiProviderId,
+			modelEndpointId: recent.modelEndpointId,
+			modelProtocol: recent.modelProtocol,
+		});
+		this.#finishClose();
 	}
 
 	emit(agentId: SessionAgentId, modelValue: string): void {

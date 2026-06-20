@@ -398,6 +398,7 @@ export class ConversationSessionController {
 				startup?.modelProtocol ?? selected.modelProtocol ?? deps.agentState.modelProtocol;
 			const permissionMode = startup?.permissionMode ?? deps.agentState.permissionMode;
 			const thinkingMode = startup?.thinkingMode ?? deps.agentState.thinkingMode;
+			const claudeThinkingMode = startup?.claudeThinkingMode ?? deps.agentState.claudeThinkingMode;
 			const ampAgentMode = startup?.ampAgentMode ?? deps.agentState.ampAgentMode;
 
 			try {
@@ -413,7 +414,7 @@ export class ConversationSessionController {
 					modelProtocol,
 					permissionMode,
 					thinkingMode,
-					claudeThinkingMode: 'auto',
+					claudeThinkingMode,
 					ampAgentMode,
 					command: text,
 					tags: startup?.tags,

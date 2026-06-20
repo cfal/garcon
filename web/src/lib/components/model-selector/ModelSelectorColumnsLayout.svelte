@@ -23,6 +23,7 @@
 
 	$effect(() => {
 		if (!selector.open) return;
+		if (selector.isRecentsPaneActive) return;
 		requestAnimationFrame(() => inputRef?.focus());
 	});
 
@@ -55,6 +56,24 @@
 		<section
 			class="min-h-0 touch-pan-y overflow-y-auto overscroll-contain border-r border-border p-1 [-webkit-overflow-scrolling:touch] sm:w-56"
 		>
+			{#if selector.recentOptions.length > 0}
+				<button
+					type="button"
+					class={cn(
+						'mb-1 flex w-full touch-pan-y items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+						selector.isRecentsPaneActive && 'bg-accent text-accent-foreground',
+					)}
+					aria-pressed={selector.isRecentsPaneActive}
+					onclick={() => selector.showRecentsPane()}
+				>
+					<span class="min-w-0 flex-1 truncate font-medium">
+						{m.model_selector_recents()}
+					</span>
+					{#if selector.isRecentsPaneActive}
+						<Check class="size-4 shrink-0" />
+					{/if}
+				</button>
+			{/if}
 			<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">
 				{m.model_selector_agent()}
 			</div>
@@ -64,9 +83,11 @@
 						type="button"
 						class={cn(
 							'flex w-full touch-pan-y items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-							option.value === selector.agentId && 'bg-accent text-accent-foreground',
+							!selector.isRecentsPaneActive &&
+								option.value === selector.agentId &&
+								'bg-accent text-accent-foreground',
 						)}
-						aria-pressed={option.value === selector.agentId}
+						aria-pressed={!selector.isRecentsPaneActive && option.value === selector.agentId}
 						onclick={() => selector.selectAgent(option.value)}
 					>
 						<span class="min-w-0 flex-1">
@@ -77,7 +98,7 @@
 								>
 							{/if}
 						</span>
-						{#if option.value === selector.agentId}
+						{#if !selector.isRecentsPaneActive && option.value === selector.agentId}
 							<Check class="mt-0.5 size-4 shrink-0" />
 						{/if}
 					</button>
@@ -86,7 +107,25 @@
 		</section>
 	{/if}
 
-	{#if showSource}
+	{#if selector.isRecentsPaneActive}
+		<section class="min-h-0 min-w-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]">
+			<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+				{m.model_selector_recent_models()}
+			</div>
+			<div class="space-y-1">
+				{#each selector.recentOptions as recent (recent.id)}
+					<button
+						type="button"
+						title={recent.displayLabel}
+						class="flex min-h-9 w-full items-center rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+						onclick={() => selector.selectRecent(recent)}
+					>
+						<span class="min-w-0 truncate">{recent.displayLabel}</span>
+					</button>
+				{/each}
+			</div>
+		</section>
+	{:else if showSource}
 		<section
 			class="min-h-0 touch-pan-y overflow-y-auto overscroll-contain border-r border-border p-1 [-webkit-overflow-scrolling:touch] sm:w-48"
 		>
@@ -117,6 +156,7 @@
 		</section>
 	{/if}
 
+	{#if !selector.isRecentsPaneActive}
 	<section class="flex min-h-0 min-w-0 flex-1 flex-col">
 		<div class="flex items-center gap-2 border-b border-border px-3">
 			<Search class="size-4 shrink-0 text-muted-foreground" />
@@ -152,4 +192,5 @@
 			/>
 		{/if}
 	</section>
+	{/if}
 </div>

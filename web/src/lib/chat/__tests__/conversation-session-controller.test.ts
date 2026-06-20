@@ -6,6 +6,7 @@ import {
 	forkRunChat,
 	getChatQueue,
 	runChat,
+	startChat,
 } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 import type { ChatRestoreResult } from '../state.svelte';
@@ -34,6 +35,7 @@ const mockForkChat = vi.mocked(forkChat);
 const mockForkRunChat = vi.mocked(forkRunChat);
 const mockGetChatQueue = vi.mocked(getChatQueue);
 const mockRunChat = vi.mocked(runChat);
+const mockStartChat = vi.mocked(startChat);
 const mockEnqueueChatMessage = vi.mocked(enqueueChatMessage);
 
 function deferred<T>() {
@@ -182,6 +184,7 @@ function createDeps(chat = createRunningChat()) {
 				permissionMode: 'default',
 				thinkingMode: 'none',
 				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
 			},
 			lifecycle: {
 				currentChatId: null as string | null,
@@ -192,7 +195,10 @@ function createDeps(chat = createRunningChat()) {
 				beginTurn: vi.fn(),
 			},
 			conversationUi,
-			startupCoordinator: {},
+			startupCoordinator: {
+				beginLocalStartup: vi.fn(),
+				completeStartup: vi.fn(),
+			},
 			ws: {
 				sendMessage: vi.fn(),
 				waitForConnection,
@@ -230,6 +236,7 @@ describe('ConversationSessionController', () => {
 		mockForkRunChat.mockReset();
 		mockGetChatQueue.mockReset();
 		mockRunChat.mockReset();
+		mockStartChat.mockReset();
 		mockEnqueueChatMessage.mockReset();
 		mockGetChatQueue.mockResolvedValue({
 			success: true,
@@ -435,6 +442,51 @@ describe('ConversationSessionController', () => {
 			expect(acceptedInput.deliveryStatus).toBe('accepted');
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-1', true);
+	});
+
+	it('starts draft chats with the draft Claude thinking mode', async () => {
+		const draft = createRunningChat({
+			id: 'draft-1',
+			status: 'draft',
+			model: 'opus',
+			claudeThinkingMode: 'off',
+		});
+		const { deps } = createDeps(draft);
+		deps.sessions.isDraft = vi.fn(() => true);
+		deps.sessions.startupByChatId = {
+			'draft-1': {
+				agentId: 'claude',
+				model: 'opus',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				claudeThinkingMode: 'on',
+				ampAgentMode: 'smart',
+				tags: ['draft'],
+			},
+		};
+		deps.composerState.inputText = 'start from draft';
+		mockStartChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'chat-start',
+			clientRequestId: 'req-1',
+			chatId: 'draft-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+		});
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('draft-1');
+
+		expect(mockStartChat).toHaveBeenCalledWith(expect.objectContaining({
+			chatId: 'draft-1',
+			command: 'start from draft',
+			claudeThinkingMode: 'on',
+			ampAgentMode: 'smart',
+		}));
 	});
 
 	it('submits image attachments as native data URLs', async () => {

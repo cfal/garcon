@@ -14,7 +14,12 @@ import type {
 	PermissionMode,
 	ThinkingMode,
 } from '$lib/types/chat.js';
-import type { RemoteSettingsSnapshot } from '$shared/settings';
+import type {
+	ExecutionDefaults,
+	RecentAgentSetting,
+	RemoteExecutionDefaults,
+	RemoteSettingsSnapshot,
+} from '$shared/settings';
 import {
 	normalizeAmpAgentMode,
 	normalizeClaudeThinkingMode,
@@ -56,6 +61,8 @@ export class NewChatFormState {
 	thinkingMode = $state<ThinkingMode>('none');
 	claudeThinkingMode = $state<ClaudeThinkingMode>('auto');
 	ampAgentMode = $state<AmpAgentMode>('smart');
+	#modesTouched = false;
+	#executionDefaults: RemoteExecutionDefaults | null = null;
 
 	// Tags
 	chatTags = $state<string[]>([]);
@@ -123,7 +130,31 @@ export class NewChatFormState {
 	// Agent selection
 
 	selectAgent(next: SessionAgentId): void {
+		const changed = this.agentId !== next;
 		this.agentId = next;
+		if (changed && !this.#modesTouched) {
+			this.#applyExecutionDefaultsForAgent(next);
+		}
+	}
+
+	setPermissionMode(mode: PermissionMode): void {
+		this.permissionMode = normalizePermissionMode(mode);
+		this.#modesTouched = true;
+	}
+
+	setThinkingMode(mode: ThinkingMode): void {
+		this.thinkingMode = normalizeThinkingMode(mode);
+		this.#modesTouched = true;
+	}
+
+	setClaudeThinkingMode(mode: ClaudeThinkingMode): void {
+		this.claudeThinkingMode = normalizeClaudeThinkingMode(mode);
+		this.#modesTouched = true;
+	}
+
+	setAmpAgentMode(mode: AmpAgentMode): void {
+		this.ampAgentMode = normalizeAmpAgentMode(mode);
+		this.#modesTouched = true;
 	}
 
 	// Model
@@ -424,6 +455,7 @@ export class NewChatFormState {
 		this.worktreeError = null;
 		this.chatTags = [];
 		this.showTagInput = false;
+		this.#modesTouched = false;
 	}
 
 	// Initialization
@@ -459,11 +491,12 @@ export class NewChatFormState {
 
 	#applySettings(snap: RemoteSettingsSnapshot): void {
 		this.projectBasePath = snap.projectBasePath;
+		this.#executionDefaults = snap.executionDefaults;
 
 		this.pinnedProjectPaths = snap.paths.pinnedProjectPaths ?? [];
 		this.browseStartPath = snap.paths.browseStartPath ?? '';
 
-		const defaultPath = snap.lastProjectPath || this.browseStartPath;
+		const defaultPath = snap.paths.recentProjectPaths[0] || this.browseStartPath;
 		if (defaultPath && !this.projectPath) {
 			this.projectPath = defaultPath;
 		}
@@ -472,18 +505,64 @@ export class NewChatFormState {
 			this.projectPath = this.projectBasePath;
 		}
 
-		this.agentId = this.#resolveStartupAgent(snap.lastAgentId);
-		if (snap.lastModel) {
-			this.applyResolvedModel(this.agentId, snap.lastModel, snap.lastModelEndpointId);
-		} else {
-			for (const agentId of this.#modelCatalog.getSelectableAgents()) {
-				this.applyResolvedModel(agentId, this.#modelCatalog.getDefaultModel(agentId));
-			}
+		const recent = this.#firstSelectableRecent(snap.recentAgentSettings);
+		if (recent) {
+			this.agentId = recent.agentId as SessionAgentId;
+			this.applyResolvedModel(this.agentId, recent.model, recent.modelEndpointId);
+			this.#applyExecutionDefaultsForAgent(this.agentId);
+			return;
 		}
-		this.permissionMode = normalizePermissionMode(snap.lastPermissionMode);
-		this.thinkingMode = normalizeThinkingMode(snap.lastThinkingMode);
-		this.claudeThinkingMode = normalizeClaudeThinkingMode(snap.lastClaudeThinkingMode);
-		this.ampAgentMode = normalizeAmpAgentMode(snap.lastAmpAgentMode);
+
+		this.agentId = this.#resolveStartupAgent('claude');
+		for (const agentId of this.#modelCatalog.getSelectableAgents()) {
+			this.applyResolvedModel(agentId, this.#modelCatalog.getDefaultModel(agentId));
+		}
+		this.#applyExecutionDefaultsForAgent(this.agentId);
+	}
+
+	#firstSelectableRecent(recents: RecentAgentSetting[]): RecentAgentSetting | null {
+		const selectable = new Set(this.#modelCatalog.getSelectableAgents());
+		for (const recent of recents) {
+			const agentId = recent.agentId as SessionAgentId;
+			if (!selectable.has(agentId)) continue;
+			const modelValue = this.#modelCatalog.selectionValueFor(
+				agentId,
+				recent.model,
+				recent.modelEndpointId,
+			);
+			if (!modelValue) continue;
+			const model = this.#modelCatalog.getModelForSelection(
+				agentId,
+				modelValue,
+				recent.modelEndpointId,
+			);
+			if (model) return recent;
+		}
+		return null;
+	}
+
+	#executionDefaultsForAgent(agentId: SessionAgentId): ExecutionDefaults {
+		const defaults = this.#executionDefaults;
+		if (!defaults) {
+			return {
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
+			};
+		}
+		return {
+			...defaults.global,
+			...(defaults.byAgent[agentId] ?? {}),
+		};
+	}
+
+	#applyExecutionDefaultsForAgent(agentId: SessionAgentId): void {
+		const modes = this.#executionDefaultsForAgent(agentId);
+		this.permissionMode = normalizePermissionMode(modes.permissionMode);
+		this.thinkingMode = normalizeThinkingMode(modes.thinkingMode);
+		this.claudeThinkingMode = normalizeClaudeThinkingMode(modes.claudeThinkingMode);
+		this.ampAgentMode = normalizeAmpAgentMode(modes.ampAgentMode);
 	}
 
 	// Auto-open browser on first path focus

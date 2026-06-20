@@ -42,7 +42,7 @@ const settings = {
   toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
   reorderWindow: mock(() => Promise.resolve({ success: true })),
   reorderRelative: mock(() => Promise.resolve({ success: true })),
-  setLastChatDefaults: mock(() => Promise.resolve(undefined)),
+  recordChatStartup: mock(() => Promise.resolve(undefined)),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
 const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };

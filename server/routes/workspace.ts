@@ -72,16 +72,8 @@ export async function buildRemoteSettingsSnapshot({
   const ui = asPlainObject(settingsSource.ui);
   const paths = settingsSource.paths;
   const pinnedChatIds = settingsSource.pinnedChatIds;
-  const lastAgentId = settingsSource.lastAgentId;
-  const lastProjectPath = settingsSource.lastProjectPath;
-  const lastModel = settingsSource.lastModel;
-  const lastPermissionMode = settingsSource.lastPermissionMode;
-  const lastThinkingMode = settingsSource.lastThinkingMode;
-  const lastClaudeThinkingMode = settingsSource.lastClaudeThinkingMode;
-  const lastAmpAgentMode = settingsSource.lastAmpAgentMode;
-  const lastApiProviderId = settingsSource.lastApiProviderId ?? null;
-  const lastModelEndpointId = settingsSource.lastModelEndpointId ?? null;
-  const lastModelProtocol = settingsSource.lastModelProtocol ?? null;
+  const recentAgentSettings = settingsSource.recentAgentSettings;
+  const executionDefaults = settingsSource.executionDefaults;
 
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({
@@ -103,18 +95,13 @@ export async function buildRemoteSettingsSnapshot({
         ? paths.pinnedProjectPaths.filter((entry): entry is string => typeof entry === 'string')
         : [],
       browseStartPath: typeof paths?.browseStartPath === 'string' ? paths.browseStartPath : '',
+      recentProjectPaths: Array.isArray(paths?.recentProjectPaths)
+        ? paths.recentProjectPaths.filter((entry): entry is string => typeof entry === 'string')
+        : [],
     },
     pinnedChatIds: Array.isArray(pinnedChatIds) ? pinnedChatIds : [],
-    lastAgentId,
-    lastProjectPath,
-    lastModel,
-    lastApiProviderId: lastApiProviderId ?? null,
-    lastModelEndpointId: lastModelEndpointId ?? null,
-    lastModelProtocol: lastModelProtocol ?? null,
-    lastPermissionMode,
-    lastThinkingMode,
-    lastClaudeThinkingMode,
-    lastAmpAgentMode,
+    recentAgentSettings,
+    executionDefaults,
     projectBasePath: getProjectBasePath(),
     telegram: telegramSettings?.getPublicStatus?.() ?? emptyTelegramStatus,
   };

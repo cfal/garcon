@@ -8,7 +8,7 @@
 	import type { ModelSelectorState } from './model-selector-state.svelte';
 	import VirtualModelList from './VirtualModelList.svelte';
 
-	type CompactPane = 'agent' | 'source' | 'model';
+	type CompactPane = 'menu' | 'recent' | 'agent' | 'source' | 'model';
 
 	interface Props {
 		selector: ModelSelectorState;
@@ -30,14 +30,19 @@
 	const hasFilteredModels = $derived(selector.filteredModelRows.items.length > 0);
 	const canFinish = $derived(Boolean(selector.currentModelValue));
 	const previousPane = $derived.by<CompactPane | null>(() => {
+		if (pane === 'recent') return 'menu';
+		if (pane === 'agent') return selector.recentOptions.length > 0 ? 'menu' : null;
 		if (pane === 'source') return showAgent ? 'agent' : null;
 		if (pane === 'model') {
 			if (shouldShowSourcePaneFor(selector.agentId)) return 'source';
-			return showAgent ? 'agent' : null;
+			if (showAgent) return selector.recentOptions.length > 0 ? 'menu' : 'agent';
+			return null;
 		}
 		return null;
 	});
 	const headerTitle = $derived.by(() => {
+		if (pane === 'menu') return m.model_selector_model();
+		if (pane === 'recent') return m.model_selector_recent_models();
 		if (pane === 'agent') return m.model_selector_agent();
 		if (pane === 'source') return m.model_selector_provider_title({ agent: selector.agentLabel });
 		const parts = [
@@ -47,6 +52,8 @@
 		return parts.length > 0 ? parts.join(' / ') : m.model_selector_model();
 	});
 	const headerSubtitle = $derived.by(() => {
+		if (pane === 'menu') return '';
+		if (pane === 'recent') return '';
 		if (pane === 'agent') return '';
 		if (pane === 'source') return '';
 		return m.model_selector_model();
@@ -69,6 +76,7 @@
 	});
 
 	function firstPane(): CompactPane {
+		if (selector.recentOptions.length > 0 && showAgent) return 'menu';
 		if (selector.currentModelValue) return 'model';
 		if (showAgent) return 'agent';
 		if (shouldShowSourcePaneFor(selector.agentId)) return 'source';
@@ -154,7 +162,61 @@
 	</header>
 
 	<div data-slot="model-selector-compact-pane" class="flex min-h-0 flex-1 flex-col">
-		{#if pane === 'agent'}
+		{#if pane === 'menu'}
+			<div
+				class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
+			>
+				{#if selector.recentOptions.length > 0}
+					<button
+						type="button"
+						class="flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+						onclick={() => (pane = 'recent')}
+					>
+						<span class="min-w-0 flex-1 truncate font-medium">
+							{m.model_selector_recents()}
+						</span>
+					</button>
+				{/if}
+				{#each selector.agentOptions as option (option.value)}
+					<button
+						type="button"
+						class={cn(
+							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+							option.value === selector.agentId && 'bg-accent text-accent-foreground',
+						)}
+						aria-pressed={option.value === selector.agentId}
+						onclick={() => handleAgentSelect(option.value)}
+					>
+						<span class="min-w-0 flex-1">
+							<span class="block truncate font-medium">{option.label}</span>
+							{#if option.description}
+								<span class="block truncate text-xs text-muted-foreground"
+									>{option.description}</span
+								>
+							{/if}
+						</span>
+						{#if option.value === selector.agentId}
+							<Check class="size-4 shrink-0" />
+						{/if}
+					</button>
+				{/each}
+			</div>
+		{:else if pane === 'recent'}
+			<div
+				class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
+			>
+				{#each selector.recentOptions as recent (recent.id)}
+					<button
+						type="button"
+						title={recent.displayLabel}
+						class="flex min-h-12 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+						onclick={() => selector.selectRecent(recent)}
+					>
+						<span class="min-w-0 flex-1 truncate">{recent.displayLabel}</span>
+					</button>
+				{/each}
+			</div>
+		{:else if pane === 'agent'}
 			<div
 				class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
 			>

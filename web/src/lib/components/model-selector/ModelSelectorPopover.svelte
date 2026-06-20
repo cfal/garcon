@@ -11,6 +11,7 @@
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
+		ModelSelectorRecentOption,
 		ModelSelectorValue,
 	} from './model-selector-types';
 
@@ -18,6 +19,7 @@
 		value: ModelSelectorValue;
 		mode: ModelSelectorMode;
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
+		recents?: ModelSelectorRecentOption[];
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
@@ -29,6 +31,7 @@
 		value,
 		mode,
 		onChange,
+		recents = [],
 		disabled = false,
 		align = 'end',
 		side = 'bottom',
@@ -46,6 +49,9 @@
 		},
 		get mode() {
 			return mode;
+		},
+		get recents() {
+			return recents;
 		},
 		onChange: (next) => onChange(next),
 	});

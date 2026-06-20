@@ -49,7 +49,7 @@ interface SettingsDep {
   getUiSettings(): { chatTitle?: unknown } | null | undefined;
   getChatName(chatId: string): string | null | undefined;
   setSessionName(chatId: string, title: string): Promise<unknown>;
-  setLastChatDefaults(defaults: Record<string, unknown>): Promise<void>;
+  recordChatStartup(defaults: Record<string, unknown>): Promise<void>;
   ensureInNormal(chatId: string): Promise<void>;
   removeFromAllOrderLists(chatId: string): Promise<void>;
 }
@@ -319,7 +319,7 @@ export class ChatCommandService {
     });
     this.deps.metadata.addNewChatMetadata(chatId, command);
 
-    await this.deps.settings.setLastChatDefaults({
+    await this.deps.settings.recordChatStartup({
       agentId,
       projectPath,
       model: input.model,
