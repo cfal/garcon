@@ -30,9 +30,3 @@ export function nativeSourceLabelFor(agentId: string, fallback?: string): string
 	if (agentId === 'codex') return m.agent_openai_oauth();
 	return agentLabelFor(agentId, fallback);
 }
-
-export function nativeProviderLabelFor(agentId: string, fallback?: string): string {
-	if (agentId === 'claude') return m.provider_anthropic();
-	if (agentId === 'codex') return m.provider_openai();
-	return agentLabelFor(agentId, fallback);
-}

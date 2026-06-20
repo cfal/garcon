@@ -200,8 +200,8 @@ describe('NewChatForm', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Claude · Anthropic · Opus' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Codex · OpenAI · GPT-5.4' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Claude · Claude OAuth · Opus' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Codex · OpenAI OAuth · GPT-5.4' })).toBeTruthy();
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 	});
 

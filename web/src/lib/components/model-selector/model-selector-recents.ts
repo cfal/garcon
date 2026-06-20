@@ -1,9 +1,8 @@
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
-import { nativeProviderLabelFor } from '$lib/i18n/agent-labels';
 import type { RecentAgentSetting } from '$shared/settings';
-import { modelDisplayLabel } from './model-selector-options';
-import type { ModelSelectorRecentOption, ModelSourceOption } from './model-selector-types';
+import { buildModelSources, modelDisplayLabel, modelSourceKeyFor } from './model-selector-options';
+import type { ModelSelectorRecentOption } from './model-selector-types';
 
 export const MODEL_SELECTOR_RECENTS_LIMIT = 20;
 
@@ -42,24 +41,13 @@ export function buildModelSelectorRecents(
 		);
 		if (!selectedModel) continue;
 
-		const source = selectedModel.endpointId
-			? modelCatalog.findEndpoint(selectedModel.endpointId)
-			: null;
+		const sourceKey = modelSourceKeyFor(agentId, selectedModel);
+		const sourceOption =
+			buildModelSources(modelCatalog, agentId).find((source) => source.key === sourceKey) ?? null;
+		if (!sourceOption) continue;
+
 		const agentLabel = modelCatalog.getAgentLabel(agentId);
-		const sourceLabel = source
-			? source.apiProvider.label
-			: nativeProviderLabelFor(agentId, agentLabel);
-		const sourceOption: ModelSourceOption | null = source
-			? {
-					key: `endpoint:${source.endpoint.id}`,
-					label: sourceLabel,
-					description: '',
-					apiProviderId: source.apiProvider.id,
-					endpointId: source.endpoint.id,
-					protocol: source.endpoint.protocol,
-					models: [],
-				}
-			: null;
+		const sourceLabel = sourceOption.label;
 		const modelLabel = modelDisplayLabel(selectedModel, modelValue, sourceOption);
 
 		rows.push({
