@@ -17,6 +17,7 @@
 		includeDuplicateModel?: boolean;
 		includeEndpointModel?: boolean;
 		recents?: ModelSelectorRecentOption[];
+		preferRecentsOnOpen?: boolean;
 	}
 
 	let {
@@ -27,6 +28,7 @@
 		includeDuplicateModel = true,
 		includeEndpointModel = false,
 		recents = [],
+		preferRecentsOnOpen = false,
 	}: Props = $props();
 
 	let claudeModels = $derived.by<ModelOption[]>(() => {
@@ -133,4 +135,4 @@
 	} as unknown as ModelCatalogStore);
 </script>
 
-<ModelSelectorPopover {value} {mode} {onChange} {recents} />
+<ModelSelectorPopover {value} {mode} {onChange} {recents} {preferRecentsOnOpen} />

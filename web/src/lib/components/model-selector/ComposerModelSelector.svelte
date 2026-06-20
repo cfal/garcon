@@ -12,6 +12,7 @@
 		mode: ModelSelectorMode;
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
 		recents?: ModelSelectorRecentOption[];
+		preferRecentsOnOpen?: boolean;
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
@@ -22,6 +23,7 @@
 		mode,
 		onChange,
 		recents = [],
+		preferRecentsOnOpen = false,
 		disabled = false,
 		align = 'end',
 		side = 'bottom',
@@ -33,6 +35,7 @@
 	mode={{ ...mode, surface: 'composer' }}
 	{onChange}
 	{recents}
+	{preferRecentsOnOpen}
 	{disabled}
 	{align}
 	{side}

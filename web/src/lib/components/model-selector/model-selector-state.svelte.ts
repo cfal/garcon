@@ -27,6 +27,7 @@ interface ModelSelectorStateOptions {
 	get value(): ModelSelectorValue;
 	get mode(): ModelSelectorMode;
 	get recents(): ModelSelectorRecentOption[];
+	get preferRecentsOnOpen(): boolean;
 	onChange: (next: ModelSelectorChange) => void | Promise<void>;
 }
 
@@ -101,6 +102,10 @@ export class ModelSelectorState {
 
 	get isRecentsPaneActive(): boolean {
 		return this.contentPane === 'recents';
+	}
+
+	get shouldStartFromRecentsOnOpen(): boolean {
+		return this.#options.preferRecentsOnOpen && this.recentOptions.length > 1;
 	}
 
 	get agentId(): SessionAgentId {
@@ -292,7 +297,7 @@ export class ModelSelectorState {
 		if (this.open) return;
 		this.open = true;
 		this.query = '';
-		this.contentPane = 'browse';
+		this.contentPane = this.shouldStartFromRecentsOnOpen ? 'recents' : 'browse';
 		this.#startDraftFromValue();
 		this.resetActiveModelIndex();
 	}

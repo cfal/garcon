@@ -234,6 +234,7 @@
 	const recentSelectorOptions = $derived.by(() =>
 		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
 	);
+	const preferRecentsOnOpen = $derived(recentSelectorOptions.length > 1);
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
@@ -491,6 +492,7 @@
 							mode={modelSelectorMode}
 							onChange={handleModelSelectorChange}
 							recents={recentSelectorOptions}
+							{preferRecentsOnOpen}
 							align="end"
 							side="bottom"
 						/>

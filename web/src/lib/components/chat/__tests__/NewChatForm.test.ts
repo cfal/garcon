@@ -169,4 +169,54 @@ describe('NewChatForm', () => {
 		});
 		await waitForDialogTeardown();
 	});
+
+	it('opens the model selector at recents when multiple recent targets exist', async () => {
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'claude',
+						model: 'opus',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		render(NewChatFormTestHost);
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+
+		expect(await screen.findByText('Recent models')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Claude · Anthropic · Opus' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Codex · OpenAI · GPT-5.4' })).toBeTruthy();
+		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
+	});
+
+	it('opens the model selector at the selected model when only one recent target exists', async () => {
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
+
+		render(NewChatFormTestHost);
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+
+		const listbox = await screen.findByRole('listbox', { name: 'Model' });
+		expect(listbox).toBeTruthy();
+		expect(screen.queryByText('Recent models')).toBeNull();
+	});
 });

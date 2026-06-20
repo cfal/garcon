@@ -76,8 +76,9 @@
 	});
 
 	function firstPane(): CompactPane {
-		if (selector.recentOptions.length > 0 && showAgent) return 'menu';
+		if (selector.shouldStartFromRecentsOnOpen) return 'recent';
 		if (selector.currentModelValue) return 'model';
+		if (selector.recentOptions.length > 0 && showAgent) return 'menu';
 		if (showAgent) return 'agent';
 		if (shouldShowSourcePaneFor(selector.agentId)) return 'source';
 		return 'model';

@@ -107,7 +107,7 @@ describe('model selector recents', () => {
 		});
 	});
 
-	it('omits stale recents and caps the list at ten rows', () => {
+	it('omits stale recents and caps the list at twenty rows', () => {
 		const recents: RecentAgentSetting[] = [
 			{
 				agentId: 'removed-agent' as any,
@@ -123,18 +123,21 @@ describe('model selector recents', () => {
 				modelEndpointId: null,
 				modelProtocol: null,
 			},
-			...Array.from({ length: 12 }, (): RecentAgentSetting => ({
-				agentId: 'codex',
-				model: 'gpt-5',
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-			})),
+			...Array.from(
+				{ length: 22 },
+				(): RecentAgentSetting => ({
+					agentId: 'codex',
+					model: 'gpt-5',
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+				}),
+			),
 		];
 
 		const rows = buildModelSelectorRecents(makeCatalog(), recents);
 
-		expect(rows).toHaveLength(10);
+		expect(rows).toHaveLength(20);
 		expect(rows.every((row) => row.displayLabel === 'Codex · OpenAI · gpt-5')).toBe(true);
 	});
 });

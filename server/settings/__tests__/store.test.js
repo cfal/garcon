@@ -918,7 +918,7 @@ describe('settings store', () => {
     });
 
     it('moves duplicate recent targets to the front and caps the list', async () => {
-      for (let index = 0; index < 11; index += 1) {
+      for (let index = 0; index < 21; index += 1) {
         await store.recordChatStartup({
           agentId: 'codex',
           projectPath: `/workspace/project-${index}`,
@@ -933,7 +933,7 @@ describe('settings store', () => {
       });
 
       const recents = store.getRecentAgentSettings();
-      expect(recents).toHaveLength(10);
+      expect(recents).toHaveLength(20);
       expect(recents[0].model).toBe('gpt-5.5');
       expect(recents.filter((entry) => entry.model === 'gpt-5.5')).toHaveLength(1);
       expect(store.getRecentProjectPaths()).toHaveLength(10);

@@ -5,6 +5,8 @@ import type { RecentAgentSetting } from '$shared/settings';
 import { modelDisplayLabel } from './model-selector-options';
 import type { ModelSelectorRecentOption, ModelSourceOption } from './model-selector-types';
 
+export const MODEL_SELECTOR_RECENTS_LIMIT = 20;
+
 function recentAgentSettingKey(entry: RecentAgentSetting): string {
 	return [
 		entry.agentId,
@@ -40,7 +42,9 @@ export function buildModelSelectorRecents(
 		);
 		if (!selectedModel) continue;
 
-		const source = selectedModel.endpointId ? modelCatalog.findEndpoint(selectedModel.endpointId) : null;
+		const source = selectedModel.endpointId
+			? modelCatalog.findEndpoint(selectedModel.endpointId)
+			: null;
 		const agentLabel = modelCatalog.getAgentLabel(agentId);
 		const sourceLabel = source
 			? source.apiProvider.label
@@ -72,7 +76,7 @@ export function buildModelSelectorRecents(
 			displayLabel: [agentLabel, sourceLabel, modelLabel].filter(Boolean).join(' · '),
 		});
 
-		if (rows.length >= 10) break;
+		if (rows.length >= MODEL_SELECTOR_RECENTS_LIMIT) break;
 	}
 
 	return rows;

@@ -16,7 +16,7 @@ import type {
   RecentAgentSetting,
 } from './types.js';
 
-export const RECENT_AGENT_SETTINGS_LIMIT = 10;
+export const RECENT_AGENT_SETTINGS_LIMIT = 20;
 export const RECENT_PROJECT_PATHS_LIMIT = 10;
 const EXECUTION_DEFAULT_KEYS = [
   'permissionMode',
