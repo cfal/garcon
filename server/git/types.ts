@@ -6,6 +6,11 @@ export interface GitCommandResult {
   stderr: string;
 }
 
+export interface GitCommandOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
 export interface GitCommandTrace {
   args: string[];
   durationMs: number;
@@ -13,18 +18,37 @@ export interface GitCommandTrace {
   stderrBytes: number;
   failed?: boolean;
   exitCode?: number;
+  timedOut?: boolean;
+  aborted?: boolean;
 }
 
 export interface GitProcessError extends Error {
   code?: number;
   stdout?: string;
   stderr?: string;
+  timedOut?: boolean;
+  aborted?: boolean;
 }
 
 export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
 export type GitReviewMode = 'working' | 'staged';
 export type GitStageMode = 'stage' | 'unstage';
 export type RevertStrategy = 'revert' | 'reset-soft';
+export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
+export type GitDiffLimitReason =
+  | 'patch-too-large'
+  | 'too-many-rows'
+  | 'line-too-long'
+  | 'binary'
+  | 'unsupported-file-kind';
+
+export const GIT_DIFF_LIMITS = Object.freeze({
+  maxBatchFiles: 64,
+  maxContextLines: 50,
+  maxPatchBytes: 1_000_000,
+  maxRenderedRows: 20_000,
+  maxLineBytes: 20_000,
+});
 
 export interface DiffStats {
   additions: number;
@@ -45,6 +69,7 @@ export interface ChangeFacet {
   changeKind: GitChangeKind;
   stats: DiffStats;
   originalPath?: string;
+  category?: GitFileReviewCategory;
 }
 
 export interface ChangeEntry extends PorcelainStatusEntry {
@@ -58,6 +83,7 @@ export interface CompatibleTreeFields {
   changeKind?: GitChangeKind;
   additions: number;
   deletions: number;
+  category?: GitFileReviewCategory;
 }
 
 export interface TreeNode extends Partial<CompatibleTreeFields> {
@@ -69,31 +95,10 @@ export interface TreeNode extends Partial<CompatibleTreeFields> {
   stagedFacet?: ChangeFacet;
   unstagedFacet?: ChangeFacet;
   children?: TreeMap | TreeNode[];
+  category?: GitFileReviewCategory;
 }
 
 export type TreeMap = Map<string, TreeNode>;
-
-export interface DiffOp {
-  type: 'delete' | 'insert' | 'equal';
-  before: [number, number];
-  after: [number, number];
-}
-
-export interface DiffHunkMetadata {
-  id: string;
-  header: string;
-  oldStart: number;
-  oldLines: number;
-  newStart: number;
-  newLines: number;
-  lineStartIndex: number;
-  lineEndIndex: number;
-}
-
-export interface ParsedUnifiedPatch {
-  diffOps: DiffOp[];
-  hunks: DiffHunkMetadata[];
-}
 
 export interface PatchHunk {
   rawHeader: string;
@@ -118,11 +123,6 @@ export interface HunkLineCounts {
 export interface HunkHeaderResult {
   header: string;
   nextOffset: number;
-}
-
-export interface ReviewTruncation {
-  truncated: boolean;
-  truncatedReason?: string;
 }
 
 export interface CommitMessageOptions {
@@ -157,6 +157,7 @@ export interface CreateGitServiceOptions {
 export interface ProjectOptions {
   projectPath: string;
   trace?: GitCommandTrace[];
+  signal?: AbortSignal;
 }
 
 export type GitTreeStatsState = 'pending' | 'loaded';
@@ -214,12 +215,53 @@ export interface PushOptions extends ProjectOptions {
 export interface FileReviewOptions extends FileOptions {
   mode?: GitReviewMode;
   context?: number;
+  signal?: AbortSignal;
 }
 
 export interface BatchFileReviewOptions extends ProjectOptions {
   files: string[];
   mode?: GitReviewMode;
   context?: number;
+  signal?: AbortSignal;
+}
+
+export type GitRenderedDiffRowKind = 'hunk' | 'context' | 'add' | 'del';
+
+export interface GitRenderedDiffRow {
+  key: string;
+  kind: GitRenderedDiffRowKind;
+  hunkIndex: number;
+  hunkId: string;
+  beforeLine: number | null;
+  afterLine: number | null;
+  text: string;
+  diffLineIndex: number;
+}
+
+export interface GitRenderedHunk {
+  id: string;
+  header: string;
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  rowStartIndex: number;
+  rowEndIndex: number;
+}
+
+export interface GitFileReviewData {
+  path: string;
+  mode: GitReviewMode;
+  indexStatus?: string;
+  workTreeStatus?: string;
+  isBinary: boolean;
+  truncated: boolean;
+  truncatedReason?: string;
+  limitReason?: GitDiffLimitReason;
+  category?: GitFileReviewCategory;
+  rows: GitRenderedDiffRow[];
+  hunks: GitRenderedHunk[];
+  error?: string;
 }
 
 export interface StageSelectionOptions extends FileOptions {
@@ -261,8 +303,98 @@ export interface TargetCandidate {
 }
 
 export interface BatchReviewResult {
-  files: Record<string, unknown>;
+  files: Record<string, GitFileReviewData>;
   errors: Record<string, string>;
+}
+
+export type GitConflictStatus = 'UU' | 'AA' | 'DD' | 'AU' | 'UA' | 'DU' | 'UD';
+
+export interface GitConflictFile {
+  path: string;
+  status: GitConflictStatus;
+  baseAvailable: boolean;
+  oursAvailable: boolean;
+  theirsAvailable: boolean;
+}
+
+export interface GitConflictDetails {
+  path: string;
+  base: string | null;
+  ours: string | null;
+  theirs: string | null;
+  working: string;
+}
+
+export interface GitStashEntry {
+  index: number;
+  ref: string;
+  hash: string;
+  message: string;
+  date: string;
+}
+
+export interface GitFileHistoryEntry {
+  hash: string;
+  author: string;
+  email: string;
+  date: string;
+  subject: string;
+}
+
+export interface GitBlameLine {
+  line: number;
+  originalLine: number;
+  finalLine: number;
+  commit: string;
+  author: string;
+  authorMail: string;
+  authorTime: string;
+  summary: string;
+  content: string;
+}
+
+export interface GitGraphCommit {
+  graph: string;
+  hash: string;
+  parents: string[];
+  decorations: string[];
+  author: string;
+  date: string;
+  subject: string;
+}
+
+export interface GitCompareFile {
+  path: string;
+  status: string;
+  originalPath?: string;
+  additions: number;
+  deletions: number;
+}
+
+export interface ConflictDetailsOptions extends FileOptions {}
+export interface ConflictAcceptOptions extends FileOptions {
+  side: 'ours' | 'theirs';
+}
+export interface StashCreateOptions extends ProjectOptions {
+  message?: string;
+  includeUntracked?: boolean;
+}
+export interface StashRefOptions extends ProjectOptions {
+  stashRef: string;
+}
+export interface FileHistoryOptions extends FileOptions {
+  limit?: number;
+}
+export interface BlameOptions extends FileOptions {
+  ref?: string;
+  limit?: number;
+}
+export interface GraphOptions extends ProjectOptions {
+  limit?: number;
+}
+export interface CompareOptions extends ProjectOptions {
+  base: string;
+  head: string;
 }
 
 export interface CommitSummary {
@@ -322,12 +454,25 @@ export interface GitService {
   push(options: PushOptions): Promise<unknown>;
   discard(options: FileOptions): Promise<unknown>;
   deleteUntracked(options: FileOptions): Promise<unknown>;
-  getFileReviewData(options: FileReviewOptions): Promise<unknown>;
-  getFileReviewDataBatch(options: BatchFileReviewOptions): Promise<unknown>;
+  getFileReviewData(options: FileReviewOptions): Promise<GitFileReviewData>;
+  getFileReviewDataBatch(options: BatchFileReviewOptions): Promise<BatchReviewResult>;
   getChangesTree(options: ChangesTreeOptions): Promise<unknown>;
   getChangesStats(options: ChangesStatsOptions): Promise<unknown>;
   stageSelection(options: StageSelectionOptions): Promise<unknown>;
   stageHunk(options: StageHunkOptions): Promise<unknown>;
+  getConflicts(options: ProjectOptions): Promise<{ conflicts: GitConflictFile[] }>;
+  getConflictDetails(options: ConflictDetailsOptions): Promise<GitConflictDetails>;
+  acceptConflictSide(options: ConflictAcceptOptions): Promise<unknown>;
+  markConflictResolved(options: FileOptions): Promise<unknown>;
+  getStashes(options: ProjectOptions): Promise<{ stashes: GitStashEntry[] }>;
+  createStash(options: StashCreateOptions): Promise<unknown>;
+  applyStash(options: StashRefOptions): Promise<unknown>;
+  popStash(options: StashRefOptions): Promise<unknown>;
+  dropStash(options: StashRefOptions): Promise<unknown>;
+  getFileHistory(options: FileHistoryOptions): Promise<{ commits: GitFileHistoryEntry[] }>;
+  getBlame(options: BlameOptions): Promise<{ lines: GitBlameLine[]; truncated: boolean }>;
+  getGraph(options: GraphOptions): Promise<{ commits: GitGraphCommit[] }>;
+  getCompare(options: CompareOptions): Promise<{ files: GitCompareFile[] }>;
   getRepoInfo(options: ProjectOptions): Promise<RepoInfo>;
   getWorktrees(options: ProjectOptions): Promise<{ worktrees: WorktreeInfo[] }>;
   getTargetCandidates(options: ProjectOptions): Promise<{ targets: TargetCandidate[] }>;

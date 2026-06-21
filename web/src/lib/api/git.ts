@@ -3,12 +3,19 @@
 
 import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
-import { apiGet, apiPost } from './client.js';
+import { apiGet, apiPost, type ApiFetchOptions } from './client.js';
 
-// Workbench V2 types
+// Workbench contract types
 
 export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
 export type GitStatusCode = ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!';
+export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
+export type GitDiffLimitReason =
+	| 'patch-too-large'
+	| 'too-many-rows'
+	| 'line-too-long'
+	| 'binary'
+	| 'unsupported-file-kind';
 
 export interface GitChangeStats {
 	additions: number;
@@ -22,6 +29,7 @@ export interface GitFileChangeFacet {
 	changeKind: GitChangeKind;
 	stats: GitChangeStats;
 	originalPath?: string;
+	category?: GitFileReviewCategory;
 }
 
 export interface GitTreeNode {
@@ -38,6 +46,7 @@ export interface GitTreeNode {
 	children?: GitTreeNode[];
 	additions?: number;
 	deletions?: number;
+	category?: GitFileReviewCategory;
 }
 
 export interface GitChangesTreeResult {
@@ -51,39 +60,45 @@ export interface GitChangesStatsResult {
 	staged: Record<string, GitChangeStats>;
 }
 
-export interface GitDiffRange {
-	type: 'equal' | 'insert' | 'delete' | 'replace' | 'skip';
-	before: [number, number];
-	after: [number, number];
-	header?: string;
+export type GitDiffTab = 'unstaged' | 'staged';
+export type GitFileReviewMode = 'working' | 'staged';
+
+export type GitRenderedDiffRowKind = 'hunk' | 'context' | 'add' | 'del';
+
+export interface GitRenderedDiffRow {
+	key: string;
+	kind: GitRenderedDiffRowKind;
+	hunkIndex: number;
+	hunkId: string;
+	beforeLine: number | null;
+	afterLine: number | null;
+	text: string;
+	diffLineIndex: number;
 }
 
-export interface GitHunk {
+export interface GitRenderedHunk {
 	id: string;
 	header: string;
 	oldStart: number;
 	oldLines: number;
 	newStart: number;
 	newLines: number;
-	lineStartIndex: number;
-	lineEndIndex: number;
+	rowStartIndex: number;
+	rowEndIndex: number;
 }
-
-export type GitDiffTab = 'unstaged' | 'staged';
-export type GitFileReviewMode = 'working' | 'staged';
 
 export interface GitFileReviewData {
 	path: string;
-	mode?: GitFileReviewMode;
+	mode: GitFileReviewMode;
 	indexStatus?: GitStatusCode;
 	workTreeStatus?: GitStatusCode;
 	isBinary: boolean;
 	truncated: boolean;
 	truncatedReason?: string;
-	contentBefore: string | null;
-	contentAfter: string | null;
-	diffOps: GitDiffRange[];
-	hunks: GitHunk[];
+	limitReason?: GitDiffLimitReason;
+	category?: GitFileReviewCategory;
+	rows: GitRenderedDiffRow[];
+	hunks: GitRenderedHunk[];
 	error?: string;
 }
 
@@ -155,6 +170,70 @@ export interface ConfirmAction {
 	type: 'discard' | 'delete' | 'commit' | 'pull' | 'push';
 	file?: string;
 	message?: string;
+}
+
+export type GitConflictStatus = 'UU' | 'AA' | 'DD' | 'AU' | 'UA' | 'DU' | 'UD';
+
+export interface GitConflictFile {
+	path: string;
+	status: GitConflictStatus;
+	baseAvailable: boolean;
+	oursAvailable: boolean;
+	theirsAvailable: boolean;
+}
+
+export interface GitConflictDetails {
+	path: string;
+	base: string | null;
+	ours: string | null;
+	theirs: string | null;
+	working: string;
+}
+
+export interface GitStashEntry {
+	index: number;
+	ref: string;
+	hash: string;
+	message: string;
+	date: string;
+}
+
+export interface GitFileHistoryEntry {
+	hash: string;
+	author: string;
+	email: string;
+	date: string;
+	subject: string;
+}
+
+export interface GitBlameLine {
+	line: number;
+	originalLine: number;
+	finalLine: number;
+	commit: string;
+	author: string;
+	authorMail: string;
+	authorTime: string;
+	summary: string;
+	content: string;
+}
+
+export interface GitGraphCommit {
+	graph: string;
+	hash: string;
+	parents: string[];
+	decorations: string[];
+	author: string;
+	date: string;
+	subject: string;
+}
+
+export interface GitCompareFile {
+	path: string;
+	status: string;
+	originalPath?: string;
+	additions: number;
+	deletions: number;
 }
 
 interface SuccessResponse {
@@ -306,17 +385,19 @@ export async function gitDeleteUntracked(project: string, file: string): Promise
 	return apiPost<SuccessResponse>('/api/v1/git/delete-untracked', { project, file });
 }
 
-// Workbench V2 API
+// Workbench API
 
 export async function getGitFileReviewData(
 	project: string,
 	file: string,
 	tab: GitDiffTab,
 	context = 5,
+	options?: ApiFetchOptions,
 ): Promise<GitFileReviewData> {
 	const mode = tab === 'staged' ? 'staged' : 'working';
 	return apiGet<GitFileReviewData>(
 		`/api/v1/git/file-review-data?${projectParam(project)}&file=${encodeURIComponent(file)}&mode=${mode}&context=${context}`,
+		options,
 	);
 }
 
@@ -325,25 +406,128 @@ export async function getGitFileReviewDataBatch(
 	files: string[],
 	tab: GitDiffTab,
 	context = 5,
+	options?: ApiFetchOptions,
 ): Promise<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }> {
 	const mode = tab === 'staged' ? 'staged' : 'working';
 	return apiPost<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }>(
 		'/api/v1/git/file-review-data/batch',
 		{ project, files, mode, context },
+		options,
 	);
 }
 
 export async function getGitChangesTree(
 	project: string,
 	includeStats = false,
+	options?: ApiFetchOptions,
 ): Promise<GitChangesTreeResult> {
 	return apiGet<GitChangesTreeResult>(
 		`/api/v1/git/changes-tree?${projectParam(project)}&includeStats=${includeStats}`,
+		options,
 	);
 }
 
-export async function getGitChangesStats(project: string): Promise<GitChangesStatsResult> {
-	return apiGet<GitChangesStatsResult>(`/api/v1/git/changes-stats?${projectParam(project)}`);
+export async function getGitChangesStats(
+	project: string,
+	options?: ApiFetchOptions,
+): Promise<GitChangesStatsResult> {
+	return apiGet<GitChangesStatsResult>(
+		`/api/v1/git/changes-stats?${projectParam(project)}`,
+		options,
+	);
+}
+
+export async function getGitConflicts(project: string): Promise<{ conflicts: GitConflictFile[] }> {
+	return apiGet<{ conflicts: GitConflictFile[] }>(`/api/v1/git/conflicts?${projectParam(project)}`);
+}
+
+export async function getGitConflictDetails(
+	project: string,
+	file: string,
+): Promise<GitConflictDetails> {
+	return apiGet<GitConflictDetails>(
+		`/api/v1/git/conflict-details?${projectParam(project)}&file=${encodeURIComponent(file)}`,
+	);
+}
+
+export async function gitAcceptConflictSide(
+	project: string,
+	file: string,
+	side: 'ours' | 'theirs',
+): Promise<SuccessResponse> {
+	return apiPost<SuccessResponse>('/api/v1/git/conflict/accept', { project, file, side });
+}
+
+export async function gitMarkConflictResolved(
+	project: string,
+	file: string,
+): Promise<SuccessResponse> {
+	return apiPost<SuccessResponse>('/api/v1/git/conflict/resolve', { project, file });
+}
+
+export async function getGitStashes(project: string): Promise<{ stashes: GitStashEntry[] }> {
+	return apiGet<{ stashes: GitStashEntry[] }>(`/api/v1/git/stashes?${projectParam(project)}`);
+}
+
+export async function gitCreateStash(
+	project: string,
+	message = '',
+	includeUntracked = false,
+): Promise<SuccessResponse> {
+	return apiPost<SuccessResponse>('/api/v1/git/stash/create', {
+		project,
+		message,
+		includeUntracked,
+	});
+}
+
+export async function gitApplyStash(project: string, stashRef: string): Promise<SuccessResponse> {
+	return apiPost<SuccessResponse>('/api/v1/git/stash/apply', { project, stashRef });
+}
+
+export async function gitPopStash(project: string, stashRef: string): Promise<SuccessResponse> {
+	return apiPost<SuccessResponse>('/api/v1/git/stash/pop', { project, stashRef });
+}
+
+export async function gitDropStash(project: string, stashRef: string): Promise<SuccessResponse> {
+	return apiPost<SuccessResponse>('/api/v1/git/stash/drop', { project, stashRef });
+}
+
+export async function getGitFileHistory(
+	project: string,
+	file: string,
+	limit = 50,
+): Promise<{ commits: GitFileHistoryEntry[] }> {
+	return apiGet<{ commits: GitFileHistoryEntry[] }>(
+		`/api/v1/git/file-history?${projectParam(project)}&file=${encodeURIComponent(file)}&limit=${limit}`,
+	);
+}
+
+export async function getGitBlame(
+	project: string,
+	file: string,
+	ref = 'HEAD',
+	limit = 2000,
+): Promise<{ lines: GitBlameLine[]; truncated: boolean }> {
+	return apiGet<{ lines: GitBlameLine[]; truncated: boolean }>(
+		`/api/v1/git/blame?${projectParam(project)}&file=${encodeURIComponent(file)}&ref=${encodeURIComponent(ref)}&limit=${limit}`,
+	);
+}
+
+export async function getGitGraph(project: string, limit = 200): Promise<{ commits: GitGraphCommit[] }> {
+	return apiGet<{ commits: GitGraphCommit[] }>(
+		`/api/v1/git/graph?${projectParam(project)}&limit=${limit}`,
+	);
+}
+
+export async function getGitCompare(
+	project: string,
+	base: string,
+	head: string,
+): Promise<{ files: GitCompareFile[] }> {
+	return apiGet<{ files: GitCompareFile[] }>(
+		`/api/v1/git/compare?${projectParam(project)}&base=${encodeURIComponent(base)}&head=${encodeURIComponent(head)}`,
+	);
 }
 
 export async function getGitTargetCandidates(

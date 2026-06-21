@@ -114,77 +114,36 @@ interface BuildSplitRowViewsOptions {
 export function buildUnifiedDiffRows(reviewData: GitFileReviewData | null): RenderedDiffRow[] {
 	if (!reviewData || reviewData.isBinary || reviewData.truncated) return [];
 
-	const result: RenderedDiffRow[] = [];
-	const beforeLines = reviewData.contentBefore?.split('\n') ?? [];
-	const afterLines = reviewData.contentAfter?.split('\n') ?? [];
-	let diffLineIndex = 0;
-
-	for (let hunkIndex = 0; hunkIndex < reviewData.hunks.length; hunkIndex++) {
-		const hunk = reviewData.hunks[hunkIndex];
-		result.push({
-			key: `hunk:${hunkIndex}:${hunk.id}`,
-			kind: 'hunk-header',
-			beforeLine: null,
-			afterLine: null,
-			beforeText: hunk.header,
-			afterText: '',
-			hunkId: hunk.id,
-			hunkIndex,
-			diffLineIndex: -1,
-		});
-
-		for (
-			let opIndex = hunk.lineStartIndex;
-			opIndex <= hunk.lineEndIndex && opIndex < reviewData.diffOps.length;
-			opIndex++
-		) {
-			const op = reviewData.diffOps[opIndex];
-
-			if (op.type === 'equal') {
-				const beforeLine = op.before[0];
-				const afterLine = op.after[0];
-				result.push({
-					key: `line:${diffLineIndex}:context:${beforeLine}:${afterLine}`,
-					kind: 'context',
-					beforeLine,
-					afterLine,
-					beforeText: beforeLines[beforeLine - 1] ?? '',
-					afterText: afterLines[afterLine - 1] ?? '',
-					hunkId: hunk.id,
-					hunkIndex,
-					diffLineIndex: diffLineIndex++,
-				});
-			} else if (op.type === 'delete') {
-				const beforeLine = op.before[0];
-				result.push({
-					key: `line:${diffLineIndex}:del:${beforeLine}`,
-					kind: 'del',
-					beforeLine,
-					afterLine: null,
-					beforeText: beforeLines[beforeLine - 1] ?? '',
-					afterText: '',
-					hunkId: hunk.id,
-					hunkIndex,
-					diffLineIndex: diffLineIndex++,
-				});
-			} else if (op.type === 'insert') {
-				const afterLine = op.after[0];
-				result.push({
-					key: `line:${diffLineIndex}:add:${afterLine}`,
-					kind: 'add',
-					beforeLine: null,
-					afterLine,
-					beforeText: '',
-					afterText: afterLines[afterLine - 1] ?? '',
-					hunkId: hunk.id,
-					hunkIndex,
-					diffLineIndex: diffLineIndex++,
-				});
-			}
+	return reviewData.rows.map((row): RenderedDiffRow => {
+		if (row.kind === 'hunk') {
+			return {
+				key: row.key,
+				kind: 'hunk-header',
+				beforeLine: null,
+				afterLine: null,
+				beforeText: row.text,
+				afterText: '',
+				hunkId: row.hunkId,
+				hunkIndex: row.hunkIndex,
+				diffLineIndex: -1,
+			};
 		}
-	}
+		return {
+			key: row.key,
+			kind: row.kind === 'add' ? 'add' : row.kind === 'del' ? 'del' : 'context',
+			beforeLine: row.beforeLine,
+			afterLine: row.afterLine,
+			beforeText: row.kind === 'add' ? '' : row.text,
+			afterText: row.kind === 'del' ? '' : row.text,
+			hunkId: row.hunkId,
+			hunkIndex: row.hunkIndex,
+			diffLineIndex: row.diffLineIndex,
+		};
+	});
+}
 
-	return result;
+export function buildUnifiedDiffRowsFromRendered(reviewData: GitFileReviewData | null): RenderedDiffRow[] {
+	return buildUnifiedDiffRows(reviewData);
 }
 
 export function buildSplitDiffRows(rows: RenderedDiffRow[]): SplitDiffRow[] {

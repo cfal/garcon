@@ -16,6 +16,8 @@ import {
 } from './git/git-line-selection.svelte';
 import { GitReviewDataLoader } from './git/git-review-data-loader.svelte';
 import { GitReviewDrafts, type CommentComposerState } from './git/git-review-drafts.svelte';
+import { GitReviewProgress } from './git/git-review-progress.svelte';
+import { GitPorcelainState } from './git/git-porcelain.svelte';
 import { GitStagingActions } from './git/git-staging-actions.svelte';
 import { GitTreeState } from './git/git-tree-state.svelte';
 import {
@@ -65,6 +67,22 @@ function shouldLogWorkbenchTrace(): boolean {
 	}
 }
 
+function filterTreeForWorkbench(
+	nodes: GitTreeNode[],
+	shouldKeepFile: (node: GitTreeNode) => boolean,
+): GitTreeNode[] {
+	const result: GitTreeNode[] = [];
+	for (const node of nodes) {
+		if (node.kind === 'file') {
+			if (shouldKeepFile(node)) result.push(node);
+			continue;
+		}
+		const children = node.children ? filterTreeForWorkbench(node.children, shouldKeepFile) : [];
+		if (children.length > 0) result.push({ ...node, children });
+	}
+	return result;
+}
+
 function logWorkbenchTrace(trace: WorkbenchLoadTrace): void {
 	if (!shouldLogWorkbenchTrace()) return;
 	console.debug('git workbench load', trace);
@@ -84,10 +102,12 @@ export class GitWorkbenchStore {
 	private readonly treeState: GitTreeState;
 	private readonly reviewLoader: GitReviewDataLoader;
 	private readonly lineSelection: GitLineSelectionState;
+	private readonly reviewProgress: GitReviewProgress;
 	private readonly stagingActions: GitStagingActions;
 	private readonly commitController: GitCommitController;
 	private readonly reviewDrafts: GitReviewDrafts;
 	private readonly worktreeController: GitWorktrees;
+	private readonly porcelainController: GitPorcelainState;
 
 	private diffModeValue = $state<DiffMode>('unified');
 	private contextLinesValue = $state(5);
@@ -118,6 +138,7 @@ export class GitWorkbenchStore {
 			surfaceError: (message) => this.surfaceError(message),
 		});
 		this.lineSelection = new GitLineSelectionState();
+		this.reviewProgress = new GitReviewProgress();
 		this.stagingActions = new GitStagingActions({
 			selectedFile: () => this.selectedFile,
 			activeTab: () => this.activeTab,
@@ -154,6 +175,15 @@ export class GitWorkbenchStore {
 		});
 		this.reviewDrafts = new GitReviewDrafts();
 		this.worktreeController = new GitWorktrees({
+			surfaceError: (message) => this.surfaceError(message),
+		});
+		this.porcelainController = new GitPorcelainState({
+			selectedFile: () => this.selectedFile,
+			refreshAfterMutation: (projectPath) =>
+				this.refreshAfterGitAction(projectPath, {
+					reason: 'git-action',
+					preferSelectedFile: true,
+				}),
 			surfaceError: (message) => this.surfaceError(message),
 		});
 
@@ -453,8 +483,14 @@ export class GitWorkbenchStore {
 		return this.reviewLoader.currentReviewData;
 	}
 
+	get porcelain(): GitPorcelainState {
+		return this.porcelainController;
+	}
+
 	get filteredTree(): GitTreeNode[] {
-		return this.treeState.filteredTree;
+		return filterTreeForWorkbench(this.treeState.filteredTree, (node) =>
+			this.shouldShowFileNode(node),
+		);
 	}
 
 	get commentsByFile(): Record<string, GitReviewCommentDraft[]> {
@@ -465,8 +501,39 @@ export class GitWorkbenchStore {
 		return this.treeState.totalChangedFiles;
 	}
 
+	get visibleChangedFiles(): number {
+		return this.visibleFilePaths.length;
+	}
+
 	get visibleFilePaths(): string[] {
-		return this.treeState.visibleFilePaths(this.activeTab);
+		return this.treeState
+			.visibleFilePaths(this.activeTab)
+			.filter((filePath) => this.shouldShowFilePath(filePath));
+	}
+
+	get reviewableFileCount(): number {
+		return this.treeState
+			.visibleFilePaths(this.activeTab)
+			.filter((filePath) => this.shouldShowFilePath(filePath, { includeViewed: true })).length;
+	}
+
+	get reviewedFileCount(): number {
+		return this.treeState
+			.visibleFilePaths(this.activeTab)
+			.filter((filePath) => this.shouldShowFilePath(filePath, { includeViewed: true }))
+			.filter((filePath) => this.isFileViewed(filePath)).length;
+	}
+
+	get reviewProgressLabel(): string {
+		return `${this.reviewedFileCount} / ${this.reviewableFileCount} viewed`;
+	}
+
+	get hideViewed(): boolean {
+		return this.reviewProgress.hideViewed;
+	}
+
+	get showGenerated(): boolean {
+		return this.reviewProgress.showGenerated;
 	}
 
 	get unstagedFileCount(): number {
@@ -479,6 +546,10 @@ export class GitWorkbenchStore {
 
 	get hasSelection(): boolean {
 		return this.lineSelection.hasSelection;
+	}
+
+	get hasPendingOperation(): boolean {
+		return this.stagingActions.hasPendingOperations;
 	}
 
 	get stagedFiles(): string[] {
@@ -638,6 +709,95 @@ export class GitWorkbenchStore {
 		this.loadSelectedFileIfNeeded();
 	}
 
+	setHideViewed(value: boolean): void {
+		this.reviewProgress.hideViewed = value;
+		this.ensureSelectedFileIsVisible();
+		this.loadSelectedFileIfNeeded();
+	}
+
+	setShowGenerated(value: boolean): void {
+		this.reviewProgress.showGenerated = value;
+		this.ensureSelectedFileIsVisible();
+		this.loadSelectedFileIfNeeded();
+	}
+
+	isFileViewed(filePath: string): boolean {
+		const node = this.findTreeNode(filePath);
+		return this.reviewProgress.isViewed(
+			filePath,
+			this.activeTab,
+			this.reviewProgress.signatureForNode(filePath, this.activeTab, node),
+		);
+	}
+
+	setFileViewed(filePath: string, viewed: boolean): void {
+		const node = this.findTreeNode(filePath);
+		this.reviewProgress.setViewed(
+			filePath,
+			this.activeTab,
+			this.reviewProgress.signatureForNode(filePath, this.activeTab, node),
+			viewed,
+		);
+	}
+
+	toggleFileViewed(filePath: string): boolean {
+		const node = this.findTreeNode(filePath);
+		const viewed = this.reviewProgress.toggleViewed(
+			filePath,
+			this.activeTab,
+			this.reviewProgress.signatureForNode(filePath, this.activeTab, node),
+		);
+		this.ensureSelectedFileIsVisible();
+		this.loadSelectedFileIfNeeded();
+		return viewed;
+	}
+
+	nextVisibleFile(): string | null {
+		const paths = this.visibleFilePaths;
+		if (paths.length === 0) return null;
+		const currentIndex = this.selectedFile ? paths.indexOf(this.selectedFile) : -1;
+		return paths[Math.min(paths.length - 1, currentIndex + 1)] ?? null;
+	}
+
+	previousVisibleFile(): string | null {
+		const paths = this.visibleFilePaths;
+		if (paths.length === 0) return null;
+		const currentIndex = this.selectedFile ? paths.indexOf(this.selectedFile) : 0;
+		return paths[Math.max(0, currentIndex - 1)] ?? null;
+	}
+
+	async selectNextFile(projectPath: string): Promise<boolean> {
+		const next = this.nextVisibleFile();
+		if (!next || next === this.selectedFile) return false;
+		await this.selectFile(projectPath, next);
+		return true;
+	}
+
+	async selectPreviousFile(projectPath: string): Promise<boolean> {
+		const previous = this.previousVisibleFile();
+		if (!previous || previous === this.selectedFile) return false;
+		await this.selectFile(projectPath, previous);
+		return true;
+	}
+
+	async markSelectedViewedAndAdvance(projectPath: string): Promise<boolean> {
+		const filePath = this.selectedFile;
+		if (!filePath) return false;
+		const pathsBefore = this.visibleFilePaths;
+		const currentIndex = Math.max(0, pathsBefore.indexOf(filePath));
+		this.setFileViewed(filePath, true);
+		const pathsAfter = this.visibleFilePaths;
+		const next = pathsBefore[currentIndex + 1] && pathsAfter.includes(pathsBefore[currentIndex + 1])
+			? pathsBefore[currentIndex + 1]
+			: pathsAfter[Math.min(currentIndex, pathsAfter.length - 1)] ?? null;
+		if (!next) {
+			this.selectedFile = null;
+			return true;
+		}
+		await this.selectFile(projectPath, next);
+		return true;
+	}
+
 	setReviewScope(scope: DiffReviewScope): void {
 		if (scope === this.reviewScope) return;
 		this.reviewScope = scope;
@@ -724,6 +884,22 @@ export class GitWorkbenchStore {
 
 	async unstageDirectory(projectPath: string, dirPath: string): Promise<boolean> {
 		return this.stagingActions.unstageDirectory(projectPath, dirPath);
+	}
+
+	isStageFilePending(filePath: string): boolean {
+		return this.stagingActions.isFilePending(filePath, 'stage');
+	}
+
+	isUnstageFilePending(filePath: string): boolean {
+		return this.stagingActions.isFilePending(filePath, 'unstage');
+	}
+
+	isStageDirectoryPending(dirPath: string): boolean {
+		return this.stagingActions.isDirectoryPending(dirPath, 'stage');
+	}
+
+	isUnstageDirectoryPending(dirPath: string): boolean {
+		return this.stagingActions.isDirectoryPending(dirPath, 'unstage');
 	}
 
 	requestDiscard(filePath: string): void {
@@ -848,6 +1024,7 @@ export class GitWorkbenchStore {
 		const paths = new Set(this.treeState.filePaths);
 		this.reviewLoader.pruneToFilePaths(paths);
 		this.lineSelection.pruneToFilePaths(paths);
+		this.reviewProgress.pruneToPaths(paths);
 
 		if (
 			effective.preserveSelection &&
@@ -951,6 +1128,33 @@ export class GitWorkbenchStore {
 		this.selectedFile = this.visibleFilePaths[0] ?? null;
 	}
 
+	private ensureSelectedFileIsVisible(): void {
+		if (this.selectedFile && this.visibleFilePaths.includes(this.selectedFile)) return;
+		this.selectedFile = this.visibleFilePaths[0] ?? null;
+	}
+
+	private shouldShowFilePath(
+		filePath: string,
+		options: { includeViewed?: boolean } = {},
+	): boolean {
+		const node = this.findTreeNode(filePath);
+		if (!node) return false;
+		if (!this.shouldShowFileCategory(node)) return false;
+		if (!options.includeViewed && this.hideViewed && this.isFileViewed(filePath)) return false;
+		return true;
+	}
+
+	private shouldShowFileNode(node: GitTreeNode): boolean {
+		if (!this.shouldShowFileCategory(node)) return false;
+		if (this.hideViewed && this.isFileViewed(node.path)) return false;
+		return true;
+	}
+
+	private shouldShowFileCategory(node: GitTreeNode): boolean {
+		if (this.showGenerated) return true;
+		return node.category !== 'generated' && node.category !== 'lockfile';
+	}
+
 	private loadSelectedFileIfNeeded(): void {
 		if (!this.projectPath || !this.selectedFile) return;
 		void this.loadFileReviewData(this.projectPath, this.selectedFile);
@@ -961,9 +1165,11 @@ export class GitWorkbenchStore {
 		this.reviewLoader.reset();
 		this.lineSelection.reset();
 		this.stagingActions.reset();
+		this.reviewProgress.reset();
 		this.reviewDrafts.reset();
 		this.commitController.resetForTargetChange();
 		this.worktreeController.reset();
+		this.porcelainController.reset();
 		this.activeTab = 'unstaged';
 		this.reviewScope = 'selected-file';
 		this.lastError = null;

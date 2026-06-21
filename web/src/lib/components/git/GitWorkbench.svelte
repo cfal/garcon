@@ -1,5 +1,5 @@
 <script lang="ts">
-	// Main workbench shell for Git V2. Provides a two-pane layout on
+	// Main workbench shell for Git. Provides a two-pane layout on
 	// desktop (file tree + diff) and a segmented single-pane on mobile.
 	// Review drafts open in a modal; comments use a popover (desktop)
 	// or modal (mobile). All state lives in GitWorkbenchStore.
@@ -10,9 +10,16 @@
 	import Minus from '@lucide/svelte/icons/minus';
 	import X from '@lucide/svelte/icons/x';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import ChevronUp from '@lucide/svelte/icons/chevron-up';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import Check from '@lucide/svelte/icons/check';
+	import Archive from '@lucide/svelte/icons/archive';
+	import HistoryIcon from '@lucide/svelte/icons/history';
+	import GitGraph from '@lucide/svelte/icons/git-graph';
 	import GitFileTree from './GitFileTree.svelte';
 	import GitAllFilesVirtualList from './GitAllFilesVirtualList.svelte';
 	import GitDiffViewer from './GitDiffViewer.svelte';
+	import GitPorcelainPanel from './GitPorcelainPanel.svelte';
 	import GitReviewChangesModal from './GitReviewChangesModal.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
@@ -21,6 +28,7 @@
 		type GitWorkbenchTarget,
 		type GitDiffActionTarget,
 	} from '$lib/stores/git-workbench.svelte.js';
+	import type { GitInspectorView } from '$lib/stores/git/git-porcelain.svelte';
 	import type { GitFileReviewData, ConfirmAction } from '$lib/api/git.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as m from '$lib/paraglide/messages.js';
@@ -183,10 +191,58 @@
 		wb.requestDiscard(filePath);
 	}
 
+	function handleToggleFileViewed(filePath: string): void {
+		wb.toggleFileViewed(filePath);
+	}
+
+	function handlePreviousFile(): void {
+		if (!activeProjectPath) return;
+		void wb.selectPreviousFile(activeProjectPath);
+	}
+
+	function handleNextFile(): void {
+		if (!activeProjectPath) return;
+		void wb.selectNextFile(activeProjectPath);
+	}
+
+	function handleMarkViewedAndAdvance(): void {
+		if (!activeProjectPath) return;
+		void wb.markSelectedViewedAndAdvance(activeProjectPath);
+	}
+
+	function isTextInputTarget(target: EventTarget | null): boolean {
+		return target instanceof HTMLElement &&
+			Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+	}
+
+	function handleWorkbenchKeydown(event: KeyboardEvent): void {
+		if (!activeProjectPath || !event.altKey || isTextInputTarget(event.target)) return;
+		if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			handlePreviousFile();
+		} else if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			handleNextFile();
+		} else if (event.key === 'Enter') {
+			event.preventDefault();
+			handleMarkViewedAndAdvance();
+		}
+	}
+
 	function renderScopeToggleClass(scope: 'selected-file' | 'all-files'): string {
 		return wb.reviewScope === scope
 			? 'bg-background text-foreground shadow-sm'
 			: 'text-muted-foreground hover:text-foreground';
+	}
+
+	function inspectorButtonClass(view: GitInspectorView): string {
+		return wb.porcelain.inspectorView === view
+			? 'text-interactive-accent bg-muted'
+			: 'text-muted-foreground hover:text-foreground hover:bg-muted';
+	}
+
+	function handleInspectorView(view: Exclude<GitInspectorView, 'none'>): void {
+		wb.porcelain.setInspectorView(view);
 	}
 
 	let discardConfirmAction = $derived.by((): ConfirmAction | null => {
@@ -199,6 +255,49 @@
 		};
 	});
 </script>
+
+{#snippet inspectorButtons()}
+	<div class="flex items-center gap-1">
+		<button
+			type="button"
+			onclick={() => handleInspectorView('conflicts')}
+			class="rounded p-1 {inspectorButtonClass('conflicts')}"
+			title="Conflicts"
+			aria-label="Conflicts"
+		>
+			<AlertTriangle class="h-3.5 w-3.5" />
+		</button>
+		<button
+			type="button"
+			onclick={() => handleInspectorView('stash')}
+			class="rounded p-1 {inspectorButtonClass('stash')}"
+			title="Stash"
+			aria-label="Stash"
+		>
+			<Archive class="h-3.5 w-3.5" />
+		</button>
+		<button
+			type="button"
+			onclick={() => handleInspectorView('history')}
+			class="rounded p-1 {inspectorButtonClass('history')}"
+			title="History and blame"
+			aria-label="History and blame"
+		>
+			<HistoryIcon class="h-3.5 w-3.5" />
+		</button>
+		<button
+			type="button"
+			onclick={() => handleInspectorView('graph')}
+			class="rounded p-1 {inspectorButtonClass('graph')}"
+			title="Graph and compare"
+			aria-label="Graph and compare"
+		>
+			<GitGraph class="h-3.5 w-3.5" />
+		</button>
+	</div>
+{/snippet}
+
+<svelte:window onkeydown={handleWorkbenchKeydown} />
 
 {#if !activeProjectPath}
 	<div class="h-full flex items-center justify-center text-muted-foreground">
@@ -268,12 +367,24 @@
 						collapsedDirs={wb.collapsedDirs}
 						treeSearchQuery={wb.treeSearchQuery}
 						totalChangedFiles={wb.totalChangedFiles}
+						visibleChangedFiles={wb.visibleChangedFiles}
+						reviewProgressLabel={wb.reviewProgressLabel}
+						hideViewed={wb.hideViewed}
+						showGenerated={wb.showGenerated}
 						onSelectFile={handleSelectFile}
 						onSelectDirectory={handleSelectDirectory}
 						onToggleDir={(p) => wb.toggleDirCollapsed(p)}
 						onSearchChange={(q) => {
 							wb.treeSearchQuery = q;
 						}}
+						onHideViewedChange={(value) => wb.setHideViewed(value)}
+						onShowGeneratedChange={(value) => wb.setShowGenerated(value)}
+						isFileViewed={(path) => wb.isFileViewed(path)}
+						onToggleFileViewed={handleToggleFileViewed}
+						isStageFilePending={(path) => wb.isStageFilePending(path)}
+						isUnstageFilePending={(path) => wb.isUnstageFilePending(path)}
+						isStageDirPending={(path) => wb.isStageDirectoryPending(path)}
+						isUnstageDirPending={(path) => wb.isUnstageDirectoryPending(path)}
 						onStageFile={handleStageFile}
 						onUnstageFile={handleUnstageFile}
 						onStageDir={handleStageDir}
@@ -299,7 +410,40 @@
 							</button>
 						{/each}
 					</div>
-					<div class="flex justify-end border-b border-border px-2 py-1">
+					<div class="flex items-center justify-between gap-2 border-b border-border px-2 py-1">
+						<div class="flex items-center gap-1">
+							<button
+								type="button"
+								onclick={handlePreviousFile}
+								disabled={!wb.previousVisibleFile() || wb.previousVisibleFile() === wb.selectedFile}
+								class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
+								title="Previous file"
+								aria-label="Previous file"
+							>
+								<ChevronUp class="w-3.5 h-3.5" />
+							</button>
+							<button
+								type="button"
+								onclick={handleNextFile}
+								disabled={!wb.nextVisibleFile() || wb.nextVisibleFile() === wb.selectedFile}
+								class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
+								title="Next file"
+								aria-label="Next file"
+							>
+								<ChevronDown class="w-3.5 h-3.5" />
+							</button>
+							<button
+								type="button"
+								onclick={handleMarkViewedAndAdvance}
+								disabled={!wb.selectedFile}
+								class="p-1 rounded text-muted-foreground hover:text-status-success-foreground hover:bg-muted disabled:opacity-40"
+								title="Mark viewed and advance"
+								aria-label="Mark viewed and advance"
+							>
+								<Check class="w-3.5 h-3.5" />
+							</button>
+						</div>
+						{@render inspectorButtons()}
 						<div class="flex rounded-md bg-muted p-0.5">
 							<button
 								type="button"
@@ -321,6 +465,11 @@
 							</button>
 						</div>
 					</div>
+					<GitPorcelainPanel
+						projectPath={activeProjectPath}
+						selectedFile={wb.selectedFile}
+						porcelain={wb.porcelain}
+					/>
 					{#if wb.reviewScope === 'selected-file'}
 						<GitDiffViewer
 							filePath={wb.selectedFile ?? ''}
@@ -330,6 +479,7 @@
 							contextLines={wb.contextLines}
 							fontSize={diffFontSize}
 							selectedLineKeys={wb.selectedLineKeys}
+							operationPending={wb.hasPendingOperation}
 							isLoading={wb.isLoadingFile || wb.isLoadingTree}
 							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
@@ -355,6 +505,7 @@
 							contextLines={wb.contextLines}
 							fontSize={diffFontSize}
 							selectedLineKeys={wb.selectedLineKeys}
+							operationPending={wb.hasPendingOperation}
 							overscan={3}
 							onRequestLoad={handleRequestLoad}
 							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
@@ -382,7 +533,8 @@
 							onclick={() => {
 								if (activeProjectPath) wb.stageSelectedLines(activeProjectPath);
 							}}
-							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-added/20 text-git-added"
+							disabled={wb.hasPendingOperation}
+							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-added/20 text-git-added disabled:opacity-50"
 						>
 							Stage ({wb.selectedLineKeys.size})
 						</button>
@@ -391,7 +543,8 @@
 							onclick={() => {
 								if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath);
 							}}
-							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-deleted/20 text-git-deleted"
+							disabled={wb.hasPendingOperation}
+							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-deleted/20 text-git-deleted disabled:opacity-50"
 						>
 							Unstage ({wb.selectedLineKeys.size})
 						</button>
@@ -417,12 +570,24 @@
 						collapsedDirs={wb.collapsedDirs}
 						treeSearchQuery={wb.treeSearchQuery}
 						totalChangedFiles={wb.totalChangedFiles}
+						visibleChangedFiles={wb.visibleChangedFiles}
+						reviewProgressLabel={wb.reviewProgressLabel}
+						hideViewed={wb.hideViewed}
+						showGenerated={wb.showGenerated}
 						onSelectFile={handleSelectFile}
 						onSelectDirectory={handleSelectDirectory}
 						onToggleDir={(p) => wb.toggleDirCollapsed(p)}
 						onSearchChange={(q) => {
 							wb.treeSearchQuery = q;
 						}}
+						onHideViewedChange={(value) => wb.setHideViewed(value)}
+						onShowGeneratedChange={(value) => wb.setShowGenerated(value)}
+						isFileViewed={(path) => wb.isFileViewed(path)}
+						onToggleFileViewed={handleToggleFileViewed}
+						isStageFilePending={(path) => wb.isStageFilePending(path)}
+						isUnstageFilePending={(path) => wb.isUnstageFilePending(path)}
+						isStageDirPending={(path) => wb.isStageDirectoryPending(path)}
+						isUnstageDirPending={(path) => wb.isUnstageDirectoryPending(path)}
 						onStageFile={handleStageFile}
 						onUnstageFile={handleUnstageFile}
 						onStageDir={handleStageDir}
@@ -459,6 +624,39 @@
 								</button>
 							{/each}
 						</div>
+						<div class="flex items-center gap-1">
+							<button
+								type="button"
+								onclick={handlePreviousFile}
+								disabled={!wb.previousVisibleFile() || wb.previousVisibleFile() === wb.selectedFile}
+								class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
+								title="Previous file"
+								aria-label="Previous file"
+							>
+								<ChevronUp class="w-3.5 h-3.5" />
+							</button>
+							<button
+								type="button"
+								onclick={handleNextFile}
+								disabled={!wb.nextVisibleFile() || wb.nextVisibleFile() === wb.selectedFile}
+								class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
+								title="Next file"
+								aria-label="Next file"
+							>
+								<ChevronDown class="w-3.5 h-3.5" />
+							</button>
+							<button
+								type="button"
+								onclick={handleMarkViewedAndAdvance}
+								disabled={!wb.selectedFile}
+								class="p-1 rounded text-muted-foreground hover:text-status-success-foreground hover:bg-muted disabled:opacity-40"
+								title="Mark viewed and advance"
+								aria-label="Mark viewed and advance"
+							>
+								<Check class="w-3.5 h-3.5" />
+							</button>
+						</div>
+						{@render inspectorButtons()}
 						<div class="flex rounded-md bg-muted p-0.5">
 							<button
 								type="button"
@@ -480,6 +678,11 @@
 							</button>
 						</div>
 					</div>
+					<GitPorcelainPanel
+						projectPath={activeProjectPath}
+						selectedFile={wb.selectedFile}
+						porcelain={wb.porcelain}
+					/>
 					{#if wb.reviewScope === 'selected-file'}
 						<GitDiffViewer
 							filePath={wb.selectedFile ?? ''}
@@ -489,6 +692,7 @@
 							contextLines={wb.contextLines}
 							fontSize={diffFontSize}
 							selectedLineKeys={wb.selectedLineKeys}
+							operationPending={wb.hasPendingOperation}
 							isLoading={wb.isLoadingFile || wb.isLoadingTree}
 							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
@@ -523,6 +727,7 @@
 							contextLines={wb.contextLines}
 							fontSize={diffFontSize}
 							selectedLineKeys={wb.selectedLineKeys}
+							operationPending={wb.hasPendingOperation}
 							overscan={5}
 							onRequestLoad={handleRequestLoad}
 							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
@@ -557,7 +762,8 @@
 									onclick={() => {
 										if (activeProjectPath) wb.stageSelectedLines(activeProjectPath);
 									}}
-									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors"
+									disabled={wb.hasPendingOperation}
+									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors disabled:opacity-50"
 								>
 									<Plus class="w-4 h-4" />
 									Stage {wb.selectedLineKeys.size}
@@ -568,7 +774,8 @@
 									onclick={() => {
 										if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath);
 									}}
-									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors"
+									disabled={wb.hasPendingOperation}
+									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors disabled:opacity-50"
 								>
 									<Minus class="w-4 h-4" />
 									Unstage {wb.selectedLineKeys.size}

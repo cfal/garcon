@@ -19,6 +19,7 @@
 		contextLines: number;
 		fontSize?: number;
 		selectedLineKeys: Set<string>;
+		operationPending?: boolean;
 		overscan?: number;
 		onRequestLoad: (filePaths: string[]) => void;
 		onToggleLineSelection: (key: string) => void;
@@ -54,6 +55,7 @@
 		contextLines,
 		fontSize = 12,
 		selectedLineKeys,
+		operationPending = false,
 		overscan = 5,
 		onRequestLoad,
 		onToggleLineSelection,
@@ -249,6 +251,7 @@
 							{contextLines}
 							{fontSize}
 							{selectedLineKeys}
+							{operationPending}
 							isLoading={!item.reviewData}
 							{onToggleLineSelection}
 							{onSelectLineRange}

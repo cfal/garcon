@@ -32,6 +32,7 @@
 		colCount: number;
 		composer: GitDiffComposerDraft | null;
 		showLineActions: boolean;
+		operationPending?: boolean;
 		viewportRef: HTMLDivElement | null;
 		overscan?: number;
 		onCellClick: (event: MouseEvent | KeyboardEvent, cell: SplitDiffCellView) => void;
@@ -64,6 +65,7 @@
 		colCount,
 		composer,
 		showLineActions,
+		operationPending = false,
 		viewportRef,
 		overscan = DIFF_TABLE_OVERSCAN,
 		onCellClick,
@@ -172,8 +174,9 @@
 									{#if activeTab === 'unstaged'}
 										<button
 											type="button"
+											disabled={operationPending}
 											onclick={() => onStageHunk(actionTarget, diffRow.row.hunkIndex ?? -1)}
-											class="px-1.5 py-0.5 text-[10px] rounded bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors"
+											class="px-1.5 py-0.5 text-[10px] rounded bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors disabled:opacity-50"
 											title={m.git_action_stage_hunk()}
 										>
 											<Plus class="w-3 h-3 inline" />
@@ -182,8 +185,9 @@
 									{:else}
 										<button
 											type="button"
+											disabled={operationPending}
 											onclick={() => onUnstageHunk(actionTarget, diffRow.row.hunkIndex ?? -1)}
-											class="px-1.5 py-0.5 text-[10px] rounded bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors"
+											class="px-1.5 py-0.5 text-[10px] rounded bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors disabled:opacity-50"
 											title={m.git_action_unstage_hunk()}
 										>
 											<Minus class="w-3 h-3 inline" />
@@ -205,11 +209,12 @@
 										{#if activeTab === 'unstaged'}
 											<button
 												type="button"
+												disabled={operationPending}
 												onclick={(event) => {
 													event.stopPropagation();
 													onStageLine?.(actionTarget, diffRow.left!.cell.diffLineIndex);
 												}}
-												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
+												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5 disabled:opacity-50"
 												title={m.git_action_stage_line()}
 											>
 												<Plus class="w-2.5 h-2.5" />
@@ -217,11 +222,12 @@
 										{:else}
 											<button
 												type="button"
+												disabled={operationPending}
 												onclick={(event) => {
 													event.stopPropagation();
 													onUnstageLine?.(actionTarget, diffRow.left!.cell.diffLineIndex);
 												}}
-												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
+												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5 disabled:opacity-50"
 												title={m.git_action_unstage_line()}
 											>
 												<Minus class="w-2.5 h-2.5" />
@@ -275,11 +281,12 @@
 										{#if activeTab === 'unstaged'}
 											<button
 												type="button"
+												disabled={operationPending}
 												onclick={(event) => {
 													event.stopPropagation();
 													onStageLine?.(actionTarget, diffRow.right!.cell.diffLineIndex);
 												}}
-												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5"
+												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-added hover:bg-git-added/20 transition-colors rounded p-0.5 disabled:opacity-50"
 												title={m.git_action_stage_line()}
 											>
 												<Plus class="w-2.5 h-2.5" />
@@ -287,11 +294,12 @@
 										{:else}
 											<button
 												type="button"
+												disabled={operationPending}
 												onclick={(event) => {
 													event.stopPropagation();
 													onUnstageLine?.(actionTarget, diffRow.right!.cell.diffLineIndex);
 												}}
-												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5"
+												class="flex items-center justify-center text-muted-foreground/30 hover:text-git-deleted hover:bg-git-deleted/20 transition-colors rounded p-0.5 disabled:opacity-50"
 												title={m.git_action_unstage_line()}
 											>
 												<Minus class="w-2.5 h-2.5" />

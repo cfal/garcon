@@ -21,6 +21,7 @@ mock.module('../../config.js', () => ({
 
 import createGitRoutes from '../git.js';
 import { parseJsonBody } from '../../lib/http-request.js';
+import { GIT_DIFF_LIMITS } from '../../git/types.js';
 
 const ctx = {
   agents: {
@@ -312,16 +313,69 @@ describe('GET /api/v1/git/file-review-data validation', () => {
     expect(body.error).toContain('required');
   });
 
-  it('returns 400 for invalid mode', async () => {
-    const url = makeUrl('/api/v1/git/file-review-data', { project: '/proj', file: 'a.ts', mode: 'head' });
-    const request = new Request(url.toString());
-    const response = await handler(request, url);
-    const body = await response.json();
+	  it('returns 400 for invalid mode', async () => {
+	    const url = makeUrl('/api/v1/git/file-review-data', { project: '/proj', file: 'a.ts', mode: 'head' });
+	    const request = new Request(url.toString());
+	    const response = await handler(request, url);
+	    const body = await response.json();
 
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('Invalid mode. Expected one of: working, staged.');
-  });
-});
+	    expect(response.status).toBe(400);
+	    expect(body.error).toBe('Invalid mode. Expected one of: working, staged.');
+	  });
+
+	  it('returns 400 for context above the server limit', async () => {
+	    const url = makeUrl('/api/v1/git/file-review-data', {
+	      project: '/proj',
+	      file: 'a.ts',
+	      mode: 'working',
+	      context: String(GIT_DIFF_LIMITS.maxContextLines + 1),
+	    });
+	    const request = new Request(url.toString());
+	    const response = await handler(request, url);
+	    const body = await response.json();
+
+	    expect(response.status).toBe(400);
+	    expect(body.error).toBe(`Invalid context. Expected an integer between 0 and ${GIT_DIFF_LIMITS.maxContextLines}.`);
+	  });
+	});
+
+	describe('POST /api/v1/git/file-review-data/batch validation', () => {
+	  const handler = routes['/api/v1/git/file-review-data/batch'].POST;
+
+	  beforeEach(() => { parseJsonBody.mockClear(); });
+
+	  it('returns 400 when files exceed the server batch limit', async () => {
+	    parseJsonBody.mockImplementation(() =>
+	      Promise.resolve({
+	        project: '/proj',
+	        files: Array.from({ length: GIT_DIFF_LIMITS.maxBatchFiles + 1 }, (_, index) => `file-${index}.ts`),
+	        mode: 'working',
+	        context: 5,
+	      }),
+	    );
+	    const response = await handler(makeRequest({}));
+	    const body = await response.json();
+
+	    expect(response.status).toBe(400);
+	    expect(body.error).toBe(`Too many files. Maximum is ${GIT_DIFF_LIMITS.maxBatchFiles}.`);
+	  });
+
+	  it('returns 400 when context is invalid', async () => {
+	    parseJsonBody.mockImplementation(() =>
+	      Promise.resolve({
+	        project: '/proj',
+	        files: ['a.ts'],
+	        mode: 'working',
+	        context: GIT_DIFF_LIMITS.maxContextLines + 1,
+	      }),
+	    );
+	    const response = await handler(makeRequest({}));
+	    const body = await response.json();
+
+	    expect(response.status).toBe(400);
+	    expect(body.error).toBe(`Invalid context. Expected an integer between 0 and ${GIT_DIFF_LIMITS.maxContextLines}.`);
+	  });
+	});
 
 describe('POST /api/v1/git/stage-selection validation', () => {
   const handler = routes['/api/v1/git/stage-selection'].POST;
@@ -448,42 +502,40 @@ describe('malformed JSON body', () => {
   });
 });
 
-describe('route registration', () => {
-  it('registers all workbench V2 routes', () => {
-    expect(routes['/api/v1/git/commit-index']).toBeDefined();
-    expect(routes['/api/v1/git/commit-index'].POST).toBeFunction();
+	describe('route registration', () => {
+	  it('registers workbench routes', () => {
+	    const expectedRoutes = {
+	      '/api/v1/git/commit-index': 'POST',
+	      '/api/v1/git/stage-file': 'POST',
+	      '/api/v1/git/changes-tree': 'GET',
+	      '/api/v1/git/changes-stats': 'GET',
+	      '/api/v1/git/file-review-data': 'GET',
+	      '/api/v1/git/file-review-data/batch': 'POST',
+	      '/api/v1/git/stage-selection': 'POST',
+	      '/api/v1/git/stage-hunk': 'POST',
+	      '/api/v1/git/revert-last-commit': 'POST',
+	      '/api/v1/git/worktrees': 'GET',
+	      '/api/v1/git/targets': 'GET',
+	      '/api/v1/git/worktrees/create': 'POST',
+	      '/api/v1/git/worktrees/remove': 'POST',
+	      '/api/v1/git/conflicts': 'GET',
+	      '/api/v1/git/conflict-details': 'GET',
+	      '/api/v1/git/conflict/accept': 'POST',
+	      '/api/v1/git/conflict/resolve': 'POST',
+	      '/api/v1/git/stashes': 'GET',
+	      '/api/v1/git/stash/create': 'POST',
+	      '/api/v1/git/stash/apply': 'POST',
+	      '/api/v1/git/stash/pop': 'POST',
+	      '/api/v1/git/stash/drop': 'POST',
+	      '/api/v1/git/file-history': 'GET',
+	      '/api/v1/git/blame': 'GET',
+	      '/api/v1/git/graph': 'GET',
+	      '/api/v1/git/compare': 'GET',
+	    };
 
-    expect(routes['/api/v1/git/stage-file']).toBeDefined();
-    expect(routes['/api/v1/git/stage-file'].POST).toBeFunction();
-
-    expect(routes['/api/v1/git/changes-tree']).toBeDefined();
-    expect(routes['/api/v1/git/changes-tree'].GET).toBeFunction();
-
-    expect(routes['/api/v1/git/file-review-data']).toBeDefined();
-    expect(routes['/api/v1/git/file-review-data'].GET).toBeFunction();
-
-    expect(routes['/api/v1/git/file-review-data/batch']).toBeDefined();
-    expect(routes['/api/v1/git/file-review-data/batch'].POST).toBeFunction();
-
-    expect(routes['/api/v1/git/stage-selection']).toBeDefined();
-    expect(routes['/api/v1/git/stage-selection'].POST).toBeFunction();
-
-    expect(routes['/api/v1/git/stage-hunk']).toBeDefined();
-    expect(routes['/api/v1/git/stage-hunk'].POST).toBeFunction();
-
-    expect(routes['/api/v1/git/revert-last-commit']).toBeDefined();
-    expect(routes['/api/v1/git/revert-last-commit'].POST).toBeFunction();
-
-    expect(routes['/api/v1/git/worktrees']).toBeDefined();
-    expect(routes['/api/v1/git/worktrees'].GET).toBeFunction();
-
-    expect(routes['/api/v1/git/targets']).toBeDefined();
-    expect(routes['/api/v1/git/targets'].GET).toBeFunction();
-
-    expect(routes['/api/v1/git/worktrees/create']).toBeDefined();
-    expect(routes['/api/v1/git/worktrees/create'].POST).toBeFunction();
-
-    expect(routes['/api/v1/git/worktrees/remove']).toBeDefined();
-    expect(routes['/api/v1/git/worktrees/remove'].POST).toBeFunction();
-  });
-});
+	    for (const [route, method] of Object.entries(expectedRoutes)) {
+	      expect(routes[route]).toBeDefined();
+	      expect(routes[route][method]).toBeFunction();
+	    }
+	  });
+	});

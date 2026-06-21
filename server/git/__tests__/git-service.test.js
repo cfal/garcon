@@ -61,17 +61,21 @@ describe('GitDomainError', () => {
 describe('createGitService', () => {
   const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 
-  it('returns an object with all expected service methods', () => {
-    const expectedMethods = [
-      'getStatus', 'getDiff', 'getFileWithDiff', 'initialCommit',
-      'commit', 'getBranches', 'checkout', 'createBranch',
-      'getCommits', 'getCommitDiff', 'generateCommitMessageForFiles',
-      'getRemoteStatus', 'getRemotes', 'fetch', 'pull', 'push',
-      'discard', 'deleteUntracked', 'getFileReviewData',
-      'getFileReviewDataBatch', 'getChangesTree', 'getChangesStats', 'stageSelection', 'stageHunk',
-      'getWorktrees', 'getTargetCandidates', 'createWorktree', 'removeWorktree',
-      'commitIndex', 'stageFile', 'revertLastCommit', 'toHttpError',
-    ];
+	  it('returns an object with all expected service methods', () => {
+	    const expectedMethods = [
+	      'getStatus', 'getDiff', 'getFileWithDiff', 'initialCommit',
+	      'commit', 'getBranches', 'checkout', 'createBranch',
+	      'getCommits', 'getCommitDiff', 'generateCommitMessageForFiles',
+	      'getRemoteStatus', 'getRemotes', 'fetch', 'pull', 'push',
+	      'discard', 'deleteUntracked', 'getFileReviewData',
+	      'getFileReviewDataBatch', 'getChangesTree', 'getChangesStats', 'stageSelection', 'stageHunk',
+	      'getWorktrees', 'getTargetCandidates', 'createWorktree', 'removeWorktree',
+	      'commitIndex', 'stageFile', 'revertLastCommit',
+	      'getConflicts', 'getConflictDetails', 'acceptConflictSide', 'markConflictResolved',
+	      'getStashes', 'createStash', 'applyStash', 'popStash', 'dropStash',
+	      'getFileHistory', 'getBlame', 'getGraph', 'getCompare',
+	      'toHttpError',
+	    ];
     for (const method of expectedMethods) {
       expect(typeof git[method]).toBe('function');
     }
@@ -256,13 +260,24 @@ describe('getFileReviewData', () => {
       const staged = await git.getFileReviewData({ projectPath, file: 'a.txt', mode: 'staged', context: 3 });
       const working = await git.getFileReviewData({ projectPath, file: 'a.txt', mode: 'working', context: 3 });
 
-      expect(staged.contentBefore).toContain('one');
-      expect(staged.contentAfter).toContain('staged');
-      expect(staged.diffOps.some((op) => op.type === 'insert')).toBe(true);
-      expect(working.contentBefore).toContain('staged');
-      expect(working.contentAfter).toBeNull();
-      expect(working.diffOps.some((op) => op.type === 'delete')).toBe(true);
-    } finally {
+	      expect(staged.mode).toBe('staged');
+	      expect(staged.isBinary).toBe(false);
+	      expect(staged.rows.some((row) => row.kind === 'add' && row.text === 'staged')).toBe(true);
+	      expect(staged.rows.some((row) => row.kind === 'del')).toBe(false);
+	      expect(staged.hunks.length).toBeGreaterThan(0);
+	      expect('contentBefore' in staged).toBe(false);
+	      expect('contentAfter' in staged).toBe(false);
+	      expect('diffOps' in staged).toBe(false);
+
+	      expect(working.mode).toBe('working');
+	      expect(working.isBinary).toBe(false);
+	      expect(working.rows.some((row) => row.kind === 'del' && row.text === 'staged')).toBe(true);
+	      expect(working.rows.some((row) => row.kind === 'add')).toBe(false);
+	      expect(working.hunks.length).toBeGreaterThan(0);
+	      expect('contentBefore' in working).toBe(false);
+	      expect('contentAfter' in working).toBe(false);
+	      expect('diffOps' in working).toBe(false);
+	    } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });

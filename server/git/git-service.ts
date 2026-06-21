@@ -4,6 +4,7 @@ import {
   isCommitMessageErrorCode,
 } from './commit-message.js';
 import { createDiffEngine } from './diff-engine.js';
+import { createPorcelainOperations } from './porcelain.js';
 import { createStatusOperations } from './status.js';
 import { createWorktreeOperations } from './worktrees.js';
 import type { ClassifiedGitError, CreateGitServiceOptions, GitService } from './types.js';
@@ -37,11 +38,13 @@ function classifiedGitErrorToResponse(classified: ClassifiedGitError): Response 
 export function createGitService({ agents, classifyGitError }: CreateGitServiceOptions): GitService {
   const status = createStatusOperations(agents);
   const diff = createDiffEngine();
+  const porcelain = createPorcelainOperations();
   const worktrees = createWorktreeOperations();
 
   return {
     ...status,
     ...diff,
+    ...porcelain,
     ...worktrees,
     toHttpError(error: unknown): Response {
       logger.error('[git]', error);

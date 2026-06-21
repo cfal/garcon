@@ -213,16 +213,15 @@ describe('git API contract', () => {
 		});
 	});
 
-	// Workbench V2 contract tests
+	// Workbench contract tests
 
 	it('getGitFileReviewData calls GET with file/mode/context for unstaged tab', async () => {
 		const payload = {
 			path: 'a.ts',
+			mode: 'working',
 			isBinary: false,
 			truncated: false,
-			contentBefore: '',
-			contentAfter: '',
-			diffOps: [],
+			rows: [],
 			hunks: [],
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
@@ -230,7 +229,7 @@ describe('git API contract', () => {
 		const result = await getGitFileReviewData('/project', 'a.ts', 'unstaged', 5);
 
 		expect(result.path).toBe('a.ts');
-		expect(result.diffOps).toEqual([]);
+		expect(result.rows).toEqual([]);
 		const [url] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/git/file-review-data');
 		expect(url).toContain('file=a.ts');
@@ -386,19 +385,29 @@ describe('git API contract', () => {
 	it('getGitFileReviewData sends mode=staged for staged tab', async () => {
 		const payload = {
 			path: 'a.ts',
+			mode: 'staged',
 			isBinary: false,
 			truncated: false,
-			contentBefore: 'old',
-			contentAfter: 'new',
-			diffOps: [],
+			rows: [
+				{
+					key: 'hunk:0:hunk-0',
+					kind: 'hunk',
+					hunkIndex: 0,
+					hunkId: 'hunk-0',
+					beforeLine: null,
+					afterLine: null,
+					text: '@@ -1 +1 @@',
+					diffLineIndex: -1,
+				},
+			],
 			hunks: [],
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
 		const result = await getGitFileReviewData('/project', 'a.ts', 'staged', 3);
 
-		expect(result.contentBefore).toBe('old');
-		expect(result.contentAfter).toBe('new');
+		expect(result.mode).toBe('staged');
+		expect(result.rows[0].kind).toBe('hunk');
 		const [url] = fetchMock.mock.calls[0];
 		expect(url).toContain('mode=staged');
 		expect(url).toContain('context=3');

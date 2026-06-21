@@ -24,6 +24,8 @@ export class GitReviewDataLoader {
 
 	private inFlightByKey = new Map<ReviewDataKey, Promise<GitFileReviewData | null>>();
 	private batchResolversByKey = new Map<ReviewDataKey, (data: GitFileReviewData | null) => void>();
+	private selectedFileController: AbortController | null = null;
+	private batchControllers = new Set<AbortController>();
 	private pendingLoadQueue: string[] = [];
 	private loadGeneration = 0;
 	private loadProjectPath = '';
@@ -39,6 +41,7 @@ export class GitReviewDataLoader {
 	}
 
 	async loadFileReviewData(projectPath: string, filePath: string): Promise<void> {
+		this.abortSelectedFileLoad();
 		const guard = this.createLoadGuard(projectPath);
 		const tab = guard.tab;
 		const contextLines = guard.contextLines;
@@ -48,19 +51,27 @@ export class GitReviewDataLoader {
 			return;
 		}
 		const requestId = ++this.fileLoadRequestId;
+		const controller = new AbortController();
+		this.selectedFileController = controller;
 		this.isLoadingFile = true;
 		try {
-			const data = await this.loadFileOnce(projectPath, filePath, tab, contextLines);
+			const data = await this.loadFileOnce(projectPath, filePath, tab, contextLines, {
+				signal: controller.signal,
+			});
 			if (!this.isCurrentFileLoadGuard(guard)) return;
 			if (!data) return;
 			this.cacheSet(filePath, data, tab, contextLines);
 			this.reviewDataByPath = { ...this.reviewDataByPath, [filePath]: data };
 		} catch (error) {
+			if (isAbortError(error)) return;
 			if (!this.isCurrentFileLoadGuard(guard)) return;
 			this.deps.surfaceError(
 				`Failed to load diff: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		} finally {
+			if (this.selectedFileController === controller) {
+				this.selectedFileController = null;
+			}
 			if (requestId === this.fileLoadRequestId && this.isCurrentFileLoadGuard(guard)) {
 				this.isLoadingFile = false;
 			}
@@ -209,12 +220,13 @@ export class GitReviewDataLoader {
 		filePath: string,
 		tab: GitDiffTab,
 		contextLines: number,
+		options: { signal?: AbortSignal } = {},
 	): Promise<GitFileReviewData | null> {
 		const key = this.cacheKey(filePath, tab, contextLines);
 		const existing = this.inFlightByKey.get(key);
 		if (existing) return existing;
 
-		const promise = getGitFileReviewData(projectPath, filePath, tab, contextLines)
+		const promise = getGitFileReviewData(projectPath, filePath, tab, contextLines, options)
 			.then((data) => {
 				this.cacheSet(filePath, data, tab, contextLines);
 				return data;
@@ -246,9 +258,17 @@ export class GitReviewDataLoader {
 	}
 
 	private clearInFlightLoads(): void {
+		this.abortSelectedFileLoad();
+		for (const controller of this.batchControllers) controller.abort();
+		this.batchControllers.clear();
 		for (const resolve of this.batchResolversByKey.values()) resolve(null);
 		this.batchResolversByKey.clear();
 		this.inFlightByKey.clear();
+	}
+
+	private abortSelectedFileLoad(): void {
+		this.selectedFileController?.abort();
+		this.selectedFileController = null;
 	}
 
 	private pumpFileQueue(): void {
@@ -271,8 +291,12 @@ export class GitReviewDataLoader {
 		for (const filePath of batch) {
 			keysByFile.set(filePath, this.markBatchFileInFlight(filePath, tab, contextLines));
 		}
+		const controller = new AbortController();
+		this.batchControllers.add(controller);
 
-		void getGitFileReviewDataBatch(projectPath, batch, tab, contextLines)
+		void getGitFileReviewDataBatch(projectPath, batch, tab, contextLines, {
+			signal: controller.signal,
+		})
 			.then((result) => {
 				if (generation !== this.loadGeneration) {
 					for (const key of keysByFile.values()) this.resolveBatchFile(key, null);
@@ -299,7 +323,11 @@ export class GitReviewDataLoader {
 				}
 				this.reviewDataByPath = next;
 			})
-			.catch(() => {
+			.catch((error) => {
+				if (isAbortError(error)) {
+					for (const key of keysByFile.values()) this.resolveBatchFile(key, null);
+					return;
+				}
 				if (generation !== this.loadGeneration) {
 					for (const key of keysByFile.values()) this.resolveBatchFile(key, null);
 					return;
@@ -314,6 +342,7 @@ export class GitReviewDataLoader {
 				this.reviewDataByPath = next;
 			})
 			.finally(() => {
+				this.batchControllers.delete(controller);
 				if (generation === this.loadGeneration) this.pumpFileQueue();
 			});
 	}
@@ -325,10 +354,13 @@ function createDiffLoadError(filePath: string, tab: GitDiffTab, error: string): 
 		mode: tab === 'staged' ? 'staged' : 'working',
 		isBinary: false,
 		truncated: false,
-		contentBefore: '',
-		contentAfter: '',
-		diffOps: [],
+		rows: [],
 		hunks: [],
 		error,
 	};
+}
+
+function isAbortError(error: unknown): boolean {
+	return error instanceof DOMException && error.name === 'AbortError' ||
+		error instanceof Error && error.name === 'AbortError';
 }

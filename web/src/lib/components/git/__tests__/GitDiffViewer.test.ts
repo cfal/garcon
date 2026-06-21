@@ -8,25 +8,41 @@ function makeLargeInsertDiff(lineCount: number): GitFileReviewData {
 	const lines = Array.from({ length: lineCount }, (_, index) => `line ${index + 1}`);
 	return {
 		path: 'src/generated.ts',
+		mode: 'working',
 		isBinary: false,
 		truncated: false,
-		contentBefore: '',
-		contentAfter: lines.join('\n'),
-		diffOps: lines.map((_, index) => ({
-			type: 'insert' as const,
-			before: [1, 0] as [number, number],
-			after: [index + 1, index + 1] as [number, number],
-		})),
+		rows: [
+			{
+				key: 'hunk:0:hunk-0',
+				kind: 'hunk',
+				hunkIndex: 0,
+				hunkId: 'hunk-0',
+				beforeLine: null,
+				afterLine: null,
+				text: `@@ -0,0 +1,${lineCount} @@`,
+				diffLineIndex: -1,
+			},
+			...lines.map((line, index) => ({
+				key: `line:${index}:add:${index + 1}`,
+				kind: 'add' as const,
+				hunkIndex: 0,
+				hunkId: 'hunk-0',
+				beforeLine: null,
+				afterLine: index + 1,
+				text: line,
+				diffLineIndex: index,
+			})),
+		],
 		hunks: [
 			{
-				id: 'hunk-1',
+				id: 'hunk-0',
 				header: `@@ -0,0 +1,${lineCount} @@`,
 				oldStart: 0,
 				oldLines: 0,
 				newStart: 1,
 				newLines: lineCount,
-				lineStartIndex: 0,
-				lineEndIndex: lineCount - 1,
+				rowStartIndex: 0,
+				rowEndIndex: lineCount,
 			},
 		],
 	};

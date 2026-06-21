@@ -16,6 +16,7 @@
 		activeTab?: GitDiffTab;
 		diffMode: DiffMode;
 		selectedLineKeys: Set<string>;
+		operationPending?: boolean;
 		itemMinHeightClass?: string;
 		onToggleLineSelection: (key: string) => void;
 		onSelectLineRange: (startKey: string, endKey: string, allKeys: string[]) => void;
@@ -31,6 +32,7 @@
 		activeTab = 'unstaged' as GitDiffTab,
 		diffMode,
 		selectedLineKeys,
+		operationPending = false,
 		itemMinHeightClass = 'min-h-64',
 		onToggleLineSelection,
 		onSelectLineRange,
@@ -56,6 +58,7 @@
 					{activeTab}
 					{diffMode}
 					{selectedLineKeys}
+					{operationPending}
 					isLoading={!item.reviewData}
 					readOnly
 					{onToggleLineSelection}
