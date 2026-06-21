@@ -9,15 +9,18 @@
 	import SavedSearchManagerDialog from './SavedSearchManagerDialog.svelte';
 	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
-	import { getAppShell, getNotifications, getReadReceiptOutbox } from '$lib/context';
+	import {
+		getAppShell,
+		getNotifications,
+		getReadReceiptOutbox,
+		getSidebarSearch,
+	} from '$lib/context';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
 	import { createPerListWriteQueue } from './reorder-write-queue';
 	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
 	import { SidebarDialogsState } from './sidebar-dialogs-state.svelte';
-	import { SidebarSearchState } from './sidebar-search-state.svelte';
-	import { SavedSearchStore } from './saved-search-store.svelte';
 	import { ChatSelectionStore } from '$lib/stores/chat-selection.svelte';
 	import { addTagToQuery } from './sidebar-search';
 	import type { SavedChatSearch } from '$lib/api/settings';
@@ -68,35 +71,15 @@
 	const appShell = getAppShell();
 	const notifications = getNotifications();
 	const readReceiptOutbox = getReadReceiptOutbox();
+	const sidebarSearch = getSidebarSearch();
 	const controller = new SidebarController({
 		get onQuietRefresh() {
 			return onQuietRefresh;
 		},
 	});
 
-	const searchState = new SidebarSearchState({
-		get chats() {
-			return chats;
-		},
-		get selectedChatId() {
-			return selectedChatId;
-		},
-	});
-
 	const selection = new ChatSelectionStore();
 	const dialogs = new SidebarDialogsState();
-	const savedSearches = new SavedSearchStore({
-		get draftQuery() {
-			return searchState.draftQuery;
-		},
-		suspendSearchDialog() {
-			searchState.suspendSearchDialog();
-		},
-		resumeSearchDialog() {
-			searchState.resumeSearchDialog();
-		},
-		reportActionFailure,
-	});
 	const MINUTE_MS = 60_000;
 
 	// Sidebar UI state.
@@ -105,7 +88,7 @@
 	let isMarkingAllRead = $state(false);
 
 	let visibleUnreadChatIds = $derived.by(() =>
-		searchState.filteredChats
+		sidebarSearch.filteredChats
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
 			.map((chat) => chat.id),
 	);
@@ -250,7 +233,7 @@
 	}
 
 	function handleTagClick(tag: string) {
-		searchState.activeQuery = addTagToQuery(searchState.activeQuery, tag);
+		sidebarSearch.applyQuery(addTagToQuery(sidebarSearch.activeQuery, tag));
 	}
 
 	async function handleSaveTags(chatId: string, tags: string[]) {
@@ -294,7 +277,7 @@
 
 	function handleMultiSelectToggle(chatId: string, shiftKey: boolean) {
 		if (shiftKey) {
-			const allVisibleIds = searchState.filteredChats.map((c) => c.id);
+			const allVisibleIds = sidebarSearch.filteredChats.map((c) => c.id);
 			selection.selectRange(allVisibleIds, chatId);
 		} else {
 			selection.toggle(chatId);
@@ -302,7 +285,7 @@
 	}
 
 	function handleSelectAll() {
-		selection.selectAll(searchState.filteredChats.map((c) => c.id));
+		selection.selectAll(sidebarSearch.filteredChats.map((c) => c.id));
 	}
 
 	function handleDeselectAll() {
@@ -440,31 +423,27 @@
 	// Search dialog actions.
 
 	function handleSearchSelectChat(chatId: string) {
-		searchState.confirmSearchDialog();
+		sidebarSearch.confirmSearchDialog();
 		onChatSelect(chatId);
 	}
 
 	function handleApplySavedSearch(search: SavedChatSearch) {
-		searchState.updateDraftQuery(search.query);
+		sidebarSearch.updateDraftQuery(search.query);
 	}
 
 	function handleApplySidebarMenuSearch(query: string) {
-		searchState.applyQuery(query);
+		sidebarSearch.applyQuery(query);
 	}
 
 	function handleApplySidebarPillSearch(search: SavedChatSearch) {
-		searchState.applyQuery(search.query);
+		sidebarSearch.applyQuery(search.query);
 	}
 
 	function handleClearActiveQuery() {
-		searchState.applyQuery('');
+		sidebarSearch.applyQuery('');
 	}
 
 	// Lifecycle.
-
-	onMount(async () => {
-		await savedSearches.load();
-	});
 
 	onMount(() =>
 		appShell.onRenameSelectedChatRequested(() => {
@@ -490,7 +469,7 @@
 
 	onMount(() =>
 		appShell.onSidebarSearchRequested(() => {
-			searchState.toggleSearchDialog();
+			sidebarSearch.toggleSearchDialog();
 		}),
 	);
 </script>
@@ -502,10 +481,10 @@
 			{isLoading}
 			visibleUnreadCount={visibleUnreadChatIds.length}
 			{isMarkingAllRead}
-			sidebarMenuSearches={savedSearches.sidebarMenuSearches}
-			sidebarPillSearches={savedSearches.sidebarPillSearches}
-			activeQuery={searchState.activeQuery}
-			onOpenSearchDialog={() => searchState.openSearchDialog()}
+			sidebarMenuSearches={sidebarSearch.sidebarMenuSearches}
+			sidebarPillSearches={sidebarSearch.sidebarPillSearches}
+			activeQuery={sidebarSearch.activeQuery}
+			onOpenSearchDialog={() => sidebarSearch.openSearchDialog()}
 			onCreateChat={handlePrimaryAction}
 			onMarkAllRead={() => {
 				void handleMarkAllRead();
@@ -520,12 +499,12 @@
 	<div class="order-2 flex min-h-0 flex-1">
 		<SidebarContent
 			{chats}
-			filteredChats={searchState.filteredChats}
+			filteredChats={sidebarSearch.filteredChats}
 			{selectedChatId}
 			{isLoading}
 			{isMobile}
 			{currentTime}
-			searchFilter={searchState.activeQuery}
+			searchFilter={sidebarSearch.activeQuery}
 			isMultiSelectMode={selection.isActive}
 			isMultiSelected={(id) => selection.isSelected(id)}
 			onEnterMultiSelect={enterMultiSelect}
@@ -558,7 +537,7 @@
 	{#if selection.isActive}
 		<SidebarSelectionBar
 			count={selectedChats.length}
-			totalVisible={searchState.filteredChats.length}
+			totalVisible={sidebarSearch.filteredChats.length}
 			showPin={bulkShowPin}
 			showUnpin={bulkShowUnpin}
 			showArchive={bulkShowArchive}
@@ -657,47 +636,47 @@
 
 <SidebarTagDialog
 	tagDialog={dialogs.tagDialog}
-	allKnownTags={searchState.allKnownTags}
+	allKnownTags={sidebarSearch.allKnownTags}
 	onClose={() => dialogs.closeTagDialog()}
 	onSave={handleSaveTags}
 />
 
 <SidebarSearchDialog
-	open={searchState.searchDialogOpen}
-	query={searchState.draftQuery}
-	filteredChats={searchState.dialogFilteredChats}
-	savedSearches={savedSearches.searchDialogSavedSearches}
+	open={sidebarSearch.searchDialogOpen}
+	query={sidebarSearch.draftQuery}
+	filteredChats={sidebarSearch.dialogFilteredChats}
+	savedSearches={sidebarSearch.searchDialogSavedSearches}
 	{currentTime}
-	highlightedIndex={searchState.highlightedResultIndex}
-	onQueryChange={(q) => searchState.updateDraftQuery(q)}
+	highlightedIndex={sidebarSearch.highlightedResultIndex}
+	onQueryChange={(q) => sidebarSearch.updateDraftQuery(q)}
 	onSelectChat={handleSearchSelectChat}
 	onApplySavedSearch={handleApplySavedSearch}
-	onOpenManager={() => savedSearches.openManagerFromSearchDialog()}
-	onCreateSavedSearch={() => savedSearches.openEditorForCreateFromSearchDialog()}
+	onOpenManager={() => sidebarSearch.openManagerFromSearchDialog()}
+	onCreateSavedSearch={() => sidebarSearch.openEditorForCreateFromSearchDialog()}
 	onHighlightChange={(i) => {
-		searchState.highlightedResultIndex = i;
+		sidebarSearch.highlightedResultIndex = i;
 	}}
-	onClose={() => searchState.closeSearchDialog()}
+	onClose={() => sidebarSearch.closeSearchDialog()}
 />
 
 <SavedSearchManagerDialog
-	open={savedSearches.managerOpen}
-	searches={savedSearches.savedSearches}
-	onClose={() => savedSearches.closeManager()}
-	onAdd={() => savedSearches.openEditorForCreate()}
-	onEdit={(search) => savedSearches.openEditorForEdit(search)}
-	onDelete={(id) => savedSearches.requestDelete(id)}
+	open={sidebarSearch.managerOpen}
+	searches={sidebarSearch.savedSearches}
+	onClose={() => sidebarSearch.closeManager()}
+	onAdd={() => sidebarSearch.openEditorForCreate()}
+	onEdit={(search) => sidebarSearch.openEditorForEdit(search)}
+	onDelete={(id) => sidebarSearch.requestDelete(id)}
 	onReorder={(oldOrder, newOrder) => {
-		void savedSearches.reorder(oldOrder, newOrder);
+		void sidebarSearch.reorder(oldOrder, newOrder);
 	}}
 />
 
 <SavedSearchEditorDialog
-	editorState={savedSearches.editorState}
+	editorState={sidebarSearch.editorState}
 	onClose={() => {
-		savedSearches.closeEditor();
+		sidebarSearch.closeEditor();
 	}}
-	onSave={(data, searchId) => savedSearches.saveEditor(data, searchId)}
+	onSave={(data, searchId) => sidebarSearch.saveEditor(data, searchId)}
 />
 
 <ShareChatDialog
@@ -709,15 +688,15 @@
 />
 
 <Dialog.Root
-	open={savedSearches.deleteConfirmation !== null}
+	open={sidebarSearch.deleteConfirmation !== null}
 	onOpenChange={(open) => {
-		if (!open) savedSearches.clearDeleteConfirmation();
+		if (!open) sidebarSearch.clearDeleteConfirmation();
 	}}
 >
 	<Dialog.Content
 		onOpenAutoFocus={(e) => {
 			e.preventDefault();
-			savedSearches.deleteButtonRef?.focus();
+			sidebarSearch.deleteButtonRef?.focus();
 		}}
 	>
 		<Dialog.Header>
@@ -727,15 +706,15 @@
 			>
 		</Dialog.Header>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => savedSearches.clearDeleteConfirmation()}
+			<Button variant="outline" onclick={() => sidebarSearch.clearDeleteConfirmation()}
 				>{m.sidebar_actions_cancel()}</Button
 			>
 			<Button
 				variant="destructive"
 				onclick={() => {
-					void savedSearches.confirmDelete();
+					void sidebarSearch.confirmDelete();
 				}}
-				bind:ref={savedSearches.deleteButtonRef}>{m.sidebar_actions_delete()}</Button
+				bind:ref={sidebarSearch.deleteButtonRef}>{m.sidebar_actions_delete()}</Button
 			>
 		</Dialog.Footer>
 	</Dialog.Content>
