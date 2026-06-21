@@ -7,13 +7,18 @@ import { createEventRouter, type EventRouterStores } from '$lib/events/router.sv
 import { gotoChat } from '$lib/chat/chat-navigation';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
-import { INITIAL_VISIBLE_MESSAGES, type ChatState } from '$lib/chat/state.svelte';
+import type { ChatState } from '$lib/chat/state.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatViewMessage } from '$shared/chat-view';
+import type {
+	ChatTranscriptApplyResult,
+	ChatTranscriptCache,
+} from './chat-transcript-cache.svelte';
+import type { BackgroundTranscriptLoader } from './background-transcript-loader';
 
 export interface ConversationRouterDeps {
 	ws: WsConnection;
@@ -39,6 +44,8 @@ export interface ConversationRouterDeps {
 	conversationUi: ConversationUiStore;
 	startupCoordinator: StartupCoordinator;
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
+	transcriptCache?: ChatTranscriptCache;
+	backgroundTranscriptLoader?: BackgroundTranscriptLoader;
 	visiblePreviews?: {
 		isVisible: (chatId: string) => boolean;
 		applyMessages: (
@@ -51,8 +58,35 @@ export interface ConversationRouterDeps {
 	};
 }
 
+function routerApplyStatus(
+	result: ChatTranscriptApplyResult,
+): 'applied' | 'generation-changed' | 'gap-detected' {
+	if (result.status === 'applied') return 'applied';
+	if (result.status === 'generation-changed') return 'generation-changed';
+	return 'gap-detected';
+}
+
 // Assembles the EventRouterStores contract from workspace dependencies.
 export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStores {
+	const transcriptCache = deps.transcriptCache ?? deps.chatState.transcriptCache;
+	const queueBackgroundLoad = (
+		chatId: string,
+		generationId: string,
+		messages: ChatViewMessage[],
+	): void => {
+		deps.backgroundTranscriptLoader?.queueLoad(chatId, { generationId, messages });
+	};
+	const applyBackgroundTranscript = (
+		chatId: string,
+		generationId: string,
+		messages: ChatViewMessage[],
+	): ChatTranscriptApplyResult => {
+		const result = transcriptCache.applyMessages(chatId, generationId, messages);
+		if (result.status !== 'applied') {
+			queueBackgroundLoad(chatId, generationId, messages);
+		}
+		return result;
+	};
 	return {
 		agentSettings: {
 			permissionMode: () => deps.agentState.permissionMode,
@@ -63,19 +97,19 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 		chatState: {
 			getCursor: () => deps.chatState.getCursor(),
 			applyChatMessages: (chatId, generationId, messages) => {
-				if (deps.sessions.selectedChatId !== chatId) return 'applied';
-				return deps.chatState.applyMessages(generationId, messages);
+				if (deps.sessions.selectedChatId !== chatId) {
+					return routerApplyStatus(applyBackgroundTranscript(chatId, generationId, messages));
+				}
+				return deps.chatState.applyMessages(chatId, generationId, messages);
 			},
-			reloadChatSnapshot: (chatId) => {
+			reloadChatTranscript: (chatId) => {
 				if (deps.sessions.selectedChatId !== chatId) return;
 				void deps.chatState.loadMessages(chatId).catch(() => {
 					// Leaves current visible state until a later retry succeeds.
 				});
 			},
-			warmBackgroundChatSnapshot: (chatId, generationId, messages) =>
-				deps.chatState.snapshotCache.applyMessages(chatId, generationId, messages, undefined, {
-					limit: INITIAL_VISIBLE_MESSAGES,
-				}),
+			warmBackgroundTranscript: (chatId, generationId, messages) =>
+				applyBackgroundTranscript(chatId, generationId, messages).status === 'applied',
 			isVisiblePreviewChat: (chatId) => deps.visiblePreviews?.isVisible(chatId) ?? false,
 			warmVisibleChatPreview: (chatId, generationId, messages) =>
 				deps.visiblePreviews?.applyMessages(chatId, generationId, messages),
@@ -89,9 +123,9 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
 				deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
 			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
-			removeChatSnapshot: (chatId) => deps.chatState.snapshotCache.remove(chatId),
-			markChatSnapshotStale: (chatId) => deps.chatState.snapshotCache.markStale(chatId),
-			markChatSnapshotValidated: (chatId) => deps.chatState.snapshotCache.markValidated(chatId),
+			removeChatTranscript: (chatId) => transcriptCache.remove(chatId),
+			markChatTranscriptStale: (chatId) => transcriptCache.markStale(chatId),
+			markChatTranscriptValidated: (chatId) => transcriptCache.markValidated(chatId),
 		},
 		lifecycle: {
 			currentChatId: () => deps.lifecycle.currentChatId,

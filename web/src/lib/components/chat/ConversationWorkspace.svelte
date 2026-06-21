@@ -10,7 +10,8 @@
 	import QueueControls from './QueueControls.svelte';
 	import { ChatState, INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
 	import type { ChatViewMessage } from '$shared/chat-view';
-	import { ChatSnapshotPersistence } from '$lib/chat/chat-snapshot-persistence';
+	import { ChatTranscriptCache } from '$lib/chat/chat-transcript-cache.svelte';
+	import { BackgroundTranscriptLoader } from '$lib/chat/background-transcript-loader';
 	import type { SplitPanePreviewCursor } from '$lib/chat/split-pane-preview-store.svelte';
 	import { ComposerState } from '$lib/chat/composer.svelte';
 	import { AgentState } from '$lib/chat/agent-state.svelte';
@@ -48,6 +49,7 @@
 	interface ConversationWorkspaceProps {
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
+		transcriptCache?: ChatTranscriptCache;
 		reserveTopFloatingToolbar?: boolean;
 		getVisibleChatIds?: () => string[];
 		isVisiblePreviewChat?: (chatId: string) => boolean;
@@ -66,6 +68,7 @@
 	let {
 		onRegisterSubmit,
 		onRegisterReload,
+		transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES }),
 		reserveTopFloatingToolbar = false,
 		getVisibleChatIds,
 		isVisiblePreviewChat,
@@ -84,17 +87,8 @@
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const modelCatalog = getModelCatalog();
 
-	const chatState = new ChatState();
-	const snapshotPersistence = new ChatSnapshotPersistence({
-		persist: ({ chatId, entries, generationId, lastSeq }) => {
-			chatState.snapshotCache.persist(
-				chatId,
-				entries,
-				{ generationId, lastSeq },
-				{ limit: INITIAL_VISIBLE_MESSAGES },
-			);
-		},
-	});
+	const chatState = new ChatState(transcriptCache);
+	const backgroundTranscriptLoader = new BackgroundTranscriptLoader({ cache: transcriptCache });
 	const composerState = new ComposerState();
 	const agentState = new AgentState();
 	const lifecycle = new ChatLifecycleStore();
@@ -109,25 +103,22 @@
 		getQueue: getChatQueue,
 		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),
 		quietRefreshChats: () => sessions.quietRefreshChats(),
-		getBackgroundCursors: () => chatState.snapshotCache.listCursors(20),
+		getBackgroundCursors: () => transcriptCache.listCursors(20),
 		getVisibleChatIds: () => getVisibleChatIds?.() ?? [],
 		getVisibleChatCursor: (chatId) => getVisiblePreviewCursor?.(chatId) ?? null,
 		loadVisibleChatSnapshot: (chatId) => loadVisiblePreviewSnapshot?.(chatId),
 		onVisibleChatMessages: (chatId, generationId, messages, lastSeq) =>
 			applyVisiblePreviewMessages?.(chatId, generationId, messages, lastSeq),
 		loadBackgroundSnapshot: async (chatId) => {
-			chatState.snapshotCache.markStale(chatId);
 			if (sessions.selectedChatId === chatId) {
 				await chatState.loadMessages(chatId);
 				return;
 			}
-			await sessions.quietRefreshChats();
+			backgroundTranscriptLoader.queueLoad(chatId);
 		},
 		onBackgroundMessages: (chatId, generationId, messages, lastSeq) => {
-			const applied = chatState.snapshotCache.applyMessages(chatId, generationId, messages, lastSeq, {
-				limit: INITIAL_VISIBLE_MESSAGES,
-			});
-			if (!applied) return false;
+			const applied = transcriptCache.applyMessages(chatId, generationId, messages, lastSeq);
+			if (applied.status !== 'applied') return false;
 			const preview = selectPreviewFromBatch(messages.map((entry) => entry.message));
 			if (preview) sessions.patchPreview(chatId, preview.content);
 			return true;
@@ -161,7 +152,7 @@
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
 		drainHandle.cleanup();
-		snapshotPersistence.dispose();
+		transcriptCache.flush();
 	});
 
 	mountConversationRouter({
@@ -174,6 +165,8 @@
 		conversationUi,
 		startupCoordinator,
 		readReceiptOutbox,
+		transcriptCache,
+		backgroundTranscriptLoader,
 		visiblePreviews: {
 			isVisible: (chatId) => isVisiblePreviewChat?.(chatId) ?? false,
 			applyMessages: (chatId, generationId, messages) =>
@@ -235,24 +228,6 @@
 	// Chat switch effect (dedup handled inside the controller).
 	$effect(() => {
 		controller.handleChatSwitchIfChanged(sessions.selectedChatId);
-	});
-
-	// Debounced persistence to avoid main-thread JSON.stringify per token during streaming.
-	$effect(() => {
-		const chatId = sessions.selectedChatId;
-		const entries = chatState.entries;
-		const lastSeq = chatState.lastSeq;
-		const generationId = chatState.generationId;
-		if (!chatId) {
-			snapshotPersistence.flush();
-			return;
-		}
-		snapshotPersistence.schedule({
-			chatId,
-			entries: entries.slice(),
-			generationId,
-			lastSeq,
-		});
 	});
 
 	// Scrolls to bottom when the bottom row changes, including same-count replacements.

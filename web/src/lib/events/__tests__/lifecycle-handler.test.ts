@@ -20,7 +20,7 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 		markChatsAsCompleted: vi.fn(),
 		getPendingChatId: () => null,
 		clearPendingChatId: vi.fn(),
-		markChatSnapshotValidated: vi.fn(),
+		markChatTranscriptValidated: vi.fn(),
 		...overrides,
 	};
 }
@@ -29,13 +29,13 @@ describe('handleAgentComplete', () => {
 	it('marks snapshot validated instead of deleting on successful completion', () => {
 		const ctx = createCtx();
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
-		expect(ctx.markChatSnapshotValidated).toHaveBeenCalledWith('chat-1');
+		expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('does not mark validated when exitCode is 1', () => {
 		const ctx = createCtx();
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 1), ctx);
-		expect(ctx.markChatSnapshotValidated).not.toHaveBeenCalled();
+		expect(ctx.markChatTranscriptValidated).not.toHaveBeenCalled();
 	});
 
 	it('clears selected-turn metadata and marks completed', () => {

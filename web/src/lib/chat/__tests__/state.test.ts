@@ -67,11 +67,11 @@ describe('ChatState', () => {
 	it('applies same-generation messages by seq and ignores duplicates', () => {
 		const chat = new ChatState();
 
-		expect(chat.applyMessages('generation-1', [
+		expect(chat.applyMessages('chat-1', 'generation-1', [
 			entry(1, user('hello')),
 			entry(2, assistant('hi')),
 		])).toBe('applied');
-		expect(chat.applyMessages('generation-1', [
+		expect(chat.applyMessages('chat-1', 'generation-1', [
 			entry(2, assistant('duplicate')),
 			entry(3, assistant('next')),
 		])).toBe('applied');
@@ -82,9 +82,9 @@ describe('ChatState', () => {
 
 	it('signals generation changes instead of merging across generations', () => {
 		const chat = new ChatState();
-		chat.applyMessages('generation-1', [entry(1, user('old'))]);
+		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('old'))]);
 
-		const result = chat.applyMessages('generation-2', [entry(1, assistant('fresh'))]);
+		const result = chat.applyMessages('chat-1', 'generation-2', [entry(1, assistant('fresh'))]);
 
 		expect(result).toBe('generation-changed');
 		expect(chat.chatMessages).toEqual([]);
@@ -93,7 +93,7 @@ describe('ChatState', () => {
 
 	it('renders local messages as transient display-only rows', () => {
 		const chat = new ChatState();
-		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('server'))]);
 
 		chat.appendLocalNotice('progress', 'local status');
 		chat.appendLocalNotice('error', 'local error');
@@ -106,18 +106,18 @@ describe('ChatState', () => {
 
 	it('clears transient local messages when new server messages apply', () => {
 		const chat = new ChatState();
-		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('server'))]);
 		chat.appendLocalNotice('progress', 'local status');
 		chat.appendLocalNotice('error', 'local error');
 
-		chat.applyMessages('generation-1', [entry(2, assistant('next'))]);
+		chat.applyMessages('chat-1', 'generation-1', [entry(2, assistant('next'))]);
 
 		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'next']);
 	});
 
 	it('clears transient local messages when a pending user input is submitted', () => {
 		const chat = new ChatState();
-		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('server'))]);
 		chat.appendLocalNotice('warning', 'Chat interrupted by user.');
 		const noticeBottomRowId = chat.bottomVisibleRowId;
 		expect(chat.displayMessageCount).toBe(2);
@@ -140,10 +140,10 @@ describe('ChatState', () => {
 
 	it('keeps transient local messages when replay only overlaps existing server messages', () => {
 		const chat = new ChatState();
-		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('server'))]);
 		chat.appendLocalNotice('error', 'local error');
 
-		chat.applyMessages('generation-1', [entry(1, user('duplicate'))]);
+		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('duplicate'))]);
 
 		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'local error']);
 	});
@@ -151,9 +151,9 @@ describe('ChatState', () => {
 	it('detects same-generation gaps without advancing the cursor', () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const chat = new ChatState();
-		chat.applyMessages('generation-1', [entry(1, user('server'))]);
+		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('server'))]);
 
-		const result = chat.applyMessages('generation-1', [entry(3, assistant('later'))]);
+		const result = chat.applyMessages('chat-1', 'generation-1', [entry(3, assistant('later'))]);
 
 		expect(result).toBe('gap-detected');
 		expect(chat.chatMessages.map(contentOf)).toEqual(['server']);
@@ -164,10 +164,10 @@ describe('ChatState', () => {
 
 	it('clears transient local messages when a live batch changes generation', () => {
 		const chat = new ChatState();
-		chat.applyMessages('generation-1', [entry(1, user('old'))]);
+		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('old'))]);
 		chat.appendLocalNotice('error', 'local error');
 
-		const result = chat.applyMessages('generation-2', [entry(1, assistant('fresh'))]);
+		const result = chat.applyMessages('chat-1', 'generation-2', [entry(1, assistant('fresh'))]);
 
 		expect(result).toBe('generation-changed');
 		expect(chat.displayMessages).toEqual([]);
@@ -177,8 +177,8 @@ describe('ChatState', () => {
 		const chat = new ChatState();
 		const epoch = chat.beginSnapshotLoad();
 
-		chat.applyMessages('generation-1', [entry(2, assistant('live'))]);
-		const result = chat.setFromPage(page({
+		chat.applyMessages('chat-1', 'generation-1', [entry(2, assistant('live'))]);
+		const result = chat.setFromPage('chat-1', page({
 			generationId: 'generation-1',
 			messages: [entry(1, user('history'))],
 			lastSeq: 1,
@@ -194,8 +194,8 @@ describe('ChatState', () => {
 		const chat = new ChatState();
 		const epoch = chat.beginSnapshotLoad();
 
-		chat.applyMessages('generation-1', [entry(5, assistant('later'))]);
-		const result = chat.setFromPage(page({
+		chat.applyMessages('chat-1', 'generation-1', [entry(5, assistant('later'))]);
+		const result = chat.setFromPage('chat-1', page({
 			generationId: 'generation-1',
 			messages: [
 				entry(1, user('one')),
@@ -213,11 +213,11 @@ describe('ChatState', () => {
 
 	it('does not install a stale snapshot when buffered messages indicate a new generation', () => {
 		const chat = new ChatState();
-		chat.replaceGeneration('current-generation', [entry(1, assistant('current'))], { lastSeq: 1 });
+		chat.replaceGeneration('chat-1', 'current-generation', [entry(1, assistant('current'))], { lastSeq: 1 });
 		const epoch = chat.beginSnapshotLoad();
 
-		chat.applyMessages('new-generation', [entry(1, assistant('new live'))]);
-		const result = chat.setFromPage(page({
+		chat.applyMessages('chat-1', 'new-generation', [entry(1, assistant('new live'))]);
+		const result = chat.setFromPage('chat-1', page({
 			generationId: 'old-generation',
 			messages: [entry(1, user('old page'))],
 			lastSeq: 1,
@@ -232,7 +232,7 @@ describe('ChatState', () => {
 		const chat = new ChatState();
 		const epoch = chat.beginSnapshotLoad();
 
-		chat.setFromPage(page({
+		chat.setFromPage('chat-1', page({
 			messages: [],
 			lastSeq: 0,
 			pendingUserInputs: [{
@@ -246,7 +246,7 @@ describe('ChatState', () => {
 		expect(chat.visiblePendingInputs).toHaveLength(1);
 		expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
 
-		chat.applyMessages('generation-1', [
+		chat.applyMessages('chat-1', 'generation-1', [
 			entry(1, user('pending', { clientRequestId: 'req-1', deliveryStatus: 'accepted' })),
 		]);
 
@@ -264,7 +264,7 @@ describe('ChatState', () => {
 			deliveryStatus: 'accepted',
 		}]);
 
-		chat.replaceGeneration('generation-2', [
+		chat.replaceGeneration('chat-1', 'generation-2', [
 			entry(1, assistant('native')),
 			entry(2, new ErrorMessage(TS, 'The process died.')),
 		], { lastSeq: 2 });
@@ -274,16 +274,16 @@ describe('ChatState', () => {
 		expect(chat.chatMessages[1]).toBeInstanceOf(ErrorMessage);
 	});
 
-	it('persists and restores generation-scoped snapshots', () => {
+	it('persists and activates generation-scoped transcript windows', () => {
 		const chat = new ChatState();
-		chat.applyMessages('generation-1', [
+		chat.applyMessages('chat-1', 'generation-1', [
 			entry(1, user('first')),
 			entry(2, assistant('second')),
 		]);
-		chat.persistMessages('chat-1');
+		chat.transcriptCache.flush();
 
 		const restored = new ChatState();
-		const result = restored.restoreMessages('chat-1');
+		const result = restored.activateChat('chat-1');
 
 		expect(result).toEqual({ count: 2, stale: false });
 		expect(restored.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });

@@ -9,7 +9,7 @@ import {
 } from '$shared/ws-events';
 import type { QueueState } from '$shared/queue-state';
 import type { ChatViewMessage } from '$shared/chat-view';
-import type { CachedChatCursor } from '$lib/chat/chat-snapshot-cache';
+import type { ChatTranscriptCursor } from '$lib/chat/chat-transcript-cache.svelte';
 import type { ChatState } from '$lib/chat/state.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import { extractRunningChatIds } from '$lib/events/handlers/chat-sessions-running';
@@ -29,9 +29,9 @@ export interface ChatReconnectCoordinatorOptions {
 	getQueue: (chatId: string) => Promise<{ queue: QueueState }>;
 	reconcileProcessing: (activeChatIds: Set<string>) => void;
 	quietRefreshChats: () => Promise<void> | void;
-	getBackgroundCursors: () => CachedChatCursor[];
+	getBackgroundCursors: () => ChatTranscriptCursor[];
 	getVisibleChatIds?: () => string[];
-	getVisibleChatCursor?: (chatId: string) => CachedChatCursor | null;
+	getVisibleChatCursor?: (chatId: string) => ChatTranscriptCursor | null;
 	loadVisibleChatSnapshot?: (chatId: string) => Promise<void> | void;
 	onVisibleChatMessages?: (
 		chatId: string,
@@ -107,7 +107,7 @@ export class ChatReconnectCoordinator {
 		}
 
 		if (selectedChatId) {
-			this.options.chatState.snapshotCache.markStale(selectedChatId);
+			this.options.chatState.transcriptCache.markStale(selectedChatId);
 			await this.#resumeSelectedChat(selectedChatId, epoch);
 		}
 
@@ -154,7 +154,11 @@ export class ChatReconnectCoordinator {
 				return;
 			}
 
-			const result = this.options.chatState.applyMessages(message.generationId ?? '', message.messages);
+			const result = this.options.chatState.applyMessages(
+				chatId,
+				message.generationId ?? '',
+				message.messages,
+			);
 			if (result !== 'applied') {
 				await this.#loadSelectedSnapshot(chatId, epoch);
 				return;
@@ -163,7 +167,7 @@ export class ChatReconnectCoordinator {
 				await this.#loadSelectedSnapshot(chatId, epoch);
 				return;
 			}
-			this.options.chatState.snapshotCache.markValidated(chatId);
+			this.options.chatState.transcriptCache.markValidated(chatId);
 		} catch {
 			if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
 			try {
@@ -178,7 +182,7 @@ export class ChatReconnectCoordinator {
 		if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
 		await this.options.chatState.loadMessages(chatId);
 		if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
-		this.options.chatState.snapshotCache.markValidated(chatId);
+		this.options.chatState.transcriptCache.markValidated(chatId);
 	}
 
 	#visibleChatIds(selectedChatId: string | null): string[] {

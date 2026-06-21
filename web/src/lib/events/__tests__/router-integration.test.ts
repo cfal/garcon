@@ -23,15 +23,15 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		chatState: {
 			getCursor: vi.fn(() => ({ generationId: 'generation-current', lastSeq: 1 })),
 			applyChatMessages: vi.fn((): 'applied' => 'applied'),
-			reloadChatSnapshot: vi.fn(),
-			warmBackgroundChatSnapshot: vi.fn(() => true),
+			reloadChatTranscript: vi.fn(),
+			warmBackgroundTranscript: vi.fn(() => true),
 			appendLocalNotice: vi.fn(),
 			upsertPendingUserInput: vi.fn(),
 			clearPendingUserInput: vi.fn(),
 			updatePendingUserInputDeliveryStatus: vi.fn(),
 			loadMessages: vi.fn().mockResolvedValue([]),
-			markChatSnapshotStale: vi.fn(),
-			markChatSnapshotValidated: vi.fn(),
+			markChatTranscriptStale: vi.fn(),
+			markChatTranscriptValidated: vi.fn(),
 		},
 		lifecycle: {
 			currentChatId: () => 'chat-a',
@@ -132,7 +132,7 @@ describe('event router integration', () => {
 		);
 
 		expect(stores.chatState.updatePendingUserInputDeliveryStatus).toHaveBeenCalledWith('req-1', 'accepted');
-		expect(stores.chatState.warmBackgroundChatSnapshot).not.toHaveBeenCalled();
+		expect(stores.chatState.warmBackgroundTranscript).not.toHaveBeenCalled();
 		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
 		expect(stores.sessions.setChatProcessing).not.toHaveBeenCalled();
 		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
@@ -181,7 +181,7 @@ describe('event router integration', () => {
 			chatState: {
 				...defaults.chatState,
 				applyChatMessages: vi.fn((): 'gap-detected' => 'gap-detected'),
-				reloadChatSnapshot: vi.fn(),
+				reloadChatTranscript: vi.fn(),
 			},
 		});
 
@@ -206,7 +206,7 @@ describe('event router integration', () => {
 			'generation-current',
 			expect.arrayContaining([expect.objectContaining({ seq: 3 })]),
 		);
-		expect(stores.chatState.reloadChatSnapshot).toHaveBeenCalledWith('chat-a');
+		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
 	});
 
 	it('patches background previews and warms cached background snapshots', () => {
@@ -228,7 +228,7 @@ describe('event router integration', () => {
 		);
 
 		expect(stores.sessions.patchChatPreview).toHaveBeenCalledWith('chat-b', 'background', TS);
-		expect(stores.chatState.warmBackgroundChatSnapshot).toHaveBeenCalledWith(
+		expect(stores.chatState.warmBackgroundTranscript).toHaveBeenCalledWith(
 			'chat-b',
 			'generation-b',
 			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
@@ -267,7 +267,7 @@ describe('event router integration', () => {
 			'generation-b',
 			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
 		);
-		expect(stores.chatState.warmBackgroundChatSnapshot).toHaveBeenCalledWith(
+		expect(stores.chatState.warmBackgroundTranscript).toHaveBeenCalledWith(
 			'chat-b',
 			'generation-b',
 			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
@@ -352,7 +352,7 @@ describe('event router integration', () => {
 					calls.push('apply');
 					return 'applied';
 				}),
-				reloadChatSnapshot: vi.fn(() => {
+				reloadChatTranscript: vi.fn(() => {
 					calls.push('reload');
 				}),
 			},
@@ -384,7 +384,7 @@ describe('event router integration', () => {
 		);
 
 		expect(calls).toEqual(['apply', 'reload']);
-		expect(stores.chatState.reloadChatSnapshot).toHaveBeenCalledWith('chat-a');
+		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
 	});
 
 	it('marks background snapshots stale on generation reset', () => {
@@ -400,7 +400,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.chatState.markChatSnapshotStale).toHaveBeenCalledWith('chat-b');
+		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-b');
 	});
 
 	it('reloads visible split-pane previews on generation reset', () => {
@@ -427,7 +427,7 @@ describe('event router integration', () => {
 
 		expect(stores.chatState.markVisibleChatPreviewStale).toHaveBeenCalledWith('chat-b');
 		expect(stores.chatState.loadVisibleChatPreview).toHaveBeenCalledWith('chat-b');
-		expect(stores.chatState.markChatSnapshotStale).toHaveBeenCalledWith('chat-b');
+		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-b');
 	});
 
 	it('preserves streamed output order before same-drain stop messages', () => {

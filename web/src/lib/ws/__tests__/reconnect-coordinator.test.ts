@@ -83,7 +83,11 @@ function createReconnectDeps(options: {
 	});
 	const chatState = {
 		getCursor: vi.fn(() => selectedCursor),
-		applyMessages: vi.fn((generationId: string, messages: Array<{ seq?: unknown }>) => {
+		applyMessages: vi.fn((
+			_chatId: string,
+			generationId: string,
+			messages: Array<{ seq?: unknown }>,
+		) => {
 			const last = messages.at(-1);
 			if (typeof last?.seq === 'number') {
 				selectedCursor = { generationId, lastSeq: last.seq };
@@ -91,7 +95,7 @@ function createReconnectDeps(options: {
 			return 'applied';
 		}),
 		loadMessages: vi.fn(async () => []),
-		snapshotCache: {
+		transcriptCache: {
 			markStale: vi.fn(),
 			markValidated: vi.fn(),
 		},
@@ -160,6 +164,7 @@ describe('ChatReconnectCoordinator', () => {
 			afterSeq: 2,
 		}));
 		expect(deps.chatState.applyMessages).toHaveBeenCalledWith(
+			'chat-1',
 			'generation-selected',
 			expect.arrayContaining([expect.objectContaining({ seq: 3 })]),
 		);
@@ -175,7 +180,7 @@ describe('ChatReconnectCoordinator', () => {
 		await reconnectAfterFirstConnection(deps);
 
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
-		expect(deps.chatState.snapshotCache.markValidated).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('falls back to selected snapshot when reconnect replay detects a seq gap', async () => {
@@ -189,7 +194,7 @@ describe('ChatReconnectCoordinator', () => {
 		await reconnectAfterFirstConnection(deps);
 
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
-		expect(deps.chatState.snapshotCache.markValidated).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('falls back to selected snapshot when reconnect delta lastSeq stays ahead after apply', async () => {
@@ -205,7 +210,7 @@ describe('ChatReconnectCoordinator', () => {
 		await reconnectAfterFirstConnection(deps);
 
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
-		expect(deps.chatState.snapshotCache.markValidated).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('falls back to selected snapshot when subscribe request fails', async () => {
@@ -221,7 +226,7 @@ describe('ChatReconnectCoordinator', () => {
 		await reconnectAfterFirstConnection(deps);
 
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
-		expect(deps.chatState.snapshotCache.markValidated).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.applyMessages).not.toHaveBeenCalled();
 	});
 
@@ -235,7 +240,7 @@ describe('ChatReconnectCoordinator', () => {
 		await reconnectAfterFirstConnection(deps);
 
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
-		expect(deps.chatState.snapshotCache.markValidated).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.applyMessages).not.toHaveBeenCalled();
 	});
 
@@ -404,6 +409,7 @@ describe('ChatReconnectCoordinator', () => {
 		await Promise.all([first, second]);
 
 		expect(deps.chatState.applyMessages).not.toHaveBeenCalledWith(
+			'chat-1',
 			'generation-old',
 			expect.any(Array),
 		);

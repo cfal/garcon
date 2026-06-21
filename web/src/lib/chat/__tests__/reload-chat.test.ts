@@ -43,7 +43,7 @@ describe('reloadChatFromNative', () => {
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-2', lastSeq: 1 });
 		expect(chat.chatMessages[0]).toBeInstanceOf(AssistantMessage);
 		expect((chat.chatMessages[0] as AssistantMessage).content).toBe('native');
-		expect(chat.snapshotCache.restore('chat-1')?.lastSeq).toBe(1);
+		expect(chat.transcriptCache.get('chat-1')?.lastSeq).toBe(1);
 	});
 
 	it('rejects unexpected reload responses', async () => {

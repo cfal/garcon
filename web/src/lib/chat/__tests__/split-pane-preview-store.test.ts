@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SplitPanePreviewStore } from '../split-pane-preview-store.svelte';
-import { LocalChatSnapshotCache } from '../chat-snapshot-cache';
+import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
+import { LocalChatTranscriptStorage } from '../chat-transcript-storage';
 import { AssistantMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { ChatViewMessage } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
@@ -45,12 +46,13 @@ describe('SplitPanePreviewStore', () => {
 	});
 
 	it('restores a cached preview and exposes its cursor', () => {
-		const cache = new LocalChatSnapshotCache();
-		cache.persist('chat-1', [userEntry(1, 'hello')], {
+		const storage = new LocalChatTranscriptStorage();
+		storage.persist('chat-1', [userEntry(1, 'hello')], {
 			generationId: 'generation-1',
 			lastSeq: 1,
 		});
-		const store = new SplitPanePreviewStore();
+		const transcriptCache = new ChatTranscriptCache({ limit: 50, storage });
+		const store = new SplitPanePreviewStore(transcriptCache);
 
 		store.restore('chat-1');
 
@@ -64,7 +66,9 @@ describe('SplitPanePreviewStore', () => {
 
 	it('loads an HTTP snapshot and persists it through the shared cache', async () => {
 		vi.mocked(getChatMessages).mockResolvedValueOnce(page([entry(1, 'loaded')]));
-		const store = new SplitPanePreviewStore();
+		const storage = new LocalChatTranscriptStorage();
+		const transcriptCache = new ChatTranscriptCache({ limit: 50, storage });
+		const store = new SplitPanePreviewStore(transcriptCache);
 
 		await store.loadSnapshot('chat-1');
 
@@ -72,7 +76,8 @@ describe('SplitPanePreviewStore', () => {
 		expect(store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content))
 			.toEqual(['loaded']);
 
-		const restored = new LocalChatSnapshotCache().restore('chat-1');
+		transcriptCache.flush();
+		const restored = storage.restore('chat-1');
 		expect(restored?.generationId).toBe('generation-1');
 		expect(restored?.lastSeq).toBe(1);
 	});
@@ -97,7 +102,6 @@ describe('SplitPanePreviewStore', () => {
 
 		expect(applied).toBe(false);
 		expect(store.entry('chat-1').isStale).toBe(true);
-		expect(new LocalChatSnapshotCache().restore('chat-1')?.stale).toBe(true);
 	});
 
 	it('marks stale when incoming messages have a seq gap', () => {

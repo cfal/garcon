@@ -1,5 +1,4 @@
 import {
-	applyChatViewMessages,
 	parseChatViewMessages,
 	type ChatViewMessage,
 } from '$shared/chat-view';
@@ -31,7 +30,7 @@ interface ChatSnapshotIndex {
 	entries: ChatSnapshotIndexEntry[];
 }
 
-export interface RestoredChatSnapshot {
+export interface RestoredChatTranscript {
 	entries: ChatViewMessage[];
 	generationId: string;
 	lastSeq: number;
@@ -44,7 +43,7 @@ export interface CachedChatCursor {
 	lastSeq: number;
 }
 
-export interface ChatSnapshotWindowOptions {
+export interface ChatTranscriptWindowOptions {
 	limit?: number;
 }
 
@@ -80,7 +79,10 @@ function writeIndex(index: ChatSnapshotIndex): void {
 	localStorage.setItem(INDEX_KEY, JSON.stringify(index));
 }
 
-function windowEntries(entries: ChatViewMessage[], options: ChatSnapshotWindowOptions = {}): ChatViewMessage[] {
+function windowEntries(
+	entries: ChatViewMessage[],
+	options: ChatTranscriptWindowOptions = {},
+): ChatViewMessage[] {
 	const limit = Number.isFinite(options.limit) ? Math.floor(options.limit ?? 0) : 0;
 	if (limit <= 0 || entries.length <= limit) return entries;
 	return entries.slice(-limit);
@@ -123,7 +125,7 @@ function pruneIndex(index: ChatSnapshotIndex): ChatSnapshotIndex {
 		try {
 			localStorage.removeItem(snapshotKey(entry.chatId));
 		} catch {
-			// Ignores storage removal failures.
+			// Leaves storage cleanup best-effort.
 		}
 	}
 	return { ...index, entries: keep };
@@ -133,8 +135,8 @@ function hasSnapshot(chatId: string): boolean {
 	return Boolean(localStorage.getItem(snapshotKey(chatId)));
 }
 
-export class LocalChatSnapshotCache {
-	restore(chatId: string, options: ChatSnapshotWindowOptions = {}): RestoredChatSnapshot | null {
+export class LocalChatTranscriptStorage {
+	restore(chatId: string, options: ChatTranscriptWindowOptions = {}): RestoredChatTranscript | null {
 		if (!chatId) return null;
 		try {
 			const raw = localStorage.getItem(snapshotKey(chatId));
@@ -171,7 +173,7 @@ export class LocalChatSnapshotCache {
 		chatId: string,
 		entries: ChatViewMessage[],
 		cursor: { generationId: string; lastSeq: number },
-		options: ChatSnapshotWindowOptions = {},
+		options: ChatTranscriptWindowOptions = {},
 	): void {
 		if (!chatId) return;
 		if (entries.length === 0 || !cursor.generationId) {
@@ -276,35 +278,6 @@ export class LocalChatSnapshotCache {
 		} catch {
 			return [];
 		}
-	}
-
-	applyMessages(
-		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-		lastSeq?: number,
-		options: ChatSnapshotWindowOptions = {},
-	): boolean {
-		if (!chatId || !generationId) return false;
-		const restored = this.restore(chatId);
-		if (!restored || restored.generationId !== generationId) {
-			this.markStale(chatId);
-			return false;
-		}
-		const result = applyChatViewMessages(restored.entries, messages, restored.lastSeq);
-		if (
-			result.status === 'gap-detected' ||
-			(typeof lastSeq === 'number' && lastSeq > result.lastSeq)
-		) {
-			this.markStale(chatId);
-			return false;
-		}
-		this.persist(chatId, result.messages, {
-			generationId,
-			lastSeq: result.lastSeq,
-		}, options);
-		this.markValidated(chatId);
-		return true;
 	}
 
 	clearAll(): void {
