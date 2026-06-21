@@ -138,7 +138,7 @@
 		</Dialog.Trigger>
 		<Dialog.Content
 			class={cn(
-				'top-auto bottom-0 left-0 h-[min(32rem,88dvh)] max-h-[88dvh] w-full max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-t-2xl rounded-b-none border-x-0 border-b-0 p-0',
+				'top-auto bottom-[var(--mobile-nav-total)] left-0 h-[min(32rem,calc(100dvh-var(--mobile-nav-total)))] max-h-[calc(100dvh-var(--mobile-nav-total))] w-full max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-t-2xl rounded-b-2xl border-x-0 border-b p-0',
 				contentClass,
 			)}
 			showCloseButton={false}

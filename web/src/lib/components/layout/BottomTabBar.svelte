@@ -16,8 +16,14 @@
 	const tabs = CHAT_TOOLBAR_TABS;
 </script>
 
-<nav class="flex-shrink-0 border-t border-border bg-card pb-safe">
-	<div class="flex items-center justify-around px-2 py-1">
+<nav
+	data-slot="bottom-tab-bar"
+	class="h-[var(--mobile-nav-total)] flex-shrink-0 border-t border-border bg-card"
+>
+	<div
+		data-slot="bottom-tab-bar-content"
+		class="flex h-[var(--mobile-nav-height)] items-center justify-around px-2 py-1"
+	>
 		<button
 			class="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
 			onclick={onMenuClick}
