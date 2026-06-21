@@ -111,10 +111,11 @@ export class ModelSelectorState {
 	}
 
 	isRecentSelected(recent: ModelSelectorRecentOption): boolean {
-		const selectedModel = this.selectedModel;
+		const selection = this.committedSelection;
+		const selectedModel = selection.selectedModel;
 		return (
-			recent.agentId === this.agentId &&
-			recent.modelValue === this.currentModelValue &&
+			recent.agentId === selection.agentId &&
+			recent.modelValue === selection.modelValue &&
 			recent.apiProviderId === (selectedModel?.apiProviderId ?? null) &&
 			recent.modelEndpointId === (selectedModel?.endpointId ?? null) &&
 			recent.modelProtocol === (selectedModel?.protocol ?? null)

@@ -599,6 +599,15 @@ describe('ModelSelectorPopover', () => {
 		).toBeTruthy();
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Recents' }));
+
+		expect(
+			screen
+				.getByRole('button', { name: 'Claude · Claude OAuth · Model 0' })
+				.querySelector('.lucide-check'),
+		).toBeTruthy();
+
 		await fireEvent.click(
 			await screen.findByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' }),
 		);
@@ -610,6 +619,72 @@ describe('ModelSelectorPopover', () => {
 				model: 'codex-model-1',
 			}),
 		);
+	});
+
+	it('keeps compact recent checkmark after returning from the menu for endpoint recents', async () => {
+		installMatchMedia(true);
+
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'endpoint-model', modelEndpointId: 'acme-claude' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			recents: [endpointRecent(), codexRecent()],
+			preferRecentsOnOpen: true,
+			includeEndpointModel: true,
+			onChange: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Endpoint Model/ }));
+
+		expect(await screen.findByText('Recent models')).toBeTruthy();
+		const currentRecent = screen.getByRole('button', { name: 'Claude · Acme · Endpoint Model' });
+		expect(currentRecent.querySelector('.lucide-check')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Recents' }));
+
+		expect(
+			screen
+				.getByRole('button', { name: 'Claude · Acme · Endpoint Model' })
+				.querySelector('.lucide-check'),
+		).toBeTruthy();
+	});
+
+	it('keeps compact recent checkmark after draft agent and provider navigation', async () => {
+		installMatchMedia(true);
+
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'codex', model: 'codex-model-1' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			recents: [codexRecent(), endpointRecent()],
+			preferRecentsOnOpen: true,
+			includeEndpointModel: true,
+			onChange: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Codex .* Codex Model 1/ }));
+
+		expect(await screen.findByText('Recent models')).toBeTruthy();
+		expect(
+			screen
+				.getByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' })
+				.querySelector('.lucide-check'),
+		).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Claude' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Acme' }));
+		expect(await screen.findByRole('listbox', { name: 'Model' })).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Recents' }));
+
+		expect(
+			screen
+				.getByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' })
+				.querySelector('.lucide-check'),
+		).toBeTruthy();
 	});
 
 	it('commits compact model selection immediately', async () => {
