@@ -3,6 +3,7 @@ import {
 	PermissionCancelledMessage,
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
+	ReadToolUseMessage,
 	ToolResultMessage,
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
@@ -27,6 +28,13 @@ export type ConversationFeedRenderItem =
 			kind: 'bash-group';
 			id: string;
 			messages: BashToolUseMessage[];
+			index: number;
+			prevMessage: ChatMessage | null;
+	  }
+	| {
+			kind: 'read-group';
+			id: string;
+			messages: ReadToolUseMessage[];
 			index: number;
 			prevMessage: ChatMessage | null;
 	  }
@@ -56,6 +64,10 @@ function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
 
 function bashGroupId(rows: ChatTranscriptRow[]): string {
 	return `bash-group-${rows[0]?.id ?? 'empty'}`;
+}
+
+function readGroupId(rows: ChatTranscriptRow[]): string {
+	return `read-group-${rows[0]?.id ?? 'empty'}`;
 }
 
 export function buildConversationFeedRenderModel(
@@ -129,6 +141,48 @@ export function buildConversationFeedRenderModel(
 				items.push({
 					kind: 'bash-group',
 					id: bashGroupId(groupRows),
+					messages: group,
+					index: firstIndex,
+					prevMessage,
+				});
+			} else {
+				items.push({
+					kind: 'message',
+					id: groupRows[0].id,
+					message: group[0],
+					index: firstIndex,
+					prevMessage,
+				});
+			}
+			continue;
+		}
+
+		if (message instanceof ReadToolUseMessage) {
+			const groupRows: ChatTranscriptRow[] = [];
+			const group: ReadToolUseMessage[] = [];
+			const prevMessage = previousRenderable;
+			const firstIndex = index;
+
+			while (index < rows.length) {
+				const candidateRow = rows[index];
+				if (candidateRow.kind === 'local-notice') break;
+				const candidate = candidateRow.message;
+				if (candidate instanceof ToolResultMessage) {
+					toolResultIndex.set(candidate.toolId, candidate);
+					index += 1;
+					continue;
+				}
+				if (!(candidate instanceof ReadToolUseMessage)) break;
+				groupRows.push(candidateRow);
+				group.push(candidate);
+				previousRenderable = candidate;
+				index += 1;
+			}
+
+			if (group.length > 1) {
+				items.push({
+					kind: 'read-group',
+					id: readGroupId(groupRows),
 					messages: group,
 					index: firstIndex,
 					prevMessage,

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ConversationMessage from './ConversationMessage.svelte';
 	import ChatBashToolGroup from './tools/ChatBashToolGroup.svelte';
+	import ChatReadToolGroup from './tools/ChatReadToolGroup.svelte';
 	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import LocalNoticeRow from './rows/LocalNoticeRow.svelte';
 	import { isToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
@@ -10,6 +11,7 @@
 	import type { ChatDisplayRow } from '$lib/chat/state.svelte';
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { buildConversationFeedRenderModel } from '$lib/chat/conversation-feed-items';
+	import { getChatSessions, getFileViewer } from '$lib/context';
 
 	interface PermissionDecision {
 		allow: PermissionDecisionPayload['allow'];
@@ -40,6 +42,16 @@
 		onExitPlanMode,
 	}: Props = $props();
 
+	const sessions = getChatSessions();
+	const fileViewer = getFileViewer();
+
+	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
+		if (chatContext?.chatId) return chatContext;
+		const selected = sessions.selectedChat;
+		if (!selected?.id) return null;
+		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
+	});
+
 	const pendingExitPlanIds = $derived(
 		new Set(
 			pendingPermissionRequests
@@ -50,6 +62,17 @@
 
 	const renderModel = $derived(buildConversationFeedRenderModel(rows));
 	const renderItems = $derived(renderModel.items);
+
+	function handleReadFileOpen(filePath: string): void {
+		const chat = activeChatContext;
+		if (!chat?.projectPath) return;
+		fileViewer.openAuto({
+			chatId: chat.chatId,
+			projectPath: chat.projectPath,
+			relativePath: filePath,
+			source: 'tool',
+		});
+	}
 </script>
 
 <div
@@ -61,6 +84,13 @@
 		{#if item.kind === 'bash-group'}
 			<svelte:boundary>
 				<ChatBashToolGroup messages={item.messages} />
+				{#snippet failed(error)}
+					<MessageRenderFallback {error} />
+				{/snippet}
+			</svelte:boundary>
+		{:else if item.kind === 'read-group'}
+			<svelte:boundary>
+				<ChatReadToolGroup messages={item.messages} onFileOpen={handleReadFileOpen} />
 				{#snippet failed(error)}
 					<MessageRenderFallback {error} />
 				{/snippet}
@@ -77,9 +107,8 @@
 			{@const toolResult = isToolUseMessage(message)
 				? renderModel.toolResultIndex.get(message.toolId)
 				: undefined}
-			{@const exitPlanId = message.type === 'exit-plan-mode-tool-use'
-				? `plan-exit-${message.toolId}`
-				: null}
+			{@const exitPlanId =
+				message.type === 'exit-plan-mode-tool-use' ? `plan-exit-${message.toolId}` : null}
 			{@const permTerminal =
 				message instanceof PermissionRequestMessage
 					? renderModel.permissionTerminalById.get(message.permissionRequestId)
