@@ -88,8 +88,8 @@ export interface EventRouterChatStateStore {
 		generationId: string,
 		messages: ChatViewMessage[],
 	) => 'applied' | 'generation-changed' | 'gap-detected';
-	reloadChatSnapshot: (chatId: string) => void;
-	warmBackgroundChatSnapshot?: (
+	reloadChatTranscript: (chatId: string) => void;
+	warmBackgroundTranscript?: (
 		chatId: string,
 		generationId: string,
 		messages: ChatViewMessage[],
@@ -110,9 +110,9 @@ export interface EventRouterChatStateStore {
 		deliveryStatus: 'submitting' | 'accepted' | 'failed',
 	) => void;
 	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
-	removeChatSnapshot?: (chatId: string) => void;
-	markChatSnapshotStale?: (chatId: string) => void;
-	markChatSnapshotValidated?: (chatId: string) => void;
+	removeChatTranscript?: (chatId: string) => void;
+	markChatTranscriptStale?: (chatId: string) => void;
+	markChatTranscriptValidated?: (chatId: string) => void;
 }
 
 export interface EventRouterLifecycleStore {
@@ -182,7 +182,7 @@ export function selectPreviewFromBatch(
 }
 
 export function createChatMessagesAccumulator(
-	chatState: Pick<EventRouterChatStateStore, 'applyChatMessages' | 'reloadChatSnapshot'>,
+	chatState: Pick<EventRouterChatStateStore, 'applyChatMessages' | 'reloadChatTranscript'>,
 ) {
 	let pendingMessages: ChatViewMessage[] = [];
 	let pendingGenerationId = '';
@@ -208,7 +208,7 @@ export function createChatMessagesAccumulator(
 			pendingChatId = '';
 			const result = chatState.applyChatMessages(chatId, generationId, messages);
 			if (result !== 'applied') {
-				chatState.reloadChatSnapshot(chatId);
+				chatState.reloadChatTranscript(chatId);
 			}
 		},
 	};
@@ -274,7 +274,7 @@ function buildDispatch(
 		onNavigateToChat,
 		getPendingChatId,
 		clearPendingChatId,
-		markChatSnapshotValidated: stores.chatState.markChatSnapshotValidated,
+		markChatTranscriptValidated: stores.chatState.markChatTranscriptValidated,
 	};
 
 	const chatEventCtx: ChatEventContext = {
@@ -330,7 +330,7 @@ function buildDispatch(
 		patchChatTitle: stores.sessions.patchChatTitle,
 		patchLastReadAt: stores.sessions.patchLastReadAt,
 		refreshChats: stores.sessions.refreshChats,
-		removeChatSnapshot: stores.chatState.removeChatSnapshot,
+		removeChatTranscript: stores.chatState.removeChatTranscript,
 	};
 
 	return {
@@ -349,9 +349,9 @@ function buildDispatch(
 			if (selectedChatId === msg.chatId) {
 				const cursor = stores.chatState.getCursor();
 				if (cursor.generationId !== msg.generationId) {
-					stores.chatState.reloadChatSnapshot(msg.chatId);
+					stores.chatState.reloadChatTranscript(msg.chatId);
 				} else {
-					stores.chatState.markChatSnapshotValidated?.(msg.chatId);
+					stores.chatState.markChatTranscriptValidated?.(msg.chatId);
 				}
 				return;
 			}
@@ -359,7 +359,7 @@ function buildDispatch(
 				stores.chatState.markVisibleChatPreviewStale?.(msg.chatId);
 				void stores.chatState.loadVisibleChatPreview?.(msg.chatId);
 			}
-			stores.chatState.markChatSnapshotStale?.(msg.chatId);
+			stores.chatState.markChatTranscriptStale?.(msg.chatId);
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
@@ -496,7 +496,7 @@ export function createEventRouter(
 									void stores.chatState.loadVisibleChatPreview?.(agentMsg.chatId);
 								}
 							}
-							stores.chatState.warmBackgroundChatSnapshot?.(
+							stores.chatState.warmBackgroundTranscript?.(
 								agentMsg.chatId,
 								agentMsg.generationId,
 								agentMsg.messages,

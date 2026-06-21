@@ -16,7 +16,7 @@ export interface SidebarContext {
 	patchChatTitle: (chatId: string, title: string) => void;
 	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 	refreshChats: () => void;
-	removeChatSnapshot?: (chatId: string) => void;
+	removeChatTranscript?: (chatId: string) => void;
 }
 
 export function handleChatTitle(msg: ChatTitleUpdatedMessage, ctx: SidebarContext) {
@@ -28,7 +28,7 @@ export function handleChatDeleted(msg: ChatSessionDeletedWsMessage, ctx: Sidebar
 	if (!msg.chatId) return;
 	ctx.navigateAwayFromChat(msg.chatId);
 	ctx.removeChat(msg.chatId);
-	ctx.removeChatSnapshot?.(msg.chatId);
+	ctx.removeChatTranscript?.(msg.chatId);
 }
 
 export function handleChatReadUpdated(msg: ChatReadUpdatedV1Message, ctx: SidebarContext) {

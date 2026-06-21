@@ -147,7 +147,7 @@ export class ConversationSessionController {
 		deps.navigation.setActiveTab('chat');
 
 		if (!chatId) {
-			deps.chatState.clearMessages();
+			deps.chatState.activateChat(null);
 			deps.composerState.inputText = '';
 			deps.lifecycle.clearTurnStatus();
 			deps.lifecycle.setCurrentChatId(null);
@@ -159,11 +159,9 @@ export class ConversationSessionController {
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return;
 
-		deps.chatState.resetForNewChat();
-
 		// Restore cached messages immediately so the user sees content
 		// while the server round-trip completes.
-		const restored = deps.chatState.restoreMessages(chatId);
+		const restored = deps.chatState.activateChat(chatId);
 		if (restored) {
 			requestAnimationFrame(() => deps.scrollToBottom());
 		}
@@ -270,7 +268,7 @@ export class ConversationSessionController {
 		// Restore from cache if no messages are loaded yet (e.g., WS reconnect path).
 		// The primary restore happens earlier in handleChatSwitch.
 		if (deps.chatState.chatMessages.length === 0) {
-			const restored = deps.chatState.restoreMessages(chatId);
+			const restored = deps.chatState.activateChat(chatId);
 			minimumMessageLimit = Math.max(minimumMessageLimit, restored?.count ?? 0);
 		}
 
@@ -284,7 +282,7 @@ export class ConversationSessionController {
 			});
 			if (deps.sessions.selectedChatId !== chatId) return;
 
-			deps.chatState.snapshotCache.markValidated(chatId);
+			deps.chatState.transcriptCache.markValidated(chatId);
 			requestAnimationFrame(() => deps.scrollToBottom());
 
 			const record = deps.sessions.byId[chatId];

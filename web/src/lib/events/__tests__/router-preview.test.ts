@@ -47,7 +47,7 @@ describe('createChatMessagesAccumulator', () => {
 				current = [...current, ...messages.map((item) => item.message)];
 				return 'applied';
 			},
-			reloadChatSnapshot: () => {},
+			reloadChatTranscript: () => {},
 		});
 
 		accumulator.enqueue(
@@ -73,11 +73,11 @@ describe('createChatMessagesAccumulator', () => {
 		]);
 	});
 
-	it('reloads the snapshot when accumulated messages report a generation change', () => {
+	it('reloads the transcript when accumulated messages report a generation change', () => {
 		const reloads: string[] = [];
 		const accumulator = createChatMessagesAccumulator({
 			applyChatMessages: () => 'generation-changed',
-			reloadChatSnapshot: (chatId) => reloads.push(chatId),
+			reloadChatTranscript: (chatId) => reloads.push(chatId),
 		});
 
 		accumulator.enqueue(new ChatMessagesMessage(
@@ -97,7 +97,7 @@ describe('createChatMessagesAccumulator', () => {
 				writes += 1;
 				return 'applied';
 			},
-			reloadChatSnapshot: () => {},
+			reloadChatTranscript: () => {},
 		});
 
 		accumulator.flush();

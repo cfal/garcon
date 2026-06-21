@@ -1,10 +1,7 @@
-import {
-	applyChatViewMessages,
-	type ChatViewMessage,
-} from '$shared/chat-view';
+import { applyChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
-import { LocalChatSnapshotCache } from './chat-snapshot-cache';
+import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { LocalNoticeRow, LocalNoticeType } from './local-notice';
 
@@ -53,7 +50,8 @@ function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): Pendi
 }
 
 export class ChatState {
-	readonly snapshotCache = new LocalChatSnapshotCache();
+	readonly transcriptCache: ChatTranscriptCache;
+	activeChatId = $state<string | null>(null);
 	entries = $state<ChatViewMessage[]>([]);
 	generationId = $state('');
 	lastSeq = $state(0);
@@ -71,6 +69,10 @@ export class ChatState {
 	#snapshotBuffer: Array<{ generationId: string; messages: ChatViewMessage[] }> | null = null;
 	#loadEpoch = 0;
 	#isLoadingMore = false;
+
+	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
+		this.transcriptCache = transcriptCache;
+	}
 
 	#echoedClientRequestIds = $derived.by(() => {
 		const ids = new Set<string>();
@@ -150,14 +152,17 @@ export class ChatState {
 	}
 
 	applyMessages(
+		chatId: string,
 		generationId: string,
 		messages: ChatViewMessage[],
 	): MessageApplyResult {
 		if (this.#snapshotBuffer) {
+			this.transcriptCache.applyMessages(chatId, generationId, messages);
 			this.#snapshotBuffer.push({ generationId, messages });
 			return 'applied';
 		}
 		if (this.generationId && generationId !== this.generationId) {
+			this.transcriptCache.markStale(chatId);
 			this.entries = [];
 			this.lastSeq = 0;
 			this.oldestSeq = 0;
@@ -165,23 +170,42 @@ export class ChatState {
 			this.localNotices = [];
 			return 'generation-changed';
 		}
-		this.generationId = generationId;
-		const result = applyChatViewMessages(this.entries, messages, this.lastSeq);
-		if (result.status === 'gap-detected') {
+		const result = this.transcriptCache.applyMessages(chatId, generationId, messages);
+		if (result.status === 'generation-changed') {
+			this.entries = [];
+			this.lastSeq = 0;
+			this.oldestSeq = 0;
+			this.generationId = generationId;
+			this.localNotices = [];
+			return 'generation-changed';
+		}
+		if (result.status !== 'applied') {
+			const gapDetails = result.status === 'gap-detected'
+				? ` expected=${result.expectedSeq} received=${result.receivedSeq}`
+				: '';
 			console.warn(
-				`[chat-state] seq gap detected generation=${generationId} expected=${result.expectedSeq} received=${result.receivedSeq}`,
+				`[chat-state] transcript apply failed chat=${chatId} generation=${generationId} status=${result.status}${gapDetails}`,
 			);
 			return 'gap-detected';
 		}
+		const applied = applyChatViewMessages(this.entries, messages, this.lastSeq);
+		if (applied.status === 'applied') {
+			this.generationId = generationId;
+			this.entries = applied.messages;
+			this.lastSeq = applied.lastSeq;
+			this.oldestSeq = this.entries[0]?.seq ?? 0;
+		} else {
+			const restored = this.transcriptCache.get(chatId);
+			if (!restored || restored.generationId !== generationId) return 'gap-detected';
+			this.generationId = restored.generationId;
+			this.entries = restored.messages;
+			this.lastSeq = restored.lastSeq;
+			this.oldestSeq = restored.oldestSeq;
+		}
 		if (result.changed) {
-			this.entries = result.messages;
 			this.localNotices = [];
 		}
-		this.lastSeq = result.lastSeq;
 		this.totalMessages = this.entries.length;
-		if (this.oldestSeq === 0 && this.entries.length > 0) {
-			this.oldestSeq = this.entries[0].seq;
-		}
 		if (this.entries.length > 0 && this.loadStatus !== 'error') {
 			this.loadStatus = 'loaded';
 		}
@@ -204,12 +228,15 @@ export class ChatState {
 	}
 
 	replaceGeneration(
+		chatId: string,
 		generationId: string,
 		messages: ChatViewMessage[],
 		options: { lastSeq: number; pendingUserInputs?: PendingUserInput[] } = { lastSeq: 0 },
 	): void {
+		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
 		this.#snapshotBuffer = null;
+		this.transcriptCache.replace(chatId, generationId, messages, options.lastSeq);
 		this.generationId = generationId;
 		this.entries = messages;
 		this.lastSeq = options.lastSeq;
@@ -226,7 +253,7 @@ export class ChatState {
 		this.#isLoadingMore = false;
 	}
 
-	setFromPage(page: {
+	setFromPage(chatId: string, page: {
 		generationId: string;
 		messages: ChatViewMessage[];
 		lastSeq: number;
@@ -244,6 +271,7 @@ export class ChatState {
 			return 'generation-changed';
 		}
 
+		this.transcriptCache.replaceFromPage(chatId, page);
 		this.generationId = page.generationId;
 		this.entries = page.messages;
 		this.lastSeq = page.lastSeq;
@@ -256,7 +284,7 @@ export class ChatState {
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		for (const batch of buffered) {
-			const result = this.applyMessages(batch.generationId, batch.messages);
+			const result = this.applyMessages(chatId, batch.generationId, batch.messages);
 			if (result !== 'applied') return result;
 		}
 		return 'applied';
@@ -271,7 +299,11 @@ export class ChatState {
 			const epoch = this.beginSnapshotLoad();
 			try {
 				const page = await getChatMessages({ chatId, limit });
-				const result = this.setFromPage(page, epoch);
+				if (this.activeChatId && this.activeChatId !== chatId) {
+					this.abortSnapshotLoad(epoch);
+					return this.chatMessages;
+				}
+				const result = this.setFromPage(chatId, page, epoch);
 
 				if (result === 'applied') return this.chatMessages;
 				if (result === 'stale') return this.chatMessages;
@@ -403,30 +435,24 @@ export class ChatState {
 		this.isUserScrolledUp = false;
 	}
 
-	persistMessages(chatId: string): void {
-		this.snapshotCache.persist(
-			chatId,
-			this.entries,
-			{ generationId: this.generationId, lastSeq: this.lastSeq },
-			{ limit: INITIAL_VISIBLE_MESSAGES },
-		);
-	}
-
-	restoreMessages(chatId: string): ChatRestoreResult | null {
-		const restored = this.snapshotCache.restore(chatId, { limit: INITIAL_VISIBLE_MESSAGES });
+	activateChat(chatId: string | null): ChatRestoreResult | null {
+		this.activeChatId = chatId;
+		this.resetForNewChat();
+		if (!chatId) return null;
+		const restored = this.transcriptCache.get(chatId);
 		if (!restored) return null;
-		this.entries = restored.entries;
+		this.entries = restored.messages;
 		this.generationId = restored.generationId;
 		this.lastSeq = restored.lastSeq;
-		this.oldestSeq = restored.entries.length > 0 ? restored.entries[0].seq : 0;
-		this.totalMessages = restored.entries.length;
+		this.oldestSeq = restored.oldestSeq;
+		this.totalMessages = restored.messages.length;
 		this.hasMoreMessages = false;
-		this.loadStatus = restored.entries.length === 0 ? 'empty' : 'loaded';
-		return { count: restored.entries.length, stale: restored.stale };
+		this.loadStatus = restored.messages.length === 0 ? 'empty' : 'loaded';
+		return { count: restored.messages.length, stale: restored.stale };
 	}
 
 	removeCachedMessages(chatId: string): void {
-		this.snapshotCache.remove(chatId);
+		this.transcriptCache.remove(chatId);
 	}
 }
 

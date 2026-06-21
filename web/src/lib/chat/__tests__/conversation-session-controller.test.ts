@@ -79,12 +79,12 @@ function createDeps(chat = createRunningChat()) {
 		pendingUserInputs: [] as PendingUserInput[],
 		isUserScrolledUp: false,
 		clearMessages: vi.fn(),
-			resetForNewChat: vi.fn(() => {
-				chatState.chatMessages = [];
-				chatState.localNotices = [];
-				chatState.pendingUserInputs = [];
-			}),
-			restoreMessages: vi.fn<() => ChatRestoreResult | null>(() => null),
+		resetForNewChat: vi.fn(() => {
+			chatState.chatMessages = [];
+			chatState.localNotices = [];
+			chatState.pendingUserInputs = [];
+		}),
+		activateChat: vi.fn<() => ChatRestoreResult | null>(() => null),
 		loadMessages: vi.fn(() => new Promise<never>(() => {})),
 		setPendingUserInputs: vi.fn((inputs: PendingUserInput[]) => {
 			chatState.pendingUserInputs = inputs;
@@ -122,7 +122,7 @@ function createDeps(chat = createRunningChat()) {
 				);
 			},
 		),
-		snapshotCache: {
+		transcriptCache: {
 			markValidated: vi.fn(),
 		},
 	};
@@ -302,9 +302,9 @@ describe('ConversationSessionController', () => {
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
 	});
 
-	it('validates restored snapshots with a matching message limit on chat switch', () => {
+	it('validates restored transcripts with a matching message limit on chat switch', () => {
 		const { deps } = createDeps();
-		deps.chatState.restoreMessages = vi.fn(() => {
+		deps.chatState.activateChat = vi.fn(() => {
 			deps.chatState.chatMessages = Array.from(
 				{ length: 75 },
 				(_, index) => new AssistantMessage('2026-05-14T00:00:00.000Z', `cached ${index}`),
@@ -590,7 +590,7 @@ describe('ConversationSessionController', () => {
 		const loaded = [new AssistantMessage('2026-05-14T00:00:00.000Z', 'older server snapshot')];
 		const { deps } = createDeps();
 		deps.chatState.pendingUserInputs = [pending];
-		deps.chatState.restoreMessages = vi.fn(() => null);
+		deps.chatState.activateChat = vi.fn(() => null);
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue(loaded);
 		const controller = new ConversationSessionController(deps as never);
 

@@ -13,6 +13,8 @@
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SplitContainer from '$lib/components/split/SplitContainer.svelte';
 	import { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
+	import { ChatTranscriptCache } from '$lib/chat/chat-transcript-cache.svelte';
+	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
 	import { getSplitPaneTextScale } from '$lib/chat/split-pane-text-scale';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -51,7 +53,8 @@
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
 	const splitLayout = getSplitLayout();
-	const splitPanePreviews = new SplitPanePreviewStore();
+	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
+	const splitPanePreviews = new SplitPanePreviewStore(chatTranscriptCache);
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
@@ -366,6 +369,7 @@
 								<ConversationWorkspace
 									onRegisterSubmit={handleRegisterSubmit}
 									{onRegisterReload}
+									transcriptCache={chatTranscriptCache}
 									reserveTopFloatingToolbar={showFloatingDesktopTabs}
 									textScale={splitPaneTextScale}
 									getVisibleChatIds={getVisibleSplitChatIds}
@@ -438,6 +442,7 @@
 					<ConversationWorkspace
 						onRegisterSubmit={handleRegisterSubmit}
 						{onRegisterReload}
+						transcriptCache={chatTranscriptCache}
 						reserveTopFloatingToolbar={showFloatingDesktopTabs}
 					/>
 					{#if splitDrop.workspaceDragOver}

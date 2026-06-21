@@ -19,7 +19,7 @@ export interface LifecycleContext {
 	onNavigateToChat?: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	clearPendingChatId: () => void;
-	markChatSnapshotValidated?: (chatId: string) => void;
+	markChatTranscriptValidated?: (chatId: string) => void;
 }
 
 export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: LifecycleContext) {
@@ -41,7 +41,7 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	}
 
 	if (completedChatId && msg.exitCode !== 1) {
-		ctx.markChatSnapshotValidated?.(completedChatId);
+		ctx.markChatTranscriptValidated?.(completedChatId);
 	}
 
 	// Preserve plan-exit permission requests across turn boundaries

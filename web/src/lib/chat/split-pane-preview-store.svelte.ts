@@ -1,7 +1,7 @@
 import { SvelteMap } from 'svelte/reactivity';
-import { applyChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
+import type { ChatViewMessage } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
-import { LocalChatSnapshotCache } from './chat-snapshot-cache';
+import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 
 const PREVIEW_LIMIT = 50;
 
@@ -35,8 +35,12 @@ function emptyEntry(chatId: string): SplitPanePreviewEntry {
 
 export class SplitPanePreviewStore {
 	#entries = new SvelteMap<string, SplitPanePreviewEntry>();
-	#snapshotCache = new LocalChatSnapshotCache();
 	#loadEpochs = new Map<string, number>();
+	#transcriptCache: ChatTranscriptCache;
+
+	constructor(transcriptCache = new ChatTranscriptCache({ limit: PREVIEW_LIMIT })) {
+		this.#transcriptCache = transcriptCache;
+	}
 
 	entry(chatId: string): SplitPanePreviewEntry {
 		return this.#entries.get(chatId) ?? emptyEntry(chatId);
@@ -50,13 +54,14 @@ export class SplitPanePreviewStore {
 
 	restore(chatId: string): void {
 		if (!chatId) return;
-		const restored = this.#snapshotCache.restore(chatId, { limit: PREVIEW_LIMIT });
+		const restored = this.#transcriptCache.get(chatId);
 		if (!restored) return;
+		const messages = restored.messages.slice(-PREVIEW_LIMIT);
 		this.#entries.set(chatId, {
 			chatId,
 			generationId: restored.generationId,
 			lastSeq: restored.lastSeq,
-			messages: restored.entries,
+			messages,
 			isLoading: false,
 			isStale: restored.stale,
 			error: null,
@@ -78,7 +83,8 @@ export class SplitPanePreviewStore {
 		try {
 			const page = await getChatMessages({ chatId, limit: PREVIEW_LIMIT });
 			if (this.#loadEpochs.get(chatId) !== epoch) return;
-			this.replaceSnapshot(chatId, page.generationId, page.messages, page.lastSeq);
+			this.#transcriptCache.replaceFromPage(chatId, page);
+			this.restore(chatId);
 		} catch (error) {
 			if (this.#loadEpochs.get(chatId) !== epoch) return;
 			this.#entries.set(chatId, {
@@ -95,18 +101,8 @@ export class SplitPanePreviewStore {
 		messages: ChatViewMessage[],
 		lastSeq: number,
 	): void {
-		const windowed = messages.slice(-PREVIEW_LIMIT);
-		this.#entries.set(chatId, {
-			chatId,
-			generationId,
-			lastSeq,
-			messages: windowed,
-			isLoading: false,
-			isStale: false,
-			error: null,
-		});
-		this.#snapshotCache.persist(chatId, windowed, { generationId, lastSeq }, { limit: PREVIEW_LIMIT });
-		this.#snapshotCache.markValidated(chatId);
+		this.#transcriptCache.replace(chatId, generationId, messages, lastSeq);
+		this.restore(chatId);
 	}
 
 	applyMessages(
@@ -115,53 +111,25 @@ export class SplitPanePreviewStore {
 		messages: ChatViewMessage[],
 		serverLastSeq?: number,
 	): boolean {
-		let current = this.#entries.get(chatId);
-		if (!current) {
-			this.restore(chatId);
-			current = this.#entries.get(chatId);
-		}
-		if (!current?.generationId) return false;
-		if (current.generationId !== generationId) {
+		const result = this.#transcriptCache.applyMessages(chatId, generationId, messages, serverLastSeq);
+		if (result.status !== 'applied') {
 			this.markStale(chatId);
 			return false;
 		}
-		const applied = applyChatViewMessages(current.messages, messages, current.lastSeq);
-		if (applied.status !== 'applied') {
-			this.markStale(chatId);
-			return false;
-		}
-		if (serverLastSeq !== undefined && serverLastSeq > applied.lastSeq) {
-			this.markStale(chatId);
-			return false;
-		}
-		if (!applied.changed) return true;
-
-		const windowed = applied.messages.slice(-PREVIEW_LIMIT);
-		this.#entries.set(chatId, {
-			...current,
-			messages: windowed,
-			lastSeq: applied.lastSeq,
-			isStale: false,
-			error: null,
-		});
-		this.#snapshotCache.persist(chatId, windowed, {
-			generationId,
-			lastSeq: applied.lastSeq,
-		}, { limit: PREVIEW_LIMIT });
-		this.#snapshotCache.markValidated(chatId);
+		this.restore(chatId);
 		return true;
 	}
 
 	markStale(chatId: string): void {
 		if (!chatId) return;
-		this.#snapshotCache.markStale(chatId);
+		this.#transcriptCache.markStale(chatId);
 		this.#entries.set(chatId, { ...this.entry(chatId), isStale: true });
 	}
 
 	remove(chatId: string): void {
 		if (!chatId) return;
 		this.#entries.delete(chatId);
-		this.#snapshotCache.remove(chatId);
+		this.#transcriptCache.remove(chatId);
 		this.#loadEpochs.delete(chatId);
 	}
 }

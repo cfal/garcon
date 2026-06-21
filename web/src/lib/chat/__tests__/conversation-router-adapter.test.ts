@@ -8,6 +8,7 @@ import { StartupCoordinator } from '../startup-coordinator';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatViewMessage } from '$shared/chat-view';
 import { UserMessage } from '$shared/chat-types';
+import type { BackgroundTranscriptLoader } from '../background-transcript-loader';
 
 vi.mock('$app/navigation', () => ({
 	goto: vi.fn(),
@@ -84,37 +85,39 @@ describe('buildRouterStores', () => {
 		expect(stores.sessions.selectedChat()).toBe(selectedChat);
 	});
 
-	it('warms background snapshots through the local snapshot cache', () => {
+	it('warms background transcripts through the shared transcript cache', () => {
 		const deps = depsFor(chatRecord());
-		deps.chatState.snapshotCache.persist(
-			'chat-2',
-			[entry(1, 'one')],
-			{ generationId: 'generation-2', lastSeq: 1 },
-		);
+		deps.chatState.transcriptCache.replace('chat-2', 'generation-2', [entry(1, 'one')], 1);
 		const stores = buildRouterStores(deps);
 
-		const applied = stores.chatState.warmBackgroundChatSnapshot?.(
+		const applied = stores.chatState.warmBackgroundTranscript?.(
 			'chat-2',
 			'generation-2',
 			[entry(2, 'two')],
 		);
 
 		expect(applied).toBe(true);
-		expect(deps.chatState.snapshotCache.restore('chat-2')?.entries.map((item) => item.seq)).toEqual([1, 2]);
+		expect(deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.seq)).toEqual([1, 2]);
 	});
 
-	it('does not create tail-only background snapshots', () => {
+	it('does not create tail-only background transcripts and queues recovery', () => {
 		const deps = depsFor(chatRecord());
+		const queueLoad = vi.fn();
+		deps.backgroundTranscriptLoader = { queueLoad } as unknown as BackgroundTranscriptLoader;
 		const stores = buildRouterStores(deps);
 
-		const applied = stores.chatState.warmBackgroundChatSnapshot?.(
+		const applied = stores.chatState.warmBackgroundTranscript?.(
 			'chat-2',
 			'generation-2',
 			[entry(4, 'tail')],
 		);
 
 		expect(applied).toBe(false);
-		expect(deps.chatState.snapshotCache.restore('chat-2')).toBeNull();
+		expect(deps.chatState.transcriptCache.get('chat-2')).toBeNull();
+		expect(queueLoad).toHaveBeenCalledWith('chat-2', {
+			generationId: 'generation-2',
+			messages: [expect.objectContaining({ seq: 4 })],
+		});
 	});
 
 	it('maps visible preview callbacks into router chat state hooks', () => {
