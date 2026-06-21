@@ -138,7 +138,7 @@
 		</Dialog.Trigger>
 		<Dialog.Content
 			class={cn(
-				'h-[min(32rem,calc(100dvh-1rem))] w-[calc(100vw-1rem)] overflow-hidden p-0 sm:w-full',
+				'top-[var(--app-viewport-center-y)] h-[min(32rem,calc(var(--app-height)-1rem))] w-[calc(100vw-1rem)] overflow-hidden p-0 sm:w-full',
 				contentClass,
 			)}
 			showCloseButton={false}

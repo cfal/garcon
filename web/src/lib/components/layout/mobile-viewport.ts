@@ -11,6 +11,7 @@ export interface MobileViewportSnapshot {
 export interface MobileViewportMetrics {
 	appHeight: number;
 	viewportOffsetTop: number;
+	viewportCenterY: number;
 	keyboardHeight: number;
 	keyboardVisible: boolean;
 }
@@ -50,6 +51,7 @@ export function computeMobileViewportMetrics(
 	return {
 		appHeight,
 		viewportOffsetTop: Math.round(visualViewportOffsetTop),
+		viewportCenterY: Math.round(visualViewportOffsetTop + appHeight / 2),
 		keyboardHeight,
 		keyboardVisible: keyboardHeight >= keyboardVisibleThreshold,
 	};

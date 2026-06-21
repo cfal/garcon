@@ -378,6 +378,7 @@
 
 	--app-height: 100dvh;
 	--app-viewport-offset-top: 0px;
+	--app-viewport-center-y: 50dvh;
 }
 
 .mobile-shell {

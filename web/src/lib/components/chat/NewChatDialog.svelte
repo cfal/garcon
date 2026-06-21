@@ -51,7 +51,7 @@
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
 	<Dialog.Content
-		class="h-auto max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto p-0 sm:w-full sm:max-h-[90dvh] sm:max-w-3xl"
+		class="top-[var(--app-viewport-center-y)] h-auto max-h-[calc(var(--app-height)-1rem)] w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto p-0 sm:top-[50%] sm:w-full sm:max-h-[90dvh] sm:max-w-3xl"
 		showCloseButton={true}
 		onOpenAutoFocus={(e) => {
 			// Prevent default auto-focus on the first input (project path),
