@@ -13,6 +13,7 @@ import type {
   FileOptions,
   GitBlameLine,
   GitCompareFile,
+  GitConflictContent,
   GitConflictDetails,
   GitConflictFile,
   GitConflictStatus,
@@ -30,6 +31,8 @@ const UNMERGED_STATUSES = new Set<GitConflictStatus>(['UU', 'AA', 'DD', 'AU', 'U
 const MAX_HISTORY_LIMIT = 200;
 const MAX_BLAME_LINES = 2_000;
 const MAX_GRAPH_LIMIT = 500;
+const MAX_CONFLICT_CONTENT_BYTES = 256 * 1024;
+const MAX_CONFLICT_CONTENT_LINES = 4_000;
 
 function clampLimit(value: number | undefined, fallback: number, max: number): number {
   if (!Number.isInteger(value) || value === undefined || value <= 0) return fallback;
@@ -89,11 +92,40 @@ async function stageBlobAvailable(
   signal?: AbortSignal,
 ): Promise<boolean> {
   try {
-    await runGit(projectPath, ['show', `:${stage}:${file}`], { signal });
+    await runGit(projectPath, ['cat-file', '-e', `:${stage}:${file}`], { signal });
     return true;
   } catch {
     return false;
   }
+}
+
+function emptyConflictContent(): GitConflictContent {
+  return {
+    content: null,
+    truncated: false,
+    byteLength: 0,
+    lineCount: 0,
+  };
+}
+
+function limitConflictContent(content: string, byteLength: number): GitConflictContent {
+  const lines = content.split('\n');
+  if (lines.length > MAX_CONFLICT_CONTENT_LINES) {
+    return {
+      content: lines.slice(0, MAX_CONFLICT_CONTENT_LINES).join('\n'),
+      truncated: true,
+      byteLength,
+      lineCount: lines.length,
+      limitReason: 'too-many-lines',
+    };
+  }
+
+  return {
+    content,
+    truncated: false,
+    byteLength,
+    lineCount: lines.length,
+  };
 }
 
 async function readStageBlob(
@@ -101,12 +133,43 @@ async function readStageBlob(
   stage: 1 | 2 | 3,
   file: string,
   signal?: AbortSignal,
-): Promise<string | null> {
+): Promise<GitConflictContent> {
   try {
+    const sizeResult = await runGit(projectPath, ['cat-file', '-s', `:${stage}:${file}`], { signal });
+    const byteLength = Number(sizeResult.stdout.trim());
+    if (Number.isFinite(byteLength) && byteLength > MAX_CONFLICT_CONTENT_BYTES) {
+      return {
+        content: null,
+        truncated: true,
+        byteLength,
+        lineCount: 0,
+        limitReason: 'content-too-large',
+      };
+    }
     const { stdout } = await runGit(projectPath, ['show', `:${stage}:${file}`], { signal });
-    return stdout;
+    return limitConflictContent(stdout, Buffer.byteLength(stdout));
   } catch {
-    return null;
+    return emptyConflictContent();
+  }
+}
+
+async function readWorkingConflictContent(projectPath: string, file: string): Promise<GitConflictContent> {
+  try {
+    const workingPath = resolvePathWithinProject(projectPath, file);
+    const stats = await fs.stat(workingPath);
+    if (stats.size > MAX_CONFLICT_CONTENT_BYTES) {
+      return {
+        content: null,
+        truncated: true,
+        byteLength: stats.size,
+        lineCount: 0,
+        limitReason: 'content-too-large',
+      };
+    }
+    const content = await fs.readFile(workingPath, 'utf-8');
+    return limitConflictContent(content, Buffer.byteLength(content));
+  } catch {
+    return emptyConflictContent();
   }
 }
 
@@ -136,19 +199,19 @@ async function getConflictDetails({
   signal,
 }: ConflictDetailsOptions): Promise<GitConflictDetails> {
   await assertGitRepository(projectPath);
-  const workingPath = resolvePathWithinProject(projectPath, file);
-  let working = '';
-  try {
-    working = await fs.readFile(workingPath, 'utf-8');
-  } catch {
-    working = '';
-  }
+  const [base, ours, theirs, working] = await Promise.all([
+    readStageBlob(projectPath, 1, file, signal),
+    readStageBlob(projectPath, 2, file, signal),
+    readStageBlob(projectPath, 3, file, signal),
+    readWorkingConflictContent(projectPath, file),
+  ]);
   return {
     path: file,
-    base: await readStageBlob(projectPath, 1, file, signal),
-    ours: await readStageBlob(projectPath, 2, file, signal),
-    theirs: await readStageBlob(projectPath, 3, file, signal),
+    base,
+    ours,
+    theirs,
     working,
+    truncated: base.truncated || ours.truncated || theirs.truncated || working.truncated,
   };
 }
 
@@ -376,11 +439,25 @@ async function getGraph({
   return { commits: parseGraph(stdout) };
 }
 
-function parseNumstat(output: string): Map<string, { additions: number; deletions: number }> {
+function parseNumstatZ(output: string): Map<string, { additions: number; deletions: number }> {
   const stats = new Map<string, { additions: number; deletions: number }>();
-  for (const line of output.split('\n')) {
-    if (!line.trim()) continue;
-    const [additionsRaw = '0', deletionsRaw = '0', filePath = ''] = line.split('\t');
+  const tokens = output.split('\0');
+  if (tokens[tokens.length - 1] === '') tokens.pop();
+
+  for (let index = 0; index < tokens.length;) {
+    const header = tokens[index++] ?? '';
+    if (!header) continue;
+    const firstTab = header.indexOf('\t');
+    const secondTab = firstTab >= 0 ? header.indexOf('\t', firstTab + 1) : -1;
+    if (firstTab < 0 || secondTab < 0) continue;
+    const additionsRaw = header.slice(0, firstTab);
+    const deletionsRaw = header.slice(firstTab + 1, secondTab);
+    let filePath = header.slice(secondTab + 1);
+    if (!filePath) {
+      index += 1;
+      filePath = tokens[index++] ?? '';
+    }
+    if (!filePath) continue;
     stats.set(filePath, {
       additions: additionsRaw === '-' ? 0 : Number(additionsRaw) || 0,
       deletions: deletionsRaw === '-' ? 0 : Number(deletionsRaw) || 0,
@@ -389,14 +466,20 @@ function parseNumstat(output: string): Map<string, { additions: number; deletion
   return stats;
 }
 
-function parseNameStatus(output: string, stats: Map<string, { additions: number; deletions: number }>): GitCompareFile[] {
+function parseNameStatusZ(
+  output: string,
+  stats: Map<string, { additions: number; deletions: number }>,
+): GitCompareFile[] {
   const files: GitCompareFile[] = [];
-  for (const line of output.split('\n')) {
-    if (!line.trim()) continue;
-    const fields = line.split('\t');
-    const status = fields[0] ?? '';
-    const path = status.startsWith('R') || status.startsWith('C') ? fields[2] : fields[1];
-    const originalPath = status.startsWith('R') || status.startsWith('C') ? fields[1] : undefined;
+  const tokens = output.split('\0');
+  if (tokens[tokens.length - 1] === '') tokens.pop();
+
+  for (let index = 0; index < tokens.length;) {
+    const status = tokens[index++] ?? '';
+    if (!status) continue;
+    const isRenameOrCopy = status.startsWith('R') || status.startsWith('C');
+    const originalPath = isRenameOrCopy ? tokens[index++] : undefined;
+    const path = tokens[index++];
     if (!path) continue;
     const fileStats = stats.get(path) ?? { additions: 0, deletions: 0 };
     files.push({
@@ -423,10 +506,10 @@ async function getCompare({
   ]);
   const range = `${base}...${head}`;
   const [nameStatus, numstat] = await Promise.all([
-    runGit(projectPath, ['diff', '--name-status', '--find-renames', range], { signal }),
-    runGit(projectPath, ['diff', '--numstat', '--find-renames', range], { signal }),
+    runGit(projectPath, ['diff', '--name-status', '-z', '--find-renames', range], { signal }),
+    runGit(projectPath, ['diff', '--numstat', '-z', '--find-renames', range], { signal }),
   ]);
-  return { files: parseNameStatus(nameStatus.stdout, parseNumstat(numstat.stdout)) };
+  return { files: parseNameStatusZ(nameStatus.stdout, parseNumstatZ(numstat.stdout)) };
 }
 
 export function createPorcelainOperations() {

@@ -15,6 +15,16 @@ import {
 export interface GitTreeLoadOptions {
 	isCurrent: () => boolean;
 	surfaceError: (message: string) => void;
+	signal?: AbortSignal;
+}
+
+function isAbortError(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		'name' in error &&
+		(error as { name?: unknown }).name === 'AbortError'
+	);
 }
 
 export class GitTreeState {
@@ -96,11 +106,12 @@ export class GitTreeState {
 	async loadTree(projectPath: string, options: GitTreeLoadOptions): Promise<boolean> {
 		this.isLoadingTree = true;
 		try {
-			const data = await getGitChangesTree(projectPath);
+			const data = await getGitChangesTree(projectPath, false, { signal: options.signal });
 			if (!options.isCurrent()) return false;
 			this.applyTree(data.root, data.hasCommits, data.statsState ?? 'pending');
 			return true;
 		} catch (error) {
+			if (isAbortError(error)) return false;
 			if (!options.isCurrent()) return false;
 			options.surfaceError(
 				`Failed to load changes: ${error instanceof Error ? error.message : String(error)}`,
@@ -114,11 +125,12 @@ export class GitTreeState {
 
 	async hydrateStats(projectPath: string, options: GitTreeLoadOptions): Promise<boolean> {
 		try {
-			const stats = await getGitChangesStats(projectPath);
+			const stats = await getGitChangesStats(projectPath, { signal: options.signal });
 			if (!options.isCurrent()) return false;
 			this.applyStats(stats);
 			return true;
 		} catch (error) {
+			if (isAbortError(error)) return false;
 			if (!options.isCurrent()) return false;
 			options.surfaceError(
 				`Failed to load change counts: ${error instanceof Error ? error.message : String(error)}`,

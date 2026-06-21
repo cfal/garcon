@@ -363,9 +363,10 @@
 	<GitDiffLineContextMenu
 		bind:this={lineContextMenu}
 		{activeTab}
-		{actionTarget}
-		{readOnly}
-		{onAddComment}
+			{actionTarget}
+			{readOnly}
+			{operationPending}
+			{onAddComment}
 		{onStageHunk}
 		{onUnstageHunk}
 		{onStageLine}

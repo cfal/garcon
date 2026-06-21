@@ -182,12 +182,23 @@ export interface GitConflictFile {
 	theirsAvailable: boolean;
 }
 
+export type GitConflictContentLimitReason = 'content-too-large' | 'too-many-lines';
+
+export interface GitConflictContent {
+	content: string | null;
+	truncated: boolean;
+	byteLength: number;
+	lineCount: number;
+	limitReason?: GitConflictContentLimitReason;
+}
+
 export interface GitConflictDetails {
 	path: string;
-	base: string | null;
-	ours: string | null;
-	theirs: string | null;
-	working: string;
+	base: GitConflictContent;
+	ours: GitConflictContent;
+	theirs: GitConflictContent;
+	working: GitConflictContent;
+	truncated: boolean;
 }
 
 export interface GitStashEntry {

@@ -92,12 +92,18 @@ export async function runGit(
 ): Promise<GitCommandResult> {
   for (let attempt = 0; ; attempt++) {
     const abortState = createGitAbortState(options);
-    const proc = Bun.spawn(['git', ...args], {
-      cwd,
-      stdout: 'pipe',
-      stderr: 'pipe',
-      signal: abortState.signal,
-    });
+    let proc: ReturnType<typeof Bun.spawn>;
+    try {
+      proc = Bun.spawn(['git', ...args], {
+        cwd,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        signal: abortState.signal,
+      });
+    } catch (error) {
+      abortState.cleanup();
+      throw error;
+    }
     const abortListener = (): void => {
       proc.kill();
     };
@@ -167,13 +173,19 @@ export async function runGitWithStdin(
 ): Promise<void> {
   for (let attempt = 0; ; attempt++) {
     const abortState = createGitAbortState(options);
-    const proc = Bun.spawn(['git', ...args], {
-      cwd,
-      stdin: new Blob([input]),
-      stdout: 'pipe',
-      stderr: 'pipe',
-      signal: abortState.signal,
-    });
+    let proc: ReturnType<typeof Bun.spawn>;
+    try {
+      proc = Bun.spawn(['git', ...args], {
+        cwd,
+        stdin: new Blob([input]),
+        stdout: 'pipe',
+        stderr: 'pipe',
+        signal: abortState.signal,
+      });
+    } catch (error) {
+      abortState.cleanup();
+      throw error;
+    }
     const abortListener = (): void => {
       proc.kill();
     };

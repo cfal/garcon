@@ -12,6 +12,7 @@
 		activeTab: GitDiffTab;
 		actionTarget: GitDiffActionTarget;
 		readOnly: boolean;
+		operationPending?: boolean;
 		onAddComment: (side: 'before' | 'after', line: number) => void;
 		onStageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
 		onUnstageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
@@ -24,6 +25,7 @@
 		activeTab,
 		actionTarget,
 		readOnly,
+		operationPending = false,
 		onAddComment,
 		onStageHunk,
 		onUnstageHunk,
@@ -80,25 +82,25 @@
 	}
 
 	function stageHunk(): void {
-		if (!menu.target) return;
+		if (!menu.target || operationPending) return;
 		onStageHunk(actionTarget, menu.target.hunkIndex);
 		close();
 	}
 
 	function unstageHunk(): void {
-		if (!menu.target) return;
+		if (!menu.target || operationPending) return;
 		onUnstageHunk(actionTarget, menu.target.hunkIndex);
 		close();
 	}
 
 	function stageLine(): void {
-		if (!menu.target) return;
+		if (!menu.target || operationPending) return;
 		onStageLine?.(actionTarget, menu.target.diffLineIndex);
 		close();
 	}
 
 	function unstageLine(): void {
-		if (!menu.target) return;
+		if (!menu.target || operationPending) return;
 		onUnstageLine?.(actionTarget, menu.target.diffLineIndex);
 		close();
 	}
@@ -148,7 +150,8 @@
 						type="button"
 						role="menuitem"
 						onclick={stageHunk}
-						class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added flex items-center gap-2"
+						disabled={operationPending}
+						class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<Plus class="w-3 h-3" />
 						{m.git_action_stage_hunk()}
@@ -158,7 +161,8 @@
 						type="button"
 						role="menuitem"
 						onclick={unstageHunk}
-						class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted flex items-center gap-2"
+						disabled={operationPending}
+						class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<Minus class="w-3 h-3" />
 						{m.git_action_unstage_hunk()}
@@ -171,7 +175,8 @@
 						type="button"
 						role="menuitem"
 						onclick={stageLine}
-						class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added flex items-center gap-2"
+						disabled={operationPending}
+						class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-added flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<Plus class="w-3 h-3" />
 						{m.git_action_stage_line()}
@@ -181,7 +186,8 @@
 						type="button"
 						role="menuitem"
 						onclick={unstageLine}
-						class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted flex items-center gap-2"
+						disabled={operationPending}
+						class="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-git-deleted flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<Minus class="w-3 h-3" />
 						{m.git_action_unstage_line()}

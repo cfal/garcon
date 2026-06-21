@@ -11,6 +11,11 @@
 	}
 
 	let { projectPath, selectedFile, porcelain }: GitPorcelainPanelProps = $props();
+	let pendingConfirmation = $state<
+		| { type: 'accept-conflict'; scopeKey: string; filePath: string; side: 'ours' | 'theirs' }
+		| { type: 'drop-stash'; scopeKey: string; stashRef: string }
+		| null
+	>(null);
 	let loadKey = $derived(`${projectPath}|${porcelain.inspectorView}|${selectedFile ?? ''}`);
 	let title = $derived(
 		porcelain.inspectorView === 'conflicts'
@@ -23,6 +28,16 @@
 						? 'Graph'
 						: '',
 	);
+	let activeConfirmation = $derived(
+		pendingConfirmation?.scopeKey === loadKey ? pendingConfirmation : null,
+	);
+	let confirmationLabel = $derived.by(() => {
+		if (!activeConfirmation) return '';
+		if (activeConfirmation.type === 'accept-conflict') {
+			return `Accept ${activeConfirmation.side} for ${activeConfirmation.filePath}? This replaces the working conflict content with that side and stages the file.`;
+		}
+		return `Drop ${activeConfirmation.stashRef}? This removes the stash entry and cannot be undone from this panel.`;
+	});
 
 	$effect(() => {
 		loadKey;
@@ -33,6 +48,25 @@
 		untrack(() => void porcelain.loadCurrentView(projectPath));
 		return () => porcelain.cancelActiveLoad();
 	});
+
+	function requestAcceptConflict(filePath: string, side: 'ours' | 'theirs'): void {
+		pendingConfirmation = { type: 'accept-conflict', scopeKey: loadKey, filePath, side };
+	}
+
+	function requestDropStash(stashRef: string): void {
+		pendingConfirmation = { type: 'drop-stash', scopeKey: loadKey, stashRef };
+	}
+
+	async function confirmPendingAction(): Promise<void> {
+		const confirmation = activeConfirmation;
+		if (!confirmation) return;
+		pendingConfirmation = null;
+		if (confirmation.type === 'accept-conflict') {
+			await porcelain.acceptConflictSide(projectPath, confirmation.filePath, confirmation.side);
+			return;
+		}
+		await porcelain.dropStash(projectPath, confirmation.stashRef);
+	}
 </script>
 
 {#if porcelain.inspectorView !== 'none'}
@@ -84,24 +118,14 @@
 									<button
 										type="button"
 										class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
-										onclick={() =>
-											porcelain.acceptConflictSide(
-												projectPath,
-												detail.path,
-												'ours',
-											)}
+										onclick={() => requestAcceptConflict(detail.path, 'ours')}
 									>
 										Accept ours
 									</button>
 									<button
 										type="button"
 										class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
-										onclick={() =>
-											porcelain.acceptConflictSide(
-												projectPath,
-												detail.path,
-												'theirs',
-											)}
+										onclick={() => requestAcceptConflict(detail.path, 'theirs')}
 									>
 										Accept theirs
 									</button>
@@ -113,8 +137,34 @@
 										Mark resolved
 									</button>
 								</div>
+								{#if activeConfirmation?.type === 'accept-conflict' && activeConfirmation.filePath === detail.path}
+									<div class="rounded border border-status-warning-border bg-status-warning/10 p-2 text-status-warning-muted-foreground">
+										<div class="mb-2">{confirmationLabel}</div>
+										<div class="flex gap-2">
+											<button
+												type="button"
+												class="rounded bg-status-warning px-2 py-1 text-status-warning-foreground"
+												onclick={() => void confirmPendingAction()}
+											>
+												Confirm
+											</button>
+											<button
+												type="button"
+												class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
+												onclick={() => (pendingConfirmation = null)}
+											>
+												Cancel
+											</button>
+										</div>
+									</div>
+								{/if}
+								{#if detail.truncated}
+									<div class="rounded border border-border bg-muted/40 p-2 text-muted-foreground">
+										One or more conflict versions were truncated because they exceed display limits.
+									</div>
+								{/if}
 								<pre
-									class="max-h-24 overflow-auto rounded border border-border bg-muted/40 p-2 font-mono text-[11px] text-muted-foreground">{detail.working}</pre>
+									class="max-h-24 overflow-auto rounded border border-border bg-muted/40 p-2 font-mono text-[11px] text-muted-foreground">{detail.working.content ?? 'Working content exceeds the conflict preview limit.'}</pre>
 							</div>
 						{/if}
 					</div>
@@ -170,11 +220,32 @@
 								<button
 									type="button"
 									class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-status-error-foreground"
-									onclick={() => porcelain.dropStash(projectPath, stash.ref)}
+									onclick={() => requestDropStash(stash.ref)}
 								>
 									Drop
 								</button>
 							</div>
+							{#if activeConfirmation?.type === 'drop-stash' && activeConfirmation.stashRef === stash.ref}
+								<div class="ml-2 rounded border border-status-warning-border bg-status-warning/10 p-2 text-status-warning-muted-foreground">
+									<div class="mb-2">{confirmationLabel}</div>
+									<div class="flex gap-2">
+										<button
+											type="button"
+											class="rounded bg-status-warning px-2 py-1 text-status-warning-foreground"
+											onclick={() => void confirmPendingAction()}
+										>
+											Confirm
+										</button>
+										<button
+											type="button"
+											class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
+											onclick={() => (pendingConfirmation = null)}
+										>
+											Cancel
+										</button>
+									</div>
+								</div>
+							{/if}
 						{/each}
 					</div>
 				{/if}

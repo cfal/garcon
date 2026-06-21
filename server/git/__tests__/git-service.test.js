@@ -390,6 +390,87 @@ describe('porcelain ref validation', () => {
   });
 });
 
+describe('porcelain conflict and compare robustness', () => {
+  it('returns bounded conflict details for large conflicted files', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-conflict-limit-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ['checkout', '-b', 'side']);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), `one\n${'side\n'.repeat(70_000)}`, 'utf-8');
+      await runGitCommand(projectPath, ['commit', '-am', 'side edit']);
+      await runGitCommand(projectPath, ['checkout', 'master']);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), `one\n${'main\n'.repeat(70_000)}`, 'utf-8');
+      await runGitCommand(projectPath, ['commit', '-am', 'main edit']);
+      try {
+        await runGitCommand(projectPath, ['merge', 'side']);
+      } catch {
+        // Expected merge conflict.
+      }
+
+      const { conflicts } = await git.getConflicts({ projectPath });
+      const conflict = conflicts.find((entry) => entry.path === 'a.txt');
+      const details = await git.getConflictDetails({ projectPath, file: 'a.txt' });
+
+      expect(conflict).toMatchObject({
+        status: 'UU',
+        baseAvailable: true,
+        oursAvailable: true,
+        theirsAvailable: true,
+      });
+      expect(details.truncated).toBe(true);
+      expect(details.ours).toMatchObject({
+        content: null,
+        truncated: true,
+        limitReason: 'content-too-large',
+      });
+      expect(details.theirs).toMatchObject({
+        content: null,
+        truncated: true,
+        limitReason: 'content-too-large',
+      });
+      expect(details.working.byteLength).toBeGreaterThan(0);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('parses compare output for paths containing tabs', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-compare-z-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+    const tabbedPath = 'a\tb.txt';
+    const renamedPath = 'c\td.txt';
+
+    try {
+      await runGitCommand(projectPath, ['init']);
+      await runGitCommand(projectPath, ['config', 'user.email', 'test@example.com']);
+      await runGitCommand(projectPath, ['config', 'user.name', 'Test User']);
+      await fs.writeFile(path.join(projectPath, tabbedPath), 'one\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', tabbedPath]);
+      await runGitCommand(projectPath, ['commit', '-m', 'initial']);
+      await runGitCommand(projectPath, ['checkout', '-b', 'next']);
+      await runGitCommand(projectPath, ['mv', tabbedPath, renamedPath]);
+      await fs.writeFile(path.join(projectPath, renamedPath), 'one\ntwo\n', 'utf-8');
+      await runGitCommand(projectPath, ['commit', '-am', 'rename tabbed path']);
+
+      const compare = await git.getCompare({ projectPath, base: 'master', head: 'next' });
+
+      expect(compare.files).toContainEqual(
+        expect.objectContaining({
+          status: expect.stringMatching(/^R/),
+          originalPath: tabbedPath,
+          path: renamedPath,
+          additions: 1,
+          deletions: 0,
+        }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('toHttpError', () => {
   const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 

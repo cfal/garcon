@@ -97,6 +97,8 @@ export class GitWorkbenchStore {
 	private refreshPromise: Promise<void> | null = null;
 	private treeLoadGeneration = 0;
 	private statsLoadGeneration = 0;
+	private treeLoadAbort: AbortController | null = null;
+	private statsLoadAbort: AbortController | null = null;
 	private scrollPositions = new Map<string, number>();
 
 	private readonly treeState: GitTreeState;
@@ -610,18 +612,32 @@ export class GitWorkbenchStore {
 	async loadTree(projectPath: string): Promise<boolean> {
 		const generation = ++this.treeLoadGeneration;
 		const key = targetKey(this.target);
-		return this.treeState.loadTree(projectPath, {
-			isCurrent: () => this.isCurrentTreeLoad(projectPath, generation, key),
-			surfaceError: (message) => this.surfaceError(message),
-		});
+		this.treeLoadAbort?.abort();
+		const controller = new AbortController();
+		this.treeLoadAbort = controller;
+		try {
+			return await this.treeState.loadTree(projectPath, {
+				signal: controller.signal,
+				isCurrent: () => this.isCurrentTreeLoad(projectPath, generation, key),
+				surfaceError: (message) => this.surfaceError(message),
+			});
+		} finally {
+			if (this.treeLoadAbort === controller) this.treeLoadAbort = null;
+		}
 	}
 
 	hydrateStats(projectPath: string): void {
 		const generation = ++this.statsLoadGeneration;
 		const key = targetKey(this.target);
+		this.statsLoadAbort?.abort();
+		const controller = new AbortController();
+		this.statsLoadAbort = controller;
 		void this.treeState.hydrateStats(projectPath, {
+			signal: controller.signal,
 			isCurrent: () => this.isCurrentStatsLoad(projectPath, generation, key),
 			surfaceError: (message) => this.surfaceError(message),
+		}).finally(() => {
+			if (this.statsLoadAbort === controller) this.statsLoadAbort = null;
 		});
 	}
 
@@ -726,7 +742,12 @@ export class GitWorkbenchStore {
 		return this.reviewProgress.isViewed(
 			filePath,
 			this.activeTab,
-			this.reviewProgress.signatureForNode(filePath, this.activeTab, node),
+			this.reviewProgress.signatureForNode(
+				filePath,
+				this.activeTab,
+				node,
+				this.reviewDataByPath[filePath] ?? null,
+			),
 		);
 	}
 
@@ -735,7 +756,12 @@ export class GitWorkbenchStore {
 		this.reviewProgress.setViewed(
 			filePath,
 			this.activeTab,
-			this.reviewProgress.signatureForNode(filePath, this.activeTab, node),
+			this.reviewProgress.signatureForNode(
+				filePath,
+				this.activeTab,
+				node,
+				this.reviewDataByPath[filePath] ?? null,
+			),
 			viewed,
 		);
 	}
@@ -745,7 +771,12 @@ export class GitWorkbenchStore {
 		const viewed = this.reviewProgress.toggleViewed(
 			filePath,
 			this.activeTab,
-			this.reviewProgress.signatureForNode(filePath, this.activeTab, node),
+			this.reviewProgress.signatureForNode(
+				filePath,
+				this.activeTab,
+				node,
+				this.reviewDataByPath[filePath] ?? null,
+			),
 		);
 		this.ensureSelectedFileIsVisible();
 		this.loadSelectedFileIfNeeded();
@@ -1174,6 +1205,10 @@ export class GitWorkbenchStore {
 		this.reviewScope = 'selected-file';
 		this.lastError = null;
 		this.scrollPositions.clear();
+		this.treeLoadAbort?.abort();
+		this.statsLoadAbort?.abort();
+		this.treeLoadAbort = null;
+		this.statsLoadAbort = null;
 		this.treeLoadGeneration++;
 		this.statsLoadGeneration++;
 	}

@@ -127,8 +127,8 @@ describe('GitWorkbenchStore', () => {
 		vi.restoreAllMocks();
 	});
 
-	describe('tree loading', () => {
-		it('loads tree and sets hasCommits from response', async () => {
+		describe('tree loading', () => {
+			it('loads tree and sets hasCommits from response', async () => {
 			const tree = [
 				{
 					path: 'a.ts',
@@ -145,8 +145,60 @@ describe('GitWorkbenchStore', () => {
 
 			expect(wb.tree).toEqual(tree);
 			expect(wb.hasCommits).toBe(true);
-			expect(wb.isLoadingTree).toBe(false);
-		});
+				expect(wb.isLoadingTree).toBe(false);
+				expect(mockedApi.getGitChangesTree).toHaveBeenCalledWith(
+					'/project',
+					false,
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
+				);
+			});
+
+			it('aborts stale tree loads when a newer load starts', async () => {
+				const staleTreeLoad = deferred<Awaited<ReturnType<typeof gitApi.getGitChangesTree>>>();
+				const currentTree = [
+					{ path: 'new.ts', name: 'new.ts', kind: 'file' as const, staged: false, hasUnstaged: true },
+				];
+				mockedApi.getGitChangesTree
+					.mockReturnValueOnce(staleTreeLoad.promise)
+					.mockResolvedValueOnce({ root: currentTree, hasCommits: true });
+
+				const staleLoad = wb.loadTree('/project-a');
+				const staleOptions = mockedApi.getGitChangesTree.mock.calls[0]?.[2] as RequestInit;
+				const currentLoad = wb.loadTree('/project-b');
+				const currentOptions = mockedApi.getGitChangesTree.mock.calls[1]?.[2] as RequestInit;
+
+				expect(staleOptions.signal).toBeInstanceOf(AbortSignal);
+				expect(staleOptions.signal?.aborted).toBe(true);
+				expect(currentOptions.signal).toBeInstanceOf(AbortSignal);
+				expect(currentOptions.signal?.aborted).toBe(false);
+
+				staleTreeLoad.resolve({ root: [], hasCommits: false });
+				await Promise.all([staleLoad, currentLoad]);
+
+				expect(wb.tree).toEqual(currentTree);
+			});
+
+			it('aborts stale stats loads when a newer stats load starts', async () => {
+				const staleStatsLoad = deferred<Awaited<ReturnType<typeof gitApi.getGitChangesStats>>>();
+				mockedApi.getGitChangesStats
+					.mockReturnValueOnce(staleStatsLoad.promise)
+					.mockResolvedValueOnce({ working: {}, staged: {} });
+
+				wb.hydrateStats('/project-a');
+				const staleOptions = mockedApi.getGitChangesStats.mock.calls[0]?.[1] as RequestInit;
+				wb.hydrateStats('/project-b');
+				const currentOptions = mockedApi.getGitChangesStats.mock.calls[1]?.[1] as RequestInit;
+
+				expect(staleOptions.signal).toBeInstanceOf(AbortSignal);
+				expect(staleOptions.signal?.aborted).toBe(true);
+				expect(currentOptions.signal).toBeInstanceOf(AbortSignal);
+				expect(currentOptions.signal?.aborted).toBe(false);
+
+				staleStatsLoad.resolve({ working: {}, staged: {} });
+				await vi.waitFor(() => {
+					expect(mockedApi.getGitChangesStats).toHaveBeenCalledTimes(2);
+				});
+			});
 
 		it('sets hasCommits false when no commits', async () => {
 			mockedApi.getGitChangesTree.mockResolvedValue({ root: [], hasCommits: false });
@@ -348,6 +400,56 @@ describe('GitWorkbenchStore', () => {
 			wb.refreshAllData();
 
 			expect(wb.reviewDataByPath).toEqual({});
+		});
+	});
+
+	describe('review progress', () => {
+		function setSingleModifiedFile(): void {
+			wb.tree = [
+				{
+					path: 'a.ts',
+					name: 'a.ts',
+					kind: 'file',
+					staged: false,
+					hasUnstaged: true,
+					indexStatus: ' ',
+					workTreeStatus: 'M',
+					changeKind: 'modified',
+					unstagedFacet: {
+						status: 'M',
+						changeKind: 'modified',
+						stats: { additions: 1, deletions: 0 },
+					},
+				},
+			] as any;
+		}
+
+		it('invalidates viewed state when rendered diff identity changes under the same status', () => {
+			setSingleModifiedFile();
+			wb.reviewDataByPath = { 'a.ts': makeReviewData('a.ts', 'working', 'old') };
+
+			wb.setFileViewed('a.ts', true);
+
+			expect(wb.isFileViewed('a.ts')).toBe(true);
+			wb.setHideViewed(true);
+			expect(wb.visibleFilePaths).toEqual([]);
+
+			wb.setHideViewed(false);
+			wb.reviewDataByPath = { 'a.ts': makeReviewData('a.ts', 'working', 'new') };
+
+			expect(wb.isFileViewed('a.ts')).toBe(false);
+			wb.setHideViewed(true);
+			expect(wb.visibleFilePaths).toEqual(['a.ts']);
+		});
+
+		it('does not mark a file viewed before its rendered diff identity is loaded', () => {
+			setSingleModifiedFile();
+
+			wb.setFileViewed('a.ts', true);
+
+			expect(wb.isFileViewed('a.ts')).toBe(false);
+			wb.setHideViewed(true);
+			expect(wb.visibleFilePaths).toEqual(['a.ts']);
 		});
 	});
 
@@ -1066,10 +1168,13 @@ describe('GitWorkbenchStore', () => {
 				5,
 				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			);
-			await vi.waitFor(() => {
-				expect(mockedApi.getGitChangesStats).toHaveBeenCalledWith('/project');
+				await vi.waitFor(() => {
+					expect(mockedApi.getGitChangesStats).toHaveBeenCalledWith(
+						'/project',
+						expect.objectContaining({ signal: expect.any(AbortSignal) }),
+					);
+				});
 			});
-		});
 
 		it('logs first-load timing when the workbench trace flag is enabled', async () => {
 			const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});

@@ -17,6 +17,7 @@ import {
 	getGitFileReviewDataBatch,
 	getGitChangesTree,
 	getGitChangesStats,
+	getGitConflictDetails,
 	getGitTargetCandidates,
 	gitStageSelection,
 	gitStageHunk,
@@ -265,6 +266,33 @@ describe('git API contract', () => {
 		expect(result).toEqual({ working: {}, staged: {} });
 		const [url] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/git/changes-stats');
+	});
+
+	it('getGitConflictDetails returns bounded conflict content metadata', async () => {
+		const payload = {
+			path: 'a.txt',
+			base: { content: 'base', truncated: false, byteLength: 4, lineCount: 1 },
+			ours: {
+				content: null,
+				truncated: true,
+				byteLength: 300_000,
+				lineCount: 0,
+				limitReason: 'content-too-large',
+			},
+			theirs: { content: 'theirs', truncated: false, byteLength: 6, lineCount: 1 },
+			working: { content: 'working', truncated: false, byteLength: 7, lineCount: 1 },
+			truncated: true,
+		};
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		const result = await getGitConflictDetails('/project', 'a.txt');
+
+		expect(result.ours.content).toBeNull();
+		expect(result.ours.limitReason).toBe('content-too-large');
+		expect(result.truncated).toBe(true);
+		const [url] = fetchMock.mock.calls[0];
+		expect(url).toContain('/api/v1/git/conflict-details');
+		expect(url).toContain('file=a.txt');
 	});
 
 	it('gitStageSelection sends POST with selection payload', async () => {
