@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatState } from '../state.svelte';
+import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
 import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { ChatViewMessage } from '$shared/chat-view';
 import type { PendingUserInput } from '$shared/pending-user-input';
@@ -288,5 +289,26 @@ describe('ChatState', () => {
 		expect(result).toEqual({ count: 2, stale: false });
 		expect(restored.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
 		expect(restored.chatMessages.map(contentOf)).toEqual(['first', 'second']);
+	});
+
+	it('keeps loaded earlier selected messages while the shared cache stays windowed', () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: 2 });
+		const chat = new ChatState(transcriptCache);
+
+		chat.replaceGeneration('chat-1', 'generation-1', [
+			entry(1, user('first')),
+			entry(2, assistant('second')),
+			entry(3, assistant('third')),
+		], { lastSeq: 3 });
+
+		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.seq)).toEqual([2, 3]);
+
+		const result = chat.applyMessages('chat-1', 'generation-1', [
+			entry(4, assistant('fourth')),
+		]);
+
+		expect(result).toBe('applied');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['first', 'second', 'third', 'fourth']);
+		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.seq)).toEqual([3, 4]);
 	});
 });

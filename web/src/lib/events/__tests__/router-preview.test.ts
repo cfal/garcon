@@ -73,7 +73,7 @@ describe('createChatMessagesAccumulator', () => {
 		]);
 	});
 
-	it('reloads the snapshot when accumulated messages report a generation change', () => {
+	it('reloads the transcript when accumulated messages report a generation change', () => {
 		const reloads: string[] = [];
 		const accumulator = createChatMessagesAccumulator({
 			applyChatMessages: () => 'generation-changed',

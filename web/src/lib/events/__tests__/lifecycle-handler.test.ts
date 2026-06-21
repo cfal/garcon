@@ -26,7 +26,7 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 }
 
 describe('handleAgentComplete', () => {
-	it('marks snapshot validated instead of deleting on successful completion', () => {
+	it('marks transcript validated instead of deleting on successful completion', () => {
 		const ctx = createCtx();
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
 		expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');

@@ -209,7 +209,7 @@ describe('event router integration', () => {
 		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
 	});
 
-	it('patches background previews and warms cached background snapshots', () => {
+	it('patches background previews and warms cached background transcripts', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
 			[{
@@ -387,7 +387,7 @@ describe('event router integration', () => {
 		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
 	});
 
-	it('marks background snapshots stale on generation reset', () => {
+	it('marks background transcripts stale on generation reset', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
 			[{

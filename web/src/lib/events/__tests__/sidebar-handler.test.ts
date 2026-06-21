@@ -57,7 +57,7 @@ describe('handleChatTitle', () => {
 });
 
 describe('handleChatDeleted', () => {
-	it('navigates away then removes the chat and snapshot', () => {
+	it('navigates away then removes the chat transcript', () => {
 		const ctx = {
 			removeChat: vi.fn(),
 			navigateAwayFromChat: vi.fn(),

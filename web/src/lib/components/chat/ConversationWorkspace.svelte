@@ -60,24 +60,30 @@
 			messages: ChatViewMessage[],
 			lastSeq?: number,
 		) => boolean | void;
-			loadVisiblePreviewSnapshot?: (chatId: string) => Promise<void> | void;
-			markVisiblePreviewStale?: (chatId: string) => void;
-			textScale?: number;
-		}
+		loadVisiblePreviewSnapshot?: (chatId: string) => Promise<void> | void;
+		markVisiblePreviewStale?: (chatId: string) => void;
+		textScale?: number;
+	}
+
+	const fallbackTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 
 	let {
 		onRegisterSubmit,
 		onRegisterReload,
-		transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES }),
+		transcriptCache: providedTranscriptCache,
 		reserveTopFloatingToolbar = false,
 		getVisibleChatIds,
 		isVisiblePreviewChat,
 		getVisiblePreviewCursor,
 		applyVisiblePreviewMessages,
-			loadVisiblePreviewSnapshot,
-			markVisiblePreviewStale,
-			textScale = 1,
-		}: ConversationWorkspaceProps = $props();
+		loadVisiblePreviewSnapshot,
+		markVisiblePreviewStale,
+		textScale = 1,
+	}: ConversationWorkspaceProps = $props();
+
+	function getInitialTranscriptCache(): ChatTranscriptCache {
+		return providedTranscriptCache ?? fallbackTranscriptCache;
+	}
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
@@ -87,6 +93,7 @@
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const modelCatalog = getModelCatalog();
 
+	const transcriptCache = getInitialTranscriptCache();
 	const chatState = new ChatState(transcriptCache);
 	const backgroundTranscriptLoader = new BackgroundTranscriptLoader({ cache: transcriptCache });
 	const composerState = new ComposerState();

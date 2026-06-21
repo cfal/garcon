@@ -1,4 +1,4 @@
-import type { ChatViewMessage } from '$shared/chat-view';
+import { applyChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
@@ -188,12 +188,20 @@ export class ChatState {
 			);
 			return 'gap-detected';
 		}
-		const restored = this.transcriptCache.get(chatId);
-		if (!restored) return 'gap-detected';
-		this.generationId = restored.generationId;
-		this.entries = restored.messages;
-		this.lastSeq = restored.lastSeq;
-		this.oldestSeq = restored.oldestSeq;
+		const applied = applyChatViewMessages(this.entries, messages, this.lastSeq);
+		if (applied.status === 'applied') {
+			this.generationId = generationId;
+			this.entries = applied.messages;
+			this.lastSeq = applied.lastSeq;
+			this.oldestSeq = this.entries[0]?.seq ?? 0;
+		} else {
+			const restored = this.transcriptCache.get(chatId);
+			if (!restored || restored.generationId !== generationId) return 'gap-detected';
+			this.generationId = restored.generationId;
+			this.entries = restored.messages;
+			this.lastSeq = restored.lastSeq;
+			this.oldestSeq = restored.oldestSeq;
+		}
 		if (result.changed) {
 			this.localNotices = [];
 		}
